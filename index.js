@@ -32,9 +32,11 @@ if (process.env.RCLONE_CONF_BASE64) fs.writeFileSync(config.configPath, Buffer.f
 const queue = new PQueue({ concurrency: 1 });
 let waitingTasks = []; 
 
-// 文件列表内存缓存
+// 文件列表内存缓存与状态锁
 let remoteFilesCache = null;
 let lastCacheTime = 0;
+let lastRefreshTime = 0; // 刷新限流锁
+let isRemoteLoading = false; 
 const CACHE_TTL = 10 * 60 * 1000; // 缓存有效期 10 分钟
 
 /**
@@ -115,6 +117,7 @@ class CloudTool {
             return remoteFilesCache;
         }
 
+        isRemoteLoading = true; 
         return new Promise((resolve) => {
             const rclone = spawn("rclone", ["lsjson", `${config.remoteName}:${config.remoteFolder}`, "--config", path.resolve(config.configPath), "--files-only"]);
             let output = "";
@@ -127,6 +130,7 @@ class CloudTool {
                     lastCacheTime = Date.now();
                     resolve(files);
                 } catch (e) { resolve([]); }
+                finally { isRemoteLoading = false; }
             });
         });
     }
@@ -252,15 +256,27 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                 }
                 await answer("指令已下达");
             } else if (data.startsWith("files_page_") || data.startsWith("files_refresh_")) {
+                if (isRemoteLoading) return await answer("⏳ 正在拉取云端数据，请稍后...");
+                
                 const isRefresh = data.startsWith("files_refresh_");
                 const page = parseInt(data.split("_")[2]);
+
+                // 针对刷新按钮的 10 秒冷却限制
+                if (isRefresh) {
+                    const now = Date.now();
+                    if (now - lastRefreshTime < 10000) {
+                        return await answer(`🕒 刷新太快了，请 ${Math.ceil((10000 - (now - lastRefreshTime)) / 1000)} 秒后再试`);
+                    }
+                    lastRefreshTime = now;
+                }
+
                 if (!isNaN(page)) {
-                    // 只有刷新按钮会触发真实 Rclone 调用
+                    if (isRefresh) await safeEdit(event.userId, event.msgId, "🔄 正在同步最新数据...");
                     const files = await CloudTool.listRemoteFiles(isRefresh);
                     const { text, buttons } = formatFilesPage(files, page);
                     await safeEdit(event.userId, event.msgId, text, buttons);
                 }
-                await answer(isRefresh ? "已同步云端最新列表" : "");
+                await answer(isRefresh ? "刷新成功" : "");
             } else {
                 await answer(); // 兜底 🚫 等无效按钮
             }
@@ -274,11 +290,12 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
         const target = message.peerId;
 
         if (message.message && !message.media) {
-            // 处理 /files 命令
             if (message.message === "/files") {
+                if (isRemoteLoading) return await client.sendMessage(target, { message: "⏳ 正在拉取云端数据，请稍后..." });
+                const placeholder = await client.sendMessage(target, { message: "⏳ 正在拉取云端文件列表..." });
                 const files = await CloudTool.listRemoteFiles();
                 const { text, buttons } = formatFilesPage(files, 0);
-                return await client.sendMessage(target, { message: text, buttons, parseMode: "markdown" });
+                return await safeEdit(target, placeholder.id, text, buttons);
             }
 
             const match = message.message.match(/https:\/\/t\.me\/([a-zA-Z0-9_]+)\/(\d+)/);
@@ -295,14 +312,14 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                         // 过滤掉 null/undefined 的无效结果再进行查找
                         const validMsgs = result.filter(m => m && typeof m === 'object');
                         const targetMsg = validMsgs.find(m => m.id === msgId);
-                        
+
                         if (targetMsg) {
                             let toProcess = [];
                             if (targetMsg.groupedId) {
                                 // 匹配同一媒体组
-                                toProcess = validMsgs.filter(m => 
-                                    m.groupedId && 
-                                    m.groupedId.toString() === targetMsg.groupedId.toString() && 
+                                toProcess = validMsgs.filter(m =>
+                                    m.groupedId &&
+                                    m.groupedId.toString() === targetMsg.groupedId.toString() &&
                                     m.media
                                 );
                             } else if (targetMsg.media) {
