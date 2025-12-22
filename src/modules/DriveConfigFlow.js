@@ -2,6 +2,7 @@ import { Button } from "telegram/tl/custom/button.js";
 import { d1 } from "../services/d1.js";
 import { SessionManager } from "./SessionManager.js";
 import { client } from "../services/telegram.js";
+import { CloudTool } from "../services/rclone.js";
 
 export class DriveConfigFlow {
     // 支持的网盘列表
@@ -66,14 +67,15 @@ export class DriveConfigFlow {
     static async handleInput(event, userId, session) {
         const text = event.message.message;
         const step = session.current_step;
+        const peerId = event.message.peerId; 
 
         // --- Mega 流程 ---
         if (step === "MEGA_WAIT_EMAIL") {
             // 简单的邮箱验证
-            if (!text.includes("@")) return await client.sendMessage(event.peerId, { message: "❌ 邮箱格式看似不正确，请重新输入：" });
+            if (!text.includes("@")) return await client.sendMessage(peerId, { message: "❌ 邮箱格式看似不正确，请重新输入：" });
             
             await SessionManager.update(userId, "MEGA_WAIT_PASS", { email: text.trim() });
-            await client.sendMessage(event.peerId, { message: "🔑 **请输入密码**\n(输入后消息会被立即删除以保护隐私)" });
+            await client.sendMessage(peerId, { message: "🔑 **请输入密码**\n(输入后消息会被立即删除以保护隐私)" });
             return true; // 拦截成功
         }
 
@@ -82,29 +84,61 @@ export class DriveConfigFlow {
             const password = text.trim();
 
             // 立即删除用户的密码消息
-            try { await client.deleteMessages(event.peerId, [event.message.id], { revoke: true }); } catch (e) {}
+            try { await client.deleteMessages(peerId, [event.message.id], { revoke: true }); } catch (e) {}
 
-            const tempMsg = await client.sendMessage(event.peerId, { message: "⏳ 正在验证并生成配置..." });
+            // 1. 发送验证提示
+            const tempMsg = await client.sendMessage(peerId, { message: "⏳ 正在验证账号，请稍候..." });
 
-            // 构造 Rclone 配置 (这里我们直接存 JSON，不做实时验证了，为了速度。Rclone 运行时会验证)
-            const configJson = JSON.stringify({
-                user: email,
-                pass: password // ⚠️ 注意：实际生产中建议存 rclone obscure 后的密码，这里为演示直接存
-            });
+            // 2. 构造临时配置对象
+            const configObj = { user: email, pass: password };
 
-            // 存入 user_drives 表
+            // 3. 【关键】调用 Rclone 进行验证 (增加了 await)
+            // 这一步可能会花几秒钟，现在是异步的，不会阻塞 Bot 处理其他人的消息
+            const result = await CloudTool.validateConfig('mega', configObj);
+
+            if (!result.success) {
+                // ❌ 验证失败处理
+                let errorText = "❌ **绑定失败**";
+
+                // 【修复】清洗错误日志，防止 Markdown 解析崩溃
+                const safeDetails = (result.details || '')
+                    .replace(/`/g, "'") // 替换反引号
+                    .replace(/\n/g, " ") // 替换换行符
+                    .slice(-200); // 截取长度
+
+                if (result.reason === "2FA") {
+                    errorText += "\n\n⚠️ **检测到您的账号开启了两步验证 (2FA)**。\n目前的自动化流程暂不支持 2FA。\n\n请去 Mega 网页版设置中关闭 2FA，或使用无 2FA 的小号重试。";
+                } else if (safeDetails.includes("Object (typically, node or user) not found") || safeDetails.includes("couldn't login")) {
+                    // 【修正】无法区分密码错误还是 2FA，所以两个都要提示
+                    errorText += "\n\n⚠️ **登录失败**\n\n**可能原因**：\n1. 账号或密码错误\n2. **开启了两步验证 (2FA)** (Rclone 在此模式下也会报这个错)\n\n请务必**关闭 2FA** 并且确认密码正确后重试。";
+                } else {
+                    // 其他错误
+                    errorText += `\n\n可能是网络问题或配置异常。\n错误信息: \`${safeDetails}\``;
+                }
+                
+                // 失败后清除会话，让用户重新开始
+                await SessionManager.clear(userId);
+                
+                await client.editMessage(peerId, { 
+                    message: tempMsg.id, 
+                    text: errorText
+                });
+                return true;
+            }
+
+            // ✅ 验证成功，才存入数据库
+            const configJson = JSON.stringify(configObj);
+
             await d1.run(`
                 INSERT INTO user_drives (user_id, name, type, config_data, status, created_at)
                 VALUES (?, ?, 'mega', ?, 'active', ?)
             `, [userId, `Mega-${email}`, configJson, Date.now()]);
 
-            // 清理会话
             await SessionManager.clear(userId);
             
-            // 提示成功
-            await client.editMessage(event.peerId, { 
+            await client.editMessage(peerId, { 
                 message: tempMsg.id, 
-                text: `✅ **绑定成功！**\n\n现在您可以发送文件给我，它将自动存入您的 Mega 网盘。\n账号: \`${email}\`` 
+                text: `✅ **绑定成功！**\n\n验证通过，现在您可以发送文件给我了。\n账号: \`${email}\`` 
             });
             return true;
         }
