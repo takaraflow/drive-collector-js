@@ -140,25 +140,54 @@ class CloudTool {
 
     static async uploadFile(localPath, task) {
         return new Promise((resolve) => {
-            const args = ["copy", localPath, `${config.remoteName}:${config.remoteFolder}`, "--config", path.resolve(config.configPath), "--ignore-existing", "--size-only", "--transfers", "1", "--contimeout", "60s", "--progress", "--use-json-log"];
+            // --progress-terminal-title 强制 Rclone 在 stderr 输出标准进度流
+            const args = [
+                "copy", localPath, `${config.remoteName}:${config.remoteFolder}`,
+                "--config", path.resolve(config.configPath),
+                "--ignore-existing", "--size-only", "--transfers", "1",
+                "--contimeout", "60s", "--progress", "--use-json-log"
+            ];
+            
             task.proc = spawn("rclone", args);
             let stderr = "";
             let lastUpdate = 0;
 
+            // 监听标准错误流（Rclone 进度默认发往 stderr）
             task.proc.stderr.on("data", (data) => {
-                const line = data.toString().trim();
-                try {
-                    const stats = JSON.parse(line);
-                    if (stats.percentage !== undefined) {
-                        const now = Date.now();
-                        if (now - lastUpdate > 3000) {
-                            lastUpdate = now;
-                            const current = stats.bytes || 0;
-                            const total = stats.totalBytes || stats.bytes || 1;
-                            updateStatus(task, CloudTool.getProgressText(current, total, "正在转存网盘"));
+                const chunks = data.toString().split('\n');
+                for (let chunk of chunks) {
+                    if (!chunk.trim()) continue;
+                    try {
+                        const stats = JSON.parse(chunk);
+                        // Rclone JSON 格式中，进度在 stats 对象里
+                        if (stats.stats && stats.stats.percentage !== undefined) {
+                            const now = Date.now();
+                            if (now - lastUpdate > 3000) {
+                                lastUpdate = now;
+                                const current = stats.stats.bytes || 0;
+                                const total = stats.stats.totalBytes || 1;
+                                updateStatus(task, CloudTool.getProgressText(current, total, "正在转存网盘"));
+                            }
                         }
+                    } catch (e) {
+                        // 如果不是 JSON，尝试正则捕获普通进度
+                        const match = chunk.match(/(\d+)%/);
+                        if (match) {
+                            const now = Date.now();
+                            if (now - lastUpdate > 3000) {
+                                lastUpdate = now;
+                                const pct = parseInt(match[1]);
+                                // 如果拿不到精确字节，用百分比估算进度条
+                                const barLen = 20;
+                                const filled = Math.round(barLen * (pct / 100));
+                                const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
+                                const text = `⏳ **正在转存网盘...**\n\n\`[${bar}]\` ${pct}%`;
+                                safeEdit(task.chatId, task.msgId, text, [Button.inline("🚫 取消转存", Buffer.from(`cancel_${task.id}`))]);
+                            }
+                        }
+                        stderr += chunk; 
                     }
-                } catch (e) { stderr += line; }
+                }
             });
 
             task.proc.on("close", (code) => resolve({ success: code === 0, error: stderr.trim() }));
