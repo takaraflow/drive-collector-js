@@ -208,16 +208,21 @@ async function updateQueueUI() {
 (async () => {
     // 启动 Telegram 客户端
     await client.start({ botAuthToken: config.botToken });
-    console.log("🚀 Node.js 产品化版本启动成功");
+    console.log("🚀 Drive Collector JS 启动成功");
 
     // 监听消息
     client.addEventHandler(async (event) => {
         const message = event.message;
         if (!message || !message.peerId) return;
 
-        // 仅限所有者
-        const senderId = message.senderId?.toString();
-        if (senderId !== config.ownerId) return;
+        // 权限校验：将两边都强制转为字符串并去掉两端空格再对比
+        const senderId = message.senderId?.toString().trim();
+        const ownerId = config.ownerId?.toString().trim();
+
+        if (senderId !== ownerId) {
+            console.log(`收到非所有者消息: ${senderId}，预期: ${ownerId}`);
+            return;
+        }
 
         // 处理文字/欢迎语
         if (message.text && !message.media) {
