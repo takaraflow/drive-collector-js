@@ -205,14 +205,24 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                     const [_, channel, msgIdStr] = match;
                     const msgId = parseInt(msgIdStr);
                     const ids = Array.from({ length: 19 }, (_, i) => msgId - 9 + i);
+                    
+                    // 获取消息列表
                     const result = await client.getMessages(channel, { ids });
 
-                    if (result?.length > 0) {
-                        const targetMsg = result.find(m => m.id === msgId);
+                    if (result && Array.isArray(result) && result.length > 0) {
+                        // 过滤掉 null/undefined 的无效结果再进行查找
+                        const validMsgs = result.filter(m => m && typeof m === 'object');
+                        const targetMsg = validMsgs.find(m => m.id === msgId);
+                        
                         if (targetMsg) {
                             let toProcess = [];
                             if (targetMsg.groupedId) {
-                                toProcess = result.filter(m => m.groupedId && m.groupedId.toString() === targetMsg.groupedId.toString() && m.media);
+                                // 匹配同一媒体组
+                                toProcess = validMsgs.filter(m => 
+                                    m.groupedId && 
+                                    m.groupedId.toString() === targetMsg.groupedId.toString() && 
+                                    m.media
+                                );
                             } else if (targetMsg.media) {
                                 toProcess = [targetMsg];
                             }
@@ -225,6 +235,9 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                             }
                         }
                     }
+                    // 如果走到这里，说明 ID 探测范围内没找到带媒体的目标
+                    await client.sendMessage(target, { message: "ℹ️ 未能从该链接中解析到有效的媒体消息。" });
+                    return;
                 } catch (e) {
                     await client.sendMessage(target, { message: `❌ 链接解析失败: ${e.message}` });
                     return;
