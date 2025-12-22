@@ -58,6 +58,33 @@ const updateStatus = async (task, text, isFinal = false) => {
     await safeEdit(task.chatId, task.msgId, text, buttons);
 };
 
+// 辅助函数：格式化文件列表页面 (样式：文件名+缩进详情)
+const formatFilesPage = (files, page = 0, pageSize = 6) => {
+    const start = page * pageSize;
+    const pagedFiles = files.slice(start, start + pageSize);
+    const totalPages = Math.ceil(files.length / pageSize);
+
+    let text = `📂 **目录**: \`${config.remoteFolder}\`\n\n`;
+    pagedFiles.forEach(f => {
+        const ext = path.extname(f.Name).toLowerCase();
+        const emoji = [".mp4", ".mkv", ".avi"].includes(ext) ? "🎞️" : [".jpg", ".png", ".webp"].includes(ext) ? "🖼️" : [".zip", ".rar", ".7z"].includes(ext) ? "📦" : [".pdf", ".epub"].includes(ext) ? "📝" : "📄";
+        const size = (f.Size / 1048576).toFixed(2) + " MB";
+        const time = f.ModTime.replace("T", " ").substring(0, 16);
+        text += `${emoji} **${f.Name}**\n> \`${size}\` | \`${time}\`\n\n`;
+    });
+
+    text += `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n📊 *第 ${page + 1}/${totalPages || 1} 页 | 共 ${files.length} 个文件*`;
+    
+    const buttons = [
+        [
+            Button.inline(page <= 0 ? "🚫" : "⬅️ 上一页", Buffer.from(`files_page_${page - 1}`)),
+            Button.inline("🔄 刷新", Buffer.from(`files_page_${page}`)),
+            Button.inline(page >= totalPages - 1 ? "🚫" : "下一页 ➡️", Buffer.from(`files_page_${page + 1}`))
+        ]
+    ];
+    return { text, buttons };
+};
+
 /**
  * --- 4. 云端操作工具库 (CloudTool) ---
  */
@@ -69,6 +96,17 @@ class CloudTool {
             rclone.stdout.on("data", (data) => output += data);
             rclone.on("close", () => {
                 try { resolve(JSON.parse(output).find(f => f.Name === fileName) || null); } catch (e) { resolve(null); }
+            });
+        });
+    }
+
+    static async listRemoteFiles() {
+        return new Promise((resolve) => {
+            const rclone = spawn("rclone", ["lsjson", `${config.remoteName}:${config.remoteFolder}`, "--config", path.resolve(config.configPath), "--files-only"]);
+            let output = "";
+            rclone.stdout.on("data", (data) => output += data);
+            rclone.on("close", () => {
+                try { resolve(JSON.parse(output).sort((a, b) => new Date(b.ModTime) - new Date(a.ModTime))); } catch (e) { resolve([]); }
             });
         });
     }
@@ -188,6 +226,13 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                     waitingTasks = waitingTasks.filter(t => t.id.toString() !== taskId);
                 }
                 await client.answerCallbackQuery(event.queryId, { message: "指令已下达" });
+            } else if (data.startsWith("files_page_")) {
+                const page = parseInt(data.split("_")[2]);
+                if (isNaN(page)) return await client.answerCallbackQuery(event.queryId);
+                const files = await CloudTool.listRemoteFiles();
+                const { text, buttons } = formatFilesPage(files, page);
+                await safeEdit(event.userId, event.msgId, text, buttons);
+                await client.answerCallbackQuery(event.queryId);
             }
             return;
         }
@@ -199,6 +244,13 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
         const target = message.peerId;
 
         if (message.message && !message.media) {
+            // 处理 /files 命令
+            if (message.message === "/files") {
+                const files = await CloudTool.listRemoteFiles();
+                const { text, buttons } = formatFilesPage(files, 0);
+                return await client.sendMessage(target, { message: text, buttons, parseMode: "markdown" });
+            }
+
             const match = message.message.match(/https:\/\/t\.me\/([a-zA-Z0-9_]+)\/(\d+)/);
             if (match) {
                 try {
