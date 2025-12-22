@@ -32,6 +32,11 @@ if (process.env.RCLONE_CONF_BASE64) fs.writeFileSync(config.configPath, Buffer.f
 const queue = new PQueue({ concurrency: 1 });
 let waitingTasks = []; 
 
+// 文件列表内存缓存
+let remoteFilesCache = null;
+let lastCacheTime = 0;
+const CACHE_TTL = 10 * 60 * 1000; // 缓存有效期 10 分钟
+
 /**
  * --- 3. 辅助工具函数 (Internal Helpers) ---
  */
@@ -80,7 +85,7 @@ const formatFilesPage = (files, page = 0, pageSize = 6) => {
         [
             Button.inline(page <= 0 ? "🚫" : "🏠 首页", Buffer.from(`files_page_0`)),
             Button.inline(page <= 0 ? "🚫" : "⬅️ 上一页", Buffer.from(`files_page_${page - 1}`)),
-            Button.inline("🔄 刷新", Buffer.from(`files_page_${page}`)),
+            Button.inline("🔄 刷新", Buffer.from(`files_refresh_${page}`)),
             Button.inline(page >= totalPages - 1 ? "🚫" : "下一页 ➡️", Buffer.from(`files_page_${page + 1}`)),
             Button.inline(page >= totalPages - 1 ? "🚫" : "🔚 尾页", Buffer.from(`files_page_${totalPages - 1}`))
         ]
@@ -103,13 +108,25 @@ class CloudTool {
         });
     }
 
-    static async listRemoteFiles() {
+    static async listRemoteFiles(forceRefresh = false) {
+        // 如果缓存有效且非强制刷新，直接返回缓存数据
+        const now = Date.now();
+        if (!forceRefresh && remoteFilesCache && (now - lastCacheTime < CACHE_TTL)) {
+            return remoteFilesCache;
+        }
+
         return new Promise((resolve) => {
             const rclone = spawn("rclone", ["lsjson", `${config.remoteName}:${config.remoteFolder}`, "--config", path.resolve(config.configPath), "--files-only"]);
             let output = "";
             rclone.stdout.on("data", (data) => output += data);
             rclone.on("close", () => {
-                try { resolve(JSON.parse(output).sort((a, b) => new Date(b.ModTime) - new Date(a.ModTime))); } catch (e) { resolve([]); }
+                try { 
+                    const files = JSON.parse(output).sort((a, b) => new Date(b.ModTime) - new Date(a.ModTime));
+                    // 更新全局缓存
+                    remoteFilesCache = files;
+                    lastCacheTime = Date.now();
+                    resolve(files);
+                } catch (e) { resolve([]); }
             });
         });
     }
@@ -234,14 +251,16 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                     waitingTasks = waitingTasks.filter(t => t.id.toString() !== taskId);
                 }
                 await answer("指令已下达");
-            } else if (data.startsWith("files_page_")) {
+            } else if (data.startsWith("files_page_") || data.startsWith("files_refresh_")) {
+                const isRefresh = data.startsWith("files_refresh_");
                 const page = parseInt(data.split("_")[2]);
                 if (!isNaN(page)) {
-                    const files = await CloudTool.listRemoteFiles();
+                    // 只有刷新按钮会触发真实 Rclone 调用
+                    const files = await CloudTool.listRemoteFiles(isRefresh);
                     const { text, buttons } = formatFilesPage(files, page);
                     await safeEdit(event.userId, event.msgId, text, buttons);
                 }
-                await answer();
+                await answer(isRefresh ? "已同步云端最新列表" : "");
             } else {
                 await answer(); // 兜底 🚫 等无效按钮
             }
