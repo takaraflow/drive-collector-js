@@ -13,9 +13,12 @@ RUN npm install --production
 FROM node:20-slim
 
 # 安装 rclone 和基础工具
+# 从官网安装最新版以支持最新的 MEGA 协议
 RUN apt-get update && apt-get install -y \
-    rclone \
+    curl \
+    unzip \
     ca-certificates \
+    && curl https://rclone.org/install.sh | bash \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
