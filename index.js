@@ -215,12 +215,12 @@ async function updateQueueUI() {
         const message = event.message;
         if (!message || !message.peerId) return;
 
-        // 权限校验：将两边都强制转为字符串并去掉两端空格再对比
-        const senderId = message.senderId?.toString().trim();
+        // 获取发送者 ID 的最稳健写法
+        const senderId = message.fromId ? message.fromId.userId?.toString() : message.senderId?.toString();
         const ownerId = config.ownerId?.toString().trim();
 
         if (senderId !== ownerId) {
-            console.log(`收到非所有者消息: ${senderId}，预期: ${ownerId}`);
+            console.log(`收到消息来自: ${senderId} (预期所有者: ${ownerId})`);
             return;
         }
 
