@@ -202,25 +202,33 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
             const match = message.message.match(/https:\/\/t\.me\/([a-zA-Z0-9_]+)\/(\d+)/);
             if (match) {
                 try {
-                    const [_, channel, msgId] = match;
-                    const result = await client.getMessages(channel, { ids: [parseInt(msgId)] });
+                    const [_, channel, msgIdStr] = match;
+                    const msgId = parseInt(msgIdStr);
+                    // 修正：Bot 模式下通过探测前后 ID 来兼容媒体组，避开 GetHistory 报错
+                    const ids = Array.from({ length: 19 }, (_, i) => msgId - 9 + i);
+                    const result = await client.getMessages(channel, { ids });
+
                     if (result?.length > 0) {
-                        let toProcess = [];
-                        if (result[0].groupedId) {
-                            const group = await client.getMessages(channel, { filter: new Api.InputMessagesFilterEmpty(), limit: 20 });
-                            toProcess = group.filter(m => m.groupedId?.toString() === result[0].groupedId.toString() && m.media);
-                        } else if (result[0].media) {
-                            toProcess = [result[0]];
-                        }
-                        if (toProcess.length > 0) {
-                            const finalProcess = toProcess.slice(0, 10);
-                            if (toProcess.length > 10) await client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` });
-                            for (const msg of finalProcess) await addNewTask(target, msg, "链接");
-                            return;
+                        const targetMsg = result.find(m => m.id === msgId);
+                        if (targetMsg) {
+                            let toProcess = [];
+                            if (targetMsg.groupedId) {
+                                toProcess = result.filter(m => m.groupedId && m.groupedId.toString() === targetMsg.groupedId.toString() && m.media);
+                            } else if (targetMsg.media) {
+                                toProcess = [targetMsg];
+                            }
+
+                            if (toProcess.length > 0) {
+                                const finalProcess = toProcess.slice(0, 10);
+                                if (toProcess.length > 10) await client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` });
+                                for (const msg of finalProcess) await addNewTask(target, msg, "链接");
+                                return;
+                            }
                         }
                     }
                 } catch (e) {
                     await client.sendMessage(target, { message: `❌ 链接解析失败: ${e.message}` });
+                    return;
                 }
             }
             return await client.sendMessage(target, { message: `👋 **欢迎使用云转存助手**\n\n📡 **节点**: ${config.remoteName}\n📂 **目录**: \`${config.remoteFolder}\`` });
