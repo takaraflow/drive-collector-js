@@ -57,7 +57,13 @@ export class CloudTool {
         });
     }
 
-    static async uploadFile(localPath, task) {
+    /**
+     * 上传文件
+     * @param {string} localPath 本地路径
+     * @param {object} task 任务对象
+     * @param {function} onProgress (新增) 心跳回调函数
+     */
+    static async uploadFile(localPath, task, onProgress = null) {
         return new Promise((resolve) => {
             const args = ["copy", localPath, `${config.remoteName}:${config.remoteFolder}`, "--ignore-existing", "--size-only", "--transfers", "1", "--contimeout", "60s", "--progress", "--use-json-log"];
             task.proc = this.rcloneExec(args);
@@ -65,31 +71,32 @@ export class CloudTool {
             let lastUpdate = 0;
 
             task.proc.stderr.on("data", (data) => {
-                // 修复：针对缓冲区积压导致的大文件进度不更新，进行按行切割
                 const lines = data.toString().split('\n');
                 for (let line of lines) {
                     if (!line.trim()) continue;
                     try {
                         const stats = JSON.parse(line);
-                        // 适配 Rclone 不同版本的 JSON 层级 (根对象或 stats 键下)
-                        const s = stats.stats || stats; 
+                        const s = stats.stats || stats;
                         if (s && s.percentage !== undefined) {
                             const now = Date.now();
                             if (now - lastUpdate > 3000) {
                                 lastUpdate = now;
-                                // 核心修改：实时更新上传进度
+                                // 1. 更新 UI
                                 updateStatus(task, UIHelper.renderProgress(s.bytes || 0, s.totalBytes || 1, "正在转存网盘"));
+                                // 2. (新增) 如果有心跳回调，执行它！
+                                if (onProgress) onProgress();
                             }
                         }
                     } catch (e) {
-                        // 正则兜底解析，确保进度条绝对能动
+                        // 正则兜底逻辑
                         const match = line.match(/(\d+)%/);
                         if (match) {
                             const now = Date.now();
                             if (now - lastUpdate > 3000) {
                                 lastUpdate = now;
                                 const pct = parseInt(match[1]);
-                                updateStatus(task, `⏳ **正在转存网盘...**\n\n${UIHelper.renderProgress(pct, 100, "转存进度")}`);
+                                updateStatus(task, UIHelper.renderProgress(pct, 100, "正在转存网盘"));
+                                if (onProgress) onProgress(); // 这里也要加
                             }
                         }
                         stderr += line; 
