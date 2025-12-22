@@ -212,34 +212,33 @@ async function updateQueueUI() {
 
     // 监听消息
     client.addEventHandler(async (event) => {
-        // 增加类型保护，确保只处理新消息
         if (!(event instanceof Api.UpdateNewMessage)) return;
 
         const message = event.message;
         if (!message || !message.peerId) return;
 
         // 获取发送者 ID 的最稳健写法
-        const senderId = message.fromId ? (message.fromId.userId || message.fromId.chatId)?.toString() : message.senderId?.toString();
+        const senderId = message.fromId ? (message.fromId.userId || message.fromId.chatId) : message.senderId;
         const ownerId = config.ownerId?.toString().trim();
 
-        // 调试日志
-        console.log(`📩 收到消息 | 来自: ${senderId} | 预期: ${ownerId}`);
+        // 🔍 深度日志：输出 ID 的内容、类型及对比结果
+        const isMatch = String(senderId).trim() === String(ownerId).trim();
+        console.log(`📩 收到消息 | 来自: ${senderId} (类型: ${typeof senderId}) | 预期: ${ownerId} (类型: ${typeof ownerId}) | 对比结果: ${isMatch}`);
 
-        if (senderId !== ownerId) {
-            return;
-        }
+        if (!isMatch) return;
 
-        // 使用 peerId 作为发送目标，这是 GramJS 最稳健的 Peer 引用方式
         const target = message.peerId;
 
         // 处理文字/欢迎语
         if (message.text && !message.media) {
             try {
-                await client.sendMessage(target, {
+                console.log("正在尝试发送欢迎语...");
+                const result = await client.sendMessage(target, {
                     message: `👋 **欢迎使用云转存助手 (Node.js)**\n\n📡 **存储节点**: ${config.remoteName}\n📂 **同步目录**: \`${config.remoteFolder}\``
                 });
+                console.log(`✅ 欢迎语发送成功，消息ID: ${result.id}`);
             } catch (e) {
-                console.error("❌ 发送欢迎语失败:", e.message);
+                console.error("❌ 发送欢迎语失败:", e);
             }
             return;
         }
@@ -247,10 +246,12 @@ async function updateQueueUI() {
         // 处理媒体文件
         if (message.media) {
             try {
+                console.log("正在尝试发送排队状态...");
                 const qSize = queue.size + queue.pending;
                 const statusMsg = await client.sendMessage(target, {
                     message: `🚀 **已捕获文件任务**\n当前有 \`${qSize}\` 个任务正在排队，我会按顺序为您处理。`
                 });
+                console.log(`✅ 状态消息发送成功，消息ID: ${statusMsg.id}`);
 
                 const task = {
                     id: Date.now() + Math.random(),
@@ -262,10 +263,9 @@ async function updateQueueUI() {
                 };
 
                 waitingTasks.push(task);
-                // 异步入队处理
                 queue.add(() => fileWorker(task));
             } catch (e) {
-                console.error("❌ 发送任务状态失败:", e.message);
+                console.error("❌ 发送任务状态失败:", e);
             }
         }
     });
