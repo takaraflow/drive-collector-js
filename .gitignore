@@ -1,0 +1,29 @@
+# --- 依赖项 ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- 环境与敏感信息 ---
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# --- 运行时产生的临时文件 ---
+/tmp/
+downloads/
+*.log
+rclone.conf
+
+# --- 操作系统文件 ---
+.DS_Store
+Thumbs.db
+
+# --- 编辑器配置 ---
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj

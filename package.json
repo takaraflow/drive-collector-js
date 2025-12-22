@@ -1,0 +1,17 @@
+{
+  "name": "tg-to-cloud-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Telegram 大文件转存 Node.js 版",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "async": "^3.2.6",
+    "dotenv": "^16.4.5",
+    "js-base64": "^3.7.7",
+    "p-queue": "^8.0.1",
+    "telegram": "^2.26.22"
+  }
+}
