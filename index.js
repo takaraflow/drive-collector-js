@@ -137,10 +137,27 @@ class CloudTool {
 
     static async uploadFile(localPath, task) {
         return new Promise((resolve) => {
-            const args = ["copy", localPath, `${config.remoteName}:${config.remoteFolder}`, "--config", path.resolve(config.configPath), "--ignore-existing", "--size-only", "--transfers", "1", "--contimeout", "60s"];
+            const args = ["copy", localPath, `${config.remoteName}:${config.remoteFolder}`, "--config", path.resolve(config.configPath), "--ignore-existing", "--size-only", "--transfers", "1", "--contimeout", "60s", "--progress", "--use-json-log"];
             task.proc = spawn("rclone", args);
             let stderr = "";
-            task.proc.stderr.on("data", (data) => stderr += data);
+            let lastUpdate = 0;
+
+            task.proc.stderr.on("data", (data) => {
+                const line = data.toString().trim();
+                try {
+                    const stats = JSON.parse(line);
+                    if (stats.percentage !== undefined) {
+                        const now = Date.now();
+                        if (now - lastUpdate > 3000) {
+                            lastUpdate = now;
+                            const current = stats.bytes || 0;
+                            const total = stats.totalBytes || stats.bytes || 1;
+                            updateStatus(task, CloudTool.getProgressText(current, total, "正在转存网盘"));
+                        }
+                    }
+                } catch (e) { stderr += line; }
+            });
+
             task.proc.on("close", (code) => resolve({ success: code === 0, error: stderr.trim() }));
         });
     }
