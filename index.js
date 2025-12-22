@@ -38,6 +38,7 @@ let lastRefreshTime = 0;
     client.addEventHandler(async (event) => {
         // --- 处理回调查询 (按钮点击) ---
         if (event instanceof Api.UpdateBotCallbackQuery) {
+            const userId = event.userId.toString(); // 获取操作者的 ID
             const data = event.data.toString();
             const answer = (msg = "") => client.invoke(new Api.messages.SetBotCallbackAnswer({
                 queryId: event.queryId,
@@ -46,8 +47,9 @@ let lastRefreshTime = 0;
 
             if (data.startsWith("cancel_")) {
                 const taskId = data.split("_")[1];
-                const ok = TaskManager.cancelTask(taskId);
-                await answer(ok ? "指令已下达" : "任务已不存在");
+                // 传入 userId 以进行权限验证
+                const ok = await TaskManager.cancelTask(taskId, userId);
+                await answer(ok ? "指令已下达" : "任务已不存在或无权操作");
             } else if (data.startsWith("files_page_") || data.startsWith("files_refresh_")) {
                 const isRefresh = data.startsWith("files_refresh_");
                 const page = parseInt(data.split("_")[2]);
@@ -63,8 +65,8 @@ let lastRefreshTime = 0;
                     // 触发“正在同步”的 UI 状态
                     if (isRefresh) await safeEdit(event.userId, event.msgId, "🔄 正在同步最新数据...");
                     await new Promise(r => setTimeout(r, 50));
-                    // 调用 CloudTool 获取数据，并传入当前的加载状态给 UIHelper
-                    const files = await CloudTool.listRemoteFiles(isRefresh);
+                    // 调用 CloudTool 获取数据 (传入 userId)
+                    const files = await CloudTool.listRemoteFiles(userId, isRefresh);
                     const { text, buttons } = UIHelper.renderFilesPage(files, page, 6, CloudTool.isLoading());
                     await safeEdit(event.userId, event.msgId, text, buttons);
                 }
@@ -81,6 +83,8 @@ let lastRefreshTime = 0;
         // 权限校验：仅允许所有者操作
         if (!message || (message.fromId ? (message.fromId.userId || message.fromId.chatId)?.toString() : message.senderId?.toString()) !== config.ownerId?.toString().trim()) return;
 
+        // 获取发送者的 ID
+        const userId = (message.fromId ? (message.fromId.userId || message.fromId.chatId) : message.senderId).toString();
         const target = message.peerId;
 
         if (message.message && !message.media) {
@@ -89,7 +93,9 @@ let lastRefreshTime = 0;
                 const placeholder = await client.sendMessage(target, { message: "⏳ 正在拉取云端文件列表..." });
                 // 人为让出事件循环 100ms，确保占位符消息的发送回执被优先处理
                 await new Promise(r => setTimeout(r, 100));
-                const files = await CloudTool.listRemoteFiles();
+                
+                // 传入 userId 获取专属文件列表
+                const files = await CloudTool.listRemoteFiles(userId);
                 // 传入 CloudTool 的加载状态
                 const { text, buttons } = UIHelper.renderFilesPage(files, 0, 6, CloudTool.isLoading());
                 return await safeEdit(target, placeholder.id, text, buttons);
@@ -102,7 +108,7 @@ let lastRefreshTime = 0;
                     if (toProcess.length > 0) {
                         const finalProcess = toProcess.slice(0, 10);
                         if (toProcess.length > 10) await client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` });
-                        for (const msg of finalProcess) await TaskManager.addTask(target, msg, "链接");
+                        for (const msg of finalProcess) await TaskManager.addTask(target, msg, userId, "链接");
                     } else {
                         await client.sendMessage(target, { message: "ℹ️ 未能从该链接中解析到有效的媒体消息。" });
                     }
@@ -113,10 +119,10 @@ let lastRefreshTime = 0;
             }
 
             // 兜底回复：欢迎信息
-            return await client.sendMessage(target, { message: `👋 **欢迎使用云转存助手**\n\n📡 **节点**: ${config.remoteName}\n📂 **目录**: \`${config.remoteFolder}\`` });
+            return await client.sendMessage(target, { message: `👋 **欢迎使用云转存助手**\n\n📡 **节点**: ${config.remoteName}\n🆔 **用户ID**: \`${userId}\`` });
         }
 
         // 处理直接发送的文件/视频
-        if (message.media) await TaskManager.addTask(target, message, "文件");
+        if (message.media) await TaskManager.addTask(target, message, userId, "文件");
     });
 })();

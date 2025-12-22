@@ -17,14 +17,13 @@ export class TaskManager {
     static waitingTasks = [];
     static currentTask = null;
 
-/**
+    /**
      * 初始化：只恢复那些 "心跳停止" 的僵尸任务
      */
     static async init() {
         console.log("🔄 正在检查数据库中异常中断的任务...");
         try {
             // 定义超时阈值：2分钟
-            // 意思就是：如果一个任务超过 2 分钟没有更新心跳，我们才认为它的宿主挂了，需要接管
             const TIMEOUT_MS = 2 * 60 * 1000; 
             const deadLine = Date.now() - TIMEOUT_MS;
 
@@ -57,6 +56,7 @@ export class TaskManager {
 
                     const task = { 
                         id: row.id, 
+                        userId: row.user_id, 
                         chatId: row.chat_id, 
                         msgId: row.msg_id, 
                         message: message, 
@@ -84,7 +84,7 @@ export class TaskManager {
     /**
      * 添加新任务到队列
      */
-    static async addTask(target, mediaMessage, customLabel = "") {
+    static async addTask(target, mediaMessage, userId, customLabel = "") {
         const taskId = Date.now().toString(); // 统一转为字符串存储
         const statusMsg = await client.sendMessage(target, {
             message: `🚀 **已捕获${customLabel}任务**\n正在排队处理...`,
@@ -96,16 +96,26 @@ export class TaskManager {
         // 1. 持久化：写入数据库
         try {
             await d1.run(`
-                INSERT INTO tasks (id, chat_id, msg_id, source_msg_id, file_name, file_size, status, created_at, updated_at) 
-                VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)
-            `, [taskId, target.toString(), statusMsg.id, mediaMessage.id, info?.name || 'unknown', info?.size || 0, Date.now(), Date.now()]);
+                INSERT INTO tasks (id, user_id, chat_id, msg_id, source_msg_id, file_name, file_size, status, created_at, updated_at) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+            `, [
+                taskId, 
+                userId.toString(), 
+                target.toString(), 
+                statusMsg.id, 
+                mediaMessage.id, 
+                info?.name || 'unknown', 
+                info?.size || 0, 
+                Date.now(), 
+                Date.now()
+            ]);
         } catch (e) {
             console.error("DB Write Error:", e);
-            // 即使数据库写入失败，内存队列也要继续跑，不能阻塞用户
         }
 
         const task = { 
             id: taskId, 
+            userId: userId.toString(), 
             chatId: target, 
             msgId: statusMsg.id, 
             message: mediaMessage, 
@@ -166,6 +176,7 @@ export class TaskManager {
             // 1. 开始下载前，先发送一次心跳
             await touchTask('downloading');
 
+            // 🛠️ 注意：getRemoteFileInfo 将来也需要 userId 支持多用户，目前先不动
             const remoteFile = await CloudTool.getRemoteFileInfo(info.name);
             if (remoteFile && Math.abs(remoteFile.Size - info.size) < 1024) {
                 await d1.run("UPDATE tasks SET status = 'completed', updated_at = ? WHERE id = ?", [Date.now(), task.id]).catch(console.error);
@@ -176,8 +187,8 @@ export class TaskManager {
             // 2. 下载阶段
             await client.downloadMedia(message, {
                 outputFile: localPath,
-                chunkSize: 1024 * 1024, // 设置为 1MB (默认是 256KB)
-                workers: 1,             // Zeabur 资源有限，建议保持 1 或 2，太多会爆内存
+                chunkSize: 1024 * 1024, // 设置为 1MB
+                workers: 1,            // 保持 1
                 progressCallback: async (downloaded, total) => {
                     if (task.isCancelled) throw new Error("CANCELLED");
                     const now = Date.now();
@@ -196,6 +207,7 @@ export class TaskManager {
             await touchTask('uploading');
             
             // 4. 上传阶段 (传入心跳回调)
+            // 🛠️ task 对象里现在包含了 userId，CloudTool 内部可以用 task.userId 来区分配置
             const uploadResult = await CloudTool.uploadFile(localPath, task, async () => {
                 // 这个回调会被 rclone.js 定期调用
                 await touchTask('uploading'); 
@@ -227,20 +239,32 @@ export class TaskManager {
     }
 
     /**
-     * 取消指定任务
+     * 取消指定任务 (异步 + 权限校验)
      */
-    static cancelTask(taskId) {
+    static async cancelTask(taskId, userId) {
+        // 1. 数据库层面的所有权校验 (防止A取消B的任务)
+        const dbTask = await d1.fetchOne("SELECT user_id, status FROM tasks WHERE id = ?", [taskId]);
+        
+        // 如果任务不存在，或者存在但 user_id 不匹配
+        if (!dbTask || dbTask.user_id !== userId.toString()) {
+            console.warn(`User ${userId} tried to cancel task ${taskId} (owned by ${dbTask ? dbTask.user_id : 'unknown'})`);
+            return false;
+        }
+
+        // 2. 内存层面的操作 (杀进程/移除队列)
         const task = this.waitingTasks.find(t => t.id.toString() === taskId) || 
                      (this.currentTask && this.currentTask.id.toString() === taskId ? this.currentTask : null);
+        
         if (task) {
             task.isCancelled = true;
             if (task.proc) task.proc.kill("SIGTERM");
             this.waitingTasks = this.waitingTasks.filter(t => t.id.toString() !== taskId);
-            
-            // DB 状态更新：取消
-            d1.run("UPDATE tasks SET status = 'cancelled' WHERE id = ?", [taskId]).catch(console.error);
-            return true;
         }
-        return false;
+
+        // 3. DB 状态更新：取消
+        // 即使内存里找不到(可能重启过)，也要在数据库里标记为 cancelled
+        await d1.run("UPDATE tasks SET status = 'cancelled' WHERE id = ?", [taskId]).catch(console.error);
+        
+        return true;
     }
 }
