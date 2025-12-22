@@ -112,9 +112,14 @@ let lastRefreshTime = 0;
                 return await DriveConfigFlow.sendLoginPanel(target, userId);
             }
 
-            // 2. /files 文件列表命令
+            // 2. /logout 命令
+            if (message.message === "/logout") {
+                return await DriveConfigFlow.handleLogout(target, userId);
+            }
+
+            // 3. /files 文件列表命令
             if (message.message === "/files") {
-                // 🛑 【新增】检查是否绑定
+                // 检查是否绑定
                 const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId]);
                 if (!drive) {
                     return await client.sendMessage(target, { 
@@ -133,11 +138,11 @@ let lastRefreshTime = 0;
                 return await safeEdit(target, placeholder.id, text, buttons);
             }
 
-            // 3. 处理可能存在的消息链接 (也需要检查绑定)
+            // 4. 处理可能存在的消息链接 (也需要检查绑定)
             try {
                 const toProcess = await LinkParser.parse(message.message);
                 if (toProcess && toProcess.length > 0) {
-                    // 🛑 【新增】检查是否绑定
+                    // 检查是否绑定
                     const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId]);
                     if (!drive) {
                         return await client.sendMessage(target, { 
@@ -160,7 +165,7 @@ let lastRefreshTime = 0;
 
         // --- 处理直接发送的文件/视频 ---
         if (message.media) {
-            // 🛑 【新增】检查是否绑定
+            // 检查是否绑定
             const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId]);
             if (!drive) {
                 return await client.sendMessage(target, { 

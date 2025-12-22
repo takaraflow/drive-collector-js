@@ -16,7 +16,7 @@ export class DriveConfigFlow {
      */
     static async sendLoginPanel(chatId, userId) {
         // 查库：看用户绑定了哪些
-        const existing = await d1.fetchAll("SELECT type FROM user_drives WHERE user_id = ?", [userId]);
+        const existing = await d1.fetchAll("SELECT type FROM user_drives WHERE user_id = ?", [userId.toString()]);
         const boundTypes = new Set(existing.map(e => e.type));
 
         const buttons = [];
@@ -92,31 +92,27 @@ export class DriveConfigFlow {
             // 2. 构造临时配置对象
             const configObj = { user: email, pass: password };
 
-            // 3. 【关键】调用 Rclone 进行验证 (增加了 await)
-            // 这一步可能会花几秒钟，现在是异步的，不会阻塞 Bot 处理其他人的消息
+            // 3. 调用 Rclone 进行验证
             const result = await CloudTool.validateConfig('mega', configObj);
 
             if (!result.success) {
                 // ❌ 验证失败处理
                 let errorText = "❌ **绑定失败**";
 
-                // 【修复】清洗错误日志，防止 Markdown 解析崩溃
+                // 清洗错误日志
                 const safeDetails = (result.details || '')
-                    .replace(/`/g, "'") // 替换反引号
-                    .replace(/\n/g, " ") // 替换换行符
-                    .slice(-200); // 截取长度
+                    .replace(/`/g, "'") 
+                    .replace(/\n/g, " ") 
+                    .slice(-200); 
 
                 if (result.reason === "2FA") {
                     errorText += "\n\n⚠️ **检测到您的账号开启了两步验证 (2FA)**。\n目前的自动化流程暂不支持 2FA。\n\n请去 Mega 网页版设置中关闭 2FA，或使用无 2FA 的小号重试。";
                 } else if (safeDetails.includes("Object (typically, node or user) not found") || safeDetails.includes("couldn't login")) {
-                    // 【修正】无法区分密码错误还是 2FA，所以两个都要提示
                     errorText += "\n\n⚠️ **登录失败**\n\n**可能原因**：\n1. 账号或密码错误\n2. **开启了两步验证 (2FA)** (Rclone 在此模式下也会报这个错)\n\n请务必**关闭 2FA** 并且确认密码正确后重试。";
                 } else {
-                    // 其他错误
                     errorText += `\n\n可能是网络问题或配置异常。\n错误信息: \`${safeDetails}\``;
                 }
                 
-                // 失败后清除会话，让用户重新开始
                 await SessionManager.clear(userId);
                 
                 await client.editMessage(peerId, { 
@@ -126,13 +122,13 @@ export class DriveConfigFlow {
                 return true;
             }
 
-            // ✅ 验证成功，才存入数据库
+            // ✅ 验证成功
             const configJson = JSON.stringify(configObj);
 
             await d1.run(`
                 INSERT INTO user_drives (user_id, name, type, config_data, status, created_at)
                 VALUES (?, ?, 'mega', ?, 'active', ?)
-            `, [userId, `Mega-${email}`, configJson, Date.now()]);
+            `, [userId.toString(), `Mega-${email}`, configJson, Date.now()]);
 
             await SessionManager.clear(userId);
             
@@ -143,6 +139,26 @@ export class DriveConfigFlow {
             return true;
         }
 
-        return false; // 不是会话消息，放行
+        return false; 
+    }
+
+    /**
+     * 处理 /logout 逻辑
+     */
+    static async handleLogout(chatId, userId) {
+        const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId.toString()]);
+        
+        if (!drive) {
+            return await client.sendMessage(chatId, { message: "⚠️ 您当前未绑定任何网盘，无需退出。" });
+        }
+
+        // 删除绑定记录
+        await d1.run("DELETE FROM user_drives WHERE user_id = ?", [userId.toString()]);
+        // 清理会话
+        await SessionManager.clear(userId);
+
+        await client.sendMessage(chatId, { 
+            message: "✅ **登出成功**\n\n您的账号信息已从本系统中移除。如需再次使用，请发送 /login 重新绑定。" 
+        });
     }
 }
