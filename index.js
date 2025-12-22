@@ -63,16 +63,21 @@ class UIHelper {
         const totalPages = Math.ceil(files.length / pageSize);
 
         let text = `📂 **目录**: \`${config.remoteFolder}\`\n\n`;
-        pagedFiles.forEach(f => {
-            const ext = path.extname(f.Name).toLowerCase();
-            const emoji = [".mp4", ".mkv", ".avi"].includes(ext) ? "🎞️" : [".jpg", ".png", ".webp"].includes(ext) ? "🖼️" : [".zip", ".rar", ".7z"].includes(ext) ? "📦" : [".pdf", ".epub"].includes(ext) ? "📝" : "📄";
-            const size = (f.Size / 1048576).toFixed(2) + " MB";
-            const time = f.ModTime.replace("T", " ").substring(0, 16);
-            text += `${emoji} **${f.Name}**\n> \`${size}\` | \`${time}\`\n\n`;
-        });
+        
+        if (files.length === 0 && !isRemoteLoading) {
+            text += "ℹ️ 目录为空或尚未加载。";
+        } else {
+            pagedFiles.forEach(f => {
+                const ext = path.extname(f.Name).toLowerCase();
+                const emoji = [".mp4", ".mkv", ".avi"].includes(ext) ? "🎞️" : [".jpg", ".png", ".webp"].includes(ext) ? "🖼️" : [".zip", ".rar", ".7z"].includes(ext) ? "📦" : [".pdf", ".epub"].includes(ext) ? "📝" : "📄";
+                const size = (f.Size / 1048576).toFixed(2) + " MB";
+                const time = f.ModTime.replace("T", " ").substring(0, 16);
+                text += `${emoji} **${f.Name}**\n> \`${size}\` | \`${time}\`\n\n`;
+            });
+        }
 
         text += `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n📊 *第 ${page + 1}/${totalPages || 1} 页 | 共 ${files.length} 个文件*`;
-        if (isRemoteLoading && remoteFilesCache) text += `\n🔄 _正在同步最新数据..._`;
+        if (isRemoteLoading) text += `\n🔄 _正在同步最新数据..._`;
         
         const buttons = [
             [
@@ -215,7 +220,7 @@ async function fileWorker(task) {
     try {
         const remoteFile = await CloudTool.getRemoteFileInfo(info.name);
         if (remoteFile && Math.abs(remoteFile.Size - info.size) < 1024) {
-            return await updateStatus(task, `✨ **文件已秒传成功**\n\n📄 名称: \`${info.name}\``, true);
+            return await updateStatus(task, `✨ **文件已秒传成功**\n\n📄 名称: \`${info.name}\`\n📂 目录: \`${config.remoteFolder}\``, true);
         }
 
         let lastUpdate = 0;
@@ -238,7 +243,7 @@ async function fileWorker(task) {
             await updateStatus(task, "⚙️ **转存完成，正在确认数据完整性...**");
             const finalRemote = await CloudTool.getRemoteFileInfo(info.name);
             const isOk = finalRemote && Math.abs(finalRemote.Size - fs.statSync(localPath).size) < 1024;
-            await updateStatus(task, isOk ? `✅ **文件转存成功**\n\n📄 名称: \`${info.name}\`` : `⚠️ **校验异常**: \`${info.name}\``, true);
+            await updateStatus(task, isOk ? `✅ **文件转存成功**\n\n📄 名称: \`${info.name}\`\n📂 目录: \`${config.remoteFolder}\`` : `⚠️ **校验异常**: \`${info.name}\``, true);
         } else {
             await updateStatus(task, `❌ **同步终止**\n原因: \`${task.isCancelled ? "用户手动取消" : uploadResult.error}\``, true);
         }
@@ -307,6 +312,7 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                 }
 
                 if (!isNaN(page)) {
+                    if (isRefresh) await safeEdit(event.userId, event.msgId, "🔄 正在同步最新数据...");
                     const files = await CloudTool.listRemoteFiles(isRefresh);
                     const { text, buttons } = UIHelper.renderFilesPage(files, page);
                     await safeEdit(event.userId, event.msgId, text, buttons);
@@ -326,9 +332,11 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
 
         if (message.message && !message.media) {
             if (message.message === "/files") {
+                // 回归：发送占位消息
+                const placeholder = await client.sendMessage(target, { message: "⏳ 正在拉取云端文件列表..." });
                 const files = await CloudTool.listRemoteFiles();
                 const { text, buttons } = UIHelper.renderFilesPage(files, 0);
-                return await client.sendMessage(target, { message: text, buttons, parseMode: "markdown" });
+                return await safeEdit(target, placeholder.id, text, buttons);
             }
 
             const match = message.message.match(/https:\/\/t\.me\/([a-zA-Z0-9_]+)\/(\d+)/);
