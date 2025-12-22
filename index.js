@@ -1,5 +1,6 @@
 import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
+import { Button } from "telegram/tl/custom/button.js";
 import PQueue from "p-queue";
 import { spawn } from "child_process";
 import fs from "fs";
@@ -64,8 +65,8 @@ class CloudTool {
         });
     }
 
-    // 执行转存任务
-    static async uploadFile(localPath) {
+    // 执行转存任务 (增加 task 参数以记录进程)
+    static async uploadFile(localPath, task) {
         return new Promise((resolve) => {
             const args = [
                 "copy", localPath, `${config.remoteName}:${config.remoteFolder}`,
@@ -75,10 +76,10 @@ class CloudTool {
                 "--transfers", "1",
                 "--contimeout", "60s"
             ];
-            const rclone = spawn("rclone", args);
+            task.proc = spawn("rclone", args);
             let stderr = "";
-            rclone.stderr.on("data", (data) => stderr += data);
-            rclone.on("close", (code) => resolve({ success: code === 0, error: stderr.trim() }));
+            task.proc.stderr.on("data", (data) => stderr += data);
+            task.proc.on("close", (code) => resolve({ success: code === 0, error: stderr.trim() }));
         });
     }
 
@@ -104,7 +105,7 @@ const client = new TelegramClient(new StringSession(""), config.apiId, config.ap
  * --- 5. 核心处理 Worker ---
  */
 async function fileWorker(task) {
-    const { message, statusMsg } = task;
+    const { message, statusMsg, id } = task;
     const media = message.media;
     if (!media) return;
 
@@ -145,12 +146,14 @@ async function fileWorker(task) {
         await client.downloadMedia(message, {
             outputFile: localPath,
             progressCallback: async (downloaded, total) => {
+                if (task.isCancelled) throw new Error("CANCELLED");
                 const now = Date.now();
                 if (now - lastUpdate > 3000 || downloaded === total) {
                     lastUpdate = now;
                     await client.editMessage(message.chatId, {
                         message: statusMsg.id,
-                        text: CloudTool.getProgressText(downloaded, total, "正在从 Telegram 拉取资源")
+                        text: CloudTool.getProgressText(downloaded, total, "正在从 Telegram 拉取资源"),
+                        buttons: [Button.inline("🚫 取消任务", `cancel_${id}`)]
                     }).catch(() => {});
                 }
             }
@@ -159,8 +162,12 @@ async function fileWorker(task) {
         const actualLocalSize = fs.statSync(localPath).size;
 
         // 3. 转存同步
-        await client.editMessage(message.chatId, { message: statusMsg.id, text: "📤 **资源拉取完成，正在转存至网盘...**" });
-        const uploadResult = await CloudTool.uploadFile(localPath);
+        await client.editMessage(message.chatId, { 
+            message: statusMsg.id, 
+            text: "📤 **资源拉取完成，正在转存至网盘...**",
+            buttons: [Button.inline("🚫 取消任务", `cancel_${id}`)]
+        });
+        const uploadResult = await CloudTool.uploadFile(localPath, task);
 
         if (uploadResult.success) {
             // 4. 确认环节
@@ -179,15 +186,17 @@ async function fileWorker(task) {
                 });
             }
         } else {
+            const errDetail = task.isCancelled ? "用户手动取消了任务" : uploadResult.error;
             await client.editMessage(message.chatId, {
                 message: statusMsg.id, 
-                text: `❌ **同步失败**\n错误详情: \`${uploadResult.error}\`` 
+                text: `❌ **同步终止**\n原因: \`${errDetail}\`` 
             });
         }
     } catch (e) {
+        const errorMsg = e.message === "CANCELLED" ? "🚫 任务已取消。" : `⚠️ 处理异常: ${e.message}`;
         await client.editMessage(message.chatId, {
             message: statusMsg.id,
-            text: `⚠️ **处理任务时发生异常**\n错误: ${e.message}`
+            text: errorMsg
         });
     } finally {
         if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
@@ -202,7 +211,11 @@ async function updateQueueUI() {
         const task = waitingTasks[i];
         const newText = `🕒 **任务排队中...**\n\n当前顺位: \`第 ${i + 1} 位\`\n您的任务将在前序处理完成后立即开始。`;
         if (task.lastText !== newText) {
-            await client.editMessage(task.chatId, { message: task.msgId, text: newText }).catch(() => {});
+            await client.editMessage(task.chatId, { 
+                message: task.msgId, 
+                text: newText,
+                buttons: [Button.inline("🚫 取消排队", `cancel_${task.id}`)]
+            }).catch(() => {});
             task.lastText = newText;
             await new Promise(r => setTimeout(r, 1200)); // 频率保护
         }
@@ -217,8 +230,26 @@ async function updateQueueUI() {
     await client.start({ botAuthToken: config.botToken });
     console.log("🚀 Drive Collector JS 启动成功");
 
-    // 监听消息
+    // 监听消息与回调
     client.addEventHandler(async (event) => {
+        // --- 处理取消按钮点击 ---
+        if (event instanceof Api.UpdateBotCallbackQuery) {
+            const data = event.data.toString();
+            if (data.startsWith("cancel_")) {
+                const taskId = data.split("_")[1];
+                const task = waitingTasks.find(t => t.id.toString() === taskId) || 
+                             (global.currentTask && global.currentTask.id.toString() === taskId ? global.currentTask : null);
+                
+                if (task) {
+                    task.isCancelled = true;
+                    if (task.proc) task.proc.kill("SIGTERM");
+                    waitingTasks = waitingTasks.filter(t => t.id.toString() !== taskId);
+                }
+                await client.answerCallbackQuery(event.queryId, { message: "正在尝试取消任务..." });
+            }
+            return;
+        }
+
         if (!(event instanceof Api.UpdateNewMessage)) return;
 
         const message = event.message;
@@ -231,7 +262,7 @@ async function updateQueueUI() {
 
         const target = message.peerId;
 
-        // 处理文字/指令 (修正判断逻辑，确保指令被识别)
+        // 处理文字/指令
         if (message.message && !message.media) {
             try {
                 await client.sendMessage(target, {
@@ -247,12 +278,14 @@ async function updateQueueUI() {
         if (message.media) {
             try {
                 const qSize = queue.size + queue.pending;
+                const taskId = Date.now() + Math.random();
                 const statusMsg = await client.sendMessage(target, {
-                    message: `🚀 **已捕获文件任务**\n当前有 \`${qSize}\` 个任务正在排队，我会按顺序为您处理。`
+                    message: `🚀 **已捕获文件任务**\n当前有 \`${qSize}\` 个任务正在排队，我会按顺序为您处理。`,
+                    buttons: [Button.inline("🚫 取消排队", `cancel_${taskId}`)]
                 });
 
                 const task = {
-                    id: Date.now() + Math.random(),
+                    id: taskId,
                     chatId: target,
                     msgId: statusMsg.id,
                     message: message,
@@ -261,7 +294,11 @@ async function updateQueueUI() {
                 };
 
                 waitingTasks.push(task);
-                queue.add(() => fileWorker(task));
+                queue.add(async () => {
+                    global.currentTask = task;
+                    await fileWorker(task);
+                    global.currentTask = null;
+                });
             } catch (e) {
                 console.error("❌ 发送排队提示失败:", e.message);
             }
