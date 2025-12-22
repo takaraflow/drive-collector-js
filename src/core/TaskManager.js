@@ -177,7 +177,7 @@ export class TaskManager {
             await touchTask('downloading');
 
             // 🛠️ 注意：getRemoteFileInfo 将来也需要 userId 支持多用户，目前先不动
-            const remoteFile = await CloudTool.getRemoteFileInfo(info.name);
+            const remoteFile = await CloudTool.getRemoteFileInfo(info.name, task.userId);
             if (remoteFile && Math.abs(remoteFile.Size - info.size) < 1024) {
                 await d1.run("UPDATE tasks SET status = 'completed', updated_at = ? WHERE id = ?", [Date.now(), task.id]).catch(console.error);
                 return await updateStatus(task, `✨ **文件已秒传成功**\n\n📄 名称: \`${info.name}\`\n📂 目录: \`${config.remoteFolder}\``, true);
@@ -215,7 +215,7 @@ export class TaskManager {
 
             if (uploadResult.success) {
                 await updateStatus(task, "⚙️ **转存完成，正在确认数据完整性...**");
-                const finalRemote = await CloudTool.getRemoteFileInfo(info.name);
+                const finalRemote = await CloudTool.getRemoteFileInfo(info.name, task.userId);
                 const isOk = finalRemote && Math.abs(finalRemote.Size - fs.statSync(localPath).size) < 1024;
                 
                 if (isOk) {

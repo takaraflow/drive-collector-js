@@ -7,6 +7,9 @@ import { LinkParser } from "./src/core/LinkParser.js";
 import { CloudTool } from "./src/services/rclone.js";
 import { UIHelper } from "./src/ui/templates.js";
 import { safeEdit } from "./src/utils/common.js";
+import { SessionManager } from "./src/modules/SessionManager.js";
+import { DriveConfigFlow } from "./src/modules/DriveConfigFlow.js";
+import { d1 } from "./src/services/d1.js"; // 👈 新增引入 d1，用于查库
 
 // 刷新限流锁 (保留在主入口)
 let lastRefreshTime = 0; 
@@ -50,6 +53,11 @@ let lastRefreshTime = 0;
                 // 传入 userId 以进行权限验证
                 const ok = await TaskManager.cancelTask(taskId, userId);
                 await answer(ok ? "指令已下达" : "任务已不存在或无权操作");
+            } else if (data.startsWith("login_")) {
+                // 🔹 处理登录相关按钮
+                const toast = await DriveConfigFlow.handleCallback(event, userId);
+                await answer(toast || "");
+                return; 
             } else if (data.startsWith("files_page_") || data.startsWith("files_refresh_")) {
                 const isRefresh = data.startsWith("files_refresh_");
                 const page = parseInt(data.split("_")[2]);
@@ -80,18 +88,42 @@ let lastRefreshTime = 0;
         // --- 处理新消息 ---
         if (!(event instanceof Api.UpdateNewMessage)) return;
         const message = event.message;
-        // 权限校验：仅允许所有者操作
-        if (!message || (message.fromId ? (message.fromId.userId || message.fromId.chatId)?.toString() : message.senderId?.toString()) !== config.ownerId?.toString().trim()) return;
+        if (!message) return;
 
-        // 获取发送者的 ID
+        // 先获取发送者的 ID 和 Target (为了给 SessionManager 使用)
         const userId = (message.fromId ? (message.fromId.userId || message.fromId.chatId) : message.senderId).toString();
         const target = message.peerId;
 
+        // 会话拦截器 (处理密码输入等)
+        const session = await SessionManager.get(userId);
+        if (session) {
+            const handled = await DriveConfigFlow.handleInput(event, userId, session);
+            if (handled) return; // 如果被会话逻辑消费了，就停止往下执行
+        }
+
+        // 权限校验：仅允许所有者操作 (测试完记得注释掉下面这行)
+        // if (userId !== config.ownerId?.toString().trim()) return;
+
+        // --- 处理纯文本命令 ---
         if (message.message && !message.media) {
-            // 处理 /files 文件列表命令
+            
+            // 1. /login 命令 (不需要检查是否已绑定)
+            if (message.message === "/login") {
+                return await DriveConfigFlow.sendLoginPanel(target, userId);
+            }
+
+            // 2. /files 文件列表命令
             if (message.message === "/files") {
+                // 🛑 【新增】检查是否绑定
+                const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId]);
+                if (!drive) {
+                    return await client.sendMessage(target, { 
+                        message: "🚫 **未检测到绑定的网盘**\n\n您需要先绑定一个网盘才能浏览文件。\n请发送 /login 开始绑定。" 
+                    });
+                }
+
                 const placeholder = await client.sendMessage(target, { message: "⏳ 正在拉取云端文件列表..." });
-                // 人为让出事件循环 100ms，确保占位符消息的发送回执被优先处理
+                // 人为让出事件循环 100ms
                 await new Promise(r => setTimeout(r, 100));
                 
                 // 传入 userId 获取专属文件列表
@@ -101,17 +133,20 @@ let lastRefreshTime = 0;
                 return await safeEdit(target, placeholder.id, text, buttons);
             }
 
-            // 处理可能存在的消息链接
+            // 3. 处理可能存在的消息链接 (也需要检查绑定)
             try {
                 const toProcess = await LinkParser.parse(message.message);
-                if (toProcess) {
-                    if (toProcess.length > 0) {
-                        const finalProcess = toProcess.slice(0, 10);
-                        if (toProcess.length > 10) await client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` });
-                        for (const msg of finalProcess) await TaskManager.addTask(target, msg, userId, "链接");
-                    } else {
-                        await client.sendMessage(target, { message: "ℹ️ 未能从该链接中解析到有效的媒体消息。" });
+                if (toProcess && toProcess.length > 0) {
+                    // 🛑 【新增】检查是否绑定
+                    const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId]);
+                    if (!drive) {
+                        return await client.sendMessage(target, { 
+                            message: "🚫 **未检测到绑定的网盘**\n\n请先发送 /login 绑定网盘，然后再发送链接。" 
+                        });
                     }
+
+                    if (toProcess.length > 10) await client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` });
+                    for (const msg of toProcess.slice(0, 10)) await TaskManager.addTask(target, msg, userId, "链接");
                     return;
                 }
             } catch (e) {
@@ -119,10 +154,20 @@ let lastRefreshTime = 0;
             }
 
             // 兜底回复：欢迎信息
-            return await client.sendMessage(target, { message: `👋 **欢迎使用云转存助手**\n\n📡 **节点**: ${config.remoteName}\n🆔 **用户ID**: \`${userId}\`` });
+            // 只有当不是链接，也不是命令时才显示
+            return await client.sendMessage(target, { message: `👋 **欢迎使用云转存助手**\n\n发送文件或链接给我，我会帮您转存。\n发送 /login 管理网盘绑定。\n发送 /files 查看已存文件。` });
         }
 
-        // 处理直接发送的文件/视频
-        if (message.media) await TaskManager.addTask(target, message, userId, "文件");
+        // --- 处理直接发送的文件/视频 ---
+        if (message.media) {
+            // 🛑 【新增】检查是否绑定
+            const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId]);
+            if (!drive) {
+                return await client.sendMessage(target, { 
+                    message: "🚫 **未检测到绑定的网盘**\n\n请先发送 /login 绑定网盘，然后再发送文件。" 
+                });
+            }
+            await TaskManager.addTask(target, message, userId, "文件");
+        }
     });
 })();
