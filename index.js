@@ -212,15 +212,20 @@ async function updateQueueUI() {
 
     // 监听消息
     client.addEventHandler(async (event) => {
+        // 增加 Update 类型判断，这是 Polling 模式下防止已读不回的关键
+        if (!(event instanceof Api.UpdateNewMessage)) return;
+
         const message = event.message;
         if (!message || !message.peerId) return;
 
         // 获取发送者 ID 的最稳健写法
-        const senderId = message.fromId ? message.fromId.userId?.toString() : message.senderId?.toString();
+        const senderId = message.fromId ? (message.fromId.userId || message.fromId.chatId)?.toString() : message.senderId?.toString();
         const ownerId = config.ownerId?.toString().trim();
 
+        // 调试日志：输出原始 ID，方便排查匹配问题
+        console.log(`📩 收到消息 | 来自: ${senderId} | 预期: ${ownerId}`);
+
         if (senderId !== ownerId) {
-            console.log(`收到消息来自: ${senderId} (预期所有者: ${ownerId})`);
             return;
         }
 
