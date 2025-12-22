@@ -313,6 +313,8 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
 
                 if (!isNaN(page)) {
                     if (isRefresh) await safeEdit(event.userId, event.msgId, "🔄 正在同步最新数据...");
+                    // 给异步刷新一个微小的物理延迟，确保 UI 先变更
+                    await new Promise(r => setTimeout(r, 50));
                     const files = await CloudTool.listRemoteFiles(isRefresh);
                     const { text, buttons } = UIHelper.renderFilesPage(files, page);
                     await safeEdit(event.userId, event.msgId, text, buttons);
@@ -332,8 +334,9 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
 
         if (message.message && !message.media) {
             if (message.message === "/files") {
-                // 回归：发送占位消息
                 const placeholder = await client.sendMessage(target, { message: "⏳ 正在拉取云端文件列表..." });
+                // 人为让出事件循环 100ms，确保占位符消息的发送回执被优先处理
+                await new Promise(r => setTimeout(r, 100));
                 const files = await CloudTool.listRemoteFiles();
                 const { text, buttons } = UIHelper.renderFilesPage(files, 0);
                 return await safeEdit(target, placeholder.id, text, buttons);
