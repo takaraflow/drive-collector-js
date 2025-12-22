@@ -18,6 +18,10 @@ let lastRefreshTime = 0;
     await client.start({ botAuthToken: config.botToken });
     console.log("🚀 Drive Collector JS (Modular) 启动成功");
 
+    // --- 初始化任务管理器，恢复中断任务 ---
+    // 必须在 client.start() 之后调用，因为恢复任务需要用 client 去获取消息
+    await TaskManager.init(); 
+
     client.addEventHandler(async (event) => {
         // --- 处理回调查询 (按钮点击) ---
         if (event instanceof Api.UpdateBotCallbackQuery) {
