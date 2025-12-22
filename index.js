@@ -223,7 +223,35 @@ async function updateQueueUI() {
 }
 
 /**
- * --- 7. 启动主逻辑 ---
+ * --- 7. 辅助函数：任务入队复用逻辑 ---
+ */
+async function addNewTask(target, mediaMessage, customLabel = "") {
+    const qSize = queue.size + queue.pending;
+    const taskId = Date.now() + Math.random();
+    const statusMsg = await client.sendMessage(target, {
+        message: `🚀 **已捕获${customLabel}任务**\n当前有 \`${qSize}\` 个任务正在排队，我会按顺序为您处理。`,
+        buttons: [Button.inline("🚫 取消排队", `cancel_${taskId}`)]
+    });
+
+    const task = {
+        id: taskId,
+        chatId: target,
+        msgId: statusMsg.id,
+        message: mediaMessage,
+        statusMsg: statusMsg,
+        lastText: ""
+    };
+
+    waitingTasks.push(task);
+    queue.add(async () => {
+        global.currentTask = task;
+        await fileWorker(task);
+        global.currentTask = null;
+    });
+}
+
+/**
+ * --- 8. 启动主逻辑 ---
  */
 (async () => {
     // 启动 Telegram 客户端
@@ -262,8 +290,39 @@ async function updateQueueUI() {
 
         const target = message.peerId;
 
-        // 处理文字/指令
+        // 处理文字/指令/链接解析
         if (message.message && !message.media) {
+            const linkRegex = /https:\/\/t\.me\/([a-zA-Z0-9_]+)\/(\d+)/;
+            const match = message.message.match(linkRegex);
+
+            if (match) {
+                try {
+                    const [_, channel, msgId] = match;
+                    const result = await client.getMessages(channel, { ids: [parseInt(msgId)] });
+                    if (result && result.length > 0) {
+                        let toProcess = [];
+                        if (result[0].groupedId) {
+                            const group = await client.getMessages(channel, { filter: new Api.InputMessagesFilterEmpty(), limit: 20 });
+                            toProcess = group.filter(m => m.groupedId?.toString() === result[0].groupedId.toString() && m.media);
+                        } else if (result[0].media) {
+                            toProcess = [result[0]];
+                        }
+
+                        if (toProcess.length > 0) {
+                            const totalFound = toProcess.length;
+                            const finalProcess = toProcess.slice(0, 10);
+                            if (totalFound > 10) await client.sendMessage(target, { message: `⚠️ 链接包含 ${totalFound} 个媒体，已忽略后 ${totalFound - 10} 个。` });
+                            for (const msg of finalProcess) {
+                                await addNewTask(target, msg, "链接");
+                            }
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    await client.sendMessage(target, { message: `❌ 链接解析失败: ${e.message}` });
+                }
+            }
+
             try {
                 await client.sendMessage(target, {
                     message: `👋 **欢迎使用云转存助手 (Node.js)**\n\n📡 **存储节点**: ${config.remoteName}\n📂 **同步目录**: \`${config.remoteFolder}\``
@@ -277,30 +336,9 @@ async function updateQueueUI() {
         // 处理媒体文件
         if (message.media) {
             try {
-                const qSize = queue.size + queue.pending;
-                const taskId = Date.now() + Math.random();
-                const statusMsg = await client.sendMessage(target, {
-                    message: `🚀 **已捕获文件任务**\n当前有 \`${qSize}\` 个任务正在排队，我会按顺序为您处理。`,
-                    buttons: [Button.inline("🚫 取消排队", `cancel_${taskId}`)]
-                });
-
-                const task = {
-                    id: taskId,
-                    chatId: target,
-                    msgId: statusMsg.id,
-                    message: message,
-                    statusMsg: statusMsg,
-                    lastText: ""
-                };
-
-                waitingTasks.push(task);
-                queue.add(async () => {
-                    global.currentTask = task;
-                    await fileWorker(task);
-                    global.currentTask = null;
-                });
+                await addNewTask(target, message, "文件");
             } catch (e) {
-                console.error("❌ 发送排队提示失败:", e.message);
+                console.error("❌ 任务入队失败:", e.message);
             }
         }
     });
