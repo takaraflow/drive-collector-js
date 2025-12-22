@@ -15,12 +15,25 @@ let lastRefreshTime = 0;
  * --- 启动主逻辑 ---
  */
 (async () => {
+    // 1. 先启动 Telegram 客户端
     await client.start({ botAuthToken: config.botToken });
-    console.log("🚀 Drive Collector JS (Modular) 启动成功");
+    console.log("🚀 Telegram 客户端已连接");
 
-    // --- 初始化任务管理器，恢复中断任务 ---
-    // 必须在 client.start() 之后调用，因为恢复任务需要用 client 去获取消息
-    await TaskManager.init(); 
+    // 2. 【关键】先开启端口监听，告诉 Zeabur “我已经跑起来了”
+    http.createServer((req, res) => {
+        res.writeHead(200);
+        res.end("Node Service Active");
+    }).listen(config.port, '0.0.0.0', () => {
+        console.log(`📡 健康检查端口 ${config.port} 已就绪`);
+    });
+
+    // 3. 异步初始化任务（不使用 await，让它在后台慢慢跑）
+    // 这样即便数据库响应慢，也不会阻塞容器的“存活证明”
+    TaskManager.init().then(() => {
+        console.log("✅ 历史任务初始化扫描完成");
+    }).catch(err => {
+        console.error("❌ 任务初始化过程中发生错误:", err);
+    });
 
     client.addEventHandler(async (event) => {
         // --- 处理回调查询 (按钮点击) ---
@@ -106,11 +119,4 @@ let lastRefreshTime = 0;
         // 处理直接发送的文件/视频
         if (message.media) await TaskManager.addTask(target, message, "文件");
     });
-
-    // 启动健康检查 Web 服务
-    http.createServer((req, res) => {
-        res.writeHead(200);
-        res.end("Node Service Active");
-    }).listen(config.port, '0.0.0.0');
-
 })();

@@ -31,9 +31,9 @@ export class TaskManager {
             // SQL 关键修改：增加 AND updated_at < ?
             const tasks = await d1.fetchAll(
                 `SELECT * FROM tasks 
-                 WHERE status IN ('queued', 'downloading', 'uploading') 
-                 AND updated_at < ? 
-                 ORDER BY created_at ASC`, 
+                WHERE status IN ('queued', 'downloading', 'uploading') 
+                AND (updated_at IS NULL OR updated_at < ?) 
+                ORDER BY created_at ASC`, 
                 [deadLine]
             );
             
