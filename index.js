@@ -81,6 +81,7 @@ const formatFilesPage = (files, page = 0, pageSize = 6) => {
     });
 
     text += `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n📊 *第 ${page + 1}/${totalPages || 1} 页 | 共 ${files.length} 个文件*`;
+    if (isRemoteLoading && remoteFilesCache) text += `\n🔄 _正在同步最新数据..._`;
     
     // 生成分页导航按钮
     const buttons = [
@@ -111,11 +112,14 @@ class CloudTool {
     }
 
     static async listRemoteFiles(forceRefresh = false) {
-        // 如果缓存有效且非强制刷新，直接返回缓存数据
         const now = Date.now();
+        // 独立并发逻辑：如果有缓存且未到 TTL，且不强制刷新，则立即返回，不阻塞
         if (!forceRefresh && remoteFilesCache && (now - lastCacheTime < CACHE_TTL)) {
             return remoteFilesCache;
         }
+
+        // 如果正在加载中且已有缓存，先返回旧缓存以保证响应，不阻塞 UI
+        if (isRemoteLoading && remoteFilesCache) return remoteFilesCache;
 
         isRemoteLoading = true; 
         return new Promise((resolve) => {
@@ -125,11 +129,10 @@ class CloudTool {
             rclone.on("close", () => {
                 try { 
                     const files = JSON.parse(output).sort((a, b) => new Date(b.ModTime) - new Date(a.ModTime));
-                    // 更新全局缓存
                     remoteFilesCache = files;
                     lastCacheTime = Date.now();
                     resolve(files);
-                } catch (e) { resolve([]); }
+                } catch (e) { resolve(remoteFilesCache || []); }
                 finally { isRemoteLoading = false; }
             });
         });
@@ -273,12 +276,10 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                 }
                 await answer("指令已下达");
             } else if (data.startsWith("files_page_") || data.startsWith("files_refresh_")) {
-                if (isRemoteLoading) return await answer("⏳ 正在拉取云端数据，请稍后...");
-                
                 const isRefresh = data.startsWith("files_refresh_");
                 const page = parseInt(data.split("_")[2]);
 
-                // 针对刷新按钮的 10 秒冷却限制
+                // 刷新按钮限流
                 if (isRefresh) {
                     const now = Date.now();
                     if (now - lastRefreshTime < 10000) {
@@ -288,12 +289,12 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                 }
 
                 if (!isNaN(page)) {
-                    if (isRefresh) await safeEdit(event.userId, event.msgId, "🔄 正在同步最新数据...");
+                    // 独立并发：不再拦截翻页/刷新，直接调用
                     const files = await CloudTool.listRemoteFiles(isRefresh);
                     const { text, buttons } = formatFilesPage(files, page);
                     await safeEdit(event.userId, event.msgId, text, buttons);
                 }
-                await answer(isRefresh ? "刷新成功" : "");
+                await answer(isRefresh ? "已请求刷新" : "");
             } else {
                 await answer(); // 兜底 🚫 等无效按钮
             }
@@ -308,11 +309,10 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
 
         if (message.message && !message.media) {
             if (message.message === "/files") {
-                if (isRemoteLoading) return await client.sendMessage(target, { message: "⏳ 正在拉取云端数据，请稍后..." });
-                const placeholder = await client.sendMessage(target, { message: "⏳ 正在拉取云端文件列表..." });
+                // 如果没有缓存且正在加载，才发送等待提示；否则直接走并发获取流程
                 const files = await CloudTool.listRemoteFiles();
                 const { text, buttons } = formatFilesPage(files, 0);
-                return await safeEdit(target, placeholder.id, text, buttons);
+                return await client.sendMessage(target, { message: text, buttons, parseMode: "markdown" });
             }
 
             const match = message.message.match(/https:\/\/t\.me\/([a-zA-Z0-9_]+)\/(\d+)/);
@@ -321,7 +321,7 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                     const [_, channel, msgIdStr] = match;
                     const msgId = parseInt(msgIdStr);
                     const ids = Array.from({ length: 19 }, (_, i) => msgId - 9 + i);
-                    
+
                     // 获取消息列表
                     const result = await client.getMessages(channel, { ids });
 
