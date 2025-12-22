@@ -15,7 +15,7 @@ const config = {
     apiHash: process.env.API_HASH,
     botToken: process.env.BOT_TOKEN,
     ownerId: process.env.OWNER_ID, // 7428626313
-    remoteName: process.env.RCLONE_REMOTE || "DriveCollectorBot",
+    remoteName: process.env.RCLONE_REMOTE || "mega", // 修正：默认值改为你的配置名 mega
     remoteFolder: process.env.REMOTE_FOLDER || "/DriveCollectorBot",
     downloadDir: "/tmp/downloads",
     configPath: "/tmp/rclone.conf",
@@ -49,7 +49,7 @@ class CloudTool {
             const rclone = spawn("rclone", [
                 "lsjson", 
                 `${config.remoteName}:${config.remoteFolder}`, 
-                "--config", config.configPath, 
+                "--config", path.resolve(config.configPath), // 修正：使用绝对路径确保配置读取
                 "--files-only"
             ]);
             let output = "";
@@ -69,7 +69,7 @@ class CloudTool {
         return new Promise((resolve) => {
             const args = [
                 "copy", localPath, `${config.remoteName}:${config.remoteFolder}`,
-                "--config", config.configPath,
+                "--config", path.resolve(config.configPath), // 修正：使用绝对路径确保配置读取
                 "--ignore-existing",
                 "--size-only",
                 "--transfers", "1",
