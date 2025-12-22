@@ -217,6 +217,11 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
     client.addEventHandler(async (event) => {
         if (event instanceof Api.UpdateBotCallbackQuery) {
             const data = event.data.toString();
+            const answer = (msg = "") => client.invoke(new Api.messages.SetBotCallbackAnswer({
+                queryId: event.queryId,
+                message: msg
+            })).catch(() => {});
+
             if (data.startsWith("cancel_")) {
                 const taskId = data.split("_")[1];
                 const task = waitingTasks.find(t => t.id.toString() === taskId) || (global.currentTask && global.currentTask.id.toString() === taskId ? global.currentTask : null);
@@ -225,14 +230,17 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                     if (task.proc) task.proc.kill("SIGTERM");
                     waitingTasks = waitingTasks.filter(t => t.id.toString() !== taskId);
                 }
-                await client.answerCallbackQuery(event.queryId, { message: "指令已下达" });
+                await answer("指令已下达");
             } else if (data.startsWith("files_page_")) {
                 const page = parseInt(data.split("_")[2]);
-                if (isNaN(page)) return await client.answerCallbackQuery(event.queryId);
-                const files = await CloudTool.listRemoteFiles();
-                const { text, buttons } = formatFilesPage(files, page);
-                await safeEdit(event.userId, event.msgId, text, buttons);
-                await client.answerCallbackQuery(event.queryId);
+                if (!isNaN(page)) {
+                    const files = await CloudTool.listRemoteFiles();
+                    const { text, buttons } = formatFilesPage(files, page);
+                    await safeEdit(event.userId, event.msgId, text, buttons);
+                }
+                await answer();
+            } else {
+                await answer(); // 兜底 🚫 等无效按钮
             }
             return;
         }
