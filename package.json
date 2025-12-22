@@ -1,17 +1,27 @@
 {
-  "name": "tg-to-cloud-bot",
-  "version": "1.0.0",
-  "type": "module",
-  "description": "Telegram 大文件转存 Node.js 版",
+  "name": "drive-collector-bot",
+  "version": "2.0.0",
+  "description": "A modular Telegram bot for transferring files to Rclone remotes",
   "main": "index.js",
+  "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "node --watch index.js"
   },
+  "keywords": [
+    "telegram",
+    "bot",
+    "rclone",
+    "mega",
+    "drive"
+  ],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
-    "async": "^3.2.6",
-    "dotenv": "^16.4.5",
-    "js-base64": "^3.7.7",
     "p-queue": "^8.0.1",
-    "telegram": "^2.26.22"
+    "telegram": "^2.22.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
