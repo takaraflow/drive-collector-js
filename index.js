@@ -212,7 +212,7 @@ async function updateQueueUI() {
 
     // 监听消息
     client.addEventHandler(async (event) => {
-        // 增加 Update 类型判断，这是 Polling 模式下防止已读不回的关键
+        // 增加类型保护，确保只处理新消息
         if (!(event instanceof Api.UpdateNewMessage)) return;
 
         const message = event.message;
@@ -222,40 +222,51 @@ async function updateQueueUI() {
         const senderId = message.fromId ? (message.fromId.userId || message.fromId.chatId)?.toString() : message.senderId?.toString();
         const ownerId = config.ownerId?.toString().trim();
 
-        // 调试日志：输出原始 ID，方便排查匹配问题
+        // 调试日志
         console.log(`📩 收到消息 | 来自: ${senderId} | 预期: ${ownerId}`);
 
         if (senderId !== ownerId) {
             return;
         }
 
+        // 使用 peerId 作为发送目标，这是 GramJS 最稳健的 Peer 引用方式
+        const target = message.peerId;
+
         // 处理文字/欢迎语
         if (message.text && !message.media) {
-            await client.sendMessage(message.chatId, {
-                message: `👋 **欢迎使用云转存助手 (Node.js)**\n\n📡 **存储节点**: ${config.remoteName}\n📂 **同步目录**: \`${config.remoteFolder}\``
-            });
+            try {
+                await client.sendMessage(target, {
+                    message: `👋 **欢迎使用云转存助手 (Node.js)**\n\n📡 **存储节点**: ${config.remoteName}\n📂 **同步目录**: \`${config.remoteFolder}\``
+                });
+            } catch (e) {
+                console.error("❌ 发送欢迎语失败:", e.message);
+            }
             return;
         }
 
         // 处理媒体文件
         if (message.media) {
-            const qSize = queue.size + queue.pending;
-            const statusMsg = await client.sendMessage(message.chatId, {
-                message: `🚀 **已捕获文件任务**\n当前有 \`${qSize}\` 个任务正在排队，我会按顺序为您处理。`
-            });
+            try {
+                const qSize = queue.size + queue.pending;
+                const statusMsg = await client.sendMessage(target, {
+                    message: `🚀 **已捕获文件任务**\n当前有 \`${qSize}\` 个任务正在排队，我会按顺序为您处理。`
+                });
 
-            const task = {
-                id: Date.now() + Math.random(),
-                chatId: message.chatId,
-                msgId: statusMsg.id,
-                message: message,
-                statusMsg: statusMsg,
-                lastText: ""
-            };
+                const task = {
+                    id: Date.now() + Math.random(),
+                    chatId: target,
+                    msgId: statusMsg.id,
+                    message: message,
+                    statusMsg: statusMsg,
+                    lastText: ""
+                };
 
-            waitingTasks.push(task);
-            // 异步入队处理
-            queue.add(() => fileWorker(task));
+                waitingTasks.push(task);
+                // 异步入队处理
+                queue.add(() => fileWorker(task));
+            } catch (e) {
+                console.error("❌ 发送任务状态失败:", e.message);
+            }
         }
     });
 
