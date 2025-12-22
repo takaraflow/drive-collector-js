@@ -100,9 +100,16 @@ const formatFilesPage = (files, page = 0, pageSize = 6) => {
  * --- 4. 云端操作工具库 (CloudTool) ---
  */
 class CloudTool {
+    /**
+     * 基础执行器：统一管理 Rclone 进程生成
+     */
+    static rcloneExec(args) {
+        return spawn("rclone", [...args, "--config", path.resolve(config.configPath)]);
+    }
+
     static async getRemoteFileInfo(fileName) {
         return new Promise((resolve) => {
-            const rclone = spawn("rclone", ["lsjson", `${config.remoteName}:${config.remoteFolder}`, "--config", path.resolve(config.configPath), "--files-only"]);
+            const rclone = this.rcloneExec(["lsjson", `${config.remoteName}:${config.remoteFolder}`, "--files-only"]);
             let output = "";
             rclone.stdout.on("data", (data) => output += data);
             rclone.on("close", () => {
@@ -114,17 +121,18 @@ class CloudTool {
     static async listRemoteFiles(forceRefresh = false) {
         // 如果缓存有效且非强制刷新，直接返回缓存数据
         const now = Date.now();
-        // 独立并发逻辑：如果有缓存且未到 TTL，且不强制刷新，则立即返回，不阻塞
+        // 独立并发逻辑：如果有缓存且未到 TTL，且不强制刷新，则立即返回，不阻塞
         if (!forceRefresh && remoteFilesCache && (now - lastCacheTime < CACHE_TTL)) {
             return remoteFilesCache;
         }
 
-        // 如果正在加载中且已有缓存，先返回旧缓存以保证响应，不阻塞 UI
+        // 如果正在加载中且已有缓存，先返回旧缓存以保证响应，不阻塞 UI
         if (isRemoteLoading && remoteFilesCache) return remoteFilesCache;
 
         isRemoteLoading = true; 
         return new Promise((resolve) => {
-            const rclone = spawn("rclone", ["lsjson", `${config.remoteName}:${config.remoteFolder}`, "--config", path.resolve(config.configPath), "--files-only"]);
+            // 增加降权参数，确保并发查询不至于彻底拖慢转存
+            const rclone = this.rcloneExec(["lsjson", `${config.remoteName}:${config.remoteFolder}`, "--files-only", "--tpslimit", "2"]);
             let output = "";
             rclone.stdout.on("data", (data) => output += data);
             rclone.on("close", () => {
@@ -142,35 +150,35 @@ class CloudTool {
 
     static async uploadFile(localPath, task) {
         return new Promise((resolve) => {
-            const args = ["copy", localPath, `${config.remoteName}:${config.remoteFolder}`, "--config", path.resolve(config.configPath), "--ignore-existing", "--size-only", "--transfers", "1", "--contimeout", "60s", "--progress", "--use-json-log"];
-            task.proc = spawn("rclone", args);
+            const args = ["copy", localPath, `${config.remoteName}:${config.remoteFolder}`, "--ignore-existing", "--size-only", "--transfers", "1", "--contimeout", "60s", "--progress", "--use-json-log"];
+            task.proc = this.rcloneExec(args);
             let stderr = "";
             let lastUpdate = 0;
 
             task.proc.stderr.on("data", (data) => {
+                // 修复：针对缓冲区积压导致的大文件进度不更新，进行按行切割
                 const lines = data.toString().split('\n');
                 for (let line of lines) {
                     if (!line.trim()) continue;
                     try {
                         const stats = JSON.parse(line);
-                        // 适配 Rclone JSON 输出层级
+                        // 兼容不同 Rclone 版本的 JSON 层级
                         const s = stats.stats || stats;
                         if (s.percentage !== undefined) {
                             const now = Date.now();
                             if (now - lastUpdate > 3000) {
                                 lastUpdate = now;
-                                updateStatus(task, CloudTool.getProgressText(s.bytes || 0, s.totalBytes || 1, "正在转存网盘"));
+                                updateStatus(task, this.getProgressText(s.bytes || 0, s.totalBytes || 1, "正在转存网盘"));
                             }
                         }
                     } catch (e) {
-                        // 如果不是 JSON，尝试正则兜底解析
+                        // 正则兜底解析，确保进度条绝对能动
                         const match = line.match(/(\d+)%/);
                         if (match) {
                             const now = Date.now();
                             if (now - lastUpdate > 3000) {
                                 lastUpdate = now;
                                 const pct = parseInt(match[1]);
-                                // 如果拿不到精确字节，用百分比估算进度条
                                 const barLen = 20;
                                 const filled = Math.round(barLen * (pct / 100));
                                 const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
@@ -300,7 +308,7 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                 const isRefresh = data.startsWith("files_refresh_");
                 const page = parseInt(data.split("_")[2]);
 
-                // 刷新按钮限流
+                // 刷新按钮限流
                 if (isRefresh) {
                     const now = Date.now();
                     if (now - lastRefreshTime < 10000) return await answer(`🕒 刷新太快了，请 ${Math.ceil((10000 - (now - lastRefreshTime)) / 1000)} 秒后再试`);
@@ -308,13 +316,14 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                 }
 
                 if (!isNaN(page)) {
+                    // 独立并发：不再拦截翻页/刷新，直接调用
                     const files = await CloudTool.listRemoteFiles(isRefresh);
                     const { text, buttons } = formatFilesPage(files, page);
                     await safeEdit(event.userId, event.msgId, text, buttons);
                 }
-                await answer(isRefresh ? "刷新成功" : "");
+                await answer(isRefresh ? "已请求刷新" : "");
             } else {
-                await answer();
+                await answer(); // 兜底 🚫 等无效按钮
             }
             return;
         }
@@ -327,7 +336,7 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
 
         if (message.message && !message.media) {
             if (message.message === "/files") {
-                // 如果没有缓存且正在加载，才发送等待提示；否则直接走并发获取流程
+                // 如果没有缓存且正在加载，才发送等待提示；否则直接走并发获取流程
                 const files = await CloudTool.listRemoteFiles();
                 const { text, buttons } = formatFilesPage(files, 0);
                 return await client.sendMessage(target, { message: text, buttons, parseMode: "markdown" });
@@ -340,18 +349,18 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                     const msgId = parseInt(msgIdStr);
                     const ids = Array.from({ length: 19 }, (_, i) => msgId - 9 + i);
                     
-                    // 获取消息列表
+                    // 获取消息列表
                     const result = await client.getMessages(channel, { ids });
 
                     if (result && Array.isArray(result) && result.length > 0) {
-                        // 过滤掉 null/undefined 的无效结果再进行查找
+                        // 过滤掉 null/undefined 的无效结果再进行查找
                         const validMsgs = result.filter(m => m && typeof m === 'object');
                         const targetMsg = validMsgs.find(m => m.id === msgId);
 
                         if (targetMsg) {
                             let toProcess = [];
                             if (targetMsg.groupedId) {
-                                // 匹配同一媒体组
+                                // 匹配同一媒体组
                                 toProcess = validMsgs.filter(m =>
                                     m.groupedId &&
                                     m.groupedId.toString() === targetMsg.groupedId.toString() &&
@@ -369,7 +378,7 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                             }
                         }
                     }
-                    // 如果走到这里，说明 ID 探测范围内没找到带媒体的目标
+                    // 如果走到这里，说明 ID 探测范围内没找到带媒体的目标
                     await client.sendMessage(target, { message: "ℹ️ 未能从该链接中解析到有效的媒体消息。" });
                     return;
                 } catch (e) {
@@ -383,7 +392,7 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
         if (message.media) await addNewTask(target, message, "文件");
     });
 
-    // 启动健康检查 Web 服务
+    // 启动健康检查 Web 服务
     http.createServer((req, res) => {
         res.writeHead(200);
         res.end("Node Service Active");
