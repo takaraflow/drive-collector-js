@@ -7,6 +7,8 @@ import { LinkParser } from "./src/core/LinkParser.js";
 import { CloudTool } from "./src/services/rclone.js";
 import { UIHelper } from "./src/ui/templates.js";
 import { safeEdit } from "./src/utils/common.js";
+import { SessionManager } from "./src/modules/SessionManager.js";
+import { DriveConfigFlow } from "./src/modules/DriveConfigFlow.js";
 
 // 刷新限流锁 (保留在主入口)
 let lastRefreshTime = 0; 
@@ -50,6 +52,11 @@ let lastRefreshTime = 0;
                 // 传入 userId 以进行权限验证
                 const ok = await TaskManager.cancelTask(taskId, userId);
                 await answer(ok ? "指令已下达" : "任务已不存在或无权操作");
+            } else if (data.startsWith("login_")) {
+                // 🔹 新增：处理登录相关按钮
+                const toast = await DriveConfigFlow.handleCallback(event, userId);
+                await answer(toast || "");
+                return; 
             } else if (data.startsWith("files_page_") || data.startsWith("files_refresh_")) {
                 const isRefresh = data.startsWith("files_refresh_");
                 const page = parseInt(data.split("_")[2]);
@@ -80,14 +87,29 @@ let lastRefreshTime = 0;
         // --- 处理新消息 ---
         if (!(event instanceof Api.UpdateNewMessage)) return;
         const message = event.message;
-        // 权限校验：仅允许所有者操作
-        if (!message || (message.fromId ? (message.fromId.userId || message.fromId.chatId)?.toString() : message.senderId?.toString()) !== config.ownerId?.toString().trim()) return;
+        if (!message) return;
 
-        // 获取发送者的 ID
+        // 先获取发送者的 ID 和 Target (为了给 SessionManager 使用)
         const userId = (message.fromId ? (message.fromId.userId || message.fromId.chatId) : message.senderId).toString();
         const target = message.peerId;
 
+        // 会话拦截器 (处理密码输入等)
+        const session = await SessionManager.get(userId);
+        if (session) {
+            const handled = await DriveConfigFlow.handleInput(event, userId, session);
+            if (handled) return; // 如果被会话逻辑消费了，就停止往下执行
+        }
+
+        // 权限校验：仅允许所有者操作
+        // ⚠️ 提示：等你测试完 /login 流程后，记得注释掉下面这行，否则别人无法使用
+        if (userId !== config.ownerId?.toString().trim()) return;
+
         if (message.message && !message.media) {
+            // 处理 /login 命令
+            if (message.message === "/login") {
+                return await DriveConfigFlow.sendLoginPanel(target, userId);
+            }
+
             // 处理 /files 文件列表命令
             if (message.message === "/files") {
                 const placeholder = await client.sendMessage(target, { message: "⏳ 正在拉取云端文件列表..." });
