@@ -6,26 +6,29 @@ WORKDIR /app
 # 复制依赖定义
 COPY package*.json ./
 
-# 安装依赖
-RUN npm install --production
+# 1. 修改点：安装依赖后立即清理缓存，减少中间层体积
+RUN npm install --production && npm cache clean --force
 
 # --- 第二阶段：运行环境 ---
 FROM node:20-slim
 
 # 安装 rclone 和基础工具
-# 从官网安装最新版以支持最新的 MEGA 协议
+# 2. 修改点：安装完 curl/unzip 后立即卸载，只保留运行 rclone 所需的 ca-certificates
 RUN apt-get update && apt-get install -y \
     curl \
     unzip \
     ca-certificates \
     && curl https://rclone.org/install.sh | bash \
+    && apt-get purge -y curl unzip \
+    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # 从构建阶段复制 node_modules
 COPY --from=builder /app/node_modules ./node_modules
-# 复制源代码
+
+# 3. 建议点：在复制源代码前，确保你项目根目录有 .dockerignore 文件
 COPY . .
 
 # 创建必要的目录并设置权限
@@ -34,5 +37,4 @@ RUN mkdir -p /tmp/downloads && chmod 777 /tmp/downloads
 # 健康检查端口
 EXPOSE 7860
 
-# 使用 node 直接运行（生产环境建议使用此方式）
 CMD ["node", "index.js"]
