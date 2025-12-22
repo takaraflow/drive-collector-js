@@ -176,6 +176,8 @@ export class TaskManager {
             // 2. 下载阶段
             await client.downloadMedia(message, {
                 outputFile: localPath,
+                chunkSize: 1024 * 1024, // 设置为 1MB (默认是 256KB)
+                workers: 1,             // Zeabur 资源有限，建议保持 1 或 2，太多会爆内存
                 progressCallback: async (downloaded, total) => {
                     if (task.isCancelled) throw new Error("CANCELLED");
                     const now = Date.now();
