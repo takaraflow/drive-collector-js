@@ -38,7 +38,7 @@ let waitingTasks = [];
 // 安全编辑消息，统一处理异常
 const safeEdit = async (chatId, msgId, text, buttons = null) => {
     try {
-        await client.editMessage(chatId, { message: msgId, text, buttons }).catch(() => {});
+        await client.editMessage(chatId, { message: msgId, text, buttons, parseMode: "markdown" }).catch(() => {});
     } catch (e) {}
 };
 
@@ -54,7 +54,7 @@ const getMediaInfo = (media) => {
 
 // 统一更新任务状态 (带取消按钮)
 const updateStatus = async (task, text, isFinal = false) => {
-    const buttons = isFinal ? null : [Button.inline(task.proc ? "🚫 取消转存" : "🚫 取消任务", `cancel_${task.id}`)];
+    const buttons = isFinal ? null : [Button.inline(task.proc ? "🚫 取消转存" : "🚫 取消任务", Buffer.from(`cancel_${task.id}`))];
     await safeEdit(task.chatId, task.msgId, text, buttons);
 };
 
@@ -162,7 +162,7 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
     const taskId = Date.now() + Math.random();
     const statusMsg = await client.sendMessage(target, {
         message: `🚀 **已捕获${customLabel}任务**\n正在排队处理...`,
-        buttons: [Button.inline("🚫 取消排队", `cancel_${taskId}`)]
+        buttons: [Button.inline("🚫 取消排队", Buffer.from(`cancel_${taskId}`))]
     });
     const task = { id: taskId, chatId: target, msgId: statusMsg.id, message: mediaMessage, lastText: "" };
     waitingTasks.push(task);
@@ -204,7 +204,6 @@ async function addNewTask(target, mediaMessage, customLabel = "") {
                 try {
                     const [_, channel, msgIdStr] = match;
                     const msgId = parseInt(msgIdStr);
-                    // 修正：Bot 模式下通过探测前后 ID 来兼容媒体组，避开 GetHistory 报错
                     const ids = Array.from({ length: 19 }, (_, i) => msgId - 9 + i);
                     const result = await client.getMessages(channel, { ids });
 
