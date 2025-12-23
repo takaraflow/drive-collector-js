@@ -22,6 +22,8 @@ import { STRINGS, format } from "../locales/zh-CN.js";
  * 3. 将请求路由到正确的业务模块 (Router)
  */
 export class Dispatcher {
+    // 🆕 媒体组缓存：用于聚合短时间内具有相同 groupedId 的消息
+    static groupBuffers = new Map();
     
     // 防止刷新按钮被疯狂点击
     static lastRefreshTime = 0;
@@ -139,7 +141,7 @@ export class Dispatcher {
         }
 
         if (!isNaN(page)) {
-            if (isRefresh) await safeEdit(event.userId, event.msgId, "🔄 正在同步最新数据...", null, userId);
+            if (isRefresh) await safeEdit(event.userId, event.msgId, STRINGS.files.syncing, null, userId);
             await new Promise(r => setTimeout(r, 50));
             
             const files = await CloudTool.listRemoteFiles(userId, isRefresh);
@@ -198,11 +200,34 @@ export class Dispatcher {
             }), userId);
         }
 
-        // 5. 处理直接发送的文件
+        // 5. 处理带媒体的消息 (文件/视频/图片)
         if (message.media) {
             const drive = await DriveRepository.findByUserId(userId);
             if (!drive) return await this._sendBindHint(target, userId);
-            
+
+            // 🚀 核心逻辑：如果是媒体组消息
+            if (message.groupedId) {
+                const gid = message.groupedId.toString();
+                
+                // 如果是该组的第一条消息，启动收集计时器
+                if (!this.groupBuffers.has(gid)) {
+                    this.groupBuffers.set(gid, {
+                        messages: [],
+                        timer: setTimeout(async () => {
+                            const buffer = this.groupBuffers.get(gid);
+                            this.groupBuffers.delete(gid);
+                            // 收集完毕，交给 TaskManager 批量处理
+                            await TaskManager.addBatchTasks(target, buffer.messages, userId);
+                        }, 800) // 800ms 足够收齐一组消息
+                    });
+                }
+                
+                // 将消息加入缓存
+                this.groupBuffers.get(gid).messages.push(message);
+                return;
+            }
+
+            // 零散文件逻辑保持不动
             await TaskManager.addTask(target, message, userId, "文件");
             return;
         }

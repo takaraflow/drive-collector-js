@@ -131,15 +131,56 @@ export class TaskManager {
     }
 
     /**
+     * 批量添加媒体组任务
+     * @param {string|Object} target 
+     * @param {Array} messages 
+     * @param {string} userId 
+     */
+    static async addBatchTasks(target, messages, userId) {
+        // 1. 发送该组唯一的共享看板消息
+        const statusMsg = await runBotTask(
+            () => client.sendMessage(target, {
+                message: format(STRINGS.task.batch_captured, { count: messages.length }),
+                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_batch_${messages[0].groupedId}`))]
+            }),
+            userId
+        );
+
+        // 2. 循环创建任务，它们将共享同一个 msgId (看板 ID)
+        for (const msg of messages) {
+            const taskId = randomUUID();
+            const info = getMediaInfo(msg);
+
+            await TaskRepository.create({
+                id: taskId,
+                userId: userId.toString(),
+                chatId: target.toString(),
+                msgId: statusMsg.id, // 👈 关键：共享同一个消息 ID
+                sourceMsgId: msg.id,
+                fileName: info?.name,
+                fileSize: info?.size
+            });
+
+            const task = this._createTaskObject(taskId, userId, target, statusMsg.id, msg);
+            task.isGroup = true; // 标记这是组任务
+            
+            this._enqueueTask(task);
+        }
+        this.updateQueueUI();
+    }
+
+    /**
      * [私有] 标准化构造内存中的任务对象
      */
     static _createTaskObject(id, userId, chatId, msgId, message) {
+        const info = getMediaInfo(message);
         return {
             id,
             userId: userId.toString(),
             chatId: chatId.toString(),
             msgId,
             message,
+            fileName: info?.name || 'unknown',
             lastText: "",
             isCancelled: false
         };
@@ -174,89 +215,123 @@ export class TaskManager {
     }
 
     /**
-     * 任务执行核心 Worker
+     * 任务执行核心 Worker (支持媒体组看板)
      * @param {Object} task 
      */
     static async fileWorker(task) {
         const { message, id } = task;
         if (!message.media) return;
 
-        // 从等待队列移除
+        // 1. 队列管理：从等待列表移除
         this.waitingTasks = this.waitingTasks.filter(t => t.id !== id);
         this.updateQueueUI(); 
 
         const info = getMediaInfo(message.media);
-        if (!info) return await updateStatus(task, "❌ 无法解析该媒体文件信息。", true);
+        if (!info) return await updateStatus(task, STRINGS.task.parse_failed, true);
 
         const localPath = path.join(config.downloadDir, info.name);
 
-        // --- 心跳函数 ---
-        // 封装心跳逻辑，减少重复代码
-        const heartbeat = async (status) => {
+        /**
+         * 🚀 核心改进：统一的心跳函数
+         * 会根据 task.isGroup 自动选择是更新“单条消息”还是“组看板”
+         */
+        const heartbeat = async (status, downloaded = 0, total = 0) => {
             if (task.isCancelled) throw new Error("CANCELLED");
             await TaskRepository.updateStatus(task.id, status);
+            
+            if (task.isGroup) {
+                // 如果是组任务，刷新整个看板
+                await this._refreshGroupMonitor(task, status, downloaded, total);
+            } else {
+                // 如果是普通文件，按原样渲染进度条
+                const text = (downloaded > 0) 
+                    ? UIHelper.renderProgress(downloaded, total) 
+                    : (status === 'uploading' ? STRINGS.task.uploading : STRINGS.task.downloading);
+                await updateStatus(task, text);
+            }
         };
 
         try {
             await heartbeat('downloading');
 
-            // 1. 秒传检查
+            // 2. 秒传检查
             const remoteFile = await CloudTool.getRemoteFileInfo(info.name, task.userId);
-            // 误差 1KB 内视为同一文件
             if (remoteFile && Math.abs(remoteFile.Size - info.size) < 1024) {
                 await TaskRepository.updateStatus(task.id, 'completed');
-                return await updateStatus(task, `✨ **文件已秒传成功**\n\n📄 名称: \`${info.name}\`\n📂 目录: \`${config.remoteFolder}\``, true);
+                if (task.isGroup) {
+                    await this._refreshGroupMonitor(task, 'completed');
+                } else {
+                    await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: info.name, folder: config.remoteFolder }), true);
+                }
+                return;
             }
 
-            // 2. 下载阶段
+            // 3. 下载阶段
             let lastUpdate = 0;
             await runMtprotoTask(() => client.downloadMedia(message, {
                     outputFile: localPath,
                     chunkSize: 1024 * 1024,
                     workers: 1,
                     progressCallback: async (downloaded, total) => {
-                        if (task.isCancelled) throw new Error("CANCELLED");
                         const now = Date.now();
-                        // 3秒 UI 节流 + 数据库心跳
+                        // 3秒 UI 节流
                         if (now - lastUpdate > 3000 || downloaded === total) {
                             lastUpdate = now;
-                            await updateStatus(task, UIHelper.renderProgress(downloaded, total));
-                            await heartbeat('downloading');
+                            // 调用统一心跳
+                            await heartbeat('downloading', downloaded, total);
                         }
                     }
                 })
             );
 
-            await updateStatus(task, "📤 **资源拉取完成，正在启动转存...**");
+            await updateStatus(task, STRINGS.task.uploading);
             await heartbeat('uploading');
             
-            // 3. 上传阶段
+            // 4. 上传阶段
             const uploadResult = await CloudTool.uploadFile(localPath, task, async () => {
+                // 上传中的心跳 (没有字节级进度，仅报 status)
                 await heartbeat('uploading'); 
             });
 
-            // 4. 结果处理
+            // 5. 结果处理
             if (uploadResult.success) {
-                await updateStatus(task, "⚙️ **转存完成，正在确认数据完整性...**");
+                await updateStatus(task, STRINGS.task.verifying);
                 const finalRemote = await CloudTool.getRemoteFileInfo(info.name, task.userId);
-                // 二次校验
                 const isOk = finalRemote && Math.abs(finalRemote.Size - fs.statSync(localPath).size) < 1024;
                 
-                if (isOk) {
-                    await TaskRepository.updateStatus(task.id, 'completed');
-                } else {
-                    await TaskRepository.updateStatus(task.id, 'failed', 'Validation failed');
-                }
+                const finalStatus = isOk ? 'completed' : 'failed';
+                await TaskRepository.updateStatus(task.id, finalStatus);
 
-                await updateStatus(task, isOk ? `✅ **文件转存成功**\n\n📄 名称: \`${info.name}\`\n📂 目录: \`${config.remoteFolder}\`` : `⚠️ **校验异常**: \`${info.name}\``, true);
+                if (task.isGroup) {
+                    // 组任务：更新看板为最终态
+                    await this._refreshGroupMonitor(task, finalStatus);
+                } else {
+                    // 普通任务：发成功/失败消息
+                    const text = isOk 
+                        ? format(STRINGS.task.success, { name: info.name, folder: config.remoteFolder }) 
+                        : format(STRINGS.task.failed_validation, { name: info.name });
+                    await updateStatus(task, text, true);
+                }
             } else {
                 await TaskRepository.updateStatus(task.id, 'failed', uploadResult.error || "Upload failed");
-                await updateStatus(task, `❌ **同步终止**\n原因: \`${task.isCancelled ? "用户手动取消" : uploadResult.error}\``, true);
+                if (task.isGroup) {
+                    await this._refreshGroupMonitor(task, 'failed');
+                } else {
+                    await updateStatus(task, format(STRINGS.task.failed_upload, { 
+                        reason: task.isCancelled ? "用户手动取消" : uploadResult.error 
+                    }), true);
+                }
             }
         } catch (e) {
             const isCancel = e.message === "CANCELLED";
             await TaskRepository.updateStatus(task.id, isCancel ? 'cancelled' : 'failed', e.message);
-            await updateStatus(task, isCancel ? "🚫 任务已取消。" : `⚠️ 处理异常: ${e.message}`, true);
+            
+            if (task.isGroup) {
+                await this._refreshGroupMonitor(task, isCancel ? 'cancelled' : 'failed');
+            } else {
+                const text = isCancel ? STRINGS.task.cancelled : `${STRINGS.task.error_prefix}${e.message}`;
+                await updateStatus(task, text, true);
+            }
         } finally {
             if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
         }
@@ -294,5 +369,32 @@ export class TaskManager {
         // 3. DB 状态更新
         await TaskRepository.markCancelled(taskId);
         return true;
+    }
+
+    // 🆕 UI 节流锁：防止看板更新太快导致 Telegram API 限流
+    static monitorLocks = new Map();
+
+    /**
+     * [私有] 刷新组任务看板
+     */
+    static async _refreshGroupMonitor(task, status, downloaded = 0, total = 0) {
+        const msgId = task.msgId;
+        
+        // UI 节流：每 2.5 秒才允许编辑一次看板
+        const lastUpdate = this.monitorLocks.get(msgId) || 0;
+        const now = Date.now();
+        const isFinal = status === 'completed' || status === 'failed';
+        
+        if (!isFinal && now - lastUpdate < 2500) return;
+        this.monitorLocks.set(msgId, now);
+
+        // 1. 从数据库拉取该看板下的所有任务状态
+        const groupTasks = await d1.fetchAll("SELECT file_name, status FROM tasks WHERE msg_id = ? ORDER BY created_at ASC", [msgId]);
+        
+        // 2. 调用 UI 模板生成看板文本
+        const { text } = UIHelper.renderBatchMonitor(groupTasks, task, status, downloaded, total);
+        
+        // 3. 执行安全编辑
+        await safeEdit(task.chatId, task.msgId, text, null, task.userId);
     }
 }

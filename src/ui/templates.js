@@ -10,7 +10,7 @@ export class UIHelper {
     /**
      * 生成 ASCII 进度条文本
      */
-    static renderProgress(current, total, actionName = "正在拉取资源") {
+    static renderProgress(current, total, actionName = STRINGS.task.downloading) {
         const percentage = (current / (total || 1) * 100).toFixed(1);
         const barLen = 20;
         const filled = Math.round(barLen * (current / (total || 1)));
@@ -58,5 +58,42 @@ export class UIHelper {
             ]
         ];
         return { text, buttons };
+    }
+
+    /**
+     * 🆕 渲染批量任务看板
+     * @param {Array} allTasks - 数据库中该组的所有任务
+     * @param {Object} focusTask - 当前正在操作的 Task 对象
+     * @param {string} focusStatus - 当前 Task 的状态
+     */
+    static renderBatchMonitor(allTasks, focusTask, focusStatus, downloaded = 0, total = 0) {
+        const totalCount = allTasks.length;
+        const completedCount = allTasks.filter(t => t.status === 'completed').length;
+        
+        let statusLines = [];
+
+        allTasks.forEach(t => {
+            if (t.file_name === focusTask.fileName) {
+                // 焦点任务：显示进度条或当前状态
+                let label = focusStatus === 'downloading' ? STRINGS.task.focus_downloading : STRINGS.task.focus_uploading;
+                let line = format(label, { name: t.file_name });
+                if (downloaded > 0) {
+                    line += `\n${this.renderProgress(downloaded, total, "")}`; // 复用进度条，去掉前缀
+                }
+                statusLines.push(line);
+            } else {
+                // 非焦点任务：只显示状态图标
+                let icon = t.status === 'completed' ? "✅" : (t.status === 'failed' ? "❌" : "🕒");
+                statusLines.push(`${icon} \`${t.file_name}\``);
+            }
+        });
+
+        const text = format(STRINGS.task.batch_monitor, {
+            current: completedCount,
+            total: totalCount,
+            statusText: statusLines.join('\n')
+        });
+
+        return { text };
     }
 }
