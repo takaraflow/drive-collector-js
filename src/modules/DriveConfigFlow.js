@@ -123,7 +123,7 @@ export class DriveConfigFlow {
             const password = text.trim();
 
             // 立即删除用户的密码消息
-            try { await client.deleteMessages(peerId, [event.message.id], { revoke: true }); } catch (e) {}
+            try { await runMtprotoTask(() => client.deleteMessages(peerId, [event.message.id], { revoke: true })); } catch (e) {}
 
             // 1. 发送验证提示
             const tempMsg = await runBotTask(() => client.sendMessage(peerId, { message: "⏳ 正在验证账号，请稍候..." }), userId);
