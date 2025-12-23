@@ -11,6 +11,7 @@ import { SessionManager } from "./src/modules/SessionManager.js";
 import { DriveConfigFlow } from "./src/modules/DriveConfigFlow.js";
 import { d1 } from "./src/services/d1.js"; // 👈 新增引入 d1，用于查库
 import { runBotTask } from "./src/utils/limiter.js";
+import { AuthGuard } from "./src/modules/AuthGuard.js";
 
 // 刷新限流锁 (保留在主入口)
 let lastRefreshTime = 0; 
@@ -61,10 +62,11 @@ let lastRefreshTime = 0;
 
         // 如果获取到了用户ID，进行权限检查
         if (userId) {
+            const role = await AuthGuard.getRole(userId);
             const ownerId = config.ownerId?.toString();
             const isOwner = userId === ownerId;
 
-            if (!isOwner) {
+            if (!isOwner && !(await AuthGuard.can(userId, "maintenance:bypass"))) {
                 // 查库获取当前模式 (默认 public)
                 const setting = await d1.fetchOne("SELECT value FROM system_settings WHERE key = 'access_mode'");
                 const mode = setting ? setting.value : 'public';

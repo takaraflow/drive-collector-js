@@ -10,6 +10,7 @@ import { d1 } from "../services/d1.js";
 import { UIHelper } from "../ui/templates.js";
 import { getMediaInfo, updateStatus } from "../utils/common.js";
 import { runBotTask, runMtprotoTask } from "../utils/limiter.js";
+import { AuthGuard } from "../modules/AuthGuard.js";
 
 /**
  * --- 任务管理调度中心 (TaskManager) ---
@@ -260,9 +261,12 @@ export class TaskManager {
         // 1. 数据库层面的所有权校验 (防止A取消B的任务)
         const dbTask = await d1.fetchOne("SELECT user_id, status FROM tasks WHERE id = ?", [taskId]);
         
-        // 如果任务不存在，或者存在但 user_id 不匹配
-        if (!dbTask || dbTask.user_id !== userId.toString()) {
-            console.warn(`User ${userId} tried to cancel task ${taskId} (owned by ${dbTask ? dbTask.user_id : 'unknown'})`);
+        if (!dbTask) return false;
+
+        const isOwner = dbTask.user_id === userId.toString();
+        const canCancelAny = await AuthGuard.can(userId, "task:cancel:any");
+        if (!isOwner && !canCancelAny) {
+            console.warn(`User ${userId} tried to cancel task ${taskId} (owned by ${dbTask.user_id})`);
             return false;
         }
 
