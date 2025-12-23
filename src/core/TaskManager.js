@@ -10,7 +10,8 @@ import { UIHelper } from "../ui/templates.js";
 import { getMediaInfo, updateStatus } from "../utils/common.js";
 import { runBotTask, runMtprotoTask } from "../utils/limiter.js";
 import { AuthGuard } from "../modules/AuthGuard.js";
-import { TaskRepository } from "../repositories/TaskRepository.js"; // 👈 引入 Repo
+import { TaskRepository } from "../repositories/TaskRepository.js";
+import { STRINGS, format } from "../locales/zh-CN.js";
 
 /**
  * --- 任务管理调度中心 (TaskManager) ---

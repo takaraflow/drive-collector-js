@@ -8,10 +8,11 @@ import { TaskManager } from "../core/TaskManager.js";
 import { LinkParser } from "../core/LinkParser.js";
 import { UIHelper } from "../ui/templates.js";
 import { CloudTool } from "../services/rclone.js";
-import { SettingsRepository } from "../repositories/SettingsRepository.js"; // 👈 引入 Repo
-import { DriveRepository } from "../repositories/DriveRepository.js";       // 👈 引入 Repo
+import { SettingsRepository } from "../repositories/SettingsRepository.js";
+import { DriveRepository } from "../repositories/DriveRepository.js";
 import { safeEdit } from "../utils/common.js";
 import { runBotTask } from "../utils/limiter.js";
+import { STRINGS, format } from "../locales/zh-CN.js";
 
 /**
  * 消息分发器 (Dispatcher)
