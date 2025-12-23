@@ -1,4 +1,5 @@
 import PQueue from "p-queue";
+import { randomUUID } from "crypto";
 import path from "path";
 import fs from "fs";
 import { Button } from "telegram/tl/custom/button.js";
@@ -86,7 +87,7 @@ export class TaskManager {
      * 添加新任务到队列
      */
     static async addTask(target, mediaMessage, userId, customLabel = "") {
-        const taskId = Date.now().toString(); // 统一转为字符串存储
+        const taskId = randomUUID(); // 确保全局唯一，避免 DB UNIQUE 约束冲突
         const statusMsg = await runBotTask(
             () => client.sendMessage(target, {
                 message: `🚀 **已捕获${customLabel}任务**\n正在排队处理...`,
