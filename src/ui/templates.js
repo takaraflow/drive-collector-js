@@ -1,6 +1,7 @@
 import { Button } from "telegram/tl/custom/button.js";
 import path from "path";
 import { config } from "../config/index.js";
+import { STRINGS, format } from "../locales/zh-CN.js";
 
 /**
  * --- UI 模板工具库 (UIHelper) ---
@@ -25,10 +26,10 @@ export class UIHelper {
         const pagedFiles = files.slice(start, start + pageSize);
         const totalPages = Math.ceil(files.length / pageSize);
 
-        let text = `📂 **目录**: \`${config.remoteFolder}\`\n\n`;
+        let text = format(STRINGS.files.directory_prefix, { folder: config.remoteFolder });
         
         if (files.length === 0 && !isLoading) {
-            text += "ℹ️ 目录为空或尚未加载。";
+            text += STRINGS.files.dir_empty_or_loading;
         } else {
             pagedFiles.forEach(f => {
                 const ext = path.extname(f.Name).toLowerCase();
@@ -39,17 +40,21 @@ export class UIHelper {
             });
         }
 
-        text += `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n📊 *第 ${page + 1}/${totalPages || 1} 页 | 共 ${files.length} 个文件*`;
-        if (isLoading) text += `\n🔄 _正在同步最新数据..._`;
+        text += `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n` + format(STRINGS.files.page_info, { 
+            current: page + 1, 
+            total: totalPages || 1, 
+            count: files.length 
+        });
+        if (isLoading) text += `\n🔄 _${STRINGS.files.syncing}_`;
         
         // 生成分页导航按钮
         const buttons = [
             [
-                Button.inline(page <= 0 ? "🚫" : "🏠 首页", Buffer.from(`files_page_0`)),
-                Button.inline(page <= 0 ? "🚫" : "⬅️ 上一页", Buffer.from(`files_page_${page - 1}`)),
-                Button.inline("🔄 刷新", Buffer.from(`files_refresh_${page}`)),
-                Button.inline(page >= totalPages - 1 ? "🚫" : "下一页 ➡️", Buffer.from(`files_page_${page + 1}`)),
-                Button.inline(page >= totalPages - 1 ? "🚫" : "🔚 尾页", Buffer.from(`files_page_${totalPages - 1}`))
+                Button.inline(page <= 0 ? "🚫" : STRINGS.files.btn_home, Buffer.from(`files_page_0`)),
+                Button.inline(page <= 0 ? "🚫" : STRINGS.files.btn_prev, Buffer.from(`files_page_${page - 1}`)),
+                Button.inline(STRINGS.files.btn_refresh, Buffer.from(`files_refresh_${page}`)),
+                Button.inline(page >= totalPages - 1 ? "🚫" : STRINGS.files.btn_next, Buffer.from(`files_page_${page + 1}`)),
+                Button.inline(page >= totalPages - 1 ? "🚫" : STRINGS.files.btn_end, Buffer.from(`files_page_${totalPages - 1}`))
             ]
         ];
         return { text, buttons };

@@ -93,8 +93,8 @@ export class TaskManager {
         // 1. 发送排队 UI
         const statusMsg = await runBotTask(
             () => client.sendMessage(target, {
-                message: `🚀 **已捕获${customLabel}任务**\n正在排队处理...`,
-                buttons: [Button.inline("🚫 取消排队", Buffer.from(`cancel_${taskId}`))]
+                message: format(STRINGS.task.captured, { label: customLabel }),
+                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_${taskId}`))]
             }),
             userId
         );
@@ -123,7 +123,7 @@ export class TaskManager {
             // 💥 如果失败，告诉用户
             await client.editMessage(target, { 
                 message: statusMsg.id, 
-                text: "❌ **任务创建失败**\n\n数据库连接异常，请稍后重试。" 
+                text: STRINGS.task.create_failed
             }).catch(() => {});
         }
         
@@ -162,7 +162,7 @@ export class TaskManager {
     static async updateQueueUI() {
         for (let i = 0; i < Math.min(this.waitingTasks.length, 5); i++) {
             const task = this.waitingTasks[i];
-            const newText = `🕒 **任务排队中...**\n\n当前顺位: \`第 ${i + 1} 位\``;
+            const newText = format(STRINGS.task.queued, { rank: i + 1 });
             if (task.lastText !== newText) {
                 await updateStatus(task, newText);
                 task.lastText = newText;

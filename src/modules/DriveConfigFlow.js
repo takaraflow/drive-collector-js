@@ -3,7 +3,8 @@ import { SessionManager } from "./SessionManager.js";
 import { client } from "../services/telegram.js";
 import { CloudTool } from "../services/rclone.js";
 import { runBotTask, runMtprotoTask, PRIORITY } from "../utils/limiter.js";
-import { DriveRepository } from "../repositories/DriveRepository.js"; // 👈 引入 Repo
+import { DriveRepository } from "../repositories/DriveRepository.js";
+import { STRINGS, format } from "../locales/zh-CN.js";
 
 /**
  * 驱动配置流程模块
@@ -23,21 +24,24 @@ export class DriveConfigFlow {
         // 使用 Repository 获取数据
         const drive = await DriveRepository.findByUserId(userId);
         
-        let message = "🛠️ **网盘管理中心**\n\n";
+        let message = STRINGS.drive.menu_title;
         const buttons = [];
 
         if (drive) {
             const email = drive.name.split('-')[1] || drive.name;
-            message += `✅ **已绑定服务：**\n类型：\`${drive.type.toUpperCase()}\`\n账号：\`${email}\`\n\n您可以选择管理文件或解绑当前网盘。`;
+            message += format(STRINGS.drive.bound_info, { 
+                type: drive.type.toUpperCase(), 
+                account: email 
+            });
             
             buttons.push([
-                Button.inline("📁 浏览文件", Buffer.from("files_page_0")),
-                Button.inline("❌ 解绑网盘", Buffer.from("drive_unbind_confirm"))
+                Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0")),
+                Button.inline(STRINGS.drive.btn_unbind, Buffer.from("drive_unbind_confirm"))
             ]);
         } else {
-            message += "目前尚未绑定任何网盘。请选择下方服务开始绑定：";
+            message += STRINGS.drive.not_bound;
             buttons.push([
-                Button.inline("➕ 绑定 Mega 网盘", Buffer.from("drive_bind_mega")) 
+                Button.inline(STRINGS.drive.btn_bind_mega, Buffer.from("drive_bind_mega")) 
             ]);
         }
         await runBotTask(() => client.sendMessage(chatId, { message, buttons }), userId);
@@ -55,20 +59,20 @@ export class DriveConfigFlow {
         if (data === "drive_unbind_confirm") {
             await runBotTask(() => client.editMessage(event.userId, {
                     message: event.msgId,
-                    text: "⚠️ **确定要解绑该网盘吗？**\n\n解绑后将无法进行转存，且再次使用需重新输入密码。",
+                    text: STRINGS.drive.unbind_confirm,
                     buttons: [
                         [
-                            Button.inline("✅ 确定解绑", Buffer.from("drive_unbind_execute")), // 修正了前缀
-                            Button.inline("🔙 取消", Buffer.from("drive_manager_back"))
+                            Button.inline(STRINGS.drive.btn_confirm_unbind, Buffer.from("drive_unbind_execute")), 
+                            Button.inline(STRINGS.drive.btn_cancel, Buffer.from("drive_manager_back"))
                         ]
                     ]
                 }), userId);
-            return "请确认操作";
+            return STRINGS.drive.please_confirm;
         }
 
         if (data === "drive_unbind_execute") {
             await this.handleUnbind(event.userId, userId);
-            return "已成功解绑";
+            return STRINGS.drive.success_unbind;
         }
 
         if (data === "drive_manager_back") {
@@ -76,28 +80,28 @@ export class DriveConfigFlow {
             // 这里为了简单，我们重新查一次库手动构造 editMessage
             // 原则上应该抽取 renderDriveMenuText 函数，这里为了代码紧凑直接写
             const drive = await DriveRepository.findByUserId(userId);
-            let message = "🛠️ **网盘管理中心**\n\n";
+            let message = STRINGS.drive.menu_title;
             const buttons = [];
             if (drive) {
                 const email = drive.name.split('-')[1] || drive.name;
-                message += `✅ **已绑定服务：**\n类型：\`${drive.type.toUpperCase()}\`\n账号：\`${email}\`\n\n您可以选择管理文件或解绑当前网盘。`;
+                message += format(STRINGS.drive.bound_info, { type: drive.type.toUpperCase(), account: email });
                 buttons.push([
-                    Button.inline("📁 浏览文件", Buffer.from("files_page_0")),
-                    Button.inline("❌ 解绑网盘", Buffer.from("drive_unbind_confirm"))
+                    Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0")),
+                    Button.inline(STRINGS.drive.btn_unbind, Buffer.from("drive_unbind_confirm"))
                 ]);
             } else {
-                message += "目前尚未绑定任何网盘。请选择下方服务开始绑定：";
-                buttons.push([Button.inline("➕ 绑定 Mega 网盘", Buffer.from("drive_bind_mega"))]);
+                message += STRINGS.drive.not_bound; 
+                buttons.push([Button.inline(STRINGS.drive.btn_bind_mega, Buffer.from("drive_bind_mega"))]);
             }
 
             await runBotTask(() => client.editMessage(event.userId, { message: event.msgId, text: message, buttons }), userId);
-            return "已返回";
+            return STRINGS.drive.returned;
         }
 
         if (data === "drive_bind_mega") { 
             await SessionManager.start(userId, "MEGA_WAIT_EMAIL");
-            await runBotTask(() => client.sendMessage(event.userId, { message: "📧 **请输入您的 Mega 登录邮箱**：" }), userId, { priority: PRIORITY.HIGH });
-            return "请查看输入提示";
+            await runBotTask(() => client.sendMessage(event.userId, { message: STRINGS.drive.mega_input_email }), userId, { priority: PRIORITY.HIGH }); // 👈 替换
+            return STRINGS.drive.check_input;
         }
         
         return null;
@@ -139,7 +143,7 @@ export class DriveConfigFlow {
 
             if (!result.success) {
                 // 错误处理逻辑
-                let errorText = "❌ **绑定失败**";
+                let errorText = STRINGS.drive.bind_failed;
                 const safeDetails = (result.details || '').replace(/`/g, "'").replace(/\n/g, " ").slice(-200); 
 
                 if (result.reason === "2FA") {

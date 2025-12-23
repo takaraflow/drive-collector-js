@@ -3,7 +3,8 @@ import path from "path";
 import fs from "fs";
 import { config } from "../config/index.js";
 import { d1 } from "./d1.js"; 
-import { DriveRepository } from "../repositories/DriveRepository.js"; 
+import { DriveRepository } from "../repositories/DriveRepository.js";
+import { STRINGS } from "../locales/zh-CN.js";
 
 // 确定 rclone 二进制路径 (兼容 Zeabur 和 本地)
 const rcloneBinary = fs.existsSync("/app/rclone/rclone") 
@@ -19,13 +20,13 @@ export class CloudTool {
     static loading = false;
 
     static async _getUserConfig(userId) {
-        if (!userId) throw new Error("User ID is required");
+        if (!userId) throw new Error(STRINGS.drive.user_id_required);
 
         // 1. 使用 Repo
         const drive = await DriveRepository.findByUserId(userId);
         
         if (!drive) {
-            throw new Error("未绑定网盘，请发送 /drive 进行绑定");
+            throw new Error(STRINGS.drive.no_drive_found);
         }
         
         const driveConfig = JSON.parse(drive.config_data);

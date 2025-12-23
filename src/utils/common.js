@@ -1,6 +1,7 @@
 import { Button } from "telegram/tl/custom/button.js";
 import { client } from "../services/telegram.js";
 import { runBotTask } from "./limiter.js";
+import { STRINGS } from "../locales/zh-CN.js";
 
 /**
  * --- 辅助工具函数 (Internal Helpers) ---
@@ -28,6 +29,7 @@ export const getMediaInfo = (media) => {
 
 // 统一更新任务状态 (带取消按钮)
 export const updateStatus = async (task, text, isFinal = false) => {
-    const buttons = isFinal ? null : [Button.inline(task.proc ? "🚫 取消转存" : "🚫 取消任务", Buffer.from(`cancel_${task.id}`))];
+    const cancelText = task.proc ? STRINGS.task.cancel_transfer_btn : STRINGS.task.cancel_task_btn;
+    const buttons = isFinal ? null : [Button.inline(cancelText, Buffer.from(`cancel_${task.id}`))];
     await safeEdit(task.chatId, task.msgId, text, buttons, task.userId);
 };

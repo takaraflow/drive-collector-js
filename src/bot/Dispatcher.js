@@ -108,7 +108,7 @@ export class Dispatcher {
         if (data.startsWith("cancel_")) {
             const taskId = data.split("_")[1];
             const ok = await TaskManager.cancelTask(taskId, userId);
-            await answer(ok ? "指令已下达" : "任务已不存在或无权操作");
+            await answer(ok ? STRINGS.task.cmd_sent : STRINGS.task.task_not_found);
         
         } else if (data.startsWith("drive_")) { 
             const toast = await DriveConfigFlow.handleCallback(event, userId);
@@ -131,7 +131,9 @@ export class Dispatcher {
 
         if (isRefresh) {
             const now = Date.now();
-            if (now - this.lastRefreshTime < 10000) return await answerCallback(`🕒 刷新太快了，请 ${Math.ceil((10000 - (now - this.lastRefreshTime)) / 1000)} 秒后再试`);
+            if (now - this.lastRefreshTime < 10000) return await answerCallback(format(STRINGS.files.refresh_limit, { 
+                seconds: Math.ceil((10000 - (now - this.lastRefreshTime)) / 1000) 
+            }));
             this.lastRefreshTime = now;
         }
 
@@ -143,7 +145,7 @@ export class Dispatcher {
             const { text, buttons } = UIHelper.renderFilesPage(files, page, 6, CloudTool.isLoading());
             await safeEdit(event.userId, event.msgId, text, buttons, userId);
         }
-        await answerCallback(isRefresh ? "刷新成功" : "");
+        await answerCallback(isRefresh ? STRINGS.files.refresh_success : "");
     }
 
     /**
@@ -201,7 +203,7 @@ export class Dispatcher {
         // 5. 兜底回复
         if (text && !message.media && !text.startsWith("/")) {
              return await runBotTask(() => client.sendMessage(target, { 
-                message: `👋 **欢迎使用云转存助手**\n\n可以直接发送文件或链接给我，我会帮您转存。\n\n/drive 🔐 绑定网盘\n/files 📁 浏览文件` 
+                message: STRINGS.system.welcome
             }), userId);
         }
     }
@@ -226,7 +228,7 @@ export class Dispatcher {
      */
     static async _sendBindHint(target, userId) {
         return await runBotTask(() => client.sendMessage(target, { 
-            message: "🚫 **未检测到绑定的网盘**\n\n请先发送 /drive 绑定网盘，然后再发送文件/链接。" 
+            message: STRINGS.drive.no_drive_found
         }), userId);
     }
 }
