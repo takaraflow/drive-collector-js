@@ -6,13 +6,20 @@ const createLimiter = (options) => {
     const { delayBetweenTasks = 0, ...queueOptions } = options;
     const queue = new PQueue(queueOptions);
 
-    const run = (fn) => queue.add(async () => {
-        const result = await fn();
-        if (delayBetweenTasks > 0) await sleep(delayBetweenTasks);
-        return result;
-    });
+    const run = (fn, addOptions = {}) =>
+        queue.add(async () => {
+            const result = await fn();
+            if (delayBetweenTasks > 0) await sleep(delayBetweenTasks);
+            return result;
+        }, addOptions);
 
     return { queue, run };
+};
+
+export const PRIORITY = {
+    HIGH: 10,
+    NORMAL: 0,
+    LOW: -10
 };
 
 // Telegram Bot API：全局限流 30 QPS
@@ -31,15 +38,18 @@ const getUserLimiter = (userId) => {
 /**
  * Bot API 调用限流封装：先过全局，再过用户维度
  */
-export const runBotTask = (fn, userId) =>
-    botGlobalLimiter.run(() => getUserLimiter(userId).run(fn));
+export const runBotTask = (fn, userId, addOptions = {}) =>
+    botGlobalLimiter.run(
+        () => getUserLimiter(userId).run(fn, addOptions),
+        addOptions
+    );
 
 // MTProto 文件传输：小并发 + 轻微延迟，减少 FloodWait
 export const fileLimiter = createLimiter({ concurrency: 3, delayBetweenTasks: 50 });
 
 // MTProto 通用队列（用于 getMessages / downloadMedia 等）
 const mtprotoLimiter = createLimiter({ concurrency: 3, delayBetweenTasks: 50 });
-export const runMtprotoTask = (fn) => mtprotoLimiter.run(fn);
+export const runMtprotoTask = (fn, addOptions = {}) => mtprotoLimiter.run(fn, addOptions);
 
 // MTProto 认证：极低频率，避免封禁
 export const authLimiter = createLimiter({ intervalCap: 1, interval: 60 * 1000 });

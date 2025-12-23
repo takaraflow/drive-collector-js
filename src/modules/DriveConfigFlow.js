@@ -3,7 +3,7 @@ import { d1 } from "../services/d1.js";
 import { SessionManager } from "./SessionManager.js";
 import { client } from "../services/telegram.js";
 import { CloudTool } from "../services/rclone.js";
-import { runBotTask } from "../utils/limiter.js";
+import { runBotTask, runMtprotoTask, PRIORITY } from "../utils/limiter.js";
 
 export class DriveConfigFlow {
     // 支持的网盘列表
@@ -93,7 +93,7 @@ export class DriveConfigFlow {
         // 绑定 Mega (语义清晰：在 drive 模块下执行 bind mega 动作)
         if (data === "drive_bind_mega") { 
             await SessionManager.start(userId, "MEGA_WAIT_EMAIL");
-            await runBotTask(() => client.sendMessage(event.userId, { message: "📧 **请输入您的 Mega 登录邮箱**：" }), userId);
+            await runBotTask(() => client.sendMessage(event.userId, { message: "📧 **请输入您的 Mega 登录邮箱**：" }), userId, { priority: PRIORITY.HIGH });
             return "请查看输入提示";
         }
         
@@ -111,10 +111,10 @@ export class DriveConfigFlow {
         // --- Mega 流程 ---
         if (step === "MEGA_WAIT_EMAIL") {
             // 简单的邮箱验证
-            if (!text.includes("@")) return await runBotTask(() => client.sendMessage(peerId, { message: "❌ 邮箱格式看似不正确，请重新输入：" }), userId);
+            if (!text.includes("@")) return await runBotTask(() => client.sendMessage(peerId, { message: "❌ 邮箱格式看似不正确，请重新输入：" }), userId, { priority: PRIORITY.HIGH });
             
             await SessionManager.update(userId, "MEGA_WAIT_PASS", { email: text.trim() });
-            await runBotTask(() => client.sendMessage(peerId, { message: "🔑 **请输入密码**\n(输入后消息会被立即删除以保护隐私)" }), userId);
+            await runBotTask(() => client.sendMessage(peerId, { message: "🔑 **请输入密码**\n(输入后消息会被立即删除以保护隐私)" }), userId, { priority: PRIORITY.HIGH });
             return true; // 拦截成功
         }
 
@@ -123,10 +123,10 @@ export class DriveConfigFlow {
             const password = text.trim();
 
             // 立即删除用户的密码消息
-            try { await runMtprotoTask(() => client.deleteMessages(peerId, [event.message.id], { revoke: true })); } catch (e) {}
+            try { await runMtprotoTask(() => client.deleteMessages(peerId, [event.message.id], { revoke: true }), { priority: PRIORITY.HIGH }); } catch (e) {}
 
             // 1. 发送验证提示
-            const tempMsg = await runBotTask(() => client.sendMessage(peerId, { message: "⏳ 正在验证账号，请稍候..." }), userId);
+            const tempMsg = await runBotTask(() => client.sendMessage(peerId, { message: "⏳ 正在验证账号，请稍候..." }), userId, { priority: PRIORITY.HIGH });
 
             // 2. 构造临时配置对象
             const configObj = { user: email, pass: password };
@@ -158,7 +158,8 @@ export class DriveConfigFlow {
                         message: tempMsg.id, 
                         text: errorText
                     }),
-                    userId
+                    userId,
+                    { priority: PRIORITY.HIGH }
                 );
                 return true;
             }
@@ -177,7 +178,8 @@ export class DriveConfigFlow {
                     message: tempMsg.id, 
                     text: `✅ **绑定成功！**\n\n验证通过，现在您可以发送文件给我了。\n账号: \`${email}\`` 
                 }),
-                userId
+                userId,
+                { priority: PRIORITY.HIGH }
             );
             return true;
         }
