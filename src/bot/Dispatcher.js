@@ -190,22 +190,21 @@ export class Dispatcher {
             } catch (e) {
                 return await runBotTask(() => client.sendMessage(target, { message: `❌ ${e.message}` }), userId);
             }
+
+            // 4. 通用兜底回复：
+            // 如果是纯文本消息（包括未匹配的命令），且未被上述逻辑处理，则发送欢迎语。
+            return await runBotTask(() => client.sendMessage(target, { 
+                message: STRINGS.system.welcome
+            }), userId);
         }
 
-        // 4. 处理直接发送的文件
+        // 5. 处理直接发送的文件
         if (message.media) {
             const drive = await DriveRepository.findByUserId(userId);
             if (!drive) return await this._sendBindHint(target, userId);
             
             await TaskManager.addTask(target, message, userId, "文件");
             return;
-        }
-
-        // 5. 兜底回复
-        if (text && !message.media && !text.startsWith("/")) {
-             return await runBotTask(() => client.sendMessage(target, { 
-                message: STRINGS.system.welcome
-            }), userId);
         }
     }
 
