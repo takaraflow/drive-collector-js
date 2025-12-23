@@ -37,6 +37,10 @@ export const runBotTask = (fn, userId) =>
 // MTProto 文件传输：小并发 + 轻微延迟，减少 FloodWait
 export const fileLimiter = createLimiter({ concurrency: 3, delayBetweenTasks: 50 });
 
+// MTProto 通用队列（用于 getMessages / downloadMedia 等）
+const mtprotoLimiter = createLimiter({ concurrency: 3, delayBetweenTasks: 50 });
+export const runMtprotoTask = (fn) => mtprotoLimiter.run(fn);
+
 // MTProto 认证：极低频率，避免封禁
 export const authLimiter = createLimiter({ intervalCap: 1, interval: 60 * 1000 });
 

@@ -1,5 +1,5 @@
 import { client } from "../services/telegram.js";
-import { runBotTask } from "../utils/limiter.js";
+import { runMtprotoTask } from "../utils/limiter.js";
 
 /**
  * --- 链接解析与消息探测逻辑 (LinkParser) ---
@@ -19,7 +19,7 @@ export class LinkParser {
         try {
             // 构建 ID 探测范围 (±9)，用于捕获关联的消息组
             const ids = Array.from({ length: 19 }, (_, i) => msgId - 9 + i);
-            const result = await runBotTask(() => client.getMessages(channel, { ids }), userId);
+            const result = await runMtprotoTask(() => client.getMessages(channel, { ids }));
 
             if (!result || !Array.isArray(result) || result.length === 0) return null;
 

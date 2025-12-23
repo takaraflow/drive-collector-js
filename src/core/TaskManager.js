@@ -8,7 +8,7 @@ import { CloudTool } from "../services/rclone.js";
 import { d1 } from "../services/d1.js";
 import { UIHelper } from "../ui/templates.js";
 import { getMediaInfo, updateStatus } from "../utils/common.js";
-import { runBotTask } from "../utils/limiter.js";
+import { runBotTask, runMtprotoTask } from "../utils/limiter.js";
 
 /**
  * --- 任务管理调度中心 (TaskManager) ---
@@ -46,7 +46,7 @@ export class TaskManager {
             
             for (const row of tasks) {
                 try {
-                    const messages = await runBotTask(() => client.getMessages(row.chat_id, { ids: [row.source_msg_id] }), row.user_id);
+                    const messages = await runMtprotoTask(() => client.getMessages(row.chat_id, { ids: [row.source_msg_id] }));
                     const message = messages[0];
 
                     if (!message || !message.media) {
@@ -189,21 +189,22 @@ export class TaskManager {
 
             let lastUpdate = 0;
             // 2. 下载阶段
-            await client.downloadMedia(message, {
-                outputFile: localPath,
-                chunkSize: 1024 * 1024, // 设置为 1MB
-                workers: 1,            // 保持 1
-                progressCallback: async (downloaded, total) => {
-                    if (task.isCancelled) throw new Error("CANCELLED");
-                    const now = Date.now();
-                    // 每3秒更新一次UI，顺便更新一次数据库心跳
-                    if (now - lastUpdate > 3000 || downloaded === total) {
-                        lastUpdate = now;
-                        await updateStatus(task, UIHelper.renderProgress(downloaded, total));
-                        await touchTask('downloading'); // <--- 发送心跳
+            await runMtprotoTask(() => client.downloadMedia(message, {
+                    outputFile: localPath,
+                    chunkSize: 1024 * 1024, // 设置为 1MB
+                    workers: 1,            // 保持 1
+                    progressCallback: async (downloaded, total) => {
+                        if (task.isCancelled) throw new Error("CANCELLED");
+                        const now = Date.now();
+                        // 每3秒更新一次UI，顺便更新一次数据库心跳
+                        if (now - lastUpdate > 3000 || downloaded === total) {
+                            lastUpdate = now;
+                            await updateStatus(task, UIHelper.renderProgress(downloaded, total));
+                            await touchTask('downloading'); // <--- 发送心跳
+                        }
                     }
-                }
-            });
+                })
+            );
 
             await updateStatus(task, "📤 **资源拉取完成，正在启动转存...**");
             
