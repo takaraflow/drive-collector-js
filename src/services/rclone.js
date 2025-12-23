@@ -18,10 +18,10 @@ export class CloudTool {
     static loading = false;
 
     /**
-     * 【内部核心】获取用户的 Rclone 环境变量
-     * 这会在运行时动态创建一个名为 "target" 的 Rclone 配置
+     * 【内部核心】获取用户的 Rclone 配置信息 (不依赖环境变量注入)
+     * 返回结构化对象，供后续构建 Connection String 使用
      */
-    static async _getUserEnv(userId) {
+    static async _getUserConfig(userId) {
         if (!userId) throw new Error("User ID is required for Rclone operations");
 
         // 1. 查库
@@ -31,30 +31,23 @@ export class CloudTool {
         );
         
         if (!drive) {
-            throw new Error("未绑定网盘，请发送 /login 进行绑定");
+            throw new Error("未绑定网盘，请发送 /drive 进行绑定");
         }
 
         const driveConfig = JSON.parse(drive.config_data);
-        const env = { ...process.env }; // 继承当前环境变量
-
-        // 2. 注入动态配置 -> 定义一个名为 'target' 的 remote
-        // 对应 rclone.conf 中的 [target] type = ...
-        env[`RCLONE_CONFIG_TARGET_TYPE`] = drive.type;
-
-        for (const [key, value] of Object.entries(driveConfig)) {
-            // 3. 特殊处理：Mega 的密码需要 obscure (混淆)
-            // 如果存的是明文密码，我们需要在这里实时混淆一下
-            let finalValue = value;
-            // 【修复】只要是 Mega 的密码，无条件进行混淆
-            // 去掉了之前的正则判断，因为简单密码也会命中正则，导致漏掉混淆
-            if (drive.type === 'mega' && key === 'pass') {
-                 finalValue = this._obscure(value);
-            }
-
-            env[`RCLONE_CONFIG_TARGET_${key.toUpperCase()}`] = finalValue;
+        
+        // 2. 密码混淆处理
+        let finalPass = driveConfig.pass;
+        if (drive.type === 'mega') {
+             finalPass = this._obscure(finalPass);
         }
 
-        return env;
+        // 3. 返回清洗后的配置对象
+        return {
+            type: drive.type,
+            user: driveConfig.user,
+            pass: finalPass
+        };
     }
 
     /**
@@ -64,7 +57,7 @@ export class CloudTool {
     static _obscure(password) {
         try {
             // 使用参数数组传递密码，杜绝 Shell 注入和转义干扰
-            const ret = spawnSync(rcloneBinary, ["obscure", password], { encoding: 'utf-8' });
+            const ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "obscure", password], { encoding: 'utf-8' });
             
             if (ret.error) {
                 console.error("Obscure spawn error:", ret.error);
@@ -102,7 +95,7 @@ export class CloudTool {
                 const connectionString = `:${type},user=${configData.user},pass=${finalPass}:`;
 
                 // 3. 直接对这个动态后端执行 about 命令
-                const args = ["about", connectionString, "--json", "--timeout", "15s"];
+                const args = ["--config", "/dev/null", "about", connectionString, "--json", "--timeout", "15s"];
                 
                 // 注意：这里不需要注入特殊的 env 了，因为配置都在 args 里
                 const proc = spawn(rcloneBinary, args, { env: process.env });
@@ -140,7 +133,7 @@ export class CloudTool {
     }
 
     /**
-     * 上传文件
+     * 上传文件 (彻底修复多租户隔离失效问题)
      * @param {string} localPath 本地文件路径
      * @param {object} task 任务对象 (必须包含 userId)
      * @param {function} onProgress 进度回调 (可选)
@@ -148,15 +141,19 @@ export class CloudTool {
     static async uploadFile(localPath, task, onProgress) {
         return new Promise(async (resolve) => {
             try {
-                // 获取专属环境变量
-                const userEnv = await this._getUserEnv(task.userId);
+                // 🛑 关键修复：显式获取配置，不依赖隐式环境变量
+                const conf = await this._getUserConfig(task.userId);
                 
-                // 目标路径：使用动态的 'target' remote
-                const remotePath = `target:${config.remoteFolder}/`; 
+                // 🛑 关键修复：构造显式 Connection String
+                // 任何时候 rclone 都会直接用这个字符串里的账号密码，绝对不会读错配置
+                const connectionString = `:${conf.type},user=${conf.user},pass=${conf.pass}:`;
+                const remotePath = `${connectionString}${config.remoteFolder}/`; 
 
                 // 启动上传进程
-                const args = ["copy", localPath, remotePath, "--progress", "--transfers", "4", "--stats", "1s"];
-                const proc = spawn(rcloneBinary, args, { env: userEnv });
+                const args = ["--config", "/dev/null", "copy", localPath, remotePath, "--progress", "--transfers", "4", "--stats", "1s"];
+                
+                // 这里 env 只需要 process.env 即可，因为配置已经在 args 里了
+                const proc = spawn(rcloneBinary, args, { env: process.env });
                 
                 // 将进程句柄挂载到 task 上，方便 TaskManager 执行 cancelTask 时杀进程
                 task.proc = proc;
@@ -208,21 +205,13 @@ export class CloudTool {
     static async listRemoteFiles(userId, forceRefresh = false) {
         this.loading = true;
         try {
-            // 1. 获取包含混淆后密码的 env
-            const userEnv = await this._getUserEnv(userId);
+            // 🛑 关键修复：复用 _getUserConfig，逻辑统一
+            const conf = await this._getUserConfig(userId);
             
-            // 2. 提取配置，构造 Connection String (绕过环境变量隐式传递的问题)
-            const type = userEnv['RCLONE_CONFIG_TARGET_TYPE'];
-            const user = userEnv['RCLONE_CONFIG_TARGET_USER'];
-            const pass = userEnv['RCLONE_CONFIG_TARGET_PASS'];
-            
-            const connectionString = `:${type},user=${user},pass=${pass}:`;
+            const connectionString = `:${conf.type},user=${conf.user},pass=${conf.pass}:`;
             const fullRemotePath = `${connectionString}${config.remoteFolder}/`;
 
-            // 【关键修复】移除 "--stat" 参数
-            // --stat 会让 lsjson 返回目录对象本身(Object)，而不是目录内容列表(Array)
-            // 这就是导致 "files.sort is not a function" 的根本原因
-            const args = ["lsjson", fullRemotePath];
+            const args = ["--config", "/dev/null", "lsjson", fullRemotePath];
             
             const ret = spawnSync(rcloneBinary, args, { 
                 env: process.env, 
@@ -264,16 +253,13 @@ export class CloudTool {
         if (!userId) return null; 
 
         try {
-            const userEnv = await this._getUserEnv(userId);
+            // 🛑 关键修复：复用 _getUserConfig，逻辑统一
+            const conf = await this._getUserConfig(userId);
             
-            const type = userEnv['RCLONE_CONFIG_TARGET_TYPE'];
-            const user = userEnv['RCLONE_CONFIG_TARGET_USER'];
-            const pass = userEnv['RCLONE_CONFIG_TARGET_PASS'];
-            const connectionString = `:${type},user=${user},pass=${pass}:`;
-            
+            const connectionString = `:${conf.type},user=${conf.user},pass=${conf.pass}:`;
             const fullRemotePath = `${connectionString}${config.remoteFolder}/${fileName}`;
             
-            const ret = spawnSync(rcloneBinary, ["lsjson", fullRemotePath], { 
+            const ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "lsjson", fullRemotePath], { 
                 env: process.env,
                 encoding: 'utf-8' 
             });
