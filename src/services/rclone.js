@@ -2,7 +2,8 @@ import { spawn, spawnSync, execSync } from "child_process";
 import path from "path";
 import fs from "fs";
 import { config } from "../config/index.js";
-import { d1 } from "./d1.js"; // 引入数据库
+import { d1 } from "./d1.js"; 
+import { DriveRepository } from "../repositories/DriveRepository.js"; 
 
 // 确定 rclone 二进制路径 (兼容 Zeabur 和 本地)
 const rcloneBinary = fs.existsSync("/app/rclone/rclone") 
@@ -17,31 +18,22 @@ export class CloudTool {
     };
     static loading = false;
 
-    /**
-     * 【内部核心】获取用户的 Rclone 配置信息 (不依赖环境变量注入)
-     * 返回结构化对象，供后续构建 Connection String 使用
-     */
     static async _getUserConfig(userId) {
-        if (!userId) throw new Error("User ID is required for Rclone operations");
+        if (!userId) throw new Error("User ID is required");
 
-        // 1. 查库
-        const drive = await d1.fetchOne(
-            "SELECT * FROM user_drives WHERE user_id = ? AND status = 'active'", 
-            [userId.toString()]
-        );
+        // 1. 使用 Repo
+        const drive = await DriveRepository.findByUserId(userId);
         
         if (!drive) {
             throw new Error("未绑定网盘，请发送 /drive 进行绑定");
         }
-
-        const driveConfig = JSON.parse(drive.config_data);
         
+        const driveConfig = JSON.parse(drive.config_data);
         // 2. 密码混淆处理
         let finalPass = driveConfig.pass;
         if (drive.type === 'mega') {
              finalPass = this._obscure(finalPass);
         }
-
         // 3. 返回清洗后的配置对象
         return {
             type: drive.type,
@@ -86,7 +78,8 @@ export class CloudTool {
                 let finalPass = configData.pass;
                 // 【修复】只要是 Mega，输入的一定是明文，必须混淆
                 if (type === 'mega') {
-                     finalPass = this._obscure(finalPass);
+                     // 改为 CloudTool._obscure 以防上下文丢失
+                     finalPass = CloudTool._obscure(finalPass);
                 }
 
                 // 2. 构造动态后端连接字符串
