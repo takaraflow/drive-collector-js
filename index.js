@@ -53,11 +53,11 @@ let lastRefreshTime = 0;
                 // 传入 userId 以进行权限验证
                 const ok = await TaskManager.cancelTask(taskId, userId);
                 await answer(ok ? "指令已下达" : "任务已不存在或无权操作");
-            } else if (data.startsWith("login_")) {
-                // 🔹 处理登录相关按钮
+            } else if (data.startsWith("drive_")) { 
+                // 处理网盘管理相关按钮
                 const toast = await DriveConfigFlow.handleCallback(event, userId);
                 await answer(toast || "");
-                return; 
+                return;
             } else if (data.startsWith("files_page_") || data.startsWith("files_refresh_")) {
                 const isRefresh = data.startsWith("files_refresh_");
                 const page = parseInt(data.split("_")[2]);
@@ -107,23 +107,28 @@ let lastRefreshTime = 0;
         // --- 处理纯文本命令 ---
         if (message.message && !message.media) {
             
-            // 1. /login 命令 (不需要检查是否已绑定)
-            if (message.message === "/login") {
-                return await DriveConfigFlow.sendLoginPanel(target, userId);
+            // 1. /drive 命令 (主菜单)
+            if (message.message === "/drive") {
+                return await DriveConfigFlow.sendDriveManager(target, userId);
             }
 
-            // 2. /logout 命令
-            if (message.message === "/logout") {
-                return await DriveConfigFlow.handleLogout(target, userId);
+            // 2. /unbind 命令 (解绑网盘)
+            if (message.message === "/logout" || message.message === "/unbind") {
+                return await DriveConfigFlow.handleUnbind(target, userId);
             }
 
-            // 3. /files 文件列表命令
+            // 3. /status
+            if (message.message === "/status") {
+                // 暂用 DriveConfigFlow 或 TaskManager 处理，此处先占位
+                return await client.sendMessage(target, { message: "📊 **查看状态 (转存进度)**\n\n目前没有进行中的任务。" });
+            }
+
+            // 4. /files
             if (message.message === "/files") {
-                // 检查是否绑定
-                const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId]);
+                const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId.toString()]);
                 if (!drive) {
                     return await client.sendMessage(target, { 
-                        message: "🚫 **未检测到绑定的网盘**\n\n您需要先绑定一个网盘才能浏览文件。\n请发送 /login 开始绑定。" 
+                        message: "🚫 **未检测到绑定的网盘**\n\n请先使用 /drive 绑定网盘，然后再浏览文件。" 
                     });
                 }
 
@@ -138,15 +143,16 @@ let lastRefreshTime = 0;
                 return await safeEdit(target, placeholder.id, text, buttons);
             }
 
-            // 4. 处理可能存在的消息链接 (也需要检查绑定)
+            // 5. 处理可能存在的消息链接 (也需要检查绑定)
             try {
                 const toProcess = await LinkParser.parse(message.message);
                 if (toProcess && toProcess.length > 0) {
-                    // 检查是否绑定
-                    const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId]);
+                    // 🛑 修正：增加 .toString() 保证 ID 类型一致
+                    const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId.toString()]);
                     if (!drive) {
                         return await client.sendMessage(target, { 
-                            message: "🚫 **未检测到绑定的网盘**\n\n请先发送 /login 绑定网盘，然后再发送链接。" 
+                            // 🛑 修正：将 /login 改为 /drive
+                            message: "🚫 **未检测到绑定的网盘**\n\n请先发送 /drive 绑定网盘，然后再发送链接。" 
                         });
                     }
 
@@ -159,17 +165,17 @@ let lastRefreshTime = 0;
             }
 
             // 兜底回复：欢迎信息
-            // 只有当不是链接，也不是命令时才显示
-            return await client.sendMessage(target, { message: `👋 **欢迎使用云转存助手**\n\n发送文件或链接给我，我会帮您转存。\n发送 /login 管理网盘绑定。\n发送 /files 查看已存文件。` });
+            return await client.sendMessage(target, { 
+                message: `👋 **欢迎使用云转存助手**\n\n可以直接发送文件或链接给我，我会帮您转存。\n\n/drive 🔐 绑定网盘 (账号管理)\n/files 📁 浏览文件 (云端管理)\n/status 📊 查看状态 (转存进度)` 
+            });
         }
 
         // --- 处理直接发送的文件/视频 ---
         if (message.media) {
-            // 检查是否绑定
-            const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId]);
+            const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId.toString()]);
             if (!drive) {
                 return await client.sendMessage(target, { 
-                    message: "🚫 **未检测到绑定的网盘**\n\n请先发送 /login 绑定网盘，然后再发送文件。" 
+                    message: "🚫 **未检测到绑定的网盘**\n\n请先使用 /drive 绑定网盘，然后再发送文件。" 
                 });
             }
             await TaskManager.addTask(target, message, userId, "文件");
