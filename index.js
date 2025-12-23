@@ -10,6 +10,7 @@ import { safeEdit } from "./src/utils/common.js";
 import { SessionManager } from "./src/modules/SessionManager.js";
 import { DriveConfigFlow } from "./src/modules/DriveConfigFlow.js";
 import { d1 } from "./src/services/d1.js"; // 👈 新增引入 d1，用于查库
+import { runBotTask } from "./src/utils/limiter.js";
 
 // 刷新限流锁 (保留在主入口)
 let lastRefreshTime = 0; 
@@ -71,16 +72,16 @@ let lastRefreshTime = 0;
                 if (mode !== 'public') {
                     // ⛔ 维护模式拦截
                     if (isCallback) {
-                        await client.invoke(new Api.messages.SetBotCallbackAnswer({
+                        await runBotTask(() => client.invoke(new Api.messages.SetBotCallbackAnswer({
                             queryId: event.queryId,
                             message: "🚧 系统维护中",
                             alert: true
-                        })).catch(() => {});
+                        })).catch(() => {}), userId);
                     } else if (target) {
                         // 避免群组刷屏，如果是私聊则回复
-                        await client.sendMessage(target, { 
+                        await runBotTask(() => client.sendMessage(target, { 
                             message: "🚧 **系统维护中**\n\n当前 Bot 仅限管理员使用，请稍后访问。" 
-                        });
+                        }), userId);
                     }
                     return; // 停止后续逻辑
                 }
@@ -92,10 +93,10 @@ let lastRefreshTime = 0;
         // --- 处理回调查询 (按钮点击) ---
         if (event instanceof Api.UpdateBotCallbackQuery) {
             const data = event.data.toString();
-            const answer = (msg = "") => client.invoke(new Api.messages.SetBotCallbackAnswer({
+            const answer = (msg = "") => runBotTask(() => client.invoke(new Api.messages.SetBotCallbackAnswer({
                 queryId: event.queryId,
                 message: msg
-            })).catch(() => {});
+            })).catch(() => {}), userId);
 
             if (data.startsWith("cancel_")) {
                 const taskId = data.split("_")[1];
@@ -120,12 +121,12 @@ let lastRefreshTime = 0;
 
                 if (!isNaN(page)) {
                     // 触发“正在同步”的 UI 状态
-                    if (isRefresh) await safeEdit(event.userId, event.msgId, "🔄 正在同步最新数据...");
+                    if (isRefresh) await safeEdit(event.userId, event.msgId, "🔄 正在同步最新数据...", null, userId);
                     await new Promise(r => setTimeout(r, 50));
                     // 调用 CloudTool 获取数据 (传入 userId)
                     const files = await CloudTool.listRemoteFiles(userId, isRefresh);
                     const { text, buttons } = UIHelper.renderFilesPage(files, page, 6, CloudTool.isLoading());
-                    await safeEdit(event.userId, event.msgId, text, buttons);
+                    await safeEdit(event.userId, event.msgId, text, buttons, userId);
                 }
                 await answer(isRefresh ? "刷新成功" : "");
             } else {
@@ -165,19 +166,19 @@ let lastRefreshTime = 0;
             // 3. /status
             if (message.message === "/status") {
                 // 暂用 DriveConfigFlow 或 TaskManager 处理，此处先占位
-                return await client.sendMessage(target, { message: "📊 **查看状态 (转存进度)**\n\n目前没有进行中的任务。" });
+                return await runBotTask(() => client.sendMessage(target, { message: "📊 **查看状态 (转存进度)**\n\n目前没有进行中的任务。" }), userId);
             }
 
             // 4. /files
             if (message.message === "/files") {
                 const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId.toString()]);
                 if (!drive) {
-                    return await client.sendMessage(target, { 
+                    return await runBotTask(() => client.sendMessage(target, { 
                         message: "🚫 **未检测到绑定的网盘**\n\n请先使用 /drive 绑定网盘，然后再浏览文件。" 
-                    });
+                    }), userId);
                 }
 
-                const placeholder = await client.sendMessage(target, { message: "⏳ 正在拉取云端文件列表..." });
+                const placeholder = await runBotTask(() => client.sendMessage(target, { message: "⏳ 正在拉取云端文件列表..." }), userId);
                 // 人为让出事件循环 100ms
                 await new Promise(r => setTimeout(r, 100));
                 
@@ -185,43 +186,43 @@ let lastRefreshTime = 0;
                 const files = await CloudTool.listRemoteFiles(userId);
                 // 传入 CloudTool 的加载状态
                 const { text, buttons } = UIHelper.renderFilesPage(files, 0, 6, CloudTool.isLoading());
-                return await safeEdit(target, placeholder.id, text, buttons);
+                return await safeEdit(target, placeholder.id, text, buttons, userId);
             }
 
             // 5. 处理可能存在的消息链接 (也需要检查绑定)
             try {
-                const toProcess = await LinkParser.parse(message.message);
+                const toProcess = await LinkParser.parse(message.message, userId);
                 if (toProcess && toProcess.length > 0) {
                     // 🛑 修正：增加 .toString() 保证 ID 类型一致
                     const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId.toString()]);
                     if (!drive) {
-                        return await client.sendMessage(target, { 
+                        return await runBotTask(() => client.sendMessage(target, { 
                             // 🛑 修正：将 /login 改为 /drive
                             message: "🚫 **未检测到绑定的网盘**\n\n请先发送 /drive 绑定网盘，然后再发送链接。" 
-                        });
+                        }), userId);
                     }
 
-                    if (toProcess.length > 10) await client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` });
+                    if (toProcess.length > 10) await runBotTask(() => client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` }), userId);
                     for (const msg of toProcess.slice(0, 10)) await TaskManager.addTask(target, msg, userId, "链接");
                     return;
                 }
             } catch (e) {
-                return await client.sendMessage(target, { message: `❌ ${e.message}` });
+                return await runBotTask(() => client.sendMessage(target, { message: `❌ ${e.message}` }), userId);
             }
 
             // 兜底回复：欢迎信息
-            return await client.sendMessage(target, { 
+            return await runBotTask(() => client.sendMessage(target, { 
                 message: `👋 **欢迎使用云转存助手**\n\n可以直接发送文件或链接给我，我会帮您转存。\n\n/drive 🔐 绑定网盘 (账号管理)\n/files 📁 浏览文件 (云端管理)\n/status 📊 查看状态 (转存进度)` 
-            });
+            }), userId);
         }
 
         // --- 处理直接发送的文件/视频 ---
         if (message.media) {
             const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId.toString()]);
             if (!drive) {
-                return await client.sendMessage(target, { 
+                return await runBotTask(() => client.sendMessage(target, { 
                     message: "🚫 **未检测到绑定的网盘**\n\n请先使用 /drive 绑定网盘，然后再发送文件。" 
-                });
+                }), userId);
             }
             await TaskManager.addTask(target, message, userId, "文件");
         }

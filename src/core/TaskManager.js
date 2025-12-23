@@ -8,6 +8,7 @@ import { CloudTool } from "../services/rclone.js";
 import { d1 } from "../services/d1.js";
 import { UIHelper } from "../ui/templates.js";
 import { getMediaInfo, updateStatus } from "../utils/common.js";
+import { runBotTask } from "../utils/limiter.js";
 
 /**
  * --- 任务管理调度中心 (TaskManager) ---
@@ -45,7 +46,7 @@ export class TaskManager {
             
             for (const row of tasks) {
                 try {
-                    const messages = await client.getMessages(row.chat_id, { ids: [row.source_msg_id] });
+                    const messages = await runBotTask(() => client.getMessages(row.chat_id, { ids: [row.source_msg_id] }), row.user_id);
                     const message = messages[0];
 
                     if (!message || !message.media) {
@@ -86,10 +87,13 @@ export class TaskManager {
      */
     static async addTask(target, mediaMessage, userId, customLabel = "") {
         const taskId = Date.now().toString(); // 统一转为字符串存储
-        const statusMsg = await client.sendMessage(target, {
-            message: `🚀 **已捕获${customLabel}任务**\n正在排队处理...`,
-            buttons: [Button.inline("🚫 取消排队", Buffer.from(`cancel_${taskId}`))]
-        });
+        const statusMsg = await runBotTask(
+            () => client.sendMessage(target, {
+                message: `🚀 **已捕获${customLabel}任务**\n正在排队处理...`,
+                buttons: [Button.inline("🚫 取消排队", Buffer.from(`cancel_${taskId}`))]
+            }),
+            userId
+        );
 
         const info = getMediaInfo(mediaMessage);
 
