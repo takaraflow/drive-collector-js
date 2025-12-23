@@ -388,13 +388,21 @@ export class TaskManager {
         if (!isFinal && now - lastUpdate < 2500) return;
         this.monitorLocks.set(msgId, now);
 
-        // 1. 从数据库拉取该看板下的所有任务状态
-        const groupTasks = await d1.fetchAll("SELECT file_name, status FROM tasks WHERE msg_id = ? ORDER BY created_at ASC", [msgId]);
+        // 1. 拉取该看板下的所有任务状态
+        const groupTasks = await TaskRepository.findByMsgId(msgId);
         
         // 2. 调用 UI 模板生成看板文本
         const { text } = UIHelper.renderBatchMonitor(groupTasks, task, status, downloaded, total);
         
         // 3. 执行安全编辑
-        await safeEdit(task.chatId, task.msgId, text, null, task.userId);
+        try {
+            await client.editMessage(task.chatId, {
+               message: task.msgId,
+               text: text,
+               parseMode: "html"
+           });
+       } catch (e) {
+           // 忽略编辑错误（如内容未变）
+       }
     }
 }

@@ -2,7 +2,6 @@ import { spawn, spawnSync, execSync } from "child_process";
 import path from "path";
 import fs from "fs";
 import { config } from "../config/index.js";
-import { d1 } from "./d1.js"; 
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { STRINGS } from "../locales/zh-CN.js";
 

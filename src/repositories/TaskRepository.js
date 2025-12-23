@@ -115,4 +115,22 @@ export class TaskRepository {
             console.error(`TaskRepository.markCancelled failed for ${taskId}:`, e);
         }
     }
+
+    /**
+     * 根据 msg_id 获取该消息组下的所有任务状态（用于看板）
+     * @param {number} msgId 
+     * @returns {Promise<Array>}
+     */
+    static async findByMsgId(msgId) {
+        if (!msgId) return [];
+        try {
+            return await d1.fetchAll(
+                "SELECT file_name, status FROM tasks WHERE msg_id = ? ORDER BY created_at ASC", 
+                [msgId]
+            );
+        } catch (e) {
+            console.error(`TaskRepository.findByMsgId error for ${msgId}:`, e);
+            return [];
+        }
+    }
 }
