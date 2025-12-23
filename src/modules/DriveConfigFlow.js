@@ -12,50 +12,86 @@ export class DriveConfigFlow {
     ];
 
     /**
-     * 1. 渲染 /login 面板
+     * 网盘管理中心
      */
-    static async sendLoginPanel(chatId, userId) {
-        // 查库：看用户绑定了哪些
-        const existing = await d1.fetchAll("SELECT type FROM user_drives WHERE user_id = ?", [userId.toString()]);
-        const boundTypes = new Set(existing.map(e => e.type));
-
+    static async sendDriveManager(chatId, userId) {
+        const drive = await d1.fetchOne("SELECT * FROM user_drives WHERE user_id = ?", [userId.toString()]);
+        
+        let message = "🛠️ **网盘管理中心**\n\n";
         const buttons = [];
-        for (const drive of this.SUPPORTED_DRIVES) {
-            const isBound = boundTypes.has(drive.type);
-            buttons.push(Button.inline(
-                isBound ? `✅ ${drive.name} (已绑定)` : `➕ ${drive.name}`,
-                Buffer.from(isBound ? "login_noop" : `login_select_${drive.type}`)
-            ));
-        }
 
-        // 两列布局
-        const rows = [];
-        for (let i = 0; i < buttons.length; i += 2) {
-            rows.push(buttons.slice(i, i + 2));
+        if (drive) {
+            const email = drive.name.split('-')[1] || drive.name;
+            message += `✅ **已绑定服务：**\n类型：\`${drive.type.toUpperCase()}\`\n账号：\`${email}\`\n\n您可以选择管理文件或解绑当前网盘。`;
+            
+            buttons.push([
+                Button.inline("📁 浏览文件", Buffer.from("files_page_0")),
+                Button.inline("❌ 解绑网盘", Buffer.from("drive_unbind_confirm")) // 👈 增加 drive_ 前缀保持统一
+            ]);
+        } else {
+            message += "目前尚未绑定任何网盘。请选择下方服务开始绑定：";
+            buttons.push([
+                // 💡 使用 bind 明确这是一个具体的“绑定”动作，避免歧义
+                Button.inline("➕ 绑定 Mega 网盘", Buffer.from("drive_bind_mega")) 
+            ]);
         }
-
-        await client.sendMessage(chatId, {
-            message: "🔐 **请选择要绑定的网盘服务**\n\n绑定后，您的文件将自动转存到该网盘。",
-            buttons: rows
-        });
+        await client.sendMessage(chatId, { message, buttons });
     }
 
     /**
-     * 2. 处理按钮点击
+     * 处理按钮回调
      */
     static async handleCallback(event, userId) {
         const data = event.data.toString();
-        
-        // 点击了“已绑定”的按钮
-        if (data === "login_noop") {
-            return "⚠️ 该网盘已绑定，无需重复操作。";
+
+        // 1. 二次确认解绑
+        if (data === "drive_unbind_confirm") {
+            await client.editMessage(event.userId, {
+                message: event.msgId,
+                text: "⚠️ **确定要解绑该网盘吗？**\n\n解绑后将无法进行转存，且再次使用需重新输入密码。",
+                buttons: [
+                    [
+                        Button.inline("✅ 确定解绑", Buffer.from("unbind_execute")),
+                        Button.inline("🔙 取消", Buffer.from("drive_manager_back"))
+                    ]
+                ]
+            });
+            return "请确认操作";
         }
 
-        // 选择 Mega
-        if (data === "login_select_mega") {
+        // 2. 执行解绑
+        if (data === "drive_unbind_execute") {
+            await this.handleUnbind(event.userId, userId);
+            return "已成功解绑";
+        }
+
+        // 3. 返回管理面板
+        if (data === "drive_manager_back") {
+            const drive = await d1.fetchOne("SELECT * FROM user_drives WHERE user_id = ?", [userId.toString()]);
+            let message = "🛠️ **网盘管理中心**\n\n";
+            const buttons = [];
+
+            if (drive) {
+                const email = drive.name.split('-')[1] || drive.name;
+                message += `✅ **已绑定服务：**\n类型：\`${drive.type.toUpperCase()}\`\n账号：\`${email}\`\n\n您可以选择管理文件或解绑当前网盘。`;
+                buttons.push([
+                    Button.inline("📁 浏览文件", Buffer.from("files_page_0")),
+                    Button.inline("❌ 解绑网盘", Buffer.from("drive_unbind_confirm")) // 👈 修正：加上 drive_ 前缀
+                ]);
+            } else {
+                message += "目前尚未绑定任何网盘。请选择下方服务开始绑定：";
+                buttons.push([Button.inline("➕ 绑定 Mega 网盘", Buffer.from("drive_bind_mega"))]); // 👈 修正：动作名对齐
+            }
+
+            await client.editMessage(event.userId, { message: event.msgId, text: message, buttons });
+            return "已返回";
+        }
+
+        // 绑定 Mega (语义清晰：在 drive 模块下执行 bind mega 动作)
+        if (data === "drive_bind_mega") { 
             await SessionManager.start(userId, "MEGA_WAIT_EMAIL");
             await client.sendMessage(event.userId, { message: "📧 **请输入您的 Mega 登录邮箱**：" });
-            return "请查看聊天窗口输入提示";
+            return "请查看输入提示";
         }
         
         return null;
@@ -143,13 +179,13 @@ export class DriveConfigFlow {
     }
 
     /**
-     * 处理 /logout 逻辑
+     * 处理解绑逻辑
      */
-    static async handleLogout(chatId, userId) {
+    static async handleUnbind(chatId, userId) { 
         const drive = await d1.fetchOne("SELECT id FROM user_drives WHERE user_id = ?", [userId.toString()]);
         
         if (!drive) {
-            return await client.sendMessage(chatId, { message: "⚠️ 您当前未绑定任何网盘，无需退出。" });
+            return await client.sendMessage(chatId, { message: "⚠️ 您当前未绑定任何网盘，无需解绑。" });
         }
 
         // 删除绑定记录
@@ -158,7 +194,8 @@ export class DriveConfigFlow {
         await SessionManager.clear(userId);
 
         await client.sendMessage(chatId, { 
-            message: "✅ **登出成功**\n\n您的账号信息已从本系统中移除。如需再次使用，请发送 /login 重新绑定。" 
+            // 💡 提示词全面语义化
+            message: "✅ **解绑成功**\n\n您的账号信息已从本系统中移除。如需再次使用，请发送 /drive 重新绑定。" 
         });
     }
 }
