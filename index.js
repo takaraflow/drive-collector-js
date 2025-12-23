@@ -39,9 +39,58 @@ let lastRefreshTime = 0;
     });
 
     client.addEventHandler(async (event) => {
+        // ---------------------------------------------------------
+        // 🛡️ 1. 全局身份与状态检查 (前置拦截)
+        // ---------------------------------------------------------
+        let userId = null;
+        let target = null;
+        let isCallback = false;
+
+        // 统一提取 ID
+        if (event instanceof Api.UpdateBotCallbackQuery) {
+            userId = event.userId.toString();
+            // Callback 时 target 主要用于逻辑判断，不直接用于 sendMessage
+            target = event.peer; 
+            isCallback = true;
+        } else if (event instanceof Api.UpdateNewMessage && event.message) {
+            const m = event.message;
+            userId = (m.fromId ? (m.fromId.userId || m.fromId.chatId) : m.senderId).toString();
+            target = m.peerId;
+        }
+
+        // 如果获取到了用户ID，进行权限检查
+        if (userId) {
+            const ownerId = config.ownerId?.toString();
+            const isOwner = userId === ownerId;
+
+            if (!isOwner) {
+                // 查库获取当前模式 (默认 public)
+                const setting = await d1.fetchOne("SELECT value FROM system_settings WHERE key = 'access_mode'");
+                const mode = setting ? setting.value : 'public';
+
+                if (mode !== 'public') {
+                    // ⛔ 维护模式拦截
+                    if (isCallback) {
+                        await client.invoke(new Api.messages.SetBotCallbackAnswer({
+                            queryId: event.queryId,
+                            message: "🚧 系统维护中",
+                            alert: true
+                        })).catch(() => {});
+                    } else if (target) {
+                        // 避免群组刷屏，如果是私聊则回复
+                        await client.sendMessage(target, { 
+                            message: "🚧 **系统维护中**\n\n当前 Bot 仅限管理员使用，请稍后访问。" 
+                        });
+                    }
+                    return; // 停止后续逻辑
+                }
+            }
+        }
+        // ---------------------------------------------------------
+
+
         // --- 处理回调查询 (按钮点击) ---
         if (event instanceof Api.UpdateBotCallbackQuery) {
-            const userId = event.userId.toString(); // 获取操作者的 ID
             const data = event.data.toString();
             const answer = (msg = "") => client.invoke(new Api.messages.SetBotCallbackAnswer({
                 queryId: event.queryId,
@@ -89,10 +138,6 @@ let lastRefreshTime = 0;
         if (!(event instanceof Api.UpdateNewMessage)) return;
         const message = event.message;
         if (!message) return;
-
-        // 先获取发送者的 ID 和 Target (为了给 SessionManager 使用)
-        const userId = (message.fromId ? (message.fromId.userId || message.fromId.chatId) : message.senderId).toString();
-        const target = message.peerId;
 
         // 会话拦截器 (处理密码输入等)
         const session = await SessionManager.get(userId);
