@@ -57,7 +57,7 @@ export class CloudTool {
     static _obscure(password) {
         try {
             // 使用参数数组传递密码，杜绝 Shell 注入和转义干扰
-            const ret = spawnSync(rcloneBinary, ["obscure", password], { encoding: 'utf-8' });
+            const ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "obscure", password], { encoding: 'utf-8' });
             
             if (ret.error) {
                 console.error("Obscure spawn error:", ret.error);
@@ -95,7 +95,7 @@ export class CloudTool {
                 const connectionString = `:${type},user=${configData.user},pass=${finalPass}:`;
 
                 // 3. 直接对这个动态后端执行 about 命令
-                const args = ["about", connectionString, "--json", "--timeout", "15s"];
+                const args = ["--config", "/dev/null", "about", connectionString, "--json", "--timeout", "15s"];
                 
                 // 注意：这里不需要注入特殊的 env 了，因为配置都在 args 里
                 const proc = spawn(rcloneBinary, args, { env: process.env });
@@ -150,7 +150,7 @@ export class CloudTool {
                 const remotePath = `${connectionString}${config.remoteFolder}/`; 
 
                 // 启动上传进程
-                const args = ["copy", localPath, remotePath, "--progress", "--transfers", "4", "--stats", "1s"];
+                const args = ["--config", "/dev/null", "copy", localPath, remotePath, "--progress", "--transfers", "4", "--stats", "1s"];
                 
                 // 这里 env 只需要 process.env 即可，因为配置已经在 args 里了
                 const proc = spawn(rcloneBinary, args, { env: process.env });
@@ -211,8 +211,7 @@ export class CloudTool {
             const connectionString = `:${conf.type},user=${conf.user},pass=${conf.pass}:`;
             const fullRemotePath = `${connectionString}${config.remoteFolder}/`;
 
-            // 【关键修复】移除 "--stat" 参数
-            const args = ["lsjson", fullRemotePath];
+            const args = ["--config", "/dev/null", "lsjson", fullRemotePath];
             
             const ret = spawnSync(rcloneBinary, args, { 
                 env: process.env, 
@@ -260,7 +259,7 @@ export class CloudTool {
             const connectionString = `:${conf.type},user=${conf.user},pass=${conf.pass}:`;
             const fullRemotePath = `${connectionString}${config.remoteFolder}/${fileName}`;
             
-            const ret = spawnSync(rcloneBinary, ["lsjson", fullRemotePath], { 
+            const ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "lsjson", fullRemotePath], { 
                 env: process.env,
                 encoding: 'utf-8' 
             });
