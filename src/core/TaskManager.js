@@ -47,6 +47,11 @@ export class TaskManager {
             
             for (const row of tasks) {
                 try {
+                    // 防御：如果历史数据里 chat_id 异常（例如存了 [object Object]），跳过恢复
+                    if (!row.chat_id || row.chat_id === "[object Object]") {
+                        console.warn(`⚠️ 无效 chat_id，跳过任务恢复: ${row.id}`);
+                        continue;
+                    }
                     const messages = await runMtprotoTask(() => client.getMessages(row.chat_id, { ids: [row.source_msg_id] }));
                     const message = messages[0];
 
@@ -88,6 +93,10 @@ export class TaskManager {
      */
     static async addTask(target, mediaMessage, userId, customLabel = "") {
         const taskId = randomUUID(); // 确保全局唯一，避免 DB UNIQUE 约束冲突
+        const chatIdStr = (() => {
+            const id = target?.userId ?? target?.chatId ?? target?.channelId ?? target;
+            return id?.toString ? id.toString() : String(id);
+        })();
         const statusMsg = await runBotTask(
             () => client.sendMessage(target, {
                 message: `🚀 **已捕获${customLabel}任务**\n正在排队处理...`,
@@ -106,7 +115,7 @@ export class TaskManager {
             `, [
                 taskId, 
                 userId.toString(), 
-                target.toString(), 
+                chatIdStr, 
                 statusMsg.id, 
                 mediaMessage.id, 
                 info?.name || 'unknown', 
@@ -121,7 +130,7 @@ export class TaskManager {
         const task = { 
             id: taskId, 
             userId: userId.toString(), 
-            chatId: target, 
+            chatId: chatIdStr, 
             msgId: statusMsg.id, 
             message: mediaMessage, 
             lastText: "",
