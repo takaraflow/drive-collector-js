@@ -14,22 +14,22 @@ jest.unstable_mockModule("../src/locales/zh-CN.js", () => ({
     STRINGS: {
         task: {
             downloading: "📥 正在下载资源...",
-            uploading: "📤 **资源拉取完成，正在启动转存...**",
-            batch_monitor: "📊 **媒体组转存看板 ({{current}}/{{total}})**\n━━━━━━━━━━━━━━\n{{statusText}}\n━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件",
-            focus_downloading: "📥 **正在下载**: `{{name}}`",
-            focus_uploading: "📤 **正在上传**: `{{name}}`",
-            focus_waiting: "🕒 **等待处理**: `{{name}}`",
-            focus_completed: "✅ **已完成**: `{{name}}`",
-            focus_failed: "❌ **处理失败**: `{{name}}`",
+            uploading: "📤 <b>资源拉取完成，正在启动转存...</b>",
+            batch_monitor: "📊 <b>媒体组转存看板 ({{current}}/{{total}})</b>\n━━━━━━━━━━━━━━\n{{statusText}}\n━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件",
+            focus_downloading: "📥 <b>正在下载</b>: <code>{{name}}</code>",
+            focus_uploading: "📤 <b>正在上传</b>: <code>{{name}}</code>",
+            focus_waiting: "🕒 <b>等待处理</b>: <code>{{name}}</code>",
+            focus_completed: "✅ <b>已完成</b>: <code>{{name}}</code>",
+            focus_failed: "❌ <b>处理失败</b>: <code>{{name}}</code>",
         },
         files: {
-            directory_prefix: "📂 **目录**: `{{folder}}`\n\n",
+            directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
             dir_empty_or_loading: "ℹ️ 目录为空或尚未加载。",
-            page_info: "📊 *第 {{current}}/{{total}} 页 | 共 {{count}} 个文件*",
+            page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 个文件</i>",
             btn_home: "⏮️",
-            btn_prev: "⬅️ 上一页",
-            btn_refresh: "🔄 刷新",
-            btn_next: "下一页 ➡️",
+            btn_prev: "⬅️",
+            btn_refresh: "🔄",
+            btn_next: "➡️",
             btn_end: "⏭️",
             syncing: "🔄 正在同步最新数据...",
             refresh_limit: "🕒 刷新太快了，请 {{seconds}} 秒后再试",
@@ -59,7 +59,7 @@ describe('UIHelper', () => {
   describe('renderProgress', () => {
     test('renders progress bar correctly', () => {
       const result = UIHelper.renderProgress(50, 100, 'Downloading');
-      expect(result).toContain('⏳ **Downloading...**');
+      expect(result).toContain('⏳ <b>Downloading...</b>');
       expect(result).toContain('50.0%');
       expect(result).toContain('0.0/0.0 MB');
       expect(result).toContain('█'.repeat(10) + '░'.repeat(10)); // 50% filled
@@ -78,7 +78,7 @@ describe('UIHelper', () => {
 
     test('renders with fileName correctly', () => {
       const result = UIHelper.renderProgress(25, 100, 'Uploading', 'my_long_file_name_by_someone.mp4');
-      expect(result).toContain('⏳ **Uploading...**');
+      expect(result).toContain('⏳ <b>Uploading...</b>');
       expect(result).toContain('📄 my_long__by_someon.mp4'); // shortened
       expect(result).toContain('25.0%');
       expect(result).toContain('0.0/0.0 MB');
@@ -117,40 +117,40 @@ describe('UIHelper', () => {
     test('renders first page correctly', () => {
       const { text, buttons } = UIHelper.renderFilesPage(mockFiles, 0, 6, false);
 
-      expect(text).toContain("📂 **目录**: `/DriveCollectorBot`");
-      expect(text).toContain('🎞️ **file1.mp4**\n> `100.00 MB` | `2023-01-01 12:00`');
-      expect(text).toContain("📊 *第 1/2 页 | 共 7 个文件*");
-      expect(buttons[0][0].text).toBe('🚫'); // Home button disabled
-      expect(buttons[0][1].text).toBe('🚫'); // Prev button disabled
-      expect(buttons[0][2].text).toBe('🔄 刷新');
-      expect(buttons[0][3].text).toBe('下一页 ➡️');
+      expect(text).toContain("📂 <b>目录</b>: <code>/DriveCollectorBot</code>");
+      expect(text).toContain('🎞️ <b>file1.mp4</b>\n> <code>100.00 MB</code> | <code>2023-01-01 12:00</code>');
+      expect(text).toContain("📊 <i>第 1/2 页 | 共 7 个文件</i>");
+      expect(buttons[0][0].text).toBe(' '); // Home button disabled
+      expect(buttons[0][1].text).toBe(' '); // Prev button disabled
+      expect(buttons[0][2].text).toBe('🔄');
+      expect(buttons[0][3].text).toBe('➡️');
       expect(buttons[0][4].text).toBe('⏭️');
     });
 
     test('renders second page correctly', () => {
       const { text, buttons } = UIHelper.renderFilesPage(mockFiles, 1, 6, false);
 
-      expect(text).toContain('📄 **last.txt**\n> `0.00 MB` | `2023-01-07 18:00`');
-      expect(text).toContain("📊 *第 2/2 页 | 共 7 个文件*");
+      expect(text).toContain('📄 <b>last.txt</b>\n> <code>0.00 MB</code> | <code>2023-01-07 18:00</code>');
+      expect(text).toContain("📊 <i>第 2/2 页 | 共 7 个文件</i>");
       expect(buttons[0][0].text).toBe('⏮️'); // Home button enabled
-      expect(buttons[0][1].text).toBe('⬅️ 上一页');
-      expect(buttons[0][3].text).toBe('🚫'); // Next button disabled
-      expect(buttons[0][4].text).toBe('🚫'); // End button disabled
+      expect(buttons[0][1].text).toBe('⬅️');
+      expect(buttons[0][3].text).toBe(' '); // Next button disabled
+      expect(buttons[0][4].text).toBe(' '); // End button disabled
     });
 
     test('handles empty file list', () => {
       const { text, buttons } = UIHelper.renderFilesPage([], 0, 6, false);
       expect(text).toContain("ℹ️ 目录为空或尚未加载。");
-      expect(text).toContain("📊 *第 1/1 页 | 共 {{count}} 个文件*");
-      expect(buttons[0][0].text).toBe('🚫');
-      expect(buttons[0][1].text).toBe('🚫');
-      expect(buttons[0][3].text).toBe('🚫');
-      expect(buttons[0][4].text).toBe('🚫');
+      expect(text).toContain("📊 <i>第 1/1 页 | 共 {{count}} 个文件</i>");
+      expect(buttons[0][0].text).toBe(' ');
+      expect(buttons[0][1].text).toBe(' ');
+      expect(buttons[0][3].text).toBe(' ');
+      expect(buttons[0][4].text).toBe(' ');
     });
 
     test('shows syncing message when isLoading is true', () => {
       const { text } = UIHelper.renderFilesPage([], 0, 6, true);
-      expect(text).toContain("🔄 _🔄 正在同步最新数据..._");
+      expect(text).toContain("🔄 <i>🔄 正在同步最新数据...</i>");
     });
   });
 
@@ -165,7 +165,7 @@ describe('UIHelper', () => {
     test('renders batch monitor correctly', () => {
       const mockFocusTask = { fileName: 'file2.mp4' };
       const { text } = UIHelper.renderBatchMonitor(mockTasks, mockFocusTask, 'downloading', 50, 100);
-      expect(text).toContain("📊 **媒体组转存看板 (1/4)**");
+      expect(text).toContain("📊 <b>媒体组转存看板 (1/4)</b>");
       expect(text).toContain('✅ file1.mp4');
       expect(text).toContain('🔄 file2.mp4 [50%]');
       expect(text).toContain('🕒 file3.mp4');
@@ -198,7 +198,7 @@ describe('UIHelper', () => {
 
     test('handles empty tasks array', () => {
         const { text } = UIHelper.renderBatchMonitor([], {}, 'waiting');
-      expect(text).toContain("📊 **媒体组转存看板 ({{current}}/{{total}})**");
+      expect(text).toContain("📊 <b>媒体组转存看板 ({{current}}/{{total}})</b>");
         expect(text).not.toContain('━━━━━━━━━━━━━━\n');
     });
   });
