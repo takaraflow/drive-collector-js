@@ -1,5 +1,4 @@
 import { Button } from "telegram/tl/custom/button.js";
-import { client } from "../services/telegram.js";
 import { runBotTask, runBotTaskWithRetry } from "./limiter.js";
 import { STRINGS } from "../locales/zh-CN.js";
 
@@ -9,21 +8,21 @@ import { STRINGS } from "../locales/zh-CN.js";
 
 /**
  * 转义 HTML 特殊字符，防止消息注入
- * @param {string} str 
- * @returns {string}
  */
 export const escapeHTML = (str) => {
     if (!str) return "";
     return str
-        .split('&').join('&')
-        .split('<').join('<')
-        .split('>').join('>')
-        .split('"').join('"')
-        .split("'").join('&#039;');
+        .replace(/&/g, "&" + "amp;")
+        .replace(/</g, "&" + "lt;")
+        .replace(/>/g, "&" + "gt;")
+        .replace(/"/g, "&" + "quot;")
+        .replace(/'/g, "&" + "#039;");
 };
 
 // 安全编辑消息，统一处理异常
 export const safeEdit = async (chatId, msgId, text, buttons = null, userId = null, parseMode = "html") => {
+    // 延迟导入 client 避免循环依赖
+    const { client } = await import("../services/telegram.js");
     try {
         await runBotTaskWithRetry(
             () => client.editMessage(chatId, { message: msgId, text, buttons, parseMode }).catch(() => {}),

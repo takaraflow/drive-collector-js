@@ -15,33 +15,6 @@ import { runBotTask, runBotTaskWithRetry } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 
 /**
->>>>>>> SEARCH
-            // 3. 尝试解析链接
-            try {
-                const toProcess = await LinkParser.parse(text, userId);
-                if (toProcess && toProcess.length > 0) {
-                    if (!selectedDrive) return await this._sendBindHint(target, userId);
-
-                    if (toProcess.length > 10) await runBotTaskWithRetry(() => client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` }), userId, {}, false, 3);
-                    for (const msg of toProcess.slice(0, 10)) await TaskManager.addTask(target, msg, userId, "链接");
-                    return;
-                }
-            } catch (e) {
-                return await runBotTaskWithRetry(() => client.sendMessage(target, { message: `❌ ${e.message}` }), userId, {}, false, 3);
-            }
-            // 3. 尝试解析链接
-            try {
-                const toProcess = await LinkParser.parse(text, userId);
-                if (toProcess && toProcess.length > 0) {
-                    if (!selectedDrive) return await this._sendBindHint(target, userId);
-
-                    if (toProcess.length > 10) await runBotTaskWithRetry(() => client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` }), userId, {}, false, 3);
-                    for (const msg of toProcess.slice(0, 10)) await TaskManager.addTask(target, msg, userId, "链接");
-                    return;
-                }
-            } catch (e) {
-                return await runBotTaskWithRetry(() => client.sendMessage(target, { message: `❌ ${escapeHTML(e.message)}` }), userId, {}, false, 3);
-            }
  * 消息分发器 (Dispatcher)
  * 职责：
  * 1. 接收所有 Telegram 事件
@@ -235,7 +208,7 @@ export class Dispatcher {
                     return;
                 }
             } catch (e) {
-                return await runBotTaskWithRetry(() => client.sendMessage(target, { message: `❌ ${e.message}` }), userId, {}, false, 3);
+                return await runBotTaskWithRetry(() => client.sendMessage(target, { message: `❌ ${escapeHTML(e.message)}` }), userId, {}, false, 3);
             }
 
             // 4. 通用兜底回复：
