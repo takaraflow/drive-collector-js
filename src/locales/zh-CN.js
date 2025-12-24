@@ -17,7 +17,7 @@ export const STRINGS = {
               "如有疑问或建议，请联系管理员。",
         maintenance_mode: "🚧 <b>系统维护中</b>\n\n当前 Bot 仅限管理员使用，请稍后访问。",
         maintenance_alert: "🚧 系统维护中",
-        welcome: "👋 <b>欢迎使用云转存助手</b>\n\n可以直接发送文件或链接给我，我会帮您转存。\n\n/drive 🔐 绑定网盘\n/files 📁 浏览文件\n/status 📊 查看系统状态",
+        welcome: "👋 <b>欢迎使用云转存助手</b>\n\n可以直接发送文件或链接给我，我会帮您转存。\n\n/drive - 🔐 绑定网盘\n/files - 📁 浏览文件\n/status - 📊 查看系统状态",
         unknown_error: "❌ 发生未知错误，请稍后重试。",
         // 🆕 新增
         node_service_active: "Node Service Active",
