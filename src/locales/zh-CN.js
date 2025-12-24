@@ -36,6 +36,7 @@ export const STRINGS = {
         create_failed: "❌ <b>任务创建失败</b>\n\n数据库连接异常，请稍后重试。",
         restore: "🔄 <b>系统重启，检测到任务中断，已自动恢复...</b>",
         downloading: "📥 正在下载资源...",
+        downloaded_waiting_upload: "📥 <b>下载完成，等待转存...</b>",
         uploading: "📤 <b>资源拉取完成，正在启动转存...</b>",
         verifying: "⚙️ <b>转存完成，正在确认数据完整性...</b>",
         success_sec_transfer: "✨ <b>文件已秒传成功</b>\n\n📄 名称: <code>{{name}}</code>\n📂 目录: <code>{{folder}}</code>",

@@ -105,9 +105,9 @@ export class TaskRepository {
 
         try {
             return await d1.fetchAll(
-                `SELECT * FROM tasks 
-                WHERE status IN ('queued', 'downloading', 'uploading') 
-                AND (updated_at IS NULL OR updated_at < ?) 
+                `SELECT * FROM tasks
+                WHERE status IN ('queued', 'downloading', 'downloaded', 'uploading')
+                AND (updated_at IS NULL OR updated_at < ?)
                 ORDER BY created_at ASC`,
                 [deadLine]
             );

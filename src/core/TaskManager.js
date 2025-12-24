@@ -63,9 +63,17 @@ class UploadBatcher {
  * 负责队列管理、任务恢复、以及具体的下载/上传流程编排
  */
 export class TaskManager {
-    static queue = new PQueue({ concurrency: 1 });
+    // 分离下载和上传队列
+    static downloadQueue = new PQueue({ concurrency: 2 }); // 下载队列：处理MTProto下载
+    static uploadQueue = new PQueue({ concurrency: 1 });   // 上传队列：处理rclone转存
+
+    // 兼容性：保留原有queue引用
+    static get queue() { return this.downloadQueue; }
+    static set queue(value) { this.downloadQueue = value; }
+
     static waitingTasks = [];
     static currentTask = null;
+    static waitingUploadTasks = []; // 等待上传的任务队列
     
     // 初始化聚合器
     static uploadBatcher = new UploadBatcher(async (tasks) => {
@@ -140,7 +148,24 @@ export class TaskManager {
 
                 const task = this._createTaskObject(row.id, row.user_id, row.chat_id, row.msg_id, message);
                 await updateStatus(task, "🔄 **系统重启，检测到任务中断，已自动恢复...**");
-                this._enqueueTask(task);
+
+                // 根据任务状态决定恢复到哪个队列
+                if (row.status === 'downloaded') {
+                    // 恢复到上传队列
+                    const localPath = path.join(config.downloadDir, row.file_name);
+                    if (fs.existsSync(localPath)) {
+                        task.localPath = localPath;
+                        this._enqueueUploadTask(task);
+                        console.log(`📤 恢复下载完成的任务 ${row.id} 到上传队列`);
+                    } else {
+                        // 本地文件不存在，重新下载
+                        console.warn(`⚠️ 本地文件不存在，重新下载任务 ${row.id}`);
+                        this._enqueueTask(task);
+                    }
+                } else {
+                    // 其他状态（queued, downloading）恢复到下载队列
+                    this._enqueueTask(task);
+                }
             }
         } catch (e) {
             console.error(`批量恢复会话 ${chatId} 的任务失败:`, e);
@@ -258,14 +283,25 @@ export class TaskManager {
     }
 
     /**
-     * [私有] 将任务推入队列并开始执行
+     * [私有] 将任务推入下载队列
      */
     static _enqueueTask(task) {
         this.waitingTasks.push(task);
-        this.queue.add(async () => {
+        this.downloadQueue.add(async () => {
             this.currentTask = task;
-            await this.fileWorker(task);
+            await this.downloadWorker(task);
             this.currentTask = null;
+        });
+    }
+
+    /**
+     * [私有] 将任务推入上传队列
+     */
+    static _enqueueUploadTask(task) {
+        this.waitingUploadTasks.push(task);
+        this.uploadQueue.add(async () => {
+            this.waitingUploadTasks = this.waitingUploadTasks.filter(t => t.id !== task.id);
+            await this.uploadWorker(task);
         });
     }
 
@@ -286,14 +322,14 @@ export class TaskManager {
     }
 
     /**
-     * 任务执行核心 Worker
+     * 下载Worker - 负责MTProto下载阶段
      */
-    static async fileWorker(task) {
+    static async downloadWorker(task) {
         const { message, id } = task;
         if (!message.media) return;
 
         this.waitingTasks = this.waitingTasks.filter(t => t.id !== id);
-        this.updateQueueUI(); 
+        this.updateQueueUI();
 
         const info = getMediaInfo(message.media);
         if (!info) return await updateStatus(task, STRINGS.task.parse_failed, true);
@@ -302,21 +338,16 @@ export class TaskManager {
         task.localPath = localPath;
 
         let lastUpdate = 0;
-        const heartbeat = async (status, downloaded = 0, total = 0, uploadProgress = null) => {
+        const heartbeat = async (status, downloaded = 0, total = 0) => {
             if (task.isCancelled) throw new Error("CANCELLED");
             await TaskRepository.updateStatus(task.id, status);
-            
+
             if (task.isGroup) {
                 await this._refreshGroupMonitor(task, status, downloaded, total);
             } else {
-                let text;
-                if (status === 'uploading' && uploadProgress) {
-                    text = UIHelper.renderProgress(uploadProgress.bytes, uploadProgress.size, STRINGS.task.uploading, info.name);
-                } else {
-                    text = (downloaded > 0) 
-                        ? UIHelper.renderProgress(downloaded, total, status === 'uploading' ? STRINGS.task.uploading : STRINGS.task.downloading, info.name) 
-                        : (status === 'uploading' ? STRINGS.task.uploading : STRINGS.task.downloading);
-                }
+                const text = (downloaded > 0)
+                    ? UIHelper.renderProgress(downloaded, total, STRINGS.task.downloading, info.name)
+                    : STRINGS.task.downloading;
                 await updateStatus(task, text);
             }
         };
@@ -324,7 +355,7 @@ export class TaskManager {
         try {
             await heartbeat('downloading');
 
-            // 2. 秒传检查
+            // 秒传检查 - 如果文件已存在且大小匹配，直接标记完成
             const remoteFile = await CloudTool.getRemoteFileInfo(info.name, task.userId);
             if (remoteFile && Math.abs(remoteFile.Size - info.size) < 1024) {
                 await TaskRepository.updateStatus(task.id, 'completed');
@@ -336,7 +367,7 @@ export class TaskManager {
                 return;
             }
 
-            // 3. 下载阶段
+            // 下载阶段 - MTProto文件下载
             const isLargeFile = info.size > 100 * 1024 * 1024;
             const downloadOptions = {
                 outputFile: localPath,
@@ -353,7 +384,64 @@ export class TaskManager {
 
             await runMtprotoFileTaskWithRetry(() => client.downloadMedia(message, downloadOptions));
 
-            // 4. 上传阶段 (使用聚合器)
+            // 下载完成，推入上传队列
+            await TaskRepository.updateStatus(task.id, 'downloaded');
+            if (!task.isGroup) {
+                await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(info.name) }));
+            }
+
+            // 推入上传队列进行后续处理
+            this._enqueueUploadTask(task);
+
+        } catch (e) {
+            const isCancel = e.message === "CANCELLED";
+            await TaskRepository.updateStatus(task.id, isCancel ? 'cancelled' : 'failed', e.message);
+
+            if (task.isGroup) {
+                await this._refreshGroupMonitor(task, isCancel ? 'cancelled' : 'failed');
+            } else {
+                const text = isCancel ? STRINGS.task.cancelled : `${STRINGS.task.error_prefix}<code>${escapeHTML(e.message)}</code>`;
+                await updateStatus(task, text, true);
+            }
+        } finally {
+            // 注意：这里不删除文件，文件将在上传完成后删除
+        }
+    }
+
+    /**
+     * 上传Worker - 负责rclone转存阶段（无需MTProto）
+     */
+    static async uploadWorker(task) {
+        const info = getMediaInfo(task.message.media);
+        if (!info) return;
+
+        const localPath = task.localPath;
+        if (!fs.existsSync(localPath)) {
+            await TaskRepository.updateStatus(task.id, 'failed', 'Local file not found');
+            await updateStatus(task, STRINGS.task.failed_validation, true);
+            return;
+        }
+
+        let lastUpdate = 0;
+        const heartbeat = async (status, downloaded = 0, total = 0, uploadProgress = null) => {
+            if (task.isCancelled) throw new Error("CANCELLED");
+            await TaskRepository.updateStatus(task.id, status);
+
+            if (task.isGroup) {
+                await this._refreshGroupMonitor(task, status, downloaded, total);
+            } else {
+                let text;
+                if (status === 'uploading' && uploadProgress) {
+                    text = UIHelper.renderProgress(uploadProgress.bytes, uploadProgress.size, STRINGS.task.uploading, info.name);
+                } else {
+                    text = STRINGS.task.uploading;
+                }
+                await updateStatus(task, text);
+            }
+        };
+
+        try {
+            // 上传阶段 - rclone批量上传
             if (!task.isGroup) await updateStatus(task, STRINGS.task.uploading);
             await heartbeat('uploading');
 
@@ -369,12 +457,12 @@ export class TaskManager {
                 this.uploadBatcher.add(task);
             });
 
-            // 5. 结果处理
+            // 结果处理
             if (uploadResult.success) {
                 if (!task.isGroup) await updateStatus(task, STRINGS.task.verifying);
                 const finalRemote = await CloudTool.getRemoteFileInfo(info.name, task.userId);
                 const isOk = finalRemote && Math.abs(finalRemote.Size - fs.statSync(localPath).size) < 1024;
-                
+
                 const finalStatus = isOk ? 'completed' : 'failed';
                 await TaskRepository.updateStatus(task.id, finalStatus);
 
@@ -383,7 +471,7 @@ export class TaskManager {
                 } else {
                     const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
                     const fileNameHtml = `<a href="${fileLink}">${escapeHTML(info.name)}</a>`;
-                    const baseText = isOk 
+                    const baseText = isOk
                         ? STRINGS.task.success.replace('{{name}}', fileNameHtml).replace('{{folder}}', config.remoteFolder)
                         : STRINGS.task.failed_validation.replace('{{name}}', fileNameHtml);
                     await updateStatus(task, baseText, true);
@@ -393,15 +481,15 @@ export class TaskManager {
                 if (task.isGroup) {
                     await this._refreshGroupMonitor(task, 'failed');
                 } else {
-                    await updateStatus(task, format(STRINGS.task.failed_upload, { 
-                        reason: task.isCancelled ? "用户手动取消" : escapeHTML(uploadResult.error) 
+                    await updateStatus(task, format(STRINGS.task.failed_upload, {
+                        reason: task.isCancelled ? "用户手动取消" : escapeHTML(uploadResult.error)
                     }), true);
                 }
             }
         } catch (e) {
             const isCancel = e.message === "CANCELLED";
             await TaskRepository.updateStatus(task.id, isCancel ? 'cancelled' : 'failed', e.message);
-            
+
             if (task.isGroup) {
                 await this._refreshGroupMonitor(task, isCancel ? 'cancelled' : 'failed');
             } else {
@@ -409,6 +497,7 @@ export class TaskManager {
                 await updateStatus(task, text, true);
             }
         } finally {
+            // 上传完成后清理本地文件
             if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
         }
     }
@@ -422,16 +511,25 @@ export class TaskManager {
 
         const isOwner = dbTask.user_id === userId.toString();
         const canCancelAny = await AuthGuard.can(userId, "task:cancel:any");
-        
+
         if (!isOwner && !canCancelAny) return false;
 
-        const task = this.waitingTasks.find(t => t.id.toString() === taskId) || 
-                     (this.currentTask && this.currentTask.id.toString() === taskId ? this.currentTask : null);
-        
-        if (task) {
-            task.isCancelled = true;
-            if (task.proc) task.proc.kill("SIGTERM");
+        // 检查下载队列
+        const downloadTask = this.waitingTasks.find(t => t.id.toString() === taskId) ||
+                            (this.currentTask && this.currentTask.id.toString() === taskId ? this.currentTask : null);
+
+        if (downloadTask) {
+            downloadTask.isCancelled = true;
+            if (downloadTask.proc) downloadTask.proc.kill("SIGTERM");
             this.waitingTasks = this.waitingTasks.filter(t => t.id.toString() !== taskId);
+        }
+
+        // 检查上传队列
+        const uploadTask = this.waitingUploadTasks.find(t => t.id.toString() === taskId);
+        if (uploadTask) {
+            uploadTask.isCancelled = true;
+            if (uploadTask.proc) uploadTask.proc.kill("SIGTERM");
+            this.waitingUploadTasks = this.waitingUploadTasks.filter(t => t.id.toString() !== taskId);
         }
 
         await TaskRepository.markCancelled(taskId);

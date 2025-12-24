@@ -88,6 +88,7 @@ jest.unstable_mockModule("../../src/locales/zh-CN.js", () => ({
             create_failed: "failed",
             queued: "queued {{rank}}",
             downloading: "downloading",
+            downloaded_waiting_upload: "📥 <b>下载完成，等待转存...</b>",
             uploading: "uploading",
             success_sec_transfer: "success_sec",
             verifying: "verifying",
@@ -104,7 +105,8 @@ jest.unstable_mockModule("../../src/locales/zh-CN.js", () => ({
         let res = s;
         if (args) {
             for (const key in args) {
-                res = res.replace(`{{${key}}}`, args[key]);
+                // 处理嵌套的替换
+                res = res.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), args[key]);
             }
         }
         return res;
@@ -281,8 +283,8 @@ describe("TaskManager", () => {
         });
     });
 
-    describe("fileWorker", () => {
-        test("should handle successful transfer", async () => {
+    describe("downloadWorker", () => {
+        test("should handle successful download", async () => {
             const task = {
                 id: "t1",
                 userId: "u1",
@@ -296,18 +298,15 @@ describe("TaskManager", () => {
 
             mockCloudTool.getRemoteFileInfo.mockResolvedValueOnce(null); // No sec transfer
             mockClient.downloadMedia.mockResolvedValue("path/to/file");
-            mockCloudTool.uploadBatch.mockImplementation(async (tasks, onProgress) => {
-                tasks.forEach(t => {
-                   if (t.onUploadComplete) t.onUploadComplete({ success: true });
-                });
-                return { success: true };
-            });
-            mockCloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Size: 1024 }); // Final check
 
-            await TaskManager.fileWorker(task);
+            // Mock enqueueUploadTask to avoid triggering additional UI updates
+            TaskManager._enqueueUploadTask = jest.fn();
 
-            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("t1", "completed");
-            expect(updateStatus).toHaveBeenLastCalledWith(task, expect.stringContaining("success"), true);
+            await TaskManager.downloadWorker(task);
+
+            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("t1", "downloaded");
+            expect(updateStatus).toHaveBeenCalledWith(task, "📥 <b>下载完成，等待转存...</b>");
+            expect(TaskManager._enqueueUploadTask).toHaveBeenCalledWith(task);
         }, 10000);
 
         test("should handle second transfer (秒传)", async () => {
@@ -323,13 +322,13 @@ describe("TaskManager", () => {
 
             mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Size: 1024 });
 
-            await TaskManager.fileWorker(task);
+            await TaskManager.downloadWorker(task);
 
             expect(mockClient.downloadMedia).not.toHaveBeenCalled();
             expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("t1", "completed");
         });
 
-        test("should handle cancellation during execution", async () => {
+        test("should handle cancellation during download", async () => {
             const task = {
                 id: "t1",
                 userId: "u1",
@@ -340,10 +339,68 @@ describe("TaskManager", () => {
                 isCancelled: true
             };
 
-            await TaskManager.fileWorker(task);
+            await TaskManager.downloadWorker(task);
 
             expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("t1", "cancelled", "CANCELLED");
         });
+    });
+
+    describe("uploadWorker", () => {
+        test("should handle successful upload", async () => {
+            const task = {
+                id: "t1",
+                userId: "u1",
+                chatId: "c1",
+                msgId: 100,
+                message: { id: 200, media: {} },
+                fileName: "test.mp4",
+                localPath: "/tmp/test.mp4",
+                isCancelled: false,
+                lastText: ""
+            };
+
+            // Mock uploadBatcher to immediately complete
+            TaskManager.uploadBatcher.add = jest.fn((task) => {
+                // Simulate immediate completion
+                setTimeout(() => {
+                    if (task.onUploadComplete) {
+                        task.onUploadComplete({ success: true });
+                    }
+                }, 1);
+            });
+            mockCloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Size: 1024 }); // Final check
+
+            await TaskManager.uploadWorker(task);
+
+            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("t1", "completed");
+            expect(updateStatus).toHaveBeenLastCalledWith(task, expect.stringContaining("success"), true);
+        }, 1000);
+
+        test("should handle upload failure", async () => {
+            const task = {
+                id: "t1",
+                userId: "u1",
+                chatId: "c1",
+                msgId: 100,
+                message: { id: 200, media: {} },
+                fileName: "test.mp4",
+                localPath: "/tmp/test.mp4",
+                isCancelled: false
+            };
+
+            // Mock uploadBatcher to immediately fail
+            TaskManager.uploadBatcher.add = jest.fn((task) => {
+                setTimeout(() => {
+                    if (task.onUploadComplete) {
+                        task.onUploadComplete({ success: false, error: "Upload failed" });
+                    }
+                }, 1);
+            });
+
+            await TaskManager.uploadWorker(task);
+
+            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("t1", "failed", "Upload failed");
+        }, 1000);
     });
 
     describe("_refreshGroupMonitor", () => {
