@@ -54,7 +54,7 @@ export class DriveConfigFlow {
                 Button.inline(STRINGS.drive.btn_bind_mega, Buffer.from("drive_bind_mega")) 
             ]);
         }
-        await runBotTaskWithRetry(() => client.sendMessage(chatId, { message, buttons }), userId, {}, false, 3);
+        await runBotTaskWithRetry(() => client.sendMessage(chatId, { message, buttons, parseMode: "html" }), userId, {}, false, 3);
     }
 
     /**
@@ -77,6 +77,7 @@ export class DriveConfigFlow {
             await runBotTaskWithRetry(() => client.editMessage(event.userId, {
                     message: event.msgId,
                     text: STRINGS.drive.unbind_confirm,
+                    parseMode: "html",
                     buttons: [
                         [
                             Button.inline(STRINGS.drive.btn_confirm_unbind, Buffer.from("drive_unbind_execute")), 
@@ -118,13 +119,13 @@ export class DriveConfigFlow {
                 buttons.push([Button.inline(STRINGS.drive.btn_bind_mega, Buffer.from("drive_bind_mega"))]);
             }
 
-            await runBotTask(() => client.editMessage(event.userId, { message: event.msgId, text: message, buttons }), userId);
+            await runBotTask(() => client.editMessage(event.userId, { message: event.msgId, text: message, buttons, parseMode: "html" }), userId);
             return STRINGS.drive.returned;
         }
 
         if (data === "drive_bind_mega") { 
             await SessionManager.start(userId, "MEGA_WAIT_EMAIL");
-            await runBotTask(() => client.sendMessage(event.userId, { message: STRINGS.drive.mega_input_email }), userId, { priority: PRIORITY.HIGH }); // 👈 替换
+            await runBotTask(() => client.sendMessage(event.userId, { message: STRINGS.drive.mega_input_email, parseMode: "html" }), userId, { priority: PRIORITY.HIGH }); // 👈 替换
             return STRINGS.drive.check_input;
         }
         
@@ -150,7 +151,7 @@ export class DriveConfigFlow {
             }
             
             await SessionManager.update(userId, "MEGA_WAIT_PASS", { email: text.trim() });
-            await runBotTask(() => client.sendMessage(peerId, { message: "🔑 **请输入密码**\n(输入后消息会被立即删除以保护隐私)" }), userId, { priority: PRIORITY.HIGH });
+            await runBotTask(() => client.sendMessage(peerId, { message: STRINGS.drive.mega_input_pass, parseMode: "html" }), userId, { priority: PRIORITY.HIGH });
             return true;
         }
 
@@ -174,15 +175,15 @@ export class DriveConfigFlow {
                 const safeDetails = (result.details || '').replace(/`/g, "'").replace(/\n/g, " ").slice(-200); 
 
                 if (result.reason === "2FA") {
-                    errorText += "\n\n⚠️ **检测到您的账号开启了两步验证 (2FA)**。\n请先关闭 2FA 后重试。";
+                    errorText += `\n\n${STRINGS.drive.mega_fail_2fa}`;
                 } else if (safeDetails.includes("Object (typically, node or user) not found") || safeDetails.includes("couldn't login")) {
-                    errorText += "\n\n⚠️ **登录失败**\n账号/密码错误或开启了 2FA。";
+                    errorText += `\n\n${STRINGS.drive.mega_fail_login}`;
                 } else {
-                    errorText += `\n\n网络或配置异常: \`${safeDetails}\``;
+                    errorText += `\n\n网络或配置异常: <code>${safeDetails}</code>`;
                 }
                 
                 await SessionManager.clear(userId);
-                await runBotTask(() => client.editMessage(peerId, { message: tempMsg.id, text: errorText }), userId, { priority: PRIORITY.HIGH });
+                await runBotTask(() => client.editMessage(peerId, { message: tempMsg.id, text: errorText, parseMode: "html" }), userId, { priority: PRIORITY.HIGH });
                 return true;
             }
 
@@ -192,7 +193,8 @@ export class DriveConfigFlow {
             await SessionManager.clear(userId);
             await runBotTask(() => client.editMessage(peerId, { 
                 message: tempMsg.id, 
-                text: `✅ **绑定成功！**\n\n账号: \`${email}\`` 
+                text: format(STRINGS.drive.mega_success, { email }),
+                parseMode: "html"
             }), userId, { priority: PRIORITY.HIGH });
             return true;
         }
@@ -207,7 +209,7 @@ export class DriveConfigFlow {
         const drive = await DriveRepository.findByUserId(userId);
 
         if (!drive) {
-            return await runBotTask(() => client.sendMessage(chatId, { message: "⚠️ 您当前未绑定任何网盘，无需解绑。" }), userId);
+            return await runBotTask(() => client.sendMessage(chatId, { message: STRINGS.drive.no_drive_unbind, parseMode: "html" }), userId);
         }
 
         // 使用 Repository 删除
@@ -216,7 +218,8 @@ export class DriveConfigFlow {
         await SessionManager.clear(userId);
 
         await runBotTask(() => client.sendMessage(chatId, { 
-                message: "✅ **解绑成功**\n\n您的账号信息已从本系统中移除。" 
+                message: STRINGS.drive.unbind_success,
+                parseMode: "html"
             }), userId
         );
     }

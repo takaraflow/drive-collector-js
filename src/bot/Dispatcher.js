@@ -83,15 +83,18 @@ export class Dispatcher {
             const mode = await SettingsRepository.get("access_mode", "public");
 
             if (mode !== 'public') {
-                const text = "🚧 **系统维护中**\n\n当前 Bot 仅限管理员使用，请稍后访问。";
+                const text = STRINGS.system.maintenance_mode;
                 if (isCallback) {
                     await runBotTaskWithRetry(() => client.invoke(new Api.messages.SetBotCallbackAnswer({
                         queryId: event.queryId,
-                        message: "🚧 系统维护中",
+                        message: STRINGS.system.maintenance_alert,
                         alert: true
                     })).catch(() => {}), userId, {}, false, 3);
                 } else if (target) {
-                    await runBotTaskWithRetry(() => client.sendMessage(target, { message: text }), userId, {}, false, 3);
+                    await runBotTaskWithRetry(() => client.sendMessage(target, { 
+                        message: text,
+                        parseMode: "html"
+                    }), userId, {}, false, 3);
                 }
                 return false; // 拦截
             }
@@ -108,6 +111,8 @@ export class Dispatcher {
             queryId: event.queryId,
             message: msg
         })).catch(() => {}), userId, {}, false, 3);
+
+        if (data === "noop") return await answer();
 
         if (data.startsWith("cancel_")) {
             const taskId = data.split("_")[1];
@@ -209,7 +214,8 @@ export class Dispatcher {
             // 4. 通用兜底回复：
             // 如果是纯文本消息（包括未匹配的命令），且未被上述逻辑处理，则发送欢迎语。
             return await runBotTaskWithRetry(() => client.sendMessage(target, { 
-                message: STRINGS.system.welcome
+                message: STRINGS.system.welcome,
+                parseMode: "html"
             }), userId, {}, false, 3);
         }
 
@@ -285,7 +291,7 @@ export class Dispatcher {
         return await runBotTaskWithRetry(() => client.sendMessage(target, { 
             message: message,
             buttons: buttons,
-            parseMode: "markdown"
+            parseMode: "html"
         }), userId, {}, false, 3);
     }
 
@@ -385,7 +391,8 @@ export class Dispatcher {
      */
     static async _sendBindHint(target, userId) {
         return await runBotTaskWithRetry(() => client.sendMessage(target, { 
-            message: STRINGS.drive.no_drive_found
+            message: STRINGS.drive.no_drive_found,
+            parseMode: "html"
         }), userId, {}, false, 3);
     }
 }

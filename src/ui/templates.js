@@ -20,7 +20,7 @@ export class UIHelper {
         const displayName = fileName ? this._shortenFileName(fileName, 25) : '';
         const fileInfo = fileName ? `\n📄 ${displayName}` : '';
         
-        return `⏳ **${actionName}...**${fileInfo}\n\n` + `\`[${bar}]\` ${percentage}% (${(current / 1048576).toFixed(1)}/${(total / 1048576).toFixed(1)} MB)`;
+        return `⏳ <b>${actionName}...</b>${fileInfo}\n\n` + `<code>[${bar}]</code> ${percentage}% (${(current / 1048576).toFixed(1)}/${(total / 1048576).toFixed(1)} MB)`;
     }
 
     /**
@@ -41,7 +41,7 @@ export class UIHelper {
                 const emoji = [".mp4", ".mkv", ".avi"].includes(ext) ? "🎞️" : [".jpg", ".png", ".webp"].includes(ext) ? "🖼️" : [".zip", ".rar", ".7z"].includes(ext) ? "📦" : [".pdf", ".epub"].includes(ext) ? "📝" : "📄";
                 const size = (f.Size / 1048576).toFixed(2) + " MB";
                 const time = f.ModTime.replace("T", " ").substring(0, 16);
-                text += `${emoji} **${f.Name}**\n> \`${size}\` | \`${time}\`\n\n`;
+                text += `${emoji} <b>${f.Name}</b>\n> <code>${size}</code> | <code>${time}</code>\n\n`;
             });
         }
 
@@ -50,16 +50,16 @@ export class UIHelper {
             total: totalPages || 1, 
             count: files.length 
         });
-        if (isLoading) text += `\n🔄 _${STRINGS.files.syncing}_`;
+        if (isLoading) text += `\n🔄 <i>${STRINGS.files.syncing}</i>`;
         
         // 生成分页导航按钮
         const buttons = [
             [
-                Button.inline(page <= 0 ? "🚫" : STRINGS.files.btn_home, Buffer.from(`files_page_0`)),
-                Button.inline(page <= 0 ? "🚫" : STRINGS.files.btn_prev, Buffer.from(`files_page_${page - 1}`)),
+                Button.inline(page <= 0 ? " " : STRINGS.files.btn_home, Buffer.from(page <= 0 ? "noop" : `files_page_0`)),
+                Button.inline(page <= 0 ? " " : STRINGS.files.btn_prev, Buffer.from(page <= 0 ? "noop" : `files_page_${page - 1}`)),
                 Button.inline(STRINGS.files.btn_refresh, Buffer.from(`files_refresh_${page}`)),
-                Button.inline(page >= totalPages - 1 ? "🚫" : STRINGS.files.btn_next, Buffer.from(`files_page_${page + 1}`)),
-                Button.inline(page >= totalPages - 1 ? "🚫" : STRINGS.files.btn_end, Buffer.from(`files_page_${totalPages - 1}`))
+                Button.inline(page >= totalPages - 1 ? " " : STRINGS.files.btn_next, Buffer.from(page >= totalPages - 1 ? "noop" : `files_page_${page + 1}`)),
+                Button.inline(page >= totalPages - 1 ? " " : STRINGS.files.btn_end, Buffer.from(page >= totalPages - 1 ? "noop" : `files_page_${totalPages - 1}`))
             ]
         ];
         return { text, buttons };

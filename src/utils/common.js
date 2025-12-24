@@ -8,7 +8,7 @@ import { STRINGS } from "../locales/zh-CN.js";
  */
 
 // 安全编辑消息，统一处理异常
-export const safeEdit = async (chatId, msgId, text, buttons = null, userId = null, parseMode = "markdown") => {
+export const safeEdit = async (chatId, msgId, text, buttons = null, userId = null, parseMode = "html") => {
     try {
         await runBotTaskWithRetry(
             () => client.editMessage(chatId, { message: msgId, text, buttons, parseMode }).catch(() => {}),
