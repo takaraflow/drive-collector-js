@@ -1,4 +1,5 @@
 import { d1 } from "../services/d1.js";
+import { cacheService } from "../utils/CacheService.js";
 
 /**
  * 网盘配置仓储层
@@ -12,11 +13,15 @@ export class DriveRepository {
      */
     static async findByUserId(userId) {
         if (!userId) return null;
+        const cacheKey = `drive_${userId}`;
+        
         try {
-            return await d1.fetchOne(
-                "SELECT * FROM user_drives WHERE user_id = ? AND status = 'active'", 
-                [userId.toString()]
-            );
+            return await cacheService.getOrSet(cacheKey, async () => {
+                return await d1.fetchOne(
+                    "SELECT * FROM user_drives WHERE user_id = ? AND status = 'active'", 
+                    [userId.toString()]
+                );
+            }, 10 * 60 * 1000); // 缓存 10 分钟
         } catch (e) {
             console.error(`DriveRepository.findByUserId error for ${userId}:`, e);
             return null;
@@ -42,6 +47,7 @@ export class DriveRepository {
                 INSERT INTO user_drives (user_id, name, type, config_data, status, created_at)
                 VALUES (?, ?, ?, ?, 'active', ?)
             `, [userId.toString(), name, type, configJson, Date.now()]);
+            cacheService.del(`drive_${userId}`);
             return true;
         } catch (e) {
             console.error(`DriveRepository.create failed for ${userId}:`, e);
@@ -58,6 +64,7 @@ export class DriveRepository {
         if (!userId) return;
         try {
             await d1.run("DELETE FROM user_drives WHERE user_id = ?", [userId.toString()]);
+            cacheService.del(`drive_${userId}`);
         } catch (e) {
             console.error(`DriveRepository.deleteByUserId failed for ${userId}:`, e);
             throw e;

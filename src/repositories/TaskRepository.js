@@ -5,17 +5,42 @@ import { d1 } from "../services/d1.js";
  * 负责与 'tasks' 表进行交互，隔离 SQL 细节
  */
 export class TaskRepository {
+    static pendingUpdates = new Map();
+    static flushTimer = null;
+
+    /**
+     * 启动定时刷新任务
+     */
+    static startFlushing() {
+        if (this.flushTimer) return;
+        this.flushTimer = setInterval(() => this.flushUpdates(), 10000); // 每 10 秒刷新一次
+    }
+
+    /**
+     * 将积压的更新批量写入数据库
+     */
+    static async flushUpdates() {
+        if (this.pendingUpdates.size === 0) return;
+
+        const updates = Array.from(this.pendingUpdates.values());
+        this.pendingUpdates.clear();
+
+        const now = Date.now();
+        const statements = updates.map(u => ({
+            sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
+            params: [u.status, u.errorMsg, now, u.taskId]
+        }));
+
+        try {
+            await d1.batch(statements);
+        } catch (error) {
+            console.error("TaskRepository.flushUpdates failed:", error);
+        }
+    }
+
     /**
      * 创建新任务
      * @param {Object} taskData - 任务数据对象
-     * @param {string} taskData.id - 任务唯一ID
-     * @param {string} taskData.userId - 用户ID
-     * @param {string} taskData.chatId - 会话ID
-     * @param {number} taskData.msgId - 状态消息ID
-     * @param {number} taskData.sourceMsgId - 原始消息ID
-     * @param {string} taskData.fileName - 文件名
-     * @param {number} taskData.fileSize - 文件大小
-     * @returns {Promise<boolean>} 是否插入成功
      */
     static async create(taskData) {
         if (!taskData.id || !taskData.userId) {
@@ -46,11 +71,8 @@ export class TaskRepository {
 
     /**
      * 查找所有“僵尸”任务（长时间未更新的任务）
-     * @param {number} timeoutMs - 超时阈值（毫秒）
-     * @returns {Promise<Array>} 任务列表
      */
     static async findStalledTasks(timeoutMs) {
-        // 使用防御性编程：确保 timeoutMs 是正整数
         const safeTimeout = Math.max(0, timeoutMs || 0);
         const deadLine = Date.now() - safeTimeout;
 
@@ -70,8 +92,6 @@ export class TaskRepository {
 
     /**
      * 根据 ID 获取任务
-     * @param {string} taskId 
-     * @returns {Promise<Object|null>}
      */
     static async findById(taskId) {
         if (!taskId) return null;
@@ -84,29 +104,29 @@ export class TaskRepository {
     }
 
     /**
-     * 更新任务状态和心跳
-     * @param {string} taskId 
-     * @param {string} status - 新状态
-     * @param {string|null} errorMsg - 错误信息（可选）
-     * @returns {Promise<void>}
+     * 更新任务状态和心跳 (内存缓冲版)
      */
     static async updateStatus(taskId, status, errorMsg = null) {
-        try {
-            // 更新 updated_at 相当于“心跳”，证明进程还活着
-            await d1.run(
-                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
-                [status, errorMsg, Date.now(), taskId]
-            );
-        } catch (e) {
-            // 这里吞掉错误是防止数据库抖动导致整个任务流程崩溃，但会记录日志
-            console.error(`TaskRepository.updateStatus failed for ${taskId}:`, e);
+        const isCritical = ['completed', 'failed', 'cancelled'].includes(status);
+
+        if (isCritical) {
+            this.pendingUpdates.delete(taskId);
+            try {
+                await d1.run(
+                    "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
+                    [status, errorMsg, Date.now(), taskId]
+                );
+            } catch (e) {
+                console.error(`TaskRepository.updateStatus (critical) failed for ${taskId}:`, e);
+            }
+        } else {
+            this.pendingUpdates.set(taskId, { taskId, status, errorMsg });
+            this.startFlushing();
         }
     }
 
     /**
      * 标记任务为已取消
-     * @param {string} taskId 
-     * @returns {Promise<void>}
      */
     static async markCancelled(taskId) {
         try {
@@ -118,8 +138,6 @@ export class TaskRepository {
 
     /**
      * 根据 msg_id 获取该消息组下的所有任务状态（用于看板）
-     * @param {number} msgId 
-     * @returns {Promise<Array>}
      */
     static async findByMsgId(msgId) {
         if (!msgId) return [];
@@ -136,7 +154,6 @@ export class TaskRepository {
 
     /**
      * 批量创建任务
-     * @param {Array<Object>} tasksData 
      */
     static async createBatch(tasksData) {
         if (!tasksData || tasksData.length === 0) return true;

@@ -1,5 +1,6 @@
 import { d1 } from "../services/d1.js";
 import { kv } from "../services/kv.js";
+import { cacheService } from "../utils/CacheService.js";
 
 /**
  * 系统设置仓储层
@@ -18,18 +19,27 @@ export class SettingsRepository {
      * @returns {Promise<string>}
      */
     static async get(key, defaultValue = null) {
+        const cacheKey = this.getSettingsKey(key);
         try {
+            // 0. 尝试从内存缓存获取
+            const memoryCached = cacheService.get(cacheKey);
+            if (memoryCached !== null) return memoryCached;
+
             // 1. 尝试从 KV 获取
-            const cached = await kv.get(this.getSettingsKey(key), "text");
-            if (cached !== null) return cached;
+            const cached = await kv.get(cacheKey, "text");
+            if (cached !== null) {
+                cacheService.set(cacheKey, cached, 30 * 60 * 1000); // 内存缓存 30 分钟
+                return cached;
+            }
 
             // 2. 从 D1 获取
             const row = await d1.fetchOne("SELECT value FROM system_settings WHERE key = ?", [key]);
             const value = row ? row.value : defaultValue;
 
-            // 3. 异步回填到 KV (不阻塞返回)
+            // 3. 异步回填到 KV 和内存 (不阻塞返回)
             if (value !== null) {
-                kv.set(this.getSettingsKey(key), value).catch(console.error);
+                kv.set(cacheKey, value).catch(console.error);
+                cacheService.set(cacheKey, value, 30 * 60 * 1000);
             }
 
             return value;
@@ -46,6 +56,7 @@ export class SettingsRepository {
      * @returns {Promise<void>}
      */
     static async set(key, value) {
+        const cacheKey = this.getSettingsKey(key);
         try {
             // 1. 更新 D1
             await d1.run(
@@ -53,8 +64,9 @@ export class SettingsRepository {
                 [key, value]
             );
 
-            // 2. 更新 KV
-            await kv.set(this.getSettingsKey(key), value);
+            // 2. 更新 KV 和内存
+            await kv.set(cacheKey, value);
+            cacheService.set(cacheKey, value, 30 * 60 * 1000);
         } catch (e) {
             console.error(`SettingsRepository.set failed for ${key}:`, e);
         }

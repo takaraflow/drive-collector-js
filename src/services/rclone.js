@@ -4,6 +4,7 @@ import fs from "fs";
 import { config } from "../config/index.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { STRINGS } from "../locales/zh-CN.js";
+import { cacheService } from "../utils/CacheService.js";
 
 // 确定 rclone 二进制路径 (兼容 Zeabur 和 本地)
 const rcloneBinary = fs.existsSync("/app/rclone/rclone") 
@@ -11,8 +12,6 @@ const rcloneBinary = fs.existsSync("/app/rclone/rclone")
     : "rclone";
 
 export class CloudTool {
-    // 内存缓存：避免频繁 lsjson (针对 listRemoteFiles)
-    static cache = {};
     static loading = false;
 
     static async _getUserConfig(userId) {
@@ -171,10 +170,10 @@ export class CloudTool {
      */
     static async listRemoteFiles(userId, forceRefresh = false) {
         const cacheKey = `files_${userId}`;
-        const now = Date.now();
         
-        if (!forceRefresh && this.cache[cacheKey] && (now - this.cache[cacheKey].time) < 5 * 60 * 1000) {
-            return this.cache[cacheKey].data;
+        if (!forceRefresh) {
+            const cached = cacheService.get(cacheKey);
+            if (cached) return cached;
         }
         
         this.loading = true;
@@ -201,7 +200,8 @@ export class CloudTool {
                 return new Date(b.ModTime) - new Date(a.ModTime);
             });
 
-            this.cache[cacheKey] = { data: files, time: now };
+            // 缓存 10 分钟
+            cacheService.set(cacheKey, files, 10 * 60 * 1000);
             this.loading = false;
             return files;
 
