@@ -152,34 +152,25 @@ describe("D1 Service", () => {
   });
 
   describe("batch", () => {
-    test("should execute a batch of statements concurrently", async () => {
-      const mockResult1 = { success: true };
-      const mockResult2 = { success: true };
+    test("should execute a batch of statements concurrently and return settled results", async () => {
+      const mockResult1 = { id: 1 };
       
       jest.spyOn(d1Instance, "_execute")
           .mockResolvedValueOnce(mockResult1)
-          .mockResolvedValueOnce(mockResult2);
+          .mockRejectedValueOnce(new Error("Some error"));
 
       const statements = [
-        { sql: "UPDATE users SET status = ? WHERE id = ?", params: ["active", 1] },
-        { sql: "DELETE FROM old_data WHERE date < ?", params: ["2023-01-01"] },
+        { sql: "UPDATE users SET status = ?", params: ["active"] },
+        { sql: "BAD SQL", params: [] },
       ];
       
       const results = await d1Instance.batch(statements);
 
       expect(d1Instance._execute).toHaveBeenCalledTimes(2);
-      expect(d1Instance._execute).toHaveBeenCalledWith(statements[0].sql, statements[0].params);
-      expect(d1Instance._execute).toHaveBeenCalledWith(statements[1].sql, statements[1].params);
-      expect(results).toEqual([mockResult1, mockResult2]);
-    });
-
-    test("should throw an error if any statement fails", async () => {
-      jest.spyOn(d1Instance, "_execute")
-          .mockRejectedValueOnce(new Error("D1 Error: Some error"));
-
-      const statements = [{ sql: "INVALID SQL" }];
-
-      await expect(d1Instance.batch(statements)).rejects.toThrow("D1 Error: Some error");
+      expect(results).toHaveLength(2);
+      expect(results[0]).toEqual({ success: true, result: mockResult1 });
+      expect(results[1]).toEqual({ success: false, error: expect.any(Error) });
+      expect(results[1].error.message).toBe("Some error");
     });
   });
 });

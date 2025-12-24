@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [2.2.4](https://github.com/YoungSx/drive-collector-js/compare/v2.2.3...v2.2.4) (2025-12-24)
+
+
+### ✅ 质量保障
+
+* **代码文档**: 完善了 TaskRepository 和 D1 服务类的文档注释，提升代码可读性。
+* **测试优化**: 调整了相关单元测试用例，确保测试覆盖率的稳定性和准确性。
+
+### [2.2.3](https://github.com/YoungSx/drive-collector-js/compare/v2.2.2...v2.2.3) (2025-12-24)
+
+
+### 🐛 问题修复
+
+* resolve D1 batch error and prevent data loss in flushUpdates ([82d119b](https://github.com/YoungSx/drive-collector-js/commit/82d119b52f6f136a5bcdc74bc2020e838a3510b0))
+* sanitize user input and variables in messages to prevent HTML rendering issues ([d6df339](https://github.com/YoungSx/drive-collector-js/commit/d6df339be01c308a320deacc23b64354fcc3e841))
+
 ### [2.2.2](https://github.com/YoungSx/drive-collector-js/compare/v2.2.1...v2.2.2) (2025-12-24)
 
 
