@@ -80,7 +80,7 @@ export const STRINGS = {
         mega_fail_login: "⚠️ <b>登录失败</b>\n账号/密码错误或开启了 2FA。",
         email_invalid: "❌ 邮箱格式看似不正确，请重新输入：",
         // 🆕 新增
-        bind_failed: "❌ **绑定失败**",
+        bind_failed: "❌ <b>绑定失败</b>",
         please_confirm: "请确认操作",
         success_unbind: "已成功解绑",
         returned: "已返回",

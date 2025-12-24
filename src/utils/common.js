@@ -48,5 +48,7 @@ export const getMediaInfo = (media) => {
 export const updateStatus = async (task, text, isFinal = false) => {
     const cancelText = task.proc ? STRINGS.task.cancel_transfer_btn : STRINGS.task.cancel_task_btn;
     const buttons = isFinal ? null : [Button.inline(cancelText, Buffer.from(`cancel_${task.id}`))];
-    await safeEdit(task.chatId, task.msgId, text, buttons, task.userId, text.includes('<a href=') ? 'html' : 'markdown');
+    // 增强 HTML 检测：包含常见标签即视为 HTML 模式
+    const isHtml = /<\/?(b|i|code|pre|a)(\s|>)/i.test(text);
+    await safeEdit(task.chatId, task.msgId, text, buttons, task.userId, isHtml ? 'html' : 'markdown');
 };

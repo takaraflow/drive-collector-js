@@ -7,7 +7,7 @@ import { config } from "../config/index.js";
 import { client } from "../services/telegram.js";
 import { CloudTool } from "../services/rclone.js";
 import { UIHelper } from "../ui/templates.js";
-import { getMediaInfo, updateStatus } from "../utils/common.js";
+import { getMediaInfo, updateStatus, escapeHTML } from "../utils/common.js";
 import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, runMtprotoFileTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { AuthGuard } from "../modules/AuthGuard.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
@@ -331,7 +331,7 @@ export class TaskManager {
                 if (task.isGroup) {
                     await this._refreshGroupMonitor(task, 'completed');
                 } else {
-                    await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: info.name, folder: config.remoteFolder }), true);
+                    await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(info.name), folder: config.remoteFolder }), true);
                 }
                 return;
             }
@@ -382,7 +382,7 @@ export class TaskManager {
                     await this._refreshGroupMonitor(task, finalStatus);
                 } else {
                     const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
-                    const fileNameHtml = `<a href="${fileLink}">${info.name}</a>`;
+                    const fileNameHtml = `<a href="${fileLink}">${escapeHTML(info.name)}</a>`;
                     const baseText = isOk 
                         ? STRINGS.task.success.replace('{{name}}', fileNameHtml).replace('{{folder}}', config.remoteFolder)
                         : STRINGS.task.failed_validation.replace('{{name}}', fileNameHtml);
@@ -394,7 +394,7 @@ export class TaskManager {
                     await this._refreshGroupMonitor(task, 'failed');
                 } else {
                     await updateStatus(task, format(STRINGS.task.failed_upload, { 
-                        reason: task.isCancelled ? "用户手动取消" : uploadResult.error 
+                        reason: task.isCancelled ? "用户手动取消" : escapeHTML(uploadResult.error) 
                     }), true);
                 }
             }
@@ -405,7 +405,7 @@ export class TaskManager {
             if (task.isGroup) {
                 await this._refreshGroupMonitor(task, isCancel ? 'cancelled' : 'failed');
             } else {
-                const text = isCancel ? STRINGS.task.cancelled : `${STRINGS.task.error_prefix}${e.message}`;
+                const text = isCancel ? STRINGS.task.cancelled : `${STRINGS.task.error_prefix}<code>${escapeHTML(e.message)}</code>`;
                 await updateStatus(task, text, true);
             }
         } finally {

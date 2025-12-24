@@ -6,6 +6,7 @@ import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetr
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
+import { escapeHTML } from "../utils/common.js";
 
 /**
  * 驱动配置流程模块
@@ -34,7 +35,7 @@ export class DriveConfigFlow {
             const isDefault = drive.id === defaultDriveId;
             message += format(STRINGS.drive.bound_info, { 
                 type: drive.type.toUpperCase(), 
-                account: email 
+                account: escapeHTML(email) 
             });
             if (isDefault) {
                 message += ` ${STRINGS.drive.is_default}`;
@@ -102,7 +103,7 @@ export class DriveConfigFlow {
             if (drive) {
                 const email = drive.name.split('-')[1] || drive.name;
                 const isDefault = drive.id === defaultDriveId;
-                message += format(STRINGS.drive.bound_info, { type: drive.type.toUpperCase(), account: email });
+                message += format(STRINGS.drive.bound_info, { type: drive.type.toUpperCase(), account: escapeHTML(email) });
                 if (isDefault) {
                     message += ` ${STRINGS.drive.is_default}`;
                 } else {
@@ -179,7 +180,7 @@ export class DriveConfigFlow {
                 } else if (safeDetails.includes("Object (typically, node or user) not found") || safeDetails.includes("couldn't login")) {
                     errorText += `\n\n${STRINGS.drive.mega_fail_login}`;
                 } else {
-                    errorText += `\n\n网络或配置异常: <code>${safeDetails}</code>`;
+                    errorText += `\n\n网络或配置异常: <code>${escapeHTML(safeDetails)}</code>`;
                 }
                 
                 await SessionManager.clear(userId);
@@ -193,7 +194,7 @@ export class DriveConfigFlow {
             await SessionManager.clear(userId);
             await runBotTask(() => client.editMessage(peerId, { 
                 message: tempMsg.id, 
-                text: format(STRINGS.drive.mega_success, { email }),
+                text: format(STRINGS.drive.mega_success, { email: escapeHTML(email) }),
                 parseMode: "html"
             }), userId, { priority: PRIORITY.HIGH });
             return true;

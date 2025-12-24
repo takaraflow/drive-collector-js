@@ -212,7 +212,7 @@ export class Dispatcher {
                     return;
                 }
             } catch (e) {
-                return await runBotTaskWithRetry(() => client.sendMessage(target, { message: `❌ ${escapeHTML(e.message)}` }), userId, {}, false, 3);
+                return await runBotTaskWithRetry(() => client.sendMessage(target, { message: `❌ ${escapeHTML(e.message)}`, parseMode: "html" }), userId, {}, false, 3);
             }
 
             // 4. 通用兜底回复：

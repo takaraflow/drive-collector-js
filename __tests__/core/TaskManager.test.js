@@ -60,6 +60,7 @@ jest.unstable_mockModule("../../src/modules/AuthGuard.js", () => ({
 jest.unstable_mockModule("../../src/utils/common.js", () => ({
     getMediaInfo: jest.fn((msg) => ({ name: "test.mp4", size: 1024 })),
     updateStatus: jest.fn(),
+    escapeHTML: jest.fn(str => str),
 }));
 
 // Mock utils/limiter
