@@ -1,4 +1,4 @@
-import { jest, describe, it, expect } from "@jest/globals";
+import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 
 jest.unstable_mockModule("../../src/services/d1.js", () => ({
     d1: {
@@ -6,10 +6,25 @@ jest.unstable_mockModule("../../src/services/d1.js", () => ({
     },
 }));
 
+jest.unstable_mockModule("../../src/utils/CacheService.js", () => ({
+    cacheService: {
+        getOrSet: jest.fn(),
+        del: jest.fn(),
+    },
+}));
+
 const { DriveRepository } = await import("../../src/repositories/DriveRepository.js");
 const { d1 } = await import("../../src/services/d1.js");
+const { cacheService } = await import("../../src/utils/CacheService.js");
 
 describe("DriveRepository.findAll", () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        cacheService.getOrSet.mockImplementation(async (key, loader) => {
+            return await loader();
+        });
+    });
+
     it("should call d1.fetchAll with correct SQL", async () => {
         const mockDrives = [
             { id: 1, user_id: "user1", status: "active" },

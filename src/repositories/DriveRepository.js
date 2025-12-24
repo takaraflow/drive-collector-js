@@ -48,6 +48,7 @@ export class DriveRepository {
                 VALUES (?, ?, ?, ?, 'active', ?)
             `, [userId.toString(), name, type, configJson, Date.now()]);
             cacheService.del(`drive_${userId}`);
+            cacheService.del("drives:active");
             return true;
         } catch (e) {
             console.error(`DriveRepository.create failed for ${userId}:`, e);
@@ -65,6 +66,7 @@ export class DriveRepository {
         try {
             await d1.run("DELETE FROM user_drives WHERE user_id = ?", [userId.toString()]);
             cacheService.del(`drive_${userId}`);
+            cacheService.del("drives:active");
         } catch (e) {
             console.error(`DriveRepository.deleteByUserId failed for ${userId}:`, e);
             throw e;
@@ -80,6 +82,7 @@ export class DriveRepository {
         if (!driveId) return;
         try {
             await d1.run("DELETE FROM user_drives WHERE id = ?", [driveId.toString()]);
+            cacheService.del("drives:active");
         } catch (e) {
             console.error(`DriveRepository.delete failed for ${driveId}:`, e);
             throw e;
@@ -109,8 +112,11 @@ export class DriveRepository {
      * @returns {Promise<Array>}
      */
     static async findAll() {
+        const cacheKey = "drives:active";
         try {
-            return await d1.fetchAll("SELECT * FROM user_drives WHERE status = 'active'");
+            return await cacheService.getOrSet(cacheKey, async () => {
+                return await d1.fetchAll("SELECT * FROM user_drives WHERE status = 'active'");
+            }, 5 * 60 * 1000); // 缓存 5 分钟
         } catch (e) {
             console.error("DriveRepository.findAll error:", e);
             return [];
