@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [2.1.1](https://github.com/YoungSx/drive-collector-js/compare/v2.1.0...v2.1.1) (2025-12-24)
+
+### ✨ 核心功能
+* **新增帮助菜单**: 实现 `/help` 命令，提供详细的使用指南，并自动显示当前版本号。
+* **分发逻辑优化**: 在 `Dispatcher` 中引入 `fs` 和 `path` 模块以支持版本读取。
+
 ## 2.1.0 (2025-12-24)
 
 ### ✨ 核心功能

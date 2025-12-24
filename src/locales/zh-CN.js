@@ -2,6 +2,19 @@ export const STRINGS = {
     // --- 系统/全局 ---
     system: {
         startup: "🚀 Telegram 客户端已连接",
+        help: "📖 <b>云转存助手 使用帮助</b> (v{{version}})\n\n" +
+              "您可以直接向我发送<b>文件、视频、图片</b>或支持的<b>链接</b>，我会自动帮您转存到绑定的网盘中。\n\n" +
+              "<b>常用命令：</b>\n" +
+              "/drive - 🔐 绑定或管理您的网盘\n" +
+              "/files - 📁 浏览已转存的文件\n" +
+              "/status - 📊 查看系统状态与任务历史\n" +
+              "/help - 📖 显示此帮助菜单\n" +
+              "/logout - ❌ 解绑当前网盘\n\n" +
+              "<b>支持的链接类型：</b>\n" +
+              "• Google Drive (文件/目录)\n" +
+              "• Telegram 消息链接\n" +
+              "• 直链 (部分支持)\n\n" +
+              "如有疑问或建议，请联系管理员。",
         maintenance_mode: "🚧 <b>系统维护中</b>\n\n当前 Bot 仅限管理员使用，请稍后访问。",
         maintenance_alert: "🚧 系统维护中",
         welcome: "👋 <b>欢迎使用云转存助手</b>\n\n可以直接发送文件或链接给我，我会帮您转存。\n\n/drive 🔐 绑定网盘\n/files 📁 浏览文件\n/status 📊 查看系统状态",

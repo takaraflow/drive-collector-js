@@ -13,6 +13,8 @@ import { DriveRepository } from "../repositories/DriveRepository.js";
 import { safeEdit, escapeHTML } from "../utils/common.js";
 import { runBotTask, runBotTaskWithRetry } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
+import fs from "fs";
+import path from "path";
 
 /**
  * 消息分发器 (Dispatcher)
@@ -194,6 +196,8 @@ export class Dispatcher {
                     return await this._handleFilesCommand(target, userId);
                 case "/status":
                     return await this._handleStatusCommand(target, userId, text);
+                case "/help":
+                    return await this._handleHelpCommand(target, userId);
                 // 更多命令可在此添加...
             }
 
@@ -397,6 +401,23 @@ export class Dispatcher {
         const seconds = Math.floor(uptime % 60);
         
         return `${hours}h ${minutes}m ${seconds}s`;
+    }
+
+    /**
+     * [私有] 处理 /help 命令
+     */
+    static async _handleHelpCommand(target, userId) {
+        // 读取版本号
+        const pkgPath = path.join(process.cwd(), 'package.json');
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        const version = pkg.version || 'unknown';
+
+        const message = format(STRINGS.system.help, { version });
+        
+        return await runBotTaskWithRetry(() => client.sendMessage(target, { 
+            message: message,
+            parseMode: "html"
+        }), userId, {}, false, 3);
     }
 
     /**
