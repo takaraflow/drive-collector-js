@@ -36,6 +36,7 @@ jest.unstable_mockModule("../../src/services/rclone.js", () => ({
 // Mock repositories/TaskRepository
 const mockTaskRepository = {
     create: jest.fn(),
+    createBatch: jest.fn(),
     findStalledTasks: jest.fn(),
     updateStatus: jest.fn(),
     findById: jest.fn(),
@@ -215,18 +216,18 @@ describe("TaskManager", () => {
             TaskManager.queue.pause();
         });
 
-        test("should add batch tasks correctly", async () => {
+        test("should add batch tasks correctly using createBatch", async () => {
             const target = "chat123";
             const messages = [{ id: 201, groupedId: "g1" }, { id: 202, groupedId: "g1" }];
             const userId = "user456";
 
             mockClient.sendMessage.mockResolvedValue({ id: 300 });
-            mockTaskRepository.create.mockResolvedValue(true); // 明确成功
+            mockTaskRepository.createBatch.mockResolvedValue(true);
 
             await TaskManager.addBatchTasks(target, messages, userId);
 
             expect(mockClient.sendMessage).toHaveBeenCalledTimes(1);
-            expect(mockTaskRepository.create).toHaveBeenCalledTimes(2);
+            expect(mockTaskRepository.createBatch).toHaveBeenCalled();
             expect(TaskManager.waitingTasks.length).toBe(2);
             expect(TaskManager.waitingTasks[0].isGroup).toBe(true);
         });

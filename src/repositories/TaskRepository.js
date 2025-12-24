@@ -133,4 +133,39 @@ export class TaskRepository {
             return [];
         }
     }
+
+    /**
+     * 批量创建任务
+     * @param {Array<Object>} tasksData 
+     */
+    static async createBatch(tasksData) {
+        if (!tasksData || tasksData.length === 0) return true;
+        
+        const now = Date.now();
+        const statements = tasksData.map(taskData => ({
+            sql: `
+                INSERT INTO tasks (id, user_id, chat_id, msg_id, source_msg_id, file_name, file_size, status, created_at, updated_at) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+            `,
+            params: [
+                taskData.id,
+                taskData.userId,
+                taskData.chatId,
+                taskData.msgId,
+                taskData.sourceMsgId,
+                taskData.fileName || 'unknown',
+                taskData.fileSize || 0,
+                now,
+                now
+            ]
+        }));
+
+        try {
+            await d1.batch(statements);
+            return true;
+        } catch (e) {
+            console.error("TaskRepository.createBatch failed:", e);
+            throw e;
+        }
+    }
 }

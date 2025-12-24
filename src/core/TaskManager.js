@@ -37,11 +37,25 @@ export class TaskManager {
                 return;
             }
 
-            console.log(`📥 发现 ${tasks.length} 个僵尸任务，正在恢复...`);
+            console.log(`📥 发现 ${tasks.length} 个僵尸任务，正在按 Chat 分组批量恢复...`);
             
+            // 按 chat_id 分组以实现批量获取消息
+            const chatGroups = new Map();
             for (const row of tasks) {
-                await this._restoreTask(row);
+                if (!row.chat_id || row.chat_id.includes("Object")) {
+                    console.warn(`⚠️ 跳过无效 chat_id 的任务: ${row.id}`);
+                    continue;
+                }
+                if (!chatGroups.has(row.chat_id)) {
+                    chatGroups.set(row.chat_id, []);
+                }
+                chatGroups.get(row.chat_id).push(row);
             }
+
+            for (const [chatId, rows] of chatGroups) {
+                await this._restoreBatchTasks(chatId, rows);
+            }
+
             this.updateQueueUI();
         } catch (e) {
             console.error("TaskManager.init critical error:", e);
@@ -49,33 +63,35 @@ export class TaskManager {
     }
 
     /**
-     * [私有] 恢复单个任务的逻辑
-     * @param {Object} row 数据库行对象
+     * [私有] 批量恢复同一个会话下的任务
+     * @param {string} chatId 
+     * @param {Array} rows 
      */
-    static async _restoreTask(row) {
+    static async _restoreBatchTasks(chatId, rows) {
         try {
-            // 防御性校验：确保 chat_id 有效
-            if (!row.chat_id || row.chat_id.includes("Object")) {
-                console.warn(`⚠️ 跳过无效 chat_id 的任务: ${row.id}`);
-                return;
-            }
-
-            const messages = await runMtprotoTaskWithRetry(() => client.getMessages(row.chat_id, { ids: [row.source_msg_id] }));
-            const message = messages[0];
-
-            if (!message || !message.media) {
-                console.warn(`⚠️ 无法找到原始消息 (ID: ${row.source_msg_id})`);
-                await TaskRepository.updateStatus(row.id, 'failed', 'Source msg missing');
-                return;
-            }
-
-            const task = this._createTaskObject(row.id, row.user_id, row.chat_id, row.msg_id, message);
+            const sourceMsgIds = rows.map(r => r.source_msg_id);
+            // 批量获取消息：一次 API 调用获取多个消息
+            const messages = await runMtprotoTaskWithRetry(() => client.getMessages(chatId, { ids: sourceMsgIds }));
             
-            await updateStatus(task, "🔄 **系统重启，检测到任务中断，已自动恢复...**");
-            this._enqueueTask(task);
+            const messageMap = new Map();
+            messages.forEach(m => {
+                if (m) messageMap.set(m.id, m);
+            });
 
+            for (const row of rows) {
+                const message = messageMap.get(row.source_msg_id);
+                if (!message || !message.media) {
+                    console.warn(`⚠️ 无法找到原始消息 (ID: ${row.source_msg_id})`);
+                    await TaskRepository.updateStatus(row.id, 'failed', 'Source msg missing');
+                    continue;
+                }
+
+                const task = this._createTaskObject(row.id, row.user_id, row.chat_id, row.msg_id, message);
+                await updateStatus(task, "🔄 **系统重启，检测到任务中断，已自动恢复...**");
+                this._enqueueTask(task);
+            }
         } catch (e) {
-            console.error(`恢复任务 ${row.id} 失败:`, e);
+            console.error(`批量恢复会话 ${chatId} 的任务失败:`, e);
         }
     }
 
@@ -157,16 +173,19 @@ export class TaskManager {
             3
         );
 
-        // 2. 循环创建任务，它们将共享同一个 msgId (看板 ID)
+        // 2. 批量创建任务，它们将共享同一个 msgId (看板 ID)
+        const tasksData = [];
+        const taskObjects = [];
+
         for (const msg of messages) {
             const taskId = randomUUID();
             const info = getMediaInfo(msg);
 
-            await TaskRepository.create({
+            tasksData.push({
                 id: taskId,
                 userId: userId.toString(),
                 chatId: chatIdStr,
-                msgId: statusMsg.id, // 👈 关键：共享同一个消息 ID
+                msgId: statusMsg.id,
                 sourceMsgId: msg.id,
                 fileName: info?.name,
                 fileSize: info?.size
@@ -174,7 +193,14 @@ export class TaskManager {
 
             const task = this._createTaskObject(taskId, userId, chatIdStr, statusMsg.id, msg);
             task.isGroup = true; // 标记这是组任务
-            
+            taskObjects.push(task);
+        }
+
+        // 批量持久化到 DB
+        await TaskRepository.createBatch(tasksData);
+
+        // 加入内存队列
+        for (const task of taskObjects) {
             this._enqueueTask(task);
         }
         this.updateQueueUI();
