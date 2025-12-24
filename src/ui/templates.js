@@ -15,7 +15,7 @@ export class UIHelper {
         const barLen = 20;
         const filled = Math.round(barLen * (current / (total || 1)));
         const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
-        return `⏳ **${actionName}...**\n\n` + `\`[${bar}]\` ${percentage}% (${(current / 1048576).toFixed(1)}/${(total / 1048576).toFixed(1)} MB)`;
+        return `⏳ **${actionName}...**\n\n` + `\`[${bar}]\` ${percentage}% (${current.toFixed(1)}/${total.toFixed(1)} MB)`;
     }
 
     /**

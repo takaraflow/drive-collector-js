@@ -1,4 +1,4 @@
-import { TaskManager } from '../src/core/TaskManager.js';
+import { TaskManager } from '../src/core/TaskManager';
 
 // Mock external dependencies
 jest.mock('../src/services/telegram.js', () => ({

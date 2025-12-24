@@ -4,7 +4,7 @@ import assert from 'assert';
 console.log('Running tests...');
 
 // Test UIHelper.renderProgress
-const progressResult = UIHelper.renderProgress(50 * 1024 * 1024, 100 * 1024 * 1024, 'Downloading'); // Use MB values
+const progressResult = UIHelper.renderProgress(50, 100, 'Downloading'); // Use MB values
 assert(progressResult.includes('⏳ **Downloading...**'), 'Progress bar should contain title');
 assert(progressResult.includes('50.0%'), 'Progress bar should contain percentage');
 assert(progressResult.includes('50.0/100.0 MB'), 'Progress bar should contain sizes');

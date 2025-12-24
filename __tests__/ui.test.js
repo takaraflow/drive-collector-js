@@ -1,4 +1,4 @@
-import { UIHelper } from '../src/ui/templates.js';
+import { UIHelper } from '../src/ui/templates';
 
 describe('UIHelper', () => {
   describe('renderProgress', () => {
