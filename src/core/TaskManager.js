@@ -64,7 +64,7 @@ class UploadBatcher {
  */
 export class TaskManager {
     // 分离下载和上传队列
-    static downloadQueue = new PQueue({ concurrency: 2 }); // 下载队列：处理MTProto下载
+    static downloadQueue = new PQueue({ concurrency: 1 }); // 下载队列：处理MTProto下载，降低并发避免连接压力
     static uploadQueue = new PQueue({ concurrency: 1 });   // 上传队列：处理rclone转存
 
     // 兼容性：保留原有queue引用
@@ -382,7 +382,7 @@ export class TaskManager {
                 }
             };
 
-            await runMtprotoFileTaskWithRetry(() => client.downloadMedia(message, downloadOptions));
+            await runMtprotoFileTaskWithRetry(() => client.downloadMedia(message, downloadOptions), {}, 5); // 增加重试次数到5次
 
             // 下载完成，推入上传队列
             await TaskRepository.updateStatus(task.id, 'downloaded');

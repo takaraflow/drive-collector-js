@@ -42,19 +42,29 @@ export const saveSession = async () => {
 };
 
 // 初始化 Telegram 客户端单例
-// 优化配置以应对限流：增加重试次数，模拟真实设备信息，设置 FloodWait 阈值
-// 使用动态加载的 Session
+// 优化配置以应对限流和连接问题：增加重试次数，模拟真实设备信息，设置 FloodWait 阈值
+// 增强连接稳定性和数据中心切换处理
 export const client = new TelegramClient(
-    new StringSession(await getSavedSession()), 
-    config.apiId, 
-    config.apiHash, 
-    { 
-        connectionRetries: 10,
+    new StringSession(await getSavedSession()),
+    config.apiId,
+    config.apiHash,
+    {
+        connectionRetries: 15, // 增加连接重试次数
         floodSleepThreshold: 60, // 自动处理 60 秒内的 FloodWait
         deviceModel: "DriveCollector-Server",
         systemVersion: "Linux",
-        appVersion: "1.2.0",
+        appVersion: "2.3.0", // 更新版本号
         useWSS: false, // 服务端环境下通常不需要 WSS
-        autoReconnect: true
+        autoReconnect: true,
+        // 增强连接稳定性设置
+        timeout: 30000, // 连接超时 30 秒
+        requestRetries: 5, // 请求重试次数
+        retryDelay: 2000, // 重试延迟 2 秒
+        // 数据中心切换优化
+        dcId: undefined, // 让客户端自动选择最佳数据中心
+        useIPv6: false, // 禁用 IPv6 以提高兼容性
+        // 连接池设置
+        maxConcurrentDownloads: 3, // 限制并发下载数量
+        connectionPoolSize: 5 // 连接池大小
     }
 );
