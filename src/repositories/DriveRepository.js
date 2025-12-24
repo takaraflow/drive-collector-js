@@ -103,4 +103,17 @@ export class DriveRepository {
             return null;
         }
     }
+
+    /**
+     * 获取所有活跃的网盘绑定
+     * @returns {Promise<Array>}
+     */
+    static async findAll() {
+        try {
+            return await d1.fetchAll("SELECT * FROM user_drives WHERE status = 'active'");
+        } catch (e) {
+            console.error("DriveRepository.findAll error:", e);
+            return [];
+        }
+    }
 }
