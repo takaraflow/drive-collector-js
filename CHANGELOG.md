@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [2.3.1](https://github.com/YoungSx/drive-collector-js/compare/v2.3.0...v2.3.1) (2025-12-24)
+
+
+### 🐛 问题修复
+
+* **连接稳定性**：修复Telegram连接超时和数据中心切换问题，大幅提升文件下载的成功率和系统稳定性。通过优化连接参数、重试机制和并发控制，解决了"Not connected"和"File lives in another DC"等常见连接错误。
+
 ## [2.3.0](https://github.com/YoungSx/drive-collector-js/compare/v2.2.5...v2.3.0) (2025-12-24)
 
 
