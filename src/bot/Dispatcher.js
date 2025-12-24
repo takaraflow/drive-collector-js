@@ -10,11 +10,38 @@ import { UIHelper } from "../ui/templates.js";
 import { CloudTool } from "../services/rclone.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
-import { safeEdit } from "../utils/common.js";
+import { safeEdit, escapeHTML } from "../utils/common.js";
 import { runBotTask, runBotTaskWithRetry } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 
 /**
+>>>>>>> SEARCH
+            // 3. 尝试解析链接
+            try {
+                const toProcess = await LinkParser.parse(text, userId);
+                if (toProcess && toProcess.length > 0) {
+                    if (!selectedDrive) return await this._sendBindHint(target, userId);
+
+                    if (toProcess.length > 10) await runBotTaskWithRetry(() => client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` }), userId, {}, false, 3);
+                    for (const msg of toProcess.slice(0, 10)) await TaskManager.addTask(target, msg, userId, "链接");
+                    return;
+                }
+            } catch (e) {
+                return await runBotTaskWithRetry(() => client.sendMessage(target, { message: `❌ ${e.message}` }), userId, {}, false, 3);
+            }
+            // 3. 尝试解析链接
+            try {
+                const toProcess = await LinkParser.parse(text, userId);
+                if (toProcess && toProcess.length > 0) {
+                    if (!selectedDrive) return await this._sendBindHint(target, userId);
+
+                    if (toProcess.length > 10) await runBotTaskWithRetry(() => client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` }), userId, {}, false, 3);
+                    for (const msg of toProcess.slice(0, 10)) await TaskManager.addTask(target, msg, userId, "链接");
+                    return;
+                }
+            } catch (e) {
+                return await runBotTaskWithRetry(() => client.sendMessage(target, { message: `❌ ${escapeHTML(e.message)}` }), userId, {}, false, 3);
+            }
  * 消息分发器 (Dispatcher)
  * 职责：
  * 1. 接收所有 Telegram 事件
@@ -308,7 +335,7 @@ export class Dispatcher {
         status += format(STRINGS.status.current_task, { count: currentTask ? '1' : '0' }) + '\n';
         
         if (currentTask) {
-            status += '\n' + format(STRINGS.status.current_file, { name: currentTask.fileName }) + '\n';
+            status += '\n' + format(STRINGS.status.current_file, { name: escapeHTML(currentTask.fileName) }) + '\n';
         }
         
         return status;
@@ -338,7 +365,7 @@ export class Dispatcher {
             status += format(STRINGS.status.task_item, {
                 index: index + 1,
                 status: taskStatus,
-                name: task.file_name || '未知文件',
+                name: escapeHTML(task.file_name || '未知文件'),
                 statusText: statusText
             }) + '\n';
         });

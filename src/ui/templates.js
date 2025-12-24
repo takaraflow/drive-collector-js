@@ -2,6 +2,7 @@ import { Button } from "telegram/tl/custom/button.js";
 import path from "path";
 import { config } from "../config/index.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
+import { escapeHTML } from "../utils/common.js";
 
 /**
  * --- UI 模板工具库 (UIHelper) ---
@@ -17,11 +18,93 @@ export class UIHelper {
         const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
         
         // 如果提供了文件名，显示简洁版本
-        const displayName = fileName ? this._shortenFileName(fileName, 25) : '';
+        const displayName = fileName ? escapeHTML(this._shortenFileName(fileName, 25)) : '';
         const fileInfo = fileName ? `\n📄 ${displayName}` : '';
         
         return `⏳ <b>${actionName}...</b>${fileInfo}\n\n` + `<code>[${bar}]</code> ${percentage}% (${(current / 1048576).toFixed(1)}/${(total / 1048576).toFixed(1)} MB)`;
     }
+>>>>>>> SEARCH
+            pagedFiles.forEach(f => {
+                const ext = path.extname(f.Name).toLowerCase();
+                const emoji = [".mp4", ".mkv", ".avi"].includes(ext) ? "🎞️" : [".jpg", ".png", ".webp"].includes(ext) ? "🖼️" : [".zip", ".rar", ".7z"].includes(ext) ? "📦" : [".pdf", ".epub"].includes(ext) ? "📝" : "📄";
+                const size = (f.Size / 1048576).toFixed(2) + " MB";
+                const time = f.ModTime.replace("T", " ").substring(0, 16);
+                text += `${emoji} <b>${f.Name}</b>\n    <code>${size}</code> | <code>${time}</code>\n\n`;
+            });
+            pagedFiles.forEach(f => {
+                const ext = path.extname(f.Name).toLowerCase();
+                const emoji = [".mp4", ".mkv", ".avi"].includes(ext) ? "🎞️" : [".jpg", ".png", ".webp"].includes(ext) ? "🖼️" : [".zip", ".rar", ".7z"].includes(ext) ? "📦" : [".pdf", ".epub"].includes(ext) ? "📝" : "📄";
+                const size = (f.Size / 1048576).toFixed(2) + " MB";
+                const time = f.ModTime.replace("T", " ").substring(0, 16);
+                text += `${emoji} <b>${escapeHTML(f.Name)}</b>\n    <code>${size}</code> | <code>${time}</code>\n\n`;
+            });
+>>>>>>> SEARCH
+            // 增加 .trim() 确保匹配成功
+            const dbName = (t.file_name || "").trim();
+            const currentName = (focusTask.fileName || "").trim();
+            const isFocus = dbName === currentName;
+            
+            // 截断文件名以适应移动端显示
+            const displayName = this._shortenFileName(dbName, 20);
+            
+            if (isFocus) {
+                // 焦点任务：显示简洁状态和进度
+                const statusIcon = focusStatus === 'completed' ? '✅' : 
+                                  focusStatus === 'failed' ? '❌' : 
+                                  focusStatus === 'cancelled' ? '🚫' : '🔄';
+                
+                if (downloaded > 0 && (focusStatus === 'downloading' || focusStatus === 'uploading')) {
+                    const progress = Math.round((downloaded / total) * 100);
+                    statusLines.push(`${statusIcon} ${displayName} [${progress}%]`);
+                } else {
+                    // 使用简短的状态文本
+                    const statusText = focusStatus === 'completed' ? '完成' :
+                                      focusStatus === 'failed' ? '失败' :
+                                      focusStatus === 'cancelled' ? '已取消' :
+                                      focusStatus === 'downloading' ? '下载中' :
+                                      focusStatus === 'uploading' ? '上传中' : '等待中';
+                    statusLines.push(`${statusIcon} ${displayName} (${statusText})`);
+                }
+            } else {
+                // 非焦点任务：只显示状态图标和简短文件名
+                const statusIcon = t.status === 'completed' ? '✅' : 
+                                  t.status === 'failed' ? '❌' : 
+                                  t.status === 'cancelled' ? '🚫' : '🕒';
+                statusLines.push(`${statusIcon} ${displayName}`);
+            }
+            // 增加 .trim() 确保匹配成功
+            const dbName = (t.file_name || "").trim();
+            const currentName = (focusTask.fileName || "").trim();
+            const isFocus = dbName === currentName;
+            
+            // 截断文件名以适应移动端显示
+            const displayName = escapeHTML(this._shortenFileName(dbName, 20));
+            
+            if (isFocus) {
+                // 焦点任务：显示简洁状态和进度
+                const statusIcon = focusStatus === 'completed' ? '✅' : 
+                                  focusStatus === 'failed' ? '❌' : 
+                                  focusStatus === 'cancelled' ? '🚫' : '🔄';
+                
+                if (downloaded > 0 && (focusStatus === 'downloading' || focusStatus === 'uploading')) {
+                    const progress = Math.round((downloaded / total) * 100);
+                    statusLines.push(`${statusIcon} ${displayName} [${progress}%]`);
+                } else {
+                    // 使用简短的状态文本
+                    const statusText = focusStatus === 'completed' ? '完成' :
+                                      focusStatus === 'failed' ? '失败' :
+                                      focusStatus === 'cancelled' ? '已取消' :
+                                      focusStatus === 'downloading' ? '下载中' :
+                                      focusStatus === 'uploading' ? '上传中' : '等待中';
+                    statusLines.push(`${statusIcon} ${displayName} (${statusText})`);
+                }
+            } else {
+                // 非焦点任务：只显示状态图标和简短文件名
+                const statusIcon = t.status === 'completed' ? '✅' : 
+                                  t.status === 'failed' ? '❌' : 
+                                  t.status === 'cancelled' ? '🚫' : '🕒';
+                statusLines.push(`${statusIcon} ${displayName}`);
+            }
 
     /**
      * 格式化文件列表页面 (样式：文件名+缩进详情)
