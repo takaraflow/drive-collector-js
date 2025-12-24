@@ -122,15 +122,22 @@ export class TaskManager {
     static async init() {
         console.log("🔄 正在检查数据库中异常中断的任务...");
         try {
-            const tasks = await TaskRepository.findStalledTasks(120000);
-            
+            // 并行加载初始化数据：僵尸任务 + 预热常用缓存
+            const results = await Promise.allSettled([
+                TaskRepository.findStalledTasks(120000),
+                this._preloadCommonData() // 预加载常用数据
+            ]);
+
+            const tasks = results[0].status === 'fulfilled' ? results[0].value : [];
+            // 预加载失败不会影响主流程，只记录日志
+
             if (!tasks || tasks.length === 0) {
                 console.log("✅ 没有发现僵尸任务。");
                 return;
             }
 
             console.log(`📥 发现 ${tasks.length} 个僵尸任务，正在按 Chat 分组批量恢复...`);
-            
+
             const chatGroups = new Map();
             for (const row of tasks) {
                 if (!row.chat_id || row.chat_id.includes("Object")) {
@@ -143,13 +150,31 @@ export class TaskManager {
                 chatGroups.get(row.chat_id).push(row);
             }
 
-            for (const [chatId, rows] of chatGroups) {
-                await this._restoreBatchTasks(chatId, rows);
-            }
+            // 并行恢复所有chat groups的任务
+            const restorePromises = Array.from(chatGroups.entries()).map(([chatId, rows]) =>
+                this._restoreBatchTasks(chatId, rows)
+            );
+            await Promise.allSettled(restorePromises);
 
             this.updateQueueUI();
         } catch (e) {
             console.error("TaskManager.init critical error:", e);
+        }
+    }
+
+    /**
+     * [私有] 预加载常用数据，提升后续操作性能
+     */
+    static async _preloadCommonData() {
+        try {
+            // 预加载活跃驱动列表（已实现缓存）
+            const { DriveRepository } = await import("../repositories/DriveRepository.js");
+            await DriveRepository.findAll();
+
+            // 可以在这里添加其他常用数据的预加载
+            console.log("📊 预加载常用数据完成");
+        } catch (e) {
+            console.warn("预加载数据失败:", e.message);
         }
     }
 
