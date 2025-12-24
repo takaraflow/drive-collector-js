@@ -4,6 +4,9 @@ import { client } from "./src/services/telegram.js";
 import { TaskManager } from "./src/core/TaskManager.js";
 import { Dispatcher } from "./src/bot/Dispatcher.js";
 
+// 全局消息去重缓存 (防止多实例重复处理)
+const processedMessages = new Map();
+
 /**
  * --- 🚀 应用程序入口 ---
  */
@@ -31,6 +34,33 @@ import { Dispatcher } from "./src/bot/Dispatcher.js";
 
         // 4. 注册事件监听器 -> 交给分发器处理
         client.addEventHandler(async (event) => {
+            // 多实例分片处理：防止重复消息 (通过环境变量控制)
+            const msgId = event.message?.id;
+            if (msgId && process.env.INSTANCE_COUNT && process.env.INSTANCE_ID) {
+                const count = parseInt(process.env.INSTANCE_COUNT);
+                const id = parseInt(process.env.INSTANCE_ID);
+                if (msgId % count !== (id - 1) % count) {
+                    return; // 跳过不属于此实例的消息
+                }
+            }
+            
+            // 去重检查：防止多实例部署时的重复处理
+            if (msgId) {
+                const now = Date.now();
+                if (processedMessages.has(msgId)) {
+                    console.log(`Skipping duplicate message ${msgId}`);
+                    return;
+                }
+                processedMessages.set(msgId, now);
+                
+                // 清理超过10分钟的旧消息ID
+                for (const [id, time] of processedMessages.entries()) {
+                    if (now - time > 10 * 60 * 1000) {
+                        processedMessages.delete(id);
+                    }
+                }
+            }
+            
             try {
                 await Dispatcher.handle(event);
             } catch (e) {
