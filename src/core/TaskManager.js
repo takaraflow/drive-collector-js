@@ -397,30 +397,33 @@ export class TaskManager {
     static startAutoScaling() {
         if (this.autoScalingInterval) return;
         
-        this.autoScalingInterval = setInterval(() => {
-            try {
-                // 导入 limiter 以调整并发数
-                const limiterModule = require('../utils/limiter.js');
-                const botGlobalLimiter = limiterModule.botGlobalLimiter;
-                const mtprotoLimiter = limiterModule.mtprotoLimiter;
-                const mtprotoFileLimiter = limiterModule.mtprotoFileLimiter;
-                
-                // 手动触发并发数调整
-                if (botGlobalLimiter && botGlobalLimiter.adjustConcurrency) {
-                    botGlobalLimiter.adjustConcurrency();
+        // 直接导入 limiter 模块
+        import('../utils/limiter.js').then((limiterModule) => {
+            this.autoScalingInterval = setInterval(() => {
+                try {
+                    const botGlobalLimiter = limiterModule.botGlobalLimiter;
+                    const mtprotoLimiter = limiterModule.mtprotoLimiter;
+                    const mtprotoFileLimiter = limiterModule.mtprotoFileLimiter;
+                    
+                    // 手动触发并发数调整
+                    if (botGlobalLimiter && botGlobalLimiter.adjustConcurrency) {
+                        botGlobalLimiter.adjustConcurrency();
+                    }
+                    
+                    if (mtprotoLimiter && mtprotoLimiter.adjustConcurrency) {
+                        mtprotoLimiter.adjustConcurrency();
+                    }
+                    
+                    if (mtprotoFileLimiter && mtprotoFileLimiter.adjustConcurrency) {
+                        mtprotoFileLimiter.adjustConcurrency();
+                    }
+                } catch (error) {
+                    console.error('Auto-scaling adjustment error:', error.message);
                 }
-                
-                if (mtprotoLimiter && mtprotoLimiter.adjustConcurrency) {
-                    mtprotoLimiter.adjustConcurrency();
-                }
-                
-                if (mtprotoFileLimiter && mtprotoFileLimiter.adjustConcurrency) {
-                    mtprotoFileLimiter.adjustConcurrency();
-                }
-            } catch (error) {
-                console.error('Auto-scaling adjustment error:', error.message);
-            }
-        }, 30000); // 每30秒检查一次
+            }, 30000); // 每30秒检查一次
+        }).catch(error => {
+            console.error('Failed to load limiter module for auto-scaling:', error.message);
+        });
     }
 
     /**
