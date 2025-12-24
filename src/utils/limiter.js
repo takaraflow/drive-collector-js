@@ -37,6 +37,44 @@ const createAutoScalingLimiter = (options, autoScaling = {}) => {
     let successCount = 0;
     let errorCount = 0;
     let lastAdjustment = Date.now();
+
+    /**
+     * 调整并发数
+     */
+    const _adjustConcurrency = () => {
+        const now = Date.now();
+        const { min = 1, max = 10, factor = 0.8, interval = 5000 } = autoScaling;
+        
+        // 只在指定间隔内调整
+        if (now - lastAdjustment < interval) return;
+        lastAdjustment = now;
+        
+        // 计算成功率
+        const total = successCount + errorCount;
+        if (total === 0) return;
+        
+        const successRate = successCount / total;
+        let newConcurrency = queue.concurrency;
+        
+        // 根据成功率调整并发数
+        if (successRate > 0.9 && queue.size < queue.pending * 0.8) {
+            // 成功率高且队列不满，可以增加并发
+            newConcurrency = Math.min(max, Math.floor(queue.concurrency * (1 + (1 - factor))));
+        } else if (successRate < 0.7 || errorCount > successCount * 0.3) {
+            // 成功率低或错误过多，减少并发
+            newConcurrency = Math.max(min, Math.floor(queue.concurrency * factor));
+        }
+        
+        // 更新并发数
+        if (newConcurrency !== queue.concurrency) {
+            queue.concurrency = newConcurrency;
+            console.log(`📊 Auto-scaling: Adjusted concurrency from ${queue.concurrency} to ${newConcurrency}`);
+        }
+        
+        // 重置计数器
+        successCount = 0;
+        errorCount = 0;
+    };
     
     const run = (fn, addOptions = {}) =>
         queue.add(async () => {
@@ -50,54 +88,16 @@ const createAutoScalingLimiter = (options, autoScaling = {}) => {
                 throw error;
             } finally {
                 // 定期调整并发数
-                _adjustConcurrency(queue, autoScaling);
+                _adjustConcurrency();
             }
         }, addOptions);
     
     const limiter = { queue, run };
     
     // 添加调整方法
-    limiter.adjustConcurrency = () => this._adjustConcurrency(queue, autoScaling);
+    limiter.adjustConcurrency = _adjustConcurrency;
     
     return limiter;
-};
-
-/**
- * 调整并发数
- */
-const _adjustConcurrency = (queue, autoScaling) => {
-    const now = Date.now();
-    const { min = 1, max = 10, factor = 0.8, interval = 5000 } = autoScaling;
-    
-    // 只在指定间隔内调整
-    if (now - lastAdjustment < interval) return;
-    lastAdjustment = now;
-    
-    // 计算成功率
-    const total = successCount + errorCount;
-    if (total === 0) return;
-    
-    const successRate = successCount / total;
-    let newConcurrency = queue.concurrency;
-    
-    // 根据成功率调整并发数
-    if (successRate > 0.9 && queue.size < queue.pending * 0.8) {
-        // 成功率高且队列不满，可以增加并发
-        newConcurrency = Math.min(max, Math.floor(queue.concurrency * (1 + (1 - factor))));
-    } else if (successRate < 0.7 || errorCount > successCount * 0.3) {
-        // 成功率低或错误过多，减少并发
-        newConcurrency = Math.max(min, Math.floor(queue.concurrency * factor));
-    }
-    
-    // 更新并发数
-    if (newConcurrency !== queue.concurrency) {
-        queue.concurrency = newConcurrency;
-        console.log(`📊 Auto-scaling: Adjusted concurrency from ${queue.concurrency} to ${newConcurrency}`);
-    }
-    
-    // 重置计数器
-    successCount = 0;
-    errorCount = 0;
 };
 
 /**
