@@ -8,10 +8,10 @@ import { STRINGS } from "../locales/zh-CN.js";
  */
 
 // 安全编辑消息，统一处理异常
-export const safeEdit = async (chatId, msgId, text, buttons = null, userId = null) => {
+export const safeEdit = async (chatId, msgId, text, buttons = null, userId = null, parseMode = "markdown") => {
     try {
         await runBotTaskWithRetry(
-            () => client.editMessage(chatId, { message: msgId, text, buttons, parseMode: "markdown" }).catch(() => {}),
+            () => client.editMessage(chatId, { message: msgId, text, buttons, parseMode }).catch(() => {}),
             userId,
             {},
             false,
@@ -34,5 +34,5 @@ export const getMediaInfo = (media) => {
 export const updateStatus = async (task, text, isFinal = false) => {
     const cancelText = task.proc ? STRINGS.task.cancel_transfer_btn : STRINGS.task.cancel_task_btn;
     const buttons = isFinal ? null : [Button.inline(cancelText, Buffer.from(`cancel_${task.id}`))];
-    await safeEdit(task.chatId, task.msgId, text, buttons, task.userId);
+    await safeEdit(task.chatId, task.msgId, text, buttons, task.userId, text.includes('<a href=') ? 'html' : 'markdown');
 };

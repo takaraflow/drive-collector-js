@@ -318,9 +318,12 @@ export class TaskManager {
                     await this._refreshGroupMonitor(task, finalStatus);
                 } else {
                     // 普通任务：发成功/失败消息
-                    const text = isOk 
-                        ? format(STRINGS.task.success, { name: info.name, folder: config.remoteFolder }) 
-                        : format(STRINGS.task.failed_validation, { name: info.name });
+                    const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
+                    const fileNameHtml = `<a href="${fileLink}">${info.name}</a>`;
+                    const baseText = isOk 
+                        ? STRINGS.task.success.replace('{{name}}', fileNameHtml).replace('{{folder}}', config.remoteFolder)
+                        : STRINGS.task.failed_validation.replace('{{name}}', fileNameHtml);
+                    const text = baseText;
                     await updateStatus(task, text, true);
                 }
             } else {
