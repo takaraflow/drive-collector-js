@@ -75,6 +75,10 @@ export const STRINGS = {
         btn_confirm_unbind: "✅ 确定解绑",
         btn_cancel: "🔙 取消",
         user_id_required: "User ID is required",
+        // 默认网盘
+        btn_set_default: "设为默认网盘",
+        is_default: "(默认)",
+        set_default_success: "✅ 默认网盘设置成功！",
     },
 
     // --- 文件浏览 ---

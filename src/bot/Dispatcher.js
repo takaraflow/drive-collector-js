@@ -10,6 +10,7 @@ import { UIHelper } from "../ui/templates.js";
 import { CloudTool } from "../services/rclone.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
+import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { safeEdit } from "../utils/common.js";
 import { runBotTask, runBotTaskWithRetry } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
@@ -165,6 +166,17 @@ export class Dispatcher {
             if (handled) return; 
         }
 
+        // 获取默认网盘设置
+        const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
+        let selectedDrive = null;
+        if (defaultDriveId) {
+            selectedDrive = await DriveRepository.findById(defaultDriveId);
+        }
+        // 如果没有默认网盘，就用用户唯一绑定的网盘 (当前只有 Mega，所以直接取第一个)
+        if (!selectedDrive) {
+            selectedDrive = await DriveRepository.findByUserId(userId);
+        }
+
         // 2. 文本命令路由
         if (text && !message.media) {
             switch (text.split(' ')[0]) { // 只匹配第一段，如 /drive
@@ -184,8 +196,7 @@ export class Dispatcher {
             try {
                 const toProcess = await LinkParser.parse(text, userId);
                 if (toProcess && toProcess.length > 0) {
-                    const drive = await DriveRepository.findByUserId(userId);
-                    if (!drive) return await this._sendBindHint(target, userId);
+                    if (!selectedDrive) return await this._sendBindHint(target, userId);
 
                     if (toProcess.length > 10) await runBotTaskWithRetry(() => client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` }), userId, {}, false, 3);
                     for (const msg of toProcess.slice(0, 10)) await TaskManager.addTask(target, msg, userId, "链接");
@@ -204,8 +215,7 @@ export class Dispatcher {
 
         // 5. 处理带媒体的消息 (文件/视频/图片)
         if (message.media) {
-            const drive = await DriveRepository.findByUserId(userId);
-            if (!drive) return await this._sendBindHint(target, userId);
+            if (!selectedDrive) return await this._sendBindHint(target, userId);
 
             // 🚀 核心逻辑：如果是媒体组消息
             if (message.groupedId) {

@@ -20,4 +20,21 @@ export class SettingsRepository {
             return defaultValue;
         }
     }
+
+    /**
+     * 设置指定键的设置值
+     * @param {string} key 
+     * @param {string} value 
+     * @returns {Promise<void>}
+     */
+    static async set(key, value) {
+        try {
+            await d1.run(
+                "INSERT INTO system_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value",
+                [key, value]
+            );
+        } catch (e) {
+            console.error(`SettingsRepository.set failed for ${key}:`, e);
+        }
+    }
 }

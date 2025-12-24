@@ -4,6 +4,7 @@ import { client } from "../services/telegram.js";
 import { CloudTool } from "../services/rclone.js";
 import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
+import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 
 /**
@@ -23,16 +24,25 @@ export class DriveConfigFlow {
     static async sendDriveManager(chatId, userId) {
         // 使用 Repository 获取数据
         const drive = await DriveRepository.findByUserId(userId);
+        const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
         
         let message = STRINGS.drive.menu_title;
         const buttons = [];
 
         if (drive) {
             const email = drive.name.split('-')[1] || drive.name;
+            const isDefault = drive.id === defaultDriveId;
             message += format(STRINGS.drive.bound_info, { 
                 type: drive.type.toUpperCase(), 
                 account: email 
             });
+            if (isDefault) {
+                message += ` ${STRINGS.drive.is_default}`;
+            } else {
+                buttons.push([
+                    Button.inline(STRINGS.drive.btn_set_default, Buffer.from(`drive_set_default_${drive.id}`)) 
+                ]);
+            }
             
             buttons.push([
                 Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0")),
@@ -56,6 +66,13 @@ export class DriveConfigFlow {
     static async handleCallback(event, userId) {
         const data = event.data.toString();
 
+        if (data.startsWith("drive_set_default_")) {
+            const driveId = data.split("_")[3];
+            await SettingsRepository.set(`default_drive_${userId}`, driveId);
+            await this.sendDriveManager(event.userId, userId); // 刷新界面
+            return STRINGS.drive.set_default_success;
+        }
+
         if (data === "drive_unbind_confirm") {
             await runBotTaskWithRetry(() => client.editMessage(event.userId, {
                     message: event.msgId,
@@ -76,15 +93,22 @@ export class DriveConfigFlow {
         }
 
         if (data === "drive_manager_back") {
-            // 返回主菜单，直接复用 sendDriveManager 的逻辑稍显麻烦因为需要 editMessage
-            // 这里为了简单，我们重新查一次库手动构造 editMessage
-            // 原则上应该抽取 renderDriveMenuText 函数，这里为了代码紧凑直接写
             const drive = await DriveRepository.findByUserId(userId);
+            const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
+
             let message = STRINGS.drive.menu_title;
             const buttons = [];
             if (drive) {
                 const email = drive.name.split('-')[1] || drive.name;
+                const isDefault = drive.id === defaultDriveId;
                 message += format(STRINGS.drive.bound_info, { type: drive.type.toUpperCase(), account: email });
+                if (isDefault) {
+                    message += ` ${STRINGS.drive.is_default}`;
+                } else {
+                    buttons.push([
+                        Button.inline(STRINGS.drive.btn_set_default, Buffer.from(`drive_set_default_${drive.id}`)) 
+                    ]);
+                }
                 buttons.push([
                     Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0")),
                     Button.inline(STRINGS.drive.btn_unbind, Buffer.from("drive_unbind_confirm"))
