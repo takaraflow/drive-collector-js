@@ -12,10 +12,7 @@ const rcloneBinary = fs.existsSync("/app/rclone/rclone")
 
 export class CloudTool {
     // 内存缓存：避免频繁 lsjson (针对 listRemoteFiles)
-    static cache = {
-        data: null,
-        time: 0
-    };
+    static cache = {};
     static loading = false;
 
     static async _getUserConfig(userId) {
@@ -196,6 +193,15 @@ export class CloudTool {
      * @param {boolean} forceRefresh
      */
     static async listRemoteFiles(userId, forceRefresh = false) {
+        // 缓存机制：5分钟内不重复请求
+        const cacheKey = `files_${userId}`;
+        const now = Date.now();
+        
+        // 如果不强制刷新且缓存有效，直接返回缓存
+        if (!forceRefresh && this.cache[cacheKey] && (now - this.cache[cacheKey].time) < 5 * 60 * 1000) {
+            return this.cache[cacheKey].data;
+        }
+        
         this.loading = true;
         try {
             // 🛑 关键修复：复用 _getUserConfig，逻辑统一
@@ -223,6 +229,12 @@ export class CloudTool {
                 if (a.IsDir !== b.IsDir) return b.IsDir ? 1 : -1;
                 return new Date(b.ModTime) - new Date(a.ModTime);
             });
+
+            // 更新缓存
+            this.cache[cacheKey] = {
+                data: files,
+                time: now
+            };
 
             this.loading = false;
             return files;
