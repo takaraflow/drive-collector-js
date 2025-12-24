@@ -50,7 +50,7 @@ const createAutoScalingLimiter = (options, autoScaling = {}) => {
                 throw error;
             } finally {
                 // 定期调整并发数
-                this._adjustConcurrency(queue, autoScaling);
+                _adjustConcurrency(queue, autoScaling);
             }
         }, addOptions);
     
