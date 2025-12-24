@@ -41,7 +41,7 @@ export class UIHelper {
                 const emoji = [".mp4", ".mkv", ".avi"].includes(ext) ? "🎞️" : [".jpg", ".png", ".webp"].includes(ext) ? "🖼️" : [".zip", ".rar", ".7z"].includes(ext) ? "📦" : [".pdf", ".epub"].includes(ext) ? "📝" : "📄";
                 const size = (f.Size / 1048576).toFixed(2) + " MB";
                 const time = f.ModTime.replace("T", " ").substring(0, 16);
-                text += `${emoji} <b>${f.Name}</b>\n> <code>${size}</code> | <code>${time}</code>\n\n`;
+                text += `${emoji} <b>${f.Name}</b>\n    <code>${size}</code> | <code>${time}</code>\n\n`;
             });
         }
 
