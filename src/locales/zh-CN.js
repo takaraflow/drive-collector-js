@@ -133,5 +133,5 @@ export const STRINGS = {
  * 用法: format(STRINGS.task.queued, { rank: 1 })
  */
 export function format(template, vars = {}) {
-    return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] || `{{${key}}}`);
+    return template.replace(/\{\{(\w+)\}\}/g, (_, key) => (vars[key] !== undefined && vars[key] !== null) ? vars[key] : `{{${key}}}`);
 }
