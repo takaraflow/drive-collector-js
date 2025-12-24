@@ -78,4 +78,22 @@ export class DriveRepository {
             throw e;
         }
     }
+
+    /**
+     * 根据 ID 获取网盘配置
+     * @param {string} driveId
+     * @returns {Promise<Object|null>}
+     */
+    static async findById(driveId) {
+        if (!driveId) return null;
+        try {
+            return await d1.fetchOne(
+                "SELECT * FROM user_drives WHERE id = ? AND status = 'active'",
+                [driveId.toString()]
+            );
+        } catch (e) {
+            console.error(`DriveRepository.findById error for ${driveId}:`, e);
+            return null;
+        }
+    }
 }
