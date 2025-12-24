@@ -387,6 +387,51 @@ export class TaskManager {
 
     // 🆕 UI 节流锁：防止看板更新太快导致 Telegram API 限流
     static monitorLocks = new Map();
+    
+    // 🆕 并发调整定时器
+    static autoScalingInterval = null;
+
+    /**
+     * 启动自动缩放监控
+     */
+    static startAutoScaling() {
+        if (this.autoScalingInterval) return;
+        
+        this.autoScalingInterval = setInterval(() => {
+            try {
+                // 导入 limiter 以调整并发数
+                const limiterModule = require('../utils/limiter.js');
+                const botGlobalLimiter = limiterModule.botGlobalLimiter;
+                const mtprotoLimiter = limiterModule.mtprotoLimiter;
+                const mtprotoFileLimiter = limiterModule.mtprotoFileLimiter;
+                
+                // 手动触发并发数调整
+                if (botGlobalLimiter && botGlobalLimiter.adjustConcurrency) {
+                    botGlobalLimiter.adjustConcurrency();
+                }
+                
+                if (mtprotoLimiter && mtprotoLimiter.adjustConcurrency) {
+                    mtprotoLimiter.adjustConcurrency();
+                }
+                
+                if (mtprotoFileLimiter && mtprotoFileLimiter.adjustConcurrency) {
+                    mtprotoFileLimiter.adjustConcurrency();
+                }
+            } catch (error) {
+                console.error('Auto-scaling adjustment error:', error.message);
+            }
+        }, 30000); // 每30秒检查一次
+    }
+
+    /**
+     * 停止自动缩放监控
+     */
+    static stopAutoScaling() {
+        if (this.autoScalingInterval) {
+            clearInterval(this.autoScalingInterval);
+            this.autoScalingInterval = null;
+        }
+    }
 
     /**
      * [私有] 刷新组任务看板

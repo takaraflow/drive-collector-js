@@ -32,6 +32,10 @@ const processedMessages = new Map();
             console.error("❌ 任务初始化过程中发生错误:", err);
         });
 
+        // 4. 启动自动缩放监控
+        TaskManager.startAutoScaling();
+        console.log("📊 已启动自动缩放监控，将动态调整并发参数");
+
         // 4. 注册事件监听器 -> 交给分发器处理
         client.addEventHandler(async (event) => {
             // 多实例分片处理：防止重复消息 (通过环境变量控制)
