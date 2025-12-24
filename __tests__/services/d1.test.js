@@ -1,19 +1,188 @@
-import { d1 } from "../../src/services/d1.js";
+import { jest, describe, test, expect, beforeEach, beforeAll, afterAll } from "@jest/globals";
+
+// Mock the global fetch function
+const mockFetch = jest.fn();
+global.fetch = mockFetch;
+
+// Store original process.env
+const originalEnv = process.env;
+
+let d1Instance;
 
 describe("D1 Service", () => {
+  beforeAll(async () => {
+    // Set up mock environment variables
+    process.env = {
+      ...originalEnv,
+      CF_ACCOUNT_ID: "mock_account_id",
+      CF_D1_DATABASE_ID: "mock_database_id",
+      CF_D1_TOKEN: "mock_token",
+    };
+    jest.resetModules(); // Reset modules to re-import d1 with new env
+
+    // Dynamically import d1 after setting up mocks
+    const { d1: importedD1 } = await import("../../src/services/d1.js");
+    d1Instance = importedD1;
+  });
+
+  afterAll(() => {
+    // Restore original environment variables
+    process.env = originalEnv;
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   test("should initialize the D1 service", () => {
-    expect(d1).toBeDefined();
+    expect(d1Instance).toBeDefined();
+    expect(d1Instance.accountId).toBe("mock_account_id");
+    expect(d1Instance.databaseId).toBe("mock_database_id");
+    expect(d1Instance.token).toBe("mock_token");
+    expect(d1Instance.apiUrl).toBe("https://api.cloudflare.com/client/v4/accounts/mock_account_id/d1/database/mock_database_id/query");
   });
 
   test("should have the correct service type", () => {
-    expect(d1.constructor.name).toBe("D1Service");
+    expect(d1Instance.constructor.name).toBe("D1Service");
   });
 
   test("should have the required methods", () => {
-    expect(typeof d1._execute).toBe("function");
-    expect(typeof d1.fetchAll).toBe("function");
-    expect(typeof d1.fetchOne).toBe("function");
-    expect(typeof d1.run).toBe("function");
-    expect(typeof d1.batch).toBe("function");
+    expect(typeof d1Instance._execute).toBe("function");
+    expect(typeof d1Instance.fetchAll).toBe("function");
+    expect(typeof d1Instance.fetchOne).toBe("function");
+    expect(typeof d1Instance.run).toBe("function");
+    expect(typeof d1Instance.batch).toBe("function");
+  });
+
+  describe("_execute", () => {
+    test("should execute SQL successfully", async () => {
+      const mockResponse = {
+        success: true,
+        result: [{ results: [{ id: 1, name: "test" }] }],
+      };
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      const sql = "SELECT * FROM users WHERE id = ?";
+      const params = [1];
+      const result = await d1Instance._execute(sql, params);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        d1Instance.apiUrl,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ sql, params }),
+        })
+      );
+      expect(result).toEqual(mockResponse.result[0]);
+    });
+
+    test("should throw an error if execution fails", async () => {
+      const mockErrorResponse = {
+        success: false,
+        errors: [{ message: "D1 specific error" }],
+      };
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve(mockErrorResponse),
+      });
+
+      const sql = "INSERT INTO users (name) VALUES (?) ";
+      const params = ["test"];
+
+      await expect(d1Instance._execute(sql, params)).rejects.toThrow("D1 Error: D1 specific error");
+    });
+  });
+
+  describe("fetchAll", () => {
+    test("should fetch all results", async () => {
+      const mockResults = [{ id: 1 }, { id: 2 }];
+      jest.spyOn(d1Instance, "_execute").mockResolvedValueOnce({ results: mockResults });
+
+      const sql = "SELECT * FROM items";
+      const results = await d1Instance.fetchAll(sql);
+
+      expect(d1Instance._execute).toHaveBeenCalledWith(sql, []);
+      expect(results).toEqual(mockResults);
+    });
+
+    test("should return empty array if no results", async () => {
+      jest.spyOn(d1Instance, "_execute").mockResolvedValueOnce({ results: [] });
+
+      const sql = "SELECT * FROM items WHERE false";
+      const results = await d1Instance.fetchAll(sql);
+
+      expect(results).toEqual([]);
+    });
+  });
+
+  describe("fetchOne", () => {
+    test("should fetch one result", async () => {
+      const mockResult = { id: 1 };
+      jest.spyOn(d1Instance, "fetchAll").mockResolvedValueOnce([mockResult]);
+
+      const sql = "SELECT * FROM items WHERE id = ?";
+      const result = await d1Instance.fetchOne(sql, [1]);
+
+      expect(d1Instance.fetchAll).toHaveBeenCalledWith(sql, [1]);
+      expect(result).toEqual(mockResult);
+    });
+
+    test("should return null if no result found", async () => {
+      jest.spyOn(d1Instance, "fetchAll").mockResolvedValueOnce([]);
+
+      const sql = "SELECT * FROM items WHERE id = ?";
+      const result = await d1Instance.fetchOne(sql, [99]);
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("run", () => {
+    test("should execute a run operation", async () => {
+      const mockExecuteResult = { success: true };
+      jest.spyOn(d1Instance, "_execute").mockResolvedValueOnce(mockExecuteResult);
+
+      const sql = "INSERT INTO logs (message) VALUES (?)";
+      const result = await d1Instance.run(sql, ["log message"]);
+
+      expect(d1Instance._execute).toHaveBeenCalledWith(sql, ["log message"]);
+      expect(result).toEqual(mockExecuteResult);
+    });
+  });
+
+  describe("batch", () => {
+    test("should execute a batch of statements successfully", async () => {
+      const mockBatchResponse = { success: true, result: [{ results: [] }, { results: [] }] };
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve(mockBatchResponse),
+      });
+
+      const statements = [
+        { sql: "UPDATE users SET status = ? WHERE id = ?", params: ["active", 1] },
+        { sql: "DELETE FROM old_data WHERE date < ?", params: ["2023-01-01"] },
+      ];
+      const result = await d1Instance.batch(statements);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        d1Instance.apiUrl.replace('/query', '/batch'),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify(statements),
+        })
+      );
+      expect(result).toEqual(mockBatchResponse.result);
+    });
+
+    test("should throw an error if batch execution fails", async () => {
+      const mockBatchErrorResponse = { success: false, errors: [{ message: "Batch error" }] };
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve(mockBatchErrorResponse),
+      });
+
+      const statements = [{ sql: "INVALID SQL" }];
+
+      await expect(d1Instance.batch(statements)).rejects.toThrow("D1 Batch Error");
+    });
   });
 });

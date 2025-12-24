@@ -63,4 +63,19 @@ export class DriveRepository {
             throw e;
         }
     }
+
+    /**
+     * 删除指定的网盘绑定
+     * @param {string} driveId 
+     * @returns {Promise<void>}
+     */
+    static async delete(driveId) {
+        if (!driveId) return;
+        try {
+            await d1.run("DELETE FROM user_drives WHERE id = ?", [driveId.toString()]);
+        } catch (e) {
+            console.error(`DriveRepository.delete failed for ${driveId}:`, e);
+            throw e;
+        }
+    }
 }

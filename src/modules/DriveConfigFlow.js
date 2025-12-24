@@ -144,7 +144,10 @@ export class DriveConfigFlow {
         const peerId = event.message.peerId; 
 
         if (step === "MEGA_WAIT_EMAIL") {
-            if (!text.includes("@")) return await runBotTask(() => client.sendMessage(peerId, { message: "❌ 邮箱格式看似不正确，请重新输入：" }), userId, { priority: PRIORITY.HIGH });
+            if (!text.includes("@")) {
+                await runBotTask(() => client.sendMessage(peerId, { message: "❌ 邮箱格式看似不正确，请重新输入：" }), userId, { priority: PRIORITY.HIGH });
+                return true;
+            }
             
             await SessionManager.update(userId, "MEGA_WAIT_PASS", { email: text.trim() });
             await runBotTask(() => client.sendMessage(peerId, { message: "🔑 **请输入密码**\n(输入后消息会被立即删除以保护隐私)" }), userId, { priority: PRIORITY.HIGH });
@@ -194,7 +197,7 @@ export class DriveConfigFlow {
             return true;
         }
 
-        return false; 
+        return false;
     }
 
     /**
@@ -202,13 +205,14 @@ export class DriveConfigFlow {
      */
     static async handleUnbind(chatId, userId) { 
         const drive = await DriveRepository.findByUserId(userId);
-        
+
         if (!drive) {
             return await runBotTask(() => client.sendMessage(chatId, { message: "⚠️ 您当前未绑定任何网盘，无需解绑。" }), userId);
         }
 
         // 使用 Repository 删除
-        await DriveRepository.deleteByUserId(userId);
+        await DriveRepository.delete(drive.id);
+        await SettingsRepository.set(`default_drive_${userId}`, null);
         await SessionManager.clear(userId);
 
         await runBotTask(() => client.sendMessage(chatId, { 

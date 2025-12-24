@@ -140,11 +140,22 @@ export class UIHelper {
             }
         });
 
-        const text = format(STRINGS.task.batch_monitor, {
-            current: completedCount,
-            total: totalCount,
-            statusText: statusLines.join('\n')
-        });
+        let text;
+
+        if (allTasks.length === 0) {
+            text = format(STRINGS.task.batch_monitor, {
+                current: completedCount,
+                total: totalCount,
+                statusText: STRINGS.files.dir_empty_or_loading // Use a placeholder or empty string
+            });
+            text = text.replace(/━━━━━━━━━━━━━━\n/g, '').replace(/💡 进度条仅显示当前正在处理的文件/g, ''); // Remove separators
+        } else {
+            text = format(STRINGS.task.batch_monitor, {
+                current: completedCount,
+                total: totalCount,
+                statusText: statusLines.join('\n')
+            });
+        }
 
         return { text };
     }
