@@ -476,17 +476,66 @@ describe("TaskManager", () => {
         });
     });
 
+    describe("batchUpdateStatus", () => {
+        test("should batch update task statuses successfully", async () => {
+            // Mock d1 at the top level
+            const mockD1Batch = jest.fn().mockResolvedValue([{ success: true }, { success: true }]);
+            const originalD1 = await import("../../src/services/d1.js");
+            originalD1.d1.batch = mockD1Batch;
+
+            const updates = [
+                { id: "task1", status: "completed", error: null },
+                { id: "task2", status: "failed", error: "Upload failed" }
+            ];
+
+            await TaskManager.batchUpdateStatus(updates);
+
+            expect(mockD1Batch).toHaveBeenCalledWith([
+                {
+                    sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = datetime('now') WHERE id = ?",
+                    params: ["completed", null, "task1"]
+                },
+                {
+                    sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = datetime('now') WHERE id = ?",
+                    params: ["failed", "Upload failed", "task2"]
+                }
+            ]);
+        });
+
+        test("should handle empty updates array", async () => {
+            const mockD1Batch = jest.fn();
+            const originalD1 = await import("../../src/services/d1.js");
+            originalD1.d1.batch = mockD1Batch;
+
+            await TaskManager.batchUpdateStatus([]);
+
+            expect(mockD1Batch).not.toHaveBeenCalled();
+        });
+
+        test("should fallback to individual updates on batch failure", async () => {
+            const mockD1Batch = jest.fn().mockRejectedValue(new Error("Batch failed"));
+            const originalD1 = await import("../../src/services/d1.js");
+            originalD1.d1.batch = mockD1Batch;
+
+            const updates = [{ id: "task1", status: "completed" }];
+
+            await TaskManager.batchUpdateStatus(updates);
+
+            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task1", "completed", undefined);
+        });
+    });
+
     describe("updateQueueUI", () => {
         test("should update UI for waiting tasks", async () => {
             // 避免使用 fake timers，因为 PQueue 和其他异步逻辑可能受影响
             const task = { id: "1", lastText: "", isGroup: false };
             TaskManager.waitingTasks = [task];
-            
+
             // 临时 mock updateStatus 以立即解决
             updateStatus.mockResolvedValue(true);
 
             await TaskManager.updateQueueUI();
-            
+
             expect(updateStatus).toHaveBeenCalledWith(task, expect.stringContaining("queued"));
             expect(task.lastText).toContain("queued");
         });
@@ -494,9 +543,9 @@ describe("TaskManager", () => {
         test("should skip group tasks in queue UI", async () => {
             const task = { id: "1", isGroup: true };
             TaskManager.waitingTasks = [task];
-            
+
             await TaskManager.updateQueueUI();
-            
+
             expect(updateStatus).not.toHaveBeenCalled();
         });
     });

@@ -11,6 +11,7 @@ import { getMediaInfo, updateStatus, escapeHTML } from "../utils/common.js";
 import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, runMtprotoFileTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { AuthGuard } from "../modules/AuthGuard.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
+import { d1 } from "../services/d1.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 
 /**
@@ -63,6 +64,33 @@ class UploadBatcher {
  * 负责队列管理、任务恢复、以及具体的下载/上传流程编排
  */
 export class TaskManager {
+    /**
+     * 批量更新任务状态
+     * @param {Array<{id: string, status: string, error?: string}>} updates
+     */
+    static async batchUpdateStatus(updates) {
+        if (!updates || updates.length === 0) return;
+
+        const statements = updates.map(({id, status, error}) => ({
+            sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = datetime('now') WHERE id = ?",
+            params: [status, error || null, id]
+        }));
+
+        try {
+            await d1.batch(statements);
+        } catch (e) {
+            console.error("TaskManager.batchUpdateStatus failed:", e);
+            // 降级到单个更新
+            for (const update of updates) {
+                try {
+                    await TaskRepository.updateStatus(update.id, update.status, update.error);
+                } catch (err) {
+                    console.error(`Failed to update task ${update.id}:`, err);
+                }
+            }
+        }
+    }
+
     // 分离下载和上传队列
     static downloadQueue = new PQueue({ concurrency: 1 }); // 下载队列：处理MTProto下载，降低并发避免连接压力
     static uploadQueue = new PQueue({ concurrency: 1 });   // 上传队列：处理rclone转存
@@ -576,15 +604,26 @@ export class TaskManager {
         const lastUpdate = this.monitorLocks.get(msgId) || 0;
         const now = Date.now();
         const isFinal = status === 'completed' || status === 'failed';
-        
+
         if (!isFinal && now - lastUpdate < 2500) return;
         this.monitorLocks.set(msgId, now);
 
         const groupTasks = await TaskRepository.findByMsgId(msgId);
         if (!groupTasks.length) return;
 
+        // 如果是最终状态，批量更新所有同组任务的状态
+        if (isFinal) {
+            const taskIds = groupTasks.map(t => t.id);
+            const updates = taskIds.map(taskId => ({
+                id: taskId,
+                status: status,
+                error: status === 'failed' ? 'Batch operation completed' : null
+            }));
+            await this.batchUpdateStatus(updates);
+        }
+
         const { text } = UIHelper.renderBatchMonitor(groupTasks, task, status, downloaded, total);
-        
+
         try {
             let peer = task.chatId;
             if (typeof peer === 'string' && /^-?\d+$/.test(peer)) peer = BigInt(peer);
