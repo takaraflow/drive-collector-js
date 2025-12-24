@@ -1,6 +1,35 @@
 import PQueue from "p-queue";
+import { redis } from "../services/redis.js";
 
 const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * 分布式限流器装饰器
+ * @param {string} key - 限流标识
+ * @param {number} limit - 限制次数
+ * @param {number} windowMs - 时间窗口(ms)
+ * @param {Function} runFn - 原有的 run 函数
+ */
+const withDistributedLimit = (key, limit, windowMs, runFn) => {
+    return async (fn, addOptions = {}) => {
+        // 如果 Redis 启用，则先检查分布式限流
+        if (redis.enabled) {
+            let allowed = false;
+            let retryCount = 0;
+            while (!allowed && retryCount < 10) {
+                const res = await redis.slidingWindowLimit(key, limit, windowMs);
+                if (res.allowed) {
+                    allowed = true;
+                } else {
+                    // 简单的退避重试
+                    await sleep(100 + Math.random() * 200);
+                    retryCount++;
+                }
+            }
+        }
+        return runFn(fn, addOptions);
+    };
+};
 
 const createLimiter = (options) => {
     const { delayBetweenTasks = 0, ...queueOptions } = options;
@@ -17,11 +46,12 @@ const createLimiter = (options) => {
 };
 
 /**
- * 创建带自动缩放的限流器
+ * 创建带自动缩放和分布式支持的限流器
  * @param {Object} options - 限流器选项
  * @param {Object} autoScaling - 自动缩放配置
+ * @param {Object} distributed - 分布式限流配置 { key, limit, windowMs }
  */
-const createAutoScalingLimiter = (options, autoScaling = {}) => {
+const createAutoScalingLimiter = (options, autoScaling = {}, distributed = null) => {
     const { delayBetweenTasks = 0, ...queueOptions } = options;
     
     // 初始并发数
@@ -76,7 +106,7 @@ const createAutoScalingLimiter = (options, autoScaling = {}) => {
         errorCount = 0;
     };
     
-    const run = (fn, addOptions = {}) =>
+    let run = (fn, addOptions = {}) =>
         queue.add(async () => {
             try {
                 const result = await fn();
@@ -91,6 +121,11 @@ const createAutoScalingLimiter = (options, autoScaling = {}) => {
                 _adjustConcurrency();
             }
         }, addOptions);
+
+    // 装饰分布式限流
+    if (distributed && distributed.key) {
+        run = withDistributedLimit(distributed.key, distributed.limit, distributed.windowMs, run);
+    }
     
     const limiter = { queue, run };
     
@@ -129,15 +164,18 @@ const createTokenBucketLimiter = (capacity, fillRate) => {
 };
 
 export const PRIORITY = {
-    HIGH: 10,
-    NORMAL: 0,
-    LOW: -10
+    UI: 20,      // UI 交互，最高优先级
+    HIGH: 10,    // 重要状态更新
+    NORMAL: 0,   // 普通消息/查询
+    LOW: -10,    // 文件传输相关
+    BACKGROUND: -20 // 后台清理/恢复任务
 };
 
-// Telegram Bot API：全局限流 30 QPS（带自动缩放）
+// Telegram Bot API：全局限流 30 QPS（带自动缩放和分布式支持）
 const botGlobalLimiter = createAutoScalingLimiter(
     { intervalCap: 30, interval: 1000 },
-    { min: 20, max: 30, factor: 0.8, interval: 5000 }
+    { min: 20, max: 30, factor: 0.8, interval: 5000 },
+    { key: "limiter:bot:global", limit: 30, windowMs: 1000 }
 );
 
 // Telegram Bot API：单用户 1 QPS
@@ -150,46 +188,59 @@ const getUserLimiter = (userId) => {
     return botUserLimiters.get(userId);
 };
 
-// Telegram Bot API：文件上传限流 20/分钟（带自动缩放）
+// Telegram Bot API：文件上传限流 20/分钟（带自动缩放和分布式支持）
 const botFileUploadLimiter = createAutoScalingLimiter(
     { intervalCap: 20, interval: 60 * 1000 },
-    { min: 15, max: 25, factor: 0.7, interval: 10000 }
+    { min: 15, max: 25, factor: 0.7, interval: 10000 },
+    { key: "limiter:bot:upload", limit: 20, windowMs: 60000 }
 );
 
 /**
  * Bot API 调用限流封装：先过全局，再过用户维度
  * @param {Function} fn - 要执行的函数
  * @param {string} userId - 用户ID
- * @param {Object} addOptions - 额外选项
+ * @param {Object} addOptions - 额外选项 (包括 priority)
  * @param {boolean} isFileUpload - 是否为文件上传操作
  */
 export const runBotTask = (fn, userId, addOptions = {}, isFileUpload = false) => {
+    const priority = addOptions.priority ?? PRIORITY.NORMAL;
+    const taskOptions = { ...addOptions, priority };
+
     const limiterChain = isFileUpload 
-        ? botFileUploadLimiter.run(() => getUserLimiter(userId).run(fn, addOptions), addOptions)
-        : getUserLimiter(userId).run(fn, addOptions);
+        ? botFileUploadLimiter.run(() => getUserLimiter(userId).run(fn, taskOptions), taskOptions)
+        : getUserLimiter(userId).run(fn, taskOptions);
     
-    return botGlobalLimiter.run(() => limiterChain, addOptions);
+    return botGlobalLimiter.run(() => limiterChain, taskOptions);
 };
 
 // MTProto 文件传输：使用 token bucket 算法，30 请求突发，25/秒填充（带自动缩放）
 const mtprotoFileTokenBucket = createTokenBucketLimiter(30, 25);
 const mtprotoFileLimiter = createAutoScalingLimiter(
     { concurrency: 5 },
-    { min: 3, max: 7, factor: 0.7, interval: 5000 }
+    { min: 3, max: 7, factor: 0.7, interval: 5000 },
+    { key: "limiter:mtproto:file", limit: 30, windowMs: 1000 }
 );
 export const runMtprotoFileTask = async (fn, addOptions = {}) => {
+    const priority = addOptions.priority ?? PRIORITY.LOW;
+    const taskOptions = { ...addOptions, priority };
+
     while (!mtprotoFileTokenBucket.take()) {
         await sleep(100); // 等待令牌填充
     }
-    return mtprotoFileLimiter.run(fn, addOptions);
+    return mtprotoFileLimiter.run(fn, taskOptions);
 };
 
 // MTProto 通用队列（用于 getMessages / downloadMedia 等，带自动缩放）
 const mtprotoLimiter = createAutoScalingLimiter(
     { concurrency: 5, delayBetweenTasks: 20 },
-    { min: 3, max: 8, factor: 0.8, interval: 5000 }
+    { min: 3, max: 8, factor: 0.8, interval: 5000 },
+    { key: "limiter:mtproto:general", limit: 50, windowMs: 1000 }
 );
-export const runMtprotoTask = (fn, addOptions = {}) => mtprotoLimiter.run(fn, addOptions);
+export const runMtprotoTask = (fn, addOptions = {}) => {
+    const priority = addOptions.priority ?? PRIORITY.NORMAL;
+    const taskOptions = { ...addOptions, priority };
+    return mtprotoLimiter.run(fn, taskOptions);
+};
 
 // MTProto 认证：1-5 次/分钟，并添加指数退避
 const authTokenBucket = createTokenBucketLimiter(5, 5/60); // 5 令牌，5/60 令牌/秒
@@ -248,4 +299,3 @@ export const runAuthTaskWithRetry = async (fn, addOptions = {}, maxRetries = 3) 
 };
 
 export const botLimiter = botGlobalLimiter;
-

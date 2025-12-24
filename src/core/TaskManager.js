@@ -8,7 +8,7 @@ import { client } from "../services/telegram.js";
 import { CloudTool } from "../services/rclone.js";
 import { UIHelper } from "../ui/templates.js";
 import { getMediaInfo, updateStatus } from "../utils/common.js";
-import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, runMtprotoFileTaskWithRetry } from "../utils/limiter.js";
+import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, runMtprotoFileTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { AuthGuard } from "../modules/AuthGuard.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
@@ -70,8 +70,8 @@ export class TaskManager {
     static async _restoreBatchTasks(chatId, rows) {
         try {
             const sourceMsgIds = rows.map(r => r.source_msg_id);
-            // 批量获取消息：一次 API 调用获取多个消息
-            const messages = await runMtprotoTaskWithRetry(() => client.getMessages(chatId, { ids: sourceMsgIds }));
+            // 批量获取消息：一次 API 调用获取多个消息，恢复任务设为背景优先级
+            const messages = await runMtprotoTaskWithRetry(() => client.getMessages(chatId, { ids: sourceMsgIds }), { priority: PRIORITY.BACKGROUND });
             
             const messageMap = new Map();
             messages.forEach(m => {
@@ -115,7 +115,7 @@ export class TaskManager {
                 parseMode: "html"
             }),
             userId,
-            {},
+            { priority: PRIORITY.UI },
             false,
             3
         );
@@ -168,7 +168,7 @@ export class TaskManager {
                 parseMode: "html"
             }),
             userId,
-            {},
+            { priority: PRIORITY.UI },
             false,
             3
         );
