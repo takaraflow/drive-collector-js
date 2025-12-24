@@ -304,23 +304,26 @@ export class TaskManager {
                 return;
             }
 
-            // 3. 下载阶段
-            let lastUpdate = 0;
-            await runMtprotoFileTaskWithRetry(() => client.downloadMedia(message, {
-                    outputFile: localPath,
-                    chunkSize: 1024 * 1024,
-                    workers: 1,
-                    progressCallback: async (downloaded, total) => {
-                        const now = Date.now();
-                        // 3秒 UI 节流
-                        if (now - lastUpdate > 3000 || downloaded === total) {
-                            lastUpdate = now;
-                            // 调用统一心跳
-                            await heartbeat('downloading', downloaded, total);
-                        }
+            // 3. 下载阶段 - 动态调整下载参数以优化 MTProto 交互
+            // 大于 100MB 的文件使用更大的分片和稍多的并发
+            const isLargeFile = info.size > 100 * 1024 * 1024;
+            const downloadOptions = {
+                outputFile: localPath,
+                chunkSize: isLargeFile ? 512 * 1024 : 128 * 1024, // 动态分片
+                workers: isLargeFile ? 3 : 1, // 动态并发
+                progressCallback: async (downloaded, total) => {
+                    const now = Date.now();
+                    // 3秒 UI 节流
+                    if (now - lastUpdate > 3000 || downloaded === total) {
+                        lastUpdate = now;
+                        // 调用统一心跳
+                        await heartbeat('downloading', downloaded, total);
                     }
-                })
-            );
+                }
+            };
+
+            let lastUpdate = 0;
+            await runMtprotoFileTaskWithRetry(() => client.downloadMedia(message, downloadOptions));
 
             if (!task.isGroup) await updateStatus(task, STRINGS.task.uploading);
             await heartbeat('uploading');

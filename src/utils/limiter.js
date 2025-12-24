@@ -252,33 +252,66 @@ export const runAuthTask = async (fn, addOptions = {}) => {
     return authLimiter.run(fn, addOptions);
 };
 
+// 全局冷静期状态
+let globalCoolingUntil = 0;
+
+/**
+ * 检查是否处于冷静期
+ */
+const checkCooling = async () => {
+    const now = Date.now();
+    if (now < globalCoolingUntil) {
+        const waitTime = globalCoolingUntil - now;
+        console.warn(`❄️ System is in global cooling period, waiting ${waitTime}ms...`);
+        await sleep(waitTime);
+    }
+};
+
 // 429 错误处理和重试机制
 const handle429Error = async (fn, maxRetries = 3) => {
     let retryCount = 0;
     let lastRetryAfter = 0;
     
     while (retryCount < maxRetries) {
+        await checkCooling();
         try {
             return await fn();
         } catch (error) {
-            // 检查是否为 429 错误
-            if (error && (error.code === 429 || error.message.includes('429') || error.message.includes('FloodWait'))) {
-                const retryAfter = error.retry_after ? parseInt(error.retry_after) : 
-                                  error.message.match(/wait (\d+) seconds?/) ? 
-                                  parseInt(error.message.match(/wait (\d+) seconds?/)[1]) * 1000 : 
-                                  Math.min(1000 * (2 ** retryCount), 30000); // 指数退避，最大 30 秒
+            // 检查是否为 429 错误或 FloodWaitError
+            const isFlood = error && (
+                error.code === 429 || 
+                error.message.includes('429') || 
+                error.message.includes('FloodWait') ||
+                error.name === 'FloodWaitError'
+            );
+
+            if (isFlood) {
+                // 提取等待时间，如果大于 60 秒，触发全局冷静期
+                let retryAfter = error.retryAfter || error.seconds || 0;
+                if (!retryAfter) {
+                    const match = error.message.match(/wait (\d+) seconds?/);
+                    retryAfter = match ? parseInt(match[1]) : 0;
+                }
                 
-                console.warn(`429 error encountered, retrying after ${retryAfter}ms (attempt ${retryCount + 1}/${maxRetries})`);
-                await sleep(retryAfter);
+                // 将秒转为毫秒，并加上一些抖动
+                const waitMs = (retryAfter > 0 ? retryAfter * 1000 : Math.min(1000 * (2 ** retryCount), 60000)) + Math.random() * 1000;
+                
+                if (retryAfter > 60) {
+                    console.error(`🚨 Large FloodWait detected (${retryAfter}s). Triggering GLOBAL cooling.`);
+                    globalCoolingUntil = Date.now() + waitMs;
+                }
+
+                console.warn(`⚠️ 429/FloodWait encountered, retrying after ${Math.round(waitMs)}ms (attempt ${retryCount + 1}/${maxRetries})`);
+                await sleep(waitMs);
                 retryCount++;
-                lastRetryAfter = retryAfter;
+                lastRetryAfter = waitMs;
             } else {
                 throw error;
             }
         }
     }
     
-    throw new Error(`Max retries (${maxRetries}) exceeded for 429 errors. Last retry-after: ${lastRetryAfter}ms`);
+    throw new Error(`Max retries (${maxRetries}) exceeded for 429 errors. Last retry-after: ${Math.round(lastRetryAfter)}ms`);
 };
 
 // 封装带重试的任务执行
@@ -298,4 +331,5 @@ export const runAuthTaskWithRetry = async (fn, addOptions = {}, maxRetries = 3) 
     return handle429Error(() => runAuthTask(fn, addOptions), maxRetries);
 };
 
+export { handle429Error }; // 导出以供测试
 export const botLimiter = botGlobalLimiter;
