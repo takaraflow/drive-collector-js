@@ -34,11 +34,10 @@ jest.unstable_mockModule('../../src/utils/CacheService.js', () => ({
     cacheService: mockCacheService
 }));
 
-jest.unstable_mockModule('../../src/services/redis.js', () => ({
-    redis: {
-        enabled: true,
+jest.unstable_mockModule('../../src/services/kv.js', () => ({
+    kv: {
         get: jest.fn(),
-        set: jest.fn().mockResolvedValue('OK')
+        set: jest.fn().mockResolvedValue(true)
     }
 }));
 
@@ -242,9 +241,9 @@ describe('CloudTool', () => {
             mockCacheService.get.mockReturnValue(null);
         });
 
-        it('should return files and cache them (Multi-level)', async () => {
-            const { redis } = await import('../../src/services/redis.js');
-            redis.get.mockResolvedValue(null);
+        it('should return files and cache them (Multi-level KV)', async () => {
+            const { kv } = await import('../../src/services/kv.js');
+            kv.get.mockResolvedValue(null);
 
             mockFindByUserId.mockResolvedValue({
                 type: 'drive',
@@ -260,7 +259,7 @@ describe('CloudTool', () => {
             const files = await CloudTool.listRemoteFiles('user123');
             expect(files).toEqual(mockFiles);
             expect(mockCacheService.set).toHaveBeenCalled();
-            expect(redis.set).toHaveBeenCalled();
+            expect(kv.set).toHaveBeenCalled();
             
             // Mock memory cache for next call
             mockCacheService.get.mockReturnValue(mockFiles);
@@ -268,10 +267,10 @@ describe('CloudTool', () => {
             expect(mockSpawnSync).toHaveBeenCalledTimes(1);
         });
 
-        it('should use Redis cache if memory cache is empty', async () => {
-            const { redis } = await import('../../src/services/redis.js');
-            const mockFiles = [{ name: 'redis-file.txt', IsDir: false, ModTime: '2023-01-01T00:00:00Z' }];
-            redis.get.mockResolvedValue(JSON.stringify(mockFiles));
+        it('should use KV cache if memory cache is empty', async () => {
+            const { kv } = await import('../../src/services/kv.js');
+            const mockFiles = [{ name: 'kv-file.txt', IsDir: false, ModTime: '2023-01-01T00:00:00Z' }];
+            kv.get.mockResolvedValue(mockFiles); // KV service returns parsed JSON by default
 
             const files = await CloudTool.listRemoteFiles('user124');
             expect(files).toEqual(mockFiles);
@@ -279,8 +278,8 @@ describe('CloudTool', () => {
         });
 
         it('should force refresh when requested', async () => {
-            const { redis } = await import('../../src/services/redis.js');
-            redis.get.mockResolvedValue(null);
+            const { kv } = await import('../../src/services/kv.js');
+            kv.get.mockResolvedValue(null);
             mockFindByUserId.mockResolvedValue({
                 type: 'drive',
                 config_data: JSON.stringify({ user: 'u', pass: 'p' })
@@ -294,8 +293,8 @@ describe('CloudTool', () => {
         });
 
         it('should handle rclone error and return empty array', async () => {
-            const { redis } = await import('../../src/services/redis.js');
-            redis.get.mockResolvedValue(null);
+            const { kv } = await import('../../src/services/kv.js');
+            kv.get.mockResolvedValue(null);
             mockFindByUserId.mockResolvedValue({
                 type: 'drive',
                 config_data: JSON.stringify({ user: 'u', pass: 'p' })

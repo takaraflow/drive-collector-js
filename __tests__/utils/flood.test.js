@@ -1,12 +1,12 @@
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 
-// Mock redis
-const mockRedis = {
-    enabled: false,
-    slidingWindowLimit: jest.fn()
+// Mock KV
+const mockKV = {
+    get: jest.fn(),
+    set: jest.fn().mockResolvedValue(true)
 };
-jest.unstable_mockModule('../../src/services/redis.js', () => ({
-    redis: mockRedis
+jest.unstable_mockModule('../../src/services/kv.js', () => ({
+    kv: mockKV
 }));
 
 // Import after mocking

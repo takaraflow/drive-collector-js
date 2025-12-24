@@ -5,7 +5,7 @@ import { config } from "../config/index.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { STRINGS } from "../locales/zh-CN.js";
 import { cacheService } from "../utils/CacheService.js";
-import { redis } from "./redis.js";
+import { kv } from "./kv.js";
 
 // 确定 rclone 二进制路径 (兼容 Zeabur 和 本地)
 const rcloneBinary = fs.existsSync("/app/rclone/rclone") 
@@ -177,18 +177,15 @@ export class CloudTool {
             const memCached = cacheService.get(cacheKey);
             if (memCached) return memCached;
 
-            // 2. 尝试 Redis 缓存 (持久化)
-            if (redis.enabled) {
-                try {
-                    const redisCached = await redis.get(cacheKey);
-                    if (redisCached) {
-                        const parsed = JSON.parse(redisCached);
-                        cacheService.set(cacheKey, parsed, 5 * 60 * 1000); // 存入内存 5 分钟
-                        return parsed;
-                    }
-                } catch (e) {
-                    console.error("Redis get files error:", e.message);
+            // 2. 尝试 KV 缓存 (持久化)
+            try {
+                const kvCached = await kv.get(cacheKey, "json");
+                if (kvCached) {
+                    cacheService.set(cacheKey, kvCached, 5 * 60 * 1000); // 存入内存 5 分钟
+                    return kvCached;
                 }
+            } catch (e) {
+                console.error("KV get files error:", e.message);
             }
         }
         
@@ -218,9 +215,11 @@ export class CloudTool {
 
             // 缓存处理
             cacheService.set(cacheKey, files, 10 * 60 * 1000);
-            if (redis.enabled) {
-                // Redis 缓存 30 分钟，持久化应对重启
-                await redis.set(cacheKey, JSON.stringify(files), 1800).catch(console.error);
+            try {
+                // KV 缓存 30 分钟 (1800s)，持久化应对重启
+                await kv.set(cacheKey, files, 1800);
+            } catch (e) {
+                console.error("KV set files error:", e.message);
             }
 
             this.loading = false;

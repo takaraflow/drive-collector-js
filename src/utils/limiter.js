@@ -1,35 +1,7 @@
 import PQueue from "p-queue";
-import { redis } from "../services/redis.js";
+import { kv } from "../services/kv.js";
 
 const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * 分布式限流器装饰器
- * @param {string} key - 限流标识
- * @param {number} limit - 限制次数
- * @param {number} windowMs - 时间窗口(ms)
- * @param {Function} runFn - 原有的 run 函数
- */
-const withDistributedLimit = (key, limit, windowMs, runFn) => {
-    return async (fn, addOptions = {}) => {
-        // 如果 Redis 启用，则先检查分布式限流
-        if (redis.enabled) {
-            let allowed = false;
-            let retryCount = 0;
-            while (!allowed && retryCount < 10) {
-                const res = await redis.slidingWindowLimit(key, limit, windowMs);
-                if (res.allowed) {
-                    allowed = true;
-                } else {
-                    // 简单的退避重试
-                    await sleep(100 + Math.random() * 200);
-                    retryCount++;
-                }
-            }
-        }
-        return runFn(fn, addOptions);
-    };
-};
 
 const createLimiter = (options) => {
     const { delayBetweenTasks = 0, ...queueOptions } = options;
@@ -46,12 +18,11 @@ const createLimiter = (options) => {
 };
 
 /**
- * 创建带自动缩放和分布式支持的限流器
+ * 创建带自动缩放支持的限流器
  * @param {Object} options - 限流器选项
  * @param {Object} autoScaling - 自动缩放配置
- * @param {Object} distributed - 分布式限流配置 { key, limit, windowMs }
  */
-const createAutoScalingLimiter = (options, autoScaling = {}, distributed = null) => {
+const createAutoScalingLimiter = (options, autoScaling = {}) => {
     const { delayBetweenTasks = 0, ...queueOptions } = options;
     
     // 初始并发数
@@ -106,7 +77,7 @@ const createAutoScalingLimiter = (options, autoScaling = {}, distributed = null)
         errorCount = 0;
     };
     
-    let run = (fn, addOptions = {}) =>
+    const run = (fn, addOptions = {}) =>
         queue.add(async () => {
             try {
                 const result = await fn();
@@ -121,11 +92,6 @@ const createAutoScalingLimiter = (options, autoScaling = {}, distributed = null)
                 _adjustConcurrency();
             }
         }, addOptions);
-
-    // 装饰分布式限流
-    if (distributed && distributed.key) {
-        run = withDistributedLimit(distributed.key, distributed.limit, distributed.windowMs, run);
-    }
     
     const limiter = { queue, run };
     
@@ -171,11 +137,10 @@ export const PRIORITY = {
     BACKGROUND: -20 // 后台清理/恢复任务
 };
 
-// Telegram Bot API：全局限流 30 QPS（带自动缩放和分布式支持）
+// Telegram Bot API：全局限流 30 QPS（带自动缩放）
 const botGlobalLimiter = createAutoScalingLimiter(
     { intervalCap: 30, interval: 1000 },
-    { min: 20, max: 30, factor: 0.8, interval: 5000 },
-    { key: "limiter:bot:global", limit: 30, windowMs: 1000 }
+    { min: 20, max: 30, factor: 0.8, interval: 5000 }
 );
 
 // Telegram Bot API：单用户 1 QPS
@@ -188,11 +153,10 @@ const getUserLimiter = (userId) => {
     return botUserLimiters.get(userId);
 };
 
-// Telegram Bot API：文件上传限流 20/分钟（带自动缩放和分布式支持）
+// Telegram Bot API：文件上传限流 20/分钟（带自动缩放）
 const botFileUploadLimiter = createAutoScalingLimiter(
     { intervalCap: 20, interval: 60 * 1000 },
-    { min: 15, max: 25, factor: 0.7, interval: 10000 },
-    { key: "limiter:bot:upload", limit: 20, windowMs: 60000 }
+    { min: 15, max: 25, factor: 0.7, interval: 10000 }
 );
 
 /**
@@ -217,8 +181,7 @@ export const runBotTask = (fn, userId, addOptions = {}, isFileUpload = false) =>
 const mtprotoFileTokenBucket = createTokenBucketLimiter(30, 25);
 const mtprotoFileLimiter = createAutoScalingLimiter(
     { concurrency: 5 },
-    { min: 3, max: 7, factor: 0.7, interval: 5000 },
-    { key: "limiter:mtproto:file", limit: 30, windowMs: 1000 }
+    { min: 3, max: 7, factor: 0.7, interval: 5000 }
 );
 export const runMtprotoFileTask = async (fn, addOptions = {}) => {
     const priority = addOptions.priority ?? PRIORITY.LOW;
@@ -233,8 +196,7 @@ export const runMtprotoFileTask = async (fn, addOptions = {}) => {
 // MTProto 通用队列（用于 getMessages / downloadMedia 等，带自动缩放）
 const mtprotoLimiter = createAutoScalingLimiter(
     { concurrency: 5, delayBetweenTasks: 20 },
-    { min: 3, max: 8, factor: 0.8, interval: 5000 },
-    { key: "limiter:mtproto:general", limit: 50, windowMs: 1000 }
+    { min: 3, max: 8, factor: 0.8, interval: 5000 }
 );
 export const runMtprotoTask = (fn, addOptions = {}) => {
     const priority = addOptions.priority ?? PRIORITY.NORMAL;
@@ -254,12 +216,25 @@ export const runAuthTask = async (fn, addOptions = {}) => {
 
 // 全局冷静期状态
 let globalCoolingUntil = 0;
+let lastKVCheck = 0;
 
 /**
- * 检查是否处于冷静期
+ * 检查是否处于冷静期 (通过内存 + KV 同步)
  */
 const checkCooling = async () => {
     const now = Date.now();
+    
+    // 每 10 秒从 KV 同步一次冷却状态，防止多实例并发踩坑
+    if (now - lastKVCheck > 10000) {
+        try {
+            const remoteCooling = await kv.get("system:cooling_until", "text");
+            if (remoteCooling) {
+                globalCoolingUntil = Math.max(globalCoolingUntil, parseInt(remoteCooling));
+            }
+            lastKVCheck = now;
+        } catch (e) {}
+    }
+
     if (now < globalCoolingUntil) {
         const waitTime = globalCoolingUntil - now;
         console.warn(`❄️ System is in global cooling period, waiting ${waitTime}ms...`);
@@ -299,6 +274,8 @@ const handle429Error = async (fn, maxRetries = 3) => {
                 if (retryAfter > 60) {
                     console.error(`🚨 Large FloodWait detected (${retryAfter}s). Triggering GLOBAL cooling.`);
                     globalCoolingUntil = Date.now() + waitMs;
+                    // 同步到 KV
+                    await kv.set("system:cooling_until", globalCoolingUntil.toString(), Math.ceil(waitMs / 1000) + 60).catch(() => {});
                 }
 
                 console.warn(`⚠️ 429/FloodWait encountered, retrying after ${Math.round(waitMs)}ms (attempt ${retryCount + 1}/${maxRetries})`);
