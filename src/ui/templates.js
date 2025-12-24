@@ -73,11 +73,25 @@ export class UIHelper {
         let statusLines = [];
 
         allTasks.forEach(t => {
-            if (t.file_name === focusTask.fileName) {
+            // 增加 .trim() 确保匹配成功
+            const dbName = (t.file_name || "").trim();
+            const currentName = (focusTask.fileName || "").trim();
+            if (dbName === currentName) {
                 // 焦点任务：显示进度条或当前状态
-                let label = focusStatus === 'downloading' ? STRINGS.task.focus_downloading : STRINGS.task.focus_uploading;
+                let label;
+                if (focusStatus === 'downloading') {
+                    label = STRINGS.task.focus_downloading;
+                } else if (focusStatus === 'uploading') {
+                    label = STRINGS.task.focus_uploading;
+                } else if (focusStatus === 'completed') {
+                    label = STRINGS.task.focus_completed;
+                } else if (focusStatus === 'failed') {
+                    label = STRINGS.task.focus_failed;
+                } else {
+                    label = STRINGS.task.focus_waiting;
+                }
                 let line = format(label, { name: t.file_name });
-                if (downloaded > 0) {
+                if (downloaded > 0 && (focusStatus === 'downloading' || focusStatus === 'uploading')) {
                     line += `\n${this.renderProgress(downloaded, total, "")}`; // 复用进度条，去掉前缀
                 }
                 statusLines.push(line);

@@ -89,7 +89,7 @@ export class TaskManager {
     static async addTask(target, mediaMessage, userId, customLabel = "") {
         const taskId = randomUUID();
         // 确保 ID 统一转换为字符串
-        const chatIdStr = (target?.userId ?? target?.chatId ?? target?.channelId ?? target).toString();
+        const chatIdStr = (target?.userId ?? target?.chatId ?? target?.channelId ?? target?.id ?? target).toString();
 
         // 1. 发送排队 UI
         const statusMsg = await runBotTask(
@@ -137,11 +137,15 @@ export class TaskManager {
      * @param {string} userId 
      */
     static async addBatchTasks(target, messages, userId) {
+        // 确保 ID 统一转换为字符串
+        const chatIdStr = (target?.userId ?? target?.chatId ?? target?.channelId ?? target?.id ?? target).toString();
+
         // 1. 发送该组唯一的共享看板消息
         const statusMsg = await runBotTask(
             () => client.sendMessage(target, {
                 message: format(STRINGS.task.batch_captured, { count: messages.length }),
-                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_batch_${messages[0].groupedId}`))]
+                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_batch_${messages[0].groupedId}`))],
+                parseMode: "markdown"
             }),
             userId
         );
@@ -154,14 +158,14 @@ export class TaskManager {
             await TaskRepository.create({
                 id: taskId,
                 userId: userId.toString(),
-                chatId: target.toString(),
+                chatId: chatIdStr,
                 msgId: statusMsg.id, // 👈 关键：共享同一个消息 ID
                 sourceMsgId: msg.id,
                 fileName: info?.name,
                 fileSize: info?.size
             });
 
-            const task = this._createTaskObject(taskId, userId, target, statusMsg.id, msg);
+            const task = this._createTaskObject(taskId, userId, chatIdStr, statusMsg.id, msg);
             task.isGroup = true; // 标记这是组任务
             
             this._enqueueTask(task);
@@ -204,6 +208,7 @@ export class TaskManager {
     static async updateQueueUI() {
         for (let i = 0; i < Math.min(this.waitingTasks.length, 5); i++) {
             const task = this.waitingTasks[i];
+            if (task.isGroup) continue; // 组任务的排队状态在看板中显示，无需单独更新
             const newText = format(STRINGS.task.queued, { rank: i + 1 });
             if (task.lastText !== newText) {
                 await updateStatus(task, newText);
@@ -284,7 +289,7 @@ export class TaskManager {
                 })
             );
 
-            await updateStatus(task, STRINGS.task.uploading);
+            if (!task.isGroup) await updateStatus(task, STRINGS.task.uploading);
             await heartbeat('uploading');
             
             // 4. 上传阶段
@@ -295,7 +300,7 @@ export class TaskManager {
 
             // 5. 结果处理
             if (uploadResult.success) {
-                await updateStatus(task, STRINGS.task.verifying);
+                if (!task.isGroup) await updateStatus(task, STRINGS.task.verifying);
                 const finalRemote = await CloudTool.getRemoteFileInfo(info.name, task.userId);
                 const isOk = finalRemote && Math.abs(finalRemote.Size - fs.statSync(localPath).size) < 1024;
                 
@@ -390,19 +395,27 @@ export class TaskManager {
 
         // 1. 拉取该看板下的所有任务状态
         const groupTasks = await TaskRepository.findByMsgId(msgId);
-        
+        if (!groupTasks.length) return;
+
         // 2. 调用 UI 模板生成看板文本
         const { text } = UIHelper.renderBatchMonitor(groupTasks, task, status, downloaded, total);
         
         // 3. 执行安全编辑
         try {
-            await client.editMessage(task.chatId, {
-               message: task.msgId,
+            // 修正编辑逻辑：确保 chatId 是 BigInt 或正确格式
+            // 如果 task.chatId 是字符串，尝试转回 BigInt
+            let peer = task.chatId;
+            if (typeof peer === 'string' && /^-?\d+$/.test(peer)) {
+                peer = BigInt(peer);
+            }
+            await client.editMessage(peer, {
+               message: parseInt(task.msgId),
                text: text,
                parseMode: "html"
            });
        } catch (e) {
-           // 忽略编辑错误（如内容未变）
+           // 🚨 至少在测试阶段，打印出这个错误，看看是不是 API 限流了
+           console.error(`[Monitor Update Error] msgId ${msgId}:`, e.message);
        }
     }
 }
