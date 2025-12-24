@@ -5,8 +5,6 @@ const ROLE_ORDER = ["user", "vip", "admin", "owner"];
 const DEFAULT_ROLE = "user";
 const CACHE_MS = 5 * 60 * 1000;
 
-const roleCache = new Map(); // userId -> { role, ts }
-
 const ACL = {
     "maintenance:bypass": ["admin", "owner"],
     "task:cancel:any": ["admin", "owner"]
@@ -21,19 +19,26 @@ const isRoleAllowed = (role, allowedRoles) => {
 };
 
 export const AuthGuard = {
+    roleCache: new Map(),
+
     async getRole(userId) {
         if (!userId) return DEFAULT_ROLE;
         const idStr = userId.toString();
         if (config.ownerId && idStr === config.ownerId.toString()) return "owner";
 
-        const cached = roleCache.get(idStr);
+        const cached = this.roleCache.get(idStr);
         const now = Date.now();
         if (cached && now - cached.ts < CACHE_MS) return cached.role;
 
-        const row = await d1.fetchOne("SELECT role FROM user_roles WHERE user_id = ?", [idStr]);
-        const role = row?.role || DEFAULT_ROLE;
-        roleCache.set(idStr, { role, ts: now });
-        return role;
+        try {
+            const row = await d1.fetchOne("SELECT role FROM user_roles WHERE user_id = ?", [idStr]);
+            const role = row?.role || DEFAULT_ROLE;
+            this.roleCache.set(idStr, { role, ts: now });
+            return role;
+        } catch (error) {
+            console.error("Failed to fetch user role from DB:", error);
+            return DEFAULT_ROLE;
+        }
     },
 
     async can(userId, action) {
