@@ -10,12 +10,17 @@ export class UIHelper {
     /**
      * 生成 ASCII 进度条文本
      */
-    static renderProgress(current, total, actionName = STRINGS.task.downloading) {
+    static renderProgress(current, total, actionName = STRINGS.task.downloading, fileName = '') {
         const percentage = (current / (total || 1) * 100).toFixed(1);
         const barLen = 20;
         const filled = Math.round(barLen * (current / (total || 1)));
         const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
-        return `⏳ **${actionName}...**\n\n` + `\`[${bar}]\` ${percentage}% (${(current / 1048576).toFixed(1)}/${(total / 1048576).toFixed(1)} MB)`;
+        
+        // 如果提供了文件名，显示简洁版本
+        const displayName = fileName ? this._shortenFileName(fileName, 25) : '';
+        const fileInfo = fileName ? `\n📄 ${displayName}` : '';
+        
+        return `⏳ **${actionName}...**${fileInfo}\n\n` + `\`[${bar}]\` ${percentage}% (${(current / 1048576).toFixed(1)}/${(total / 1048576).toFixed(1)} MB)`;
     }
 
     /**

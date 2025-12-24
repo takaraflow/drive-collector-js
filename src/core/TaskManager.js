@@ -254,9 +254,9 @@ export class TaskManager {
                 // 如果是组任务，刷新整个看板
                 await this._refreshGroupMonitor(task, status, downloaded, total);
             } else {
-                // 如果是普通文件，按原样渲染进度条
+                // 如果是普通文件，按原样渲染进度条（带文件名）
                 const text = (downloaded > 0) 
-                    ? UIHelper.renderProgress(downloaded, total) 
+                    ? UIHelper.renderProgress(downloaded, total, status === 'uploading' ? STRINGS.task.uploading : STRINGS.task.downloading, info.name) 
                     : (status === 'uploading' ? STRINGS.task.uploading : STRINGS.task.downloading);
                 await updateStatus(task, text);
             }
