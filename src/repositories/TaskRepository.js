@@ -22,17 +22,26 @@ export class TaskRepository {
     static async flushUpdates() {
         if (this.pendingUpdates.size === 0) return;
 
-        const updates = Array.from(this.pendingUpdates.values());
-        this.pendingUpdates.clear();
-
+        // 创建快照，暂不清除 pendingUpdates 以防发送失败导致数据丢失
+        const updatesToFlush = Array.from(this.pendingUpdates.values());
+        
         const now = Date.now();
-        const statements = updates.map(u => ({
+        const statements = updatesToFlush.map(u => ({
             sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
             params: [u.status, u.errorMsg, now, u.taskId]
         }));
 
         try {
             await d1.batch(statements);
+            
+            // 发送成功后，清除已发送的更新
+            // 注意：需检查引用是否一致，防止清除期间产生的新更新被误删
+            for (const u of updatesToFlush) {
+                const current = this.pendingUpdates.get(u.taskId);
+                if (current === u) {
+                    this.pendingUpdates.delete(u.taskId);
+                }
+            }
         } catch (error) {
             console.error("TaskRepository.flushUpdates failed:", error);
         }

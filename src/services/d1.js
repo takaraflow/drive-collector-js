@@ -60,24 +60,15 @@ class D1Service {
 
     /**
      * 批量执行：用于同步大批量文件索引 (性能优化关键)
+     * 注：由于 D1 REST API 的 /batch 端点支持情况不明，改为并发执行
      */
     async batch(statements) {
         // statements 格式为 [{ sql: string, params: [] }, ...]
-        const response = await fetch(`${this.apiUrl.replace('/query', '/batch')}`, {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${this.token}`,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(statements),
-        });
-
-        const result = await response.json();
-        if (!result.success) {
-            const errorMsg = result.errors?.[0]?.message || "Unknown D1 Batch Error";
-            throw new Error(`D1 Batch Error: ${errorMsg}`);
-        }
-        return result.result;
+        // 使用 Promise.all 并发执行所有语句
+        // 虽然失去了事务性，但保证了 HTTP API 的兼容性
+        return await Promise.all(statements.map(stmt => 
+            this._execute(stmt.sql, stmt.params)
+        ));
     }
 }
 

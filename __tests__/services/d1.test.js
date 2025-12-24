@@ -152,37 +152,34 @@ describe("D1 Service", () => {
   });
 
   describe("batch", () => {
-    test("should execute a batch of statements successfully", async () => {
-      const mockBatchResponse = { success: true, result: [{ results: [] }, { results: [] }] };
-      mockFetch.mockResolvedValueOnce({
-        json: () => Promise.resolve(mockBatchResponse),
-      });
+    test("should execute a batch of statements concurrently", async () => {
+      const mockResult1 = { success: true };
+      const mockResult2 = { success: true };
+      
+      jest.spyOn(d1Instance, "_execute")
+          .mockResolvedValueOnce(mockResult1)
+          .mockResolvedValueOnce(mockResult2);
 
       const statements = [
         { sql: "UPDATE users SET status = ? WHERE id = ?", params: ["active", 1] },
         { sql: "DELETE FROM old_data WHERE date < ?", params: ["2023-01-01"] },
       ];
-      const result = await d1Instance.batch(statements);
+      
+      const results = await d1Instance.batch(statements);
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        d1Instance.apiUrl.replace('/query', '/batch'),
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify(statements),
-        })
-      );
-      expect(result).toEqual(mockBatchResponse.result);
+      expect(d1Instance._execute).toHaveBeenCalledTimes(2);
+      expect(d1Instance._execute).toHaveBeenCalledWith(statements[0].sql, statements[0].params);
+      expect(d1Instance._execute).toHaveBeenCalledWith(statements[1].sql, statements[1].params);
+      expect(results).toEqual([mockResult1, mockResult2]);
     });
 
-    test("should throw an error if batch execution fails with message", async () => {
-      const mockBatchErrorResponse = { success: false, errors: [{ message: "Batch error details" }] };
-      mockFetch.mockResolvedValueOnce({
-        json: () => Promise.resolve(mockBatchErrorResponse),
-      });
+    test("should throw an error if any statement fails", async () => {
+      jest.spyOn(d1Instance, "_execute")
+          .mockRejectedValueOnce(new Error("D1 Error: Some error"));
 
       const statements = [{ sql: "INVALID SQL" }];
 
-      await expect(d1Instance.batch(statements)).rejects.toThrow("D1 Batch Error: Batch error details");
+      await expect(d1Instance.batch(statements)).rejects.toThrow("D1 Error: Some error");
     });
   });
 });
