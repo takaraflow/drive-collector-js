@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [2.2.2](https://github.com/YoungSx/drive-collector-js/compare/v2.2.1...v2.2.2) (2025-12-24)
+
+
+### ✅ 质量保障
+
+* **测试修复**: 修复了 Rclone 批量上传、Telegram 服务和 UI 助手的单元测试用例，解决了依赖冲突和 Mock 不正确的问题，确保 CI/CD 流程的稳定运行。
+
 ### [2.2.1](https://github.com/YoungSx/drive-collector-js/compare/v2.2.0...v2.2.1) (2025-12-24)
 
 

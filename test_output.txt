@@ -1,74 +1,51 @@
 
-> drive-collector-bot@2.0.0 test
+> drive-collector-bot@2.2.1 test
 > node --experimental-vm-modules node_modules/jest/bin/jest.js
 
-(node:37860) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(node:37808) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-PASS __tests__/modules/SessionManager.test.js
-(node:41268) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(node:53092) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:45704) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
 PASS __tests__/services/kv.test.js
-(node:8668) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(node:45220) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS __tests__/utils/CacheService.test.js
+(node:45136) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
 PASS __tests__/locales/zh-CN.test.js
-(node:48596) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(node:55520) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS __tests__/repositories/TaskRepository.cache.test.js
+(node:14848) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
 PASS __tests__/config/index.test.js
-(node:50452) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(node:46584) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-PASS __tests__/services/d1.test.js
-(node:3164) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+PASS __tests__/modules/SessionManager.test.js
+(node:38804) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-FAIL __tests__/repositories/TaskRepository.cache.test.js
-  鈼?Test suite failed to run
-
-    TypeError: Cannot redefine property: Symbol($$jest-matchers-object)
-        at Object.defineProperty (<anonymous>)
-
-      at node_modules/@vitest/expect/dist/index.js:680:9
-
-(node:49868) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
-FAIL __tests__/utils/CacheService.test.js
-  鈼?Test suite failed to run
-
-    TypeError: Cannot redefine property: Symbol($$jest-matchers-object)
-        at Object.defineProperty (<anonymous>)
-
-      at node_modules/@vitest/expect/dist/index.js:680:9
-
-(node:9580) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
-FAIL __tests__/utils/limiter.test.js
-  鈼?Test suite failed to run
-
-    TypeError: Cannot redefine property: Symbol($$jest-matchers-object)
-        at Object.defineProperty (<anonymous>)
-
-      at node_modules/@vitest/expect/dist/index.js:680:9
-
-(node:41908) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
-FAIL __tests__/services/rclone.test.js
+PASS __tests__/services/rclone.test.js
   鈼?Console
 
     console.error
       Obscure non-zero exit: error
 
-      53 |             }
-      54 |             if (ret.status !== 0) {
-    > 55 |                 console.error("Obscure non-zero exit:", ret.stderr);
+      54 |             }
+      55 |             if (ret.status !== 0) {
+    > 56 |                 console.error("Obscure non-zero exit:", ret.stderr);
          |                         ^
-      56 |                 return password;
-      57 |             }
-      58 |             
+      57 |                 return password;
+      58 |             }
+      59 |             
 
-      at CloudTool._obscure (src/services/rclone.js:55:25)
-      at Object.<anonymous> (__tests__/services/rclone.test.js:97:38)
+      at CloudTool._obscure (src/services/rclone.js:56:25)
+      at Object.<anonymous> (__tests__/services/rclone.test.js:113:38)
 
     console.error
       Obscure spawn error: Error: spawn error
-          at Object.<anonymous> (C:\Users\shang\Project\drive-collector-js\__tests__\services\rclone.test.js:103:24)
+          at Object.<anonymous> (C:\Users\shang\Project\drive-collector-js\__tests__\services\rclone.test.js:119:24)
           at Promise.then.completed (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\utils.js:298:28)
           at new Promise (<anonymous>)
           at callAsyncCircusFn (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\utils.js:231:10)
@@ -85,20 +62,20 @@ FAIL __tests__/services/rclone.test.js
           at runTest (C:\Users\shang\Project\drive-collector-js\node_modules\jest-runner\build\runTest.js:444:34)
           at Object.worker (C:\Users\shang\Project\drive-collector-js\node_modules\jest-runner\build\testWorker.js:106:12)
 
-      49 |             
-      50 |             if (ret.error) {
-    > 51 |                 console.error("Obscure spawn error:", ret.error);
+      50 |             
+      51 |             if (ret.error) {
+    > 52 |                 console.error("Obscure spawn error:", ret.error);
          |                         ^
-      52 |                 return password;
-      53 |             }
-      54 |             if (ret.status !== 0) {
+      53 |                 return password;
+      54 |             }
+      55 |             if (ret.status !== 0) {
 
-      at CloudTool._obscure (src/services/rclone.js:51:25)
-      at Object.<anonymous> (__tests__/services/rclone.test.js:106:38)
+      at CloudTool._obscure (src/services/rclone.js:52:25)
+      at Object.<anonymous> (__tests__/services/rclone.test.js:122:38)
 
     console.error
       Obscure spawn error: Error: spawn error
-          at Object.<anonymous> (C:\Users\shang\Project\drive-collector-js\__tests__\services\rclone.test.js:103:24)
+          at Object.<anonymous> (C:\Users\shang\Project\drive-collector-js\__tests__\services\rclone.test.js:119:24)
           at Promise.then.completed (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\utils.js:298:28)
           at new Promise (<anonymous>)
           at callAsyncCircusFn (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\utils.js:231:10)
@@ -115,22 +92,22 @@ FAIL __tests__/services/rclone.test.js
           at runTest (C:\Users\shang\Project\drive-collector-js\node_modules\jest-runner\build\runTest.js:444:34)
           at Object.worker (C:\Users\shang\Project\drive-collector-js\node_modules\jest-runner\build\testWorker.js:106:12)
 
-      49 |             
-      50 |             if (ret.error) {
-    > 51 |                 console.error("Obscure spawn error:", ret.error);
+      50 |             
+      51 |             if (ret.error) {
+    > 52 |                 console.error("Obscure spawn error:", ret.error);
          |                         ^
-      52 |                 return password;
-      53 |             }
-      54 |             if (ret.status !== 0) {
+      53 |                 return password;
+      54 |             }
+      55 |             if (ret.status !== 0) {
 
-      at CloudTool._obscure (src/services/rclone.js:51:25)
-      at src/services/rclone.js:83:44
-      at CloudTool.validateConfig (src/services/rclone.js:79:16)
-      at Object.<anonymous> (__tests__/services/rclone.test.js:117:39)
+      at CloudTool._obscure (src/services/rclone.js:52:25)
+      at src/services/rclone.js:84:44
+      at CloudTool.validateConfig (src/services/rclone.js:80:16)
+      at Object.<anonymous> (__tests__/services/rclone.test.js:133:39)
 
     console.error
       Obscure spawn error: Error: spawn error
-          at Object.<anonymous> (C:\Users\shang\Project\drive-collector-js\__tests__\services\rclone.test.js:103:24)
+          at Object.<anonymous> (C:\Users\shang\Project\drive-collector-js\__tests__\services\rclone.test.js:119:24)
           at Promise.then.completed (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\utils.js:298:28)
           at new Promise (<anonymous>)
           at callAsyncCircusFn (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\utils.js:231:10)
@@ -147,22 +124,22 @@ FAIL __tests__/services/rclone.test.js
           at runTest (C:\Users\shang\Project\drive-collector-js\node_modules\jest-runner\build\runTest.js:444:34)
           at Object.worker (C:\Users\shang\Project\drive-collector-js\node_modules\jest-runner\build\testWorker.js:106:12)
 
-      49 |             
-      50 |             if (ret.error) {
-    > 51 |                 console.error("Obscure spawn error:", ret.error);
+      50 |             
+      51 |             if (ret.error) {
+    > 52 |                 console.error("Obscure spawn error:", ret.error);
          |                         ^
-      52 |                 return password;
-      53 |             }
-      54 |             if (ret.status !== 0) {
+      53 |                 return password;
+      54 |             }
+      55 |             if (ret.status !== 0) {
 
-      at CloudTool._obscure (src/services/rclone.js:51:25)
-      at src/services/rclone.js:83:44
-      at CloudTool.validateConfig (src/services/rclone.js:79:16)
-      at Object.<anonymous> (__tests__/services/rclone.test.js:132:39)
+      at CloudTool._obscure (src/services/rclone.js:52:25)
+      at src/services/rclone.js:84:44
+      at CloudTool.validateConfig (src/services/rclone.js:80:16)
+      at Object.<anonymous> (__tests__/services/rclone.test.js:148:39)
 
     console.error
       Obscure spawn error: Error: spawn error
-          at Object.<anonymous> (C:\Users\shang\Project\drive-collector-js\__tests__\services\rclone.test.js:103:24)
+          at Object.<anonymous> (C:\Users\shang\Project\drive-collector-js\__tests__\services\rclone.test.js:119:24)
           at Promise.then.completed (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\utils.js:298:28)
           at new Promise (<anonymous>)
           at callAsyncCircusFn (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\utils.js:231:10)
@@ -179,165 +156,307 @@ FAIL __tests__/services/rclone.test.js
           at runTest (C:\Users\shang\Project\drive-collector-js\node_modules\jest-runner\build\runTest.js:444:34)
           at Object.worker (C:\Users\shang\Project\drive-collector-js\node_modules\jest-runner\build\testWorker.js:106:12)
 
-      49 |             
-      50 |             if (ret.error) {
-    > 51 |                 console.error("Obscure spawn error:", ret.error);
+      50 |             
+      51 |             if (ret.error) {
+    > 52 |                 console.error("Obscure spawn error:", ret.error);
          |                         ^
-      52 |                 return password;
-      53 |             }
-      54 |             if (ret.status !== 0) {
+      53 |                 return password;
+      54 |             }
+      55 |             if (ret.status !== 0) {
 
-      at CloudTool._obscure (src/services/rclone.js:51:25)
-      at src/services/rclone.js:83:44
-      at CloudTool.validateConfig (src/services/rclone.js:79:16)
-      at Object.<anonymous> (__tests__/services/rclone.test.js:149:44)
+      at CloudTool._obscure (src/services/rclone.js:52:25)
+      at src/services/rclone.js:84:44
+      at CloudTool.validateConfig (src/services/rclone.js:80:16)
+      at Object.<anonymous> (__tests__/services/rclone.test.js:165:44)
 
     console.error
-      Rclone Error (Task undefined): Upload failed because of disk full
+      Rclone Batch Error: Upload failed because of disk full
 
-      151 |                     } else {
-      152 |                         const finalError = errorLog.slice(-500) || `Rclone exited with code ${code}`;
-    > 153 |                         console.error(`Rclone Error (Task ${task.id}):`, finalError);
+      198 |                     } else {
+      199 |                         const finalError = errorLog.slice(-500) || `Rclone exited with code ${code}`;
+    > 200 |                         console.error(`Rclone Batch Error:`, finalError);
           |                                 ^
-      154 |                         resolve({ success: false, error: finalError.trim() });
-      155 |                     }
-      156 |                 });
+      201 |                         resolve({ success: false, error: finalError.trim() });
+      202 |                     }
+      203 |                 });
 
-      at EventEmitter.<anonymous> (src/services/rclone.js:153:33)
-      at Timeout._onTimeout (__tests__/services/rclone.test.js:192:26)
+      at EventEmitter.<anonymous> (src/services/rclone.js:200:33)
+      at Timeout._onTimeout (__tests__/services/rclone.test.js:207:26)
 
-  鈼?CloudTool 鈥?listRemoteFiles 鈥?should return files and cache them
+    console.error
+      List files error (Detail): Rclone lsjson failed: error
 
-    expect(received).toBeDefined()
+      294 |
+      295 |         } catch (e) {
+    > 296 |             console.error("List files error (Detail):", e.message); 
+          |                     ^
+      297 |             this.loading = false;
+      298 |             return []; 
+      299 |         }
 
-    Received: undefined
+      at CloudTool.listRemoteFiles (src/services/rclone.js:296:21)
+      at Object.<anonymous> (__tests__/services/rclone.test.js:314:27)
 
-      236 |             const files = await CloudTool.listRemoteFiles('user123');
-      237 |             expect(files).toEqual(mockFiles);
-    > 238 |             expect(CloudTool.cache['files_user123']).toBeDefined();
-          |                                                      ^
-      239 |             
-      240 |             // Second call should use cache
-      241 |             await CloudTool.listRemoteFiles('user123');
-
-      at Object.<anonymous> (__tests__/services/rclone.test.js:238:54)
-
-  鈼?CloudTool 鈥?listRemoteFiles 鈥?should force refresh when requested
-
-    expect(jest.fn()).toHaveBeenCalledTimes(expected)
-
-    Expected number of calls: 2
-    Received number of calls: 1
-
-      252 |             await CloudTool.listRemoteFiles('user123');
-      253 |             await CloudTool.listRemoteFiles('user123', true);
-    > 254 |             expect(mockSpawnSync).toHaveBeenCalledTimes(2);
-          |                                   ^
-      255 |         });
-      256 |
-      257 |         it('should handle rclone error and return empty array', async () => {
-
-      at Object.<anonymous> (__tests__/services/rclone.test.js:254:35)
-
-(node:44628) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
-PASS __tests__/services/telegram.test.js
-FAIL __tests__/bot/Dispatcher.test.js
-  鈼?Test suite failed to run
-
-    SyntaxError: The requested module '../utils/common.js' does not provide an export named 'escapeHTML'
-
-      123 |
-      124 | // Load Dispatcher
-    > 125 | const { Dispatcher } = await import("../../src/bot/Dispatcher.js");
-          |                        ^
-      126 |
-      127 | describe("Dispatcher", () => {
-      128 |   beforeEach(() => {
-
-      at Runtime.linkAndEvaluateModule (node_modules/jest-runtime/build/index.js:708:5)
-      at __tests__/bot/Dispatcher.test.js:125:24
-
-(node:26644) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
-FAIL __tests__/core/TaskManager.test.js
-  鈼?Test suite failed to run
-
-    SyntaxError: The requested module '../utils/limiter.js' does not provide an export named 'PRIORITY'
-
-      121 |
-      122 | // 瀵煎叆 TaskManager
-    > 123 | const { TaskManager } = await import("../../src/core/TaskManager.js");
-          |                         ^
-      124 | const { updateStatus } = await import("../../src/utils/common.js");
-      125 |
-      126 | describe("TaskManager", () => {
-
-      at Runtime.linkAndEvaluateModule (node_modules/jest-runtime/build/index.js:708:5)
-      at __tests__/core/TaskManager.test.js:123:25
-
-(node:2016) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
-(node:48000) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+PASS __tests__/services/d1.test.js
+PASS __tests__/services/rclone_batch.test.js
+PASS __tests__/startup.test.js
+PASS __tests__/locales/format.test.js
+PASS __tests__/repositories/DriveRepository.test.js
+(node:51484) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
 PASS __tests__/modules/DriveConfigFlow.test.js
-(node:46456) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(node:28648) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS __tests__/bot/Dispatcher.test.js
+(node:49208) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS __tests__/services/telegram.test.js
+(node:52456) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS __tests__/bot/FilesCommand.test.js
+  鈼?Console
+
+    console.error
+      Files command async error: Error: Network error
+          at Object.<anonymous> (C:\Users\shang\Project\drive-collector-js\__tests__\bot\FilesCommand.test.js:74:57)
+          at Promise.then.completed (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\utils.js:298:28)
+          at new Promise (<anonymous>)
+          at callAsyncCircusFn (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\utils.js:231:10)
+          at _callCircusTest (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\run.js:316:40)
+          at _runTest (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\run.js:252:3)
+          at _runTestsForDescribeBlock (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\run.js:126:9)
+          at _runTestsForDescribeBlock (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\run.js:121:9)
+          at run (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\run.js:71:3)
+          at runAndTransformResultsToJestFormat (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\legacy-code-todo-rewrite\jestAdapterInit.js:122:21)
+          at jestAdapter (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\legacy-code-todo-rewrite\jestAdapter.js:79:19)
+          at runTestInternal (C:\Users\shang\Project\drive-collector-js\node_modules\jest-runner\build\runTest.js:367:16)
+          at runTest (C:\Users\shang\Project\drive-collector-js\node_modules\jest-runner\build\runTest.js:444:34)
+          at Object.worker (C:\Users\shang\Project\drive-collector-js\node_modules\jest-runner\build\testWorker.js:106:12)
+
+      278 |                 // 濡傛灉鍙戠幇鏁版嵁鏄姞杞戒腑鐨勶紙渚嬪缂撳瓨杩囨湡姝ｅ湪鍚庡彴鍒锋柊锛夛紝鍙互鑰冭檻鍦ㄨ繖閲岄€昏緫
+      279 |             } catch (e) {
+    > 280 |                 console.error("Files command async error:", e);
+          |                         ^
+      281 |                 await safeEdit(target, placeholder.id, "鉂?鏃犳硶鑾峰彇鏂囦欢鍒楄〃锛岃绋嶅悗閲嶈瘯銆?, null, userId);
+      282 |             }
+      283 |         })();
+
+      at src/bot/Dispatcher.js:280:25
+
+(node:48264) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46540) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
 FAIL __tests__/ui.test.js
-  鈼?UIHelper 鈥?renderFilesPage 鈥?renders first page correctly
+  鈼?UIHelper 鈥?renderFilesPage 鈥?handles empty file list
 
     expect(received).toContain(expected) // indexOf
 
-    Expected substring: "馃帪锔?<b>file1.mp4</b>
-    > <code>100.00 MB</code> | <code>2023-01-01 12:00</code>"
+    Expected substring: "馃搳 <i>绗?1/1 椤?| 鍏?{{count}} 涓枃浠?/i>"
     Received string:    "馃搨 <b>鐩綍</b>: <code>/DriveCollectorBot</code>路
-    馃帪锔?<b>file1.mp4</b>
-        <code>100.00 MB</code> | <code>2023-01-01 12:00</code>路
-    馃摑 <b>document.pdf</b>
-        <code>5.00 MB</code> | <code>2023-01-02 13:00</code>路
-    馃摝 <b>archive.zip</b>
-        <code>1000.00 MB</code> | <code>2023-01-03 14:00</code>路
-    馃柤锔?<b>image.jpg</b>
-        <code>2.00 MB</code> | <code>2023-01-04 15:00</code>路
-    馃帪锔?<b>video.mkv</b>
-        <code>200.00 MB</code> | <code>2023-01-05 16:00</code>路
-    馃帪锔?<b>another.mp4</b>
-        <code>300.00 MB</code> | <code>2023-01-06 17:00</code>路
-    鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳?    馃搳 <i>绗?1/2 椤?| 鍏?7 涓枃浠?/i>"
+    鈩癸笍 鐩綍涓虹┖鎴栧皻鏈姞杞姐€傗幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆
+    馃搳 <i>绗?1/1 椤?| 鍏?0 涓枃浠?/i>"
 
-      119 |
-      120 |       expect(text).toContain("馃搨 <b>鐩綍</b>: <code>/DriveCollectorBot</code>");
-    > 121 |       expect(text).toContain('馃帪锔?<b>file1.mp4</b>\n> <code>100.00 MB</code> | <code>2023-01-01 12:00</code>');
+      142 |       const { text, buttons } = UIHelper.renderFilesPage([], 0, 6, false);
+      143 |       expect(text).toContain("鈩癸笍 鐩綍涓虹┖鎴栧皻鏈姞杞姐€?);
+    > 144 |       expect(text).toContain("馃搳 <i>绗?1/1 椤?| 鍏?{{count}} 涓枃浠?/i>");
           |                    ^
-      122 |       expect(text).toContain("馃搳 <i>绗?1/2 椤?| 鍏?7 涓枃浠?/i>");
-      123 |       expect(buttons[0][0].text).toBe(' '); // Home button disabled
-      124 |       expect(buttons[0][1].text).toBe(' '); // Prev button disabled
+      145 |       expect(buttons[0][0].text).toBe(' ');
+      146 |       expect(buttons[0][1].text).toBe(' ');
+      147 |       expect(buttons[0][3].text).toBe(' ');
 
-      at Object.<anonymous> (__tests__/ui.test.js:121:20)
+      at Object.<anonymous> (__tests__/ui.test.js:144:20)
 
-  鈼?UIHelper 鈥?renderFilesPage 鈥?renders second page correctly
+  鈼?UIHelper 鈥?renderBatchMonitor 鈥?handles empty tasks array
 
     expect(received).toContain(expected) // indexOf
 
-    Expected substring: "馃搫 <b>last.txt</b>
-    > <code>0.00 MB</code> | <code>2023-01-07 18:00</code>"
-    Received string:    "馃搨 <b>鐩綍</b>: <code>/DriveCollectorBot</code>路
-    馃搫 <b>last.txt</b>
-        <code>0.00 MB</code> | <code>2023-01-07 18:00</code>路
-    鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳?    馃搳 <i>绗?2/2 椤?| 鍏?7 涓枃浠?/i>"
+    Expected substring: "馃搳 <b>濯掍綋缁勮浆瀛樼湅鏉?({{current}}/{{total}})</b>"
+    Received string:    "馃搳 <b>濯掍綋缁勮浆瀛樼湅鏉?(0/0)</b>
+    鈩癸笍 鐩綍涓虹┖鎴栧皻鏈姞杞姐€?    "
 
-      131 |       const { text, buttons } = UIHelper.renderFilesPage(mockFiles, 1, 6, false);
-      132 |
-    > 133 |       expect(text).toContain('馃搫 <b>last.txt</b>\n> <code>0.00 MB</code> | <code>2023-01-07 18:00</code>');
+      199 |     test('handles empty tasks array', () => {
+      200 |         const { text } = UIHelper.renderBatchMonitor([], {}, 'waiting');
+    > 201 |       expect(text).toContain("馃搳 <b>濯掍綋缁勮浆瀛樼湅鏉?({{current}}/{{total}})</b>");
           |                    ^
-      134 |       expect(text).toContain("馃搳 <i>绗?2/2 椤?| 鍏?7 涓枃浠?/i>");
-      135 |       expect(buttons[0][0].text).toBe('鈴笍'); // Home button enabled
-      136 |       expect(buttons[0][1].text).toBe('猬咃笍');
+      202 |         expect(text).not.toContain('鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣\n');
+      203 |     });
+      204 |   });
 
-      at Object.<anonymous> (__tests__/ui.test.js:133:20)
+      at Object.<anonymous> (__tests__/ui.test.js:201:20)
 
-Test Suites: 7 failed, 7 passed, 14 total
-Tests:       4 failed, 78 passed, 82 total
+PASS __tests__/utils/flood.test.js
+  鈼?Console
+
+    console.warn
+      鈿狅笍 429/FloodWait encountered, retrying after 1837ms (attempt 1/2)
+
+      279 |                 }
+      280 |
+    > 281 |                 console.warn(`鈿狅笍 429/FloodWait encountered, retrying after ${Math.round(waitMs)}ms (attempt ${retryCount + 1}/${maxRetries})`);
+          |                         ^
+      282 |                 await sleep(waitMs);
+      283 |                 retryCount++;
+      284 |                 lastRetryAfter = waitMs;
+
+      at handle429Error (src/utils/limiter.js:281:25)
+      at Object.<anonymous> (__tests__/utils/flood.test.js:29:24)
+
+    console.error
+      馃毃 Large FloodWait detected (61s). Triggering GLOBAL cooling.
+
+      273 |                 
+      274 |                 if (retryAfter > 60) {
+    > 275 |                     console.error(`馃毃 Large FloodWait detected (${retryAfter}s). Triggering GLOBAL cooling.`);
+          |                             ^
+      276 |                     globalCoolingUntil = Date.now() + waitMs;
+      277 |                     // 鍚屾鍒?KV
+      278 |                     await kv.set("system:cooling_until", globalCoolingUntil.toString(), Math.ceil(waitMs / 1000) + 60).catch(() => {});
+
+      at handle429Error (src/utils/limiter.js:275:29)
+
+    console.warn
+      鈿狅笍 429/FloodWait encountered, retrying after 61559ms (attempt 1/2)
+
+      279 |                 }
+      280 |
+    > 281 |                 console.warn(`鈿狅笍 429/FloodWait encountered, retrying after ${Math.round(waitMs)}ms (attempt ${retryCount + 1}/${maxRetries})`);
+          |                         ^
+      282 |                 await sleep(waitMs);
+      283 |                 retryCount++;
+      284 |                 lastRetryAfter = waitMs;
+
+      at handle429Error (src/utils/limiter.js:281:25)
+
+    console.warn
+      鉂勶笍 System is in global cooling period, waiting 61458.9189453125ms...
+
+      238 |     if (now < globalCoolingUntil) {
+      239 |         const waitTime = globalCoolingUntil - now;
+    > 240 |         console.warn(`鉂勶笍 System is in global cooling period, waiting ${waitTime}ms...`);
+          |                 ^
+      241 |         await sleep(waitTime);
+      242 |     }
+      243 | };
+
+      at checkCooling (src/utils/limiter.js:240:17)
+      at handle429Error (src/utils/limiter.js:251:15)
+      at Object.<anonymous> (__tests__/utils/flood.test.js:54:20)
+
+    console.warn
+      鉂勶笍 System is in global cooling period, waiting 0.9189453125ms...
+
+      238 |     if (now < globalCoolingUntil) {
+      239 |         const waitTime = globalCoolingUntil - now;
+    > 240 |         console.warn(`鉂勶笍 System is in global cooling period, waiting ${waitTime}ms...`);
+          |                 ^
+      241 |         await sleep(waitTime);
+      242 |     }
+      243 | };
+
+      at checkCooling (src/utils/limiter.js:240:17)
+      at handle429Error (src/utils/limiter.js:251:9)
+
+PASS __tests__/utils/limiter.test.js
+PASS __tests__/core/TaskManager.test.js (9.686 s)
+  鈼?Console
+
+    console.log
+      馃攧 姝ｅ湪妫€鏌ユ暟鎹簱涓紓甯镐腑鏂殑浠诲姟...
+
+      at TaskManager.init (src/core/TaskManager.js:87:17)
+
+    console.log
+      馃摜 鍙戠幇 1 涓兊灏镐换鍔★紝姝ｅ湪鎸?Chat 鍒嗙粍鎵归噺鎭㈠...
+
+      at TaskManager.init (src/core/TaskManager.js:96:21)
+
+    console.log
+      馃攧 姝ｅ湪妫€鏌ユ暟鎹簱涓紓甯镐腑鏂殑浠诲姟...
+
+      at TaskManager.init (src/core/TaskManager.js:87:17)
+
+    console.log
+      馃攧 姝ｅ湪妫€鏌ユ暟鎹簱涓紓甯镐腑鏂殑浠诲姟...
+
+      at TaskManager.init (src/core/TaskManager.js:87:17)
+
+    console.log
+      馃摜 鍙戠幇 1 涓兊灏镐换鍔★紝姝ｅ湪鎸?Chat 鍒嗙粍鎵归噺鎭㈠...
+
+      at TaskManager.init (src/core/TaskManager.js:96:21)
+
+    console.warn
+      鈿狅笍 璺宠繃鏃犳晥 chat_id 鐨勪换鍔? 1
+
+       99 |             for (const row of tasks) {
+      100 |                 if (!row.chat_id || row.chat_id.includes("Object")) {
+    > 101 |                     console.warn(`鈿狅笍 璺宠繃鏃犳晥 chat_id 鐨勪换鍔? ${row.id}`);
+          |                             ^
+      102 |                     continue;
+      103 |                 }
+      104 |                 if (!chatGroups.has(row.chat_id)) {
+
+      at TaskManager.init (src/core/TaskManager.js:101:29)
+      at Object.<anonymous> (__tests__/core/TaskManager.test.js:181:13)
+
+    console.error
+      Task creation failed: Error: DB Error
+          at Object.<anonymous> (C:\Users\shang\Project\drive-collector-js\__tests__\core\TaskManager.test.js:214:57)
+          at Promise.then.completed (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\utils.js:298:28)
+          at new Promise (<anonymous>)
+          at callAsyncCircusFn (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\utils.js:231:10)
+          at _callCircusTest (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\run.js:316:40)
+          at processTicksAndRejections (node:internal/process/task_queues:103:5)
+          at _runTest (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\run.js:252:3)
+          at _runTestsForDescribeBlock (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\run.js:126:9)
+          at _runTestsForDescribeBlock (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\run.js:121:9)
+          at _runTestsForDescribeBlock (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\run.js:121:9)
+          at run (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\run.js:71:3)
+          at runAndTransformResultsToJestFormat (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\legacy-code-todo-rewrite\jestAdapterInit.js:122:21)
+          at jestAdapter (C:\Users\shang\Project\drive-collector-js\node_modules\jest-circus\build\legacy-code-todo-rewrite\jestAdapter.js:79:19)
+          at runTestInternal (C:\Users\shang\Project\drive-collector-js\node_modules\jest-runner\build\runTest.js:367:16)
+          at runTest (C:\Users\shang\Project\drive-collector-js\node_modules\jest-runner\build\runTest.js:444:34)
+          at Object.worker (C:\Users\shang\Project\drive-collector-js\node_modules\jest-runner\build\testWorker.js:106:12)
+
+      185 |
+      186 |         } catch (e) {
+    > 187 |             console.error("Task creation failed:", e);
+          |                     ^
+      188 |             await client.editMessage(target, { 
+      189 |                 message: statusMsg.id, 
+      190 |                 text: STRINGS.task.create_failed
+
+      at TaskManager.addTask (src/core/TaskManager.js:187:21)
+      at Object.<anonymous> (__tests__/core/TaskManager.test.js:216:13)
+
+    console.log
+      馃摝 Task t1 added to upload batch u1_remote_folder (1 tasks)
+
+      at UploadBatcher.add (src/core/TaskManager.js:37:17)
+
+    console.log
+      馃殌 Triggering batch upload for u1_remote_folder with 1 tasks
+
+      at UploadBatcher.trigger (src/core/TaskManager.js:48:17)
+
+    console.error
+      [Monitor Update Error] msgId 100: API Error
+
+      497 |            });
+      498 |        } catch (e) {
+    > 499 |            console.error(`[Monitor Update Error] msgId ${msgId}:`, e.message);
+          |                    ^
+      500 |        }
+      501 |     }
+      502 | }
+
+      at TaskManager._refreshGroupMonitor (src/core/TaskManager.js:499:20)
+      at Object.<anonymous> (__tests__/core/TaskManager.test.js:393:13)
+
+
+Test Suites: 1 failed, 19 passed, 20 total
+Tests:       2 failed, 130 passed, 132 total
 Snapshots:   0 total
-Time:        2.509 s, estimated 3 s
+Time:        10.886 s, estimated 11 s
 Ran all test suites.
