@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [2.2.5](https://github.com/YoungSx/drive-collector-js/compare/v2.2.3...v2.2.5) (2025-12-24)
+
+
+### 🐛 问题修复
+
+* **Telegram 连接**: 修复应用启动时的 AUTH_KEY_DUPLICATED 错误，添加自动 Session 清理和重试机制，提升连接稳定性。
+
 ### [2.2.4](https://github.com/YoungSx/drive-collector-js/compare/v2.2.3...v2.2.4) (2025-12-24)
 
 

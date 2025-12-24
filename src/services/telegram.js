@@ -15,6 +15,18 @@ const getSavedSession = async () => {
 };
 
 /**
+ * 清除保存的 Session 字符串（用于解决 AUTH_KEY_DUPLICATED 问题）
+ */
+export const clearSession = async () => {
+    try {
+        await SettingsRepository.set("tg_bot_session", "");
+        console.log("🗑️ Telegram Session 已清除");
+    } catch (e) {
+        console.error("❌ 清除 Session 失败:", e);
+    }
+};
+
+/**
  * 保存当前的 Session 字符串
  */
 export const saveSession = async () => {

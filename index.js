@@ -1,6 +1,6 @@
 import http from "http";
 import { config } from "./src/config/index.js";
-import { client, saveSession } from "./src/services/telegram.js";
+import { client, saveSession, clearSession } from "./src/services/telegram.js";
 import { TaskManager } from "./src/core/TaskManager.js";
 import { Dispatcher } from "./src/bot/Dispatcher.js";
 import { SettingsRepository } from "./src/repositories/SettingsRepository.js";
@@ -36,10 +36,34 @@ const processedMessages = new Map();
         }
         await SettingsRepository.set("last_startup_time", Date.now().toString());
 
-        // 1. 启动 Telegram 客户端
-        await client.start({ botAuthToken: config.botToken });
-        await saveSession(); // 登录成功后保存 Session
-        console.log("🚀 Telegram 客户端已连接");
+        // 1. 启动 Telegram 客户端（带重试机制处理 AUTH_KEY_DUPLICATED）
+        let clientStarted = false;
+        let retryCount = 0;
+        const maxRetries = 3;
+
+        while (!clientStarted && retryCount < maxRetries) {
+            try {
+                await client.start({ botAuthToken: config.botToken });
+                await saveSession(); // 登录成功后保存 Session
+                console.log("🚀 Telegram 客户端已连接");
+                clientStarted = true;
+            } catch (error) {
+                if (error.code === 406 && error.errorMessage?.includes('AUTH_KEY_DUPLICATED')) {
+                    retryCount++;
+                    console.warn(`⚠️ 检测到 AUTH_KEY_DUPLICATED 错误 (尝试 ${retryCount}/${maxRetries})，正在清除旧 Session 并重试...`);
+
+                    if (retryCount < maxRetries) {
+                        await clearSession();
+                        // 等待一小段时间让服务器释放旧连接
+                        await new Promise(r => setTimeout(r, 2000));
+                        continue;
+                    }
+                }
+
+                // 如果不是 AUTH_KEY_DUPLICATED 错误或者重试次数用完，直接抛出错误
+                throw error;
+            }
+        }
 
         // 2. 启动 HTTP 健康检查端口 (用于保活)
         http.createServer((req, res) => {
