@@ -1,15 +1,16 @@
 import { jest, describe, test, expect, beforeEach } from "@jest/globals";
 
-// Mock d1 service
-jest.unstable_mockModule("../../src/services/d1.js", () => ({
-  d1: {
-    fetchOne: jest.fn(),
-    run: jest.fn(),
+// Mock kv service
+jest.unstable_mockModule("../../src/services/kv.js", () => ({
+  kv: {
+    get: jest.fn(),
+    set: jest.fn(),
+    delete: jest.fn(),
   },
 }));
 
 const { SessionManager } = await import("../../src/modules/SessionManager.js");
-const { d1 } = await import("../../src/services/d1.js");
+const { kv } = await import("../../src/services/kv.js");
 
 describe("SessionManager", () => {
   beforeEach(() => {
@@ -27,17 +28,17 @@ describe("SessionManager", () => {
     test("should retrieve a session", async () => {
       const userId = "user123";
       const mockSession = { user_id: userId, current_step: "STEP1", temp_data: "{}" };
-      d1.fetchOne.mockResolvedValue(mockSession);
+      kv.get.mockResolvedValue(mockSession);
 
       const session = await SessionManager.get(userId);
 
-      expect(d1.fetchOne).toHaveBeenCalledWith("SELECT * FROM sessions WHERE user_id = ?", [userId]);
+      expect(kv.get).toHaveBeenCalledWith(`session:${userId}`);
       expect(session).toEqual(mockSession);
     });
 
     test("should return null if no session found", async () => {
       const userId = "user123";
-      d1.fetchOne.mockResolvedValue(null);
+      kv.get.mockResolvedValue(null);
 
       const session = await SessionManager.get(userId);
 
@@ -46,29 +47,21 @@ describe("SessionManager", () => {
   });
 
   describe("start", () => {
-    test("should insert a new session", async () => {
+    test("should set a new session in KV", async () => {
       const userId = "user123";
       const step = "NEW_STEP";
       const data = { some: "data" };
 
       await SessionManager.start(userId, step, data);
 
-      expect(d1.run).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO sessions"),
-        [userId, step, JSON.stringify(data), expect.any(Number)]
-      );
-    });
-
-    test("should update an existing session if user_id conflicts", async () => {
-      const userId = "user123";
-      const step = "UPDATED_STEP";
-      const data = { new: "data" };
-
-      await SessionManager.start(userId, step, data);
-
-      expect(d1.run).toHaveBeenCalledWith(
-        expect.stringContaining("ON CONFLICT(user_id) DO UPDATE SET"),
-        [userId, step, JSON.stringify(data), expect.any(Number)]
+      expect(kv.set).toHaveBeenCalledWith(
+        `session:${userId}`,
+        expect.objectContaining({
+            user_id: userId,
+            current_step: step,
+            temp_data: JSON.stringify(data)
+        }),
+        86400
       );
     });
   });
@@ -82,36 +75,40 @@ describe("SessionManager", () => {
       const newData = { updated: "value" };
       const mockSession = { user_id: userId, current_step: oldStep, temp_data: JSON.stringify(oldData) };
 
-      d1.fetchOne.mockResolvedValue(mockSession);
+      kv.get.mockResolvedValue(mockSession);
 
       await SessionManager.update(userId, newStep, newData);
 
       const mergedData = { ...oldData, ...newData };
-      expect(d1.run).toHaveBeenCalledWith(
-        "UPDATE sessions SET current_step = ?, temp_data = ?, updated_at = ? WHERE user_id = ?",
-        [newStep, JSON.stringify(mergedData), expect.any(Number), userId]
+      expect(kv.set).toHaveBeenCalledWith(
+        `session:${userId}`,
+        expect.objectContaining({
+            current_step: newStep,
+            temp_data: JSON.stringify(mergedData)
+        }),
+        86400
       );
     });
 
     test("should return undefined if session does not exist", async () => {
       const userId = "user123";
-      d1.fetchOne.mockResolvedValue(null);
+      kv.get.mockResolvedValue(null);
 
       const result = await SessionManager.update(userId, "STEP", {});
 
-      expect(d1.fetchOne).toHaveBeenCalledWith("SELECT * FROM sessions WHERE user_id = ?", [userId]);
-      expect(d1.run).not.toHaveBeenCalled();
+      expect(kv.get).toHaveBeenCalledWith(`session:${userId}`);
+      expect(kv.set).not.toHaveBeenCalled();
       expect(result).toBeUndefined();
     });
   });
 
   describe("clear", () => {
-    test("should delete a session", async () => {
+    test("should delete a session from KV", async () => {
       const userId = "user123";
 
       await SessionManager.clear(userId);
 
-      expect(d1.run).toHaveBeenCalledWith("DELETE FROM sessions WHERE user_id = ?", [userId]);
+      expect(kv.delete).toHaveBeenCalledWith(`session:${userId}`);
     });
   });
 });
