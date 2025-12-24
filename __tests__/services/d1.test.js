@@ -174,15 +174,15 @@ describe("D1 Service", () => {
       expect(result).toEqual(mockBatchResponse.result);
     });
 
-    test("should throw an error if batch execution fails", async () => {
-      const mockBatchErrorResponse = { success: false, errors: [{ message: "Batch error" }] };
+    test("should throw an error if batch execution fails with message", async () => {
+      const mockBatchErrorResponse = { success: false, errors: [{ message: "Batch error details" }] };
       mockFetch.mockResolvedValueOnce({
         json: () => Promise.resolve(mockBatchErrorResponse),
       });
 
       const statements = [{ sql: "INVALID SQL" }];
 
-      await expect(d1Instance.batch(statements)).rejects.toThrow("D1 Batch Error");
+      await expect(d1Instance.batch(statements)).rejects.toThrow("D1 Batch Error: Batch error details");
     });
   });
 });

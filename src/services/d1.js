@@ -73,7 +73,10 @@ class D1Service {
         });
 
         const result = await response.json();
-        if (!result.success) throw new Error("D1 Batch Error");
+        if (!result.success) {
+            const errorMsg = result.errors?.[0]?.message || "Unknown D1 Batch Error";
+            throw new Error(`D1 Batch Error: ${errorMsg}`);
+        }
         return result.result;
     }
 }
