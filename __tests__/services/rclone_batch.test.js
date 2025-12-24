@@ -1,39 +1,67 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { CloudTool } from '../../src/services/rclone.js';
-import { spawn } from 'child_process';
-import path from 'path';
+import { jest } from '@jest/globals';
 
-vi.mock('child_process');
-vi.mock('../../src/repositories/DriveRepository.js');
-vi.mock('../../src/services/kv.js');
-vi.mock('../../src/config/index.js', () => ({
+const mockSpawn = jest.fn();
+
+jest.unstable_mockModule('child_process', () => ({
+    spawn: mockSpawn,
+    spawnSync: jest.fn(),
+    execSync: jest.fn()
+}));
+
+jest.unstable_mockModule('../../src/repositories/DriveRepository.js', () => ({
+    DriveRepository: {
+        findByUserId: jest.fn()
+    }
+}));
+
+jest.unstable_mockModule('../../src/services/kv.js', () => ({
+    kv: jest.fn()
+}));
+
+jest.unstable_mockModule('../../src/config/index.js', () => ({
     config: {
         downloadDir: '/tmp/downloads',
         remoteFolder: 'test-remote'
     }
 }));
 
+const { CloudTool } = await import('../../src/services/rclone.js');
+
+const waitFor = async (callback, timeout = 1000, interval = 50) => {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeout) {
+        try {
+            const result = callback();
+            if (result !== false) return;
+        } catch (e) {
+            // ignore
+        }
+        await new Promise(r => setTimeout(r, interval));
+    }
+    callback(); // run one last time to throw if still failing
+};
+
 describe('CloudTool Batch Upload', () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        jest.clearAllMocks();
     });
 
     it('should call rclone with correct batch arguments', async () => {
         const mockProc = {
-            stderr: { on: vi.fn() },
-            on: vi.fn((event, cb) => {
+            stderr: { on: jest.fn() },
+            on: jest.fn((event, cb) => {
                 if (event === 'close') {
                     // 模拟异步关闭
                     process.nextTick(() => cb(0));
                 }
             }),
             stdin: {
-                write: vi.fn(),
-                end: vi.fn()
+                write: jest.fn(),
+                end: jest.fn()
             },
-            stdout: { on: vi.fn() }
+            stdout: { on: jest.fn() }
         };
-        vi.mocked(spawn).mockReturnValue(mockProc);
+        mockSpawn.mockReturnValue(mockProc);
 
         const tasks = [
             { id: '1', userId: 'user1', localPath: '/tmp/downloads/file1.mp4' },
@@ -41,7 +69,7 @@ describe('CloudTool Batch Upload', () => {
         ];
 
         // 模拟 _getUserConfig
-        vi.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({
+        jest.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({
             type: 'onedrive',
             user: 'test',
             pass: 'pass'
@@ -50,11 +78,11 @@ describe('CloudTool Batch Upload', () => {
         const promise = CloudTool.uploadBatch(tasks);
         
         // 显式等待 spawn 被调用 (因为 uploadBatch 是 async 的)
-        await vi.waitFor(() => {
-            expect(spawn).toHaveBeenCalled();
+        await waitFor(() => {
+            expect(mockSpawn).toHaveBeenCalled();
         });
 
-        expect(spawn).toHaveBeenCalledWith(expect.any(String), expect.arrayContaining([
+        expect(mockSpawn).toHaveBeenCalledWith(expect.any(String), expect.arrayContaining([
             'copy',
             '/tmp/downloads',
             expect.stringContaining(':onedrive,user="test",pass="pass":test-remote/'),
@@ -71,30 +99,30 @@ describe('CloudTool Batch Upload', () => {
         let progressCallback;
         const mockProc = {
             stderr: { 
-                on: vi.fn((event, cb) => {
+                on: jest.fn((event, cb) => {
                     if (event === 'data') progressCallback = cb;
                 }) 
             },
-            on: vi.fn((event, cb) => {
+            on: jest.fn((event, cb) => {
                 if (event === 'close') {
                     process.nextTick(() => cb(0));
                 }
             }),
-            stdin: { write: vi.fn(), end: vi.fn() }
+            stdin: { write: jest.fn(), end: jest.fn() }
         };
-        vi.mocked(spawn).mockReturnValue(mockProc);
+        mockSpawn.mockReturnValue(mockProc);
 
         const tasks = [
             { id: 'task-1', userId: 'u1', localPath: '/tmp/downloads/movie.mp4' }
         ];
 
-        vi.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({ type: 'drive', user: 'u', pass: 'p' });
+        jest.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({ type: 'drive', user: 'u', pass: 'p' });
 
-        const onProgress = vi.fn();
+        const onProgress = jest.fn();
         const uploadPromise = CloudTool.uploadBatch(tasks, onProgress);
 
         // 等待 stderr.on('data') 被注册
-        await vi.waitFor(() => {
+        await waitFor(() => {
             if (!progressCallback) throw new Error("Callback not set");
         });
 

@@ -8,6 +8,14 @@ jest.unstable_mockModule("../../src/config/index.js", () => ({
   },
 }));
 
+// Mock SettingsRepository to prevent DB calls
+jest.unstable_mockModule("../../src/repositories/SettingsRepository.js", () => ({
+  SettingsRepository: {
+    get: jest.fn().mockResolvedValue(""),
+    set: jest.fn().mockResolvedValue(true),
+  },
+}));
+
 // Mock the Telegram library itself to prevent network calls
 jest.unstable_mockModule("telegram", () => ({
   TelegramClient: jest.fn().mockImplementation(() => ({

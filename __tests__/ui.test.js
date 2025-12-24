@@ -141,7 +141,7 @@ describe('UIHelper', () => {
     test('handles empty file list', () => {
       const { text, buttons } = UIHelper.renderFilesPage([], 0, 6, false);
       expect(text).toContain("ℹ️ 目录为空或尚未加载。");
-      expect(text).toContain("📊 <i>第 1/1 页 | 共 {{count}} 个文件</i>");
+      expect(text).toContain("📊 <i>第 1/1 页 | 共 0 个文件</i>");
       expect(buttons[0][0].text).toBe(' ');
       expect(buttons[0][1].text).toBe(' ');
       expect(buttons[0][3].text).toBe(' ');
@@ -198,7 +198,7 @@ describe('UIHelper', () => {
 
     test('handles empty tasks array', () => {
         const { text } = UIHelper.renderBatchMonitor([], {}, 'waiting');
-      expect(text).toContain("📊 <b>媒体组转存看板 ({{current}}/{{total}})</b>");
+      expect(text).toContain("📊 <b>媒体组转存看板 (0/0)</b>");
         expect(text).not.toContain('━━━━━━━━━━━━━━\n');
     });
   });
