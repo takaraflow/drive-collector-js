@@ -42,9 +42,10 @@ export class Dispatcher {
         if (!passed) return;
 
         // 3. 路由分发
-        if (event instanceof Api.UpdateBotCallbackQuery) {
+        // 使用 className 检查替代 instanceof，提高鲁棒性并方便测试
+        if (event.className === 'UpdateBotCallbackQuery') {
             await this._handleCallback(event, ctx);
-        } else if (event instanceof Api.UpdateNewMessage && event.message) {
+        } else if (event.className === 'UpdateNewMessage' && event.message) {
             await this._handleMessage(event, ctx);
         }
     }
@@ -57,11 +58,11 @@ export class Dispatcher {
         let target = null;
         let isCallback = false;
 
-        if (event instanceof Api.UpdateBotCallbackQuery) {
+        if (event.className === 'UpdateBotCallbackQuery') {
             userId = event.userId.toString();
             target = event.peer;
             isCallback = true;
-        } else if (event instanceof Api.UpdateNewMessage && event.message) {
+        } else if (event.className === 'UpdateNewMessage' && event.message) {
             const m = event.message;
             userId = (m.fromId ? (m.fromId.userId || m.fromId.chatId) : m.senderId).toString();
             target = m.peerId;
