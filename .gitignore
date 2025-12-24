@@ -12,6 +12,7 @@ yarn-error.log*
 .env.production.local
 
 # --- 运行时产生的临时文件 ---
+coverage/
 /tmp/
 downloads/
 *.log
