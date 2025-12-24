@@ -60,6 +60,25 @@ const processedMessages = new Map();
         TaskManager.startAutoScaling();
         console.log("📊 已启动自动缩放监控，将动态调整并发参数");
 
+        // 5. 启动后台预热：扫描有绑定网盘的用户并预热文件列表
+        (async () => {
+            try {
+                const { DriveRepository } = await import("./src/repositories/DriveRepository.js");
+                const { CloudTool } = await import("./src/services/rclone.js");
+                const activeDrives = await DriveRepository.findAll();
+                if (activeDrives.length > 0) {
+                    console.log(`🔥 正在预热 ${activeDrives.length} 个用户的云端文件列表...`);
+                    // 使用并行但受限的方式预热，避免启动时瞬间 Rclone 爆炸
+                    for (const drive of activeDrives) {
+                        CloudTool.listRemoteFiles(drive.user_id, true).catch(() => {});
+                        await new Promise(r => setTimeout(r, 2000)); // 每 2s 启动一个预热
+                    }
+                }
+            } catch (e) {
+                console.error("❌ 预热失败:", e.message);
+            }
+        })();
+
         // 4. 注册事件监听器 -> 交给分发器处理
         client.addEventHandler(async (event) => {
             // 多实例分片处理：防止重复消息 (通过环境变量控制)

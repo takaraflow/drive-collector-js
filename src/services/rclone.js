@@ -5,6 +5,7 @@ import { config } from "../config/index.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { STRINGS } from "../locales/zh-CN.js";
 import { cacheService } from "../utils/CacheService.js";
+import { redis } from "./redis.js";
 
 // 确定 rclone 二进制路径 (兼容 Zeabur 和 本地)
 const rcloneBinary = fs.existsSync("/app/rclone/rclone") 
@@ -166,14 +167,29 @@ export class CloudTool {
     }
 
     /**
-     * 获取文件列表
+     * 获取文件列表 (带多级缓存)
      */
     static async listRemoteFiles(userId, forceRefresh = false) {
         const cacheKey = `files_${userId}`;
         
         if (!forceRefresh) {
-            const cached = cacheService.get(cacheKey);
-            if (cached) return cached;
+            // 1. 尝试内存缓存
+            const memCached = cacheService.get(cacheKey);
+            if (memCached) return memCached;
+
+            // 2. 尝试 Redis 缓存 (持久化)
+            if (redis.enabled) {
+                try {
+                    const redisCached = await redis.get(cacheKey);
+                    if (redisCached) {
+                        const parsed = JSON.parse(redisCached);
+                        cacheService.set(cacheKey, parsed, 5 * 60 * 1000); // 存入内存 5 分钟
+                        return parsed;
+                    }
+                } catch (e) {
+                    console.error("Redis get files error:", e.message);
+                }
+            }
         }
         
         this.loading = true;
@@ -200,8 +216,13 @@ export class CloudTool {
                 return new Date(b.ModTime) - new Date(a.ModTime);
             });
 
-            // 缓存 10 分钟
+            // 缓存处理
             cacheService.set(cacheKey, files, 10 * 60 * 1000);
+            if (redis.enabled) {
+                // Redis 缓存 30 分钟，持久化应对重启
+                await redis.set(cacheKey, JSON.stringify(files), 1800).catch(console.error);
+            }
+
             this.loading = false;
             return files;
 

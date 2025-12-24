@@ -34,6 +34,14 @@ jest.unstable_mockModule('../../src/utils/CacheService.js', () => ({
     cacheService: mockCacheService
 }));
 
+jest.unstable_mockModule('../../src/services/redis.js', () => ({
+    redis: {
+        enabled: true,
+        get: jest.fn(),
+        set: jest.fn().mockResolvedValue('OK')
+    }
+}));
+
 // --- Import under test ---
 const { CloudTool } = await import('../../src/services/rclone.js');
 
@@ -230,7 +238,14 @@ describe('CloudTool', () => {
     });
 
     describe('listRemoteFiles', () => {
-        it('should return files and cache them', async () => {
+        beforeEach(() => {
+            mockCacheService.get.mockReturnValue(null);
+        });
+
+        it('should return files and cache them (Multi-level)', async () => {
+            const { redis } = await import('../../src/services/redis.js');
+            redis.get.mockResolvedValue(null);
+
             mockFindByUserId.mockResolvedValue({
                 type: 'drive',
                 config_data: JSON.stringify({ user: 'u', pass: 'p' })
@@ -245,32 +260,49 @@ describe('CloudTool', () => {
             const files = await CloudTool.listRemoteFiles('user123');
             expect(files).toEqual(mockFiles);
             expect(mockCacheService.set).toHaveBeenCalled();
+            expect(redis.set).toHaveBeenCalled();
             
-            // Second call should use cache
+            // Mock memory cache for next call
+            mockCacheService.get.mockReturnValue(mockFiles);
             await CloudTool.listRemoteFiles('user123');
             expect(mockSpawnSync).toHaveBeenCalledTimes(1);
         });
 
+        it('should use Redis cache if memory cache is empty', async () => {
+            const { redis } = await import('../../src/services/redis.js');
+            const mockFiles = [{ name: 'redis-file.txt', IsDir: false, ModTime: '2023-01-01T00:00:00Z' }];
+            redis.get.mockResolvedValue(JSON.stringify(mockFiles));
+
+            const files = await CloudTool.listRemoteFiles('user124');
+            expect(files).toEqual(mockFiles);
+            expect(mockSpawnSync).not.toHaveBeenCalled();
+        });
+
         it('should force refresh when requested', async () => {
+            const { redis } = await import('../../src/services/redis.js');
+            redis.get.mockResolvedValue(null);
             mockFindByUserId.mockResolvedValue({
                 type: 'drive',
                 config_data: JSON.stringify({ user: 'u', pass: 'p' })
             });
             mockSpawnSync.mockReturnValue({ status: 0, stdout: '[]' });
 
-            await CloudTool.listRemoteFiles('user123');
-            await CloudTool.listRemoteFiles('user123', true);
+            await CloudTool.listRemoteFiles('user125');
+            mockCacheService.get.mockReturnValue([]);
+            await CloudTool.listRemoteFiles('user125', true);
             expect(mockSpawnSync).toHaveBeenCalledTimes(2);
         });
 
         it('should handle rclone error and return empty array', async () => {
+            const { redis } = await import('../../src/services/redis.js');
+            redis.get.mockResolvedValue(null);
             mockFindByUserId.mockResolvedValue({
                 type: 'drive',
                 config_data: JSON.stringify({ user: 'u', pass: 'p' })
             });
             mockSpawnSync.mockReturnValue({ status: 1, stderr: 'error' });
 
-            const files = await CloudTool.listRemoteFiles('user123');
+            const files = await CloudTool.listRemoteFiles('user126');
             expect(files).toEqual([]);
         });
     });

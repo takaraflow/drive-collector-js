@@ -252,18 +252,31 @@ export class Dispatcher {
     }
 
     /**
-     * [私有] 处理 /files 命令
+     * [私有] 处理 /files 命令 (优化响应速度)
      */
     static async _handleFilesCommand(target, userId) {
         const drive = await DriveRepository.findByUserId(userId);
         if (!drive) return await this._sendBindHint(target, userId);
 
-        const placeholder = await runBotTaskWithRetry(() => client.sendMessage(target, { message: "⏳ 正在拉取云端文件列表..." }), userId, {}, false, 3);
-        await new Promise(r => setTimeout(r, 100));
+        // 1. 立即响应：发送占位消息或从缓存加载的预览
+        const placeholder = await runBotTaskWithRetry(() => client.sendMessage(target, { 
+            message: "📂 正在加载文件列表..." 
+        }), userId, { priority: PRIORITY.UI }, false, 3);
         
-        const files = await CloudTool.listRemoteFiles(userId);
-        const { text, buttons } = UIHelper.renderFilesPage(files, 0, 6, CloudTool.isLoading());
-        return await safeEdit(target, placeholder.id, text, buttons, userId);
+        // 2. 异步处理：获取文件并更新 UI，不阻塞
+        (async () => {
+            try {
+                // 如果 listRemoteFiles 命中了 Redis 或内存缓存，这里会非常快
+                const files = await CloudTool.listRemoteFiles(userId);
+                const { text, buttons } = UIHelper.renderFilesPage(files, 0, 6, CloudTool.isLoading());
+                await safeEdit(target, placeholder.id, text, buttons, userId);
+                
+                // 如果发现数据是加载中的（例如缓存过期正在后台刷新），可以考虑在这里逻辑
+            } catch (e) {
+                console.error("Files command async error:", e);
+                await safeEdit(target, placeholder.id, "❌ 无法获取文件列表，请稍后重试。", null, userId);
+            }
+        })();
     }
 
     /**
