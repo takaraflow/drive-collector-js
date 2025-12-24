@@ -119,30 +119,76 @@ export class CloudTool {
     }
 
     /**
-     * 上传文件
+     * 批量上传文件 (优化版)
+     * @param {Array} tasks - 任务对象数组
+     * @param {Function} onProgress - 进度回调 (taskId, progressInfo)
      */
-    static async uploadFile(localPath, task, onProgress) {
+    static async uploadBatch(tasks, onProgress) {
+        if (!tasks || tasks.length === 0) return { success: true };
+        
         return new Promise(async (resolve) => {
             try {
-                const conf = await this._getUserConfig(task.userId);
+                // 假设所有任务属于同一用户且目标一致（由调用者确保）
+                const firstTask = tasks[0];
+                const conf = await this._getUserConfig(firstTask.userId);
                 const connectionString = this._getConnectionString(conf);
-                const remotePath = `${connectionString}${config.remoteFolder}/`; 
+                const remotePath = `${connectionString}${config.remoteFolder}/`;
 
-                const args = ["--config", "/dev/null", "copy", localPath, remotePath, "--progress", "--transfers", "4", "--stats", "1s"];
+                // 准备 --files-from 数据 (使用 stdin 传递以支持大量文件且避免路径转义问题)
+                // 注意：rclone copy 的 source 应该是这些文件共同的父目录
+                const commonSourceDir = config.downloadDir;
+                const fileList = tasks.map(t => path.relative(commonSourceDir, t.localPath)).join('\n');
+
+                const args = [
+                    "--config", "/dev/null",
+                    "copy", commonSourceDir, remotePath,
+                    "--files-from-raw", "-",         // 从 stdin 读取文件列表
+                    "--progress",
+                    "--use-json-log",               // 使用 JSON 日志以便精确解析进度
+                    "--transfers", "4",             // 限制同时上传的文件数
+                    "--checkers", "8",
+                    "--retries", "3",               // 增加重试
+                    "--low-level-retries", "10",
+                    "--stats", "1s",
+                    "--buffer-size", "32M"          // 增加缓冲区提升速度
+                ];
+
                 const proc = spawn(rcloneBinary, args, { env: process.env });
-                task.proc = proc;
+                
+                // 将进程关联到所有相关任务，以便统一取消
+                tasks.forEach(t => t.proc = proc);
 
-                let lastLogTime = 0;
                 let errorLog = "";
 
                 proc.stderr.on("data", (data) => {
-                    const log = data.toString();
-                    if (!log.includes("Transferred:") && !log.includes("ETA")) {
-                        errorLog += log;
-                    }
-                    if (onProgress && Date.now() - lastLogTime > 2000) {
-                        lastLogTime = Date.now();
-                        onProgress();
+                    const lines = data.toString().split('\n');
+                    for (const line of lines) {
+                        if (!line.trim()) continue;
+                        try {
+                            const log = JSON.parse(line);
+                            // 解析 rclone JSON 日志中的进度信息
+                            if (log.msg === "Status update" || (log.stats && log.msg.includes("progress"))) {
+                                const stats = log.stats || {};
+                                if (onProgress && stats.transferring) {
+                                    // 匹配每个正在传输的文件到对应的任务
+                                    stats.transferring.forEach(transfer => {
+                                        const task = tasks.find(t => t.localPath.endsWith(transfer.name));
+                                        if (task) {
+                                            onProgress(task.id, {
+                                                percentage: transfer.percentage,
+                                                speed: transfer.speed,
+                                                eta: transfer.eta,
+                                                bytes: transfer.bytes,
+                                                size: transfer.size
+                                            });
+                                        }
+                                    });
+                                }
+                            }
+                        } catch (e) {
+                            // 非 JSON 日志（如普通错误输出）
+                            errorLog += line + "\n";
+                        }
                     }
                 });
 
@@ -151,7 +197,7 @@ export class CloudTool {
                         resolve({ success: true });
                     } else {
                         const finalError = errorLog.slice(-500) || `Rclone exited with code ${code}`;
-                        console.error(`Rclone Error (Task ${task.id}):`, finalError);
+                        console.error(`Rclone Batch Error:`, finalError);
                         resolve({ success: false, error: finalError.trim() });
                     }
                 });
@@ -160,9 +206,23 @@ export class CloudTool {
                     resolve({ success: false, error: err.message });
                 });
 
+                // 写入文件列表到 stdin 并关闭
+                proc.stdin.write(fileList);
+                proc.stdin.end();
+
             } catch (e) {
                 resolve({ success: false, error: e.message });
             }
+        });
+    }
+
+    /**
+     * 上传单个文件 (内部转调 uploadBatch)
+     */
+    static async uploadFile(localPath, task, onProgress) {
+        task.localPath = localPath;
+        return this.uploadBatch([task], (taskId, progress) => {
+            if (onProgress) onProgress(progress);
         });
     }
 

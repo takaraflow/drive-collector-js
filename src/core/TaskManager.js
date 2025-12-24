@@ -14,6 +14,51 @@ import { TaskRepository } from "../repositories/TaskRepository.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 
 /**
+ * 上传聚合器：负责收集已下载完成的任务，并分批触发批量上传
+ */
+class UploadBatcher {
+    constructor(processBatchFn) {
+        this.batches = new Map(); // key: userId_folder -> [tasks]
+        this.processBatchFn = processBatchFn;
+        this.waitWindow = 5000; // 5秒等待窗口
+    }
+
+    /**
+     * 添加任务到聚合池
+     */
+    add(task) {
+        const key = `${task.userId}_${config.remoteFolder}`;
+        if (!this.batches.has(key)) {
+            this.batches.set(key, []);
+            // 开启该分组的计时器
+            setTimeout(() => this.trigger(key), this.waitWindow);
+        }
+        this.batches.get(key).push(task);
+        console.log(`📦 Task ${task.id} added to upload batch ${key} (${this.batches.get(key).length} tasks)`);
+    }
+
+    /**
+     * 触发批量上传
+     */
+    async trigger(key) {
+        const tasks = this.batches.get(key);
+        if (!tasks || tasks.length === 0) return;
+        
+        this.batches.delete(key);
+        console.log(`🚀 Triggering batch upload for ${key} with ${tasks.length} tasks`);
+        
+        try {
+            await this.processBatchFn(tasks);
+        } catch (e) {
+            console.error(`Batch upload failed for ${key}:`, e);
+            tasks.forEach(t => {
+                if (t.onUploadComplete) t.onUploadComplete({ success: false, error: e.message });
+            });
+        }
+    }
+}
+
+/**
  * --- 任务管理调度中心 (TaskManager) ---
  * 负责队列管理、任务恢复、以及具体的下载/上传流程编排
  */
@@ -21,15 +66,26 @@ export class TaskManager {
     static queue = new PQueue({ concurrency: 1 });
     static waitingTasks = [];
     static currentTask = null;
+    
+    // 初始化聚合器
+    static uploadBatcher = new UploadBatcher(async (tasks) => {
+        const result = await CloudTool.uploadBatch(tasks, (tid, progress) => {
+            const targetTask = tasks.find(bt => bt.id === tid);
+            if (targetTask && targetTask.onUploadProgress) {
+                targetTask.onUploadProgress(progress);
+            }
+        });
+        tasks.forEach(bt => {
+            if (bt.onUploadComplete) bt.onUploadComplete(result);
+        });
+    });
 
     /**
      * 初始化：恢复因重启中断的僵尸任务
-     * @returns {Promise<void>}
      */
     static async init() {
         console.log("🔄 正在检查数据库中异常中断的任务...");
         try {
-            // 定义超时阈值：2分钟 (120000ms)
             const tasks = await TaskRepository.findStalledTasks(120000);
             
             if (!tasks || tasks.length === 0) {
@@ -39,7 +95,6 @@ export class TaskManager {
 
             console.log(`📥 发现 ${tasks.length} 个僵尸任务，正在按 Chat 分组批量恢复...`);
             
-            // 按 chat_id 分组以实现批量获取消息
             const chatGroups = new Map();
             for (const row of tasks) {
                 if (!row.chat_id || row.chat_id.includes("Object")) {
@@ -64,13 +119,10 @@ export class TaskManager {
 
     /**
      * [私有] 批量恢复同一个会话下的任务
-     * @param {string} chatId 
-     * @param {Array} rows 
      */
     static async _restoreBatchTasks(chatId, rows) {
         try {
             const sourceMsgIds = rows.map(r => r.source_msg_id);
-            // 批量获取消息：一次 API 调用获取多个消息，恢复任务设为背景优先级
             const messages = await runMtprotoTaskWithRetry(() => client.getMessages(chatId, { ids: sourceMsgIds }), { priority: PRIORITY.BACKGROUND });
             
             const messageMap = new Map();
@@ -97,17 +149,11 @@ export class TaskManager {
 
     /**
      * 添加新任务到队列
-     * @param {string|Object} target - 目标聊天对象
-     * @param {Object} mediaMessage - 包含媒体的 Telegram 消息对象
-     * @param {string} userId - 用户ID
-     * @param {string} customLabel - 自定义标签（用于UI显示）
      */
     static async addTask(target, mediaMessage, userId, customLabel = "") {
         const taskId = randomUUID();
-        // 确保 ID 统一转换为字符串
         const chatIdStr = (target?.userId ?? target?.chatId ?? target?.channelId ?? target?.id ?? target).toString();
 
-        // 1. 发送排队 UI
         const statusMsg = await runBotTaskWithRetry(
             () => client.sendMessage(target, {
                 message: format(STRINGS.task.captured, { label: customLabel }),
@@ -123,7 +169,6 @@ export class TaskManager {
         const info = getMediaInfo(mediaMessage);
 
         try {
-            // 2. 持久化到 DB (使用 Repository)
             await TaskRepository.create({
                 id: taskId,
                 userId: userId.toString(),
@@ -134,33 +179,25 @@ export class TaskManager {
                 fileSize: info?.size
             });
 
-            // 3. 加入内存队列
             const task = this._createTaskObject(taskId, userId, chatIdStr, statusMsg.id, mediaMessage);
             this._enqueueTask(task);
             this.updateQueueUI();
 
         } catch (e) {
             console.error("Task creation failed:", e);
-            // 💥 如果失败，告诉用户
             await client.editMessage(target, { 
                 message: statusMsg.id, 
                 text: STRINGS.task.create_failed
             }).catch(() => {});
         }
-        
     }
 
     /**
      * 批量添加媒体组任务
-     * @param {string|Object} target 
-     * @param {Array} messages 
-     * @param {string} userId 
      */
     static async addBatchTasks(target, messages, userId) {
-        // 确保 ID 统一转换为字符串
         const chatIdStr = (target?.userId ?? target?.chatId ?? target?.channelId ?? target?.id ?? target).toString();
 
-        // 1. 发送该组唯一的共享看板消息
         const statusMsg = await runBotTaskWithRetry(
             () => client.sendMessage(target, {
                 message: format(STRINGS.task.batch_captured, { count: messages.length }),
@@ -173,7 +210,6 @@ export class TaskManager {
             3
         );
 
-        // 2. 批量创建任务，它们将共享同一个 msgId (看板 ID)
         const tasksData = [];
         const taskObjects = [];
 
@@ -192,14 +228,12 @@ export class TaskManager {
             });
 
             const task = this._createTaskObject(taskId, userId, chatIdStr, statusMsg.id, msg);
-            task.isGroup = true; // 标记这是组任务
+            task.isGroup = true;
             taskObjects.push(task);
         }
 
-        // 批量持久化到 DB
         await TaskRepository.createBatch(tasksData);
 
-        // 加入内存队列
         for (const task of taskObjects) {
             this._enqueueTask(task);
         }
@@ -241,26 +275,23 @@ export class TaskManager {
     static async updateQueueUI() {
         for (let i = 0; i < Math.min(this.waitingTasks.length, 5); i++) {
             const task = this.waitingTasks[i];
-            if (task.isGroup) continue; // 组任务的排队状态在看板中显示，无需单独更新
+            if (task.isGroup) continue;
             const newText = format(STRINGS.task.queued, { rank: i + 1 });
             if (task.lastText !== newText) {
                 await updateStatus(task, newText);
                 task.lastText = newText;
-                // 简单的 UI 节流
                 await new Promise(r => setTimeout(r, 1200));
             }
         }
     }
 
     /**
-     * 任务执行核心 Worker (支持媒体组看板)
-     * @param {Object} task 
+     * 任务执行核心 Worker
      */
     static async fileWorker(task) {
         const { message, id } = task;
         if (!message.media) return;
 
-        // 1. 队列管理：从等待列表移除
         this.waitingTasks = this.waitingTasks.filter(t => t.id !== id);
         this.updateQueueUI(); 
 
@@ -268,23 +299,24 @@ export class TaskManager {
         if (!info) return await updateStatus(task, STRINGS.task.parse_failed, true);
 
         const localPath = path.join(config.downloadDir, info.name);
+        task.localPath = localPath;
 
-        /**
-         * 🚀 核心改进：统一的心跳函数
-         * 会根据 task.isGroup 自动选择是更新“单条消息”还是“组看板”
-         */
-        const heartbeat = async (status, downloaded = 0, total = 0) => {
+        let lastUpdate = 0;
+        const heartbeat = async (status, downloaded = 0, total = 0, uploadProgress = null) => {
             if (task.isCancelled) throw new Error("CANCELLED");
             await TaskRepository.updateStatus(task.id, status);
             
             if (task.isGroup) {
-                // 如果是组任务，刷新整个看板
                 await this._refreshGroupMonitor(task, status, downloaded, total);
             } else {
-                // 如果是普通文件，按原样渲染进度条（带文件名）
-                const text = (downloaded > 0) 
-                    ? UIHelper.renderProgress(downloaded, total, status === 'uploading' ? STRINGS.task.uploading : STRINGS.task.downloading, info.name) 
-                    : (status === 'uploading' ? STRINGS.task.uploading : STRINGS.task.downloading);
+                let text;
+                if (status === 'uploading' && uploadProgress) {
+                    text = UIHelper.renderProgress(uploadProgress.bytes, uploadProgress.size, STRINGS.task.uploading, info.name);
+                } else {
+                    text = (downloaded > 0) 
+                        ? UIHelper.renderProgress(downloaded, total, status === 'uploading' ? STRINGS.task.uploading : STRINGS.task.downloading, info.name) 
+                        : (status === 'uploading' ? STRINGS.task.uploading : STRINGS.task.downloading);
+                }
                 await updateStatus(task, text);
             }
         };
@@ -304,34 +336,37 @@ export class TaskManager {
                 return;
             }
 
-            // 3. 下载阶段 - 动态调整下载参数以优化 MTProto 交互
-            // 大于 100MB 的文件使用更大的分片和稍多的并发
+            // 3. 下载阶段
             const isLargeFile = info.size > 100 * 1024 * 1024;
             const downloadOptions = {
                 outputFile: localPath,
-                chunkSize: isLargeFile ? 512 * 1024 : 128 * 1024, // 动态分片
-                workers: isLargeFile ? 3 : 1, // 动态并发
+                chunkSize: isLargeFile ? 512 * 1024 : 128 * 1024,
+                workers: isLargeFile ? 3 : 1,
                 progressCallback: async (downloaded, total) => {
                     const now = Date.now();
-                    // 3秒 UI 节流
                     if (now - lastUpdate > 3000 || downloaded === total) {
                         lastUpdate = now;
-                        // 调用统一心跳
                         await heartbeat('downloading', downloaded, total);
                     }
                 }
             };
 
-            let lastUpdate = 0;
             await runMtprotoFileTaskWithRetry(() => client.downloadMedia(message, downloadOptions));
 
+            // 4. 上传阶段 (使用聚合器)
             if (!task.isGroup) await updateStatus(task, STRINGS.task.uploading);
             await heartbeat('uploading');
-            
-            // 4. 上传阶段
-            const uploadResult = await CloudTool.uploadFile(localPath, task, async () => {
-                // 上传中的心跳 (没有字节级进度，仅报 status)
-                await heartbeat('uploading'); 
+
+            const uploadResult = await new Promise(async (resolve) => {
+                task.onUploadComplete = (result) => resolve(result);
+                task.onUploadProgress = async (progress) => {
+                    const now = Date.now();
+                    if (now - lastUpdate > 3000) {
+                        lastUpdate = now;
+                        await heartbeat('uploading', 0, 0, progress);
+                    }
+                };
+                this.uploadBatcher.add(task);
             });
 
             // 5. 结果处理
@@ -344,17 +379,14 @@ export class TaskManager {
                 await TaskRepository.updateStatus(task.id, finalStatus);
 
                 if (task.isGroup) {
-                    // 组任务：更新看板为最终态
                     await this._refreshGroupMonitor(task, finalStatus);
                 } else {
-                    // 普通任务：发成功/失败消息
                     const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
                     const fileNameHtml = `<a href="${fileLink}">${info.name}</a>`;
                     const baseText = isOk 
                         ? STRINGS.task.success.replace('{{name}}', fileNameHtml).replace('{{folder}}', config.remoteFolder)
                         : STRINGS.task.failed_validation.replace('{{name}}', fileNameHtml);
-                    const text = baseText;
-                    await updateStatus(task, text, true);
+                    await updateStatus(task, baseText, true);
                 }
             } else {
                 await TaskRepository.updateStatus(task.id, 'failed', uploadResult.error || "Upload failed");
@@ -383,24 +415,16 @@ export class TaskManager {
 
     /**
      * 取消指定任务
-     * @param {string} taskId 
-     * @param {string} userId - 请求发起人的ID
-     * @returns {Promise<boolean>}
      */
     static async cancelTask(taskId, userId) {
-        // 1. 权限校验
         const dbTask = await TaskRepository.findById(taskId);
         if (!dbTask) return false;
 
         const isOwner = dbTask.user_id === userId.toString();
         const canCancelAny = await AuthGuard.can(userId, "task:cancel:any");
         
-        if (!isOwner && !canCancelAny) {
-            console.warn(`User ${userId} tried to cancel task ${taskId} (owned by ${dbTask.user_id})`);
-            return false;
-        }
+        if (!isOwner && !canCancelAny) return false;
 
-        // 2. 内存操作 (杀进程)
         const task = this.waitingTasks.find(t => t.id.toString() === taskId) || 
                      (this.currentTask && this.currentTask.id.toString() === taskId ? this.currentTask : null);
         
@@ -410,15 +434,11 @@ export class TaskManager {
             this.waitingTasks = this.waitingTasks.filter(t => t.id.toString() !== taskId);
         }
 
-        // 3. DB 状态更新
         await TaskRepository.markCancelled(taskId);
         return true;
     }
 
-    // 🆕 UI 节流锁：防止看板更新太快导致 Telegram API 限流
     static monitorLocks = new Map();
-    
-    // 🆕 并发调整定时器
     static autoScalingInterval = null;
 
     /**
@@ -426,33 +446,17 @@ export class TaskManager {
      */
     static startAutoScaling() {
         if (this.autoScalingInterval) return;
-        
-        // 直接导入 limiter 模块
         import('../utils/limiter.js').then((limiterModule) => {
             this.autoScalingInterval = setInterval(() => {
                 try {
-                    const botGlobalLimiter = limiterModule.botGlobalLimiter;
-                    const mtprotoLimiter = limiterModule.mtprotoLimiter;
-                    const mtprotoFileLimiter = limiterModule.mtprotoFileLimiter;
-                    
-                    // 手动触发并发数调整
-                    if (botGlobalLimiter && botGlobalLimiter.adjustConcurrency) {
-                        botGlobalLimiter.adjustConcurrency();
-                    }
-                    
-                    if (mtprotoLimiter && mtprotoLimiter.adjustConcurrency) {
-                        mtprotoLimiter.adjustConcurrency();
-                    }
-                    
-                    if (mtprotoFileLimiter && mtprotoFileLimiter.adjustConcurrency) {
-                        mtprotoFileLimiter.adjustConcurrency();
-                    }
+                    const { botGlobalLimiter, mtprotoLimiter, mtprotoFileLimiter } = limiterModule;
+                    if (botGlobalLimiter?.adjustConcurrency) botGlobalLimiter.adjustConcurrency();
+                    if (mtprotoLimiter?.adjustConcurrency) mtprotoLimiter.adjustConcurrency();
+                    if (mtprotoFileLimiter?.adjustConcurrency) mtprotoFileLimiter.adjustConcurrency();
                 } catch (error) {
                     console.error('Auto-scaling adjustment error:', error.message);
                 }
-            }, 30000); // 每30秒检查一次
-        }).catch(error => {
-            console.error('Failed to load limiter module for auto-scaling:', error.message);
+            }, 30000);
         });
     }
 
@@ -471,8 +475,6 @@ export class TaskManager {
      */
     static async _refreshGroupMonitor(task, status, downloaded = 0, total = 0) {
         const msgId = task.msgId;
-        
-        // UI 节流：每 2.5 秒才允许编辑一次看板
         const lastUpdate = this.monitorLocks.get(msgId) || 0;
         const now = Date.now();
         const isFinal = status === 'completed' || status === 'failed';
@@ -480,28 +482,20 @@ export class TaskManager {
         if (!isFinal && now - lastUpdate < 2500) return;
         this.monitorLocks.set(msgId, now);
 
-        // 1. 拉取该看板下的所有任务状态
         const groupTasks = await TaskRepository.findByMsgId(msgId);
         if (!groupTasks.length) return;
 
-        // 2. 调用 UI 模板生成看板文本
         const { text } = UIHelper.renderBatchMonitor(groupTasks, task, status, downloaded, total);
         
-        // 3. 执行安全编辑
         try {
-            // 修正编辑逻辑：确保 chatId 是 BigInt 或正确格式
-            // 如果 task.chatId 是字符串，尝试转回 BigInt
             let peer = task.chatId;
-            if (typeof peer === 'string' && /^-?\d+$/.test(peer)) {
-                peer = BigInt(peer);
-            }
+            if (typeof peer === 'string' && /^-?\d+$/.test(peer)) peer = BigInt(peer);
             await client.editMessage(peer, {
                message: parseInt(task.msgId),
                text: text,
                parseMode: "html"
            });
        } catch (e) {
-           // 🚨 至少在测试阶段，打印出这个错误，看看是不是 API 限流了
            console.error(`[Monitor Update Error] msgId ${msgId}:`, e.message);
        }
     }
