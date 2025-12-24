@@ -8,7 +8,7 @@ import { client } from "../services/telegram.js";
 import { CloudTool } from "../services/rclone.js";
 import { UIHelper } from "../ui/templates.js";
 import { getMediaInfo, updateStatus } from "../utils/common.js";
-import { runBotTask, runMtprotoTask } from "../utils/limiter.js";
+import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, runMtprotoFileTaskWithRetry } from "../utils/limiter.js";
 import { AuthGuard } from "../modules/AuthGuard.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
@@ -60,7 +60,7 @@ export class TaskManager {
                 return;
             }
 
-            const messages = await runMtprotoTask(() => client.getMessages(row.chat_id, { ids: [row.source_msg_id] }));
+            const messages = await runMtprotoTaskWithRetry(() => client.getMessages(row.chat_id, { ids: [row.source_msg_id] }));
             const message = messages[0];
 
             if (!message || !message.media) {
@@ -92,12 +92,15 @@ export class TaskManager {
         const chatIdStr = (target?.userId ?? target?.chatId ?? target?.channelId ?? target?.id ?? target).toString();
 
         // 1. 发送排队 UI
-        const statusMsg = await runBotTask(
+        const statusMsg = await runBotTaskWithRetry(
             () => client.sendMessage(target, {
                 message: format(STRINGS.task.captured, { label: customLabel }),
                 buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_${taskId}`))]
             }),
-            userId
+            userId,
+            {},
+            false,
+            3
         );
 
         const info = getMediaInfo(mediaMessage);
@@ -141,13 +144,16 @@ export class TaskManager {
         const chatIdStr = (target?.userId ?? target?.chatId ?? target?.channelId ?? target?.id ?? target).toString();
 
         // 1. 发送该组唯一的共享看板消息
-        const statusMsg = await runBotTask(
+        const statusMsg = await runBotTaskWithRetry(
             () => client.sendMessage(target, {
                 message: format(STRINGS.task.batch_captured, { count: messages.length }),
                 buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_batch_${messages[0].groupedId}`))],
                 parseMode: "markdown"
             }),
-            userId
+            userId,
+            {},
+            false,
+            3
         );
 
         // 2. 循环创建任务，它们将共享同一个 msgId (看板 ID)
@@ -273,7 +279,7 @@ export class TaskManager {
 
             // 3. 下载阶段
             let lastUpdate = 0;
-            await runMtprotoTask(() => client.downloadMedia(message, {
+            await runMtprotoFileTaskWithRetry(() => client.downloadMedia(message, {
                     outputFile: localPath,
                     chunkSize: 1024 * 1024,
                     workers: 1,

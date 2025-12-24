@@ -2,7 +2,7 @@ import { Button } from "telegram/tl/custom/button.js";
 import { SessionManager } from "./SessionManager.js";
 import { client } from "../services/telegram.js";
 import { CloudTool } from "../services/rclone.js";
-import { runBotTask, runMtprotoTask, PRIORITY } from "../utils/limiter.js";
+import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 
@@ -44,7 +44,7 @@ export class DriveConfigFlow {
                 Button.inline(STRINGS.drive.btn_bind_mega, Buffer.from("drive_bind_mega")) 
             ]);
         }
-        await runBotTask(() => client.sendMessage(chatId, { message, buttons }), userId);
+        await runBotTaskWithRetry(() => client.sendMessage(chatId, { message, buttons }), userId, {}, false, 3);
     }
 
     /**
@@ -57,7 +57,7 @@ export class DriveConfigFlow {
         const data = event.data.toString();
 
         if (data === "drive_unbind_confirm") {
-            await runBotTask(() => client.editMessage(event.userId, {
+            await runBotTaskWithRetry(() => client.editMessage(event.userId, {
                     message: event.msgId,
                     text: STRINGS.drive.unbind_confirm,
                     buttons: [
@@ -66,7 +66,7 @@ export class DriveConfigFlow {
                             Button.inline(STRINGS.drive.btn_cancel, Buffer.from("drive_manager_back"))
                         ]
                     ]
-                }), userId);
+                }), userId, {}, false, 3);
             return STRINGS.drive.please_confirm;
         }
 

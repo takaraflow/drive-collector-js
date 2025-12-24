@@ -11,7 +11,7 @@ import { CloudTool } from "../services/rclone.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { safeEdit } from "../utils/common.js";
-import { runBotTask } from "../utils/limiter.js";
+import { runBotTask, runBotTaskWithRetry } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 
 /**
@@ -84,13 +84,13 @@ export class Dispatcher {
             if (mode !== 'public') {
                 const text = "🚧 **系统维护中**\n\n当前 Bot 仅限管理员使用，请稍后访问。";
                 if (isCallback) {
-                    await runBotTask(() => client.invoke(new Api.messages.SetBotCallbackAnswer({
+                    await runBotTaskWithRetry(() => client.invoke(new Api.messages.SetBotCallbackAnswer({
                         queryId: event.queryId,
                         message: "🚧 系统维护中",
                         alert: true
-                    })).catch(() => {}), userId);
+                    })).catch(() => {}), userId, {}, false, 3);
                 } else if (target) {
-                    await runBotTask(() => client.sendMessage(target, { message: text }), userId);
+                    await runBotTaskWithRetry(() => client.sendMessage(target, { message: text }), userId, {}, false, 3);
                 }
                 return false; // 拦截
             }
@@ -103,10 +103,10 @@ export class Dispatcher {
      */
     static async _handleCallback(event, { userId }) {
         const data = event.data.toString();
-        const answer = (msg = "") => runBotTask(() => client.invoke(new Api.messages.SetBotCallbackAnswer({
+        const answer = (msg = "") => runBotTaskWithRetry(() => client.invoke(new Api.messages.SetBotCallbackAnswer({
             queryId: event.queryId,
             message: msg
-        })).catch(() => {}), userId);
+        })).catch(() => {}), userId, {}, false, 3);
 
         if (data.startsWith("cancel_")) {
             const taskId = data.split("_")[1];
@@ -185,19 +185,19 @@ export class Dispatcher {
                     const drive = await DriveRepository.findByUserId(userId);
                     if (!drive) return await this._sendBindHint(target, userId);
 
-                    if (toProcess.length > 10) await runBotTask(() => client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` }), userId);
+                    if (toProcess.length > 10) await runBotTaskWithRetry(() => client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` }), userId, {}, false, 3);
                     for (const msg of toProcess.slice(0, 10)) await TaskManager.addTask(target, msg, userId, "链接");
                     return;
                 }
             } catch (e) {
-                return await runBotTask(() => client.sendMessage(target, { message: `❌ ${e.message}` }), userId);
+                return await runBotTaskWithRetry(() => client.sendMessage(target, { message: `❌ ${e.message}` }), userId, {}, false, 3);
             }
 
             // 4. 通用兜底回复：
             // 如果是纯文本消息（包括未匹配的命令），且未被上述逻辑处理，则发送欢迎语。
-            return await runBotTask(() => client.sendMessage(target, { 
+            return await runBotTaskWithRetry(() => client.sendMessage(target, { 
                 message: STRINGS.system.welcome
-            }), userId);
+            }), userId, {}, false, 3);
         }
 
         // 5. 处理带媒体的消息 (文件/视频/图片)
@@ -240,7 +240,7 @@ export class Dispatcher {
         const drive = await DriveRepository.findByUserId(userId);
         if (!drive) return await this._sendBindHint(target, userId);
 
-        const placeholder = await runBotTask(() => client.sendMessage(target, { message: "⏳ 正在拉取云端文件列表..." }), userId);
+        const placeholder = await runBotTaskWithRetry(() => client.sendMessage(target, { message: "⏳ 正在拉取云端文件列表..." }), userId, {}, false, 3);
         await new Promise(r => setTimeout(r, 100));
         
         const files = await CloudTool.listRemoteFiles(userId);
@@ -252,8 +252,8 @@ export class Dispatcher {
      * [私有] 发送绑定提示
      */
     static async _sendBindHint(target, userId) {
-        return await runBotTask(() => client.sendMessage(target, { 
+        return await runBotTaskWithRetry(() => client.sendMessage(target, { 
             message: STRINGS.drive.no_drive_found
-        }), userId);
+        }), userId, {}, false, 3);
     }
 }

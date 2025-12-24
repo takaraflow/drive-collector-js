@@ -1,6 +1,6 @@
 import { Button } from "telegram/tl/custom/button.js";
 import { client } from "../services/telegram.js";
-import { runBotTask } from "./limiter.js";
+import { runBotTask, runBotTaskWithRetry } from "./limiter.js";
 import { STRINGS } from "../locales/zh-CN.js";
 
 /**
@@ -10,9 +10,12 @@ import { STRINGS } from "../locales/zh-CN.js";
 // 安全编辑消息，统一处理异常
 export const safeEdit = async (chatId, msgId, text, buttons = null, userId = null) => {
     try {
-        await runBotTask(
+        await runBotTaskWithRetry(
             () => client.editMessage(chatId, { message: msgId, text, buttons, parseMode: "markdown" }).catch(() => {}),
-            userId
+            userId,
+            {},
+            false,
+            3
         );
     } catch (e) {}
 };
