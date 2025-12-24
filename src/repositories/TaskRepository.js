@@ -18,12 +18,15 @@ export class TaskRepository {
 
     /**
      * 将积压的更新批量写入数据库
+     * 每次最多处理 50 条，防止并发请求过多阻塞网络导致 Telegram 连接断开
      */
     static async flushUpdates() {
         if (this.pendingUpdates.size === 0) return;
 
-        // 创建快照，暂不清除 pendingUpdates 以防发送失败导致数据丢失
-        const updatesToFlush = Array.from(this.pendingUpdates.values());
+        // 获取待处理的任务列表
+        const allUpdates = Array.from(this.pendingUpdates.values());
+        // 限制每次只处理前 50 条 (流量控制)
+        const updatesToFlush = allUpdates.slice(0, 50);
         
         const now = Date.now();
         const statements = updatesToFlush.map(u => ({
@@ -32,18 +35,33 @@ export class TaskRepository {
         }));
 
         try {
-            await d1.batch(statements);
+            // 使用新版 batch，返回结果数组
+            const results = await d1.batch(statements);
             
-            // 发送成功后，清除已发送的更新
-            // 注意：需检查引用是否一致，防止清除期间产生的新更新被误删
-            for (const u of updatesToFlush) {
-                const current = this.pendingUpdates.get(u.taskId);
-                if (current === u) {
-                    this.pendingUpdates.delete(u.taskId);
+            // 遍历结果，只清除已处理的任务
+            results.forEach((res, index) => {
+                const update = updatesToFlush[index];
+                
+                if (!res.success) {
+                    console.error(`Task flush failed for ${update.taskId}:`, res.error);
                 }
+
+                // 无论成功还是失败，都从队列中移除，防止毒丸(poison pill)效应导致无限循环
+                // 注意：需检查引用是否一致，防止清除期间产生的新更新被误删
+                const current = this.pendingUpdates.get(update.taskId);
+                if (current === update) {
+                    this.pendingUpdates.delete(update.taskId);
+                }
+            });
+            
+            // 如果还有剩余任务，立即安排下一次刷新，而不是等待 10s
+            if (this.pendingUpdates.size > 0) {
+                setTimeout(() => this.flushUpdates(), 1000);
             }
+
         } catch (error) {
-            console.error("TaskRepository.flushUpdates failed:", error);
+            // 如果 batch 本身抛出异常（极少见，因为我们用了 Promise.allSettled）
+            console.error("TaskRepository.flushUpdates critical error:", error);
         }
     }
 

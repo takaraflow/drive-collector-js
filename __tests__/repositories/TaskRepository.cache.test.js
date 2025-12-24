@@ -3,7 +3,10 @@ import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 // Mock services/d1.js
 const mockD1 = {
     run: jest.fn(),
-    batch: jest.fn().mockResolvedValue(true)
+    // Mock return value must match the new batch implementation (array of result objects)
+    batch: jest.fn().mockImplementation(async (statements) => {
+        return statements.map(() => ({ success: true, result: {} }));
+    })
 };
 jest.unstable_mockModule("../../src/services/d1.js", () => ({
     d1: mockD1

@@ -64,11 +64,17 @@ class D1Service {
      */
     async batch(statements) {
         // statements 格式为 [{ sql: string, params: [] }, ...]
-        // 使用 Promise.all 并发执行所有语句
-        // 虽然失去了事务性，但保证了 HTTP API 的兼容性
-        return await Promise.all(statements.map(stmt => 
+        // 使用 Promise.allSettled 并发执行所有语句，防止单点故障阻塞整个批次
+        const results = await Promise.allSettled(statements.map(stmt => 
             this._execute(stmt.sql, stmt.params)
         ));
+
+        // 格式化返回结果：[{ success: true, result: ... }, { success: false, error: ... }]
+        return results.map(r => 
+            r.status === 'fulfilled' 
+                ? { success: true, result: r.value } 
+                : { success: false, error: r.reason }
+        );
     }
 }
 
