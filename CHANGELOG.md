@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [2.2.1](https://github.com/YoungSx/drive-collector-js/compare/v2.2.0...v2.2.1) (2025-12-24)
+
+
+### 🐛 问题修复
+
+* **状态显示**: 修复了在没有等待任务时，系统状态面板中“等待中的任务”数量错误显示为占位符的问题。
+
 ## [2.2.0](https://github.com/YoungSx/drive-collector-js/compare/v2.1.4...v2.2.0) (2025-12-24)
 
 
