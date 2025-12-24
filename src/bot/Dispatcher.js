@@ -175,6 +175,8 @@ export class Dispatcher {
                     return await DriveConfigFlow.handleUnbind(target, userId);
                 case "/files":
                     return await this._handleFilesCommand(target, userId);
+                case "/status":
+                    return await this._handleStatusCommand(target, userId, text);
                 // 更多命令可在此添加...
             }
 
@@ -246,6 +248,126 @@ export class Dispatcher {
         const files = await CloudTool.listRemoteFiles(userId);
         const { text, buttons } = UIHelper.renderFilesPage(files, 0, 6, CloudTool.isLoading());
         return await safeEdit(target, placeholder.id, text, buttons, userId);
+    }
+
+    /**
+     * [私有] 处理 /status 命令
+     */
+    static async _handleStatusCommand(target, userId, fullText) {
+        const parts = fullText.split(' ');
+        const subCommand = parts.length > 1 ? parts[1].toLowerCase() : 'general';
+        
+        let message = '';
+        let buttons = null;
+        
+        switch (subCommand) {
+            case 'queue':
+                message = this._getQueueStatus();
+                break;
+            case 'user':
+                message = await this._getUserStatus(userId);
+                break;
+            case 'general':
+            default:
+                message = await this._getGeneralStatus(userId);
+        }
+        
+        return await runBotTaskWithRetry(() => client.sendMessage(target, { 
+            message: message,
+            buttons: buttons,
+            parseMode: "markdown"
+        }), userId, {}, false, 3);
+    }
+
+    /**
+     * [私有] 获取队列状态
+     */
+    static _getQueueStatus() {
+        const waitingCount = TaskManager.waitingTasks.length;
+        const currentTask = TaskManager.currentTask;
+        
+        let status = format(STRINGS.status.header, {}) + '\n\n';
+        status += format(STRINGS.status.queue_title, {}) + '\n';
+        status += format(STRINGS.status.waiting_tasks, { count: waitingCount }) + '\n';
+        status += format(STRINGS.status.current_task, { count: currentTask ? '1' : '0' }) + '\n';
+        
+        if (currentTask) {
+            status += '\n' + format(STRINGS.status.current_file, { name: currentTask.fileName }) + '\n';
+        }
+        
+        return status;
+    }
+
+    /**
+     * [私有] 获取用户状态
+     */
+    static async _getUserStatus(userId) {
+        // 获取用户的任务历史
+        const tasks = await TaskRepository.findByUserId(userId, 10); // 获取最近10个任务
+        
+        let status = format(STRINGS.status.user_history, {}) + '\n\n';
+        
+        if (!tasks || tasks.length === 0) {
+            status += STRINGS.status.no_tasks;
+            return status;
+        }
+        
+        tasks.forEach((task, index) => {
+            const taskStatus = task.status === 'completed' ? '✅' : 
+                              task.status === 'failed' ? '❌' : 
+                              task.status === 'cancelled' ? '🚫' : '🔄';
+            const statusText = task.status === 'completed' ? '完成' : 
+                              task.status === 'failed' ? '失败' : 
+                              task.status === 'cancelled' ? '已取消' : '处理中';
+            status += format(STRINGS.status.task_item, {
+                index: index + 1,
+                status: taskStatus,
+                name: task.file_name || '未知文件',
+                statusText: statusText
+            }) + '\n';
+        });
+        
+        return status;
+    }
+
+    /**
+     * [私有] 获取通用状态
+     */
+    static async _getGeneralStatus(userId) {
+        const drive = await DriveRepository.findByUserId(userId);
+        const waitingCount = TaskManager.waitingTasks.length;
+        const currentTask = TaskManager.currentTask;
+        
+        let status = format(STRINGS.status.header, {}) + '\n\n';
+        
+        // 网盘状态
+        status += format(STRINGS.status.drive_status, {
+            status: drive ? `✅ 已绑定 (${drive.type})` : '❌ 未绑定'
+        }) + '\n\n';
+        
+        // 队列状态
+        status += format(STRINGS.status.queue_title, {}) + '\n';
+        status += format(STRINGS.status.waiting_tasks, { count: waitingCount }) + '\n';
+        status += format(STRINGS.status.current_task, { count: currentTask ? '1' : '0' }) + '\n';
+        
+        // 系统信息
+        status += '\n' + format(STRINGS.status.system_info, {}) + '\n';
+        status += format(STRINGS.status.uptime, { uptime: this._getUptime() }) + '\n';
+        status += format(STRINGS.status.service_status, { status: '✅ 正常' });
+        
+        return status;
+    }
+
+    /**
+     * [私有] 获取运行时间
+     */
+    static _getUptime() {
+        const uptime = process.uptime();
+        const hours = Math.floor(uptime / 3600);
+        const minutes = Math.floor((uptime % 3600) / 60);
+        const seconds = Math.floor(uptime % 60);
+        
+        return `${hours}h ${minutes}m ${seconds}s`;
     }
 
     /**

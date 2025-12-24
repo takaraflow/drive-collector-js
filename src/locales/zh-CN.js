@@ -4,7 +4,7 @@ export const STRINGS = {
         startup: "🚀 Telegram 客户端已连接",
         maintenance_mode: "🚧 **系统维护中**\n\n当前 Bot 仅限管理员使用，请稍后访问。",
         maintenance_alert: "🚧 系统维护中",
-        welcome: "👋 **欢迎使用云转存助手**\n\n可以直接发送文件或链接给我，我会帮您转存。\n\n/drive 🔐 绑定网盘\n/files 📁 浏览文件",
+        welcome: "👋 **欢迎使用云转存助手**\n\n可以直接发送文件或链接给我，我会帮您转存。\n\n/drive 🔐 绑定网盘\n/files 📁 浏览文件\n/status 📊 查看系统状态",
         unknown_error: "❌ 发生未知错误，请稍后重试。",
         // 🆕 新增
         node_service_active: "Node Service Active",
@@ -92,6 +92,22 @@ export const STRINGS = {
         btn_refresh: "🔄 刷新",
         btn_next: "下一页 ➡️",
         btn_end: "⏭️",
+    },
+
+    // --- 状态相关 ---
+    status: {
+        header: "📊 **系统状态**",
+        queue_title: "📦 任务队列",
+        waiting_tasks: "🕒 等待中的任务: {{count}}",
+        current_task: "🔄 当前正在处理: {{count}}",
+        current_file: "📄 当前任务: `{{name}}`",
+        user_history: "👤 您的任务历史",
+        no_tasks: "尚无任务记录。",
+        task_item: "{{index}}. {{status}} `{{name}}` ({{statusText}})",
+        drive_status: "🔐 网盘绑定: {{status}}",
+        system_info: "💻 系统信息",
+        uptime: "⏱️ 运行时间: {{uptime}}",
+        service_status: "📡 服务状态: {{status}}",
     }
 };
 
