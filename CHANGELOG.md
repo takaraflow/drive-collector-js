@@ -2,7 +2,12 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
-### [2.1.3](https://github.com/YoungSx/drive-collector-js/compare/v2.1.2...v2.1.3) (2025-12-24)
+### [2.1.4](https://github.com/YoungSx/drive-collector-js/compare/v2.1.2...v2.1.4) (2025-12-24)
+
+### 🐛 问题修复
+* **文件列表服务**: 修复了 Rclone `lsjson` 在目录不存在时报错的问题，增强了路径检测的鲁棒性。
+* **分发器逻辑**: 解决了 `Dispatcher` 中 `PRIORITY` 变量未定义的 ReferenceError，恢复了 `/files` 命令的正常响应。
+* **单元测试**: 修复了 `TaskManager` 和 `CloudTool` 的多个单元测试用例，提高了测试套件的稳定性。
 
 ### [2.1.2](https://github.com/YoungSx/drive-collector-js/compare/v2.1.1...v2.1.2) (2025-12-24)
 
