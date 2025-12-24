@@ -28,10 +28,10 @@ async function main() {
     console.log(`Current version: ${oldVersion}`);
 
     // 3. 执行 standard-version
-    // 注意：这里我们只生成，不自动 commit，以便 AI 可以修改 CHANGELOG
-    console.log('🚀 Running standard-version...');
-    // 如果用户手动改了 package.json 的大版本号，standard-version 会识别并更新 tag
-    exec('npx standard-version');
+    // 注意：这里我们跳过 commit 和 tag，以便 AI 可以修改 CHANGELOG 后再进行统一提交
+    console.log('🚀 Running standard-version (dry run)...');
+    // --skip.commit --skip.tag 允许我们手动控制提交时机
+    exec('npx standard-version --skip.commit --skip.tag');
 
     // 4. 获取更新后的版本号
     const newPkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
@@ -51,7 +51,9 @@ async function main() {
       console.log('请 AI 润色 CHANGELOG.md 中新增的条目，确保其为通俗易懂的中文业务描述。');
     }
 
-    console.log('\n完成后，请手动或由 AI 执行: git add . && git commit --amend --no-edit && git tag -f v' + newVersion);
+    console.log('\n完成后，请由 AI 根据本次变动总结 Commit 信息（英文）并打标签：');
+    console.log(`git add . && git commit -m "<type>: <summary in English>" && git tag v${newVersion}`);
+    console.log('⚠️ 注意：Commit 信息中绝对不要包含版本号，且必须使用英文。');
     
   } catch (error) {
     console.error('❌ Release 失败:', error.message);

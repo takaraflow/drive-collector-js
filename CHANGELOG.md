@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [2.1.2](https://github.com/YoungSx/drive-collector-js/compare/v2.1.1...v2.1.2) (2025-12-24)
+
+### 🔧 规则优化
+* **发布流程革新**: 优化 AI 版本管理规则，实现版本号与 Commit 信息解耦。
+* **自动化脚本升级**: 调整 `release-ai` 脚本，支持静默生成与 AI 驱动的总结性提交。
+
 ### [2.1.1](https://github.com/YoungSx/drive-collector-js/compare/v2.1.0...v2.1.1) (2025-12-24)
 
 ### ✨ 核心功能
