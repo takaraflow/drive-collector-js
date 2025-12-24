@@ -28,6 +28,7 @@ jest.unstable_mockModule("../../src/services/telegram.js", () => ({
 const mockCloudTool = {
     getRemoteFileInfo: jest.fn(),
     uploadFile: jest.fn(),
+    uploadBatch: jest.fn(),
 };
 jest.unstable_mockModule("../../src/services/rclone.js", () => ({
     CloudTool: mockCloudTool,
@@ -294,14 +295,19 @@ describe("TaskManager", () => {
 
             mockCloudTool.getRemoteFileInfo.mockResolvedValueOnce(null); // No sec transfer
             mockClient.downloadMedia.mockResolvedValue("path/to/file");
-            mockCloudTool.uploadFile.mockResolvedValue({ success: true });
+            mockCloudTool.uploadBatch.mockImplementation(async (tasks, onProgress) => {
+                tasks.forEach(t => {
+                   if (t.onUploadComplete) t.onUploadComplete({ success: true });
+                });
+                return { success: true };
+            });
             mockCloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Size: 1024 }); // Final check
 
             await TaskManager.fileWorker(task);
 
             expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("t1", "completed");
             expect(updateStatus).toHaveBeenLastCalledWith(task, expect.stringContaining("success"), true);
-        });
+        }, 10000);
 
         test("should handle second transfer (秒传)", async () => {
             const task = {

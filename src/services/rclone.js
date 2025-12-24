@@ -68,8 +68,8 @@ export class CloudTool {
      * 辅助方法：构造安全的连接字符串
      */
     static _getConnectionString(conf) {
-        const user = conf.user.replace(/"/g, '\\"');
-        const pass = conf.pass.replace(/"/g, '\\"');
+        const user = (conf.user || "").replace(/"/g, '\\"');
+        const pass = (conf.pass || "").replace(/"/g, '\\"');
         return `:${conf.type},user="${user}",pass="${pass}":`;
     }
 
@@ -136,8 +136,8 @@ export class CloudTool {
 
                 // 准备 --files-from 数据 (使用 stdin 传递以支持大量文件且避免路径转义问题)
                 // 注意：rclone copy 的 source 应该是这些文件共同的父目录
-                const commonSourceDir = config.downloadDir;
-                const fileList = tasks.map(t => path.relative(commonSourceDir, t.localPath)).join('\n');
+                const commonSourceDir = config.downloadDir || "/tmp/downloads";
+                const fileList = tasks.map(t => path.relative(commonSourceDir, t.localPath || "")).join('\n');
 
                 const args = [
                     "--config", "/dev/null",
@@ -263,7 +263,14 @@ export class CloudTool {
             });
 
             if (ret.error) throw ret.error;
-            if (ret.status !== 0) throw new Error(`Rclone lsjson failed: ${ret.stderr}`);
+            if (ret.status !== 0) {
+                if (ret.stderr && ret.stderr.includes("directory not found")) {
+                    console.warn("Rclone directory not found, returning empty list.");
+                    this.loading = false;
+                    return [];
+                }
+                throw new Error(`Rclone lsjson failed: ${ret.stderr}`);
+            }
 
             let files = JSON.parse(ret.stdout || "[]");
             if (!Array.isArray(files)) files = [];

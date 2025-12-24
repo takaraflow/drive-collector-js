@@ -169,14 +169,17 @@ describe('CloudTool', () => {
     });
 
     describe('uploadFile', () => {
-        it('should handle successful upload', async () => {
+        beforeEach(() => {
             mockFindByUserId.mockResolvedValue({
                 type: 'drive',
                 config_data: JSON.stringify({ user: 'u', pass: 'p' })
             });
+        });
 
+        it('should handle successful upload', async () => {
             const mockProc = new EventEmitter();
             mockProc.stderr = new EventEmitter();
+            mockProc.stdin = { write: jest.fn(), end: jest.fn() };
             mockSpawn.mockReturnValue(mockProc);
 
             const task = { userId: 'user123', id: 'task1' };
@@ -192,13 +195,9 @@ describe('CloudTool', () => {
         });
 
         it('should handle upload failure and return error log', async () => {
-            mockFindByUserId.mockResolvedValue({
-                type: 'drive',
-                config_data: JSON.stringify({ user: 'u', pass: 'p' })
-            });
-
             const mockProc = new EventEmitter();
             mockProc.stderr = new EventEmitter();
+            mockProc.stdin = { write: jest.fn(), end: jest.fn() };
             mockSpawn.mockReturnValue(mockProc);
 
             const promise = CloudTool.uploadFile('/local/path', { userId: 'user123' });
@@ -214,20 +213,31 @@ describe('CloudTool', () => {
         });
 
         it('should trigger onProgress callback', async () => {
-            mockFindByUserId.mockResolvedValue({
-                type: 'drive',
-                config_data: JSON.stringify({ user: 'u', pass: 'p' })
-            });
-
             const mockProc = new EventEmitter();
             mockProc.stderr = new EventEmitter();
+            mockProc.stdin = { write: jest.fn(), end: jest.fn() };
             mockSpawn.mockReturnValue(mockProc);
 
             const onProgress = jest.fn();
             const promise = CloudTool.uploadFile('/local/path', { userId: 'user123' }, onProgress);
 
             setTimeout(() => {
-                mockProc.stderr.emit('data', Buffer.from('Transferred: 10%'));
+                const log = {
+                    msg: "Status update",
+                    stats: {
+                        transferring: [
+                            {
+                                name: "path",
+                                percentage: 10,
+                                speed: 100,
+                                eta: 10,
+                                bytes: 1024,
+                                size: 10240
+                            }
+                        ]
+                    }
+                };
+                mockProc.stderr.emit('data', Buffer.from(JSON.stringify(log) + '\n'));
                 mockProc.emit('close', 0);
             }, 10);
 

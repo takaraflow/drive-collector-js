@@ -11,7 +11,7 @@ import { CloudTool } from "../services/rclone.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { safeEdit, escapeHTML } from "../utils/common.js";
-import { runBotTask, runBotTaskWithRetry } from "../utils/limiter.js";
+import { runBotTask, runBotTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 import fs from "fs";
 import path from "path";
