@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.2.0](https://github.com/YoungSx/drive-collector-js/compare/v2.1.4...v2.2.0) (2025-12-24)
+
+
+### ✨ 用户体验
+* **欢迎消息**: 优化欢迎消息的排版格式，提升命令列表的可读性。
+
+### 🛡️ 稳定性
+* **数据库**: 优化 D1 数据库批量操作的错误处理逻辑，提升数据操作的可靠性。
+
 ### [2.1.4](https://github.com/YoungSx/drive-collector-js/compare/v2.1.2...v2.1.4) (2025-12-24)
 
 ### 🐛 问题修复
