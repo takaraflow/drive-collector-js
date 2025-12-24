@@ -7,8 +7,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "test": "node test.js",
-    "build": "echo \"No build step\""
+    "test": "node test.js"
   },
   "keywords": [
     "telegram",

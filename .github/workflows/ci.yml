@@ -27,4 +27,3 @@ jobs:
         echo "Node version: $(node --version)"
     - run: npm ci
     - run: npm test
-    - run: npm run build  # if you add build script later
