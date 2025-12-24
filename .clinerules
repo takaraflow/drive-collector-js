@@ -1,28 +1,18 @@
-# AI 版本管理与自动化发布规则
+## 2. 自动化发布流程 (AIVM v3.0 - 原子提交版)
 
-作为项目的 AI 开发助手，你必须严格遵守以下版本管理流程：
-
-## 1. 提交规范 (Conventional Commits)
-每次提交代码时，Commit Message 必须遵循 Conventional Commits 规范，保持简洁，且**必须使用英文**。
-- **格式**：`<type>: <description>`
-- **常见类型**：`feat` (新功能), `fix` (修复), `docs` (文档), `chore` (琐碎任务), `refactor` (重构), `test` (测试)。
-- **注意**：Commit 信息中**绝对不要**包含版本号。版本号仅通过 Git Tag 管理。
-
-## 2. 自动化发布流程 (AIVM)
-当你完成了一组逻辑连贯的修改，或者用户要求发布版本时，请执行以下操作：
-
-1. **执行发布脚本**：运行 `npm run release:ai`。该脚本会自动更新 `package.json` 中的版本号并生成 `CHANGELOG.md`。
-2. **润色 Changelog**：
-   - 读取 `CHANGELOG.md` 的最新部分，将其中的英文条目翻译并润色为**中文**。
-   - 描述应侧重于“业务影响”（例如：“修复了 Google Drive 链接解析失败的问题”而非“修改了 LinkParser.js 的 regex”）。
-3. **整理大版本**：
-   - 如果发生主版本号（Major）变更，应合并琐碎条目，突出核心功能模块。
-4. **提交与打标签 (Crucial)**：
-   - **核心原则**：Commit 信息中**绝对不要**包含版本号（如 `v1.2.3`）。版本号必须且仅通过 Git Tag 标识。
-   - **Commit 信息要求**：即使是发布时的 commit，也要按照 Conventional Commits 规范，由 AI 总结本次发布的核心变动，且**必须使用英文**（例如：`feat: integrate Google Drive export and optimize UI`）。
-   - 润色完成后，执行：`git add . && git commit -m "<type>: <本次发布的英文简洁总结>" && git tag v[新版本号]`。
-5. **提示推送**：提示用户执行 `git push --follow-tags`。
-
-## 3. 触发时机
-- 每次完成 `feat` 或 `fix` 且测试通过后，应主动询问用户是否需要执行 `npm run release:ai`。
-- 如果用户手动修改了 `package.json` 中的版本号，下次发布时向用户确认是否视为“大版本重整”流程。
+1. **执行基础更新**：运行 `npm run release:ai`。
+2. **AI 中文润色**：
+   - 立即读取 `CHANGELOG.md`。
+   - 将新增的英文 Log 翻译并润色为中文（侧重业务价值）。
+   - **保存文件**。
+3. **原子化提交 (必须由 AI 完成)**：
+   - 获取 `package.json` 中的新版本号（设为 `${VER}`）。
+   - **一次性执行**以下命令：
+     ```bash
+     git add .
+     git commit -m "chore(release): v${VER} [AI Summarized]"
+     git tag v${VER}
+     ```
+4. **禁令**：
+   - **严禁**使用 `--amend`。
+   - **严禁**在润色完成前产生任何中间提交。
