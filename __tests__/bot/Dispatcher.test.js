@@ -103,11 +103,19 @@ jest.unstable_mockModule("../../src/repositories/TaskRepository.js", () => ({
 // Mock utils
 jest.unstable_mockModule("../../src/utils/common.js", () => ({
   safeEdit: jest.fn(),
+  escapeHTML: jest.fn((str) => str),
 }));
 
 jest.unstable_mockModule("../../src/utils/limiter.js", () => ({
   runBotTask: jest.fn((fn) => fn()),
   runBotTaskWithRetry: jest.fn((fn) => fn()),
+  PRIORITY: {
+    UI: 20,
+    HIGH: 10,
+    NORMAL: 0,
+    LOW: -10,
+    BACKGROUND: -20
+  }
 }));
 
 // Mock locales

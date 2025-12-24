@@ -5,6 +5,11 @@ import { EventEmitter } from 'events';
 const mockFindByUserId = jest.fn();
 const mockSpawn = jest.fn();
 const mockSpawnSync = jest.fn();
+const mockCache = new Map();
+const mockCacheService = {
+    get: jest.fn((key) => mockCache.get(key)),
+    set: jest.fn((key, val) => mockCache.set(key, val)),
+};
 
 // --- Module Mocks ---
 jest.unstable_mockModule('../../src/repositories/DriveRepository.js', () => ({
@@ -25,13 +30,17 @@ jest.unstable_mockModule('../../src/config/index.js', () => ({
     }
 }));
 
+jest.unstable_mockModule('../../src/utils/CacheService.js', () => ({
+    cacheService: mockCacheService
+}));
+
 // --- Import under test ---
 const { CloudTool } = await import('../../src/services/rclone.js');
 
 describe('CloudTool', () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        CloudTool.cache = {};
+        mockCache.clear();
         CloudTool.loading = false;
     });
 
@@ -235,7 +244,7 @@ describe('CloudTool', () => {
 
             const files = await CloudTool.listRemoteFiles('user123');
             expect(files).toEqual(mockFiles);
-            expect(CloudTool.cache['files_user123']).toBeDefined();
+            expect(mockCacheService.set).toHaveBeenCalled();
             
             // Second call should use cache
             await CloudTool.listRemoteFiles('user123');

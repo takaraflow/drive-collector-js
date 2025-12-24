@@ -1,10 +1,14 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 import { cacheService } from "../../src/utils/CacheService.js";
 
 describe("CacheService", () => {
     beforeEach(() => {
         cacheService.clear();
-        vi.useFakeTimers();
+        jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+        jest.useRealTimers();
     });
 
     it("should set and get cache", () => {
@@ -14,7 +18,7 @@ describe("CacheService", () => {
 
     it("should return null for expired cache", () => {
         cacheService.set("test", "value", 1000);
-        vi.advanceTimersByTime(1001);
+        jest.advanceTimersByTime(1001);
         expect(cacheService.get("test")).toBeNull();
     });
 
@@ -25,7 +29,7 @@ describe("CacheService", () => {
     });
 
     it("should use getOrSet correctly", async () => {
-        const loader = vi.fn().mockResolvedValue("loaded");
+        const loader = jest.fn().mockResolvedValue("loaded");
         const result1 = await cacheService.getOrSet("key", loader, 1000);
         expect(result1).toBe("loaded");
         expect(loader).toHaveBeenCalledTimes(1);

@@ -1,13 +1,17 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { TaskRepository } from "../../src/repositories/TaskRepository.js";
-import { d1 } from "../../src/services/d1.js";
+import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 
-vi.mock("../../src/services/d1.js", () => ({
-    d1: {
-        run: vi.fn(),
-        batch: vi.fn().mockResolvedValue(true)
-    }
+// Mock services/d1.js
+const mockD1 = {
+    run: jest.fn(),
+    batch: jest.fn().mockResolvedValue(true)
+};
+jest.unstable_mockModule("../../src/services/d1.js", () => ({
+    d1: mockD1
 }));
+
+// Import TaskRepository after mocking
+const { TaskRepository } = await import("../../src/repositories/TaskRepository.js");
+const { d1 } = await import("../../src/services/d1.js");
 
 describe("TaskRepository Cache", () => {
     beforeEach(() => {
@@ -16,7 +20,12 @@ describe("TaskRepository Cache", () => {
             clearInterval(TaskRepository.flushTimer);
             TaskRepository.flushTimer = null;
         }
-        vi.useFakeTimers();
+        jest.useFakeTimers();
+        jest.clearAllMocks();
+    });
+
+    afterEach(() => {
+        jest.useRealTimers();
     });
 
     it("should buffer non-critical status updates", async () => {

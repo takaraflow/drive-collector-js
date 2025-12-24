@@ -68,6 +68,13 @@ jest.unstable_mockModule("../../src/utils/limiter.js", () => ({
     runBotTaskWithRetry: jest.fn((fn) => fn()),
     runMtprotoTaskWithRetry: jest.fn((fn) => fn()),
     runMtprotoFileTaskWithRetry: jest.fn((fn) => fn()),
+    PRIORITY: {
+        UI: 20,
+        HIGH: 10,
+        NORMAL: 0,
+        LOW: -10,
+        BACKGROUND: -20
+    }
 }));
 
 // Mock locales

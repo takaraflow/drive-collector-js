@@ -1,18 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { PRIORITY, runBotTask } from '../../src/utils/limiter.js';
-import { redis } from '../../src/services/redis.js';
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 
 // Mock redis
-vi.mock('../../src/services/redis.js', () => ({
-    redis: {
-        enabled: false,
-        slidingWindowLimit: vi.fn()
-    }
+const mockRedis = {
+    enabled: false,
+    slidingWindowLimit: jest.fn()
+};
+jest.unstable_mockModule('../../src/services/redis.js', () => ({
+    redis: mockRedis
 }));
+
+// Import after mocking
+const { PRIORITY, runBotTask } = await import('../../src/utils/limiter.js');
+const { redis } = await import('../../src/services/redis.js');
 
 describe('Limiter Priority & Distribution', () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        jest.clearAllMocks();
         redis.enabled = false;
     });
 
@@ -23,9 +26,6 @@ describe('Limiter Priority & Distribution', () => {
             results.push(id);
         };
 
-        // 我们不能直接测试 p-queue 内部，但可以通过 runBotTask 提交不同优先级的任务
-        // 由于 runBotTask 内部使用了多个 limiter 层级，我们需要提交足够多的任务来观察排序
-        
         // 模拟一个用户 ID
         const userId = "test_user";
 
@@ -38,12 +38,9 @@ describe('Limiter Priority & Distribution', () => {
 
         await Promise.all([p1, p2, p3]);
 
-        // 注意：第一个任务 (p1) 可能会立即开始执行，因为队列当时是空的
-        // 后续任务应该按优先级排序
         expect(results).toContain(2);
         expect(results).toContain(1);
         expect(results).toContain(3);
-        // 验证 UI 任务确实执行了
         expect(results.length).toBe(3);
     });
 

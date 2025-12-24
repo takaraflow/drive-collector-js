@@ -118,7 +118,7 @@ describe('UIHelper', () => {
       const { text, buttons } = UIHelper.renderFilesPage(mockFiles, 0, 6, false);
 
       expect(text).toContain("📂 <b>目录</b>: <code>/DriveCollectorBot</code>");
-      expect(text).toContain('🎞️ <b>file1.mp4</b>\n> <code>100.00 MB</code> | <code>2023-01-01 12:00</code>');
+      expect(text).toContain('🎞️ <b>file1.mp4</b>\n    <code>100.00 MB</code> | <code>2023-01-01 12:00</code>');
       expect(text).toContain("📊 <i>第 1/2 页 | 共 7 个文件</i>");
       expect(buttons[0][0].text).toBe(' '); // Home button disabled
       expect(buttons[0][1].text).toBe(' '); // Prev button disabled
@@ -130,7 +130,7 @@ describe('UIHelper', () => {
     test('renders second page correctly', () => {
       const { text, buttons } = UIHelper.renderFilesPage(mockFiles, 1, 6, false);
 
-      expect(text).toContain('📄 <b>last.txt</b>\n> <code>0.00 MB</code> | <code>2023-01-07 18:00</code>');
+      expect(text).toContain('📄 <b>last.txt</b>\n    <code>0.00 MB</code> | <code>2023-01-07 18:00</code>');
       expect(text).toContain("📊 <i>第 2/2 页 | 共 7 个文件</i>");
       expect(buttons[0][0].text).toBe('⏮️'); // Home button enabled
       expect(buttons[0][1].text).toBe('⬅️');
