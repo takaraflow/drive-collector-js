@@ -87,11 +87,11 @@ export const STRINGS = {
         directory_prefix: "📂 **目录**: \`{{folder}}\`\n\n",
         dir_empty_or_loading: "ℹ️ 目录为空或尚未加载。",
         page_info: "📊 *第 {{current}}/{{total}} 页 | 共 {{count}} 个文件*",
-        btn_home: "🏠 首页",
+        btn_home: "⏮️",
         btn_prev: "⬅️ 上一页",
         btn_refresh: "🔄 刷新",
         btn_next: "下一页 ➡️",
-        btn_end: "🔚 尾页",
+        btn_end: "⏭️",
     }
 };
 
