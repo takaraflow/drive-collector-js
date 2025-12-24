@@ -10,7 +10,6 @@ import { UIHelper } from "../ui/templates.js";
 import { CloudTool } from "../services/rclone.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
-import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { safeEdit } from "../utils/common.js";
 import { runBotTask, runBotTaskWithRetry } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
