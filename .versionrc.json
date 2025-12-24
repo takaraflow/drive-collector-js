@@ -1,0 +1,16 @@
+{
+  "types": [
+    {"type": "feat", "section": "✨ 新特性", "hidden": false},
+    {"type": "fix", "section": "🐛 问题修复", "hidden": false},
+    {"type": "chore", "section": "🔧 其他任务", "hidden": false},
+    {"type": "docs", "section": "📝 文档更新", "hidden": false},
+    {"type": "style", "section": "💄 样式调整", "hidden": false},
+    {"type": "refactor", "section": "♻️ 代码重构", "hidden": false},
+    {"type": "perf", "section": "🚀 性能优化", "hidden": false},
+    {"type": "test", "section": "✅ 测试相关", "hidden": false}
+  ],
+  "commitUrlFormat": "https://github.com/{{owner}}/{{repository}}/commit/{{hash}}",
+  "compareUrlFormat": "https://github.com/{{owner}}/{{repository}}/compare/{{previousTag}}...{{currentTag}}",
+  "issueUrlFormat": "https://github.com/{{owner}}/{{repository}}/issues/{{id}}",
+  "userUrlFormat": "https://github.com/{{user}}"
+}
