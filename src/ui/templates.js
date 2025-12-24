@@ -61,7 +61,34 @@ export class UIHelper {
     }
 
     /**
-     * 🆕 渲染批量任务看板
+     * 辅助方法：智能截断文件名
+     * @param {string} fileName - 完整文件名
+     * @param {number} maxLength - 最大长度（默认25个字符）
+     * @returns {string} 截断后的文件名
+     */
+    static _shortenFileName(fileName, maxLength = 25) {
+        if (!fileName || fileName.length <= maxLength) return fileName;
+
+        const ext = path.extname(fileName);
+        const base = path.basename(fileName, ext);
+
+        // 对于 Telegram 文件名，尝试智能缩短
+        if (base.includes('_by_')) {
+            const parts = base.split('_by_');
+            if (parts.length === 2) {
+                // 保留前8个字符和后6个字符
+                return `${parts[0].substring(0, 8)}_by_${parts[1].substring(0, 6)}${ext}`;
+            }
+        }
+
+        // 一般情况：保留开头和结尾
+        const keepFromStart = Math.ceil((maxLength - ext.length) * 0.6);
+        const keepFromEnd = Math.floor((maxLength - ext.length) * 0.4);
+        return `${base.substring(0, keepFromStart)}...${base.substring(base.length - keepFromEnd)}${ext}`;
+    }
+
+    /**
+     * 🆕 渲染批量任务看板（优化版）
      * @param {Array} allTasks - 数据库中该组的所有任务
      * @param {Object} focusTask - 当前正在操作的 Task 对象
      * @param {string} focusStatus - 当前 Task 的状态
@@ -76,29 +103,35 @@ export class UIHelper {
             // 增加 .trim() 确保匹配成功
             const dbName = (t.file_name || "").trim();
             const currentName = (focusTask.fileName || "").trim();
-            if (dbName === currentName) {
-                // 焦点任务：显示进度条或当前状态
-                let label;
-                if (focusStatus === 'downloading') {
-                    label = STRINGS.task.focus_downloading;
-                } else if (focusStatus === 'uploading') {
-                    label = STRINGS.task.focus_uploading;
-                } else if (focusStatus === 'completed') {
-                    label = STRINGS.task.focus_completed;
-                } else if (focusStatus === 'failed') {
-                    label = STRINGS.task.focus_failed;
-                } else {
-                    label = STRINGS.task.focus_waiting;
-                }
-                let line = format(label, { name: t.file_name });
+            const isFocus = dbName === currentName;
+            
+            // 截断文件名以适应移动端显示
+            const displayName = this._shortenFileName(dbName, 20);
+            
+            if (isFocus) {
+                // 焦点任务：显示简洁状态和进度
+                const statusIcon = focusStatus === 'completed' ? '✅' : 
+                                  focusStatus === 'failed' ? '❌' : 
+                                  focusStatus === 'cancelled' ? '🚫' : '🔄';
+                
                 if (downloaded > 0 && (focusStatus === 'downloading' || focusStatus === 'uploading')) {
-                    line += `\n${this.renderProgress(downloaded, total, "")}`; // 复用进度条，去掉前缀
+                    const progress = Math.round((downloaded / total) * 100);
+                    statusLines.push(`${statusIcon} ${displayName} [${progress}%]`);
+                } else {
+                    // 使用简短的状态文本
+                    const statusText = focusStatus === 'completed' ? '完成' :
+                                      focusStatus === 'failed' ? '失败' :
+                                      focusStatus === 'cancelled' ? '已取消' :
+                                      focusStatus === 'downloading' ? '下载中' :
+                                      focusStatus === 'uploading' ? '上传中' : '等待中';
+                    statusLines.push(`${statusIcon} ${displayName} (${statusText})`);
                 }
-                statusLines.push(line);
             } else {
-                // 非焦点任务：只显示状态图标
-                let icon = t.status === 'completed' ? "✅" : (t.status === 'failed' ? "❌" : "🕒");
-                statusLines.push(`${icon} \`${t.file_name}\``);
+                // 非焦点任务：只显示状态图标和简短文件名
+                const statusIcon = t.status === 'completed' ? '✅' : 
+                                  t.status === 'failed' ? '❌' : 
+                                  t.status === 'cancelled' ? '🚫' : '🕒';
+                statusLines.push(`${statusIcon} ${displayName}`);
             }
         });
 
