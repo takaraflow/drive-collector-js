@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [2.3.0](https://github.com/YoungSx/drive-collector-js/compare/v2.2.5...v2.3.0) (2025-12-24)
+
+
+### ✨ 新特性
+
+* **智能队列分离**：将文件下载和上传流程分离为独立队列，大幅提升系统并发处理能力。下载队列专注处理Telegram文件获取，上传队列专门管理云端转存，两者互不干扰，显著提高了整体处理效率和系统稳定性。
+
 ### [2.2.6](https://github.com/YoungSx/drive-collector-js/compare/v2.2.5...v2.2.6) (2025-12-24)
 
 ### [2.2.5](https://github.com/YoungSx/drive-collector-js/compare/v2.2.3...v2.2.5) (2025-12-24)
