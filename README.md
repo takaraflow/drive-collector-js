@@ -49,6 +49,16 @@ Tests cover:
 - UI template rendering (progress bars, batch monitors)
 - Basic functionality validation
 
+### CI/CD
+
+Tests are automatically run on:
+- Push to `main` or `develop` branches
+- Pull requests to `main` or `develop` branches
+
+Using GitHub Actions with Node.js 20.x.
+
+For Zeabur deployments, tests run locally before deployment. Consider adding test steps to your Dockerfile if needed.
+
 ## Architecture
 
 - `src/core/`: Core business logic (TaskManager)
