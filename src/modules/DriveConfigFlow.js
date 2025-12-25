@@ -166,9 +166,14 @@ export class DriveConfigFlow {
             const tempMsg = await runBotTask(() => client.sendMessage(peerId, { message: "⏳ 正在验证账号，请稍候..." }), userId, { priority: PRIORITY.HIGH });
 
             const configObj = { user: email, pass: password };
-            
+
             // 调用业务验证
-            const result = await CloudTool.validateConfig('mega', configObj);
+            let result;
+            try {
+                result = await CloudTool.validateConfig('mega', configObj);
+            } catch (e) {
+                result = { success: false, reason: "ERROR", details: e.message };
+            }
 
             if (!result.success) {
                 // 错误处理逻辑

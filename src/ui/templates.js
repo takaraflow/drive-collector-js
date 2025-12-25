@@ -14,7 +14,7 @@ export class UIHelper {
     static renderProgress(current, total, actionName = STRINGS.task.downloading, fileName = '') {
         const percentage = (current / (total || 1) * 100).toFixed(1);
         const barLen = 20;
-        const filled = Math.round(barLen * (current / (total || 1)));
+        const filled = Math.max(0, Math.min(barLen, Math.round(barLen * (current / (total || 1)))));
         const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
         
         // 如果提供了文件名，显示简洁版本
