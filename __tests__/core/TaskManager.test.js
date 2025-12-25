@@ -158,9 +158,6 @@ jest.unstable_mockModule("../../src/services/kv.js", () => ({
     }
 }));
 
-// Define safeEdit in the mock environment explicitly if needed, but the unmocked import should work if unmocked
-// However, in ESM with jest.unstable_mockModule, we have to be careful.
-
 // 导入 TaskManager
 const { TaskManager } = await import("../../src/core/TaskManager.js");
 
@@ -325,6 +322,31 @@ describe("TaskManager", () => {
             await TaskManager.batchUpdateStatus(updates);
 
             expect(mockD1Batch).toHaveBeenCalled();
+        });
+    });
+
+    describe("updateQueueUI Regression", () => {
+        test("should handle queue modification during UI update (Race Condition)", async () => {
+            // 设置多个任务触发循环
+            TaskManager.waitingTasks = [
+                { id: "t1", lastText: "", userId: "u1" },
+                { id: "t2", lastText: "", userId: "u1" },
+                { id: "t3", lastText: "", userId: "u1" }
+            ];
+
+            // 模拟 updateStatus 包含延迟，以便我们有窗口修改数组
+            const { updateStatus } = await import("../../src/utils/common.js");
+            updateStatus.mockImplementation(() => new Promise(resolve => setTimeout(resolve, 10)));
+
+            // 启动更新过程
+            const updatePromise = TaskManager.updateQueueUI();
+
+            // 在执行中途强行修改队列（模拟 downloadWorker 移除任务）
+            // 如果内部没有快照且没有非空检查，snapshot[i] 指向 undefined 导致报错
+            TaskManager.waitingTasks = []; 
+
+            // 应该正常完成而不抛出 TypeError: Cannot read properties of undefined
+            await expect(updatePromise).resolves.not.toThrow();
         });
     });
 });
