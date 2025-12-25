@@ -672,15 +672,35 @@ export class TaskManager {
     }
 
     /**
-     * [私有] 刷新组任务看板
+     * [私有] 刷新组任务看板 (智能节流)
      */
     static async _refreshGroupMonitor(task, status, downloaded = 0, total = 0) {
         const msgId = task.msgId;
         const lastUpdate = this.monitorLocks.get(msgId) || 0;
         const now = Date.now();
-        const isFinal = status === 'completed' || status === 'failed';
+        const isFinal = status === 'completed' || status === 'failed' || status === 'cancelled';
 
-        if (!isFinal && now - lastUpdate < 2500) return;
+        // 动态节流：最终状态立即更新，进度状态智能节流
+        let throttleMs = 0;
+        if (!isFinal) {
+            // 非最终状态的智能节流
+            if (status === 'downloading' || status === 'uploading') {
+                // 下载/上传状态：根据进度调整节流时间
+                const progress = total > 0 ? downloaded / total : 0;
+                if (progress < 0.1) {
+                    throttleMs = 1000; // 初期：1秒
+                } else if (progress < 0.5) {
+                    throttleMs = 2000; // 中期：2秒
+                } else {
+                    throttleMs = 3000; // 后期：3秒
+                }
+            } else {
+                // 其他状态：2秒节流
+                throttleMs = 2000;
+            }
+        }
+
+        if (now - lastUpdate < throttleMs) return;
         this.monitorLocks.set(msgId, now);
 
         const groupTasks = await TaskRepository.findByMsgId(msgId);
@@ -692,7 +712,7 @@ export class TaskManager {
             const updates = taskIds.map(taskId => ({
                 id: taskId,
                 status: status,
-                error: status === 'failed' ? 'Batch operation completed' : null
+                error: isFinal && status === 'failed' ? 'Batch operation completed' : null
             }));
             await this.batchUpdateStatus(updates);
         }
