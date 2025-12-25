@@ -90,9 +90,11 @@ describe('Dispatcher /files command', () => {
 
         await Dispatcher._handleFilesCommand(target, userId);
 
-        expect(mockClient.sendMessage).toHaveBeenCalledWith(target, expect.objectContaining({
-            message: expect.stringContaining("网盘")
-        }));
+        // Wait for async operations to complete
+        await new Promise(resolve => setImmediate(resolve));
+
+        expect(mockClient.sendMessage).toHaveBeenCalledTimes(1);
+        expect(mockSafeEdit).toHaveBeenCalledWith(target, 123, expect.stringContaining("网盘"), null, userId);
         expect(mockCloudTool.listRemoteFiles).not.toHaveBeenCalled();
     });
 });
