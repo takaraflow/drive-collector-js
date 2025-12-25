@@ -57,8 +57,6 @@ Tests are automatically run on:
 
 Using GitHub Actions with Node.js 20.x.
 
-For Zeabur deployments, tests run locally before deployment. Consider adding test steps to your Dockerfile if needed.
-
 ## Architecture
 
 - `src/core/`: Core business logic (TaskManager)
@@ -70,6 +68,8 @@ For Zeabur deployments, tests run locally before deployment. Consider adding tes
 - `src/modules/`: Additional modules (AuthGuard, etc.)
 
 ## Deployment
+
+Built using Docker (see Dockerfile in root)
 
 For zero-downtime deployments with multiple instances:
 
