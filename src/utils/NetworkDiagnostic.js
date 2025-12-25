@@ -163,25 +163,30 @@ export class NetworkDiagnostic {
                 ? "/app/rclone/rclone"
                 : "rclone";
 
-            const result = spawnSync(rcloneBinary, ["version", "--json"], {
+            // 先检查 rclone 是否可用
+            const versionResult = spawnSync(rcloneBinary, ["version"], {
                 encoding: 'utf-8',
                 timeout: 10000
             });
 
             const responseTime = Date.now() - startTime;
 
-            if (result.status === 0) {
-                const versionInfo = JSON.parse(result.stdout);
+            if (versionResult.status === 0) {
+                // 解析版本信息，从输出中提取版本号
+                const output = versionResult.stdout;
+                const versionMatch = output.match(/rclone\s+v?([\d.]+)/i);
+                const version = versionMatch ? versionMatch[1] : 'unknown';
+
                 return {
                     status: 'ok',
                     responseTime: `${responseTime}ms`,
-                    message: `rclone 正常 (版本: ${versionInfo.version})`
+                    message: `rclone 正常 (版本: ${version})`
                 };
             } else {
                 return {
                     status: 'error',
                     responseTime: `${responseTime}ms`,
-                    message: `rclone 错误: ${result.stderr || result.error}`
+                    message: `rclone 错误: ${versionResult.stderr || versionResult.error}`
                 };
             }
         } catch (error) {
