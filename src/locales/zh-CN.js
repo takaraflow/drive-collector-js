@@ -11,7 +11,6 @@ export const STRINGS = {
               "/help - 📖 显示此帮助菜单\n" +
               "/logout - ❌ 解绑当前网盘\n\n" +
               "<b>支持的链接类型：</b>\n" +
-              "• Google Drive (文件/目录)\n" +
               "• Telegram 消息链接\n" +
               "• 直链 (部分支持)\n\n" +
               "如有疑问或建议，请联系管理员。",
