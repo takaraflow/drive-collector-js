@@ -185,22 +185,28 @@ export class TaskManager {
         try {
             const sourceMsgIds = rows.map(r => r.source_msg_id);
             const messages = await runMtprotoTaskWithRetry(() => client.getMessages(chatId, { ids: sourceMsgIds }), { priority: PRIORITY.BACKGROUND });
-            
+
             const messageMap = new Map();
             messages.forEach(m => {
                 if (m) messageMap.set(m.id, m);
             });
 
+            // 预处理任务，分离有效和无效任务
+            const validTasks = [];
+            const failedUpdates = [];
+            const tasksToEnqueue = [];
+            const tasksToUpload = [];
+
             for (const row of rows) {
                 const message = messageMap.get(row.source_msg_id);
                 if (!message || !message.media) {
                     console.warn(`⚠️ 无法找到原始消息 (ID: ${row.source_msg_id})`);
-                    await TaskRepository.updateStatus(row.id, 'failed', 'Source msg missing');
+                    failedUpdates.push({ id: row.id, status: 'failed', error: 'Source msg missing' });
                     continue;
                 }
 
                 const task = this._createTaskObject(row.id, row.user_id, row.chat_id, row.msg_id, message);
-                await updateStatus(task, "🔄 **系统重启，检测到任务中断，已自动恢复...**");
+                validTasks.push(task);
 
                 // 根据任务状态决定恢复到哪个队列
                 if (row.status === 'downloaded') {
@@ -208,18 +214,36 @@ export class TaskManager {
                     const localPath = path.join(config.downloadDir, row.file_name);
                     if (fs.existsSync(localPath)) {
                         task.localPath = localPath;
-                        this._enqueueUploadTask(task);
+                        tasksToUpload.push(task);
                         console.log(`📤 恢复下载完成的任务 ${row.id} 到上传队列`);
                     } else {
                         // 本地文件不存在，重新下载
                         console.warn(`⚠️ 本地文件不存在，重新下载任务 ${row.id}`);
-                        this._enqueueTask(task);
+                        tasksToEnqueue.push(task);
                     }
                 } else {
                     // 其他状态（queued, downloading）恢复到下载队列
-                    this._enqueueTask(task);
+                    tasksToEnqueue.push(task);
                 }
             }
+
+            // 批量更新失败状态
+            if (failedUpdates.length > 0) {
+                await this.batchUpdateStatus(failedUpdates);
+            }
+
+            // 并发发送恢复消息（限制并发避免 API 限制）
+            const recoveryPromises = validTasks.map(task =>
+                updateStatus(task, "🔄 **系统重启，检测到任务中断，已自动恢复...**")
+            );
+            await Promise.allSettled(recoveryPromises);
+
+            // 批量入队下载任务
+            tasksToEnqueue.forEach(task => this._enqueueTask(task));
+
+            // 批量入队上传任务
+            tasksToUpload.forEach(task => this._enqueueUploadTask(task));
+
         } catch (e) {
             console.error(`批量恢复会话 ${chatId} 的任务失败:`, e);
         }
