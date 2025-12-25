@@ -212,6 +212,47 @@ describe("TaskManager", () => {
             expect(consoleSpy).toHaveBeenCalledWith("预加载数据失败:", "Preload failed");
             consoleSpy.mockRestore();
         });
+
+        test("should batch restore tasks efficiently", async () => {
+            const stalledTasks = [
+                { id: "1", user_id: "u1", chat_id: "c1", msg_id: 100, source_msg_id: 200, status: 'downloaded', file_name: 'file1.mp4' },
+                { id: "2", user_id: "u1", chat_id: "c1", msg_id: 100, source_msg_id: 201, status: 'queued', file_name: 'file2.mp4' },
+                { id: "3", user_id: "u1", chat_id: "c1", msg_id: 100, source_msg_id: 202, status: 'queued', file_name: 'file3.mp4' } // invalid message
+            ];
+            mockTaskRepository.findStalledTasks.mockResolvedValue(stalledTasks);
+            mockClient.getMessages.mockResolvedValue([
+                { id: 200, media: {} },
+                { id: 201, media: {} },
+                null // 202 is missing
+            ]);
+
+            // Mock batchUpdateStatus to capture calls
+            const batchUpdateSpy = jest.spyOn(TaskManager, 'batchUpdateStatus');
+            const enqueueUploadSpy = jest.spyOn(TaskManager, '_enqueueUploadTask');
+            const enqueueTaskSpy = jest.spyOn(TaskManager, '_enqueueTask');
+            TaskManager.queue.pause();
+
+            await TaskManager.init();
+
+            // Should batch update failed status
+            expect(batchUpdateSpy).toHaveBeenCalledWith([
+                { id: "3", status: 'failed', error: 'Source msg missing' }
+            ]);
+
+            // Should have called enqueue methods
+            expect(enqueueUploadSpy).toHaveBeenCalledWith(
+                expect.objectContaining({ id: "1" })
+            );
+            expect(enqueueTaskSpy).toHaveBeenCalledWith(
+                expect.objectContaining({ id: "2" })
+            );
+
+            // Should have enqueued valid tasks
+            expect(TaskManager.waitingTasks.length).toBe(1); // task 2 only, task 1 goes to upload
+
+            batchUpdateSpy.mockRestore();
+            TaskManager.queue.clear();
+        });
     });
 
     describe("addTask", () => {
