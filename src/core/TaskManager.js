@@ -646,6 +646,10 @@ export class TaskManager {
             // 结果处理
             if (uploadResult.success) {
                 if (!task.isGroup) await updateStatus(task, STRINGS.task.verifying);
+                
+                // 增加校验前的延迟，应对网盘 API 的最终一致性延迟
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                
                 const finalRemote = await CloudTool.getRemoteFileInfo(info.name, task.userId);
                 const localSize = fs.statSync(localPath).size;
                 const isOk = finalRemote && Math.abs(finalRemote.Size - localSize) < 1024;

@@ -136,8 +136,9 @@ export class CloudTool {
 
                 // 准备 --files-from 数据 (使用 stdin 传递以支持大量文件且避免路径转义问题)
                 // 注意：rclone copy 的 source 应该是这些文件共同的父目录
-                const commonSourceDir = config.downloadDir || "/tmp/downloads";
-                const fileList = tasks.map(t => path.relative(commonSourceDir, t.localPath || "")).join('\n');
+                // 使用 path.resolve 确保获取绝对路径，避免由于相对路径处理不当导致的上传失败
+                const commonSourceDir = path.resolve(config.downloadDir || "/tmp/downloads");
+                const fileList = tasks.map(t => path.relative(commonSourceDir, path.resolve(t.localPath || ""))).join('\n');
 
                 const args = [
                     "--config", "/dev/null",
