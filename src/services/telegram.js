@@ -41,6 +41,19 @@ export const saveSession = async () => {
     }
 };
 
+/**
+ * 重置客户端 Session 为空（用于 AUTH_KEY_DUPLICATED 恢复）
+ */
+export const resetClientSession = () => {
+    try {
+        // 将当前客户端的 Session 替换为空的新 Session
+        client.session = new StringSession("");
+        console.log("🔄 客户端内存 Session 已重置");
+    } catch (e) {
+        console.error("❌ 重置内存 Session 失败:", e);
+    }
+};
+
 // 初始化 Telegram 客户端单例
 // 优化配置以应对限流和连接问题：增加重试次数，模拟真实设备信息，设置 FloodWait 阈值
 // 增强连接稳定性和数据中心切换处理

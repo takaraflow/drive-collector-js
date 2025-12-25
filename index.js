@@ -1,6 +1,6 @@
 import http from "http";
 import { config } from "./src/config/index.js";
-import { client, saveSession, clearSession } from "./src/services/telegram.js";
+import { client, saveSession, clearSession, resetClientSession } from "./src/services/telegram.js";
 import { TaskManager } from "./src/core/TaskManager.js";
 import { Dispatcher } from "./src/bot/Dispatcher.js";
 import { SettingsRepository } from "./src/repositories/SettingsRepository.js";
@@ -55,6 +55,7 @@ const processedMessages = new Map();
 
                     if (retryCount < maxRetries) {
                         await clearSession();
+                        resetClientSession(); // 关键：重置内存中的 Session
                         // 等待一小段时间让服务器释放旧连接
                         await new Promise(r => setTimeout(r, 2000));
                         continue;
