@@ -379,16 +379,22 @@ export class CloudTool {
             try {
                 const conf = await this._getUserConfig(userId);
                 const connectionString = this._getConnectionString(conf);
-                const fullRemotePath = `${connectionString}${config.remoteFolder}/${fileName}`;
+                // 使用 rclone lsjson 探测目标目录下的特定文件
+                const fullRemoteFolder = `${connectionString}${config.remoteFolder}/`;
                 
-                const ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "lsjson", fullRemotePath], { 
+                const ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "lsjson", "--files-only", fullRemoteFolder], { 
                     env: process.env,
                     encoding: 'utf-8' 
                 });
 
                 if (ret.status === 0) {
                     const files = JSON.parse(ret.stdout);
-                    if (files && files.length > 0) return files[0];
+                    if (Array.isArray(files)) {
+                        const file = files.find(f => f.Name === fileName);
+                        if (file) return file;
+                    }
+                } else {
+                    console.warn(`[getRemoteFileInfo] lsjson returned status ${ret.status} for ${fileName}: ${ret.stderr}`);
                 }
             } catch (e) {
                 console.warn(`[getRemoteFileInfo] Attempt ${i + 1} failed for ${fileName}:`, e.message);

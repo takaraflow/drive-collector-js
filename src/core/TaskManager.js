@@ -647,20 +647,31 @@ export class TaskManager {
             if (uploadResult.success) {
                 if (!task.isGroup) await updateStatus(task, STRINGS.task.verifying);
                 const finalRemote = await CloudTool.getRemoteFileInfo(info.name, task.userId);
-                const isOk = finalRemote && Math.abs(finalRemote.Size - fs.statSync(localPath).size) < 1024;
+                const localSize = fs.statSync(localPath).size;
+                const isOk = finalRemote && Math.abs(finalRemote.Size - localSize) < 1024;
+
+                if (!isOk) {
+                    console.error(`[Validation Failed] Task: ${task.id}, File: ${info.name}`);
+                    console.error(`- Local Size: ${localSize}`);
+                    console.error(`- Remote Size: ${finalRemote ? finalRemote.Size : 'N/A'}`);
+                    console.error(`- Remote Info: ${JSON.stringify(finalRemote)}`);
+                }
 
                 const finalStatus = isOk ? 'completed' : 'failed';
-                await TaskRepository.updateStatus(task.id, finalStatus);
+                const errorMsg = isOk ? null : `校验失败: 本地(${localSize}) vs 远程(${finalRemote ? finalRemote.Size : '未找到'})`;
+                await TaskRepository.updateStatus(task.id, finalStatus, errorMsg);
 
                 if (task.isGroup) {
-                    await this._refreshGroupMonitor(task, finalStatus);
+                    await this._refreshGroupMonitor(task, finalStatus, 0, 0, errorMsg);
                 } else {
                     const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
                     const fileNameHtml = `<a href="${fileLink}">${escapeHTML(info.name)}</a>`;
                     const baseText = isOk
                         ? format(STRINGS.task.success, { name: fileNameHtml, folder: config.remoteFolder })
                         : format(STRINGS.task.failed_validation, { name: fileNameHtml });
-                    await updateStatus(task, baseText, true);
+                    
+                    const finalMsg = isOk ? baseText : `${baseText}\n<code>${escapeHTML(errorMsg)}</code>`;
+                    await updateStatus(task, finalMsg, true);
                 }
             } else {
                 await TaskRepository.updateStatus(task.id, 'failed', uploadResult.error || "Upload failed");
