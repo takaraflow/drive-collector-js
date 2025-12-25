@@ -333,15 +333,35 @@ describe('CloudTool', () => {
             expect(info).toEqual(mockFileInfo);
         });
 
-        it('should return null if file does not exist or error occurs', async () => {
+        it('should retry on failure and eventually return info (Verification of Retry Logic)', async () => {
+            mockFindByUserId.mockResolvedValue({
+                type: 'drive',
+                config_data: JSON.stringify({ user: 'u', pass: 'p' })
+            });
+
+            const mockFileInfo = { name: 'retry.txt', Size: 200 };
+            
+            // First 2 calls fail, 3rd succeeds
+            mockSpawnSync
+                .mockReturnValueOnce({ status: 1 })
+                .mockReturnValueOnce({ status: 1 })
+                .mockReturnValueOnce({ status: 0, stdout: JSON.stringify([mockFileInfo]) });
+
+            const info = await CloudTool.getRemoteFileInfo('retry.txt', 'user123', 3);
+            expect(info).toEqual(mockFileInfo);
+            expect(mockSpawnSync).toHaveBeenCalledTimes(3);
+        });
+
+        it('should return null after all retries fail', async () => {
             mockFindByUserId.mockResolvedValue({
                 type: 'drive',
                 config_data: JSON.stringify({ user: 'u', pass: 'p' })
             });
             mockSpawnSync.mockReturnValue({ status: 1 });
 
-            const info = await CloudTool.getRemoteFileInfo('missing.txt', 'user123');
+            const info = await CloudTool.getRemoteFileInfo('missing.txt', 'user123', 2);
             expect(info).toBeNull();
+            expect(mockSpawnSync).toHaveBeenCalledTimes(2);
         });
 
         it('should return null if userId is missing', async () => {
@@ -349,15 +369,17 @@ describe('CloudTool', () => {
             expect(info).toBeNull();
         });
 
-        it('should return null if JSON parsing fails', async () => {
+        it('should handle JSON parsing errors and retry', async () => {
             mockFindByUserId.mockResolvedValue({
                 type: 'drive',
                 config_data: JSON.stringify({ user: 'u', pass: 'p' })
             });
-            mockSpawnSync.mockReturnValue({ status: 0, stdout: 'invalid-json' });
+            mockSpawnSync
+                .mockReturnValueOnce({ status: 0, stdout: 'invalid-json' })
+                .mockReturnValueOnce({ status: 0, stdout: JSON.stringify([{ Name: 'ok.txt' }]) });
 
-            const info = await CloudTool.getRemoteFileInfo('file.txt', 'user123');
-            expect(info).toBeNull();
+            const info = await CloudTool.getRemoteFileInfo('file.txt', 'user123', 2);
+            expect(info).toEqual({ Name: 'ok.txt' });
         });
     });
 

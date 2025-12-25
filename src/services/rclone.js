@@ -358,27 +358,36 @@ export class CloudTool {
     }
 
     /**
-     * 简单的文件完整性检查
+     * 简单的文件完整性检查 (带重试机制以应对 API 延迟)
      */
-    static async getRemoteFileInfo(fileName, userId) {
+    static async getRemoteFileInfo(fileName, userId, retries = 3) {
         if (!userId) return null; 
 
-        try {
-            const conf = await this._getUserConfig(userId);
-            const connectionString = this._getConnectionString(conf);
-            const fullRemotePath = `${connectionString}${config.remoteFolder}/${fileName}`;
-            
-            const ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "lsjson", fullRemotePath], { 
-                env: process.env,
-                encoding: 'utf-8' 
-            });
+        for (let i = 0; i < retries; i++) {
+            try {
+                const conf = await this._getUserConfig(userId);
+                const connectionString = this._getConnectionString(conf);
+                const fullRemotePath = `${connectionString}${config.remoteFolder}/${fileName}`;
+                
+                const ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "lsjson", fullRemotePath], { 
+                    env: process.env,
+                    encoding: 'utf-8' 
+                });
 
-            if (ret.status !== 0) return null;
-            const files = JSON.parse(ret.stdout);
-            return files[0] || null;
-        } catch (e) {
-            return null;
+                if (ret.status === 0) {
+                    const files = JSON.parse(ret.stdout);
+                    if (files && files.length > 0) return files[0];
+                }
+            } catch (e) {
+                console.warn(`[getRemoteFileInfo] Attempt ${i + 1} failed for ${fileName}:`, e.message);
+            }
+            
+            if (i < retries - 1) {
+                // 等待一段时间后重试
+                await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
+            }
         }
+        return null;
     }
     
     static async killTask(taskId) {

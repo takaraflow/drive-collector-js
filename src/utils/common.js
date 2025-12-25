@@ -25,13 +25,26 @@ export const safeEdit = async (chatId, msgId, text, buttons = null, userId = nul
     const { client } = await import("../services/telegram.js");
     try {
         await runBotTaskWithRetry(
-            () => client.editMessage(chatId, { message: msgId, text, buttons, parseMode }).catch(() => {}),
+            async () => {
+                try {
+                    await client.editMessage(chatId, { message: msgId, text, buttons, parseMode });
+                } catch (e) {
+                    // 忽略 "Message Not Modified" 错误，这是由于更新内容完全一致导致的
+                    if (e.message && (e.message.includes("MESSAGE_NOT_MODIFIED") || e.code === 400 && e.errorMessage === "MESSAGE_NOT_MODIFIED")) {
+                        return;
+                    }
+                    throw e;
+                }
+            },
             userId,
             {},
             false,
             3
         );
-    } catch (e) {}
+    } catch (e) {
+        // 最终失败也不抛出，避免中断主流程
+        console.warn(`[safeEdit Failed] msgId ${msgId}:`, e.message);
+    }
 };
 
 // 提取媒体元数据 (文件名、大小)

@@ -765,29 +765,15 @@ export class TaskManager {
         const groupTasks = await TaskRepository.findByMsgId(msgId);
         if (!groupTasks.length) return;
 
-        // 如果是最终状态，批量更新所有同组任务的状态
-        if (isFinal) {
-            const taskIds = groupTasks.map(t => t.id);
-            const updates = taskIds.map(taskId => ({
-                id: taskId,
-                status: status,
-                error: isFinal && status === 'failed' ? 'Batch operation completed' : null
-            }));
-            await this.batchUpdateStatus(updates);
-        }
-
+        // 【修复】不再批量更新整个组的状态，而是只更新当前任务的状态
+        // 逻辑已在 worker 中处理了 TaskRepository.updateStatus，这里仅做 UI 刷新
+        
         const { text } = UIHelper.renderBatchMonitor(groupTasks, task, status, downloaded, total);
 
-        try {
-            let peer = task.chatId;
-            if (typeof peer === 'string' && /^-?\d+$/.test(peer)) peer = BigInt(peer);
-            await client.editMessage(peer, {
-               message: parseInt(task.msgId),
-               text: text,
-               parseMode: "html"
-           });
-       } catch (e) {
-           console.error(`[Monitor Update Error] msgId ${msgId}:`, e.message);
-       }
+        let peer = task.chatId;
+        if (typeof peer === 'string' && /^-?\d+$/.test(peer)) peer = BigInt(peer);
+        
+        // 使用统一的 safeEdit 以处理 MESSAGE_NOT_MODIFIED 等错误
+        await safeEdit(peer, parseInt(task.msgId), text, null, task.userId, "html");
     }
 }

@@ -114,30 +114,26 @@ export class UIHelper {
             // 截断文件名以适应移动端显示
             const displayName = escapeHTML(this._shortenFileName(dbName, 20));
             
-            if (isFocus) {
-                // 焦点任务：显示简洁状态和进度
-                const statusIcon = focusStatus === 'completed' ? '✅' : 
-                                  focusStatus === 'failed' ? '❌' : 
-                                  focusStatus === 'cancelled' ? '🚫' : '🔄';
-                
-                if (downloaded > 0 && (focusStatus === 'downloading' || focusStatus === 'uploading')) {
-                    const progress = Math.round((downloaded / total) * 100);
-                    statusLines.push(`${statusIcon} ${displayName} [${progress}%]`);
-                } else {
-                    // 使用简短的状态文本
-                    const statusText = focusStatus === 'completed' ? '完成' :
-                                      focusStatus === 'failed' ? '失败' :
-                                      focusStatus === 'cancelled' ? '已取消' :
-                                      focusStatus === 'downloading' ? '下载中' :
-                                      focusStatus === 'uploading' ? '上传中' : '等待中';
-                    statusLines.push(`${statusIcon} ${displayName} (${statusText})`);
-                }
+            // 确定显示状态：如果是焦点任务，使用实时的 focusStatus；否则使用数据库记录的 t.status
+            const displayStatus = isFocus ? focusStatus : t.status;
+
+            const statusIcon = displayStatus === 'completed' ? '✅' : 
+                              displayStatus === 'failed' ? '❌' : 
+                              displayStatus === 'cancelled' ? '🚫' : 
+                              (isFocus ? '🔄' : '🕒');
+            
+            if (isFocus && downloaded > 0 && (displayStatus === 'downloading' || displayStatus === 'uploading')) {
+                const progress = Math.round((downloaded / total) * 100);
+                statusLines.push(`${statusIcon} ${displayName} [${progress}%]`);
             } else {
-                // 非焦点任务：只显示状态图标和简短文件名
-                const statusIcon = t.status === 'completed' ? '✅' : 
-                                  t.status === 'failed' ? '❌' : 
-                                  t.status === 'cancelled' ? '🚫' : '🕒';
-                statusLines.push(`${statusIcon} ${displayName}`);
+                // 使用简短的状态文本
+                const statusText = displayStatus === 'completed' ? '完成' :
+                                  displayStatus === 'failed' ? '失败' :
+                                  displayStatus === 'cancelled' ? '已取消' :
+                                  displayStatus === 'downloading' ? '下载中' :
+                                  displayStatus === 'uploading' ? '上传中' : 
+                                  displayStatus === 'downloaded' ? '已下载' : '等待中';
+                statusLines.push(`${statusIcon} ${displayName} (${statusText})`);
             }
         });
 
@@ -147,9 +143,9 @@ export class UIHelper {
             text = format(STRINGS.task.batch_monitor, {
                 current: completedCount,
                 total: totalCount,
-                statusText: STRINGS.files.dir_empty_or_loading // Use a placeholder or empty string
+                statusText: STRINGS.files.dir_empty_or_loading
             });
-            text = text.replace(/━━━━━━━━━━━━━━\n/g, '').replace(/💡 进度条仅显示当前正在处理的文件/g, ''); // Remove separators
+            text = text.replace(/━━━━━━━━━━━━━━\n/g, '').replace(/💡 进度条仅显示当前正在处理的文件/g, ''); 
         } else {
             text = format(STRINGS.task.batch_monitor, {
                 current: completedCount,

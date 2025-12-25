@@ -102,6 +102,28 @@ describe('common utils', () => {
 
             await expect(safeEdit(123456, 789, 'test message')).resolves.not.toThrow();
         });
+
+        it('should ignore MESSAGE_NOT_MODIFIED error', async () => {
+            const error = new Error('400: MESSAGE_NOT_MODIFIED');
+            error.code = 400;
+            error.errorMessage = 'MESSAGE_NOT_MODIFIED';
+            mockClient.editMessage.mockRejectedValue(error);
+
+            // Using mockRunBotTaskWithRetry implementation from beforeEach which calls the function
+            await expect(safeEdit(123456, 789, 'same text')).resolves.not.toThrow();
+            
+            // Should have called editMessage
+            expect(mockClient.editMessage).toHaveBeenCalledTimes(1);
+        });
+
+        it('should retry on other errors but eventually not throw', async () => {
+            mockClient.editMessage.mockRejectedValue(new Error('Other error'));
+            
+            await expect(safeEdit(123456, 789, 'test')).resolves.not.toThrow();
+            
+            // runBotTaskWithRetry handles the retries, here it's called once
+            expect(mockRunBotTaskWithRetry).toHaveBeenCalledTimes(1);
+        });
     });
 
     describe('getMediaInfo', () => {
