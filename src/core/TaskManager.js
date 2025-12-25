@@ -335,10 +335,15 @@ export class TaskManager {
 
         } catch (e) {
             console.error("Task creation failed:", e);
-            await client.editMessage(target, { 
-                message: statusMsg.id, 
-                text: STRINGS.task.create_failed
-            }).catch(() => {});
+            // 尝试更新状态消息，如果失败则记录但不抛出异常
+            try {
+                await client.editMessage(target, {
+                    message: statusMsg.id,
+                    text: STRINGS.task.create_failed
+                });
+            } catch (editError) {
+                console.warn("Failed to update error message:", editError.message);
+            }
         }
     }
 
