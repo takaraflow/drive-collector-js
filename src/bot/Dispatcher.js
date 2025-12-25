@@ -77,13 +77,15 @@ export class Dispatcher {
      * @returns {Promise<boolean>} 是否允许通过
      */
     static async _globalGuard(event, { userId, target, isCallback }) {
-        const role = await AuthGuard.getRole(userId);
+        // 🚀 性能优化：并发执行权限检查和设置查询
+        const [role, mode] = await Promise.all([
+            AuthGuard.getRole(userId),
+            SettingsRepository.get("access_mode", "public")
+        ]);
+
         const isOwner = userId === config.ownerId?.toString();
 
         if (!isOwner && !(await AuthGuard.can(userId, "maintenance:bypass"))) {
-            // 使用 SettingsRepository
-            const mode = await SettingsRepository.get("access_mode", "public");
-
             if (mode !== 'public') {
                 const text = STRINGS.system.maintenance_mode;
                 if (isCallback) {
@@ -93,7 +95,7 @@ export class Dispatcher {
                         alert: true
                     })).catch(() => {}), userId, {}, false, 3);
                 } else if (target) {
-                    await runBotTaskWithRetry(() => client.sendMessage(target, { 
+                    await runBotTaskWithRetry(() => client.sendMessage(target, {
                         message: text,
                         parseMode: "html"
                     }), userId, {}, false, 3);
@@ -166,22 +168,30 @@ export class Dispatcher {
         const message = event.message;
         const text = message.message;
 
+        // 🚀 性能优化：为 /start 命令添加快速路径，避免不必要的数据库查询
+        if (text === "/start") {
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.system.welcome,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        }
+
         // 1. 会话拦截 (密码输入等)
         const session = await SessionManager.get(userId);
         if (session) {
             const handled = await DriveConfigFlow.handleInput(event, userId, session);
-            if (handled) return; 
+            if (handled) return;
         }
 
-        // 获取默认网盘设置
-        const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
-        let selectedDrive = null;
-        if (defaultDriveId) {
-            selectedDrive = await DriveRepository.findById(defaultDriveId);
-        }
-        // 如果没有默认网盘，就用用户唯一绑定的网盘 (当前只有 Mega，所以直接取第一个)
-        if (!selectedDrive) {
-            selectedDrive = await DriveRepository.findByUserId(userId);
+        // 🚀 性能优化：并发获取网盘设置，避免串行查询
+        const [defaultDriveId, selectedDrive] = await Promise.all([
+            SettingsRepository.get(`default_drive_${userId}`, null),
+            DriveRepository.findByUserId(userId)
+        ]);
+
+        let finalSelectedDrive = selectedDrive;
+        if (defaultDriveId && !selectedDrive) {
+            finalSelectedDrive = await DriveRepository.findById(defaultDriveId);
         }
 
         // 2. 文本命令路由

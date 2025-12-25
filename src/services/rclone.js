@@ -235,7 +235,7 @@ export class CloudTool {
         if (!forceRefresh) {
             // 1. 尝试内存缓存
             const memCached = cacheService.get(cacheKey);
-            if (memCached) return memCached;
+            if (memCached) return memCached.files || memCached;
 
             // 2. 尝试 KV 缓存 (持久化)
             try {
