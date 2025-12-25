@@ -168,8 +168,8 @@ describe('TaskRepository', () => {
     describe('findByMsgId', () => {
         it('should find tasks by message id', async () => {
             const mockTasks = [
-                { file_name: 'file1.mp4', status: 'completed' },
-                { file_name: 'file2.mp4', status: 'downloading' }
+                { id: 'task1', file_name: 'file1.mp4', status: 'completed', error_msg: null },
+                { id: 'task2', file_name: 'file2.mp4', status: 'downloading', error_msg: null }
             ];
 
             mockD1.fetchAll.mockResolvedValue(mockTasks);
@@ -177,7 +177,7 @@ describe('TaskRepository', () => {
             const result = await TaskRepository.findByMsgId(12345);
             expect(result).toEqual(mockTasks);
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
-                "SELECT file_name, status FROM tasks WHERE msg_id = ? ORDER BY created_at ASC",
+                "SELECT id, file_name, status, error_msg FROM tasks WHERE msg_id = ? ORDER BY created_at ASC",
                 [12345]
             );
         });

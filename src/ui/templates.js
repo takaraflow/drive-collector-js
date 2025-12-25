@@ -126,12 +126,19 @@ export class UIHelper {
                 statusLines.push(`${statusIcon} ${displayName} [${progress}%]`);
             } else {
                 // 使用简短的状态文本
-                const statusText = displayStatus === 'completed' ? '完成' :
-                                  displayStatus === 'failed' ? '失败' :
-                                  displayStatus === 'cancelled' ? '已取消' :
-                                  displayStatus === 'downloading' ? '下载中' :
-                                  displayStatus === 'uploading' ? '上传中' : 
-                                  displayStatus === 'downloaded' ? '已下载' : '等待中';
+                let statusText = displayStatus === 'completed' ? '完成' :
+                                displayStatus === 'failed' ? '失败' :
+                                displayStatus === 'cancelled' ? '已取消' :
+                                displayStatus === 'downloading' ? '下载中' :
+                                displayStatus === 'uploading' ? '上传中' :
+                                displayStatus === 'downloaded' ? '已下载' : '等待中';
+
+                // 如果失败状态有错误信息，显示简短错误提示
+                if (displayStatus === 'failed' && t.error_msg) {
+                    const shortError = t.error_msg.length > 30 ? t.error_msg.substring(0, 30) + '...' : t.error_msg;
+                    statusText += `: ${escapeHTML(shortError)}`;
+                }
+
                 statusLines.push(`${statusIcon} ${displayName} (${statusText})`);
             }
         });
