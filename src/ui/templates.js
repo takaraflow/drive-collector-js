@@ -125,8 +125,6 @@ export class UIHelper {
                 const progress = Math.round((downloaded / total) * 100);
                 statusLines.push(`${statusIcon} ${displayName} [${progress}%]`);
             } else {
->>>>+++ REPLACE
-
                 // 使用简短的状态文本
                 const statusText = displayStatus === 'completed' ? '完成' :
                                   displayStatus === 'failed' ? '失败' :
