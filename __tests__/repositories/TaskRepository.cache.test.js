@@ -46,13 +46,45 @@ describe("TaskRepository Cache", () => {
     it("should flush pending updates periodically", async () => {
         await TaskRepository.updateStatus("task1", "downloading");
         await TaskRepository.updateStatus("task2", "uploading");
-        
+
         expect(TaskRepository.pendingUpdates.size).toBe(2);
-        
+
         // Trigger flush
         await TaskRepository.flushUpdates();
-        
+
         expect(d1.batch).toHaveBeenCalled();
         expect(TaskRepository.pendingUpdates.size).toBe(0);
+    });
+
+    it("should cleanup expired pending updates", async () => {
+        const now = Date.now();
+        const expiredUpdate = { taskId: "expired", status: "downloading", timestamp: now - 31 * 60 * 1000 }; // 31ŸM
+        const validUpdate = { taskId: "valid", status: "downloading", timestamp: now - 10 * 60 * 1000 }; // 10ŸM
+
+        TaskRepository.pendingUpdates.set("expired", expiredUpdate);
+        TaskRepository.pendingUpdates.set("valid", validUpdate);
+
+        // gL
+        TaskRepository.cleanupExpiredUpdates();
+
+        // ŒÁÇaî«	HaîÝY
+        expect(TaskRepository.pendingUpdates.has("expired")).toBe(false);
+        expect(TaskRepository.pendingUpdates.has("valid")).toBe(true);
+        expect(TaskRepository.pendingUpdates.size).toBe(1);
+    });
+
+    it("should handle empty pendingUpdates cleanup", () => {
+        TaskRepository.pendingUpdates.clear();
+
+        // gL”åú
+        expect(() => TaskRepository.cleanupExpiredUpdates()).not.toThrow();
+    });
+
+    it("should add timestamp to pending updates", async () => {
+        await TaskRepository.updateStatus("task1", "downloading");
+
+        const update = TaskRepository.pendingUpdates.get("task1");
+        expect(update).toHaveProperty("timestamp");
+        expect(typeof update.timestamp).toBe("number");
     });
 });
