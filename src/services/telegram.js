@@ -69,11 +69,59 @@ export const client = new TelegramClient(
     }
 );
 
+// --- 🛡️ 客户端监控与健康检查 (Watchdog) ---
+let lastHeartbeat = Date.now();
+let isReconnecting = false;
+
 // 监听错误以防止更新循环因超时而崩溃
 client.on("error", (err) => {
     if (err.message && err.message.includes("TIMEOUT")) {
-        console.warn("⚠️ Telegram 客户端更新循环超时 (TIMEOUT)，正在尝试自动恢复...");
+        console.warn("⚠️ Telegram 客户端更新循环超时 (TIMEOUT)，检测连接状态...");
+        handleConnectionIssue();
+    } else if (err.message && err.message.includes("Not connected")) {
+        console.warn("⚠️ Telegram 客户端未连接，尝试重连...");
+        handleConnectionIssue();
     } else {
         console.error("❌ Telegram 客户端发生错误:", err);
     }
 });
+
+/**
+ * 处理连接异常情况
+ */
+async function handleConnectionIssue() {
+    if (isReconnecting) return;
+    isReconnecting = true;
+
+    try {
+        console.log("🔄 正在触发主动重连序列...");
+        // 尝试断开并重新连接
+        if (client.connected) {
+            await client.disconnect();
+        }
+        await new Promise(r => setTimeout(r, 5000));
+        await client.connect();
+        console.log("✅ 客户端主动重连成功");
+    } catch (e) {
+        console.error("❌ 主动重连失败，等待系统自动处理:", e.message);
+    } finally {
+        isReconnecting = false;
+    }
+}
+
+// 定时检查心跳（通过获取自身信息）
+setInterval(async () => {
+    if (!client.connected || isReconnecting) return;
+    
+    try {
+        // 简单的 API 调用测试连通性
+        await client.getMe();
+        lastHeartbeat = Date.now();
+    } catch (e) {
+        console.warn("💔 心跳检测失败:", e.message);
+        if (Date.now() - lastHeartbeat > 5 * 60 * 1000) {
+            console.error("🚨 超过 5 分钟无心跳响应，强制重启连接...");
+            handleConnectionIssue();
+        }
+    }
+}, 60 * 1000); // 每分钟检查一次

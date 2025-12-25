@@ -323,7 +323,7 @@ describe('CloudTool', () => {
                 config_data: JSON.stringify({ user: 'u', pass: 'p' })
             });
 
-            const mockFileInfo = { name: 'test.txt', Size: 100 };
+            const mockFileInfo = { Name: 'test.txt', Size: 100 };
             mockSpawnSync.mockReturnValue({
                 status: 0,
                 stdout: JSON.stringify([mockFileInfo])
@@ -339,7 +339,7 @@ describe('CloudTool', () => {
                 config_data: JSON.stringify({ user: 'u', pass: 'p' })
             });
 
-            const mockFileInfo = { name: 'retry.txt', Size: 200 };
+            const mockFileInfo = { Name: 'retry.txt', Size: 200 };
             
             // First 2 calls fail, 3rd succeeds
             mockSpawnSync
@@ -378,7 +378,7 @@ describe('CloudTool', () => {
                 .mockReturnValueOnce({ status: 0, stdout: 'invalid-json' })
                 .mockReturnValueOnce({ status: 0, stdout: JSON.stringify([{ Name: 'ok.txt' }]) });
 
-            const info = await CloudTool.getRemoteFileInfo('file.txt', 'user123', 2);
+            const info = await CloudTool.getRemoteFileInfo('ok.txt', 'user123', 2);
             expect(info).toEqual({ Name: 'ok.txt' });
         });
     });

@@ -82,11 +82,13 @@ describe('CloudTool Batch Upload', () => {
             expect(mockSpawn).toHaveBeenCalled();
         });
 
-        expect(mockSpawn).toHaveBeenCalledWith(expect.any(String), expect.arrayContaining([
+        expect(mockSpawn).toHaveBeenCalledWith('rclone', expect.arrayContaining([
+            '--config', '/dev/null',
             'copy',
-            '/tmp/downloads',
+            expect.stringContaining('downloads'),
             expect.stringContaining(':onedrive,user="test",pass="pass":test-remote/'),
             '--files-from-raw', '-',
+            '--progress',
             '--use-json-log'
         ]), expect.any(Object));
 

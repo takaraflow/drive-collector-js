@@ -51,6 +51,8 @@ const mockTaskManager = {
   addBatchTasks: jest.fn(),
   waitingTasks: [],
   currentTask: null,
+  getWaitingCount: jest.fn(() => 0),
+  getProcessingCount: jest.fn(() => 0),
 };
 jest.unstable_mockModule("../../src/core/TaskManager.js", () => ({
   TaskManager: mockTaskManager,

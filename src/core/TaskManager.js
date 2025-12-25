@@ -121,6 +121,20 @@ export class TaskManager {
         return this.waitingTasks.length + this.waitingUploadTasks.length;
     }
 
+    /**
+     * @deprecated Use getWaitingCount instead
+     */
+    static waitingCount() {
+        return this.getWaitingCount();
+    }
+
+    /**
+     * @deprecated Use getProcessingCount instead
+     */
+    static processingCount() {
+        return this.getProcessingCount();
+    }
+
     // 内存中的任务执行锁，防止同一任务被多次 worker 处理
     static activeWorkers = new Set();
 
