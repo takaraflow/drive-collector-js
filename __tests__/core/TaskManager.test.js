@@ -188,8 +188,8 @@ describe("TaskManager", () => {
 
             await TaskManager.init();
 
-            // Since we use Promise.allSettled, findStalledTasks failure now logs a different message
-            expect(consoleSpy).toHaveBeenCalledWith("TaskManager.init critical error:", expect.any(Error));
+            // Since we use Promise.allSettled, the error is handled internally and logged as part of preload
+            expect(consoleSpy).toHaveBeenCalledWith("DriveRepository.findAll error:", expect.any(Error));
             consoleSpy.mockRestore();
         });
 
@@ -211,7 +211,8 @@ describe("TaskManager", () => {
 
             await TaskManager.init();
 
-            expect(consoleSpy).toHaveBeenCalledWith("📊 预加载常用数据完成");
+            // Should call the preload message
+            expect(consoleSpy).toHaveBeenCalledWith("📊 预加载常用数据完成: 6/6 个任务成功");
             consoleSpy.mockRestore();
         });
 
@@ -404,6 +405,10 @@ describe("TaskManager", () => {
                 isCancelled: false
             };
 
+            // Mock local file exists with correct size, and remote file exists
+            const fs = await import("fs");
+            fs.default.existsSync.mockReturnValue(true);
+            fs.default.statSync.mockReturnValue({ size: 1024 });
             mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Size: 1024 });
 
             await TaskManager.downloadWorker(task);
@@ -452,6 +457,10 @@ describe("TaskManager", () => {
                     }
                 }, 1);
             });
+            // Mock the file size check to match
+            const fs = await import("fs");
+            fs.default.existsSync.mockReturnValue(true);
+            fs.default.statSync.mockReturnValue({ size: 1024 });
             mockCloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Size: 1024 }); // Final check
 
             await TaskManager.uploadWorker(task);
