@@ -58,16 +58,16 @@ describe("TaskRepository Cache", () => {
 
     it("should cleanup expired pending updates", async () => {
         const now = Date.now();
-        const expiredUpdate = { taskId: "expired", status: "downloading", timestamp: now - 31 * 60 * 1000 }; // 31ŸM
-        const validUpdate = { taskId: "valid", status: "downloading", timestamp: now - 10 * 60 * 1000 }; // 10ŸM
+        const expiredUpdate = { taskId: "expired", status: "downloading", timestamp: now - 31 * 60 * 1000 }; // 31 minutes ago
+        const validUpdate = { taskId: "valid", status: "downloading", timestamp: now - 10 * 60 * 1000 }; // 10 minutes ago
 
         TaskRepository.pendingUpdates.set("expired", expiredUpdate);
         TaskRepository.pendingUpdates.set("valid", validUpdate);
 
-        // gL
+        // Call cleanup
         TaskRepository.cleanupExpiredUpdates();
 
-        // ŒÁÇaî«	HaîÝY
+        // Check results
         expect(TaskRepository.pendingUpdates.has("expired")).toBe(false);
         expect(TaskRepository.pendingUpdates.has("valid")).toBe(true);
         expect(TaskRepository.pendingUpdates.size).toBe(1);
@@ -76,7 +76,7 @@ describe("TaskRepository Cache", () => {
     it("should handle empty pendingUpdates cleanup", () => {
         TaskRepository.pendingUpdates.clear();
 
-        // gL”åú
+        // Call cleanup
         expect(() => TaskRepository.cleanupExpiredUpdates()).not.toThrow();
     });
 
