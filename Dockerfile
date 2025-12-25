@@ -31,17 +31,13 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# --- 强制依赖第一阶段的测试结果 ---
+COPY --from=builder /app/package.json ./package.json
+
 # 安装生产依赖
-COPY package*.json ./
 RUN npm ci --production && npm cache clean --force
 
-# 3. 建议点：在复制源代码前，确保你项目根目录有 .dockerignore 文件
 COPY . .
-
-# 创建必要的目录并设置权限
 RUN mkdir -p /tmp/downloads && chmod 777 /tmp/downloads
-
-# 健康检查端口
 EXPOSE 7860
-
 CMD ["node", "index.js"]
