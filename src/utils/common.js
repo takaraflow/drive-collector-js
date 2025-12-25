@@ -33,6 +33,14 @@ export const safeEdit = async (chatId, msgId, text, buttons = null, userId = nul
                     if (e.message && (e.message.includes("MESSAGE_NOT_MODIFIED") || e.code === 400 && e.errorMessage === "MESSAGE_NOT_MODIFIED")) {
                         return;
                     }
+                    // 处理 AUTH_KEY_DUPLICATED 错误
+                    if (e.code === 406 && (e.errorMessage?.includes('AUTH_KEY_DUPLICATED') || e.message?.includes('AUTH_KEY_DUPLICATED'))) {
+                        const { clearSession } = await import("../services/telegram.js");
+                        await clearSession();
+                        console.error(`🚨 关键错误: AUTH_KEY_DUPLICATED 检测到，已清除 Session。建议重启服务。`);
+                        // 不再重试，因为 Session 已失效
+                        return;
+                    }
                     throw e;
                 }
             },
@@ -43,6 +51,9 @@ export const safeEdit = async (chatId, msgId, text, buttons = null, userId = nul
         );
     } catch (e) {
         // 最终失败也不抛出，避免中断主流程
+        if (e.code === 406 && (e.errorMessage?.includes('AUTH_KEY_DUPLICATED') || e.message?.includes('AUTH_KEY_DUPLICATED'))) {
+            return; // 已经在内部处理过了
+        }
         console.warn(`[safeEdit Failed] msgId ${msgId}:`, e.message);
     }
 };
@@ -52,7 +63,13 @@ export const getMediaInfo = (media) => {
     const obj = media.document || media.video || media.photo;
     if (!obj) return null;
     let name = obj.attributes?.find(a => a.fileName)?.fileName;
-    if (!name) name = `transfer_${Math.floor(Date.now() / 1000)}${media.video ? ".mp4" : (media.photo ? ".jpg" : ".bin")}`;
+    if (!name) {
+        // 使用时间戳 + 6位随机字符串确保文件名唯一，特别是在处理媒体组时
+        const nonce = Math.random().toString(36).substring(2, 8);
+        const timestamp = Date.now();
+        const ext = media.video ? ".mp4" : (media.photo ? ".jpg" : ".bin");
+        name = `transfer_${timestamp}_${nonce}${ext}`;
+    }
     const size = obj.size || (obj.sizes ? obj.sizes[obj.sizes.length - 1].size : 0);
     return { name, size };
 };

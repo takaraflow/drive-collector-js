@@ -168,7 +168,7 @@ describe('common utils', () => {
 
             const result = getMediaInfo(media);
             expect(result).toEqual({
-                name: expect.stringMatching(/transfer_\d+\.jpg/), // Generated name
+                name: expect.stringMatching(/transfer_\d+_[a-z0-9]+\.jpg/), // Generated name with nonce
                 size: 512 // obj.size takes precedence over sizes
             });
         });
@@ -188,7 +188,7 @@ describe('common utils', () => {
             };
 
             const result = getMediaInfo(media);
-            expect(result.name).toMatch(/transfer_\d+\.mp4/);
+            expect(result.name).toMatch(/transfer_\d+_[a-z0-9]+\.mp4/);
             expect(result.size).toBe(3072);
         });
 
@@ -200,7 +200,7 @@ describe('common utils', () => {
             };
 
             const result = getMediaInfo(media);
-            expect(result.name).toMatch(/transfer_\d+\.bin/);
+            expect(result.name).toMatch(/transfer_\d+_[a-z0-9]+\.bin/);
             expect(result.size).toBe(4096);
         });
     });
