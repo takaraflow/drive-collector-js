@@ -32,10 +32,10 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # --- 强制依赖第一阶段的测试结果 ---
-COPY --from=builder /app/package.json ./package.json
+COPY /app/package*.json ./
 
 # 安装生产依赖
-RUN npm ci --production && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 COPY . .
 RUN mkdir -p /tmp/downloads && chmod 777 /tmp/downloads
