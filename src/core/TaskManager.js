@@ -795,7 +795,7 @@ export class TaskManager {
             }
         }
 
-        if (now - lastUpdate < throttleMs) return;
+        if (now - lastUpdate < throttleMs && !isFinal) return;
         this.monitorLocks.set(msgId, now);
 
         const groupTasks = await TaskRepository.findByMsgId(msgId);

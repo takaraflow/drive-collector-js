@@ -59,7 +59,11 @@ export const safeEdit = async (chatId, msgId, text, buttons = null, userId = nul
 };
 
 // 提取媒体元数据 (文件名、大小)
-export const getMediaInfo = (media) => {
+export const getMediaInfo = (input) => {
+    // 兼容传入消息对象或媒体对象
+    const media = input?.media || input;
+    if (!media) return null;
+
     const obj = media.document || media.video || media.photo;
     if (!obj) return null;
     let name = obj.attributes?.find(a => a.fileName)?.fileName;
