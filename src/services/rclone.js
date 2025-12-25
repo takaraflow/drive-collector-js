@@ -68,8 +68,9 @@ export class CloudTool {
      * 辅助方法：构造安全的连接字符串
      */
     static _getConnectionString(conf) {
-        const user = (conf.user || "").replace(/"/g, '\\"');
-        const pass = (conf.pass || "").replace(/"/g, '\\"');
+        // 【修复 2】先转义反斜杠，再转义双引号
+        const user = (conf.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const pass = (conf.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         return `:${conf.type},user="${user}",pass="${pass}":`;
     }
 
@@ -137,8 +138,12 @@ export class CloudTool {
                 // 准备 --files-from 数据 (使用 stdin 传递以支持大量文件且避免路径转义问题)
                 // 注意：rclone copy 的 source 应该是这些文件共同的父目录
                 // 使用 path.resolve 确保获取绝对路径，避免由于相对路径处理不当导致的上传失败
+                // 【修复 3】过滤无效路径，防止解析到根目录
                 const commonSourceDir = path.resolve(config.downloadDir || "/tmp/downloads");
-                const fileList = tasks.map(t => path.relative(commonSourceDir, path.resolve(t.localPath || ""))).join('\n');
+                const fileList = tasks
+                    .filter(t => t.localPath) // 确保路径存在
+                    .map(t => path.relative(commonSourceDir, path.resolve(t.localPath)))
+                    .join('\n');
 
                 const args = [
                     "--config", "/dev/null",
@@ -155,14 +160,24 @@ export class CloudTool {
                 ];
 
                 const proc = spawn(rcloneBinary, args, { env: process.env });
-                
+
                 // 将进程关联到所有相关任务，以便统一取消
                 tasks.forEach(t => t.proc = proc);
 
+                // 【修复 1】添加缓冲区变量，处理流数据分片
+                let stderrBuffer = "";
                 let errorLog = "";
 
                 proc.stderr.on("data", (data) => {
-                    const lines = data.toString().split('\n');
+                    // 拼接到缓冲区
+                    stderrBuffer += data.toString();
+
+                    // 按换行符分割
+                    const lines = stderrBuffer.split('\n');
+
+                    // 【关键】取出最后一个可能不完整的片段，放回缓冲区等待下一次数据
+                    stderrBuffer = lines.pop();
+
                     for (const line of lines) {
                         if (!line.trim()) continue;
                         try {
@@ -173,7 +188,8 @@ export class CloudTool {
                                 if (onProgress && stats.transferring) {
                                     // 匹配每个正在传输的文件到对应的任务
                                     stats.transferring.forEach(transfer => {
-                                        const task = tasks.find(t => t.localPath.endsWith(transfer.name));
+                                        // 注意：这里建议加个容错，防止 localPath 为空
+                                        const task = tasks.find(t => t.localPath && t.localPath.endsWith(transfer.name));
                                         if (task) {
                                             onProgress(task.id, {
                                                 percentage: transfer.percentage,
@@ -187,7 +203,7 @@ export class CloudTool {
                                 }
                             }
                         } catch (e) {
-                            // 非 JSON 日志（如普通错误输出）
+                            // 解析失败的行通常是 Rclone 的普通文本错误日志，收集起来
                             errorLog += line + "\n";
                         }
                     }
@@ -413,7 +429,10 @@ export class CloudTool {
                         const timer = setTimeout(() => {
                             if (!completed) {
                                 completed = true;
-                                proc.kill(); // 强制杀死进程
+                                if (typeof proc.kill === 'function') {
+                                    proc.kill();
+                                }
+                                // 【建议】直接 resolve，不等待 close 回调，防止 kill 后 close 不触发导致卡死
                                 resolve({ code: -1, stdout: "", stderr: "TIMEOUT" });
                             }
                         }, timeout);
