@@ -141,6 +141,17 @@ const { updateStatus } = await import("../../src/utils/common.js");
 describe("TaskManager", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        // Reset all mocks to default behavior
+        mockCloudTool.uploadBatch.mockResolvedValue({ success: true });
+        mockClient.sendMessage.mockResolvedValue({ id: 300 });
+        mockClient.editMessage.mockResolvedValue();
+        mockTaskRepository.create.mockResolvedValue();
+        mockTaskRepository.createBatch.mockResolvedValue();
+        mockTaskRepository.updateStatus.mockResolvedValue();
+        mockTaskRepository.findById.mockResolvedValue({ user_id: "u1" });
+        mockTaskRepository.findByMsgId.mockResolvedValue([]);
+        mockAuthGuard.can.mockResolvedValue(false);
+
         TaskManager.waitingTasks = [];
         TaskManager.currentTask = null;
         TaskManager.waitingUploadTasks = [];
@@ -508,6 +519,176 @@ describe("TaskManager", () => {
 
             expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("t1", "failed", "Upload failed");
         }, 1000);
+
+        test("should handle local file not found", async () => {
+            const task = {
+                id: "t1",
+                userId: "u1",
+                chatId: "c1",
+                msgId: 100,
+                message: { id: 200, media: {} },
+                fileName: "test.mp4",
+                localPath: "/tmp/missing.mp4",
+                isCancelled: false
+            };
+
+            const fs = await import("fs");
+            fs.default.existsSync.mockReturnValue(false);
+
+            await TaskManager.uploadWorker(task);
+
+            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("t1", "failed", "Local file not found");
+            expect(updateStatus).toHaveBeenCalledWith(task, "failed_val", true);
+        });
+
+        test("should handle upload verification failure", async () => {
+            const task = {
+                id: "t1",
+                userId: "u1",
+                chatId: "c1",
+                msgId: 100,
+                message: { id: 200, media: {} },
+                fileName: "test.mp4",
+                localPath: "/tmp/test.mp4",
+                isCancelled: false
+            };
+
+            // Mock successful upload but verification fails
+            TaskManager.uploadBatcher.add = jest.fn((task) => {
+                setTimeout(() => {
+                    if (task.onUploadComplete) {
+                        task.onUploadComplete({ success: true });
+                    }
+                }, 1);
+            });
+
+            const fs = await import("fs");
+            fs.default.existsSync.mockReturnValue(true);
+            fs.default.statSync.mockReturnValue({ size: 1024 });
+            mockCloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Size: 3000 }); // Size mismatch > 1024
+
+            await TaskManager.uploadWorker(task);
+
+            expect(mockTaskRepository.updateStatus).toHaveBeenNthCalledWith(2, "t1", "failed");
+            expect(updateStatus).toHaveBeenCalledWith(task, "failed_val", true);
+        });
+
+        test("should handle cancellation during upload", async () => {
+            const task = {
+                id: "t1",
+                userId: "u1",
+                chatId: "c1",
+                msgId: 100,
+                message: { id: 200, media: {} },
+                fileName: "test.mp4",
+                localPath: "/tmp/test.mp4",
+                isCancelled: true
+            };
+
+            const fs = await import("fs");
+            fs.default.existsSync.mockReturnValue(true);
+
+            await TaskManager.uploadWorker(task);
+
+            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("t1", "cancelled", "CANCELLED");
+        });
+
+        test("should handle group task upload updates", async () => {
+            const task = {
+                id: "t1",
+                userId: "u1",
+                chatId: "c1",
+                msgId: 100,
+                message: { id: 200, media: {} },
+                fileName: "test.mp4",
+                localPath: "/tmp/test.mp4",
+                isCancelled: false,
+                isGroup: true
+            };
+
+            // Mock findByMsgId to return valid group tasks
+            mockTaskRepository.findByMsgId.mockResolvedValue([{ id: "t1", status: "uploading" }]);
+
+            TaskManager.uploadBatcher.add = jest.fn((task) => {
+                setTimeout(() => {
+                    if (task.onUploadComplete) {
+                        task.onUploadComplete({ success: true });
+                    }
+                    if (task.onUploadProgress) {
+                        task.onUploadProgress({ bytes: 512, size: 1024 });
+                    }
+                }, 1);
+            });
+
+            const fs = await import("fs");
+            fs.default.existsSync.mockReturnValue(true);
+            fs.default.statSync.mockReturnValue({ size: 1024 });
+            mockCloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Size: 1024 });
+
+            await TaskManager.uploadWorker(task);
+
+            expect(mockTaskRepository.findByMsgId).toHaveBeenCalledWith(100);
+        });
+
+        test("should handle file cleanup after successful upload", async () => {
+            const task = {
+                id: "t1",
+                userId: "u1",
+                chatId: "c1",
+                msgId: 100,
+                message: { id: 200, media: {} },
+                fileName: "test.mp4",
+                localPath: "/tmp/test.mp4",
+                isCancelled: false
+            };
+
+            TaskManager.uploadBatcher.add = jest.fn((task) => {
+                setTimeout(() => {
+                    if (task.onUploadComplete) {
+                        task.onUploadComplete({ success: true });
+                    }
+                }, 1);
+            });
+
+            const fs = await import("fs");
+            fs.default.existsSync.mockReturnValue(true);
+            fs.default.statSync.mockReturnValue({ size: 1024 });
+            mockCloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Size: 1024 });
+
+            await TaskManager.uploadWorker(task);
+
+            expect(fs.default.promises.unlink).toHaveBeenCalledWith("/tmp/test.mp4");
+        });
+
+        test("should handle file cleanup failure gracefully", async () => {
+            const task = {
+                id: "t1",
+                userId: "u1",
+                chatId: "c1",
+                msgId: 100,
+                message: { id: 200, media: {} },
+                fileName: "test.mp4",
+                localPath: "/tmp/test.mp4",
+                isCancelled: false
+            };
+
+            TaskManager.uploadBatcher.add = jest.fn((task) => {
+                setTimeout(() => {
+                    if (task.onUploadComplete) {
+                        task.onUploadComplete({ success: true });
+                    }
+                }, 1);
+            });
+
+            const fs = await import("fs");
+            fs.default.existsSync.mockReturnValue(true);
+            fs.default.statSync.mockReturnValue({ size: 1024 });
+            mockCloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Size: 1024 });
+            fs.default.promises.unlink.mockRejectedValue(new Error("Cleanup failed"));
+
+            // Should not throw error even if cleanup fails
+            await expect(TaskManager.uploadWorker(task)).resolves.not.toThrow();
+        });
     });
 
     describe("_refreshGroupMonitor", () => {
@@ -655,5 +836,317 @@ describe("TaskManager", () => {
 
             expect(updateStatus).not.toHaveBeenCalled();
         });
+
+        test("should limit UI updates to first 5 tasks", async () => {
+            const tasks = Array.from({ length: 10 }, (_, i) => ({
+                id: `${i}`,
+                lastText: "",
+                isGroup: false
+            }));
+            TaskManager.waitingTasks = tasks;
+
+            updateStatus.mockResolvedValue(true);
+
+            await TaskManager.updateQueueUI();
+
+            expect(updateStatus).toHaveBeenCalledTimes(5);
+        });
+    });
+
+    describe("UploadBatcher", () => {
+        test("should add task to batch and trigger upload", async () => {
+            const task = { id: "t1", userId: "u1" };
+            const processBatchFn = jest.fn();
+
+            const batcher = new TaskManager.uploadBatcher.constructor(processBatchFn);
+
+            // Mock setTimeout to execute immediately
+            jest.useFakeTimers();
+            batcher.add(task);
+
+            jest.advanceTimersByTime(5000);
+
+            expect(processBatchFn).toHaveBeenCalledWith([task]);
+            jest.useRealTimers();
+        });
+
+        test("should group tasks by user and folder", async () => {
+            const task1 = { id: "t1", userId: "u1" };
+            const task2 = { id: "t2", userId: "u1" };
+            const task3 = { id: "t3", userId: "u2" };
+
+            const processBatchFn = jest.fn();
+
+            const batcher = new TaskManager.uploadBatcher.constructor(processBatchFn);
+
+            jest.useFakeTimers();
+            batcher.add(task1);
+            batcher.add(task2);
+            batcher.add(task3);
+
+            jest.advanceTimersByTime(5000);
+
+            expect(processBatchFn).toHaveBeenCalledTimes(2); // Two different user groups
+            expect(processBatchFn).toHaveBeenCalledWith([task1, task2]);
+            expect(processBatchFn).toHaveBeenCalledWith([task3]);
+            jest.useRealTimers();
+        });
+    });
+
+    describe("cancelTask - additional edge cases", () => {
+        test("should handle task not found", async () => {
+            mockTaskRepository.findById.mockResolvedValue(null);
+
+            const result = await TaskManager.cancelTask("nonexistent", "user1");
+
+            expect(result).toBe(false);
+        });
+
+        test("should cancel current task", async () => {
+            const taskId = "current";
+            const userId = "user1";
+            mockTaskRepository.findById.mockResolvedValue({ user_id: userId });
+
+            const currentTask = { id: taskId, userId: userId, isCancelled: false, proc: { kill: jest.fn() } };
+            TaskManager.currentTask = currentTask;
+
+            const result = await TaskManager.cancelTask(taskId, userId);
+
+            expect(result).toBe(true);
+            expect(currentTask.isCancelled).toBe(true);
+            expect(currentTask.proc.kill).toHaveBeenCalledWith("SIGTERM");
+        });
+
+        test("should cancel upload task", async () => {
+            const taskId = "upload";
+            const userId = "user1";
+            mockTaskRepository.findById.mockResolvedValue({ user_id: userId });
+
+            const uploadTask = { id: taskId, userId: userId, isCancelled: false, proc: { kill: jest.fn() } };
+            TaskManager.waitingUploadTasks.push(uploadTask);
+
+            const result = await TaskManager.cancelTask(taskId, userId);
+
+            expect(result).toBe(true);
+            expect(uploadTask.isCancelled).toBe(true);
+            expect(TaskManager.waitingUploadTasks).not.toContain(uploadTask);
+        });
+    });
+
+    describe("addTask - additional edge cases", () => {
+        test("should handle different target formats", async () => {
+            const targets = [
+                "chat123",
+                { userId: "user123" },
+                { chatId: "chat123" },
+                { channelId: "channel123" },
+                { id: "id123" },
+                123456789 // numeric
+            ];
+
+            for (const target of targets) {
+                mockClient.sendMessage.mockResolvedValueOnce({ id: 300 });
+
+                await TaskManager.addTask(target, { id: 200 }, "user456");
+
+                expect(mockClient.sendMessage).toHaveBeenCalled();
+                expect(mockTaskRepository.create).toHaveBeenCalled();
+            }
+        });
+
+        test("should handle sendMessage failure", async () => {
+            const { runBotTaskWithRetry } = await import("../../src/utils/limiter.js");
+            runBotTaskWithRetry.mockRejectedValue(new Error("Send failed"));
+
+            await expect(TaskManager.addTask("chat123", { id: 200 }, "user456")).rejects.toThrow("Send failed");
+        });
+
+        test("should pass correct priority to sendMessage", async () => {
+            const { runBotTaskWithRetry } = await import("../../src/utils/limiter.js");
+            runBotTaskWithRetry.mockResolvedValue({ id: 300 });
+
+            await TaskManager.addTask("chat123", { id: 200 }, "user456");
+
+            expect(runBotTaskWithRetry).toHaveBeenCalledWith(
+                expect.any(Function),
+                "user456",
+                { priority: 20 },
+                false,
+                3
+            );
+        });
+    });
+
+    describe("addBatchTasks - additional edge cases", () => {
+        test("should handle empty messages array", async () => {
+            // addBatchTasks doesn't throw for empty array, it just returns early
+            await expect(TaskManager.addBatchTasks("chat123", [], "user456")).resolves.toBeUndefined();
+        });
+
+        test("should handle sendMessage failure in batch", async () => {
+            // Temporarily override the mock for this test
+            const { runBotTaskWithRetry } = await import("../../src/utils/limiter.js");
+            const originalMock = runBotTaskWithRetry.getMockImplementation();
+            runBotTaskWithRetry.mockRejectedValueOnce(new Error("Send failed"));
+
+            await expect(TaskManager.addBatchTasks("chat123", [{ id: 200 }], "user456")).rejects.toThrow("Send failed");
+
+            // Restore original mock
+            runBotTaskWithRetry.mockImplementation(originalMock);
+        });
+
+        test("should create correct number of tasks", async () => {
+            const messages = [{ id: 201 }, { id: 202 }, { id: 203 }];
+            mockClient.sendMessage.mockResolvedValue({ id: 300 });
+            mockTaskRepository.createBatch.mockResolvedValue(true);
+
+            TaskManager.queue.pause();
+
+            await TaskManager.addBatchTasks("chat123", messages, "user456");
+
+            expect(mockTaskRepository.createBatch).toHaveBeenCalledWith(
+                expect.arrayContaining([
+                    expect.objectContaining({ sourceMsgId: 201 }),
+                    expect.objectContaining({ sourceMsgId: 202 }),
+                    expect.objectContaining({ sourceMsgId: 203 })
+                ])
+            );
+            expect(TaskManager.waitingTasks.length).toBe(3);
+        });
+    });
+
+    describe("_refreshGroupMonitor - additional edge cases", () => {
+        test("should handle dynamic throttling based on progress", async () => {
+            const task = { msgId: "100", chatId: "123", isGroup: true };
+            mockTaskRepository.findByMsgId.mockResolvedValue([{ status: "downloading" }]);
+
+            // Test early progress (0-10%)
+            TaskManager.monitorLocks.set("100", 0); // Reset lock
+            await TaskManager._refreshGroupMonitor(task, "downloading", 50, 1000); // 5%
+            expect(mockUIHelper.renderBatchMonitor).toHaveBeenCalled();
+
+            // Test mid progress (10-50%)
+            jest.clearAllMocks();
+            TaskManager.monitorLocks.set("100", 0);
+            await TaskManager._refreshGroupMonitor(task, "downloading", 300, 1000); // 30%
+            expect(mockUIHelper.renderBatchMonitor).toHaveBeenCalled();
+
+            // Test late progress (50-100%)
+            jest.clearAllMocks();
+            TaskManager.monitorLocks.set("100", 0);
+            await TaskManager._refreshGroupMonitor(task, "downloading", 800, 1000); // 80%
+            expect(mockUIHelper.renderBatchMonitor).toHaveBeenCalled();
+        });
+
+        test("should handle numeric chatId conversion", async () => {
+            const task = { msgId: "100", chatId: "123456789", isGroup: true }; // 字符串格式会被转换为BigInt
+            mockTaskRepository.findByMsgId.mockResolvedValue([{ status: "downloading" }]);
+
+            await TaskManager._refreshGroupMonitor(task, "downloading");
+
+            expect(mockClient.editMessage).toHaveBeenCalledWith(BigInt("123456789"), expect.any(Object));
+        });
+
+        test("should batch update statuses for final states", async () => {
+            const task = { msgId: "100", chatId: "123", isGroup: true };
+            const groupTasks = [
+                { id: "t1", status: "downloading" },
+                { id: "t2", status: "downloading" }
+            ];
+            mockTaskRepository.findByMsgId.mockResolvedValue(groupTasks);
+
+            const batchUpdateSpy = jest.spyOn(TaskManager, 'batchUpdateStatus');
+
+            await TaskManager._refreshGroupMonitor(task, "completed");
+
+            expect(batchUpdateSpy).toHaveBeenCalledWith([
+                { id: "t1", status: "completed", error: null },
+                { id: "t2", status: "completed", error: null }
+            ]);
+
+            batchUpdateSpy.mockRestore();
+        });
+
+        test("should handle empty group tasks", async () => {
+            const task = { msgId: "100", chatId: "123", isGroup: true };
+            mockTaskRepository.findByMsgId.mockResolvedValue([]);
+
+            await TaskManager._refreshGroupMonitor(task, "downloading");
+
+            expect(mockUIHelper.renderBatchMonitor).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("queue compatibility", () => {
+        test("should maintain backward compatibility with queue property", () => {
+            const originalQueue = TaskManager.downloadQueue;
+            const newQueue = { test: "queue" };
+
+            TaskManager.queue = newQueue;
+
+            expect(TaskManager.downloadQueue).toBe(newQueue);
+            expect(TaskManager.queue).toBe(newQueue);
+
+            // Restore
+            TaskManager.downloadQueue = originalQueue;
+        });
+    });
+
+    describe("error handling and recovery", () => {
+        test("should handle downloadWorker errors gracefully", async () => {
+            const task = {
+                id: "t1",
+                userId: "u1",
+                chatId: "c1",
+                msgId: 100,
+                message: { media: {} },
+                fileName: "test.mp4",
+                isCancelled: false
+            };
+
+            // Mock getMediaInfo to return valid info
+            const { getMediaInfo } = await import("../../src/utils/common.js");
+            getMediaInfo.mockReturnValue({ name: "test.mp4", size: 1024 });
+
+            // Ensure no sec transfer by making local file not exist or size mismatch
+            const fs = await import("fs");
+            fs.default.promises.stat.mockRejectedValue(new Error("File not found"));
+            mockCloudTool.getRemoteFileInfo.mockResolvedValueOnce(null);
+
+            // Mock download to fail
+            const { runMtprotoFileTaskWithRetry } = await import("../../src/utils/limiter.js");
+            runMtprotoFileTaskWithRetry.mockRejectedValue(new Error("Network error"));
+
+            await TaskManager.downloadWorker(task);
+
+            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("t1", "failed", "Network error");
+        });
+
+        test("should handle uploadWorker errors gracefully", async () => {
+            const task = {
+                id: "t1",
+                userId: "u1",
+                chatId: "c1",
+                msgId: 100,
+                message: { media: {} },
+                localPath: "/tmp/test.mp4",
+                isCancelled: false
+            };
+
+            const fs = await import("fs");
+            fs.default.existsSync.mockReturnValue(true);
+
+            TaskManager.uploadBatcher.add = jest.fn((task) => {
+                setTimeout(() => {
+                    if (task.onUploadComplete) {
+                        task.onUploadComplete({ success: false, error: "Upload error" });
+                    }
+                }, 1);
+            });
+
+            await TaskManager.uploadWorker(task);
+
+            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("t1", "failed", "Upload error");
+        }, 20000);
     });
 });
