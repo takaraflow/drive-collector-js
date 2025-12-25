@@ -150,9 +150,15 @@ describe("TaskManager", () => {
     });
 
     afterEach(() => {
-        // 清理所有未完成的异步操作
-        jest.clearAllTimers();
-        jest.runOnlyPendingTimers();
+        // 清理所有未完成的异步操作（仅在启用fake timers时）
+        try {
+            if (jest.isMockFunction(setTimeout)) {
+                jest.clearAllTimers();
+                jest.runOnlyPendingTimers();
+            }
+        } catch (e) {
+            // 忽略 fake timers 未启用的错误
+        }
     });
 
     describe("init", () => {
