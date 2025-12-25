@@ -5,7 +5,7 @@ import { CloudTool } from "../services/rclone.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { config } from "../config/index.js";
 import { spawnSync } from "child_process";
-import fs from "fs";
+import * as fs from "fs";
 
 /**
  * 网络诊断工具

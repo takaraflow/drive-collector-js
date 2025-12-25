@@ -1,5 +1,6 @@
 import { kv } from "./kv.js";
 import { d1 } from "./d1.js";
+import { InstanceRepository } from "../repositories/InstanceRepository.js";
 
 /**
  * --- 多实例协调服务 ---
@@ -122,8 +123,17 @@ export class InstanceCoordinator {
      */
     async getAllInstances() {
         try {
-            // 注意：KV 不支持列表操作，这里需要从 D1 获取或使用已知实例列表
-            // 暂时通过已知的活跃实例集合返回
+            // 优先从数据库获取实例列表
+            const dbInstances = await InstanceRepository.findAll();
+
+            // 如果数据库有数据，返回数据库结果
+            if (dbInstances && dbInstances.length > 0) {
+                // 同步到本地缓存
+                this.activeInstances = new Set(dbInstances.map(inst => inst.id));
+                return dbInstances;
+            }
+
+            // 如果数据库为空，尝试从KV获取已知的活跃实例
             const instances = [];
             for (const instanceId of this.activeInstances) {
                 try {
@@ -135,7 +145,7 @@ export class InstanceCoordinator {
             }
             return instances;
         } catch (e) {
-            console.error(`获取所有实例失败:`, e.message);
+            console.error(`获取所有实例失败:`, e?.message || String(e));
             return [];
         }
     }
@@ -204,19 +214,26 @@ export class InstanceCoordinator {
         };
 
         try {
-            // 使用 KV 的原子操作特性
+            // 尝试原子性地设置锁，如果键不存在则成功
+            // Cloudflare KV 不支持真正的条件操作，这里使用时间戳作为版本号
             const existing = await kv.get(`lock:${lockKey}`);
-            if (existing && existing.instanceId !== this.instanceId) {
+
+            if (existing) {
+                // 检查锁是否仍然有效
                 const now = Date.now();
-                if ((now - existing.acquiredAt) < (existing.ttl * 1000)) {
+                if (existing.instanceId !== this.instanceId &&
+                    (now - existing.acquiredAt) < (existing.ttl * 1000)) {
                     return false; // 锁被其他实例持有且未过期
                 }
+                // 如果锁过期或被当前实例持有，允许重新获取
             }
 
+            // 设置锁，使用时间戳作为额外的验证
+            lockValue.version = Date.now();
             await kv.set(`lock:${lockKey}`, lockValue, ttl);
             return true;
         } catch (e) {
-            console.error(`获取锁失败 ${lockKey}:`, e.message);
+            console.error(`获取锁失败 ${lockKey}:`, e?.message || String(e));
             return false;
         }
     }
@@ -232,7 +249,7 @@ export class InstanceCoordinator {
                 await kv.delete(`lock:${lockKey}`);
             }
         } catch (e) {
-            console.error(`释放锁失败 ${lockKey}:`, e.message);
+            console.error(`释放锁失败 ${lockKey}:`, e?.message || String(e));
         }
     }
 
