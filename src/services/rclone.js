@@ -265,28 +265,39 @@ export class CloudTool {
             const conf = await this._getUserConfig(userId);
             const connectionString = this._getConnectionString(conf);
             
-            // 尝试获取文件列表，如果目录不存在则尝试创建
-            const fetchFiles = (path) => {
-                return spawnSync(rcloneBinary, ["--config", "/dev/null", "lsjson", path], {
-                    env: process.env,
-                    encoding: 'utf-8',
-                    maxBuffer: 10 * 1024 * 1024
+            // 尝试获取文件列表，如果目录不存在则尝试创建 (异步化)
+            const runLsJson = (path) => {
+                return new Promise((resolve, reject) => {
+                    const proc = spawn(rcloneBinary, ["--config", "/dev/null", "lsjson", path], {
+                        env: process.env
+                    });
+                    
+                    let stdout = "";
+                    let stderr = "";
+
+                    proc.stdout.on("data", (data) => stdout += data);
+                    proc.stderr.on("data", (data) => stderr += data);
+
+                    proc.on("close", (code) => {
+                        resolve({ code, stdout, stderr });
+                    });
+
+                    proc.on("error", (err) => reject(err));
                 });
             };
 
             const fullRemotePath = `${connectionString}${config.remoteFolder}/`;
-            let ret = fetchFiles(fullRemotePath);
+            let ret = await runLsJson(fullRemotePath);
 
-            if (ret.status !== 0 && ret.stderr && (ret.stderr.includes("directory not found") || ret.stderr.includes("error listing"))) {
+            if (ret.code !== 0 && ret.stderr && (ret.stderr.includes("directory not found") || ret.stderr.includes("error listing"))) {
                 console.log(`Directory ${config.remoteFolder} not found, attempting to create it...`);
                 // 尝试创建一个空目录/触发目录初始化
                 spawnSync(rcloneBinary, ["--config", "/dev/null", "mkdir", fullRemotePath], { env: process.env });
                 // 再次尝试
-                ret = fetchFiles(fullRemotePath);
+                ret = await runLsJson(fullRemotePath);
             }
 
-            if (ret.error) throw ret.error;
-            if (ret.status !== 0) {
+            if (ret.code !== 0) {
                 if (ret.stderr && (ret.stderr.includes("directory not found") || ret.stderr.includes("error listing"))) {
                     console.warn("Rclone directory still not found after attempt, returning empty list.");
                     this.loading = false;
@@ -378,7 +389,7 @@ export class CloudTool {
     }
 
     /**
-     * 简单的文件完整性检查 (带重试机制以应对 API 延迟)
+     * 简单的文件完整性检查 (带重试机制以应对 API 延迟) - 异步非阻塞版
      */
     static async getRemoteFileInfo(fileName, userId, retries = 3) {
         if (!userId) return null;
@@ -388,41 +399,81 @@ export class CloudTool {
                 const conf = await this._getUserConfig(userId);
                 const connectionString = this._getConnectionString(conf);
 
+                const runLsJson = (path, args = [], timeout = 10000) => {
+                    return new Promise((resolve, reject) => {
+                        const proc = spawn(rcloneBinary, ["--config", "/dev/null", "lsjson", ...args, path], {
+                            env: process.env
+                        });
+                        
+                        let stdout = "";
+                        let stderr = "";
+                        let completed = false;
+
+                        // 设置超时保护
+                        const timer = setTimeout(() => {
+                            if (!completed) {
+                                completed = true;
+                                proc.kill(); // 强制杀死进程
+                                resolve({ code: -1, stdout: "", stderr: "TIMEOUT" });
+                            }
+                        }, timeout);
+
+                        proc.stdout.on("data", (data) => stdout += data);
+                        proc.stderr.on("data", (data) => stderr += data);
+
+                        proc.on("close", (code) => {
+                            if (!completed) {
+                                completed = true;
+                                clearTimeout(timer);
+                                resolve({ code, stdout, stderr });
+                            }
+                        });
+
+                        proc.on("error", (err) => {
+                            if (!completed) {
+                                completed = true;
+                                clearTimeout(timer);
+                                reject(err);
+                            }
+                        });
+                    });
+                };
+
                 // 优先尝试直接查询文件（更高效）
                 const fullRemotePath = `${connectionString}${config.remoteFolder}/${fileName}`;
-                let ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "lsjson", fullRemotePath], {
-                    env: process.env,
-                    encoding: 'utf-8',
-                    timeout: 10000 // 10秒超时
-                });
+                let ret = await runLsJson(fullRemotePath, [], 10000);
 
                 // 如果直接查询失败，尝试列出目录
-                if (ret.status !== 0) {
-                    console.warn(`[getRemoteFileInfo] Direct lsjson failed for ${fileName}, trying directory listing`);
-                    const fullRemoteFolder = `${connectionString}${config.remoteFolder}/`;
-                    ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "lsjson", "--files-only", "--max-depth", "1", fullRemoteFolder], {
-                        env: process.env,
-                        encoding: 'utf-8',
-                        timeout: 15000 // 15秒超时
-                    });
+                if (ret.code !== 0) {
+                    // console.warn(`[getRemoteFileInfo] Direct lsjson failed for ${fileName}, trying directory listing`);
+                    // 仅当非超时错误时尝试 fallback
+                    if (ret.stderr !== "TIMEOUT") {
+                        const fullRemoteFolder = `${connectionString}${config.remoteFolder}/`;
+                        ret = await runLsJson(fullRemoteFolder, ["--files-only", "--max-depth", "1"], 15000);
 
-                    if (ret.status === 0) {
-                        const files = JSON.parse(ret.stdout || "[]");
-                        if (Array.isArray(files)) {
-                            const file = files.find(f => f.Name === fileName);
-                            if (file) return file;
+                        if (ret.code === 0) {
+                            try {
+                                const files = JSON.parse(ret.stdout || "[]");
+                                if (Array.isArray(files)) {
+                                    const file = files.find(f => f.Name === fileName);
+                                    if (file) return file;
+                                }
+                            } catch (e) {}
                         }
                     }
                 } else {
                     // 直接查询成功，解析结果
-                    const files = JSON.parse(ret.stdout || "[]");
-                    if (Array.isArray(files) && files.length > 0) {
-                        return files[0]; // 直接查询文件时只返回一个文件
-                    }
+                    try {
+                        const files = JSON.parse(ret.stdout || "[]");
+                        if (Array.isArray(files) && files.length > 0) {
+                            return files[0]; // 直接查询文件时只返回一个文件
+                        }
+                    } catch (e) {}
                 }
 
-                if (ret.status !== 0) {
-                    console.warn(`[getRemoteFileInfo] lsjson returned status ${ret.status} for ${fileName}: ${ret.stderr}`);
+                // 如果都没有找到或出错，记录日志（排除找不到文件的情况，减少日志噪音）
+                if (ret.code !== 0 && !ret.stderr.includes("directory not found") && !ret.stderr.includes("error listing")) {
+                    // console.warn(`[getRemoteFileInfo] Status ${ret.code} for ${fileName}: ${ret.stderr}`);
                 }
             } catch (e) {
                 console.warn(`[getRemoteFileInfo] Attempt ${i + 1} failed for ${fileName}:`, e.message);
