@@ -4,6 +4,7 @@ import { client, saveSession, clearSession } from "./src/services/telegram.js";
 import { TaskManager } from "./src/core/TaskManager.js";
 import { Dispatcher } from "./src/bot/Dispatcher.js";
 import { SettingsRepository } from "./src/repositories/SettingsRepository.js";
+import { instanceCoordinator } from "./src/services/InstanceCoordinator.js";
 
 // 全局消息去重缓存 (防止多实例重复处理)
 const processedMessages = new Map();
@@ -73,14 +74,17 @@ const processedMessages = new Map();
             console.log(`📡 健康检查端口 ${config.port} 已就绪`);
         });
 
-        // 3. 初始化后台任务系统 (恢复历史任务)
+        // 3. 初始化实例协调器（多实例支持）
+        await instanceCoordinator.start();
+
+        // 4. 初始化后台任务系统 (恢复历史任务)
         TaskManager.init().then(() => {
             console.log("✅ 历史任务初始化扫描完成");
         }).catch(err => {
             console.error("❌ 任务初始化过程中发生错误:", err);
         });
 
-        // 4. 启动自动缩放监控
+        // 5. 启动自动缩放监控
         TaskManager.startAutoScaling();
         console.log("📊 已启动自动缩放监控，将动态调整并发参数");
 
@@ -138,6 +142,32 @@ const processedMessages = new Map();
                 console.error("Critical: Unhandled Dispatcher Error:", e);
             }
         });
+
+        // 6. 设置优雅关闭处理
+        const gracefulShutdown = async (signal) => {
+            console.log(`\n📴 收到 ${signal} 信号，正在优雅关闭...`);
+
+            try {
+                // 停止实例协调器
+                await instanceCoordinator.stop();
+
+                // 停止自动缩放监控
+                TaskManager.stopAutoScaling();
+
+                console.log("✅ 优雅关闭完成");
+                process.exit(0);
+            } catch (e) {
+                console.error("❌ 优雅关闭失败:", e);
+                process.exit(1);
+            }
+        };
+
+        // 监听关闭信号
+        process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+        process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+        console.log("🎉 应用启动完成！");
+
     } catch (error) {
         console.error("❌ 应用启动失败:", error);
         process.exit(1);

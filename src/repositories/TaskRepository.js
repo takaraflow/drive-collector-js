@@ -192,6 +192,22 @@ export class TaskRepository {
     }
 
     /**
+     * 根据用户ID获取该用户最近的任务（用于状态显示）
+     */
+    static async findByUserId(userId, limit = 10) {
+        if (!userId) return [];
+        try {
+            return await d1.fetchAll(
+                "SELECT id, file_name, status, error_msg, created_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                [userId, limit]
+            );
+        } catch (e) {
+            console.error(`TaskRepository.findByUserId error for ${userId}:`, e);
+            return [];
+        }
+    }
+
+    /**
      * 根据 msg_id 获取该消息组下的所有任务状态（用于看板）
      */
     static async findByMsgId(msgId) {

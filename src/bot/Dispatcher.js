@@ -14,6 +14,7 @@ import { safeEdit, escapeHTML } from "../utils/common.js";
 import { runBotTask, runBotTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 import { NetworkDiagnostic } from "../utils/NetworkDiagnostic.js";
+import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import fs from "fs";
 import path from "path";
 
@@ -472,19 +473,85 @@ export class Dispatcher {
 
         // 发送占位消息
         const placeholder = await runBotTaskWithRetry(() => client.sendMessage(target, {
-            message: "🔍 正在执行网络诊断..."
+            message: "🔍 正在执行系统诊断..."
         }), userId, {}, false, 3);
 
         // 异步执行诊断
         (async () => {
             try {
-                const results = await NetworkDiagnostic.diagnoseAll();
-                const message = NetworkDiagnostic.formatResults(results);
+                // 并行执行网络诊断和实例状态获取
+                const [networkResults, instanceInfo] = await Promise.all([
+                    NetworkDiagnostic.diagnoseAll(),
+                    this._getInstanceInfo()
+                ]);
+
+                // 合并结果
+                let message = "🔍 **系统诊断报告**\n\n";
+
+                // 多实例状态
+                message += instanceInfo;
+
+                // 网络诊断结果
+                message += "\n" + "🌐 **网络诊断**\n";
+                message += NetworkDiagnostic.formatResults(networkResults);
+
                 await safeEdit(target, placeholder.id, message, null, userId);
             } catch (error) {
                 console.error("Diagnosis error:", error);
                 await safeEdit(target, placeholder.id, `❌ 诊断过程中发生错误: ${escapeHTML(error.message)}`, null, userId);
             }
         })();
+    }
+
+    /**
+     * [私有] 获取多实例状态信息
+     */
+    static async _getInstanceInfo() {
+        let info = "🏗️ **多实例状态**\n";
+
+        try {
+            // 当前实例信息
+            const currentInstanceId = instanceCoordinator.getInstanceId();
+            const isLeader = instanceCoordinator.isLeader;
+
+            info += `📍 当前实例: ${escapeHTML(currentInstanceId)}\n`;
+            info += `👑 领导者状态: ${isLeader ? '✅ 是' : '❌ 否'}\n`;
+
+            // 活跃实例列表
+            const activeInstances = await instanceCoordinator.getActiveInstances();
+            const instanceCount = await instanceCoordinator.getInstanceCount();
+
+            info += `📊 活跃实例数: ${instanceCount}\n`;
+
+            if (activeInstances.length > 0) {
+                info += `📋 活跃实例列表:\n`;
+                activeInstances.forEach((instance, index) => {
+                    const isCurrent = instance.id === currentInstanceId;
+                    const marker = isCurrent ? '👉' : '•';
+                    const leaderMark = instance.id === activeInstances.sort((a, b) => a.id.localeCompare(b.id))[0].id ? '👑' : '';
+                    const uptime = instance.lastHeartbeat ? Math.floor((Date.now() - instance.lastHeartbeat) / 1000) : '未知';
+                    info += `${marker} ${escapeHTML(instance.id)} ${leaderMark}(心跳: ${uptime}s前)\n`;
+                });
+            } else {
+                info += `⚠️ 无活跃实例\n`;
+            }
+
+            // 系统资源信息
+            const memUsage = process.memoryUsage();
+            const rss = Math.round(memUsage.rss / 1024 / 1024);
+            const heapUsed = Math.round(memUsage.heapUsed / 1024 / 1024);
+            const heapTotal = Math.round(memUsage.heapTotal / 1024 / 1024);
+
+            info += `\n💾 **系统资源**\n`;
+            info += `内存使用: ${rss}MB (堆: ${heapUsed}MB/${heapTotal}MB)\n`;
+            info += `运行时间: ${this._getUptime()}\n`;
+            info += `Node.js版本: ${process.version}\n`;
+
+        } catch (error) {
+            console.error("获取实例信息失败:", error);
+            info += `❌ 获取实例信息失败: ${escapeHTML(error.message)}\n`;
+        }
+
+        return info + "\n";
     }
 }
