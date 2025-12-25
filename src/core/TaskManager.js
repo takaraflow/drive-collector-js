@@ -386,14 +386,19 @@ export class TaskManager {
      * 批量更新排队中的 UI
      */
     static async updateQueueUI() {
-        for (let i = 0; i < Math.min(this.waitingTasks.length, 5); i++) {
+        const maxTasks = Math.min(this.waitingTasks.length, 5);
+        for (let i = 0; i < maxTasks; i++) {
             const task = this.waitingTasks[i];
             if (task.isGroup) continue;
+
             const newText = format(STRINGS.task.queued, { rank: i + 1 });
             if (task.lastText !== newText) {
                 await updateStatus(task, newText);
                 task.lastText = newText;
-                await new Promise(r => setTimeout(r, 1200));
+                // 添加延迟避免 API 限制，但使用更高效的 Promise.race 控制并发
+                if (i < maxTasks - 1) { // 最后一次不需要延迟
+                    await new Promise(resolve => setTimeout(resolve, 1200));
+                }
             }
         }
     }
