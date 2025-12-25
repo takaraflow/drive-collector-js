@@ -195,7 +195,14 @@ export class CloudTool {
 
                 proc.on("close", (code) => {
                     if (code === 0) {
-                        resolve({ success: true });
+                        // Even with exit code 0, check for errors in the log
+                        const hasErrors = errorLog.includes('ERROR') || errorLog.includes('Failed') || errorLog.includes('failed');
+                        if (hasErrors) {
+                            console.error(`Rclone Batch completed with exit code 0 but contains errors:`, errorLog.slice(-500));
+                            resolve({ success: false, error: `Upload completed but with errors: ${errorLog.slice(-200).trim()}` });
+                        } else {
+                            resolve({ success: true });
+                        }
                     } else {
                         const finalError = errorLog.slice(-500) || `Rclone exited with code ${code}`;
                         console.error(`Rclone Batch Error:`, finalError);

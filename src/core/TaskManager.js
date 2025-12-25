@@ -686,8 +686,23 @@ export class TaskManager {
                 
                 // 增加校验前的延迟，应对网盘 API 的最终一致性延迟
                 await new Promise(resolve => setTimeout(resolve, 3000));
-                
-                const finalRemote = await CloudTool.getRemoteFileInfo(info.name, task.userId);
+
+                // 更健壮的文件校验逻辑
+                let finalRemote = null;
+                let validationAttempts = 0;
+                const maxValidationAttempts = 5;
+
+                while (validationAttempts < maxValidationAttempts) {
+                    finalRemote = await CloudTool.getRemoteFileInfo(info.name, task.userId, 2); // 减少每个校验的内部重试次数
+                    if (finalRemote) break;
+
+                    validationAttempts++;
+                    if (validationAttempts < maxValidationAttempts) {
+                        console.log(`[Validation] Attempt ${validationAttempts} failed for ${info.name}, retrying in ${validationAttempts * 5}s...`);
+                        await new Promise(resolve => setTimeout(resolve, validationAttempts * 5000)); // 递增延迟: 5s, 10s, 15s, 20s
+                    }
+                }
+
                 const localSize = fs.statSync(localPath).size;
                 const isOk = finalRemote && Math.abs(finalRemote.Size - localSize) < 1024;
 
@@ -696,6 +711,7 @@ export class TaskManager {
                     console.error(`- Local Size: ${localSize}`);
                     console.error(`- Remote Size: ${finalRemote ? finalRemote.Size : 'N/A'}`);
                     console.error(`- Remote Info: ${JSON.stringify(finalRemote)}`);
+                    console.error(`- Validation attempts: ${validationAttempts}`);
                 }
 
                 const finalStatus = isOk ? 'completed' : 'failed';
