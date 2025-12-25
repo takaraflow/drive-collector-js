@@ -32,7 +32,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # --- 强制依赖第一阶段的测试结果 ---
-COPY /app/package*.json ./
+COPY package*.json ./
 
 # 安装生产依赖
 RUN npm ci --omit=dev && npm cache clean --force
