@@ -658,14 +658,14 @@ export class TaskManager {
                     const fileLink = `tg://openmessage?chat_id=\${task.chatId}&message_id=\${task.message.id}`;
                     const fileNameHtml = `<a href="\${fileLink}">\${escapeHTML(info.name)}</a>`;
                     const baseText = isOk
-                        ? STRINGS.task.success.replace('{{name}}', fileNameHtml).replace('{{folder}}', config.remoteFolder)
-                        : STRINGS.task.failed_validation.replace('{{name}}', fileNameHtml);
+                        ? format(STRINGS.task.success, { name: fileNameHtml, folder: config.remoteFolder })
+                        : format(STRINGS.task.failed_validation, { name: fileNameHtml });
                     await updateStatus(task, baseText, true);
                 }
             } else {
                 await TaskRepository.updateStatus(task.id, 'failed', uploadResult.error || "Upload failed");
                 if (task.isGroup) {
-                    await this._refreshGroupMonitor(task, 'failed');
+                    await this._refreshGroupMonitor(task, 'failed', 0, 0, uploadResult.error || "Upload failed");
                 } else {
                     await updateStatus(task, format(STRINGS.task.failed_upload, {
                         reason: task.isCancelled ? "用户手动取消" : escapeHTML(uploadResult.error)
@@ -769,7 +769,7 @@ export class TaskManager {
     /**
      * [私有] 刷新组任务看板 (智能节流)
      */
-    static async _refreshGroupMonitor(task, status, downloaded = 0, total = 0) {
+    static async _refreshGroupMonitor(task, status, downloaded = 0, total = 0, errorMsg = null) {
         const msgId = task.msgId;
         const lastUpdate = this.monitorLocks.get(msgId) || 0;
         const now = Date.now();
@@ -803,12 +803,12 @@ export class TaskManager {
 
         // 【修复】不再批量更新整个组的状态，而是只更新当前任务的状态
         // 逻辑已在 worker 中处理了 TaskRepository.updateStatus，这里仅做 UI 刷新
-        
-        const { text } = UIHelper.renderBatchMonitor(groupTasks, task, status, downloaded, total);
+
+        const { text } = UIHelper.renderBatchMonitor(groupTasks, task, status, downloaded, total, errorMsg);
 
         let peer = task.chatId;
         if (typeof peer === 'string' && /^-?\d+$/.test(peer)) peer = BigInt(peer);
-        
+
         // 使用统一的 safeEdit 以处理 MESSAGE_NOT_MODIFIED 等错误
         await safeEdit(peer, parseInt(task.msgId), text, null, task.userId, "html");
     }

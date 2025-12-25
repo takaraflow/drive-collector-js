@@ -98,8 +98,11 @@ export class UIHelper {
      * @param {Array} allTasks - 数据库中该组的所有任务
      * @param {Object} focusTask - 当前正在操作的 Task 对象
      * @param {string} focusStatus - 当前 Task 的状态
+     * @param {number} downloaded - 已下载字节数
+     * @param {number} total - 总字节数
+     * @param {string} focusErrorMsg - 焦点任务的错误消息（用于实时显示）
      */
-    static renderBatchMonitor(allTasks, focusTask, focusStatus, downloaded = 0, total = 0) {
+    static renderBatchMonitor(allTasks, focusTask, focusStatus, downloaded = 0, total = 0, focusErrorMsg = null) {
         const totalCount = allTasks.length;
         const completedCount = allTasks.filter(t => t.status === 'completed').length;
         
@@ -134,9 +137,12 @@ export class UIHelper {
                                 displayStatus === 'downloaded' ? '已下载' : '等待中';
 
                 // 如果失败状态有错误信息，显示简短错误提示
-                if (displayStatus === 'failed' && t.error_msg) {
-                    const shortError = t.error_msg.length > 30 ? t.error_msg.substring(0, 30) + '...' : t.error_msg;
-                    statusText += `: ${escapeHTML(shortError)}`;
+                if (displayStatus === 'failed') {
+                    const errorMsg = isFocus ? focusErrorMsg : t.error_msg;
+                    if (errorMsg) {
+                        const shortError = errorMsg.length > 30 ? errorMsg.substring(0, 30) + '...' : errorMsg;
+                        statusText += `: ${escapeHTML(shortError)}`;
+                    }
                 }
 
                 statusLines.push(`${statusIcon} ${displayName} (${statusText})`);
