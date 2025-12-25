@@ -10,7 +10,7 @@ jest.unstable_mockModule("../../src/locales/zh-CN.js", () => ({
     STRINGS: {
         task: {
             downloading: "Downloading",
-            batch_monitor: "📊 <b>媒体组转存看板 ({{current}}/{{total}})</b>\n━━━━━━━━━━━━━\n{{statusText}}\n━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件"
+            batch_monitor: "📊 <b>媒体组转存看板 ({{current}}/{{total}})</b>\n━━━━━━━━━━━━━━\n{{statusText}}\n━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件"
         },
         files: {
             dir_empty_or_loading: "ℹ️ 目录为空或尚未加载。"
@@ -161,6 +161,145 @@ describe("UIHelper", () => {
             const result = UIHelper.renderProgress(50, 100, "Test", "Some Movie Name_by_channel_name.mp4");
 
             expect(result).toContain("Some Mov_by_channe.mp4");
+        });
+    });
+
+    describe("generateProgressBar", () => {
+        test("should generate correct progress bar for 50%", () => {
+            const result = UIHelper.generateProgressBar(50, 100);
+            expect(result).toBe("[██████████░░░░░░░░░░] 50%");
+        });
+
+        test("should generate correct progress bar for 0%", () => {
+            const result = UIHelper.generateProgressBar(0, 100);
+            expect(result).toBe("[░░░░░░░░░░░░░░░░░░░░] 0%");
+        });
+
+        test("should generate correct progress bar for 100%", () => {
+            const result = UIHelper.generateProgressBar(100, 100);
+            expect(result).toBe("[████████████████████] 100%");
+        });
+
+        test("should handle zero total", () => {
+            const result = UIHelper.generateProgressBar(50, 0);
+            expect(result).toBe("");
+        });
+
+        test("should handle negative total", () => {
+            const result = UIHelper.generateProgressBar(50, -10);
+            expect(result).toBe("");
+        });
+
+        test("should round percentage correctly", () => {
+            const result = UIHelper.generateProgressBar(1, 3);
+            expect(result).toBe("[███████░░░░░░░░░░░░░] 33%");
+        });
+
+        test("should handle custom bar length", () => {
+            const result = UIHelper.generateProgressBar(50, 100, 10);
+            expect(result).toBe("[█████░░░░░] 50%");
+        });
+
+        test("should handle very small percentages", () => {
+            const result = UIHelper.generateProgressBar(1, 1000);
+            expect(result).toBe("[░░░░░░░░░░░░░░░░░░░░] 0%");
+        });
+
+        test("should handle very large percentages", () => {
+            const result = UIHelper.generateProgressBar(150, 100);
+            expect(result).toBe("[████████████████████] 150%");
+        });
+    });
+
+    describe("renderBatchMonitor with Progress Bar", () => {
+        test("should show progress bar when downloading with progress", () => {
+            const tasks = [
+                { id: "task1", file_name: "file1.mp4", status: "completed" },
+                { id: "task2", file_name: "file2.mp4", status: "downloading" },
+                { id: "task3", file_name: "file3.mp4", status: "waiting" }
+            ];
+            const currentTask = { id: "task2" };
+
+            const result = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 52428800, 104857600); // 50MB of 100MB
+
+            expect(result.text).toContain("🔄 file2.mp4 [50%]");
+            expect(result.text).toContain("[██████████░░░░░░░░░░] 50%");
+            expect(result.text).toContain("💡 进度条仅显示当前正在处理的文件");
+            expect(result.text).not.toContain("━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件");
+        });
+
+        test("should show progress bar when uploading with progress", () => {
+            const tasks = [
+                { id: "task1", file_name: "file1.mp4", status: "completed" },
+                { id: "task2", file_name: "file2.mp4", status: "uploading" }
+            ];
+            const currentTask = { id: "task2" };
+
+            const result = UIHelper.renderBatchMonitor(tasks, currentTask, "uploading", 26214400, 52428800); // 25MB of 50MB
+
+            expect(result.text).toContain("🔄 file2.mp4 [50%]");
+            expect(result.text).toContain("[██████████░░░░░░░░░░] 50%");
+        });
+
+        test("should not show progress bar when no progress data", () => {
+            const tasks = [
+                { id: "task1", file_name: "file1.mp4", status: "completed" },
+                { id: "task2", file_name: "file2.mp4", status: "downloading" }
+            ];
+            const currentTask = { id: "task2" };
+
+            const result = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 0, 0);
+
+            expect(result.text).toContain("🔄 file2.mp4 (下载中)");
+            expect(result.text).toContain("━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件");
+            expect(result.text).not.toContain("[");
+        });
+
+        test("should not show progress bar when total is zero", () => {
+            const tasks = [
+                { id: "task1", file_name: "file1.mp4", status: "completed" },
+                { id: "task2", file_name: "file2.mp4", status: "downloading" }
+            ];
+            const currentTask = { id: "task2" };
+
+            const result = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 52428800, 0);
+
+            expect(result.text).toContain("🔄 file2.mp4 (下载中)");
+            expect(result.text).toContain("━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件");
+            expect(result.text).not.toContain("[");
+        });
+
+        test("should not show progress bar for non-active statuses", () => {
+            const tasks = [
+                { id: "task1", file_name: "file1.mp4", status: "completed" },
+                { id: "task2", file_name: "file2.mp4", status: "waiting" }
+            ];
+            const currentTask = { id: "task2" };
+
+            const result = UIHelper.renderBatchMonitor(tasks, currentTask, "waiting", 52428800, 104857600);
+
+            expect(result.text).toContain("🕒 file2.mp4 (等待中)");
+            expect(result.text).toContain("━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件");
+            expect(result.text).not.toContain("[");
+        });
+
+        test("should handle progress bar with different percentages", () => {
+            const tasks = [
+                { id: "task1", file_name: "file1.mp4", status: "downloading" }
+            ];
+            const currentTask = { id: "task1" };
+
+            // Test 25%
+            const result25 = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 26214400, 104857600);
+            expect(result25.text).toContain("[█████░░░░░░░░░░░░░░░] 25%");
+
+            // Test 75%
+            const result75 = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 78643200, 104857600);
+            expect(result75.text).toContain("[███████████████░░░░░] 75%");
+
+            // Test 100%
+            const result100 = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 104857600, 104857600);
+            expect(result100.text).toContain("[████████████████████] 100%");
         });
     });
 });

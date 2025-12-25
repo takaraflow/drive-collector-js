@@ -94,6 +94,21 @@ export class UIHelper {
     }
 
     /**
+     * 生成ASCII进度条
+     * @param {number} current - 当前进度值
+     * @param {number} total - 总进度值
+     * @param {number} length - 进度条长度
+     * @returns {string} ASCII进度条字符串
+     */
+    static generateProgressBar(current, total, length = 20) {
+        if (total <= 0) return '';
+        const percentage = Math.round((current / total) * 100);
+        const filled = Math.max(0, Math.min(length, Math.round((current / total) * length)));
+        const bar = "█".repeat(filled) + "░".repeat(length - filled);
+        return `[${bar}] ${percentage}%`;
+    }
+
+    /**
      * 🆕 渲染批量任务看板（优化版）
      * @param {Array} allTasks - 数据库中该组的所有任务
      * @param {Object} focusTask - 当前正在操作的 Task 对象
@@ -161,13 +176,19 @@ export class UIHelper {
                 total: totalCount,
                 statusText: STRINGS.files.dir_empty_or_loading
             });
-            text = text.replace(/━━━━━━━━━━━━━━\n/g, '').replace(/💡 进度条仅显示当前正在处理的文件/g, ''); 
+            text = text.replace(/━━━━━━━━━━━━━━\n/g, '').replace(/💡 进度条仅显示当前正在处理的文件/g, '');
         } else {
             text = format(STRINGS.task.batch_monitor, {
                 current: completedCount,
                 total: totalCount,
                 statusText: statusLines.join('\n')
             });
+
+            // 将第二个━━━━━━━━━━━━━━替换为ASCII进度条（如果有焦点任务进度）
+            if (total > 0 && (focusStatus === 'downloading' || focusStatus === 'uploading')) {
+                const progressBar = this.generateProgressBar(downloaded, total);
+                text = text.replace(/━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件/g, `${progressBar}\n💡 进度条仅显示当前正在处理的文件`);
+            }
         }
 
         return { text };
