@@ -7,6 +7,7 @@ import { d1 } from "../services/d1.js";
 export class TaskRepository {
     static pendingUpdates = new Map();
     static flushTimer = null;
+    static cleanupTimer = null;
 
     /**
      * 启动定时刷新任务
@@ -14,6 +15,33 @@ export class TaskRepository {
     static startFlushing() {
         if (this.flushTimer) return;
         this.flushTimer = setInterval(() => this.flushUpdates(), 10000); // 每 10 秒刷新一次
+
+        // 启动定期清理任务，每5分钟清理一次过期条目
+        if (!this.cleanupTimer) {
+            this.cleanupTimer = setInterval(() => this.cleanupExpiredUpdates(), 5 * 60 * 1000);
+        }
+    }
+
+    /**
+     * 清理过期的待更新条目（防止内存泄漏）
+     * 移除超过30分钟未处理的条目
+     */
+    static cleanupExpiredUpdates() {
+        const now = Date.now();
+        const expiryTime = 30 * 60 * 1000; // 30分钟
+        let cleanedCount = 0;
+
+        for (const [taskId, update] of this.pendingUpdates) {
+            // 检查更新对象的创建时间（通过 update 对象本身的时间戳）
+            if (update.timestamp && (now - update.timestamp) > expiryTime) {
+                this.pendingUpdates.delete(taskId);
+                cleanedCount++;
+            }
+        }
+
+        if (cleanedCount > 0) {
+            console.log(`🧹 TaskRepository 清理了 ${cleanedCount} 个过期的待更新条目`);
+        }
     }
 
     /**
@@ -27,7 +55,7 @@ export class TaskRepository {
         const allUpdates = Array.from(this.pendingUpdates.values());
         // 限制每次只处理前 50 条 (流量控制)
         const updatesToFlush = allUpdates.slice(0, 50);
-        
+
         const now = Date.now();
         const statements = updatesToFlush.map(u => ({
             sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
@@ -37,11 +65,11 @@ export class TaskRepository {
         try {
             // 使用新版 batch，返回结果数组
             const results = await d1.batch(statements);
-            
+
             // 遍历结果，只清除已处理的任务
             results.forEach((res, index) => {
                 const update = updatesToFlush[index];
-                
+
                 if (!res.success) {
                     console.error(`Task flush failed for ${update.taskId}:`, res.error);
                 }
@@ -53,7 +81,7 @@ export class TaskRepository {
                     this.pendingUpdates.delete(update.taskId);
                 }
             });
-            
+
             // 如果还有剩余任务，立即安排下一次刷新，而不是等待 10s
             if (this.pendingUpdates.size > 0) {
                 setTimeout(() => this.flushUpdates(), 1000);
@@ -76,7 +104,7 @@ export class TaskRepository {
 
         try {
             await d1.run(`
-                INSERT INTO tasks (id, user_id, chat_id, msg_id, source_msg_id, file_name, file_size, status, created_at, updated_at) 
+                INSERT INTO tasks (id, user_id, chat_id, msg_id, source_msg_id, file_name, file_size, status, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
             `, [
                 taskData.id,
@@ -147,7 +175,7 @@ export class TaskRepository {
                 console.error(`TaskRepository.updateStatus (critical) failed for ${taskId}:`, e);
             }
         } else {
-            this.pendingUpdates.set(taskId, { taskId, status, errorMsg });
+            this.pendingUpdates.set(taskId, { taskId, status, errorMsg, timestamp: Date.now() });
             this.startFlushing();
         }
     }
@@ -170,7 +198,7 @@ export class TaskRepository {
         if (!msgId) return [];
         try {
             return await d1.fetchAll(
-                "SELECT file_name, status FROM tasks WHERE msg_id = ? ORDER BY created_at ASC", 
+                "SELECT file_name, status FROM tasks WHERE msg_id = ? ORDER BY created_at ASC",
                 [msgId]
             );
         } catch (e) {
@@ -184,11 +212,11 @@ export class TaskRepository {
      */
     static async createBatch(tasksData) {
         if (!tasksData || tasksData.length === 0) return true;
-        
+
         const now = Date.now();
         const statements = tasksData.map(taskData => ({
             sql: `
-                INSERT INTO tasks (id, user_id, chat_id, msg_id, source_msg_id, file_name, file_size, status, created_at, updated_at) 
+                INSERT INTO tasks (id, user_id, chat_id, msg_id, source_msg_id, file_name, file_size, status, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
             `,
             params: [
