@@ -2,11 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [2.3.4](https://github.com/YoungSx/drive-collector-js/compare/v2.3.3...v2.3.4) (2025-12-25)
+
+### 🐛 问题修复
+
+* **任务队列稳定性**：修复了在任务状态频繁变动时可能发生的 `TypeError: Cannot read properties of undefined (reading 'isGroup')` 错误。通过在 `updateQueueUI` 中引入任务快照机制并增加非空检查，显著提升了高并发场景下队列 UI 更新的鲁棒性。
+
 ### [2.3.3](https://github.com/YoungSx/drive-collector-js/compare/v2.3.2...v2.3.3) (2025-12-25)
 
 ### 🐛 问题修复
 
 * **任务监控看板**：修复了在刷新组任务状态时发生的 `ReferenceError: safeEdit is not defined` 错误。通过在 `TaskManager.js` 中正确导入 `safeEdit` 工具函数，确保了媒体组（Album）任务进度的实时更新稳定性。
+>>>>+++ REPLACE
+
 
 ### [2.3.2](https://github.com/YoungSx/drive-collector-js/compare/v2.3.1...v2.3.2) (2025-12-25)
 

@@ -439,12 +439,16 @@ export class TaskManager {
      * 批量更新排队中的 UI
      */
     static async updateQueueUI() {
-        const maxTasks = Math.min(this.waitingTasks.length, 5);
+        // 获取快照以避免在循环中由于数组变动导致 index 越界
+        const snapshot = [...this.waitingTasks];
+        const maxTasks = Math.min(snapshot.length, 5);
+        
         for (let i = 0; i < maxTasks; i++) {
-            const task = this.waitingTasks[i];
-            if (task.isGroup) continue;
+            const task = snapshot[i];
+            if (!task || task.isGroup) continue;
 
             const newText = format(STRINGS.task.queued, { rank: i + 1 });
+
             if (task.lastText !== newText) {
                 await updateStatus(task, newText);
                 task.lastText = newText;
