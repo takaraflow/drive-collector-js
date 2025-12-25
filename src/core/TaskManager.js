@@ -282,6 +282,9 @@ export class TaskManager {
             const tasksToEnqueue = [];
             const tasksToUpload = [];
 
+            // 检查是否为批量任务（同一msg_id下有多个任务）
+            const isBatchTask = rows.length > 1;
+
             for (const row of rows) {
                 const message = messageMap.get(row.source_msg_id);
                 if (!message || !message.media) {
@@ -291,6 +294,9 @@ export class TaskManager {
                 }
 
                 const task = this._createTaskObject(row.id, row.user_id, row.chat_id, row.msg_id, message);
+                if (isBatchTask) {
+                    task.isGroup = true;
+                }
                 validTasks.push(task);
 
                 // 根据任务状态决定恢复到哪个队列
