@@ -122,7 +122,7 @@ jest.unstable_mockModule("../../src/utils/limiter.js", () => ({
 jest.unstable_mockModule("../../src/locales/zh-CN.js", () => ({
   STRINGS: {
     task: { cmd_sent: "sent", task_not_found: "not found" },
-    system: { welcome: "welcome" },
+    system: { welcome: "welcome", maintenance_mode: "🚧 <b>系统维护中</b>\n\n当前 Bot 仅限管理员使用，请稍后访问。" },
     drive: { no_drive_found: "no drive" },
     status: { header: "header", queue_title: "queue", waiting_tasks: "waiting", current_task: "current", system_info: "sys", uptime: "up", service_status: "svc" }
   },
@@ -205,14 +205,67 @@ describe("Dispatcher", () => {
   describe("_handleMessage", () => {
     const target = { className: "PeerUser", userId: BigInt(123) };
 
+    test("should handle /start command with fast path", async () => {
+      mockSettingsRepository.get.mockResolvedValue("public");
+
+      const message = {
+        id: 1,
+        message: "/start",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockSettingsRepository.get).toHaveBeenCalledWith("access_mode", "public");
+      expect(mockAuthGuard.getRole).not.toHaveBeenCalled(); // 确保不查询用户角色
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, {
+        message: "welcome",
+        parseMode: "html"
+      });
+    });
+
+    test("should handle /start in maintenance mode for non-owner", async () => {
+      mockSettingsRepository.get.mockResolvedValue("private");
+
+      const message = {
+        id: 1,
+        message: "/start",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "789", target });
+
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, {
+        message: expect.stringContaining("维护中"),
+        parseMode: "html"
+      });
+    });
+
+    test("should handle /start in maintenance mode for owner", async () => {
+      mockSettingsRepository.get.mockResolvedValue("private");
+
+      const message = {
+        id: 1,
+        message: "/start",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123456", target });
+
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, {
+        message: "welcome",
+        parseMode: "html"
+      });
+    });
+
     test("should handle media messages", async () => {
       mockSessionManager.get.mockResolvedValue(null);
       mockDriveRepository.findByUserId.mockResolvedValue({ id: 1 });
-      
+
       const message = {
         id: 1,
         media: { className: "MessageMediaPhoto" },
-        peerId: target 
+        peerId: target
       };
       const event = { message };
       await Dispatcher._handleMessage(event, { userId: "123", target });
