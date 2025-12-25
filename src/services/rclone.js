@@ -242,9 +242,10 @@ export class CloudTool {
                 const kvCached = await kv.get(cacheKey, "json");
                 if (kvCached) {
                     // 根据文件新鲜度动态调整内存缓存时间
-                    const cacheAge = this._calculateOptimalCacheTime(kvCached);
+                    const cacheAge = this._calculateOptimalCacheTime(kvCached.files || kvCached);
                     cacheService.set(cacheKey, kvCached, cacheAge);
-                    return kvCached;
+                    // 返回文件数组（兼容旧格式和新格式）
+                    return kvCached.files || kvCached;
                 }
             } catch (e) {
                 console.error("KV get files error:", e.message);
