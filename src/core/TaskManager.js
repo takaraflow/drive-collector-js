@@ -7,7 +7,7 @@ import { config } from "../config/index.js";
 import { client } from "../services/telegram.js";
 import { CloudTool } from "../services/rclone.js";
 import { UIHelper } from "../ui/templates.js";
-import { getMediaInfo, updateStatus, escapeHTML } from "../utils/common.js";
+import { getMediaInfo, updateStatus, escapeHTML, safeEdit } from "../utils/common.js";
 import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, runMtprotoFileTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { AuthGuard } from "../modules/AuthGuard.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";

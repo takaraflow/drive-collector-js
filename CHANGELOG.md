@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [2.3.3](https://github.com/YoungSx/drive-collector-js/compare/v2.3.2...v2.3.3) (2025-12-25)
+
+### 🐛 问题修复
+
+* **任务监控看板**：修复了在刷新组任务状态时发生的 `ReferenceError: safeEdit is not defined` 错误。通过在 `TaskManager.js` 中正确导入 `safeEdit` 工具函数，确保了媒体组（Album）任务进度的实时更新稳定性。
+
 ### [2.3.2](https://github.com/YoungSx/drive-collector-js/compare/v2.3.1...v2.3.2) (2025-12-25)
 
 
