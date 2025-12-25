@@ -139,9 +139,26 @@ describe("TaskManager", () => {
         jest.clearAllMocks();
         TaskManager.waitingTasks = [];
         TaskManager.currentTask = null;
+        TaskManager.waitingUploadTasks = [];
         // 清理队列
         TaskManager.queue.clear();
         TaskManager.monitorLocks.clear();
+        // 清理 UploadBatcher 的定时器
+        if (TaskManager.uploadBatcher && TaskManager.uploadBatcher.batches) {
+            for (const [key, tasks] of TaskManager.uploadBatcher.batches) {
+                // 清理可能存在的定时器（通过重新创建实例）
+                TaskManager.uploadBatcher = new (await import("../../src/core/TaskManager.js")).UploadBatcher(
+                    TaskManager.uploadBatcher.processBatchFn
+                );
+                break;
+            }
+        }
+    });
+
+    afterEach(() => {
+        // 清理所有未完成的异步操作
+        jest.clearAllTimers();
+        jest.runOnlyPendingTimers();
     });
 
     describe("init", () => {

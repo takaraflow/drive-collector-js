@@ -650,7 +650,13 @@ export class TaskManager {
         } finally {
             // 上传完成后异步清理本地文件
             try {
-                await fs.promises.unlink(localPath);
+                // 检查 fs.promises 是否可用（兼容性处理）
+                if (fs.promises && fs.promises.unlink) {
+                    await fs.promises.unlink(localPath);
+                } else {
+                    // 降级到同步删除（用于测试环境）
+                    fs.unlinkSync(localPath);
+                }
             } catch (e) {
                 // 忽略清理失败的错误，文件可能已被其他进程处理
                 console.warn(`Failed to cleanup local file ${localPath}:`, e.message);
