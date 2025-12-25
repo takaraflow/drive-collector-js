@@ -68,3 +68,12 @@ export const client = new TelegramClient(
         connectionPoolSize: 5 // 连接池大小
     }
 );
+
+// 监听错误以防止更新循环因超时而崩溃
+client.on("error", (err) => {
+    if (err.message && err.message.includes("TIMEOUT")) {
+        console.warn("⚠️ Telegram 客户端更新循环超时 (TIMEOUT)，正在尝试自动恢复...");
+    } else {
+        console.error("❌ Telegram 客户端发生错误:", err);
+    }
+});

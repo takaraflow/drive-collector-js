@@ -256,19 +256,31 @@ export class CloudTool {
         try {
             const conf = await this._getUserConfig(userId);
             const connectionString = this._getConnectionString(conf);
-            const fullRemotePath = `${connectionString}${config.remoteFolder}/`;
-            const args = ["--config", "/dev/null", "lsjson", fullRemotePath];
+            
+            // 尝试获取文件列表，如果目录不存在则尝试创建
+            const fetchFiles = (path) => {
+                return spawnSync(rcloneBinary, ["--config", "/dev/null", "lsjson", path], {
+                    env: process.env,
+                    encoding: 'utf-8',
+                    maxBuffer: 10 * 1024 * 1024
+                });
+            };
 
-            const ret = spawnSync(rcloneBinary, args, {
-                env: process.env,
-                encoding: 'utf-8',
-                maxBuffer: 10 * 1024 * 1024
-            });
+            const fullRemotePath = `${connectionString}${config.remoteFolder}/`;
+            let ret = fetchFiles(fullRemotePath);
+
+            if (ret.status !== 0 && ret.stderr && (ret.stderr.includes("directory not found") || ret.stderr.includes("error listing"))) {
+                console.log(`Directory ${config.remoteFolder} not found, attempting to create it...`);
+                // 尝试创建一个空目录/触发目录初始化
+                spawnSync(rcloneBinary, ["--config", "/dev/null", "mkdir", fullRemotePath], { env: process.env });
+                // 再次尝试
+                ret = fetchFiles(fullRemotePath);
+            }
 
             if (ret.error) throw ret.error;
             if (ret.status !== 0) {
-                if (ret.stderr && ret.stderr.includes("directory not found")) {
-                    console.warn("Rclone directory not found, returning empty list.");
+                if (ret.stderr && (ret.stderr.includes("directory not found") || ret.stderr.includes("error listing"))) {
+                    console.warn("Rclone directory still not found after attempt, returning empty list.");
                     this.loading = false;
                     return [];
                 }
