@@ -177,10 +177,9 @@ describe("Dispatcher", () => {
       mockAuthGuard.getRole.mockResolvedValue("user");
       mockAuthGuard.can.mockResolvedValue(false);
       mockSettingsRepository.get.mockResolvedValue("private");
-      
       const event = { queryId: "qid" };
       const passed = await Dispatcher._globalGuard(event, { userId: "789", isCallback: true });
-      
+
       expect(passed).toBe(false);
       expect(mockClient.invoke).toHaveBeenCalled();
     });
@@ -195,11 +194,57 @@ describe("Dispatcher", () => {
         peer: new Api.PeerUser({ userId: BigInt(123) }),
       });
       mockTaskManager.cancelTask.mockResolvedValue(true);
-      
+
       await Dispatcher._handleCallback(event, { userId: "123" });
       expect(mockTaskManager.cancelTask).toHaveBeenCalledWith("task123", "123");
       expect(mockClient.invoke).toHaveBeenCalled();
     });
+
+    test("should handle noop callback", async () => {
+      const event = new Api.UpdateBotCallbackQuery({
+        data: Buffer.from("noop"),
+        userId: BigInt(123),
+        queryId: BigInt(1),
+        peer: new Api.PeerUser({ userId: BigInt(123) }),
+      });
+
+      await Dispatcher._handleCallback(event, { userId: "123" });
+      expect(mockClient.invoke).toHaveBeenCalledWith(
+        new Api.messages.SetBotCallbackAnswer({
+          queryId: BigInt(1),
+          message: ""
+        })
+      );
+    });
+
+    test("should handle drive callbacks", async () => {
+      const event = new Api.UpdateBotCallbackQuery({
+        data: Buffer.from("drive_bind_mega"),
+        userId: BigInt(123),
+        queryId: BigInt(1),
+        peer: new Api.PeerUser({ userId: BigInt(123) }),
+      });
+      mockDriveConfigFlow.handleCallback.mockResolvedValue("test toast");
+
+      await Dispatcher._handleCallback(event, { userId: "123" });
+      expect(mockDriveConfigFlow.handleCallback).toHaveBeenCalledWith(event, "123");
+    });
+
+    test("should handle files callbacks", async () => {
+      const event = new Api.UpdateBotCallbackQuery({
+        data: Buffer.from("files_page_0"),
+        userId: BigInt(123),
+        queryId: BigInt(1),
+        peer: new Api.PeerUser({ userId: BigInt(123) }),
+        msgId: 456,
+      });
+
+      await Dispatcher._handleCallback(event, { userId: "123" });
+      expect(mockCloudTool.listRemoteFiles).toHaveBeenCalledWith("123", false);
+      expect(mockUIHelper.renderFilesPage).toHaveBeenCalled();
+    });
+
+
   });
 
   describe("_handleMessage", () => {
@@ -296,6 +341,141 @@ describe("Dispatcher", () => {
       expect(mockTaskManager.addBatchTasks).toHaveBeenCalled();
       jest.useRealTimers();
     });
+
+    test("should handle /drive command", async () => {
+      const message = {
+        id: 1,
+        message: "/drive",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockDriveConfigFlow.sendDriveManager).toHaveBeenCalledWith(target, "123");
+    });
+
+    test("should handle /logout command", async () => {
+      const message = {
+        id: 1,
+        message: "/logout",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockDriveConfigFlow.handleUnbind).toHaveBeenCalledWith(target, "123");
+    });
+
+    test("should handle /status command", async () => {
+      const message = {
+        id: 1,
+        message: "/status",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockClient.sendMessage).toHaveBeenCalled();
+    });
+
+    test("should handle /status queue subcommand", async () => {
+      const message = {
+        id: 1,
+        message: "/status queue",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockClient.sendMessage).toHaveBeenCalled();
+    });
+
+    test("should parse and process links", async () => {
+      mockSessionManager.get.mockResolvedValue(null);
+      mockDriveRepository.findByUserId.mockResolvedValue({ id: 1 });
+      mockLinkParser.parse.mockResolvedValue([{ url: "https://example.com/file.mp4" }]);
+
+      const message = {
+        id: 1,
+        message: "https://example.com/file.mp4",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockLinkParser.parse).toHaveBeenCalledWith("https://example.com/file.mp4", "123");
+      expect(mockTaskManager.addTask).toHaveBeenCalled();
+    });
+
+    test("should limit link processing to 10 items", async () => {
+      mockSessionManager.get.mockResolvedValue(null);
+      mockDriveRepository.findByUserId.mockResolvedValue({ id: 1 });
+      const links = Array.from({ length: 15 }, (_, i) => ({ url: `https://example.com/file${i}.mp4` }));
+      mockLinkParser.parse.mockResolvedValue(links);
+
+      const message = {
+        id: 1,
+        message: "multiple links...",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockTaskManager.addTask).toHaveBeenCalledTimes(10);
+    });
+
+    test("should send bind hint when processing links without drive", async () => {
+      mockSessionManager.get.mockResolvedValue(null);
+      mockDriveRepository.findByUserId.mockResolvedValue(null);
+      mockLinkParser.parse.mockResolvedValue([{ url: "https://example.com/file.mp4" }]);
+
+      const message = {
+        id: 1,
+        message: "https://example.com/file.mp4",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, expect.objectContaining({
+        message: "no drive"
+      }));
+    });
+
+    test("should handle invalid links", async () => {
+      mockSessionManager.get.mockResolvedValue(null);
+      mockLinkParser.parse.mockRejectedValue(new Error("Invalid URL"));
+
+      const message = {
+        id: 1,
+        message: "invalid-link",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, expect.objectContaining({
+        message: expect.stringContaining("❌")
+      }));
+    });
+
+    test("should block media messages when no drive bound", async () => {
+      mockSessionManager.get.mockResolvedValue(null);
+      mockDriveRepository.findByUserId.mockResolvedValue(null);
+
+      const message = {
+        id: 1,
+        media: { className: "MessageMediaPhoto" },
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, expect.objectContaining({
+        message: "no drive"
+      }));
+      expect(mockTaskManager.addTask).not.toHaveBeenCalled();
+    });
   });
 
   describe("handle", () => {
@@ -309,7 +489,7 @@ describe("Dispatcher", () => {
         queryId: BigInt(1),
         className: "UpdateBotCallbackQuery"
       };
-      
+
       mockAuthGuard.getRole.mockResolvedValue("owner");
       await Dispatcher.handle(event);
       expect(mockDriveConfigFlow.handleCallback).toHaveBeenCalled();
@@ -326,7 +506,7 @@ describe("Dispatcher", () => {
         },
         className: "UpdateNewMessage"
       };
-      
+
       mockAuthGuard.getRole.mockResolvedValue("owner");
       await Dispatcher.handle(event);
       expect(mockDriveConfigFlow.sendDriveManager).toHaveBeenCalled();
