@@ -7,7 +7,13 @@ WORKDIR /app
 COPY package*.json ./
 
 # 1. 修改点：安装依赖后立即清理缓存，减少中间层体积
-RUN npm install --production && npm cache clean --force
+RUN npm ci && npm cache clean --force
+
+# 复制源代码
+COPY . .
+
+# 运行测试
+RUN npm test
 
 # --- 第二阶段：运行环境 ---
 FROM node:20-slim
@@ -25,8 +31,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# 从构建阶段复制 node_modules
-COPY --from=builder /app/node_modules ./node_modules
+# 安装生产依赖
+COPY package*.json ./
+RUN npm ci --production && npm cache clean --force
 
 # 3. 建议点：在复制源代码前，确保你项目根目录有 .dockerignore 文件
 COPY . .

@@ -2,3 +2,10 @@ node_modules
 npm-debug.log
 .git
 .env
+__tests__
+coverage
+*.log
+vitest.config.js
+jest.config.js
+test_output.txt
+scripts
