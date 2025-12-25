@@ -158,11 +158,25 @@ export class TaskManager {
      */
     static async init() {
         console.log("🔄 正在检查数据库中异常中断的任务...");
+
+        // 安全检查：如果处于 KV 故障转移模式，延迟任务恢复以优先让主集群处理
+        if (kv.isFailoverMode) {
+            console.warn("⚠️ 系统处于 KV 故障转移模式 (使用 Upstash)。将在 30 秒后尝试恢复任务，以优先让 Cloudflare KV 主集群（如果有）处理积压任务。");
+            
+            // 先预加载常用数据
+            await this._preloadCommonData();
+            
+            // 延迟 30 秒
+            await new Promise(resolve => setTimeout(resolve, 30000));
+            console.log("⏰ 故障转移实例开始执行延迟恢复检查...");
+        }
+
         try {
             // 并行加载初始化数据：僵尸任务 + 预热常用缓存
+            // 注意：如果是 failover 模式，commonData 可能已经预加载过了，但再次调用无害（通常有缓存或幂等）
             const results = await Promise.allSettled([
-                TaskRepository.findStalledTasks(120000),
-                this._preloadCommonData() // 预加载常用数据
+                TaskRepository.findStalledTasks(120000), // 查找 2 分钟未更新的任务
+                this._preloadCommonData() 
             ]);
 
             const tasks = results[0].status === 'fulfilled' ? results[0].value : [];

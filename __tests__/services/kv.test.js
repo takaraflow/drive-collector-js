@@ -8,6 +8,7 @@ global.fetch = mockFetch;
 const originalEnv = process.env;
 
 let kvInstance;
+let upstashKVInstance;
 
 describe("KV Service", () => {
   beforeAll(async () => {
@@ -80,8 +81,202 @@ describe("KV Service", () => {
         });
 
         await expect(kvInstance.set("key", "val")).rejects.toThrow("KV Set Error: KV write error");
+  });
+});
+
+describe("KV Service - Upstash", () => {
+  beforeAll(async () => {
+    // Set up mock environment variables for Upstash
+    process.env = {
+      ...originalEnv,
+      KV_PROVIDER: "upstash",
+      UPSTASH_REDIS_REST_URL: "https://mock-upstash-endpoint.upstash.io",
+      UPSTASH_REDIS_REST_TOKEN: "mock-upstash-token",
+    };
+    jest.resetModules();
+
+    // Dynamically import after setting up mocks
+    const { kv: importedKV } = await import("../../src/services/kv.js");
+    upstashKVInstance = importedKV;
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test("should initialize the Upstash KV service", () => {
+    expect(upstashKVInstance).toBeDefined();
+    expect(upstashKVInstance.useUpstash).toBe(true);
+    expect(upstashKVInstance.upstashUrl).toBe("https://mock-upstash-endpoint.upstash.io");
+    expect(upstashKVInstance.upstashToken).toBe("mock-upstash-token");
+  });
+
+  describe("Upstash set", () => {
+    test("should set a value successfully", async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ result: "OK" }),
+      });
+
+      const key = "test_key";
+      const value = { foo: "bar" };
+      const result = await upstashKVInstance.set(key, value);
+
+      expect(result).toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://mock-upstash-endpoint.upstash.io/set/test_key/%7B%22foo%22%3A%22bar%22%7D",
+        expect.objectContaining({
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer mock-upstash-token",
+          },
+        })
+      );
+    });
+
+    test("should handle expiration TTL", async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ result: "OK" }),
+      });
+
+      const key = "test_key";
+      const value = "test_value";
+      const ttl = 3600;
+      await upstashKVInstance.set(key, value, ttl);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://mock-upstash-endpoint.upstash.io/set/test_key/test_value?ex=3600",
+        expect.any(Object)
+      );
+    });
+
+    test("should throw error if Upstash set fails", async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "Upstash write error" }),
+      });
+
+      await expect(upstashKVInstance.set("key", "val")).rejects.toThrow("Upstash Set Error: Upstash write error");
     });
   });
+
+  describe("Upstash get", () => {
+    test("should get a JSON value successfully", async () => {
+      const mockData = { a: 1 };
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ result: JSON.stringify(mockData) }),
+      });
+
+      const result = await upstashKVInstance.get("key");
+      expect(result).toEqual(mockData);
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://mock-upstash-endpoint.upstash.io/get/key",
+        expect.objectContaining({
+          method: "GET",
+          headers: {
+            "Authorization": "Bearer mock-upstash-token",
+          },
+        })
+      );
+    });
+
+    test("should return null if key not found", async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ result: null }),
+      });
+
+      const result = await upstashKVInstance.get("missing_key");
+      expect(result).toBeNull();
+    });
+
+    test("should handle string values", async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ result: "plain text" }),
+      });
+
+      const result = await upstashKVInstance.get("key", "text");
+      expect(result).toBe("plain text");
+    });
+
+    test("should throw error if Upstash get fails", async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "Upstash read error" }),
+      });
+
+      await expect(upstashKVInstance.get("key")).rejects.toThrow("Upstash Get Error: Upstash read error");
+    });
+  });
+
+  describe("Upstash delete", () => {
+    test("should delete a key successfully", async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ result: 1 }),
+      });
+
+      const result = await upstashKVInstance.delete("key");
+      expect(result).toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://mock-upstash-endpoint.upstash.io/del/key",
+        expect.objectContaining({
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer mock-upstash-token",
+          },
+        })
+      );
+    });
+
+    test("should handle key not found", async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ result: 0 }),
+      });
+
+      const result = await upstashKVInstance.delete("missing_key");
+      expect(result).toBe(false); // ÔÞ d„pÏ
+    });
+
+    test("should throw error if Upstash delete fails", async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: () => Promise.resolve({ error: "Upstash delete error" }),
+      });
+
+      await expect(upstashKVInstance.delete("key")).rejects.toThrow("Upstash Delete Error: Upstash delete error");
+    });
+  });
+
+  describe("Upstash bulkSet", () => {
+    test("should bulk set values by calling set multiple times", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({ result: "OK" }),
+        })
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({ result: "OK" }),
+        });
+
+      const pairs = [
+        { key: "k1", value: "v1" },
+        { key: "k2", value: { obj: 1 } },
+      ];
+      const result = await upstashKVInstance.bulkSet(pairs);
+
+      expect(result).toBe(true);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
+        "https://mock-upstash-endpoint.upstash.io/set/k1/v1",
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        "https://mock-upstash-endpoint.upstash.io/set/k2/%7B%22obj%22%3A1%7D",
+        expect.any(Object)
+      );
+    });
+  });
+});
 
   describe("get", () => {
     test("should get a JSON value successfully", async () => {

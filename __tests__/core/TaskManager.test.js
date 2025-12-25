@@ -152,12 +152,14 @@ jest.unstable_mockModule("../../src/repositories/DriveRepository.js", () => ({
 }));
 
 // Mock services/kv.js
+const mockKv = {
+    get: jest.fn().mockResolvedValue("ok"),
+    set: jest.fn().mockResolvedValue(true),
+    delete: jest.fn().mockResolvedValue(true),
+    isFailoverMode: false
+};
 jest.unstable_mockModule("../../src/services/kv.js", () => ({
-    kv: {
-        get: jest.fn().mockResolvedValue("ok"),
-        set: jest.fn().mockResolvedValue(true),
-        delete: jest.fn().mockResolvedValue(true)
-    }
+    kv: mockKv
 }));
 
 // 导入 TaskManager
@@ -204,7 +206,51 @@ describe("TaskManager", () => {
     });
 
     describe("init", () => {
+        test("should delay recovery if in failover mode", async () => {
+            // Mock _preloadCommonData to resolve immediately to avoid timing issues
+            const originalPreload = TaskManager._preloadCommonData;
+            TaskManager._preloadCommonData = jest.fn().mockResolvedValue();
+
+            // Enable fake timers
+            jest.useFakeTimers();
+            
+            // Set failover mode
+            mockKv.isFailoverMode = true;
+            const consoleSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+            const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+            // Start init
+            const initPromise = TaskManager.init();
+
+            // Yield to allow sync part of init to run
+            await Promise.resolve();
+
+            // Verify warning logged immediately
+            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("故障转移模式"));
+            
+            // At this point, findStalledTasks should NOT have been called yet
+            expect(mockTaskRepository.findStalledTasks).not.toHaveBeenCalled();
+
+            // Advance time by 30s to trigger the recovery
+            jest.advanceTimersByTime(30000);
+
+            // Wait for promise to resolve
+            await initPromise;
+
+            // Now it should have been called
+            expect(mockTaskRepository.findStalledTasks).toHaveBeenCalled();
+            expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("延迟恢复检查"));
+
+            // Cleanup
+            mockKv.isFailoverMode = false;
+            TaskManager._preloadCommonData = originalPreload;
+            consoleSpy.mockRestore();
+            logSpy.mockRestore();
+            jest.useRealTimers();
+        });
+
         test("should restore stalled tasks", async () => {
+            mockKv.isFailoverMode = false;
             const stalledTasks = [
                 { id: "1", user_id: "u1", chat_id: "c1", msg_id: 100, source_msg_id: 200 }
             ];

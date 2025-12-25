@@ -53,7 +53,7 @@ export class InstanceCoordinator {
     }
 
     /**
-     * 注册实例到 KV
+     * 注册实例 (双写机制：D1 + KV)
      */
     async registerInstance() {
         const instanceData = {
@@ -65,13 +65,15 @@ export class InstanceCoordinator {
             status: 'active'
         };
 
+        // 1. 始终优先写入 D1 数据库 (作为真理之源，防止脑裂)
+        await this.registerInstanceToDB(instanceData);
+
+        // 2. 尝试写入 KV (用于快速访问和分布式锁)
         try {
             await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
-            console.log(`📝 实例已注册: ${this.instanceId}`);
+            console.log(`📝 实例已注册到 KV: ${this.instanceId}`);
         } catch (kvError) {
-            console.warn(`⚠️ 实例注册失败，继续运行（单实例模式）: ${kvError.message}`);
-            // 在KV失败时，将实例信息存储到内存和D1中作为备用
-            await this.registerInstanceToDB(instanceData);
+            console.warn(`⚠️ KV注册失败 (非致命，已写入DB): ${kvError.message}`);
         }
     }
 
@@ -96,26 +98,31 @@ export class InstanceCoordinator {
     }
 
     /**
-     * 启动心跳
+     * 启动心跳 (双写机制：D1 + KV)
      */
     startHeartbeat() {
         this.heartbeatTimer = setInterval(async () => {
+            const now = Date.now();
+
+            // 1. 始终优先更新 D1 (真理之源)
+            try {
+                await InstanceRepository.updateHeartbeat(this.instanceId, now);
+            } catch (dbError) {
+                console.error(`DB心跳更新失败: ${dbError.message}`);
+            }
+
+            // 2. 尝试更新 KV
             try {
                 const instanceData = await kv.get(`instance:${this.instanceId}`);
                 if (instanceData) {
-                    instanceData.lastHeartbeat = Date.now();
+                    instanceData.lastHeartbeat = now;
                     await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
                 } else {
-                    // 重新注册
+                    // 重新注册 (registerInstance 内部也会写 D1)
                     await this.registerInstance();
                 }
             } catch (kvError) {
-                // KV心跳失败时，尝试更新数据库中的心跳
-                try {
-                    await InstanceRepository.updateHeartbeat(this.instanceId, Date.now());
-                } catch (dbError) {
-                    console.error(`心跳更新失败: KV=${kvError.message}, DB=${dbError.message}`);
-                }
+                // KV 失败忽略，D1 已作为主心跳源
             }
         }, this.heartbeatInterval);
     }

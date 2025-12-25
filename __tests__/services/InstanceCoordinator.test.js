@@ -16,6 +16,7 @@ jest.unstable_mockModule("../../src/repositories/InstanceRepository.js", () => (
     createTableIfNotExists: jest.fn().mockResolvedValue(undefined),
     findAll: jest.fn().mockResolvedValue([]),
     upsert: jest.fn().mockResolvedValue(true),
+    updateHeartbeat: jest.fn().mockResolvedValue(true),
   },
 }));
 
@@ -64,13 +65,23 @@ describe("InstanceCoordinator", () => {
   });
 
   describe("registerInstance", () => {
-    test("should register instance successfully", async () => {
+    test("should register instance successfully (Dual Write)", async () => {
       mockFetch.mockResolvedValueOnce({
         json: () => Promise.resolve({ success: true }),
       });
 
       await instanceCoordinator.registerInstance();
 
+      // Verify DB write
+      const { InstanceRepository } = await import("../../src/repositories/InstanceRepository.js");
+      expect(InstanceRepository.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "test_instance_123",
+          status: "active"
+        })
+      );
+
+      // Verify KV write
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining("storage/kv/namespaces/mock_namespace_id/values/instance:test_instance_123"),
         expect.objectContaining({
@@ -80,16 +91,16 @@ describe("InstanceCoordinator", () => {
       );
     });
 
-    test("should handle registration failure gracefully", async () => {
+    test("should handle KV registration failure gracefully (DB still writes)", async () => {
       // Mock KV failure
       mockFetch.mockResolvedValueOnce({
         json: () => Promise.resolve({ success: false, errors: [{ message: "Registration failed" }] }),
       });
 
-      // Should not throw, but log warning and use DB fallback
+      // Should not throw, but log warning
       await expect(instanceCoordinator.registerInstance()).resolves.not.toThrow();
 
-      // Verify DB fallback was called
+      // Verify DB still called
       const { InstanceRepository } = await import("../../src/repositories/InstanceRepository.js");
       expect(InstanceRepository.upsert).toHaveBeenCalledWith(
         expect.objectContaining({

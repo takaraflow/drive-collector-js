@@ -130,11 +130,14 @@ export class NetworkDiagnostic {
     }
 
     /**
-     * 检查 Cloudflare KV 连通性
+     * 检查 KV 存储连通性 (Cloudflare KV 或 Upstash)
      */
     static async _checkKV() {
         const startTime = Date.now();
         try {
+            // 检测当前使用的KV提供商
+            const kvProvider = process.env.KV_PROVIDER === 'upstash' ? 'Upstash Redis' : 'Cloudflare KV';
+
             // 尝试读取一个不存在的key，应该返回null但不报错
             const testKey = `__diagnostic_test_${Date.now()}__`;
             await kv.get(testKey);
@@ -142,13 +145,14 @@ export class NetworkDiagnostic {
             return {
                 status: 'ok',
                 responseTime: `${responseTime}ms`,
-                message: 'Cloudflare KV 连接正常'
+                message: `${kvProvider} 连接正常`
             };
         } catch (error) {
+            const kvProvider = process.env.KV_PROVIDER === 'upstash' ? 'Upstash Redis' : 'Cloudflare KV';
             return {
                 status: 'error',
                 responseTime: `${Date.now() - startTime}ms`,
-                message: `Cloudflare KV 连接失败: ${error.message}`
+                message: `${kvProvider} 连接失败: ${error.message}`
             };
         }
     }
