@@ -15,6 +15,10 @@ const mockUIHelper = {
     renderFilesPage: jest.fn().mockReturnValue({ text: 'file list', buttons: [] })
 };
 const mockSafeEdit = jest.fn();
+const mockCacheService = {
+    get: jest.fn(),
+    set: jest.fn()
+};
 
 jest.unstable_mockModule('../../src/services/telegram.js', () => ({ client: mockClient }));
 jest.unstable_mockModule('../../src/services/rclone.js', () => ({ CloudTool: mockCloudTool }));

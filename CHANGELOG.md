@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [2.3.2](https://github.com/YoungSx/drive-collector-js/compare/v2.3.1...v2.3.2) (2025-12-25)
+
+
+### 🔧 其他任务
+
+* finalize atomic AIVM workflow for clean git history ([9bf5cd5](https://github.com/YoungSx/drive-collector-js/commit/9bf5cd50a08337109c26e6b8a2057897f199e907))
+
+
+### ✅ 测试相关
+
+* 为内存泄漏修复添加测试用例 ([062c8e1](https://github.com/YoungSx/drive-collector-js/commit/062c8e1acb5649739b5206e21b5e2d9f681d4524))
+
+
+### 🚀 性能优化
+
+* 修复内存泄漏风险，在TaskRepository中添加定期清理机制 ([0bccdbc](https://github.com/YoungSx/drive-collector-js/commit/0bccdbcff1487503b7561087b868d25aea1534bb))
+* 优化错误处理，移除空的catch块并提供详细错误信息 ([4a34883](https://github.com/YoungSx/drive-collector-js/commit/4a348837a5088bba99fdc4d5a940714ca47e541b))
+* 优化缓存策略，基于文件变化频率动态调整缓存时间 ([b63e338](https://github.com/YoungSx/drive-collector-js/commit/b63e33885d3ae5c6fcc8c4f44f58c89ae542c7fc))
+* 优化数据库批量操作，在任务恢复时使用批量更新和并发处理 ([616811e](https://github.com/YoungSx/drive-collector-js/commit/616811e4fa6ae94a0017d71b0982797548b67293))
+* 优化数据库批量操作，在任务恢复时使用批量更新和并发处理 ([1a91408](https://github.com/YoungSx/drive-collector-js/commit/1a91408c59989c5adfe2ef77e2af1e5f52368c46))
+* 优化文件处理，替换同步文件操作为异步操作 ([08b0960](https://github.com/YoungSx/drive-collector-js/commit/08b096099d51eac18317a50cce19e5b68efcf89c))
+* 优化限流器性能，消除CPU浪费的while循环 ([1c8156f](https://github.com/YoungSx/drive-collector-js/commit/1c8156f83785a939a4fde97ac20f0a8d3ab4b860))
+* 优化循环性能，在updateQueueUI中使用更高效的延迟控制 ([e61d04c](https://github.com/YoungSx/drive-collector-js/commit/e61d04c4c74228dde5c99e5b049342003c673829))
+* 优化预加载数据，提升系统启动性能 ([1e5c42b](https://github.com/YoungSx/drive-collector-js/commit/1e5c42b8a28ce0e577d3e9b35c6e6beea581cd1c))
+* 优化DriveRepository查询性能 - 为findAll()添加5分钟缓存机制 ([79b1133](https://github.com/YoungSx/drive-collector-js/commit/79b113335062cdceb00db077e27de8988fc2e4ef))
+* 优化TaskManager初始化 - 实现异步操作并行化，提升启动性能 ([4390f57](https://github.com/YoungSx/drive-collector-js/commit/4390f575dfcdf37aee1d5bdc4a4582d1e98d9de9))
+* 优化TaskManager批量数据库操作 - 添加batchUpdateStatus方法并在组任务完成时使用 ([1644421](https://github.com/YoungSx/drive-collector-js/commit/1644421264fb5b04a9c8293671e8c6fd8fb05d6e))
+* 优化UI更新节流机制，基于任务状态和进度动态调整节流时间 ([f69aa58](https://github.com/YoungSx/drive-collector-js/commit/f69aa5857d40d738f4ed0f8288c956ce56c070d6))
+
+
+### 🐛 问题修复
+
+* 修复测试语法错误，移除不兼容的await import语法 ([846aa3e](https://github.com/YoungSx/drive-collector-js/commit/846aa3e02a9a304c2d674c76a5d80b901d3602f1))
+* 修复测试fake timers警告，条件性清理定时器 ([a759423](https://github.com/YoungSx/drive-collector-js/commit/a7594238b694fbfaf47e3360b098b85fcdf0672b))
+* 修复所有npm test测试失败问题 ([29fbfce](https://github.com/YoungSx/drive-collector-js/commit/29fbfce5dfdb4cd2aff54e27e0fb6d8e29cff1d5))
+* 修复最后的测试失败问题 ([d12845f](https://github.com/YoungSx/drive-collector-js/commit/d12845f28688889e5492a4c3e4229b7640adee36))
+* 修复files.slice is not a function错误 ([2221578](https://github.com/YoungSx/drive-collector-js/commit/22215782358136b9bf24a652907ca72eaca87052))
+* 修复npm test异步操作清理问题 ([aef32c2](https://github.com/YoungSx/drive-collector-js/commit/aef32c261d37effcc9080149563743e4bc6043d9))
+* 重新创建TaskRepository缓存测试文件，修复语法错误 ([9e801d3](https://github.com/YoungSx/drive-collector-js/commit/9e801d3700a66b27530c2d83f29acbbe577afb32))
+* **文件列表命令**：修复异步错误中的TypeError，确保文件列表功能正常工作，提升用户体验稳定性。
+
 ### [2.3.1](https://github.com/YoungSx/drive-collector-js/compare/v2.3.0...v2.3.1) (2025-12-24)
 
 

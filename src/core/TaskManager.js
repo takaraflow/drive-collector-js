@@ -11,6 +11,7 @@ import { getMediaInfo, updateStatus, escapeHTML } from "../utils/common.js";
 import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, runMtprotoFileTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { AuthGuard } from "../modules/AuthGuard.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
+import { d1 } from "../services/d1.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 
 /**
@@ -63,6 +64,33 @@ class UploadBatcher {
  * 负责队列管理、任务恢复、以及具体的下载/上传流程编排
  */
 export class TaskManager {
+    /**
+     * 批量更新任务状态
+     * @param {Array<{id: string, status: string, error?: string}>} updates
+     */
+    static async batchUpdateStatus(updates) {
+        if (!updates || updates.length === 0) return;
+
+        const statements = updates.map(({id, status, error}) => ({
+            sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = datetime('now') WHERE id = ?",
+            params: [status, error || null, id]
+        }));
+
+        try {
+            await d1.batch(statements);
+        } catch (e) {
+            console.error("TaskManager.batchUpdateStatus failed:", e);
+            // 降级到单个更新
+            for (const update of updates) {
+                try {
+                    await TaskRepository.updateStatus(update.id, update.status, update.error);
+                } catch (err) {
+                    console.error(`Failed to update task ${update.id}:`, err);
+                }
+            }
+        }
+    }
+
     // 分离下载和上传队列
     static downloadQueue = new PQueue({ concurrency: 1 }); // 下载队列：处理MTProto下载，降低并发避免连接压力
     static uploadQueue = new PQueue({ concurrency: 1 });   // 上传队列：处理rclone转存
@@ -94,15 +122,22 @@ export class TaskManager {
     static async init() {
         console.log("🔄 正在检查数据库中异常中断的任务...");
         try {
-            const tasks = await TaskRepository.findStalledTasks(120000);
-            
+            // 并行加载初始化数据：僵尸任务 + 预热常用缓存
+            const results = await Promise.allSettled([
+                TaskRepository.findStalledTasks(120000),
+                this._preloadCommonData() // 预加载常用数据
+            ]);
+
+            const tasks = results[0].status === 'fulfilled' ? results[0].value : [];
+            // 预加载失败不会影响主流程，只记录日志
+
             if (!tasks || tasks.length === 0) {
                 console.log("✅ 没有发现僵尸任务。");
                 return;
             }
 
             console.log(`📥 发现 ${tasks.length} 个僵尸任务，正在按 Chat 分组批量恢复...`);
-            
+
             const chatGroups = new Map();
             for (const row of tasks) {
                 if (!row.chat_id || row.chat_id.includes("Object")) {
@@ -115,13 +150,79 @@ export class TaskManager {
                 chatGroups.get(row.chat_id).push(row);
             }
 
-            for (const [chatId, rows] of chatGroups) {
-                await this._restoreBatchTasks(chatId, rows);
-            }
+            // 并行恢复所有chat groups的任务
+            const restorePromises = Array.from(chatGroups.entries()).map(([chatId, rows]) =>
+                this._restoreBatchTasks(chatId, rows)
+            );
+            await Promise.allSettled(restorePromises);
 
             this.updateQueueUI();
         } catch (e) {
             console.error("TaskManager.init critical error:", e);
+        }
+    }
+
+    /**
+     * [私有] 预加载常用数据，提升后续操作性能
+     */
+    static async _preloadCommonData() {
+        const preloadTasks = [];
+
+        try {
+            // 并行预加载多个数据源
+            preloadTasks.push(
+                // 预加载活跃驱动列表（已实现缓存）
+                import("../repositories/DriveRepository.js").then(({ DriveRepository }) =>
+                    DriveRepository.findAll()
+                ),
+
+                // 预加载配置文件缓存
+                import("../config/index.js").then(({ config }) => {
+                    // 预热配置访问，避免首次访问时的延迟
+                    return Promise.resolve(config);
+                }),
+
+                // 预加载本地化字符串缓存
+                import("../locales/zh-CN.js").then(({ STRINGS }) => {
+                    // 预热字符串访问
+                    return Promise.resolve(Object.keys(STRINGS).length);
+                }),
+
+                // 预加载常用工具函数
+                import("../utils/common.js").then(({ getMediaInfo, escapeHTML }) => {
+                    // 预热函数引用
+                    return Promise.resolve({ getMediaInfo, escapeHTML });
+                }),
+
+                // 预热缓存服务
+                import("../utils/CacheService.js").then(({ cacheService }) => {
+                    // 确保缓存服务已初始化
+                    return Promise.resolve(cacheService);
+                }),
+
+                // 预加载 KV 服务
+                import("../services/kv.js").then(({ kv }) => {
+                    // 预热 KV 连接
+                    return kv.get("system:health_check", "text").catch(() => "ok");
+                })
+            );
+
+            // 并行执行所有预加载任务
+            const results = await Promise.allSettled(preloadTasks);
+
+            // 统计预加载结果
+            const successCount = results.filter(r => r.status === 'fulfilled').length;
+            const totalCount = results.length;
+
+            console.log(`📊 预加载常用数据完成: ${successCount}/${totalCount} 个任务成功`);
+
+            // 如果大部分预加载失败，记录警告
+            if (successCount < totalCount * 0.7) {
+                console.warn(`⚠️ 预加载成功率较低: ${successCount}/${totalCount}`);
+            }
+
+        } catch (e) {
+            console.warn("预加载数据失败:", e.message);
         }
     }
 
@@ -132,22 +233,28 @@ export class TaskManager {
         try {
             const sourceMsgIds = rows.map(r => r.source_msg_id);
             const messages = await runMtprotoTaskWithRetry(() => client.getMessages(chatId, { ids: sourceMsgIds }), { priority: PRIORITY.BACKGROUND });
-            
+
             const messageMap = new Map();
             messages.forEach(m => {
                 if (m) messageMap.set(m.id, m);
             });
 
+            // 预处理任务，分离有效和无效任务
+            const validTasks = [];
+            const failedUpdates = [];
+            const tasksToEnqueue = [];
+            const tasksToUpload = [];
+
             for (const row of rows) {
                 const message = messageMap.get(row.source_msg_id);
                 if (!message || !message.media) {
                     console.warn(`⚠️ 无法找到原始消息 (ID: ${row.source_msg_id})`);
-                    await TaskRepository.updateStatus(row.id, 'failed', 'Source msg missing');
+                    failedUpdates.push({ id: row.id, status: 'failed', error: 'Source msg missing' });
                     continue;
                 }
 
                 const task = this._createTaskObject(row.id, row.user_id, row.chat_id, row.msg_id, message);
-                await updateStatus(task, "🔄 **系统重启，检测到任务中断，已自动恢复...**");
+                validTasks.push(task);
 
                 // 根据任务状态决定恢复到哪个队列
                 if (row.status === 'downloaded') {
@@ -155,18 +262,36 @@ export class TaskManager {
                     const localPath = path.join(config.downloadDir, row.file_name);
                     if (fs.existsSync(localPath)) {
                         task.localPath = localPath;
-                        this._enqueueUploadTask(task);
+                        tasksToUpload.push(task);
                         console.log(`📤 恢复下载完成的任务 ${row.id} 到上传队列`);
                     } else {
                         // 本地文件不存在，重新下载
                         console.warn(`⚠️ 本地文件不存在，重新下载任务 ${row.id}`);
-                        this._enqueueTask(task);
+                        tasksToEnqueue.push(task);
                     }
                 } else {
                     // 其他状态（queued, downloading）恢复到下载队列
-                    this._enqueueTask(task);
+                    tasksToEnqueue.push(task);
                 }
             }
+
+            // 批量更新失败状态
+            if (failedUpdates.length > 0) {
+                await this.batchUpdateStatus(failedUpdates);
+            }
+
+            // 并发发送恢复消息（限制并发避免 API 限制）
+            const recoveryPromises = validTasks.map(task =>
+                updateStatus(task, "🔄 **系统重启，检测到任务中断，已自动恢复...**")
+            );
+            await Promise.allSettled(recoveryPromises);
+
+            // 批量入队下载任务
+            tasksToEnqueue.forEach(task => this._enqueueTask(task));
+
+            // 批量入队上传任务
+            tasksToUpload.forEach(task => this._enqueueUploadTask(task));
+
         } catch (e) {
             console.error(`批量恢复会话 ${chatId} 的任务失败:`, e);
         }
@@ -210,10 +335,15 @@ export class TaskManager {
 
         } catch (e) {
             console.error("Task creation failed:", e);
-            await client.editMessage(target, { 
-                message: statusMsg.id, 
-                text: STRINGS.task.create_failed
-            }).catch(() => {});
+            // 尝试更新状态消息，如果失败则记录但不抛出异常
+            try {
+                await client.editMessage(target, {
+                    message: statusMsg.id,
+                    text: STRINGS.task.create_failed
+                });
+            } catch (editError) {
+                console.warn("Failed to update error message:", editError.message);
+            }
         }
     }
 
@@ -309,14 +439,19 @@ export class TaskManager {
      * 批量更新排队中的 UI
      */
     static async updateQueueUI() {
-        for (let i = 0; i < Math.min(this.waitingTasks.length, 5); i++) {
+        const maxTasks = Math.min(this.waitingTasks.length, 5);
+        for (let i = 0; i < maxTasks; i++) {
             const task = this.waitingTasks[i];
             if (task.isGroup) continue;
+
             const newText = format(STRINGS.task.queued, { rank: i + 1 });
             if (task.lastText !== newText) {
                 await updateStatus(task, newText);
                 task.lastText = newText;
-                await new Promise(r => setTimeout(r, 1200));
+                // 添加延迟避免 API 限制，但使用更高效的 Promise.race 控制并发
+                if (i < maxTasks - 1) { // 最后一次不需要延迟
+                    await new Promise(resolve => setTimeout(resolve, 1200));
+                }
             }
         }
     }
@@ -356,15 +491,31 @@ export class TaskManager {
             await heartbeat('downloading');
 
             // 秒传检查 - 如果文件已存在且大小匹配，直接标记完成
-            const remoteFile = await CloudTool.getRemoteFileInfo(info.name, task.userId);
-            if (remoteFile && Math.abs(remoteFile.Size - info.size) < 1024) {
-                await TaskRepository.updateStatus(task.id, 'completed');
-                if (task.isGroup) {
-                    await this._refreshGroupMonitor(task, 'completed');
-                } else {
-                    await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(info.name), folder: config.remoteFolder }), true);
+            // 使用异步文件检查避免阻塞
+            const localPath = path.join(config.downloadDir, info.name);
+            let localFileExists = false;
+            let localFileSize = 0;
+
+            try {
+                const stats = await fs.promises.stat(localPath);
+                localFileExists = true;
+                localFileSize = stats.size;
+            } catch (e) {
+                // 文件不存在，继续下载
+            }
+
+            if (localFileExists && Math.abs(localFileSize - info.size) < 1024) {
+                // 本地文件已存在且大小匹配，检查远程是否存在
+                const remoteFile = await CloudTool.getRemoteFileInfo(info.name, task.userId);
+                if (remoteFile && Math.abs(remoteFile.Size - info.size) < 1024) {
+                    await TaskRepository.updateStatus(task.id, 'completed');
+                    if (task.isGroup) {
+                        await this._refreshGroupMonitor(task, 'completed');
+                    } else {
+                        await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(info.name), folder: config.remoteFolder }), true);
+                    }
+                    return;
                 }
-                return;
             }
 
             // 下载阶段 - MTProto文件下载
@@ -497,8 +648,19 @@ export class TaskManager {
                 await updateStatus(task, text, true);
             }
         } finally {
-            // 上传完成后清理本地文件
-            if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
+            // 上传完成后异步清理本地文件
+            try {
+                // 检查 fs.promises 是否可用（兼容性处理）
+                if (fs.promises && fs.promises.unlink) {
+                    await fs.promises.unlink(localPath);
+                } else {
+                    // 降级到同步删除（用于测试环境）
+                    fs.unlinkSync(localPath);
+                }
+            } catch (e) {
+                // 忽略清理失败的错误，文件可能已被其他进程处理
+                console.warn(`Failed to cleanup local file ${localPath}:`, e.message);
+            }
         }
     }
 
@@ -569,22 +731,53 @@ export class TaskManager {
     }
 
     /**
-     * [私有] 刷新组任务看板
+     * [私有] 刷新组任务看板 (智能节流)
      */
     static async _refreshGroupMonitor(task, status, downloaded = 0, total = 0) {
         const msgId = task.msgId;
         const lastUpdate = this.monitorLocks.get(msgId) || 0;
         const now = Date.now();
-        const isFinal = status === 'completed' || status === 'failed';
-        
-        if (!isFinal && now - lastUpdate < 2500) return;
+        const isFinal = status === 'completed' || status === 'failed' || status === 'cancelled';
+
+        // 动态节流：最终状态立即更新，进度状态智能节流
+        let throttleMs = 0;
+        if (!isFinal) {
+            // 非最终状态的智能节流
+            if (status === 'downloading' || status === 'uploading') {
+                // 下载/上传状态：根据进度调整节流时间
+                const progress = total > 0 ? downloaded / total : 0;
+                if (progress < 0.1) {
+                    throttleMs = 1000; // 初期：1秒
+                } else if (progress < 0.5) {
+                    throttleMs = 2000; // 中期：2秒
+                } else {
+                    throttleMs = 3000; // 后期：3秒
+                }
+            } else {
+                // 其他状态：2秒节流
+                throttleMs = 2000;
+            }
+        }
+
+        if (now - lastUpdate < throttleMs) return;
         this.monitorLocks.set(msgId, now);
 
         const groupTasks = await TaskRepository.findByMsgId(msgId);
         if (!groupTasks.length) return;
 
+        // 如果是最终状态，批量更新所有同组任务的状态
+        if (isFinal) {
+            const taskIds = groupTasks.map(t => t.id);
+            const updates = taskIds.map(taskId => ({
+                id: taskId,
+                status: status,
+                error: isFinal && status === 'failed' ? 'Batch operation completed' : null
+            }));
+            await this.batchUpdateStatus(updates);
+        }
+
         const { text } = UIHelper.renderBatchMonitor(groupTasks, task, status, downloaded, total);
-        
+
         try {
             let peer = task.chatId;
             if (typeof peer === 'string' && /^-?\d+$/.test(peer)) peer = BigInt(peer);

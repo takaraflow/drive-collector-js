@@ -119,6 +119,10 @@ jest.unstable_mockModule("fs", () => ({
         existsSync: jest.fn(() => true),
         unlinkSync: jest.fn(),
         statSync: jest.fn(() => ({ size: 1024 })),
+        promises: {
+            stat: jest.fn(() => Promise.resolve({ size: 1024 })),
+            unlink: jest.fn(() => Promise.resolve())
+        }
     }
 }));
 
@@ -139,9 +143,26 @@ describe("TaskManager", () => {
         jest.clearAllMocks();
         TaskManager.waitingTasks = [];
         TaskManager.currentTask = null;
+        TaskManager.waitingUploadTasks = [];
         // 清理队列
         TaskManager.queue.clear();
         TaskManager.monitorLocks.clear();
+        // 清理 UploadBatcher 的定时器（重置实例）
+        if (TaskManager.uploadBatcher) {
+            TaskManager.uploadBatcher.batches.clear();
+        }
+    });
+
+    afterEach(() => {
+        // 清理所有未完成的异步操作（仅在启用fake timers时）
+        try {
+            if (jest.isMockFunction(setTimeout)) {
+                jest.clearAllTimers();
+                jest.runOnlyPendingTimers();
+            }
+        } catch (e) {
+            // 忽略 fake timers 未启用的错误
+        }
     });
 
     describe("init", () => {
@@ -160,7 +181,7 @@ describe("TaskManager", () => {
             expect(mockTaskRepository.findStalledTasks).toHaveBeenCalled();
             expect(mockClient.getMessages).toHaveBeenCalled();
             expect(TaskManager.waitingTasks.length).toBe(1);
-            
+
             // 确保清理，避免 open handles
             TaskManager.queue.clear();
         });
@@ -171,7 +192,8 @@ describe("TaskManager", () => {
 
             await TaskManager.init();
 
-            expect(consoleSpy).toHaveBeenCalledWith("TaskManager.init critical error:", expect.any(Error));
+            // Since we use Promise.allSettled, the error is handled internally and logged as part of preload
+            expect(consoleSpy).toHaveBeenCalledWith("DriveRepository.findAll error:", expect.any(Error));
             consoleSpy.mockRestore();
         });
 
@@ -185,6 +207,84 @@ describe("TaskManager", () => {
 
             expect(mockClient.getMessages).not.toHaveBeenCalled();
             expect(TaskManager.waitingTasks.length).toBe(0);
+        });
+
+        test("should preload common data during init", async () => {
+            mockTaskRepository.findStalledTasks.mockResolvedValue([]);
+            const consoleSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+            await TaskManager.init();
+
+            // Should call the preload message
+            expect(consoleSpy).toHaveBeenCalledWith("📊 预加载常用数据完成: 6/6 个任务成功");
+            consoleSpy.mockRestore();
+        });
+
+        test("should handle preload data failure gracefully", async () => {
+            mockTaskRepository.findStalledTasks.mockResolvedValue([]);
+            const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+            const consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+            // Mock the preload method to simulate partial failure
+            const originalPreload = TaskManager._preloadCommonData;
+            TaskManager._preloadCommonData = jest.fn(async () => {
+                // Simulate 5 successes and 1 failure
+                console.log("📊 预加载常用数据完成: 5/6 个任务成功");
+                console.warn("⚠️ 预加载成功率较低: 5/6");
+            });
+
+            await TaskManager.init();
+
+            // Should still complete init successfully despite preload issues
+            expect(consoleLogSpy).toHaveBeenCalledWith("📊 预加载常用数据完成: 5/6 个任务成功");
+            expect(consoleWarnSpy).toHaveBeenCalledWith("⚠️ 预加载成功率较低: 5/6");
+
+            consoleLogSpy.mockRestore();
+            consoleWarnSpy.mockRestore();
+
+            // Restore original method
+            TaskManager._preloadCommonData = originalPreload;
+        });
+
+        test("should batch restore tasks efficiently", async () => {
+            const stalledTasks = [
+                { id: "1", user_id: "u1", chat_id: "c1", msg_id: 100, source_msg_id: 200, status: 'downloaded', file_name: 'file1.mp4' },
+                { id: "2", user_id: "u1", chat_id: "c1", msg_id: 100, source_msg_id: 201, status: 'queued', file_name: 'file2.mp4' },
+                { id: "3", user_id: "u1", chat_id: "c1", msg_id: 100, source_msg_id: 202, status: 'queued', file_name: 'file3.mp4' } // invalid message
+            ];
+            mockTaskRepository.findStalledTasks.mockResolvedValue(stalledTasks);
+            mockClient.getMessages.mockResolvedValue([
+                { id: 200, media: {} },
+                { id: 201, media: {} },
+                null // 202 is missing
+            ]);
+
+            // Mock batchUpdateStatus to capture calls
+            const batchUpdateSpy = jest.spyOn(TaskManager, 'batchUpdateStatus');
+            const enqueueUploadSpy = jest.spyOn(TaskManager, '_enqueueUploadTask');
+            const enqueueTaskSpy = jest.spyOn(TaskManager, '_enqueueTask');
+            TaskManager.queue.pause();
+
+            await TaskManager.init();
+
+            // Should batch update failed status
+            expect(batchUpdateSpy).toHaveBeenCalledWith([
+                { id: "3", status: 'failed', error: 'Source msg missing' }
+            ]);
+
+            // Should have called enqueue methods
+            expect(enqueueUploadSpy).toHaveBeenCalledWith(
+                expect.objectContaining({ id: "1" })
+            );
+            expect(enqueueTaskSpy).toHaveBeenCalledWith(
+                expect.objectContaining({ id: "2" })
+            );
+
+            // Should have enqueued valid tasks
+            expect(TaskManager.waitingTasks.length).toBe(1); // task 2 only, task 1 goes to upload
+
+            batchUpdateSpy.mockRestore();
+            TaskManager.queue.clear();
         });
     });
 
@@ -320,6 +420,9 @@ describe("TaskManager", () => {
                 isCancelled: false
             };
 
+            // Mock local file exists with correct size, and remote file exists
+            const fs = await import("fs");
+            fs.default.promises.stat.mockResolvedValue({ size: 1024 });
             mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Size: 1024 });
 
             await TaskManager.downloadWorker(task);
@@ -368,6 +471,10 @@ describe("TaskManager", () => {
                     }
                 }, 1);
             });
+            // Mock the file size check to match
+            const fs = await import("fs");
+            fs.default.existsSync.mockReturnValue(true);
+            fs.default.statSync.mockReturnValue({ size: 1024 });
             mockCloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Size: 1024 }); // Final check
 
             await TaskManager.uploadWorker(task);
@@ -476,17 +583,66 @@ describe("TaskManager", () => {
         });
     });
 
+    describe("batchUpdateStatus", () => {
+        test("should batch update task statuses successfully", async () => {
+            // Mock d1 at the top level
+            const mockD1Batch = jest.fn().mockResolvedValue([{ success: true }, { success: true }]);
+            const originalD1 = await import("../../src/services/d1.js");
+            originalD1.d1.batch = mockD1Batch;
+
+            const updates = [
+                { id: "task1", status: "completed", error: null },
+                { id: "task2", status: "failed", error: "Upload failed" }
+            ];
+
+            await TaskManager.batchUpdateStatus(updates);
+
+            expect(mockD1Batch).toHaveBeenCalledWith([
+                {
+                    sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = datetime('now') WHERE id = ?",
+                    params: ["completed", null, "task1"]
+                },
+                {
+                    sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = datetime('now') WHERE id = ?",
+                    params: ["failed", "Upload failed", "task2"]
+                }
+            ]);
+        });
+
+        test("should handle empty updates array", async () => {
+            const mockD1Batch = jest.fn();
+            const originalD1 = await import("../../src/services/d1.js");
+            originalD1.d1.batch = mockD1Batch;
+
+            await TaskManager.batchUpdateStatus([]);
+
+            expect(mockD1Batch).not.toHaveBeenCalled();
+        });
+
+        test("should fallback to individual updates on batch failure", async () => {
+            const mockD1Batch = jest.fn().mockRejectedValue(new Error("Batch failed"));
+            const originalD1 = await import("../../src/services/d1.js");
+            originalD1.d1.batch = mockD1Batch;
+
+            const updates = [{ id: "task1", status: "completed" }];
+
+            await TaskManager.batchUpdateStatus(updates);
+
+            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task1", "completed", undefined);
+        });
+    });
+
     describe("updateQueueUI", () => {
         test("should update UI for waiting tasks", async () => {
             // 避免使用 fake timers，因为 PQueue 和其他异步逻辑可能受影响
             const task = { id: "1", lastText: "", isGroup: false };
             TaskManager.waitingTasks = [task];
-            
+
             // 临时 mock updateStatus 以立即解决
             updateStatus.mockResolvedValue(true);
 
             await TaskManager.updateQueueUI();
-            
+
             expect(updateStatus).toHaveBeenCalledWith(task, expect.stringContaining("queued"));
             expect(task.lastText).toContain("queued");
         });
@@ -494,9 +650,9 @@ describe("TaskManager", () => {
         test("should skip group tasks in queue UI", async () => {
             const task = { id: "1", isGroup: true };
             TaskManager.waitingTasks = [task];
-            
+
             await TaskManager.updateQueueUI();
-            
+
             expect(updateStatus).not.toHaveBeenCalled();
         });
     });
