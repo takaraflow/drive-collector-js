@@ -168,8 +168,18 @@ export class Dispatcher {
         const message = event.message;
         const text = message.message;
 
-        // 🚀 性能优化：为 /start 命令添加快速路径，避免不必要的数据库查询
+        // 🚀 性能优化：为 /start 命令添加快速路径，只检查维护模式，避免查询用户角色
         if (text === "/start") {
+            const mode = await SettingsRepository.get("access_mode", "public");
+            const isOwner = userId === config.ownerId?.toString();
+
+            if (!isOwner && mode !== 'public') {
+                return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: STRINGS.system.maintenance_mode,
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            }
+
             return await runBotTaskWithRetry(() => client.sendMessage(target, {
                 message: STRINGS.system.welcome,
                 parseMode: "html"
