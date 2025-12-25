@@ -102,21 +102,22 @@ const createAutoScalingLimiter = (options, autoScaling = {}) => {
 };
 
 /**
- * Token Bucket 算法实现
+ * Token Bucket 算法实现 (优化版，支持异步等待)
  * @param {number} capacity - 令牌桶容量
  * @param {number} fillRate - 填充速率（令牌/秒）
  */
 const createTokenBucketLimiter = (capacity, fillRate) => {
     let tokens = capacity;
     let lastRefill = Date.now();
-    
+    let waitingQueue = [];
+
     const refill = () => {
         const now = Date.now();
         const elapsed = (now - lastRefill) / 1000;
         tokens = Math.min(capacity, tokens + elapsed * fillRate);
         lastRefill = now;
     };
-    
+
     const take = (count = 1) => {
         refill();
         if (tokens >= count) {
@@ -125,8 +126,28 @@ const createTokenBucketLimiter = (capacity, fillRate) => {
         }
         return false;
     };
-    
-    return { take };
+
+    /**
+     * 异步获取令牌，如果没有可用令牌则等待
+     * @param {number} count - 需要令牌数量
+     * @returns {Promise<void>}
+     */
+    const takeAsync = async (count = 1) => {
+        return new Promise((resolve) => {
+            const tryTake = () => {
+                if (take(count)) {
+                    resolve();
+                } else {
+                    // 计算需要等待的时间
+                    const waitTime = Math.max(100, (count - tokens) / fillRate * 1000);
+                    setTimeout(tryTake, Math.min(waitTime, 1000)); // 最多等待1秒后重试
+                }
+            };
+            tryTake();
+        });
+    };
+
+    return { take, takeAsync };
 };
 
 export const PRIORITY = {
@@ -187,9 +208,8 @@ export const runMtprotoFileTask = async (fn, addOptions = {}) => {
     const priority = addOptions.priority ?? PRIORITY.LOW;
     const taskOptions = { ...addOptions, priority };
 
-    while (!mtprotoFileTokenBucket.take()) {
-        await sleep(100); // 等待令牌填充
-    }
+    // 使用异步令牌获取，避免 CPU 浪费的 while 循环
+    await mtprotoFileTokenBucket.takeAsync();
     return mtprotoFileLimiter.run(fn, taskOptions);
 };
 
@@ -208,9 +228,8 @@ export const runMtprotoTask = (fn, addOptions = {}) => {
 const authTokenBucket = createTokenBucketLimiter(5, 5/60); // 5 令牌，5/60 令牌/秒
 const authLimiter = createLimiter({ intervalCap: 5, interval: 60 * 1000 });
 export const runAuthTask = async (fn, addOptions = {}) => {
-    while (!authTokenBucket.take()) {
-        await sleep(100); // 等待令牌填充
-    }
+    // 使用异步令牌获取，避免 CPU 浪费的 while 循环
+    await authTokenBucket.takeAsync();
     return authLimiter.run(fn, addOptions);
 };
 
