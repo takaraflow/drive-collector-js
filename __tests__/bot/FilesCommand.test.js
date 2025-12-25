@@ -1,40 +1,39 @@
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
+import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 // --- Mocks ---
 const mockClient = {
-    sendMessage: jest.fn().mockResolvedValue({ id: 123 }),
+    sendMessage: vi.fn().mockResolvedValue({ id: 123 }),
 };
 const mockCloudTool = {
-    listRemoteFiles: jest.fn(),
-    isLoading: jest.fn().mockReturnValue(false)
+    listRemoteFiles: vi.fn(),
+    isLoading: vi.fn().mockReturnValue(false)
 };
 const mockDriveRepository = {
-    findByUserId: jest.fn().mockResolvedValue({ id: 1, type: 'mega' })
+    findByUserId: vi.fn().mockResolvedValue({ id: 1, type: 'mega' })
 };
 const mockUIHelper = {
-    renderFilesPage: jest.fn().mockReturnValue({ text: 'file list', buttons: [] })
+    renderFilesPage: vi.fn().mockReturnValue({ text: 'file list', buttons: [] })
 };
-const mockSafeEdit = jest.fn();
+const mockSafeEdit = vi.fn();
 
-// --- Module Mocks ---
-jest.unstable_mockModule('../../src/services/telegram.js', () => ({ client: mockClient }));
-jest.unstable_mockModule('../../src/services/rclone.js', () => ({ CloudTool: mockCloudTool }));
-jest.unstable_mockModule('../../src/repositories/DriveRepository.js', () => ({ DriveRepository: mockDriveRepository }));
-jest.unstable_mockModule('../../src/ui/templates.js', () => ({ UIHelper: mockUIHelper }));
-jest.unstable_mockModule('../../src/utils/common.js', () => ({ 
+vi.mock('../../src/services/telegram.js', () => ({ client: mockClient }));
+vi.mock('../../src/services/rclone.js', () => ({ CloudTool: mockCloudTool }));
+vi.mock('../../src/repositories/DriveRepository.js', () => ({ DriveRepository: mockDriveRepository }));
+vi.mock('../../src/ui/templates.js', () => ({ UIHelper: mockUIHelper }));
+vi.mock('../../src/utils/common.js', () => ({
     safeEdit: mockSafeEdit,
     escapeHTML: (t) => t,
-    getMediaInfo: jest.fn(),
-    updateStatus: jest.fn()
+    getMediaInfo: vi.fn(),
+    updateStatus: vi.fn()
 }));
 const mockPriority = { UI: 10, NORMAL: 0, LOW: -10, BACKGROUND: -20 };
 global.PRIORITY = mockPriority; // 注入全局变量
-jest.unstable_mockModule('../../src/utils/limiter.js', () => ({
-    runBotTask: jest.fn((fn) => fn()),
-    runBotTaskWithRetry: jest.fn((fn) => fn()),
-    runMtprotoTask: jest.fn((fn) => fn()),
-    runMtprotoTaskWithRetry: jest.fn((fn) => fn()),
-    runMtprotoFileTaskWithRetry: jest.fn((fn) => fn()),
+vi.mock('../../src/utils/limiter.js', () => ({
+    runBotTask: vi.fn((fn) => fn()),
+    runBotTaskWithRetry: vi.fn((fn) => fn()),
+    runMtprotoTask: vi.fn((fn) => fn()),
+    runMtprotoTaskWithRetry: vi.fn((fn) => fn()),
+    runMtprotoFileTaskWithRetry: vi.fn((fn) => fn()),
     PRIORITY: mockPriority
 }));
 
@@ -43,7 +42,7 @@ const { Dispatcher } = await import('../../src/bot/Dispatcher.js');
 
 describe('Dispatcher /files command', () => {
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
     });
 
     it('should show loading immediately and then update with file list', async () => {
@@ -74,9 +73,22 @@ describe('Dispatcher /files command', () => {
         mockCloudTool.listRemoteFiles.mockRejectedValue(new Error("Network error"));
 
         await Dispatcher._handleFilesCommand(target, userId);
-        
+
         await new Promise(resolve => setImmediate(resolve));
 
         expect(mockSafeEdit).toHaveBeenCalledWith(target, 123, expect.stringContaining("无法获取"), null, userId);
+    });
+
+    it('should send bind hint when no drive found', async () => {
+        const target = "chat123";
+        const userId = "user456";
+        mockDriveRepository.findByUserId.mockResolvedValue(null);
+
+        await Dispatcher._handleFilesCommand(target, userId);
+
+        expect(mockClient.sendMessage).toHaveBeenCalledWith(target, expect.objectContaining({
+            message: expect.stringContaining("网盘")
+        }));
+        expect(mockCloudTool.listRemoteFiles).not.toHaveBeenCalled();
     });
 });
