@@ -23,6 +23,9 @@ export class InstanceCoordinator {
     async start() {
         console.log(`🚀 启动实例协调器: ${this.instanceId}`);
 
+        // 确保数据库表存在
+        await InstanceRepository.createTableIfNotExists();
+
         // 注册实例
         await this.registerInstance();
 

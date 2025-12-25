@@ -10,6 +10,15 @@ const originalEnv = process.env;
 let instanceCoordinator;
 let kv;
 
+// Mock InstanceRepository
+jest.unstable_mockModule("../../src/repositories/InstanceRepository.js", () => ({
+  InstanceRepository: {
+    createTableIfNotExists: jest.fn().mockResolvedValue(undefined),
+    findAll: jest.fn().mockResolvedValue([]),
+    upsert: jest.fn().mockResolvedValue(true),
+  },
+}));
+
 describe("InstanceCoordinator", () => {
   beforeAll(async () => {
     // Set up mock environment variables
