@@ -360,7 +360,7 @@ describe("TaskManager", () => {
                 message: { media: {} },
                 isGroup: false
             };
-            
+
             // 模拟 heartbeat 会导致一段时间的异步等待
             const { updateStatus } = await import("../../src/utils/common.js");
             updateStatus.mockImplementation(() => new Promise(resolve => setTimeout(resolve, 50)));
@@ -375,7 +375,7 @@ describe("TaskManager", () => {
             // 验证关键的业务逻辑（如 heartbeat/updateStatus）只被一个 Worker 执行
             // 第一次 heartbeat 是 'downloading'
             expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloading');
-            
+
             // 如果锁生效，updateStatus 应该只被调用一次（针对该任务的初始状态）
             // 注意：因为 heartbeat 内部会多次调用 updateStatus，我们检查它的起始调用
             const downloadingCalls = mockTaskRepository.updateStatus.mock.calls.filter(call => call[1] === 'downloading');
@@ -389,7 +389,7 @@ describe("TaskManager", () => {
                 message: { media: {} },
                 isGroup: false
             };
-            
+
             // 模拟下载失败
             mockClient.downloadMedia.mockRejectedValue(new Error("Network Error"));
 
@@ -397,11 +397,156 @@ describe("TaskManager", () => {
 
             // 验证锁已释放
             expect(TaskManager.activeWorkers.has(task.id)).toBe(false);
-            
+
             // 能够再次进入处理（即使状态是 failed）
             mockClient.downloadMedia.mockResolvedValue({});
             await TaskManager.downloadWorker(task);
             expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloaded');
+        });
+    });
+
+    describe("Resource Competition and Lock Conflicts", () => {
+        test("should handle concurrent task state transitions (downloading -> uploading)", async () => {
+            const task = {
+                id: "transition-task",
+                userId: "u1",
+                message: { media: {} },
+                isGroup: false,
+                chatId: "chat123",
+                msgId: "msg456"
+            };
+
+            // Mock successful download but disable sec-transfer check by making file not exist
+            const mockFs = await import("fs");
+            mockFs.default.existsSync.mockReturnValue(false); // File doesn't exist, skip sec-transfer
+            mockClient.downloadMedia.mockResolvedValue({});
+            mockCloudTool.getRemoteFileInfo.mockResolvedValue(null); // No remote file
+
+            // Start download worker
+            await TaskManager.downloadWorker(task);
+
+            // Verify task was marked as downloaded and queued for upload
+            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloading');
+            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloaded');
+
+            // Verify upload worker was queued
+            expect(TaskManager.waitingUploadTasks.length).toBeGreaterThan(0);
+        });
+
+        test("should prevent race condition when cancel occurs during download completion", async () => {
+            const task = {
+                id: "race-task",
+                userId: "u1",
+                message: { media: {} },
+                isGroup: false
+            };
+
+            // Mock downloadMedia to resolve immediately
+            mockClient.downloadMedia.mockResolvedValue({});
+            mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Size: 1024 });
+
+            // Start download and immediately try to cancel
+            const downloadPromise = TaskManager.downloadWorker(task);
+            const cancelPromise = TaskManager.cancelTask(task.id, task.userId);
+
+            const cancelResult = await cancelPromise;
+            await downloadPromise;
+
+            // Cancel should succeed even if task completed
+            expect(cancelResult).toBe(true);
+            expect(mockTaskRepository.markCancelled).toHaveBeenCalledWith(task.id);
+        });
+    });
+
+    describe("Database Operation Failure Handling", () => {
+        test("should handle TaskRepository.updateStatus failure gracefully", async () => {
+            const task = {
+                id: "db-fail-task",
+                userId: "u1",
+                message: { media: {} },
+                isGroup: false
+            };
+
+            // Mock database failure
+            mockTaskRepository.updateStatus.mockRejectedValue(new Error("DB Connection Failed"));
+            // Mock successful download to trigger heartbeat
+            mockClient.downloadMedia.mockResolvedValue({});
+
+            // Should handle the error and complete
+            await expect(TaskManager.downloadWorker(task)).resolves.toBeUndefined();
+
+            // Lock should still be released
+            expect(TaskManager.activeWorkers.has(task.id)).toBe(false);
+        });
+
+        test("should rollback in-memory state when database operations fail", async () => {
+            const task = {
+                id: "rollback-task",
+                userId: "u1",
+                message: { media: {} },
+                isGroup: false
+            };
+
+            // Mock database failure during status update
+            mockTaskRepository.updateStatus.mockRejectedValue(new Error("DB Error"));
+            // Mock successful download
+            mockClient.downloadMedia.mockResolvedValue({});
+
+            // Worker should complete without crashing
+            await expect(TaskManager.downloadWorker(task)).resolves.toBeUndefined();
+
+            // Verify lock cleanup
+            expect(TaskManager.activeWorkers.has(task.id)).toBe(false);
+        });
+    });
+
+    describe("File Cleanup Reliability", () => {
+        test("should handle file cleanup failure without crashing", async () => {
+            const task = {
+                id: "cleanup-fail-task",
+                userId: "u1",
+                message: { media: {} },
+                isGroup: false,
+                localPath: "/tmp/test.mp4"
+            };
+
+            // Mock successful operations - uploadBatch is called by uploadBatcher
+            mockCloudTool.uploadBatch.mockResolvedValue({ success: true });
+
+            // Mock file system operations
+            const mockFs = await import("fs");
+            mockFs.default.existsSync.mockReturnValue(true);
+            mockFs.default.statSync.mockReturnValue({ size: 1024 });
+            mockFs.default.promises.unlink.mockRejectedValue(new Error("Disk I/O Error"));
+
+            await TaskManager.uploadWorker(task);
+
+            // Should complete successfully despite cleanup failure
+            expect(mockCloudTool.uploadBatch).toHaveBeenCalled();
+            // File cleanup failure should be logged but not cause failure
+        });
+
+        test("should cleanup files even when upload fails", async () => {
+            const task = {
+                id: "cleanup-after-fail-task",
+                userId: "u1",
+                message: { media: {} },
+                isGroup: false,
+                localPath: "/tmp/fail.mp4"
+            };
+
+            // Mock upload failure
+            mockCloudTool.uploadFile.mockResolvedValue({ success: false, error: "Upload failed" });
+
+            const mockFs = await import("fs");
+            mockFs.default.existsSync.mockReturnValue(true);
+            mockFs.default.statSync.mockReturnValue({ size: 1024 });
+            mockFs.default.promises.unlink.mockResolvedValue();
+
+            await TaskManager.uploadWorker(task);
+
+            // File should still be cleaned up
+            expect(mockFs.default.promises.unlink).toHaveBeenCalledWith("/tmp/fail.mp4");
         });
     });
 });

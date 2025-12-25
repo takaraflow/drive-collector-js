@@ -565,7 +565,11 @@ export class TaskManager {
 
         } catch (e) {
             const isCancel = e.message === "CANCELLED";
-            await TaskRepository.updateStatus(task.id, isCancel ? 'cancelled' : 'failed', e.message);
+            try {
+                await TaskRepository.updateStatus(task.id, isCancel ? 'cancelled' : 'failed', e.message);
+            } catch (updateError) {
+                console.error(`Failed to update task status for ${task.id}:`, updateError);
+            }
 
             if (task.isGroup) {
                 await this._refreshGroupMonitor(task, isCancel ? 'cancelled' : 'failed');
