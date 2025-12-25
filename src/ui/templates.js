@@ -124,9 +124,13 @@ export class UIHelper {
                               displayStatus === 'cancelled' ? '🚫' : 
                               (isFocus && (displayStatus === 'downloading' || displayStatus === 'uploading') ? '🔄' : '🕒');
             
-            if (isFocus && downloaded > 0 && (displayStatus === 'downloading' || displayStatus === 'uploading')) {
+            // 【重要】无论下载还是上传，只要是焦点任务且有进度，就显示百分比
+            if (isFocus && total > 0 && (displayStatus === 'downloading' || displayStatus === 'uploading')) {
                 const progress = Math.round((downloaded / total) * 100);
                 statusLines.push(`${statusIcon} ${displayName} [${progress}%]`);
+            } else if (isFocus && displayStatus === 'uploading' && !total) {
+                // 上传中但尚未获取到具体大小时，显示上传中标识
+                statusLines.push(`${statusIcon} ${displayName} [上传中]`);
             } else {
                 // 使用简短的状态文本
                 let statusText = displayStatus === 'completed' ? '完成' :
