@@ -166,13 +166,61 @@ export class TaskManager {
      * [私有] 预加载常用数据，提升后续操作性能
      */
     static async _preloadCommonData() {
-        try {
-            // 预加载活跃驱动列表（已实现缓存）
-            const { DriveRepository } = await import("../repositories/DriveRepository.js");
-            await DriveRepository.findAll();
+        const preloadTasks = [];
 
-            // 可以在这里添加其他常用数据的预加载
-            console.log("📊 预加载常用数据完成");
+        try {
+            // 并行预加载多个数据源
+            preloadTasks.push(
+                // 预加载活跃驱动列表（已实现缓存）
+                import("../repositories/DriveRepository.js").then(({ DriveRepository }) =>
+                    DriveRepository.findAll()
+                ),
+
+                // 预加载配置文件缓存
+                import("../config/index.js").then(({ config }) => {
+                    // 预热配置访问，避免首次访问时的延迟
+                    return Promise.resolve(config);
+                }),
+
+                // 预加载本地化字符串缓存
+                import("../locales/zh-CN.js").then(({ STRINGS }) => {
+                    // 预热字符串访问
+                    return Promise.resolve(Object.keys(STRINGS).length);
+                }),
+
+                // 预加载常用工具函数
+                import("../utils/common.js").then(({ getMediaInfo, escapeHTML }) => {
+                    // 预热函数引用
+                    return Promise.resolve({ getMediaInfo, escapeHTML });
+                }),
+
+                // 预热缓存服务
+                import("../utils/CacheService.js").then(({ cacheService }) => {
+                    // 确保缓存服务已初始化
+                    return Promise.resolve(cacheService);
+                }),
+
+                // 预加载 KV 服务
+                import("../services/kv.js").then(({ kv }) => {
+                    // 预热 KV 连接
+                    return kv.get("system:health_check", "text").catch(() => "ok");
+                })
+            );
+
+            // 并行执行所有预加载任务
+            const results = await Promise.allSettled(preloadTasks);
+
+            // 统计预加载结果
+            const successCount = results.filter(r => r.status === 'fulfilled').length;
+            const totalCount = results.length;
+
+            console.log(`📊 预加载常用数据完成: ${successCount}/${totalCount} 个任务成功`);
+
+            // 如果大部分预加载失败，记录警告
+            if (successCount < totalCount * 0.7) {
+                console.warn(`⚠️ 预加载成功率较低: ${successCount}/${totalCount}`);
+            }
+
         } catch (e) {
             console.warn("预加载数据失败:", e.message);
         }
