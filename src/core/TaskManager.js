@@ -438,15 +438,31 @@ export class TaskManager {
             await heartbeat('downloading');
 
             // 秒传检查 - 如果文件已存在且大小匹配，直接标记完成
-            const remoteFile = await CloudTool.getRemoteFileInfo(info.name, task.userId);
-            if (remoteFile && Math.abs(remoteFile.Size - info.size) < 1024) {
-                await TaskRepository.updateStatus(task.id, 'completed');
-                if (task.isGroup) {
-                    await this._refreshGroupMonitor(task, 'completed');
-                } else {
-                    await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(info.name), folder: config.remoteFolder }), true);
+            // 使用异步文件检查避免阻塞
+            const localPath = path.join(config.downloadDir, info.name);
+            let localFileExists = false;
+            let localFileSize = 0;
+
+            try {
+                const stats = await fs.promises.stat(localPath);
+                localFileExists = true;
+                localFileSize = stats.size;
+            } catch (e) {
+                // 文件不存在，继续下载
+            }
+
+            if (localFileExists && Math.abs(localFileSize - info.size) < 1024) {
+                // 本地文件已存在且大小匹配，检查远程是否存在
+                const remoteFile = await CloudTool.getRemoteFileInfo(info.name, task.userId);
+                if (remoteFile && Math.abs(remoteFile.Size - info.size) < 1024) {
+                    await TaskRepository.updateStatus(task.id, 'completed');
+                    if (task.isGroup) {
+                        await this._refreshGroupMonitor(task, 'completed');
+                    } else {
+                        await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(info.name), folder: config.remoteFolder }), true);
+                    }
+                    return;
                 }
-                return;
             }
 
             // 下载阶段 - MTProto文件下载
@@ -579,8 +595,13 @@ export class TaskManager {
                 await updateStatus(task, text, true);
             }
         } finally {
-            // 上传完成后清理本地文件
-            if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
+            // 上传完成后异步清理本地文件
+            try {
+                await fs.promises.unlink(localPath);
+            } catch (e) {
+                // 忽略清理失败的错误，文件可能已被其他进程处理
+                console.warn(`Failed to cleanup local file ${localPath}:`, e.message);
+            }
         }
     }
 
