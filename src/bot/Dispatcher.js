@@ -339,13 +339,14 @@ export class Dispatcher {
      * [私有] 获取队列状态
      */
     static _getQueueStatus() {
-        const waitingCount = TaskManager.waitingTasks.length;
+        const waitingCount = TaskManager.getWaitingCount();
+        const processingCount = TaskManager.getProcessingCount();
         const currentTask = TaskManager.currentTask;
         
         let status = format(STRINGS.status.header, {}) + '\n\n';
         status += format(STRINGS.status.queue_title, {}) + '\n';
         status += format(STRINGS.status.waiting_tasks, { count: waitingCount }) + '\n';
-        status += format(STRINGS.status.current_task, { count: currentTask ? '1' : '0' }) + '\n';
+        status += format(STRINGS.status.current_task, { count: processingCount }) + '\n';
         
         if (currentTask) {
             status += '\n' + format(STRINGS.status.current_file, { name: escapeHTML(currentTask.fileName) }) + '\n';
@@ -391,8 +392,8 @@ export class Dispatcher {
      */
     static async _getGeneralStatus(userId) {
         const drive = await DriveRepository.findByUserId(userId);
-        const waitingCount = TaskManager.waitingTasks.length;
-        const currentTask = TaskManager.currentTask;
+        const waitingCount = TaskManager.getWaitingCount();
+        const processingCount = TaskManager.getProcessingCount();
         
         let status = format(STRINGS.status.header, {}) + '\n\n';
         
@@ -404,7 +405,7 @@ export class Dispatcher {
         // 队列状态
         status += format(STRINGS.status.queue_title, {}) + '\n';
         status += format(STRINGS.status.waiting_tasks, { count: waitingCount }) + '\n';
-        status += format(STRINGS.status.current_task, { count: currentTask ? '1' : '0' }) + '\n';
+        status += format(STRINGS.status.current_task, { count: processingCount }) + '\n';
         
         // 系统信息
         status += '\n' + format(STRINGS.status.system_info, {}) + '\n';

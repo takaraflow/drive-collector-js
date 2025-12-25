@@ -100,9 +100,27 @@ export class TaskManager {
     static set queue(value) { this.downloadQueue = value; }
 
     static waitingTasks = [];
-    static currentTask = null;
+    static currentTask = null; // 兼容旧代码：当前正在下载的任务
+    static processingUploadTasks = new Set(); // 正在上传的任务
     static waitingUploadTasks = []; // 等待上传的任务队列
     
+    /**
+     * 获取当前正在处理的任务总数 (下载中 + 上传中)
+     */
+    static getProcessingCount() {
+        let count = 0;
+        if (this.currentTask) count++;
+        count += this.processingUploadTasks.size;
+        return count;
+    }
+
+    /**
+     * 获取等待中的任务总数 (下载排队 + 上传排队)
+     */
+    static getWaitingCount() {
+        return this.waitingTasks.length + this.waitingUploadTasks.length;
+    }
+
     // 内存中的任务执行锁，防止同一任务被多次 worker 处理
     static activeWorkers = new Set();
 
@@ -434,7 +452,12 @@ export class TaskManager {
         this.waitingUploadTasks.push(task);
         this.uploadQueue.add(async () => {
             this.waitingUploadTasks = this.waitingUploadTasks.filter(t => t.id !== task.id);
-            await this.uploadWorker(task);
+            this.processingUploadTasks.add(task.id);
+            try {
+                await this.uploadWorker(task);
+            } finally {
+                this.processingUploadTasks.delete(task.id);
+            }
         });
     }
 
