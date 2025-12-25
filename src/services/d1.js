@@ -16,23 +16,34 @@ class D1Service {
      * 核心请求器：发送 SQL 到 Cloudflare
      */
     async _execute(sql, params = []) {
-        const response = await fetch(this.apiUrl, {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${this.token}`,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                sql: sql,
-                params: params,
-            }),
-        });
+        try {
+            const response = await fetch(this.apiUrl, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${this.token}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    sql: sql,
+                    params: params,
+                }),
+            });
 
-        const result = await response.json();
-        if (!result.success) {
-            throw new Error(`D1 Error: ${result.errors[0]?.message || "Unknown error"}`);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(`D1 Error: ${result.errors[0]?.message || "Unknown error"}`);
+            }
+            return result.result[0];
+        } catch (error) {
+            if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                throw new Error('D1 Error: Network connection lost');
+            }
+            throw error;
         }
-        return result.result[0];
     }
 
     /**

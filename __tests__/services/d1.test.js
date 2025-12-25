@@ -61,6 +61,7 @@ describe("D1 Service", () => {
         result: [{ results: [{ id: 1, name: "test" }] }],
       };
       mockFetch.mockResolvedValueOnce({
+        ok: true,
         json: () => Promise.resolve(mockResponse),
       });
 
@@ -84,6 +85,7 @@ describe("D1 Service", () => {
         errors: [{ message: "D1 specific error" }],
       };
       mockFetch.mockResolvedValueOnce({
+        ok: true,
         json: () => Promise.resolve(mockErrorResponse),
       });
 
@@ -91,6 +93,30 @@ describe("D1 Service", () => {
       const params = ["test"];
 
       await expect(d1Instance._execute(sql, params)).rejects.toThrow("D1 Error: D1 specific error");
+    });
+
+    test("should throw network error if fetch fails", async () => {
+      const networkError = new TypeError("Failed to fetch");
+      mockFetch.mockRejectedValueOnce(networkError);
+
+      const sql = "SELECT * FROM users";
+      const params = [];
+
+      await expect(d1Instance._execute(sql, params)).rejects.toThrow("D1 Error: Network connection lost");
+    });
+
+    test("should throw HTTP error for non-200 responses", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: "Internal Server Error",
+        json: () => Promise.resolve({}),
+      });
+
+      const sql = "SELECT * FROM users";
+      const params = [];
+
+      await expect(d1Instance._execute(sql, params)).rejects.toThrow("HTTP 500: Internal Server Error");
     });
   });
 
