@@ -361,7 +361,7 @@ describe('CloudTool', () => {
 
             const info = await CloudTool.getRemoteFileInfo('missing.txt', 'user123', 2);
             expect(info).toBeNull();
-            expect(mockSpawnSync).toHaveBeenCalledTimes(2);
+            expect(mockSpawnSync).toHaveBeenCalledTimes(4); // 2 retries × 2 attempts each (direct + directory)
         });
 
         it('should return null if userId is missing', async () => {

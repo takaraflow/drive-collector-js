@@ -381,33 +381,53 @@ export class CloudTool {
      * 简单的文件完整性检查 (带重试机制以应对 API 延迟)
      */
     static async getRemoteFileInfo(fileName, userId, retries = 3) {
-        if (!userId) return null; 
+        if (!userId) return null;
 
         for (let i = 0; i < retries; i++) {
             try {
                 const conf = await this._getUserConfig(userId);
                 const connectionString = this._getConnectionString(conf);
-                // 使用 rclone lsjson 探测目标目录下的特定文件
-                const fullRemoteFolder = `${connectionString}${config.remoteFolder}/`;
-                
-                const ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "lsjson", "--files-only", fullRemoteFolder], { 
+
+                // 优先尝试直接查询文件（更高效）
+                const fullRemotePath = `${connectionString}${config.remoteFolder}/${fileName}`;
+                let ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "lsjson", fullRemotePath], {
                     env: process.env,
-                    encoding: 'utf-8' 
+                    encoding: 'utf-8',
+                    timeout: 10000 // 10秒超时
                 });
 
-                if (ret.status === 0) {
-                    const files = JSON.parse(ret.stdout);
-                    if (Array.isArray(files)) {
-                        const file = files.find(f => f.Name === fileName);
-                        if (file) return file;
+                // 如果直接查询失败，尝试列出目录
+                if (ret.status !== 0) {
+                    console.warn(`[getRemoteFileInfo] Direct lsjson failed for ${fileName}, trying directory listing`);
+                    const fullRemoteFolder = `${connectionString}${config.remoteFolder}/`;
+                    ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "lsjson", "--files-only", "--max-depth", "1", fullRemoteFolder], {
+                        env: process.env,
+                        encoding: 'utf-8',
+                        timeout: 15000 // 15秒超时
+                    });
+
+                    if (ret.status === 0) {
+                        const files = JSON.parse(ret.stdout || "[]");
+                        if (Array.isArray(files)) {
+                            const file = files.find(f => f.Name === fileName);
+                            if (file) return file;
+                        }
                     }
                 } else {
+                    // 直接查询成功，解析结果
+                    const files = JSON.parse(ret.stdout || "[]");
+                    if (Array.isArray(files) && files.length > 0) {
+                        return files[0]; // 直接查询文件时只返回一个文件
+                    }
+                }
+
+                if (ret.status !== 0) {
                     console.warn(`[getRemoteFileInfo] lsjson returned status ${ret.status} for ${fileName}: ${ret.stderr}`);
                 }
             } catch (e) {
                 console.warn(`[getRemoteFileInfo] Attempt ${i + 1} failed for ${fileName}:`, e.message);
             }
-            
+
             if (i < retries - 1) {
                 // 等待一段时间后重试
                 await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
