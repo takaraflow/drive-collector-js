@@ -143,15 +143,9 @@ describe("TaskManager", () => {
         // 清理队列
         TaskManager.queue.clear();
         TaskManager.monitorLocks.clear();
-        // 清理 UploadBatcher 的定时器
-        if (TaskManager.uploadBatcher && TaskManager.uploadBatcher.batches) {
-            for (const [key, tasks] of TaskManager.uploadBatcher.batches) {
-                // 清理可能存在的定时器（通过重新创建实例）
-                TaskManager.uploadBatcher = new (await import("../../src/core/TaskManager.js")).UploadBatcher(
-                    TaskManager.uploadBatcher.processBatchFn
-                );
-                break;
-            }
+        // 清理 UploadBatcher 的定时器（重置实例）
+        if (TaskManager.uploadBatcher) {
+            TaskManager.uploadBatcher.batches.clear();
         }
     });
 
