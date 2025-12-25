@@ -655,8 +655,8 @@ export class TaskManager {
                 if (task.isGroup) {
                     await this._refreshGroupMonitor(task, finalStatus);
                 } else {
-                    const fileLink = `tg://openmessage?chat_id=\${task.chatId}&message_id=\${task.message.id}`;
-                    const fileNameHtml = `<a href="\${fileLink}">\${escapeHTML(info.name)}</a>`;
+                    const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
+                    const fileNameHtml = `<a href="${fileLink}">${escapeHTML(info.name)}</a>`;
                     const baseText = isOk
                         ? format(STRINGS.task.success, { name: fileNameHtml, folder: config.remoteFolder })
                         : format(STRINGS.task.failed_validation, { name: fileNameHtml });
