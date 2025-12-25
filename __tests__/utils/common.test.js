@@ -1,20 +1,21 @@
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 
 // Mock dependencies
 const mockClient = {
-    editMessage: vi.fn()
+    editMessage: jest.fn()
 };
-const mockRunBotTaskWithRetry = vi.fn();
+const mockRunBotTaskWithRetry = jest.fn();
 
-vi.mock('../../src/services/telegram.js', () => ({
+jest.unstable_mockModule('../../src/services/telegram.js', () => ({
     client: mockClient
 }));
 
-vi.mock('../../src/utils/limiter.js', () => ({
+jest.unstable_mockModule('../../src/utils/limiter.js', () => ({
+    runBotTask: jest.fn(),
     runBotTaskWithRetry: mockRunBotTaskWithRetry
 }));
 
-vi.mock('../../src/locales/zh-CN.js', () => ({
+jest.unstable_mockModule('../../src/locales/zh-CN.js', () => ({
     STRINGS: {
         task: {
             cancel_transfer_btn: 'cancel_transfer',
@@ -23,9 +24,9 @@ vi.mock('../../src/locales/zh-CN.js', () => ({
     }
 }));
 
-vi.mock('telegram/tl/custom/button.js', () => ({
+jest.unstable_mockModule('telegram/tl/custom/button.js', () => ({
     Button: {
-        inline: vi.fn((text, data) => ({ text, data: data.toString() }))
+        inline: jest.fn((text, data) => ({ text, data: data.toString() }))
     }
 }));
 
@@ -33,7 +34,7 @@ const { escapeHTML, safeEdit, getMediaInfo, updateStatus } = await import('../..
 
 describe('common utils', () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        jest.clearAllMocks();
         mockRunBotTaskWithRetry.mockImplementation(async (fn) => {
             return fn();
         });
@@ -42,7 +43,7 @@ describe('common utils', () => {
 
     describe('escapeHTML', () => {
         it('should escape HTML special characters', () => {
-            expect(escapeHTML('<>&"\'')).toBe('<>&"&#039;');
+            expect(escapeHTML('<>&"\'')).toBe('&lt;&gt;&amp;&quot;&#039;');
         });
 
         it('should return empty string for null input', () => {
@@ -54,7 +55,7 @@ describe('common utils', () => {
         });
 
         it('should handle complex HTML', () => {
-            expect(escapeHTML('<b>Hello & welcome</b>')).toBe('<b>Hello & welcome</b>');
+            expect(escapeHTML('<b>Hello & welcome</b>')).toBe('&lt;b&gt;Hello &amp; welcome&lt;/b&gt;');
         });
     });
 

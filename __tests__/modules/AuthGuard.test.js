@@ -1,15 +1,15 @@
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 
 // Mock dependencies
 const mockD1 = {
-    fetchOne: vi.fn()
+    fetchOne: jest.fn()
 };
-vi.mock('../../src/services/d1.js', () => ({
+jest.unstable_mockModule('../../src/services/d1.js', () => ({
     d1: mockD1
 }));
 
 const mockConfig = { ownerId: null };
-vi.mock('../../src/config/index.js', () => ({
+jest.unstable_mockModule('../../src/config/index.js', () => ({
     config: mockConfig
 }));
 
@@ -17,13 +17,13 @@ const { AuthGuard } = await import('../../src/modules/AuthGuard.js');
 
 describe('AuthGuard', () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        jest.clearAllMocks();
         AuthGuard.roleCache.clear();
-        vi.useFakeTimers();
+        jest.useFakeTimers();
     });
 
     afterEach(() => {
-        vi.useRealTimers();
+        jest.useRealTimers();
     });
 
     describe('getRole', () => {

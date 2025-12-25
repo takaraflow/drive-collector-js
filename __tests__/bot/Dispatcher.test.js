@@ -1,114 +1,114 @@
-import { vi, describe, test, expect, beforeEach } from "vitest";
+import { jest, describe, test, expect, beforeEach } from "@jest/globals";
 import { Api } from "telegram";
 
 // 1. Mock dependencies
-vi.mock("../../src/config/index.js", () => ({
+jest.unstable_mockModule("../../src/config/index.js", () => ({
   config: {
     ownerId: "123456",
   },
 }));
 
 const mockClient = {
-  invoke: vi.fn().mockImplementation(() => {
+  invoke: jest.fn().mockImplementation(() => {
     const p = Promise.resolve();
     p.catch = (fn) => p;
     return p;
   }),
-  sendMessage: vi.fn().mockImplementation(() => Promise.resolve({ id: 1 })),
+  sendMessage: jest.fn().mockImplementation(() => Promise.resolve({ id: 1 })),
 };
-vi.mock("../../src/services/telegram.js", () => ({
+jest.unstable_mockModule("../../src/services/telegram.js", () => ({
   client: mockClient,
 }));
 
 const mockAuthGuard = {
-  getRole: vi.fn(),
-  can: vi.fn(),
+  getRole: jest.fn(),
+  can: jest.fn(),
 };
-vi.mock("../../src/modules/AuthGuard.js", () => ({
+jest.unstable_mockModule("../../src/modules/AuthGuard.js", () => ({
   AuthGuard: mockAuthGuard,
 }));
 
 const mockSessionManager = {
-  get: vi.fn(),
+  get: jest.fn(),
 };
-vi.mock("../../src/modules/SessionManager.js", () => ({
+jest.unstable_mockModule("../../src/modules/SessionManager.js", () => ({
   SessionManager: mockSessionManager,
 }));
 
 const mockDriveConfigFlow = {
-  handleCallback: vi.fn(),
-  handleInput: vi.fn(),
-  sendDriveManager: vi.fn(),
-  handleUnbind: vi.fn(),
+  handleCallback: jest.fn(),
+  handleInput: jest.fn(),
+  sendDriveManager: jest.fn(),
+  handleUnbind: jest.fn(),
 };
-vi.mock("../../src/modules/DriveConfigFlow.js", () => ({
+jest.unstable_mockModule("../../src/modules/DriveConfigFlow.js", () => ({
   DriveConfigFlow: mockDriveConfigFlow,
 }));
 
 const mockTaskManager = {
-  cancelTask: vi.fn(),
-  addTask: vi.fn(),
-  addBatchTasks: vi.fn(),
+  cancelTask: jest.fn(),
+  addTask: jest.fn(),
+  addBatchTasks: jest.fn(),
   waitingTasks: [],
   currentTask: null,
 };
-vi.mock("../../src/core/TaskManager.js", () => ({
+jest.unstable_mockModule("../../src/core/TaskManager.js", () => ({
   TaskManager: mockTaskManager,
 }));
 
 const mockLinkParser = {
-  parse: vi.fn(),
+  parse: jest.fn(),
 };
-vi.mock("../../src/core/LinkParser.js", () => ({
+jest.unstable_mockModule("../../src/core/LinkParser.js", () => ({
   LinkParser: mockLinkParser,
 }));
 
 const mockUIHelper = {
-  renderFilesPage: vi.fn(() => ({ text: "mock_text", buttons: [] })),
+  renderFilesPage: jest.fn(() => ({ text: "mock_text", buttons: [] })),
 };
-vi.mock("../../src/ui/templates.js", () => ({
+jest.unstable_mockModule("../../src/ui/templates.js", () => ({
   UIHelper: mockUIHelper,
 }));
 
 const mockCloudTool = {
-  listRemoteFiles: vi.fn(),
-  isLoading: vi.fn(() => false),
+  listRemoteFiles: jest.fn(),
+  isLoading: jest.fn(() => false),
 };
-vi.mock("../../src/services/rclone.js", () => ({
+jest.unstable_mockModule("../../src/services/rclone.js", () => ({
   CloudTool: mockCloudTool,
 }));
 
 const mockSettingsRepository = {
-  get: vi.fn(),
+  get: jest.fn(),
 };
-vi.mock("../../src/repositories/SettingsRepository.js", () => ({
+jest.unstable_mockModule("../../src/repositories/SettingsRepository.js", () => ({
   SettingsRepository: mockSettingsRepository,
 }));
 
 const mockDriveRepository = {
-  findById: vi.fn(),
-  findByUserId: vi.fn(),
+  findById: jest.fn(),
+  findByUserId: jest.fn(),
 };
-vi.mock("../../src/repositories/DriveRepository.js", () => ({
+jest.unstable_mockModule("../../src/repositories/DriveRepository.js", () => ({
   DriveRepository: mockDriveRepository,
 }));
 
 const mockTaskRepository = {
-  findByUserId: vi.fn(),
+  findByUserId: jest.fn(),
 };
-vi.mock("../../src/repositories/TaskRepository.js", () => ({
+jest.unstable_mockModule("../../src/repositories/TaskRepository.js", () => ({
   TaskRepository: mockTaskRepository,
 }));
 
 // Mock utils
-vi.mock("../../src/utils/common.js", () => ({
-  safeEdit: vi.fn(),
-  escapeHTML: vi.fn((str) => str),
+jest.unstable_mockModule("../../src/utils/common.js", () => ({
+  safeEdit: jest.fn(),
+  escapeHTML: jest.fn((str) => str),
 }));
 
-vi.mock("../../src/utils/limiter.js", () => ({
-  runBotTask: vi.fn((fn) => fn()),
-  runBotTaskWithRetry: vi.fn((fn) => fn()),
+jest.unstable_mockModule("../../src/utils/limiter.js", () => ({
+  runBotTask: jest.fn((fn) => fn()),
+  runBotTaskWithRetry: jest.fn((fn) => fn()),
   PRIORITY: {
     UI: 20,
     HIGH: 10,
@@ -119,7 +119,7 @@ vi.mock("../../src/utils/limiter.js", () => ({
 }));
 
 // Mock locales
-vi.mock("../../src/locales/zh-CN.js", () => ({
+jest.unstable_mockModule("../../src/locales/zh-CN.js", () => ({
   STRINGS: {
     task: { cmd_sent: "sent", task_not_found: "not found" },
     system: { welcome: "welcome" },
@@ -134,7 +134,7 @@ const { Dispatcher } = await import("../../src/bot/Dispatcher.js");
 
 describe("Dispatcher", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
     Dispatcher.groupBuffers.clear();
     Dispatcher.lastRefreshTime = 0;
   });
@@ -220,7 +220,7 @@ describe("Dispatcher", () => {
     });
 
     test("should aggregate grouped media", async () => {
-      vi.useFakeTimers();
+      jest.useFakeTimers();
       mockSessionManager.get.mockResolvedValue(null);
       mockDriveRepository.findByUserId.mockResolvedValue({ id: 1 });
 
@@ -237,11 +237,11 @@ describe("Dispatcher", () => {
 
       expect(Dispatcher.groupBuffers.has("999")).toBe(true);
 
-      vi.runAllTimers();
+      jest.runAllTimers();
       await Promise.resolve();
 
       expect(mockTaskManager.addBatchTasks).toHaveBeenCalled();
-      vi.useRealTimers();
+      jest.useRealTimers();
     });
   });
 

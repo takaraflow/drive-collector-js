@@ -1,27 +1,27 @@
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 
 // Mock dependencies
 const mockD1 = {
-    fetchOne: vi.fn(),
-    run: vi.fn()
+    fetchOne: jest.fn(),
+    run: jest.fn()
 };
-vi.mock('../../src/services/d1.js', () => ({
+jest.unstable_mockModule('../../src/services/d1.js', () => ({
     d1: mockD1
 }));
 
 const mockKV = {
-    get: vi.fn(),
-    set: vi.fn().mockResolvedValue(undefined)
+    get: jest.fn(),
+    set: jest.fn().mockResolvedValue(undefined)
 };
-vi.mock('../../src/services/kv.js', () => ({
+jest.unstable_mockModule('../../src/services/kv.js', () => ({
     kv: mockKV
 }));
 
 const mockCacheService = {
-    get: vi.fn(),
-    set: vi.fn()
+    get: jest.fn(),
+    set: jest.fn()
 };
-vi.mock('../../src/utils/CacheService.js', () => ({
+jest.unstable_mockModule('../../src/utils/CacheService.js', () => ({
     cacheService: mockCacheService
 }));
 
@@ -29,12 +29,12 @@ const { SettingsRepository } = await import('../../src/repositories/SettingsRepo
 
 describe('SettingsRepository', () => {
     beforeEach(() => {
-        vi.clearAllMocks();
-        vi.useFakeTimers();
+        jest.clearAllMocks();
+        jest.useFakeTimers();
     });
 
     afterEach(() => {
-        vi.useRealTimers();
+        jest.useRealTimers();
     });
 
     describe('get', () => {

@@ -1,13 +1,13 @@
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 
 // Mock dependencies
 const mockD1 = {
-    run: vi.fn(),
-    fetchOne: vi.fn(),
-    fetchAll: vi.fn(),
-    batch: vi.fn()
+    run: jest.fn(),
+    fetchOne: jest.fn(),
+    fetchAll: jest.fn(),
+    batch: jest.fn()
 };
-vi.mock('../../src/services/d1.js', () => ({
+jest.unstable_mockModule('../../src/services/d1.js', () => ({
     d1: mockD1
 }));
 
@@ -15,7 +15,7 @@ const { TaskRepository } = await import('../../src/repositories/TaskRepository.j
 
 describe('TaskRepository', () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        jest.clearAllMocks();
         // Clear static properties
         TaskRepository.pendingUpdates.clear();
         if (TaskRepository.flushTimer) {

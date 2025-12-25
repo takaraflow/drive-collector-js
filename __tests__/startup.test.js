@@ -1,47 +1,47 @@
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 
 // Mock Dependencies
 const mockSettings = new Map();
-vi.mock('../src/repositories/SettingsRepository.js', () => ({
+jest.unstable_mockModule('../src/repositories/SettingsRepository.js', () => ({
     SettingsRepository: {
-        get: vi.fn((key, def) => mockSettings.has(key) ? mockSettings.get(key) : def),
-        set: vi.fn((key, val) => mockSettings.set(key, val))
+        get: jest.fn((key, def) => mockSettings.has(key) ? mockSettings.get(key) : def),
+        set: jest.fn((key, val) => mockSettings.set(key, val))
     }
 }));
 
 const mockClient = {
-    start: vi.fn().mockResolvedValue(true),
-    session: { save: vi.fn().mockReturnValue("mock_session") },
-    addEventHandler: vi.fn()
+    start: jest.fn().mockResolvedValue(true),
+    session: { save: jest.fn().mockReturnValue("mock_session") },
+    addEventHandler: jest.fn()
 };
-vi.mock('../src/services/telegram.js', () => ({
+jest.unstable_mockModule('../src/services/telegram.js', () => ({
     client: mockClient,
-    saveSession: vi.fn()
+    saveSession: jest.fn()
 }));
 
 // We need to mock other things used in index.js
-vi.mock('../src/core/TaskManager.js', () => ({
+jest.unstable_mockModule('../src/core/TaskManager.js', () => ({
     TaskManager: {
-        init: vi.fn().mockResolvedValue(true),
-        startAutoScaling: vi.fn()
+        init: jest.fn().mockResolvedValue(true),
+        startAutoScaling: jest.fn()
     }
 }));
-vi.mock('../src/bot/Dispatcher.js', () => ({
-    Dispatcher: { handle: vi.fn() }
+jest.unstable_mockModule('../src/bot/Dispatcher.js', () => ({
+    Dispatcher: { handle: jest.fn() }
 }));
-vi.mock('http', () => ({
+jest.unstable_mockModule('http', () => ({
     default: { createServer: () => ({ listen: () => ({}) }) }
 }));
 
 describe('Startup Backoff Logic', () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        jest.clearAllMocks();
         mockSettings.clear();
-        vi.useFakeTimers();
+        jest.useFakeTimers();
     });
 
     afterEach(() => {
-        vi.useRealTimers();
+        jest.useRealTimers();
     });
 
     it('should calculate backoff time correctly', async () => {

@@ -1,15 +1,15 @@
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 
 // Mock dependencies
 const mockClient = {
-    getMessages: vi.fn()
+    getMessages: jest.fn()
 };
-vi.mock('../../src/services/telegram.js', () => ({
+jest.unstable_mockModule('../../src/services/telegram.js', () => ({
     client: mockClient
 }));
 
-const mockRunMtprotoTask = vi.fn();
-vi.mock('../../src/utils/limiter.js', () => ({
+const mockRunMtprotoTask = jest.fn();
+jest.unstable_mockModule('../../src/utils/limiter.js', () => ({
     runMtprotoTask: mockRunMtprotoTask
 }));
 
@@ -17,7 +17,7 @@ const { LinkParser } = await import('../../src/core/LinkParser.js');
 
 describe('LinkParser', () => {
     beforeEach(() => {
-        vi.clearAllMocks();
+        jest.clearAllMocks();
         mockRunMtprotoTask.mockImplementation(async (fn) => fn());
     });
 

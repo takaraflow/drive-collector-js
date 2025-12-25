@@ -1,16 +1,16 @@
-import { vi, describe, test, expect, beforeEach } from 'vitest';
+import { jest, describe, test, expect, beforeEach } from '@jest/globals';
 import { UIHelper } from '../src/ui/templates';
 import { STRINGS, format } from '../src/locales/zh-CN.js';
 import { Button } from "telegram/tl/custom/button.js";
 
 // Mock the config module to provide dummy remoteFolder
-vi.mock("../src/config/index.js", () => ({
+jest.unstable_mockModule("../src/config/index.js", () => ({
   config: {
     remoteFolder: "/DriveCollectorBot",
   },
 }));
 
-vi.mock("../src/locales/zh-CN.js", () => ({
+jest.unstable_mockModule("../src/locales/zh-CN.js", () => ({
     STRINGS: {
         task: {
             downloading: "📥 正在下载资源...",
@@ -36,7 +36,7 @@ vi.mock("../src/locales/zh-CN.js", () => ({
             refresh_success: "刷新成功",
         },
     },
-    format: vi.fn((template, vars) => {
+    format: jest.fn((template, vars) => {
       let result = template;
       for (const key in vars) {
         result = result.replace(new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g'), vars[key]);
@@ -45,15 +45,15 @@ vi.mock("../src/locales/zh-CN.js", () => ({
     }),
   }));
 
-vi.mock("telegram/tl/custom/button.js", () => ({
+jest.unstable_mockModule("telegram/tl/custom/button.js", () => ({
     Button: {
-      inline: vi.fn((text, data) => ({ text, data: data.toString() })),
+      inline: jest.fn((text, data) => ({ text, data: data.toString() })),
     },
 }));
 
 describe('UIHelper', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   describe('renderProgress', () => {
