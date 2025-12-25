@@ -13,6 +13,7 @@ import { DriveRepository } from "../repositories/DriveRepository.js";
 import { safeEdit, escapeHTML } from "../utils/common.js";
 import { runBotTask, runBotTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
+import { NetworkDiagnostic } from "../utils/NetworkDiagnostic.js";
 import fs from "fs";
 import path from "path";
 
@@ -218,6 +219,8 @@ export class Dispatcher {
                     return await this._handleStatusCommand(target, userId, text);
                 case "/help":
                     return await this._handleHelpCommand(target, userId);
+                case "/diagnosis":
+                    return await this._handleDiagnosisCommand(target, userId);
                 // 更多命令可在此添加...
             }
 
@@ -448,9 +451,40 @@ export class Dispatcher {
      * [私有] 发送绑定提示
      */
     static async _sendBindHint(target, userId) {
-        return await runBotTaskWithRetry(() => client.sendMessage(target, { 
+        return await runBotTaskWithRetry(() => client.sendMessage(target, {
             message: STRINGS.drive.no_drive_found,
             parseMode: "html"
         }), userId, {}, false, 3);
+    }
+
+    /**
+     * [私有] 处理 /diagnosis 命令 (管理员专用)
+     */
+    static async _handleDiagnosisCommand(target, userId) {
+        // 检查管理员权限
+        const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
+        if (!isAdmin) {
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: "❌ 此命令仅限管理员使用。",
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        }
+
+        // 发送占位消息
+        const placeholder = await runBotTaskWithRetry(() => client.sendMessage(target, {
+            message: "🔍 正在执行网络诊断..."
+        }), userId, {}, false, 3);
+
+        // 异步执行诊断
+        (async () => {
+            try {
+                const results = await NetworkDiagnostic.diagnoseAll();
+                const message = NetworkDiagnostic.formatResults(results);
+                await safeEdit(target, placeholder.id, message, null, userId);
+            } catch (error) {
+                console.error("Diagnosis error:", error);
+                await safeEdit(target, placeholder.id, `❌ 诊断过程中发生错误: ${escapeHTML(error.message)}`, null, userId);
+            }
+        })();
     }
 }
