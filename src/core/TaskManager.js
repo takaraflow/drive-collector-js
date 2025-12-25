@@ -139,12 +139,12 @@ export class TaskManager {
                 return;
             }
 
-            console.log(`📥 发现 \${tasks.length} 个僵尸任务，正在按 Chat 分组批量恢复...`);
+            console.log(`📥 发现 ${tasks.length} 个僵尸任务，正在按 Chat 分组批量恢复...`);
 
             const chatGroups = new Map();
             for (const row of tasks) {
                 if (!row.chat_id || row.chat_id.includes("Object")) {
-                    console.warn(`⚠️ 跳过无效 chat_id 的任务: \${row.id}`);
+                    console.warn(`⚠️ 跳过无效 chat_id 的任务: ${row.id}`);
                     continue;
                 }
                 if (!chatGroups.has(row.chat_id)) {
@@ -217,11 +217,11 @@ export class TaskManager {
             const successCount = results.filter(r => r.status === 'fulfilled').length;
             const totalCount = results.length;
 
-            console.log(`📊 预加载常用数据完成: \${successCount}/\${totalCount} 个任务成功`);
+            console.log(`📊 预加载常用数据完成: ${successCount}/${totalCount} 个任务成功`);
 
             // 如果大部分预加载失败，记录警告
             if (successCount < totalCount * 0.7) {
-                console.warn(`⚠️ 预加载成功率较低: \${successCount}/\${totalCount}`);
+                console.warn(`⚠️ 预加载成功率较低: ${successCount}/${totalCount}`);
             }
 
         } catch (e) {
@@ -251,7 +251,7 @@ export class TaskManager {
             for (const row of rows) {
                 const message = messageMap.get(row.source_msg_id);
                 if (!message || !message.media) {
-                    console.warn(`⚠️ 无法找到原始消息 (ID: \${row.source_msg_id})`);
+                    console.warn(`⚠️ 无法找到原始消息 (ID: ${row.source_msg_id})`);
                     failedUpdates.push({ id: row.id, status: 'failed', error: 'Source msg missing' });
                     continue;
                 }
@@ -266,10 +266,10 @@ export class TaskManager {
                     if (fs.existsSync(localPath)) {
                         task.localPath = localPath;
                         tasksToUpload.push(task);
-                        console.log(`📤 恢复下载完成的任务 \${row.id} 到上传队列`);
+                        console.log(`📤 恢复下载完成的任务 ${row.id} 到上传队列`);
                     } else {
                         // 本地文件不存在，重新下载
-                        console.warn(`⚠️ 本地文件不存在，重新下载任务 \${row.id}`);
+                        console.warn(`⚠️ 本地文件不存在，重新下载任务 ${row.id}`);
                         tasksToEnqueue.push(task);
                     }
                 } else {
@@ -310,7 +310,7 @@ export class TaskManager {
         const statusMsg = await runBotTaskWithRetry(
             () => client.sendMessage(target, {
                 message: format(STRINGS.task.captured, { label: customLabel }),
-                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_\${taskId}`))],
+                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_${taskId}`))],
                 parseMode: "html"
             }),
             userId,
@@ -359,7 +359,7 @@ export class TaskManager {
         const statusMsg = await runBotTaskWithRetry(
             () => client.sendMessage(target, {
                 message: format(STRINGS.task.batch_captured, { count: messages.length }),
-                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_batch_\${messages[0].groupedId}`))],
+                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_batch_${messages[0].groupedId}`))],
                 parseMode: "html"
             }),
             userId,
@@ -472,7 +472,7 @@ export class TaskManager {
 
         // 防重入：检查任务是否已经在处理中
         if (this.activeWorkers.has(id)) {
-            console.log(`⚠️ Task \${id} is already being processed, skipping download worker.`);
+            console.log(`⚠️ Task ${id} is already being processed, skipping download worker.`);
             return;
         }
         this.activeWorkers.add(id);
@@ -574,7 +574,7 @@ export class TaskManager {
             if (task.isGroup) {
                 await this._refreshGroupMonitor(task, isCancel ? 'cancelled' : 'failed');
             } else {
-                const text = isCancel ? STRINGS.task.cancelled : `\${STRINGS.task.error_prefix}<code>\${escapeHTML(e.message)}</code>`;
+                const text = isCancel ? STRINGS.task.cancelled : `${STRINGS.task.error_prefix}<code>${escapeHTML(e.message)}</code>`;
                 await updateStatus(task, text, true);
             }
             this.activeWorkers.delete(id);
@@ -589,7 +589,7 @@ export class TaskManager {
 
         // 防重入：上传 Worker 也增加检查
         if (this.activeWorkers.has(id)) {
-            console.log(`⚠️ Task \${id} is already being processed, skipping upload worker.`);
+            console.log(`⚠️ Task ${id} is already being processed, skipping upload worker.`);
             return;
         }
         this.activeWorkers.add(id);
@@ -694,7 +694,7 @@ export class TaskManager {
             if (task.isGroup) {
                 await this._refreshGroupMonitor(task, isCancel ? 'cancelled' : 'failed');
             } else {
-                const text = isCancel ? STRINGS.task.cancelled : `\${STRINGS.task.error_prefix}<code>\${escapeHTML(e.message)}</code>`;
+                const text = isCancel ? STRINGS.task.cancelled : `${STRINGS.task.error_prefix}<code>${escapeHTML(e.message)}</code>`;
                 await updateStatus(task, text, true);
             }
         } finally {
@@ -709,7 +709,7 @@ export class TaskManager {
                 }
             } catch (e) {
                 // 忽略清理失败的错误，文件可能已被其他进程处理
-                console.warn(`Failed to cleanup local file \${localPath}:`, e.message);
+                console.warn(`Failed to cleanup local file ${localPath}:`, e.message);
             }
             this.activeWorkers.delete(id);
         }
