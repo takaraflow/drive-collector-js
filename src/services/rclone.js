@@ -227,11 +227,11 @@ export class CloudTool {
     }
 
     /**
-     * 获取文件列表 (带多级缓存)
+     * 获取文件列表 (带智能缓存策略)
      */
     static async listRemoteFiles(userId, forceRefresh = false) {
         const cacheKey = `files_${userId}`;
-        
+
         if (!forceRefresh) {
             // 1. 尝试内存缓存
             const memCached = cacheService.get(cacheKey);
@@ -241,25 +241,27 @@ export class CloudTool {
             try {
                 const kvCached = await kv.get(cacheKey, "json");
                 if (kvCached) {
-                    cacheService.set(cacheKey, kvCached, 5 * 60 * 1000); // 存入内存 5 分钟
+                    // 根据文件新鲜度动态调整内存缓存时间
+                    const cacheAge = this._calculateOptimalCacheTime(kvCached);
+                    cacheService.set(cacheKey, kvCached, cacheAge);
                     return kvCached;
                 }
             } catch (e) {
                 console.error("KV get files error:", e.message);
             }
         }
-        
+
         this.loading = true;
         try {
             const conf = await this._getUserConfig(userId);
             const connectionString = this._getConnectionString(conf);
             const fullRemotePath = `${connectionString}${config.remoteFolder}/`;
             const args = ["--config", "/dev/null", "lsjson", fullRemotePath];
-            
-            const ret = spawnSync(rcloneBinary, args, { 
-                env: process.env, 
+
+            const ret = spawnSync(rcloneBinary, args, {
+                env: process.env,
                 encoding: 'utf-8',
-                maxBuffer: 10 * 1024 * 1024 
+                maxBuffer: 10 * 1024 * 1024
             });
 
             if (ret.error) throw ret.error;
@@ -274,17 +276,27 @@ export class CloudTool {
 
             let files = JSON.parse(ret.stdout || "[]");
             if (!Array.isArray(files)) files = [];
-            
+
             files.sort((a, b) => {
                 if (a.IsDir !== b.IsDir) return b.IsDir ? 1 : -1;
                 return new Date(b.ModTime) - new Date(a.ModTime);
             });
 
-            // 缓存处理
-            cacheService.set(cacheKey, files, 10 * 60 * 1000);
+            // 智能缓存处理
+            const cacheData = {
+                files,
+                timestamp: Date.now(),
+                userId
+            };
+
+            // 根据文件变化频率动态设置缓存时间
+            const optimalMemoryTTL = this._calculateOptimalCacheTime(files);
+            const optimalKVTTL = Math.max(600, optimalMemoryTTL / 1000); // KV至少缓存10分钟
+
+            cacheService.set(cacheKey, cacheData, optimalMemoryTTL);
             try {
-                // KV 缓存 30 分钟 (1800s)，持久化应对重启
-                await kv.set(cacheKey, files, 1800);
+                // KV 缓存使用动态时间，应对重启
+                await kv.set(cacheKey, cacheData, optimalKVTTL);
             } catch (e) {
                 console.error("KV set files error:", e.message);
             }
@@ -293,9 +305,50 @@ export class CloudTool {
             return files;
 
         } catch (e) {
-            console.error("List files error (Detail):", e.message); 
+            console.error("List files error (Detail):", e.message);
             this.loading = false;
-            return []; 
+            return [];
+        }
+    }
+
+    /**
+     * 计算最优缓存时间 (基于文件变化频率)
+     * @param {Array} files - 文件列表
+     * @returns {number} 缓存时间(毫秒)
+     */
+    static _calculateOptimalCacheTime(files) {
+        if (!files || files.length === 0) {
+            return 5 * 60 * 1000; // 空目录：5分钟
+        }
+
+        // 计算文件的平均修改时间间隔
+        const now = Date.now();
+        const recentFiles = files
+            .filter(f => !f.IsDir)
+            .map(f => new Date(f.ModTime).getTime())
+            .filter(time => (now - time) < 7 * 24 * 60 * 60 * 1000) // 只考虑最近7天的文件
+            .sort((a, b) => b - a); // 降序排序
+
+        if (recentFiles.length < 2) {
+            return 15 * 60 * 1000; // 文件较少：15分钟
+        }
+
+        // 计算平均修改间隔
+        let totalInterval = 0;
+        for (let i = 1; i < recentFiles.length; i++) {
+            totalInterval += recentFiles[i - 1] - recentFiles[i];
+        }
+        const avgInterval = totalInterval / (recentFiles.length - 1);
+
+        // 根据平均间隔动态调整缓存时间
+        if (avgInterval < 60 * 1000) { // 高频变化（<1分钟）
+            return 2 * 60 * 1000; // 2分钟
+        } else if (avgInterval < 60 * 60 * 1000) { // 中等频率（<1小时）
+            return 5 * 60 * 1000; // 5分钟
+        } else if (avgInterval < 24 * 60 * 60 * 1000) { // 低频变化（<1天）
+            return 30 * 60 * 1000; // 30分钟
+        } else { // 极低频变化
+            return 60 * 60 * 1000; // 1小时
         }
     }
 
