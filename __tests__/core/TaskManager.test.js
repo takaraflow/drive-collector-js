@@ -549,6 +549,45 @@ describe("TaskManager", () => {
             expect(mockFs.default.promises.unlink).toHaveBeenCalledWith("/tmp/fail.mp4");
         });
     });
+
+    describe("Filename Validation Consistency", () => {
+        test("should use actual local filename for validation instead of regenerating from media info", async () => {
+            const task = {
+                id: "validation-filename-task",
+                userId: "u1",
+                message: { media: {} },
+                isGroup: false,
+                chatId: "chat123",
+                msgId: "msg456",
+                localPath: "/tmp/downloads/transfer_1766663719382_fc61fh.jpg" // Actual downloaded filename
+            };
+
+            // Mock successful upload
+            mockCloudTool.uploadBatch.mockResolvedValue({ success: true });
+
+            // Mock file system operations
+            const mockFs = await import("fs");
+            mockFs.default.existsSync.mockReturnValue(true);
+            mockFs.default.statSync.mockReturnValue({ size: 1024 });
+
+            // Mock getMediaInfo to return a different filename (simulating the bug scenario)
+            const { getMediaInfo } = await import("../../src/utils/common.js");
+            getMediaInfo.mockReturnValueOnce({
+                name: "transfer_1766663722153_a82fwq.jpg", // Different filename that would be generated now
+                size: 1024
+            });
+
+            // Mock validation - should be called with actual filename, not the regenerated one
+            mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Size: 1024 }); // File exists and matches
+
+            await TaskManager.uploadWorker(task);
+
+            // Verify that getRemoteFileInfo was called with the actual filename from localPath
+            expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalledWith("transfer_1766663719382_fc61fh.jpg", "u1", 2);
+            // Should NOT be called with the regenerated filename
+            expect(mockCloudTool.getRemoteFileInfo).not.toHaveBeenCalledWith("transfer_1766663722153_a82fwq.jpg", "u1", expect.any(Number));
+        });
+    });
 });
 
 // Provide safeEdit to the global scope of this module so TaskManager can find it if it was unmocked

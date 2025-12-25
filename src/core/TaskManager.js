@@ -687,31 +687,34 @@ export class TaskManager {
                 // 增加校验前的延迟，应对网盘 API 的最终一致性延迟
                 await new Promise(resolve => setTimeout(resolve, 3000));
 
+                // 从实际本地文件路径提取正确文件名
+                const actualFileName = path.basename(localPath);
+
                 // 更健壮的文件校验逻辑
                 let finalRemote = null;
                 let validationAttempts = 0;
                 const maxValidationAttempts = 5;
 
                 while (validationAttempts < maxValidationAttempts) {
-                    finalRemote = await CloudTool.getRemoteFileInfo(info.name, task.userId, 2); // 减少每个校验的内部重试次数
+                    finalRemote = await CloudTool.getRemoteFileInfo(actualFileName, task.userId, 2); // 减少每个校验的内部重试次数
                     if (finalRemote) break;
 
                     validationAttempts++;
                     if (validationAttempts < maxValidationAttempts) {
                         // 如果是最后一次尝试，强制刷新文件列表缓存
                         if (validationAttempts === maxValidationAttempts - 1) {
-                            console.log(`[Validation] Final attempt for ${info.name}, forcing cache refresh...`);
+                            console.log(`[Validation] Final attempt for ${actualFileName}, forcing cache refresh...`);
                             try {
                                 await CloudTool.listRemoteFiles(task.userId, true); // 强制刷新缓存
                                 // 再试一次
-                                finalRemote = await CloudTool.getRemoteFileInfo(info.name, task.userId, 1);
+                                finalRemote = await CloudTool.getRemoteFileInfo(actualFileName, task.userId, 1);
                                 if (finalRemote) break;
                             } catch (e) {
                                 console.warn(`[Validation] Cache refresh failed:`, e.message);
                             }
                         }
 
-                        console.log(`[Validation] Attempt ${validationAttempts} failed for ${info.name}, retrying in ${validationAttempts * 5}s...`);
+                        console.log(`[Validation] Attempt ${validationAttempts} failed for ${actualFileName}, retrying in ${validationAttempts * 5}s...`);
                         await new Promise(resolve => setTimeout(resolve, validationAttempts * 5000)); // 递增延迟: 5s, 10s, 15s, 20s
                     }
                 }
@@ -720,7 +723,7 @@ export class TaskManager {
                 const isOk = finalRemote && Math.abs(finalRemote.Size - localSize) < 1024;
 
                 if (!isOk) {
-                    console.error(`[Validation Failed] Task: ${task.id}, File: ${info.name}`);
+                    console.error(`[Validation Failed] Task: ${task.id}, File: ${actualFileName}`);
                     console.error(`- Local Size: ${localSize}`);
                     console.error(`- Remote Size: ${finalRemote ? finalRemote.Size : 'N/A'}`);
                     console.error(`- Remote Info: ${JSON.stringify(finalRemote)}`);
