@@ -184,6 +184,8 @@ describe("TaskManager", () => {
         if (TaskManager.downloadQueue) TaskManager.downloadQueue.clear();
         if (TaskManager.uploadQueue) TaskManager.uploadQueue.clear();
         TaskManager.monitorLocks.clear();
+        // 清理 activeWorkers
+        if (TaskManager.activeWorkers) TaskManager.activeWorkers.clear();
         // 清理 UploadBatcher 的定时器（重置实例）
         if (TaskManager.uploadBatcher) {
             TaskManager.uploadBatcher.batches.clear();
@@ -347,6 +349,59 @@ describe("TaskManager", () => {
 
             // 应该正常完成而不抛出 TypeError: Cannot read properties of undefined
             await expect(updatePromise).resolves.not.toThrow();
+        });
+    });
+
+    describe("Concurrency and Re-entry Protection", () => {
+        test("should prevent duplicate processing of the same task using activeWorkers lock", async () => {
+            const task = {
+                id: "unique-task-id",
+                userId: "u1",
+                message: { media: {} },
+                isGroup: false
+            };
+            
+            // 模拟 heartbeat 会导致一段时间的异步等待
+            const { updateStatus } = await import("../../src/utils/common.js");
+            updateStatus.mockImplementation(() => new Promise(resolve => setTimeout(resolve, 50)));
+
+            // 模拟两个 Worker 同时尝试处理同一个任务
+            // 正常情况下，第一个进入后会设置锁，第二个应该直接退出
+            const promise1 = TaskManager.downloadWorker(task);
+            const promise2 = TaskManager.downloadWorker(task);
+
+            await Promise.all([promise1, promise2]);
+
+            // 验证关键的业务逻辑（如 heartbeat/updateStatus）只被一个 Worker 执行
+            // 第一次 heartbeat 是 'downloading'
+            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloading');
+            
+            // 如果锁生效，updateStatus 应该只被调用一次（针对该任务的初始状态）
+            // 注意：因为 heartbeat 内部会多次调用 updateStatus，我们检查它的起始调用
+            const downloadingCalls = mockTaskRepository.updateStatus.mock.calls.filter(call => call[1] === 'downloading');
+            expect(downloadingCalls.length).toBe(1);
+        });
+
+        test("should release lock when task fails or completes", async () => {
+            const task = {
+                id: "error-task-id",
+                userId: "u1",
+                message: { media: {} },
+                isGroup: false
+            };
+            
+            // 模拟下载失败
+            mockClient.downloadMedia.mockRejectedValue(new Error("Network Error"));
+
+            await TaskManager.downloadWorker(task);
+
+            // 验证锁已释放
+            expect(TaskManager.activeWorkers.has(task.id)).toBe(false);
+            
+            // 能够再次进入处理（即使状态是 failed）
+            mockClient.downloadMedia.mockResolvedValue({});
+            await TaskManager.downloadWorker(task);
+            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloaded');
         });
     });
 });

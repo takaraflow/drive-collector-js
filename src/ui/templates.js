@@ -106,10 +106,9 @@ export class UIHelper {
         let statusLines = [];
 
         allTasks.forEach(t => {
-            // 增加 .trim() 确保匹配成功
+            // 使用 ID 进行精确匹配，而非文件名
+            const isFocus = t.id === focusTask.id;
             const dbName = (t.file_name || "").trim();
-            const currentName = (focusTask.fileName || "").trim();
-            const isFocus = dbName === currentName;
             
             // 截断文件名以适应移动端显示
             const displayName = escapeHTML(this._shortenFileName(dbName, 20));
@@ -120,12 +119,14 @@ export class UIHelper {
             const statusIcon = displayStatus === 'completed' ? '✅' : 
                               displayStatus === 'failed' ? '❌' : 
                               displayStatus === 'cancelled' ? '🚫' : 
-                              (isFocus ? '🔄' : '🕒');
+                              (isFocus && (displayStatus === 'downloading' || displayStatus === 'uploading') ? '🔄' : '🕒');
             
             if (isFocus && downloaded > 0 && (displayStatus === 'downloading' || displayStatus === 'uploading')) {
                 const progress = Math.round((downloaded / total) * 100);
                 statusLines.push(`${statusIcon} ${displayName} [${progress}%]`);
             } else {
+>>>>+++ REPLACE
+
                 // 使用简短的状态文本
                 const statusText = displayStatus === 'completed' ? '完成' :
                                   displayStatus === 'failed' ? '失败' :
