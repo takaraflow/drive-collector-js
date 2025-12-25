@@ -119,6 +119,10 @@ jest.unstable_mockModule("fs", () => ({
         existsSync: jest.fn(() => true),
         unlinkSync: jest.fn(),
         statSync: jest.fn(() => ({ size: 1024 })),
+        promises: {
+            stat: jest.fn(() => Promise.resolve({ size: 1024 })),
+            unlink: jest.fn(() => Promise.resolve())
+        }
     }
 }));
 
@@ -407,8 +411,7 @@ describe("TaskManager", () => {
 
             // Mock local file exists with correct size, and remote file exists
             const fs = await import("fs");
-            fs.default.existsSync.mockReturnValue(true);
-            fs.default.statSync.mockReturnValue({ size: 1024 });
+            fs.default.promises.stat.mockResolvedValue({ size: 1024 });
             mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Size: 1024 });
 
             await TaskManager.downloadWorker(task);
