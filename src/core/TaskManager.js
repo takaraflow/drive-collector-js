@@ -516,6 +516,8 @@ export class TaskManager {
             return;
         }
 
+        let shouldUpload = false;
+
         try {
             // 防重入：检查任务是否已经在处理中
             if (this.activeWorkers.has(id)) {
@@ -533,7 +535,9 @@ export class TaskManager {
                 return await updateStatus(task, STRINGS.task.parse_failed, true);
             }
 
-            const localPath = path.join(config.downloadDir, info.name);
+            // 使用任务中已有的文件名（保持一致性），如果不存在则使用 info.name
+            const fileName = task.fileName || info.name;
+            const localPath = path.join(config.downloadDir, fileName);
             task.localPath = localPath;
 
             let lastUpdate = 0;
@@ -545,7 +549,7 @@ export class TaskManager {
                     await this._refreshGroupMonitor(task, status, downloaded, total);
                 } else {
                     const text = (downloaded > 0)
-                        ? UIHelper.renderProgress(downloaded, total, STRINGS.task.downloading, info.name)
+                        ? UIHelper.renderProgress(downloaded, total, STRINGS.task.downloading, fileName)
                         : STRINGS.task.downloading;
                     await updateStatus(task, text);
                 }
@@ -554,9 +558,21 @@ export class TaskManager {
             try {
                 await heartbeat('downloading');
 
-                // 秒传检查 - 如果文件已存在且大小匹配，直接标记完成
-                // 使用异步文件检查避免阻塞
-                const localPath = path.join(config.downloadDir, info.name);
+                // 1. 优先检查远程秒传 (直接跳过下载)
+                // 如果远程已存在且大小匹配，直接完成
+                const remoteFile = await CloudTool.getRemoteFileInfo(fileName, task.userId);
+                if (remoteFile && this._isSizeMatch(remoteFile.Size, info.size)) {
+                    await TaskRepository.updateStatus(task.id, 'completed');
+                    if (task.isGroup) {
+                        await this._refreshGroupMonitor(task, 'completed');
+                    } else {
+                        await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(fileName), folder: config.remoteFolder }), true);
+                    }
+                    this.activeWorkers.delete(id);
+                    return;
+                }
+
+                // 2. 本地文件检查 (断点续传或利用本地缓存)
                 let localFileExists = false;
                 let localFileSize = 0;
 
@@ -568,19 +584,16 @@ export class TaskManager {
                     // 文件不存在，继续下载
                 }
 
-                if (localFileExists && Math.abs(localFileSize - info.size) < 1024) {
-                    // 本地文件已存在且大小匹配，检查远程是否存在
-                    const remoteFile = await CloudTool.getRemoteFileInfo(info.name, task.userId);
-                    if (remoteFile && Math.abs(remoteFile.Size - info.size) < 1024) {
-                        await TaskRepository.updateStatus(task.id, 'completed');
-                        if (task.isGroup) {
-                            await this._refreshGroupMonitor(task, 'completed');
-                        } else {
-                            await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(info.name), folder: config.remoteFolder }), true);
-                        }
-                        this.activeWorkers.delete(id);
-                        return;
+                // 如果本地文件已存在且完整，跳过下载，直接进入上传流程
+                if (localFileExists && this._isSizeMatch(localFileSize, info.size)) {
+                    // 本地文件完好，直接进入上传队列
+                    await TaskRepository.updateStatus(task.id, 'downloaded');
+                    if (!task.isGroup) {
+                        await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
                     }
+                    this.activeWorkers.delete(id);
+                    shouldUpload = true;
+                    return;
                 }
 
                 // 下载阶段 - MTProto文件下载
@@ -603,12 +616,12 @@ export class TaskManager {
                 // 下载完成，推入上传队列
                 await TaskRepository.updateStatus(task.id, 'downloaded');
                 if (!task.isGroup) {
-                    await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(info.name) }));
+                    await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
                 }
 
-                // 推入上传队列进行后续处理
-                this.activeWorkers.delete(id); // 下载完成，释放锁以便上传 Worker 获取
-                this._enqueueUploadTask(task);
+                // 标记需要进入上传队列
+                this.activeWorkers.delete(id);
+                shouldUpload = true;
 
             } catch (e) {
                 const isCancel = e.message === "CANCELLED";
@@ -629,6 +642,10 @@ export class TaskManager {
         } finally {
             // 确保分布式锁被释放
             await instanceCoordinator.releaseTaskLock(id);
+            // 在释放锁之后，再将任务推入上传队列，防止 Worker 间的竞争条件
+            if (shouldUpload) {
+                this._enqueueUploadTask(task);
+            }
         }
     }
 
@@ -686,6 +703,22 @@ export class TaskManager {
         };
 
         try {
+            // 上传前重复检查：如果远程已存在同名且大小匹配的文件，跳过上传
+            // 使用本地文件名进行检查，确保一致性
+            const fileName = path.basename(localPath);
+            const remoteFile = await CloudTool.getRemoteFileInfo(fileName, task.userId);
+            
+            if (remoteFile && this._isSizeMatch(remoteFile.Size, info.size)) {
+                await TaskRepository.updateStatus(task.id, 'completed');
+                if (task.isGroup) {
+                    await this._refreshGroupMonitor(task, 'completed');
+                } else {
+                    await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(fileName), folder: config.remoteFolder }), true);
+                }
+                this.activeWorkers.delete(id);
+                return;
+            }
+
             // 上传阶段 - rclone批量上传
             if (!task.isGroup) await updateStatus(task, STRINGS.task.uploading);
             await heartbeat('uploading');
@@ -742,7 +775,7 @@ export class TaskManager {
                 }
 
                 const localSize = fs.statSync(localPath).size;
-                const isOk = finalRemote && Math.abs(finalRemote.Size - localSize) < 1024;
+                const isOk = finalRemote && this._isSizeMatch(finalRemote.Size, localSize);
 
                 if (!isOk) {
                     console.error(`[Validation Failed] Task: ${task.id}, File: ${actualFileName}`);
@@ -873,6 +906,30 @@ export class TaskManager {
         if (this.autoScalingInterval) {
             clearInterval(this.autoScalingInterval);
             this.autoScalingInterval = null;
+        }
+    }
+
+    /**
+     * [私有] 检查文件大小是否匹配（带动态容差）
+     * @param {number} size1 - 第一个文件大小
+     * @param {number} size2 - 第二个文件大小
+     * @returns {boolean} 是否匹配
+     */
+    static _isSizeMatch(size1, size2) {
+        const diff = Math.abs(size1 - size2);
+        const maxSize = Math.max(size1, size2);
+
+        // 小文件：容差10KB
+        if (maxSize < 1024 * 1024) {
+            return diff < 10 * 1024;
+        }
+        // 中等文件：容差1MB
+        else if (maxSize < 100 * 1024 * 1024) {
+            return diff < 1024 * 1024;
+        }
+        // 大文件：容差10MB
+        else {
+            return diff < 10 * 1024 * 1024;
         }
     }
 

@@ -40,6 +40,7 @@ export const STRINGS = {
         verifying: "⚙️ <b>转存完成，正在确认数据完整性...</b>",
         success_sec_transfer: "✨ <b>文件已秒传成功</b>\n\n📄 名称: <code>{{name}}</code>\n📂 目录: <code>{{folder}}</code>",
         success: "✅ <b>文件转存成功</b>\n\n📄 名称: <code>{{name}}</code>\n📂 目录: <code>{{folder}}</code>",
+        duplicate: "⚠️ <b>文件已存在</b>\n\n📄 名称: <code>{{name}}</code>\n📂 目录: <code>{{folder}}</code>\n\n该文件之前已成功转存，无需重复处理。",
         failed_validation: "⚠️ <b>校验异常</b>: <code>{{name}}</code>",
         failed_upload: "❌ <b>同步终止</b>\n原因: <code>{{reason}}</code>",
         parse_failed: "❌ 无法解析该媒体文件信息。",

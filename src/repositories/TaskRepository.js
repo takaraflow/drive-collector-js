@@ -224,6 +224,38 @@ export class TaskRepository {
     }
 
     /**
+     * 根据用户ID查找所有已完成的相同文件任务（用于重复检查）
+     */
+    static async findAllCompletedByUser(userId) {
+        if (!userId) return [];
+        try {
+            return await d1.fetchAll(
+                "SELECT id, file_name, file_size, status FROM tasks WHERE user_id = ? AND status = 'completed' ORDER BY created_at DESC",
+                [userId]
+            );
+        } catch (e) {
+            console.error(`TaskRepository.findAllCompletedByUser error for ${userId}:`, e);
+            return [];
+        }
+    }
+
+    /**
+     * 根据用户ID、文件名和文件大小查找已完成的相同文件任务（用于重复检查）
+     */
+    static async findCompletedByFile(userId, fileName, fileSize) {
+        if (!userId || !fileName || fileSize == null) return null;
+        try {
+            return await d1.fetchOne(
+                "SELECT id, status FROM tasks WHERE user_id = ? AND file_name = ? AND file_size = ? AND status = 'completed' ORDER BY created_at DESC LIMIT 1",
+                [userId, fileName, fileSize]
+            );
+        } catch (e) {
+            console.error(`TaskRepository.findCompletedByFile error for ${userId}/${fileName}:`, e);
+            return null;
+        }
+    }
+
+    /**
      * 批量创建任务
      */
     static async createBatch(tasksData) {
