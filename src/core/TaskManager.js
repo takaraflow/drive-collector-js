@@ -698,6 +698,19 @@ export class TaskManager {
 
                     validationAttempts++;
                     if (validationAttempts < maxValidationAttempts) {
+                        // 如果是最后一次尝试，强制刷新文件列表缓存
+                        if (validationAttempts === maxValidationAttempts - 1) {
+                            console.log(`[Validation] Final attempt for ${info.name}, forcing cache refresh...`);
+                            try {
+                                await CloudTool.listRemoteFiles(task.userId, true); // 强制刷新缓存
+                                // 再试一次
+                                finalRemote = await CloudTool.getRemoteFileInfo(info.name, task.userId, 1);
+                                if (finalRemote) break;
+                            } catch (e) {
+                                console.warn(`[Validation] Cache refresh failed:`, e.message);
+                            }
+                        }
+
                         console.log(`[Validation] Attempt ${validationAttempts} failed for ${info.name}, retrying in ${validationAttempts * 5}s...`);
                         await new Promise(resolve => setTimeout(resolve, validationAttempts * 5000)); // 递增延迟: 5s, 10s, 15s, 20s
                     }
