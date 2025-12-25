@@ -80,12 +80,23 @@ describe("InstanceCoordinator", () => {
       );
     });
 
-    test("should handle registration failure", async () => {
+    test("should handle registration failure gracefully", async () => {
+      // Mock KV failure
       mockFetch.mockResolvedValueOnce({
         json: () => Promise.resolve({ success: false, errors: [{ message: "Registration failed" }] }),
       });
 
-      await expect(instanceCoordinator.registerInstance()).rejects.toThrow("KV Set Error: Registration failed");
+      // Should not throw, but log warning and use DB fallback
+      await expect(instanceCoordinator.registerInstance()).resolves.not.toThrow();
+
+      // Verify DB fallback was called
+      const { InstanceRepository } = await import("../../src/repositories/InstanceRepository.js");
+      expect(InstanceRepository.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "test_instance_123",
+          status: "active"
+        })
+      );
     });
   });
 

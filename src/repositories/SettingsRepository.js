@@ -51,11 +51,17 @@ export class SettingsRepository {
 
     /**
      * 设置指定键的设置值
-     * @param {string} key 
-     * @param {string} value 
+     * @param {string} key
+     * @param {string} value
      * @returns {Promise<void>}
      */
     static async set(key, value) {
+        // 处理null key的情况
+        if (key == null) {
+            console.warn('SettingsRepository.set called with null/undefined key, ignoring');
+            return;
+        }
+
         const cacheKey = this.getSettingsKey(key);
         try {
             // 1. 更新 D1
@@ -63,12 +69,19 @@ export class SettingsRepository {
                 "INSERT INTO system_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value",
                 [key, value]
             );
+        } catch (dbError) {
+            console.error(`SettingsRepository.set failed for ${key} (D1):`, dbError);
+            throw dbError; // D1是主存储，失败时抛出异常
+        }
 
-            // 2. 更新 KV 和内存
+        // 2. 更新内存缓存
+        cacheService.set(cacheKey, value, 30 * 60 * 1000);
+
+        // 3. 尝试更新 KV（失败不影响主流程）
+        try {
             await kv.set(cacheKey, value);
-            cacheService.set(cacheKey, value, 30 * 60 * 1000);
-        } catch (e) {
-            console.error(`SettingsRepository.set failed for ${key}:`, e);
+        } catch (kvError) {
+            console.warn(`⚠️ KV缓存更新失败，继续使用D1存储: ${kvError.message}`);
         }
     }
 }

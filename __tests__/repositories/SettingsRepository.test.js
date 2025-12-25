@@ -108,13 +108,14 @@ describe('SettingsRepository', () => {
         it('should handle database errors gracefully', async () => {
             mockD1.run.mockRejectedValue(new Error('DB Error'));
 
-            // Should not throw, just log error
-            await expect(SettingsRepository.set('test_key', 'test_value')).resolves.not.toThrow();
+            // Should throw since D1 is the primary storage
+            await expect(SettingsRepository.set('test_key', 'test_value')).rejects.toThrow('DB Error');
         });
 
         it('should handle null key gracefully', async () => {
             await SettingsRepository.set(null, 'value');
-            expect(mockD1.run).toHaveBeenCalled();
+            // Should not call D1.run for null key
+            expect(mockD1.run).not.toHaveBeenCalled();
         });
     });
 

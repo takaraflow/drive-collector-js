@@ -65,8 +65,26 @@ export class InstanceCoordinator {
             status: 'active'
         };
 
-        await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
-        console.log(`📝 实例已注册: ${this.instanceId}`);
+        try {
+            await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
+            console.log(`📝 实例已注册: ${this.instanceId}`);
+        } catch (kvError) {
+            console.warn(`⚠️ 实例注册失败，继续运行（单实例模式）: ${kvError.message}`);
+            // 在KV失败时，将实例信息存储到内存和D1中作为备用
+            await this.registerInstanceToDB(instanceData);
+        }
+    }
+
+    /**
+     * 将实例信息注册到D1数据库（KV失败时的备用方案）
+     */
+    async registerInstanceToDB(instanceData) {
+        try {
+            await InstanceRepository.upsert(instanceData);
+            console.log(`📝 实例已注册到数据库: ${this.instanceId}`);
+        } catch (dbError) {
+            console.error(`❌ 实例注册到数据库也失败: ${dbError.message}`);
+        }
     }
 
     /**
@@ -91,8 +109,13 @@ export class InstanceCoordinator {
                     // 重新注册
                     await this.registerInstance();
                 }
-            } catch (e) {
-                console.error(`心跳失败:`, e.message);
+            } catch (kvError) {
+                // KV心跳失败时，尝试更新数据库中的心跳
+                try {
+                    await InstanceRepository.updateHeartbeat(this.instanceId, Date.now());
+                } catch (dbError) {
+                    console.error(`心跳更新失败: KV=${kvError.message}, DB=${dbError.message}`);
+                }
             }
         }, this.heartbeatInterval);
     }
