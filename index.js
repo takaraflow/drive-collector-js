@@ -3,11 +3,9 @@ import { config } from "./src/config/index.js";
 import { client, saveSession, clearSession, resetClientSession } from "./src/services/telegram.js";
 import { TaskManager } from "./src/core/TaskManager.js";
 import { Dispatcher } from "./src/bot/Dispatcher.js";
+import { MessageHandler } from "./src/bot/MessageHandler.js";
 import { SettingsRepository } from "./src/repositories/SettingsRepository.js";
 import { instanceCoordinator } from "./src/services/InstanceCoordinator.js";
-
-// 全局消息去重缓存 (防止多实例重复处理)
-const processedMessages = new Map();
 
 /**
  * --- 🚀 应用程序入口 ---
@@ -141,37 +139,14 @@ const processedMessages = new Map();
             }
         })();
 
-        // 4. 注册事件监听器 -> 交给分发器处理
+        // 4. 注册事件监听器 -> 交给 MessageHandler 处理
+        // 初始化 MessageHandler (预加载 Bot ID)
         client.addEventHandler(async (event) => {
-            // 基础事件记录
-            if (event.className === 'UpdateNewMessage' || event.className === 'UpdateBotCallbackQuery') {
-                console.log(`📩 收到新事件: ${event.className}`);
-            }
-
-            // 去重检查：防止多实例部署时的重复处理
-            const msgId = event.message?.id;
-            if (msgId) {
-                const now = Date.now();
-                if (processedMessages.has(msgId)) {
-                    console.log(`♻️ 跳过重复消息 ${msgId} (已由本实例或其他分片处理)`);
-                    return;
-                }
-                processedMessages.set(msgId, now);
-                
-                // 清理超过10分钟的旧消息ID
-                for (const [id, time] of processedMessages.entries()) {
-                    if (now - time > 10 * 60 * 1000) {
-                        processedMessages.delete(id);
-                    }
-                }
-            }
-            
-            try {
-                await Dispatcher.handle(event);
-            } catch (e) {
-                console.error("Critical: Unhandled Dispatcher Error:", e);
-            }
+            await MessageHandler.handleEvent(event, client);
         });
+        
+        // 延迟初始化 Bot ID (等待连接建立)
+        setTimeout(() => MessageHandler.init(client), 5000);
 
         // 6. 设置优雅关闭处理
         const gracefulShutdown = async (signal) => {
