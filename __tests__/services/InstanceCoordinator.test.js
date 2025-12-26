@@ -71,26 +71,18 @@ describe("InstanceCoordinator", () => {
   });
 
   describe("registerInstance", () => {
-    test("should register instance successfully (Dual Write)", async () => {
+    test("should register instance successfully (KV only)", async () => {
       mockFetch.mockResolvedValueOnce({
         json: () => Promise.resolve({ success: true }),
       });
 
       await instanceCoordinator.registerInstance();
 
-      // Wait for async KV registration (with random delay up to 5s)
-      await new Promise(resolve => setTimeout(resolve, 6000));
-
-      // Verify DB write
-      const { InstanceRepository } = await import("../../src/repositories/InstanceRepository.js");
-      expect(InstanceRepository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: "test_instance_123",
-          status: "active"
-        })
-      );
-
-      // Verify KV write
+<<<<<<< HEAD
+      // Verify KV write only
+=======
+      // Verify KV write only
+>>>>>>> 7c5ec6f (test: refactor DriveRepository tests to use KV instead of D1)
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining("storage/kv/namespaces/mock_namespace_id/values/instance:test_instance_123"),
         expect.objectContaining({
@@ -100,23 +92,14 @@ describe("InstanceCoordinator", () => {
       );
     });
 
-    test("should handle KV registration failure gracefully (DB still writes)", async () => {
+    test("should throw error when KV registration fails", async () => {
       // Mock KV failure
       mockFetch.mockResolvedValueOnce({
         json: () => Promise.resolve({ success: false, errors: [{ message: "Registration failed" }] }),
       });
 
-      // Should not throw, but log warning
-      await expect(instanceCoordinator.registerInstance()).resolves.not.toThrow();
-
-      // Verify DB still called
-      const { InstanceRepository } = await import("../../src/repositories/InstanceRepository.js");
-      expect(InstanceRepository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: "test_instance_123",
-          status: "active"
-        })
-      );
+      // Should throw since KV is the primary storage
+      await expect(instanceCoordinator.registerInstance()).rejects.toThrow("KV Set Error: Registration failed");
     });
   });
 

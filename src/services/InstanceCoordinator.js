@@ -4,7 +4,7 @@ import { InstanceRepository } from "../repositories/InstanceRepository.js";
 
 /**
  * --- 多实例协调服务 ---
- * 基于 Cloudflare KV/D1 实现异地多实例支持
+ * 基于 Cloudflare KV 实现异地多实例支持
  * 职责：实例注册、心跳、分布式锁、任务协调
  */
 export class InstanceCoordinator {
@@ -22,9 +22,6 @@ export class InstanceCoordinator {
      */
     async start() {
         console.log(`🚀 启动实例协调器: ${this.instanceId}`);
-
-        // 确保数据库表存在
-        await InstanceRepository.createTableIfNotExists();
 
         // 注册实例
         await this.registerInstance();
@@ -53,7 +50,7 @@ export class InstanceCoordinator {
     }
 
     /**
-     * 注册实例 (双写机制：D1 + KV)
+     * 注册实例 (KV 存储，符合低频关键数据规则)
      */
     async registerInstance() {
         const instanceData = {
@@ -65,33 +62,13 @@ export class InstanceCoordinator {
             status: 'active'
         };
 
-        // 1. 始终优先写入 D1 数据库 (作为真理之源，防止脑裂)
-        await this.registerInstanceToDB(instanceData);
-
-        // 2. 尝试写入 KV (用于快速访问和分布式锁)
-        // 增加随机延迟，避免多个实例同时启动时撞击 KV 限制
-        setTimeout(async () => {
-            try {
-                // 如果处于故障转移模式（意味着 KV 已挂），则跳过 KV 注册，只依赖 D1
-                if (!kv.isFailoverMode) {
-                    await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
-                    console.log(`📝 实例已注册到 KV: ${this.instanceId}`);
-                }
-            } catch (kvError) {
-                console.warn(`⚠️ KV注册失败 (非致命，已写入DB): ${kvError.message}`);
-            }
-        }, Math.random() * 5000);
-    }
-
-    /**
-     * 将实例信息注册到D1数据库（KV失败时的备用方案）
-     */
-    async registerInstanceToDB(instanceData) {
+        // 写入 KV (核心 KV 模块，用于关键数据存储)
         try {
-            await InstanceRepository.upsert(instanceData);
-            console.log(`📝 实例已注册到数据库: ${this.instanceId}`);
-        } catch (dbError) {
-            console.error(`❌ 实例注册到数据库也失败: ${dbError.message}`);
+            await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
+            console.log(`📝 实例已注册到 KV: ${this.instanceId}`);
+        } catch (kvError) {
+            console.error(`❌ KV注册失败: ${kvError.message}`);
+            throw kvError; // KV 是主存储，失败时抛出异常
         }
     }
 
@@ -104,21 +81,12 @@ export class InstanceCoordinator {
     }
 
     /**
-     * 启动心跳 (双写机制：D1 + KV)
+     * 启动心跳 (KV 存储，符合低频关键数据规则)
      */
     startHeartbeat() {
         this.heartbeatTimer = setInterval(async () => {
             const now = Date.now();
 
-            // 1. 始终优先更新 D1 (真理之源)
-            try {
-                await InstanceRepository.updateHeartbeat(this.instanceId, now);
-            } catch (dbError) {
-                console.error(`DB心跳更新失败: ${dbError.message}`);
-            }
-
-            // 2. 尝试更新 KV (仅当不在故障转移模式或偶尔更新)
-            // 如果是 KV 额度耗尽，我们希望减少调用
             try {
                 // 仅在非故障转移模式，或者每 3 次心跳才尝试一次 KV 更新
                 if (!kv.isFailoverMode || Math.random() < 0.3) {
@@ -130,9 +98,12 @@ export class InstanceCoordinator {
                         status: 'active'
                     };
                     await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
+                } else {
+                    // 重新注册
+                    await this.registerInstance();
                 }
             } catch (kvError) {
-                // KV 失败忽略
+                console.error(`KV心跳更新失败: ${kvError.message}`);
             }
         }, this.heartbeatInterval);
     }
@@ -176,21 +147,11 @@ export class InstanceCoordinator {
     }
 
     /**
-     * 获取所有实例（包括可能过期的）
+     * 获取所有实例（从 KV 获取当前已知的活跃实例）
      */
     async getAllInstances() {
         try {
-            // 优先从数据库获取实例列表
-            const dbInstances = await InstanceRepository.findAll();
-
-            // 如果数据库有数据，返回数据库结果
-            if (dbInstances && dbInstances.length > 0) {
-                // 同步到本地缓存
-                this.activeInstances = new Set(dbInstances.map(inst => inst.id));
-                return dbInstances;
-            }
-
-            // 如果数据库为空，尝试从KV获取已知的活跃实例
+            // 从 KV 获取当前活跃实例集合中的实例
             const instances = [];
             for (const instanceId of this.activeInstances) {
                 try {
