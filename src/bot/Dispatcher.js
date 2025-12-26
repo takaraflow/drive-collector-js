@@ -37,9 +37,13 @@ export class Dispatcher {
      * @param {Api.TypeUpdate} event 
      */
     static async handle(event) {
+        // console.log(`[Dispatcher] 收到原始事件: ${event.className}`);
         // 1. 提取上下文信息
         const ctx = this._extractContext(event);
-        if (!ctx.userId) return; // 无法识别用户，忽略
+        if (!ctx.userId) {
+            // console.log(`[Dispatcher] 无法提取用户ID: ${event.className}`);
+            return;
+        }
 
         // 2. 全局前置守卫 (权限、维护模式)
         const passed = await this._globalGuard(event, ctx);
@@ -51,9 +55,13 @@ export class Dispatcher {
         // 3. 路由分发
         // 使用 className 检查替代 instanceof，提高鲁棒性并方便测试
         if (event.className === 'UpdateBotCallbackQuery') {
+            console.log(`🔘 处理回调: ${event.data?.toString() || '无数据'} (User: ${ctx.userId})`);
             await this._handleCallback(event, ctx);
         } else if (event.className === 'UpdateNewMessage' && event.message) {
+            console.log(`💬 处理消息: ${event.message.message?.slice(0, 20) || '媒体内容'} (User: ${ctx.userId})`);
             await this._handleMessage(event, ctx);
+        } else {
+            // console.log(`[Dispatcher] 忽略不感兴趣的事件类: ${event.className}`);
         }
     }
 
@@ -65,15 +73,30 @@ export class Dispatcher {
         let target = null;
         let isCallback = false;
 
-        if (event.className === 'UpdateBotCallbackQuery') {
-            userId = event.userId.toString();
-            target = event.peer;
-            isCallback = true;
-        } else if (event.className === 'UpdateNewMessage' && event.message) {
-            const m = event.message;
-            userId = (m.fromId ? (m.fromId.userId || m.fromId.chatId) : m.senderId).toString();
-            target = m.peerId;
+        try {
+            if (event.className === 'UpdateBotCallbackQuery') {
+                userId = event.userId?.toString();
+                target = event.peer;
+                isCallback = true;
+            } else if (event.className === 'UpdateNewMessage' && event.message) {
+                const m = event.message;
+                // 兼容不同版本的 GramJS 消息结构
+                const fromId = m.fromId;
+                if (fromId) {
+                    if (fromId.userId) userId = fromId.userId.toString();
+                    else if (fromId.chatId) userId = fromId.chatId.toString();
+                }
+                
+                if (!userId && m.senderId) {
+                    userId = m.senderId.toString();
+                }
+                
+                target = m.peerId;
+            }
+        } catch (e) {
+            console.error(`[Dispatcher] Context extraction error:`, e);
         }
+        
         return { userId, target, isCallback };
     }
 
