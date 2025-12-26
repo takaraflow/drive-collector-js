@@ -1,10 +1,11 @@
+// Updated test file - V3
 import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 
-jest.unstable_mockModule("../../src/services/d1.js", () => ({
-    d1: {
-        fetchAll: jest.fn(),
-        fetchOne: jest.fn(),
-        run: jest.fn(),
+jest.unstable_mockModule("../../src/services/kv.js", () => ({
+    kv: {
+        get: jest.fn(),
+        set: jest.fn(),
+        delete: jest.fn(),
     },
 }));
 
@@ -16,7 +17,7 @@ jest.unstable_mockModule("../../src/utils/CacheService.js", () => ({
 }));
 
 const { DriveRepository } = await import("../../src/repositories/DriveRepository.js");
-const { d1 } = await import("../../src/services/d1.js");
+const { kv } = await import("../../src/services/kv.js");
 const { cacheService } = await import("../../src/utils/CacheService.js");
 
 describe("DriveRepository", () => {
@@ -35,7 +36,7 @@ describe("DriveRepository", () => {
         });
 
         it("should return cached drive data", async () => {
-            const mockDrive = { id: 1, user_id: "user1", status: "active" };
+            const mockDrive = { id: "drive123", user_id: "user1", status: "active" };
             cacheService.getOrSet.mockResolvedValue(mockDrive);
 
             const result = await DriveRepository.findByUserId("user1");
@@ -44,12 +45,12 @@ describe("DriveRepository", () => {
             expect(result).toEqual(mockDrive);
         });
 
-        it("should return null and log error on database failure", async () => {
+        it("should return null and log error on KV failure", async () => {
             const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             cacheService.getOrSet.mockImplementation(async (key, loader) => {
                 await loader(); // Call the loader function
             });
-            d1.fetchOne.mockRejectedValue(new Error("DB Error"));
+            kv.get.mockRejectedValue(new Error("KV Error"));
 
             const result = await DriveRepository.findByUserId("user1");
 
@@ -68,24 +69,31 @@ describe("DriveRepository", () => {
 
         it("should create drive successfully", async () => {
             const configData = { user: "test@example.com", pass: "password" };
-            d1.run.mockResolvedValue({ success: true });
+            kv.set.mockResolvedValue(true);
 
             const result = await DriveRepository.create("user1", "Mega-test@example.com", "mega", configData);
 
-            expect(d1.run).toHaveBeenCalledWith(
-                expect.stringContaining("INSERT INTO user_drives"),
-                ["user1", "Mega-test@example.com", "mega", JSON.stringify(configData), expect.any(Number)]
-            );
+            expect(kv.set).toHaveBeenCalledWith("drive:user1", expect.objectContaining({
+                id: expect.any(String),
+                user_id: "user1",
+                name: "Mega-test@example.com",
+                type: "mega",
+                config_data: configData,
+                status: "active"
+            }));
+            expect(kv.set).toHaveBeenCalledWith(expect.stringMatching(/^drive_id:.+/), expect.objectContaining({
+                id: expect.any(String),
+                user_id: "user1"
+            }));
             expect(cacheService.del).toHaveBeenCalledWith("drive_user1");
-            expect(cacheService.del).toHaveBeenCalledWith("drives:active");
             expect(result).toBe(true);
         });
 
-        it("should throw error on database failure", async () => {
+        it("should throw error on KV failure", async () => {
             const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-            d1.run.mockRejectedValue(new Error("DB Error"));
+            kv.set.mockRejectedValue(new Error("KV Error"));
 
-            await expect(DriveRepository.create("user1", "name", "mega", {})).rejects.toThrow("DB Error");
+            await expect(DriveRepository.create("user1", "name", "mega", {})).rejects.toThrow("KV Error");
             expect(consoleSpy).toHaveBeenCalled();
             consoleSpy.mockRestore();
         });
@@ -94,24 +102,30 @@ describe("DriveRepository", () => {
     describe("deleteByUserId", () => {
         it("should return early for invalid userId", async () => {
             await DriveRepository.deleteByUserId(null);
-            expect(d1.run).not.toHaveBeenCalled();
+            expect(kv.get).not.toHaveBeenCalled();
         });
 
         it("should delete drive by userId successfully", async () => {
-            d1.run.mockResolvedValue({ success: true });
+            const mockDrive = { id: "drive123", user_id: "user1" };
+            kv.get.mockResolvedValue(mockDrive);
+            kv.delete.mockResolvedValue(true);
 
             await DriveRepository.deleteByUserId("user1");
 
-            expect(d1.run).toHaveBeenCalledWith("DELETE FROM user_drives WHERE user_id = ?", ["user1"]);
+            expect(kv.get).toHaveBeenCalledWith("drive:user1", "json");
+            expect(kv.delete).toHaveBeenCalledWith("drive:user1");
+            expect(kv.delete).toHaveBeenCalledWith("drive_id:drive123");
             expect(cacheService.del).toHaveBeenCalledWith("drive_user1");
-            expect(cacheService.del).toHaveBeenCalledWith("drives:active");
         });
 
-        it("should throw error on database failure", async () => {
+        it("should throw error on KV failure during deletion", async () => {
             const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-            d1.run.mockRejectedValue(new Error("DB Error"));
+            // Mock findByUserId success
+            kv.get.mockResolvedValue({ id: "drive123", user_id: "user1" });
+            // Mock delete failure
+            kv.delete.mockRejectedValue(new Error("KV Delete Error"));
 
-            await expect(DriveRepository.deleteByUserId("user1")).rejects.toThrow("DB Error");
+            await expect(DriveRepository.deleteByUserId("user1")).rejects.toThrow("KV Delete Error");
             expect(consoleSpy).toHaveBeenCalled();
             consoleSpy.mockRestore();
         });
@@ -120,23 +134,30 @@ describe("DriveRepository", () => {
     describe("delete", () => {
         it("should return early for invalid driveId", async () => {
             await DriveRepository.delete(null);
-            expect(d1.run).not.toHaveBeenCalled();
+            expect(kv.get).not.toHaveBeenCalled();
         });
 
         it("should delete drive by id successfully", async () => {
-            d1.run.mockResolvedValue({ success: true });
+            const mockDrive = { id: "drive123", user_id: "user1" };
+            kv.get.mockResolvedValue(mockDrive);
+            kv.delete.mockResolvedValue(true);
 
-            await DriveRepository.delete("123");
+            await DriveRepository.delete("drive123");
 
-            expect(d1.run).toHaveBeenCalledWith("DELETE FROM user_drives WHERE id = ?", ["123"]);
+            expect(kv.get).toHaveBeenCalledWith("drive_id:drive123", "json");
+            expect(kv.delete).toHaveBeenCalledWith("drive:user1");
+            expect(kv.delete).toHaveBeenCalledWith("drive_id:drive123");
             expect(cacheService.del).toHaveBeenCalledWith("drives:active");
         });
 
-        it("should throw error on database failure", async () => {
+        it("should throw error on KV failure during deletion", async () => {
             const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-            d1.run.mockRejectedValue(new Error("DB Error"));
+            // Mock findById success
+            kv.get.mockResolvedValue({ id: "drive123", user_id: "user1" });
+            // Mock delete failure
+            kv.delete.mockRejectedValue(new Error("KV Delete Error"));
 
-            await expect(DriveRepository.delete("123")).rejects.toThrow("DB Error");
+            await expect(DriveRepository.delete("drive123")).rejects.toThrow("KV Delete Error");
             expect(consoleSpy).toHaveBeenCalled();
             consoleSpy.mockRestore();
         });
@@ -146,27 +167,24 @@ describe("DriveRepository", () => {
         it("should return null for invalid driveId", async () => {
             const result = await DriveRepository.findById(null);
             expect(result).toBeNull();
-            expect(d1.fetchOne).not.toHaveBeenCalled();
+            expect(kv.get).not.toHaveBeenCalled();
         });
 
         it("should return drive by id", async () => {
-            const mockDrive = { id: 123, user_id: "user1", status: "active" };
-            d1.fetchOne.mockResolvedValue(mockDrive);
+            const mockDrive = { id: "drive123", user_id: "user1", status: "active" };
+            kv.get.mockResolvedValue(mockDrive);
 
-            const result = await DriveRepository.findById("123");
+            const result = await DriveRepository.findById("drive123");
 
-            expect(d1.fetchOne).toHaveBeenCalledWith(
-                "SELECT * FROM user_drives WHERE id = ? AND status = 'active'",
-                ["123"]
-            );
+            expect(kv.get).toHaveBeenCalledWith("drive_id:drive123", "json");
             expect(result).toEqual(mockDrive);
         });
 
-        it("should return null and log error on database failure", async () => {
+        it("should return null and log error on KV failure", async () => {
             const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-            d1.fetchOne.mockRejectedValue(new Error("DB Error"));
+            kv.get.mockRejectedValue(new Error("KV Error"));
 
-            const result = await DriveRepository.findById("123");
+            const result = await DriveRepository.findById("drive123");
 
             expect(result).toBeNull();
             expect(consoleSpy).toHaveBeenCalled();
@@ -175,27 +193,14 @@ describe("DriveRepository", () => {
     });
 
     describe("findAll", () => {
-        it("should call d1.fetchAll with correct SQL", async () => {
-            const mockDrives = [
-                { id: 1, user_id: "user1", status: "active" },
-                { id: 2, user_id: "user2", status: "active" }
-            ];
-            d1.fetchAll.mockResolvedValue(mockDrives);
-
-            const result = await DriveRepository.findAll();
-
-            expect(d1.fetchAll).toHaveBeenCalledWith("SELECT * FROM user_drives WHERE status = 'active'");
-            expect(result).toEqual(mockDrives);
-        });
-
-        it("should return empty array and log error on failure", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-            d1.fetchAll.mockRejectedValue(new Error("DB Error"));
+        it("should return empty array and log warning", async () => {
+            const consoleSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 
             const result = await DriveRepository.findAll();
 
             expect(result).toEqual([]);
-            expect(consoleSpy).toHaveBeenCalled();
+            // Use stringContaining to avoid encoding issues with full Chinese string
+            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("DriveRepository.findAll"));
             consoleSpy.mockRestore();
         });
     });
