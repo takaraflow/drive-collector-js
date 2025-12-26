@@ -483,6 +483,24 @@ describe("Dispatcher", () => {
   describe("handle", () => {
     const ownerId = "123456";
 
+    test("should log blocked messages in globalGuard", async () => {
+      mockAuthGuard.getRole.mockResolvedValue("user");
+      mockAuthGuard.can.mockResolvedValue(false);
+      mockSettingsRepository.get.mockResolvedValue("private");
+      
+      const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+      
+      const event = {
+        userId: BigInt(789),
+        peer: { className: "PeerUser", userId: BigInt(789) },
+        className: "UpdateBotCallbackQuery"
+      };
+
+      await Dispatcher.handle(event);
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("🛡️ 消息被全局守卫拦截"));
+      logSpy.mockRestore();
+    });
+
     test("should route to callback handler", async () => {
       const event = {
         userId: BigInt(ownerId),

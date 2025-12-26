@@ -134,12 +134,19 @@ const processedMessages = new Map();
 
         // 4. 注册事件监听器 -> 交给分发器处理
         client.addEventHandler(async (event) => {
+            // 基础事件记录
+            if (event.className === 'UpdateNewMessage' || event.className === 'UpdateBotCallbackQuery') {
+                console.log(`📩 收到新事件: ${event.className}`);
+            }
+
             // 多实例分片处理：防止重复消息 (通过环境变量控制)
             const msgId = event.message?.id;
             if (msgId && process.env.INSTANCE_COUNT && process.env.INSTANCE_ID) {
                 const count = parseInt(process.env.INSTANCE_COUNT);
                 const id = parseInt(process.env.INSTANCE_ID);
                 if (msgId % count !== (id - 1) % count) {
+                    // 仅在 debug 时记录，或者适当减少此类日志
+                    // console.log(`[Sharding] Instance ${id} skipping msg ${msgId} (belongs to instance ${(msgId % count) + 1})`);
                     return; // 跳过不属于此实例的消息
                 }
             }
@@ -148,7 +155,7 @@ const processedMessages = new Map();
             if (msgId) {
                 const now = Date.now();
                 if (processedMessages.has(msgId)) {
-                    console.log(`Skipping duplicate message ${msgId}`);
+                    console.log(`♻️ 跳过重复消息 ${msgId} (已由本实例或其他分片处理)`);
                     return;
                 }
                 processedMessages.set(msgId, now);

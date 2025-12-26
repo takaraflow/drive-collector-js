@@ -43,7 +43,10 @@ export class Dispatcher {
 
         // 2. 全局前置守卫 (权限、维护模式)
         const passed = await this._globalGuard(event, ctx);
-        if (!passed) return;
+        if (!passed) {
+            console.log(`🛡️ 消息被全局守卫拦截 (User: ${ctx.userId})`);
+            return;
+        }
 
         // 3. 路由分发
         // 使用 className 检查替代 instanceof，提高鲁棒性并方便测试
