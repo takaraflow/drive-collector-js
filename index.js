@@ -152,12 +152,15 @@ const processedMessages = new Map();
             if (msgId && process.env.INSTANCE_COUNT && process.env.INSTANCE_ID) {
                 const count = parseInt(process.env.INSTANCE_COUNT);
                 const id = parseInt(process.env.INSTANCE_ID);
-                if (msgId % count !== (id - 1) % count) {
-                    // 仅在 debug 时记录，或者适当减少此类日志
-                    // console.log(`[Sharding] Instance ${id} skipping msg ${msgId} (belongs to instance ${(msgId % count) + 1})`);
+                const expectedInstance = (msgId % count) + 1; // 实例ID从1开始
+                if ((id - 1) % count !== msgId % count) {
+                    console.log(`🗂️ 分片跳过: 消息 ${msgId} 应由实例 ${expectedInstance} 处理 (当前实例: ${id})`);
                     return; // 跳过不属于此实例的消息
+                } else {
+                    console.log(`✅ 分片处理: 消息 ${msgId} 由实例 ${id} 处理`);
                 }
             }
++++++++ REPLACE</parameter>
             
             // 去重检查：防止多实例部署时的重复处理
             if (msgId) {
