@@ -44,11 +44,27 @@ export const saveSession = async () => {
 /**
  * 重置客户端 Session 为空（用于 AUTH_KEY_DUPLICATED 恢复）
  */
-export const resetClientSession = () => {
+export const resetClientSession = async () => {
     try {
+        if (client.connected) {
+            console.log("🔌 正在断开 Telegram 客户端连接...");
+            await client.disconnect();
+        }
+
+        // 彻底销毁旧的连接器状态 (如果是 TIMEOUT 错误，可能内部状态已损坏)
+        // GramJS 内部会管理 _sender，这里手动清理以防万一
+        if (client._sender) {
+            try {
+                await client._sender.disconnect();
+            } catch (e) {
+                console.warn("⚠️ 清理 GramJS _sender 失败:", e.message);
+            }
+            client._sender = undefined; // 清除引用
+        }
+
         // 将当前客户端的 Session 替换为空的新 Session
         client.session = new StringSession("");
-        console.log("🔄 客户端内存 Session 已重置");
+        console.log("🔄 客户端内存 Session 已重置，准备重新连接...");
     } catch (e) {
         console.error("❌ 重置内存 Session 失败:", e);
     }
@@ -180,7 +196,7 @@ setInterval(async () => {
         await client.getMe();
         lastHeartbeat = Date.now();
     } catch (e) {
-        if (e.code === 406 && e.errorMessage?.includes('AUTH_KEY_DUPLICATED')) {
+        if (e.code === 406 && e.errorMessage?.includes("AUTH_KEY_DUPLICATED")) {
             console.error("🚨 检测到 AUTH_KEY_DUPLICATED，会话已在别处激活，本实例应停止连接");
             // 这里不主动 disconnect，让 index.js 的锁续租失败来处理，
             // 或者标记需要重置

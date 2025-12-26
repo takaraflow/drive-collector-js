@@ -27,44 +27,74 @@ class D1Service {
             throw new Error("D1 Error: Missing configuration (Account ID or Database ID)");
         }
 
-        try {
-            const requestBody = {
-                sql: sql,
-                params: params,
-            };
+        let attempts = 0;
+        const maxAttempts = 3;
 
-            const response = await fetch(this.apiUrl, {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${this.token}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify(requestBody),
-            });
+        while (attempts < maxAttempts) {
+            try {
+                const requestBody = {
+                    sql: sql,
+                    params: params,
+                };
 
-            if (!response.ok) {
-                // 详细的错误诊断
-                console.error(`🚨 D1 HTTP Error ${response.status}: ${response.statusText}`);
-                console.error(`   URL: ${this.apiUrl}`);
-                // 尝试读取响应体以获取更多错误细节
-                try {
-                    const errorBody = await response.text();
-                    console.error(`   Response: ${errorBody}`);
-                } catch (e) {}
-                
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
+                const response = await fetch(this.apiUrl, {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${this.token}`,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(requestBody),
+                });
 
-            const result = await response.json();
-            if (!result.success) {
-                throw new Error(`D1 Error: ${result.errors[0]?.message || "Unknown error"}`);
+                if (!response.ok) {
+                    // 如果是服务器错误 (5xx) 或特定的 4xx 错误，尝试读取 body 判断是否可重试
+                    const isServerError = response.status >= 500;
+                    let errorBody = "";
+                    try {
+                        errorBody = await response.text();
+                    } catch (e) {}
+
+                    // 检查是否是 "Network connection lost" (Code 7500)
+                    const isNetworkLost = errorBody.includes('"code":7500') || errorBody.includes('Network connection lost');
+                    
+                    if ((isServerError || isNetworkLost) && attempts < maxAttempts - 1) {
+                        attempts++;
+                        const delay = attempts * 2000; // 线性退避: 2s, 4s
+                        console.warn(`⚠️ D1 请求失败 (${response.status})，${isNetworkLost ? '检测到连接丢失，' : ''}正在重试 (${attempts}/${maxAttempts})...`);
+                        await new Promise(r => setTimeout(r, delay));
+                        continue;
+                    }
+
+                    // 详细的错误诊断
+                    console.error(`🚨 D1 HTTP Error ${response.status}: ${response.statusText}`);
+                    console.error(`   URL: ${this.apiUrl}`);
+                    if (errorBody) console.error(`   Response: ${errorBody}`);
+                    
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(`D1 Error: ${result.errors[0]?.message || "Unknown error"}`);
+                }
+                return result.result[0];
+
+            } catch (error) {
+                // 处理 fetch 网络错误 (DNS, Timeout 等)
+                if ((error.name === 'TypeError' && error.message.includes('fetch')) || 
+                    error.message.includes('network') || 
+                    error.message.includes('timeout')) {
+                    
+                    if (attempts < maxAttempts - 1) {
+                        attempts++;
+                        console.warn(`⚠️ D1 网络请求异常: ${error.message}，正在重试 (${attempts}/${maxAttempts})...`);
+                        await new Promise(r => setTimeout(r, 2000));
+                        continue;
+                    }
+                    throw new Error('D1 Error: Network connection lost (Max retries exceeded)');
+                }
+                throw error;
             }
-            return result.result[0];
-        } catch (error) {
-            if (error.name === 'TypeError' && error.message.includes('fetch')) {
-                throw new Error('D1 Error: Network connection lost');
-            }
-            throw error;
         }
     }
 

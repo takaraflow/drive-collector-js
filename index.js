@@ -33,25 +33,29 @@ process.on("uncaughtException", (err) => {
         console.log("🔄 正在启动应用...");
 
         // --- 🛡️ 启动退避机制 (Startup Backoff) ---
-        const lastStartup = await SettingsRepository.get("last_startup_time", "0");
-        const now = Date.now();
-        const diff = now - parseInt(lastStartup);
-        
-        // 如果两次启动间隔小于 60 秒，触发退避
-        if (diff < 60 * 1000) {
-            const crashCount = parseInt(await SettingsRepository.get("recent_crash_count", "0")) + 1;
-            await SettingsRepository.set("recent_crash_count", crashCount.toString());
+        try {
+            const lastStartup = await SettingsRepository.get("last_startup_time", "0");
+            const now = Date.now();
+            const diff = now - parseInt(lastStartup);
             
-            // 指数级增加退避时间：基础 10s * crashCount，最大 5 分钟
-            const backoffSeconds = Math.min(10 * crashCount + Math.floor((60 * 1000 - diff) / 1000), 300);
-            
-            console.warn(`⚠️ 检测到频繁重启 (次数: ${crashCount}, 间隔: ${Math.floor(diff/1000)}s)，启动退避：休眠 ${backoffSeconds}s...`);
-            await new Promise(r => setTimeout(r, backoffSeconds * 1000));
-        } else {
-            // 如果启动间隔正常，重置崩溃计数
-            await SettingsRepository.set("recent_crash_count", "0");
+            // 如果两次启动间隔小于 60 秒，触发退避
+            if (diff < 60 * 1000) {
+                const crashCount = parseInt(await SettingsRepository.get("recent_crash_count", "0")) + 1;
+                await SettingsRepository.set("recent_crash_count", crashCount.toString());
+                
+                // 指数级增加退避时间：基础 10s * crashCount，最大 5 分钟
+                const backoffSeconds = Math.min(10 * crashCount + Math.floor((60 * 1000 - diff) / 1000), 300);
+                
+                console.warn(`⚠️ 检测到频繁重启 (次数: ${crashCount}, 间隔: ${Math.floor(diff/1000)}s)，启动退避：休眠 ${backoffSeconds}s...`);
+                await new Promise(r => setTimeout(r, backoffSeconds * 1000));
+            } else {
+                // 如果启动间隔正常，重置崩溃计数
+                await SettingsRepository.set("recent_crash_count", "0");
+            }
+            await SettingsRepository.set("last_startup_time", Date.now().toString());
+        } catch (settingsError) {
+            console.warn("⚠️ 启动退避逻辑执行失败 (D1/KV 异常)，跳过退避，直接启动:", settingsError.message);
         }
-        await SettingsRepository.set("last_startup_time", Date.now().toString());
 
         // 2. 启动 HTTP 健康检查端口 (用于保活)
         http.createServer((req, res) => {

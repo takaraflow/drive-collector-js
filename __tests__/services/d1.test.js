@@ -95,22 +95,24 @@ describe("D1 Service", () => {
       await expect(d1Instance._execute(sql, params)).rejects.toThrow("D1 Error: D1 specific error");
     });
 
-    test("should throw network error if fetch fails", async () => {
+    test("should throw network error if fetch fails after retries", async () => {
       const networkError = new TypeError("Failed to fetch");
-      mockFetch.mockRejectedValueOnce(networkError);
+      // Mock fetch to fail 3 times (max retries)
+      mockFetch.mockRejectedValue(networkError);
 
       const sql = "SELECT * FROM users";
       const params = [];
 
-      await expect(d1Instance._execute(sql, params)).rejects.toThrow("D1 Error: Network connection lost");
+      await expect(d1Instance._execute(sql, params)).rejects.toThrow("D1 Error: Network connection lost (Max retries exceeded)");
     });
 
     test("should throw HTTP error for non-200 responses", async () => {
-      mockFetch.mockResolvedValueOnce({
+      // Mock fetch to return 500 error on all attempts
+      mockFetch.mockResolvedValue({
         ok: false,
         status: 500,
         statusText: "Internal Server Error",
-        json: () => Promise.resolve({}),
+        text: () => Promise.resolve("{}"),
       });
 
       const sql = "SELECT * FROM users";
