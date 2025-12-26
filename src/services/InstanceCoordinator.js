@@ -152,6 +152,20 @@ export class InstanceCoordinator {
     }
 
     /**
+     * 检查当前实例是否持有特定的锁
+     * @param {string} lockKey - 锁的键
+     * @returns {boolean}
+     */
+    async hasLock(lockKey) {
+        try {
+            const existing = await kv.get(`lock:${lockKey}`, "json", { skipCache: true });
+            return existing && existing.instanceId === this.instanceId;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /**
      * 获取所有实例（包括可能过期的）
      */
     async getAllInstances() {

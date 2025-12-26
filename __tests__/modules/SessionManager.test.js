@@ -32,7 +32,7 @@ describe("SessionManager", () => {
 
       const session = await SessionManager.get(userId);
 
-      expect(kv.get).toHaveBeenCalledWith(`session:${userId}`);
+      expect(kv.get).toHaveBeenCalledWith(`session:${userId}`, expect.anything(), expect.anything());
       expect(session).toEqual(mockSession);
     });
 
@@ -96,7 +96,7 @@ describe("SessionManager", () => {
 
       const result = await SessionManager.update(userId, "STEP", {});
 
-      expect(kv.get).toHaveBeenCalledWith(`session:${userId}`);
+      expect(kv.get).toHaveBeenCalledWith(`session:${userId}`, expect.anything(), expect.anything());
       expect(kv.set).not.toHaveBeenCalled();
       expect(result).toBeUndefined();
     });

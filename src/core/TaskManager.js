@@ -350,7 +350,7 @@ export class TaskManager {
             tasksToUpload.forEach(task => this._enqueueUploadTask(task));
 
         } catch (e) {
-            console.error(`批量恢复会话 \${chatId} 的任务失败:`, e);
+            console.error(`批量恢复会话 ${chatId} 的任务失败:`, e);
         }
     }
 
@@ -386,9 +386,8 @@ export class TaskManager {
                 fileSize: info?.size
             });
 
-            const task = this._createTaskObject(taskId, userId, chatIdStr, statusMsg.id, mediaMessage);
-            this._enqueueTask(task);
-            this.updateQueueUI();
+            // 解耦：仅存入数据库，等待轮询机制认领处理
+            console.log(`📝 Task ${taskId} created and persisted to database. Waiting for instance to claim.`);
 
         } catch (e) {
             console.error("Task creation failed:", e);
@@ -423,7 +422,6 @@ export class TaskManager {
         );
 
         const tasksData = [];
-        const taskObjects = [];
 
         for (const msg of messages) {
             const taskId = randomUUID();
@@ -438,18 +436,11 @@ export class TaskManager {
                 fileName: info?.name,
                 fileSize: info?.size
             });
-
-            const task = this._createTaskObject(taskId, userId, chatIdStr, statusMsg.id, msg);
-            task.isGroup = true;
-            taskObjects.push(task);
         }
 
         await TaskRepository.createBatch(tasksData);
-
-        for (const task of taskObjects) {
-            this._enqueueTask(task);
-        }
-        this.updateQueueUI();
+        // 解耦：批量任务也通过轮询认领
+        console.log(`📝 Batch tasks (${messages.length}) created and persisted. Waiting for instance to claim.`);
     }
 
     /**
@@ -844,15 +835,12 @@ export class TaskManager {
         } finally {
             // 上传完成后异步清理本地文件
             try {
-                // 检查 fs.promises 是否可用（兼容性处理）
                 if (fs.promises && fs.promises.unlink) {
                     await fs.promises.unlink(localPath);
                 } else {
-                    // 降级到同步删除（用于测试环境）
                     fs.unlinkSync(localPath);
                 }
             } catch (e) {
-                // 忽略清理失败的错误，文件可能已被其他进程处理
                 console.warn(`Failed to cleanup local file ${localPath}:`, e.message);
             }
             this.activeWorkers.delete(id);
@@ -931,26 +919,13 @@ export class TaskManager {
 
     /**
      * [私有] 检查文件大小是否匹配（带动态容差）
-     * @param {number} size1 - 第一个文件大小
-     * @param {number} size2 - 第二个文件大小
-     * @returns {boolean} 是否匹配
      */
     static _isSizeMatch(size1, size2) {
         const diff = Math.abs(size1 - size2);
         const maxSize = Math.max(size1, size2);
-
-        // 小文件：容差10KB
-        if (maxSize < 1024 * 1024) {
-            return diff < 10 * 1024;
-        }
-        // 中等文件：容差1MB
-        else if (maxSize < 100 * 1024 * 1024) {
-            return diff < 1024 * 1024;
-        }
-        // 大文件：容差10MB
-        else {
-            return diff < 10 * 1024 * 1024;
-        }
+        if (maxSize < 1024 * 1024) return diff < 10 * 1024;
+        else if (maxSize < 100 * 1024 * 1024) return diff < 1024 * 1024;
+        else return diff < 10 * 1024 * 1024;
     }
 
     /**
@@ -962,41 +937,99 @@ export class TaskManager {
         const now = Date.now();
         const isFinal = status === 'completed' || status === 'failed' || status === 'cancelled';
 
-        // 动态节流：最终状态立即更新，进度状态智能节流
-        let throttleMs = 0;
-        if (!isFinal) {
-            // 非最终状态的智能节流
-            if (status === 'downloading' || status === 'uploading') {
-                // 下载/上传状态：根据进度调整节流时间
-                const progress = total > 0 ? downloaded / total : 0;
-                if (progress < 0.1) {
-                    throttleMs = 1000; // 初期：1秒
-                } else if (progress < 0.5) {
-                    throttleMs = 2000; // 中期：2秒
-                } else {
-                    throttleMs = 3000; // 后期：3秒
-                }
-            } else {
-                // 其他状态：2秒节流
-                throttleMs = 2000;
-            }
-        }
-
-        if (now - lastUpdate < throttleMs && !isFinal) return;
+        if (now - lastUpdate < 2000 && !isFinal) return;
         this.monitorLocks.set(msgId, now);
 
         const groupTasks = await TaskRepository.findByMsgId(msgId);
         if (!groupTasks.length) return;
-
-        // 【修复】不再批量更新整个组的状态，而是只更新当前任务的状态
-        // 逻辑已在 worker 中处理了 TaskRepository.updateStatus，这里仅做 UI 刷新
 
         const { text } = UIHelper.renderBatchMonitor(groupTasks, task, status, downloaded, total, errorMsg);
 
         let peer = task.chatId;
         if (typeof peer === 'string' && /^-?\d+$/.test(peer)) peer = BigInt(peer);
 
-        // 使用统一的 safeEdit 以处理 MESSAGE_NOT_MODIFIED 等错误
         await safeEdit(peer, parseInt(task.msgId), text, null, task.userId, "html");
+    }
+
+    static pollingTimer = null;
+
+    /**
+     * 启动任务轮询机制
+     */
+    static startPolling() {
+        if (this.pollingTimer) return;
+        console.log("🔍 任务轮询机制已启动");
+        this.pollingTimer = setInterval(() => this.pollTasks(), 10000); // 每 10 秒检查一次
+    }
+
+    /**
+     * 停止任务轮询
+     */
+    static stopPolling() {
+        if (this.pollingTimer) {
+            clearInterval(this.pollingTimer);
+            this.pollingTimer = null;
+        }
+    }
+
+    /**
+     * 轮询并认领任务
+     */
+    static async pollTasks() {
+        try {
+            if (this.getProcessingCount() >= 5) return;
+
+            const hasTgLock = await instanceCoordinator.hasLock("telegram_client");
+            if (hasTgLock) {
+                const queuedTasks = await TaskRepository.findStalledTasks(300000, 'queued');
+                for (const row of queuedTasks) {
+                    if (this.getProcessingCount() >= 5) break;
+                    if (this.activeWorkers.has(row.id)) continue;
+                    console.log(`🤖 Instance claiming download task: ${row.id}`);
+                    this._restoreAndEnqueue(row);
+                }
+            }
+
+            const uploadTasks = await TaskRepository.findStalledTasks(300000, 'downloaded');
+            for (const row of uploadTasks) {
+                if (this.getProcessingCount() >= 5) break;
+                if (this.activeWorkers.has(row.id)) continue;
+                const localPath = path.join(config.downloadDir, row.file_name);
+                if (!fs.existsSync(localPath)) continue;
+                console.log(`🤖 Instance claiming upload task: ${row.id}`);
+                this._restoreAndEnqueue(row);
+            }
+        } catch (e) {
+            console.error("Task polling error:", e);
+        }
+    }
+
+    /**
+     * [私有] 恢复并入队单个任务
+     */
+    static async _restoreAndEnqueue(row) {
+        try {
+            const messages = await runMtprotoTaskWithRetry(() => client.getMessages(row.chat_id, { ids: [row.source_msg_id] }), { priority: PRIORITY.BACKGROUND });
+            const message = messages[0];
+            if (!message || !message.media) {
+                await TaskRepository.updateStatus(row.id, 'failed', 'Source msg missing');
+                return;
+            }
+
+            const task = this._createTaskObject(row.id, row.user_id, row.chat_id, row.msg_id, message);
+            if (row.status === 'downloaded' || row.status === 'uploading') {
+                const localPath = path.join(config.downloadDir, row.file_name);
+                if (fs.existsSync(localPath)) {
+                    task.localPath = localPath;
+                    this._enqueueUploadTask(task);
+                } else {
+                    this._enqueueTask(task);
+                }
+            } else {
+                this._enqueueTask(task);
+            }
+        } catch (e) {
+            console.error(`Failed to restore task ${row.id}:`, e);
+        }
     }
 }

@@ -77,7 +77,7 @@ describe("InstanceCoordinator Dual Registration", () => {
                 id: "test_instance_dual",
                 status: "active"
             }),
-            120
+            180
         );
     });
 
@@ -103,7 +103,7 @@ describe("InstanceCoordinator Dual Registration", () => {
                 id: "test_instance_dual",
                 status: "active"
             }),
-            120
+            180
         );
     });
 
@@ -123,8 +123,8 @@ describe("InstanceCoordinator Dual Registration", () => {
         // Start heartbeat manually for testing
         await instanceCoordinator.startHeartbeat();
 
-        // Advance timer to trigger heartbeat
-        jest.advanceTimersByTime(31000);
+        // Advance timer to trigger heartbeat (interval is 60s)
+        jest.advanceTimersByTime(61000);
         if (instanceCoordinator.heartbeatTimer) {
             clearInterval(instanceCoordinator.heartbeatTimer);
             instanceCoordinator.heartbeatTimer = null;
@@ -144,8 +144,8 @@ describe("InstanceCoordinator Dual Registration", () => {
         // Start heartbeat
         await instanceCoordinator.startHeartbeat();
 
-        // Advance timer to trigger heartbeat
-        jest.advanceTimersByTime(31000);
+        // Advance timer to trigger heartbeat (interval is 60s)
+        jest.advanceTimersByTime(61000);
         if (instanceCoordinator.heartbeatTimer) {
             clearInterval(instanceCoordinator.heartbeatTimer);
             instanceCoordinator.heartbeatTimer = null;

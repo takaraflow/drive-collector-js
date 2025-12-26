@@ -292,7 +292,7 @@ describe("TaskManager", () => {
     });
 
     describe("addTask", () => {
-        test("should add a task correctly", async () => {
+        test("should add a task to database (Decoupled)", async () => {
             const target = "chat123";
             const mediaMessage = { id: 200 };
             const userId = "user456";
@@ -302,9 +302,13 @@ describe("TaskManager", () => {
             await TaskManager.addTask(target, mediaMessage, userId, "TestLabel");
 
             expect(mockClient.sendMessage).toHaveBeenCalled();
-            expect(mockTaskRepository.create).toHaveBeenCalled();
-            expect(TaskManager.waitingTasks.length).toBe(1);
-            expect(TaskManager.waitingTasks[0].userId).toBe(userId);
+            expect(mockTaskRepository.create).toHaveBeenCalledWith(expect.objectContaining({
+                userId: userId,
+                sourceMsgId: 200
+            }));
+            
+            // In decoupled mode, it should NOT be enqueued immediately
+            expect(TaskManager.waitingTasks.length).toBe(0);
         });
     });
 
