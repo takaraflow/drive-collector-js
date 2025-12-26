@@ -60,8 +60,8 @@ describe("InstanceCoordinator", () => {
 
   test("should initialize with correct instance ID", () => {
     expect(instanceCoordinator.instanceId).toBe("test_instance_123");
-    expect(instanceCoordinator.heartbeatInterval).toBe(30000);
-    expect(instanceCoordinator.instanceTimeout).toBe(120000);
+    expect(instanceCoordinator.heartbeatInterval).toBe(60000);
+    expect(instanceCoordinator.instanceTimeout).toBe(180000);
   });
 
   describe("registerInstance", () => {

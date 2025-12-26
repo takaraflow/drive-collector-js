@@ -7,7 +7,8 @@ export class SessionManager {
 
     // 获取用户当前状态
     static async get(userId) {
-        return await kv.get(this.getSessionKey(userId));
+        // 使用 30 秒内存缓存，减少同一用户交互时的 KV 调用
+        return await kv.get(this.getSessionKey(userId), "json", { cacheTtl: 30000 });
     }
 
     // 开启新会话 (覆盖旧的)
@@ -19,6 +20,7 @@ export class SessionManager {
             updated_at: Date.now()
         };
         // 会话默认保留 24 小时 (86400 秒)
+        // 写入时同时更新 L1 缓存
         await kv.set(this.getSessionKey(userId), session, 86400);
     }
 

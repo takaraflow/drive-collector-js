@@ -243,10 +243,19 @@ let lastKVCheck = 0;
 const checkCooling = async () => {
     const now = Date.now();
     
-    // 每 10 秒从 KV 同步一次冷却状态，防止多实例并发踩坑
-    if (now - lastKVCheck > 10000) {
+    // 1. 如果本地已经处于冷静期，直接等待，不需要同步 KV
+    if (now < globalCoolingUntil) {
+        const waitTime = globalCoolingUntil - now;
+        console.warn(`❄️ System is in LOCAL cooling period, waiting ${waitTime}ms...`);
+        await sleep(waitTime);
+        return;
+    }
+
+    // 2. 每 30 秒从 KV 同步一次全局冷却状态（延长同步间隔）
+    if (now - lastKVCheck > 30000) {
         try {
-            const remoteCooling = await kv.get("system:cooling_until", "text");
+            // 使用缓存读取，虽然 kv.get 已经有了 L1，但这里显式设置较长 TTL
+            const remoteCooling = await kv.get("system:cooling_until", "text", { cacheTtl: 30000 });
             if (remoteCooling) {
                 globalCoolingUntil = Math.max(globalCoolingUntil, parseInt(remoteCooling));
             }

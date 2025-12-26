@@ -20,6 +20,23 @@ class CacheService {
     }
 
     /**
+     * 检查值是否未变且未过期
+     * @param {string} key 
+     * @param {any} newValue 
+     * @returns {boolean}
+     */
+    isUnchanged(key, newValue) {
+        const cached = this.get(key);
+        if (cached === null) return false;
+        
+        try {
+            return JSON.stringify(cached) === JSON.stringify(newValue);
+        } catch (e) {
+            return cached === newValue;
+        }
+    }
+
+    /**
      * 获取缓存
      * @param {string} key 
      * @returns {any|null}

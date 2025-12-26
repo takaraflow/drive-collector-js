@@ -1,9 +1,10 @@
 import { config } from "../config/index.js";
+import { cacheService } from "../utils/CacheService.js";
 
 /**
  * --- KV 存储服务层 ---
  * 支持 Cloudflare KV 和 Upstash Redis REST API
- * 具有自动故障转移功能
+ * 具有自动故障转移功能，并集成 L1 内存缓存减少物理调用
  */
 class KVService {
     constructor() {
@@ -12,6 +13,9 @@ class KVService {
         this.namespaceId = process.env.CF_KV_NAMESPACE_ID;
         this.token = process.env.CF_KV_TOKEN || process.env.CF_D1_TOKEN;
         this.apiUrl = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/storage/kv/namespaces/${this.namespaceId}`;
+
+        // L1 内存缓存配置
+        this.l1CacheTtl = 10 * 1000; // 默认 10 秒内存缓存
 
         // Upstash备用配置
         this.upstashUrl = process.env.UPSTASH_REDIS_REST_URL;
@@ -76,7 +80,6 @@ class KVService {
     _failover() {
         if (this.currentProvider === 'cloudflare' && this.hasUpstash) {
             // 关键修复：在启动新检查任务前，必须先清理可能存在的旧定时器
-            // 这样可以防止在测试环境或高频率切换时产生多个未关闭的句柄，导致 Jest 无法退出
             if (this.recoveryTimer) {
                 clearInterval(this.recoveryTimer);
                 this.recoveryTimer = null;
@@ -139,25 +142,12 @@ class KVService {
 
     /**
      * 检查是否处于故障转移模式
-     * @returns {boolean} true 表示当前使用的提供商与配置的默认提供商不一致
      */
     get isFailoverMode() {
-        // 如果配置了强制使用 Upstash，则当前必须是 Upstash 才不算 failover
         if (process.env.KV_PROVIDER === 'upstash') {
             return this.currentProvider !== 'upstash';
         }
-        // 默认是 Cloudflare，如果当前是 Upstash，则处于 failover 模式
         return this.currentProvider === 'upstash';
-    }
-
-    _isNetworkOrQuotaError(error) {
-        const msg = error.message.toLowerCase();
-        return msg.includes('free usage limit') ||
-            msg.includes('quota exceeded') ||
-            msg.includes('rate limit') ||
-            msg.includes('fetch failed') ||
-            msg.includes('network') ||
-            msg.includes('timeout');
     }
 
     /**
@@ -186,17 +176,14 @@ class KVService {
             } catch (error) {
                 attempts++;
 
-                // 如果不是可重试错误，或者已经是 Upstash 模式，立即抛出
                 if (!this._isRetryableError(error) || this.currentProvider === 'upstash') {
                     throw error;
                 }
 
-                // 尝试故障转移
                 if (this._shouldFailover(error)) {
-                    if (this._failover()) continue; // 切换后重试
+                    if (this._failover()) continue;
                 }
 
-                // 只有 Cloudflare 的网络/额度错误且未达阈值才继续循环
                 if (attempts >= maxAttempts) throw error;
                 console.log(`ℹ️ ${this.getCurrentProvider()} 重试中 (${attempts}/${maxAttempts})...`);
             }
@@ -260,9 +247,22 @@ class KVService {
      * @param {string} key
      * @param {any} value - 会被 JSON.stringify
      * @param {number} expirationTtl - 过期时间（秒），最小 60 秒
+     * @param {Object} options - { skipCache: boolean }
      */
-    async set(key, value, expirationTtl = null) {
-        return await this._executeWithFailover('set', key, value, expirationTtl);
+    async set(key, value, expirationTtl = null, options = {}) {
+        // 1. 检查 L1 缓存，如果值没变且未过期，跳过物理写入（减少 KV 调用）
+        if (!options.skipCache && cacheService.isUnchanged(`kv:${key}`, value)) {
+            return true;
+        }
+
+        const result = await this._executeWithFailover('set', key, value, expirationTtl);
+        
+        // 2. 更新 L1 缓存
+        if (result && !options.skipCache) {
+            cacheService.set(`kv:${key}`, value, this.l1CacheTtl);
+        }
+        
+        return result;
     }
 
     /**
@@ -311,7 +311,7 @@ class KVService {
             try {
                 return JSON.parse(value);
             } catch (e) {
-                return value; // 如果不是有效的JSON，返回字符串
+                return value;
             }
         }
         return value;
@@ -321,9 +321,23 @@ class KVService {
      * 读取键值
      * @param {string} key
      * @param {string} type - 'text' | 'json'
+     * @param {Object} options - { skipCache: boolean, cacheTtl: number }
      */
-    async get(key, type = "json") {
-        return await this._executeWithFailover('get', key, type);
+    async get(key, type = "json", options = {}) {
+        // 1. 尝试从 L1 缓存获取
+        if (!options.skipCache) {
+            const cached = cacheService.get(`kv:${key}`);
+            if (cached !== null) return cached;
+        }
+
+        const value = await this._executeWithFailover('get', key, type);
+        
+        // 2. 写入 L1 缓存
+        if (value !== null && !options.skipCache) {
+            cacheService.set(`kv:${key}`, value, options.cacheTtl || this.l1CacheTtl);
+        }
+        
+        return value;
     }
 
     /**
@@ -359,7 +373,7 @@ class KVService {
         if (result.error) {
             throw new Error(`Upstash Delete Error: ${result.error}`);
         }
-        return result.result > 0; // 返回删除的数量
+        return result.result > 0;
     }
 
     /**
@@ -367,6 +381,7 @@ class KVService {
      * @param {string} key
      */
     async delete(key) {
+        cacheService.del(`kv:${key}`);
         return await this._executeWithFailover('delete', key);
     }
 
@@ -394,11 +409,9 @@ class KVService {
     }
 
     /**
-     * Upstash bulkSet 实现 - 已升级为 Pipeline 模式
-     * 减少 HTTP 请求次数，提升批量写入效率
+     * Upstash bulkSet 实现
      */
     async _upstash_bulkSet(pairs) {
-        // 构造 Pipeline 指令集
         const commands = pairs.map(p => {
             const valueStr = typeof p.value === "string" ? p.value : JSON.stringify(p.value);
             return ["SET", p.key, valueStr];
@@ -414,8 +427,6 @@ class KVService {
         });
 
         const results = await response.json();
-        
-        // 检查 Pipeline 中是否有任何指令执行失败
         const errorResult = results.find(r => r.error);
         if (errorResult) {
             throw new Error(`Upstash Pipeline Error: ${errorResult.error}`);
@@ -429,6 +440,9 @@ class KVService {
      * @param {Array<{key: string, value: string}>} pairs
      */
     async bulkSet(pairs) {
+        pairs.forEach(p => {
+            cacheService.set(`kv:${p.key}`, p.value, this.l1CacheTtl);
+        });
         return await this._executeWithFailover('bulkSet', pairs);
     }
 }

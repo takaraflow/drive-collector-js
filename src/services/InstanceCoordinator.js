@@ -10,8 +10,8 @@ import { InstanceRepository } from "../repositories/InstanceRepository.js";
 export class InstanceCoordinator {
     constructor() {
         this.instanceId = process.env.INSTANCE_ID || `instance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        this.heartbeatInterval = 30000; // 30秒心跳
-        this.instanceTimeout = 120000; // 2分钟超时
+        this.heartbeatInterval = 60000; // 延长至60秒心跳，减少 KV 调用
+        this.instanceTimeout = 180000; // 3分钟超时
         this.heartbeatTimer = null;
         this.isLeader = false;
         this.activeInstances = new Set();
@@ -170,7 +170,8 @@ export class InstanceCoordinator {
             const instances = [];
             for (const instanceId of this.activeInstances) {
                 try {
-                    const instance = await kv.get(`instance:${instanceId}`);
+                    // 使用缓存读取，防止高频调用
+                    const instance = await kv.get(`instance:${instanceId}`, "json", { cacheTtl: 30000 });
                     if (instance) instances.push(instance);
                 } catch (e) {
                     // 忽略单个实例获取失败
@@ -248,8 +249,8 @@ export class InstanceCoordinator {
 
         try {
             // 尝试原子性地设置锁，如果键不存在则成功
-            // Cloudflare KV 不支持真正的条件操作，这里使用时间戳作为版本号
-            const existing = await kv.get(`lock:${lockKey}`);
+            // 锁的读取不使用 L1 缓存，确保实时性
+            const existing = await kv.get(`lock:${lockKey}`, "json", { skipCache: true });
 
             if (existing) {
                 // 检查锁是否仍然有效
@@ -263,7 +264,7 @@ export class InstanceCoordinator {
 
             // 设置锁，使用时间戳作为额外的验证
             lockValue.version = Date.now();
-            await kv.set(`lock:${lockKey}`, lockValue, ttl);
+            await kv.set(`lock:${lockKey}`, lockValue, ttl, { skipCache: true });
             return true;
         } catch (e) {
             console.error(`获取锁失败 ${lockKey}:`, e?.message || String(e));
@@ -277,7 +278,7 @@ export class InstanceCoordinator {
      */
     async releaseLock(lockKey) {
         try {
-            const existing = await kv.get(`lock:${lockKey}`);
+            const existing = await kv.get(`lock:${lockKey}`, "json", { skipCache: true });
             if (existing && existing.instanceId === this.instanceId) {
                 await kv.delete(`lock:${lockKey}`);
             }
