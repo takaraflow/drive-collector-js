@@ -9,6 +9,12 @@ class D1Service {
         this.accountId = process.env.CF_ACCOUNT_ID;
         this.databaseId = process.env.CF_D1_DATABASE_ID;
         this.token = process.env.CF_D1_TOKEN;
+
+        // 验证必要的配置
+        if (!this.accountId || !this.databaseId || !this.token) {
+            console.warn("⚠️ D1配置缺失: 请检查 CF_ACCOUNT_ID, CF_D1_DATABASE_ID, CF_D1_TOKEN");
+        }
+
         this.apiUrl = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/d1/database/${this.databaseId}/query`;
     }
 
@@ -16,20 +22,36 @@ class D1Service {
      * 核心请求器：发送 SQL 到 Cloudflare
      */
     async _execute(sql, params = []) {
+        // 如果配置缺失，直接报错，避免发送无效请求
+        if (!this.accountId || !this.databaseId) {
+            throw new Error("D1 Error: Missing configuration (Account ID or Database ID)");
+        }
+
         try {
+            const requestBody = {
+                sql: sql,
+                params: params,
+            };
+
             const response = await fetch(this.apiUrl, {
                 method: "POST",
                 headers: {
                     "Authorization": `Bearer ${this.token}`,
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({
-                    sql: sql,
-                    params: params,
-                }),
+                body: JSON.stringify(requestBody),
             });
 
             if (!response.ok) {
+                // 详细的错误诊断
+                console.error(`🚨 D1 HTTP Error ${response.status}: ${response.statusText}`);
+                console.error(`   URL: ${this.apiUrl}`);
+                // 尝试读取响应体以获取更多错误细节
+                try {
+                    const errorBody = await response.text();
+                    console.error(`   Response: ${errorBody}`);
+                } catch (e) {}
+                
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
 
