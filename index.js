@@ -160,7 +160,6 @@ const processedMessages = new Map();
                     console.log(`✅ 分片处理: 消息 ${msgId} 由实例 ${id} 处理`);
                 }
             }
-+++++++ REPLACE</parameter>
             
             // 去重检查：防止多实例部署时的重复处理
             if (msgId) {
