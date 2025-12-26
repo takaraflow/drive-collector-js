@@ -17,7 +17,10 @@ const mockClientInstance = {
     session: {
         save: jest.fn().mockReturnValue("mock_session")
     },
-    connected: true
+    connected: true,
+    _sender: {
+        disconnect: jest.fn().mockResolvedValue(undefined)
+    }
 };
 
 // 2. Mock 外部依赖
@@ -92,14 +95,15 @@ describe("Telegram Service Watchdog", () => {
         expect(capturedErrorCallback).toBeDefined();
 
         await capturedErrorCallback(new Error("TIMEOUT"));
-        
+
         // 现在的逻辑是 setTimeout 2秒后再触发断开
         jest.advanceTimersByTime(2001);
         await flushPromises();
-        
+
         expect(mockClientInstance.disconnect).toHaveBeenCalled();
 
-        jest.advanceTimersByTime(5001);
+        // 由于使用了随机等待时间（5-10秒），我们需要等待更长时间
+        jest.advanceTimersByTime(10001);
         await flushPromises();
 
         expect(mockClientInstance.connect).toHaveBeenCalled();
@@ -108,10 +112,16 @@ describe("Telegram Service Watchdog", () => {
     test("应当在检测到 Not connected 错误时触发重连", async () => {
         expect(capturedErrorCallback).toBeDefined();
 
+        // 对于 "Not connected" 错误，直接调用 handleConnectionIssue（无 setTimeout）
         await capturedErrorCallback(new Error("RPCError: ... Not connected ..."));
+
+        // 等待 disconnect 的异步操作完成
+        await flushPromises();
+
         expect(mockClientInstance.disconnect).toHaveBeenCalled();
-        
-        jest.advanceTimersByTime(5001);
+
+        // 由于使用了随机等待时间（5-10秒），我们需要等待更长时间
+        jest.advanceTimersByTime(10001);
         await flushPromises();
 
         expect(mockClientInstance.connect).toHaveBeenCalled();
@@ -129,8 +139,8 @@ describe("Telegram Service Watchdog", () => {
         // 验证由于心跳超时，调用了 disconnect
         expect(mockClientInstance.disconnect).toHaveBeenCalled();
 
-        // 关键修复：确保重连逻辑（包括5秒等待）执行完毕，释放 isReconnecting 锁
-        jest.advanceTimersByTime(5001);
+        // 关键修复：确保重连逻辑（包括随机等待时间）执行完毕，释放 isReconnecting 锁
+        jest.advanceTimersByTime(10001);
         await flushPromises();
         expect(mockClientInstance.connect).toHaveBeenCalled();
     });
@@ -143,15 +153,58 @@ describe("Telegram Service Watchdog", () => {
 
         // 触发 setTimeout 内部的 handleConnectionIssue
         jest.advanceTimersByTime(2001);
-        
+
         await Promise.all([p1, p2]);
         await flushPromises();
 
         // disconnect 应该只被调用一次
         expect(mockClientInstance.disconnect).toHaveBeenCalledTimes(1);
 
-        // 善后：完成重连流程
+        // 善后：完成重连流程（随机等待时间）
+        jest.advanceTimersByTime(10001);
+        await flushPromises();
+    });
+
+    test("应当在重连时强制清理底层连接器状态", async () => {
+        expect(capturedErrorCallback).toBeDefined();
+
+        await capturedErrorCallback(new Error("TIMEOUT"));
+
+        jest.advanceTimersByTime(2001);
+        await flushPromises();
+
+        expect(mockClientInstance.disconnect).toHaveBeenCalled();
+        expect(mockClientInstance._sender.disconnect).toHaveBeenCalled();
+
+        // 随机等待时间
+        jest.advanceTimersByTime(10001);
+        await flushPromises();
+
+        expect(mockClientInstance.connect).toHaveBeenCalled();
+    });
+
+    test("应当处理 disconnect() 超时情况", async () => {
+        expect(capturedErrorCallback).toBeDefined();
+
+        // 模拟 disconnect() 永不返回的情况
+        mockClientInstance.disconnect.mockImplementation(() => new Promise(() => {}));
+
+        await capturedErrorCallback(new Error("TIMEOUT"));
+
+        jest.advanceTimersByTime(2001);
+        await flushPromises();
+
+        // 等待 Promise.race 的超时（5秒）
         jest.advanceTimersByTime(5001);
         await flushPromises();
+
+        // 现在 _sender.disconnect 应该被调用
+        expect(mockClientInstance._sender.disconnect).toHaveBeenCalled();
+
+        // 等待随机延迟时间
+        jest.advanceTimersByTime(10001);
+        await flushPromises();
+
+        expect(mockClientInstance.connect).toHaveBeenCalled();
     });
 });

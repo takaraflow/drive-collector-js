@@ -8,6 +8,24 @@ import { SettingsRepository } from "./src/repositories/SettingsRepository.js";
 import { instanceCoordinator } from "./src/services/InstanceCoordinator.js";
 
 /**
+ * --- 🛡️ 全局错误处理 ---
+ */
+process.on("unhandledRejection", (reason, promise) => {
+    console.error("🚨 未捕获的 Promise 拒绝:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+    console.error("🚨 未捕获的异常:", err);
+    // 对于 TIMEOUT 错误，我们通常希望程序继续运行并由 Watchdog 处理
+    if (err?.message?.includes("TIMEOUT")) {
+        console.warn("⚠️ 忽略 TIMEOUT 导致的进程崩溃风险，等待 Watchdog 恢复...");
+    } else {
+        // 其他严重错误建议安全退出
+        // process.exit(1);
+    }
+});
+
+/**
  * --- 🚀 应用程序入口 ---
  */
 (async () => {

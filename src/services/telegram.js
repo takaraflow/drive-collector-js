@@ -66,13 +66,13 @@ export const client = new TelegramClient(
         floodSleepThreshold: 60, // 自动处理 60 秒内的 FloodWait
         deviceModel: "DriveCollector-Server",
         systemVersion: "Linux",
-        appVersion: "2.3.0", // 更新版本号
+        appVersion: "2.3.3", // 更新版本号
         useWSS: false, // 服务端环境下通常不需要 WSS
         autoReconnect: true,
         // 增强连接稳定性设置
-        timeout: 30000, // 连接超时 30 秒
-        requestRetries: 5, // 请求重试次数
-        retryDelay: 2000, // 重试延迟 2 秒
+        timeout: 60000, // 增加连接超时到 60 秒，减少 TIMEOUT 频率
+        requestRetries: 10, // 增加请求重试次数
+        retryDelay: 3000, // 增加重试延迟
         // 数据中心切换优化
         dcId: undefined, // 让客户端自动选择最佳数据中心
         useIPv6: false, // 禁用 IPv6 以提高兼容性
@@ -88,12 +88,13 @@ let isReconnecting = false;
 
 // 监听错误以防止更新循环因超时而崩溃
 client.on("error", (err) => {
-    if (err.message && err.message.includes("TIMEOUT")) {
+    const errorMsg = err?.message || "";
+    if (errorMsg.includes("TIMEOUT")) {
         // TIMEOUT 通常发生在 _updateLoop 中，GramJS 可能已经进入不可恢复状态
-        console.warn("⚠️ Telegram 客户端更新循环超时 (TIMEOUT)，准备主动重连...");
+        console.warn(`⚠️ Telegram 客户端更新循环超时 (TIMEOUT): ${errorMsg}，准备主动重连...`);
         // 增加延迟避免在网络波动时频繁重连
         setTimeout(() => handleConnectionIssue(), 2000);
-    } else if (err.message && err.message.includes("Not connected")) {
+    } else if (errorMsg.includes("Not connected")) {
         console.warn("⚠️ Telegram 客户端未连接，尝试重连...");
         handleConnectionIssue();
     } else {
@@ -110,13 +111,35 @@ async function handleConnectionIssue() {
 
     try {
         console.log("🔄 正在触发主动重连序列...");
-        // 尝试断开并重新连接
-        if (client.connected) {
-            await client.disconnect();
+        
+        // 尝试优雅断开
+        try {
+            if (client.connected) {
+                // 给 disconnect 一个超时，防止它也卡死
+                await Promise.race([
+                    client.disconnect(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("Disconnect Timeout")), 5000))
+                ]);
+            }
+        } catch (de) {
+            console.warn("⚠️ 断开连接时异常（可能是已断开）:", de.message);
         }
-        await new Promise(r => setTimeout(r, 5000));
+
+        // 彻底销毁旧的连接器状态 (如果是 TIMEOUT 错误，可能内部状态已损坏)
+        if (client._sender) {
+            try {
+                await client._sender.disconnect();
+            } catch (e) {}
+        }
+
+        // 等待一段时间让网络资源释放
+        const waitTime = 5000 + Math.random() * 5000;
+        console.log(`⏳ 等待 ${Math.floor(waitTime/1000)}s 后尝试重新建立连接...`);
+        await new Promise(r => setTimeout(r, waitTime));
+        
         await client.connect();
         console.log("✅ 客户端主动重连成功");
+        lastHeartbeat = Date.now(); // 重置心跳
     } catch (e) {
         console.error("❌ 主动重连失败，等待系统自动处理:", e.message);
     } finally {
