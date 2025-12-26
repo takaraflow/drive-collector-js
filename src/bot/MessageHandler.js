@@ -31,33 +31,40 @@ export class MessageHandler {
      * @param {object} client - Telegram Client 实例 (用于获取 Bot ID)
      */
     static async handleEvent(event, client) {
+        // 统一提取 message 对象 (兼容 UpdateNewMessage, Message, UpdateShortMessage 等)
+        let message = event.message || event;
+        
+        // 特殊处理 UpdateBotCallbackQuery，它没有 message 属性，数据在 event 本身
+        if (event.className === 'UpdateBotCallbackQuery') {
+            message = event; // 暂时将 event 视为消息主体进行处理
+        }
+
         // 基础事件记录
-        if (event.className === 'UpdateNewMessage' || event.className === 'UpdateBotCallbackQuery') {
-            // console.log(`📩 收到新事件: ${event.className}`);
+        if (message && (message.className === 'Message' || event.className === 'UpdateNewMessage')) {
+            // console.log(`📩 收到消息 ID: ${message.id}`);
         }
 
         // 0. 过滤自己发送的消息 (防止无限循环)
-        if (event.message?.out) {
-            // GramJS 的 out 属性标识是否为自己发送的消息
+        if (message.out === true) {
             return;
         }
 
-        // 补充：双重检查 senderId (针对某些特殊情况)
+        // 补充：双重检查 senderId
         if (!this.botId && client && client.session?.save()) {
-            // 尝试懒加载 Bot ID
             try {
                 const me = await client.getMe();
                 if (me) this.botId = me.id.toString();
             } catch (e) {}
         }
         
-        if (this.botId && event.message?.senderId?.toString() === this.botId) {
+        if (this.botId && message.senderId?.toString() === this.botId) {
             return;
         }
 
         // 1. 去重检查：防止多实例部署时的重复处理
-        // 升级为：内存 + KV 双层去重
-        const msgId = event.message?.id;
+        // 仅对有 ID 的消息进行去重 (Message 类型通常有 id，CallbackQuery 有 queryId)
+        const msgId = message.id || event.queryId?.toString();
+        
         if (msgId) {
             const now = Date.now();
 
@@ -70,13 +77,20 @@ export class MessageHandler {
             // 1.2 分布式 KV 锁检查 (关键：解决多实例重复响应)
             // 尝试获取该消息的锁，TTL 60秒
             const lockKey = `msg_lock:${msgId}`;
-            const hasLock = await instanceCoordinator.acquireLock(lockKey, 60);
             
-            if (!hasLock) {
-                console.log(`♻️ [Distributed] 跳过重复消息 ${msgId} (其他实例正在处理)`);
-                // 标记为本地已处理，避免后续重复请求 KV
-                processedMessages.set(msgId, now);
-                return;
+            try {
+                const hasLock = await instanceCoordinator.acquireLock(lockKey, 60);
+                
+                if (!hasLock) {
+                    console.log(`♻️ [Distributed] 跳过重复消息 ${msgId} (其他实例正在处理或锁获取失败)`);
+                    // 标记为本地已处理，避免后续重复请求 KV
+                    processedMessages.set(msgId, now);
+                    return;
+                }
+            } catch (lockError) {
+                console.error(`⚠️ 获取消息锁时发生异常: ${lockError.message}, 降级处理继续执行`);
+                // 如果锁服务完全挂了，为了不丢消息，我们可以选择继续处理（但这可能导致重复回复）
+                // 这里选择继续执行，毕竟可用性优先
             }
 
             // 获取锁成功，标记本地并继续
@@ -91,6 +105,8 @@ export class MessageHandler {
         }
         
         try {
+            // 显式日志，确认进入分发阶段
+            // console.log(`➡️ 正在分发消息: ${msgId || 'unknown'}`);
             await Dispatcher.handle(event);
         } catch (e) {
             console.error("Critical: Unhandled Dispatcher Error:", e);
