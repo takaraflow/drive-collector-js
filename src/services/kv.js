@@ -103,6 +103,13 @@ class KVService {
     }
 
     /**
+     * 启动恢复定时器（测试用公共方法）
+     */
+    startRecoveryTimer() {
+        this._startRecoveryCheck();
+    }
+
+    /**
      * 启动定期恢复检查
      */
     _startRecoveryCheck() {
@@ -223,7 +230,7 @@ class KVService {
 
         const result = await response.json();
         if (!result.success) {
-            throw new Error(`KV Set Error: ${result.errors[0]?.message || "Unknown error"}`);
+            throw new Error(`KV Set Error: ${result.errors?.[0]?.message || "Unknown error"}`);
         }
         return true;
     }
@@ -303,7 +310,7 @@ class KVService {
         if (response.status === 404) return null;
         if (!response.ok) {
             const result = await response.json();
-            throw new Error(`KV Get Error: ${result.errors[0]?.message || "Unknown error"}`);
+            throw new Error(`KV Get Error: ${result.errors?.[0]?.message || "Unknown error"}`);
         }
 
         if (type === "json") {
@@ -377,7 +384,7 @@ class KVService {
 
         const result = await response.json();
         if (!result.success && response.status !== 404) {
-            throw new Error(`KV Delete Error: ${result.errors[0]?.message || "Unknown error"}`);
+            throw new Error(`KV Delete Error: ${result.errors?.[0]?.message || "Unknown error"}`);
         }
         return true;
     }
@@ -427,9 +434,10 @@ class KVService {
 
         const result = await response.json();
         if (!result.success) {
-            throw new Error(`KV Bulk Set Error: ${result.errors[0]?.message || "Unknown error"}`);
+            throw new Error(`KV Bulk Set Error: ${result.errors?.[0]?.message || "Unknown error"}`);
         }
-        return true;
+        // Cloudflare bulk API doesn't return per-item results, assume all successful
+        return pairs.map(() => ({ success: true, result: "OK" }));
     }
 
     /**
@@ -451,12 +459,13 @@ class KVService {
         });
 
         const results = await response.json();
-        const errorResult = results.find(r => r.error);
-        if (errorResult) {
-            throw new Error(`Upstash Pipeline Error: ${errorResult.error}`);
+        if (results.error) {
+            throw new Error(`Upstash Pipeline Error: ${results.error}`);
         }
-
-        return true;
+        return results.map(r => ({
+            success: !r.error,
+            result: r.error ? r.error : r.result
+        }));
     }
 
     /**
