@@ -90,10 +90,16 @@ describe("KV Service Full Suite", () => {
       });
     });
 
-    test("should set value using POST body", async () => {
+    test("should set value using command array format", async () => {
       mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ result: "OK" }) });
       await kvInstance.set("k1", { x: 1 });
-      expect(mockFetch).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ method: "POST", body: JSON.stringify({ x: 1 }) }));
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("https://mock.upstash.io/"),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify(["SET", "k1", "{\"x\":1}"])
+        })
+      );
     });
 
     test("should bulkSet using Pipeline API", async () => {

@@ -10,8 +10,8 @@ import { InstanceRepository } from "../repositories/InstanceRepository.js";
 export class InstanceCoordinator {
     constructor() {
         this.instanceId = process.env.INSTANCE_ID || `instance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        this.heartbeatInterval = 60000; // 延长至60秒心跳，减少 KV 调用
-        this.instanceTimeout = 180000; // 3分钟超时
+        this.heartbeatInterval = 5 * 60 * 1000; // 进一步延长至 5 分钟心跳，大幅减少 KV 调用 (因为 Cloudflare KV 免费额度有限)
+        this.instanceTimeout = 15 * 60 * 1000; // 15分钟超时
         this.heartbeatTimer = null;
         this.isLeader = false;
         this.activeInstances = new Set();
@@ -69,12 +69,18 @@ export class InstanceCoordinator {
         await this.registerInstanceToDB(instanceData);
 
         // 2. 尝试写入 KV (用于快速访问和分布式锁)
-        try {
-            await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
-            console.log(`📝 实例已注册到 KV: ${this.instanceId}`);
-        } catch (kvError) {
-            console.warn(`⚠️ KV注册失败 (非致命，已写入DB): ${kvError.message}`);
-        }
+        // 增加随机延迟，避免多个实例同时启动时撞击 KV 限制
+        setTimeout(async () => {
+            try {
+                // 如果处于故障转移模式（意味着 KV 已挂），则跳过 KV 注册，只依赖 D1
+                if (!kv.isFailoverMode) {
+                    await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
+                    console.log(`📝 实例已注册到 KV: ${this.instanceId}`);
+                }
+            } catch (kvError) {
+                console.warn(`⚠️ KV注册失败 (非致命，已写入DB): ${kvError.message}`);
+            }
+        }, Math.random() * 5000);
     }
 
     /**
@@ -111,18 +117,22 @@ export class InstanceCoordinator {
                 console.error(`DB心跳更新失败: ${dbError.message}`);
             }
 
-            // 2. 尝试更新 KV
+            // 2. 尝试更新 KV (仅当不在故障转移模式或偶尔更新)
+            // 如果是 KV 额度耗尽，我们希望减少调用
             try {
-                const instanceData = await kv.get(`instance:${this.instanceId}`);
-                if (instanceData) {
-                    instanceData.lastHeartbeat = now;
+                // 仅在非故障转移模式，或者每 3 次心跳才尝试一次 KV 更新
+                if (!kv.isFailoverMode || Math.random() < 0.3) {
+                    // 优化：直接 blind set，不先 get，减少一半调用
+                    const instanceData = {
+                        id: this.instanceId,
+                        hostname: process.env.HOSTNAME || 'unknown',
+                        lastHeartbeat: now,
+                        status: 'active'
+                    };
                     await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
-                } else {
-                    // 重新注册 (registerInstance 内部也会写 D1)
-                    await this.registerInstance();
                 }
             } catch (kvError) {
-                // KV 失败忽略，D1 已作为主心跳源
+                // KV 失败忽略
             }
         }, this.heartbeatInterval);
     }

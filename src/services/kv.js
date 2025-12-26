@@ -27,6 +27,7 @@ class KVService {
         this.failureCount = 0;
         this.lastFailureTime = 0;
         this.failoverEnabled = this.hasUpstash; // 只有配置了Upstash才启用故障转移
+        this.lastError = null;
 
         // 如果环境变量强制指定使用Upstash
         if (process.env.KV_PROVIDER === 'upstash') {
@@ -63,6 +64,7 @@ class KVService {
         if (isQuotaError) {
             this.failureCount++;
             this.lastFailureTime = Date.now();
+            this.lastError = error.message || "Unknown error";
 
             // 连续3次额度/网络错误，触发故障转移
             if (this.failureCount >= 3) {
@@ -108,7 +110,17 @@ class KVService {
             clearInterval(this.recoveryTimer);
         }
 
-        // 每30分钟检查一次是否可以恢复到主要提供商
+        // 根据错误类型动态调整检查间隔
+        // 如果是因为配额限制(limit)，则等待更长时间(例如 12 小时)
+        // 否则使用较短间隔(30分钟)
+        const isQuotaIssue = this.lastError && (
+            this.lastError.includes('free usage limit') || 
+            this.lastError.includes('quota exceeded')
+        );
+        
+        const checkInterval = isQuotaIssue ? 12 * 60 * 60 * 1000 : 30 * 60 * 1000;
+        console.log(`🕒 启动 KV 恢复检查，间隔: ${checkInterval / 60000} 分钟`);
+
         this.recoveryTimer = setInterval(async () => {
             if (this.currentProvider === 'upstash') {
                 try {
@@ -117,6 +129,7 @@ class KVService {
                     console.log('🔄 Cloudflare KV 已恢复，切换回主要提供商...');
                     this.currentProvider = 'cloudflare';
                     this.failureCount = 0;
+                    this.lastError = null;
 
                     // 清理恢复检查定时器
                     if (this.recoveryTimer) {
@@ -130,7 +143,7 @@ class KVService {
                     console.log('ℹ️ Cloudflare KV 仍不可用，继续使用 Upstash');
                 }
             }
-        }, 30 * 60 * 1000); // 30分钟
+        }, checkInterval);
     }
 
     /**

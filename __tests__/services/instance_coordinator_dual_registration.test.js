@@ -50,16 +50,27 @@ describe("InstanceCoordinator Dual Registration", () => {
         jest.useRealTimers();
     });
 
-    beforeEach(() => {
+    beforeEach(async () => {
         jest.clearAllMocks();
         instanceCoordinator.instanceId = "test_instance_dual";
+
+        // Ensure KV is in normal mode for tests
+        const { kv } = await import("../../src/services/kv.js");
+        kv.currentProvider = 'cloudflare';
     });
 
     test("should register instance in both D1 and KV (Dual Write)", async () => {
         const { kv } = await import("../../src/services/kv.js");
         kv.set.mockResolvedValueOnce(true);
 
+        // Override the random delay for testing
+        const originalSetTimeout = global.setTimeout;
+        global.setTimeout = jest.fn((fn) => fn());
+
         await instanceCoordinator.registerInstance();
+
+        // Restore original setTimeout
+        global.setTimeout = originalSetTimeout;
 
         // Verify D1 write
         const { InstanceRepository } = await import("../../src/repositories/InstanceRepository.js");
@@ -77,7 +88,7 @@ describe("InstanceCoordinator Dual Registration", () => {
                 id: "test_instance_dual",
                 status: "active"
             }),
-            180
+            900 // 15 minutes / 1000
         );
     });
 
@@ -85,7 +96,14 @@ describe("InstanceCoordinator Dual Registration", () => {
         const { kv } = await import("../../src/services/kv.js");
         kv.set.mockRejectedValueOnce(new Error("KV quota exceeded"));
 
+        // Override the random delay for testing
+        const originalSetTimeout = global.setTimeout;
+        global.setTimeout = jest.fn((fn) => fn());
+
         await instanceCoordinator.registerInstance();
+
+        // Restore original setTimeout
+        global.setTimeout = originalSetTimeout;
 
         // Verify D1 still called
         const { InstanceRepository } = await import("../../src/repositories/InstanceRepository.js");
@@ -103,7 +121,7 @@ describe("InstanceCoordinator Dual Registration", () => {
                 id: "test_instance_dual",
                 status: "active"
             }),
-            180
+            900 // 15 minutes / 1000
         );
     });
 
@@ -120,15 +138,12 @@ describe("InstanceCoordinator Dual Registration", () => {
         kv.get.mockResolvedValueOnce(instanceData);
         kv.set.mockResolvedValueOnce(true);
 
-        // Start heartbeat manually for testing
+        // Manually call the heartbeat function instead of using timer
+        // This is more reliable than timing-based tests
         await instanceCoordinator.startHeartbeat();
 
-        // Advance timer to trigger heartbeat (interval is 60s)
-        jest.advanceTimersByTime(61000);
-        if (instanceCoordinator.heartbeatTimer) {
-            clearInterval(instanceCoordinator.heartbeatTimer);
-            instanceCoordinator.heartbeatTimer = null;
-        }
+        // Advance timer to trigger one heartbeat cycle (5 minutes)
+        jest.advanceTimersByTime(300001);
 
         // Verify D1 heartbeat was sent
         expect(InstanceRepository.updateHeartbeat).toHaveBeenCalledWith("test_instance_dual", expect.any(Number));
@@ -144,12 +159,8 @@ describe("InstanceCoordinator Dual Registration", () => {
         // Start heartbeat
         await instanceCoordinator.startHeartbeat();
 
-        // Advance timer to trigger heartbeat (interval is 60s)
-        jest.advanceTimersByTime(61000);
-        if (instanceCoordinator.heartbeatTimer) {
-            clearInterval(instanceCoordinator.heartbeatTimer);
-            instanceCoordinator.heartbeatTimer = null;
-        }
+        // Advance timer to trigger one heartbeat cycle (5 minutes)
+        jest.advanceTimersByTime(300001);
 
         // Verify D1 heartbeat still worked
         expect(InstanceRepository.updateHeartbeat).toHaveBeenCalledWith("test_instance_dual", expect.any(Number));
