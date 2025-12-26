@@ -75,7 +75,13 @@ class KVService {
      */
     _failover() {
         if (this.currentProvider === 'cloudflare' && this.hasUpstash) {
-            console.log('🔄 正在切换到 Upstash Redis...');
+            // 关键修复：在启动新检查任务前，必须先清理可能存在的旧定时器
+            // 这样可以防止在测试环境或高频率切换时产生多个未关闭的句柄，导致 Jest 无法退出
+            if (this.recoveryTimer) {
+                clearInterval(this.recoveryTimer);
+                this.recoveryTimer = null;
+            }
+
             this.currentProvider = 'upstash';
             this.failureCount = 0; // 重置失败计数
 
@@ -144,30 +150,56 @@ class KVService {
         return this.currentProvider === 'upstash';
     }
 
+    _isNetworkOrQuotaError(error) {
+        const msg = error.message.toLowerCase();
+        return msg.includes('free usage limit') ||
+            msg.includes('quota exceeded') ||
+            msg.includes('rate limit') ||
+            msg.includes('fetch failed') ||
+            msg.includes('network') ||
+            msg.includes('timeout');
+    }
+
     /**
-     * 通用执行方法，支持自动故障转移
+     * 统一判断是否为可重试的网络/配额错误
      */
+    _isRetryableError(error) {
+        const msg = (error.message || "").toLowerCase();
+        return msg.includes('free usage limit') ||
+               msg.includes('quota exceeded') ||
+               msg.includes('rate limit') ||
+               msg.includes('fetch failed') ||
+               msg.includes('network') ||
+               msg.includes('timeout');
+    }
+
     async _executeWithFailover(operation, ...args) {
-        try {
-            if (this.currentProvider === 'upstash') {
-                return await this[`_upstash_${operation}`](...args);
-            } else {
-                return await this[`_cloudflare_${operation}`](...args);
-            }
-        } catch (error) {
-            if (this._shouldFailover(error)) {
-                if (this._failover()) {
-                    // 故障转移成功，重试操作
-                    console.log(`🔄 使用新提供商重试 ${operation} 操作...`);
-                    try {
-                        return await this[`_upstash_${operation}`](...args);
-                    } catch (retryError) {
-                        console.error(`❌ 故障转移后操作仍失败:`, retryError.message);
-                        throw retryError;
-                    }
+        let attempts = 0;
+        const maxAttempts = 3;
+
+        while (attempts < maxAttempts) {
+            try {
+                if (this.currentProvider === 'upstash') {
+                    return await this[`_upstash_${operation}`](...args);
                 }
+                return await this[`_cloudflare_${operation}`](...args);
+            } catch (error) {
+                attempts++;
+
+                // 如果不是可重试错误，或者已经是 Upstash 模式，立即抛出
+                if (!this._isRetryableError(error) || this.currentProvider === 'upstash') {
+                    throw error;
+                }
+
+                // 尝试故障转移
+                if (this._shouldFailover(error)) {
+                    if (this._failover()) continue; // 切换后重试
+                }
+
+                // 只有 Cloudflare 的网络/额度错误且未达阈值才继续循环
+                if (attempts >= maxAttempts) throw error;
+                console.log(`ℹ️ ${this.getCurrentProvider()} 重试中 (${attempts}/${maxAttempts})...`);
             }
-            throw error;
         }
     }
 
@@ -201,7 +233,7 @@ class KVService {
      */
     async _upstash_set(key, value, expirationTtl = null) {
         const valueStr = typeof value === "string" ? value : JSON.stringify(value);
-        let url = `${this.upstashUrl}/set/${encodeURIComponent(key)}/${encodeURIComponent(valueStr)}`;
+        let url = `${this.upstashUrl}/set/${encodeURIComponent(key)}`;
 
         if (expirationTtl) {
             url += `?ex=${expirationTtl}`;
@@ -211,7 +243,9 @@ class KVService {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${this.upstashToken}`,
+                "Content-Type": "text/plain",
             },
+            body: valueStr,
         });
 
         const result = await response.json();
@@ -360,13 +394,33 @@ class KVService {
     }
 
     /**
-     * Upstash bulkSet 实现
+     * Upstash bulkSet 实现 - 已升级为 Pipeline 模式
+     * 减少 HTTP 请求次数，提升批量写入效率
      */
     async _upstash_bulkSet(pairs) {
-        // Upstash没有原生批量操作，使用循环调用set
-        for (const pair of pairs) {
-            await this._upstash_set(pair.key, pair.value);
+        // 构造 Pipeline 指令集
+        const commands = pairs.map(p => {
+            const valueStr = typeof p.value === "string" ? p.value : JSON.stringify(p.value);
+            return ["SET", p.key, valueStr];
+        });
+
+        const response = await fetch(`${this.upstashUrl}/pipeline`, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${this.upstashToken}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(commands),
+        });
+
+        const results = await response.json();
+        
+        // 检查 Pipeline 中是否有任何指令执行失败
+        const errorResult = results.find(r => r.error);
+        if (errorResult) {
+            throw new Error(`Upstash Pipeline Error: ${errorResult.error}`);
         }
+
         return true;
     }
 

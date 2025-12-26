@@ -54,9 +54,14 @@ describe("KV Service Failover", () => {
     });
 
     test("should NOT failover on generic error", async () => {
-        // 模拟普通错误 (e.g. 404, logic error)
+        // 修正：添加 status 和 ok 属性，模拟完整的 Fetch Response 对象
         mockFetch.mockResolvedValueOnce({
-            json: () => Promise.resolve({ success: false, errors: [{ message: "Some logic error" }] })
+            ok: false, // 模拟失败响应
+            status: 400,
+            json: () => Promise.resolve({ 
+                success: false, 
+                errors: [{ message: "Some logic error" }] 
+            })
         });
 
         await expect(kvInstance.set("key", "value")).rejects.toThrow("KV Set Error");

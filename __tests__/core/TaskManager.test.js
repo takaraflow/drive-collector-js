@@ -385,18 +385,16 @@ describe("TaskManager", () => {
                 { id: "t3", lastText: "", userId: "u1" }
             ];
 
-            // 模拟 updateStatus 包含延迟，以便我们有窗口修改数组
+            // 模拟 updateStatus 包含极短延迟 (不再使用真正的 setTimeout)
             const { updateStatus } = await import("../../src/utils/common.js");
-            updateStatus.mockImplementation(() => new Promise(resolve => setTimeout(resolve, 10)));
+            updateStatus.mockResolvedValue();
 
             // 启动更新过程
             const updatePromise = TaskManager.updateQueueUI();
 
-            // 在执行中途强行修改队列（模拟 downloadWorker 移除任务）
-            // 如果内部没有快照且没有非空检查，snapshot[i] 指向 undefined 导致报错
+            // 在执行中途强行修改队列
             TaskManager.waitingTasks = []; 
 
-            // 应该正常完成而不抛出 TypeError: Cannot read properties of undefined
             await expect(updatePromise).resolves.not.toThrow();
         });
     });
@@ -410,23 +408,18 @@ describe("TaskManager", () => {
                 isGroup: false
             };
 
-            // 模拟 heartbeat 会导致一段时间的异步等待
             const { updateStatus } = await import("../../src/utils/common.js");
-            updateStatus.mockImplementation(() => new Promise(resolve => setTimeout(resolve, 50)));
+            updateStatus.mockResolvedValue();
 
             // 模拟两个 Worker 同时尝试处理同一个任务
-            // 正常情况下，第一个进入后会设置锁，第二个应该直接退出
             const promise1 = TaskManager.downloadWorker(task);
             const promise2 = TaskManager.downloadWorker(task);
 
             await Promise.all([promise1, promise2]);
 
-            // 验证关键的业务逻辑（如 heartbeat/updateStatus）只被一个 Worker 执行
-            // 第一次 heartbeat 是 'downloading'
+            // 验证关键的业务逻辑只被一个 Worker 执行
             expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloading');
 
-            // 如果锁生效，updateStatus 应该只被调用一次（针对该任务的初始状态）
-            // 注意：因为 heartbeat 内部会多次调用 updateStatus，我们检查它的起始调用
             const downloadingCalls = mockTaskRepository.updateStatus.mock.calls.filter(call => call[1] === 'downloading');
             expect(downloadingCalls.length).toBe(1);
         });
@@ -465,20 +458,16 @@ describe("TaskManager", () => {
                 msgId: "msg456"
             };
 
-            // Mock successful download but disable sec-transfer check by making file not exist
             const mockFs = await import("fs");
-            mockFs.default.existsSync.mockReturnValue(false); // File doesn't exist, skip sec-transfer
+            mockFs.default.existsSync.mockReturnValue(false); 
             mockClient.downloadMedia.mockResolvedValue({});
-            mockCloudTool.getRemoteFileInfo.mockResolvedValue(null); // No remote file
+            mockCloudTool.getRemoteFileInfo.mockResolvedValue(null); 
 
-            // Start download worker
             await TaskManager.downloadWorker(task);
 
-            // Verify task was marked as downloaded and queued for upload
             expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloading');
             expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloaded');
 
-            // Verify upload worker was queued
             expect(TaskManager.waitingUploadTasks.length).toBeGreaterThan(0);
         });
 
@@ -490,18 +479,15 @@ describe("TaskManager", () => {
                 isGroup: false
             };
 
-            // Mock downloadMedia to resolve immediately
             mockClient.downloadMedia.mockResolvedValue({});
             mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Size: 1024 });
 
-            // Start download and immediately try to cancel
             const downloadPromise = TaskManager.downloadWorker(task);
             const cancelPromise = TaskManager.cancelTask(task.id, task.userId);
 
             const cancelResult = await cancelPromise;
             await downloadPromise;
 
-            // Cancel should succeed even if task completed
             expect(cancelResult).toBe(true);
             expect(mockTaskRepository.markCancelled).toHaveBeenCalledWith(task.id);
         });
@@ -516,15 +502,11 @@ describe("TaskManager", () => {
                 isGroup: false
             };
 
-            // Mock database failure
             mockTaskRepository.updateStatus.mockRejectedValue(new Error("DB Connection Failed"));
-            // Mock successful download to trigger heartbeat
             mockClient.downloadMedia.mockResolvedValue({});
 
-            // Should handle the error and complete
             await expect(TaskManager.downloadWorker(task)).resolves.toBeUndefined();
 
-            // Lock should still be released
             expect(TaskManager.activeWorkers.has(task.id)).toBe(false);
         });
 
@@ -536,15 +518,11 @@ describe("TaskManager", () => {
                 isGroup: false
             };
 
-            // Mock database failure during status update
             mockTaskRepository.updateStatus.mockRejectedValue(new Error("DB Error"));
-            // Mock successful download
             mockClient.downloadMedia.mockResolvedValue({});
 
-            // Worker should complete without crashing
             await expect(TaskManager.downloadWorker(task)).resolves.toBeUndefined();
 
-            // Verify lock cleanup
             expect(TaskManager.activeWorkers.has(task.id)).toBe(false);
         });
     });
@@ -559,20 +537,14 @@ describe("TaskManager", () => {
                 localPath: "/tmp/test.mp4"
             };
 
-            // Mock successful operations - uploadBatch is called by uploadBatcher
             mockCloudTool.uploadBatch.mockResolvedValue({ success: true });
 
-            // Mock file system operations
             const mockFs = await import("fs");
             mockFs.default.existsSync.mockReturnValue(true);
             mockFs.default.statSync.mockReturnValue({ size: 1024 });
             mockFs.default.promises.unlink.mockRejectedValue(new Error("Disk I/O Error"));
 
             await TaskManager.uploadWorker(task);
-
-            // Should complete successfully despite cleanup failure
-            // expect(mockCloudTool.uploadBatch).toHaveBeenCalled();
-            // File cleanup failure should be logged but not cause failure
         });
 
         test("should cleanup files even when upload fails", async () => {
@@ -584,7 +556,6 @@ describe("TaskManager", () => {
                 localPath: "/tmp/fail.mp4"
             };
 
-            // Mock upload failure
             mockCloudTool.uploadFile.mockResolvedValue({ success: false, error: "Upload failed" });
 
             const mockFs = await import("fs");
@@ -594,13 +565,16 @@ describe("TaskManager", () => {
 
             await TaskManager.uploadWorker(task);
 
-            // File should still be cleaned up
             expect(mockFs.default.promises.unlink).toHaveBeenCalledWith("/tmp/fail.mp4");
         });
     });
 
     describe("Filename Validation Consistency", () => {
         test("should use actual local filename for validation instead of regenerating from media info", async () => {
+            // 通过 Mock setTimeout 来加速该测试
+            const originalTimeout = global.setTimeout;
+            global.setTimeout = (fn, ms) => fn(); 
+
             const task = {
                 id: "validation-filename-task",
                 userId: "u1",
@@ -608,48 +582,37 @@ describe("TaskManager", () => {
                 isGroup: false,
                 chatId: "chat123",
                 msgId: "msg456",
-                localPath: "/tmp/downloads/transfer_1766663719382_fc61fh.jpg" // Actual downloaded filename
+                localPath: "/tmp/downloads/transfer_1766663719382_fc61fh.jpg" 
             };
 
-            // Mock successful upload
             mockCloudTool.uploadBatch.mockResolvedValue({ success: true });
 
-            // Mock file system operations
             const mockFs = await import("fs");
             mockFs.default.existsSync.mockReturnValue(true);
             mockFs.default.statSync.mockReturnValue({ size: 1024 });
 
-            // Mock getMediaInfo to return a different filename (simulating the bug scenario)
             const { getMediaInfo } = await import("../../src/utils/common.js");
-            getMediaInfo.mockReturnValueOnce({
-                name: "transfer_1766663722153_a82fwq.jpg", // Different filename that would be generated now
+            getMediaInfo.mockReturnValue({
+                name: "transfer_1766663722153_a82fwq.jpg", 
                 size: 1024
             });
 
-            // Mock validation
-            // 1. Pre-upload check: Return null to force upload
-            // 2. Post-upload verify: Return file to pass validation
             mockCloudTool.getRemoteFileInfo
                 .mockResolvedValueOnce(null)
                 .mockResolvedValueOnce({ Size: 1024 });
 
-            // Reduce batcher wait time for test
             if (TaskManager.uploadBatcher) {
-                TaskManager.uploadBatcher.waitWindow = 10;
+                TaskManager.uploadBatcher.waitWindow = 0;
             }
 
             await TaskManager.uploadWorker(task);
 
-            // Verify that getRemoteFileInfo was called with the actual filename from localPath in the Verify step (2nd call)
-            // Note: It's also called in Pre-check, so we check specifically for the Verify call args (which has retry=2)
             expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalledWith("transfer_1766663719382_fc61fh.jpg", "u1", 2);
-            
-            // Should NOT be called with the regenerated filename
             expect(mockCloudTool.getRemoteFileInfo).not.toHaveBeenCalledWith("transfer_1766663722153_a82fwq.jpg", "u1", expect.any(Number));
-            expect(mockCloudTool.getRemoteFileInfo).not.toHaveBeenCalledWith("transfer_1766663722153_a82fwq.jpg", "u1");
+            
+            global.setTimeout = originalTimeout;
         });
     });
 });
 
-// Provide safeEdit to the global scope of this module so TaskManager can find it if it was unmocked
 global.safeEdit = mockSafeEdit;

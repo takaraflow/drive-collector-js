@@ -57,6 +57,12 @@ const fs = await import("fs");
 describe("NetworkDiagnostic", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        // Mock fetch globally for all tests to prevent real network calls
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ ok: true, result: { username: "mockbot" } })
+        });
     });
 
     describe("diagnoseAll", () => {
@@ -89,7 +95,7 @@ describe("NetworkDiagnostic", () => {
             expect(kv.get).toHaveBeenCalled();
             expect(spawnSync).toHaveBeenCalled();
             expect(DriveRepository.findAll).toHaveBeenCalled();
-        }, 15000); // Increase timeout
+        });
 
         it("should handle errors gracefully", async () => {
             // Mock errors for all services
@@ -102,6 +108,9 @@ describe("NetworkDiagnostic", () => {
             });
             fs.existsSync.mockReturnValue(false); // No rclone binary
             DriveRepository.findAll.mockRejectedValue(new Error("Repository error"));
+            
+            // Mock fetch error for bot API
+            global.fetch.mockRejectedValue(new Error("Bot API error"));
 
             const result = await NetworkDiagnostic.diagnoseAll();
 
@@ -110,7 +119,8 @@ describe("NetworkDiagnostic", () => {
             expect(result.services.kv.status).toBe("error");
             expect(result.services.rclone.status).toBe("error");
             expect(result.services.cloudStorage.status).toBe("error");
-        }, 15000); // Increase timeout
+            expect(result.services.telegramBot.status).toBe("error");
+        });
     });
 
     describe("_checkTelegram", () => {
@@ -147,23 +157,15 @@ describe("NetworkDiagnostic", () => {
 
         it("should return success when bot API responds ok", async () => {
             config.botToken = "mock_token";
-            global.fetch = jest.fn().mockResolvedValue({
-                ok: true,
-                json: jest.fn().mockResolvedValue({
-                    ok: true,
-                    result: { username: "testbot" }
-                })
-            });
-
             const result = await NetworkDiagnostic._checkTelegramBot();
 
             expect(result.status).toBe("ok");
-            expect(result.message).toContain("@testbot");
+            expect(result.message).toContain("@mockbot");
         });
 
         it("should return error when bot API fails", async () => {
             config.botToken = "mock_token";
-            global.fetch = jest.fn().mockRejectedValue(new Error("Network error"));
+            global.fetch.mockRejectedValueOnce(new Error("Network error"));
 
             const result = await NetworkDiagnostic._checkTelegramBot();
 

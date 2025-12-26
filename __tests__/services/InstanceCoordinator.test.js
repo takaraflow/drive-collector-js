@@ -175,7 +175,7 @@ describe("InstanceCoordinator", () => {
 
   describe("releaseLock", () => {
     test("should release lock held by current instance", async () => {
-      // Mock kv.get to return lock held by current instance
+      // Mock kv.get 返回当前实例持有的锁
       const getSpy = jest.spyOn(kv, 'get').mockResolvedValue({
         instanceId: "test_instance_123",
         acquiredAt: Date.now(),
@@ -192,12 +192,15 @@ describe("InstanceCoordinator", () => {
     });
 
     test("should not release lock held by another instance", async () => {
+      // Mock KV to return a lock held by another instance
       mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
         json: () => Promise.resolve({
           instanceId: "other_instance",
           acquiredAt: Date.now(),
-          ttl: 300,
-        }),
+          ttl: 300
+        })
       });
 
       await instanceCoordinator.releaseLock("test_lock");
