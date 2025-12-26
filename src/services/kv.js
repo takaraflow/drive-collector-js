@@ -18,7 +18,7 @@ class KVService {
         this.l1CacheTtl = 10 * 1000; // 默认 10 秒内存缓存
 
         // Upstash备用配置
-        this.upstashUrl = process.env.UPSTASH_REDIS_REST_URL;
+        this.upstashUrl = process.env.UPSTASH_REDIS_REST_URL ? process.env.UPSTASH_REDIS_REST_URL.replace(/\/$/, '') : '';
         this.upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN;
         this.hasUpstash = !!(this.upstashUrl && this.upstashToken);
 
@@ -217,35 +217,37 @@ class KVService {
 
     /**
      * Upstash set 实现
+     * 改为使用通用命令格式，避免 URL 路径参数可能导致的解析问题
      */
     async _upstash_set(key, value, expirationTtl = null) {
         const valueStr = typeof value === "string" ? value : JSON.stringify(value);
-        let url = `${this.upstashUrl}/set/${encodeURIComponent(key)}`;
+        
+        // 构造 Redis SET 命令: ["SET", key, value, "EX", ttl]
+        const command = ["SET", key, valueStr];
 
         // 验证并处理过期时间参数
         if (expirationTtl !== null && expirationTtl !== undefined) {
             const ttl = parseInt(expirationTtl, 10);
             if (!isNaN(ttl) && ttl > 0) {
-                url += `?ex=${ttl}`;
-            } else if (ttl === 0) {
-                // TTL 为 0 表示立即过期，不需要设置
-                console.warn(`⚠️ Upstash set: TTL 为 0，跳过过期设置 (${key})`);
-            } else {
+                command.push("EX", ttl.toString());
+            } else if (ttl !== 0) {
                 console.warn(`⚠️ Upstash set: 无效的 TTL 值 ${expirationTtl}，跳过过期设置 (${key})`);
             }
         }
 
-        const response = await fetch(url, {
+        const response = await fetch(`${this.upstashUrl}/`, {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${this.upstashToken}`,
-                "Content-Type": "text/plain",
+                "Content-Type": "application/json",
             },
-            body: valueStr,
+            body: JSON.stringify(command),
         });
 
         const result = await response.json();
         if (result.error) {
+            console.error(`🚨 Upstash Set Error for key '${key}':`, result.error);
+            console.error(`   Command:`, JSON.stringify(command));
             throw new Error(`Upstash Set Error: ${result.error}`);
         }
         return result.result === "OK";
