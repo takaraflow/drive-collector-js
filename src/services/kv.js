@@ -222,8 +222,17 @@ class KVService {
         const valueStr = typeof value === "string" ? value : JSON.stringify(value);
         let url = `${this.upstashUrl}/set/${encodeURIComponent(key)}`;
 
-        if (expirationTtl) {
-            url += `?ex=${expirationTtl}`;
+        // 验证并处理过期时间参数
+        if (expirationTtl !== null && expirationTtl !== undefined) {
+            const ttl = parseInt(expirationTtl, 10);
+            if (!isNaN(ttl) && ttl > 0) {
+                url += `?ex=${ttl}`;
+            } else if (ttl === 0) {
+                // TTL 为 0 表示立即过期，不需要设置
+                console.warn(`⚠️ Upstash set: TTL 为 0，跳过过期设置 (${key})`);
+            } else {
+                console.warn(`⚠️ Upstash set: 无效的 TTL 值 ${expirationTtl}，跳过过期设置 (${key})`);
+            }
         }
 
         const response = await fetch(url, {
