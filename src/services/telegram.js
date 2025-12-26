@@ -131,6 +131,13 @@ setInterval(async () => {
         await client.getMe();
         lastHeartbeat = Date.now();
     } catch (e) {
+        if (e.code === 406 && e.errorMessage?.includes('AUTH_KEY_DUPLICATED')) {
+            console.error("🚨 检测到 AUTH_KEY_DUPLICATED，会话已在别处激活，本实例应停止连接");
+            // 这里不主动 disconnect，让 index.js 的锁续租失败来处理，
+            // 或者标记需要重置
+            lastHeartbeat = 0; // 触发强制处理
+        }
+        
         console.warn("💔 心跳检测失败:", e.message);
         if (Date.now() - lastHeartbeat > 5 * 60 * 1000) {
             console.error("🚨 超过 5 分钟无心跳响应，强制重启连接...");

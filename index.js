@@ -37,36 +37,6 @@ const processedMessages = new Map();
         }
         await SettingsRepository.set("last_startup_time", Date.now().toString());
 
-        // 1. 启动 Telegram 客户端（带重试机制处理 AUTH_KEY_DUPLICATED）
-        let clientStarted = false;
-        let retryCount = 0;
-        const maxRetries = 3;
-
-        while (!clientStarted && retryCount < maxRetries) {
-            try {
-                await client.start({ botAuthToken: config.botToken });
-                await saveSession(); // 登录成功后保存 Session
-                console.log("🚀 Telegram 客户端已连接");
-                clientStarted = true;
-            } catch (error) {
-                if (error.code === 406 && error.errorMessage?.includes('AUTH_KEY_DUPLICATED')) {
-                    retryCount++;
-                    console.warn(`⚠️ 检测到 AUTH_KEY_DUPLICATED 错误 (尝试 ${retryCount}/${maxRetries})，正在清除旧 Session 并重试...`);
-
-                    if (retryCount < maxRetries) {
-                        await clearSession();
-                        resetClientSession(); // 关键：重置内存中的 Session
-                        // 等待一小段时间让服务器释放旧连接
-                        await new Promise(r => setTimeout(r, 2000));
-                        continue;
-                    }
-                }
-
-                // 如果不是 AUTH_KEY_DUPLICATED 错误或者重试次数用完，直接抛出错误
-                throw error;
-            }
-        }
-
         // 2. 启动 HTTP 健康检查端口 (用于保活)
         http.createServer((req, res) => {
             res.writeHead(200);
@@ -77,6 +47,60 @@ const processedMessages = new Map();
 
         // 3. 初始化实例协调器（多实例支持）
         await instanceCoordinator.start();
+
+        // --- 🤖 Telegram 客户端多实例协调启动 ---
+        let isClientActive = false;
+
+        const startTelegramClient = async () => {
+            // 尝试获取 Telegram 客户端专属锁
+            const hasLock = await instanceCoordinator.acquireLock("telegram_client", 60);
+            if (!hasLock) {
+                if (isClientActive) {
+                    console.warn("🚨 失去 Telegram 锁，正在断开连接...");
+                    await client.disconnect();
+                    isClientActive = false;
+                }
+                return false;
+            }
+
+            if (isClientActive) return true; // 已启动且持有锁
+
+            console.log("👑 已获取 Telegram 锁，正在启动客户端...");
+            let retryCount = 0;
+            const maxRetries = 3;
+
+            while (!isClientActive && retryCount < maxRetries) {
+                try {
+                    await client.start({ botAuthToken: config.botToken });
+                    await saveSession();
+                    console.log("🚀 Telegram 客户端已连接");
+                    isClientActive = true;
+                    return true;
+                } catch (error) {
+                    if (error.code === 406 && error.errorMessage?.includes('AUTH_KEY_DUPLICATED')) {
+                        retryCount++;
+                        console.warn(`⚠️ 检测到 AUTH_KEY_DUPLICATED 错误 (尝试 ${retryCount}/${maxRetries})，正在清除旧 Session 并重试...`);
+                        if (retryCount < maxRetries) {
+                            await clearSession();
+                            resetClientSession();
+                            await new Promise(r => setTimeout(r, 2000));
+                            continue;
+                        }
+                    }
+                    console.error("❌ 启动 Telegram 客户端失败:", error.message);
+                    break;
+                }
+            }
+            return isClientActive;
+        };
+
+        // 初始启动尝试
+        await startTelegramClient();
+
+        // 定期检查/续租锁
+        setInterval(async () => {
+            await startTelegramClient();
+        }, 30000);
 
         // 4. 初始化后台任务系统 (恢复历史任务)
         TaskManager.init().then(() => {
