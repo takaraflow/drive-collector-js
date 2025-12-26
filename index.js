@@ -147,21 +147,8 @@ const processedMessages = new Map();
                 console.log(`📩 收到新事件: ${event.className}`);
             }
 
-            // 多实例分片处理：防止重复消息 (通过环境变量控制)
-            const msgId = event.message?.id;
-            if (msgId && process.env.INSTANCE_COUNT && process.env.INSTANCE_ID) {
-                const count = parseInt(process.env.INSTANCE_COUNT);
-                const id = parseInt(process.env.INSTANCE_ID);
-                const expectedInstance = (msgId % count) + 1; // 实例ID从1开始
-                if ((id - 1) % count !== msgId % count) {
-                    console.log(`🗂️ 分片跳过: 消息 ${msgId} 应由实例 ${expectedInstance} 处理 (当前实例: ${id})`);
-                    return; // 跳过不属于此实例的消息
-                } else {
-                    console.log(`✅ 分片处理: 消息 ${msgId} 由实例 ${id} 处理`);
-                }
-            }
-            
             // 去重检查：防止多实例部署时的重复处理
+            const msgId = event.message?.id;
             if (msgId) {
                 const now = Date.now();
                 if (processedMessages.has(msgId)) {
