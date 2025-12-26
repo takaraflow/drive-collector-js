@@ -20,7 +20,8 @@ describe('Limiter Priority & Distribution', () => {
     it('should respect priority in p-queue', async () => {
         const results = [];
         const task = (id) => async () => {
-            await new Promise(r => setTimeout(r, 10));
+            // 使用 0 延迟消除 10ms 的硬等待，同时保留异步切换特性
+            await new Promise(r => setTimeout(r, 0));
             results.push(id);
         };
 

@@ -18,6 +18,9 @@ describe('Limiter 429 & FloodWait Handling', () => {
     });
 
     it('should retry on FloodWaitError and respect retry-after', async () => {
+        // 使用 Fake Timers 消除 1s 的真实等待
+        jest.useFakeTimers();
+        
         const mockTask = jest.fn()
             .mockRejectedValueOnce({ 
                 name: 'FloodWaitError', 
@@ -26,9 +29,16 @@ describe('Limiter 429 & FloodWait Handling', () => {
             })
             .mockResolvedValueOnce('success');
 
-        const result = await handle429Error(mockTask, 2);
+        const promise = handle429Error(mockTask, 2);
+        
+        // 推进时间以跳过 sleep
+        await jest.advanceTimersByTimeAsync(2000);
+        
+        const result = await promise;
         expect(result).toBe('success');
         expect(mockTask).toHaveBeenCalledTimes(2);
+        
+        jest.useRealTimers();
     });
 
     it('should trigger global cooling for large wait times', async () => {
@@ -41,7 +51,6 @@ describe('Limiter 429 & FloodWait Handling', () => {
         
         const mockTask2 = jest.fn().mockResolvedValue('success');
 
-        // 我们不能真的等 61 秒，所以这里 mock timers
         jest.useFakeTimers();
 
         // 启动第一个任务，它会失败并设置冷静期
@@ -61,8 +70,8 @@ describe('Limiter 429 & FloodWait Handling', () => {
         await jest.advanceTimersByTimeAsync(35000);
         
         // 最终 p2 应该执行了
-        // 注意：handle429Error 内部的 sleep 也是被 mocked 的
-        // 且 p1 的重试也需要时间，这里我们主要验证逻辑
+        await p2;
+        expect(mockTask2).toHaveBeenCalled();
         
         jest.useRealTimers();
     });
