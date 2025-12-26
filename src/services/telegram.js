@@ -85,6 +85,30 @@ export const client = new TelegramClient(
 // --- 🛡️ 客户端监控与健康检查 (Watchdog) ---
 let lastHeartbeat = Date.now();
 let isReconnecting = false;
+let connectionStatusCallback = null; // 连接状态变化回调
+
+/**
+ * 设置连接状态变化回调
+ * @param {function} callback - 当连接状态变化时调用的函数，参数：(isConnected: boolean)
+ */
+export const setConnectionStatusCallback = (callback) => {
+    connectionStatusCallback = callback;
+};
+
+// 监听连接状态变化
+client.on("connected", () => {
+    console.log("🔗 Telegram 客户端连接已建立");
+    if (connectionStatusCallback) {
+        connectionStatusCallback(true);
+    }
+});
+
+client.on("disconnected", () => {
+    console.log("🔌 Telegram 客户端连接已断开");
+    if (connectionStatusCallback) {
+        connectionStatusCallback(false);
+    }
+});
 
 // 监听错误以防止更新循环因超时而崩溃
 client.on("error", (err) => {

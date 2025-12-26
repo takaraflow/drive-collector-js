@@ -1,6 +1,6 @@
 import http from "http";
 import { config } from "./src/config/index.js";
-import { client, saveSession, clearSession, resetClientSession } from "./src/services/telegram.js";
+import { client, saveSession, clearSession, resetClientSession, setConnectionStatusCallback } from "./src/services/telegram.js";
 import { TaskManager } from "./src/core/TaskManager.js";
 import { Dispatcher } from "./src/bot/Dispatcher.js";
 import { MessageHandler } from "./src/bot/MessageHandler.js";
@@ -66,6 +66,14 @@ process.on("uncaughtException", (err) => {
 
         // --- 🤖 Telegram 客户端多实例协调启动 ---
         let isClientActive = false;
+
+        // 设置连接状态回调，当连接断开时重置 isClientActive
+        setConnectionStatusCallback((isConnected) => {
+            if (!isConnected && isClientActive) {
+                console.log("🔌 Telegram 连接已断开，重置客户端状态");
+                isClientActive = false;
+            }
+        });
 
         const startTelegramClient = async () => {
             // 尝试获取 Telegram 客户端专属锁 (增加 TTL 到 90s，减少因延迟导致的丢失)
