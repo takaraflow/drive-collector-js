@@ -25,21 +25,24 @@ jest.unstable_mockModule("../../src/services/rclone.js", () => ({
     CloudTool: mockCloudTool,
 }));
 
-const mockTaskRepository = {
-    updateStatus: jest.fn(),
-    findByMsgId: jest.fn().mockResolvedValue([]),
-    create: jest.fn(),
-    findCompletedByFile: jest.fn(),
-    findAllCompletedByUser: jest.fn().mockResolvedValue([]),
+const mockDatabaseService = {
+    updateTaskStatus: jest.fn(),
+    getTasksByMsgId: jest.fn().mockResolvedValue([]),
+    createTask: jest.fn(),
+    findCompletedTaskByFile: jest.fn(),
+    getTaskById: jest.fn().mockResolvedValue(null),
+    markTaskCancelled: jest.fn(),
+    findPendingTasks: jest.fn().mockResolvedValue([]),
 };
-jest.unstable_mockModule("../../src/repositories/TaskRepository.js", () => ({
-    TaskRepository: mockTaskRepository,
+jest.unstable_mockModule("../../src/services/database.js", () => ({
+    DatabaseService: mockDatabaseService,
 }));
 
 // Mock InstanceCoordinator
 const mockInstanceCoordinator = {
     acquireTaskLock: jest.fn().mockResolvedValue(true),
     releaseTaskLock: jest.fn().mockResolvedValue(),
+    hasLock: jest.fn().mockResolvedValue(true),
 };
 jest.unstable_mockModule("../../src/services/InstanceCoordinator.js", () => ({
     instanceCoordinator: mockInstanceCoordinator,
@@ -140,7 +143,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
 
         // Assertions
         expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalledWith("test_file.mp4", "user_1");
-        expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "completed");
+        expect(mockDatabaseService.updateTaskStatus).toHaveBeenCalledWith("task_1", "completed");
         expect(mockClient.downloadMedia).not.toHaveBeenCalled(); // Skipped download
         // Should NOT enqueue upload task
         expect(TaskManager.uploadQueue.size).toBe(0); 
@@ -160,7 +163,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         expect(mockClient.downloadMedia).not.toHaveBeenCalled(); // Skipped download
         
         // Should update status to 'downloaded'
-        expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "downloaded");
+        expect(mockDatabaseService.updateTaskStatus).toHaveBeenCalledWith("task_1", "downloaded");
         
         // Should enqueue upload task (Queue is paused, so size should be 1)
         expect(TaskManager.uploadQueue.size).toBe(1);
@@ -181,7 +184,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         expect(mockClient.downloadMedia).toHaveBeenCalled(); // Performed download
         
         // Should update status to 'downloaded'
-        expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "downloaded");
+        expect(mockDatabaseService.updateTaskStatus).toHaveBeenCalledWith("task_1", "downloaded");
         
         // Should enqueue upload task
         expect(TaskManager.uploadQueue.size).toBe(1);
@@ -194,7 +197,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         
         await TaskManager.downloadWorker(task);
 
-        expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "completed");
+        expect(mockDatabaseService.updateTaskStatus).toHaveBeenCalledWith("task_1", "completed");
         expect(mockClient.downloadMedia).not.toHaveBeenCalled();
     });
 
@@ -255,7 +258,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         
         await TaskManager.downloadWorker(smallTask);
         
-        expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_small", "completed");
+        expect(mockDatabaseService.updateTaskStatus).toHaveBeenCalledWith("task_small", "completed");
     });
 
     test("Scenario 8: Edge Case - Small File Mismatch", async () => {

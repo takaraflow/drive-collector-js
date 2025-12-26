@@ -10,7 +10,7 @@ import { UIHelper } from "../ui/templates.js";
 import { getMediaInfo, updateStatus, escapeHTML, safeEdit } from "../utils/common.js";
 import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, runMtprotoFileTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { AuthGuard } from "../modules/AuthGuard.js";
-import { TaskRepository } from "../repositories/TaskRepository.js";
+import { DatabaseService } from "../services/database.js";
 import { d1 } from "../services/d1.js";
 import { kv } from "../services/kv.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
@@ -85,7 +85,7 @@ export class TaskManager {
             // 降级到单个更新
             for (const update of updates) {
                 try {
-                    await TaskRepository.updateStatus(update.id, update.status, update.error);
+                    await DatabaseService.updateTaskStatus(update.id, update.status, update.error);
                 } catch (err) {
                     console.error(`Failed to update task ${update.id}:`, err);
                 }
@@ -175,7 +175,7 @@ export class TaskManager {
             // 并行加载初始化数据：僵尸任务 + 预热常用缓存
             // 注意：如果是 failover 模式，commonData 可能已经预加载过了，但再次调用无害（通常有缓存或幂等）
             const results = await Promise.allSettled([
-                TaskRepository.findStalledTasks(120000), // 查找 2 分钟未更新的任务
+                DatabaseService.findPendingTasks(120000), // 查找 2 分钟未更新的任务
                 this._preloadCommonData() 
             ]);
 
@@ -376,7 +376,7 @@ export class TaskManager {
         const info = getMediaInfo(mediaMessage);
 
         try {
-            await TaskRepository.create({
+            await DatabaseService.createTask({
                 id: taskId,
                 userId: userId.toString(),
                 chatId: chatIdStr,
@@ -438,7 +438,7 @@ export class TaskManager {
             });
         }
 
-        await TaskRepository.createBatch(tasksData);
+        await DatabaseService.createBatchTasks(tasksData);
         // 解耦：批量任务也通过轮询认领
         console.log(`📝 Batch tasks (${messages.length}) created and persisted. Waiting for instance to claim.`);
     }
@@ -554,7 +554,7 @@ export class TaskManager {
             let lastUpdate = 0;
             const heartbeat = async (status, downloaded = 0, total = 0) => {
                 if (task.isCancelled) throw new Error("CANCELLED");
-                await TaskRepository.updateStatus(task.id, status);
+                await DatabaseService.updateTaskStatus(task.id, status);
 
                 if (task.isGroup) {
                     await this._refreshGroupMonitor(task, status, downloaded, total);
@@ -573,7 +573,7 @@ export class TaskManager {
                 // 如果远程已存在且大小匹配，直接完成
                 const remoteFile = await CloudTool.getRemoteFileInfo(fileName, task.userId);
                 if (remoteFile && this._isSizeMatch(remoteFile.Size, info.size)) {
-                    await TaskRepository.updateStatus(task.id, 'completed');
+                    await DatabaseService.updateTaskStatus(task.id, 'completed');
                     if (task.isGroup) {
                         await this._refreshGroupMonitor(task, 'completed');
                     } else {
@@ -598,7 +598,7 @@ export class TaskManager {
                 // 如果本地文件已存在且完整，跳过下载，直接进入上传流程
                 if (localFileExists && this._isSizeMatch(localFileSize, info.size)) {
                     // 本地文件完好，直接进入上传队列
-                    await TaskRepository.updateStatus(task.id, 'downloaded');
+                    await DatabaseService.updateTaskStatus(task.id, 'downloaded');
                     if (!task.isGroup) {
                         await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
                     }
@@ -625,7 +625,7 @@ export class TaskManager {
                 await runMtprotoFileTaskWithRetry(() => client.downloadMedia(message, downloadOptions), {}, 5); // 增加重试次数到5次
 
                 // 下载完成，推入上传队列
-                await TaskRepository.updateStatus(task.id, 'downloaded');
+                await DatabaseService.updateTaskStatus(task.id, 'downloaded');
                 if (!task.isGroup) {
                     await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
                 }
@@ -637,7 +637,7 @@ export class TaskManager {
             } catch (e) {
                 const isCancel = e.message === "CANCELLED";
                 try {
-                    await TaskRepository.updateStatus(task.id, isCancel ? 'cancelled' : 'failed', e.message);
+                    await DatabaseService.updateTaskStatus(task.id, isCancel ? 'cancelled' : 'failed', e.message);
                 } catch (updateError) {
                     console.error(`Failed to update task status for ${task.id}:`, updateError);
                 }
@@ -689,7 +689,7 @@ export class TaskManager {
 
             const localPath = task.localPath;
             if (!fs.existsSync(localPath)) {
-                await TaskRepository.updateStatus(task.id, 'failed', 'Local file not found');
+                await DatabaseService.updateTaskStatus(task.id, 'failed', 'Local file not found');
                 await updateStatus(task, STRINGS.task.failed_validation, true);
                 this.activeWorkers.delete(id);
                 return;
@@ -698,7 +698,7 @@ export class TaskManager {
         let lastUpdate = 0;
         const heartbeat = async (status, downloaded = 0, total = 0, uploadProgress = null) => {
             if (task.isCancelled) throw new Error("CANCELLED");
-            await TaskRepository.updateStatus(task.id, status);
+            await DatabaseService.updateTaskStatus(task.id, status);
 
             if (task.isGroup) {
                 await this._refreshGroupMonitor(task, status, downloaded, total);
@@ -720,7 +720,7 @@ export class TaskManager {
             const remoteFile = await CloudTool.getRemoteFileInfo(fileName, task.userId);
             
             if (remoteFile && this._isSizeMatch(remoteFile.Size, info.size)) {
-                await TaskRepository.updateStatus(task.id, 'completed');
+                await DatabaseService.updateTaskStatus(task.id, 'completed');
                 if (task.isGroup) {
                     await this._refreshGroupMonitor(task, 'completed');
                 } else {
@@ -798,7 +798,7 @@ export class TaskManager {
 
                 const finalStatus = isOk ? 'completed' : 'failed';
                 const errorMsg = isOk ? null : `校验失败: 本地(${localSize}) vs 远程(${finalRemote ? finalRemote.Size : '未找到'})`;
-                await TaskRepository.updateStatus(task.id, finalStatus, errorMsg);
+                await DatabaseService.updateTaskStatus(task.id, finalStatus, errorMsg);
 
                 if (task.isGroup) {
                     await this._refreshGroupMonitor(task, finalStatus, 0, 0, errorMsg);
@@ -813,7 +813,7 @@ export class TaskManager {
                     await updateStatus(task, finalMsg, true);
                 }
             } else {
-                await TaskRepository.updateStatus(task.id, 'failed', uploadResult.error || "Upload failed");
+                await DatabaseService.updateTaskStatus(task.id, 'failed', uploadResult.error || "Upload failed");
                 if (task.isGroup) {
                     await this._refreshGroupMonitor(task, 'failed', 0, 0, uploadResult.error || "Upload failed");
                 } else {
@@ -824,7 +824,7 @@ export class TaskManager {
             }
         } catch (e) {
             const isCancel = e.message === "CANCELLED";
-            await TaskRepository.updateStatus(task.id, isCancel ? 'cancelled' : 'failed', e.message);
+            await DatabaseService.updateTaskStatus(task.id, isCancel ? 'cancelled' : 'failed', e.message);
 
             if (task.isGroup) {
                 await this._refreshGroupMonitor(task, isCancel ? 'cancelled' : 'failed');
@@ -855,7 +855,7 @@ export class TaskManager {
      * 取消指定任务
      */
     static async cancelTask(taskId, userId) {
-        const dbTask = await TaskRepository.findById(taskId);
+        const dbTask = await DatabaseService.getTaskById(taskId);
         if (!dbTask) return false;
 
         const isOwner = dbTask.user_id === userId.toString();
@@ -881,7 +881,7 @@ export class TaskManager {
             this.waitingUploadTasks = this.waitingUploadTasks.filter(t => t.id.toString() !== taskId);
         }
 
-        await TaskRepository.markCancelled(taskId);
+        await DatabaseService.markTaskCancelled(taskId);
         return true;
     }
 
@@ -940,7 +940,7 @@ export class TaskManager {
         if (now - lastUpdate < 2000 && !isFinal) return;
         this.monitorLocks.set(msgId, now);
 
-        const groupTasks = await TaskRepository.findByMsgId(msgId);
+        const groupTasks = await DatabaseService.getTasksByMsgId(msgId);
         if (!groupTasks.length) return;
 
         const { text } = UIHelper.renderBatchMonitor(groupTasks, task, status, downloaded, total, errorMsg);
@@ -981,7 +981,7 @@ export class TaskManager {
 
             const hasTgLock = await instanceCoordinator.hasLock("telegram_client");
             if (hasTgLock) {
-                const queuedTasks = await TaskRepository.findStalledTasks(300000, 'queued');
+                const queuedTasks = await DatabaseService.findPendingTasks(300000, 'queued');
                 for (const row of queuedTasks) {
                     if (this.getProcessingCount() >= 5) break;
                     if (this.activeWorkers.has(row.id)) continue;
@@ -990,7 +990,7 @@ export class TaskManager {
                 }
             }
 
-            const uploadTasks = await TaskRepository.findStalledTasks(300000, 'downloaded');
+            const uploadTasks = await DatabaseService.findPendingTasks(300000, 'downloaded');
             for (const row of uploadTasks) {
                 if (this.getProcessingCount() >= 5) break;
                 if (this.activeWorkers.has(row.id)) continue;
@@ -1012,7 +1012,7 @@ export class TaskManager {
             const messages = await runMtprotoTaskWithRetry(() => client.getMessages(row.chat_id, { ids: [row.source_msg_id] }), { priority: PRIORITY.BACKGROUND });
             const message = messages[0];
             if (!message || !message.media) {
-                await TaskRepository.updateStatus(row.id, 'failed', 'Source msg missing');
+                await DatabaseService.updateTaskStatus(row.id, 'failed', 'Source msg missing');
                 return;
             }
 

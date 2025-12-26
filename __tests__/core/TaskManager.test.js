@@ -34,7 +34,7 @@ jest.unstable_mockModule("../../src/services/rclone.js", () => ({
     CloudTool: mockCloudTool,
 }));
 
-// Mock repositories/TaskRepository
+// Mock repositories/TaskRepository (for backward compatibility if needed, but mainly we use DatabaseService now)
 const mockTaskRepository = {
     create: jest.fn(),
     createBatch: jest.fn(),
@@ -136,11 +136,28 @@ jest.unstable_mockModule("../../src/ui/templates.js", () => ({
     UIHelper: mockUIHelper,
 }));
 
-// Mock services/d1.js
+// Mock services/database.js
+const mockDatabaseService = {
+    createTask: jest.fn(),
+    createBatchTasks: jest.fn(),
+    findPendingTasks: jest.fn(),
+    updateTaskStatus: jest.fn(),
+    getTaskById: jest.fn(),
+    markTaskCancelled: jest.fn(),
+    getTasksByMsgId: jest.fn(),
+};
+jest.unstable_mockModule("../../src/services/database.js", () => ({
+    DatabaseService: mockDatabaseService,
+}));
+
+// Mock services/d1.js (no longer needed directly by TaskManager, but kept for transitive deps)
 const mockD1Batch = jest.fn().mockResolvedValue([{ success: true }]);
 jest.unstable_mockModule("../../src/services/d1.js", () => ({
     d1: {
-        batch: mockD1Batch
+        batch: mockD1Batch,
+        run: jest.fn().mockResolvedValue({}),
+        fetchAll: jest.fn().mockResolvedValue([]),
+        fetchOne: jest.fn().mockResolvedValue({})
     }
 }));
 
@@ -162,6 +179,16 @@ jest.unstable_mockModule("../../src/services/kv.js", () => ({
     kv: mockKv
 }));
 
+// Mock services/InstanceCoordinator.js
+const mockInstanceCoordinator = {
+    acquireTaskLock: jest.fn().mockResolvedValue(true),
+    releaseTaskLock: jest.fn().mockResolvedValue(true),
+    hasLock: jest.fn().mockResolvedValue(true)
+};
+jest.unstable_mockModule("../../src/services/InstanceCoordinator.js", () => ({
+    instanceCoordinator: mockInstanceCoordinator
+}));
+
 // 导入 TaskManager
 const { TaskManager } = await import("../../src/core/TaskManager.js");
 
@@ -177,6 +204,16 @@ describe("TaskManager", () => {
         mockTaskRepository.updateStatus.mockResolvedValue();
         mockTaskRepository.findById.mockResolvedValue({ user_id: "u1" });
         mockTaskRepository.findByMsgId.mockResolvedValue([]);
+        
+        // DatabaseService mocks
+        mockDatabaseService.createTask.mockResolvedValue();
+        mockDatabaseService.createBatchTasks.mockResolvedValue();
+        mockDatabaseService.updateTaskStatus.mockResolvedValue();
+        mockDatabaseService.getTaskById.mockResolvedValue({ user_id: "u1" });
+        mockDatabaseService.getTasksByMsgId.mockResolvedValue([]);
+        mockDatabaseService.findPendingTasks.mockResolvedValue([]);
+        mockDatabaseService.markTaskCancelled.mockResolvedValue();
+
         mockAuthGuard.can.mockResolvedValue(false);
         mockSafeEdit.mockResolvedValue();
         mockD1Batch.mockResolvedValue([{ success: true }]);
@@ -228,8 +265,8 @@ describe("TaskManager", () => {
             // Verify warning logged immediately
             expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("故障转移模式"));
             
-            // At this point, findStalledTasks should NOT have been called yet
-            expect(mockTaskRepository.findStalledTasks).not.toHaveBeenCalled();
+            // At this point, findPendingTasks should NOT have been called yet
+            expect(mockDatabaseService.findPendingTasks).not.toHaveBeenCalled();
 
             // Advance time by 30s to trigger the recovery
             jest.advanceTimersByTime(30000);
@@ -238,7 +275,7 @@ describe("TaskManager", () => {
             await initPromise;
 
             // Now it should have been called
-            expect(mockTaskRepository.findStalledTasks).toHaveBeenCalled();
+            expect(mockDatabaseService.findPendingTasks).toHaveBeenCalled();
             expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("延迟恢复检查"));
 
             // Cleanup
@@ -254,14 +291,14 @@ describe("TaskManager", () => {
             const stalledTasks = [
                 { id: "1", user_id: "u1", chat_id: "c1", msg_id: 100, source_msg_id: 200 }
             ];
-            mockTaskRepository.findStalledTasks.mockResolvedValue(stalledTasks);
+            mockDatabaseService.findPendingTasks.mockResolvedValue(stalledTasks);
             mockClient.getMessages.mockResolvedValue([{ id: 200, media: {} }]);
 
             if (TaskManager.downloadQueue) TaskManager.downloadQueue.pause();
 
             await TaskManager.init();
 
-            expect(mockTaskRepository.findStalledTasks).toHaveBeenCalled();
+            expect(mockDatabaseService.findPendingTasks).toHaveBeenCalled();
             expect(mockClient.getMessages).toHaveBeenCalled();
             expect(TaskManager.waitingTasks.length).toBe(1);
 
@@ -302,7 +339,7 @@ describe("TaskManager", () => {
             await TaskManager.addTask(target, mediaMessage, userId, "TestLabel");
 
             expect(mockClient.sendMessage).toHaveBeenCalled();
-            expect(mockTaskRepository.create).toHaveBeenCalledWith(expect.objectContaining({
+            expect(mockDatabaseService.createTask).toHaveBeenCalledWith(expect.objectContaining({
                 userId: userId,
                 sourceMsgId: 200
             }));
@@ -316,7 +353,7 @@ describe("TaskManager", () => {
         test("should cancel task if owner", async () => {
             const taskId = "task1";
             const userId = "user1";
-            mockTaskRepository.findById.mockResolvedValue({ user_id: userId });
+            mockDatabaseService.getTaskById.mockResolvedValue({ user_id: userId });
             
             const task = { id: taskId, userId: userId, isCancelled: false };
             TaskManager.waitingTasks.push(task);
@@ -325,7 +362,7 @@ describe("TaskManager", () => {
 
             expect(result).toBe(true);
             expect(task.isCancelled).toBe(true);
-            expect(mockTaskRepository.markCancelled).toHaveBeenCalledWith(taskId);
+            expect(mockDatabaseService.markTaskCancelled).toHaveBeenCalledWith(taskId);
         });
     });
 
@@ -339,11 +376,11 @@ describe("TaskManager", () => {
                 isGroup: true
             };
             const groupTasks = [{ file_name: "f1", status: "downloading" }];
-            mockTaskRepository.findByMsgId.mockResolvedValue(groupTasks);
+            mockDatabaseService.getTasksByMsgId.mockResolvedValue(groupTasks);
             
             await TaskManager._refreshGroupMonitor(task, "downloading", 100, 1000);
             
-            expect(mockTaskRepository.findByMsgId).toHaveBeenCalledWith("100");
+            expect(mockDatabaseService.getTasksByMsgId).toHaveBeenCalledWith("100");
             expect(mockUIHelper.renderBatchMonitor).toHaveBeenCalled();
             expect(mockSafeEdit).toHaveBeenCalled();
         });
@@ -354,7 +391,7 @@ describe("TaskManager", () => {
                 { id: "t1", status: "downloading" },
                 { id: "t2", status: "downloading" }
             ];
-            mockTaskRepository.findByMsgId.mockResolvedValue(groupTasks);
+            mockDatabaseService.getTasksByMsgId.mockResolvedValue(groupTasks);
 
             const batchUpdateSpy = jest.spyOn(TaskManager, 'batchUpdateStatus');
 
@@ -422,9 +459,9 @@ describe("TaskManager", () => {
             await Promise.all([promise1, promise2]);
 
             // 验证关键的业务逻辑只被一个 Worker 执行
-            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloading');
+            expect(mockDatabaseService.updateTaskStatus).toHaveBeenCalledWith(task.id, 'downloading');
 
-            const downloadingCalls = mockTaskRepository.updateStatus.mock.calls.filter(call => call[1] === 'downloading');
+            const downloadingCalls = mockDatabaseService.updateTaskStatus.mock.calls.filter(call => call[1] === 'downloading');
             expect(downloadingCalls.length).toBe(1);
         });
 
@@ -447,7 +484,7 @@ describe("TaskManager", () => {
             // 能够再次进入处理（即使状态是 failed）
             mockClient.downloadMedia.mockResolvedValue({});
             await TaskManager.downloadWorker(task);
-            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloaded');
+            expect(mockDatabaseService.updateTaskStatus).toHaveBeenCalledWith(task.id, 'downloaded');
         });
     });
 
@@ -469,8 +506,8 @@ describe("TaskManager", () => {
 
             await TaskManager.downloadWorker(task);
 
-            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloading');
-            expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloaded');
+            expect(mockDatabaseService.updateTaskStatus).toHaveBeenCalledWith(task.id, 'downloading');
+            expect(mockDatabaseService.updateTaskStatus).toHaveBeenCalledWith(task.id, 'downloaded');
 
             expect(TaskManager.waitingUploadTasks.length).toBeGreaterThan(0);
         });
@@ -493,12 +530,12 @@ describe("TaskManager", () => {
             await downloadPromise;
 
             expect(cancelResult).toBe(true);
-            expect(mockTaskRepository.markCancelled).toHaveBeenCalledWith(task.id);
+            expect(mockDatabaseService.markTaskCancelled).toHaveBeenCalledWith(task.id);
         });
     });
 
     describe("Database Operation Failure Handling", () => {
-        test("should handle TaskRepository.updateStatus failure gracefully", async () => {
+        test("should handle DatabaseService.updateTaskStatus failure gracefully", async () => {
             const task = {
                 id: "db-fail-task",
                 userId: "u1",
@@ -506,7 +543,7 @@ describe("TaskManager", () => {
                 isGroup: false
             };
 
-            mockTaskRepository.updateStatus.mockRejectedValue(new Error("DB Connection Failed"));
+            mockDatabaseService.updateTaskStatus.mockRejectedValue(new Error("DB Connection Failed"));
             mockClient.downloadMedia.mockResolvedValue({});
 
             await expect(TaskManager.downloadWorker(task)).resolves.toBeUndefined();
@@ -522,7 +559,7 @@ describe("TaskManager", () => {
                 isGroup: false
             };
 
-            mockTaskRepository.updateStatus.mockRejectedValue(new Error("DB Error"));
+            mockDatabaseService.updateTaskStatus.mockRejectedValue(new Error("DB Error"));
             mockClient.downloadMedia.mockResolvedValue({});
 
             await expect(TaskManager.downloadWorker(task)).resolves.toBeUndefined();
@@ -575,10 +612,6 @@ describe("TaskManager", () => {
 
     describe("Filename Validation Consistency", () => {
         test("should use actual local filename for validation instead of regenerating from media info", async () => {
-            // 通过 Mock setTimeout 来加速该测试
-            const originalTimeout = global.setTimeout;
-            global.setTimeout = (fn, ms) => fn(); 
-
             const task = {
                 id: "validation-filename-task",
                 userId: "u1",
@@ -613,10 +646,8 @@ describe("TaskManager", () => {
 
             expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalledWith("transfer_1766663719382_fc61fh.jpg", "u1", 2);
             expect(mockCloudTool.getRemoteFileInfo).not.toHaveBeenCalledWith("transfer_1766663722153_a82fwq.jpg", "u1", expect.any(Number));
-            
-            global.setTimeout = originalTimeout;
         });
     });
-});
 
 global.safeEdit = mockSafeEdit;
+});
