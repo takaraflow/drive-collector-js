@@ -89,8 +89,10 @@ let isReconnecting = false;
 // 监听错误以防止更新循环因超时而崩溃
 client.on("error", (err) => {
     if (err.message && err.message.includes("TIMEOUT")) {
-        console.warn("⚠️ Telegram 客户端更新循环超时 (TIMEOUT)，检测连接状态...");
-        handleConnectionIssue();
+        // TIMEOUT 通常发生在 _updateLoop 中，GramJS 可能已经进入不可恢复状态
+        console.warn("⚠️ Telegram 客户端更新循环超时 (TIMEOUT)，准备主动重连...");
+        // 增加延迟避免在网络波动时频繁重连
+        setTimeout(() => handleConnectionIssue(), 2000);
     } else if (err.message && err.message.includes("Not connected")) {
         console.warn("⚠️ Telegram 客户端未连接，尝试重连...");
         handleConnectionIssue();

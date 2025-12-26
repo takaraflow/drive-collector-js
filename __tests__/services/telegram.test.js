@@ -92,6 +92,11 @@ describe("Telegram Service Watchdog", () => {
         expect(capturedErrorCallback).toBeDefined();
 
         await capturedErrorCallback(new Error("TIMEOUT"));
+        
+        // 现在的逻辑是 setTimeout 2秒后再触发断开
+        jest.advanceTimersByTime(2001);
+        await flushPromises();
+        
         expect(mockClientInstance.disconnect).toHaveBeenCalled();
 
         jest.advanceTimersByTime(5001);
@@ -136,6 +141,9 @@ describe("Telegram Service Watchdog", () => {
         const p1 = capturedErrorCallback(new Error("TIMEOUT"));
         const p2 = capturedErrorCallback(new Error("TIMEOUT"));
 
+        // 触发 setTimeout 内部的 handleConnectionIssue
+        jest.advanceTimersByTime(2001);
+        
         await Promise.all([p1, p2]);
         await flushPromises();
 

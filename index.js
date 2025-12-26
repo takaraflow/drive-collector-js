@@ -52,12 +52,20 @@ const processedMessages = new Map();
         let isClientActive = false;
 
         const startTelegramClient = async () => {
-            // 尝试获取 Telegram 客户端专属锁
-            const hasLock = await instanceCoordinator.acquireLock("telegram_client", 60);
+            // 尝试获取 Telegram 客户端专属锁 (增加 TTL 到 90s，减少因延迟导致的丢失)
+            const hasLock = await instanceCoordinator.acquireLock("telegram_client", 90);
             if (!hasLock) {
                 if (isClientActive) {
-                    console.warn("🚨 失去 Telegram 锁，正在断开连接...");
-                    await client.disconnect();
+                    console.warn("🚨 失去 Telegram 锁或无法续租，正在断开连接...");
+                    try {
+                        // 强制断开，并设置较短的超时防止卡死在 disconnect
+                        await Promise.race([
+                            client.disconnect(),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error("Disconnect Timeout")), 5000))
+                        ]);
+                    } catch (e) {
+                        console.error("⚠️ 断开连接时出错:", e.message);
+                    }
                     isClientActive = false;
                 }
                 return false;
