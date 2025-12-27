@@ -1,5 +1,7 @@
 # Drive Collector Bot
 
+[中文文档](docs/README_CN.md)
+
 A modular Telegram bot for transferring files to Rclone remotes.
 
 ## Features
@@ -19,11 +21,78 @@ npm install
 
 Set the following environment variables:
 
+### Core Configuration
 - `BOT_TOKEN`: Your Telegram bot token
-- `PORT`: Port for health check server (default: 3000)
-- For multi-instance deployment:
-  - `INSTANCE_COUNT`: Total number of instances
-  - `INSTANCE_ID`: Unique ID for this instance (1 to INSTANCE_COUNT)
+- `API_ID`: Telegram API ID
+- `API_HASH`: Telegram API Hash
+- `OWNER_ID`: Bot owner Telegram ID
+- `PORT`: Port for health check server (default: 7860)
+
+### QStash Integration (Optional)
+- `QSTASH_TOKEN`: Upstash QStash API token for message queuing
+- `QSTASH_URL`: QStash endpoint URL
+- `QSTASH_CURRENT_SIGNING_KEY`: Current signing key for webhook verification
+- `QSTASH_NEXT_SIGNING_KEY`: Next signing key for key rotation
+- `APP_WEBHOOK_URL`: Base URL for webhook endpoints
+
+### Cloudflare Worker LB Configuration
+- `QSTASH_CURRENT_SIGNING_KEY`: Signing key for webhook verification
+- `UPSTASH_REDIS_REST_URL`: Upstash Redis REST URL (for KV failover)
+- `UPSTASH_REDIS_REST_TOKEN`: Upstash Redis REST token
+
+### Multi-instance Deployment
+- `INSTANCE_COUNT`: Total number of instances
+- `INSTANCE_ID`: Unique ID for this instance (1 to INSTANCE_COUNT)
+
+## QStash Integration
+
+QStash is integrated as a message queuing system to enable reliable asynchronous task processing and webhook handling.
+
+### Purpose and Architecture
+
+- **Decoupling**: Separates task scheduling from execution, allowing for elastic scaling
+- **Reliability**: Messages are persisted and retried on failure
+- **Webhook Security**: Validates incoming webhooks using cryptographic signatures
+- **Topics**: Organized into `download-tasks`, `upload-tasks`, and `system-events`
+
+### Architecture Overview
+
+```
+Telegram Bot → QStash → Webhook → Cloudflare Worker LB → Active Instances
+     ↓              ↓              ↓              ↓              ↓
+   Task Creation  Message Queue   Signature     Load Balance    Task Processing
+   (Sync)         (Async)         Verification   (Round Robin)   (Async)
+```
+
+### Features
+
+- **Message Publishing**: Send tasks to different topics with optional delays
+- **Batch Operations**: Handle multiple related tasks efficiently
+- **Signature Verification**: Ensures webhook authenticity
+- **Media Group Batching**: Aggregates related media files for batch processing
+
+## Cloudflare Worker Load Balancer
+
+A Cloudflare Worker that distributes QStash webhooks across multiple bot instances for high availability.
+
+### Role and Functions
+
+- **Load Distribution**: Routes incoming webhooks to active instances using round-robin algorithm
+- **Health Monitoring**: Tracks instance status via heartbeat mechanism
+- **Fault Tolerance**: Automatic failover between Cloudflare KV and Upstash Redis
+- **Signature Verification**: Validates QStash webhook signatures before forwarding
+
+### Deployment via GitHub Actions
+
+The load balancer is automatically deployed when changes are pushed to `main` or `develop` branches affecting worker files.
+
+**Workflow Triggers:**
+- Push to `main` → Production environment
+- Push to `develop` → Development environment
+
+**Environment-Specific Configuration:**
+- Production: `qstash-lb` worker with production KV namespace
+- Development: `qstash-lb-dev` worker with staging KV namespace
 
 ## Usage
 
@@ -67,15 +136,115 @@ Using GitHub Actions with Node.js 20.x.
 - `src/bot/`: Bot event handling (Dispatcher)
 - `src/modules/`: Additional modules (AuthGuard, etc.)
 
-## Deployment
+## Environment Variables and GitHub Secrets Configuration
 
-Built using Docker (see Dockerfile in root)
+### Environment Variables (Runtime)
 
-For zero-downtime deployments with multiple instances:
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `BOT_TOKEN` | Telegram bot token | Yes |
+| `API_ID` | Telegram API ID | Yes |
+| `API_HASH` | Telegram API Hash | Yes |
+| `OWNER_ID` | Bot owner Telegram ID | Yes |
+| `PORT` | Server port (default: 7860) | No |
+| `QSTASH_TOKEN` | Upstash QStash API token | No* |
+| `QSTASH_URL` | QStash endpoint URL | No* |
+| `QSTASH_CURRENT_SIGNING_KEY` | Current webhook signing key | No* |
+| `QSTASH_NEXT_SIGNING_KEY` | Next webhook signing key | No* |
+| `APP_WEBHOOK_URL` | Webhook base URL | No* |
+| `INSTANCE_COUNT` | Total instances for sharding | No |
+| `INSTANCE_ID` | Current instance ID (1-N) | No |
+
+*Required for QStash features
+
+### GitHub Secrets (Deployment)
+
+| Secret | Production | Development | Description |
+|--------|------------|-------------|-------------|
+| `CLOUDFLARE_API_TOKEN` | Required | Required | Cloudflare API token for deployment |
+| `CLOUDFLARE_ACCOUNT_ID` | Required | Required | Cloudflare account ID |
+| `WORKER_NAME` | `qstash-lb` | `qstash-lb-dev` | Worker name |
+| `CF_KV_NAMESPACE_ID` | Production NS | Staging NS | KV namespace ID |
+| `QSTASH_CURRENT_SIGNING_KEY` | Prod Key | Dev Key | Webhook signing key |
+| `UPSTASH_REDIS_REST_URL` | Prod URL | Dev URL | Redis REST URL |
+| `UPSTASH_REDIS_REST_TOKEN` | Prod Token | Dev Token | Redis REST token |
+
+### Secrets Setup Guide
+
+1. **Cloudflare Setup:**
+   - Create API token with Workers and KV permissions
+   - Get your account ID from Cloudflare dashboard
+
+2. **KV Namespace:**
+   - Production: Create `PRODUCTION_NS` namespace
+   - Development: Create `STAGING_NS` namespace
+
+3. **QStash Setup:**
+   - Get token from Upstash console
+   - Generate signing keys for webhook verification
+
+4. **Upstash Redis (Optional):**
+   - Create Redis database for KV failover
+   - Get REST URL and token
+
+## Local Development and Deployment
+
+### Local Development
+
+1. **Install Dependencies:**
+   ```bash
+   npm install
+   ```
+
+2. **Environment Setup:**
+   ```bash
+   cp .env.example .env  # Configure your environment variables
+   ```
+
+3. **Run Development Server:**
+   ```bash
+   npm run dev
+   ```
+
+4. **Run Tests:**
+   ```bash
+   npm test
+   ```
+
+### Deployment Commands
+
+#### Bot Deployment
+- **Docker Build:** `docker build -t drive-collector-bot .`
+- **Docker Run:** `docker run -p 7860:7860 drive-collector-bot`
+- **Railway:** Automatic deployment on push to main/develop
+- **Zeabur:** Automatic deployment via webhook
+
+#### Load Balancer Deployment
+- **Automatic:** Via GitHub Actions on push to main/develop
+- **Manual Build:** `npm run build-lb` (generates wrangler.build.toml)
+- **Manual Deploy:** Use Wrangler CLI or GitHub Actions
+
+### Multi-Environment Setup
+
+The project uses GitHub Environments for isolated production and development deployments:
+
+- **Production Environment:** `main` branch → `qstash-lb` worker
+- **Development Environment:** `develop` branch → `qstash-lb-dev` worker
+
+Each environment has separate:
+- KV namespaces (PRODUCTION_NS, STAGING_NS)
+- QStash signing keys
+- Upstash Redis instances
+- Worker names
+
+### Zero-Downtime Deployment
+
+For multi-instance deployments:
 
 1. Set `INSTANCE_COUNT` and `INSTANCE_ID` environment variables
 2. Use message sharding to prevent duplicate processing
-3. Consider using Redis for shared state in production
+3. Deploy instances incrementally
+4. Use health checks for graceful shutdown
 
 ## License
 

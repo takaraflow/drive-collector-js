@@ -1,15 +1,15 @@
-name = "qstash-lb"
+name = "${WORKER_NAME}"
 main = "dist/lb.js"
 compatibility_date = "2023-01-01"
 
 # KV 命名空间绑定（需要与主项目使用相同的 KV 命名空间）
 [[kv_namespaces]]
 binding = "KV_STORAGE"
-id = "${KV_NAMESPACE_ID}"
+id = "${CF_KV_NAMESPACE_ID}"
 preview_id = "${KV_PREVIEW_ID}"
 
 # 环境变量
 [vars]
-QSTASH_CURRENT_SIGNING_KEY = "${QSTASH_SIGNING_KEY}"
+QSTASH_CURRENT_SIGNING_KEY = "${QSTASH_CURRENT_SIGNING_KEY}"
 UPSTASH_REDIS_REST_URL = "${UPSTASH_REDIS_REST_URL}"
 UPSTASH_REDIS_REST_TOKEN = "${UPSTASH_REDIS_REST_TOKEN}"
