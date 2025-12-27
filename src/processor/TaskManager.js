@@ -333,8 +333,10 @@ export class TaskManager {
                 fileSize: info?.size
             });
 
-            // 解耦：仅存入数据库，等待轮询机制认领处理
-            logger.info("Task created and persisted", { taskId, status: 'waiting_for_claim' });
+            // 立即推送到 QStash 队列
+            const task = this._createTaskObject(taskId, userId, chatIdStr, statusMsg.id, mediaMessage);
+            await this._enqueueTask(task);
+            logger.info("Task created and enqueued", { taskId, status: 'enqueued' });
 
         } catch (e) {
             logger.error("Task creation failed", { error: e.message, stack: e.stack });
@@ -386,8 +388,16 @@ export class TaskManager {
         }
 
         await TaskRepository.createBatch(tasksData);
-        // 解耦：批量任务也通过轮询认领
-        logger.info("Batch tasks created and persisted", { count: messages.length, status: 'waiting_for_claim' });
+        // 立即推送到 QStash 队列
+        for (const data of tasksData) {
+            const message = messages.find(m => m.id === data.sourceMsgId);
+            if (message) {
+                const task = this._createTaskObject(data.id, data.userId, data.chatId, data.msgId, message);
+                task.isGroup = true;
+                await this._enqueueTask(task);
+            }
+        }
+        logger.info("Batch tasks created and enqueued", { count: messages.length, status: 'enqueued' });
     }
 
     /**
