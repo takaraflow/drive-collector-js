@@ -21,17 +21,23 @@ export class DriveRepository {
     /**
      * 获取用户的绑定网盘
      * @param {string} userId
+     * @param {boolean} skipCache - 是否跳过缓存直接查询 KV
      * @returns {Promise<Object|null>}
      */
-    static async findByUserId(userId) {
+    static async findByUserId(userId, skipCache = false) {
         if (!userId) return null;
         const cacheKey = `drive_${userId}`;
 
         try {
+            if (skipCache) {
+                const drive = await kv.get(this.getDriveKey(userId), "json");
+                return drive || null;
+            }
+
             return await cacheService.getOrSet(cacheKey, async () => {
                 const drive = await kv.get(this.getDriveKey(userId), "json");
                 return drive || null;
-            }, 10 * 60 * 1000); // 缓存 10 分钟
+            }, 60 * 1000); // 缓存 1 分钟
         } catch (e) {
             console.error(`DriveRepository.findByUserId error for ${userId}:`, e);
             return null;

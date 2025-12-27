@@ -231,6 +231,9 @@ export class Dispatcher {
         let finalSelectedDrive = selectedDrive;
         if (defaultDriveId && !selectedDrive) {
             finalSelectedDrive = await DriveRepository.findById(defaultDriveId);
+        } else if (!selectedDrive) {
+            // 兜底查询：跳过缓存尝试获取，防止缓存不一致导致误报未绑定
+            finalSelectedDrive = await DriveRepository.findByUserId(userId, true);
         }
 
         // 2. 文本命令路由
@@ -260,7 +263,7 @@ export class Dispatcher {
             try {
                 const toProcess = await LinkParser.parse(text, userId);
                 if (toProcess && toProcess.length > 0) {
-                    if (!selectedDrive) return await this._sendBindHint(target, userId);
+                    if (!finalSelectedDrive) return await this._sendBindHint(target, userId);
 
                     if (toProcess.length > 10) await runBotTaskWithRetry(() => client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` }), userId, {}, false, 3);
                     for (const msg of toProcess.slice(0, 10)) await TaskManager.addTask(target, msg, userId, "链接");
@@ -280,7 +283,7 @@ export class Dispatcher {
 
         // 5. 处理带媒体的消息 (文件/视频/图片)
         if (message.media) {
-            if (!selectedDrive) return await this._sendBindHint(target, userId);
+            if (!finalSelectedDrive) return await this._sendBindHint(target, userId);
 
             // 🚀 核心逻辑：如果是媒体组消息
             if (message.groupedId) {
@@ -323,7 +326,11 @@ export class Dispatcher {
         // 2. 异步处理：并发检查网盘绑定和获取文件列表
         (async () => {
             try {
-                const drive = await DriveRepository.findByUserId(userId);
+                let drive = await DriveRepository.findByUserId(userId);
+                if (!drive) {
+                    // 兜底查询：跳过缓存尝试获取，防止缓存不一致导致误报未绑定
+                    drive = await DriveRepository.findByUserId(userId, true);
+                }
                 if (!drive) {
                     await safeEdit(target, placeholder.id, STRINGS.drive.no_drive_found, null, userId);
                     return;
