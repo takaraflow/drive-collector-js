@@ -3,7 +3,7 @@ name: Deploy Cloudflare Worker LB
 on:
   push:
     branches: [main, develop]
-    paths: ['src/worker/**', 'wrangler.toml', 'scripts/build-lb.js']
+    paths: ['src/worker/**', 'wrangler.toml', 'scripts/build-lb.js', 'package.json', 'wrangler.build.toml', 'src/config/**', 'src/services/**', 'src/utils/**']
 
 jobs:
   deploy:
