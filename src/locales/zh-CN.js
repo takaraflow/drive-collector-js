@@ -126,6 +126,8 @@ export const STRINGS = {
         system_info: "💻 系统信息",
         uptime: "⏱️ 运行时间: {{uptime}}",
         service_status: "📡 服务状态: {{status}}",
+        mode_changed: "✅ <b>访问模式已切换</b>\n\n当前模式: <code>{{mode}}</code>",
+        no_permission: "❌ <b>无权限</b>\n\n此操作仅限管理员执行。",
     }
 };
 

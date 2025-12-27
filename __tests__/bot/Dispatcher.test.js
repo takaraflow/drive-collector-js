@@ -82,6 +82,7 @@ jest.unstable_mockModule("../../src/services/rclone.js", () => ({
 
 const mockSettingsRepository = {
   get: jest.fn(),
+  set: jest.fn(),
 };
 jest.unstable_mockModule("../../src/repositories/SettingsRepository.js", () => ({
   SettingsRepository: mockSettingsRepository,
@@ -126,9 +127,9 @@ jest.unstable_mockModule("../../src/locales/zh-CN.js", () => ({
     task: { cmd_sent: "sent", task_not_found: "not found" },
     system: { welcome: "welcome", maintenance_mode: "🚧 <b>系统维护中</b>\n\n当前 Bot 仅限管理员使用，请稍后访问。" },
     drive: { no_drive_found: "no drive" },
-    status: { header: "header", queue_title: "queue", waiting_tasks: "waiting", current_task: "current", system_info: "sys", uptime: "up", service_status: "svc" }
+    status: { header: "header", queue_title: "queue", waiting_tasks: "🕒 等待中的任务: {{count}}", current_task: "🔄 当前正在处理: {{count}}", current_file: "📄 当前任务: <code>{{name}}</code>", user_history: "👤 您的任务历史", task_item: "{{index}}. {{status}} <code>{{name}}</code> ({{statusText}})", drive_status: "🔑 网盘绑定: {{status}}", system_info: "💻 系统信息", uptime: "⏱️ 运行时间: {{uptime}}", service_status: "📡 服务状态: {{status}}", mode_changed: "✅ <b>访问模式已切换</b>\n\n当前模式: <code>{{mode}}</code>", no_permission: "❌ <b>无权限</b>\n\n此操作仅限管理员执行。" }
   },
-  format: (s) => s,
+  format: (template, vars = {}) => template.replace(/\{\{(\w+)\}\}/g, (_, key) => (vars[key] !== undefined && vars[key] !== null) ? vars[key] : `{{${key}}}`),
 }));
 
 // Load Dispatcher
@@ -390,6 +391,65 @@ describe("Dispatcher", () => {
       await Dispatcher._handleMessage(event, { userId: "123", target });
 
       expect(mockClient.sendMessage).toHaveBeenCalled();
+    });
+
+    test("should handle /status_public command for admin", async () => {
+      mockAuthGuard.can.mockResolvedValue(true);
+      mockSettingsRepository.set.mockResolvedValue();
+
+      const message = {
+        id: 1,
+        message: "/status_public",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockAuthGuard.can).toHaveBeenCalledWith("123", "maintenance:bypass");
+      expect(mockSettingsRepository.set).toHaveBeenCalledWith("access_mode", "public");
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, {
+        message: "✅ <b>访问模式已切换</b>\n\n当前模式: <code>公开</code>",
+        parseMode: "html"
+      });
+    });
+
+    test("should handle /status_private command for admin", async () => {
+      mockAuthGuard.can.mockResolvedValue(true);
+      mockSettingsRepository.set.mockResolvedValue();
+
+      const message = {
+        id: 1,
+        message: "/status_private",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockAuthGuard.can).toHaveBeenCalledWith("123", "maintenance:bypass");
+      expect(mockSettingsRepository.set).toHaveBeenCalledWith("access_mode", "private");
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, {
+        message: "✅ <b>访问模式已切换</b>\n\n当前模式: <code>私有(维护)</code>",
+        parseMode: "html"
+      });
+    });
+
+    test("should reject /status_public command for non-admin", async () => {
+      mockAuthGuard.can.mockResolvedValue(false);
+
+      const message = {
+        id: 1,
+        message: "/status_public",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockAuthGuard.can).toHaveBeenCalledWith("123", "maintenance:bypass");
+      expect(mockSettingsRepository.set).not.toHaveBeenCalled();
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, {
+        message: "❌ <b>无权限</b>\n\n此操作仅限管理员执行。",
+        parseMode: "html"
+      });
     });
 
     test("should parse and process links", async () => {

@@ -248,6 +248,10 @@ export class Dispatcher {
                     return await this._handleHelpCommand(target, userId);
                 case "/diagnosis":
                     return await this._handleDiagnosisCommand(target, userId);
+                case "/status_public":
+                    return await this._handleModeSwitchCommand(target, userId, 'public');
+                case "/status_private":
+                    return await this._handleModeSwitchCommand(target, userId, 'private');
                 // 更多命令可在此添加...
             }
 
@@ -579,5 +583,25 @@ export class Dispatcher {
         }
 
         return info + "\n";
+    }
+
+    /**
+     * [私有] 处理模式切换命令 (/status_public, /status_private)
+     */
+    static async _handleModeSwitchCommand(target, userId, mode) {
+        const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
+        if (!isAdmin) {
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.status.no_permission,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        }
+
+        await SettingsRepository.set("access_mode", mode);
+
+        return await runBotTaskWithRetry(() => client.sendMessage(target, {
+            message: format(STRINGS.status.mode_changed, { mode: mode === 'public' ? '公开' : '私有(维护)' }),
+            parseMode: "html"
+        }), userId, {}, false, 3);
     }
 }
