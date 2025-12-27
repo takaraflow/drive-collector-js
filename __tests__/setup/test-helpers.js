@@ -109,3 +109,25 @@ export function resetAllMocks(mocks) {
     }
   });
 }
+
+/**
+ * 清理已知的单例服务定时器
+ * 用于防止测试间的定时器泄露
+ */
+export async function cleanupSingletonTimers() {
+  // 清理 Telegram 服务定时器
+  try {
+    const { stopWatchdog } = await import("../../src/services/telegram.js");
+    if (stopWatchdog) stopWatchdog();
+  } catch (e) {
+    // 忽略导入错误，可能被 mock
+  }
+
+  // 清理 KV 服务定时器
+  try {
+    const { kv } = await import("../../src/services/kv.js");
+    if (kv && kv.stopRecoveryCheck) kv.stopRecoveryCheck();
+  } catch (e) {
+    // 忽略导入错误，可能被 mock
+  }
+}

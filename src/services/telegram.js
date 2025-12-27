@@ -102,6 +102,8 @@ export const client = new TelegramClient(
 let lastHeartbeat = Date.now();
 let isReconnecting = false;
 let connectionStatusCallback = null; // 连接状态变化回调
+let watchdogTimer = null;
+let reconnectTimeout = null;
 
 /**
  * 设置连接状态变化回调
@@ -133,7 +135,8 @@ client.on("error", (err) => {
         // TIMEOUT 通常发生在 _updateLoop 中，GramJS 可能已经进入不可恢复状态
         console.warn(`⚠️ Telegram 客户端更新循环超时 (TIMEOUT): ${errorMsg}，准备主动重连...`);
         // 增加延迟避免在网络波动时频繁重连
-        setTimeout(() => handleConnectionIssue(), 2000);
+        if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        reconnectTimeout = setTimeout(() => handleConnectionIssue(), 2000);
     } else if (errorMsg.includes("Not connected")) {
         console.warn("⚠️ Telegram 客户端未连接，尝试重连...");
         handleConnectionIssue();
@@ -187,8 +190,23 @@ async function handleConnectionIssue() {
     }
 }
 
+/**
+ * 停止看门狗定时器
+ */
+export const stopWatchdog = () => {
+    if (watchdogTimer) {
+        clearInterval(watchdogTimer);
+        watchdogTimer = null;
+    }
+    if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+    }
+    isReconnecting = false;
+};
+
 // 定时检查心跳（通过获取自身信息）
-setInterval(async () => {
+watchdogTimer = setInterval(async () => {
     if (!client.connected || isReconnecting) return;
     
     try {

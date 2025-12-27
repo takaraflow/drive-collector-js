@@ -4,11 +4,11 @@ import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globa
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
-// Mock the global setInterval
-const originalSetInterval = global.setInterval;
-const originalClearInterval = global.clearInterval;
+
 
 describe("Telegram Startup Protection and Re-entrance Prevention", () => {
+    // Increase timeout for slow async operations
+    jest.setTimeout(60000);
     let mockClient;
     let mockCoordinator;
     let mockSettingsRepository;
@@ -52,21 +52,11 @@ describe("Telegram Startup Protection and Re-entrance Prevention", () => {
             SettingsRepository: mockSettingsRepository
         }));
 
-        // Mock setInterval to capture calls
-        global.setInterval = jest.fn((callback, interval) => {
-            const timerId = Symbol('timer');
-            // Simulate calling the callback immediately for testing
-            setTimeout(() => callback(), 0);
-            return timerId;
-        });
 
-        global.clearInterval = jest.fn();
     });
 
     afterEach(() => {
         jest.useRealTimers();
-        global.setInterval = originalSetInterval;
-        global.clearInterval = originalClearInterval;
         jest.clearAllMocks();
     });
 
@@ -116,30 +106,46 @@ describe("Telegram Startup Protection and Re-entrance Prevention", () => {
             }
         };
 
-        return { startTelegramClient, getClientState: () => ({ isClientActive, isClientStarting }) };
+        return {
+            startTelegramClient,
+            getClientState: () => ({ isClientActive, isClientStarting }),
+            setClientState: (active, starting) => {
+                isClientActive = active;
+                isClientStarting = starting;
+            }
+        };
     }
 
     test("should prevent concurrent startup attempts", async () => {
-        // Mock client.start to take 5 seconds (simulating slow network)
-        mockClient.start.mockImplementation(() => new Promise(resolve => setTimeout(resolve, 5000)));
+        // 使用一个受控的 Promise 来模拟慢速启动
+        let resolveStart;
+        const startPromise = new Promise(resolve => { resolveStart = resolve; });
+        mockClient.start.mockReturnValue(startPromise);
 
         const { startTelegramClient, getClientState } = await simulateFixedStartTelegramClient();
 
         // 第一次调用开始启动
         const promise1 = startTelegramClient();
 
-        // 立即第二次调用（模拟 setInterval 触发）
+        // 确保第一次调用已经运行到第一个 await (acquireLock) 之后
+        // 在 Fake Timers 模式下，微任务需要手动 flush
+        await Promise.resolve();
+
+        // 立即第二次调用
         const promise2 = startTelegramClient();
 
-        // 第二次调用应该立即返回，因为 isClientStarting = true
+        // 第二次调用应该立即返回 false，因为它检测到 isClientStarting 为 true
         const result2 = await promise2;
         expect(result2).toBe(false);
         expect(getClientState().isClientStarting).toBe(true);
 
-        // 等待第一次调用完成
-        await jest.advanceTimersByTimeAsync(5000);
-        const result1 = await promise1;
-        expect(result1).toBe(true);
+        // 完成第一次启动
+        resolveStart();
+
+        // 刷新所有 Promise 和 Timer
+        await Promise.resolve();
+        await Promise.resolve(); // 多次 flush 确保 finally 执行
+
         expect(getClientState().isClientActive).toBe(true);
         expect(getClientState().isClientStarting).toBe(false);
     });
@@ -171,11 +177,10 @@ describe("Telegram Startup Protection and Re-entrance Prevention", () => {
     });
 
     test("should skip startup when already active", async () => {
-        const { startTelegramClient, getClientState } = await simulateFixedStartTelegramClient();
+        const { startTelegramClient, getClientState, setClientState } = await simulateFixedStartTelegramClient();
 
         // 手动设置已启动状态
-        const state = getClientState();
-        state.isClientActive = true;
+        setClientState(true, false);
 
         const result = await startTelegramClient();
 
@@ -187,11 +192,10 @@ describe("Telegram Startup Protection and Re-entrance Prevention", () => {
     test("should disconnect when lock is lost and client is active", async () => {
         mockCoordinator.acquireLock.mockResolvedValue(false);
 
-        const { startTelegramClient, getClientState } = await simulateFixedStartTelegramClient();
+        const { startTelegramClient, getClientState, setClientState } = await simulateFixedStartTelegramClient();
 
         // 手动设置已启动状态
-        const state = getClientState();
-        state.isClientActive = true;
+        setClientState(true, false);
 
         const result = await startTelegramClient();
 

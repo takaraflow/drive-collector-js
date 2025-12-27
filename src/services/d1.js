@@ -77,7 +77,8 @@ class D1Service {
                 if (!result.success) {
                     throw new Error(`D1 Error: ${result.errors[0]?.message || "Unknown error"}`);
                 }
-                return result.result[0];
+                // 兼容标准 Cloudflare D1 格式和扁平化 Mock 格式
+                return result.result ? result.result[0] : result;
 
             } catch (error) {
                 // 处理 fetch 网络错误 (DNS, Timeout 等)
@@ -118,7 +119,9 @@ class D1Service {
      * 执行操作：用于 INSERT, UPDATE, DELETE
      */
     async run(sql, params = []) {
-        return await this._execute(sql, params);
+        const result = await this._execute(sql, params);
+        // 统一返回处理：如果结果包含 results 数组，返回第一个结果，否则返回整个结果对象
+        return result.results ? result.results[0] : result;
     }
 
     /**

@@ -88,19 +88,19 @@ export class InstanceCoordinator {
             const now = Date.now();
 
             try {
-                // 仅在非故障转移模式，或者每 3 次心跳才尝试一次 KV 更新
-                if (!kv.isFailoverMode || Math.random() < 0.3) {
-                    // 优化：直接 blind set，不先 get，减少一半调用
+                // 检查实例是否仍然存在于 KV 中
+                const existing = await kv.get(`instance:${this.instanceId}`);
+                if (!existing) {
+                    // 实例不存在，重新注册
+                    await this.registerInstance();
+                } else {
+                    // 实例存在，更新心跳
                     const instanceData = {
-                        id: this.instanceId,
-                        hostname: process.env.HOSTNAME || 'unknown',
+                        ...existing,
                         lastHeartbeat: now,
                         status: 'active'
                     };
                     await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
-                } else {
-                    // 重新注册
-                    await this.registerInstance();
                 }
             } catch (kvError) {
                 console.error(`KV心跳更新失败: ${kvError.message}`);

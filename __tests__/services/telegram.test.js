@@ -82,8 +82,13 @@ describe("Telegram Service Watchdog", () => {
         mockClientInstance.connected = true;
     });
 
-    afterAll(() => {
+    afterAll(async () => {
         jest.useRealTimers();
+        // Clean up timers
+        const module = await import("../../src/services/telegram.js");
+        if (module.stopWatchdog) {
+            module.stopWatchdog();
+        }
     });
 
     test("应当注册 'error' 事件监听器", () => {
@@ -103,7 +108,7 @@ describe("Telegram Service Watchdog", () => {
         expect(mockClientInstance.disconnect).toHaveBeenCalled();
 
         // 由于使用了随机等待时间（5-10秒），我们需要等待更长时间
-        jest.advanceTimersByTime(10001);
+        jest.advanceTimersByTime(15000);
         await flushPromises();
 
         expect(mockClientInstance.connect).toHaveBeenCalled();
@@ -121,7 +126,7 @@ describe("Telegram Service Watchdog", () => {
         expect(mockClientInstance.disconnect).toHaveBeenCalled();
 
         // 由于使用了随机等待时间（5-10秒），我们需要等待更长时间
-        jest.advanceTimersByTime(10001);
+        jest.advanceTimersByTime(15000);
         await flushPromises();
 
         expect(mockClientInstance.connect).toHaveBeenCalled();
@@ -140,7 +145,7 @@ describe("Telegram Service Watchdog", () => {
         expect(mockClientInstance.disconnect).toHaveBeenCalled();
 
         // 关键修复：确保重连逻辑（包括随机等待时间）执行完毕，释放 isReconnecting 锁
-        jest.advanceTimersByTime(10001);
+        jest.advanceTimersByTime(15000);
         await flushPromises();
         expect(mockClientInstance.connect).toHaveBeenCalled();
     });
@@ -161,7 +166,7 @@ describe("Telegram Service Watchdog", () => {
         expect(mockClientInstance.disconnect).toHaveBeenCalledTimes(1);
 
         // 善后：完成重连流程（随机等待时间）
-        jest.advanceTimersByTime(10001);
+        jest.advanceTimersByTime(15000);
         await flushPromises();
     });
 
@@ -177,7 +182,7 @@ describe("Telegram Service Watchdog", () => {
         expect(mockClientInstance._sender.disconnect).toHaveBeenCalled();
 
         // 随机等待时间
-        jest.advanceTimersByTime(10001);
+        jest.advanceTimersByTime(15000);
         await flushPromises();
 
         expect(mockClientInstance.connect).toHaveBeenCalled();
@@ -202,7 +207,7 @@ describe("Telegram Service Watchdog", () => {
         expect(mockClientInstance._sender.disconnect).toHaveBeenCalled();
 
         // 等待随机延迟时间
-        jest.advanceTimersByTime(10001);
+        jest.advanceTimersByTime(15000);
         await flushPromises();
 
         expect(mockClientInstance.connect).toHaveBeenCalled();

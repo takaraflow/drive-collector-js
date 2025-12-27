@@ -78,11 +78,7 @@ describe("InstanceCoordinator", () => {
 
       await instanceCoordinator.registerInstance();
 
-<<<<<<< HEAD
       // Verify KV write only
-=======
-      // Verify KV write only
->>>>>>> 7c5ec6f (test: refactor DriveRepository tests to use KV instead of D1)
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining("storage/kv/namespaces/mock_namespace_id/values/instance:test_instance_123"),
         expect.objectContaining({

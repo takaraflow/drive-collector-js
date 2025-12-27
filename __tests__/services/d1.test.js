@@ -31,7 +31,18 @@ describe("D1 Service", () => {
   });
 
   beforeEach(() => {
+    jest.useFakeTimers();
     jest.clearAllMocks();
+    // Mock setTimeout to execute immediately to eliminate real delays
+    jest.spyOn(global, 'setTimeout').mockImplementation((cb) => {
+      cb();
+      return 1;
+    });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
   });
 
   test("should initialize the D1 service", () => {

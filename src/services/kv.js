@@ -110,6 +110,16 @@ class KVService {
     }
 
     /**
+     * 停止恢复检查（清理定时器）
+     */
+    stopRecoveryCheck() {
+        if (this.recoveryTimer) {
+            clearInterval(this.recoveryTimer);
+            this.recoveryTimer = null;
+        }
+    }
+
+    /**
      * 启动定期恢复检查
      */
     _startRecoveryCheck() {
@@ -336,7 +346,7 @@ class KVService {
         }
 
         const value = result.result;
-        if (value === null) return null;
+        if (value === null || value === undefined) return null;
 
         if (type === "json") {
             try {
@@ -444,7 +454,14 @@ class KVService {
      * Upstash bulkSet 实现
      */
     async _upstash_bulkSet(pairs) {
+        if (!Array.isArray(pairs)) {
+            throw new Error("Upstash bulkSet: pairs must be an array");
+        }
+
         const commands = pairs.map(p => {
+            if (!p || typeof p.key !== 'string' || p.value === undefined) {
+                throw new Error("Upstash bulkSet: each pair must have 'key' (string) and 'value'");
+            }
             const valueStr = typeof p.value === "string" ? p.value : JSON.stringify(p.value);
             return ["SET", p.key, valueStr];
         });
@@ -462,7 +479,8 @@ class KVService {
         if (results.error) {
             throw new Error(`Upstash Pipeline Error: ${results.error}`);
         }
-        return results.map(r => ({
+        const items = results.results || (Array.isArray(results) ? results : [results]);
+        return items.map(r => ({
             success: !r.error,
             result: r.error ? r.error : r.result
         }));

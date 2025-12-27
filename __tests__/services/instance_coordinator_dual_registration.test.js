@@ -17,6 +17,7 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
             CF_KV_NAMESPACE_ID: "mock_namespace_id",
             CF_KV_TOKEN: "mock_kv_token",
             INSTANCE_ID: "test_instance_heartbeat",
+            HOSTNAME: "unknown", // Mock hostname for consistent test results
         };
 
         // Enable fake timers for testing
@@ -37,6 +38,7 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
                 get: jest.fn(),
                 set: jest.fn(),
                 delete: jest.fn(),
+                isFailoverMode: true, // Force failover mode to trigger get operations
             },
         }));
 
@@ -75,8 +77,8 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         // Start heartbeat manually
         instanceCoordinator.startHeartbeat();
 
-        // Advance timer
-        await jest.advanceTimersByTimeAsync(61000);
+        // Advance timer (heartbeat interval is 5 minutes)
+        await jest.advanceTimersByTimeAsync(300000);
 
         // Verify KV heartbeat was sent
         expect(kv.get).toHaveBeenCalledWith("instance:test_instance_heartbeat");
@@ -86,7 +88,7 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
                 id: "test_instance_heartbeat",
                 lastHeartbeat: expect.any(Number)
             }),
-            180
+            900
         );
     });
 
@@ -100,8 +102,8 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         // Start heartbeat
         instanceCoordinator.startHeartbeat();
 
-        // Advance timer
-        await jest.advanceTimersByTimeAsync(61000);
+        // Advance timer (heartbeat interval is 5 minutes)
+        await jest.advanceTimersByTimeAsync(300000);
 
         // Verify re-registration
         expect(kv.get).toHaveBeenCalledWith("instance:test_instance_heartbeat");
@@ -110,9 +112,13 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
             "instance:test_instance_heartbeat",
             expect.objectContaining({
                 id: "test_instance_heartbeat",
-                status: "active"
+                status: "active",
+                hostname: "unknown",
+                region: "unknown",
+                startedAt: expect.any(Number),
+                lastHeartbeat: expect.any(Number)
             }),
-            180
+            900
         );
     });
 
@@ -126,8 +132,8 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         // Start heartbeat
         instanceCoordinator.startHeartbeat();
 
-        // Advance timer
-        await jest.advanceTimersByTimeAsync(61000);
+        // Advance timer (heartbeat interval is 5 minutes)
+        await jest.advanceTimersByTimeAsync(300000);
 
         // Should log error but not crash
         // Use English matching to avoid encoding issues with Chinese characters

@@ -18,6 +18,7 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
             CF_D1_DATABASE_ID: "test_db",
             CF_D1_TOKEN: "test_token",
         };
+        jest.useFakeTimers();
         jest.resetModules();
 
         // Dynamically import d1 after setting up mocks
@@ -27,6 +28,7 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
 
     afterEach(() => {
         process.env = originalEnv;
+        jest.useRealTimers();
         jest.clearAllMocks();
     });
 
@@ -43,7 +45,9 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
                 })
             });
 
-        const result = await d1Instance.fetchAll("SELECT * FROM test");
+        const promise = d1Instance.fetchAll("SELECT * FROM test");
+        await jest.advanceTimersByTimeAsync(10000); // Advance for retry delays
+        const result = await promise;
 
         expect(mockFetch).toHaveBeenCalledTimes(3); // 2 failures + 1 success
         expect(result).toEqual([{ id: 1 }]);
@@ -72,7 +76,9 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
                 })
             });
 
-        const result = await d1Instance.run("UPDATE test SET status = ?", ["ok"]);
+        const promise = d1Instance.run("UPDATE test SET status = ?", ["ok"]);
+        await jest.advanceTimersByTimeAsync(10000); // Advance for retry delays
+        const result = await promise;
 
         expect(mockFetch).toHaveBeenCalledTimes(3);
         expect(result).toEqual({ status: "ok" });
@@ -101,7 +107,9 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
                 })
             });
 
-        const result = await d1Instance.run("DELETE FROM test WHERE id = ?", [1]);
+        const promise = d1Instance.run("DELETE FROM test WHERE id = ?", [1]);
+        await jest.advanceTimersByTimeAsync(10000); // Advance for retry delays
+        const result = await promise;
 
         expect(mockFetch).toHaveBeenCalledTimes(3);
         expect(result).toEqual({ changes: 1 });
@@ -111,8 +119,10 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
         // Mock fetch to always fail with network errors
         mockFetch.mockRejectedValue(new TypeError("Failed to fetch"));
 
-        await expect(d1Instance.fetchOne("SELECT * FROM test WHERE id = ?", [1]))
+        const promise = expect(d1Instance.fetchOne("SELECT * FROM test WHERE id = ?", [1]))
             .rejects.toThrow("D1 Error: Network connection lost (Max retries exceeded)");
+        await jest.advanceTimersByTimeAsync(10000); // Advance for retry delays
+        await promise;
 
         expect(mockFetch).toHaveBeenCalledTimes(3); // Max 3 attempts
     });
@@ -182,8 +192,6 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
     });
 
     test("should maintain linear backoff timing", async () => {
-        jest.useFakeTimers();
-
         let callCount = 0;
         mockFetch.mockImplementation(() => {
             callCount++;
@@ -215,7 +223,5 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
 
         expect(callCount).toBe(3); // 2 retries + 1 success
         expect(result).toEqual({ success: true });
-
-        jest.useRealTimers();
     });
 });
