@@ -18,14 +18,14 @@ jest.unstable_mockModule('../src/services/telegram.js', () => ({
     clearSession: jest.fn()
 }));
 
-jest.unstable_mockModule('../src/core/TaskManager.js', () => ({
+jest.unstable_mockModule('../src/processor/TaskManager.js', () => ({
     TaskManager: {
         init: jest.fn().mockResolvedValue(true),
         startAutoScaling: jest.fn()
     }
 }));
 
-jest.unstable_mockModule('../src/bot/Dispatcher.js', () => ({
+jest.unstable_mockModule('../src/dispatcher/Dispatcher.js', () => ({
     Dispatcher: {
         handle: jest.fn()
     }

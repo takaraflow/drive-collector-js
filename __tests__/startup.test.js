@@ -41,7 +41,7 @@ describe("Project Smoke Test (Startup)", () => {
         // 这些模块在顶级作用域有副作用（如初始化连接），需要 Mock
         const complexModules = [
             "../src/services/telegram.js",
-            "../src/core/TaskManager.js",
+            "../src/processor/TaskManager.js",
             "../src/repositories/TaskRepository.js"
         ];
 

@@ -13,7 +13,7 @@ jest.unstable_mockModule('../../src/utils/limiter.js', () => ({
     runMtprotoTask: mockRunMtprotoTask
 }));
 
-const { LinkParser } = await import('../../src/core/LinkParser.js');
+const { LinkParser } = await import('../../src/processor/LinkParser.js');
 
 describe('LinkParser', () => {
     beforeEach(() => {

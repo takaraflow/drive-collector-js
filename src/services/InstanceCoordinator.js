@@ -10,6 +10,7 @@ import { InstanceRepository } from "../repositories/InstanceRepository.js";
 export class InstanceCoordinator {
     constructor() {
         this.instanceId = process.env.INSTANCE_ID || `instance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        this.nodeType = process.env.NODE_MODE || 'bot';
         this.heartbeatInterval = 5 * 60 * 1000; // 进一步延长至 5 分钟心跳，大幅减少 KV 调用 (因为 Cloudflare KV 免费额度有限)
         this.instanceTimeout = 15 * 60 * 1000; // 15分钟超时
         this.heartbeatTimer = null;

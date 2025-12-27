@@ -2,10 +2,11 @@ import { config } from '../config/index.js';
 import { ossHelper } from '../utils/oss-helper.js';
 import fs from 'fs';
 import path from 'path';
+import { CloudTool } from './rclone.js';
 
 /**
  * --- OSS 服务层 ---
- * 实现双轨制上传逻辑：优先通过 Cloudflare Worker 隧道，其次回退到 S3 SDK 直接上传
+ * 实现三轨制上传逻辑：优先通过 Cloudflare Worker 隧道，其次回退到 S3 SDK 直连，最后兜底到 Rclone
  */
 class OSSService {
     constructor() {
@@ -21,13 +22,14 @@ class OSSService {
     }
 
     /**
-     * 双轨制上传文件
+     * 三轨制上传文件
      * @param {string} localPath - 本地文件路径
      * @param {string} remoteName - 远程文件名
      * @param {Function} onProgress - 进度回调函数 (progress) => {}
+     * @param {string} userId - 用户ID，用于Rclone兜底
      * @returns {Promise<Object>} 上传结果 { success: boolean, url?: string, error?: string }
      */
-    async upload(localPath, remoteName, onProgress = null) {
+    async upload(localPath, remoteName, onProgress = null, userId = null) {
         // 验证文件存在
         if (!fs.existsSync(localPath)) {
             throw new Error(`文件不存在: ${localPath}`);
@@ -59,10 +61,23 @@ class OSSService {
             console.log(`✅ S3 回退上传成功: ${remoteName}`);
             return result;
         } catch (error) {
-            console.error(`🚨 S3 上传也失败: ${error.message}`);
+            console.error(`🚨 S3 上传失败: ${error.message}`);
+            // 尝试 Rclone 兜底
+            if (userId) {
+                try {
+                    console.log(`🔄 尝试 Rclone 兜底上传: ${remoteName}`);
+                    const rcloneResult = await this._uploadViaRclone(localPath, remoteName, userId, onProgress);
+                    if (rcloneResult.success) {
+                        console.log(`✅ Rclone 兜底上传成功: ${remoteName}`);
+                        return rcloneResult;
+                    }
+                } catch (rcloneError) {
+                    console.error(`🚨 Rclone 兜底也失败: ${rcloneError.message}`);
+                }
+            }
             return {
                 success: false,
-                error: `上传失败: ${error.message}`
+                error: `所有上传路径都失败: ${error.message}`
             };
         }
     }
@@ -122,6 +137,24 @@ class OSSService {
             url: ossHelper.getPublicUrl(remoteName),
             method: 's3',
             s3Result: result
+        };
+    }
+
+    /**
+     * 通过 Rclone 兜底上传
+     * @private
+     */
+    async _uploadViaRclone(localPath, remoteName, userId, onProgress) {
+        const mockTask = { userId: userId.toString(), id: 'oss_fallback_' + Date.now() };
+        const result = await CloudTool.uploadFile(localPath, mockTask, (progress) => {
+            if (onProgress) onProgress(progress);
+        });
+
+        return {
+            success: result.success,
+            url: null, // Rclone 不提供直接 URL
+            method: 'rclone',
+            error: result.error
         };
     }
 }

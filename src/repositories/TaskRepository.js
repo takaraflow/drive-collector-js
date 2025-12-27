@@ -146,6 +146,50 @@ export class TaskRepository {
     }
 
     /**
+     * 原子化认领任务：将任务状态从 'queued' 改为 'downloading' 并记录认领实例
+     * @param {string} taskId - 任务ID
+     * @param {string} instanceId - 实例ID
+     * @returns {boolean} 是否认领成功
+     */
+    static async claimTask(taskId, instanceId) {
+        if (!taskId || !instanceId) {
+            throw new Error("TaskRepository.claimTask: Missing required fields (taskId or instanceId).");
+        }
+
+        try {
+            const result = await d1.run(
+                "UPDATE tasks SET status = 'downloading', claimed_by = ?, updated_at = ? WHERE id = ? AND status = 'queued'",
+                [instanceId, Date.now(), taskId]
+            );
+            return result.changes > 0; // 如果更新了行，则认领成功
+        } catch (e) {
+            console.error(`TaskRepository.claimTask failed for ${taskId}:`, e);
+            return false;
+        }
+    }
+
+    /**
+     * 重置僵尸任务：将长时间未更新的任务重置为 'queued' 状态，清除认领信息
+     * @param {Array<string>} taskIds - 要重置的任务ID数组
+     * @returns {number} 重置的任务数量
+     */
+    static async resetStalledTasks(taskIds) {
+        if (!taskIds || taskIds.length === 0) return 0;
+
+        try {
+            const placeholders = taskIds.map(() => '?').join(',');
+            const result = await d1.run(
+                `UPDATE tasks SET status = 'queued', claimed_by = NULL, updated_at = ? WHERE id IN (${placeholders}) AND status IN ('downloading', 'uploading')`,
+                [Date.now(), ...taskIds]
+            );
+            return result.changes;
+        } catch (e) {
+            console.error("TaskRepository.resetStalledTasks failed:", e);
+            return 0;
+        }
+    }
+
+    /**
      * 根据 ID 获取任务
      */
     static async findById(taskId) {

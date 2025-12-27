@@ -15,7 +15,7 @@ await jest.unstable_mockModule('../../src/services/telegram.js', () => ({
 }));
 
 // Mock Dispatcher
-await jest.unstable_mockModule('../../src/bot/Dispatcher.js', () => ({
+await jest.unstable_mockModule('../../src/dispatcher/Dispatcher.js', () => ({
     Dispatcher: {
         handle: jest.fn().mockResolvedValue(true)
     }
@@ -29,8 +29,8 @@ await jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () =
 }));
 
 // 动态导入被测试模块
-const { MessageHandler } = await import('../../src/bot/MessageHandler.js');
-const { Dispatcher } = await import('../../src/bot/Dispatcher.js');
+const { MessageHandler } = await import('../../src/dispatcher/MessageHandler.js');
+const { Dispatcher } = await import('../../src/dispatcher/Dispatcher.js');
 const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
 
 describe('MessageHandler Integration Tests', () => {

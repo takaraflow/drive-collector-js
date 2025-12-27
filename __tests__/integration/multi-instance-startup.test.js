@@ -44,7 +44,7 @@ jest.unstable_mockModule("../../src/config/index.js", () => ({
 }));
 
 // Mock 其他不相关的依赖
-jest.unstable_mockModule("../../src/core/TaskManager.js", () => ({
+jest.unstable_mockModule("../../src/processor/TaskManager.js", () => ({
     TaskManager: {
         init: jest.fn().mockResolvedValue(undefined),
         startAutoScaling: jest.fn(),
@@ -52,7 +52,7 @@ jest.unstable_mockModule("../../src/core/TaskManager.js", () => ({
     }
 }));
 
-jest.unstable_mockModule("../../src/bot/Dispatcher.js", () => ({
+jest.unstable_mockModule("../../src/dispatcher/Dispatcher.js", () => ({
     Dispatcher: {
         handle: jest.fn()
     }

@@ -54,14 +54,14 @@ const mockTaskManager = {
   getWaitingCount: jest.fn(() => 0),
   getProcessingCount: jest.fn(() => 0),
 };
-jest.unstable_mockModule("../../src/core/TaskManager.js", () => ({
+jest.unstable_mockModule("../../src/processor/TaskManager.js", () => ({
   TaskManager: mockTaskManager,
 }));
 
 const mockLinkParser = {
   parse: jest.fn(),
 };
-jest.unstable_mockModule("../../src/core/LinkParser.js", () => ({
+jest.unstable_mockModule("../../src/processor/LinkParser.js", () => ({
   LinkParser: mockLinkParser,
 }));
 
@@ -133,7 +133,7 @@ jest.unstable_mockModule("../../src/locales/zh-CN.js", () => ({
 }));
 
 // Load Dispatcher
-const { Dispatcher } = await import("../../src/bot/Dispatcher.js");
+const { Dispatcher } = await import("../../src/dispatcher/Dispatcher.js");
 
 describe("Dispatcher", () => {
   beforeEach(() => {

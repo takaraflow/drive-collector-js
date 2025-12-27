@@ -138,8 +138,8 @@ export class TaskManager {
         return this.getProcessingCount();
     }
 
-    // 内存中的任务执行锁，防止同一任务被多次 worker 处理
-    static activeWorkers = new Set();
+    // 内存中的任务执行锁，防止同一任务被多次 processor 处理
+    static activeProcessors = new Set();
 
     // 初始化聚合器
     static uploadBatcher = new UploadBatcher(async (tasks) => {
@@ -468,7 +468,7 @@ export class TaskManager {
         this.waitingTasks.push(task);
         this.downloadQueue.add(async () => {
             this.currentTask = task;
-            await this.downloadWorker(task);
+            await this.downloadTask(task);
             this.currentTask = null;
         });
     }
@@ -482,7 +482,7 @@ export class TaskManager {
             this.waitingUploadTasks = this.waitingUploadTasks.filter(t => t.id !== task.id);
             this.processingUploadTasks.add(task.id);
             try {
-                await this.uploadWorker(task);
+                await this.uploadTask(task);
             } finally {
                 this.processingUploadTasks.delete(task.id);
             }
@@ -515,9 +515,9 @@ export class TaskManager {
     }
 
     /**
-     * 下载Worker - 负责MTProto下载阶段
+     * 下载Task - 负责MTProto下载阶段
      */
-    static async downloadWorker(task) {
+    static async downloadTask(task) {
         const { message, id } = task;
         if (!message.media) return;
 
@@ -532,18 +532,18 @@ export class TaskManager {
 
         try {
             // 防重入：检查任务是否已经在处理中
-            if (this.activeWorkers.has(id)) {
-                console.log(`⚠️ Task ${id} is already being processed, skipping download worker.`);
+            if (this.activeProcessors.has(id)) {
+                console.log(`⚠️ Task ${id} is already being processed, skipping download task.`);
                 return;
             }
-            this.activeWorkers.add(id);
+            this.activeProcessors.add(id);
 
             this.waitingTasks = this.waitingTasks.filter(t => t.id !== id);
             this.updateQueueUI();
 
             const info = getMediaInfo(message.media);
             if (!info) {
-                this.activeWorkers.delete(id);
+                this.activeProcessors.delete(id);
                 return await updateStatus(task, STRINGS.task.parse_failed, true);
             }
 
@@ -580,7 +580,7 @@ export class TaskManager {
                     } else {
                         await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(fileName), folder: config.remoteFolder }), true);
                     }
-                    this.activeWorkers.delete(id);
+                    this.activeProcessors.delete(id);
                     return;
                 }
 
@@ -603,7 +603,7 @@ export class TaskManager {
                     if (!task.isGroup) {
                         await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
                     }
-                    this.activeWorkers.delete(id);
+                    this.activeProcessors.delete(id);
                     shouldUpload = true;
                     return;
                 }
@@ -632,7 +632,7 @@ export class TaskManager {
                 }
 
                 // 标记需要进入上传队列
-                this.activeWorkers.delete(id);
+                this.activeProcessors.delete(id);
                 shouldUpload = true;
 
             } catch (e) {
@@ -649,7 +649,7 @@ export class TaskManager {
                     const text = isCancel ? STRINGS.task.cancelled : `${STRINGS.task.error_prefix}<code>${escapeHTML(e.message)}</code>`;
                     await updateStatus(task, text, true);
                 }
-                this.activeWorkers.delete(id);
+                this.activeProcessors.delete(id);
             }
         } finally {
             // 确保分布式锁被释放
@@ -662,9 +662,9 @@ export class TaskManager {
     }
 
     /**
-     * 上传Worker - 负责rclone转存阶段（无需MTProto）
+     * 上传Task - 负责rclone转存阶段（无需MTProto）
      */
-    static async uploadWorker(task) {
+    static async uploadTask(task) {
         const { id } = task;
 
         // 分布式锁：尝试获取任务锁，确保多实例下同一任务不会被重复处理
@@ -675,16 +675,16 @@ export class TaskManager {
         }
 
         try {
-            // 防重入：上传 Worker 也增加检查
-            if (this.activeWorkers.has(id)) {
-                console.log(`⚠️ Task ${id} is already being processed, skipping upload worker.`);
+            // 防重入：上传 Task 也增加检查
+            if (this.activeProcessors.has(id)) {
+                console.log(`⚠️ Task ${id} is already being processed, skipping upload task.`);
                 return;
             }
-            this.activeWorkers.add(id);
+            this.activeProcessors.add(id);
 
             const info = getMediaInfo(task.message.media);
             if (!info) {
-                this.activeWorkers.delete(id);
+                this.activeProcessors.delete(id);
                 return;
             }
 
@@ -692,7 +692,7 @@ export class TaskManager {
             if (!fs.existsSync(localPath)) {
                 await TaskRepository.updateStatus(task.id, 'failed', 'Local file not found');
                 await updateStatus(task, STRINGS.task.failed_validation, true);
-                this.activeWorkers.delete(id);
+                this.activeProcessors.delete(id);
                 return;
             }
 
@@ -747,7 +747,7 @@ export class TaskManager {
                         lastUpdate = now;
                         heartbeat('uploading', 0, 0, progress);
                     }
-                });
+                }, task.userId);
                 // 转换 OSS 结果为期望格式
                 uploadResult = uploadResult.success ? { success: true } : { success: false, error: uploadResult.error };
             } else {
@@ -862,7 +862,7 @@ export class TaskManager {
             } catch (e) {
                 console.warn(`Failed to cleanup local file ${localPath}:`, e.message);
             }
-            this.activeWorkers.delete(id);
+            this.activeProcessors.delete(id);
         }
     } finally {
         // 确保分布式锁被释放

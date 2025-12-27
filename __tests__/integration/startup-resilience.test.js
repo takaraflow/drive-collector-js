@@ -58,7 +58,7 @@ describe("Application Startup Resilience and Degradation", () => {
             setConnectionStatusCallback: jest.fn()
         }));
 
-        jest.doMock("../../src/core/TaskManager.js", () => ({
+        jest.doMock("../../src/processor/TaskManager.js", () => ({
             TaskManager: {
                 init: jest.fn().mockResolvedValue(undefined),
                 startAutoScaling: jest.fn(),
@@ -67,7 +67,7 @@ describe("Application Startup Resilience and Degradation", () => {
             }
         }));
 
-        jest.doMock("../../src/bot/MessageHandler.js", () => ({
+        jest.doMock("../../src/dispatcher/MessageHandler.js", () => ({
             MessageHandler: {
                 init: jest.fn()
             }

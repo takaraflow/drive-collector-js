@@ -42,7 +42,7 @@ jest.unstable_mockModule('../../src/utils/limiter.js', () => ({
 }));
 
 // --- Import under test ---
-const { Dispatcher } = await import('../../src/bot/Dispatcher.js');
+const { Dispatcher } = await import('../../src/dispatcher/Dispatcher.js');
 
 describe('Dispatcher /files command', () => {
     beforeEach(() => {

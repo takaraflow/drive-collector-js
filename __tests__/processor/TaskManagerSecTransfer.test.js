@@ -102,14 +102,14 @@ jest.unstable_mockModule("fs", () => ({
 }));
 
 // Import TaskManager
-const { TaskManager } = await import("../../src/core/TaskManager.js");
+const { TaskManager } = await import("../../src/processor/TaskManager.js");
 
 describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
     let task;
 
     beforeEach(() => {
         jest.clearAllMocks();
-        TaskManager.activeWorkers.clear();
+        TaskManager.activeProcessors.clear();
         TaskManager.waitingTasks = [];
         
         // Ensure queues are paused so tasks stay in queue for inspection
@@ -136,15 +136,15 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         // Mock Remote File exists and size matches (10MB)
         mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Name: "test_file.mp4", Size: 10485760 });
         
-        await TaskManager.downloadWorker(task);
+        await TaskManager.downloadTask(task);
 
         // Assertions
         expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalledWith("test_file.mp4", "user_1");
         expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "completed");
         expect(mockClient.downloadMedia).not.toHaveBeenCalled(); // Skipped download
         // Should NOT enqueue upload task
-        expect(TaskManager.uploadQueue.size).toBe(0); 
-        expect(TaskManager.activeWorkers.has("task_1")).toBe(false);
+        expect(TaskManager.uploadQueue.size).toBe(0);
+        expect(TaskManager.activeProcessors.has("task_1")).toBe(false);
     });
 
     test("Scenario 2: Remote Miss, Local Cache Hit - Should skip download, queue upload", async () => {
@@ -152,8 +152,8 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
         // Mock Local File exists and size matches
         mockFs.promises.stat.mockResolvedValue({ size: 10485760 });
-        
-        await TaskManager.downloadWorker(task);
+
+        await TaskManager.downloadTask(task);
 
         expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalled();
         expect(mockFs.promises.stat).toHaveBeenCalled();
@@ -171,10 +171,10 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
         // Mock Local File missing
         mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
-        
+
         mockClient.downloadMedia.mockResolvedValue(); // Download success
 
-        await TaskManager.downloadWorker(task);
+        await TaskManager.downloadTask(task);
 
         expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalled();
         expect(mockFs.promises.stat).toHaveBeenCalled();
@@ -191,8 +191,8 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         // 10MB file. Tolerance is 1MB.
         // Remote file is 10MB + 500KB (within 1MB)
         mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Name: "test_file.mp4", Size: 10485760 + 512000 });
-        
-        await TaskManager.downloadWorker(task);
+
+        await TaskManager.downloadTask(task);
 
         expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "completed");
         expect(mockClient.downloadMedia).not.toHaveBeenCalled();
@@ -206,7 +206,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
         mockClient.downloadMedia.mockResolvedValue();
 
-        await TaskManager.downloadWorker(task);
+        await TaskManager.downloadTask(task);
 
         // Should NOT complete immediately
         expect(mockClient.downloadMedia).toHaveBeenCalled(); // Should download
@@ -231,7 +231,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
             return originalAdd(fn);
         });
 
-        await TaskManager.downloadWorker(task);
+        await TaskManager.downloadTask(task);
 
         // Verification: releaseLock MUST happen before enqueueUpload
         expect(callOrder).toEqual(["releaseLock", "enqueueUpload"]);
@@ -252,8 +252,8 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
 
         // Remote file: 500KB + 5KB (Match)
         mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Name: "small.jpg", Size: 512000 + 5120 });
-        
-        await TaskManager.downloadWorker(smallTask);
+
+        await TaskManager.downloadTask(smallTask);
         
         expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_small", "completed");
     });
@@ -267,7 +267,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
         mockClient.downloadMedia.mockResolvedValue();
 
-        await TaskManager.downloadWorker({ ...task, id: "task_small_diff" });
+        await TaskManager.downloadTask({ ...task, id: "task_small_diff" });
         
         expect(mockClient.downloadMedia).toHaveBeenCalled();
     });

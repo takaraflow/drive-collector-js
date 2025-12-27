@@ -163,7 +163,7 @@ jest.unstable_mockModule("../../src/services/kv.js", () => ({
 }));
 
 // 导入 TaskManager
-const { TaskManager } = await import("../../src/core/TaskManager.js");
+const { TaskManager } = await import("../../src/processor/TaskManager.js");
 
 describe("TaskManager", () => {
     beforeEach(() => {
@@ -188,8 +188,8 @@ describe("TaskManager", () => {
         if (TaskManager.downloadQueue) TaskManager.downloadQueue.clear();
         if (TaskManager.uploadQueue) TaskManager.uploadQueue.clear();
         TaskManager.monitorLocks.clear();
-        // 清理 activeWorkers
-        if (TaskManager.activeWorkers) TaskManager.activeWorkers.clear();
+        // 清理 activeProcessors
+        if (TaskManager.activeProcessors) TaskManager.activeProcessors.clear();
         // 清理 UploadBatcher 的定时器（重置实例）
         if (TaskManager.uploadBatcher) {
             TaskManager.uploadBatcher.batches.clear();
@@ -404,7 +404,7 @@ describe("TaskManager", () => {
     });
 
     describe("Concurrency and Re-entry Protection", () => {
-        test("should prevent duplicate processing of the same task using activeWorkers lock", async () => {
+        test("should prevent duplicate processing of the same task using activeProcessors lock", async () => {
             const task = {
                 id: "unique-task-id",
                 userId: "u1",
@@ -415,9 +415,9 @@ describe("TaskManager", () => {
             const { updateStatus } = await import("../../src/utils/common.js");
             updateStatus.mockResolvedValue();
 
-            // 模拟两个 Worker 同时尝试处理同一个任务
-            const promise1 = TaskManager.downloadWorker(task);
-            const promise2 = TaskManager.downloadWorker(task);
+            // 模拟两个 Task 同时尝试处理同一个任务
+            const promise1 = TaskManager.downloadTask(task);
+            const promise2 = TaskManager.downloadTask(task);
 
             await Promise.all([promise1, promise2]);
 
@@ -439,14 +439,14 @@ describe("TaskManager", () => {
             // 模拟下载失败
             mockClient.downloadMedia.mockRejectedValue(new Error("Network Error"));
 
-            await TaskManager.downloadWorker(task);
+            await TaskManager.downloadTask(task);
 
             // 验证锁已释放
-            expect(TaskManager.activeWorkers.has(task.id)).toBe(false);
+            expect(TaskManager.activeProcessors.has(task.id)).toBe(false);
 
             // 能够再次进入处理（即使状态是 failed）
             mockClient.downloadMedia.mockResolvedValue({});
-            await TaskManager.downloadWorker(task);
+            await TaskManager.downloadTask(task);
             expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloaded');
         });
     });
@@ -463,11 +463,11 @@ describe("TaskManager", () => {
             };
 
             const mockFs = await import("fs");
-            mockFs.default.existsSync.mockReturnValue(false); 
+            mockFs.default.existsSync.mockReturnValue(false);
             mockClient.downloadMedia.mockResolvedValue({});
-            mockCloudTool.getRemoteFileInfo.mockResolvedValue(null); 
+            mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
 
-            await TaskManager.downloadWorker(task);
+            await TaskManager.downloadTask(task);
 
             expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloading');
             expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloaded');
@@ -486,7 +486,7 @@ describe("TaskManager", () => {
             mockClient.downloadMedia.mockResolvedValue({});
             mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Size: 1024 });
 
-            const downloadPromise = TaskManager.downloadWorker(task);
+            const downloadPromise = TaskManager.downloadTask(task);
             const cancelPromise = TaskManager.cancelTask(task.id, task.userId);
 
             const cancelResult = await cancelPromise;
@@ -509,9 +509,9 @@ describe("TaskManager", () => {
             mockTaskRepository.updateStatus.mockRejectedValue(new Error("DB Connection Failed"));
             mockClient.downloadMedia.mockResolvedValue({});
 
-            await expect(TaskManager.downloadWorker(task)).resolves.toBeUndefined();
+            await expect(TaskManager.downloadTask(task)).resolves.toBeUndefined();
 
-            expect(TaskManager.activeWorkers.has(task.id)).toBe(false);
+            expect(TaskManager.activeProcessors.has(task.id)).toBe(false);
         });
 
         test("should rollback in-memory state when database operations fail", async () => {
@@ -525,9 +525,9 @@ describe("TaskManager", () => {
             mockTaskRepository.updateStatus.mockRejectedValue(new Error("DB Error"));
             mockClient.downloadMedia.mockResolvedValue({});
 
-            await expect(TaskManager.downloadWorker(task)).resolves.toBeUndefined();
+            await expect(TaskManager.downloadTask(task)).resolves.toBeUndefined();
 
-            expect(TaskManager.activeWorkers.has(task.id)).toBe(false);
+            expect(TaskManager.activeProcessors.has(task.id)).toBe(false);
         });
     });
 
@@ -548,7 +548,7 @@ describe("TaskManager", () => {
             mockFs.default.statSync.mockReturnValue({ size: 1024 });
             mockFs.default.promises.unlink.mockRejectedValue(new Error("Disk I/O Error"));
 
-            await TaskManager.uploadWorker(task);
+            await TaskManager.uploadTask(task);
         });
 
         test("should cleanup files even when upload fails", async () => {
@@ -567,7 +567,7 @@ describe("TaskManager", () => {
             mockFs.default.statSync.mockReturnValue({ size: 1024 });
             mockFs.default.promises.unlink.mockResolvedValue();
 
-            await TaskManager.uploadWorker(task);
+            await TaskManager.uploadTask(task);
 
             expect(mockFs.default.promises.unlink).toHaveBeenCalledWith("/tmp/fail.mp4");
         });
@@ -609,7 +609,7 @@ describe("TaskManager", () => {
                 TaskManager.uploadBatcher.waitWindow = 0;
             }
 
-            await TaskManager.uploadWorker(task);
+            await TaskManager.uploadTask(task);
 
             expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalledWith("transfer_1766663719382_fc61fh.jpg", "u1", 2);
             expect(mockCloudTool.getRemoteFileInfo).not.toHaveBeenCalledWith("transfer_1766663722153_a82fwq.jpg", "u1", expect.any(Number));
