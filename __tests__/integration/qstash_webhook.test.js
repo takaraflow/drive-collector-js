@@ -161,7 +161,7 @@ describe("QStash Webhook Integration", () => {
     });
 
     test("应当正确处理 system-events Webhook", async () => {
-        const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
+        const consoleSpy = jest.spyOn(console, 'info').mockImplementation();
         const req = createMockRequest('/api/tasks/system-events', { event: 'test', data: 'value' });
         const res = createMockResponse();
 
@@ -240,7 +240,7 @@ describe("QStash Webhook Integration", () => {
 
         await handleQStashWebhook(req, res);
 
-        expect(consoleSpy).toHaveBeenCalledWith('⚠️ 未知的 Webhook topic: unknown-topic');
+        expect(consoleSpy).toHaveBeenCalledWith('⚠️ 未知的 Webhook topic: unknown-topic', {});
         expect(res.writeHead).toHaveBeenCalledWith(200);
         expect(res.end).toHaveBeenCalledWith('OK');
 

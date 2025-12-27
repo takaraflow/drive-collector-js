@@ -6,19 +6,20 @@ import { qstashService } from "./src/services/QStashService.js";
 import { TaskManager } from "./src/processor/TaskManager.js";
 import { startDispatcher } from "./src/dispatcher/bootstrap.js";
 import { startProcessor, stopProcessor } from "./src/processor/bootstrap.js";
+import { logger } from "./src/services/logger.js";
 
 /**
  * --- 🛡️ 全局错误处理 ---
  */
 process.on("unhandledRejection", (reason, promise) => {
-    console.error("🚨 未捕获的 Promise 拒绝:", reason);
+    logger.error("🚨 未捕获的 Promise 拒绝:", { reason });
 });
 
 process.on("uncaughtException", (err) => {
-    console.error("🚨 未捕获的异常:", err);
+    logger.error("🚨 未捕获的异常:", { err });
     // 对于 TIMEOUT 错误，我们通常希望程序继续运行并由 Watchdog 处理
     if (err?.message?.includes("TIMEOUT")) {
-        console.warn("⚠️ 忽略 TIMEOUT 导致的进程崩溃风险，等待 Watchdog 恢复...");
+        logger.warn("⚠️ 忽略 TIMEOUT 导致的进程崩溃风险...");
     } else {
         // 其他严重错误建议安全退出
         // process.exit(1);
@@ -50,7 +51,7 @@ async function handleQStashWebhook(req, res) {
             return;
         }
 
-        console.log(`🎣 收到 QStash Webhook: ${topic}`, data);
+        logger.info(`🎣 收到 QStash Webhook: ${topic}`, data);
 
         // 根据 topic 分发处理
         switch (topic) {
@@ -65,16 +66,16 @@ async function handleQStashWebhook(req, res) {
                 break;
             case 'system-events':
                 // 处理系统事件广播
-                console.log(`📢 系统事件: ${data.event}`, data);
+                logger.info(`📢 系统事件: ${data.event}`, data);
                 break;
             default:
-                console.warn(`⚠️ 未知的 Webhook topic: ${topic}`);
+                logger.warn(`⚠️ 未知的 Webhook topic: ${topic}`);
         }
 
         res.writeHead(200);
         res.end('OK');
     } catch (error) {
-        console.error('❌ Webhook 处理失败:', error);
+        logger.error('❌ Webhook 处理失败:', { error });
         res.writeHead(500);
         res.end('Internal Server Error');
     }
@@ -87,14 +88,14 @@ async function handleQStashWebhook(req, res) {
 export { handleQStashWebhook };
 (async () => {
     try {
-        console.log("🔄 正在启动应用...");
+        logger.info("🔄 正在启动应用...");
 
         // 检查 NODE_MODE 环境变量（支持向后兼容旧名称）
         const modeMapping = { bot: 'dispatcher', worker: 'processor' };
         let nodeMode = process.env.NODE_MODE || 'all';
         nodeMode = modeMapping[nodeMode] || nodeMode;
         if (!['all', 'dispatcher', 'processor'].includes(nodeMode)) {
-            console.error("❌ NODE_MODE 必须是 'all', 'dispatcher' 或 'processor' 之一");
+            logger.error("❌ NODE_MODE 必须是 'all', 'dispatcher' 或 'processor' 之一");
             process.exit(1);
         }
 
@@ -112,7 +113,7 @@ export { handleQStashWebhook };
                 // 指数级增加退避时间：基础 10s * crashCount，最大 5 分钟
                 const backoffSeconds = Math.min(10 * crashCount + Math.floor((60 * 1000 - diff) / 1000), 300);
 
-                console.warn(`⚠️ 检测到频繁重启 (次数: ${crashCount}, 间隔: ${Math.floor(diff/1000)}s)，启动退避：休眠 ${backoffSeconds}s...`);
+                logger.warn(`⚠️ 检测到频繁重启 (次数: ${crashCount}, 间隔: ${Math.floor(diff/1000)}s)，启动退避：休眠 ${backoffSeconds}s...`);
                 await new Promise(r => setTimeout(r, backoffSeconds * 1000));
             } else {
                 // 如果启动间隔正常，重置崩溃计数
@@ -120,7 +121,7 @@ export { handleQStashWebhook };
             }
             await SettingsRepository.set("last_startup_time", Date.now().toString());
         } catch (settingsError) {
-            console.warn("⚠️ 启动退避逻辑执行失败 (D1/KV 异常)，跳过退避，直接启动:", settingsError.message);
+            logger.warn("⚠️ 启动退避逻辑执行失败 (D1/KV 异常)，跳过退避，直接启动:", { error: settingsError.message });
         }
 
         // 2. 启动 HTTP 服务器 (健康检查 + QStash Webhook)
@@ -137,7 +138,7 @@ export { handleQStashWebhook };
         });
 
         server.listen(config.port, '0.0.0.0', () => {
-            console.log(`📡 HTTP 服务器端口 ${config.port} 已就绪`);
+            logger.info(`📡 HTTP 服务器端口 ${config.port} 已就绪`);
         });
 
         // 3. 初始化实例协调器（多实例支持）
@@ -158,7 +159,7 @@ export { handleQStashWebhook };
                     const { CloudTool } = await import("./src/services/rclone.js");
                     const activeDrives = await DriveRepository.findAll();
                     if (activeDrives.length > 0) {
-                        console.log(`🔥 正在预热 ${activeDrives.length} 个用户的云端文件列表...`);
+                        logger.info(`🔥 正在预热 ${activeDrives.length} 个用户的云端文件列表...`);
                         // 使用并行但受限的方式预热，避免启动时瞬间 Rclone 爆炸
                         for (const drive of activeDrives) {
                             CloudTool.listRemoteFiles(drive.user_id, true).catch(() => {});
@@ -166,7 +167,7 @@ export { handleQStashWebhook };
                         }
                     }
                 } catch (e) {
-                    console.error("❌ 预热失败:", e.message);
+                    logger.error("❌ 预热失败:", { error: e.message });
                 }
             })();
         }
@@ -174,40 +175,40 @@ export { handleQStashWebhook };
         // 6. 设置优雅关闭处理
 // 新增：关闭 HTTP 服务器版本，遵循计划
         const gracefulShutdown = async (signal) => {
-            console.log(`\n📴 收到 ${signal} 信号，正在优雅关闭...`);
+            logger.info(`\n📴 收到 ${signal} 信号，正在优雅关闭...`);
 
             try {
                 // 新增：关闭 HTTP 服务器
                 server.close((err) => {
                     if (err) {
-                        console.error("❌ 服务器关闭失败:", err);
+                        logger.error("❌ 服务器关闭失败:", { err });
                         process.exit(1);
                         return;
                     }
-                    console.log("🔌 HTTP 服务器已关闭");
+                    logger.info("🔌 HTTP 服务器已关闭");
 
                     // 停止实例协调器
                     instanceCoordinator.stop().then(() => {
                         // 停止 Processor 组件（如果已启动）
                         if (nodeMode === 'all' || nodeMode === 'processor') {
                             stopProcessor().then(() => {
-                                console.log("✅ 优雅关闭完成");
+                                logger.info("✅ 优雅关闭完成");
                                 process.exit(0);
                             }).catch((e) => {
-                                console.error("❌ Processor 停止失败:", e);
+                                logger.error("❌ Processor 停止失败:", { error: e });
                                 process.exit(1);
                             });
                         } else {
-                            console.log("✅ 优雅关闭完成");
+                            logger.info("✅ 优雅关闭完成");
                             process.exit(0);
                         }
                     }).catch((e) => {
-                        console.error("❌ 实例协调器停止失败:", e);
+                        logger.error("❌ 实例协调器停止失败:", { error: e });
                         process.exit(1);
                     });
                 });
             } catch (e) {
-                console.error("❌ 优雅关闭失败:", e);
+                logger.error("❌ 优雅关闭失败:", { error: e });
                 process.exit(1);
             }
         };
@@ -216,10 +217,10 @@ export { handleQStashWebhook };
         process.on('SIGINT', () => gracefulShutdown('SIGINT'));
         process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
-        console.log("🎉 应用启动完成！");
+        logger.info("🎉 应用启动完成！");
 
     } catch (error) {
-        console.error("❌ 应用启动失败:", error);
+        logger.error("❌ 应用启动失败:", { error });
         process.exit(1);
     }
 })();
