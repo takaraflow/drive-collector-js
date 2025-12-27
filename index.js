@@ -12,11 +12,11 @@ import { logger } from "./src/services/logger.js";
  * --- 🛡️ 全局错误处理 ---
  */
 process.on("unhandledRejection", (reason, promise) => {
-    logger.error("🚨 未捕获的 Promise 拒绝:", { reason });
+    logger.error("🚨 未捕获的 Promise 拒绝:", reason);
 });
 
 process.on("uncaughtException", (err) => {
-    logger.error("🚨 未捕获的异常:", { err });
+    logger.error("🚨 未捕获的异常:", err);
     // 对于 TIMEOUT 错误，我们通常希望程序继续运行并由 Watchdog 处理
     if (err?.message?.includes("TIMEOUT")) {
         logger.warn("⚠️ 忽略 TIMEOUT 导致的进程崩溃风险...");
@@ -75,7 +75,7 @@ async function handleQStashWebhook(req, res) {
         res.writeHead(200);
         res.end('OK');
     } catch (error) {
-        logger.error('❌ Webhook 处理失败:', { error });
+        logger.error('❌ Webhook 处理失败:', error);
         res.writeHead(500);
         res.end('Internal Server Error');
     }
@@ -121,7 +121,7 @@ export { handleQStashWebhook };
             }
             await SettingsRepository.set("last_startup_time", Date.now().toString());
         } catch (settingsError) {
-            logger.warn("⚠️ 启动退避逻辑执行失败 (D1/KV 异常)，跳过退避，直接启动:", { error: settingsError.message });
+            logger.warn("⚠️ 启动退避逻辑执行失败 (D1/KV 异常)，跳过退避，直接启动:", settingsError);
         }
 
         // 2. 启动 HTTP 服务器 (健康检查 + QStash Webhook)
@@ -167,7 +167,7 @@ export { handleQStashWebhook };
                         }
                     }
                 } catch (e) {
-                    logger.error("❌ 预热失败:", { error: e.message });
+                    logger.error("❌ 预热失败:", e);
                 }
             })();
         }
@@ -181,7 +181,7 @@ export { handleQStashWebhook };
                 // 新增：关闭 HTTP 服务器
                 server.close((err) => {
                     if (err) {
-                        logger.error("❌ 服务器关闭失败:", { err });
+                        logger.error("❌ 服务器关闭失败:", err);
                         process.exit(1);
                         return;
                     }
@@ -195,7 +195,7 @@ export { handleQStashWebhook };
                                 logger.info("✅ 优雅关闭完成");
                                 process.exit(0);
                             }).catch((e) => {
-                                logger.error("❌ Processor 停止失败:", { error: e });
+                                logger.error("❌ Processor 停止失败:", e);
                                 process.exit(1);
                             });
                         } else {
@@ -203,12 +203,12 @@ export { handleQStashWebhook };
                             process.exit(0);
                         }
                     }).catch((e) => {
-                        logger.error("❌ 实例协调器停止失败:", { error: e });
+                        logger.error("❌ 实例协调器停止失败:", e);
                         process.exit(1);
                     });
                 });
             } catch (e) {
-                logger.error("❌ 优雅关闭失败:", { error: e });
+                logger.error("❌ 优雅关闭失败:", e);
                 process.exit(1);
             }
         };
@@ -220,7 +220,7 @@ export { handleQStashWebhook };
         logger.info("🎉 应用启动完成！");
 
     } catch (error) {
-        logger.error("❌ 应用启动失败:", { error });
+        logger.error("❌ 应用启动失败:", error);
         process.exit(1);
     }
 })();

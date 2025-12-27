@@ -32,6 +32,37 @@ const initAxiom = async () => {
   }
 };
 
+const serializeError = (err) => {
+  if (!(err instanceof Error)) return err;
+  const serialized = {
+    name: err.name,
+    message: err.message,
+    stack: err.stack,
+  };
+  // Add any additional enumerable properties
+  for (const key in err) {
+    if (err.hasOwnProperty(key) && !(key in serialized)) {
+      serialized[key] = err[key];
+    }
+  }
+  return serialized;
+};
+
+const serializeData = (data) => {
+  if (!data) return {};
+  if (data instanceof Error) return serializeError(data);
+  if (typeof data === 'object') {
+    const serialized = {};
+    for (const key in data) {
+      if (data.hasOwnProperty(key)) {
+        serialized[key] = data[key] instanceof Error ? serializeError(data[key]) : data[key];
+      }
+    }
+    return serialized;
+  }
+  return data;
+};
+
 const log = async (instanceId, level, message, data = {}) => {
   if (!axiom) {
     await initAxiom();
@@ -47,7 +78,7 @@ const log = async (instanceId, level, message, data = {}) => {
     instanceId,
     level,
     message,
-    ...data,
+    ...serializeData(data),
     timestamp: new Date().toISOString(),
     // 在Cloudflare Worker环境下获取一些额外信息
     worker: {

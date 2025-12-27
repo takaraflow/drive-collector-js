@@ -161,7 +161,8 @@ describe('Logger Service', () => {
 
     test('logger.error calls axiom.ingest with correct payload', async () => {
       const message = 'structured error message';
-      const data = { error: new Error('test error') };
+      const error = new Error('test error');
+      const data = { error };
 
       await logger.error(message, data);
 
@@ -171,7 +172,11 @@ describe('Logger Service', () => {
         instanceId: expect.any(String),
         level: 'error',
         message,
-        error: expect.any(Error)
+        error: {
+          name: 'Error',
+          message: 'test error',
+          stack: expect.any(String)
+        }
       });
     });
 

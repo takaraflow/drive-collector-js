@@ -89,7 +89,7 @@ export class MessageHandler {
                     return;
                 }
             } catch (lockError) {
-                logger.error(`⚠️ 获取消息锁时发生异常: ${lockError.message}, 降级处理继续执行`);
+                logger.error(`⚠️ 获取消息锁时发生异常, 降级处理继续执行`, lockError);
                 // 如果锁服务完全挂了，为了不丢消息，我们可以选择继续处理（但这可能导致重复回复）
                 // 这里选择继续执行，毕竟可用性优先
             }
@@ -110,7 +110,7 @@ export class MessageHandler {
             // logger.debug("正在分发消息", { msgId: msgId || 'unknown' });
             await Dispatcher.handle(event);
         } catch (e) {
-            logger.error("Critical: Unhandled Dispatcher Error", { error: e.message, stack: e.stack });
+            logger.error("Critical: Unhandled Dispatcher Error", e);
         }
     }
 }

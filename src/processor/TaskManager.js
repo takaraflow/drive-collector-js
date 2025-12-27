@@ -41,13 +41,13 @@ export class TaskManager {
         try {
             await d1.batch(statements);
         } catch (e) {
-            logger.error("batchUpdateStatus failed", { error: e.message });
+            logger.error("batchUpdateStatus failed", e);
             // 降级到单个更新
             for (const update of updates) {
                 try {
                     await TaskRepository.updateStatus(update.id, update.status, update.error);
                 } catch (err) {
-                    logger.error("Failed to update task", { taskId: update.id, error: err.message });
+                    logger.error("Failed to update task", { taskId: update.id, error: err });
                 }
             }
         }
@@ -156,7 +156,7 @@ export class TaskManager {
 
             this.updateQueueUI();
         } catch (e) {
-            logger.error("TaskManager.init critical error", { error: e.message, stack: e.stack });
+            logger.error("TaskManager.init critical error", e);
         }
     }
 
@@ -220,7 +220,7 @@ export class TaskManager {
             }
 
         } catch (e) {
-            logger.warn("预加载数据失败", { error: e.message });
+            logger.warn("预加载数据失败", e);
         }
     }
 
@@ -339,7 +339,7 @@ export class TaskManager {
             logger.info("Task created and enqueued", { taskId, status: 'enqueued' });
 
         } catch (e) {
-            logger.error("Task creation failed", { error: e.message, stack: e.stack });
+            logger.error("Task creation failed", e);
             // 尝试更新状态消息，如果失败则记录但不抛出异常
             try {
                 await client.editMessage(target, {
@@ -429,7 +429,7 @@ export class TaskManager {
             });
             logger.info("Task enqueued for download", { taskId: task.id, service: 'qstash' });
         } catch (error) {
-            logger.error("Failed to enqueue download task", { taskId: task.id, error: error.message });
+            logger.error("Failed to enqueue download task", { taskId: task.id, error });
         }
     }
 
@@ -446,7 +446,7 @@ export class TaskManager {
             });
             logger.info("Task enqueued for upload", { taskId: task.id, service: 'qstash' });
         } catch (error) {
-            logger.error("Failed to enqueue upload task", { taskId: task.id, error: error.message });
+            logger.error("Failed to enqueue upload task", { taskId: task.id, error });
         }
     }
 
@@ -508,7 +508,7 @@ export class TaskManager {
             await this.downloadTask(task);
 
         } catch (error) {
-            logger.error("Download webhook failed", { taskId, error: error.message, stack: error.stack });
+            logger.error("Download webhook failed", { taskId, error });
             await TaskRepository.updateStatus(taskId, 'failed', error.message);
         }
     }
@@ -554,7 +554,7 @@ export class TaskManager {
             await this.uploadTask(task);
 
         } catch (error) {
-            logger.error("Upload webhook failed", { taskId, error: error.message, stack: error.stack });
+            logger.error("Upload webhook failed", { taskId, error });
             await TaskRepository.updateStatus(taskId, 'failed', error.message);
         }
     }
@@ -572,7 +572,7 @@ export class TaskManager {
             }
 
         } catch (error) {
-            logger.error("Media batch webhook failed", { groupId, error: error.message, stack: error.stack });
+            logger.error("Media batch webhook failed", { groupId, error });
         }
     }
 
@@ -863,7 +863,7 @@ export class TaskManager {
                                 finalRemote = await CloudTool.getRemoteFileInfo(actualFileName, task.userId, 1);
                                 if (finalRemote) break;
                             } catch (e) {
-                                logger.warn(`[Validation] Cache refresh failed:`, e.message);
+                                logger.warn(`[Validation] Cache refresh failed:`, e);
                             }
                         }
 
@@ -928,7 +928,7 @@ export class TaskManager {
                     fs.unlinkSync(localPath);
                 }
             } catch (e) {
-                logger.warn(`Failed to cleanup local file ${localPath}:`, e.message);
+                logger.warn(`Failed to cleanup local file ${localPath}:`, e);
             }
             this.activeProcessors.delete(id);
         }
@@ -988,7 +988,7 @@ export class TaskManager {
                     if (mtprotoLimiter?.adjustConcurrency) mtprotoLimiter.adjustConcurrency();
                     if (mtprotoFileLimiter?.adjustConcurrency) mtprotoFileLimiter.adjustConcurrency();
                 } catch (error) {
-                    logger.error('Auto-scaling adjustment error:', error.message);
+                    logger.error('Auto-scaling adjustment error:', error);
                 }
             }, 30000);
         });

@@ -134,7 +134,7 @@ describe("TaskManager QStash Integration", () => {
 
             expect(consoleSpy).toHaveBeenCalledWith(
                 'Failed to enqueue download task',
-                { taskId: '123', error: 'QStash error' }
+                { taskId: '123', error: expect.any(Error) }
             );
             consoleSpy.mockRestore();
         });
@@ -296,7 +296,7 @@ describe("TaskManager QStash Integration", () => {
 
             expect(consoleSpy).toHaveBeenCalledWith(
                 'Media batch webhook failed',
-                { groupId: 'group1', error: 'Download failed', stack: expect.any(String) }
+                { groupId: 'group1', error: expect.any(Error) }
             );
             consoleSpy.mockRestore();
         });

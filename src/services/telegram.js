@@ -58,7 +58,7 @@ export const resetClientSession = async () => {
             try {
                 await client._sender.disconnect();
             } catch (e) {
-                logger.warn("⚠️ 清理 GramJS _sender 失败:", e.message);
+                logger.warn("⚠️ 清理 GramJS _sender 失败:", e);
             }
             client._sender = undefined; // 清除引用
         }
@@ -166,7 +166,7 @@ async function handleConnectionIssue() {
                 ]);
             }
         } catch (de) {
-            logger.warn("⚠️ 断开连接时异常（可能是已断开）:", de.message);
+            logger.warn("⚠️ 断开连接时异常（可能是已断开）:", de);
         }
 
         // 彻底销毁旧的连接器状态 (如果是 TIMEOUT 错误，可能内部状态已损坏)
@@ -185,7 +185,7 @@ async function handleConnectionIssue() {
         logger.info("✅ 客户端主动重连成功");
         lastHeartbeat = Date.now(); // 重置心跳
     } catch (e) {
-        logger.error("❌ 主动重连失败，等待系统自动处理:", e.message);
+        logger.error("❌ 主动重连失败，等待系统自动处理:", e);
     } finally {
         isReconnecting = false;
     }
@@ -222,7 +222,7 @@ watchdogTimer = setInterval(async () => {
             lastHeartbeat = 0; // 触发强制处理
         }
 
-        logger.warn("💔 心跳检测失败:", e.message);
+        logger.warn("💔 心跳检测失败:", e);
         if (Date.now() - lastHeartbeat > 5 * 60 * 1000) {
             logger.error("🚨 超过 5 分钟无心跳响应，强制重启连接...");
             handleConnectionIssue();
