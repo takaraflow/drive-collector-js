@@ -13,30 +13,35 @@ jobs:
     
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - name: Generate wrangler.build.toml
-        run: node scripts/build-lb.js
+        run: |
+          bash scripts/build-lb.sh
+          echo "Generated wrangler.build.toml content:"
+          cat wrangler.build.toml
         env:
           WORKER_NAME: ${{ secrets.WORKER_NAME }}
           CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
           QSTASH_CURRENT_SIGNING_KEY: ${{ secrets.QSTASH_CURRENT_SIGNING_KEY }}
           UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
           UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+          AXIOM_TOKEN: ${{ secrets.AXIOM_TOKEN }}
+          AXIOM_ORG_ID: ${{ secrets.AXIOM_ORG_ID }}
+          AXIOM_DATASET: ${{ secrets.AXIOM_DATASET }}
 
-      - name: Build
-        run: npm run build
+      - name: Build with esbuild
+        run: |
+          npx esbuild src/worker/lb.js --bundle --format=esm --outdir=dist
+          ls -R dist/
 
       - name: Deploy to Cloudflare Workers
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # 使用构建生成的配置
-          command: deploy --config wrangler.build.toml
+        run: |
+          npx wrangler deploy dist/lb.js --config wrangler.build.toml --name ${{ secrets.WORKER_NAME }} --compatibility-date 2023-01-01
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

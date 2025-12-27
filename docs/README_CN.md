@@ -132,7 +132,7 @@ npm test
 | `QSTASH_URL` | QStash 端点 URL | 否* |
 | `QSTASH_CURRENT_SIGNING_KEY` | 当前 webhook 签名密钥 | 否* |
 | `QSTASH_NEXT_SIGNING_KEY` | 下一个 webhook 签名密钥 | 否* |
-| `APP_WEBHOOK_URL` | Webhook 基本 URL | 否* |
+| `LB_WEBHOOK_URL` | Webhook 基本 URL | 否* |
 | `INSTANCE_COUNT` | 分片的实例总数 | 否 |
 | `INSTANCE_ID` | 当前实例 ID（1-N） | 否 |
 

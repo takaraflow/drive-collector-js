@@ -134,7 +134,7 @@ Using GitHub Actions with Node.js 20.x.
 | `QSTASH_URL` | QStash endpoint URL | No* |
 | `QSTASH_CURRENT_SIGNING_KEY` | Current webhook signing key | No* |
 | `QSTASH_NEXT_SIGNING_KEY` | Next webhook signing key | No* |
-| `APP_WEBHOOK_URL` | Webhook base URL | No* |
+| `LB_WEBHOOK_URL` | Webhook base URL | No* |
 | `INSTANCE_COUNT` | Total instances for sharding | No |
 | `INSTANCE_ID` | Current instance ID (1-N) | No |
 

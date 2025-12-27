@@ -15,11 +15,17 @@ const initAxiom = async () => {
   if (axiomInitialized) return;
 
   try {
-    // 动态导入 config 以避免循环依赖
-    const configModule = await import('../config/index.js');
-    config = configModule.config;
+    if (!config) {
+      try {
+        const configModule = await import('../config/index.js');
+        config = configModule.config;
+      } catch (e) {
+        // 在 Worker 环境下，如果无法加载 config/index.js，则依赖手动配置
+        console.debug('Logger: Falling back to manual configuration');
+      }
+    }
 
-    if (config.axiom && config.axiom.token && config.axiom.orgId) {
+    if (config && config.axiom && config.axiom.token && config.axiom.orgId) {
       axiom = new Axiom({
         token: config.axiom.token,
         orgId: config.axiom.orgId,
@@ -107,7 +113,16 @@ export const logger = {
     info: (message, data) => log(getSafeInstanceId(), 'info', message, data),
     warn: (message, data) => log(getSafeInstanceId(), 'warn', message, data),
     error: (message, data) => log(getSafeInstanceId(), 'error', message, data),
-    debug: (message, data) => log(getSafeInstanceId(), 'debug', message, data)
+    debug: (message, data) => log(getSafeInstanceId(), 'debug', message, data),
+    configure: (customConfig) => {
+        config = { ...config, ...customConfig };
+        // 如果提供了 axiom 配置，重置初始化状态以便重新初始化
+        if (customConfig.axiom) {
+            axiom = null;
+            axiomInitialized = false;
+        }
+    },
+    isInitialized: () => axiomInitialized
 };
 
 export const resetLogger = () => {
