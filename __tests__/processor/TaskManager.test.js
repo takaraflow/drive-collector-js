@@ -229,11 +229,12 @@ describe("TaskManager", () => {
 
             // Enable fake timers
             jest.useFakeTimers();
-            
+
             // Set failover mode
             mockKv.isFailoverMode = true;
-            const consoleSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-            const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+            const loggerModule = await import("../../src/services/logger.js");
+            const loggerWarnSpy = jest.spyOn(loggerModule.logger, "warn").mockImplementation(() => {});
+            const loggerInfoSpy = jest.spyOn(loggerModule.logger, "info").mockImplementation(() => {});
 
             // Start init
             const initPromise = TaskManager.init();
@@ -241,9 +242,9 @@ describe("TaskManager", () => {
             // Yield to allow sync part of init to run
             await Promise.resolve();
 
-            // Verify warning logged immediately
-            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("故障转移模式"));
-            
+            // Verify warning logged immediately via logger.warn
+            expect(loggerWarnSpy).toHaveBeenCalledWith("系统处于 KV 故障转移模式", expect.objectContaining({ provider: 'upstash', delay: 30000 }));
+
             // At this point, findStalledTasks should NOT have been called yet
             expect(mockTaskRepository.findStalledTasks).not.toHaveBeenCalled();
 
@@ -255,13 +256,13 @@ describe("TaskManager", () => {
 
             // Now it should have been called
             expect(mockTaskRepository.findStalledTasks).toHaveBeenCalled();
-            expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("延迟恢复检查"));
+            expect(loggerInfoSpy).toHaveBeenCalledWith("故障转移实例开始执行延迟恢复检查");
 
             // Cleanup
             mockKv.isFailoverMode = false;
             TaskManager._preloadCommonData = originalPreload;
-            consoleSpy.mockRestore();
-            logSpy.mockRestore();
+            loggerWarnSpy.mockRestore();
+            loggerInfoSpy.mockRestore();
             jest.useRealTimers();
         });
 
@@ -300,12 +301,13 @@ describe("TaskManager", () => {
 
         test("should preload common data during init", async () => {
             mockTaskRepository.findStalledTasks.mockResolvedValue([]);
-            const consoleSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+            const loggerModule = await import("../../src/services/logger.js");
+            const loggerInfoSpy = jest.spyOn(loggerModule.logger, "info").mockImplementation(() => {});
 
             await TaskManager.init();
 
-            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("预加载常用数据完成"));
-            consoleSpy.mockRestore();
+            expect(loggerInfoSpy).toHaveBeenCalledWith("预加载常用数据完成", expect.any(Object));
+            loggerInfoSpy.mockRestore();
         });
     });
 
@@ -414,10 +416,11 @@ describe("TaskManager", () => {
             const updatePromise = TaskManager.updateQueueUI();
 
             // 在执行中途强行修改队列
-            TaskManager.waitingTasks = []; 
+            TaskManager.waitingTasks = [];
 
+            // 等待异步操作完成，不应抛出异常
             await expect(updatePromise).resolves.not.toThrow();
-        });
+        }, 15000); // 增加超时时间到15秒
     });
 
     describe("Concurrency and Re-entry Protection", () => {

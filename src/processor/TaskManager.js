@@ -16,6 +16,7 @@ import { d1 } from "../services/d1.js";
 import { kv } from "../services/kv.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { qstashService } from "../services/QStashService.js";
+import { logger } from "../services/logger.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 
 // QStash 延迟队列替代了 UploadBatcher
@@ -40,13 +41,13 @@ export class TaskManager {
         try {
             await d1.batch(statements);
         } catch (e) {
-            console.error("TaskManager.batchUpdateStatus failed:", e);
+            logger.error("batchUpdateStatus failed", { error: e.message });
             // 降级到单个更新
             for (const update of updates) {
                 try {
                     await TaskRepository.updateStatus(update.id, update.status, update.error);
                 } catch (err) {
-                    console.error(`Failed to update task ${update.id}:`, err);
+                    logger.error("Failed to update task", { taskId: update.id, error: err.message });
                 }
             }
         }
@@ -103,18 +104,18 @@ export class TaskManager {
      * 初始化：恢复因重启中断的僵尸任务
      */
     static async init() {
-        console.log("🔄 正在检查数据库中异常中断的任务...");
+        logger.info("正在检查数据库中异常中断的任务");
 
         // 安全检查：如果处于 KV 故障转移模式，延迟任务恢复以优先让主集群处理
         if (kv.isFailoverMode) {
-            console.warn("⚠️ 系统处于 KV 故障转移模式 (使用 Upstash)。将在 30 秒后尝试恢复任务，以优先让 Cloudflare KV 主集群（如果有）处理积压任务。");
-            
+            logger.warn("系统处于 KV 故障转移模式", { provider: 'upstash', delay: 30000 });
+
             // 先预加载常用数据
             await this._preloadCommonData();
-            
+
             // 延迟 30 秒
             await new Promise(resolve => setTimeout(resolve, 30000));
-            console.log("⏰ 故障转移实例开始执行延迟恢复检查...");
+            logger.info("故障转移实例开始执行延迟恢复检查");
         }
 
         try {
@@ -129,16 +130,16 @@ export class TaskManager {
             // 预加载失败不会影响主流程，只记录日志
 
             if (!tasks || tasks.length === 0) {
-                console.log("✅ 没有发现僵尸任务。");
+                logger.info("没有发现僵尸任务");
                 return;
             }
 
-            console.log(`📥 发现 ${tasks.length} 个僵尸任务，正在按 Chat 分组批量恢复...`);
+            logger.info("发现僵尸任务", { count: tasks.length, action: 'batch_restore' });
 
             const chatGroups = new Map();
             for (const row of tasks) {
                 if (!row.chat_id || row.chat_id.includes("Object")) {
-                    console.warn(`⚠️ 跳过无效 chat_id 的任务: ${row.id}`);
+                    logger.warn("跳过无效 chat_id 的任务", { taskId: row.id, chatId: row.chat_id });
                     continue;
                 }
                 if (!chatGroups.has(row.chat_id)) {
@@ -155,7 +156,7 @@ export class TaskManager {
 
             this.updateQueueUI();
         } catch (e) {
-            console.error("TaskManager.init critical error:", e);
+            logger.error("TaskManager.init critical error", { error: e.message, stack: e.stack });
         }
     }
 
@@ -211,15 +212,15 @@ export class TaskManager {
             const successCount = results.filter(r => r.status === 'fulfilled').length;
             const totalCount = results.length;
 
-            console.log(`📊 预加载常用数据完成: ${successCount}/${totalCount} 个任务成功`);
+            logger.info("预加载常用数据完成", { successCount, totalCount });
 
             // 如果大部分预加载失败，记录警告
             if (successCount < totalCount * 0.7) {
-                console.warn(`⚠️ 预加载成功率较低: ${successCount}/${totalCount}`);
+                logger.warn("预加载成功率较低", { successCount, totalCount });
             }
 
         } catch (e) {
-            console.warn("预加载数据失败:", e.message);
+            logger.warn("预加载数据失败", { error: e.message });
         }
     }
 
@@ -333,10 +334,10 @@ export class TaskManager {
             });
 
             // 解耦：仅存入数据库，等待轮询机制认领处理
-            console.log(`📝 Task ${taskId} created and persisted to database. Waiting for instance to claim.`);
+            logger.info("Task created and persisted", { taskId, status: 'waiting_for_claim' });
 
         } catch (e) {
-            console.error("Task creation failed:", e);
+            logger.error("Task creation failed", { error: e.message, stack: e.stack });
             // 尝试更新状态消息，如果失败则记录但不抛出异常
             try {
                 await client.editMessage(target, {
@@ -344,7 +345,7 @@ export class TaskManager {
                     text: STRINGS.task.create_failed
                 });
             } catch (editError) {
-                console.warn("Failed to update error message:", editError.message);
+                logger.warn("Failed to update error message", { error: editError.message });
             }
         }
     }
@@ -386,7 +387,7 @@ export class TaskManager {
 
         await TaskRepository.createBatch(tasksData);
         // 解耦：批量任务也通过轮询认领
-        console.log(`📝 Batch tasks (${messages.length}) created and persisted. Waiting for instance to claim.`);
+        logger.info("Batch tasks created and persisted", { count: messages.length, status: 'waiting_for_claim' });
     }
 
     /**
@@ -416,9 +417,9 @@ export class TaskManager {
                 chatId: task.chatId,
                 msgId: task.msgId
             });
-            console.log(`📤 Task ${task.id} enqueued for download via QStash`);
+            logger.info("Task enqueued for download", { taskId: task.id, service: 'qstash' });
         } catch (error) {
-            console.error(`❌ Failed to enqueue download task ${task.id}:`, error);
+            logger.error("Failed to enqueue download task", { taskId: task.id, error: error.message });
         }
     }
 
@@ -433,9 +434,9 @@ export class TaskManager {
                 msgId: task.msgId,
                 localPath: task.localPath
             });
-            console.log(`📤 Task ${task.id} enqueued for upload via QStash`);
+            logger.info("Task enqueued for upload", { taskId: task.id, service: 'qstash' });
         } catch (error) {
-            console.error(`❌ Failed to enqueue upload task ${task.id}:`, error);
+            logger.error("Failed to enqueue upload task", { taskId: task.id, error: error.message });
         }
     }
 
@@ -469,7 +470,7 @@ export class TaskManager {
      */
     static async handleDownloadWebhook(taskId) {
         try {
-            console.log(`🎣 Received download webhook for task ${taskId}`);
+            logger.info("Received download webhook", { taskId });
 
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
@@ -497,7 +498,7 @@ export class TaskManager {
             await this.downloadTask(task);
 
         } catch (error) {
-            console.error(`❌ Download webhook failed for task ${taskId}:`, error);
+            logger.error("Download webhook failed", { taskId, error: error.message, stack: error.stack });
             await TaskRepository.updateStatus(taskId, 'failed', error.message);
         }
     }
@@ -507,7 +508,7 @@ export class TaskManager {
      */
     static async handleUploadWebhook(taskId) {
         try {
-            console.log(`🎣 Received upload webhook for task ${taskId}`);
+            logger.info("Received upload webhook", { taskId });
 
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
@@ -543,7 +544,7 @@ export class TaskManager {
             await this.uploadTask(task);
 
         } catch (error) {
-            console.error(`❌ Upload webhook failed for task ${taskId}:`, error);
+            logger.error("Upload webhook failed", { taskId, error: error.message, stack: error.stack });
             await TaskRepository.updateStatus(taskId, 'failed', error.message);
         }
     }
@@ -553,7 +554,7 @@ export class TaskManager {
      */
     static async handleMediaBatchWebhook(groupId, taskIds) {
         try {
-            console.log(`🎣 Received media batch webhook for group ${groupId} with ${taskIds.length} tasks`);
+            logger.info("Received media batch webhook", { groupId, taskCount: taskIds.length });
 
             // 这里可以实现批处理逻辑，目前先逐个处理
             for (const taskId of taskIds) {
@@ -561,7 +562,7 @@ export class TaskManager {
             }
 
         } catch (error) {
-            console.error(`❌ Media batch webhook failed for group ${groupId}:`, error);
+            logger.error("Media batch webhook failed", { groupId, error: error.message, stack: error.stack });
         }
     }
 
@@ -575,7 +576,7 @@ export class TaskManager {
         // 分布式锁：尝试获取任务锁，确保多实例下同一任务不会被重复处理
         const lockAcquired = await instanceCoordinator.acquireTaskLock(id);
         if (!lockAcquired) {
-            console.log(`🔒 Task ${id} is being processed by another instance, skipping.`);
+            logger.info("Task lock exists, skipping download", { taskId: id, instance: 'current' });
             return;
         }
 
@@ -584,7 +585,7 @@ export class TaskManager {
         try {
             // 防重入：检查任务是否已经在处理中
             if (this.activeProcessors.has(id)) {
-                console.log(`⚠️ Task ${id} is already being processed, skipping download task.`);
+                logger.warn("Task already processing, skipping download", { taskId: id });
                 return;
             }
             this.activeProcessors.add(id);
@@ -662,7 +663,7 @@ export class TaskManager {
                         msgId: task.msgId,
                         localPath: task.localPath
                     });
-                    console.log(`📤 Local file exists, triggered upload webhook for task ${task.id}`);
+                    logger.info("Local file exists, triggered upload webhook", { taskId: task.id });
                     return;
                 }
 
@@ -697,7 +698,7 @@ export class TaskManager {
                     msgId: task.msgId,
                     localPath: task.localPath
                 });
-                console.log(`📤 Download complete, triggered upload webhook for task ${task.id}`);
+                logger.info("Download complete, triggered upload webhook", { taskId: task.id });
 
             } catch (e) {
                 const isCancel = e.message === "CANCELLED";
@@ -730,14 +731,14 @@ export class TaskManager {
         // 分布式锁：尝试获取任务锁，确保多实例下同一任务不会被重复处理
         const lockAcquired = await instanceCoordinator.acquireTaskLock(id);
         if (!lockAcquired) {
-            console.log(`🔒 Task ${id} is being processed by another instance, skipping.`);
+            logger.info("Task lock exists, skipping upload", { taskId: id, instance: 'current' });
             return;
         }
 
         try {
             // 防重入：上传 Task 也增加检查
             if (this.activeProcessors.has(id)) {
-                console.log(`⚠️ Task ${id} is already being processed, skipping upload task.`);
+                logger.warn("Task already processing, skipping upload", { taskId: id });
                 return;
             }
             this.activeProcessors.add(id);

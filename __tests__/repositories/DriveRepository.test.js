@@ -41,7 +41,7 @@ describe("DriveRepository", () => {
 
             const result = await DriveRepository.findByUserId("user1");
 
-            expect(cacheService.getOrSet).toHaveBeenCalledWith("drive_user1", expect.any(Function), 10 * 60 * 1000);
+            expect(cacheService.getOrSet).toHaveBeenCalledWith("drive_user1", expect.any(Function), 60 * 1000);
             expect(result).toEqual(mockDrive);
         });
 

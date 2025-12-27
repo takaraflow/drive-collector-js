@@ -29,6 +29,11 @@ export const config = {
             bucket: process.env.R2_BUCKET,
             publicUrl: process.env.R2_PUBLIC_URL
         }
+    },
+    axiom: {
+        token: process.env.AXIOM_TOKEN,
+        orgId: process.env.AXIOM_ORG_ID,
+        dataset: process.env.AXIOM_DATASET || 'drive-collector',
     }
 };
 

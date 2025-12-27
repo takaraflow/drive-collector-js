@@ -133,8 +133,8 @@ describe("TaskManager QStash Integration", () => {
             await TaskManager._enqueueTask(task);
 
             expect(consoleSpy).toHaveBeenCalledWith(
-                '❌ Failed to enqueue download task 123:',
-                expect.any(Error)
+                'Failed to enqueue download task',
+                { taskId: '123', error: 'QStash error' }
             );
             consoleSpy.mockRestore();
         });
@@ -295,8 +295,8 @@ describe("TaskManager QStash Integration", () => {
             await TaskManager.handleMediaBatchWebhook('group1', ['123']);
 
             expect(consoleSpy).toHaveBeenCalledWith(
-                '❌ Media batch webhook failed for group group1:',
-                expect.any(Error)
+                'Media batch webhook failed',
+                { groupId: 'group1', error: 'Download failed', stack: expect.any(String) }
             );
             consoleSpy.mockRestore();
         });

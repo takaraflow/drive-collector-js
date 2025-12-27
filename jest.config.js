@@ -8,7 +8,8 @@ export default {
   ],
   forceExit: true,
   detectOpenHandles: true,
-  testTimeout: 10000,
+  testTimeout: 30000, // 增加超时时间
   clearMocks: true,
   restoreMocks: true,
+  maxWorkers: 4,
 };

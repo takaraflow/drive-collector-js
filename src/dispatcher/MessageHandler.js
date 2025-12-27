@@ -1,5 +1,6 @@
 import { Dispatcher } from "./Dispatcher.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
+import { logger } from "../services/logger.js";
 
 // 全局消息去重缓存 (防止多实例重复处理)
 const processedMessages = new Map();
@@ -70,7 +71,7 @@ export class MessageHandler {
 
             // 1.1 内存快速过滤
             if (processedMessages.has(msgId)) {
-                console.log(`♻️ [Memory] 跳过重复消息 ${msgId}`);
+                logger.debug("跳过重复消息", { msgId, filter: 'memory' });
                 return;
             }
             
@@ -82,7 +83,7 @@ export class MessageHandler {
                 const hasLock = await instanceCoordinator.acquireLock(lockKey, 60);
                 
                 if (!hasLock) {
-                    console.log(`♻️ [Distributed] 跳过重复消息 ${msgId} (其他实例正在处理或锁获取失败)`);
+                    logger.debug("跳过重复消息", { msgId, filter: 'distributed', reason: 'lock_unavailable' });
                     // 标记为本地已处理，避免后续重复请求 KV
                     processedMessages.set(msgId, now);
                     return;
@@ -106,10 +107,10 @@ export class MessageHandler {
         
         try {
             // 显式日志，确认进入分发阶段
-            // console.log(`➡️ 正在分发消息: ${msgId || 'unknown'}`);
+            // logger.debug("正在分发消息", { msgId: msgId || 'unknown' });
             await Dispatcher.handle(event);
         } catch (e) {
-            console.error("Critical: Unhandled Dispatcher Error:", e);
+            logger.error("Critical: Unhandled Dispatcher Error", { error: e.message, stack: e.stack });
         }
     }
 }

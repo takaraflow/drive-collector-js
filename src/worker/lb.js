@@ -3,6 +3,8 @@
  * 负载均衡器，接收QStash Webhook，转发到活跃实例
  */
 
+import { logger } from '../services/logger.js';
+
 // 常量
 const INSTANCE_PREFIX = 'instance:';
 const HEARTBEAT_TIMEOUT = 15 * 60 * 1000; // 15分钟
@@ -33,7 +35,7 @@ function shouldFailover(error, env) {
         failureCount++;
         lastFailureTime = Date.now();
         if (failureCount >= MAX_FAILURES) {
-            console.warn(`⚠️ Cloudflare KV 连续失败 ${failureCount} 次，触发自动故障转移到 Upstash`);
+            logger.warn(`Cloudflare KV 连续失败，触发故障转移`, { failureCount, provider: 'cloudflare' });
             return true;
         }
     }
@@ -48,7 +50,7 @@ function failover(env) {
     if (currentProvider === 'cloudflare' && env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
         currentProvider = 'upstash';
         failureCount = 0;
-        console.log('✅ 已切换到 Upstash Redis');
+        logger.info('故障转移完成', { from: 'cloudflare', to: 'upstash' });
         return true;
     }
     return false;
@@ -262,13 +264,13 @@ async function getActiveInstances(env) {
                 }
             } catch (e) {
                 // 忽略单个实例获取失败
-                console.error(`Failed to get instance ${key.name}:`, e.message);
+                logger.error('实例信息获取失败', { instance: key.name, error: e.message });
             }
         }
 
         return activeInstances;
     } catch (error) {
-        console.error('Failed to get active instances:', error.message);
+        logger.error('活跃实例列表获取失败', { error: error.message });
         return [];
     }
 }
@@ -287,7 +289,7 @@ async function selectTargetInstance(instances, env) {
         const stored = await executeWithFailover('_kv_get', env, ROUND_ROBIN_KEY);
         currentIndex = stored ? parseInt(stored) : 0;
     } catch (e) {
-        console.error('Failed to get round robin index:', e.message);
+        logger.error('轮询索引获取失败', { error: e.message });
     }
 
     // 选择实例
@@ -298,7 +300,7 @@ async function selectTargetInstance(instances, env) {
     try {
         await executeWithFailover('_kv_put', env, ROUND_ROBIN_KEY, (currentIndex + 1).toString());
     } catch (e) {
-        console.error('Failed to update round robin index:', e.message);
+        logger.error('轮询索引更新失败', { error: e.message });
     }
 
     return targetInstance;
@@ -345,7 +347,7 @@ async function fetchWithRetry(instances, request, env) {
             const response = await forwardToInstance(instance, request, request.body);
             return response;
         } catch (error) {
-            console.error(`Failed to forward to ${instance.id}:`, error.message);
+            logger.error('转发请求失败', { instanceId: instance.id, error: error.message });
             lastError = error;
             // 继续尝试下一个实例
         }
@@ -388,7 +390,7 @@ export default {
 
             // 2. 获取活跃实例
             const activeInstances = await getActiveInstances(env);
-            console.log(`Active instances: ${activeInstances.length}`);
+            logger.info('活跃实例查询完成', { count: activeInstances.length });
 
             if (activeInstances.length === 0) {
                 return new Response('No active instances available', { status: 503 });
@@ -400,7 +402,7 @@ export default {
                 return new Response('No target instance selected', { status: 503 });
             }
 
-            console.log(`Forwarding to instance: ${targetInstance.id} (${targetInstance.url})`);
+            logger.info('开始转发请求', { instanceId: targetInstance.id, url: targetInstance.url });
 
             // 4. 转发请求
             const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], request, env);
@@ -411,7 +413,7 @@ export default {
             return response;
 
         } catch (error) {
-            console.error('LB Error:', error.message);
+            logger.error('负载均衡器错误', { error: error.message, stack: error.stack });
             return new Response(`Load Balancer Error: ${error.message}`, { status: 500 });
         }
     }

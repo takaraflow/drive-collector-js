@@ -25,7 +25,10 @@ const mockClientInstance = {
 
 // 2. Mock 外部依赖
 jest.unstable_mockModule("telegram", () => ({
-    TelegramClient: jest.fn().mockImplementation(() => mockClientInstance),
+    TelegramClient: jest.fn().mockImplementation((session, apiId, apiHash, options) => {
+        // 模拟构造函数，忽略 session 检查
+        return mockClientInstance;
+    }),
     Api: {
         messages: {
             GetHistory: jest.fn()
@@ -34,8 +37,8 @@ jest.unstable_mockModule("telegram", () => ({
 }));
 
 jest.unstable_mockModule("telegram/sessions/index.js", () => ({
-    StringSession: jest.fn().mockImplementation(() => ({
-        save: jest.fn().mockReturnValue("mock_session")
+    StringSession: jest.fn().mockImplementation((sessionString) => ({
+        save: jest.fn().mockReturnValue(sessionString || "mock_session")
     }))
 }));
 
