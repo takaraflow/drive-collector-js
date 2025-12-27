@@ -10,14 +10,14 @@
     "start:processor": "cross-env NODE_MODE=processor node index.js",
     "dev": "cross-env NODE_MODE=dev node --watch index.js",
     "dev:lb": "wrangler dev --config wrangler.toml --port 8788",
-    "build:lb": "node scripts/build-lb.js && esbuild src/worker/lb.js --bundle --outdir=dist",
+    "build:lb": "node scripts/build-lb.js && esbuild src/worker/lb.js --bundle --format=esm --outdir=dist",
     "deploy:lb": "npm run build:lb && wrangler deploy --config wrangler.build.toml",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "release": "standard-version",
     "release:ai": "node scripts/release-ai.js",
-    "build": "esbuild src/worker/lb.js --bundle --outdir=dist"
+    "build": "esbuild src/worker/lb.js --bundle --format=esm --outdir=dist"
   },
   "keywords": [
     "telegram",
