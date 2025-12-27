@@ -17,6 +17,7 @@ class OSSHelper {
      * 初始化 S3 客户端
      */
     _initS3Client() {
+        console.log('调试: config.oss.r2 =', JSON.stringify(config.oss?.r2, null, 2));
         if (!config.oss?.r2?.endpoint || !config.oss?.r2?.accessKeyId || !config.oss?.r2?.secretAccessKey) {
             console.warn('⚠️ OSS Helper: R2 配置不完整，S3 客户端初始化跳过');
             return;
