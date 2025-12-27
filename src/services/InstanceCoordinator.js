@@ -57,6 +57,7 @@ export class InstanceCoordinator {
     async registerInstance() {
         const instanceData = {
             id: this.instanceId,
+            url: process.env.APP_EXTERNAL_URL, // 新增：外部可访问的 URL，用于 LB 转发
             hostname: process.env.HOSTNAME || 'unknown',
             region: process.env.CF_REGION || 'unknown',
             startedAt: Date.now(),

@@ -19,6 +19,7 @@ downloads/
 *.log
 rclone.conf
 plans/
+dist/
 
 # --- 操作系统文件 ---
 .DS_Store
