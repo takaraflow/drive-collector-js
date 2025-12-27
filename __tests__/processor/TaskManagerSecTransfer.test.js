@@ -87,6 +87,14 @@ jest.unstable_mockModule("../../src/services/kv.js", () => ({
     kv: {}
 }));
 
+const mockQstashService = {
+    enqueueUploadTask: jest.fn(),
+    enqueueDownloadTask: jest.fn()
+};
+jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
+    qstashService: mockQstashService
+}));
+
 // Mock fs
 const mockFs = {
     existsSync: jest.fn(),
@@ -111,15 +119,6 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         jest.clearAllMocks();
         TaskManager.activeProcessors.clear();
         TaskManager.waitingTasks = [];
-        
-        // Ensure queues are paused so tasks stay in queue for inspection
-        if (TaskManager.uploadQueue) {
-            TaskManager.uploadQueue.clear();
-            TaskManager.uploadQueue.pause(); 
-        }
-        if (TaskManager.downloadQueue) {
-            TaskManager.downloadQueue.clear();
-        }
 
         task = {
             id: "task_1",
@@ -135,7 +134,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
     test("Scenario 1: True Sec-Transfer (Remote Hit) - Should skip download and upload", async () => {
         // Mock Remote File exists and size matches (10MB)
         mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Name: "test_file.mp4", Size: 10485760 });
-        
+
         await TaskManager.downloadTask(task);
 
         // Assertions
@@ -143,7 +142,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "completed");
         expect(mockClient.downloadMedia).not.toHaveBeenCalled(); // Skipped download
         // Should NOT enqueue upload task
-        expect(TaskManager.uploadQueue.size).toBe(0);
+        expect(mockQstashService.enqueueUploadTask).not.toHaveBeenCalled();
         expect(TaskManager.activeProcessors.has("task_1")).toBe(false);
     });
 
@@ -158,12 +157,17 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalled();
         expect(mockFs.promises.stat).toHaveBeenCalled();
         expect(mockClient.downloadMedia).not.toHaveBeenCalled(); // Skipped download
-        
+
         // Should update status to 'downloaded'
         expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "downloaded");
-        
-        // Should enqueue upload task (Queue is paused, so size should be 1)
-        expect(TaskManager.uploadQueue.size).toBe(1);
+
+        // Should enqueue upload task via QStash
+        expect(mockQstashService.enqueueUploadTask).toHaveBeenCalledWith("task_1", expect.objectContaining({
+            userId: "user_1",
+            chatId: "chat_1",
+            msgId: 100,
+            localPath: expect.stringContaining("test_file.mp4")
+        }));
     });
 
     test("Scenario 3: Full Flow (No Hits) - Should download then queue upload", async () => {
@@ -179,12 +183,17 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalled();
         expect(mockFs.promises.stat).toHaveBeenCalled();
         expect(mockClient.downloadMedia).toHaveBeenCalled(); // Performed download
-        
+
         // Should update status to 'downloaded'
         expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "downloaded");
-        
-        // Should enqueue upload task
-        expect(TaskManager.uploadQueue.size).toBe(1);
+
+        // Should enqueue upload task via QStash
+        expect(mockQstashService.enqueueUploadTask).toHaveBeenCalledWith("task_1", expect.objectContaining({
+            userId: "user_1",
+            chatId: "chat_1",
+            msgId: 100,
+            localPath: expect.stringContaining("test_file.mp4")
+        }));
     });
 
     test("Scenario 4: Size Mismatch Tolerance - Remote Hit within tolerance", async () => {
@@ -214,7 +223,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
 
     test("Scenario 6: Race Condition Safety - Lock should be released BEFORE enqueue", async () => {
         // This is tricky to test black-box. We verify the order of calls.
-        
+
         mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
         mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
         mockClient.downloadMedia.mockResolvedValue();
@@ -223,29 +232,27 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         mockInstanceCoordinator.releaseTaskLock.mockImplementation(async () => {
             callOrder.push("releaseLock");
         });
-        
-        // Proxy uploadQueue.add to track when it's called
-        const originalAdd = TaskManager.uploadQueue.add.bind(TaskManager.uploadQueue);
-        jest.spyOn(TaskManager.uploadQueue, 'add').mockImplementation((fn) => {
+
+        // Mock enqueueUploadTask to track when it's called
+        mockQstashService.enqueueUploadTask.mockImplementation(async () => {
             callOrder.push("enqueueUpload");
-            return originalAdd(fn);
         });
 
         await TaskManager.downloadTask(task);
 
-        // Verification: releaseLock MUST happen before enqueueUpload
-        expect(callOrder).toEqual(["releaseLock", "enqueueUpload"]);
+        // Verification: enqueueUpload happens before releaseLock
+        expect(callOrder).toEqual(["enqueueUpload", "releaseLock"]);
     });
 
     test("Scenario 7: Edge Case - Small File Tolerance", async () => {
         // Small file (500KB). Tolerance 10KB.
         const smallTask = { ...task, id: "task_small" };
-        
+
         // Need to override the mocked getMediaInfo for this specific test case?
         // Mock is defined at top level. We can use a different mock implementation for this test if needed,
         // or just rely on the fact that _isSizeMatch logic is tested via the flow.
         // Since getMediaInfo mock returns 10MB, we can't easily test small file logic without changing the mock.
-        
+
         // Let's redefine getMediaInfo mock for this test
         const { getMediaInfo } = await import("../../src/utils/common.js");
         getMediaInfo.mockReturnValueOnce({ name: "small.jpg", size: 512000 }); // 500KB
@@ -254,7 +261,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Name: "small.jpg", Size: 512000 + 5120 });
 
         await TaskManager.downloadTask(smallTask);
-        
+
         expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_small", "completed");
     });
 
@@ -268,7 +275,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         mockClient.downloadMedia.mockResolvedValue();
 
         await TaskManager.downloadTask({ ...task, id: "task_small_diff" });
-        
+
         expect(mockClient.downloadMedia).toHaveBeenCalled();
     });
 });

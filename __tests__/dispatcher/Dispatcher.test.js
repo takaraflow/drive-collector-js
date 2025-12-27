@@ -58,6 +58,13 @@ jest.unstable_mockModule("../../src/processor/TaskManager.js", () => ({
   TaskManager: mockTaskManager,
 }));
 
+const mockQstashService = {
+  scheduleMediaGroupBatch: jest.fn(),
+};
+jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
+  qstashService: mockQstashService,
+}));
+
 const mockLinkParser = {
   parse: jest.fn(),
 };
@@ -324,6 +331,7 @@ describe("Dispatcher", () => {
       jest.useFakeTimers();
       mockSessionManager.get.mockResolvedValue(null);
       mockDriveRepository.findByUserId.mockResolvedValue({ id: 1 });
+      mockTaskManager.addBatchTasks.mockResolvedValue(['task1', 'task2']);
 
       const common = {
         media: { className: "MessageMediaPhoto" },
@@ -337,11 +345,44 @@ describe("Dispatcher", () => {
       await Dispatcher._handleMessage(event2, { userId: "123", target });
 
       expect(Dispatcher.groupBuffers.has("999")).toBe(true);
+      expect(Dispatcher.groupBuffers.get("999").messages).toHaveLength(2);
 
       jest.runAllTimers();
       await Promise.resolve();
 
-      expect(mockTaskManager.addBatchTasks).toHaveBeenCalled();
+      expect(mockTaskManager.addBatchTasks).toHaveBeenCalledWith(target, [event1.message, event2.message], "123");
+      expect(mockQstashService.scheduleMediaGroupBatch).toHaveBeenCalledWith("999", ['task1', 'task2'], 1);
+      jest.useRealTimers();
+    });
+
+    test("should handle media group aggregation timeout", async () => {
+      jest.useFakeTimers();
+      mockSessionManager.get.mockResolvedValue(null);
+      mockDriveRepository.findByUserId.mockResolvedValue({ id: 1 });
+      mockTaskManager.addBatchTasks.mockResolvedValue(['task1']);
+
+      const message = {
+        media: { className: "MessageMediaPhoto" },
+        peerId: target,
+        groupedId: BigInt(888),
+        id: 1
+      };
+      const event = { message };
+
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(Dispatcher.groupBuffers.has("888")).toBe(true);
+
+      // Advance timer by exactly 800ms
+      jest.advanceTimersByTime(800);
+      await Promise.resolve();
+
+      expect(mockTaskManager.addBatchTasks).toHaveBeenCalledWith(target, [message], "123");
+      expect(mockQstashService.scheduleMediaGroupBatch).toHaveBeenCalledWith("888", ['task1'], 1);
+
+      // Buffer should be cleared
+      expect(Dispatcher.groupBuffers.has("888")).toBe(false);
+
       jest.useRealTimers();
     });
 

@@ -15,52 +15,10 @@ import { TaskRepository } from "../repositories/TaskRepository.js";
 import { d1 } from "../services/d1.js";
 import { kv } from "../services/kv.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
+import { qstashService } from "../services/QStashService.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 
-/**
- * 上传聚合器：负责收集已下载完成的任务，并分批触发批量上传
- */
-class UploadBatcher {
-    constructor(processBatchFn) {
-        this.batches = new Map(); // key: userId_folder -> [tasks]
-        this.processBatchFn = processBatchFn;
-        this.waitWindow = 5000; // 5秒等待窗口
-    }
-
-    /**
-     * 添加任务到聚合池
-     */
-    add(task) {
-        const key = `${task.userId}_${config.remoteFolder}`;
-        if (!this.batches.has(key)) {
-            this.batches.set(key, []);
-            // 开启该分组的计时器
-            setTimeout(() => this.trigger(key), this.waitWindow);
-        }
-        this.batches.get(key).push(task);
-        console.log(`📦 Task ${task.id} added to upload batch ${key} (${this.batches.get(key).length} tasks)`);
-    }
-
-    /**
-     * 触发批量上传
-     */
-    async trigger(key) {
-        const tasks = this.batches.get(key);
-        if (!tasks || tasks.length === 0) return;
-        
-        this.batches.delete(key);
-        console.log(`🚀 Triggering batch upload for ${key} with ${tasks.length} tasks`);
-        
-        try {
-            await this.processBatchFn(tasks);
-        } catch (e) {
-            console.error(`Batch upload failed for ${key}:`, e);
-            tasks.forEach(t => {
-                if (t.onUploadComplete) t.onUploadComplete({ success: false, error: e.message });
-            });
-        }
-    }
-}
+// QStash 延迟队列替代了 UploadBatcher
 
 /**
  * --- 任务管理调度中心 (TaskManager) ---
@@ -94,9 +52,7 @@ export class TaskManager {
         }
     }
 
-    // 分离下载和上传队列
-    static downloadQueue = new PQueue({ concurrency: 1 }); // 下载队列：处理MTProto下载，降低并发避免连接压力
-    static uploadQueue = new PQueue({ concurrency: 1 });   // 上传队列：处理rclone转存
+    // QStash 事件驱动：移除传统队列，改为 Webhook 处理
 
     // 兼容性：保留原有queue引用
     static get queue() { return this.downloadQueue; }
@@ -141,18 +97,7 @@ export class TaskManager {
     // 内存中的任务执行锁，防止同一任务被多次 processor 处理
     static activeProcessors = new Set();
 
-    // 初始化聚合器
-    static uploadBatcher = new UploadBatcher(async (tasks) => {
-        const result = await CloudTool.uploadBatch(tasks, (tid, progress) => {
-            const targetTask = tasks.find(bt => bt.id === tid);
-            if (targetTask && targetTask.onUploadProgress) {
-                targetTask.onUploadProgress(progress);
-            }
-        });
-        tasks.forEach(bt => {
-            if (bt.onUploadComplete) bt.onUploadComplete(result);
-        });
-    });
+    // QStash 延迟队列替代了 uploadBatcher
 
     /**
      * 初始化：恢复因重启中断的僵尸任务
@@ -462,31 +407,36 @@ export class TaskManager {
     }
 
     /**
-     * [私有] 将任务推入下载队列
+     * [私有] 发布任务到 QStash 下载队列
      */
-    static _enqueueTask(task) {
-        this.waitingTasks.push(task);
-        this.downloadQueue.add(async () => {
-            this.currentTask = task;
-            await this.downloadTask(task);
-            this.currentTask = null;
-        });
+    static async _enqueueTask(task) {
+        try {
+            await qstashService.enqueueDownloadTask(task.id, {
+                userId: task.userId,
+                chatId: task.chatId,
+                msgId: task.msgId
+            });
+            console.log(`📤 Task ${task.id} enqueued for download via QStash`);
+        } catch (error) {
+            console.error(`❌ Failed to enqueue download task ${task.id}:`, error);
+        }
     }
 
     /**
-     * [私有] 将任务推入上传队列
+     * [私有] 发布任务到 QStash 上传队列
      */
-    static _enqueueUploadTask(task) {
-        this.waitingUploadTasks.push(task);
-        this.uploadQueue.add(async () => {
-            this.waitingUploadTasks = this.waitingUploadTasks.filter(t => t.id !== task.id);
-            this.processingUploadTasks.add(task.id);
-            try {
-                await this.uploadTask(task);
-            } finally {
-                this.processingUploadTasks.delete(task.id);
-            }
-        });
+    static async _enqueueUploadTask(task) {
+        try {
+            await qstashService.enqueueUploadTask(task.id, {
+                userId: task.userId,
+                chatId: task.chatId,
+                msgId: task.msgId,
+                localPath: task.localPath
+            });
+            console.log(`📤 Task ${task.id} enqueued for upload via QStash`);
+        } catch (error) {
+            console.error(`❌ Failed to enqueue upload task ${task.id}:`, error);
+        }
     }
 
     /**
@@ -511,6 +461,107 @@ export class TaskManager {
                     await new Promise(resolve => setTimeout(resolve, 1200));
                 }
             }
+        }
+    }
+
+    /**
+     * 处理下载 Webhook - QStash 事件驱动
+     */
+    static async handleDownloadWebhook(taskId) {
+        try {
+            console.log(`🎣 Received download webhook for task ${taskId}`);
+
+            // 从数据库获取任务信息
+            const dbTask = await TaskRepository.findById(taskId);
+            if (!dbTask) {
+                console.error(`❌ Task ${taskId} not found in database`);
+                return;
+            }
+
+            // 获取原始消息
+            const messages = await runMtprotoTaskWithRetry(
+                () => client.getMessages(dbTask.chat_id, { ids: [dbTask.source_msg_id] }),
+                { priority: PRIORITY.BACKGROUND }
+            );
+            const message = messages[0];
+            if (!message || !message.media) {
+                await TaskRepository.updateStatus(taskId, 'failed', 'Source msg missing');
+                return;
+            }
+
+            // 创建任务对象
+            const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
+            task.fileName = dbTask.file_name;
+
+            // 执行下载逻辑
+            await this.downloadTask(task);
+
+        } catch (error) {
+            console.error(`❌ Download webhook failed for task ${taskId}:`, error);
+            await TaskRepository.updateStatus(taskId, 'failed', error.message);
+        }
+    }
+
+    /**
+     * 处理上传 Webhook - QStash 事件驱动
+     */
+    static async handleUploadWebhook(taskId) {
+        try {
+            console.log(`🎣 Received upload webhook for task ${taskId}`);
+
+            // 从数据库获取任务信息
+            const dbTask = await TaskRepository.findById(taskId);
+            if (!dbTask) {
+                console.error(`❌ Task ${taskId} not found in database`);
+                return;
+            }
+
+            // 验证本地文件存在
+            const localPath = path.join(config.downloadDir, dbTask.file_name);
+            if (!fs.existsSync(localPath)) {
+                await TaskRepository.updateStatus(taskId, 'failed', 'Local file not found');
+                return;
+            }
+
+            // 获取原始消息
+            const messages = await runMtprotoTaskWithRetry(
+                () => client.getMessages(dbTask.chat_id, { ids: [dbTask.source_msg_id] }),
+                { priority: PRIORITY.BACKGROUND }
+            );
+            const message = messages[0];
+            if (!message || !message.media) {
+                await TaskRepository.updateStatus(taskId, 'failed', 'Source msg missing');
+                return;
+            }
+
+            // 创建任务对象
+            const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
+            task.localPath = localPath;
+            task.fileName = dbTask.file_name;
+
+            // 执行上传逻辑
+            await this.uploadTask(task);
+
+        } catch (error) {
+            console.error(`❌ Upload webhook failed for task ${taskId}:`, error);
+            await TaskRepository.updateStatus(taskId, 'failed', error.message);
+        }
+    }
+
+    /**
+     * 处理媒体组批处理 Webhook - QStash 事件驱动
+     */
+    static async handleMediaBatchWebhook(groupId, taskIds) {
+        try {
+            console.log(`🎣 Received media batch webhook for group ${groupId} with ${taskIds.length} tasks`);
+
+            // 这里可以实现批处理逻辑，目前先逐个处理
+            for (const taskId of taskIds) {
+                await this.handleDownloadWebhook(taskId);
+            }
+
+        } catch (error) {
+            console.error(`❌ Media batch webhook failed for group ${groupId}:`, error);
         }
     }
 
@@ -581,6 +632,7 @@ export class TaskManager {
                         await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(fileName), folder: config.remoteFolder }), true);
                     }
                     this.activeProcessors.delete(id);
+                    // 秒传完成，无需上传
                     return;
                 }
 
@@ -598,13 +650,19 @@ export class TaskManager {
 
                 // 如果本地文件已存在且完整，跳过下载，直接进入上传流程
                 if (localFileExists && this._isSizeMatch(localFileSize, info.size)) {
-                    // 本地文件完好，直接进入上传队列
+                    // 本地文件完好，直接触发上传 Webhook
                     await TaskRepository.updateStatus(task.id, 'downloaded');
                     if (!task.isGroup) {
                         await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
                     }
                     this.activeProcessors.delete(id);
-                    shouldUpload = true;
+                    await qstashService.enqueueUploadTask(task.id, {
+                        userId: task.userId,
+                        chatId: task.chatId,
+                        msgId: task.msgId,
+                        localPath: task.localPath
+                    });
+                    console.log(`📤 Local file exists, triggered upload webhook for task ${task.id}`);
                     return;
                 }
 
@@ -631,9 +689,15 @@ export class TaskManager {
                     await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
                 }
 
-                // 标记需要进入上传队列
+                // 触发上传 Webhook
                 this.activeProcessors.delete(id);
-                shouldUpload = true;
+                await qstashService.enqueueUploadTask(task.id, {
+                    userId: task.userId,
+                    chatId: task.chatId,
+                    msgId: task.msgId,
+                    localPath: task.localPath
+                });
+                console.log(`📤 Download complete, triggered upload webhook for task ${task.id}`);
 
             } catch (e) {
                 const isCancel = e.message === "CANCELLED";
@@ -654,10 +718,6 @@ export class TaskManager {
         } finally {
             // 确保分布式锁被释放
             await instanceCoordinator.releaseTaskLock(id);
-            // 在释放锁之后，再将任务推入上传队列，防止 Worker 间的竞争条件
-            if (shouldUpload) {
-                this._enqueueUploadTask(task);
-            }
         }
     }
 
@@ -727,7 +787,7 @@ export class TaskManager {
                 } else {
                     await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(fileName), folder: config.remoteFolder }), true);
                 }
-                this.activeWorkers.delete(id);
+                this.activeProcessors.delete(id);
                 return;
             }
 
@@ -751,17 +811,14 @@ export class TaskManager {
                 // 转换 OSS 结果为期望格式
                 uploadResult = uploadResult.success ? { success: true } : { success: false, error: uploadResult.error };
             } else {
-                // 使用 rclone 批量上传
-                uploadResult = await new Promise(async (resolve) => {
-                    task.onUploadComplete = (result) => resolve(result);
-                    task.onUploadProgress = async (progress) => {
-                        const now = Date.now();
-                        if (now - lastUpdate > 3000) {
-                            lastUpdate = now;
-                            await heartbeat('uploading', 0, 0, progress);
-                        }
-                    };
-                    this.uploadBatcher.add(task);
+                // 使用 rclone 直接上传单个文件
+                console.log(`📤 使用 rclone 直接上传: ${fileName}`);
+                uploadResult = await CloudTool.uploadFile(localPath, task, (progress) => {
+                    const now = Date.now();
+                    if (now - lastUpdate > 3000) {
+                        lastUpdate = now;
+                        heartbeat('uploading', 0, 0, progress);
+                    }
                 });
             }
 
@@ -970,85 +1027,9 @@ export class TaskManager {
         await safeEdit(peer, parseInt(task.msgId), text, null, task.userId, "html");
     }
 
-    static pollingTimer = null;
+    // QStash 事件驱动：移除轮询机制
 
-    /**
-     * 启动任务轮询机制
-     */
-    static startPolling() {
-        if (this.pollingTimer) return;
-        console.log("🔍 任务轮询机制已启动");
-        this.pollingTimer = setInterval(() => this.pollTasks(), 10000); // 每 10 秒检查一次
-    }
+    // QStash 事件驱动：移除轮询认领逻辑
 
-    /**
-     * 停止任务轮询
-     */
-    static stopPolling() {
-        if (this.pollingTimer) {
-            clearInterval(this.pollingTimer);
-            this.pollingTimer = null;
-        }
-    }
-
-    /**
-     * 轮询并认领任务
-     */
-    static async pollTasks() {
-        try {
-            if (this.getProcessingCount() >= 5) return;
-
-            const hasTgLock = await instanceCoordinator.hasLock("telegram_client");
-            if (hasTgLock) {
-                const queuedTasks = await TaskRepository.findStalledTasks(300000, 'queued');
-                for (const row of queuedTasks) {
-                    if (this.getProcessingCount() >= 5) break;
-                    if (this.activeWorkers.has(row.id)) continue;
-                    console.log(`🤖 Instance claiming download task: ${row.id}`);
-                    this._restoreAndEnqueue(row);
-                }
-            }
-
-            const uploadTasks = await TaskRepository.findStalledTasks(300000, 'downloaded');
-            for (const row of uploadTasks) {
-                if (this.getProcessingCount() >= 5) break;
-                if (this.activeWorkers.has(row.id)) continue;
-                const localPath = path.join(config.downloadDir, row.file_name);
-                if (!fs.existsSync(localPath)) continue;
-                console.log(`🤖 Instance claiming upload task: ${row.id}`);
-                this._restoreAndEnqueue(row);
-            }
-        } catch (e) {
-            console.error("Task polling error:", e);
-        }
-    }
-
-    /**
-     * [私有] 恢复并入队单个任务
-     */
-    static async _restoreAndEnqueue(row) {
-        try {
-            const messages = await runMtprotoTaskWithRetry(() => client.getMessages(row.chat_id, { ids: [row.source_msg_id] }), { priority: PRIORITY.BACKGROUND });
-            const message = messages[0];
-            if (!message || !message.media) {
-                await TaskRepository.updateStatus(row.id, 'failed', 'Source msg missing');
-                return;
-            }
-
-            const task = this._createTaskObject(row.id, row.user_id, row.chat_id, row.msg_id, message);
-            if (row.status === 'downloaded' || row.status === 'uploading') {
-                const localPath = path.join(config.downloadDir, row.file_name);
-                if (fs.existsSync(localPath)) {
-                    task.localPath = localPath;
-                    this._enqueueUploadTask(task);
-                } else {
-                    this._enqueueTask(task);
-                }
-            } else {
-                this._enqueueTask(task);
-            }
-        } catch (e) {
-            console.error(`Failed to restore task ${row.id}:`, e);
-        }
-    }
+    // QStash 事件驱动：移除恢复入队逻辑
 }

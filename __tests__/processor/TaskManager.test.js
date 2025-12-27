@@ -29,6 +29,7 @@ const mockCloudTool = {
     getRemoteFileInfo: jest.fn(),
     uploadFile: jest.fn(),
     uploadBatch: jest.fn(),
+    listRemoteFiles: jest.fn()
 };
 jest.unstable_mockModule("../../src/services/rclone.js", () => ({
     CloudTool: mockCloudTool,
@@ -162,6 +163,29 @@ jest.unstable_mockModule("../../src/services/kv.js", () => ({
     kv: mockKv
 }));
 
+const mockQstashService = {
+    enqueueUploadTask: jest.fn(),
+    enqueueDownloadTask: jest.fn()
+};
+jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
+    qstashService: mockQstashService
+}));
+
+const mockInstanceCoordinator = {
+    acquireTaskLock: jest.fn().mockResolvedValue(true),
+    releaseTaskLock: jest.fn().mockResolvedValue(),
+};
+jest.unstable_mockModule("../../src/services/InstanceCoordinator.js", () => ({
+    instanceCoordinator: mockInstanceCoordinator
+}));
+
+const mockOssService = {
+    upload: jest.fn().mockResolvedValue({ success: true })
+};
+jest.unstable_mockModule("../../src/services/oss.js", () => ({
+    ossService: mockOssService
+}));
+
 // 导入 TaskManager
 const { TaskManager } = await import("../../src/processor/TaskManager.js");
 
@@ -184,17 +208,9 @@ describe("TaskManager", () => {
         TaskManager.waitingTasks = [];
         TaskManager.currentTask = null;
         TaskManager.waitingUploadTasks = [];
-        // 清理队列
-        if (TaskManager.downloadQueue) TaskManager.downloadQueue.clear();
-        if (TaskManager.uploadQueue) TaskManager.uploadQueue.clear();
         TaskManager.monitorLocks.clear();
         // 清理 activeProcessors
         if (TaskManager.activeProcessors) TaskManager.activeProcessors.clear();
-        // 清理 UploadBatcher 的定时器（重置实例）
-        if (TaskManager.uploadBatcher) {
-            TaskManager.uploadBatcher.batches.clear();
-            TaskManager.uploadBatcher.waitWindow = 10; // Reduce wait time for tests
-        }
     });
 
     afterEach(() => {
@@ -249,7 +265,7 @@ describe("TaskManager", () => {
             jest.useRealTimers();
         });
 
-        test("should restore stalled tasks", async () => {
+        test("should restore stalled tasks via QStash", async () => {
             mockKv.isFailoverMode = false;
             const stalledTasks = [
                 { id: "1", user_id: "u1", chat_id: "c1", msg_id: 100, source_msg_id: 200 }
@@ -257,15 +273,17 @@ describe("TaskManager", () => {
             mockTaskRepository.findStalledTasks.mockResolvedValue(stalledTasks);
             mockClient.getMessages.mockResolvedValue([{ id: 200, media: {} }]);
 
-            if (TaskManager.downloadQueue) TaskManager.downloadQueue.pause();
+            const originalEnqueue = TaskManager._enqueueTask;
+            const mockEnqueue = jest.fn();
+            TaskManager._enqueueTask = mockEnqueue;
 
             await TaskManager.init();
 
             expect(mockTaskRepository.findStalledTasks).toHaveBeenCalled();
             expect(mockClient.getMessages).toHaveBeenCalled();
-            expect(TaskManager.waitingTasks.length).toBe(1);
+            expect(mockEnqueue).toHaveBeenCalledTimes(1);
 
-            if (TaskManager.downloadQueue) TaskManager.downloadQueue.clear();
+            TaskManager._enqueueTask = originalEnqueue;
         });
 
         test("should skip invalid chat_id", async () => {
@@ -307,8 +325,7 @@ describe("TaskManager", () => {
                 sourceMsgId: 200
             }));
             
-            // In decoupled mode, it should NOT be enqueued immediately
-            expect(TaskManager.waitingTasks.length).toBe(0);
+            // In QStash mode, it should NOT be enqueued immediately to memory queue
         });
     });
 
@@ -452,7 +469,7 @@ describe("TaskManager", () => {
     });
 
     describe("Resource Competition and Lock Conflicts", () => {
-        test("should handle concurrent task state transitions (downloading -> uploading)", async () => {
+        test("should handle concurrent task state transitions (downloading -> uploading) via QStash", async () => {
             const task = {
                 id: "transition-task",
                 userId: "u1",
@@ -467,12 +484,22 @@ describe("TaskManager", () => {
             mockClient.downloadMedia.mockResolvedValue({});
             mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
 
+            // Mock qstashService
+            const mockQstash = (await import("../../src/services/QStashService.js")).qstashService;
+            const originalEnqueue = mockQstash.enqueueUploadTask;
+            mockQstash.enqueueUploadTask = jest.fn();
+
             await TaskManager.downloadTask(task);
 
             expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloading');
             expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith(task.id, 'downloaded');
+            expect(mockQstash.enqueueUploadTask).toHaveBeenCalledWith(task.id, expect.objectContaining({
+                userId: "u1",
+                chatId: "chat123",
+                msgId: "msg456"
+            }));
 
-            expect(TaskManager.waitingUploadTasks.length).toBeGreaterThan(0);
+            mockQstash.enqueueUploadTask = originalEnqueue;
         });
 
         test("should prevent race condition when cancel occurs during download completion", async () => {
@@ -605,14 +632,10 @@ describe("TaskManager", () => {
                 .mockResolvedValueOnce(null)
                 .mockResolvedValueOnce({ Size: 1024 });
 
-            if (TaskManager.uploadBatcher) {
-                TaskManager.uploadBatcher.waitWindow = 0;
-            }
-
             await TaskManager.uploadTask(task);
 
-            expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalledWith("transfer_1766663719382_fc61fh.jpg", "u1", 2);
-            expect(mockCloudTool.getRemoteFileInfo).not.toHaveBeenCalledWith("transfer_1766663722153_a82fwq.jpg", "u1", expect.any(Number));
+            expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalledWith("transfer_1766663719382_fc61fh.jpg", "u1");
+            expect(mockCloudTool.getRemoteFileInfo).not.toHaveBeenCalledWith("transfer_1766663722153_a82fwq.jpg", "u1");
             
             global.setTimeout = originalTimeout;
         });

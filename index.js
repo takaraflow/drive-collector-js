@@ -2,6 +2,8 @@ import http from "http";
 import { config } from "./src/config/index.js";
 import { SettingsRepository } from "./src/repositories/SettingsRepository.js";
 import { instanceCoordinator } from "./src/services/InstanceCoordinator.js";
+import { qstashService } from "./src/services/QStashService.js";
+import { TaskManager } from "./src/processor/TaskManager.js";
 import { startDispatcher } from "./src/dispatcher/bootstrap.js";
 import { startProcessor, stopProcessor } from "./src/processor/bootstrap.js";
 
@@ -24,8 +26,65 @@ process.on("uncaughtException", (err) => {
 });
 
 /**
+ * 处理 QStash Webhook 请求
+ */
+async function handleQStashWebhook(req, res) {
+    try {
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const pathParts = url.pathname.split('/').filter(Boolean);
+        const topic = pathParts[2]; // /api/tasks/{topic}
+
+        // 读取请求体
+        const chunks = [];
+        for await (const chunk of req) {
+            chunks.push(chunk);
+        }
+        const body = Buffer.concat(chunks).toString();
+        const data = JSON.parse(body);
+
+        // 验证签名
+        const signature = req.headers['upstash-signature'];
+        if (!qstashService.verifyWebhookSignature(signature, body)) {
+            res.writeHead(401);
+            res.end('Unauthorized');
+            return;
+        }
+
+        console.log(`🎣 收到 QStash Webhook: ${topic}`, data);
+
+        // 根据 topic 分发处理
+        switch (topic) {
+            case 'download-tasks':
+                await TaskManager.handleDownloadWebhook(data.taskId);
+                break;
+            case 'upload-tasks':
+                await TaskManager.handleUploadWebhook(data.taskId);
+                break;
+            case 'media-batch':
+                await TaskManager.handleMediaBatchWebhook(data.groupId, data.taskIds || []);
+                break;
+            case 'system-events':
+                // 处理系统事件广播
+                console.log(`📢 系统事件: ${data.event}`, data);
+                break;
+            default:
+                console.warn(`⚠️ 未知的 Webhook topic: ${topic}`);
+        }
+
+        res.writeHead(200);
+        res.end('OK');
+    } catch (error) {
+        console.error('❌ Webhook 处理失败:', error);
+        res.writeHead(500);
+        res.end('Internal Server Error');
+    }
+}
+
+/**
  * --- 🚀 应用程序入口 ---
  */
+
+export { handleQStashWebhook };
 (async () => {
     try {
         console.log("🔄 正在启动应用...");
@@ -64,12 +123,21 @@ process.on("uncaughtException", (err) => {
             console.warn("⚠️ 启动退避逻辑执行失败 (D1/KV 异常)，跳过退避，直接启动:", settingsError.message);
         }
 
-        // 2. 启动 HTTP 健康检查端口 (用于保活)
-        http.createServer((req, res) => {
+        // 2. 启动 HTTP 服务器 (健康检查 + QStash Webhook)
+        const server = http.createServer(async (req, res) => {
+            // QStash Webhook 处理
+            if (req.method === 'POST' && req.url?.startsWith('/api/tasks/')) {
+                await handleQStashWebhook(req, res);
+                return;
+            }
+
+            // 健康检查
             res.writeHead(200);
             res.end(`${nodeMode.charAt(0).toUpperCase() + nodeMode.slice(1)} Node Active`);
-        }).listen(config.port, '0.0.0.0', () => {
-            console.log(`📡 健康检查端口 ${config.port} 已就绪`);
+        });
+
+        server.listen(config.port, '0.0.0.0', () => {
+            console.log(`📡 HTTP 服务器端口 ${config.port} 已就绪`);
         });
 
         // 3. 初始化实例协调器（多实例支持）

@@ -1,5 +1,6 @@
 import { kv } from "./kv.js";
 import { d1 } from "./d1.js";
+import { qstashService } from "./QStashService.js";
 import { InstanceRepository } from "../repositories/InstanceRepository.js";
 
 /**
@@ -310,6 +311,24 @@ export class InstanceCoordinator {
     async getInstanceCount() {
         const activeInstances = await this.getActiveInstances();
         return activeInstances.length;
+    }
+
+    /**
+     * 广播系统事件到所有实例 (使用 QStash Topics)
+     * @param {string} event - 事件名称
+     * @param {object} data - 事件数据
+     */
+    async broadcast(event, data = {}) {
+        try {
+            await qstashService.broadcastSystemEvent(event, {
+                ...data,
+                sourceInstance: this.instanceId,
+                timestamp: Date.now()
+            });
+            console.log(`📢 广播系统事件: ${event}`);
+        } catch (error) {
+            console.error(`❌ 广播事件失败 ${event}:`, error);
+        }
     }
 }
 

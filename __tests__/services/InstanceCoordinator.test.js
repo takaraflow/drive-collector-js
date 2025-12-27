@@ -242,4 +242,50 @@ describe("InstanceCoordinator", () => {
       releaseLockSpy.mockRestore();
     });
   });
+
+  describe("broadcast", () => {
+    test("should broadcast system event with sourceInstance and timestamp", async () => {
+      // Mock qstashService.broadcastSystemEvent
+      const mockBroadcastSystemEvent = jest.fn().mockResolvedValue();
+      jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
+        qstashService: {
+          broadcastSystemEvent: mockBroadcastSystemEvent
+        }
+      }));
+
+      // Re-import to get updated mock
+      jest.resetModules();
+      const { instanceCoordinator: newIC } = await import("../../src/services/InstanceCoordinator.js");
+
+      await newIC.broadcast("instance_started", { nodeType: "dispatcher" });
+
+      expect(mockBroadcastSystemEvent).toHaveBeenCalledWith("instance_started", {
+        nodeType: "dispatcher",
+        sourceInstance: newIC.instanceId,
+        timestamp: expect.any(Number)
+      });
+    });
+
+    test("should handle broadcast failure gracefully", async () => {
+      // Mock qstashService.broadcastSystemEvent to throw
+      const mockBroadcastSystemEvent = jest.fn().mockRejectedValue(new Error("QStash error"));
+      jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
+        qstashService: {
+          broadcastSystemEvent: mockBroadcastSystemEvent
+        }
+      }));
+
+      // Re-import to get updated mock
+      jest.resetModules();
+      const { instanceCoordinator: newIC } = await import("../../src/services/InstanceCoordinator.js");
+      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      await newIC.broadcast("instance_failed", { error: "test" });
+
+      expect(mockBroadcastSystemEvent).toHaveBeenCalled();
+      expect(consoleSpy).toHaveBeenCalledWith("❌ 广播事件失败 instance_failed:", expect.any(Error));
+
+      consoleSpy.mockRestore();
+    });
+  });
 });

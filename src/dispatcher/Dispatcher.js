@@ -15,6 +15,7 @@ import { runBotTask, runBotTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 import { NetworkDiagnostic } from "../utils/NetworkDiagnostic.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
+import { qstashService } from "../services/QStashService.js";
 import fs from "fs";
 import path from "path";
 
@@ -26,9 +27,9 @@ import path from "path";
  * 3. 将请求路由到正确的业务模块 (Router)
  */
 export class Dispatcher {
-    // 🆕 媒体组缓存：用于聚合短时间内具有相同 groupedId 的消息
+    // 媒体组缓存：用于聚合短时间内具有相同 groupedId 的消息
     static groupBuffers = new Map();
-    
+
     // 防止刷新按钮被疯狂点击
     static lastRefreshTime = 0;
 
@@ -284,7 +285,7 @@ export class Dispatcher {
             // 🚀 核心逻辑：如果是媒体组消息
             if (message.groupedId) {
                 const gid = message.groupedId.toString();
-                
+
                 // 如果是该组的第一条消息，启动收集计时器
                 if (!this.groupBuffers.has(gid)) {
                     this.groupBuffers.set(gid, {
@@ -292,12 +293,13 @@ export class Dispatcher {
                         timer: setTimeout(async () => {
                             const buffer = this.groupBuffers.get(gid);
                             this.groupBuffers.delete(gid);
-                            // 收集完毕，交给 TaskManager 批量处理
-                            await TaskManager.addBatchTasks(target, buffer.messages, userId);
-                        }, 800) // 800ms 足够收齐一组消息
+                            // 创建批量任务并调度 QStash 延迟批处理
+                            const taskIds = await TaskManager.addBatchTasks(target, buffer.messages, userId);
+                            qstashService.scheduleMediaGroupBatch(gid, taskIds, 1);
+                        }, 800) // 800ms 收集时间
                     });
                 }
-                
+
                 // 将消息加入缓存
                 this.groupBuffers.get(gid).messages.push(message);
                 return;

@@ -14,6 +14,11 @@ export const config = {
     downloadDir: "/tmp/downloads",
     configPath: "/tmp/rclone.conf",
     port: process.env.PORT || 7860,
+    qstash: {
+        token: process.env.QSTASH_TOKEN,
+        url: process.env.QSTASH_URL,
+        webhookUrl: process.env.APP_WEBHOOK_URL
+    },
     oss: {
         workerUrl: process.env.OSS_WORKER_URL,
         workerSecret: process.env.OSS_WORKER_SECRET,
