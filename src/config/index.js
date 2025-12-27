@@ -9,11 +9,22 @@ export const config = {
     apiHash: process.env.API_HASH,
     botToken: process.env.BOT_TOKEN,
     ownerId: process.env.OWNER_ID, // 7428626313
-    remoteName: process.env.RCLONE_REMOTE || "mega", 
+    remoteName: process.env.RCLONE_REMOTE || "mega",
     remoteFolder: process.env.REMOTE_FOLDER || "/DriveCollectorBot",
     downloadDir: "/tmp/downloads",
     configPath: "/tmp/rclone.conf",
-    port: process.env.PORT || 7860
+    port: process.env.PORT || 7860,
+    oss: {
+        workerUrl: process.env.OSS_WORKER_URL,
+        workerSecret: process.env.OSS_WORKER_SECRET,
+        r2: {
+            endpoint: process.env.R2_ENDPOINT,
+            accessKeyId: process.env.R2_ACCESS_KEY_ID,
+            secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+            bucket: process.env.R2_BUCKET,
+            publicUrl: process.env.R2_PUBLIC_URL
+        }
+    }
 };
 
 if (!fs.existsSync(config.downloadDir)) fs.mkdirSync(config.downloadDir, { recursive: true });

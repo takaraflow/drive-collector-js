@@ -6,6 +6,7 @@ import { Button } from "telegram/tl/custom/button.js";
 import { config } from "../config/index.js";
 import { client } from "../services/telegram.js";
 import { CloudTool } from "../services/rclone.js";
+import { ossService } from "../services/oss.js";
 import { UIHelper } from "../ui/templates.js";
 import { getMediaInfo, updateStatus, escapeHTML, safeEdit } from "../utils/common.js";
 import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, runMtprotoFileTaskWithRetry, PRIORITY } from "../utils/limiter.js";
@@ -730,21 +731,39 @@ export class TaskManager {
                 return;
             }
 
-            // 上传阶段 - rclone批量上传
+            // 上传阶段 - 根据驱动类型选择上传方式
             if (!task.isGroup) await updateStatus(task, STRINGS.task.uploading);
             await heartbeat('uploading');
 
-            const uploadResult = await new Promise(async (resolve) => {
-                task.onUploadComplete = (result) => resolve(result);
-                task.onUploadProgress = async (progress) => {
+            let uploadResult;
+            const isR2Drive = config.remoteName === 'r2' && config.oss?.r2?.bucket;
+
+            if (isR2Drive) {
+                // 使用 OSS 服务进行双轨制上传
+                console.log(`📤 使用 OSS 服务上传到 R2: ${fileName}`);
+                uploadResult = await ossService.upload(localPath, fileName, (progress) => {
                     const now = Date.now();
                     if (now - lastUpdate > 3000) {
                         lastUpdate = now;
-                        await heartbeat('uploading', 0, 0, progress);
+                        heartbeat('uploading', 0, 0, progress);
                     }
-                };
-                this.uploadBatcher.add(task);
-            });
+                });
+                // 转换 OSS 结果为期望格式
+                uploadResult = uploadResult.success ? { success: true } : { success: false, error: uploadResult.error };
+            } else {
+                // 使用 rclone 批量上传
+                uploadResult = await new Promise(async (resolve) => {
+                    task.onUploadComplete = (result) => resolve(result);
+                    task.onUploadProgress = async (progress) => {
+                        const now = Date.now();
+                        if (now - lastUpdate > 3000) {
+                            lastUpdate = now;
+                            await heartbeat('uploading', 0, 0, progress);
+                        }
+                    };
+                    this.uploadBatcher.add(task);
+                });
+            }
 
             // 结果处理
             if (uploadResult.success) {
