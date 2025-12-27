@@ -1,5 +1,13 @@
 import { jest } from "@jest/globals";
 
+// Mock console methods that logger uses
+const mockConsole = {
+    info: jest.spyOn(console, 'info').mockImplementation(),
+    warn: jest.spyOn(console, 'warn').mockImplementation(),
+    error: jest.spyOn(console, 'error').mockImplementation(),
+    debug: jest.spyOn(console, 'debug').mockImplementation()
+};
+
 // Mock dependencies
 const mockFindById = jest.fn();
 const mockUpdateStatus = jest.fn();
@@ -85,6 +93,23 @@ describe("TaskManager QStash Integration", () => {
     let originalDownloadTask;
     let originalUploadTask;
 
+    // Mock console globally for logger testing
+    const originalConsole = global.console;
+    beforeAll(() => {
+        global.console = {
+            ...originalConsole,
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+            debug: jest.fn(),
+            log: jest.fn()
+        };
+    });
+
+    afterAll(() => {
+        global.console = originalConsole;
+    });
+
     beforeAll(async () => {
         const module = await import("../../src/processor/TaskManager.js");
         TaskManager = module.TaskManager;
@@ -161,9 +186,10 @@ describe("TaskManager QStash Integration", () => {
             TaskManager.downloadTask = jest.fn().mockResolvedValue();
         });
 
-        test("应当正确处理下载 Webhook", async () => {
+        test("应当正确处理下载 Webhook 并记录日志", async () => {
             await TaskManager.handleDownloadWebhook('123');
 
+            expect(console.info).toHaveBeenCalledWith('[QStash] Received download webhook for Task: 123', expect.any(Object));
             expect(mockFindById).toHaveBeenCalledWith('123');
             expect(mockGetMessages).toHaveBeenCalledWith('chat1', { ids: [789] });
             expect(TaskManager.downloadTask).toHaveBeenCalledWith(
@@ -228,9 +254,10 @@ describe("TaskManager QStash Integration", () => {
             TaskManager.uploadTask = jest.fn().mockResolvedValue();
         });
 
-        test("应当正确处理上传 Webhook", async () => {
+        test("应当正确处理上传 Webhook 并记录日志", async () => {
             await TaskManager.handleUploadWebhook('123');
 
+            expect(console.info).toHaveBeenCalledWith('[QStash] Received upload webhook for Task: 123', expect.any(Object));
             expect(mockFindById).toHaveBeenCalledWith('123');
         });
 
@@ -277,11 +304,12 @@ describe("TaskManager QStash Integration", () => {
             TaskManager.handleDownloadWebhook = jest.fn().mockResolvedValue();
         });
 
-        test("应当循环处理媒体组任务", async () => {
+        test("应当循环处理媒体组任务并记录日志", async () => {
             const taskIds = ['123', '456', '789'];
 
             await TaskManager.handleMediaBatchWebhook('group1', taskIds);
 
+            expect(console.info).toHaveBeenCalledWith('[QStash] Received media-batch webhook for Group: group1, TaskCount: 3', expect.any(Object));
             expect(TaskManager.handleDownloadWebhook).toHaveBeenCalledTimes(3);
             expect(TaskManager.handleDownloadWebhook).toHaveBeenCalledWith('123');
             expect(TaskManager.handleDownloadWebhook).toHaveBeenCalledWith('456');

@@ -29,8 +29,33 @@ jest.unstable_mockModule("../../src/config/index.js", () => ({
     }
 }));
 
+// Mock console methods that logger uses
+const mockConsole = {
+    info: jest.spyOn(console, 'info').mockImplementation(),
+    warn: jest.spyOn(console, 'warn').mockImplementation(),
+    error: jest.spyOn(console, 'error').mockImplementation(),
+    debug: jest.spyOn(console, 'debug').mockImplementation()
+};
+
 describe("QStashService", () => {
     let service;
+
+    // Mock console globally for logger testing
+    const originalConsole = global.console;
+    beforeAll(() => {
+        global.console = {
+            ...originalConsole,
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+            debug: jest.fn(),
+            log: jest.fn()
+        };
+    });
+
+    afterAll(() => {
+        global.console = originalConsole;
+    });
 
     describe("正常模式 (with token)", () => {
         beforeEach(async () => {
@@ -44,13 +69,19 @@ describe("QStashService", () => {
             service = new module.QStashService();
         });
 
-        test("publish 应该正确调用 client.publishJSON", async () => {
+        test("应该记录初始化日志", () => {
+            expect(console.info).toHaveBeenCalledWith('[QStash] Service initialized (Mode: Real)', expect.any(Object));
+        });
+
+        test("publish 应该正确调用 client.publishJSON 并记录日志", async () => {
             const topic = "download-tasks";
             const message = { taskId: "123" };
             const options = { delay: 10 };
 
             await service.publish(topic, message, options);
 
+            expect(console.debug).toHaveBeenCalledWith(`[QStash] Publishing to ${topic}, URL: https://example.com/api/tasks/${topic}, Payload: ${JSON.stringify(message)}`, expect.any(Object));
+            expect(console.info).toHaveBeenCalledWith(expect.stringMatching(/\[QStash\] Published to download-tasks, MsgID: test-id, Duration: \d+\.\d+ms/), expect.any(Object));
             expect(mockPublishJSON).toHaveBeenCalledWith({
                 url: "https://example.com/api/tasks/download-tasks",
                 body: JSON.stringify(message),
@@ -61,7 +92,7 @@ describe("QStashService", () => {
             });
         });
 
-        test("batchPublish 应该使用 Promise.allSettled", async () => {
+        test("batchPublish 应该使用 Promise.allSettled 并记录日志", async () => {
             const messages = [
                 { topic: "download-tasks", message: { taskId: "1" } },
                 { topic: "upload-tasks", message: { taskId: "2" } }
@@ -75,6 +106,9 @@ describe("QStashService", () => {
             expect(results).toHaveLength(2);
             expect(results[0].status).toBe("fulfilled");
             expect(results[1].status).toBe("rejected");
+            expect(console.info).toHaveBeenCalledWith('[QStash] Batch published: 1 successful, 1 failed', expect.any(Object));
+            // The error log will contain the failed index based on the actual results array
+            expect(console.error).toHaveBeenCalledWith(expect.stringMatching(/\[QStash\] Batch publish failures:/), expect.any(Object));
         });
 
         test("publishDelayed 应该添加 delay 选项", async () => {
@@ -94,17 +128,18 @@ describe("QStashService", () => {
             });
         });
 
-        test("verifyWebhookSignature 验证成功时返回 true", async () => {
+        test("verifyWebhookSignature 验证成功时返回 true 并记录日志", async () => {
             const signature = "valid_signature";
             const body = "test body";
 
             const result = await service.verifyWebhookSignature(signature, body);
 
             expect(result).toBe(true);
+            expect(console.info).toHaveBeenCalledWith('[QStash] Signature verification successful', expect.any(Object));
             expect(mockVerify).toHaveBeenCalledWith({ signature, body });
         });
 
-        test("verifyWebhookSignature 验证失败时返回 false", async () => {
+        test("verifyWebhookSignature 验证失败时返回 false 并记录错误日志", async () => {
             const signature = "invalid_signature";
             const body = "test body";
 
@@ -112,6 +147,7 @@ describe("QStashService", () => {
             const result = await service.verifyWebhookSignature(signature, body);
 
             expect(result).toBe(false);
+            expect(console.error).toHaveBeenCalledWith('[QStash] Signature verification failed', expect.any(Error));
             expect(mockVerify).toHaveBeenCalledWith({ signature, body });
         });
 
@@ -218,12 +254,9 @@ describe("QStashService", () => {
             mockPublishJSON.mockResolvedValueOnce({});
             mockPublishJSON.mockRejectedValueOnce(new Error("fail"));
 
-            const consoleSpy = jest.spyOn(console, "warn").mockImplementation();
-
             await service.batchPublish(messages);
 
-            expect(consoleSpy).toHaveBeenCalled();
-            consoleSpy.mockRestore();
+            expect(console.error).toHaveBeenCalledWith(expect.stringContaining('[QStash] Batch publish failures:'), expect.any(Object));
         });
     });
 });

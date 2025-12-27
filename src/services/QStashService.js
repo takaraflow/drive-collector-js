@@ -32,6 +32,8 @@ class QStashService {
             currentSigningKey: process.env.QSTASH_CURRENT_SIGNING_KEY,
             nextSigningKey: process.env.QSTASH_NEXT_SIGNING_KEY
         });
+
+        logger.info(`[QStash] Service initialized (Mode: ${this.isMockMode ? 'Mock' : 'Real'})`);
     }
 
     /**
@@ -67,12 +69,17 @@ class QStashService {
             ...options
         };
 
+        const startTime = performance.now();
+        logger.debug(`[QStash] Publishing to ${topic}, URL: ${url}, Payload: ${JSON.stringify(message)}`);
+
         try {
             const result = await this.client.publishJSON(publishOptions);
-            logger.info(`📤 发布消息到 ${topic}:`, message);
+            const duration = performance.now() - startTime;
+            logger.info(`[QStash] Published to ${topic}, MsgID: ${result.messageId}, Duration: ${duration.toFixed(2)}ms`);
             return result;
         } catch (error) {
-            logger.error(`❌ 发布消息失败 ${topic}:`, error);
+            const duration = performance.now() - startTime;
+            logger.error(`[QStash] Publish failed for ${topic}, Error: ${error.message}, Duration: ${duration.toFixed(2)}ms`, error);
             throw error;
         }
     }
@@ -95,15 +102,21 @@ class QStashService {
             const successful = results.filter(r => r.status === 'fulfilled').length;
             const failed = results.filter(r => r.status === 'rejected').length;
 
-            logger.info(`📤 批量发布完成: ${successful} 成功, ${failed} 失败`);
+            logger.info(`[QStash] Batch published: ${successful} successful, ${failed} failed`);
 
             if (failed > 0) {
-                logger.warn('失败的消息:', results.filter(r => r.status === 'rejected'));
+                const failedReasons = results
+                    .filter(r => r.status === 'rejected')
+                    .map((r, index) => ({
+                        index,
+                        reason: r.reason?.message || r.reason
+                    }));
+                logger.error(`[QStash] Batch publish failures: ${JSON.stringify(failedReasons)}`);
             }
 
             return results;
         } catch (error) {
-            logger.error('❌ 批量发布失败:', error);
+            logger.error('[QStash] Batch publish failed:', error);
             throw error;
         }
     }
@@ -141,9 +154,10 @@ class QStashService {
                 signature,
                 body
             });
+            logger.info('[QStash] Signature verification successful');
             return true;
         } catch (error) {
-            logger.error('❌ Webhook 签名验证失败:', error);
+            logger.error('[QStash] Signature verification failed', error);
             return false;
         }
     }
