@@ -17,30 +17,13 @@ npm install
 
 ## 配置
 
-设置以下环境变量：
+1.  复制 `.env.example` 文件到 `.env`：
 
-### 核心配置
-- `BOT_TOKEN`: 您的 Telegram 机器人令牌
-- `API_ID`: Telegram API ID
-- `API_HASH`: Telegram API Hash
-- `OWNER_ID`: 机器人所有者 Telegram ID
-- `PORT`: 健康检查服务器端口（默认：7860）
+    ```bash
+    cp .env.example .env
+    ```
 
-### QStash 集成（可选）
-- `QSTASH_TOKEN`: Upstash QStash API 令牌，用于消息队列
-- `QSTASH_URL`: QStash 端点 URL
-- `QSTASH_CURRENT_SIGNING_KEY`: Webhook 验证的当前签名密钥
-- `QSTASH_NEXT_SIGNING_KEY`: 密钥轮换的下一个签名密钥
-- `APP_WEBHOOK_URL`: Webhook 端点的基本 URL
-
-### Cloudflare Worker LB 配置
-- `QSTASH_CURRENT_SIGNING_KEY`: Webhook 验证的签名密钥
-- `UPSTASH_REDIS_REST_URL`: Upstash Redis REST URL（用于 KV 故障转移）
-- `UPSTASH_REDIS_REST_TOKEN`: Upstash Redis REST 令牌
-
-### 多实例部署
-- `INSTANCE_COUNT`: 实例总数
-- `INSTANCE_ID`: 此实例的唯一 ID（1 到 INSTANCE_COUNT）
+2.  编辑 `.env` 文件并填入您的凭据。所有必需的环境变量都已在此文件中列出。
 
 ## QStash 集成
 

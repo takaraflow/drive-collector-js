@@ -19,30 +19,13 @@ npm install
 
 ## Configuration
 
-Set the following environment variables:
+1.  Copy the `.env.example` file to `.env`:
 
-### Core Configuration
-- `BOT_TOKEN`: Your Telegram bot token
-- `API_ID`: Telegram API ID
-- `API_HASH`: Telegram API Hash
-- `OWNER_ID`: Bot owner Telegram ID
-- `PORT`: Port for health check server (default: 7860)
+    ```bash
+    cp .env.example .env
+    ```
 
-### QStash Integration (Optional)
-- `QSTASH_TOKEN`: Upstash QStash API token for message queuing
-- `QSTASH_URL`: QStash endpoint URL
-- `QSTASH_CURRENT_SIGNING_KEY`: Current signing key for webhook verification
-- `QSTASH_NEXT_SIGNING_KEY`: Next signing key for key rotation
-- `APP_WEBHOOK_URL`: Base URL for webhook endpoints
-
-### Cloudflare Worker LB Configuration
-- `QSTASH_CURRENT_SIGNING_KEY`: Signing key for webhook verification
-- `UPSTASH_REDIS_REST_URL`: Upstash Redis REST URL (for KV failover)
-- `UPSTASH_REDIS_REST_TOKEN`: Upstash Redis REST token
-
-### Multi-instance Deployment
-- `INSTANCE_COUNT`: Total number of instances
-- `INSTANCE_ID`: Unique ID for this instance (1 to INSTANCE_COUNT)
+2.  Edit the `.env` file and fill in your credentials. All required environment variables are listed in this file.
 
 ## QStash Integration
 
