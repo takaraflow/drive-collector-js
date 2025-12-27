@@ -172,20 +172,40 @@ export { handleQStashWebhook };
         }
 
         // 6. 设置优雅关闭处理
+// 新增：关闭 HTTP 服务器版本，遵循计划
         const gracefulShutdown = async (signal) => {
             console.log(`\n📴 收到 ${signal} 信号，正在优雅关闭...`);
 
             try {
-                // 停止实例协调器
-                await instanceCoordinator.stop();
+                // 新增：关闭 HTTP 服务器
+                server.close((err) => {
+                    if (err) {
+                        console.error("❌ 服务器关闭失败:", err);
+                        process.exit(1);
+                        return;
+                    }
+                    console.log("🔌 HTTP 服务器已关闭");
 
-                // 停止 Processor 组件（如果已启动）
-                if (nodeMode === 'all' || nodeMode === 'processor') {
-                    await stopProcessor();
-                }
-
-                console.log("✅ 优雅关闭完成");
-                process.exit(0);
+                    // 停止实例协调器
+                    instanceCoordinator.stop().then(() => {
+                        // 停止 Processor 组件（如果已启动）
+                        if (nodeMode === 'all' || nodeMode === 'processor') {
+                            stopProcessor().then(() => {
+                                console.log("✅ 优雅关闭完成");
+                                process.exit(0);
+                            }).catch((e) => {
+                                console.error("❌ Processor 停止失败:", e);
+                                process.exit(1);
+                            });
+                        } else {
+                            console.log("✅ 优雅关闭完成");
+                            process.exit(0);
+                        }
+                    }).catch((e) => {
+                        console.error("❌ 实例协调器停止失败:", e);
+                        process.exit(1);
+                    });
+                });
             } catch (e) {
                 console.error("❌ 优雅关闭失败:", e);
                 process.exit(1);
