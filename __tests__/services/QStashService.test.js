@@ -1,27 +1,22 @@
 import { jest } from "@jest/globals";
 
-// Mock crypto first
-const mockDigest = jest.fn().mockReturnValue("mock_digest");
-const mockUpdate = jest.fn().mockReturnThis();
-const mockHmac = { update: mockUpdate, digest: mockDigest };
-const mockCreateHmac = jest.fn(() => mockHmac);
-
-jest.unstable_mockModule("crypto", () => ({
-    default: {
-        createHmac: mockCreateHmac
-    }
-}));
-
 // Mock @upstash/qstash
 const mockPublishJSON = jest.fn();
+const mockVerify = jest.fn();
 const MockClient = class {
     constructor() {
         this.publishJSON = mockPublishJSON;
     }
 };
+const MockReceiver = class {
+    constructor() {
+        this.verify = mockVerify;
+    }
+};
 
 jest.unstable_mockModule("@upstash/qstash", () => ({
-    Client: MockClient
+    Client: MockClient,
+    Receiver: MockReceiver
 }));
 
 // Mock config
@@ -42,10 +37,9 @@ describe("QStashService", () => {
             jest.clearAllMocks();
             // Set up default mocks
             mockPublishJSON.mockResolvedValue({ messageId: "test-id" });
-            mockDigest.mockReturnValue("mock_digest");
-            mockUpdate.mockReturnValue(mockHmac);
-            mockCreateHmac.mockReturnValue(mockHmac);
-            process.env.QSTASH_WEBHOOK_SECRET = "secret";
+            mockVerify.mockResolvedValue(undefined); // verify resolves without throwing
+            process.env.QSTASH_CURRENT_SIGNING_KEY = "current_key";
+            process.env.QSTASH_NEXT_SIGNING_KEY = "next_key";
             const module = await import("../../src/services/QStashService.js");
             service = new module.QStashService();
         });
@@ -100,27 +94,25 @@ describe("QStashService", () => {
             });
         });
 
-        test("verifyWebhookSignature 匹配时返回 true", () => {
-            process.env.QSTASH_WEBHOOK_SECRET = "secret";
-            const signature = "v1=mock_digest";
+        test("verifyWebhookSignature 验证成功时返回 true", async () => {
+            const signature = "valid_signature";
             const body = "test body";
 
-            const result = service.verifyWebhookSignature(signature, body);
+            const result = await service.verifyWebhookSignature(signature, body);
 
             expect(result).toBe(true);
-            expect(mockCreateHmac).toHaveBeenCalledWith("sha256", "secret");
-            expect(mockUpdate).toHaveBeenCalledWith(body, "utf8");
-            expect(mockDigest).toHaveBeenCalledWith("hex");
+            expect(mockVerify).toHaveBeenCalledWith({ signature, body });
         });
 
-        test("verifyWebhookSignature 不匹配时返回 false", () => {
-            process.env.QSTASH_WEBHOOK_SECRET = "secret";
-            const signature = "v1=wrong_digest";
+        test("verifyWebhookSignature 验证失败时返回 false", async () => {
+            const signature = "invalid_signature";
             const body = "test body";
 
-            const result = service.verifyWebhookSignature(signature, body);
+            mockVerify.mockRejectedValueOnce(new Error("Invalid signature"));
+            const result = await service.verifyWebhookSignature(signature, body);
 
             expect(result).toBe(false);
+            expect(mockVerify).toHaveBeenCalledWith({ signature, body });
         });
 
         test("enqueueDownloadTask 调用 publish", async () => {
@@ -170,9 +162,6 @@ describe("QStashService", () => {
         beforeEach(async () => {
             jest.clearAllMocks();
             mockPublishJSON.mockResolvedValue({ messageId: "test-id" });
-            mockDigest.mockReturnValue("mock_digest");
-            mockUpdate.mockReturnValue(mockHmac);
-            mockCreateHmac.mockReturnValue(mockHmac);
             const module = await import("../../src/services/QStashService.js");
             service = new module.QStashService();
             service.isMockMode = true; // Force mock mode
@@ -199,8 +188,8 @@ describe("QStashService", () => {
             expect(mockPublishJSON).not.toHaveBeenCalled();
         });
 
-        test("Mock 模式下 verifyWebhookSignature 返回 true", () => {
-            const result = service.verifyWebhookSignature("sig", "body");
+        test("Mock 模式下 verifyWebhookSignature 返回 true", async () => {
+            const result = await service.verifyWebhookSignature("sig", "body");
 
             expect(result).toBe(true);
         });
@@ -210,9 +199,6 @@ describe("QStashService", () => {
         beforeEach(async () => {
             jest.clearAllMocks();
             mockPublishJSON.mockResolvedValue({ messageId: "test-id" });
-            mockDigest.mockReturnValue("mock_digest");
-            mockUpdate.mockReturnValue(mockHmac);
-            mockCreateHmac.mockReturnValue(mockHmac);
             const module = await import("../../src/services/QStashService.js");
             service = new module.QStashService();
         });

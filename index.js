@@ -44,7 +44,7 @@ async function handleQStashWebhook(req, res) {
 
         // 验证签名
         const signature = req.headers['upstash-signature'];
-        if (!qstashService.verifyWebhookSignature(signature, body)) {
+        if (!(await qstashService.verifyWebhookSignature(signature, body))) {
             res.writeHead(401);
             res.end('Unauthorized');
             return;

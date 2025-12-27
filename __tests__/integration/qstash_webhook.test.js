@@ -1,7 +1,7 @@
 import { jest } from "@jest/globals";
 
 // Mock QStashService
-const mockVerifySignature = jest.fn();
+const mockVerifySignature = jest.fn().mockResolvedValue(true);
 const mockQstashService = {
     verifyWebhookSignature: mockVerifySignature
 };
@@ -96,7 +96,7 @@ describe("QStash Webhook Integration", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        mockVerifySignature.mockReturnValue(true);
+        mockVerifySignature.mockResolvedValue(true);
     });
 
     const createMockRequest = (url, body = {}, headers = {}) => {
@@ -175,7 +175,7 @@ describe("QStash Webhook Integration", () => {
     });
 
     test("应当拒绝非法签名", async () => {
-        mockVerifySignature.mockReturnValue(false);
+        mockVerifySignature.mockResolvedValue(false);
 
         const req = createMockRequest('/api/tasks/download-tasks', { taskId: '123' });
         const res = createMockResponse();

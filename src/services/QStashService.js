@@ -1,6 +1,5 @@
-import { Client } from "@upstash/qstash";
+import { Client, Receiver } from "@upstash/qstash";
 import { config } from "../config/index.js";
-import crypto from "crypto";
 
 /**
  * QStash 服务层
@@ -27,8 +26,11 @@ class QStashService {
             systemEvents: "system-events"
         };
 
-        // Webhook 签名验证密钥（从环境变量获取）
-        this.webhookSecret = process.env.QSTASH_WEBHOOK_SECRET;
+        // 初始化 QStash Receiver 用于签名验证
+        this.receiver = new Receiver({
+            currentSigningKey: process.env.QSTASH_CURRENT_SIGNING_KEY,
+            nextSigningKey: process.env.QSTASH_NEXT_SIGNING_KEY
+        });
     }
 
     /**
@@ -125,32 +127,22 @@ class QStashService {
      * 验证 QStash Webhook 签名
      * @param {string} signature - 请求头中的签名
      * @param {string} body - 请求体
-     * @returns {boolean} 签名是否有效
+     * @returns {Promise<boolean>} 签名是否有效
      */
-    verifyWebhookSignature(signature, body) {
+    async verifyWebhookSignature(signature, body) {
         if (this.isMockMode) {
             console.warn('⚠️ 处于模拟模式，跳过签名验证');
             return true; // 模拟模式跳过
         }
 
-        if (!this.webhookSecret) {
-            console.warn('⚠️ 未配置 QSTASH_WEBHOOK_SECRET，跳过签名验证');
-            return true; // 开发环境跳过
-        }
-
         try {
-            const expectedSignature = crypto
-                .createHmac('sha256', this.webhookSecret)
-                .update(body, 'utf8')
-                .digest('hex');
-
-            const isValid = signature === `v1=${expectedSignature}`;
-            if (!isValid) {
-                console.error('❌ Webhook 签名验证失败');
-            }
-            return isValid;
+            await this.receiver.verify({
+                signature,
+                body
+            });
+            return true;
         } catch (error) {
-            console.error('❌ 签名验证错误:', error);
+            console.error('❌ Webhook 签名验证失败:', error);
             return false;
         }
     }
