@@ -1,6 +1,7 @@
 import { S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { config } from '../config/index.js';
+import logger from '../services/logger.js';
 import fs from 'fs';
 
 /**
@@ -17,9 +18,9 @@ class OSSHelper {
      * 初始化 S3 客户端
      */
     _initS3Client() {
-        console.log('调试: config.oss.r2 =', JSON.stringify(config.oss?.r2, null, 2));
+        logger.debug('OSS R2 Config:', { config: config.oss?.r2 });
         if (!config.oss?.r2?.endpoint || !config.oss?.r2?.accessKeyId || !config.oss?.r2?.secretAccessKey) {
-            console.warn('⚠️ OSS Helper: R2 配置不完整，S3 客户端初始化跳过');
+            logger.warn('⚠️ OSS Helper: R2 config incomplete, S3 client initialization skipped');
             return;
         }
 
@@ -32,7 +33,7 @@ class OSSHelper {
             },
         });
 
-        console.log('✅ OSS Helper: S3 客户端初始化完成');
+        logger.info('✅ OSS Helper: S3 client initialized successfully');
     }
 
     /**
@@ -70,10 +71,10 @@ class OSSHelper {
 
         try {
             const result = await upload.done();
-            console.log(`✅ S3 上传成功: ${remoteName}`);
+            logger.info(`✅ S3 upload successful: ${remoteName}`);
             return result;
         } catch (error) {
-            console.error(`🚨 S3 上传失败: ${remoteName}`, error);
+            logger.error(`🚨 S3 upload failed: ${remoteName}`, error);
             throw error;
         }
     }

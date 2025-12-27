@@ -1,4 +1,5 @@
 import { config } from "../config/index.js";
+import logger from "./logger.js";
 
 /**
  * --- D1 数据库服务层 ---
@@ -12,7 +13,7 @@ class D1Service {
 
         // 验证必要的配置
         if (!this.accountId || !this.databaseId || !this.token) {
-            console.warn("⚠️ D1配置缺失: 请检查 CF_ACCOUNT_ID, CF_D1_DATABASE_ID, CF_D1_TOKEN");
+            logger.warn("⚠️ D1配置缺失: 请检查 CF_ACCOUNT_ID, CF_D1_DATABASE_ID, CF_D1_TOKEN");
         }
 
         this.apiUrl = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/d1/database/${this.databaseId}/query`;
@@ -60,15 +61,15 @@ class D1Service {
                     if ((isServerError || isNetworkLost) && attempts < maxAttempts - 1) {
                         attempts++;
                         const delay = attempts * 2000; // 线性退避: 2s, 4s
-                        console.warn(`⚠️ D1 请求失败 (${response.status})，${isNetworkLost ? '检测到连接丢失，' : ''}正在重试 (${attempts}/${maxAttempts})...`);
+                        logger.warn(`⚠️ D1 请求失败 (${response.status})，${isNetworkLost ? '检测到连接丢失，' : ''}正在重试 (${attempts}/${maxAttempts})...`);
                         await new Promise(r => setTimeout(r, delay));
                         continue;
                     }
 
                     // 详细的错误诊断
-                    console.error(`🚨 D1 HTTP Error ${response.status}: ${response.statusText}`);
-                    console.error(`   URL: ${this.apiUrl}`);
-                    if (errorBody) console.error(`   Response: ${errorBody}`);
+                    logger.error(`🚨 D1 HTTP Error ${response.status}: ${response.statusText}`);
+                    logger.error(`   URL: ${this.apiUrl}`);
+                    if (errorBody) logger.error(`   Response: ${errorBody}`);
                     
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
@@ -88,7 +89,7 @@ class D1Service {
                     
                     if (attempts < maxAttempts - 1) {
                         attempts++;
-                        console.warn(`⚠️ D1 网络请求异常: ${error.message}，正在重试 (${attempts}/${maxAttempts})...`);
+                        logger.warn(`⚠️ D1 网络请求异常: ${error.message}，正在重试 (${attempts}/${maxAttempts})...`);
                         await new Promise(r => setTimeout(r, 2000));
                         continue;
                     }

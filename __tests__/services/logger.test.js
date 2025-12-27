@@ -16,6 +16,11 @@ jest.mock('../../src/config/index.js', () => ({
   config: {}
 }));
 
+// Mock InstanceCoordinator
+jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () => ({
+  getInstanceId: jest.fn().mockReturnValue('test-instance-id')
+}));
+
 describe('Logger Service', () => {
   let logger;
   let consoleInfoSpy;
@@ -125,6 +130,7 @@ describe('Logger Service', () => {
 
       const payload = mockIngest.mock.calls[0][1][0];
       expect(payload).toMatchObject({
+        instanceId: expect.any(String),
         level: 'info',
         message,
         userId: 123,
@@ -146,6 +152,7 @@ describe('Logger Service', () => {
       expect(mockIngest).toHaveBeenCalledTimes(1);
       const payload = mockIngest.mock.calls[0][1][0];
       expect(payload).toMatchObject({
+        instanceId: expect.any(String),
         level: 'warn',
         message,
         warning: 'deprecated'
@@ -161,6 +168,7 @@ describe('Logger Service', () => {
       expect(mockIngest).toHaveBeenCalledTimes(1);
       const payload = mockIngest.mock.calls[0][1][0];
       expect(payload).toMatchObject({
+        instanceId: expect.any(String),
         level: 'error',
         message,
         error: expect.any(Error)
@@ -176,6 +184,7 @@ describe('Logger Service', () => {
       expect(mockIngest).toHaveBeenCalledTimes(1);
       const payload = mockIngest.mock.calls[0][1][0];
       expect(payload).toMatchObject({
+        instanceId: expect.any(String),
         level: 'debug',
         message,
         debug: 'verbose'

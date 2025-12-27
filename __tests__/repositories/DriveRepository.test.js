@@ -16,9 +16,19 @@ jest.unstable_mockModule("../../src/utils/CacheService.js", () => ({
     },
 }));
 
+jest.unstable_mockModule("../../src/services/logger.js", () => ({
+    default: {
+        info: jest.fn(),
+        error: jest.fn(),
+        warn: jest.fn(),
+        debug: jest.fn(),
+    },
+}));
+
 const { DriveRepository } = await import("../../src/repositories/DriveRepository.js");
 const { kv } = await import("../../src/services/kv.js");
 const { cacheService } = await import("../../src/utils/CacheService.js");
+const { default: logger } = await import("../../src/services/logger.js");
 
 describe("DriveRepository", () => {
     beforeEach(() => {
@@ -46,7 +56,6 @@ describe("DriveRepository", () => {
         });
 
         it("should return null and log error on KV failure", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             cacheService.getOrSet.mockImplementation(async (key, loader) => {
                 await loader(); // Call the loader function
             });
@@ -55,8 +64,7 @@ describe("DriveRepository", () => {
             const result = await DriveRepository.findByUserId("user1");
 
             expect(result).toBeNull();
-            expect(consoleSpy).toHaveBeenCalledWith("DriveRepository.findByUserId error for user1:", expect.any(Error));
-            consoleSpy.mockRestore();
+            expect(logger.error).toHaveBeenCalledWith("DriveRepository.findByUserId error for user1:", expect.anything());
         });
     });
 
@@ -90,12 +98,10 @@ describe("DriveRepository", () => {
         });
 
         it("should throw error on KV failure", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             kv.set.mockRejectedValue(new Error("KV Error"));
 
             await expect(DriveRepository.create("user1", "name", "mega", {})).rejects.toThrow("KV Error");
-            expect(consoleSpy).toHaveBeenCalled();
-            consoleSpy.mockRestore();
+            expect(logger.error).toHaveBeenCalled();
         });
     });
 
@@ -119,15 +125,13 @@ describe("DriveRepository", () => {
         });
 
         it("should throw error on KV failure during deletion", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             // Mock findByUserId success
             kv.get.mockResolvedValue({ id: "drive123", user_id: "user1" });
             // Mock delete failure
             kv.delete.mockRejectedValue(new Error("KV Delete Error"));
 
             await expect(DriveRepository.deleteByUserId("user1")).rejects.toThrow("KV Delete Error");
-            expect(consoleSpy).toHaveBeenCalled();
-            consoleSpy.mockRestore();
+            expect(logger.error).toHaveBeenCalled();
         });
     });
 
@@ -151,15 +155,13 @@ describe("DriveRepository", () => {
         });
 
         it("should throw error on KV failure during deletion", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             // Mock findById success
             kv.get.mockResolvedValue({ id: "drive123", user_id: "user1" });
             // Mock delete failure
             kv.delete.mockRejectedValue(new Error("KV Delete Error"));
 
             await expect(DriveRepository.delete("drive123")).rejects.toThrow("KV Delete Error");
-            expect(consoleSpy).toHaveBeenCalled();
-            consoleSpy.mockRestore();
+            expect(logger.error).toHaveBeenCalled();
         });
     });
 
@@ -181,27 +183,22 @@ describe("DriveRepository", () => {
         });
 
         it("should return null and log error on KV failure", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             kv.get.mockRejectedValue(new Error("KV Error"));
 
             const result = await DriveRepository.findById("drive123");
 
             expect(result).toBeNull();
-            expect(consoleSpy).toHaveBeenCalled();
-            consoleSpy.mockRestore();
+            expect(logger.error).toHaveBeenCalled();
         });
     });
 
     describe("findAll", () => {
         it("should return empty array and log warning", async () => {
-            const consoleSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-
             const result = await DriveRepository.findAll();
 
             expect(result).toEqual([]);
             // Use stringContaining to avoid encoding issues with full Chinese string
-            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("DriveRepository.findAll"));
-            consoleSpy.mockRestore();
+            expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("DriveRepository.findAll"));
         });
     });
 });

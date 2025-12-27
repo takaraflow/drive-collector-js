@@ -3,6 +3,7 @@ import { ossHelper } from '../utils/oss-helper.js';
 import fs from 'fs';
 import path from 'path';
 import { CloudTool } from './rclone.js';
+import logger from './logger.js';
 
 /**
  * --- OSS 服务层 ---
@@ -15,9 +16,9 @@ class OSSService {
         this.hasWorker = !!(this.workerUrl && this.workerSecret);
 
         if (this.hasWorker) {
-            console.log('✅ OSS 服务：Worker 路径已配置');
+            logger.info('✅ OSS 服务：Worker 路径已配置');
         } else {
-            console.warn('⚠️ OSS 服务：Worker 路径未配置，将直接使用 S3 回退');
+            logger.warn('⚠️ OSS 服务：Worker 路径未配置，将直接使用 S3 回退');
         }
     }
 
@@ -40,39 +41,39 @@ class OSSService {
         const fileSize = stats.size;
         const fileName = path.basename(localPath);
 
-        console.log(`📤 开始上传: ${fileName} (${fileSize} bytes) -> ${remoteName}`);
+        logger.info(`📤 开始上传: ${fileName} (${fileSize} bytes) -> ${remoteName}`);
 
         // 尝试 Worker 路径
         if (this.hasWorker) {
             try {
                 const result = await this._uploadViaWorker(localPath, remoteName, fileSize, onProgress);
                 if (result.success) {
-                    console.log(`✅ Worker 上传成功: ${remoteName}`);
+                    logger.info(`✅ Worker 上传成功: ${remoteName}`);
                     return result;
                 }
             } catch (error) {
-                console.warn(`⚠️ Worker 上传失败: ${error.message}，尝试 S3 回退`);
+                logger.warn(`⚠️ Worker 上传失败: ${error.message}，尝试 S3 回退`);
             }
         }
 
         // 回退到 S3 直接上传
         try {
             const result = await this._uploadViaS3(localPath, remoteName, onProgress);
-            console.log(`✅ S3 回退上传成功: ${remoteName}`);
+            logger.info(`✅ S3 回退上传成功: ${remoteName}`);
             return result;
         } catch (error) {
-            console.error(`🚨 S3 上传失败: ${error.message}`);
+            logger.error(`🚨 S3 上传失败: ${error.message}`);
             // 尝试 Rclone 兜底
             if (userId) {
                 try {
-                    console.log(`🔄 尝试 Rclone 兜底上传: ${remoteName}`);
+                    logger.info(`🔄 尝试 Rclone 兜底上传: ${remoteName}`);
                     const rcloneResult = await this._uploadViaRclone(localPath, remoteName, userId, onProgress);
                     if (rcloneResult.success) {
-                        console.log(`✅ Rclone 兜底上传成功: ${remoteName}`);
+                        logger.info(`✅ Rclone 兜底上传成功: ${remoteName}`);
                         return rcloneResult;
                     }
                 } catch (rcloneError) {
-                    console.error(`🚨 Rclone 兜底也失败: ${rcloneError.message}`);
+                    logger.error(`🚨 Rclone 兜底也失败: ${rcloneError.message}`);
                 }
             }
             return {

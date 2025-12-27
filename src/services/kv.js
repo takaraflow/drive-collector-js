@@ -1,5 +1,6 @@
 import { config } from "../config/index.js";
 import { cacheService } from "../utils/CacheService.js";
+import logger from "./logger.js";
 
 /**
  * --- KV 存储服务层 ---
@@ -35,9 +36,9 @@ class KVService {
                 throw new Error('Upstash配置不完整，请设置 UPSTASH_REDIS_REST_URL 和 UPSTASH_REDIS_REST_TOKEN');
             }
             this.currentProvider = 'upstash';
-            console.log('🔄 KV服务：强制使用 Upstash Redis');
+            logger.info('🔄 KV服务：强制使用 Upstash Redis');
         } else {
-            console.log(`🔄 KV服务：使用 Cloudflare KV${this.failoverEnabled ? ' (支持智能故障转移到 Upstash)' : ''}`);
+            logger.info(`🔄 KV服务：使用 Cloudflare KV${this.failoverEnabled ? ' (支持智能故障转移到 Upstash)' : ''}`);
         }
 
         // 设置便利属性
@@ -68,7 +69,7 @@ class KVService {
 
             // 连续3次额度/网络错误，触发故障转移
             if (this.failureCount >= 3) {
-                console.warn(`⚠️ ${this.getCurrentProvider()} 连续失败 ${this.failureCount} 次，触发自动故障转移到 Upstash`);
+                logger.warn(`⚠️ ${this.getCurrentProvider()} 连续失败 ${this.failureCount} 次，触发自动故障转移到 Upstash`);
                 return true;
             }
         }
@@ -96,7 +97,7 @@ class KVService {
             // 启动定期恢复检查
             this._startRecoveryCheck();
 
-            console.log('✅ 已切换到 Upstash Redis');
+            logger.info('✅ 已切换到 Upstash Redis');
             return true;
         }
         return false;
@@ -136,14 +137,14 @@ class KVService {
         );
         
         const checkInterval = isQuotaIssue ? 12 * 60 * 60 * 1000 : 30 * 60 * 1000;
-        console.log(`🕒 启动 KV 恢复检查，间隔: ${checkInterval / 60000} 分钟`);
+        logger.info(`🕒 启动 KV 恢复检查，间隔: ${checkInterval / 60000} 分钟`);
 
         this.recoveryTimer = setInterval(async () => {
             if (this.currentProvider === 'upstash') {
                 try {
                     // 尝试用主要提供商执行一个简单的操作
                     await this._cloudflare_get('__health_check__');
-                    console.log('🔄 Cloudflare KV 已恢复，切换回主要提供商...');
+                    logger.info('🔄 Cloudflare KV 已恢复，切换回主要提供商...');
                     this.currentProvider = 'cloudflare';
                     this.failureCount = 0;
                     this.lastError = null;
@@ -154,10 +155,10 @@ class KVService {
                         this.recoveryTimer = null;
                     }
 
-                    console.log('✅ 已恢复到 Cloudflare KV');
+                    logger.info('✅ 已恢复到 Cloudflare KV');
                 } catch (error) {
                     // 恢复失败，继续使用Upstash
-                    console.log('ℹ️ Cloudflare KV 仍不可用，继续使用 Upstash');
+                    logger.info('ℹ️ Cloudflare KV 仍不可用，继续使用 Upstash');
                 }
             }
         }, checkInterval);
@@ -215,7 +216,7 @@ class KVService {
                 }
 
                 if (attempts >= maxAttempts) throw error;
-                console.log(`ℹ️ ${this.getCurrentProvider()} 重试中 (${attempts}/${maxAttempts})...`);
+                logger.info(`ℹ️ ${this.getCurrentProvider()} 重试中 (${attempts}/${maxAttempts})...`);
             }
         }
     }
@@ -261,7 +262,7 @@ class KVService {
             if (!isNaN(ttl) && ttl > 0) {
                 command.push("EX", ttl.toString());
             } else if (ttl !== 0) {
-                console.warn(`⚠️ Upstash set: 无效的 TTL 值 ${expirationTtl}，跳过过期设置 (${key})`);
+                logger.warn(`⚠️ Upstash set: 无效的 TTL 值 ${expirationTtl}，跳过过期设置 (${key})`);
             }
         }
 
@@ -276,8 +277,8 @@ class KVService {
 
         const result = await response.json();
         if (result.error) {
-            console.error(`🚨 Upstash Set Error for key '${key}':`, result.error);
-            console.error(`   Command:`, JSON.stringify(command));
+            logger.error(`🚨 Upstash Set Error for key '${key}':`, result.error);
+            logger.error(`   Command:`, JSON.stringify(command));
             throw new Error(`Upstash Set Error: ${result.error}`);
         }
         return result.result === "OK";

@@ -1,4 +1,10 @@
 import { Axiom } from '@axiomhq/js';
+// Removed InstanceCoordinator dependency to avoid circular import
+let getInstanceIdFunc = () => 'unknown';
+
+export const setInstanceIdProvider = (provider) => {
+    getInstanceIdFunc = provider;
+};
 
 let axiom = null;
 let axiomInitialized = false;
@@ -26,7 +32,7 @@ const initAxiom = async () => {
   }
 };
 
-const log = async (level, message, data = {}) => {
+const log = async (instanceId, level, message, data = {}) => {
   if (!axiom) {
     await initAxiom();
   }
@@ -38,6 +44,7 @@ const log = async (level, message, data = {}) => {
   }
 
   const payload = {
+    instanceId,
     level,
     message,
     ...data,
@@ -56,14 +63,25 @@ const log = async (level, message, data = {}) => {
   }
 };
 
+const getSafeInstanceId = () => {
+    try {
+        return getInstanceIdFunc();
+    } catch {
+        return 'unknown';
+    }
+};
+
+// Use a simple object with methods for the logger to avoid Proxy issues in tests/production
+export const logger = {
+    info: (message, data) => log(getSafeInstanceId(), 'info', message, data),
+    warn: (message, data) => log(getSafeInstanceId(), 'warn', message, data),
+    error: (message, data) => log(getSafeInstanceId(), 'error', message, data),
+    debug: (message, data) => log(getSafeInstanceId(), 'debug', message, data)
+};
+
 export const resetLogger = () => {
   axiom = null;
   axiomInitialized = false;
 };
 
-export const logger = {
-  info: (message, data) => log('info', message, data),
-  warn: (message, data) => log('warn', message, data),
-  error: (message, data) => log('error', message, data),
-  debug: (message, data) => log('debug', message, data),
-};
+export default logger;

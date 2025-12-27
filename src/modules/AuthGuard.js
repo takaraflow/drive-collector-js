@@ -1,5 +1,6 @@
 import { config } from "../config/index.js";
 import { d1 } from "../services/d1.js";
+import logger from "../services/logger.js";
 
 const ROLE_ORDER = ["user", "vip", "admin", "owner"];
 const DEFAULT_ROLE = "user";
@@ -36,7 +37,7 @@ export const AuthGuard = {
             this.roleCache.set(idStr, { role, ts: now });
             return role;
         } catch (error) {
-            console.error("Failed to fetch user role from DB:", error);
+            logger.error("Failed to fetch user role from DB:", error);
             return DEFAULT_ROLE;
         }
     },

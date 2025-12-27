@@ -16,6 +16,7 @@ import { STRINGS, format } from "../locales/zh-CN.js";
 import { NetworkDiagnostic } from "../utils/NetworkDiagnostic.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { qstashService } from "../services/QStashService.js";
+import logger from "../services/logger.js";
 import fs from "fs";
 import path from "path";
 
@@ -38,31 +39,31 @@ export class Dispatcher {
      * @param {Api.TypeUpdate} event 
      */
     static async handle(event) {
-        // console.log(`[Dispatcher] 收到原始事件: ${event.className}`);
+        // logger.debug(`[Dispatcher] 收到原始事件: ${event.className}`);
         // 1. 提取上下文信息
         const ctx = this._extractContext(event);
         if (!ctx.userId) {
-            // console.log(`[Dispatcher] 无法提取用户ID: ${event.className}`);
+            // logger.debug(`[Dispatcher] 无法提取用户ID: ${event.className}`);
             return;
         }
 
         // 2. 全局前置守卫 (权限、维护模式)
         const passed = await this._globalGuard(event, ctx);
         if (!passed) {
-            console.log(`🛡️ 消息被全局守卫拦截 (User: ${ctx.userId})`);
+            logger.info(`🛡️ 消息被全局守卫拦截 (User: ${ctx.userId})`);
             return;
         }
 
         // 3. 路由分发
         // 使用 className 检查替代 instanceof，提高鲁棒性并方便测试
         if (event.className === 'UpdateBotCallbackQuery') {
-            console.log(`🔘 处理回调: ${event.data?.toString() || '无数据'} (User: ${ctx.userId})`);
+            logger.info(`🔘 处理回调: ${event.data?.toString() || '无数据'} (User: ${ctx.userId})`);
             await this._handleCallback(event, ctx);
         } else if (event.className === 'UpdateNewMessage' && event.message) {
-            console.log(`💬 处理消息: ${event.message.message?.slice(0, 20) || '媒体内容'} (User: ${ctx.userId})`);
+            logger.info(`💬 处理消息: ${event.message.message?.slice(0, 20) || '媒体内容'} (User: ${ctx.userId})`);
             await this._handleMessage(event, ctx);
         } else {
-            // console.log(`[Dispatcher] 忽略不感兴趣的事件类: ${event.className}`);
+            // logger.debug(`[Dispatcher] 忽略不感兴趣的事件类: ${event.className}`);
         }
     }
 
@@ -95,7 +96,7 @@ export class Dispatcher {
                 target = m.peerId;
             }
         } catch (e) {
-            console.error(`[Dispatcher] Context extraction error:`, e);
+            logger.error(`[Dispatcher] Context extraction error:`, e);
         }
         
         return { userId, target, isCallback };
@@ -343,7 +344,7 @@ export class Dispatcher {
 
                 // 如果发现数据是加载中的（例如缓存过期正在后台刷新），可以考虑在这里逻辑
             } catch (e) {
-                console.error("Files command async error:", e);
+                logger.error("Files command async error:", e);
                 await safeEdit(target, placeholder.id, "❌ 无法获取文件列表，请稍后重试。", null, userId);
             }
         })();
@@ -536,7 +537,7 @@ export class Dispatcher {
 
                 await safeEdit(target, placeholder.id, message, null, userId);
             } catch (error) {
-                console.error("Diagnosis error:", error);
+                logger.error("Diagnosis error:", error);
                 await safeEdit(target, placeholder.id, `❌ 诊断过程中发生错误: ${escapeHTML(error.message)}`, null, userId);
             }
         })();
@@ -587,7 +588,7 @@ export class Dispatcher {
             info += `Node.js版本: ${process.version}\n`;
 
         } catch (error) {
-            console.error("获取实例信息失败:", error);
+            logger.error("获取实例信息失败:", error);
             info += `❌ 获取实例信息失败: ${escapeHTML(error.message)}\n`;
         }
 

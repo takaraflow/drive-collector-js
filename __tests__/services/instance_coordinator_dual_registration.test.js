@@ -137,7 +137,7 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
 
         // Should log error but not crash
         // Use English matching to avoid encoding issues with Chinese characters
-        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("KV Network Error"));
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("KV Network Error"), expect.anything());
         consoleSpy.mockRestore();
     });
 });

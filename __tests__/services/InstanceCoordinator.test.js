@@ -20,6 +20,19 @@ jest.unstable_mockModule("../../src/repositories/InstanceRepository.js", () => (
   },
 }));
 
+// Mock logger
+const mockLogger = {
+  info: jest.fn(),
+  error: jest.fn(),
+  warn: jest.fn(),
+  debug: jest.fn(),
+};
+
+jest.unstable_mockModule("../../src/services/logger.js", () => ({
+  default: mockLogger,
+  setInstanceIdProvider: jest.fn(),
+}));
+
 describe("InstanceCoordinator", () => {
   beforeAll(async () => {
     // Set up mock environment variables
@@ -278,14 +291,12 @@ describe("InstanceCoordinator", () => {
       // Re-import to get updated mock
       jest.resetModules();
       const { instanceCoordinator: newIC } = await import("../../src/services/InstanceCoordinator.js");
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+      const { default: logger } = await import("../../src/services/logger.js");
 
       await newIC.broadcast("instance_failed", { error: "test" });
 
       expect(mockBroadcastSystemEvent).toHaveBeenCalled();
-      expect(consoleSpy).toHaveBeenCalledWith("❌ 广播事件失败 instance_failed:", expect.any(Error));
-
-      consoleSpy.mockRestore();
+      expect(logger.error).toHaveBeenCalledWith("❌ 广播事件失败 instance_failed:", expect.anything());
     });
   });
 });

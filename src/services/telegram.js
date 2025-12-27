@@ -2,6 +2,7 @@ import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import { config } from "../config/index.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
+import logger from "./logger.js";
 
 /**
  * 获取持久化的 Session 字符串
@@ -20,9 +21,9 @@ const getSavedSession = async () => {
 export const clearSession = async () => {
     try {
         await SettingsRepository.set("tg_bot_session", "");
-        console.log("🗑️ Telegram Session 已清除");
+        logger.info("🗑️ Telegram Session 已清除");
     } catch (e) {
-        console.error("❌ 清除 Session 失败:", e);
+        logger.error("❌ 清除 Session 失败:", e);
     }
 };
 
@@ -34,10 +35,10 @@ export const saveSession = async () => {
         const sessionStr = client.session.save();
         if (sessionStr) {
             await SettingsRepository.set("tg_bot_session", sessionStr);
-            console.log("💾 Telegram Session 已持久化");
+            logger.info("💾 Telegram Session 已持久化");
         }
     } catch (e) {
-        console.error("❌ 保存 Session 失败:", e);
+        logger.error("❌ 保存 Session 失败:", e);
     }
 };
 
@@ -47,7 +48,7 @@ export const saveSession = async () => {
 export const resetClientSession = async () => {
     try {
         if (client.connected) {
-            console.log("🔌 正在断开 Telegram 客户端连接...");
+            logger.info("🔌 正在断开 Telegram 客户端连接...");
             await client.disconnect();
         }
 
@@ -57,16 +58,16 @@ export const resetClientSession = async () => {
             try {
                 await client._sender.disconnect();
             } catch (e) {
-                console.warn("⚠️ 清理 GramJS _sender 失败:", e.message);
+                logger.warn("⚠️ 清理 GramJS _sender 失败:", e.message);
             }
             client._sender = undefined; // 清除引用
         }
 
         // 将当前客户端的 Session 替换为空的新 Session
         client.session = new StringSession("");
-        console.log("🔄 客户端内存 Session 已重置，准备重新连接...");
+        logger.info("🔄 客户端内存 Session 已重置，准备重新连接...");
     } catch (e) {
-        console.error("❌ 重置内存 Session 失败:", e);
+        logger.error("❌ 重置内存 Session 失败:", e);
     }
 };
 
@@ -115,14 +116,14 @@ export const setConnectionStatusCallback = (callback) => {
 
 // 监听连接状态变化
 client.on("connected", () => {
-    console.log("🔗 Telegram 客户端连接已建立");
+    logger.info("🔗 Telegram 客户端连接已建立");
     if (connectionStatusCallback) {
         connectionStatusCallback(true);
     }
 });
 
 client.on("disconnected", () => {
-    console.log("🔌 Telegram 客户端连接已断开");
+    logger.info("🔌 Telegram 客户端连接已断开");
     if (connectionStatusCallback) {
         connectionStatusCallback(false);
     }
@@ -133,15 +134,15 @@ client.on("error", (err) => {
     const errorMsg = err?.message || "";
     if (errorMsg.includes("TIMEOUT")) {
         // TIMEOUT 通常发生在 _updateLoop 中，GramJS 可能已经进入不可恢复状态
-        console.warn(`⚠️ Telegram 客户端更新循环超时 (TIMEOUT): ${errorMsg}，准备主动重连...`);
+        logger.warn(`⚠️ Telegram 客户端更新循环超时 (TIMEOUT): ${errorMsg}，准备主动重连...`);
         // 增加延迟避免在网络波动时频繁重连
         if (reconnectTimeout) clearTimeout(reconnectTimeout);
         reconnectTimeout = setTimeout(() => handleConnectionIssue(), 2000);
     } else if (errorMsg.includes("Not connected")) {
-        console.warn("⚠️ Telegram 客户端未连接，尝试重连...");
+        logger.warn("⚠️ Telegram 客户端未连接，尝试重连...");
         handleConnectionIssue();
     } else {
-        console.error("❌ Telegram 客户端发生错误:", err);
+        logger.error("❌ Telegram 客户端发生错误:", err);
     }
 });
 
@@ -153,8 +154,8 @@ async function handleConnectionIssue() {
     isReconnecting = true;
 
     try {
-        console.log("🔄 正在触发主动重连序列...");
-        
+        logger.info("🔄 正在触发主动重连序列...");
+
         // 尝试优雅断开
         try {
             if (client.connected) {
@@ -165,7 +166,7 @@ async function handleConnectionIssue() {
                 ]);
             }
         } catch (de) {
-            console.warn("⚠️ 断开连接时异常（可能是已断开）:", de.message);
+            logger.warn("⚠️ 断开连接时异常（可能是已断开）:", de.message);
         }
 
         // 彻底销毁旧的连接器状态 (如果是 TIMEOUT 错误，可能内部状态已损坏)
@@ -177,14 +178,14 @@ async function handleConnectionIssue() {
 
         // 等待一段时间让网络资源释放
         const waitTime = 5000 + Math.random() * 5000;
-        console.log(`⏳ 等待 ${Math.floor(waitTime/1000)}s 后尝试重新建立连接...`);
+        logger.info(`⏳ 等待 ${Math.floor(waitTime/1000)}s 后尝试重新建立连接...`);
         await new Promise(r => setTimeout(r, waitTime));
-        
+
         await client.connect();
-        console.log("✅ 客户端主动重连成功");
+        logger.info("✅ 客户端主动重连成功");
         lastHeartbeat = Date.now(); // 重置心跳
     } catch (e) {
-        console.error("❌ 主动重连失败，等待系统自动处理:", e.message);
+        logger.error("❌ 主动重连失败，等待系统自动处理:", e.message);
     } finally {
         isReconnecting = false;
     }
@@ -208,22 +209,22 @@ export const stopWatchdog = () => {
 // 定时检查心跳（通过获取自身信息）
 watchdogTimer = setInterval(async () => {
     if (!client.connected || isReconnecting) return;
-    
+
     try {
         // 简单的 API 调用测试连通性
         await client.getMe();
         lastHeartbeat = Date.now();
     } catch (e) {
         if (e.code === 406 && e.errorMessage?.includes("AUTH_KEY_DUPLICATED")) {
-            console.error("🚨 检测到 AUTH_KEY_DUPLICATED，会话已在别处激活，本实例应停止连接");
+            logger.error("🚨 检测到 AUTH_KEY_DUPLICATED，会话已在别处激活，本实例应停止连接");
             // 这里不主动 disconnect，让 index.js 的锁续租失败来处理，
             // 或者标记需要重置
             lastHeartbeat = 0; // 触发强制处理
         }
-        
-        console.warn("💔 心跳检测失败:", e.message);
+
+        logger.warn("💔 心跳检测失败:", e.message);
         if (Date.now() - lastHeartbeat > 5 * 60 * 1000) {
-            console.error("🚨 超过 5 分钟无心跳响应，强制重启连接...");
+            logger.error("🚨 超过 5 分钟无心跳响应，强制重启连接...");
             handleConnectionIssue();
         }
     }

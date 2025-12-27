@@ -8,8 +8,18 @@ jest.unstable_mockModule("../../src/services/d1.js", () => ({
     },
 }));
 
+jest.unstable_mockModule("../../src/services/logger.js", () => ({
+    default: {
+        info: jest.fn(),
+        error: jest.fn(),
+        warn: jest.fn(),
+        debug: jest.fn(),
+    },
+}));
+
 const { InstanceRepository } = await import("../../src/repositories/InstanceRepository.js");
 const { d1 } = await import("../../src/services/d1.js");
+const { default: logger } = await import("../../src/services/logger.js");
 
 describe("InstanceRepository", () => {
     beforeEach(() => {
@@ -28,16 +38,14 @@ describe("InstanceRepository", () => {
         });
 
         it("should handle database errors", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             d1.run.mockRejectedValue(new Error("DB Error"));
 
             await InstanceRepository.createTableIfNotExists();
 
-            expect(consoleSpy).toHaveBeenCalledWith(
+            expect(logger.error).toHaveBeenCalledWith(
                 "InstanceRepository.createTableIfNotExists failed:",
-                expect.any(Error)
+                expect.anything()
             );
-            consoleSpy.mockRestore();
         });
     });
 
@@ -99,7 +107,6 @@ describe("InstanceRepository", () => {
         });
 
         it("should return false on database error", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             d1.run.mockRejectedValue(new Error("DB Error"));
 
             const instanceData = {
@@ -111,11 +118,10 @@ describe("InstanceRepository", () => {
             const result = await InstanceRepository.upsert(instanceData);
 
             expect(result).toBe(false);
-            expect(consoleSpy).toHaveBeenCalledWith(
+            expect(logger.error).toHaveBeenCalledWith(
                 "InstanceRepository.upsert failed for instance1:",
                 expect.any(Error)
             );
-            consoleSpy.mockRestore();
         });
     });
 
@@ -151,17 +157,15 @@ describe("InstanceRepository", () => {
         });
 
         it("should return empty array on database error", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             d1.fetchAll.mockRejectedValue(new Error("DB Error"));
 
             const result = await InstanceRepository.findAllActive();
 
             expect(result).toEqual([]);
-            expect(consoleSpy).toHaveBeenCalledWith(
+            expect(logger.error).toHaveBeenCalledWith(
                 "InstanceRepository.findAllActive failed:",
                 expect.any(Error)
             );
-            consoleSpy.mockRestore();
         });
     });
 
@@ -182,17 +186,15 @@ describe("InstanceRepository", () => {
         });
 
         it("should return empty array on database error", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             d1.fetchAll.mockRejectedValue(new Error("DB Error"));
 
             const result = await InstanceRepository.findAll();
 
             expect(result).toEqual([]);
-            expect(consoleSpy).toHaveBeenCalledWith(
+            expect(logger.error).toHaveBeenCalledWith(
                 "InstanceRepository.findAll failed:",
                 expect.any(Error)
             );
-            consoleSpy.mockRestore();
         });
     });
 
@@ -219,17 +221,15 @@ describe("InstanceRepository", () => {
         });
 
         it("should return null on database error", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             d1.fetchOne.mockRejectedValue(new Error("DB Error"));
 
             const result = await InstanceRepository.findById("instance1");
 
             expect(result).toBeNull();
-            expect(consoleSpy).toHaveBeenCalledWith(
+            expect(logger.error).toHaveBeenCalledWith(
                 "InstanceRepository.findById failed for instance1:",
                 expect.any(Error)
             );
-            consoleSpy.mockRestore();
         });
     });
 
@@ -267,17 +267,15 @@ describe("InstanceRepository", () => {
         });
 
         it("should return false on database error", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             d1.run.mockRejectedValue(new Error("DB Error"));
 
             const result = await InstanceRepository.updateHeartbeat("instance1");
 
             expect(result).toBe(false);
-            expect(consoleSpy).toHaveBeenCalledWith(
+            expect(logger.error).toHaveBeenCalledWith(
                 "InstanceRepository.updateHeartbeat failed for instance1:",
                 expect.any(Error)
             );
-            consoleSpy.mockRestore();
         });
     });
 
@@ -302,17 +300,15 @@ describe("InstanceRepository", () => {
         });
 
         it("should return false on database error", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             d1.run.mockRejectedValue(new Error("DB Error"));
 
             const result = await InstanceRepository.markOffline("instance1");
 
             expect(result).toBe(false);
-            expect(consoleSpy).toHaveBeenCalledWith(
+            expect(logger.error).toHaveBeenCalledWith(
                 "InstanceRepository.markOffline failed for instance1:",
                 expect.any(Error)
             );
-            consoleSpy.mockRestore();
         });
     });
 
@@ -346,17 +342,15 @@ describe("InstanceRepository", () => {
         });
 
         it("should return 0 on database error", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             d1.run.mockRejectedValue(new Error("DB Error"));
 
             const result = await InstanceRepository.deleteExpired();
 
             expect(result).toBe(0);
-            expect(consoleSpy).toHaveBeenCalledWith(
+            expect(logger.error).toHaveBeenCalledWith(
                 "InstanceRepository.deleteExpired failed:",
                 expect.any(Error)
             );
-            consoleSpy.mockRestore();
         });
     });
 
@@ -408,7 +402,6 @@ describe("InstanceRepository", () => {
         });
 
         it("should return default stats on database error", async () => {
-            const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
             d1.fetchOne.mockRejectedValue(new Error("DB Error"));
 
             const result = await InstanceRepository.getStats();
@@ -420,11 +413,10 @@ describe("InstanceRepository", () => {
                 oldestHeartbeat: null,
                 newestHeartbeat: null
             });
-            expect(consoleSpy).toHaveBeenCalledWith(
+            expect(logger.error).toHaveBeenCalledWith(
                 "InstanceRepository.getStats failed:",
                 expect.any(Error)
             );
-            consoleSpy.mockRestore();
         });
     });
 });

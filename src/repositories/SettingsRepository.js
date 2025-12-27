@@ -1,5 +1,6 @@
 import { kv } from "../services/kv.js";
 import { cacheService } from "../utils/CacheService.js";
+import logger from "../services/logger.js";
 
 /**
  * 系统设置仓储层
@@ -32,7 +33,7 @@ export class SettingsRepository {
 
             return defaultValue;
         } catch (e) {
-            console.error(`SettingsRepository.get failed for ${key}:`, e);
+            logger.error(`SettingsRepository.get failed for ${key}:`, e);
             return defaultValue;
         }
     }
@@ -46,7 +47,7 @@ export class SettingsRepository {
     static async set(key, value) {
         // 处理null key的情况
         if (key == null) {
-            console.warn('SettingsRepository.set called with null/undefined key, ignoring');
+            logger.warn('SettingsRepository.set called with null/undefined key, ignoring');
             return;
         }
 
@@ -55,7 +56,7 @@ export class SettingsRepository {
             // 1. 更新 KV（主存储）
             await kv.set(cacheKey, value);
         } catch (kvError) {
-            console.error(`SettingsRepository.set failed for ${key} (KV):`, kvError);
+            logger.error(`SettingsRepository.set failed for ${key} (KV):`, kvError);
             throw kvError; // KV是主存储，失败时抛出异常
         }
 

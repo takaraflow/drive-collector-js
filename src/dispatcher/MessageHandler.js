@@ -42,7 +42,7 @@ export class MessageHandler {
 
         // 基础事件记录
         if (message && (message.className === 'Message' || event.className === 'UpdateNewMessage')) {
-            // console.log(`📩 收到消息 ID: ${message.id}`);
+            // logger.info(`📩 收到消息 ID: ${message.id}`);
         }
 
         // 0. 过滤自己发送的消息 (防止无限循环)
@@ -89,7 +89,7 @@ export class MessageHandler {
                     return;
                 }
             } catch (lockError) {
-                console.error(`⚠️ 获取消息锁时发生异常: ${lockError.message}, 降级处理继续执行`);
+                logger.error(`⚠️ 获取消息锁时发生异常: ${lockError.message}, 降级处理继续执行`);
                 // 如果锁服务完全挂了，为了不丢消息，我们可以选择继续处理（但这可能导致重复回复）
                 // 这里选择继续执行，毕竟可用性优先
             }

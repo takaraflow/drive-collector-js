@@ -2,6 +2,7 @@ import { client, saveSession, clearSession, resetClientSession, setConnectionSta
 import { MessageHandler } from "./MessageHandler.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { config } from "../config/index.js";
+import logger from "../services/logger.js";
 
 /**
  * Dispatcher 引导模块：负责 Telegram 客户端的启动、锁管理和消息处理
@@ -12,7 +13,7 @@ import { config } from "../config/index.js";
  * @returns {Promise<import("telegram").TelegramClient>} 返回已启动的 Telegram 客户端实例
  */
 export async function startDispatcher() {
-    console.log("🔄 正在启动 Dispatcher 组件...");
+    logger.info("🔄 正在启动 Dispatcher 组件...");
 
     // --- 🤖 Telegram 客户端多实例协调启动 ---
     let isClientActive = false;
@@ -21,7 +22,7 @@ export async function startDispatcher() {
     // 设置连接状态回调，当连接断开时重置 isClientActive
     setConnectionStatusCallback((isConnected) => {
         if (!isConnected && isClientActive) {
-            console.log("🔌 Telegram 连接已断开，重置客户端状态");
+            logger.info("🔌 Telegram 连接已断开，重置客户端状态");
             isClientActive = false;
         }
     });
@@ -29,7 +30,7 @@ export async function startDispatcher() {
     const startTelegramClient = async () => {
         // 防止重入：如果正在启动中，直接返回
         if (isClientStarting) {
-            console.log("⏳ 客户端正在启动中，跳过本次重试...");
+            logger.info("⏳ 客户端正在启动中，跳过本次重试...");
             return false;
         }
 
@@ -37,7 +38,7 @@ export async function startDispatcher() {
         const hasLock = await instanceCoordinator.acquireLock("telegram_client", 90);
         if (!hasLock) {
             if (isClientActive) {
-                console.warn("🚨 失去 Telegram 锁或无法续租，正在断开连接...");
+                logger.warn("🚨 失去 Telegram 锁或无法续租，正在断开连接...");
                 try {
                     // 强制断开，并设置较短的超时防止卡死在 disconnect
                     await Promise.race([
@@ -45,7 +46,7 @@ export async function startDispatcher() {
                         new Promise((_, reject) => setTimeout(() => reject(new Error("Disconnect Timeout")), 5000))
                     ]);
                 } catch (e) {
-                    console.error("⚠️ 断开连接时出错:", e.message);
+                    logger.error("⚠️ 断开连接时出错:", e.message);
                 }
                 isClientActive = false;
             }
@@ -55,7 +56,7 @@ export async function startDispatcher() {
         if (isClientActive) return true; // 已启动且持有锁
 
         isClientStarting = true; // 标记开始启动
-        console.log("👑 已获取 Telegram 锁，正在启动客户端...");
+        logger.info("👑 已获取 Telegram 锁，正在启动客户端...");
 
         let retryCount = 0;
         const maxRetries = 3;
@@ -65,7 +66,7 @@ export async function startDispatcher() {
                 try {
                     await client.start({ botAuthToken: config.botToken });
                     await saveSession();
-                    console.log("🚀 Telegram 客户端已连接");
+                    logger.info("🚀 Telegram 客户端已连接");
                     isClientActive = true;
                     isClientStarting = false;
                     return true;
@@ -73,7 +74,7 @@ export async function startDispatcher() {
                     retryCount++;
 
                     if (error.code === 406 && error.errorMessage?.includes('AUTH_KEY_DUPLICATED')) {
-                        console.warn(`⚠️ 检测到 AUTH_KEY_DUPLICATED 错误 (尝试 ${retryCount}/${maxRetries})，正在清除旧 Session 并重试...`);
+                        logger.warn(`⚠️ 检测到 AUTH_KEY_DUPLICATED 错误 (尝试 ${retryCount}/${maxRetries})，正在清除旧 Session 并重试...`);
                         if (retryCount < maxRetries) {
                             await clearSession();
                             resetClientSession();
@@ -82,7 +83,7 @@ export async function startDispatcher() {
                         }
                     }
 
-                    console.error(`❌ 启动 Telegram 客户端失败 (尝试 ${retryCount}/${maxRetries}):`, error.message);
+                    logger.error(`❌ 启动 Telegram 客户端失败 (尝试 ${retryCount}/${maxRetries}):`, error.message);
 
                     // 如果不是 Auth Key 问题，增加一点延迟再重试，避免瞬间刷爆
                     if (retryCount < maxRetries) {
@@ -114,6 +115,6 @@ export async function startDispatcher() {
     // 延迟初始化 Bot ID (等待连接建立)
     setTimeout(() => MessageHandler.init(client), 5000);
 
-    console.log("🎉 Dispatcher 组件启动完成！");
+    logger.info("🎉 Dispatcher 组件启动完成！");
     return client;
 }

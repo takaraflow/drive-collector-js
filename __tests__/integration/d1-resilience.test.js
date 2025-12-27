@@ -7,6 +7,18 @@ global.fetch = mockFetch;
 // Store original process.env
 const originalEnv = process.env;
 
+// Mock logger
+const mockLogger = {
+    info: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+};
+
+jest.unstable_mockModule("../../src/services/logger.js", () => ({
+    default: mockLogger,
+}));
+
 describe("D1 Service Resilience and Retry Mechanisms", () => {
     let d1Instance;
 
@@ -165,8 +177,6 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
     });
 
     test("should provide detailed error logging for debugging", async () => {
-        const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
         mockFetch.mockResolvedValueOnce({
             ok: false,
             status: 400,
@@ -174,21 +184,24 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
             text: () => Promise.resolve('{"errors":[{"message":"Invalid SQL syntax"}]}')
         });
 
-        await expect(d1Instance.run("INVALID SQL"))
+        // Re-import to get updated mock
+        jest.resetModules();
+        const { d1: newD1Instance } = await import("../../src/services/d1.js");
+        const { default: logger } = await import("../../src/services/logger.js");
+
+        await expect(newD1Instance.run("INVALID SQL"))
             .rejects.toThrow("HTTP 400: Bad Request");
 
         // Check that detailed error info was logged
-        expect(consoleSpy).toHaveBeenCalledWith(
-            expect.stringContaining("🚨 D1 HTTP Error 400")
+        expect(logger.error).toHaveBeenCalledWith(
+            expect.stringContaining("🚨 D1 HTTP Error"),
         );
-        expect(consoleSpy).toHaveBeenCalledWith(
+        expect(logger.error).toHaveBeenCalledWith(
             expect.stringContaining("URL: https://api.cloudflare.com")
         );
-        expect(consoleSpy).toHaveBeenCalledWith(
+        expect(logger.error).toHaveBeenCalledWith(
             expect.stringContaining('Response: {"errors":[{"message":"Invalid SQL syntax"}]}')
         );
-
-        consoleSpy.mockRestore();
     });
 
     test("should maintain linear backoff timing", async () => {

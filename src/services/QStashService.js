@@ -1,5 +1,6 @@
 import { Client, Receiver } from "@upstash/qstash";
 import { config } from "../config/index.js";
+import logger from "./logger.js";
 
 /**
  * QStash 服务层
@@ -9,7 +10,7 @@ class QStashService {
     constructor() {
         // 检查 QStash 配置是否存在
         if (!config.qstash) {
-            console.warn('⚠️ QStash 配置未找到，使用模拟模式');
+            logger.warn('⚠️ QStash 配置未找到，使用模拟模式');
             this.client = null;
             this.isMockMode = true;
         } else {
@@ -38,7 +39,7 @@ class QStashService {
      */
     _checkMockMode() {
         if (this.isMockMode) {
-            console.log('📤 [模拟模式] QStash 未配置，跳过操作');
+            logger.info('📤 [模拟模式] QStash 未配置，跳过操作');
             return true;
         }
         return false;
@@ -68,10 +69,10 @@ class QStashService {
 
         try {
             const result = await this.client.publishJSON(publishOptions);
-            console.log(`📤 发布消息到 ${topic}:`, message);
+            logger.info(`📤 发布消息到 ${topic}:`, message);
             return result;
         } catch (error) {
-            console.error(`❌ 发布消息失败 ${topic}:`, error);
+            logger.error(`❌ 发布消息失败 ${topic}:`, error);
             throw error;
         }
     }
@@ -94,15 +95,15 @@ class QStashService {
             const successful = results.filter(r => r.status === 'fulfilled').length;
             const failed = results.filter(r => r.status === 'rejected').length;
 
-            console.log(`📤 批量发布完成: ${successful} 成功, ${failed} 失败`);
+            logger.info(`📤 批量发布完成: ${successful} 成功, ${failed} 失败`);
 
             if (failed > 0) {
-                console.warn('失败的消息:', results.filter(r => r.status === 'rejected'));
+                logger.warn('失败的消息:', results.filter(r => r.status === 'rejected'));
             }
 
             return results;
         } catch (error) {
-            console.error('❌ 批量发布失败:', error);
+            logger.error('❌ 批量发布失败:', error);
             throw error;
         }
     }
@@ -131,7 +132,7 @@ class QStashService {
      */
     async verifyWebhookSignature(signature, body) {
         if (this.isMockMode) {
-            console.warn('⚠️ 处于模拟模式，跳过签名验证');
+            logger.warn('⚠️ 处于模拟模式，跳过签名验证');
             return true; // 模拟模式跳过
         }
 
@@ -142,7 +143,7 @@ class QStashService {
             });
             return true;
         } catch (error) {
-            console.error('❌ Webhook 签名验证失败:', error);
+            logger.error('❌ Webhook 签名验证失败:', error);
             return false;
         }
     }

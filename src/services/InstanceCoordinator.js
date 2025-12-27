@@ -2,6 +2,7 @@ import { kv } from "./kv.js";
 import { d1 } from "./d1.js";
 import { qstashService } from "./QStashService.js";
 import { InstanceRepository } from "../repositories/InstanceRepository.js";
+import logger, { setInstanceIdProvider } from "./logger.js";
 
 /**
  * --- 多实例协调服务 ---
@@ -11,6 +12,9 @@ import { InstanceRepository } from "../repositories/InstanceRepository.js";
 export class InstanceCoordinator {
     constructor() {
         this.instanceId = process.env.INSTANCE_ID || `instance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Register this instance as the ID provider for the logger
+        setInstanceIdProvider(() => this.instanceId);
         this.nodeType = process.env.NODE_MODE || 'bot';
         this.heartbeatInterval = 5 * 60 * 1000; // 进一步延长至 5 分钟心跳，大幅减少 KV 调用 (因为 Cloudflare KV 免费额度有限)
         this.instanceTimeout = 15 * 60 * 1000; // 15分钟超时
@@ -23,7 +27,7 @@ export class InstanceCoordinator {
      * 启动实例协调器
      */
     async start() {
-        console.log(`🚀 启动实例协调器: ${this.instanceId}`);
+        logger.info(`🚀 启动实例协调器: ${this.instanceId}`);
 
         // 注册实例
         await this.registerInstance();
@@ -34,14 +38,14 @@ export class InstanceCoordinator {
         // 监听其他实例变化
         this.watchInstances();
 
-        console.log(`✅ 实例协调器启动完成`);
+        logger.info(`✅ 实例协调器启动完成`);
     }
 
     /**
      * 停止实例协调器
      */
     async stop() {
-        console.log(`🛑 停止实例协调器: ${this.instanceId}`);
+        logger.info(`🛑 停止实例协调器: ${this.instanceId}`);
 
         if (this.heartbeatTimer) {
             clearInterval(this.heartbeatTimer);
@@ -68,9 +72,9 @@ export class InstanceCoordinator {
         // 写入 KV (核心 KV 模块，用于关键数据存储)
         try {
             await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
-            console.log(`📝 实例已注册到 KV: ${this.instanceId}`);
+            logger.info(`📝 实例已注册到 KV: ${this.instanceId}`);
         } catch (kvError) {
-            console.error(`❌ KV注册失败: ${kvError.message}`);
+            logger.error(`❌ KV注册失败: ${kvError.message}`);
             throw kvError; // KV 是主存储，失败时抛出异常
         }
     }
@@ -80,7 +84,7 @@ export class InstanceCoordinator {
      */
     async unregisterInstance() {
         await kv.delete(`instance:${this.instanceId}`);
-        console.log(`📝 实例已注销: ${this.instanceId}`);
+        logger.info(`📝 实例已注销: ${this.instanceId}`);
     }
 
     /**
@@ -106,7 +110,7 @@ export class InstanceCoordinator {
                     await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
                 }
             } catch (kvError) {
-                console.error(`KV心跳更新失败: ${kvError.message}`);
+                logger.error(`KV心跳更新失败: ${kvError.message}`);
             }
         }, this.heartbeatInterval);
     }
@@ -130,7 +134,7 @@ export class InstanceCoordinator {
             this.activeInstances = new Set(activeInstances.map(inst => inst.id));
             return activeInstances;
         } catch (e) {
-            console.error(`获取活跃实例失败:`, e.message);
+            logger.error(`获取活跃实例失败:`, e.message);
             return [];
         }
     }
@@ -167,7 +171,7 @@ export class InstanceCoordinator {
             }
             return instances;
         } catch (e) {
-            console.error(`获取所有实例失败:`, e?.message || String(e));
+            logger.error(`获取所有实例失败:`, e?.message || String(e));
             return [];
         }
     }
@@ -188,7 +192,7 @@ export class InstanceCoordinator {
             this.isLeader = leader && leader.id === this.instanceId;
 
             if (this.isLeader) {
-                console.log(`👑 本实例成为领导者 (${instanceCount} 个活跃实例)`);
+                logger.info(`👑 本实例成为领导者 (${instanceCount} 个活跃实例)`);
             }
 
             // 清理过期的实例数据
@@ -215,10 +219,10 @@ export class InstanceCoordinator {
             }
 
             if (cleanedCount > 0) {
-                console.log(`🧹 清理了 ${cleanedCount} 个过期实例`);
+                logger.info(`🧹 清理了 ${cleanedCount} 个过期实例`);
             }
         } catch (e) {
-            console.error(`清理过期实例失败:`, e.message);
+            logger.error(`清理过期实例失败:`, e.message);
         }
     }
 
@@ -255,7 +259,7 @@ export class InstanceCoordinator {
             await kv.set(`lock:${lockKey}`, lockValue, ttl, { skipCache: true });
             return true;
         } catch (e) {
-            console.error(`获取锁失败 ${lockKey}:`, e?.message || String(e));
+            logger.error(`获取锁失败 ${lockKey}:`, e?.message || String(e));
             return false;
         }
     }
@@ -271,7 +275,7 @@ export class InstanceCoordinator {
                 await kv.delete(`lock:${lockKey}`);
             }
         } catch (e) {
-            console.error(`释放锁失败 ${lockKey}:`, e?.message || String(e));
+            logger.error(`释放锁失败 ${lockKey}:`, e?.message || String(e));
         }
     }
 
@@ -326,12 +330,18 @@ export class InstanceCoordinator {
                 sourceInstance: this.instanceId,
                 timestamp: Date.now()
             });
-            console.log(`📢 广播系统事件: ${event}`);
+            logger.info(`📢 广播系统事件: ${event}`);
         } catch (error) {
-            console.error(`❌ 广播事件失败 ${event}:`, error);
+            logger.error(`❌ 广播事件失败 ${event}:`, error);
         }
     }
 }
 
 // 导出单例实例
 export const instanceCoordinator = new InstanceCoordinator();
+
+// 导出获取实例 ID 的函数
+export const getInstanceId = () => instanceCoordinator.instanceId;
+
+// 默认导出
+export default instanceCoordinator;

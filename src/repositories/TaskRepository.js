@@ -1,4 +1,5 @@
 import { d1 } from "../services/d1.js";
+import logger from "../services/logger.js";
 
 /**
  * 任务数据仓储层
@@ -40,7 +41,7 @@ export class TaskRepository {
         }
 
         if (cleanedCount > 0) {
-            console.log(`🧹 TaskRepository 清理了 ${cleanedCount} 个过期的待更新条目`);
+            logger.info(`🧹 TaskRepository 清理了 ${cleanedCount} 个过期的待更新条目`);
         }
     }
 
@@ -71,7 +72,7 @@ export class TaskRepository {
                 const update = updatesToFlush[index];
 
                 if (!res.success) {
-                    console.error(`Task flush failed for ${update.taskId}:`, res.error);
+                    logger.error(`Task flush failed for ${update.taskId}:`, res.error);
                 }
 
                 // 无论成功还是失败，都从队列中移除，防止毒丸(poison pill)效应导致无限循环
@@ -89,7 +90,7 @@ export class TaskRepository {
 
         } catch (error) {
             // 如果 batch 本身抛出异常（极少见，因为我们用了 Promise.allSettled）
-            console.error("TaskRepository.flushUpdates critical error:", error);
+            logger.error("TaskRepository.flushUpdates critical error:", error);
         }
     }
 
@@ -119,7 +120,7 @@ export class TaskRepository {
             ]);
             return true;
         } catch (e) {
-            console.error(`TaskRepository.create failed for ${taskData.id}:`, e);
+            logger.error(`TaskRepository.create failed for ${taskData.id}:`, e);
             throw e;
         }
     }
@@ -140,7 +141,7 @@ export class TaskRepository {
                 [deadLine]
             );
         } catch (e) {
-            console.error("TaskRepository.findStalledTasks error:", e);
+            logger.error("TaskRepository.findStalledTasks error:", e);
             return [];
         }
     }
@@ -163,7 +164,7 @@ export class TaskRepository {
             );
             return result.changes > 0; // 如果更新了行，则认领成功
         } catch (e) {
-            console.error(`TaskRepository.claimTask failed for ${taskId}:`, e);
+            logger.error(`TaskRepository.claimTask failed for ${taskId}:`, e);
             return false;
         }
     }
@@ -184,7 +185,7 @@ export class TaskRepository {
             );
             return result.changes;
         } catch (e) {
-            console.error("TaskRepository.resetStalledTasks failed:", e);
+            logger.error("TaskRepository.resetStalledTasks failed:", e);
             return 0;
         }
     }
@@ -197,7 +198,7 @@ export class TaskRepository {
         try {
             return await d1.fetchOne("SELECT * FROM tasks WHERE id = ?", [taskId]);
         } catch (e) {
-            console.error(`TaskRepository.findById error for ${taskId}:`, e);
+            logger.error(`TaskRepository.findById error for ${taskId}:`, e);
             return null;
         }
     }
@@ -216,7 +217,7 @@ export class TaskRepository {
                     [status, errorMsg, Date.now(), taskId]
                 );
             } catch (e) {
-                console.error(`TaskRepository.updateStatus (critical) failed for ${taskId}:`, e);
+                logger.error(`TaskRepository.updateStatus (critical) failed for ${taskId}:`, e);
             }
         } else {
             this.pendingUpdates.set(taskId, { taskId, status, errorMsg, timestamp: Date.now() });
@@ -231,7 +232,7 @@ export class TaskRepository {
         try {
             await d1.run("UPDATE tasks SET status = 'cancelled' WHERE id = ?", [taskId]);
         } catch (e) {
-            console.error(`TaskRepository.markCancelled failed for ${taskId}:`, e);
+            logger.error(`TaskRepository.markCancelled failed for ${taskId}:`, e);
         }
     }
 
@@ -246,7 +247,7 @@ export class TaskRepository {
                 [userId, limit]
             );
         } catch (e) {
-            console.error(`TaskRepository.findByUserId error for ${userId}:`, e);
+            logger.error(`TaskRepository.findByUserId error for ${userId}:`, e);
             return [];
         }
     }
@@ -262,7 +263,7 @@ export class TaskRepository {
                 [msgId]
             );
         } catch (e) {
-            console.error(`TaskRepository.findByMsgId error for ${msgId}:`, e);
+            logger.error(`TaskRepository.findByMsgId error for ${msgId}:`, e);
             return [];
         }
     }
@@ -278,7 +279,7 @@ export class TaskRepository {
                 [userId]
             );
         } catch (e) {
-            console.error(`TaskRepository.findAllCompletedByUser error for ${userId}:`, e);
+            logger.error(`TaskRepository.findAllCompletedByUser error for ${userId}:`, e);
             return [];
         }
     }
@@ -294,7 +295,7 @@ export class TaskRepository {
                 [userId, fileName, fileSize]
             );
         } catch (e) {
-            console.error(`TaskRepository.findCompletedByFile error for ${userId}/${fileName}:`, e);
+            logger.error(`TaskRepository.findCompletedByFile error for ${userId}/${fileName}:`, e);
             return null;
         }
     }
@@ -328,7 +329,7 @@ export class TaskRepository {
             await d1.batch(statements);
             return true;
         } catch (e) {
-            console.error("TaskRepository.createBatch failed:", e);
+            logger.error("TaskRepository.createBatch failed:", e);
             throw e;
         }
     }

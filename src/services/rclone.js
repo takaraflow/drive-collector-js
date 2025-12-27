@@ -6,6 +6,7 @@ import { DriveRepository } from "../repositories/DriveRepository.js";
 import { STRINGS } from "../locales/zh-CN.js";
 import { cacheService } from "../utils/CacheService.js";
 import { kv } from "./kv.js";
+import logger from "./logger.js";
 
 // 确定 rclone 二进制路径 (兼容 Zeabur 和 本地)
 const rcloneBinary = fs.existsSync("/app/rclone/rclone") 
@@ -49,17 +50,17 @@ export class CloudTool {
             const ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "obscure", password], { encoding: 'utf-8' });
             
             if (ret.error) {
-                console.error("Obscure spawn error:", ret.error);
+                logger.error("Obscure spawn error:", ret.error);
                 return password;
             }
             if (ret.status !== 0) {
-                console.error("Obscure non-zero exit:", ret.stderr);
+                logger.error("Obscure non-zero exit:", ret.stderr);
                 return password;
             }
             
             return ret.stdout.trim();
         } catch (e) {
-            console.error("Password obscure failed:", e);
+            logger.error("Password obscure failed:", e);
             return password; // 失败则返回原值尝试
         }
     }
@@ -102,8 +103,8 @@ export class CloudTool {
                         if (errorLog.includes("Multi-factor authentication") || errorLog.includes("2FA")) {
                             resolve({ success: false, reason: "2FA" });
                         } else {
-                            console.error("Validation failed. Cmd:", `rclone about :${type},user=***,pass=***:`);
-                            console.error("Error Log:", errorLog);
+                            logger.error("Validation failed. Cmd:", `rclone about :${type},user=***,pass=***:`);
+                            logger.error("Error Log:", errorLog);
                             resolve({ success: false, reason: "ERROR", details: errorLog });
                         }
                     }
@@ -214,14 +215,14 @@ export class CloudTool {
                         // Even with exit code 0, check for errors in the log
                         const hasErrors = errorLog.includes('ERROR') || errorLog.includes('Failed') || errorLog.includes('failed');
                         if (hasErrors) {
-                            console.error(`Rclone Batch completed with exit code 0 but contains errors:`, errorLog.slice(-500));
+                            logger.error(`Rclone Batch completed with exit code 0 but contains errors:`, errorLog.slice(-500));
                             resolve({ success: false, error: `Upload completed but with errors: ${errorLog.slice(-200).trim()}` });
                         } else {
                             resolve({ success: true });
                         }
                     } else {
                         const finalError = errorLog.slice(-500) || `Rclone exited with code ${code}`;
-                        console.error(`Rclone Batch Error:`, finalError);
+                        logger.error(`Rclone Batch Error:`, finalError);
                         resolve({ success: false, error: finalError.trim() });
                     }
                 });
@@ -272,7 +273,7 @@ export class CloudTool {
                     return kvCached.files || kvCached;
                 }
             } catch (e) {
-                console.error("KV get files error:", e.message);
+                logger.error("KV get files error:", e.message);
             }
         }
 
@@ -306,7 +307,7 @@ export class CloudTool {
             let ret = await runLsJson(fullRemotePath);
 
             if (ret.code !== 0 && ret.stderr && (ret.stderr.includes("directory not found") || ret.stderr.includes("error listing"))) {
-                console.log(`Directory ${config.remoteFolder} not found, attempting to create it...`);
+                logger.info(`Directory ${config.remoteFolder} not found, attempting to create it...`);
                 // 尝试创建一个空目录/触发目录初始化
                 spawnSync(rcloneBinary, ["--config", "/dev/null", "mkdir", fullRemotePath], { env: process.env });
                 // 再次尝试
@@ -315,7 +316,7 @@ export class CloudTool {
 
             if (ret.code !== 0) {
                 if (ret.stderr && (ret.stderr.includes("directory not found") || ret.stderr.includes("error listing"))) {
-                    console.warn("Rclone directory still not found after attempt, returning empty list.");
+                    logger.warn("Rclone directory still not found after attempt, returning empty list.");
                     this.loading = false;
                     return [];
                 }
@@ -346,14 +347,14 @@ export class CloudTool {
                 // KV 缓存使用动态时间，应对重启
                 await kv.set(cacheKey, cacheData, optimalKVTTL);
             } catch (e) {
-                console.error("KV set files error:", e.message);
+                logger.error("KV set files error:", e.message);
             }
 
             this.loading = false;
             return files;
 
         } catch (e) {
-            console.error("List files error (Detail):", e.message);
+            logger.error("List files error (Detail):", e.message);
             this.loading = false;
             return [];
         }
@@ -495,7 +496,7 @@ export class CloudTool {
                     // console.warn(`[getRemoteFileInfo] Status ${ret.code} for ${fileName}: ${ret.stderr}`);
                 }
             } catch (e) {
-                console.warn(`[getRemoteFileInfo] Attempt ${i + 1} failed for ${fileName}:`, e.message);
+                logger.warn(`[getRemoteFileInfo] Attempt ${i + 1} failed for ${fileName}:`, e.message);
             }
 
             if (i < retries - 1) {

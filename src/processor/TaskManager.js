@@ -249,7 +249,7 @@ export class TaskManager {
             for (const row of rows) {
                 const message = messageMap.get(row.source_msg_id);
                 if (!message || !message.media) {
-                    console.warn(`⚠️ 无法找到原始消息 (ID: ${row.source_msg_id})`);
+                    logger.warn(`⚠️ 无法找到原始消息 (ID: ${row.source_msg_id})`);
                     failedUpdates.push({ id: row.id, status: 'failed', error: 'Source msg missing' });
                     continue;
                 }
@@ -267,10 +267,10 @@ export class TaskManager {
                     if (fs.existsSync(localPath)) {
                         task.localPath = localPath;
                         tasksToUpload.push(task);
-                        console.log(`📤 恢复下载完成的任务 ${row.id} 到上传队列`);
+                        logger.info(`📤 恢复下载完成的任务 ${row.id} 到上传队列`);
                     } else {
                         // 本地文件不存在，重新下载
-                        console.warn(`⚠️ 本地文件不存在，重新下载任务 ${row.id}`);
+                        logger.warn(`⚠️ 本地文件不存在，重新下载任务 ${row.id}`);
                         tasksToEnqueue.push(task);
                     }
                 } else {
@@ -297,7 +297,7 @@ export class TaskManager {
             tasksToUpload.forEach(task => this._enqueueUploadTask(task));
 
         } catch (e) {
-            console.error(`批量恢复会话 ${chatId} 的任务失败:`, e);
+            logger.error(`批量恢复会话 ${chatId} 的任务失败:`, e);
         }
     }
 
@@ -475,7 +475,7 @@ export class TaskManager {
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
             if (!dbTask) {
-                console.error(`❌ Task ${taskId} not found in database`);
+                logger.error(`❌ Task ${taskId} not found in database`);
                 return;
             }
 
@@ -513,7 +513,7 @@ export class TaskManager {
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
             if (!dbTask) {
-                console.error(`❌ Task ${taskId} not found in database`);
+                logger.error(`❌ Task ${taskId} not found in database`);
                 return;
             }
 
@@ -705,7 +705,7 @@ export class TaskManager {
                 try {
                     await TaskRepository.updateStatus(task.id, isCancel ? 'cancelled' : 'failed', e.message);
                 } catch (updateError) {
-                    console.error(`Failed to update task status for ${task.id}:`, updateError);
+                    logger.error(`Failed to update task status for ${task.id}:`, updateError);
                 }
 
                 if (task.isGroup) {
@@ -801,7 +801,7 @@ export class TaskManager {
 
             if (isR2Drive) {
                 // 使用 OSS 服务进行双轨制上传
-                console.log(`📤 使用 OSS 服务上传到 R2: ${fileName}`);
+                logger.info(`📤 使用 OSS 服务上传到 R2: ${fileName}`);
                 uploadResult = await ossService.upload(localPath, fileName, (progress) => {
                     const now = Date.now();
                     if (now - lastUpdate > 3000) {
@@ -813,7 +813,7 @@ export class TaskManager {
                 uploadResult = uploadResult.success ? { success: true } : { success: false, error: uploadResult.error };
             } else {
                 // 使用 rclone 直接上传单个文件
-                console.log(`📤 使用 rclone 直接上传: ${fileName}`);
+                logger.info(`📤 使用 rclone 直接上传: ${fileName}`);
                 uploadResult = await CloudTool.uploadFile(localPath, task, (progress) => {
                     const now = Date.now();
                     if (now - lastUpdate > 3000) {
@@ -846,18 +846,18 @@ export class TaskManager {
                     if (validationAttempts < maxValidationAttempts) {
                         // 如果是最后一次尝试，强制刷新文件列表缓存
                         if (validationAttempts === maxValidationAttempts - 1) {
-                            console.log(`[Validation] Final attempt for ${actualFileName}, forcing cache refresh...`);
+                            logger.info(`[Validation] Final attempt for ${actualFileName}, forcing cache refresh...`);
                             try {
                                 await CloudTool.listRemoteFiles(task.userId, true); // 强制刷新缓存
                                 // 再试一次
                                 finalRemote = await CloudTool.getRemoteFileInfo(actualFileName, task.userId, 1);
                                 if (finalRemote) break;
                             } catch (e) {
-                                console.warn(`[Validation] Cache refresh failed:`, e.message);
+                                logger.warn(`[Validation] Cache refresh failed:`, e.message);
                             }
                         }
 
-                        console.log(`[Validation] Attempt ${validationAttempts} failed for ${actualFileName}, retrying in ${validationAttempts * 5}s...`);
+                        logger.info(`[Validation] Attempt ${validationAttempts} failed for ${actualFileName}, retrying in ${validationAttempts * 5}s...`);
                         await new Promise(resolve => setTimeout(resolve, validationAttempts * 5000)); // 递增延迟: 5s, 10s, 15s, 20s
                     }
                 }
@@ -866,11 +866,11 @@ export class TaskManager {
                 const isOk = finalRemote && this._isSizeMatch(finalRemote.Size, localSize);
 
                 if (!isOk) {
-                    console.error(`[Validation Failed] Task: ${task.id}, File: ${actualFileName}`);
-                    console.error(`- Local Size: ${localSize}`);
-                    console.error(`- Remote Size: ${finalRemote ? finalRemote.Size : 'N/A'}`);
-                    console.error(`- Remote Info: ${JSON.stringify(finalRemote)}`);
-                    console.error(`- Validation attempts: ${validationAttempts}`);
+                    logger.error(`[Validation Failed] Task: ${task.id}, File: ${actualFileName}`);
+                    logger.error(`- Local Size: ${localSize}`);
+                    logger.error(`- Remote Size: ${finalRemote ? finalRemote.Size : 'N/A'}`);
+                    logger.error(`- Remote Info: ${JSON.stringify(finalRemote)}`);
+                    logger.error(`- Validation attempts: ${validationAttempts}`);
                 }
 
                 const finalStatus = isOk ? 'completed' : 'failed';
@@ -918,7 +918,7 @@ export class TaskManager {
                     fs.unlinkSync(localPath);
                 }
             } catch (e) {
-                console.warn(`Failed to cleanup local file ${localPath}:`, e.message);
+                logger.warn(`Failed to cleanup local file ${localPath}:`, e.message);
             }
             this.activeProcessors.delete(id);
         }
@@ -978,7 +978,7 @@ export class TaskManager {
                     if (mtprotoLimiter?.adjustConcurrency) mtprotoLimiter.adjustConcurrency();
                     if (mtprotoFileLimiter?.adjustConcurrency) mtprotoFileLimiter.adjustConcurrency();
                 } catch (error) {
-                    console.error('Auto-scaling adjustment error:', error.message);
+                    logger.error('Auto-scaling adjustment error:', error.message);
                 }
             }, 30000);
         });

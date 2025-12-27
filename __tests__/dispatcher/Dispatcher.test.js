@@ -589,7 +589,7 @@ describe("Dispatcher", () => {
       mockAuthGuard.can.mockResolvedValue(false);
       mockSettingsRepository.get.mockResolvedValue("private");
       
-      const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+      const logSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
       
       const event = {
         userId: BigInt(789),
@@ -598,7 +598,7 @@ describe("Dispatcher", () => {
       };
 
       await Dispatcher.handle(event);
-      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("🛡️ 消息被全局守卫拦截"));
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("🛡️ 消息被全局守卫拦截"), expect.anything());
       logSpy.mockRestore();
     });
 

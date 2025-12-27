@@ -1,4 +1,5 @@
 import { d1 } from "../services/d1.js";
+import logger from "../services/logger.js";
 
 /**
  * 实例数据仓储层
@@ -24,7 +25,7 @@ export class InstanceRepository {
                 )
             `);
         } catch (e) {
-            console.error("InstanceRepository.createTableIfNotExists failed:", e);
+            logger.error("InstanceRepository.createTableIfNotExists failed:", e);
         }
     }
 
@@ -55,7 +56,7 @@ export class InstanceRepository {
             ]);
             return true;
         } catch (e) {
-            console.error(`InstanceRepository.upsert failed for ${instanceData.id}:`, e);
+            logger.error(`InstanceRepository.upsert failed for ${instanceData.id}:`, e);
             return false;
         }
     }
@@ -75,7 +76,7 @@ export class InstanceRepository {
                 ORDER BY id ASC
             `, [deadline]);
         } catch (e) {
-            console.error("InstanceRepository.findAllActive failed:", e);
+            logger.error("InstanceRepository.findAllActive failed:", e);
             return [];
         }
     }
@@ -90,7 +91,7 @@ export class InstanceRepository {
                 ORDER BY id ASC
             `);
         } catch (e) {
-            console.error("InstanceRepository.findAll failed:", e);
+            logger.error("InstanceRepository.findAll failed:", e);
             return [];
         }
     }
@@ -104,7 +105,7 @@ export class InstanceRepository {
                 SELECT * FROM instances WHERE id = ?
             `, [instanceId]);
         } catch (e) {
-            console.error(`InstanceRepository.findById failed for ${instanceId}:`, e);
+            logger.error(`InstanceRepository.findById failed for ${instanceId}:`, e);
             return null;
         }
     }
@@ -121,7 +122,7 @@ export class InstanceRepository {
             `, [heartbeatTime, Date.now(), instanceId]);
             return true;
         } catch (e) {
-            console.error(`InstanceRepository.updateHeartbeat failed for ${instanceId}:`, e);
+            logger.error(`InstanceRepository.updateHeartbeat failed for ${instanceId}:`, e);
             return false;
         }
     }
@@ -138,7 +139,7 @@ export class InstanceRepository {
             `, [Date.now(), instanceId]);
             return true;
         } catch (e) {
-            console.error(`InstanceRepository.markOffline failed for ${instanceId}:`, e);
+            logger.error(`InstanceRepository.markOffline failed for ${instanceId}:`, e);
             return false;
         }
     }
@@ -159,7 +160,7 @@ export class InstanceRepository {
 
             return result.changes || 0;
         } catch (e) {
-            console.error("InstanceRepository.deleteExpired failed:", e);
+            logger.error("InstanceRepository.deleteExpired failed:", e);
             return 0;
         }
     }
@@ -190,7 +191,7 @@ export class InstanceRepository {
                 newestHeartbeat: stats.newest_heartbeat
             };
         } catch (e) {
-            console.error("InstanceRepository.getStats failed:", e);
+            logger.error("InstanceRepository.getStats failed:", e);
             return {
                 activeCount: 0,
                 offlineCount: 0,

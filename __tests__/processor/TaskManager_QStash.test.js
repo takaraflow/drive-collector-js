@@ -184,7 +184,7 @@ describe("TaskManager QStash Integration", () => {
 
             await TaskManager.handleDownloadWebhook('123');
 
-            expect(consoleSpy).toHaveBeenCalledWith('❌ Task 123 not found in database');
+            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('❌ Task 123 not found in database'), expect.anything());
             expect(TaskManager.downloadTask).not.toHaveBeenCalled();
             consoleSpy.mockRestore();
         });
@@ -240,7 +240,7 @@ describe("TaskManager QStash Integration", () => {
 
             await TaskManager.handleUploadWebhook('123');
 
-            expect(consoleSpy).toHaveBeenCalledWith('❌ Task 123 not found in database');
+            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('❌ Task 123 not found in database'), expect.anything());
             expect(TaskManager.uploadTask).not.toHaveBeenCalled();
             consoleSpy.mockRestore();
         });

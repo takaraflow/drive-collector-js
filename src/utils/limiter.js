@@ -1,5 +1,6 @@
 import PQueue from "p-queue";
 import { kv } from "../services/kv.js";
+import logger from "../services/logger.js";
 
 const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -69,7 +70,7 @@ const createAutoScalingLimiter = (options, autoScaling = {}) => {
         // 更新并发数
         if (newConcurrency !== queue.concurrency) {
             queue.concurrency = newConcurrency;
-            console.log(`📊 Auto-scaling: Adjusted concurrency from ${queue.concurrency} to ${newConcurrency}`);
+            logger.info(`📊 Auto-scaling: Adjusted concurrency from ${queue.concurrency} to ${newConcurrency}`);
         }
         
         // 重置计数器
@@ -246,7 +247,7 @@ const checkCooling = async () => {
     // 1. 如果本地已经处于冷静期，直接等待，不需要同步 KV
     if (now < globalCoolingUntil) {
         const waitTime = globalCoolingUntil - now;
-        console.warn(`❄️ System is in LOCAL cooling period, waiting ${waitTime}ms...`);
+        logger.warn(`❄️ System is in LOCAL cooling period, waiting ${waitTime}ms...`);
         await sleep(waitTime);
         return;
     }
@@ -265,7 +266,7 @@ const checkCooling = async () => {
 
     if (now < globalCoolingUntil) {
         const waitTime = globalCoolingUntil - now;
-        console.warn(`❄️ System is in global cooling period, waiting ${waitTime}ms...`);
+        logger.warn(`❄️ System is in global cooling period, waiting ${waitTime}ms...`);
         await sleep(waitTime);
     }
 };
@@ -300,13 +301,13 @@ const handle429Error = async (fn, maxRetries = 3) => {
                 const waitMs = (retryAfter > 0 ? retryAfter * 1000 : Math.min(1000 * (2 ** retryCount), 60000)) + Math.random() * 1000;
                 
                 if (retryAfter > 60) {
-                    console.error(`🚨 Large FloodWait detected (${retryAfter}s). Triggering GLOBAL cooling.`);
+                    logger.error(`🚨 Large FloodWait detected (${retryAfter}s). Triggering GLOBAL cooling.`);
                     globalCoolingUntil = Date.now() + waitMs;
                     // 同步到 KV
                     await kv.set("system:cooling_until", globalCoolingUntil.toString(), Math.ceil(waitMs / 1000) + 60).catch(() => {});
                 }
 
-                console.warn(`⚠️ 429/FloodWait encountered, retrying after ${Math.round(waitMs)}ms (attempt ${retryCount + 1}/${maxRetries})`);
+                logger.warn(`⚠️ 429/FloodWait encountered, retrying after ${Math.round(waitMs)}ms (attempt ${retryCount + 1}/${maxRetries})`);
                 await sleep(waitMs);
                 retryCount++;
                 lastRetryAfter = waitMs;

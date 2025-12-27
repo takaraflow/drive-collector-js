@@ -1,5 +1,6 @@
 import { kv } from "../services/kv.js";
 import { cacheService } from "../utils/CacheService.js";
+import logger from "../services/logger.js";
 
 /**
  * 网盘配置仓储层
@@ -39,7 +40,7 @@ export class DriveRepository {
                 return drive || null;
             }, 60 * 1000); // 缓存 1 分钟
         } catch (e) {
-            console.error(`DriveRepository.findByUserId error for ${userId}:`, e);
+            logger.error(`DriveRepository.findByUserId error for ${userId}:`, e);
             return null;
         }
     }
@@ -80,7 +81,7 @@ export class DriveRepository {
             cacheService.del(this.getAllDrivesKey());
             return true;
         } catch (e) {
-            console.error(`DriveRepository.create failed for ${userId}:`, e);
+            logger.error(`DriveRepository.create failed for ${userId}:`, e);
             throw e;
         }
     }
@@ -102,7 +103,7 @@ export class DriveRepository {
             cacheService.del(`drive_${userId}`);
             cacheService.del(this.getAllDrivesKey());
         } catch (e) {
-            console.error(`DriveRepository.deleteByUserId failed for ${userId}:`, e);
+            logger.error(`DriveRepository.deleteByUserId failed for ${userId}:`, e);
             throw e;
         }
     }
@@ -123,7 +124,7 @@ export class DriveRepository {
             }
             cacheService.del(this.getAllDrivesKey());
         } catch (e) {
-            console.error(`DriveRepository.delete failed for ${driveId}:`, e);
+            logger.error(`DriveRepository.delete failed for ${driveId}:`, e);
             throw e;
         }
     }
@@ -138,7 +139,7 @@ export class DriveRepository {
         try {
             return await kv.get(this.getDriveIdKey(driveId), "json");
         } catch (e) {
-            console.error(`DriveRepository.findById error for ${driveId}:`, e);
+            logger.error(`DriveRepository.findById error for ${driveId}:`, e);
             return null;
         }
     }
@@ -153,7 +154,7 @@ export class DriveRepository {
         // 由于 KV 不支持列出所有键，且为了遵循低频关键数据规则
         // 暂时返回空数组，避免使用 D1
         // 如需完整功能，需要重新设计架构
-        console.warn("DriveRepository.findAll: 当前实现返回空数组，如需完整功能请重新设计");
+        logger.warn("DriveRepository.findAll: 当前实现返回空数组，如需完整功能请重新设计");
         return [];
     }
 
