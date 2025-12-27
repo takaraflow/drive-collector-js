@@ -16,10 +16,10 @@ export async function startProcessor() {
     await TaskManager.init();
     console.log("✅ 历史任务初始化扫描与文件预热完成");
 
-    // 2. 启动自动缩放监控与任务轮询
+    // 2. 启动自动缩放监控（QStash事件驱动，无需轮询）
     TaskManager.startAutoScaling();
-    TaskManager.startPolling();
-    console.log("📊 已启动自动缩放监控与分布式任务轮询");
+    // TaskManager.startPolling(); // 移除：QStash集成后此方法已不存在
+    console.log("📊 已启动自动缩放监控（QStash事件驱动）");
 
     console.log("🎉 Processor 核心组件启动完成！");
 }
