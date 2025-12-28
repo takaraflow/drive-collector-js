@@ -776,37 +776,37 @@ export const setCurrentProviderState = (state) => {
  */
 const handler = {
     async fetch(request, env, ctx) {
-        // 规范化请求 URL：将多个连续斜杠替换为单个斜杠
-        const normalizedUrl = new URL(request.url);
-        normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
-
-        // 环境变量校验
-        if (!env.AXIOM_TOKEN) {
-            console.warn('AXIOM_TOKEN 未设置，日志功能将被禁用');
-        }
-        if (!env.QSTASH_CURRENT_SIGNING_KEY && env.SKIP_SIGNATURE_VERIFY !== 'true') {
-            console.warn('QSTASH_CURRENT_SIGNING_KEY 未设置且未跳过签名验证，Webhook 请求将被拒绝');
-        }
-        if (env.CF_KV_NAMESPACE_ID && !env.KV_STORAGE) {
-            console.warn('CF_KV_NAMESPACE_ID 已设置但 KV_STORAGE 绑定缺失，KV 功能将被禁用');
-        }
-        if (!env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) {
-            console.warn('UPSTASH_REDIS_REST_URL 或 UPSTASH_REDIS_REST_TOKEN 未设置，故障转移功能将被禁用');
-        }
-
-        // 初始化日志配置
-        logger.configure({
-            env: env.NODE_ENV || 'production'
-        });
-        logger.info('环境初始化', { nodeEnv: env.NODE_ENV || 'production', hasKv: !!env.KV_STORAGE }, ctx);
-
-        // 可选：设置 Worker ID
-        // Cloudflare Workers 不支持 global 对象，此处逻辑仅在测试环境有效
-        if (typeof globalThis !== 'undefined') {
-            globalThis.WORKER_ID = 'qstash-lb';
-        }
-
         try {
+            // 规范化请求 URL：将多个连续斜杠替换为单个斜杠
+            const normalizedUrl = new URL(request.url);
+            normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
+
+            // 环境变量校验
+            if (!env.AXIOM_TOKEN) {
+                console.warn('AXIOM_TOKEN 未设置，日志功能将被禁用');
+            }
+            if (!env.QSTASH_CURRENT_SIGNING_KEY && env.SKIP_SIGNATURE_VERIFY !== 'true') {
+                console.warn('QSTASH_CURRENT_SIGNING_KEY 未设置且未跳过签名验证，Webhook 请求将被拒绝');
+            }
+            if (env.CF_KV_NAMESPACE_ID && !env.KV_STORAGE) {
+                console.warn('CF_KV_NAMESPACE_ID 已设置但 KV_STORAGE 绑定缺失，KV 功能将被禁用');
+            }
+            if (!env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) {
+                console.warn('UPSTASH_REDIS_REST_URL 或 UPSTASH_REDIS_REST_TOKEN 未设置，故障转移功能将被禁用');
+            }
+
+            // 初始化日志配置
+            logger.configure({
+                env: env.NODE_ENV || 'production'
+            });
+            logger.info('环境初始化', { nodeEnv: env.NODE_ENV || 'production', hasKv: !!env.KV_STORAGE }, ctx);
+
+            // 可选：设置 Worker ID
+            // Cloudflare Workers 不支持 global 对象，此处逻辑仅在测试环境有效
+            if (typeof globalThis !== 'undefined') {
+                globalThis.WORKER_ID = 'qstash-lb';
+            }
+
             // 检查健康检查路径
             if ((request.method === 'GET' || request.method === 'HEAD') && normalizedUrl.pathname === '/health') {
                 return new Response('LB is running', { status: 200 });
