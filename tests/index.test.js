@@ -511,4 +511,4 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       expect(response.status).toBe(200);
     });
   });
-};
+});

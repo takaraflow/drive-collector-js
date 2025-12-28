@@ -2,6 +2,7 @@ name = "${WORKER_NAME}"
 main = "dist/index.js"
 compatibility_date = "2023-01-01"
 
+compatibility_flags = ["nodejs_compat"]
 # KV 命名空间绑定（需要与主项目使用相同的 KV 命名空间）
 [[kv_namespaces]]
 binding = "KV_STORAGE"
