@@ -869,6 +869,8 @@ const handler = {
     }
 };
 
+
+// @ts-expect-error Dynamic config function is supported by the library at runtime despite TypeScript complaints
 export default instrument(handler, (env) => ({
     exporter: {
         url: 'https://api.axiom.co/v1/traces',
