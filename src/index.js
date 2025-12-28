@@ -893,6 +893,26 @@ const handlerNoop = { ...handler };
 instrument(handlerAxiom, configAxiom);
 instrument(handlerNoop, configNoop);
 
+/**
+ * 修复 @microlabs/otel-cf-workers 库的 Bug
+ * 该库在拦截环境变量访问时，如果值为 undefined 会导致 isKVNamespace 函数报错
+ * TypeError: Cannot read properties of undefined (reading 'getWithMetadata')
+ */
+const createSafeEnv = (env) => {
+    return new Proxy(env || {}, {
+        get(target, prop, receiver) {
+            const value = Reflect.get(target, prop, receiver);
+            // 如果值为 undefined，返回空字符串
+            // 这样 isKVNamespace checks (value.getWithMetadata) 会变成 undefined (safe)
+            // 且空字符串是 falsy 值，不影响一般的 if (env.VAR) 判断
+            if (value === undefined) {
+                return "";
+            }
+            return value;
+        }
+    });
+};
+
 export default {
     async fetch(request, env, ctx) {
         if (env?.AXIOM_TOKEN && env?.AXIOM_DATASET) {
@@ -901,9 +921,9 @@ export default {
             enrichedEnv['otel.headers.Authorization'] = `Bearer ${env.AXIOM_TOKEN}`;
             enrichedEnv['otel.headers.X-Axiom-Dataset'] = env.AXIOM_DATASET;
             
-            return handlerAxiom.fetch(request, enrichedEnv, ctx);
+            return handlerAxiom.fetch(request, createSafeEnv(enrichedEnv), ctx);
         } else {
-            return handlerNoop.fetch(request, env, ctx);
+            return handlerNoop.fetch(request, createSafeEnv(env), ctx);
         }
     }
 };
