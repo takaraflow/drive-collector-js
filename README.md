@@ -69,6 +69,7 @@ Cloudflare Worker 负载均衡器，用于多实例请求转发，支持故障�
    ### 本地 Deploy
    ```
    export WORKER_NAME=your-worker-name
+   # 本地部署需设置 CLOUDFLARE_API_TOKEN 环境变量 或运行 `npx wrangler login`
    # 其他 env vars from .env
    npm run deploy
    ```
