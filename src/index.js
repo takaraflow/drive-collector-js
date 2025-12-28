@@ -269,30 +269,38 @@ function base64UrlEncode(buffer) {
 /**
  * 验证QStash签名 (手动实现)
  */
-async function verifyQStashSignature(request, env, ctx = null) {
+async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = null) {
   console.log('=== QStash Signature Debug Start ===');
   const headersLog = Object.fromEntries(request.headers.entries());
   console.log('All request headers:', headersLog);
-    const signature = request.headers.get('Upstash-Signature');
-    const timestamp = request.headers.get('Upstash-Timestamp');
+  const signature = request.headers.get('Upstash-Signature');
+  const timestamp = request.headers.get('Upstash-Timestamp');
 
-    const body = await request.text();
-    console.log('Request body length:', body.length);
-    console.log('Body preview (first 100 chars):', body.substring(0, 100) + (body.length > 100 ? '...' : ''));
+  console.log('Raw signature:', signature);
+  console.log('Raw timestamp:', timestamp);
 
-    console.log('Raw signature:', signature);
-    console.log('Raw timestamp:', timestamp);
-  
-    // 1. 验证签名是否存在
-    if (!signature || !timestamp) {
-        if (env.SKIP_SIGNATURE_VERIFY === 'true') {
-            console.log('=== QStash Signature Verified OK ===');
-            return body;
-        }
-        const error = new Error('Missing Upstash-Signature or Upstash-Timestamp header');
-        Object.assign(error, { status: 401 });
-        throw error;
+  let body;
+
+  if (!signature || !timestamp) {
+    if (skipBodyRead) {
+      console.log('=== QStash Signature Skipped (no headers) ===');
+      return null;
     }
+    if (env.SKIP_SIGNATURE_VERIFY === 'true') {
+      body = await request.text();
+      console.log('Request body length:', body.length);
+      console.log('=== QStash Signature Verified OK (skipped) ===');
+      return body;
+    }
+    const error = new Error('Missing Upstash-Signature or Upstash-Timestamp header');
+    Object.assign(error, { status: 401 });
+    throw error;
+  }
+
+  // 有签名头，读取 body 并验证
+  body = await request.text();
+  console.log('Request body length:', body.length);
+  console.log('Body preview (first 100 chars):', body.substring(0, 100) + (body.length > 100 ? '...' : ''));
 
     // 2. 验证时间戳是否过期
     const now = Math.floor(Date.now() / 1000);
@@ -531,8 +539,18 @@ const handler = {
                 return new Response('LB is running', { status: 200 });
             }
 
+            if (request.method === 'OPTIONS') {
+                return new Response(null, { status: 204 });
+            }
+
             // 1. 验证QStash签名
-            const body = await verifyQStashSignature(request, env);
+            let body = null;
+            if (request.method === 'GET') {
+                body = await verifyQStashSignature(request, env, true);
+            } else {
+                body = await verifyQStashSignature(request, env, false);
+            }
+            if (body === null) body = '';
 
             // 2. 获取活跃实例
             const activeInstances = await getActiveInstances(env, ctx);
@@ -561,8 +579,12 @@ const handler = {
             return response;
 
         } catch (error) {
-            logger.error('负载均衡器错误', { error: error.message, stack: error.stack }, ctx);
             const status = error.status || 500;
+            if (status === 401) {
+                logger.warn('签名验证失败', { error: error.message }, ctx);
+            } else {
+                logger.error('负载均衡器错误', { error: error.message, stack: error.stack }, ctx);
+            }
             return new Response(JSON.stringify({
               error: error.message,
               timestamp: new Date().toISOString()
