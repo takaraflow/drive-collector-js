@@ -17,3 +17,8 @@ SIGNATURE_EXPIRATION_WINDOW = "900"
 UPSTASH_REDIS_REST_URL = ""
 UPSTASH_REDIS_REST_TOKEN = ""
 NODE_ENV = "production"
+
+[observability]
+enabled = true
+# 采样率：1.0 表示 100% 记录，0.1 表示记录 10%
+head_sampling_rate = 1
