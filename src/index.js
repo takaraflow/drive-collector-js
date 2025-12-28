@@ -275,8 +275,7 @@ async function executeWithFailover(operation, env, ...args) {
  * Base64URL 编码辅助函数
  */
 function base64UrlEncode(buffer) {
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
-    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    return Buffer.from(buffer).toString('base64url');
 }
 
 /**
@@ -335,7 +334,7 @@ async function verifyQStashSignature(request, env, ctx = null) {
     const expectedBase64 = base64UrlEncode(expectedSignature);
 
     // 比较签名 (QStash使用 v1a=base64url 格式)
-    const providedSignature = signature.replace('v1a=', '');
+    const providedSignature = signature.replace('v1a=', '').replace(/=/g, '');
     if (providedSignature !== expectedBase64) {
         logger.debug('签名验证失败详情', {
             expectedSignature: expectedBase64,

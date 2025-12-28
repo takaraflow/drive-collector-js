@@ -139,6 +139,29 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       const result = await verifyQStashSignature(request, envWithSkip);
       expect(result).toBe('test-body');
     });
+
+    it('应该在签名包含填充字符=时正确验证', async () => {
+      const body = 'test-body';
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const signature = 'v1a=c2lnXzVQZmtKeXhjajFCQzVYOVc1aDk0TWh4bmROZ0c='; // 带填充字符的base64url
+
+      const request = {
+        headers: new Map([
+          ['Upstash-Signature', signature],
+          ['Upstash-Timestamp', timestamp],
+        ]),
+        text: jest.fn().mockResolvedValue(body),
+      };
+
+      // Mock crypto
+      global.crypto.subtle.importKey.mockResolvedValue('mock-key');
+      // Mock sign to return bytes that base64UrlEncode produces 'c2lnXzVQZmtKeXhjajFCQzVYOVc1aDk0TWh4bmROZ0c'
+      const expectedBytes = new Uint8Array(Buffer.from('c2lnXzVQZmtKeXhjajFCQzVYOVc1aDk0TWh4bmROZ0c', 'base64url'));
+      global.crypto.subtle.sign.mockResolvedValue(expectedBytes);
+
+      const result = await verifyQStashSignature(request, mockEnv);
+      expect(result).toBe(body);
+    });
   });
 
   describe('getActiveInstances', () => {
