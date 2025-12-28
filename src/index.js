@@ -278,6 +278,41 @@ async function upstash_put(env, key, value) {
 }
 
 /**
+ * Upstash KV mget 批量获取实现
+ */
+async function upstash_mget(env, keys) {
+    if (keys.length === 0) return [];
+
+    const body = JSON.stringify({ keys });
+
+    const response = await fetch(`${env.UPSTASH_REDIS_REST_URL}/mget`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`,
+            'Content-Type': 'application/json',
+        },
+        body: body,
+    });
+
+    if (!response.ok) {
+        const responseText = await response.text();
+        throw new Error(`Upstash MGET Error: ${response.status} ${response.statusText}. Response: ${responseText.substring(0, 100)}`);
+    }
+
+    const responseText = await response.text();
+    const result = safeJsonParse(responseText, 'upstash_mget');
+    if (!result) {
+        throw new Error(`Upstash MGET Parse Error: Failed to parse response. Response: ${responseText.substring(0, 100)}`);
+    }
+
+    if (result.error) {
+        throw new Error(`Upstash MGET Error: ${result.error}`);
+    }
+
+    return result.result || [];
+}
+
+/**
  * 带故障转移的KV操作执行器
  */
 async function executeWithFailover(operation, env, ctx, ...args) {
@@ -490,18 +525,33 @@ async function getActiveInstances(env, ctx) {
         const activeInstances = [];
         const now = Date.now();
 
-        // 获取所有实例键
-        const keys = await executeWithFailover('_kv_list', env, ctx, { prefix: INSTANCE_PREFIX });
-        logger.debug('获取到实例键列表', { keys: keys.keys.map(k => k.name) }, ctx);
+        // 1. 获取所有实例键
+        const keysResult = await executeWithFailover('_kv_list', env, ctx, { prefix: INSTANCE_PREFIX });
+        const keys = keysResult.keys.map(k => k.name);
+        logger.debug('获取到实例键列表', { keys }, ctx);
 
-        for (const key of keys.keys) {
+        if (keys.length === 0) return [];
+
+        // 2. 批量获取数据
+        let rawDatas;
+        if (currentProvider === 'upstash') {
+            rawDatas = await upstash_mget(env, keys);
+        } else {
+            rawDatas = await Promise.all(
+                keys.map(key => executeWithFailover('_kv_get', env, ctx, key))
+            );
+        }
+
+        // 3. 解析并过滤
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            const rawData = rawDatas[i];
             try {
-                const rawData = await executeWithFailover('_kv_get', env, ctx, key.name);
-                logger.debug('获取到实例原始数据', { key: key.name, rawData }, ctx);
-                const instance = parseInstanceData(rawData, key.name);
-                logger.debug('实例数据解析成功', { key: key.name, parsedInstance: instance }, ctx);
+                logger.debug('获取到实例原始数据', { key, rawData }, ctx);
+                const instance = parseInstanceData(rawData, key);
+                logger.debug('实例数据解析成功', { key, parsedInstance: instance }, ctx);
                 if (!instance || typeof instance !== 'object') {
-                    logger.warn('实例数据为空、格式错误或不是对象', { key: key.name, rawData, instanceType: typeof instance, provider: getCurrentProvider() }, ctx);
+                    logger.warn('实例数据为空、格式错误或不是对象', { key, rawData, instanceType: typeof instance, provider: getCurrentProvider() }, ctx);
                     continue;
                 }
                 if (instance.status !== 'active') {
@@ -523,8 +573,7 @@ async function getActiveInstances(env, ctx) {
                 }
                 activeInstances.push(instance);
             } catch (e) {
-                // 忽略单个实例获取失败
-                logger.error('实例信息获取失败', { instance: key.name, error: e.message, provider: getCurrentProvider() }, ctx);
+                logger.error('实例信息获取失败', { instance: key, error: e.message, provider: getCurrentProvider() }, ctx);
             }
         }
 
