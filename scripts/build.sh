@@ -1,1 +1,35 @@
-#!/bin/bash&#10;&#10;# 设置可选环境变量默认值&#10;WORKER_NAME=${WORKER_NAME:-drive-collector-lb}&#10;&#10;if [ -z "$CF_KV_NAMESPACE_ID" ]; then&#10;  echo "Warning: CF_KV_NAMESPACE_ID not set, KV binding will be empty in wrangler.build.toml"&#10;  CF_KV_NAMESPACE_ID=""&#10;fi&#10;&#10;# 设置默认值&#10;if [ -z "$KV_PREVIEW_ID" ]; then&#10;  KV_PREVIEW_ID="$CF_KV_NAMESPACE_ID"&#10;fi&#10;&#10;# 使用sed替换占位符&#10;sed \&#10;  -e "s/\${WORKER_NAME}/$WORKER_NAME/g" \&#10;  -e "s/\${CF_KV_NAMESPACE_ID}/$CF_KV_NAMESPACE_ID/g" \&#10;  -e "s/\${KV_PREVIEW_ID}/$KV_PREVIEW_ID/g" \&#10;  -e "s/\${AXIOM_TOKEN}/${AXIOM_TOKEN:-}/g" \&#10;  -e "s/\${AXIOM_ORG_ID}/${AXIOM_ORG_ID:-}/g" \&#10;  -e "s/\${AXIOM_DATASET}/${AXIOM_DATASET:-}/g" \&#10;  -e "s/\${QSTASH_CURRENT_SIGNING_KEY}/${QSTASH_CURRENT_SIGNING_KEY:-}/g" \&#10;  -e "s/\${UPSTASH_REDIS_REST_URL}/${UPSTASH_REDIS_REST_URL:-}/g" \&#10;  -e "s/\${UPSTASH_REDIS_REST_TOKEN}/${UPSTASH_REDIS_REST_TOKEN:-}/g" \&#10;  -e "s/\${NODE_ENV}/${NODE_ENV:-production}/g" \&#10;  wrangler.toml > wrangler.build.toml&#10;&#10;echo "wrangler.build.toml generated successfully"
+#!/bin/bash
+
+# 设置可选环境变量默认值
+WORKER_NAME=${WORKER_NAME:-drive-collector-lb}
+
+if [ -z "$CF_KV_NAMESPACE_ID" ]; then
+  echo "Warning: CF_KV_NAMESPACE_ID not set, KV binding will be empty in wrangler.toml"
+  CF_KV_NAMESPACE_ID=""
+fi
+
+# 设置默认值
+if [ -z "$KV_PREVIEW_ID" ]; then
+  KV_PREVIEW_ID="$CF_KV_NAMESPACE_ID"
+fi
+
+# 使用sed直接在wrangler.toml中替换占位符
+sed -i \
+  -e "s/\${WORKER_NAME}/$WORKER_NAME/g" \
+  -e "s/\${CF_KV_NAMESPACE_ID}/$CF_KV_NAMESPACE_ID/g" \
+  -e "s/\${KV_PREVIEW_ID}/$KV_PREVIEW_ID/g" \
+  -e "s/\${AXIOM_TOKEN}/${AXIOM_TOKEN:-}/g" \
+  -e "s/\${AXIOM_ORG_ID}/${AXIOM_ORG_ID:-}/g" \
+  -e "s/\${AXIOM_DATASET}/${AXIOM_DATASET:-}/g" \
+  -e "s/\${QSTASH_CURRENT_SIGNING_KEY}/${QSTASH_CURRENT_SIGNING_KEY:-}/g" \
+  -e "s/\${UPSTASH_REDIS_REST_URL}/${UPSTASH_REDIS_REST_URL:-}/g" \
+  -e "s/\${UPSTASH_REDIS_REST_TOKEN}/${UPSTASH_REDIS_REST_TOKEN:-}/g" \
+  -e "s/\${NODE_ENV}/${NODE_ENV:-production}/g" \
+  wrangler.toml
+
+if [ -z "$CF_KV_NAMESPACE_ID" ]; then
+  echo "Removing KV binding since CF_KV_NAMESPACE_ID is empty"
+  sed -i '/^\[\[kv_namespaces\]\]/, /preview_id /d' wrangler.toml
+fi
+
+echo "wrangler.toml updated successfully"
