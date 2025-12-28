@@ -287,10 +287,10 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
       return null;
     }
     if (env.SKIP_SIGNATURE_VERIFY === 'true') {
-      body = await request.text();
-      console.log('Request body length:', body.length);
+      body = await request.arrayBuffer();
+      console.log('Request body length:', body.byteLength);
       console.log('=== QStash Signature Verified OK (skipped) ===');
-      return body;
+      return new Uint8Array(body);
     }
     const error = new Error('Missing Upstash-Signature or Upstash-Timestamp header');
     Object.assign(error, { status: 401 });
@@ -298,9 +298,10 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
   }
 
   // 有签名头，读取 body 并验证
-  body = await request.text();
-  console.log('Request body length:', body.length);
-  console.log('Body preview (first 100 chars):', body.substring(0, 100) + (body.length > 100 ? '...' : ''));
+  body = await request.arrayBuffer();
+  const bodyString = new TextDecoder().decode(body);
+  console.log('Request body length:', body.byteLength);
+  console.log('Body preview (first 100 chars):', bodyString.substring(0, 100) + (bodyString.length > 100 ? '...' : ''));
 
     // 2. 验证时间戳是否过期
     const now = Math.floor(Date.now() / 1000);
@@ -322,13 +323,13 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
     }
 
     // QStash签名格式: timestamp.body
-    const message = `${timestamp}.${body}`;
+    const message = `${timestamp}.${bodyString}`;
 
     if (!env.QSTASH_CURRENT_SIGNING_KEY) {
       logger.error('缺少 QSTASH_CURRENT_SIGNING_KEY', {}, ctx);
       if (env.SKIP_SIGNATURE_VERIFY === 'true') {
         logger.info('SKIP_SIGNATURE_VERIFY=true，跳过签名验证', {}, ctx);
-        return body;
+        return new Uint8Array(body);
       }
       const error = new Error('QSTASH_CURRENT_SIGNING_KEY 未设置，无法验证签名');
       Object.assign(error, { status: 500 });
@@ -361,7 +362,7 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
         throw error;
     }
 
-    return body;
+    return new Uint8Array(body);
 }
 
 /**
@@ -439,6 +440,7 @@ async function forwardToInstance(instance, normalizedUrl, request, originalBody,
 
     const headers = new Headers(request.headers);
     headers.delete('content-length');
+    headers.delete('host');
 
     const requestOptions = {
         method: request.method,
@@ -453,15 +455,16 @@ async function forwardToInstance(instance, normalizedUrl, request, originalBody,
 
     if (request.method !== 'GET' && request.method !== 'HEAD') {
         requestOptions.body = originalBody;
+        logger.debug('转发请求 body', { length: originalBody.byteLength, hexPreview: Array.from(new Uint8Array(originalBody).slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join('') }, ctx);
     }
 
     const forwardRequest = new Request(url.toString(), requestOptions);
 
     const response = await fetch(forwardRequest);
 
-    // 如果是5xx错误，抛出异常以触发重试
+    // 记录5xx错误但不抛出
     if (response.status >= 500) {
-        throw new Error(`Instance ${instance.id} returned ${response.status}`);
+        logger.warn('后端返回 5xx 错误', { status: response.status, instanceId: instance.id }, ctx);
     }
 
     return response;
@@ -472,16 +475,26 @@ async function forwardToInstance(instance, normalizedUrl, request, originalBody,
  */
 async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx) {
     let lastError;
+    let last5xxResponse = null;
 
     for (const instance of instances) {
         try {
             const response = await forwardToInstance(instance, normalizedUrl, request, body, ctx);
+            if (response.status >= 500) {
+                last5xxResponse = response;
+                continue;
+            }
             return response;
         } catch (error) {
             logger.error('转发请求失败', { instanceId: instance.id, error: error.message }, ctx);
             lastError = error;
             // 继续尝试下一个实例
         }
+    }
+
+    // 如果有 5xx 响应，透传最后一个
+    if (last5xxResponse) {
+        return last5xxResponse;
     }
 
     // 所有实例都失败
@@ -562,7 +575,7 @@ const handler = {
             } else {
                 body = await verifyQStashSignature(request, env, false);
             }
-            if (body === null) body = '';
+            if (body === null) body = new Uint8Array();
 
             // 2. 获取活跃实例
             const activeInstances = await getActiveInstances(env, ctx);

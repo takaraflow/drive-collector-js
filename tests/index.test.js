@@ -82,6 +82,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           ['Upstash-Timestamp', timestamp],
         ]),
         text: jest.fn().mockResolvedValue(body),
+        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
       };
 
       // Mock crypto
@@ -91,13 +92,14 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       global.crypto.subtle.sign.mockResolvedValue(expectedBytes);
 
       const result = await verifyQStashSignature(request, mockEnv);
-      expect(result).toBe(body);
+      expect(result).toEqual(new Uint8Array(Buffer.from(body)));
     });
 
     it('应该在缺少签名头时抛出错误', async () => {
       const request = {
         headers: new Map(),
         text: jest.fn().mockResolvedValue('body'),
+        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
       };
 
       await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Missing Upstash-Signature or Upstash-Timestamp header');
@@ -111,6 +113,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           ['Upstash-Timestamp', timestamp],
         ]),
         text: jest.fn().mockResolvedValue('body'),
+        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
       };
 
       global.crypto.subtle.importKey.mockResolvedValue('mock-key');
@@ -127,6 +130,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           ['Upstash-Timestamp', expiredTimestamp],
         ]),
         text: jest.fn().mockResolvedValue('body'),
+        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
       };
 
       await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow(/Signature expired.*now.*ts.*window/);
@@ -137,10 +141,11 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       const request = {
         headers: new Map(),
         text: jest.fn().mockResolvedValue('test-body'),
+        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('test-body')),
       };
 
       const result = await verifyQStashSignature(request, envWithSkip);
-      expect(result).toBe('test-body');
+      expect(result).toEqual(new Uint8Array(Buffer.from('test-body')));
     });
 
     it('应该在签名包含填充字符=时正确验证', async () => {
@@ -154,6 +159,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           ['Upstash-Timestamp', timestamp],
         ]),
         text: jest.fn().mockResolvedValue(body),
+        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
       };
 
       // Mock crypto
@@ -163,7 +169,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       global.crypto.subtle.sign.mockResolvedValue(expectedBytes);
 
       const result = await verifyQStashSignature(request, mockEnv);
-      expect(result).toBe(body);
+      expect(result).toEqual(new Uint8Array(Buffer.from(body)));
     });
 
     it('应该支持毫秒级时间戳', async () => {
@@ -177,6 +183,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           ['Upstash-Timestamp', timestampMs],
         ]),
         text: jest.fn().mockResolvedValue(body),
+        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
       };
 
       // Mock crypto
@@ -185,7 +192,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       global.crypto.subtle.sign.mockResolvedValue(expectedBytes);
 
       const result = await verifyQStashSignature(request, mockEnv);
-      expect(result).toBe(body);
+      expect(result).toEqual(new Uint8Array(Buffer.from(body)));
     });
 
     it('应该使用默认15分钟过期窗口', async () => {
@@ -196,6 +203,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           ['Upstash-Timestamp', expiredTimestamp],
         ]),
         text: jest.fn().mockResolvedValue('body'),
+        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
       };
 
       await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Signature expired');
@@ -212,6 +220,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           ['Upstash-Timestamp', expiredTimestamp],
         ]),
         text: jest.fn().mockResolvedValue('body'),
+        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
       };
 
       // Mock crypto
@@ -220,7 +229,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       global.crypto.subtle.sign.mockResolvedValue(expectedBytes);
 
       const result = await verifyQStashSignature(request, customEnv);
-      expect(result).toBe('body');
+      expect(result).toEqual(new Uint8Array(Buffer.from('body')));
     });
   });
 
@@ -344,7 +353,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       );
     });
 
-    it('应该在5xx错误时抛出异常', async () => {
+    it('应该在5xx错误时返回响应', async () => {
       const instance = { id: '1', url: 'https://instance1.com' };
       const request = {
         url: 'https://lb.example.com/webhook',
@@ -358,7 +367,8 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       const mockResponse = { status: 500 };
       global.fetch.mockResolvedValue(mockResponse);
 
-      await expect(forwardToInstance(instance, normalizedUrl, request, originalBody)).rejects.toThrow();
+      const result = await forwardToInstance(instance, normalizedUrl, request, originalBody);
+      expect(result).toBe(mockResponse);
     });
   });
 
@@ -396,7 +406,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
-    it('应该在所有实例失败时抛出错误', async () => {
+    it('应该在所有实例失败时返回最后一个5xx响应', async () => {
       const instances = [
         { id: '1', url: 'https://instance1.com' },
         { id: '2', url: 'https://instance2.com' },
@@ -405,9 +415,11 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       const normalizedUrl = new URL(request.url);
       normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
 
-      global.fetch.mockResolvedValue({ status: 500 });
+      const lastResponse = { status: 500 };
+      global.fetch.mockResolvedValue(lastResponse);
 
-      await expect(fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body)).rejects.toThrow('Instance 2 returned 500');
+      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
+      expect(result).toBe(lastResponse);
     });
   });
 
@@ -568,6 +580,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           ['Upstash-Timestamp', Math.floor(Date.now() / 1000).toString()],
         ]),
         text: jest.fn().mockResolvedValue('body'),
+        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
       };
 
       const lb = await import('../src/index.js');
@@ -589,6 +602,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           ['Upstash-Timestamp', Math.floor(Date.now() / 1000).toString()],
         ]),
         text: jest.fn().mockResolvedValue('body'),
+        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
       };
 
       const lb = await import('../src/index.js');
@@ -602,6 +616,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         url: 'https://lb.example.com/webhook',
         headers: new Map(),
         text: jest.fn().mockResolvedValue('body'),
+        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
       };
 
       const lb = await import('../src/index.js');
@@ -671,6 +686,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           ['Upstash-Timestamp', Math.floor(Date.now() / 1000).toString()],
         ]),
         text: jest.fn().mockResolvedValue(downloadBody),
+        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(downloadBody)),
       };
 
       const lb = await import('../src/index.js');
