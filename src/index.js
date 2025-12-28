@@ -282,14 +282,23 @@ function base64UrlEncode(buffer) {
  * 验证QStash签名 (手动实现)
  */
 async function verifyQStashSignature(request, env, ctx = null) {
+  console.log('=== QStash Signature Debug Start ===');
+  const headersLog = Object.fromEntries(request.headers.entries());
+  console.log('All request headers:', headersLog);
     const signature = request.headers.get('Upstash-Signature');
     const timestamp = request.headers.get('Upstash-Timestamp');
 
     const body = await request.text();
+    console.log('Request body length:', body.length);
+    console.log('Body preview (first 100 chars):', body.substring(0, 100) + (body.length > 100 ? '...' : ''));
 
+    console.log('Raw signature:', signature);
+    console.log('Raw timestamp:', timestamp);
+  
     // 1. 验证签名是否存在
     if (!signature || !timestamp) {
         if (env.SKIP_SIGNATURE_VERIFY === 'true') {
+            console.log('=== QStash Signature Verified OK ===');
             return body;
         }
         const error = new Error('Missing Upstash-Signature or Upstash-Timestamp header');
@@ -300,14 +309,17 @@ async function verifyQStashSignature(request, env, ctx = null) {
     // 2. 验证时间戳是否过期
     const now = Math.floor(Date.now() / 1000);
     let ts = parseInt(timestamp);
-
+  
     // 兼容毫秒级时间戳 (如果 ts > 10^12，通常是毫秒)
+    console.log('Parsed timestamp (s):', ts);
     if (ts > 1000000000000) {
         ts = Math.floor(ts / 1000);
     }
 
     const window = parseInt(env.SIGNATURE_EXPIRATION_WINDOW) || 900; // 默认 15 分钟
-    if (Math.abs(now - ts) > window) {
+    const timeDiff = Math.abs(now - ts);
+    console.log('Current time (s):', now, 'Time diff (s):', timeDiff, 'Allowed window (s):', window);
+    if (timeDiff > window) {
         const error = new Error(`Signature expired (now: ${now}, ts: ${ts}, window: ${window})`);
         Object.assign(error, { status: 401 });
         throw error;
