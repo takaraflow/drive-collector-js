@@ -10,7 +10,17 @@ Cloudflare Worker 负载均衡器，用于多实例请求转发，支持故障�
 3. `source .env && npm run dev`
 
 ### 生产部署（Cloudflare Workers）
-1. 在 Cloudflare Dashboard 的 Worker 设置中添加名为 "KV" 的 KV Namespace binding。
+1. **配置 KV Namespace**：
+   1. **创建 KV Namespace**（如果没有）：[Workers & Pages > KV](https://dash.cloudflare.com/?to=/:account/workers-and-pages/kv) > Create namespace，记下 Namespace ID，填入 [`wrangler.build.toml`](wrangler.build.toml) 的 `[[kv_namespaces]]`：
+      ```
+      [[kv_namespaces]]
+      binding = "KV_STORAGE"
+      id = "your-namespace-id"
+      preview_id = "your-preview-id"
+      ```
+   2. **绑定到 Worker**：Workers > [你的 Worker] > Settings > Variables > KV Namespace Bindings > Add binding：
+      - Variable name: `KV_STORAGE`
+      - KV namespace: 选择你的 namespace
 2. **敏感环境变量使用 Secrets（推荐，避免硬编码泄露）：**
    ```
    wrangler secret put AXIOM_TOKEN
@@ -21,33 +31,48 @@ Cloudflare Worker 负载均衡器，用于多实例请求转发，支持故障�
    wrangler secret put UPSTASH_REDIS_REST_TOKEN  # 如需
    ```
    或通过 [Cloudflare Dashboard](https://dash.cloudflare.com/) 设置。
-3. **GitHub Actions CI/CD**（推荐）：
+3. **🚀 GitHub Actions CI/CD**（推荐）：
 
-   1. 在 GitHub Repository Settings > Secrets and variables > Actions 配置：
+   ### 创建 CLOUDFLARE_API_TOKEN
+   1. [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens) > Create Token > Custom token
+   2. **Permissions**（至少）：
+      | Resource | Permission |
+      |----------|------------|
+      | Account · Cloudflare Workers | Edit |
+   3. Continue to summary > Create Token，复制 value。
 
-      **Secrets**：
-      - `CLOUDFLARE_API_TOKEN`: CF API Token (Workers deploy 权限)
-      - `AXIOM_TOKEN`
-      - `AXIOM_ORG_ID`
-      - `QSTASH_CURRENT_SIGNING_KEY` (可选)
-      - `UPSTASH_REDIS_REST_TOKEN` (可选)
+   ### 配置 Secrets & Variables
+   Repository Settings > Secrets and variables > Actions：
 
-      **Variables**：
-      - `WORKER_NAME`: Worker 名称 (e.g. `lb-worker-js`)
-      - `AXIOM_DATASET`
-      - `UPSTASH_REDIS_REST_URL` (可选)
+   **Secrets**：
+   | Name | 描述 |
+   |------|------|
+   | `CLOUDFLARE_API_TOKEN` | 上步 API Token |
+   | `AXIOM_TOKEN` | Axiom ingestion token |
+   | `AXIOM_ORG_ID` | Axiom organization ID |
+   | `QSTASH_CURRENT_SIGNING_KEY` | QStash 当前 signing key (可选) |
+   | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis token (可选) |
 
-   2. Push 到 `main` 分支，自动构建并部署。
+   **Variables**：
+   | Name | 描述 |
+   |------|------|
+   | `WORKER_NAME` | Worker 名称 (e.g. `lb-worker-js`) |
+   | `AXIOM_DATASET` | Axiom dataset |
+   | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL (可选) |
 
-   **Local Deploy**：
-   设置环境变量后运行 `npm run deploy`。
+   4. Push 到 `main`，触发 [deploy.yml](.github/workflows/deploy.yml) 自动部署。
 
-   示例：
+   ### 本地 Deploy
    ```
    export WORKER_NAME=your-worker-name
+   # 其他 env vars from .env
    npm run deploy
    ```
-4. 构建 & 部署：`npm run deploy`（自动运行 build.sh 更新 toml 并 deploy，默认使用 wrangler.toml）。
+
+   ### Troubleshooting
+   - **Token error**：确认 API Token 有 "Cloudflare Workers: Edit" 权限，重试。
+   - **Wrangler version warning**：运行 `npm i wrangler@latest -g` 更新。
+   - **Deploy 失败**：检查 Actions logs，确认 secrets/vars 已设。
 
 **注意：** `wrangler.toml` 和 `build.sh` 使用占位符 `${VAR}` 机制，确保无隐私硬编码。Secrets 优先于 env vars 中的 vars。
 
