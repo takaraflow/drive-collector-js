@@ -1,0 +1,1 @@
+export const instrument = (handler) => handler;

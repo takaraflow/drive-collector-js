@@ -3,73 +3,61 @@
  * 负载均衡器，接收QStash Webhook，转发到活跃实例
  */
 
+import { trace } from '@opentelemetry/api';
+import { instrument } from '@microlabs/otel-cf-workers';
+
+const config = {
+  exporter: {
+    url: 'https://api.axiom.co/v1/traces',
+    headers: {
+      Authorization: 'Bearer ${AXIOM_TOKEN}',
+      'X-Axiom-Dataset': '${AXIOM_DATASET}',
+    },
+  },
+  serviceName: 'lb-worker-js',
+};
+
 const logger = {
-  axiom: null,
-  axiomConfig: null,
   env: 'production',
 
-  configure({ axiom, env = 'production' }) {
-    this.axiomConfig = axiom;
+  configure({ env = 'production' }) {
     this.env = env;
   },
 
   info(message, meta = {}, ctx = null) {
-    console.log(`[${new Date().toISOString()}] INFO: ${message}`, meta);
-    this.sendToAxiom('info', message, meta, ctx);
+    const span = trace.getActiveSpan();
+    if (span) span.addEvent(message, meta);
+    console.log(`INFO: ${message}`, meta);
   },
 
   warn(message, meta = {}, ctx = null) {
-    console.warn(`[${new Date().toISOString()}] WARN: ${message}`, meta);
-    this.sendToAxiom('warn', message, meta, ctx);
+    const span = trace.getActiveSpan();
+    if (span) {
+        span.setStatus({ code: 1, message: message }); // 1 = Error (in some OTel versions, or use attributes)
+        span.setAttribute('log.level', 'warn');
+        span.addEvent(message, meta);
+    }
+    console.warn(`WARN: ${message}`, meta);
   },
 
   error(message, meta = {}, ctx = null) {
-    console.error(`[${new Date().toISOString()}] ERROR: ${message}`, meta);
-    this.sendToAxiom('error', message, meta, ctx);
+    const span = trace.getActiveSpan();
+    if (span) {
+        span.recordException(message instanceof Error ? message : new Error(message));
+        span.setStatus({ code: 2 }); // 2 = Error
+    }
+    console.error(`ERROR: ${message}`, meta);
   },
    
   debug(message, meta = {}, ctx = null) {
     if (this.env !== 'production') {
-      console.debug(`[${new Date().toISOString()}] DEBUG: ${message}`, meta);
+      const span = trace.getActiveSpan();
+      if (span) span.addEvent(message, meta);
+      console.debug(`DEBUG: ${message}`, meta);
     }
-    this.sendToAxiom('debug', message, meta, ctx);
   },
    
-  sendToAxiom(level, message, meta, ctx = null) {
-    if (!this.axiomConfig) return;
-    
-    const promise = (async () => {
-      try {
-        if (!this.axiom) {
-          const { Axiom } = await import('@axiomhq/js');
-          this.axiom = new Axiom({
-            token: this.axiomConfig.token,
-            orgId: this.axiomConfig.orgId,
-          });
-          this.dataset = this.axiomConfig.dataset;
-        }
-  
-        const payload = {
-          _time: new Date().toISOString(),
-          data: {
-            level,
-            message,
-            env: this.env,
-            ...meta
-          }
-        };
-  
-        await this.axiom.ingest(this.dataset, [payload]);
-      } catch (e) {
-        console.error(`Axiom 发送失败: ${e.message}`, { level, message, meta });
-      }
-    })();
-  
-    if (ctx && typeof ctx.waitUntil === 'function') {
-      ctx.waitUntil(promise);
-    }
-    return promise;
-  }
+
 };
 
 // 常量
@@ -510,14 +498,11 @@ export const setCurrentProviderState = (state) => {
 /**
  * Worker 主入口
  */
-export default {
+const handler = {
     async fetch(request, env, ctx) {
         // 环境变量校验
         if (!env.AXIOM_TOKEN) {
             console.warn('AXIOM_TOKEN 未设置，日志功能将被禁用');
-        }
-        if (!env.AXIOM_ORG_ID) {
-            console.warn('AXIOM_ORG_ID 未设置，日志功能将被禁用');
         }
         if (!env.QSTASH_CURRENT_SIGNING_KEY && env.SKIP_SIGNATURE_VERIFY !== 'true') {
             console.warn('QSTASH_CURRENT_SIGNING_KEY 未设置且未跳过签名验证，Webhook 请求将被拒绝');
@@ -531,11 +516,6 @@ export default {
 
         // 初始化日志配置
         logger.configure({
-            axiom: {
-                token: env.AXIOM_TOKEN,
-                orgId: env.AXIOM_ORG_ID,
-                dataset: env.AXIOM_DATASET || 'drive-collector'
-            },
             env: env.NODE_ENV || 'production'
         });
 
@@ -593,3 +573,5 @@ export default {
         }
     }
 };
+
+export default instrument(handler, config);
