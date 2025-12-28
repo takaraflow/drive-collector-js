@@ -542,6 +542,16 @@ async function getActiveInstances(env, ctx) {
             );
         }
 
+        console.log(`[DEBUG] 获取到 ${keys.length} 个实例键 (provider: ${getCurrentProvider()})`);
+        console.log('[DEBUG] 实例键列表:', keys);
+        const allInstancesData = keys.map((key, i) => ({
+            key,
+            rawData: rawDatas[i],
+            parsed: parseInstanceData(rawDatas[i], key)
+        }));
+        console.log('[DEBUG] 所有实例详细信息:');
+        console.log(JSON.stringify(allInstancesData, null, 2));
+
         // 3. 解析并过滤
         for (let i = 0; i < keys.length; i++) {
             const key = keys[i];
