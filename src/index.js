@@ -870,31 +870,40 @@ const handler = {
 };
 
 
-// @ts-expect-error Dynamic config function is supported by the library at runtime
-export default instrument(handler, (env) => {
-    // 基础配置
-    const config = { 
-        serviceName: 'lb-worker-js' 
-    };
-    
-    // 只有当所有必要变量都存在时，才构造 exporter 分支
-    if (env?.AXIOM_TOKEN && env?.AXIOM_DATASET) {
-        config.exporter = {
-            url: 'https://api.axiom.co/v1/traces',
-            headers: {
-                Authorization: `Bearer ${env.AXIOM_TOKEN}`,
-                'X-Axiom-Dataset': env.AXIOM_DATASET,
-            },
-        };
-    } else {
-        console.warn('OTEL: Missing AXIOM_TOKEN or AXIOM_DATASET, running without exporter');
-        // 修复: 即使没有配置 Axiom，也提供一个空的 exporter 配置，防止 OTLPFetchTraceExporter 构造函数因 undefined options 崩溃
-        // 报错信息: "Cannot read properties of undefined (reading 'headers')"
-        config.exporter = {
-            url: 'http://localhost/ignore', // 设置一个无效地址
-            headers: {},
-        };
+const configAxiom = {
+    serviceName: 'lb-worker-js',
+    exporter: {
+        url: 'https://api.axiom.co/v1/traces',
+        headers: {}
     }
-    
-    return config;
-});
+};
+
+const configNoop = {
+    serviceName: 'lb-worker-js',
+    exporter: {
+        url: 'http://localhost/ignore',
+        headers: {}
+    }
+};
+
+// Create copies of handler to instrument differently
+const handlerAxiom = { ...handler };
+const handlerNoop = { ...handler };
+
+instrument(handlerAxiom, configAxiom);
+instrument(handlerNoop, configNoop);
+
+export default {
+    async fetch(request, env, ctx) {
+        if (env?.AXIOM_TOKEN && env?.AXIOM_DATASET) {
+            // Inject OTEL headers for Axiom
+            const enrichedEnv = { ...env };
+            enrichedEnv['otel.headers.Authorization'] = `Bearer ${env.AXIOM_TOKEN}`;
+            enrichedEnv['otel.headers.X-Axiom-Dataset'] = env.AXIOM_DATASET;
+            
+            return handlerAxiom.fetch(request, enrichedEnv, ctx);
+        } else {
+            return handlerNoop.fetch(request, env, ctx);
+        }
+    }
+};
