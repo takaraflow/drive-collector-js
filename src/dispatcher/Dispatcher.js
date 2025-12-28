@@ -253,6 +253,10 @@ export class Dispatcher {
                     return await this._handleHelpCommand(target, userId);
                 case "/diagnosis":
                     return await this._handleDiagnosisCommand(target, userId);
+                case "/open_service":
+                    return await this._handleModeSwitchCommand(target, userId, 'public');
+                case "/close_service":
+                    return await this._handleModeSwitchCommand(target, userId, 'private');
                 case "/status_public":
                     return await this._handleModeSwitchCommand(target, userId, 'public');
                 case "/status_private":

@@ -10,6 +10,9 @@ export const STRINGS = {
               "/status - 📊 查看系统状态与任务历史\n" +
               "/help - 📖 显示此帮助菜单\n" +
               "/logout - ❌ 解绑当前网盘\n\n" +
+              "<b>管理员命令：</b>\n" +
+              "/open_service - 🔓 开启服务 (公开模式)\n" +
+              "/close_service - 🔒 关闭服务 (维护模式)\n\n" +
               "<b>支持的链接类型：</b>\n" +
               "• Telegram 消息链接\n" +
               "• 直链 (部分支持)\n\n" +
