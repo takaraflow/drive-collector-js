@@ -44,10 +44,11 @@ export WORKER_NAME AXIOM_DATASET NODE_ENV CF_KV_NAMESPACE_ID KV_PREVIEW_ID
 
 # 使用 envsubst 替换占位符
 if command -v envsubst >/dev/null 2>&1; then
-  envsubst '${AXIOM_TOKEN} ${AXIOM_ORG_ID} ${QSTASH_CURRENT_SIGNING_KEY} ${UPSTASH_REDIS_REST_URL} ${UPSTASH_REDIS_REST_TOKEN} ${WORKER_NAME} ${AXIOM_DATASET} ${NODE_ENV} ${CF_KV_NAMESPACE_ID} ${KV_PREVIEW_ID}' < wrangler.toml > wrangler.toml.tmp && mv wrangler.toml.tmp wrangler.toml
+  envsubst '${AXIOM_TOKEN} ${AXIOM_ORG_ID} ${QSTASH_CURRENT_SIGNING_KEY} ${UPSTASH_REDIS_REST_URL} ${UPSTASH_REDIS_REST_TOKEN} ${WORKER_NAME} ${AXIOM_DATASET} ${NODE_ENV} ${CF_KV_NAMESPACE_ID} ${KV_PREVIEW_ID}' < wrangler.build.toml > wrangler.toml
 else
   echo "envsubst not found, falling back to sed"
-  # 回退到改进的 sed 逻辑
+  # 回退到改进的 sed 逻辑，先复制模板
+  cp wrangler.build.toml wrangler.toml
   sed -i \
     -e 's/${WORKER_NAME}/'"$WORKER_NAME"'/g' \
     -e 's/${AXIOM_TOKEN}/'"$AXIOM_TOKEN"'/g' \
