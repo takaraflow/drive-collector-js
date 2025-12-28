@@ -47,13 +47,26 @@ SIGNATURE_EXPIRATION_WINDOW=${SIGNATURE_EXPIRATION_WINDOW:-900}
 CF_KV_NAMESPACE_ID=${CF_KV_NAMESPACE_ID:-}
 KV_PREVIEW_ID=${KV_PREVIEW_ID:-}
 
+# 根据 WRANGLER_MODE 设置 CLOUDFLARE_ACCOUNT_ID
+if [ "$WRANGLER_MODE" = "local" ]; then
+    CLOUDFLARE_ACCOUNT_ID="unused-in-local-dev"
+elif [ "$WRANGLER_MODE" = "remote" ]; then
+    if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+        echo "错误: 远程开发模式需要 CLOUDFLARE_ACCOUNT_ID"
+        echo "请在 .env 文件中设置此变量"
+        exit 1
+    fi
+else
+    CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:-}
+fi
+
 # 导出变量供 envsubst 使用
 export AXIOM_TOKEN AXIOM_ORG_ID QSTASH_CURRENT_SIGNING_KEY SIGNATURE_EXPIRATION_WINDOW UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN
-export WORKER_NAME AXIOM_DATASET NODE_ENV CF_KV_NAMESPACE_ID KV_PREVIEW_ID
+export WORKER_NAME AXIOM_DATASET NODE_ENV CF_KV_NAMESPACE_ID KV_PREVIEW_ID CLOUDFLARE_ACCOUNT_ID
 
 # 使用 envsubst 替换占位符
 if command -v envsubst >/dev/null 2>&1; then
-  envsubst '${AXIOM_TOKEN} ${AXIOM_ORG_ID} ${QSTASH_CURRENT_SIGNING_KEY} ${SIGNATURE_EXPIRATION_WINDOW} ${UPSTASH_REDIS_REST_URL} ${UPSTASH_REDIS_REST_TOKEN} ${WORKER_NAME} ${AXIOM_DATASET} ${NODE_ENV} ${CF_KV_NAMESPACE_ID} ${KV_PREVIEW_ID}' < wrangler.build.toml > wrangler.toml
+  envsubst '${AXIOM_TOKEN} ${AXIOM_ORG_ID} ${QSTASH_CURRENT_SIGNING_KEY} ${SIGNATURE_EXPIRATION_WINDOW} ${UPSTASH_REDIS_REST_URL} ${UPSTASH_REDIS_REST_TOKEN} ${WORKER_NAME} ${AXIOM_DATASET} ${NODE_ENV} ${CF_KV_NAMESPACE_ID} ${KV_PREVIEW_ID} ${CLOUDFLARE_ACCOUNT_ID}' < wrangler.build.toml > wrangler.toml
 else
   echo "envsubst not found, falling back to sed"
   # 回退到改进的 sed 逻辑，先复制模板
@@ -70,7 +83,44 @@ else
     -e 's/${NODE_ENV}/'"$NODE_ENV"'/g' \
     -e 's/${CF_KV_NAMESPACE_ID}/'"$CF_KV_NAMESPACE_ID"'/g' \
     -e 's/${KV_PREVIEW_ID}/'"$KV_PREVIEW_ID"'/g' \
+    -e 's/${CLOUDFLARE_ACCOUNT_ID}/'"$CLOUDFLARE_ACCOUNT_ID"'/g' \
     wrangler.toml
+fi
+
+# 处理 preview_id
+if [ -z "$KV_PREVIEW_ID" ]; then
+  if [ "$NODE_ENV" != "production" ] && [ -n "$CF_KV_NAMESPACE_ID" ]; then
+    # 本地开发模式且设置了生产 ID：提供占位符以绕过 Wrangler 的强制校验
+    DUMMY_ID="00000000000000000000000000000000"
+    # 极端情况处理：如果生产 ID 恰好也是这个占位符，则换一个
+    if [ "$DUMMY_ID" = "$CF_KV_NAMESPACE_ID" ]; then
+      DUMMY_ID="ffffffffffffffffffffffffffffffff"
+    fi
+    sed -i "s|preview_id = .*|preview_id = \"$DUMMY_ID\"|g" wrangler.toml
+    echo "本地开发模式：已设置占位符 preview_id 以绕过 Wrangler 验证。"
+  else
+    # 生产环境或完全没有 KV 配置：移除 preview_id 行
+    sed -i '/preview_id = .*/d' wrangler.toml
+    echo "已从 wrangler.toml 中移除 preview_id。"
+
+    if [ -z "$CF_KV_NAMESPACE_ID" ]; then
+      # 如果两者都为空，移除整个 kv_namespaces 绑定
+      sed -i '/^\[\[kv_namespaces\]\]/,/^\[/ { /^\[\[kv_namespaces\]\]/d; /^\[/!d; }' wrangler.toml
+    fi
+  fi
+fi
+
+if [ "$WRANGLER_MODE" = "local" ]; then
+    echo "本地开发模式：移除 KV ID 以强制使用本地模拟"
+    sed -i '/^id = /d' wrangler.toml
+    sed -i '/^preview_id = /d' wrangler.toml
+elif [ "$WRANGLER_MODE" = "remote" ]; then
+    echo "远程开发模式：检查 KV 配置"
+    if [ -z "$CF_KV_NAMESPACE_ID" ] || [ -z "$KV_PREVIEW_ID" ]; then
+        echo "错误: 远程开发模式需要 CF_KV_NAMESPACE_ID 和 KV_PREVIEW_ID"
+        echo "请在 .env 文件中设置这些变量"
+        exit 1
+    fi
 fi
 
 # 校验构建结果：检查是否还有未替换的占位符

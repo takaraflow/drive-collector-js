@@ -443,14 +443,27 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
     });
 
     describe('shouldFailover', () => {
-      it('应该在配额错误且达到最大失败次数时返回true', () => {
+      it('应该在配额错误时立即返回true', () => {
         const error = new Error('free usage limit exceeded');
         const env = { UPSTASH_REDIS_REST_URL: 'test', UPSTASH_REDIS_REST_TOKEN: 'test' };
 
-        // 模拟多次失败
-        for (let i = 0; i < 3; i++) {
-          expect(shouldFailover(error, env)).toBe(i === 2);
-        }
+        expect(shouldFailover(error, env)).toBe(true);
+      });
+
+      it('应该在网络错误时立即返回true', () => {
+        const error = new Error('fetch failed');
+        const env = { UPSTASH_REDIS_REST_URL: 'test', UPSTASH_REDIS_REST_TOKEN: 'test' };
+
+        expect(shouldFailover(error, env)).toBe(true);
+      });
+
+      it('应该在其他错误连续失败 3 次后返回true', () => {
+        const error = new Error('unknown error');
+        const env = { UPSTASH_REDIS_REST_URL: 'test', UPSTASH_REDIS_REST_TOKEN: 'test' };
+
+        expect(shouldFailover(error, env)).toBe(false);
+        expect(shouldFailover(error, env)).toBe(false);
+        expect(shouldFailover(error, env)).toBe(true);
       });
 
       it('应该在没有Upstash配置时返回false', () => {
@@ -517,21 +530,14 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           text: () => Promise.resolve(JSON.stringify({ result: 'upstash-value' }))
         });
 
-        // Mock KV failure
+        // Mock KV failure (quota error triggers immediate failover)
         mockKV.get.mockRejectedValue(new Error('free usage limit exceeded'));
 
-        // 多次调用以触发故障转移
-        for (let i = 0; i < 3; i++) {
-          try {
-            await executeWithFailover('_kv_get', mockEnv, 'test-key');
-          } catch (e) {
-            // 忽略
-          }
-        }
-
-        // 现在应该在upstash模式
+        // 调用一次即触发故障转移并重试成功
         const result = await executeWithFailover('_kv_get', mockEnv, {}, 'test-key');
+        
         expect(result).toBe('upstash-value');
+        expect(getCurrentProvider()).toBe('Upstash Redis');
         expect(global.fetch).toHaveBeenCalledWith(
           'https://test.upstash.io/get/test-key',
           expect.objectContaining({

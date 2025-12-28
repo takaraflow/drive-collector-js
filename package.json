@@ -5,8 +5,8 @@
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "dev": "npm run build && wrangler dev --local",
-    "dev:remote": "npm run build && wrangler dev --remote",
+    "dev": "cross-env WRANGLER_MODE=local npm run build && cross-env WRANGLER_SEND_METRICS=false WRANGLER_SKIP_UPDATE_CHECK=true WRANGLER_OFFLINE=true wrangler dev --local --ip 127.0.0.1",
+    "dev:remote": "cross-env WRANGLER_MODE=remote npm run build && cross-env WRANGLER_SEND_METRICS=false WRANGLER_SKIP_UPDATE_CHECK=true wrangler dev --remote",
     "build": "bash scripts/build.sh && esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:*",
     "deploy": "npm run build && npx wrangler deploy",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",

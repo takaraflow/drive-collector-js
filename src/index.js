@@ -104,11 +104,35 @@ const INSTANCE_PREFIX = 'instance:';
 const HEARTBEAT_TIMEOUT = 30 * 60 * 1000; // 30分钟
 const ROUND_ROBIN_KEY = 'lb:round_robin_index';
 
-// 故障转移配置
+// 故障转移配置增强
 let currentProvider = 'cloudflare'; // 'cloudflare' | 'upstash'
 let failureCount = 0;
 let lastFailureTime = 0;
-const MAX_FAILURES = 3;
+let failoverReason = null; // 'quota' | 'network' | 'other'
+
+const MAX_FAILURES = 3; // 对于非立即降级的错误保留
+const QUOTA_RECOVERY_INTERVAL = 12 * 60 * 60 * 1000; // 配额错误恢复间隔：12小时
+const NETWORK_RECOVERY_INTERVAL = 30 * 60 * 1000;    // 网络错误恢复间隔：30分钟
+
+/**
+ * 检查是否可以恢复到 Cloudflare KV
+ */
+function checkRecovery(ctx) {
+    if (currentProvider !== 'upstash') return;
+
+    const now = Date.now();
+    const interval = failoverReason === 'quota' ? QUOTA_RECOVERY_INTERVAL : NETWORK_RECOVERY_INTERVAL;
+
+    if (now - lastFailureTime > interval) {
+        logger.info(`达到恢复检查阈值，尝试切回 Cloudflare KV`, { 
+            reason: failoverReason,
+            lastFailure: new Date(lastFailureTime).toISOString()
+        }, ctx);
+        // 尝试切回，如果后续操作失败会再次触发 shouldFailover
+        currentProvider = 'cloudflare';
+        failureCount = 0;
+    }
+}
 
 /**
  * 检查是否应该触发故障转移
@@ -118,20 +142,27 @@ function shouldFailover(error, env, ctx) {
         return false;
     }
 
-    const isQuotaError = error.message.includes('free usage limit') ||
-                        error.message.includes('quota exceeded') ||
-                        error.message.includes('rate limit') ||
-                        error.message.includes('fetch failed') ||
-                        error.message.includes('network') ||
-                        error.message.includes('timeout');
+    const msg = error.message.toLowerCase();
+    const isQuotaError = msg.includes('free usage limit') || msg.includes('quota exceeded') || msg.includes('rate limit');
+    const isNetworkError = msg.includes('fetch failed') || msg.includes('network') || msg.includes('timeout');
 
-    if (isQuotaError) {
-        failureCount++;
+    if (isQuotaError || isNetworkError) {
+        failoverReason = isQuotaError ? 'quota' : 'network';
         lastFailureTime = Date.now();
-        if (failureCount >= MAX_FAILURES) {
-            logger.warn(`Cloudflare KV 连续失败，触发故障转移`, { failureCount, provider: 'cloudflare' }, ctx);
-            return true;
-        }
+        logger.warn(`检测到 ${failoverReason} 错误，立即触发故障转移`, { 
+            error: error.message, 
+            provider: 'cloudflare' 
+        }, ctx);
+        return true;
+    }
+
+    // 其他错误仍走连续失败逻辑
+    failureCount++;
+    if (failureCount >= MAX_FAILURES) {
+        failoverReason = 'other';
+        lastFailureTime = Date.now();
+        logger.warn(`Cloudflare KV 连续失败，触发故障转移`, { failureCount, provider: 'cloudflare' }, ctx);
+        return true;
     }
 
     return false;
@@ -316,8 +347,11 @@ async function upstash_mget(env, keys) {
  * 带故障转移的KV操作执行器
  */
 async function executeWithFailover(operation, env, ctx, ...args) {
+    // 1. 检查是否可以恢复
+    checkRecovery(ctx);
+
     let attempts = 0;
-    const maxAttempts = 3;
+    const maxAttempts = 2; // 降级模式下减少重试次数
 
     while (attempts < maxAttempts) {
         try {
@@ -336,16 +370,16 @@ async function executeWithFailover(operation, env, ctx, ...args) {
         } catch (error) {
             attempts++;
 
-            if (!isRetryableError(error) || currentProvider === 'upstash') {
-                throw error;
-            }
-
             if (shouldFailover(error, env, ctx)) {
                 failover(env, ctx);
-                continue; // 重试一次，使用新提供商
+                // 切换后立即重试
+                continue;
             }
 
-            if (attempts >= maxAttempts) throw error;
+            if (attempts >= maxAttempts || currentProvider === 'upstash') {
+                throw error;
+            }
+            
             console.log(`ℹ️ ${getCurrentProvider()} 重试中 (${attempts}/${maxAttempts})...`);
         }
     }
@@ -717,11 +751,12 @@ export {
 };
 
 // 导出状态访问器以便测试
-export const getCurrentProviderState = () => ({ currentProvider, failureCount, lastFailureTime });
+export const getCurrentProviderState = () => ({ currentProvider, failureCount, lastFailureTime, failoverReason });
 export const setCurrentProviderState = (state) => {
     if (state.currentProvider !== undefined) currentProvider = state.currentProvider;
     if (state.failureCount !== undefined) failureCount = state.failureCount;
     if (state.lastFailureTime !== undefined) lastFailureTime = state.lastFailureTime;
+    if (state.failoverReason !== undefined) failoverReason = state.failoverReason;
 };
 
 /**
