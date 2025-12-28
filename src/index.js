@@ -888,6 +888,12 @@ export default instrument(handler, (env) => {
         };
     } else {
         console.warn('OTEL: Missing AXIOM_TOKEN or AXIOM_DATASET, running without exporter');
+        // 修复: 即使没有配置 Axiom，也提供一个空的 exporter 配置，防止 OTLPFetchTraceExporter 构造函数因 undefined options 崩溃
+        // 报错信息: "Cannot read properties of undefined (reading 'headers')"
+        config.exporter = {
+            url: 'http://localhost/ignore', // 设置一个无效地址
+            headers: {},
+        };
     }
     
     return config;
