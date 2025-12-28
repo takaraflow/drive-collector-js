@@ -31,6 +31,13 @@ if [ -z "$AXIOM_ORG_ID" ] || [ "$AXIOM_ORG_ID" = '${AXIOM_ORG_ID}' ]; then
     echo "警告: AXIOM_ORG_ID 未设置，日志功能可能受限"
 fi
 
+# 清理可能误传为占位符字符串的变量
+for var in AXIOM_TOKEN AXIOM_ORG_ID QSTASH_CURRENT_SIGNING_KEY UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN WORKER_NAME AXIOM_DATASET NODE_ENV SIGNATURE_EXPIRATION_WINDOW CF_KV_NAMESPACE_ID KV_PREVIEW_ID CLOUDFLARE_ACCOUNT_ID; do
+    if [ "${!var}" = "\${$var}" ]; then
+        unset "$var"
+    fi
+done
+
 # 设置环境变量默认值
 # 敏感变量如果未设置，则设为空字符串
 AXIOM_TOKEN=${AXIOM_TOKEN:-}
