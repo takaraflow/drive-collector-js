@@ -12,6 +12,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: Actions
+    env:
+      BARK_WEBHOOK_URL: ${{ secrets.BARK_WEBHOOK_URL }}
+      BARK_DEVICE_TOKEN: ${{ secrets.BARK_DEVICE_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,3 +45,9 @@ jobs:
           NODE_ENV: production
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: npm run deploy
+
+      - name: Notify Bark result
+        if: always()
+        run: |
+          MESSAGE="GHA ${{ github.workflow }} - ${{ github.job }} 结果: ${{ job.status }} (Commit: ${{ github.sha }})"
+          curl -X GET "${{ env.BARK_WEBHOOK_URL }}${{ env.BARK_DEVICE_TOKEN }}/$(echo $MESSAGE | sed 's/ /%20/g')?group=GHA"
