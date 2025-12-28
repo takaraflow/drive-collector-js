@@ -22,9 +22,11 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install production dependencies
+        run: npm ci --production
 
+      - name: Install build tools
+        run: npm install --no-save esbuild wrangler
       - name: Deploy
         env:
           WORKER_NAME: ${{ vars.WORKER_NAME }}
