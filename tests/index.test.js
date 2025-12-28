@@ -279,8 +279,8 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       });
 
       const result = await getActiveInstances(mockEnv);
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('1');
+      expect(result).toHaveLength(2);
+      expect(result.map(i => i.id).sort()).toEqual(['1', '3']);
     });
 
     it('应该在KV错误时返回空数组', async () => {

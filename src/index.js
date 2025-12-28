@@ -101,7 +101,7 @@ const logger = {
 
 // 常量
 const INSTANCE_PREFIX = 'instance:';
-const HEARTBEAT_TIMEOUT = 15 * 60 * 1000; // 15分钟
+const HEARTBEAT_TIMEOUT = 30 * 60 * 1000; // 30分钟
 const ROUND_ROBIN_KEY = 'lb:round_robin_index';
 
 // 故障转移配置
@@ -492,11 +492,14 @@ async function getActiveInstances(env, ctx) {
 
         // 获取所有实例键
         const keys = await executeWithFailover('_kv_list', env, ctx, { prefix: INSTANCE_PREFIX });
+        logger.debug('获取到实例键列表', { keys: keys.keys.map(k => k.name) }, ctx);
 
         for (const key of keys.keys) {
             try {
                 const rawData = await executeWithFailover('_kv_get', env, ctx, key.name);
+                logger.debug('获取到实例原始数据', { key: key.name, rawData }, ctx);
                 const instance = parseInstanceData(rawData, key.name);
+                logger.debug('实例数据解析成功', { key: key.name, parsedInstance: instance }, ctx);
                 if (!instance || typeof instance !== 'object') {
                     logger.warn('实例数据为空、格式错误或不是对象', { key: key.name, rawData, instanceType: typeof instance, provider: getCurrentProvider() }, ctx);
                     continue;
