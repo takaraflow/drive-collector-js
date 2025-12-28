@@ -672,5 +672,66 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
 
       expect(response.status).toBe(200);
     });
+
+    it('应该正确转发 type="download" 的 QStash 请求', async () => {
+      const downloadBody = JSON.stringify({
+        id: "task_123456789",
+        chatId: "chat_987654321",
+        msgId: 123456789,
+        type: "download"
+      });
+
+      // Mock 签名验证
+      global.crypto.subtle.importKey.mockResolvedValue('mock-key');
+      global.crypto.subtle.sign.mockResolvedValue(new Uint8Array(Buffer.from('expected-signature', 'utf8')));
+
+      // Mock KV
+      mockKV.list.mockResolvedValue({
+        keys: [{ name: 'instance:1' }]
+      });
+      mockKV.get.mockImplementation((key) => {
+        if (key === 'instance:1') {
+          return Promise.resolve({
+            id: '1',
+            url: 'https://instance1.com',
+            status: 'active',
+            lastHeartbeat: Date.now(),
+          });
+        }
+        if (key === 'lb:round_robin_index') {
+          return Promise.resolve(null);
+        }
+        return Promise.resolve(null);
+      });
+
+      // Mock fetch
+      const mockResponse = { status: 200, headers: new Map() };
+      let capturedRequest;
+      global.fetch = jest.fn().mockImplementation((req) => {
+        capturedRequest = req;
+        return Promise.resolve(mockResponse);
+      });
+
+      const request = {
+        url: 'https://lb.example.com/',
+        method: 'POST',
+        headers: new Map([
+          ['Content-Type', 'application/json'],
+          ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
+          ['Upstash-Timestamp', Math.floor(Date.now() / 1000).toString()],
+        ]),
+        text: jest.fn().mockResolvedValue(downloadBody),
+      };
+
+      const lb = await import('../src/index.js');
+      const response = await lb.default.fetch(request, mockEnv, {});
+
+      expect(response.status).toBe(200);
+
+      // 验证 fetch 被调用时使用了正确的 body
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(capturedRequest).toBeInstanceOf(Request);
+      expect(await capturedRequest.text()).toBe(downloadBody);
+    });
   });
 });
