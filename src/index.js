@@ -437,17 +437,25 @@ async function forwardToInstance(instance, request, originalBody, ctx = null) {
     url.host = new URL(instance.url).host;
     url.protocol = new URL(instance.url).protocol;
 
-    const forwardRequest = new Request(url.toString(), {
+    const headers = new Headers(request.headers);
+    headers.delete('content-length');
+
+    const requestOptions = {
         method: request.method,
         headers: {
-            ...Object.fromEntries(request.headers),
+            ...Object.fromEntries(headers),
             'X-Forwarded-Host': request.headers.get('Host'),
             'X-Forwarded-Proto': url.protocol.replace(':', ''),
             'X-Forwarded-For': request.headers.get('CF-Connecting-IP') || '',
             'X-Load-Balancer': 'qstash-lb'
-        },
-        body: originalBody
-    });
+        }
+    };
+
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+        requestOptions.body = originalBody;
+    }
+
+    const forwardRequest = new Request(url.toString(), requestOptions);
 
     const response = await fetch(forwardRequest);
 
