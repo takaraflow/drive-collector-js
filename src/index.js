@@ -8,53 +8,67 @@ const logger = {
   axiomConfig: null,
   env: 'production',
 
-  configure({ axiom }) {
+  configure({ axiom, env = 'production' }) {
     this.axiomConfig = axiom;
-    this.env = 'production';
+    this.env = env;
   },
 
-  async info(message, meta = {}) {
+  info(message, meta = {}, ctx = null) {
     console.log(`[${new Date().toISOString()}] INFO: ${message}`, meta);
-    await this.sendToAxiom('info', message, meta);
+    this.sendToAxiom('info', message, meta, ctx);
   },
 
-  async warn(message, meta = {}) {
+  warn(message, meta = {}, ctx = null) {
     console.warn(`[${new Date().toISOString()}] WARN: ${message}`, meta);
-    await this.sendToAxiom('warn', message, meta);
+    this.sendToAxiom('warn', message, meta, ctx);
   },
 
-  async error(message, meta = {}) {
+  error(message, meta = {}, ctx = null) {
     console.error(`[${new Date().toISOString()}] ERROR: ${message}`, meta);
-    await this.sendToAxiom('error', message, meta);
+    this.sendToAxiom('error', message, meta, ctx);
   },
-
-  async sendToAxiom(level, message, meta) {
-    if (!this.axiomConfig) return;
-
-    try {
-      if (!this.axiom) {
-        const { Axiom } = await import('@axiomhq/js');
-        this.axiom = new Axiom({
-          token: this.axiomConfig.token,
-          orgId: this.axiomConfig.orgId,
-        });
-        this.dataset = this.axiomConfig.dataset;
-      }
-
-      const payload = {
-        _time: new Date().toISOString(),
-        data: {
-          level,
-          message,
-          env: this.env,
-          ...meta
-        }
-      };
-
-      await this.axiom.ingest(this.dataset, [payload]);
-    } catch (e) {
-      // 静默失败，避免日志循环
+   
+  debug(message, meta = {}, ctx = null) {
+    if (this.env !== 'production') {
+      console.debug(`[${new Date().toISOString()}] DEBUG: ${message}`, meta);
     }
+    this.sendToAxiom('debug', message, meta, ctx);
+  },
+   
+  sendToAxiom(level, message, meta, ctx = null) {
+    if (!this.axiomConfig) return;
+    
+    const promise = (async () => {
+      try {
+        if (!this.axiom) {
+          const { Axiom } = await import('@axiomhq/js');
+          this.axiom = new Axiom({
+            token: this.axiomConfig.token,
+            orgId: this.axiomConfig.orgId,
+          });
+          this.dataset = this.axiomConfig.dataset;
+        }
+  
+        const payload = {
+          _time: new Date().toISOString(),
+          data: {
+            level,
+            message,
+            env: this.env,
+            ...meta
+          }
+        };
+  
+        await this.axiom.ingest(this.dataset, [payload]);
+      } catch (e) {
+        // 静默失败，避免日志循环
+      }
+    })();
+  
+    if (ctx && typeof ctx.waitUntil === 'function') {
+      ctx.waitUntil(promise);
+    }
+    return promise;
   }
 };
 
