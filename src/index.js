@@ -297,11 +297,18 @@ async function verifyQStashSignature(request, env, ctx = null) {
         throw error;
     }
 
-    // 2. 验证时间戳是否过期 (5分钟)
+    // 2. 验证时间戳是否过期
     const now = Math.floor(Date.now() / 1000);
-    const ts = parseInt(timestamp);
-    if (Math.abs(now - ts) > 300) {
-        const error = new Error('Signature expired');
+    let ts = parseInt(timestamp);
+
+    // 兼容毫秒级时间戳 (如果 ts > 10^12，通常是毫秒)
+    if (ts > 1000000000000) {
+        ts = Math.floor(ts / 1000);
+    }
+
+    const window = parseInt(env.SIGNATURE_EXPIRATION_WINDOW) || 900; // 默认 15 分钟
+    if (Math.abs(now - ts) > window) {
+        const error = new Error(`Signature expired (now: ${now}, ts: ${ts}, window: ${window})`);
         Object.assign(error, { status: 401 });
         throw error;
     }

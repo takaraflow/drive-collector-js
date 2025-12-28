@@ -117,7 +117,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
     });
 
     it('应该在时间戳过期时抛出错误', async () => {
-      const expiredTimestamp = (Math.floor(Date.now() / 1000) - 400).toString(); // 过期400秒
+      const expiredTimestamp = (Math.floor(Date.now() / 1000) - 1000).toString(); // 过期1000秒，超过900秒窗口
       const request = {
         headers: new Map([
           ['Upstash-Signature', 'v1a=signature'],
@@ -126,7 +126,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         text: jest.fn().mockResolvedValue('body'),
       };
 
-      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Signature expired');
+      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow(/Signature expired.*now.*ts.*window/);
     });
 
     it('应该在SKIP_SIGNATURE_VERIFY为true时跳过验证', async () => {
@@ -161,6 +161,63 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
 
       const result = await verifyQStashSignature(request, mockEnv);
       expect(result).toBe(body);
+    });
+
+    it('应该支持毫秒级时间戳', async () => {
+      const body = 'test-body';
+      const timestampMs = (Math.floor(Date.now() / 1000) * 1000).toString(); // 毫秒级时间戳
+      const signature = 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'; // base64url of 'expected-signature'
+
+      const request = {
+        headers: new Map([
+          ['Upstash-Signature', signature],
+          ['Upstash-Timestamp', timestampMs],
+        ]),
+        text: jest.fn().mockResolvedValue(body),
+      };
+
+      // Mock crypto
+      global.crypto.subtle.importKey.mockResolvedValue('mock-key');
+      const expectedBytes = new Uint8Array([101, 120, 112, 101, 99, 116, 101, 100, 45, 115, 105, 103, 110, 97, 116, 117, 114, 101]);
+      global.crypto.subtle.sign.mockResolvedValue(expectedBytes);
+
+      const result = await verifyQStashSignature(request, mockEnv);
+      expect(result).toBe(body);
+    });
+
+    it('应该使用默认15分钟过期窗口', async () => {
+      const expiredTimestamp = (Math.floor(Date.now() / 1000) - 1000).toString(); // 过期1000秒，超过默认900秒
+      const request = {
+        headers: new Map([
+          ['Upstash-Signature', 'v1a=signature'],
+          ['Upstash-Timestamp', expiredTimestamp],
+        ]),
+        text: jest.fn().mockResolvedValue('body'),
+      };
+
+      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Signature expired');
+    });
+
+    it('应该支持自定义过期窗口', async () => {
+      const customEnv = { ...mockEnv, SIGNATURE_EXPIRATION_WINDOW: '1800' }; // 30分钟
+      const expiredTimestamp = (Math.floor(Date.now() / 1000) - 1000).toString(); // 过期1000秒，小于1800秒
+      const signature = 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl';
+
+      const request = {
+        headers: new Map([
+          ['Upstash-Signature', signature],
+          ['Upstash-Timestamp', expiredTimestamp],
+        ]),
+        text: jest.fn().mockResolvedValue('body'),
+      };
+
+      // Mock crypto
+      global.crypto.subtle.importKey.mockResolvedValue('mock-key');
+      const expectedBytes = new Uint8Array([101, 120, 112, 101, 99, 116, 101, 100, 45, 115, 105, 103, 110, 97, 116, 117, 114, 101]);
+      global.crypto.subtle.sign.mockResolvedValue(expectedBytes);
+
+      const result = await verifyQStashSignature(request, customEnv);
+      expect(result).toBe('body');
     });
   });
 
