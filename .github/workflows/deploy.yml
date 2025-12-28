@@ -30,6 +30,8 @@ jobs:
       - name: Deploy
         env:
           WORKER_NAME: ${{ vars.WORKER_NAME }}
+          CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+          KV_PREVIEW_ID: ${{ secrets.KV_PREVIEW_ID }}
           AXIOM_TOKEN: ${{ secrets.AXIOM_TOKEN }}
           AXIOM_ORG_ID: ${{ secrets.AXIOM_ORG_ID }}
           AXIOM_DATASET: ${{ vars.AXIOM_DATASET }}

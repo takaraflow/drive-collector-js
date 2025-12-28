@@ -13,7 +13,8 @@ sed -i \
   -e "s/\${UPSTASH_REDIS_REST_URL}/${UPSTASH_REDIS_REST_URL:-}/g" \
   -e "s/\${UPSTASH_REDIS_REST_TOKEN}/${UPSTASH_REDIS_REST_TOKEN:-}/g" \
   -e "s/\${NODE_ENV}/${NODE_ENV:-production}/g" \
+  -e "s/\${CF_KV_NAMESPACE_ID}/${CF_KV_NAMESPACE_ID:-}/g" \
   wrangler.toml
 
 
-echo "wrangler.toml updated successfully"
+echo "wrangler.toml and wrangler.build.toml updated successfully"
