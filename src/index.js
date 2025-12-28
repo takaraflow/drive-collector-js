@@ -383,9 +383,19 @@ async function executeWithFailover(operation, env, ctx, ...args) {
 
 /**
  * Base64URL 编码辅助函数
+ * 使用标准 Web API 替代 Node.js Buffer 以避免环境兼容性问题
  */
 function base64UrlEncode(buffer) {
-    return Buffer.from(buffer).toString('base64url');
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
 }
 
 /**
