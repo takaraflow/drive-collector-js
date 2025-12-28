@@ -808,7 +808,7 @@ const handler = {
 
         try {
             // 检查健康检查路径
-            if (request.method === 'GET' && normalizedUrl.pathname === '/health') {
+            if ((request.method === 'GET' || request.method === 'HEAD') && normalizedUrl.pathname === '/health') {
                 return new Response('LB is running', { status: 200 });
             }
 
@@ -869,17 +869,13 @@ const handler = {
     }
 };
 
-export default {
-    async fetch(request, env, ctx) {
-        return instrument(handler, {
-            exporter: {
-                url: 'https://api.axiom.co/v1/traces',
-                headers: {
-                    Authorization: `Bearer ${env.AXIOM_TOKEN}`,
-                    'X-Axiom-Dataset': env.AXIOM_DATASET,
-                },
-            },
-            serviceName: 'lb-worker-js',
-        }).fetch(request, env, ctx);
-    }
-};
+export default instrument(handler, (env) => ({
+    exporter: {
+        url: 'https://api.axiom.co/v1/traces',
+        headers: {
+            Authorization: `Bearer ${env.AXIOM_TOKEN}`,
+            'X-Axiom-Dataset': env.AXIOM_DATASET,
+        },
+    },
+    serviceName: 'lb-worker-js',
+}));
