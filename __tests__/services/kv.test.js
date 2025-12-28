@@ -76,6 +76,47 @@ describe("KV Service Full Suite", () => {
       mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ success: true }) });
       expect(await kvInstance.delete("key")).toBe(true);
     });
+
+    test("should list all keys successfully", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({
+          success: true,
+          result: [
+            { name: "key1" },
+            { name: "key2" },
+            { name: "prefix:key3" }
+          ]
+        })
+      });
+      const keys = await kvInstance.listKeys();
+      expect(keys).toEqual(["key1", "key2", "prefix:key3"]);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/keys"),
+        expect.objectContaining({ method: "GET" })
+      );
+    });
+
+    test("should list keys with prefix", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({
+          success: true,
+          result: [
+            { name: "prefix:key1" },
+            { name: "prefix:key2" }
+          ]
+        })
+      });
+      const keys = await kvInstance.listKeys("prefix:");
+      expect(keys).toEqual(["prefix:key1", "prefix:key2"]);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/keys?prefix=prefix%3A"),
+        expect.objectContaining({ method: "GET" })
+      );
+    });
   });
 
   // ==========================================
@@ -106,6 +147,38 @@ describe("KV Service Full Suite", () => {
       mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve([{ result: "OK" }]) });
       await kvInstance.bulkSet([{ key: "k1", value: "v1" }]);
       expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining("/pipeline"), expect.any(Object));
+    });
+
+    test("should list all keys using KEYS command", async () => {
+      mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ result: ["key1", "key2", "prefix:key3"] }) });
+      const keys = await kvInstance.listKeys();
+      expect(keys).toEqual(["key1", "key2", "prefix:key3"]);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("https://mock.upstash.io/"),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify(["KEYS", "*"])
+        })
+      );
+    });
+
+    test("should list keys with prefix using KEYS command", async () => {
+      mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ result: ["prefix:key1", "prefix:key2"] }) });
+      const keys = await kvInstance.listKeys("prefix:");
+      expect(keys).toEqual(["prefix:key1", "prefix:key2"]);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("https://mock.upstash.io/"),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify(["KEYS", "prefix:*"])
+        })
+      );
+    });
+
+    test("should handle non-array result from Upstash KEYS", async () => {
+      mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ result: null }) });
+      const keys = await kvInstance.listKeys();
+      expect(keys).toEqual([]);
     });
   });
 

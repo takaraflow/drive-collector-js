@@ -488,6 +488,70 @@ class KVService {
     }
 
     /**
+     * Cloudflare KV listKeys 实现
+     */
+    async _cloudflare_listKeys(prefix = '') {
+        const url = new URL(`${this.apiUrl}/keys`);
+        if (prefix) {
+            url.searchParams.set('prefix', prefix);
+        }
+
+        const response = await fetch(url.toString(), {
+            method: "GET",
+            headers: {
+                "Authorization": `Bearer ${this.token}`,
+            },
+        });
+
+        if (!response.ok) {
+            const result = await response.json();
+            throw new Error(`KV ListKeys Error: ${result.errors?.[0]?.message || "Unknown error"}`);
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(`KV ListKeys Error: ${result.errors?.[0]?.message || "Unknown error"}`);
+        }
+
+        // 返回键名数组
+        return result.result.map(item => item.name);
+    }
+
+    /**
+     * Upstash listKeys 实现
+     */
+    async _upstash_listKeys(prefix = '') {
+        // 使用 KEYS 命令获取匹配的键
+        const command = ["KEYS", `${prefix}*`];
+
+        const response = await fetch(`${this.upstashUrl}/`, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${this.upstashToken}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(command),
+        });
+
+        const result = await response.json();
+        if (result.error) {
+            logger.error(`🚨 Upstash ListKeys Error:`, result.error);
+            throw new Error(`Upstash ListKeys Error: ${result.error}`);
+        }
+
+        return result.result || [];
+    }
+
+    /**
+     * 列出指定前缀的键
+     * @param {string} prefix - 键前缀
+     * @returns {Array<string>} 键名数组
+     */
+    async listKeys(prefix = '') {
+        return await this._executeWithFailover('listKeys', prefix);
+    }
+
+    /**
      * 批量写入
      * @param {Array<{key: string, value: string}>} pairs
      */

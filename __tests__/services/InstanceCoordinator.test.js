@@ -299,4 +299,100 @@ describe("InstanceCoordinator", () => {
       expect(logger.error).toHaveBeenCalledWith("❌ 广播事件失败 instance_failed:", expect.anything());
     });
   });
+
+  describe("getAllInstances", () => {
+    test("should discover all instances using kv.listKeys", async () => {
+      // Mock kv.listKeys to return instance keys
+      const mockListKeys = jest.spyOn(kv, 'listKeys').mockResolvedValue([
+        'instance:inst1',
+        'instance:inst2',
+        'instance:inst3'
+      ]);
+
+      // Mock individual instance gets
+      const mockGet = jest.spyOn(kv, 'get')
+        .mockResolvedValueOnce({
+          id: 'inst1',
+          hostname: 'host1',
+          lastHeartbeat: Date.now(),
+          status: 'active'
+        })
+        .mockResolvedValueOnce({
+          id: 'inst2',
+          hostname: 'host2',
+          lastHeartbeat: Date.now(),
+          status: 'active'
+        })
+        .mockResolvedValueOnce(null); // One instance has no data
+
+      const instances = await instanceCoordinator.getAllInstances();
+
+      expect(mockListKeys).toHaveBeenCalledWith('instance:');
+      expect(mockGet).toHaveBeenCalledTimes(3);
+      expect(instances).toHaveLength(2); // Only 2 instances with valid data
+      expect(instances[0]).toEqual({
+        id: 'inst1',
+        hostname: 'host1',
+        lastHeartbeat: expect.any(Number),
+        status: 'active'
+      });
+      expect(instances[1]).toEqual({
+        id: 'inst2',
+        hostname: 'host2',
+        lastHeartbeat: expect.any(Number),
+        status: 'active'
+      });
+      expect(instanceCoordinator.activeInstances).toEqual(new Set(['inst1', 'inst2']));
+
+      mockListKeys.mockRestore();
+      mockGet.mockRestore();
+    });
+
+    test("should handle kv.listKeys failure gracefully", async () => {
+      const mockListKeys = jest.spyOn(kv, 'listKeys').mockRejectedValue(new Error('KV ListKeys Error'));
+
+      const instances = await instanceCoordinator.getAllInstances();
+
+      expect(instances).toEqual([]);
+      expect(mockLogger.error).toHaveBeenCalledWith("获取所有实例失败:", "KV ListKeys Error");
+
+      mockListKeys.mockRestore();
+    });
+
+    test("should handle individual instance get failure", async () => {
+      const mockListKeys = jest.spyOn(kv, 'listKeys').mockResolvedValue([
+        'instance:inst1',
+        'instance:inst2'
+      ]);
+
+      const mockGet = jest.spyOn(kv, 'get')
+        .mockRejectedValueOnce(new Error('KV Get Error')) // First instance fails
+        .mockResolvedValueOnce({
+          id: 'inst2',
+          hostname: 'host2',
+          lastHeartbeat: Date.now(),
+          status: 'active'
+        });
+
+      const instances = await instanceCoordinator.getAllInstances();
+
+      expect(instances).toHaveLength(1); // Only successful instance
+      expect(instances[0].id).toBe('inst2');
+      expect(mockLogger.warn).toHaveBeenCalledWith("获取实例 instance:inst1 失败，跳过:", "KV Get Error");
+
+      mockListKeys.mockRestore();
+      mockGet.mockRestore();
+    });
+
+    test("should return empty array when no instances found", async () => {
+      const mockListKeys = jest.spyOn(kv, 'listKeys').mockResolvedValue([]);
+
+      const instances = await instanceCoordinator.getAllInstances();
+
+      expect(instances).toEqual([]);
+      expect(instanceCoordinator.activeInstances).toEqual(new Set());
+
+      mockListKeys.mockRestore();
+    });
+  });
 });

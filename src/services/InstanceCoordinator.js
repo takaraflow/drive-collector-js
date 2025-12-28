@@ -154,21 +154,35 @@ export class InstanceCoordinator {
     }
 
     /**
-     * 获取所有实例（从 KV 获取当前已知的活跃实例）
+     * 获取所有实例（主动发现所有 instance: 前缀的键）
      */
     async getAllInstances() {
         try {
-            // 从 KV 获取当前活跃实例集合中的实例
+            // 使用 listKeys 主动发现所有实例键
+            const instanceKeys = await kv.listKeys('instance:');
             const instances = [];
-            for (const instanceId of this.activeInstances) {
+
+            for (const key of instanceKeys) {
                 try {
-                    // 使用缓存读取，防止高频调用
-                    const instance = await kv.get(`instance:${instanceId}`, "json", { cacheTtl: 30000 });
-                    if (instance) instances.push(instance);
+                    // 从键名中提取实例ID
+                    const instanceId = key.replace('instance:', '');
+                    // 获取实例数据，使用缓存防止高频调用
+                    const instance = await kv.get(key, "json", { cacheTtl: 30000 });
+                    if (instance) {
+                        // 确保实例数据包含 id 字段
+                        instances.push({
+                            id: instanceId, // 确保 ID 一致
+                            ...instance
+                        });
+                    }
                 } catch (e) {
-                    // 忽略单个实例获取失败
+                    logger.warn(`获取实例 ${key} 失败，跳过:`, e?.message || String(e));
+                    // 忽略单个实例获取失败，继续处理其他实例
                 }
             }
+
+            // 更新活跃实例集合（用于向后兼容）
+            this.activeInstances = new Set(instances.map(inst => inst.id));
             return instances;
         } catch (e) {
             logger.error(`获取所有实例失败:`, e?.message || String(e));
