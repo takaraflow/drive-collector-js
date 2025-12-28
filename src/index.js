@@ -318,7 +318,7 @@ async function verifyQStashSignature(request, env, ctx = null) {
 /**
  * 获取活跃实例列表
  */
-async function getActiveInstances(env) {
+async function getActiveInstances(env, ctx = null) {
     try {
         const activeInstances = [];
         const now = Date.now();
@@ -352,7 +352,7 @@ async function getActiveInstances(env) {
 /**
  * 选择目标实例 (轮询)
  */
-async function selectTargetInstance(instances, env) {
+async function selectTargetInstance(instances, env, ctx = null) {
     if (instances.length === 0) {
         return null;
     }
@@ -383,7 +383,7 @@ async function selectTargetInstance(instances, env) {
 /**
  * 转发请求到目标实例
  */
-async function forwardToInstance(instance, request, originalBody) {
+async function forwardToInstance(instance, request, originalBody, ctx = null) {
     const url = new URL(request.url);
     url.host = new URL(instance.url).host;
     url.protocol = new URL(instance.url).protocol;
@@ -413,12 +413,12 @@ async function forwardToInstance(instance, request, originalBody) {
 /**
  * 带重试的转发逻辑
  */
-async function fetchWithRetry(instances, request, env) {
+async function fetchWithRetry(instances, request, env, ctx = null) {
     let lastError;
 
     for (const instance of instances) {
         try {
-            const response = await forwardToInstance(instance, request, request.body);
+            const response = await forwardToInstance(instance, request, request.body, ctx);
             return response;
         } catch (error) {
             logger.error('转发请求失败', { instanceId: instance.id, error: error.message });
@@ -504,6 +504,8 @@ export default {
 
             // 5. 更新轮询索引 (可选，简化版本不更新)
             // 这里可以存储到KV，但为了简化，使用环境变量或简单计数
+
+            logger.debug('负载均衡请求完成', { status: response.status }, ctx);
 
             return response;
 
