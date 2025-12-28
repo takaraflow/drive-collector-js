@@ -1,4 +1,4 @@
-import { jest } from '@jest/globals';
+import { describe, expect, it, beforeEach, afterEach, jest } from '@jest/globals';
 import {
   verifyQStashSignature,
   getActiveInstances,
@@ -13,6 +13,8 @@ import {
   getCurrentProviderState,
   setCurrentProviderState
 } from '../src/index.js';
+
+import { Buffer } from 'node:buffer';
 
 // Mock global.fetch
 global.fetch = jest.fn();

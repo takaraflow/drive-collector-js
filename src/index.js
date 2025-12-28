@@ -3,14 +3,14 @@
  * 负载均衡器，接收QStash Webhook，转发到活跃实例
  */
 
-// 内部轻量级logger实现，移除对外部logger服务的依赖
 const logger = {
   axiom: null,
+  axiomConfig: null,
   env: 'production',
 
-  configure({ axiom, env }) {
-    this.axiom = axiom;
-    this.env = env || 'production';
+  configure({ axiom }) {
+    this.axiomConfig = axiom;
+    this.env = 'production';
   },
 
   async info(message, meta = {}) {
@@ -29,9 +29,18 @@ const logger = {
   },
 
   async sendToAxiom(level, message, meta) {
-    if (!this.axiom || !this.axiom.token || !this.axiom.orgId || !this.axiom.dataset) return;
+    if (!this.axiomConfig) return;
 
     try {
+      if (!this.axiom) {
+        const { Axiom } = await import('@axiomhq/js');
+        this.axiom = new Axiom({
+          token: this.axiomConfig.token,
+          orgId: this.axiomConfig.orgId,
+        });
+        this.dataset = this.axiomConfig.dataset;
+      }
+
       const payload = {
         _time: new Date().toISOString(),
         data: {
@@ -42,15 +51,7 @@ const logger = {
         }
       };
 
-      await fetch(`https://api.axiom.co/v1/datasets/${this.axiom.dataset}/ingest`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.axiom.token}`,
-          'X-Axiom-Org-Id': this.axiom.orgId,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify([payload])
-      });
+      await this.axiom.ingest(this.dataset, [payload]);
     } catch (e) {
       // 静默失败，避免日志循环
     }
