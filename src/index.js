@@ -272,6 +272,14 @@ async function executeWithFailover(operation, env, ...args) {
 }
 
 /**
+ * Base64URL 编码辅助函数
+ */
+function base64UrlEncode(buffer) {
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+/**
  * 验证QStash签名 (手动实现)
  */
 async function verifyQStashSignature(request, env, ctx = null) {
@@ -286,6 +294,15 @@ async function verifyQStashSignature(request, env, ctx = null) {
             return body;
         }
         const error = new Error('Missing Upstash-Signature or Upstash-Timestamp header');
+        Object.assign(error, { status: 401 });
+        throw error;
+    }
+
+    // 2. 验证时间戳是否过期 (5分钟)
+    const now = Math.floor(Date.now() / 1000);
+    const ts = parseInt(timestamp);
+    if (Math.abs(now - ts) > 300) {
+        const error = new Error('Signature expired');
         Object.assign(error, { status: 401 });
         throw error;
     }
@@ -315,12 +332,19 @@ async function verifyQStashSignature(request, env, ctx = null) {
     );
 
     const expectedSignature = await crypto.subtle.sign('HMAC', key, encoder.encode(message));
-    const expectedBase64 = btoa(String.fromCharCode(...new Uint8Array(expectedSignature)));
+    const expectedBase64 = base64UrlEncode(expectedSignature);
 
-    // 比较签名 (QStash使用 v1a=base64 格式)
+    // 比较签名 (QStash使用 v1a=base64url 格式)
     const providedSignature = signature.replace('v1a=', '');
     if (providedSignature !== expectedBase64) {
-        throw new Error('Signature verification failed');
+        logger.debug('签名验证失败详情', {
+            expectedSignature: expectedBase64,
+            providedSignature: providedSignature,
+            message
+        }, ctx);
+        const error = new Error('Signature verification failed');
+        Object.assign(error, { status: 401 });
+        throw error;
     }
 
     return body;

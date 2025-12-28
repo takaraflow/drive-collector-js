@@ -70,8 +70,8 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
   describe('verifyQStashSignature', () => {
     it('应该在签名正确时返回body', async () => {
       const body = 'test-body';
-      const timestamp = '1234567890';
-      const signature = 'v1a=' + btoa('expected-signature');
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const signature = 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'; // base64url of 'expected-signature'
 
       const request = {
         headers: new Map([
@@ -83,7 +83,9 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
 
       // Mock crypto
       global.crypto.subtle.importKey.mockResolvedValue('mock-key');
-      global.crypto.subtle.sign.mockResolvedValue(new Uint8Array(Buffer.from('expected-signature', 'utf8')));
+      // Mock sign to return the bytes for 'expected-signature'
+      const expectedBytes = new Uint8Array([101, 120, 112, 101, 99, 116, 101, 100, 45, 115, 105, 103, 110, 97, 116, 117, 114, 101]);
+      global.crypto.subtle.sign.mockResolvedValue(expectedBytes);
 
       const result = await verifyQStashSignature(request, mockEnv);
       expect(result).toBe(body);
@@ -99,10 +101,11 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
     });
 
     it('应该在签名不匹配时抛出错误', async () => {
+      const timestamp = Math.floor(Date.now() / 1000).toString();
       const request = {
         headers: new Map([
           ['Upstash-Signature', 'v1a=wrong-signature'],
-          ['Upstash-Timestamp', '1234567890'],
+          ['Upstash-Timestamp', timestamp],
         ]),
         text: jest.fn().mockResolvedValue('body'),
       };
@@ -111,6 +114,19 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       global.crypto.subtle.sign.mockResolvedValue(new Uint8Array(Buffer.from('expected-signature', 'utf8')));
 
       await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Signature verification failed');
+    });
+
+    it('应该在时间戳过期时抛出错误', async () => {
+      const expiredTimestamp = (Math.floor(Date.now() / 1000) - 400).toString(); // 过期400秒
+      const request = {
+        headers: new Map([
+          ['Upstash-Signature', 'v1a=signature'],
+          ['Upstash-Timestamp', expiredTimestamp],
+        ]),
+        text: jest.fn().mockResolvedValue('body'),
+      };
+
+      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Signature expired');
     });
 
     it('应该在SKIP_SIGNATURE_VERIFY为true时跳过验证', async () => {
@@ -454,8 +470,8 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         url: 'https://lb.example.com/webhook',
         method: 'POST',
         headers: new Map([
-          ['Upstash-Signature', 'v1a=' + btoa('expected-signature')],
-          ['Upstash-Timestamp', '1234567890'],
+          ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
+          ['Upstash-Timestamp', Math.floor(Date.now() / 1000).toString()],
         ]),
         text: jest.fn().mockResolvedValue('body'),
       };
@@ -474,8 +490,8 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
 
       const request = {
         headers: new Map([
-          ['Upstash-Signature', 'v1a=' + btoa('expected-signature')],
-          ['Upstash-Timestamp', '1234567890'],
+          ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
+          ['Upstash-Timestamp', Math.floor(Date.now() / 1000).toString()],
         ]),
         text: jest.fn().mockResolvedValue('body'),
       };
