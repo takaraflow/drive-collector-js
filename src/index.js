@@ -42,16 +42,16 @@ function safeJsonParse(data, context = '') {
       }
 
       // 正则表达式匹配无引号键：单词字符开头，后跟冒号
-      // 避免匹配值中的冒号（通过检查前面不是引号或逗号）
-      fixedData = fixedData.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+      // 支持字符串开头和 { 或 , 后的键，避免匹配值中的冒号
+      fixedData = fixedData.replace(/(^|[{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
 
       // 重新添加花括号
       fixedData = `{${fixedData}}`;
 
       return JSON.parse(fixedData);
     } catch (fixError) {
-      // 如果不是有效的 JSON 且无法修复，返回原始数据（向后兼容）
-      return data;
+      // 如果不是有效的 JSON 且无法修复，返回 null
+      return null;
     }
   }
 }
@@ -235,7 +235,10 @@ async function upstash_get(env, key, options = {}) {
 
     const type = options.type || 'json';
     if (type === 'json') {
-        return safeJsonParse(value, `upstash_get value for key ${key}`);
+        // 如果值已经是对象，直接返回
+        if (typeof value === 'object') return value;
+        // 如果是字符串，尝试JSON解析
+        return safeJsonParse(value, `upstash_get value for key ${key}`) || value;
     }
     return value;
 }
@@ -283,6 +286,7 @@ async function executeWithFailover(operation, env, ctx, ...args) {
 
     while (attempts < maxAttempts) {
         try {
+            logger.debug('尝试访问存储源', { provider: getCurrentProvider(), operation }, ctx);
             if (currentProvider === 'upstash') {
                 const upstashOp = operation.replace('_kv_', 'upstash_');
                 if (upstashOp === 'upstash_list') return await upstash_list(env, ...args);
@@ -430,8 +434,15 @@ function parseInstanceData(rawData, key) {
     }
 
     // 优先使用 safeJsonParse，支持自动修复无引号键
-    const parsed = safeJsonParse(rawData, `parseInstanceData for key ${key}`);
+    let parsed = safeJsonParse(rawData, `parseInstanceData for key ${key}`);
     if (parsed !== null) {
+        // 如果解析结果是字符串且看起来像 JSON，尝试再次解析
+        if (typeof parsed === 'string' && (parsed.trim().startsWith('{') || parsed.trim().startsWith('['))) {
+            const doubleParsed = safeJsonParse(parsed, `double parse for key ${key}`);
+            if (doubleParsed !== null) {
+                parsed = doubleParsed;
+            }
+        }
         return parsed;
     }
 
@@ -463,11 +474,11 @@ function parseInstanceData(rawData, key) {
             return obj;
         }
     } catch (parseError) {
-        logger.warn('手动解析实例数据失败', { key, rawData: rawData.substring(0, 100), error: parseError.message });
+        logger.warn('手动解析实例数据失败，记录完整原始数据', { key, rawData, error: parseError.message });
     }
 
     // 所有解析方法都失败
-    logger.warn('实例数据解析失败', { key, rawData: rawData.substring(0, 100) });
+    logger.warn('实例数据解析失败，记录完整原始数据', { key, rawData });
     return null;
 }
 
@@ -486,25 +497,25 @@ async function getActiveInstances(env, ctx) {
             try {
                 const rawData = await executeWithFailover('_kv_get', env, ctx, key.name);
                 const instance = parseInstanceData(rawData, key.name);
-                if (!instance) {
-                    logger.warn('实例数据为空或格式错误', { key: key.name, rawData, provider: getCurrentProvider() }, ctx);
+                if (!instance || typeof instance !== 'object') {
+                    logger.warn('实例数据为空、格式错误或不是对象', { key: key.name, rawData, instanceType: typeof instance, provider: getCurrentProvider() }, ctx);
                     continue;
                 }
                 if (instance.status !== 'active') {
-                    logger.info('实例状态非活跃', { id: instance.id, status: instance.status }, ctx);
+                    logger.warn('跳过实例: 状态非活跃', { id: instance.id, status: instance.status, reason: 'inactive_status' }, ctx);
                     continue;
                 }
                 if (!instance.lastHeartbeat) {
-                    logger.info('实例缺少心跳时间戳', { id: instance.id }, ctx);
+                    logger.warn('跳过实例: 缺少心跳时间戳', { id: instance.id, reason: 'missing_heartbeat' }, ctx);
                     continue;
                 }
                 const timeDiff = now - instance.lastHeartbeat;
                 if (timeDiff >= HEARTBEAT_TIMEOUT) {
-                    logger.info('实例心跳过期', { id: instance.id, diff: timeDiff, timeout: HEARTBEAT_TIMEOUT, lastHeartbeat: new Date(instance.lastHeartbeat).toISOString() }, ctx);
+                    logger.warn('跳过实例: 心跳过期', { id: instance.id, diff: timeDiff, timeout: HEARTBEAT_TIMEOUT, lastHeartbeat: new Date(instance.lastHeartbeat).toISOString(), reason: 'heartbeat_expired' }, ctx);
                     continue;
                 }
                 if (!instance.url) {
-                    logger.info('实例缺少URL', { id: instance.id }, ctx);
+                    logger.warn('跳过实例: 缺少URL', { id: instance.id, reason: 'missing_url' }, ctx);
                     continue;
                 }
                 activeInstances.push(instance);
@@ -512,6 +523,10 @@ async function getActiveInstances(env, ctx) {
                 // 忽略单个实例获取失败
                 logger.error('实例信息获取失败', { instance: key.name, error: e.message, provider: getCurrentProvider() }, ctx);
             }
+        }
+
+        if (activeInstances.length === 0) {
+            logger.warn('未找到活跃实例', { nodeEnv: env.NODE_ENV, provider: getCurrentProvider(), suggestion: (env.NODE_ENV === 'development') ? '尝试使用 --remote 参数访问生产 KV 数据' : '请检查实例注册和心跳' }, ctx);
         }
 
         return activeInstances;
@@ -674,6 +689,7 @@ const handler = {
         logger.configure({
             env: env.NODE_ENV || 'production'
         });
+        logger.info('环境初始化', { nodeEnv: env.NODE_ENV || 'production', hasKv: !!env.KV_STORAGE }, ctx);
 
         // 可选：设置 Worker ID
         // Cloudflare Workers 不支持 global 对象，此处逻辑仅在测试环境有效
