@@ -18,6 +18,7 @@ const mockClient = {
 };
 jest.unstable_mockModule("../../src/services/telegram.js", () => ({
   client: mockClient,
+  isClientActive: jest.fn(() => true),
 }));
 
 const mockAuthGuard = {
@@ -93,6 +94,35 @@ const mockSettingsRepository = {
 };
 jest.unstable_mockModule("../../src/repositories/SettingsRepository.js", () => ({
   SettingsRepository: mockSettingsRepository,
+}));
+
+const mockInstanceCoordinator = {
+  getInstanceId: jest.fn(() => "test-instance-123"),
+  isLeader: true,
+  hasLock: jest.fn().mockResolvedValue(true),
+  getActiveInstances: jest.fn().mockResolvedValue([{ id: "test-instance-123", lastHeartbeat: Date.now() }]),
+  getInstanceCount: jest.fn(() => 1),
+};
+jest.unstable_mockModule("../../src/services/InstanceCoordinator.js", () => ({
+  instanceCoordinator: mockInstanceCoordinator,
+}));
+
+const mockNetworkDiagnostic = {
+  diagnoseAll: jest.fn().mockResolvedValue({}),
+  formatResults: jest.fn(() => "🌐 Network diagnostics completed"),
+};
+jest.unstable_mockModule("../../src/utils/NetworkDiagnostic.js", () => ({
+  NetworkDiagnostic: mockNetworkDiagnostic,
+}));
+
+const mockLogger = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn(),
+};
+jest.unstable_mockModule("../../src/services/logger.js", () => ({
+  default: mockLogger,
 }));
 
 const mockDriveRepository = {
@@ -588,9 +618,7 @@ describe("Dispatcher", () => {
       mockAuthGuard.getRole.mockResolvedValue("user");
       mockAuthGuard.can.mockResolvedValue(false);
       mockSettingsRepository.get.mockResolvedValue("private");
-      
-      const logSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
-      
+
       const event = {
         userId: BigInt(789),
         peer: { className: "PeerUser", userId: BigInt(789) },
@@ -598,8 +626,7 @@ describe("Dispatcher", () => {
       };
 
       await Dispatcher.handle(event);
-      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("🛡️ 消息被全局守卫拦截"), expect.anything());
-      logSpy.mockRestore();
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining("🛡️ 消息被全局守卫拦截"));
     });
 
     test("should route to callback handler", async () => {

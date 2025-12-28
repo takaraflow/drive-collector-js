@@ -1,6 +1,6 @@
 import { Api } from "telegram";
 import { config } from "../config/index.js";
-import { client } from "../services/telegram.js";
+import { client, isClientActive } from "../services/telegram.js";
 import { AuthGuard } from "../modules/AuthGuard.js";
 import { SessionManager } from "../modules/SessionManager.js";
 import { DriveConfigFlow } from "../modules/DriveConfigFlow.js";
@@ -558,8 +558,14 @@ export class Dispatcher {
             const currentInstanceId = instanceCoordinator.getInstanceId();
             const isLeader = instanceCoordinator.isLeader;
 
+            // 新增：获取 Telegram 状态
+            const tgActive = isClientActive();
+            const isTgLeader = await instanceCoordinator.hasLock('telegram_client');
+
             info += `📍 当前实例: ${escapeHTML(currentInstanceId)}\n`;
             info += `👑 领导者状态: ${isLeader ? '✅ 是' : '❌ 否'}\n`;
+            info += `🔌 Telegram 连接: ${tgActive ? '✅ 已连接' : '❌ 已断开'}\n`;
+            info += `🔑 Telegram 锁持有: ${isTgLeader ? '✅ 是' : '❌ 否'}\n`;
 
             // 活跃实例列表
             const activeInstances = await instanceCoordinator.getActiveInstances();

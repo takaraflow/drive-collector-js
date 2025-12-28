@@ -20,7 +20,10 @@ const mockCacheService = {
     set: jest.fn()
 };
 
-jest.unstable_mockModule('../../src/services/telegram.js', () => ({ client: mockClient }));
+jest.unstable_mockModule('../../src/services/telegram.js', () => ({
+  client: mockClient,
+  isClientActive: jest.fn(() => true)
+}));
 jest.unstable_mockModule('../../src/services/rclone.js', () => ({ CloudTool: mockCloudTool }));
 jest.unstable_mockModule('../../src/repositories/DriveRepository.js', () => ({ DriveRepository: mockDriveRepository }));
 jest.unstable_mockModule('../../src/ui/templates.js', () => ({ UIHelper: mockUIHelper }));
