@@ -871,13 +871,22 @@ const handler = {
 
 
 // @ts-expect-error Dynamic config function is supported by the library at runtime despite TypeScript complaints
-export default instrument(handler, (env) => ({
-    exporter: {
-        url: 'https://api.axiom.co/v1/traces',
-        headers: {
-            Authorization: `Bearer ${env.AXIOM_TOKEN}`,
-            'X-Axiom-Dataset': env.AXIOM_DATASET,
-        },
-    },
-    serviceName: 'lb-worker-js',
-}));
+export default instrument(handler, (env) => {
+   const baseConfig = { serviceName: 'lb-worker-js' };
+   
+   if (!env?.AXIOM_TOKEN || !env?.AXIOM_DATASET) {
+       console.warn('OTEL: Missing AXIOM_TOKEN or AXIOM_DATASET, using base config without exporter');
+       return baseConfig;
+   }
+   
+   return {
+       ...baseConfig,
+       exporter: {
+           url: 'https://api.axiom.co/v1/traces',
+           headers: {
+               Authorization: `Bearer ${env.AXIOM_TOKEN}`,
+               'X-Axiom-Dataset': env.AXIOM_DATASET,
+           },
+       },
+   };
+});
