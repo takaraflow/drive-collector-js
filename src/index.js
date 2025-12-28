@@ -9,10 +9,6 @@ import { instrument } from '@microlabs/otel-cf-workers';
 const config = {
   exporter: {
     url: 'https://api.axiom.co/v1/traces',
-    headers: {
-      Authorization: 'Bearer ${AXIOM_TOKEN}',
-      'X-Axiom-Dataset': '${AXIOM_DATASET}',
-    },
   },
   serviceName: 'lb-worker-js',
 };
@@ -822,10 +818,10 @@ const handler = {
 
             // 1. 验证QStash签名
             let body = null;
-            if (request.method === 'GET') {
-                body = await verifyQStashSignature(request, env, true);
+            if (request.method === 'GET' || request.method === 'HEAD') {
+                body = await verifyQStashSignature(request, env, true, ctx);
             } else {
-                body = await verifyQStashSignature(request, env, false);
+                body = await verifyQStashSignature(request, env, false, ctx);
             }
             if (body === null) body = new Uint8Array();
 
@@ -873,4 +869,17 @@ const handler = {
     }
 };
 
-export default instrument(handler, config);
+export default {
+    async fetch(request, env, ctx) {
+        return instrument(handler, {
+            exporter: {
+                url: 'https://api.axiom.co/v1/traces',
+                headers: {
+                    Authorization: `Bearer ${env.AXIOM_TOKEN}`,
+                    'X-Axiom-Dataset': env.AXIOM_DATASET,
+                },
+            },
+            serviceName: 'lb-worker-js',
+        }).fetch(request, env, ctx);
+    }
+};
