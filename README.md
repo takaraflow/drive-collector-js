@@ -21,7 +21,7 @@ Cloudflare Worker 负载均衡器，用于多实例请求转发，支持故障�
    wrangler secret put UPSTASH_REDIS_REST_TOKEN  # 如需
    ```
    或通过 [Cloudflare Dashboard](https://dash.cloudflare.com/) 设置。
-3. 非敏感变量（如 WORKER_NAME, CF_KV_NAMESPACE_ID）可在 `wrangler.toml` 配置或环境变量。
+3. **可选**非敏感变量：WORKER_NAME (默认 'lb-worker-js')，CF_KV_NAMESPACE_ID (为空时 build warn，无 KV 绑定)。CI deploy 设置：export WORKER_NAME=your-worker CF_KV_NAMESPACE_ID=your-kv-id。可在环境变量或 `wrangler.toml` 配置。
 4. 构建：`bash scripts/build.sh`（替换占位符生成 `wrangler.build.toml`）。
 5. 部署：`wrangler deploy`（或指定 config）。
 

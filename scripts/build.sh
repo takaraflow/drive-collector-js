@@ -1,9 +1,10 @@
 #!/bin/bash
 
-# 检查必需的环境变量
-if [ -z "$WORKER_NAME" ] || [ -z "$CF_KV_NAMESPACE_ID" ]; then
-  echo "Error: Missing required environment variables: WORKER_NAME or CF_KV_NAMESPACE_ID"
-  exit 1
+# 设置可选环境变量默认值
+WORKER_NAME=${WORKER_NAME:-lb-worker-js}
+if [ -z "$CF_KV_NAMESPACE_ID" ]; then
+  echo "Warning: CF_KV_NAMESPACE_ID not set, KV binding will be empty in wrangler.build.toml"
+  CF_KV_NAMESPACE_ID=""
 fi
 
 # 设置默认值
