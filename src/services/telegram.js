@@ -204,6 +204,7 @@ export const stopWatchdog = () => {
         reconnectTimeout = null;
     }
     isReconnecting = false;
+    lastHeartbeat = Date.now(); // 重置心跳时间
 };
 
 /**
@@ -238,10 +239,26 @@ export const isClientActive = () => client.connected;
 
 // 定时检查心跳（通过获取自身信息）
 watchdogTimer = setInterval(async () => {
-    if (!client.connected || isReconnecting) return;
+    if (isReconnecting) return;
+
+    const now = Date.now();
+    // 处理时间回拨（如测试环境重置时间或系统时钟同步）
+    if (lastHeartbeat > now) {
+        logger.debug("🕒 检测到时间回拨，重置心跳时间");
+        lastHeartbeat = now;
+        isReconnecting = false;
+    }
+
+    if (!client.connected) {
+        // 如果已断开连接且超过 5 分钟没有恢复，也触发强制重连
+        if (now - lastHeartbeat >= 5 * 60 * 1000) {
+            logger.error("🚨 客户端断开连接超过 5 分钟且未自动恢复，强制重启连接...");
+            handleConnectionIssue();
+        }
+        return;
+    }
 
     try {
-        // 简单的 API 调用测试连通性
         await client.getMe();
         lastHeartbeat = Date.now();
     } catch (e) {
@@ -253,7 +270,7 @@ watchdogTimer = setInterval(async () => {
         }
 
         logger.warn("💔 心跳检测失败:", e);
-        if (Date.now() - lastHeartbeat > 5 * 60 * 1000) {
+        if (Date.now() - lastHeartbeat >= 5 * 60 * 1000) {
             logger.error("🚨 超过 5 分钟无心跳响应，强制重启连接...");
             handleConnectionIssue();
         }
