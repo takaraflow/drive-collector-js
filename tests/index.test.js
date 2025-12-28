@@ -269,7 +269,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       const mockResponse = { status: 200 };
       global.fetch.mockResolvedValue(mockResponse);
 
-      const result = await fetchWithRetry(instances, request, mockEnv);
+      const result = await fetchWithRetry(instances, request, mockEnv, request.body);
       expect(result).toBe(mockResponse);
     });
 
@@ -284,7 +284,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       const mockResponse = { status: 200 };
       global.fetch.mockResolvedValueOnce(mockResponse);
 
-      const result = await fetchWithRetry(instances, request, mockEnv);
+      const result = await fetchWithRetry(instances, request, mockEnv, request.body);
       expect(result).toBe(mockResponse);
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
@@ -298,7 +298,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
 
       global.fetch.mockResolvedValue({ status: 500 });
 
-      await expect(fetchWithRetry(instances, request, mockEnv)).rejects.toThrow('Instance 2 returned 500');
+      await expect(fetchWithRetry(instances, request, mockEnv, request.body)).rejects.toThrow('Instance 2 returned 500');
     });
   });
 

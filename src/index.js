@@ -413,12 +413,12 @@ async function forwardToInstance(instance, request, originalBody, ctx = null) {
 /**
  * 带重试的转发逻辑
  */
-async function fetchWithRetry(instances, request, env, ctx = null) {
+async function fetchWithRetry(instances, request, env, body, ctx = null) {
     let lastError;
 
     for (const instance of instances) {
         try {
-            const response = await forwardToInstance(instance, request, request.body, ctx);
+            const response = await forwardToInstance(instance, request, body, ctx);
             return response;
         } catch (error) {
             logger.error('转发请求失败', { instanceId: instance.id, error: error.message });
@@ -500,7 +500,7 @@ export default {
             logger.info('开始转发请求', { instanceId: targetInstance.id, url: targetInstance.url });
 
             // 4. 转发请求
-            const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], request, env);
+            const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], request, env, body);
 
             // 5. 更新轮询索引 (可选，简化版本不更新)
             // 这里可以存储到KV，但为了简化，使用环境变量或简单计数
