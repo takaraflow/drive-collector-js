@@ -15,7 +15,7 @@ Cloudflare Worker 负载均衡器，用于多实例请求转发，支持故障�
    ```
    wrangler secret put AXIOM_TOKEN
    wrangler secret put AXIOM_ORG_ID
-   wrangler secret put AXIOM_DATASET  # 如需
+   wrangler secret put AXIOM_DATASET
    wrangler secret put QSTASH_CURRENT_SIGNING_KEY  # 如需
    wrangler secret put UPSTASH_REDIS_REST_URL  # 如需
    wrangler secret put UPSTASH_REDIS_REST_TOKEN  # 如需
