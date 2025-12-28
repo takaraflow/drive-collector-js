@@ -1,5 +1,13 @@
 #!/bin/bash
 
+if [ -f .env ]; then
+    echo "发现 .env 文件，正在加载环境变量..."
+    # 使用 set -a 自动导出 source 的变量
+    set -a
+    source .env
+    set +a
+fi
+
 # 检查必需的敏感变量
 echo "检查环境变量配置..."
 

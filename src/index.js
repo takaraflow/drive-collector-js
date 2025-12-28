@@ -17,6 +17,45 @@ const config = {
   serviceName: 'lb-worker-js',
 };
 
+/**
+ * 稳健的 JSON 解析函数，支持自动修复无引号键
+ */
+function safeJsonParse(data, context = '') {
+  if (data === null || data === undefined) return null;
+
+  // 如果已经是对象，直接返回
+  if (typeof data === 'object') return data;
+
+  try {
+    // 首先尝试标准 JSON 解析
+    return JSON.parse(data);
+  } catch (e) {
+    // 尝试修复无引号键的 JSON 格式
+    try {
+      // 使用正则表达式修复无引号键
+      // 匹配 {key:value,key:value} 格式，将键添加引号
+      let fixedData = data.trim();
+
+      // 移除外层花括号（如果有）
+      if (fixedData.startsWith('{') && fixedData.endsWith('}')) {
+        fixedData = fixedData.slice(1, -1);
+      }
+
+      // 正则表达式匹配无引号键：单词字符开头，后跟冒号
+      // 避免匹配值中的冒号（通过检查前面不是引号或逗号）
+      fixedData = fixedData.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+
+      // 重新添加花括号
+      fixedData = `{${fixedData}}`;
+
+      return JSON.parse(fixedData);
+    } catch (fixError) {
+      // 如果不是有效的 JSON 且无法修复，返回原始数据（向后兼容）
+      return data;
+    }
+  }
+}
+
 const logger = {
   env: 'production',
 
@@ -144,10 +183,16 @@ async function upstash_list(env, options = {}) {
     });
 
     if (!response.ok) {
-        throw new Error(`Upstash List Error: ${response.status} ${response.statusText}`);
+        const responseText = await response.text();
+        throw new Error(`Upstash List Error: ${response.status} ${response.statusText}. Response: ${responseText.substring(0, 100)}`);
     }
 
-    const result = await response.json();
+    const responseText = await response.text();
+    const result = safeJsonParse(responseText, 'upstash_list');
+    if (!result) {
+        throw new Error(`Upstash List Parse Error: Failed to parse response. Response: ${responseText.substring(0, 100)}`);
+    }
+
     if (result.error) {
         throw new Error(`Upstash List Error: ${result.error}`);
     }
@@ -171,10 +216,16 @@ async function upstash_get(env, key, options = {}) {
 
     if (!response.ok) {
         if (response.status === 404) return null;
-        throw new Error(`Upstash Get Error: ${response.status} ${response.statusText}`);
+        const responseText = await response.text();
+        throw new Error(`Upstash Get Error: ${response.status} ${response.statusText}. Response: ${responseText.substring(0, 100)}`);
     }
 
-    const result = await response.json();
+    const responseText = await response.text();
+    const result = safeJsonParse(responseText, 'upstash_get');
+    if (!result) {
+        throw new Error(`Upstash Get Parse Error: Failed to parse response. Response: ${responseText.substring(0, 100)}`);
+    }
+
     if (result.error) {
         throw new Error(`Upstash Get Error: ${result.error}`);
     }
@@ -184,11 +235,7 @@ async function upstash_get(env, key, options = {}) {
 
     const type = options.type || 'json';
     if (type === 'json') {
-        try {
-            return JSON.parse(value);
-        } catch (e) {
-            return value;
-        }
+        return safeJsonParse(value, `upstash_get value for key ${key}`);
     }
     return value;
 }
@@ -210,10 +257,16 @@ async function upstash_put(env, key, value) {
     });
 
     if (!response.ok) {
-        throw new Error(`Upstash Put Error: ${response.status} ${response.statusText}`);
+        const responseText = await response.text();
+        throw new Error(`Upstash Put Error: ${response.status} ${response.statusText}. Response: ${responseText.substring(0, 100)}`);
     }
 
-    const result = await response.json();
+    const responseText = await response.text();
+    const result = safeJsonParse(responseText, 'upstash_put');
+    if (!result) {
+        throw new Error(`Upstash Put Parse Error: Failed to parse response. Response: ${responseText.substring(0, 100)}`);
+    }
+
     if (result.error) {
         throw new Error(`Upstash Put Error: ${result.error}`);
     }
@@ -366,6 +419,59 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
 }
 
 /**
+ * 解析实例数据，支持多种格式
+ */
+function parseInstanceData(rawData, key) {
+    if (!rawData) return null;
+
+    // 如果已经是对象（测试环境），直接返回
+    if (typeof rawData === 'object') {
+        return rawData;
+    }
+
+    // 优先使用 safeJsonParse，支持自动修复无引号键
+    const parsed = safeJsonParse(rawData, `parseInstanceData for key ${key}`);
+    if (parsed !== null) {
+        return parsed;
+    }
+
+    // 如果 safeJsonParse 失败，尝试手动解析对象字面量格式 {key:value,key:value}
+    try {
+        // 移除外层花括号，分割键值对
+        const content = rawData.trim();
+        if (content.startsWith('{') && content.endsWith('}')) {
+            const pairs = content.slice(1, -1).split(',');
+            const obj = {};
+            for (const pair of pairs) {
+                const [keyPart, ...valueParts] = pair.split(':');
+                const value = valueParts.join(':'); // 处理值中可能包含冒号的情况
+                const cleanKey = keyPart.trim();
+                const cleanValue = value.trim();
+
+                // 尝试转换数值类型
+                if (!isNaN(cleanValue) && cleanValue !== '') {
+                    obj[cleanKey] = parseFloat(cleanValue);
+                } else if (cleanValue === 'true') {
+                    obj[cleanKey] = true;
+                } else if (cleanValue === 'false') {
+                    obj[cleanKey] = false;
+                } else {
+                    // 移除可能的引号
+                    obj[cleanKey] = cleanValue.replace(/^["']|["']$/g, '');
+                }
+            }
+            return obj;
+        }
+    } catch (parseError) {
+        logger.warn('手动解析实例数据失败', { key, rawData: rawData.substring(0, 100), error: parseError.message });
+    }
+
+    // 所有解析方法都失败
+    logger.warn('实例数据解析失败', { key, rawData: rawData.substring(0, 100) });
+    return null;
+}
+
+/**
  * 获取活跃实例列表
  */
 async function getActiveInstances(env, ctx) {
@@ -378,23 +484,39 @@ async function getActiveInstances(env, ctx) {
 
         for (const key of keys.keys) {
             try {
-                const instance = await executeWithFailover('_kv_get', env, ctx, key.name, { type: 'json' });
-                if (instance &&
-                    instance.status === 'active' &&
-                    instance.lastHeartbeat &&
-                    (now - instance.lastHeartbeat) < HEARTBEAT_TIMEOUT &&
-                    instance.url) {
-                    activeInstances.push(instance);
+                const rawData = await executeWithFailover('_kv_get', env, ctx, key.name);
+                const instance = parseInstanceData(rawData, key.name);
+                if (!instance) {
+                    logger.warn('实例数据为空或格式错误', { key: key.name, rawData, provider: getCurrentProvider() }, ctx);
+                    continue;
                 }
+                if (instance.status !== 'active') {
+                    logger.info('实例状态非活跃', { id: instance.id, status: instance.status }, ctx);
+                    continue;
+                }
+                if (!instance.lastHeartbeat) {
+                    logger.info('实例缺少心跳时间戳', { id: instance.id }, ctx);
+                    continue;
+                }
+                const timeDiff = now - instance.lastHeartbeat;
+                if (timeDiff >= HEARTBEAT_TIMEOUT) {
+                    logger.info('实例心跳过期', { id: instance.id, diff: timeDiff, timeout: HEARTBEAT_TIMEOUT, lastHeartbeat: new Date(instance.lastHeartbeat).toISOString() }, ctx);
+                    continue;
+                }
+                if (!instance.url) {
+                    logger.info('实例缺少URL', { id: instance.id }, ctx);
+                    continue;
+                }
+                activeInstances.push(instance);
             } catch (e) {
                 // 忽略单个实例获取失败
-                logger.error('实例信息获取失败', { instance: key.name, error: e.message }, ctx);
+                logger.error('实例信息获取失败', { instance: key.name, error: e.message, provider: getCurrentProvider() }, ctx);
             }
         }
 
         return activeInstances;
     } catch (error) {
-        logger.error('活跃实例列表获取失败', { error: error.message }, ctx);
+        logger.error('活跃实例列表获取失败', { error: error.message, provider: getCurrentProvider(), failureCount, lastFailureTime: new Date(lastFailureTime).toISOString() }, ctx);
         return [];
     }
 }
@@ -504,6 +626,7 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx)
 // 导出函数以便测试
 export {
     verifyQStashSignature,
+    parseInstanceData,
     getActiveInstances,
     selectTargetInstance,
     forwardToInstance,

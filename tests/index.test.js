@@ -513,7 +513,8 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         // Mock Upstash response
         global.fetch = jest.fn().mockResolvedValue({
           ok: true,
-          json: () => Promise.resolve({ result: 'upstash-value' })
+          json: () => Promise.resolve({ result: 'upstash-value' }),
+          text: () => Promise.resolve(JSON.stringify({ result: 'upstash-value' }))
         });
 
         // Mock KV failure
