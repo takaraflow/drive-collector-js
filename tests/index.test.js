@@ -326,12 +326,14 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           ['CF-Connecting-IP', '1.2.3.4'],
         ]),
       };
+      const normalizedUrl = new URL(request.url);
+      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
       const originalBody = 'test-body';
 
       const mockResponse = { status: 200, ok: true };
       global.fetch.mockResolvedValue(mockResponse);
 
-      const result = await forwardToInstance(instance, request, originalBody);
+      const result = await forwardToInstance(instance, normalizedUrl, request, originalBody);
       expect(result).toBe(mockResponse);
 
       expect(global.fetch).toHaveBeenCalledWith(
@@ -349,12 +351,14 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         method: 'POST',
         headers: new Map(),
       };
+      const normalizedUrl = new URL(request.url);
+      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
       const originalBody = 'test-body';
 
       const mockResponse = { status: 500 };
       global.fetch.mockResolvedValue(mockResponse);
 
-      await expect(forwardToInstance(instance, request, originalBody)).rejects.toThrow();
+      await expect(forwardToInstance(instance, normalizedUrl, request, originalBody)).rejects.toThrow();
     });
   });
 
@@ -364,11 +368,13 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         { id: '1', url: 'https://instance1.com' },
       ];
       const request = { url: 'https://lb.example.com/webhook', method: 'POST', headers: new Map(), body: 'body' };
+      const normalizedUrl = new URL(request.url);
+      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
 
       const mockResponse = { status: 200 };
       global.fetch.mockResolvedValue(mockResponse);
 
-      const result = await fetchWithRetry(instances, request, mockEnv, request.body);
+      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
       expect(result).toBe(mockResponse);
     });
 
@@ -378,12 +384,14 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         { id: '2', url: 'https://instance2.com' },
       ];
       const request = { url: 'https://lb.example.com/webhook', method: 'POST', headers: new Map(), body: 'body' };
+      const normalizedUrl = new URL(request.url);
+      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
 
       global.fetch.mockImplementationOnce(() => Promise.resolve({ status: 500 }));
       const mockResponse = { status: 200 };
       global.fetch.mockResolvedValueOnce(mockResponse);
 
-      const result = await fetchWithRetry(instances, request, mockEnv, request.body);
+      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
       expect(result).toBe(mockResponse);
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
@@ -394,10 +402,12 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         { id: '2', url: 'https://instance2.com' },
       ];
       const request = { url: 'https://lb.example.com/webhook', method: 'POST', headers: new Map(), body: 'body' };
+      const normalizedUrl = new URL(request.url);
+      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
 
       global.fetch.mockResolvedValue({ status: 500 });
 
-      await expect(fetchWithRetry(instances, request, mockEnv, request.body)).rejects.toThrow('Instance 2 returned 500');
+      await expect(fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body)).rejects.toThrow('Instance 2 returned 500');
     });
   });
 
@@ -573,6 +583,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       mockKV.list.mockResolvedValue({ keys: [] });
 
       const request = {
+        url: 'https://lb.example.com/webhook',
         headers: new Map([
           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
           ['Upstash-Timestamp', Math.floor(Date.now() / 1000).toString()],
@@ -588,6 +599,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
 
     it('应该在签名验证失败时返回401', async () => {
       const request = {
+        url: 'https://lb.example.com/webhook',
         headers: new Map(),
         text: jest.fn().mockResolvedValue('body'),
       };

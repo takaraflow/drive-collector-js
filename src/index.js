@@ -432,8 +432,8 @@ async function selectTargetInstance(instances, env, ctx) {
 /**
  * 转发请求到目标实例
  */
-async function forwardToInstance(instance, request, originalBody, ctx = null) {
-    const url = new URL(request.url);
+async function forwardToInstance(instance, normalizedUrl, request, originalBody, ctx = null) {
+    const url = new URL(normalizedUrl.href);
     url.host = new URL(instance.url).host;
     url.protocol = new URL(instance.url).protocol;
 
@@ -470,12 +470,12 @@ async function forwardToInstance(instance, request, originalBody, ctx = null) {
 /**
  * 带重试的转发逻辑
  */
-async function fetchWithRetry(instances, request, env, body, ctx) {
+async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx) {
     let lastError;
 
     for (const instance of instances) {
         try {
-            const response = await forwardToInstance(instance, request, body, ctx);
+            const response = await forwardToInstance(instance, normalizedUrl, request, body, ctx);
             return response;
         } catch (error) {
             logger.error('转发请求失败', { instanceId: instance.id, error: error.message }, ctx);
@@ -516,6 +516,10 @@ export const setCurrentProviderState = (state) => {
  */
 const handler = {
     async fetch(request, env, ctx) {
+        // 规范化请求 URL：将多个连续斜杠替换为单个斜杠
+        const normalizedUrl = new URL(request.url);
+        normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
+
         // 环境变量校验
         if (!env.AXIOM_TOKEN) {
             console.warn('AXIOM_TOKEN 未设置，日志功能将被禁用');
@@ -543,7 +547,7 @@ const handler = {
 
         try {
             // 检查健康检查路径
-            if (request.method === 'GET' && new URL(request.url).pathname === '/health') {
+            if (request.method === 'GET' && normalizedUrl.pathname === '/health') {
                 return new Response('LB is running', { status: 200 });
             }
 
@@ -577,7 +581,7 @@ const handler = {
             logger.info('开始转发请求', { instanceId: targetInstance.id, url: targetInstance.url }, ctx);
 
             // 4. 转发请求
-            const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], request, env, body, ctx);
+            const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], normalizedUrl, request, env, body, ctx);
 
             // 5. 更新轮询索引 (可选，简化版本不更新)
             // 这里可以存储到KV，但为了简化，使用环境变量或简单计数
