@@ -423,11 +423,10 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
     throw error;
   }
 
-  // 有签名头，读取 body 并验证
-  body = await request.arrayBuffer();
-  const bodyString = new TextDecoder().decode(body);
-  console.log('Request body length:', body.byteLength);
-  console.log('Body preview (first 100 chars):', bodyString.substring(0, 100) + (bodyString.length > 100 ? '...' : ''));
+    // 有签名头，读取 body 并验证
+    body = await request.arrayBuffer();
+    const bodyUint8 = new Uint8Array(body);
+    console.log('Request body length:', body.byteLength);
 
     // 2. 验证时间戳是否过期
     const now = Math.floor(Date.now() / 1000);
@@ -449,13 +448,18 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
     }
 
     // QStash签名格式: timestamp.body
-    const message = `${timestamp}.${bodyString}`;
+    // 使用 Uint8Array 拼接以保证多字节字符一致性
+    const encoder = new TextEncoder();
+    const timestampBytes = encoder.encode(`${timestamp}.`);
+    const message = new Uint8Array(timestampBytes.length + bodyUint8.length);
+    message.set(timestampBytes);
+    message.set(bodyUint8, timestampBytes.length);
 
     if (!env.QSTASH_CURRENT_SIGNING_KEY) {
       logger.error('缺少 QSTASH_CURRENT_SIGNING_KEY', {}, ctx);
       if (env.SKIP_SIGNATURE_VERIFY === 'true') {
         logger.info('SKIP_SIGNATURE_VERIFY=true，跳过签名验证', {}, ctx);
-        return new Uint8Array(body);
+        return bodyUint8;
       }
       const error = new Error('QSTASH_CURRENT_SIGNING_KEY 未设置，无法验证签名');
       Object.assign(error, { status: 500 });
@@ -463,7 +467,6 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
     }
 
     // 计算预期签名
-    const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
         'raw',
         encoder.encode(env.QSTASH_CURRENT_SIGNING_KEY),
@@ -472,7 +475,7 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
         ['sign']
     );
 
-    const expectedSignature = await crypto.subtle.sign('HMAC', key, encoder.encode(message));
+    const expectedSignature = await crypto.subtle.sign('HMAC', key, message);
     const expectedBase64 = base64UrlEncode(expectedSignature);
 
     // 比较签名 (QStash使用 v1a=base64url 格式)
@@ -481,14 +484,14 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
         logger.debug('签名验证失败详情', {
             expectedSignature: expectedBase64,
             providedSignature: providedSignature,
-            message
+            bodyLength: bodyUint8.length
         }, ctx);
         const error = new Error('Signature verification failed');
         Object.assign(error, { status: 401 });
         throw error;
     }
 
-    return new Uint8Array(body);
+    return bodyUint8;
 }
 
 /**
@@ -675,6 +678,9 @@ async function forwardToInstance(instance, normalizedUrl, request, originalBody,
     headers.delete('content-length');
     headers.delete('host');
 
+    // 确保 Host 头部反映目标实例
+    headers.set('Host', url.host);
+
     const requestOptions = {
         method: request.method,
         headers: {
@@ -683,12 +689,18 @@ async function forwardToInstance(instance, normalizedUrl, request, originalBody,
             'X-Forwarded-Proto': url.protocol.replace(':', ''),
             'X-Forwarded-For': request.headers.get('CF-Connecting-IP') || '',
             'X-Load-Balancer': 'qstash-lb'
-        }
+        },
+        redirect: 'follow'
     };
 
     if (request.method !== 'GET' && request.method !== 'HEAD') {
         requestOptions.body = originalBody;
-        logger.debug('转发请求 body', { length: originalBody.byteLength, hexPreview: Array.from(new Uint8Array(originalBody).slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join('') }, ctx);
+        if (originalBody instanceof Uint8Array || originalBody instanceof ArrayBuffer) {
+            const length = originalBody instanceof Uint8Array ? originalBody.length : originalBody.byteLength;
+            logger.debug('转发请求 body', { length, hexPreview: Array.from(new Uint8Array(originalBody).slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join('') }, ctx);
+        } else {
+            logger.debug('转发请求 body (非字节流)', { length: originalBody?.length }, ctx);
+        }
     }
 
     const forwardRequest = new Request(url.toString(), requestOptions);
@@ -714,23 +726,27 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx)
         try {
             const response = await forwardToInstance(instance, normalizedUrl, request, body, ctx);
             if (response.status >= 500) {
+                // 如果后端返回 5xx，保存它并尝试下一个实例
                 last5xxResponse = response;
                 continue;
             }
+            // 2xx, 3xx, 4xx 响应直接返回
             return response;
         } catch (error) {
             logger.error('转发请求失败', { instanceId: instance.id, error: error.message }, ctx);
             lastError = error;
-            // 继续尝试下一个实例
+            // 网络层面的错误，继续尝试下一个实例
         }
     }
 
-    // 如果有 5xx 响应，透传最后一个
+    // 如果所有实例都尝试过了
+    // 1. 如果有后端返回的 5xx 响应，透传它
     if (last5xxResponse) {
+        logger.warn('所有实例均返回 5xx，透传最后一个响应', { status: last5xxResponse.status }, ctx);
         return last5xxResponse;
     }
 
-    // 所有实例都失败
+    // 2. 如果是网络连接等导致的异常，抛出
     throw lastError || new Error('All instances failed');
 }
 
