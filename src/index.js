@@ -293,6 +293,23 @@ async function verifyQStashSignature(request, env, ctx = null) {
     // QStash签名格式: timestamp.body
     const message = `${timestamp}.${body}`;
 
+    logger.warn('QStash签名验证 - 密钥状态', {
+      hasKey: !!env.QSTASH_CURRENT_SIGNING_KEY,
+      keyLength: env.QSTASH_CURRENT_SIGNING_KEY ? env.QSTASH_CURRENT_SIGNING_KEY.length : 0,
+      skipVerify: env.SKIP_SIGNATURE_VERIFY === 'true'
+    });
+
+    if (!env.QSTASH_CURRENT_SIGNING_KEY) {
+      logger.error('缺少 QSTASH_CURRENT_SIGNING_KEY');
+      if (env.SKIP_SIGNATURE_VERIFY === 'true') {
+        logger.info('SKIP_SIGNATURE_VERIFY=true，跳过签名验证');
+        return body;
+      }
+      const error = new Error('QSTASH_CURRENT_SIGNING_KEY 未设置，无法验证签名');
+      Object.assign(error, { status: 500 });
+      throw error;
+    }
+
     // 计算预期签名
     const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
