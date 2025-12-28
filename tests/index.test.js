@@ -18,25 +18,28 @@ import {
 // Mock modules handled by jest.config.js moduleNameMapper
 
 import { Buffer } from 'node:buffer';
+import crypto from 'node:crypto'; // Import crypto
 
 // Mock global.fetch
 global.fetch = jest.fn();
 
-// Mock crypto
-global.crypto = {
-  subtle: {
-    importKey: jest.fn(),
-    sign: jest.fn(),
-  },
-};
+// Mock node:crypto createHmac
+const mockHmacUpdate = jest.fn();
+const mockHmacDigest = jest.fn();
+const mockCreateHmac = jest.fn().mockReturnValue({
+    update: mockHmacUpdate,
+    digest: mockHmacDigest
+});
 
-// Mock TextEncoder and btoa
-global.TextEncoder = class TextEncoder {
-  encode(str) {
-    return new Uint8Array(Buffer.from(str, 'utf8'));
-  }
-};
-global.btoa = (str) => Buffer.from(str, 'binary').toString('base64');
+jest.mock('node:crypto', () => {
+  return {
+    __esModule: true,
+    ...jest.requireActual('node:crypto'),
+    createHmac: mockCreateHmac
+  };
+});
+
+import { createHmac } from 'node:crypto'; // Re-import to get the mocked version
 
 // Mock console methods
 global.console = {
@@ -85,11 +88,8 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
       };
 
-      // Mock crypto
-      global.crypto.subtle.importKey.mockResolvedValue('mock-key');
-      // Mock sign to return the bytes for 'expected-signature'
-      const expectedBytes = new Uint8Array([101, 120, 112, 101, 99, 116, 101, 100, 45, 115, 105, 103, 110, 97, 116, 117, 114, 101]);
-      global.crypto.subtle.sign.mockResolvedValue(expectedBytes);
+      // Mock Mocked createHmac behavior for this test
+      mockHmacDigest.mockReturnValue('ZXhwZWN0ZWQtc2lnbmF0dXJl'); // expected-signature in base64url
 
       const result = await verifyQStashSignature(request, mockEnv);
       expect(result).toEqual(new Uint8Array(Buffer.from(body)));
@@ -116,8 +116,8 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
       };
 
-      global.crypto.subtle.importKey.mockResolvedValue('mock-key');
-      global.crypto.subtle.sign.mockResolvedValue(new Uint8Array(Buffer.from('expected-signature', 'utf8')));
+      // Mock Mocked createHmac behavior for this test
+      mockHmacDigest.mockReturnValue('expected-signature');
 
       await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Signature verification failed');
     });
@@ -162,11 +162,10 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
       };
 
-      // Mock crypto
-      global.crypto.subtle.importKey.mockResolvedValue('mock-key');
-      // Mock sign to return bytes that base64UrlEncode produces 'c2lnXzVQZmtKeXhjajFCQzVYOVc1aDk0TWh4bmROZ0c'
-      const expectedBytes = new Uint8Array(Buffer.from('c2lnXzVQZmtKeXhjajFCQzVYOVc1aDk0TWh4bmROZ0c', 'base64url'));
-      global.crypto.subtle.sign.mockResolvedValue(expectedBytes);
+      // Mock createHmac to return string that matches signature without v1a= and = padding
+      // signature payload: c2lnXzVQZmtKeXhjajFCQzVYOVc1aDk0TWh4bmROZ0c=
+      // expected: c2lnXzVQZmtKeXhjajFCQzVYOVc1aDk0TWh4bmROZ0c
+      mockHmacDigest.mockReturnValue('c2lnXzVQZmtKeXhjajFCQzVYOVc1aDk0TWh4bmROZ0c='); // mock return with padding to test removal
 
       const result = await verifyQStashSignature(request, mockEnv);
       expect(result).toEqual(new Uint8Array(Buffer.from(body)));
@@ -186,10 +185,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
       };
 
-      // Mock crypto
-      global.crypto.subtle.importKey.mockResolvedValue('mock-key');
-      const expectedBytes = new Uint8Array([101, 120, 112, 101, 99, 116, 101, 100, 45, 115, 105, 103, 110, 97, 116, 117, 114, 101]);
-      global.crypto.subtle.sign.mockResolvedValue(expectedBytes);
+      mockHmacDigest.mockReturnValue('ZXhwZWN0ZWQtc2lnbmF0dXJl');
 
       const result = await verifyQStashSignature(request, mockEnv);
       expect(result).toEqual(new Uint8Array(Buffer.from(body)));
@@ -223,10 +219,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
       };
 
-      // Mock crypto
-      global.crypto.subtle.importKey.mockResolvedValue('mock-key');
-      const expectedBytes = new Uint8Array([101, 120, 112, 101, 99, 116, 101, 100, 45, 115, 105, 103, 110, 97, 116, 117, 114, 101]);
-      global.crypto.subtle.sign.mockResolvedValue(expectedBytes);
+      mockHmacDigest.mockReturnValue('ZXhwZWN0ZWQtc2lnbmF0dXJl');
 
       const result = await verifyQStashSignature(request, customEnv);
       expect(result).toEqual(new Uint8Array(Buffer.from('body')));
@@ -551,10 +544,9 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
 
   // 集成测试
   describe('Integration Tests', () => {
-    it('应该在happy path下成功转发请求', async () => {
-      // Mock 签名验证
-      global.crypto.subtle.importKey.mockResolvedValue('mock-key');
-      global.crypto.subtle.sign.mockResolvedValue(new Uint8Array(Buffer.from('expected-signature', 'utf8')));
+    it('应该在集成测试中正确转发请求', async () => {
+      // Mock Hmac for integration test
+      mockHmacDigest.mockReturnValue('ZXhwZWN0ZWQtc2lnbmF0dXJl');
 
       // Mock KV
       mockKV.list.mockResolvedValue({
@@ -597,8 +589,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
     });
 
     it('应该在无活跃实例时返回503', async () => {
-      global.crypto.subtle.importKey.mockResolvedValue('mock-key');
-      global.crypto.subtle.sign.mockResolvedValue(new Uint8Array(Buffer.from('expected-signature', 'utf8')));
+      mockHmacDigest.mockReturnValue('ZXhwZWN0ZWQtc2lnbmF0dXJl');
 
       mockKV.list.mockResolvedValue({ keys: [] });
 
@@ -653,9 +644,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         type: "download"
       });
 
-      // Mock 签名验证
-      global.crypto.subtle.importKey.mockResolvedValue('mock-key');
-      global.crypto.subtle.sign.mockResolvedValue(new Uint8Array(Buffer.from('expected-signature', 'utf8')));
+      mockHmacDigest.mockReturnValue('ZXhwZWN0ZWQtc2lnbmF0dXJl');
 
       // Mock KV
       mockKV.list.mockResolvedValue({

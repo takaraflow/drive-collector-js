@@ -5,6 +5,7 @@
 
 import { trace } from '@opentelemetry/api';
 import { instrument } from '@microlabs/otel-cf-workers';
+import { createHmac } from 'node:crypto';
 
 const config = {
   exporter: {
@@ -453,14 +454,6 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
         throw error;
     }
 
-    // QStash签名格式: timestamp.body
-    // 使用 Uint8Array 拼接以保证多字节字符一致性
-    const encoder = new TextEncoder();
-    const timestampBytes = encoder.encode(`${timestamp}.`);
-    const message = new Uint8Array(timestampBytes.length + bodyUint8.length);
-    message.set(timestampBytes);
-    message.set(bodyUint8, timestampBytes.length);
-
     if (!env.QSTASH_CURRENT_SIGNING_KEY) {
       logger.error('缺少 QSTASH_CURRENT_SIGNING_KEY', {}, ctx);
       if (env.SKIP_SIGNATURE_VERIFY === 'true') {
@@ -473,22 +466,17 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
     }
 
     // 计算预期签名
-    const key = await crypto.subtle.importKey(
-        'raw',
-        encoder.encode(env.QSTASH_CURRENT_SIGNING_KEY),
-        { name: 'HMAC', hash: 'SHA-256' },
-        false,
-        ['sign']
-    );
-
-    const expectedSignature = await crypto.subtle.sign('HMAC', key, message);
-    const expectedBase64 = base64UrlEncode(expectedSignature);
+    const hmac = createHmac('sha256', env.QSTASH_CURRENT_SIGNING_KEY);
+    hmac.update(`${timestamp}.`);
+    hmac.update(bodyUint8);
+    const expectedSignature = hmac.digest('base64url');
 
     // 比较签名 (QStash使用 v1a=base64url 格式)
-    const providedSignature = signature.replace('v1a=', '').replace(/=/g, '');
-    if (providedSignature !== expectedBase64) {
+    const providedSignature = signature.replace('v1a=', '').replace(/=+$/, '');
+    
+    if (providedSignature !== expectedSignature) {
         logger.debug('签名验证失败详情', {
-            expectedSignature: expectedBase64,
+            expectedSignature: expectedSignature,
             providedSignature: providedSignature,
             bodyLength: bodyUint8.length
         }, ctx);
