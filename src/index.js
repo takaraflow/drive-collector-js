@@ -274,7 +274,7 @@ async function executeWithFailover(operation, env, ...args) {
 /**
  * 验证QStash签名 (手动实现)
  */
-async function verifyQStashSignature(request, env) {
+async function verifyQStashSignature(request, env, ctx = null) {
     const signature = request.headers.get('Upstash-Signature');
     const timestamp = request.headers.get('Upstash-Timestamp');
 
