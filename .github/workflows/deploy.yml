@@ -27,6 +27,7 @@ jobs:
 
       - name: Install build tools
         run: npm install --no-save esbuild wrangler
+
       - name: Deploy
         env:
           WORKER_NAME: ${{ vars.WORKER_NAME }}

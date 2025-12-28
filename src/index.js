@@ -293,12 +293,6 @@ async function verifyQStashSignature(request, env, ctx = null) {
     // QStash签名格式: timestamp.body
     const message = `${timestamp}.${body}`;
 
-    logger.warn('QStash签名验证 - 密钥状态', {
-      hasKey: !!env.QSTASH_CURRENT_SIGNING_KEY,
-      keyLength: env.QSTASH_CURRENT_SIGNING_KEY ? env.QSTASH_CURRENT_SIGNING_KEY.length : 0,
-      skipVerify: env.SKIP_SIGNATURE_VERIFY === 'true'
-    });
-
     if (!env.QSTASH_CURRENT_SIGNING_KEY) {
       logger.error('缺少 QSTASH_CURRENT_SIGNING_KEY');
       if (env.SKIP_SIGNATURE_VERIFY === 'true') {
@@ -475,6 +469,23 @@ export const setCurrentProviderState = (state) => {
  */
 export default {
     async fetch(request, env, ctx) {
+        // 环境变量校验
+        if (!env.AXIOM_TOKEN) {
+            console.warn('AXIOM_TOKEN 未设置，日志功能将被禁用');
+        }
+        if (!env.AXIOM_ORG_ID) {
+            console.warn('AXIOM_ORG_ID 未设置，日志功能将被禁用');
+        }
+        if (!env.QSTASH_CURRENT_SIGNING_KEY && env.SKIP_SIGNATURE_VERIFY !== 'true') {
+            console.warn('QSTASH_CURRENT_SIGNING_KEY 未设置且未跳过签名验证，Webhook 请求将被拒绝');
+        }
+        if (env.CF_KV_NAMESPACE_ID && !env.KV_STORAGE) {
+            console.warn('CF_KV_NAMESPACE_ID 已设置但 KV_STORAGE 绑定缺失，KV 功能将被禁用');
+        }
+        if (!env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) {
+            console.warn('UPSTASH_REDIS_REST_URL 或 UPSTASH_REDIS_REST_TOKEN 未设置，故障转移功能将被禁用');
+        }
+
         // 初始化日志配置
         logger.configure({
             axiom: {
@@ -529,7 +540,13 @@ export default {
         } catch (error) {
             logger.error('负载均衡器错误', { error: error.message, stack: error.stack });
             const status = error.status || 500;
-            return new Response(`Load Balancer Error: ${error.message}`, { status });
+            return new Response(JSON.stringify({
+              error: error.message,
+              timestamp: new Date().toISOString()
+            }), {
+              status,
+              headers: { 'Content-Type': 'application/json' }
+            });
         }
     }
 };
