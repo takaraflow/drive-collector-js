@@ -11,7 +11,8 @@ import {
   isRetryableError,
   executeWithFailover,
   getCurrentProviderState,
-  setCurrentProviderState
+  setCurrentProviderState,
+  logger
 } from '../src/index.js';
 
 import { Buffer } from 'node:buffer';
@@ -479,7 +480,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       it('应该在KV成功时使用Cloudflare KV', async () => {
         mockKV.get.mockResolvedValue('test-value');
 
-        const result = await executeWithFailover('_kv_get', mockEnv, 'test-key');
+        const result = await executeWithFailover('_kv_get', mockEnv, {}, 'test-key');
         expect(result).toBe('test-value');
         expect(mockKV.get).toHaveBeenCalledWith('test-key');
       });
@@ -504,7 +505,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         }
 
         // 现在应该在upstash模式
-        const result = await executeWithFailover('_kv_get', mockEnv, 'test-key');
+        const result = await executeWithFailover('_kv_get', mockEnv, {}, 'test-key');
         expect(result).toBe('upstash-value');
         expect(global.fetch).toHaveBeenCalledWith(
           'https://test.upstash.io/get/test-key',
@@ -513,6 +514,71 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           })
         );
       });
+    });
+  });
+
+  describe('Logger', () => {
+    let mockCtx;
+    let mockAxiom;
+
+    beforeEach(() => {
+      mockCtx = {
+        waitUntil: jest.fn().mockImplementation((promise) => promise)
+      };
+
+      // Mock Axiom
+      mockAxiom = {
+        ingest: jest.fn().mockResolvedValue(undefined)
+      };
+
+      // Mock import
+      jest.doMock('@axiomhq/js', () => ({
+        Axiom: jest.fn().mockImplementation(() => mockAxiom)
+      }));
+
+      // Configure logger with test data
+      logger.configure({
+        axiom: {
+          token: 'test-token',
+          orgId: 'test-org',
+          dataset: 'test-dataset'
+        },
+        env: 'test'
+      });
+    });
+
+    it('应该正确调用ctx.waitUntil用于异步日志发送', async () => {
+      await logger.info('test message', { meta: 'data' }, mockCtx);
+
+      expect(mockCtx.waitUntil).toHaveBeenCalledTimes(1);
+      expect(mockCtx.waitUntil).toHaveBeenCalledWith(expect.any(Promise));
+    });
+
+    it('应该在Axiom发送失败时输出console错误', async () => {
+      logger.axiom = {
+        ingest: jest.fn().mockRejectedValue(new Error('Network error'))
+      };
+
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      await logger.info('test message', { meta: 'data' }, mockCtx);
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Axiom 发送失败: Network error',
+        expect.objectContaining({
+          level: 'info',
+          message: 'test message',
+          meta: { meta: 'data' }
+        })
+      );
+
+      consoleErrorSpy.mockRestore();
+    });
+
+    it('应该在没有ctx时仍然记录日志', async () => {
+      await logger.info('test message', { meta: 'data' });
+
+      expect(mockCtx.waitUntil).not.toHaveBeenCalled();
     });
   });
 

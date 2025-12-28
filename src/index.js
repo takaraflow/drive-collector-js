@@ -61,7 +61,7 @@ const logger = {
   
         await this.axiom.ingest(this.dataset, [payload]);
       } catch (e) {
-        // 静默失败，避免日志循环
+        console.error(`Axiom 发送失败: ${e.message}`, { level, message, meta });
       }
     })();
   
@@ -86,7 +86,7 @@ const MAX_FAILURES = 3;
 /**
  * 检查是否应该触发故障转移
  */
-function shouldFailover(error, env) {
+function shouldFailover(error, env, ctx) {
     if (currentProvider === 'upstash' || !env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) {
         return false;
     }
@@ -102,7 +102,7 @@ function shouldFailover(error, env) {
         failureCount++;
         lastFailureTime = Date.now();
         if (failureCount >= MAX_FAILURES) {
-            logger.warn(`Cloudflare KV 连续失败，触发故障转移`, { failureCount, provider: 'cloudflare' });
+            logger.warn(`Cloudflare KV 连续失败，触发故障转移`, { failureCount, provider: 'cloudflare' }, ctx);
             return true;
         }
     }
@@ -113,11 +113,11 @@ function shouldFailover(error, env) {
 /**
  * 执行故障转移
  */
-function failover(env) {
+function failover(env, ctx) {
     if (currentProvider === 'cloudflare' && env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
         currentProvider = 'upstash';
         failureCount = 0;
-        logger.info('故障转移完成', { from: 'cloudflare', to: 'upstash' });
+        logger.info('故障转移完成', { from: 'cloudflare', to: 'upstash' }, ctx);
         return true;
     }
     return false;
@@ -236,7 +236,7 @@ async function upstash_put(env, key, value) {
 /**
  * 带故障转移的KV操作执行器
  */
-async function executeWithFailover(operation, env, ...args) {
+async function executeWithFailover(operation, env, ctx, ...args) {
     let attempts = 0;
     const maxAttempts = 3;
 
@@ -260,8 +260,8 @@ async function executeWithFailover(operation, env, ...args) {
                 throw error;
             }
 
-            if (shouldFailover(error, env)) {
-                failover(env);
+            if (shouldFailover(error, env, ctx)) {
+                failover(env, ctx);
                 continue; // 重试一次，使用新提供商
             }
 
@@ -317,9 +317,9 @@ async function verifyQStashSignature(request, env, ctx = null) {
     const message = `${timestamp}.${body}`;
 
     if (!env.QSTASH_CURRENT_SIGNING_KEY) {
-      logger.error('缺少 QSTASH_CURRENT_SIGNING_KEY');
+      logger.error('缺少 QSTASH_CURRENT_SIGNING_KEY', {}, ctx);
       if (env.SKIP_SIGNATURE_VERIFY === 'true') {
-        logger.info('SKIP_SIGNATURE_VERIFY=true，跳过签名验证');
+        logger.info('SKIP_SIGNATURE_VERIFY=true，跳过签名验证', {}, ctx);
         return body;
       }
       const error = new Error('QSTASH_CURRENT_SIGNING_KEY 未设置，无法验证签名');
@@ -359,17 +359,17 @@ async function verifyQStashSignature(request, env, ctx = null) {
 /**
  * 获取活跃实例列表
  */
-async function getActiveInstances(env, ctx = null) {
+async function getActiveInstances(env, ctx) {
     try {
         const activeInstances = [];
         const now = Date.now();
 
         // 获取所有实例键
-        const keys = await executeWithFailover('_kv_list', env, { prefix: INSTANCE_PREFIX });
+        const keys = await executeWithFailover('_kv_list', env, ctx, { prefix: INSTANCE_PREFIX });
 
         for (const key of keys.keys) {
             try {
-                const instance = await executeWithFailover('_kv_get', env, key.name, { type: 'json' });
+                const instance = await executeWithFailover('_kv_get', env, ctx, key.name, { type: 'json' });
                 if (instance &&
                     instance.status === 'active' &&
                     instance.lastHeartbeat &&
@@ -379,13 +379,13 @@ async function getActiveInstances(env, ctx = null) {
                 }
             } catch (e) {
                 // 忽略单个实例获取失败
-                logger.error('实例信息获取失败', { instance: key.name, error: e.message });
+                logger.error('实例信息获取失败', { instance: key.name, error: e.message }, ctx);
             }
         }
 
         return activeInstances;
     } catch (error) {
-        logger.error('活跃实例列表获取失败', { error: error.message });
+        logger.error('活跃实例列表获取失败', { error: error.message }, ctx);
         return [];
     }
 }
@@ -393,7 +393,7 @@ async function getActiveInstances(env, ctx = null) {
 /**
  * 选择目标实例 (轮询)
  */
-async function selectTargetInstance(instances, env, ctx = null) {
+async function selectTargetInstance(instances, env, ctx) {
     if (instances.length === 0) {
         return null;
     }
@@ -401,10 +401,10 @@ async function selectTargetInstance(instances, env, ctx = null) {
     // 获取当前索引
     let currentIndex = 0;
     try {
-        const stored = await executeWithFailover('_kv_get', env, ROUND_ROBIN_KEY);
+        const stored = await executeWithFailover('_kv_get', env, ctx, ROUND_ROBIN_KEY);
         currentIndex = stored ? parseInt(stored) : 0;
     } catch (e) {
-        logger.error('轮询索引获取失败', { error: e.message });
+        logger.error('轮询索引获取失败', { error: e.message }, ctx);
     }
 
     // 选择实例
@@ -413,9 +413,9 @@ async function selectTargetInstance(instances, env, ctx = null) {
 
     // 更新索引
     try {
-        await executeWithFailover('_kv_put', env, ROUND_ROBIN_KEY, (currentIndex + 1).toString());
+        await executeWithFailover('_kv_put', env, ctx, ROUND_ROBIN_KEY, (currentIndex + 1).toString());
     } catch (e) {
-        logger.error('轮询索引更新失败', { error: e.message });
+        logger.error('轮询索引更新失败', { error: e.message }, ctx);
     }
 
     return targetInstance;
@@ -454,7 +454,7 @@ async function forwardToInstance(instance, request, originalBody, ctx = null) {
 /**
  * 带重试的转发逻辑
  */
-async function fetchWithRetry(instances, request, env, body, ctx = null) {
+async function fetchWithRetry(instances, request, env, body, ctx) {
     let lastError;
 
     for (const instance of instances) {
@@ -462,7 +462,7 @@ async function fetchWithRetry(instances, request, env, body, ctx = null) {
             const response = await forwardToInstance(instance, request, body, ctx);
             return response;
         } catch (error) {
-            logger.error('转发请求失败', { instanceId: instance.id, error: error.message });
+            logger.error('转发请求失败', { instanceId: instance.id, error: error.message }, ctx);
             lastError = error;
             // 继续尝试下一个实例
         }
@@ -483,7 +483,8 @@ export {
     failover,
     getCurrentProvider,
     isRetryableError,
-    executeWithFailover
+    executeWithFailover,
+    logger
 };
 
 // 导出状态访问器以便测试
@@ -542,23 +543,23 @@ export default {
             const body = await verifyQStashSignature(request, env);
 
             // 2. 获取活跃实例
-            const activeInstances = await getActiveInstances(env);
-            logger.info('活跃实例查询完成', { count: activeInstances.length });
+            const activeInstances = await getActiveInstances(env, ctx);
+            logger.info('活跃实例查询完成', { count: activeInstances.length }, ctx);
 
             if (activeInstances.length === 0) {
                 return new Response('No active instances available', { status: 503 });
             }
 
             // 3. 选择目标实例 (轮询)
-            const targetInstance = await selectTargetInstance(activeInstances, env);
+            const targetInstance = await selectTargetInstance(activeInstances, env, ctx);
             if (!targetInstance) {
                 return new Response('No target instance selected', { status: 503 });
             }
 
-            logger.info('开始转发请求', { instanceId: targetInstance.id, url: targetInstance.url });
+            logger.info('开始转发请求', { instanceId: targetInstance.id, url: targetInstance.url }, ctx);
 
             // 4. 转发请求
-            const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], request, env, body);
+            const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], request, env, body, ctx);
 
             // 5. 更新轮询索引 (可选，简化版本不更新)
             // 这里可以存储到KV，但为了简化，使用环境变量或简单计数
@@ -568,7 +569,7 @@ export default {
             return response;
 
         } catch (error) {
-            logger.error('负载均衡器错误', { error: error.message, stack: error.stack });
+            logger.error('负载均衡器错误', { error: error.message, stack: error.stack }, ctx);
             const status = error.status || 500;
             return new Response(JSON.stringify({
               error: error.message,

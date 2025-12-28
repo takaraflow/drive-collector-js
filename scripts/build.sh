@@ -51,18 +51,24 @@ else
   # 回退到改进的 sed 逻辑，先复制模板
   cp wrangler.build.toml wrangler.toml
   sed -i \
-    -e 's/${WORKER_NAME}/'"$WORKER_NAME"'/g' \
-    -e 's/${AXIOM_TOKEN}/'"$AXIOM_TOKEN"'/g' \
+    -e "s|\${WORKER_NAME}|$WORKER_NAME|g" \
+    -e "s|\${AXIOM_TOKEN}|$AXIOM_TOKEN|g" \
     -e 's/${AXIOM_ORG_ID}/'"$AXIOM_ORG_ID"'/g' \
     -e 's/${AXIOM_DATASET}/'"$AXIOM_DATASET"'/g' \
     -e 's/${QSTASH_CURRENT_SIGNING_KEY}/'"$QSTASH_CURRENT_SIGNING_KEY"'/g' \
     -e 's/${SIGNATURE_EXPIRATION_WINDOW}/'"$SIGNATURE_EXPIRATION_WINDOW"'/g' \
-    -e 's/${UPSTASH_REDIS_REST_URL}/'"$UPSTASH_REDIS_REST_URL"'/g' \
+    -e "s|\${UPSTASH_REDIS_REST_URL}|$UPSTASH_REDIS_REST_URL|g" \
     -e 's/${UPSTASH_REDIS_REST_TOKEN}/'"$UPSTASH_REDIS_REST_TOKEN"'/g' \
     -e 's/${NODE_ENV}/'"$NODE_ENV"'/g' \
     -e 's/${CF_KV_NAMESPACE_ID}/'"$CF_KV_NAMESPACE_ID"'/g' \
     -e 's/${KV_PREVIEW_ID}/'"$KV_PREVIEW_ID"'/g' \
     wrangler.toml
+fi
+
+# 校验构建结果：检查是否还有未替换的占位符
+if grep -q '\${.*}' wrangler.toml; then
+    echo "错误: wrangler.toml 中仍存在未替换的占位符变量"
+    exit 1
 fi
 
 echo "wrangler.toml updated successfully"
