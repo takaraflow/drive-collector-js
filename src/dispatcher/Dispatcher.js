@@ -547,15 +547,23 @@ export class Dispatcher {
                     this._getInstanceInfo()
                 ]);
 
-                // 合并结果
-                let message = "🔍 **系统诊断报告**\n\n";
+                // 获取系统资源信息
+                const memUsage = process.memoryUsage();
+                const rss = Math.round(memUsage.rss / 1024 / 1024);
+                const heapUsed = Math.round(memUsage.heapUsed / 1024 / 1024);
+                const heapTotal = Math.round(memUsage.heapTotal / 1024 / 1024);
 
-                // 多实例状态
-                message += instanceInfo;
+                const systemResources = {
+                    memoryMB: `${rss}MB (${heapUsed}MB/${heapTotal}MB)`,
+                    uptime: this._getUptime()
+                };
 
-                // 网络诊断结果
-                message += "\n" + "🌐 **网络诊断**\n";
-                message += NetworkDiagnostic.formatResults(networkResults);
+                // 使用 UIHelper 渲染诊断报告
+                const message = UIHelper.renderDiagnosisReport({
+                    networkResults,
+                    instanceInfo,
+                    systemResources
+                });
 
                 await safeEdit(target, placeholder.id, message, null, userId);
             } catch (error) {
@@ -566,61 +574,30 @@ export class Dispatcher {
     }
 
     /**
-     * [私有] 获取多实例状态信息
+     * [私有] 获取多实例状态信息 (返回结构化对象)
      */
     static async _getInstanceInfo() {
-        let info = "🏗️ **多实例状态**\n";
+        const instanceInfo = {};
 
         try {
             // 当前实例信息
-            const currentInstanceId = instanceCoordinator.getInstanceId();
-            const isLeader = instanceCoordinator.isLeader;
+            instanceInfo.currentInstanceId = instanceCoordinator.getInstanceId();
+            instanceInfo.isLeader = instanceCoordinator.isLeader;
 
-            // 新增：获取 Telegram 状态
-            const tgActive = isClientActive();
-            const isTgLeader = await instanceCoordinator.hasLock('telegram_client');
+            // Telegram 状态
+            instanceInfo.tgActive = isClientActive();
+            instanceInfo.isTgLeader = await instanceCoordinator.hasLock('telegram_client');
 
-            info += `📍 当前实例: ${escapeHTML(currentInstanceId)}\n`;
-            info += `👑 领导者状态: ${isLeader ? '✅ 是' : '❌ 否'}\n`;
-            info += `🔌 Telegram 连接: ${tgActive ? '✅ 已连接' : '❌ 已断开'}\n`;
-            info += `🔑 Telegram 锁持有: ${isTgLeader ? '✅ 是' : '❌ 否'}\n`;
-
-            // 活跃实例列表
-            const activeInstances = await instanceCoordinator.getActiveInstances();
-            const instanceCount = await instanceCoordinator.getInstanceCount();
-
-            info += `📊 活跃实例数: ${instanceCount}\n`;
-
-            if (activeInstances.length > 0) {
-                info += `📋 活跃实例列表:\n`;
-                activeInstances.forEach((instance, index) => {
-                    const isCurrent = instance.id === currentInstanceId;
-                    const marker = isCurrent ? '👉' : '•';
-                    const leaderMark = instance.id === activeInstances.sort((a, b) => a.id.localeCompare(b.id))[0].id ? '👑' : '';
-                    const uptime = instance.lastHeartbeat ? Math.floor((Date.now() - instance.lastHeartbeat) / 1000) : '未知';
-                    info += `${marker} ${escapeHTML(instance.id)} ${leaderMark}(心跳: ${uptime}s前)\n`;
-                });
-            } else {
-                info += `⚠️ 无活跃实例\n`;
-            }
-
-            // 系统资源信息
-            const memUsage = process.memoryUsage();
-            const rss = Math.round(memUsage.rss / 1024 / 1024);
-            const heapUsed = Math.round(memUsage.heapUsed / 1024 / 1024);
-            const heapTotal = Math.round(memUsage.heapTotal / 1024 / 1024);
-
-            info += `\n💾 **系统资源**\n`;
-            info += `内存使用: ${rss}MB (堆: ${heapUsed}MB/${heapTotal}MB)\n`;
-            info += `运行时间: ${this._getUptime()}\n`;
-            info += `Node.js版本: ${process.version}\n`;
+            // 活跃实例信息
+            instanceInfo.activeInstances = await instanceCoordinator.getActiveInstances();
+            instanceInfo.instanceCount = await instanceCoordinator.getInstanceCount();
 
         } catch (error) {
             logger.error("获取实例信息失败:", error);
-            info += `❌ 获取实例信息失败: ${escapeHTML(error.message)}\n`;
+            instanceInfo.error = error.message;
         }
 
-        return info + "\n";
+        return instanceInfo;
     }
 
     /**

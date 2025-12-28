@@ -133,6 +133,27 @@ export const STRINGS = {
         mode_changed: "✅ <b>访问模式已切换</b>\n\n当前模式: <code>{{mode}}</code>",
         no_permission: "❌ <b>无权限</b>\n\n此操作仅限管理员执行。",
         btn_diagnosis: "🩺 系统诊断",
+    },
+
+    // --- 系统诊断 ---
+    diagnosis: {
+        title: "🔍 <b>系统诊断报告</b>",
+        multi_instance_title: "🏗️ <b>多实例状态</b>",
+        network_title: "🌐 <b>网络诊断</b>",
+        system_resources_title: "💾 <b>系统资源</b>",
+        current_instance: "当前实例",
+        leader_status: "领导者状态",
+        tg_connection: "TG 连接",
+        tg_lock_holder: "TG 锁持有",
+        active_instances: "活跃实例",
+        memory_usage: "内存",
+        uptime: "运行",
+        connected: "已连接",
+        disconnected: "已断开",
+        yes: "是",
+        no: "否",
+        leader: "(👑)",
+        no_active_instances: "无活跃实例",
     }
 };
 

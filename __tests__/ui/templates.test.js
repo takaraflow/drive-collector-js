@@ -8,6 +8,25 @@ jest.unstable_mockModule("../../src/utils/common.js", () => ({
 // Mock locales
 jest.unstable_mockModule("../../src/locales/zh-CN.js", () => ({
     STRINGS: {
+        diagnosis: {
+            title: "🔍 <b>系统诊断报告</b>",
+            multi_instance_title: "🏗️ <b>多实例状态</b>",
+            network_title: "🌐 <b>网络诊断</b>",
+            system_resources_title: "💾 <b>系统资源</b>",
+            current_instance: "当前实例",
+            leader_status: "领导者状态",
+            tg_connection: "TG 连接",
+            tg_lock_holder: "TG 锁持有",
+            active_instances: "活跃实例",
+            memory_usage: "内存",
+            uptime: "运行",
+            connected: "已连接",
+            disconnected: "已断开",
+            yes: "是",
+            no: "否",
+            leader: "(👑)",
+            no_active_instances: "无活跃实例"
+        },
         task: {
             downloading: "Downloading",
             batch_monitor: "📊 <b>媒体组转存看板 ({{current}}/{{total}})</b>\n━━━━━━━━━━━━━━\n{{statusText}}\n━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件"
@@ -300,6 +319,133 @@ describe("UIHelper", () => {
             // Test 100%
             const result100 = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 104857600, 104857600);
             expect(result100.text).toContain("[████████████████████] 100%");
+        });
+    });
+
+    describe("renderDiagnosisReport", () => {
+        test("should render diagnosis report with all sections", () => {
+            const data = {
+                networkResults: {
+                    services: {
+                        telegram: {
+                            status: 'ok',
+                            responseTime: '45ms',
+                            message: 'Telegram MTProto API 连接正常'
+                        },
+                        d1: {
+                            status: 'error',
+                            responseTime: '5000ms',
+                            message: 'Cloudflare D1 连接失败: Timeout'
+                        }
+                    }
+                },
+                instanceInfo: {
+                    currentInstanceId: 'instance-123',
+                    isLeader: true,
+                    tgActive: true,
+                    isTgLeader: true,
+                    instanceCount: 2
+                },
+                systemResources: {
+                    memoryMB: '120MB (100MB/200MB)',
+                    uptime: '2h 15m'
+                }
+            };
+
+            const result = UIHelper.renderDiagnosisReport(data);
+
+            expect(result).toContain("🔍 <b>系统诊断报告</b>");
+            expect(result).toContain("🏗️ <b>多实例状态</b>");
+            expect(result).toContain("当前实例: instance-123 (👑)");
+            expect(result).toContain("TG 连接: ✅ 已连接");
+            expect(result).toContain("TG 锁持有: ✅ 是");
+            expect(result).toContain("活跃实例: 2");
+            expect(result).toContain("🌐 <b>网络诊断</b>");
+            expect(result).toContain("✅ <b>TELEGRAM</b>: Telegram MTProto API 连接正常 (45ms)");
+            expect(result).toContain("❌ <b>D1</b>: Cloudflare D1 连接失败: Timeout (5000ms)");
+            expect(result).toContain("💾 <b>系统资源</b>");
+            expect(result).toContain("内存: 120MB (100MB/200MB)");
+            expect(result).toContain("运行: 2h 15m");
+            expect(result).toContain("⚠️ 发现 1 个服务异常");
+        });
+
+        test("should render diagnosis report with no errors", () => {
+            const data = {
+                networkResults: {
+                    services: {
+                        telegram: {
+                            status: 'ok',
+                            responseTime: '45ms',
+                            message: 'Telegram MTProto API 连接正常'
+                        },
+                        d1: {
+                            status: 'ok',
+                            responseTime: '120ms',
+                            message: 'Cloudflare D1 连接正常'
+                        }
+                    }
+                },
+                instanceInfo: {
+                    currentInstanceId: 'instance-456',
+                    isLeader: false,
+                    tgActive: true,
+                    isTgLeader: false,
+                    instanceCount: 1
+                },
+                systemResources: {
+                    memoryMB: '80MB (60MB/120MB)',
+                    uptime: '1h 30m'
+                }
+            };
+
+            const result = UIHelper.renderDiagnosisReport(data);
+
+            expect(result).toContain("当前实例: instance-456");
+            expect(result).toContain("TG 锁持有: ❌ 否");
+            expect(result).toContain("活跃实例: 1");
+            expect(result).toContain("✅ <b>TELEGRAM</b>:");
+            expect(result).toContain("✅ <b>D1</b>:");
+            expect(result).toContain("✅ 所有服务运行正常");
+        });
+
+        test("should handle missing data gracefully", () => {
+            const data = {
+                networkResults: null,
+                instanceInfo: null,
+                systemResources: null
+            };
+
+            const result = UIHelper.renderDiagnosisReport(data);
+
+            expect(result).toContain("🔍 <b>系统诊断报告</b>");
+            expect(result).toContain("🏗️ <b>多实例状态</b>");
+            expect(result).toContain("🌐 <b>网络诊断</b>");
+            expect(result).toContain("💾 <b>系统资源</b>");
+            // Should not crash with missing data
+        });
+
+        test("should handle disconnected Telegram", () => {
+            const data = {
+                networkResults: {
+                    services: {}
+                },
+                instanceInfo: {
+                    currentInstanceId: 'instance-789',
+                    isLeader: false,
+                    tgActive: false,
+                    isTgLeader: false,
+                    instanceCount: 0
+                },
+                systemResources: {
+                    memoryMB: '50MB (40MB/80MB)',
+                    uptime: '30m'
+                }
+            };
+
+            const result = UIHelper.renderDiagnosisReport(data);
+
+            expect(result).toContain("TG 连接: ❌ 已断开");
+            expect(result).toContain("活跃实例: 0");
         });
     });
 });

@@ -252,32 +252,5 @@ export class NetworkDiagnostic {
         }
     }
 
-    /**
-     * 格式化诊断结果为可读文本
-     */
-    static formatResults(results) {
-        let text = `🔍 <b>网络诊断报告</b>\n`;
-        text += `⏰ ${results.timestamp}\n\n`;
 
-        const statusEmojis = {
-            ok: '✅',
-            error: '❌',
-            warning: '⚠️'
-        };
-
-        for (const [service, result] of Object.entries(results.services)) {
-            const emoji = statusEmojis[result.status] || '❓';
-            text += `${emoji} <b>${service.toUpperCase()}</b>: ${result.message}\n`;
-            text += `   响应时间: ${result.responseTime}\n\n`;
-        }
-
-        const errorCount = Object.values(results.services).filter(r => r.status === 'error').length;
-        if (errorCount > 0) {
-            text += `⚠️ 发现 ${errorCount} 个服务异常，请检查网络连接或配置。`;
-        } else {
-            text += `✅ 所有服务运行正常。`;
-        }
-
-        return text;
-    }
 }

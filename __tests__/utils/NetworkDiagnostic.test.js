@@ -311,44 +311,5 @@ describe("NetworkDiagnostic", () => {
         });
     });
 
-    describe("formatResults", () => {
-        it("should format results with all services ok", () => {
-            const results = {
-                timestamp: "2025-01-01T00:00:00.000Z",
-                services: {
-                    telegram: { status: "ok", message: "OK", responseTime: "100ms" },
-                    telegramBot: { status: "ok", message: "OK", responseTime: "200ms" },
-                    d1: { status: "ok", message: "OK", responseTime: "50ms" },
-                    kv: { status: "ok", message: "OK", responseTime: "30ms" },
-                    rclone: { status: "ok", message: "OK", responseTime: "150ms" },
-                    cloudStorage: { status: "ok", message: "OK", responseTime: "300ms" }
-                }
-            };
 
-            const formatted = NetworkDiagnostic.formatResults(results);
-
-            expect(formatted).toContain("🔍");
-            expect(formatted).toContain("✅");
-            expect(formatted).toContain("所有服务运行正常");
-        });
-
-        it("should format results with some errors", () => {
-            const results = {
-                timestamp: "2025-01-01T00:00:00.000Z",
-                services: {
-                    telegram: { status: "ok", message: "OK", responseTime: "100ms" },
-                    telegramBot: { status: "error", message: "Failed", responseTime: "200ms" },
-                    d1: { status: "error", message: "DB error", responseTime: "50ms" },
-                    kv: { status: "ok", message: "OK", responseTime: "30ms" },
-                    rclone: { status: "ok", message: "OK", responseTime: "150ms" },
-                    cloudStorage: { status: "ok", message: "OK", responseTime: "300ms" }
-                }
-            };
-
-            const formatted = NetworkDiagnostic.formatResults(results);
-
-            expect(formatted).toContain("❌");
-            expect(formatted).toContain("⚠️ 发现 2 个服务异常");
-        });
-    });
 });
