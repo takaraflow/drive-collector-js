@@ -21,13 +21,34 @@ Cloudflare Worker 负载均衡器，用于多实例请求转发，支持故障�
    wrangler secret put UPSTASH_REDIS_REST_TOKEN  # 如需
    ```
    或通过 [Cloudflare Dashboard](https://dash.cloudflare.com/) 设置。
-3. **CI deploy vars**：设置环境变量 WORKER_NAME (默认 'drive-collector-lb')、CF_KV_NAMESPACE_ID、KV_PREVIEW_ID、NODE_ENV 等。例如：
+3. **GitHub Actions CI/CD**（推荐）：
+
+   1. 在 GitHub Repository Settings > Secrets and variables > Actions 配置：
+
+      **Secrets**：
+      - `CLOUDFLARE_API_TOKEN`: CF API Token (Workers deploy 权限)
+      - `AXIOM_TOKEN`
+      - `AXIOM_ORG_ID`
+      - `QSTASH_CURRENT_SIGNING_KEY` (可选)
+      - `UPSTASH_REDIS_REST_TOKEN` (可选)
+
+      **Variables**：
+      - `WORKER_NAME`: Worker 名称 (e.g. `lb-worker-js`)
+      - `CF_KV_NAMESPACE_ID`: KV Namespace ID
+      - `AXIOM_DATASET`
+      - `UPSTASH_REDIS_REST_URL` (可选)
+
+   2. Push 到 `main` 分支，自动构建并部署。
+
+   **Local Deploy**：
+   设置环境变量后运行 `npm run deploy`。
+
+   示例：
    ```
    export WORKER_NAME=your-worker-name
    export CF_KV_NAMESPACE_ID=your-kv-id
    npm run deploy
    ```
-   build.sh 会使用 sed -i 直接替换 wrangler.toml 中的占位符。
 4. 构建 & 部署：`npm run deploy`（自动运行 build.sh 更新 toml 并 deploy，默认使用 wrangler.toml）。
 
 **注意：** `wrangler.toml` 和 `build.sh` 使用占位符 `${VAR}` 机制，确保无隐私硬编码。Secrets 优先于 env vars 中的 vars。
