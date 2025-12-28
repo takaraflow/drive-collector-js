@@ -42,7 +42,7 @@ Cloudflare Worker 负载均衡器，用于多实例请求转发，支持故障�
    3. Continue to summary > Create Token，复制 value。
 
    ### 配置 Secrets & Variables
-   Repository Settings > Secrets and variables > Actions：
+   Repo Settings > Secrets and variables > Actions（默认分组，非 Environment-specific）：
 
    **Secrets**：
    | Name | 描述 |
@@ -59,6 +59,10 @@ Cloudflare Worker 负载均衡器，用于多实例请求转发，支持故障�
    | `WORKER_NAME` | Worker 名称 (e.g. `lb-worker-js`) |
    | `AXIOM_DATASET` | Axiom dataset |
    | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL (可选) |
+
+   **注意：** 以上 Secrets 和 Variables 位于 Actions 默认分组（main branch），非 Environment-specific。
+
+   如果使用 Environment "production"，需在 workflow 的 jobs 中设置 `environment: production`，并进行 manual approval。
 
    4. Push 到 `main`，触发 [deploy.yml](.github/workflows/deploy.yml) 自动部署。
 
