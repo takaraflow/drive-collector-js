@@ -23,33 +23,43 @@ if [ -z "$AXIOM_ORG_ID" ] || [ "$AXIOM_ORG_ID" = '${AXIOM_ORG_ID}' ]; then
     echo "警告: AXIOM_ORG_ID 未设置，日志功能可能受限"
 fi
 
-# 设置可选环境变量默认值
+# 设置环境变量默认值
+# 敏感变量如果未设置，则设为空字符串
+AXIOM_TOKEN=${AXIOM_TOKEN:-}
+AXIOM_ORG_ID=${AXIOM_ORG_ID:-}
+QSTASH_CURRENT_SIGNING_KEY=${QSTASH_CURRENT_SIGNING_KEY:-}
+UPSTASH_REDIS_REST_URL=${UPSTASH_REDIS_REST_URL:-}
+UPSTASH_REDIS_REST_TOKEN=${UPSTASH_REDIS_REST_TOKEN:-}
+
+# 可选变量设置默认值
 WORKER_NAME=${WORKER_NAME:-drive-collector-lb}
+AXIOM_DATASET=${AXIOM_DATASET:-drive-collector}
+NODE_ENV=${NODE_ENV:-production}
+CF_KV_NAMESPACE_ID=${CF_KV_NAMESPACE_ID:-}
+KV_PREVIEW_ID=${KV_PREVIEW_ID:-}
 
-# 处理未替换的占位符
-AXIOM_DATASET="${AXIOM_DATASET:-drive-collector}"
-if [ "$AXIOM_DATASET" = '${AXIOM_DATASET}' ]; then AXIOM_DATASET="drive-collector"; fi
+# 导出变量供 envsubst 使用
+export AXIOM_TOKEN AXIOM_ORG_ID QSTASH_CURRENT_SIGNING_KEY UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN
+export WORKER_NAME AXIOM_DATASET NODE_ENV CF_KV_NAMESPACE_ID KV_PREVIEW_ID
 
-NODE_ENV="${NODE_ENV:-production}"
-if [ "$NODE_ENV" = '${NODE_ENV}' ]; then NODE_ENV="production"; fi
-
-# 使用sed直接在wrangler.toml中替换占位符
-sed -i \
-  -e 's/${WORKER_NAME}/'"$WORKER_NAME"'/g' \
-  -e 's/${AXIOM_TOKEN}/'"${AXIOM_TOKEN:-}"'/g' \
-  -e 's/${AXIOM_ORG_ID}/'"${AXIOM_ORG_ID:-}"'/g' \
-  -e 's/${AXIOM_DATASET}/'"${AXIOM_DATASET:-drive-collector}"'/g' \
-  -e 's/${QSTASH_CURRENT_SIGNING_KEY}/'"${QSTASH_CURRENT_SIGNING_KEY:-}"'/g' \
-  -e 's/${UPSTASH_REDIS_REST_URL}/'"${UPSTASH_REDIS_REST_URL:-}"'/g' \
-  -e 's/${UPSTASH_REDIS_REST_TOKEN}/'"${UPSTASH_REDIS_REST_TOKEN:-}"'/g' \
-  -e 's/${NODE_ENV}/'"${NODE_ENV:-production}"'/g' \
-  wrangler.toml
-
-CF_KV_NAMESPACE_ID="${CF_KV_NAMESPACE_ID:-}"
-KV_PREVIEW_ID="${KV_PREVIEW_ID:-}"
-sed -i \
-  -e 's/${CF_KV_NAMESPACE_ID}/'"$CF_KV_NAMESPACE_ID"'/g' \
-  -e 's/${KV_PREVIEW_ID}/'"$KV_PREVIEW_ID"'/g' \
-  wrangler.toml
+# 使用 envsubst 替换占位符
+if command -v envsubst >/dev/null 2>&1; then
+  envsubst '${AXIOM_TOKEN} ${AXIOM_ORG_ID} ${QSTASH_CURRENT_SIGNING_KEY} ${UPSTASH_REDIS_REST_URL} ${UPSTASH_REDIS_REST_TOKEN} ${WORKER_NAME} ${AXIOM_DATASET} ${NODE_ENV} ${CF_KV_NAMESPACE_ID} ${KV_PREVIEW_ID}' < wrangler.toml > wrangler.toml.tmp && mv wrangler.toml.tmp wrangler.toml
+else
+  echo "envsubst not found, falling back to sed"
+  # 回退到改进的 sed 逻辑
+  sed -i \
+    -e 's/${WORKER_NAME}/'"$WORKER_NAME"'/g' \
+    -e 's/${AXIOM_TOKEN}/'"$AXIOM_TOKEN"'/g' \
+    -e 's/${AXIOM_ORG_ID}/'"$AXIOM_ORG_ID"'/g' \
+    -e 's/${AXIOM_DATASET}/'"$AXIOM_DATASET"'/g' \
+    -e 's/${QSTASH_CURRENT_SIGNING_KEY}/'"$QSTASH_CURRENT_SIGNING_KEY"'/g' \
+    -e 's/${UPSTASH_REDIS_REST_URL}/'"$UPSTASH_REDIS_REST_URL"'/g' \
+    -e 's/${UPSTASH_REDIS_REST_TOKEN}/'"$UPSTASH_REDIS_REST_TOKEN"'/g' \
+    -e 's/${NODE_ENV}/'"$NODE_ENV"'/g' \
+    -e 's/${CF_KV_NAMESPACE_ID}/'"$CF_KV_NAMESPACE_ID"'/g' \
+    -e 's/${KV_PREVIEW_ID}/'"$KV_PREVIEW_ID"'/g' \
+    wrangler.toml
+fi
 
 echo "wrangler.toml updated successfully"
