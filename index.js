@@ -75,6 +75,12 @@ async function handleQStashWebhook(req, res) {
         res.writeHead(200);
         res.end('OK');
     } catch (error) {
+        if (error.message === 'NOT_LEADER') {
+            logger.warn('⚠️ 非 Leader 实例尝试处理任务，返回 503');
+            res.writeHead(503);
+            res.end('Service Unavailable - Not Leader');
+            return;
+        }
         logger.error('❌ Webhook 处理失败:', error);
         res.writeHead(500);
         res.end('Internal Server Error');

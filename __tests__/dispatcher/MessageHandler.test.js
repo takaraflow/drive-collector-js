@@ -40,10 +40,11 @@ describe('MessageHandler Integration Tests', () => {
         jest.clearAllMocks();
         // 重置静态属性
         MessageHandler.botId = null;
-        
+
         mockClient = {
             session: { save: () => 'mock_session' },
-            getMe: jest.fn().mockResolvedValue({ id: 123456 })
+            getMe: jest.fn().mockResolvedValue({ id: 123456 }),
+            connected: true
         };
     });
 

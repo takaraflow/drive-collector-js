@@ -206,6 +206,36 @@ export const stopWatchdog = () => {
     isReconnecting = false;
 };
 
+/**
+ * 确保客户端已连接，如果未连接则等待连接建立
+ */
+export const ensureConnected = async () => {
+    if (client.connected) return;
+
+    logger.info("⏳ 等待 Telegram 客户端连接...");
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            reject(new Error("Telegram client connection timeout after 30 seconds"));
+        }, 30000);
+
+        const checkConnected = () => {
+            if (client.connected) {
+                clearTimeout(timeout);
+                logger.info("✅ Telegram 客户端连接已确认");
+                resolve();
+            } else {
+                setTimeout(checkConnected, 1000);
+            }
+        };
+        checkConnected();
+    });
+};
+
+/**
+ * 获取客户端活跃状态
+ */
+export const isClientActive = () => client.connected;
+
 // 定时检查心跳（通过获取自身信息）
 watchdogTimer = setInterval(async () => {
     if (!client.connected || isReconnecting) return;

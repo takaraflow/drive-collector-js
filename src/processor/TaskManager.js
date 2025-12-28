@@ -479,6 +479,11 @@ export class TaskManager {
      * 处理下载 Webhook - QStash 事件驱动
      */
     static async handleDownloadWebhook(taskId) {
+        // Leader 状态校验：只有持有 telegram_client 锁的实例才能处理任务
+        if (!(await instanceCoordinator.hasLock("telegram_client"))) {
+            throw new Error("NOT_LEADER");
+        }
+
         try {
             logger.info(`[QStash] Received download webhook for Task: ${taskId}`);
 
@@ -517,6 +522,11 @@ export class TaskManager {
      * 处理上传 Webhook - QStash 事件驱动
      */
     static async handleUploadWebhook(taskId) {
+        // Leader 状态校验：只有持有 telegram_client 锁的实例才能处理任务
+        if (!(await instanceCoordinator.hasLock("telegram_client"))) {
+            throw new Error("NOT_LEADER");
+        }
+
         try {
             logger.info(`[QStash] Received upload webhook for Task: ${taskId}`);
 

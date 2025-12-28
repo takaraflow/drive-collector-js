@@ -17,6 +17,11 @@ export class MessageHandler {
      */
     static async init(client) {
         if (!this.botId && client.session?.save()) {
+            // 确保客户端已连接
+            if (!client.connected) {
+                logger.warn("⚠️ Telegram 客户端未连接，跳过初始化");
+                return;
+            }
             try {
                 const me = await client.getMe();
                 if (me) this.botId = me.id.toString();
@@ -52,6 +57,11 @@ export class MessageHandler {
 
         // 补充：双重检查 senderId
         if (!this.botId && client && client.session?.save()) {
+            // 确保客户端已连接
+            if (!client.connected) {
+                logger.warn("⚠️ Telegram 客户端未连接，跳过 Bot ID 检查");
+                return;
+            }
             try {
                 const me = await client.getMe();
                 if (me) this.botId = me.id.toString();

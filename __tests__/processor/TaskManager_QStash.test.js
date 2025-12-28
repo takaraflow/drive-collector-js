@@ -23,9 +23,11 @@ const mockClient = {
 
 const mockAcquireTaskLock = jest.fn();
 const mockReleaseTaskLock = jest.fn();
+const mockHasLock = jest.fn();
 const mockInstanceCoordinator = {
     acquireTaskLock: mockAcquireTaskLock,
-    releaseTaskLock: mockReleaseTaskLock
+    releaseTaskLock: mockReleaseTaskLock,
+    hasLock: mockHasLock
 };
 
 const mockEnqueueDownloadTask = jest.fn();
@@ -120,6 +122,7 @@ describe("TaskManager QStash Integration", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockAcquireTaskLock.mockResolvedValue(true);
+        mockHasLock.mockResolvedValue(true);
         mockGetMessages.mockResolvedValue([{ media: { type: 'document' } }]);
         mockExistsSync.mockReturnValue(true);
         mockStatSync.mockReturnValue({ size: 1024 });

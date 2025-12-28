@@ -269,13 +269,24 @@ const handle429Error = async (fn, maxRetries = 3) => {
         } catch (error) {
             // 检查是否为 429 错误或 FloodWaitError
             const isFlood = error && (
-                error.code === 429 || 
-                error.message.includes('429') || 
+                error.code === 429 ||
+                error.message.includes('429') ||
                 error.message.includes('FloodWait') ||
                 error.name === 'FloodWaitError'
             );
 
-            if (isFlood) {
+            // 检查是否为断开连接错误
+            const isDisconnected = error && error.message && (
+                error.message.includes('disconnected') ||
+                error.message.includes('Cannot send requests while disconnected') ||
+                error.message.includes('Not connected')
+            );
+
+            if (isDisconnected) {
+                logger.warn(`🔌 Disconnected error detected, waiting 3 seconds for reconnection (attempt ${retryCount + 1}/${maxRetries})`);
+                await sleep(3000);
+                retryCount++;
+            } else if (isFlood) {
                 // 提取等待时间，如果大于 60 秒，触发全局冷静期
                 let retryAfter = error.retryAfter || error.seconds || 0;
                 if (!retryAfter) {
