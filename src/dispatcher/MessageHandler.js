@@ -1,6 +1,8 @@
+import { Api } from "telegram";
 import { Dispatcher } from "./Dispatcher.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { logger } from "../services/logger.js";
+import { config } from "../config/index.js";
 
 // 全局消息去重缓存 (防止多实例重复处理)
 const processedMessages = new Map();
@@ -25,6 +27,36 @@ export class MessageHandler {
             try {
                 const me = await client.getMe();
                 if (me) this.botId = me.id.toString();
+
+                // 设置普通用户命令
+                const commonCommands = [
+                    new Api.BotCommand({ command: 'drive', description: '🔑 绑定或管理网盘' }),
+                    new Api.BotCommand({ command: 'files', description: '📁 浏览已转存文件' }),
+                    new Api.BotCommand({ command: 'status', description: '📊 查看系统状态' }),
+                    new Api.BotCommand({ command: 'help', description: '📖 显示帮助菜单' }),
+                ];
+
+                await client.invoke(new Api.bots.SetBotCommands({
+                    scope: new Api.BotCommandScopeDefault(),
+                    langCode: '',
+                    commands: commonCommands
+                }));
+
+                // 为管理员设置专属命令
+                if (config.ownerId) {
+                    await client.invoke(new Api.bots.SetBotCommands({
+                        scope: new Api.BotCommandScopePeer({
+                            peer: config.ownerId
+                        }),
+                        langCode: '',
+                        commands: [
+                            ...commonCommands,
+                            new Api.BotCommand({ command: 'diagnosis', description: '🩺 系统诊断' }),
+                            new Api.BotCommand({ command: 'open_service', description: '🔓 开启服务' }),
+                            new Api.BotCommand({ command: 'close_service', description: '🔒 关闭服务' }),
+                        ]
+                    }));
+                }
             } catch (e) {
                 // 忽略获取失败，后续处理中会再次尝试
             }

@@ -1,23 +1,9 @@
 import { jest } from "@jest/globals";
+import { mockQstashPublish, mockQstashVerify } from '../setup/external-mocks.js';
 
-// Mock @upstash/qstash
-const mockPublishJSON = jest.fn();
-const mockVerify = jest.fn();
-const MockClient = class {
-    constructor() {
-        this.publishJSON = mockPublishJSON;
-    }
-};
-const MockReceiver = class {
-    constructor() {
-        this.verify = mockVerify;
-    }
-};
-
-jest.unstable_mockModule("@upstash/qstash", () => ({
-    Client: MockClient,
-    Receiver: MockReceiver
-}));
+// Use the global mock
+const mockPublishJSON = mockQstashPublish;
+const mockVerify = mockQstashVerify;
 
 // Mock config
 jest.unstable_mockModule("../../src/config/index.js", () => ({

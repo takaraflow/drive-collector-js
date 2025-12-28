@@ -13,6 +13,7 @@ const mockClientInstance = {
     }),
     connect: jest.fn().mockResolvedValue(undefined),
     disconnect: jest.fn().mockResolvedValue(undefined),
+    invoke: jest.fn().mockResolvedValue(undefined),
     getMe: jest.fn().mockResolvedValue({ id: 123 }),
     session: {
         save: jest.fn().mockReturnValue("mock_session")
@@ -58,7 +59,11 @@ jest.unstable_mockModule("../../src/repositories/SettingsRepository.js", () => (
 }));
 
 // 辅助函数：等待微任务队列清空
-const flushPromises = () => new Promise(resolve => jest.requireActual("timers").setImmediate(resolve));
+const flushPromises = async (n = 10) => {
+    for (let i = 0; i < n; i++) {
+        await new Promise(resolve => jest.requireActual("timers").setImmediate(resolve));
+    }
+};
 
 describe("Telegram Service Watchdog", () => {
     let client;
@@ -73,16 +78,38 @@ describe("Telegram Service Watchdog", () => {
         client = module.client;
     });
 
-    beforeEach(() => {
-        // 重置系统时间
+    beforeEach(async () => {
         jest.setSystemTime(new Date('2025-01-01T00:00:00Z'));
-        
+        // ... 清除 mock ...
+
+        // Mock Math.random to return 0 for predictable wait times (5000ms)
+        jest.spyOn(Math, 'random').mockReturnValue(0);
+
         // 清除调用记录
         mockClientInstance.connect.mockClear();
         mockClientInstance.disconnect.mockClear();
         mockClientInstance.getMe.mockClear();
-        
+
         mockClientInstance.connected = true;
+
+        // 强制设置 getMe 成功状态，确保 lastHeartbeat 在下一次心跳中被更新
+        mockClientInstance.getMe.mockResolvedValue({ id: 123 });
+
+        // 显式重启看门狗以对齐时间
+        const module = await import("../../src/services/telegram.js");
+        module.stopWatchdog();
+        module.startWatchdog();
+
+        // 热身：推进一次心跳并等待异步完成
+        jest.advanceTimersByTime(60000);
+        await flushPromises();
+
+        // 再次清除热身产生的 mock 调用记录
+        mockClientInstance.getMe.mockClear();
+    });
+
+    afterEach(() => {
+        jest.spyOn(Math, 'random').mockRestore();
     });
 
     afterAll(async () => {
@@ -136,19 +163,29 @@ describe("Telegram Service Watchdog", () => {
     });
 
     test("应当在心跳连续失败（5分钟）时触发强制重连", async () => {
+        // 重要：在设置 getMe 失败前，lastHeartbeat 已经被 beforeEach 同步了
         mockClientInstance.getMe.mockRejectedValue(new Error("Network Error"));
 
-        // 模拟时间流逝
-        for(let i=0; i<6; i++) {
-             jest.advanceTimersByTime(60 * 1000);
+        // 模拟连续失败
+        // 我们做 8 次以确保稳稳超过 5 分钟阈值
+        for(let i=0; i<8; i++) {
+             jest.advanceTimersByTime(60001);
+             await flushPromises();
+             await flushPromises();
+             await flushPromises();
+             await flushPromises();
              await flushPromises();
         }
 
-        // 验证由于心跳超时，调用了 disconnect
+        // 再次给一点时间让异步逻辑执行
+        await flushPromises();
+        await flushPromises();
+
         expect(mockClientInstance.disconnect).toHaveBeenCalled();
 
-        // 关键修复：确保重连逻辑（包括随机等待时间）执行完毕，释放 isReconnecting 锁
-        jest.advanceTimersByTime(15000);
+        // 3. 验证重连完成
+        jest.advanceTimersByTime(5000);
+        await flushPromises();
         await flushPromises();
         expect(mockClientInstance.connect).toHaveBeenCalled();
     });

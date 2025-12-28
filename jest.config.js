@@ -12,4 +12,8 @@ export default {
   clearMocks: true,
   restoreMocks: true,
   maxWorkers: 16, // 增加并行测试数以提升速度
+  setupFilesAfterEnv: [
+    '<rootDir>/__tests__/setup/external-mocks.js',
+    '<rootDir>/__tests__/setup/global-setup.js'
+  ],
 };

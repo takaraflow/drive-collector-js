@@ -1,12 +1,5 @@
 import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
 
-// Mock the Axiom SDK to avoid external dependencies
-jest.mock('@axiomhq/js', () => ({
-  Axiom: jest.fn().mockImplementation(() => ({
-    ingest: jest.fn().mockResolvedValue(undefined)
-  }))
-}));
-
 // Mock telegram package to prevent TelegramClient initialization
 jest.unstable_mockModule('telegram', () => ({
   TelegramClient: jest.fn().mockImplementation(() => ({})),

@@ -3,11 +3,19 @@ import { jest } from '@jest/globals';
 // 使用 unstable_mockModule 以支持 ESM 环境下的 Mock
 // 必须在 import 被测试模块之前执行
 
+// Mock config
+await jest.unstable_mockModule('../../src/config/index.js', () => ({
+    config: {
+        ownerId: null  // 默认无 owner，确保测试可预测
+    }
+}));
+
 // Mock telegram.js 避免副作用
 await jest.unstable_mockModule('../../src/services/telegram.js', () => ({
     client: {
         session: { save: () => '' },
-        getMe: jest.fn()
+        getMe: jest.fn(),
+        invoke: jest.fn().mockResolvedValue({})
     },
     saveSession: jest.fn(),
     clearSession: jest.fn(),
@@ -44,6 +52,7 @@ describe('MessageHandler Integration Tests', () => {
         mockClient = {
             session: { save: () => 'mock_session' },
             getMe: jest.fn().mockResolvedValue({ id: 123456 }),
+            invoke: jest.fn().mockResolvedValue({}),
             connected: true
         };
     });

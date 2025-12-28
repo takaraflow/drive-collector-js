@@ -3,14 +3,6 @@ import fs from 'fs';
 import path from 'path';
 import { Readable } from 'stream';
 
-jest.mock('@aws-sdk/client-s3', () => ({
-  S3Client: jest.fn()
-}));
-
-jest.mock('@aws-sdk/lib-storage', () => ({
-  Upload: jest.fn()
-}));
-
 jest.unstable_mockModule('../../src/config/index.js', () => ({
   config: {
     oss: {

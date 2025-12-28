@@ -12,7 +12,8 @@ export const STRINGS = {
               "/logout - ❌ 解绑当前网盘\n\n" +
               "<b>管理员命令：</b>\n" +
               "/open_service - 🔓 开启服务 (公开模式)\n" +
-              "/close_service - 🔒 关闭服务 (维护模式)\n\n" +
+              "/close_service - 🔒 关闭服务 (维护模式)\n" +
+               "/diagnosis - 🩺 系统诊断\n\n" +
               "<b>支持的链接类型：</b>\n" +
               "• Telegram 消息链接\n" +
               "• 直链 (部分支持)\n\n" +
@@ -131,6 +132,7 @@ export const STRINGS = {
         service_status: "📡 服务状态: {{status}}",
         mode_changed: "✅ <b>访问模式已切换</b>\n\n当前模式: <code>{{mode}}</code>",
         no_permission: "❌ <b>无权限</b>\n\n此操作仅限管理员执行。",
+        btn_diagnosis: "🩺 系统诊断",
     }
 };
 

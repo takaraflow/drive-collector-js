@@ -1,23 +1,15 @@
 import { jest, describe, test, expect } from "@jest/globals";
 
-// 为冒烟测试 Mock 必要的环境变量和外部连接，防止在 import 时崩溃
-// 我们主要关注语法错误，而非运行逻辑
-jest.unstable_mockModule("../src/config/index.js", () => ({
-    config: {
-        apiId: 12345,
-        apiHash: "mock_hash",
-        botToken: "mock_token",
-        downloadDir: "/tmp",
-        remoteFolder: "test"
-    }
-}));
-
-jest.unstable_mockModule("../src/services/d1.js", () => ({
-    d1: {
-        fetchAll: jest.fn().mockResolvedValue([]),
-        fetchOne: jest.fn().mockResolvedValue(null),
-        execute: jest.fn().mockResolvedValue({ success: true })
-    }
+// Mock config for startup tests using unstable_mockModule
+// 使用相对于根目录的路径，或者确保路径正确
+jest.unstable_mockModule('../../src/config/index.js', () => ({
+  config: {
+    apiId: 12345,
+    apiHash: "test_api_hash",
+    botToken: "test_token",
+    downloadDir: "/tmp",
+    remoteFolder: "test"
+  }
 }));
 
 describe("Project Smoke Test (Startup)", () => {

@@ -192,6 +192,66 @@ async function handleConnectionIssue() {
 }
 
 /**
+ * 启动看门狗定时器
+ */
+export const startWatchdog = () => {
+    // 定时检查心跳（通过获取自身信息）
+    watchdogTimer = setInterval(async () => {
+        const now = Date.now();
+
+        // [DEBUG] 打印状态
+        // console.log(`[DEBUG_FIX] Watchdog check. now=${now}, last=${lastHeartbeat}, isReconnecting=${isReconnecting}, connected=${client.connected}`);
+
+        // 必须在 isReconnecting 检查之前处理时间回拨，防止测试环境下锁死
+        // 处理时间回拨（如测试环境重置时间或系统时钟同步）
+        if (lastHeartbeat > now) {
+            logger.info(`🕒 检测到时间回拨，重置心跳时间: last=${lastHeartbeat}, now=${now}`);
+            lastHeartbeat = now;
+            isReconnecting = false;
+        }
+
+        if (isReconnecting) {
+            // console.log(`[DEBUG_FIX] Skipping check because isReconnecting=true`);
+            return;
+        }
+
+        if (!client.connected) {
+            // 如果已断开连接且超过 5 分钟没有恢复，也触发强制重连
+            if (now - lastHeartbeat >= 5 * 60 * 1000) {
+                logger.error(`🚨 客户端断开连接超过 5 分钟且未自动恢复，强制重启连接... (diff=${now - lastHeartbeat})`);
+                handleConnectionIssue();
+            }
+            return;
+        }
+
+        try {
+            await client.getMe();
+            lastHeartbeat = Date.now();
+            // console.log(`[DEBUG_FIX] Heartbeat success. lastHeartbeat updated to ${lastHeartbeat}`);
+        } catch (e) {
+            if (e.code === 406 && e.errorMessage?.includes("AUTH_KEY_DUPLICATED")) {
+                logger.error("🚨 检测到 AUTH_KEY_DUPLICATED，会话已在别处激活，本实例应停止连接");
+                // 这里不主动 disconnect，让 index.js 的锁续租失败来处理，
+                // 或者标记需要重置
+                lastHeartbeat = 0; // 触发强制处理
+            }
+
+            logger.warn("💔 心跳检测失败:", e);
+
+            // 使用当前时间再次检查差值，因为 await getMe() 可能经过了时间
+            const currentNow = Date.now();
+            const diff = currentNow - lastHeartbeat;
+            // console.log(`[DEBUG_FIX] Heartbeat failed. Diff=${diff}`);
+
+            if (diff >= 5 * 60 * 1000) {
+                logger.error(`🚨 超过 5 分钟无心跳响应，强制重启连接... (diff=${diff})`);
+                handleConnectionIssue();
+            }
+        }
+    }, 60 * 1000); // 每分钟检查一次
+};
+
+/**
  * 停止看门狗定时器
  */
 export const stopWatchdog = () => {
@@ -237,42 +297,6 @@ export const ensureConnected = async () => {
  */
 export const isClientActive = () => client.connected;
 
-// 定时检查心跳（通过获取自身信息）
-watchdogTimer = setInterval(async () => {
-    if (isReconnecting) return;
+// 启动看门狗
+startWatchdog();
 
-    const now = Date.now();
-    // 处理时间回拨（如测试环境重置时间或系统时钟同步）
-    if (lastHeartbeat > now) {
-        logger.debug("🕒 检测到时间回拨，重置心跳时间");
-        lastHeartbeat = now;
-        isReconnecting = false;
-    }
-
-    if (!client.connected) {
-        // 如果已断开连接且超过 5 分钟没有恢复，也触发强制重连
-        if (now - lastHeartbeat >= 5 * 60 * 1000) {
-            logger.error("🚨 客户端断开连接超过 5 分钟且未自动恢复，强制重启连接...");
-            handleConnectionIssue();
-        }
-        return;
-    }
-
-    try {
-        await client.getMe();
-        lastHeartbeat = Date.now();
-    } catch (e) {
-        if (e.code === 406 && e.errorMessage?.includes("AUTH_KEY_DUPLICATED")) {
-            logger.error("🚨 检测到 AUTH_KEY_DUPLICATED，会话已在别处激活，本实例应停止连接");
-            // 这里不主动 disconnect，让 index.js 的锁续租失败来处理，
-            // 或者标记需要重置
-            lastHeartbeat = 0; // 触发强制处理
-        }
-
-        logger.warn("💔 心跳检测失败:", e);
-        if (Date.now() - lastHeartbeat >= 5 * 60 * 1000) {
-            logger.error("🚨 超过 5 分钟无心跳响应，强制重启连接...");
-            handleConnectionIssue();
-        }
-    }
-}, 60 * 1000); // 每分钟检查一次

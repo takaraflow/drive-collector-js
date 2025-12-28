@@ -158,13 +158,45 @@ jest.unstable_mockModule("../../src/utils/limiter.js", () => ({
   }
 }));
 
+// Mock fs for version reading
+jest.unstable_mockModule("fs", () => ({
+  default: {
+    readFileSync: jest.fn().mockReturnValue(JSON.stringify({ version: "1.2.3" }))
+  },
+  readFileSync: jest.fn().mockReturnValue(JSON.stringify({ version: "1.2.3" }))
+}));
+
 // Mock locales
 jest.unstable_mockModule("../../src/locales/zh-CN.js", () => ({
   STRINGS: {
     task: { cmd_sent: "sent", task_not_found: "not found" },
-    system: { welcome: "welcome", maintenance_mode: "🚧 <b>系统维护中</b>\n\n当前 Bot 仅限管理员使用，请稍后访问。" },
+    system: {
+      welcome: "welcome",
+      maintenance_mode: "🚧 <b>系统维护中</b>\n\n当前 Bot 仅限管理员使用，请稍后访问。",
+      help: "基础命令：\n/start - 启动机器人\n/drive - 管理网盘\n/status - 显示状态\n\n<b>管理员命令：</b>\n/diagnosis - 运行系统诊断\n/status_public - 设置公开模式\n/status_private - 设置私有模式\n\n版本：{{version}}",
+      no_permission_for_diagnosis: "❌ 此命令仅限管理员使用。"
+    },
     drive: { no_drive_found: "no drive" },
-    status: { header: "header", queue_title: "queue", waiting_tasks: "🕒 等待中的任务: {{count}}", current_task: "🔄 当前正在处理: {{count}}", current_file: "📄 当前任务: <code>{{name}}</code>", user_history: "👤 您的任务历史", task_item: "{{index}}. {{status}} <code>{{name}}</code> ({{statusText}})", drive_status: "🔑 网盘绑定: {{status}}", system_info: "💻 系统信息", uptime: "⏱️ 运行时间: {{uptime}}", service_status: "📡 服务状态: {{status}}", mode_changed: "✅ <b>访问模式已切换</b>\n\n当前模式: <code>{{mode}}</code>", no_permission: "❌ <b>无权限</b>\n\n此操作仅限管理员执行。" }
+    status: {
+      header: "header",
+      queue_title: "queue",
+      waiting_tasks: "🕒 等待中的任务: {{count}}",
+      current_task: "🔄 当前正在处理: {{count}}",
+      current_file: "📄 当前任务: <code>{{name}}</code>",
+      user_history: "👤 您的任务历史",
+      task_item: "{{index}}. {{status}} <code>{{name}}</code> ({{statusText}})",
+      drive_status: "🔑 网盘绑定: {{status}}",
+      system_info: "💻 系统信息",
+      uptime: "⏱️ 运行时间: {{uptime}}",
+      service_status: "📡 服务状态: {{status}}",
+      mode_changed: "✅ <b>访问模式已切换</b>\n\n当前模式: <code>{{mode}}</code>",
+      no_permission: "❌ <b>无权限</b>\n\n此操作仅限管理员执行。",
+      btn_diagnosis: "系统诊断"
+    },
+    diagnosis: {
+      start: "🔍 正在执行系统诊断...",
+      completed: "🌐 Network diagnostics completed"
+    }
   },
   format: (template, vars = {}) => template.replace(/\{\{(\w+)\}\}/g, (_, key) => (vars[key] !== undefined && vars[key] !== null) ? vars[key] : `{{${key}}}`),
 }));
@@ -282,6 +314,22 @@ describe("Dispatcher", () => {
       await Dispatcher._handleCallback(event, { userId: "123" });
       expect(mockCloudTool.listRemoteFiles).toHaveBeenCalledWith("123", false);
       expect(mockUIHelper.renderFilesPage).toHaveBeenCalled();
+    });
+
+    test("should handle diagnosis_run callback", async () => {
+      mockAuthGuard.can.mockResolvedValue(true);
+      const event = new Api.UpdateBotCallbackQuery({
+        data: Buffer.from("diagnosis_run"),
+        userId: BigInt(123),
+        queryId: BigInt(1),
+        peer: new Api.PeerUser({ userId: BigInt(123) }),
+      });
+
+      await Dispatcher._handleCallback(event, { userId: "123" });
+      expect(mockNetworkDiagnostic.diagnoseAll).toHaveBeenCalled();
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
+        message: expect.stringContaining("🔍 正在执行系统诊断...")
+      }));
     });
 
 
@@ -440,7 +488,8 @@ describe("Dispatcher", () => {
       expect(mockDriveConfigFlow.handleUnbind).toHaveBeenCalledWith(target, "123");
     });
 
-    test("should handle /status command", async () => {
+    test("should handle /status command for admin with diagnosis button", async () => {
+      mockAuthGuard.can.mockResolvedValue(true);
       const message = {
         id: 1,
         message: "/status",
@@ -449,7 +498,28 @@ describe("Dispatcher", () => {
       const event = { message };
       await Dispatcher._handleMessage(event, { userId: "123", target });
 
-      expect(mockClient.sendMessage).toHaveBeenCalled();
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, expect.objectContaining({
+        buttons: expect.arrayContaining([
+          expect.arrayContaining([
+            expect.objectContaining({ text: "系统诊断" })
+          ])
+        ])
+      }));
+    });
+
+    test("should handle /status command for regular user without buttons", async () => {
+      mockAuthGuard.can.mockResolvedValue(false);
+      const message = {
+        id: 1,
+        message: "/status",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, expect.not.objectContaining({
+        buttons: expect.any(Array)
+      }));
     });
 
     test("should handle /status queue subcommand", async () => {
@@ -462,6 +532,68 @@ describe("Dispatcher", () => {
       await Dispatcher._handleMessage(event, { userId: "123", target });
 
       expect(mockClient.sendMessage).toHaveBeenCalled();
+    });
+
+    test("should handle /help command for admin with admin commands", async () => {
+      mockAuthGuard.can.mockResolvedValue(true);
+      const message = {
+        id: 1,
+        message: "/help",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, expect.objectContaining({
+        message: expect.stringContaining("管理员命令")
+      }));
+    });
+
+    test("should handle /help command for regular user without admin commands", async () => {
+      mockAuthGuard.can.mockResolvedValue(false);
+      const message = {
+        id: 1,
+        message: "/help",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, expect.objectContaining({
+        message: expect.not.stringContaining("管理员命令")
+      }));
+    });
+
+    test("should handle /diagnosis command for admin", async () => {
+      mockAuthGuard.can.mockResolvedValue(true);
+      const message = {
+        id: 1,
+        message: "/diagnosis",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockNetworkDiagnostic.diagnoseAll).toHaveBeenCalled();
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, expect.objectContaining({
+        message: expect.stringContaining("🔍 正在执行系统诊断...")
+      }));
+    });
+
+    test("should reject /diagnosis command for regular user", async () => {
+      mockAuthGuard.can.mockResolvedValue(false);
+      const message = {
+        id: 1,
+        message: "/diagnosis",
+        peerId: target
+      };
+      const event = { message };
+      await Dispatcher._handleMessage(event, { userId: "123", target });
+
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(target, expect.objectContaining({
+        message: expect.stringContaining("❌ 此命令仅限管理员使用。")
+      }));
+      expect(mockNetworkDiagnostic.diagnoseAll).not.toHaveBeenCalled();
     });
 
     test("should handle /status_public command for admin", async () => {

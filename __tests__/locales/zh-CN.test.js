@@ -10,6 +10,7 @@ describe("zh-CN Locale", () => {
     expect(STRINGS.system).toBeDefined();
     expect(typeof STRINGS.system).toBe("object");
     expect(STRINGS.system.node_service_active).toBeDefined();
+    expect(STRINGS.system.help).toContain("/diagnosis");
   });
 
   test("should have task strings", () => {
@@ -34,5 +35,6 @@ describe("zh-CN Locale", () => {
     expect(STRINGS.status).toBeDefined();
     expect(typeof STRINGS.status).toBe("object");
     expect(STRINGS.status.header).toBeDefined();
+    expect(STRINGS.status.btn_diagnosis).toBeDefined();
   });
 });

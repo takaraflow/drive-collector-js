@@ -1,4 +1,5 @@
 import { Api } from "telegram";
+import { Button } from "telegram/tl/custom/button.js";
 import { config } from "../config/index.js";
 import { client, isClientActive } from "../services/telegram.js";
 import { AuthGuard } from "../modules/AuthGuard.js";
@@ -157,11 +158,15 @@ export class Dispatcher {
             const toast = await DriveConfigFlow.handleCallback(event, userId);
             await answer(toast || "");
         
+        } else if (data === "diagnosis_run") {
+            await this._handleDiagnosisCommand(event.peer, userId);
+            return await answer();
+
         } else if (data.startsWith("files_")) {
             await this._handleFilesCallback(event, data, userId, answer);
-        
+
         } else {
-            await answer(); 
+            await answer();
         }
     }
 
@@ -360,10 +365,10 @@ export class Dispatcher {
     static async _handleStatusCommand(target, userId, fullText) {
         const parts = fullText.split(' ');
         const subCommand = parts.length > 1 ? parts[1].toLowerCase() : 'general';
-        
+
         let message = '';
         let buttons = null;
-        
+
         switch (subCommand) {
             case 'queue':
                 message = this._getQueueStatus();
@@ -374,9 +379,15 @@ export class Dispatcher {
             case 'general':
             default:
                 message = await this._getGeneralStatus(userId);
+                const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
+                if (isAdmin) {
+                    buttons = [
+                        [Button.inline(STRINGS.status.btn_diagnosis, Buffer.from("diagnosis_run"))]
+                    ];
+                }
         }
-        
-        return await runBotTaskWithRetry(() => client.sendMessage(target, { 
+
+        return await runBotTaskWithRetry(() => client.sendMessage(target, {
             message: message,
             buttons: buttons,
             parseMode: "html"
@@ -479,14 +490,21 @@ export class Dispatcher {
      * [私有] 处理 /help 命令
      */
     static async _handleHelpCommand(target, userId) {
-        // 读取版本号
-        const pkgPath = path.join(process.cwd(), 'package.json');
-        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
+        const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
         const version = pkg.version || 'unknown';
 
-        const message = format(STRINGS.system.help, { version });
-        
-        return await runBotTaskWithRetry(() => client.sendMessage(target, { 
+        let message = format(STRINGS.system.help, { version });
+
+        if (!isAdmin) {
+            // 移除管理员命令部分
+            const parts = message.split("<b>管理员命令：</b>");
+            if (parts.length > 1) {
+                message = parts[0] + "如有疑问或建议，请联系管理员。";
+            }
+        }
+
+        return await runBotTaskWithRetry(() => client.sendMessage(target, {
             message: message,
             parseMode: "html"
         }), userId, {}, false, 3);

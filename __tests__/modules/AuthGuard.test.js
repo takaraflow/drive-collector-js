@@ -87,7 +87,7 @@ describe('AuthGuard', () => {
     });
 
     describe('can', () => {
-        it('should return true for null userId', async () => {
+        it('should return false for null userId (user role lacks permission)', async () => {
             const result = await AuthGuard.can(null, 'task:cancel:any');
             expect(result).toBe(false); // user role doesn't have this permission
         });
@@ -118,6 +118,20 @@ describe('AuthGuard', () => {
             expect(result).toBe(true);
 
             mockConfig.ownerId = null; // reset
+        });
+
+        it('should allow admin to bypass maintenance mode', async () => {
+            mockD1.fetchOne.mockResolvedValue({ role: 'admin' });
+
+            const result = await AuthGuard.can('adminUser', 'maintenance:bypass');
+            expect(result).toBe(true);
+        });
+
+        it('should not allow user to bypass maintenance mode', async () => {
+            mockD1.fetchOne.mockResolvedValue({ role: 'user' });
+
+            const result = await AuthGuard.can('regularUser', 'maintenance:bypass');
+            expect(result).toBe(false);
         });
     });
 });

@@ -1,18 +1,11 @@
 import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import { mockAxiomIngest, mockAxiomConstructor } from '../setup/external-mocks.js';
 
-// Mock the Axiom SDK
-const mockIngest = jest.fn().mockResolvedValue(undefined);
-const mockAxiomConstructor = jest.fn().mockImplementation(() => ({
-  ingest: mockIngest
-}));
-
-// Use unstable_mockModule for ES modules
-jest.unstable_mockModule('@axiomhq/js', () => ({
-  Axiom: mockAxiomConstructor
-}));
+// Use the global mock
+const mockIngest = mockAxiomIngest;
 
 // Mock the config module
-jest.mock('../../src/config/index.js', () => ({
+jest.unstable_mockModule('../../src/config/index.js', () => ({
   config: {}
 }));
 
