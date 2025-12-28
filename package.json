@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "npm run build && wrangler dev",
-    "build": "bash scripts/build.sh && esbuild src/index.js --bundle --format=esm --outdir=dist",
+    "build": "bash scripts/build.sh && esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:*",
     "deploy": "npm run build && npx wrangler deploy",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch"
