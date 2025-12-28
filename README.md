@@ -10,7 +10,7 @@ Cloudflare Worker 负载均衡器，用于多实例请求转发，支持故障�
 3. `source .env && npm run dev`
 
 ### 生产部署（Cloudflare Workers）
-1. 设置 Cloudflare KV Namespace，并获取 ID。
+1. 在 Cloudflare Dashboard 的 Worker 设置中添加名为 "KV" 的 KV Namespace binding。
 2. **敏感环境变量使用 Secrets（推荐，避免硬编码泄露）：**
    ```
    wrangler secret put AXIOM_TOKEN
@@ -34,7 +34,6 @@ Cloudflare Worker 负载均衡器，用于多实例请求转发，支持故障�
 
       **Variables**：
       - `WORKER_NAME`: Worker 名称 (e.g. `lb-worker-js`)
-      - `CF_KV_NAMESPACE_ID`: KV Namespace ID
       - `AXIOM_DATASET`
       - `UPSTASH_REDIS_REST_URL` (可选)
 
@@ -46,7 +45,6 @@ Cloudflare Worker 负载均衡器，用于多实例请求转发，支持故障�
    示例：
    ```
    export WORKER_NAME=your-worker-name
-   export CF_KV_NAMESPACE_ID=your-kv-id
    npm run deploy
    ```
 4. 构建 & 部署：`npm run deploy`（自动运行 build.sh 更新 toml 并 deploy，默认使用 wrangler.toml）。

@@ -3,21 +3,9 @@
 # 设置可选环境变量默认值
 WORKER_NAME=${WORKER_NAME:-drive-collector-lb}
 
-if [ -z "$CF_KV_NAMESPACE_ID" ]; then
-  echo "Warning: CF_KV_NAMESPACE_ID not set, KV binding will be empty in wrangler.toml"
-  CF_KV_NAMESPACE_ID=""
-fi
-
-# 设置默认值
-if [ -z "$KV_PREVIEW_ID" ]; then
-  KV_PREVIEW_ID="$CF_KV_NAMESPACE_ID"
-fi
-
 # 使用sed直接在wrangler.toml中替换占位符
 sed -i \
   -e "s/\${WORKER_NAME}/$WORKER_NAME/g" \
-  -e "s/\${CF_KV_NAMESPACE_ID}/$CF_KV_NAMESPACE_ID/g" \
-  -e "s/\${KV_PREVIEW_ID}/$KV_PREVIEW_ID/g" \
   -e "s/\${AXIOM_TOKEN}/${AXIOM_TOKEN:-}/g" \
   -e "s/\${AXIOM_ORG_ID}/${AXIOM_ORG_ID:-}/g" \
   -e "s/\${AXIOM_DATASET}/${AXIOM_DATASET:-}/g" \
@@ -27,9 +15,5 @@ sed -i \
   -e "s/\${NODE_ENV}/${NODE_ENV:-production}/g" \
   wrangler.toml
 
-if [ -z "$CF_KV_NAMESPACE_ID" ]; then
-  echo "Removing KV binding since CF_KV_NAMESPACE_ID is empty"
-  sed -i '/^\[\[kv_namespaces\]\]/, /preview_id /d' wrangler.toml
-fi
 
 echo "wrangler.toml updated successfully"
