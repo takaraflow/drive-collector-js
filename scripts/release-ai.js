@@ -123,10 +123,12 @@ async function run() {
   prependToChangelog(chineseChangelog);
   
   console.log('\n✅ AI changelog generation completed!');
-  console.log('📝 Note: Roo AI should now manually review and optimize the generated changelog.');
-  console.log('🚀 Next: standard-version will handle version bumping and tagging...');
-  console.log('6. Staging CHANGELOG.md for standard-version...');
-  execSync('git add CHANGELOG.md'); // 显式将 AI 润色的日志加入暂存区
+  console.log('6. Staging CHANGELOG.md and committing via standard-version...');
+  
+  // 先 add，然后调用不带 --skip.changelog 的 standard-version
+  // standard-version 会自动 commit 暂存区的内容并更新 package.json
+  execSync('git add CHANGELOG.md'); 
+  execSync('npx standard-version --commit-all', { stdio: 'inherit' }); 
 }
 
 // Run if called directly
