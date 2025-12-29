@@ -319,7 +319,7 @@
   "entrypoint": "index.js",
   "runtime": {
     "type": "nodejs",
-    "version": ">=18.0.0"
+    "version": "nodejs20"
   },
   "config": {
     "env": {
