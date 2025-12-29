@@ -162,7 +162,83 @@ describe("Telegram Service Watchdog", () => {
         expect(mockClientInstance.connect).toHaveBeenCalled();
     });
 
-    test("应当在心跳连续失败（5分钟）时触发强制重连", async () => {
+    test("应当在检测到 BinaryReader 相关的 TypeError 时触发重连 - readUInt32LE", async () => {
+        expect(capturedErrorCallback).toBeDefined();
+
+        // 模拟 BinaryReader 的 readUInt32LE 错误
+        const binaryReaderError = new TypeError("Cannot read properties of undefined (reading 'readUInt32LE')");
+        await capturedErrorCallback(binaryReaderError);
+
+        // 现在的逻辑是 setTimeout 2秒后再触发断开
+        jest.advanceTimersByTime(2001);
+        await flushPromises();
+
+        expect(mockClientInstance.disconnect).toHaveBeenCalled();
+
+        // 由于使用了随机等待时间（5-10秒），我们需要等待更长时间
+        jest.advanceTimersByTime(15000);
+        await flushPromises();
+
+        expect(mockClientInstance.connect).toHaveBeenCalled();
+    });
+
+    test("应当在检测到 BinaryReader 相关的 TypeError 时触发重连 - readInt32LE", async () => {
+        expect(capturedErrorCallback).toBeDefined();
+
+        // 模拟 BinaryReader 的 readInt32LE 错误
+        const binaryReaderError = new TypeError("Cannot read properties of undefined (reading 'readInt32LE')");
+        await capturedErrorCallback(binaryReaderError);
+
+        // 现在的逻辑是 setTimeout 2秒后再触发断开
+        jest.advanceTimersByTime(2001);
+        await flushPromises();
+
+        expect(mockClientInstance.disconnect).toHaveBeenCalled();
+
+        // 由于使用了随机等待时间（5-10秒），我们需要等待更长时间
+        jest.advanceTimersByTime(15000);
+        await flushPromises();
+
+        expect(mockClientInstance.connect).toHaveBeenCalled();
+    });
+
+    test("应当在检测到包含 'undefined' 的 TypeError 时触发重连", async () => {
+        expect(capturedErrorCallback).toBeDefined();
+
+        // 模拟包含 'undefined' 的 TypeError
+        const undefinedError = new TypeError("Cannot read properties of undefined (reading 'someMethod')");
+        await capturedErrorCallback(undefinedError);
+
+        // 现在的逻辑是 setTimeout 2秒后再触发断开
+        jest.advanceTimersByTime(2001);
+        await flushPromises();
+
+        expect(mockClientInstance.disconnect).toHaveBeenCalled();
+
+        // 由于使用了随机等待时间（5-10秒），我们需要等待更长时间
+        jest.advanceTimersByTime(15000);
+        await flushPromises();
+
+        expect(mockClientInstance.connect).toHaveBeenCalled();
+    });
+
+    test("不应为普通 TypeError 触发重连", async () => {
+        expect(capturedErrorCallback).toBeDefined();
+
+        // 模拟普通 TypeError（不包含 BinaryReader 相关关键字）
+        const normalTypeError = new TypeError("Some other type error");
+        await capturedErrorCallback(normalTypeError);
+
+        // 等待一段时间，确保没有触发重连
+        jest.advanceTimersByTime(5000);
+        await flushPromises();
+
+        // 不应调用 disconnect 或 connect
+        expect(mockClientInstance.disconnect).not.toHaveBeenCalled();
+        expect(mockClientInstance.connect).not.toHaveBeenCalled();
+    });
+
+    test("心跳连续失败（5分钟）时触发强制重连", async () => {
         // 重要：在设置 getMe 失败前，lastHeartbeat 已经被 beforeEach 同步了
         mockClientInstance.getMe.mockRejectedValue(new Error("Network Error"));
 

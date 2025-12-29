@@ -132,6 +132,13 @@ client.on("disconnected", () => {
 // 监听错误以防止更新循环因超时而崩溃
 client.on("error", (err) => {
     const errorMsg = err?.message || "";
+    
+    // 识别 BinaryReader 相关的 TypeError
+    const isBinaryReaderError = 
+        errorMsg.includes("readUInt32LE") || 
+        errorMsg.includes("readInt32LE") ||
+        (err instanceof TypeError && errorMsg.includes("undefined"));
+    
     if (errorMsg.includes("TIMEOUT")) {
         // TIMEOUT 通常发生在 _updateLoop 中，GramJS 可能已经进入不可恢复状态
         logger.warn(`⚠️ Telegram 客户端更新循环超时 (TIMEOUT): ${errorMsg}，准备主动重连...`);
@@ -141,6 +148,11 @@ client.on("error", (err) => {
     } else if (errorMsg.includes("Not connected")) {
         logger.warn("⚠️ Telegram 客户端未连接，尝试重连...");
         handleConnectionIssue();
+    } else if (isBinaryReaderError) {
+        // 处理 BinaryReader 相关的 TypeError，这通常意味着内部状态已损坏
+        logger.warn(`⚠️ Telegram 客户端发生 BinaryReader 错误 (${errorMsg})，准备主动重连...`);
+        if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        reconnectTimeout = setTimeout(() => handleConnectionIssue(), 2000);
     } else {
         logger.error("❌ Telegram 客户端发生错误:", err);
     }
@@ -299,4 +311,3 @@ export const isClientActive = () => client.connected;
 
 // 启动看门狗
 startWatchdog();
-
