@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [3.2.0](https://github.com/YoungSx/drive-collector-js/compare/v3.1.2...v3.2.0) (2025-12-30)
+
+#### ✨ Features
+
+* **DriveRepository**: 实现基于 KV 的活跃网盘列表管理功能，支持 `findAll()` 方法返回所有活跃网盘配置 ([d9c1091](https://github.com/YoungSx/drive-collector-js/commit/d9c109123f5acb5bf468376a80dc78e3db2d612c))
+
+#### 🔧 Refactoring
+
+* **Release Script**: 优化 release-ai.js 与 standard-version 的集成，移除冗余函数，简化发布流程 ([4086754](https://github.com/YoungSx/drive-collector-js/commit/40867549a8429fe82e93fd451d486e149c8ec881))
+
+#### 🐛 Bug Fixes
+
+* **InstanceCoordinator**: 增强锁检查机制，处理 KV 限流和网络错误，避免错误的锁丢失判断
+* **Telegram Service**: 改进连接问题处理，在锁检查失败时暂缓重连，防止竞争条件
+
+#### 🔧 Maintenance
+
+* **测试修复**: 更新 DriveRepository 测试以适配新的活跃网盘列表功能
+* **配置更新**: 同步更新 manifest.json 中的 driveRepository 配置和可靠性参数
+
 ### [3.1.0](https://github.com/YoungSx/drive-collector-js/compare/v3.0.2...v3.1.0) (2025-12-29)
 
 

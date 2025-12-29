@@ -41,7 +41,6 @@ describe('release-ai.js - Core Functions', () => {
       expect(releaseAi.getGitCommits).toBeDefined();
       expect(releaseAi.checkDirtyWorkspace).toBeDefined();
       expect(releaseAi.generateChineseChangelog).toBeDefined();
-      expect(releaseAi.prependToChangelog).toBeDefined();
       expect(releaseAi.run).toBeDefined();
     });
   });
@@ -61,7 +60,6 @@ describe('release-ai.js - Core Functions', () => {
       expect(content).toContain('function getGitCommits');
       expect(content).toContain('function checkDirtyWorkspace');
       expect(content).toContain('function generateChineseChangelog');
-      expect(content).toContain('function prependToChangelog');
       expect(content).toContain('async function run');
       expect(content).toContain('export {');
     });
