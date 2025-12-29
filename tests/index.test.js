@@ -125,7 +125,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
       };
 
-      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Missing Upstash-Signature or Upstash-Timestamp header');
+      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Missing Upstash-Signature header');
     });
 
     it('应该在签名不匹配时抛出错误', async () => {
@@ -220,6 +220,32 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       mockVerify.mockResolvedValue(body);
 
       const result = await verifyQStashSignature(request, customEnv);
+      expect(new TextDecoder().decode(result)).toBe(body);
+    });
+
+    it('应该支持 JWT 格式签名（不带 Upstash-Timestamp）', async () => {
+      const body = 'test-body';
+      // 模拟一个 JWT 格式的签名（包含两个点）
+      const jwtSignature = 'header.payload.signature';
+
+      const request = {
+        headers: new Map([
+          ['Upstash-Signature', jwtSignature],
+          // 注意：没有 Upstash-Timestamp
+        ]),
+        text: jest.fn().mockResolvedValue(body),
+        url: 'https://test.url',
+      };
+
+      mockVerify.mockResolvedValue(body);
+
+      const result = await verifyQStashSignature(request, mockEnv);
+      
+      expect(mockVerify).toHaveBeenCalledWith({
+        signature: jwtSignature,
+        body,
+        url: 'https://test.url',
+      });
       expect(new TextDecoder().decode(result)).toBe(body);
     });
   });
