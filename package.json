@@ -23,7 +23,7 @@
     "release:minor": "npm test && standard-version --release-as minor",
     "release:major": "npm test && standard-version --release-as major",
     "postrelease": "git push --follow-tags origin main",
-    "release:ai": "npm test && node scripts/release-ai.js && npx standard-version --skip.changelog"
+    "release:ai": "npm test && node scripts/release-ai.js"
   },
   "keywords": [
     "telegram",

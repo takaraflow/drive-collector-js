@@ -12,7 +12,7 @@ describe('release-ai.js - Core Functions', () => {
 
       expect(result).toContain('AI-Generated Changelog');
       expect(result).toContain('commits: 2');
-      expect(result).toContain('Please manually review');
+      expect(result).toContain('This content should be replaced by Roo AI');
     });
 
     it('should handle single commit', async () => {
@@ -62,6 +62,10 @@ describe('release-ai.js - Core Functions', () => {
       expect(content).toContain('function generateChineseChangelog');
       expect(content).toContain('async function run');
       expect(content).toContain('export {');
+      // Verify new features
+      expect(content).toContain('getFilesToAddFromVersionrc');
+      expect(content).toContain('syncManifestVersion');
+      expect(content).toContain('npm test');
     });
   });
 });
