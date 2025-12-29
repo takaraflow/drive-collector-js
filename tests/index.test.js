@@ -11,6 +11,18 @@ if (typeof globalThis.TextEncoder === 'undefined') {
 // Mock global.fetch
 global.fetch = jest.fn();
 
+// Helper function to create mock response with body.cancel
+function createMockResponse(status, body = {}) {
+    return {
+        status,
+        ok: status >= 200 && status < 300,
+        body: {
+            cancel: jest.fn().mockResolvedValue(undefined)
+        },
+        ...body
+    };
+}
+
 // Mock console methods
 global.console = {
   log: jest.fn(),
@@ -52,7 +64,8 @@ import {
   executeWithFailover,
   getCurrentProviderState,
   setCurrentProviderState,
-  logger
+  logger,
+  upstash_get
 } from '../src/index.js';
 
 // Mock KV Storage
@@ -356,7 +369,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
       const originalBody = 'test-body';
 
-      const mockResponse = { status: 200, ok: true };
+      const mockResponse = createMockResponse(200);
       global.fetch.mockResolvedValue(mockResponse);
 
       const result = await forwardToInstance(instance, normalizedUrl, request, originalBody);
@@ -381,7 +394,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
       const originalBody = 'test-body';
 
-      const mockResponse = { status: 500 };
+      const mockResponse = createMockResponse(500);
       global.fetch.mockResolvedValue(mockResponse);
 
       const result = await forwardToInstance(instance, normalizedUrl, request, originalBody);
@@ -398,7 +411,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       const normalizedUrl = new URL(request.url);
       normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
 
-      const mockResponse = { status: 200 };
+      const mockResponse = createMockResponse(200);
       global.fetch.mockResolvedValue(mockResponse);
 
       const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
@@ -414,12 +427,13 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       const normalizedUrl = new URL(request.url);
       normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
 
-      global.fetch.mockImplementationOnce(() => Promise.resolve({ status: 500 }));
-      const mockResponse = { status: 200 };
-      global.fetch.mockResolvedValueOnce(mockResponse);
+      const response500 = createMockResponse(500);
+      const response200 = createMockResponse(200);
+      global.fetch.mockResolvedValueOnce(response500);
+      global.fetch.mockResolvedValueOnce(response200);
 
       const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
-      expect(result).toBe(mockResponse);
+      expect(result).toBe(response200);
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
@@ -432,11 +446,109 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       const normalizedUrl = new URL(request.url);
       normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
 
-      const lastResponse = { status: 500 };
+      const lastResponse = createMockResponse(500);
       global.fetch.mockResolvedValue(lastResponse);
 
       const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
       expect(result).toBe(lastResponse);
+    });
+
+    it('应该在第一个实例返回500，第二个实例返回200时，取消第一个响应的body', async () => {
+      const instances = [
+        { id: '1', url: 'https://instance1.com' },
+        { id: '2', url: 'https://instance2.com' },
+      ];
+      const request = { url: 'https://lb.example.com/webhook', method: 'POST', headers: new Map(), body: 'body' };
+      const normalizedUrl = new URL(request.url);
+      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
+
+      const response500 = createMockResponse(500);
+      const response200 = createMockResponse(200);
+      
+      global.fetch.mockResolvedValueOnce(response500);
+      global.fetch.mockResolvedValueOnce(response200);
+
+      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
+      
+      expect(result).toBe(response200);
+      expect(response500.body.cancel).toHaveBeenCalled();
+      expect(response200.body.cancel).not.toHaveBeenCalled();
+    });
+
+    it('应该在多个5xx响应时，取消之前保存的5xx响应body', async () => {
+      const instances = [
+        { id: '1', url: 'https://instance1.com' },
+        { id: '2', url: 'https://instance2.com' },
+        { id: '3', url: 'https://instance3.com' },
+      ];
+      const request = { url: 'https://lb.example.com/webhook', method: 'POST', headers: new Map(), body: 'body' };
+      const normalizedUrl = new URL(request.url);
+      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
+
+      const response500_1 = createMockResponse(500);
+      const response500_2 = createMockResponse(500);
+      const response200 = createMockResponse(200);
+      
+      global.fetch.mockResolvedValueOnce(response500_1);
+      global.fetch.mockResolvedValueOnce(response500_2);
+      global.fetch.mockResolvedValueOnce(response200);
+
+      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
+      
+      expect(result).toBe(response200);
+      expect(response500_1.body.cancel).toHaveBeenCalled();
+      expect(response500_2.body.cancel).toHaveBeenCalled();
+      expect(response200.body.cancel).not.toHaveBeenCalled();
+    });
+
+    it('应该在所有实例返回5xx时，只取消前N-1个响应的body', async () => {
+      const instances = [
+        { id: '1', url: 'https://instance1.com' },
+        { id: '2', url: 'https://instance2.com' },
+      ];
+      const request = { url: 'https://lb.example.com/webhook', method: 'POST', headers: new Map(), body: 'body' };
+      const normalizedUrl = new URL(request.url);
+      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
+
+      const response500_1 = createMockResponse(500);
+      const response500_2 = createMockResponse(500);
+      
+      // Mock fetch to return different responses for each call
+      global.fetch.mockResolvedValueOnce(response500_1);
+      global.fetch.mockResolvedValueOnce(response500_2);
+
+      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
+      
+      // Should return the last 5xx response
+      expect(result.status).toBe(500);
+      // First response should be cancelled
+      expect(response500_1.body.cancel).toHaveBeenCalled();
+      // Last response should not be cancelled (it's returned)
+      expect(response500_2.body.cancel).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('upstash_get body cancellation', () => {
+    it('应该在返回404时取消response body', async () => {
+      // Mock fetch to return 404 response with body.cancel
+      const mockResponse = createMockResponse(404);
+      global.fetch.mockResolvedValue(mockResponse);
+      
+      const result = await upstash_get(mockEnv, 'non-existent-key');
+      
+      expect(result).toBeNull();
+      expect(mockResponse.body.cancel).toHaveBeenCalled();
+    });
+
+    it('应该在返回其他错误时正常抛出异常', async () => {
+      const mockResponse = createMockResponse(500);
+      mockResponse.statusText = 'Internal Server Error';
+      mockResponse.text = jest.fn().mockResolvedValue('Internal Server Error');
+      global.fetch.mockResolvedValue(mockResponse);
+      
+      await expect(upstash_get(mockEnv, 'test-key')).rejects.toThrow('Upstash Get Error: 500 Internal Server Error');
+      // 500错误不应该调用cancel，因为我们会读取response body
+      expect(mockResponse.body.cancel).not.toHaveBeenCalled();
     });
   });
 
@@ -541,11 +653,11 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
 
       it('应该在KV失败时故障转移到Upstash', async () => {
         // Mock Upstash response
-        global.fetch = jest.fn().mockResolvedValue({
-          ok: true,
+        const mockUpstashResponse = createMockResponse(200, {
           json: () => Promise.resolve({ result: 'upstash-value' }),
           text: () => Promise.resolve(JSON.stringify({ result: 'upstash-value' }))
         });
+        global.fetch = jest.fn().mockResolvedValue(mockUpstashResponse);
 
         // Mock KV failure (quota error triggers immediate failover)
         mockKV.get.mockRejectedValue(new Error('free usage limit exceeded'));
@@ -592,7 +704,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       });
 
       // Mock fetch
-      const mockResponse = { status: 200, headers: new Map() };
+      const mockResponse = createMockResponse(200, { headers: new Map() });
       global.fetch.mockResolvedValue(mockResponse);
 
       const request = {
@@ -692,7 +804,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       });
 
       // Mock fetch
-      const mockResponse = { status: 200, headers: new Map() };
+      const mockResponse = createMockResponse(200, { headers: new Map() });
       let capturedRequest;
       global.fetch = jest.fn().mockImplementation((req) => {
         capturedRequest = req;

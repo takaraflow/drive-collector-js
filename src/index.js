@@ -243,7 +243,11 @@ async function upstash_get(env, key, options = {}) {
     });
 
     if (!response.ok) {
-        if (response.status === 404) return null;
+        if (response.status === 404) {
+            // 修复：取消 body 以防止泄漏
+            if (response.body) await response.body.cancel().catch(() => {});
+            return null;
+        }
         const responseText = await response.text();
         throw new Error(`Upstash Get Error: ${response.status} ${response.statusText}. Response: ${responseText.substring(0, 100)}`);
     }
@@ -725,8 +729,18 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx)
             const response = await forwardToInstance(instance, normalizedUrl, request, body, ctx);
             if (response.status >= 500) {
                 // 如果后端返回 5xx，保存它并尝试下一个实例
+                if (last5xxResponse) {
+                    // 修复：取消之前保存的 5xx 响应 body
+                    if (last5xxResponse.body) await last5xxResponse.body.cancel().catch(() => {});
+                }
                 last5xxResponse = response;
                 continue;
+            }
+            
+            // 修复：如果我们要返回一个成功的响应，但之前有 5xx 响应，取消它
+            if (last5xxResponse) {
+                if (last5xxResponse.body) await last5xxResponse.body.cancel().catch(() => {});
+                last5xxResponse = null; // 清空引用
             }
             // 2xx, 3xx, 4xx 响应直接返回
             return response;
@@ -741,6 +755,7 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx)
     // 1. 如果有后端返回的 5xx 响应，透传它
     if (last5xxResponse) {
         logger.warn('所有实例均返回 5xx，透传最后一个响应', { status: last5xxResponse.status }, ctx);
+        // 注意：这里不取消，因为我们要返回这个 response 给调用者处理
         return last5xxResponse;
     }
 
@@ -761,7 +776,8 @@ export {
     getCurrentProvider,
     isRetryableError,
     executeWithFailover,
-    logger
+    logger,
+    upstash_get
 };
 
 // 导出状态访问器以便测试
