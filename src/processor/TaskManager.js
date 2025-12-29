@@ -64,6 +64,14 @@ export class TaskManager {
     static processingUploadTasks = new Set(); // 正在上传的任务
     static waitingUploadTasks = []; // 等待上传的任务队列
     
+    // UI更新节流控制
+    static uiUpdateTracker = {
+        count: 0,
+        windowStart: Date.now(),
+        windowSize: 10000, // 10秒窗口
+        maxUpdates: 20 // 窗口内最大20次UI更新
+    };
+    
     /**
      * 获取当前正在处理的任务总数 (下载中 + 上传中)
      */
@@ -285,17 +293,19 @@ export class TaskManager {
                 await this.batchUpdateStatus(failedUpdates);
             }
 
-            // 限制并发发送恢复消息（使用小批量顺序处理）
-            const BATCH_SIZE = 3;
+            // 限制并发发送恢复消息（使用小批量顺序处理，带UI节流控制）
+            const BATCH_SIZE = 2; // 减小批量大小
             for (let i = 0; i < validTasks.length; i += BATCH_SIZE) {
                 const batch = validTasks.slice(i, i + BATCH_SIZE);
                 const recoveryPromises = batch.map(task =>
-                    updateStatus(task, "🔄 **系统重启，检测到任务中断，已自动恢复...**")
+                    this.canUpdateUI() 
+                        ? updateStatus(task, "🔄 **系统重启，检测到任务中断，已自动恢复...**")
+                        : Promise.resolve() // 跳过UI更新
                 );
                 await Promise.allSettled(recoveryPromises);
-                // 小批量间添加延迟
+                // 增加小批量间延迟，减少API压力
                 if (i + BATCH_SIZE < validTasks.length) {
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    await new Promise(resolve => setTimeout(resolve, 1500)); // 从500ms增加到1500ms
                 }
             }
 
@@ -460,7 +470,29 @@ export class TaskManager {
     }
 
     /**
-     * 批量更新排队中的 UI
+     * 检查是否允许UI更新（节流控制）
+     */
+    static canUpdateUI() {
+        const now = Date.now();
+        const tracker = this.uiUpdateTracker;
+        
+        // 重置窗口
+        if (now - tracker.windowStart > tracker.windowSize) {
+            tracker.count = 0;
+            tracker.windowStart = now;
+        }
+        
+        // 检查是否超过限制
+        if (tracker.count >= tracker.maxUpdates) {
+            return false;
+        }
+        
+        tracker.count++;
+        return true;
+    }
+
+    /**
+     * 批量更新排队中的 UI（带节流控制）
      */
     static async updateQueueUI() {
         // 获取快照以避免在循环中由于数组变动导致 index 越界
@@ -473,7 +505,7 @@ export class TaskManager {
 
             const newText = format(STRINGS.task.queued, { rank: i + 1 });
 
-            if (task.lastText !== newText) {
+            if (task.lastText !== newText && this.canUpdateUI()) {
                 await updateStatus(task, newText);
                 task.lastText = newText;
                 // 添加延迟避免 API 限制，但使用更高效的 Promise.race 控制并发

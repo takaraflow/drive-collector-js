@@ -86,7 +86,7 @@ export const client = new TelegramClient(
     config.apiHash,
     {
         connectionRetries: 15, // 增加连接重试次数
-        floodSleepThreshold: 60, // 自动处理 60 秒内的 FloodWait
+        floodSleepThreshold: 30, // 自动处理 30 秒内的 FloodWait，降低阈值让更多错误暴露给应用层
         deviceModel: "DriveCollector-Server",
         systemVersion: "Linux",
         appVersion: "2.3.3", // 更新版本号

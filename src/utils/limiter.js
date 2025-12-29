@@ -294,9 +294,13 @@ const handle429Error = async (fn, maxRetries = 10) => {
                     retryAfter = match ? parseInt(match[1]) : 0;
                 }
                 
+                // 强制最小退避机制：当 retry-after <=0 时，确保至少 2s 递增退避
+                if (retryAfter <= 0) {
+                    retryAfter = Math.min(Math.pow(2, retryCount + 1), 10);
+                }
+                
                 // 改进的等待逻辑：指数退避 + 抖动
-                // 如果有 retry-after，使用它；否则使用指数退避，最大 30 秒
-                const baseWait = retryAfter > 0 ? retryAfter * 1000 : Math.min(1000 * (2 ** retryCount), 30000);
+                const baseWait = retryAfter * 1000;
                 // 增加抖动：0-2 秒随机
                 const jitter = Math.random() * 2000;
                 const waitMs = baseWait + jitter;
