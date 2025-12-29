@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [3.2.4](https://github.com/YoungSx/drive-collector-js/compare/v3.2.2...v3.2.4) (2025-12-29)
+
+
+### 🐛 问题修复
+
+* resolve 429 error retry mechanism deadlock ([595d991](https://github.com/YoungSx/drive-collector-js/commit/595d991e97ed38aff14f744c28b7bacae6f038f7))
+
 ### [3.2.2](https://github.com/YoungSx/drive-collector-js/compare/v3.2.1...v3.2.2) (2025-12-29)
 
 
