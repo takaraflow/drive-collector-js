@@ -79,9 +79,22 @@ jobs:
           key: ${{ runner.os }}-node-${{ matrix.node-version }}-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-node-${{ matrix.node-version }}-
-      - run: npm ci
+      - name: Install dependencies
+        run: |
+          START_TIME=$(date +%s)
+          npm ci
+          echo "INSTALL_DURATION=$(($(date +%s) - $START_TIME))" >> $GITHUB_ENV
       - name: Run Tests (${{ matrix.test-type }})
-        run: npm test
+        run: |
+          TEST_START=$(date +%s)
+          npm test -- --verbose
+          echo "TEST_DURATION=$(($(date +%s) - $TEST_START))" >> $GITHUB_ENV
+      - name: Report Performance Metrics
+        run: |
+          echo "### Performance Metrics (Node.js ${{ matrix.node-version }}) 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dependency Installation:** ${{ env.INSTALL_DURATION }}s" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test Execution:** ${{ env.TEST_DURATION }}s" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Monitored Time:** $((${{ env.INSTALL_DURATION }} + ${{ env.TEST_DURATION }}))s" >> $GITHUB_STEP_SUMMARY
       - name: Upload coverage reports
         uses: actions/upload-artifact@v4
         with:
