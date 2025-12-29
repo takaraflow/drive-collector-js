@@ -10,7 +10,13 @@
     "build": "bash scripts/build.sh && esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:*",
     "deploy": "npm run build && npx wrangler deploy",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
-    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch"
+    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
+    "release": "npm test && standard-version",
+    "release:patch": "npm test && standard-version --release-as patch",
+    "release:minor": "npm test && standard-version --release-as minor",
+    "release:major": "npm test && standard-version --release-as major",
+    "release:ai": "npm test && node scripts/release-ai.js && npx standard-version --skip.changelog && node --input-type=module -e \"import { syncManifestVersion } from './scripts/release-ai.js'; syncManifestVersion()\"",
+    "postrelease": "git push --follow-tags origin main"
   },
   "keywords": [
     "cloudflare",
@@ -32,7 +38,44 @@
     "cross-env": "^7.0.3",
     "esbuild": "^0.27.2",
     "jest": "^29.7.0",
+    "standard-version": "^9.5.0",
     "typescript": "^5.9.3",
     "wrangler": "^4.56.0"
+  },
+  "standard-version": {
+    "skip": {
+      "changelog": false
+    },
+    "types": [
+      {
+        "type": "feat",
+        "section": "✨ Features"
+      },
+      {
+        "type": "fix",
+        "section": "🐛 Bug Fixes"
+      },
+      {
+        "type": "perf",
+        "section": "🚀 Performance"
+      },
+      {
+        "type": "docs",
+        "section": "📝 Documentation"
+      },
+      {
+        "type": "test",
+        "section": "✅ Testing"
+      },
+      {
+        "type": "chore",
+        "section": "🔧 Maintenance",
+        "hidden": true
+      },
+      {
+        "type": "refactor",
+        "section": "🔧 Maintenance"
+      }
+    ]
   }
 }
