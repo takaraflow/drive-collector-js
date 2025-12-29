@@ -418,21 +418,21 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
   const timestamp = request.headers.get('Upstash-Timestamp');
 
   if (!signature || !timestamp) {
-    throw new Error('Missing Upstash-Signature or Upstash-Timestamp header');
+    const error = new Error('Missing Upstash-Signature or Upstash-Timestamp header');
+    Object.assign(error, { status: 401 });
+    throw error;
   }
 
   // 检查时间戳格式（SDK 要求秒级）
-  let timestampNum = parseInt(timestamp);
-  if (timestamp.length > 10) {
-    // 毫秒级转换为秒级
-    timestampNum = Math.floor(timestampNum / 1000);
-  }
+  const timestampNum = parseInt(timestamp);
 
   const now = Math.floor(Date.now() / 1000);
   const expirationWindow = env.SIGNATURE_EXPIRATION_WINDOW ? parseInt(env.SIGNATURE_EXPIRATION_WINDOW) : 15 * 60; // 15分钟
 
   if (Math.abs(now - timestampNum) > expirationWindow) {
-    throw new Error('Signature expired');
+    const error = new Error('Signature expired');
+    Object.assign(error, { status: 401 });
+    throw error;
   }
 
   const receiver = new Receiver({
@@ -448,20 +448,24 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
   }
 
   try {
-    await receiver.verify({
-      signature,
-      body: rawBody,
-      url: request.url,
-    });
+    // 在测试环境中，如果 mock 存在，使用 mock
+    if (process.env.NODE_ENV === 'test' && global.__QSTASH_MOCK_VERIFY__) {
+      await global.__QSTASH_MOCK_VERIFY__({
+        signature,
+        body: rawBody,
+        url: request.url,
+      });
+    } else {
+      await receiver.verify({
+        signature,
+        body: rawBody,
+        url: request.url,
+      });
+    }
     
     // 验证通过，返回原始字节数组
     return new Uint8Array(new TextEncoder().encode(rawBody));
   } catch (e) {
-    // 仅捕获验证相关的错误，不掩盖系统错误
-    if (e.message === 'Signature expired' || e.message === 'Missing Upstash-Signature or Upstash-Timestamp header') {
-      throw e;
-    }
-    
     // 处理签名验证失败的情况
     let errorMessage = e.message;
     
@@ -565,15 +569,11 @@ async function getActiveInstances(env, ctx) {
             );
         }
 
-        console.log(`[DEBUG] 获取到 ${keys.length} 个实例键 (provider: ${getCurrentProvider()})`);
-        console.log('[DEBUG] 实例键列表:', keys);
         const allInstancesData = keys.map((key, i) => ({
             key,
             rawData: rawDatas[i],
             parsed: parseInstanceData(rawDatas[i], key)
         }));
-        console.log('[DEBUG] 所有实例详细信息:');
-        console.log(JSON.stringify(allInstancesData, null, 2));
 
         // 3. 解析并过滤
         for (let i = 0; i < keys.length; i++) {

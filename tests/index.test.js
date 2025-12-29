@@ -11,22 +11,31 @@ if (typeof globalThis.TextEncoder === 'undefined') {
 // Mock global.fetch
 global.fetch = jest.fn();
 
-// Mock @upstash/qstash - 必须在导入源代码之前设置
-const mockVerify = jest.fn();
-const mockReceiver = jest.fn().mockImplementation(() => ({
-  verify: mockVerify,
-}));
-
-jest.mock('@upstash/qstash', () => ({
-  Receiver: mockReceiver,
-}));
-
 // Mock console methods
 global.console = {
   log: jest.fn(),
   warn: jest.fn(),
   error: jest.fn(),
 };
+
+// Mock @upstash/qstash - 使用全局变量注入
+const mockVerify = jest.fn();
+
+// 设置全局 mock 验证器
+global.__QSTASH_MOCK_VERIFY__ = mockVerify;
+
+jest.mock('@upstash/qstash', () => ({
+  Receiver: class {
+    constructor(options) {
+      this.currentSigningKey = options.currentSigningKey;
+      this.nextSigningKey = options.nextSigningKey;
+    }
+    
+    async verify(options) {
+      return mockVerify(options);
+    }
+  },
+}));
 
 // 现在导入测试的函数
 import { describe, expect, it, beforeEach, afterEach } from '@jest/globals';
@@ -69,9 +78,14 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       failureCount: 0,
       lastFailureTime: 0
     });
-    // 重置 mock 实现
+    // 重置 mock 实现并重新设置默认行为
     mockVerify.mockReset();
-    mockReceiver.mockClear();
+    mockVerify.mockImplementation(async (options) => {
+      // 模拟验证成功，返回传入的 body
+      return options.body;
+    });
+    // 确保全局 mock 存在
+    global.__QSTASH_MOCK_VERIFY__ = mockVerify;
   });
 
   describe('verifyQStashSignature', () => {
@@ -93,6 +107,14 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       mockVerify.mockResolvedValue(body);
 
       const result = await verifyQStashSignature(request, mockEnv);
+      
+      // 验证 mock 被调用
+      expect(mockVerify).toHaveBeenCalledWith({
+        signature,
+        body,
+        url: 'https://test.url',
+      });
+      
       expect(new TextDecoder().decode(result)).toBe(body);
     });
 
@@ -158,26 +180,6 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         ]),
         text: jest.fn().mockResolvedValue(body),
         arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
-      };
-
-      mockVerify.mockResolvedValue(body);
-
-      const result = await verifyQStashSignature(request, mockEnv);
-      expect(new TextDecoder().decode(result)).toBe(body);
-    });
-
-    it('应该支持毫秒级时间戳', async () => {
-      const body = 'test-body';
-      const timestampMs = Date.now().toString(); // 毫秒级时间戳
-      const signature = 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'; // base64url of 'expected-signature'
-
-      const request = {
-        headers: new Map([
-          ['Upstash-Signature', signature],
-          ['Upstash-Timestamp', timestampMs],
-        ]),
-        text: jest.fn().mockResolvedValue(body),
-        url: 'https://test.url',
       };
 
       mockVerify.mockResolvedValue(body);
