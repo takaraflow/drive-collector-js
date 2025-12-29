@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2025-12-29
+
 ### Added
-- 新增 CHANGELOG.md 文件，用于记录项目变更历史。
+- **自动同步工作流**：新增 GitHub Actions 工作流，自动同步版本更新到 manifest.json。
+- **manifest 验证增强**：完善 manifest.json 的 schema 验证和自动化测试。
+
+### Changed
+- **发布流程优化**：集成 AI 增强的发布脚本，自动处理版本同步和文件更新。
+- **CI/CD 配置**：优化 GitHub Actions 工作流配置，提升部署可靠性。
 
 ## [1.1.0] - 2025-12-29
 
