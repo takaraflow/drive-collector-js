@@ -100,15 +100,17 @@ describe('Dispatcher Bootstrap', () => {
     await startDispatcher();
 
     expect(mockInstanceCoordinator.hasLock).toHaveBeenCalledWith("telegram_client");
-    expect(mockTelegram.clearSession).toHaveBeenCalled();
+    // resetClientSession 应该被调用（本地重置）
     expect(mockTelegram.resetClientSession).toHaveBeenCalled();
+    // clearSession 在第一次重试成功时不应该被调用
+    expect(mockTelegram.clearSession).not.toHaveBeenCalled();
     expect(mockTelegram.client.start).toHaveBeenCalledTimes(2);
   });
 
   it('should stop retry if lock is lost during AUTH_KEY_DUPLICATED handling', async () => {
     const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
     mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
-    // 立即失去锁
+    // 在检查锁时立即失去锁
     mockInstanceCoordinator.hasLock.mockResolvedValue(false);
 
     const mockTelegram = await import('../../src/services/telegram.js');
@@ -124,10 +126,45 @@ describe('Dispatcher Bootstrap', () => {
     await startDispatcher();
 
     expect(mockInstanceCoordinator.hasLock).toHaveBeenCalledWith("telegram_client");
-    // 不应该调用这些，因为在检查锁时就失败了
-    expect(mockTelegram.clearSession).not.toHaveBeenCalled();
+    // 在检查锁时就失败了，不应该调用 resetClientSession
     expect(mockTelegram.resetClientSession).not.toHaveBeenCalled();
+    expect(mockTelegram.clearSession).not.toHaveBeenCalled();
     // 应该只调用一次 start
     expect(mockTelegram.client.start).toHaveBeenCalledTimes(1);
+  });
+
+  it('should clear global session after multiple AUTH_KEY_DUPLICATED failures', async () => {
+    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
+    mockInstanceCoordinator.hasLock.mockResolvedValue(true);
+
+    const mockTelegram = await import('../../src/services/telegram.js');
+    // 模拟三次失败
+    mockTelegram.client.start
+      .mockRejectedValueOnce({
+        code: 406,
+        errorMessage: 'AUTH_KEY_DUPLICATED'
+      })
+      .mockRejectedValueOnce({
+        code: 406,
+        errorMessage: 'AUTH_KEY_DUPLICATED'
+      })
+      .mockRejectedValueOnce({
+        code: 406,
+        errorMessage: 'AUTH_KEY_DUPLICATED'
+      });
+
+    mockTelegram.clearSession.mockResolvedValue();
+    mockTelegram.resetClientSession.mockResolvedValue();
+
+    await startDispatcher();
+
+    expect(mockInstanceCoordinator.hasLock).toHaveBeenCalledWith("telegram_client");
+    // resetClientSession 应该被调用三次（每次失败都调用）
+    expect(mockTelegram.resetClientSession).toHaveBeenCalledTimes(3);
+    // clearSession 应该在第三次重试失败后被调用（retryCount = 3，达到 maxRetries）
+    expect(mockTelegram.clearSession).toHaveBeenCalled();
+    // 三次失败后，retryCount = 3，不满足 retryCount < maxRetries，循环退出
+    expect(mockTelegram.client.start).toHaveBeenCalledTimes(3);
   });
 });

@@ -74,23 +74,32 @@ export async function startDispatcher() {
                     retryCount++;
 
                     if (error.code === 406 && error.errorMessage?.includes('AUTH_KEY_DUPLICATED')) {
-                        logger.warn(`⚠️ 检测到 AUTH_KEY_DUPLICATED 错误 (尝试 ${retryCount}/${maxRetries})，正在清除旧 Session 并重试...`);
+                        logger.warn(`⚠️ 检测到 AUTH_KEY_DUPLICATED 错误 (尝试 ${retryCount}/${maxRetries})`);
+                        
+                        // 2. 检查是否仍然持有锁（在重置之前检查）
+                        const stillHasLock = await instanceCoordinator.hasLock("telegram_client");
+                        if (!stillHasLock) {
+                            logger.warn("🚨 在处理 AUTH_KEY_DUPLICATED 时失去锁，停止重试");
+                            isClientActive = false;
+                            isClientStarting = false;
+                            return false;
+                        }
+                        
+                        // 1. 进行本地 Session 重置
+                        await resetClientSession();
+                        
+                        // 3. 如果重试次数未达到上限，继续尝试（不清除全局 Session）
                         if (retryCount < maxRetries) {
-                            // 在清除 Session 前，再次确认锁状态
-                            const stillHasLock = await instanceCoordinator.hasLock("telegram_client");
-                            if (!stillHasLock) {
-                                logger.warn("🚨 在处理 AUTH_KEY_DUPLICATED 时失去锁，停止重试");
-                                isClientActive = false;
-                                isClientStarting = false;
-                                return false;
-                            }
-                            
-                            await clearSession();
-                            await resetClientSession();
+                            logger.info("🔄 尝试重新连接（保持全局 Session 不变）...");
                             await new Promise(r => setTimeout(r, 2000));
-                            // 继续重试，不跳出循环
                             continue;
                         }
+                        
+                        // 4. 如果多次重试仍然失败，说明全局 Session 已损坏，清除全局 Session
+                        logger.warn("🚨 多次重试后仍然 AUTH_KEY_DUPLICATED，清除全局 Session");
+                        await clearSession(); // 清除全局 Session
+                        await new Promise(r => setTimeout(r, 2000));
+                        continue;
                     }
 
                     logger.error(`❌ 启动 Telegram 客户端失败 (尝试 ${retryCount}/${maxRetries}):`, error.message);

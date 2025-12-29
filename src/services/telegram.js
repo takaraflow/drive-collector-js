@@ -18,11 +18,16 @@ const getSavedSession = async () => {
 
 /**
  * 清除保存的 Session 字符串（用于解决 AUTH_KEY_DUPLICATED 问题）
+ * @param {boolean} isLocal - 是否仅清除本地 Session，默认为 false（清除全局）
  */
-export const clearSession = async () => {
+export const clearSession = async (isLocal = false) => {
     try {
+        if (isLocal) {
+            logger.info("🗑️ 仅清除本地 Session，不修改全局设置");
+            return;
+        }
         await SettingsRepository.set("tg_bot_session", "");
-        logger.info("🗑️ Telegram Session 已清除");
+        logger.info("🗑️ Telegram 全局 Session 已清除");
     } catch (e) {
         logger.error("❌ 清除 Session 失败:", e);
     }
