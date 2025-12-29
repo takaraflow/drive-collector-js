@@ -195,71 +195,91 @@ export class UIHelper {
     }
 
     /**
-     * 渲染系统诊断报告
-     * @param {Object} data - 诊断数据对象
-     * @param {Object} data.networkResults - 网络诊断结果 (NetworkDiagnostic.diagnoseAll() 返回)
-     * @param {Object} data.instanceInfo - 实例状态信息 (结构化对象)
-     * @param {Object} data.systemResources - 系统资源信息
-     * @returns {string} HTML格式的诊断报告
-     */
-    static renderDiagnosisReport(data) {
-        let html = format(STRINGS.diagnosis.title, {}) + '\n\n';
-
-        // 多实例状态
-        html += format(STRINGS.diagnosis.multi_instance_title, {}) + '\n';
-        html += '<code>--------------------------</code>\n';
-
-        if (data.instanceInfo) {
-            const instance = data.instanceInfo;
-            html += `<code>${format(STRINGS.diagnosis.current_instance, {})}: ${escapeHTML(instance.currentInstanceId || 'unknown')}`;
-            if (instance.isLeader) {
-                html += ` ${STRINGS.diagnosis.leader}`;
-            }
-            html += '</code>\n';
-            html += `<code>${format(STRINGS.diagnosis.tg_connection, {})}: ${instance.tgActive ? '✅ ' + STRINGS.diagnosis.connected : '❌ ' + STRINGS.diagnosis.disconnected}</code>\n`;
-            html += `<code>${format(STRINGS.diagnosis.tg_lock_holder, {})}: ${instance.isTgLeader ? '✅ ' + STRINGS.diagnosis.yes : '❌ ' + STRINGS.diagnosis.no}</code>\n`;
-            html += `<code>${format(STRINGS.diagnosis.active_instances, {})}: ${instance.instanceCount || 0}</code>\n`;
-        }
-
-        html += '<code>--------------------------</code>\n\n';
-
-        // 网络诊断
-        html += format(STRINGS.diagnosis.network_title, {}) + '\n';
-
-        if (data.networkResults && data.networkResults.services) {
-            const statusEmojis = {
-                ok: '✅',
-                error: '❌',
-                warning: '⚠️'
-            };
-
-            for (const [service, result] of Object.entries(data.networkResults.services)) {
-                const emoji = statusEmojis[result.status] || '❓';
-                html += `${emoji} <b>${service.toUpperCase()}</b>: ${escapeHTML(result.message)} (${result.responseTime})\n`;
-            }
-        }
-
-        html += '\n';
-
-        // 系统资源
-        html += format(STRINGS.diagnosis.system_resources_title, {}) + '\n';
-
-        if (data.systemResources) {
-            const res = data.systemResources;
-            html += `<code>${format(STRINGS.diagnosis.memory_usage, {})}: ${res.memoryMB || 'N/A'}</code>\n`;
-            html += `<code>${format(STRINGS.diagnosis.uptime, {})}: ${res.uptime || 'N/A'}</code>\n`;
-        }
-
-        // 总结状态
-        if (data.networkResults && data.networkResults.services) {
-            const errorCount = Object.values(data.networkResults.services).filter(r => r.status === 'error').length;
-            if (errorCount > 0) {
-                html += `\n⚠️ 发现 ${errorCount} 个服务异常，请检查网络连接或配置。`;
-            } else {
-                html += `\n✅ 所有服务运行正常。`;
-            }
-        }
-
-        return html;
-    }
-}
+      * 渲染系统诊断报告 (HTML 表格格式)
+      * @param {Object} data - 诊断数据对象
+      * @param {Object} data.networkResults - 网络诊断结果 (NetworkDiagnostic.diagnoseAll() 返回)
+      * @param {Object} data.instanceInfo - 实例状态信息 (结构化对象)
+      * @param {Object} data.systemResources - 系统资源信息
+      * @returns {string} HTML格式的诊断报告
+      */
+     static renderDiagnosisReport(data) {
+         let html = format(STRINGS.diagnosis.title, {}) + '\n━━━━━━━━━━━━━━━━━━━\n';
+ 
+         // 多实例状态
+         html += format(STRINGS.diagnosis.multi_instance_title, {}) + '\n';
+ 
+         if (data.instanceInfo) {
+             const instance = data.instanceInfo;
+             const instanceId = escapeHTML(instance.currentInstanceId || 'unknown');
+             const leaderBadge = instance.isLeader ? ` ${STRINGS.diagnosis.leader}` : '';
+             
+             html += `<code>ID:   ${instanceId}${leaderBadge}</code>\n`;
+             html += `<code>TG:   ${instance.tgActive ? '✅ ' + STRINGS.diagnosis.connected : '❌ ' + STRINGS.diagnosis.disconnected} | 🔒 ${instance.isTgLeader ? STRINGS.diagnosis.yes : STRINGS.diagnosis.no}</code>\n`;
+             html += `<code>活跃: ${instance.instanceCount || 0} 个实例</code>\n`;
+         } else {
+             html += `<code>数据获取失败</code>\n`;
+         }
+ 
+         html += '\n';
+ 
+         // 网络诊断
+         html += format(STRINGS.diagnosis.network_title, {}) + '\n';
+ 
+         if (data.networkResults && data.networkResults.services) {
+             const statusEmojis = {
+                 ok: '✅',
+                 error: '❌',
+                 warning: '⚠️'
+             };
+ 
+             // 固定长度的标签名，实现表格对齐效果
+             const serviceLabels = {
+                 'telegram': 'TG-MT',
+                 'd1': 'DB-D1',
+                 'kv': 'KV-ST',
+                 'rclone': 'RCLONE',
+                 'bot': 'TG-BOT'
+             };
+ 
+             for (const [service, result] of Object.entries(data.networkResults.services)) {
+                 const emoji = statusEmojis[result.status] || '❓';
+                 const label = serviceLabels[service] || service.toUpperCase();
+                 const responseTime = result.responseTime || 'N/A';
+                 
+                 // 使用固定长度的标签名实现对齐
+                 html += `<code>${label.padEnd(7)}: ${emoji} ${escapeHTML(result.message)} (${responseTime})</code>\n`;
+             }
+         } else {
+             html += `<code>网络诊断数据为空</code>\n`;
+         }
+ 
+         html += '\n';
+ 
+         // 系统资源
+         html += format(STRINGS.diagnosis.system_resources_title, {}) + '\n';
+ 
+         if (data.systemResources) {
+             const res = data.systemResources;
+             html += `<code>内存: ${res.memoryMB || 'N/A'}</code>\n`;
+             html += `<code>运行: ${res.uptime || 'N/A'}</code>\n`;
+         } else {
+             html += `<code>系统资源数据为空</code>\n`;
+         }
+ 
+         html += '━━━━━━━━━━━━━━━━━━━\n';
+ 
+         // 总结状态
+         if (data.networkResults && data.networkResults.services) {
+             const errorCount = Object.values(data.networkResults.services).filter(r => r.status === 'error').length;
+             if (errorCount > 0) {
+                 html += `⚠️ 发现 ${errorCount} 个服务异常，请检查网络连接或配置。`;
+             } else {
+                 html += `✅ 所有服务运行正常`;
+             }
+         } else {
+             html += `⚠️ 无法获取完整的诊断信息`;
+         }
+ 
+         return html;
+     }
+ }

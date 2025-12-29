@@ -354,19 +354,20 @@ describe("UIHelper", () => {
 
             const result = UIHelper.renderDiagnosisReport(data);
 
+            // 验证新格式
             expect(result).toContain("🔍 <b>系统诊断报告</b>");
+            expect(result).toContain("━━━━━━━━━━━━━━━━━━━");
             expect(result).toContain("🏗️ <b>多实例状态</b>");
-            expect(result).toContain("当前实例: instance-123 (👑)");
-            expect(result).toContain("TG 连接: ✅ 已连接");
-            expect(result).toContain("TG 锁持有: ✅ 是");
-            expect(result).toContain("活跃实例: 2");
+            expect(result).toContain("ID:   instance-123 (👑)");
+            expect(result).toContain("TG:   ✅ 已连接 | 🔒 是");
+            expect(result).toContain("活跃: 2 个实例");
             expect(result).toContain("🌐 <b>网络诊断</b>");
-            expect(result).toContain("✅ <b>TELEGRAM</b>: Telegram MTProto API 连接正常 (45ms)");
-            expect(result).toContain("❌ <b>D1</b>: Cloudflare D1 连接失败: Timeout (5000ms)");
+            expect(result).toContain("TG-MT  : ✅ Telegram MTProto API 连接正常 (45ms)");
+            expect(result).toContain("DB-D1  : ❌ Cloudflare D1 连接失败: Timeout (5000ms)");
             expect(result).toContain("💾 <b>系统资源</b>");
             expect(result).toContain("内存: 120MB (100MB/200MB)");
             expect(result).toContain("运行: 2h 15m");
-            expect(result).toContain("⚠️ 发现 1 个服务异常");
+            expect(result).toContain("⚠️ 发现 1 个服务异常，请检查网络连接或配置。");
         });
 
         test("should render diagnosis report with no errors", () => {
@@ -400,11 +401,11 @@ describe("UIHelper", () => {
 
             const result = UIHelper.renderDiagnosisReport(data);
 
-            expect(result).toContain("当前实例: instance-456");
-            expect(result).toContain("TG 锁持有: ❌ 否");
-            expect(result).toContain("活跃实例: 1");
-            expect(result).toContain("✅ <b>TELEGRAM</b>:");
-            expect(result).toContain("✅ <b>D1</b>:");
+            expect(result).toContain("ID:   instance-456");
+            expect(result).toContain("TG:   ✅ 已连接 | 🔒 否");
+            expect(result).toContain("活跃: 1 个实例");
+            expect(result).toContain("TG-MT  : ✅ Telegram MTProto API 连接正常 (45ms)");
+            expect(result).toContain("DB-D1  : ✅ Cloudflare D1 连接正常 (120ms)");
             expect(result).toContain("✅ 所有服务运行正常");
         });
 
@@ -421,7 +422,10 @@ describe("UIHelper", () => {
             expect(result).toContain("🏗️ <b>多实例状态</b>");
             expect(result).toContain("🌐 <b>网络诊断</b>");
             expect(result).toContain("💾 <b>系统资源</b>");
-            // Should not crash with missing data
+            expect(result).toContain("数据获取失败");
+            expect(result).toContain("网络诊断数据为空");
+            expect(result).toContain("系统资源数据为空");
+            expect(result).toContain("⚠️ 无法获取完整的诊断信息");
         });
 
         test("should handle disconnected Telegram", () => {
@@ -444,8 +448,42 @@ describe("UIHelper", () => {
 
             const result = UIHelper.renderDiagnosisReport(data);
 
-            expect(result).toContain("TG 连接: ❌ 已断开");
-            expect(result).toContain("活跃实例: 0");
+            expect(result).toContain("TG:   ❌ 已断开 | 🔒 否");
+            expect(result).toContain("活跃: 0 个实例");
+        });
+
+        test("should handle multiple services with different statuses", () => {
+            const data = {
+                networkResults: {
+                    services: {
+                        telegram: { status: 'ok', responseTime: '45ms', message: '正常' },
+                        bot: { status: 'ok', responseTime: '30ms', message: '正常' },
+                        d1: { status: 'error', responseTime: '5000ms', message: '超时' },
+                        kv: { status: 'ok', responseTime: '120ms', message: '正常' },
+                        rclone: { status: 'ok', responseTime: '10ms', message: '正常' }
+                    }
+                },
+                instanceInfo: {
+                    currentInstanceId: 'instance-999',
+                    isLeader: false,
+                    tgActive: true,
+                    isTgLeader: false,
+                    instanceCount: 3
+                },
+                systemResources: {
+                    memoryMB: '150MB (120MB/250MB)',
+                    uptime: '5h 30m'
+                }
+            };
+
+            const result = UIHelper.renderDiagnosisReport(data);
+
+            expect(result).toContain("TG-MT  : ✅ 正常 (45ms)");
+            expect(result).toContain("TG-BOT : ✅ 正常 (30ms)");
+            expect(result).toContain("DB-D1  : ❌ 超时 (5000ms)");
+            expect(result).toContain("KV-ST  : ✅ 正常 (120ms)");
+            expect(result).toContain("RCLONE : ✅ 正常 (10ms)");
+            expect(result).toContain("⚠️ 发现 1 个服务异常，请检查网络连接或配置。");
         });
     });
 });
