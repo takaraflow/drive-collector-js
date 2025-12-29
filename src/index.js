@@ -112,6 +112,17 @@ const QUOTA_RECOVERY_INTERVAL = 12 * 60 * 60 * 1000; // 配额错误恢复间隔
 const NETWORK_RECOVERY_INTERVAL = 30 * 60 * 1000;    // 网络错误恢复间隔：30分钟
 
 /**
+ * 自定义错误类，用于精细化错误处理
+ */
+class LBError extends Error {
+  constructor(message, status, retryable = true) {
+    super(message);
+    this.status = status;
+    this.retryable = retryable;
+  }
+}
+
+/**
  * 检查是否可以恢复到 Cloudflare KV
  */
 function checkRecovery(ctx) {
@@ -727,22 +738,30 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx)
     for (const instance of instances) {
         try {
             const response = await forwardToInstance(instance, normalizedUrl, request, body, ctx);
+            
+            // 4xx 错误：直接透传，不再重试其他实例
+            if (response.status >= 400 && response.status < 500) {
+                logger.warn('实例返回 4xx 错误，停止重试', { status: response.status, instanceId: instance.id }, ctx);
+                // 取消之前保存的 5xx 响应（如果有）
+                if (last5xxResponse && last5xxResponse.body) {
+                    await last5xxResponse.body.cancel().catch(() => {});
+                }
+                return response;
+            }
+            
+            // 5xx 错误：保存并继续尝试其他实例
             if (response.status >= 500) {
-                // 如果后端返回 5xx，保存它并尝试下一个实例
-                if (last5xxResponse) {
-                    // 修复：取消之前保存的 5xx 响应 body
-                    if (last5xxResponse.body) await last5xxResponse.body.cancel().catch(() => {});
+                if (last5xxResponse && last5xxResponse.body) {
+                    await last5xxResponse.body.cancel().catch(() => {});
                 }
                 last5xxResponse = response;
                 continue;
             }
             
-            // 修复：如果我们要返回一个成功的响应，但之前有 5xx 响应，取消它
-            if (last5xxResponse) {
-                if (last5xxResponse.body) await last5xxResponse.body.cancel().catch(() => {});
-                last5xxResponse = null; // 清空引用
+            // 2xx, 3xx 响应：成功，取消之前保存的 5xx 响应
+            if (last5xxResponse && last5xxResponse.body) {
+                await last5xxResponse.body.cancel().catch(() => {});
             }
-            // 2xx, 3xx, 4xx 响应直接返回
             return response;
         } catch (error) {
             logger.error('转发请求失败', { instanceId: instance.id, error: error.message }, ctx);
@@ -755,7 +774,6 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx)
     // 1. 如果有后端返回的 5xx 响应，透传它
     if (last5xxResponse) {
         logger.warn('所有实例均返回 5xx，透传最后一个响应', { status: last5xxResponse.status }, ctx);
-        // 注意：这里不取消，因为我们要返回这个 response 给调用者处理
         return last5xxResponse;
     }
 
@@ -794,11 +812,11 @@ export const setCurrentProviderState = (state) => {
  */
 const handler = {
     async fetch(request, env, ctx) {
+        // 规范化请求 URL：将多个连续斜杠替换为单个斜杠
+        const normalizedUrl = new URL(request.url);
+        normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
+        
         try {
-            // 规范化请求 URL：将多个连续斜杠替换为单个斜杠
-            const normalizedUrl = new URL(request.url);
-            normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
-
             // 环境变量校验
             if (!env.AXIOM_TOKEN) {
                 console.warn('AXIOM_TOKEN 未设置，日志功能将被禁用');
@@ -848,7 +866,27 @@ const handler = {
             logger.info('活跃实例查询完成', { count: activeInstances.length }, ctx);
 
             if (activeInstances.length === 0) {
-                return new Response('No active instances available', { status: 503 });
+                // 无活跃实例，返回 503 + Retry-After
+                const qstashMsgId = request.headers.get('Upstash-Message-Id');
+                const retryCount = request.headers.get('Upstash-Retries');
+                
+                logger.warn('无活跃实例可用', {
+                    qstashMsgId,
+                    retryCount,
+                    path: normalizedUrl.pathname
+                }, ctx);
+                
+                return new Response(JSON.stringify({
+                    error: 'No active instances available',
+                    qstashMsgId,
+                    timestamp: new Date().toISOString()
+                }), {
+                    status: 503,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Retry-After': '60'
+                    }
+                });
             }
 
             // 3. 选择目标实例 (轮询)
@@ -871,17 +909,42 @@ const handler = {
 
         } catch (error) {
             const status = error.status || 500;
-            if (status === 401) {
-                logger.warn('签名验证失败', { error: error.message }, ctx);
-            } else {
-                logger.error('负载均衡器错误', { error: error.message, stack: error.stack }, ctx);
+            const headers = { 'Content-Type': 'application/json' };
+            
+            // 503 时添加 Retry-After
+            if (status === 503) {
+                headers['Retry-After'] = '60';
             }
+
+            // 记录 QStash 元数据
+            const qstashMsgId = request.headers.get('Upstash-Message-Id');
+            const retryCount = request.headers.get('Upstash-Retries');
+            
+            if (status === 401) {
+                logger.warn('签名验证失败', { 
+                    error: error.message,
+                    qstashMsgId,
+                    retryCount,
+                    path: normalizedUrl.pathname 
+                }, ctx);
+            } else {
+                logger.error('负载均衡器错误', { 
+                    error: error.message, 
+                    stack: error.stack,
+                    status,
+                    qstashMsgId,
+                    retryCount,
+                    path: normalizedUrl.pathname 
+                }, ctx);
+            }
+            
             return new Response(JSON.stringify({
-              error: error.message,
-              timestamp: new Date().toISOString()
+                error: error.message,
+                qstashMsgId,
+                timestamp: new Date().toISOString()
             }), {
-              status,
-              headers: { 'Content-Type': 'application/json' }
+                status,
+                headers
             });
         }
     }
