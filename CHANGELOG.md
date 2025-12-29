@@ -2,10 +2,26 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
-## [Unreleased]
+### [3.0.2](https://github.com/YoungSx/drive-collector-js/compare/v3.0.1...v3.0.2) (2025-12-29)
 
-### ✨ Features
-- 描述尚未发布的新功能
+
+### 📝 文档更新
+
+* add conventional commits guideline to clinerules ([09d0227](https://github.com/YoungSx/drive-collector-js/commit/09d02271e001dd67744428cea3a95b5745778d8b))
+* organize CHANGELOG.md: unify format, clear exceptions, and complete 6 missing Git tag versions (v3.0.1~v2.3.5), summarize changes based on commit logs ([fb46627](https://github.com/YoungSx/drive-collector-js/commit/fb466278241accd8298688f54f3594117206059c))
+* update clinerules with enhanced guidelines for production quality and manifest sync ([8f70623](https://github.com/YoungSx/drive-collector-js/commit/8f7062324de2bbc4301b736aabc15dbe9f5149c3))
+
+
+### 🐛 问题修复
+
+* ensure lock ownership during Telegram reconnection and handle AUTH_KEY_DUPLICATED ([fb465a1](https://github.com/YoungSx/drive-collector-js/commit/fb465a16a67fee1b890c530eed762b7284d04d26))
+* handle telegram binaryreader undefined stream error ([269bf45](https://github.com/YoungSx/drive-collector-js/commit/269bf45bf79d971ce3a2c85ebcb9e5aa61fc29ce))
+
+
+### 🔧 其他任务
+
+* bump version to 3.0.1 and enhance release automation ([6be3853](https://github.com/YoungSx/drive-collector-js/commit/6be38531e8017c2d89aad44c807c479d4c611c6b))
+* initialize project manifest with architecture blueprint ([c31d59a](https://github.com/YoungSx/drive-collector-js/commit/c31d59ac937c3e970b878e09dd8a29aaf4e419fb))
 
 ## [3.0.1] - 2025-12-25
 
