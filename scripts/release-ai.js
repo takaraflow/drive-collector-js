@@ -125,6 +125,8 @@ async function run() {
   console.log('\n✅ AI changelog generation completed!');
   console.log('📝 Note: Roo AI should now manually review and optimize the generated changelog.');
   console.log('🚀 Next: standard-version will handle version bumping and tagging...');
+  console.log('6. Staging CHANGELOG.md for standard-version...');
+  execSync('git add CHANGELOG.md'); // 显式将 AI 润色的日志加入暂存区
 }
 
 // Run if called directly
