@@ -197,12 +197,28 @@
       "reliability": {
         "heartbeatInterval": 300,
         "timeout": 900,
-        "cleanupInterval": 60,
+        "cleanupInterval": 300,
         "leaderElection": {
           "strategy": "minimum-id",
           "description": "所有活跃实例按 ID 字典序排序，排名第一的实例自动成为 Leader"
         }
       }
+    },
+    "driveRepository": {
+      "description": "网盘配置存储库，支持活跃网盘列表管理",
+      "input": "kv-storage",
+      "features": [
+        "active-drives-list",
+        "drive-id-lookup"
+      ],
+      "reliability": {
+        "cacheStrategy": "kv-with-json",
+        "errorHandling": "graceful-degradation",
+        "fallback": "empty-array"
+      },
+      "dependencies": [
+        "Cloudflare KV"
+      ]
     }
   },
   "instanceRegistration": {
@@ -310,7 +326,7 @@
       ]
     },
     "reliability": {
-      "cleanupInterval": 60,
+      "cleanupInterval": 300,
       "maxLockHoldTime": 1800,
       "lockRenewalThreshold": 0.7,
       "failoverStrategy": "immediate-reacquire-on-timeout"

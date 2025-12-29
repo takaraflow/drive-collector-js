@@ -147,8 +147,22 @@ export class InstanceCoordinator {
     async hasLock(lockKey) {
         try {
             const existing = await kv.get(`lock:${lockKey}`, "json", { skipCache: true });
-            return existing && existing.instanceId === this.instanceId;
+            const isOwner = existing && existing.instanceId === this.instanceId;
+            if (existing && !isOwner) {
+                // 明确被其他实例持有
+                // logger.debug(`[Lock] ${lockKey} is held by ${existing.instanceId}`);
+            }
+            return isOwner;
         } catch (e) {
+            // 关键：识别 KV 错误，不要在 429 或网络错误时立即断定失去锁
+            logger.warn(`⚠️ 检查锁失败 ${lockKey}, 可能是 KV 限流或网络问题: ${e.message}`);
+            
+            // 如果是 429 或超时，保守起见我们假设仍然持有（只要上一次成功持有）
+            // 或者抛出错误让调用者决定，而不是返回错误的 false
+            if (e.message.includes("429") || e.message.includes("limit") || e.message.includes("fetch")) {
+                // 这里暂时抛出异常，让 handleConnectionIssue 等地方感知到是 "检查失败" 而不是 "锁丢失"
+                throw e; 
+            }
             return false;
         }
     }
@@ -213,7 +227,7 @@ export class InstanceCoordinator {
             if (this.isLeader) {
                 await this.cleanupExpiredInstances();
             }
-        }, 60000); // 每分钟检查一次
+        }, 5 * 60 * 1000); // 延长至 5 分钟检查一次，与心跳频率对齐，减少 KV 读消耗
     }
 
     /**

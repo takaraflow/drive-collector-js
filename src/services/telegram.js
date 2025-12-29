@@ -171,10 +171,15 @@ async function handleConnectionIssue() {
     if (isReconnecting) return;
     
     // 关键：重连前必须确认自己仍然持有锁
-    const hasLock = await instanceCoordinator.hasLock("telegram_client");
-    if (!hasLock) {
-        logger.warn("🚨 失去锁，取消主动重连");
-        return;
+    try {
+        const hasLock = await instanceCoordinator.hasLock("telegram_client");
+        if (!hasLock) {
+            logger.warn("🚨 明确失去锁，取消主动重连");
+            return;
+        }
+    } catch (e) {
+        logger.warn(`⚠️ 检查锁状态失败（KV 异常），暂缓重连以防竞争: ${e.message}`);
+        return; // 暂缓，等待下一轮 watchdog 或系统重试
     }
 
     isReconnecting = true;

@@ -193,12 +193,25 @@ describe("DriveRepository", () => {
     });
 
     describe("findAll", () => {
-        it("should return empty array and log warning", async () => {
-            const result = await DriveRepository.findAll();
+        it("should return drives from the active list", async () => {
+            const mockDrives = ["drive1", "drive2"];
+            kv.get.mockImplementation((key) => {
+                if (key === "drives:active") return Promise.resolve(mockDrives);
+                if (key === "drive_id:drive1") return Promise.resolve({ id: "drive1", name: "Drive 1" });
+                if (key === "drive_id:drive2") return Promise.resolve({ id: "drive2", name: "Drive 2" });
+                return Promise.resolve(null);
+            });
 
+            const result = await DriveRepository.findAll();
+            expect(result).toHaveLength(2);
+            expect(result[0].name).toBe("Drive 1");
+            expect(result[1].name).toBe("Drive 2");
+        });
+
+        it("should return empty array when no active drives", async () => {
+            kv.get.mockResolvedValue(null);
+            const result = await DriveRepository.findAll();
             expect(result).toEqual([]);
-            // Use stringContaining to avoid encoding issues with full Chinese string
-            expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("DriveRepository.findAll"));
         });
     });
 });

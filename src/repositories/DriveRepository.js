@@ -146,24 +146,46 @@ export class DriveRepository {
 
     /**
      * 获取所有活跃的网盘绑定
-     * 注意：由于 KV 存储限制，findAll 在当前实现中返回空数组
-     * 如需完整功能，可考虑使用 D1 存储网盘列表，但这会违反低频数据规则
      * @returns {Promise<Array>}
      */
     static async findAll() {
-        // 由于 KV 不支持列出所有键，且为了遵循低频关键数据规则
-        // 暂时返回空数组，避免使用 D1
-        // 如需完整功能，需要重新设计架构
-        logger.warn("DriveRepository.findAll: 当前实现返回空数组，如需完整功能请重新设计");
-        return [];
+        try {
+            const activeIds = await kv.get(this.getAllDrivesKey(), "json") || [];
+            if (activeIds.length === 0) return [];
+
+            const drives = [];
+            for (const id of activeIds) {
+                const drive = await this.findById(id);
+                if (drive) drives.push(drive);
+            }
+            return drives;
+        } catch (e) {
+            logger.error("DriveRepository.findAll error:", e);
+            return [];
+        }
     }
 
     /**
-     * 更新活跃网盘列表（由于 KV 限制，暂时无效）
+     * 更新活跃网盘列表
      * @private
      */
     static async _updateActiveDrivesList() {
-        // KV 不支持列出所有键，暂时不维护全局列表
-        // 如需完整功能，需要重新设计
+        try {
+            // 使用 listKeys 发现所有驱动（前缀 drive: 但排除 drive_id:）
+            const keys = await kv.listKeys('drive:');
+            const activeIds = [];
+            
+            for (const key of keys) {
+                const drive = await kv.get(key, "json");
+                if (drive && drive.id) {
+                    activeIds.push(drive.id);
+                }
+            }
+            
+            await kv.set(this.getAllDrivesKey(), activeIds);
+            logger.info(`📝 已更新活跃网盘列表，共 ${activeIds.length} 个`);
+        } catch (e) {
+            logger.error("Failed to update active drives list:", e);
+        }
     }
 }
