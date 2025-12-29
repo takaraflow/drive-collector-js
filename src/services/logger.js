@@ -25,7 +25,7 @@ const initVersion = async () => {
         }
         
         // 方案 B: 动态读取 package.json
-        const { default: pkg } = await import('../../package.json', { assert: { type: 'json' } });
+        const { default: pkg } = await import('../../package.json', { with: { type: 'json' } });
         version = pkg.version || 'unknown';
     } catch (e) {
         console.debug('Logger: Failed to load version from package.json', e.message);
