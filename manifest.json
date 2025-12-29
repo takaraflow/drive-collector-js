@@ -1,0 +1,226 @@
+{
+  "manifest_version": "1.1",
+  "id": "drive-collector-js",
+  "name": "Drive Collector Bot",
+  "version": "2.3.3",
+  "description": "基于 JSON Schema 契约中心的分布式转存项目，支持 Telegram 媒体转存至 Rclone/S3。",
+  "type": "worker",
+  "capabilities": [
+    "distributed-task-scheduling",
+    "multi-instance-locking",
+    "instance-registration",
+    "rclone-integration",
+    "s3-transfer"
+  ],
+  "behaviors": {
+    "telegramHandler": {
+      "description": "处理 Telegram 消息与回调，包含去重、权限校验与媒体聚合",
+      "input": "telegram-mtproto",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "update": {
+            "type": "object",
+            "description": "Telegram Update 对象",
+            "properties": {
+              "update_id": { "type": "number" },
+              "message": { "type": "object" },
+              "callback_query": { "type": "object" }
+            }
+          }
+        },
+        "required": ["update"]
+      },
+      "locking": {
+        "mechanism": "kv",
+        "pattern": "msg_lock:{msgId}",
+        "ttl": 60,
+        "description": "基于消息 ID 的去重锁，防止重复处理"
+      },
+      "dependencies": ["AuthGuard", "SessionManager", "InstanceCoordinator"],
+      "reliability": {
+        "timeout": 30,
+        "errorHandling": "graceful-degradation",
+        "fallback": "skip-duplicate"
+      }
+    },
+    "taskProcessor": {
+      "description": "基于 QStash Webhook 的分布式任务处理器",
+      "input": "qstash-webhook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskId": { "type": "string" },
+          "type": { "type": "string", "enum": ["download", "upload", "batch"] },
+          "payload": { "type": "object" },
+          "timestamp": { "type": "number" }
+        },
+        "required": ["taskId", "type", "payload"]
+      },
+      "endpoints": {
+        "download": "/api/tasks/download",
+        "upload": "/api/tasks/upload",
+        "batch": "/api/tasks/media-batch"
+      },
+      "locking": {
+        "mechanism": "kv",
+        "pattern": "task:{taskId}",
+        "ttl": 600,
+        "description": "任务级分布式锁，支持故障转移后的延迟恢复"
+      },
+      "dependencies": ["TaskManager", "QStashService", "D1", "KV"],
+      "reliability": {
+        "retry": "qstash-default",
+        "failover": "delayed-recovery-on-kv-error",
+        "maxRetries": 3,
+        "timeout": 300
+      }
+    },
+    "storageUploader": {
+      "description": "三轨制存储上传器 (Worker -> S3 -> Rclone)",
+      "input": "local-file",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filePath": { "type": "string" },
+          "fileId": { "type": "string" },
+          "size": { "type": "number" },
+          "hash": { "type": "string" }
+        },
+        "required": ["filePath", "fileId"]
+      },
+      "outputs": ["rclone", "s3"],
+      "features": ["sec-transfer", "dynamic-cache-ttl", "integrity-verification"],
+      "locking": {
+        "mechanism": "local-mutex",
+        "description": "本地文件上传互斥锁，防止并发上传同一文件"
+      },
+      "dependencies": ["CloudTool (rclone)", "OSSService", "ossHelper"],
+      "reliability": {
+        "secTransfer": {
+          "enabled": true,
+          "description": "秒传校验，基于文件哈希快速验证存在性"
+        },
+        "cacheStrategy": {
+          "ttl": "dynamic",
+          "basis": "file-access-frequency"
+        },
+        "integrityCheck": "sha256"
+      }
+    },
+    "instanceCoordinator": {
+      "description": "多实例协调器，负责注册、心跳、领导者选举与分布式锁管理",
+      "input": "internal-timer",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["register", "heartbeat", "leader-check", "cleanup"] }
+        }
+      },
+      "locking": {
+        "mechanism": "kv-atomic",
+        "patterns": [
+          "instance:{instanceId}",
+          "lock:{lockKey}",
+          "task:{taskId}"
+        ],
+        "ttl": 900,
+        "description": "基于 KV 的原子操作实现分布式锁，支持锁续约与自动过期"
+      },
+      "dependencies": ["Cloudflare KV"],
+      "reliability": {
+        "heartbeatInterval": 300,
+        "timeout": 900,
+        "cleanupInterval": 60,
+        "leaderElection": {
+          "strategy": "minimum-id",
+          "description": "所有活跃实例按 ID 字典序排序，排名第一的实例自动成为 Leader"
+        }
+      }
+    }
+  },
+  "instanceRegistration": {
+    "mechanism": "Cloudflare KV",
+    "heartbeatInterval": 300,
+    "timeout": 900,
+    "keys": [
+      { "pattern": "instance:{instanceId}", "description": "实例元数据" },
+      { "pattern": "lock:{lockKey}", "description": "分布式锁" },
+      { "pattern": "task:{taskId}", "description": "任务锁" },
+      { "pattern": "msg_lock:{msgId}", "description": "消息去重锁" }
+    ],
+    "locking": {
+      "mechanism": "kv-atomic",
+      "operations": {
+        "acquire": "get-skip-cache-then-set-with-ttl",
+        "release": "delete",
+        "renew": "update-ttl"
+      },
+      "conflictResolution": "last-write-wins-with-version-check",
+      "description": "基于 KV 的原子操作实现分布式锁，支持锁续约、自动过期与版本冲突检测"
+    },
+    "valueSchema": {
+      "instance": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "url": { "type": "string" },
+          "hostname": { "type": "string" },
+          "region": { "type": "string" },
+          "startedAt": { "type": "number" },
+          "lastHeartbeat": { "type": "number" },
+          "status": { "type": "string", "enum": ["active", "offline"] }
+        },
+        "required": ["id", "url", "hostname", "startedAt", "lastHeartbeat", "status"]
+      },
+      "lock": {
+        "type": "object",
+        "properties": {
+          "instanceId": { "type": "string" },
+          "acquiredAt": { "type": "number" },
+          "ttl": { "type": "number" },
+          "version": { "type": "number" }
+        },
+        "required": ["instanceId", "acquiredAt", "ttl", "version"]
+      }
+    },
+    "leaderElection": {
+      "strategy": "minimum-id",
+      "description": "所有活跃实例按 ID 字典序排序，排名第一的实例自动成为 Leader",
+      "leaderResponsibilities": [
+        "cleanup-expired-instances",
+        "monitor-distributed-locks",
+        "coordinator-health-check"
+      ]
+    },
+    "reliability": {
+      "cleanupInterval": 60,
+      "maxLockHoldTime": 1800,
+      "lockRenewalThreshold": 0.7,
+      "failoverStrategy": "immediate-reacquire-on-timeout"
+    }
+  },
+  "entrypoint": "index.js",
+  "runtime": {
+    "type": "nodejs",
+    "version": ">=18.0.0"
+  },
+  "config": {
+    "env": {
+      "API_ID": { "type": "number", "required": true, "description": "Telegram API ID" },
+      "API_HASH": { "type": "string", "required": true, "description": "Telegram API Hash" },
+      "BOT_TOKEN": { "type": "string", "required": true, "description": "Telegram Bot Token" },
+      "OWNER_ID": { "type": "string", "required": true, "description": "Admin User ID" },
+      "QSTASH_TOKEN": { "type": "string", "required": true, "description": "Upstash QStash Token" },
+      "QSTASH_URL": { "type": "string", "required": true, "description": "QStash API 地址" },
+      "LB_WEBHOOK_URL": { "type": "string", "required": true, "description": "Webhook callback URL for QStash" },
+      "RCLONE_REMOTE": { "type": "string", "default": "mega", "description": "Rclone 远程名称" },
+      "REMOTE_FOLDER": { "type": "string", "default": "/DriveCollectorBot", "description": "远程存储目录" },
+      "RCLONE_CONF_BASE64": { "type": "string", "required": false, "description": "Rclone 配置文件的 Base64 编码" },
+      "AXIOM_TOKEN": { "type": "string", "required": false, "description": "Axiom 日志令牌" }
+    }
+  },
+  "endpoints": {
+    "webhook": "/api/tasks"
+  }
+}
