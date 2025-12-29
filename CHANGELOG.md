@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [3.1.0](https://github.com/YoungSx/drive-collector-js/compare/v3.0.2...v3.1.0) (2025-12-29)
+
+
+### ✨ Features
+
+* **日志系统**: 添加版本跟踪功能，支持从环境变量或 package.json 动态读取版本号，所有日志消息现在都会包含版本前缀 `[vX.X.X]`，便于问题追踪和版本识别
+
+### 🐛 Bug Fixes
+
+* **发布流程**: 修复 release-ai 脚本问题，确保版本发布流程正常工作
+* **Telegram 连接**: 增强 Telegram 锁续期机制，添加双重检查和抖动处理，提升连接稳定性
+* **OSS 上传**: 修复在 Node.js 18 环境下 OSS Worker 上传问题，使用 `fs.readFileSync` 替代 `createReadStream`
+
+### 🔧 Maintenance
+
+* **依赖升级**: 升级 Node 运行时至 ^20.0.0，确保依赖兼容性
+* **CI/CD 优化**:
+  - 移除 Node 18.x 测试矩阵，仅保留 20.x
+  - 添加性能指标跟踪到 CI 工作流
+  - 实现基于 GitHub App 的自动化 manifest 同步工作流
+  - 添加生产环境和 Bark Webhook 配置
+  - 增强 GitHub Actions 工作流，包含矩阵测试和 Docker 构建优化
+
 ### [3.0.2](https://github.com/YoungSx/drive-collector-js/compare/v3.0.1...v3.0.2) (2025-12-29)
 
 
