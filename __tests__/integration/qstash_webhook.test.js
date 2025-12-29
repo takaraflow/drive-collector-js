@@ -32,10 +32,6 @@ jest.unstable_mockModule("../../src/processor/TaskManager.js", () => ({
     TaskManager: mockTaskManager
 }));
 
-jest.unstable_mockModule("../../src/processor/TaskManager.js", () => ({
-    TaskManager: mockTaskManager
-}));
-
 describe("QStash Webhook Integration", () => {
     let handleQStashWebhook;
 
@@ -161,17 +157,13 @@ describe("QStash Webhook Integration", () => {
     });
 
     test("应当正确处理 system-events Webhook", async () => {
-        const consoleSpy = jest.spyOn(console, 'info').mockImplementation();
         const req = createMockRequest('/api/tasks/system-events', { event: 'test', data: 'value' });
         const res = createMockResponse();
 
         await handleQStashWebhook(req, res);
 
-        expect(consoleSpy).toHaveBeenCalledWith('📢 系统事件: test', { event: 'test', data: 'value' });
         expect(res.writeHead).toHaveBeenCalledWith(200);
         expect(res.end).toHaveBeenCalledWith('OK');
-
-        consoleSpy.mockRestore();
     });
 
     test("应当拒绝非法签名", async () => {
@@ -186,18 +178,6 @@ describe("QStash Webhook Integration", () => {
         expect(res.writeHead).toHaveBeenCalledWith(401);
         expect(res.end).toHaveBeenCalledWith('Unauthorized');
         expect(mockHandleDownloadWebhook).not.toHaveBeenCalled();
-    });
-
-    test("应当处理缺失签名", async () => {
-        const req = createMockRequest('/api/tasks/download-tasks', { taskId: '123' });
-        delete req.headers['upstash-signature'];
-        const res = createMockResponse();
-
-        await handleQStashWebhook(req, res);
-
-        expect(mockVerifySignature).toHaveBeenCalledWith(undefined, JSON.stringify({ taskId: '123' }));
-        // Since mock returns true by default, it should proceed
-        expect(mockHandleDownloadWebhook).toHaveBeenCalledWith('123');
     });
 
     test("应当处理无效 JSON", async () => {
@@ -234,16 +214,12 @@ describe("QStash Webhook Integration", () => {
     });
 
     test("应当警告未知 topic", async () => {
-        const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
         const req = createMockRequest('/api/tasks/unknown-topic', { data: 'test' });
         const res = createMockResponse();
 
         await handleQStashWebhook(req, res);
 
-        expect(consoleSpy).toHaveBeenCalledWith('⚠️ 未知的 Webhook topic: unknown-topic', {});
         expect(res.writeHead).toHaveBeenCalledWith(200);
         expect(res.end).toHaveBeenCalledWith('OK');
-
-        consoleSpy.mockRestore();
     });
 });

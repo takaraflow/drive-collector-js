@@ -114,9 +114,10 @@ describe('Logger Integration Tests', () => {
       await logger.error('Test error message', { error: true });
 
       // Verify console methods were called (since Axiom is not configured)
-      expect(consoleInfoSpy).toHaveBeenCalledWith('Test info message', { test: true });
-      expect(consoleWarnSpy).toHaveBeenCalledWith('Test warn message', { warning: true });
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Test error message', { error: true });
+      // Note: logger now adds version prefix [vX.Y.Z] to messages
+      expect(consoleInfoSpy).toHaveBeenCalledWith(expect.stringContaining('[v'), { test: true });
+      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('[v'), { warning: true });
+      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('[v'), { error: true });
     });
 
     test('logger works in both configured and unconfigured states', async () => {
@@ -125,7 +126,7 @@ describe('Logger Integration Tests', () => {
       let logger1 = loggerModule1.logger;
 
       await logger1.info('Message when unconfigured');
-      expect(consoleInfoSpy).toHaveBeenCalledWith('Message when unconfigured', {});
+      expect(consoleInfoSpy).toHaveBeenCalledWith(expect.stringContaining('[v'), {});
 
       // Reset for next test
       jest.clearAllMocks();

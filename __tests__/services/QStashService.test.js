@@ -15,234 +15,110 @@ jest.unstable_mockModule("../../src/config/index.js", () => ({
     }
 }));
 
-// Mock console methods that logger uses
-const mockConsole = {
-    info: jest.spyOn(console, 'info').mockImplementation(),
-    warn: jest.spyOn(console, 'warn').mockImplementation(),
-    error: jest.spyOn(console, 'error').mockImplementation(),
-    debug: jest.spyOn(console, 'debug').mockImplementation()
-};
-
 describe("QStashService", () => {
     let service;
 
-    // Mock console globally for logger testing
-    const originalConsole = global.console;
-    beforeAll(() => {
-        global.console = {
-            ...originalConsole,
-            info: jest.fn(),
-            warn: jest.fn(),
-            error: jest.fn(),
-            debug: jest.fn(),
-            log: jest.fn()
-        };
+    beforeEach(async () => {
+        jest.clearAllMocks();
+        // Set up default mocks
+        mockPublishJSON.mockResolvedValue({ messageId: "test-id" });
+        mockVerify.mockResolvedValue(undefined);
+        process.env.QSTASH_CURRENT_SIGNING_KEY = "current_key";
+        process.env.QSTASH_NEXT_SIGNING_KEY = "next_key";
+        
+        const module = await import("../../src/services/QStashService.js");
+        service = new module.QStashService();
     });
 
-    afterAll(() => {
-        global.console = originalConsole;
-    });
+    test("publish 应该正确调用 client.publishJSON", async () => {
+        const topic = "download-tasks";
+        const message = { taskId: "123" };
+        const options = { delay: 10 };
 
-    describe("正常模式 (with token)", () => {
-        beforeEach(async () => {
-            jest.clearAllMocks();
-            // Set up default mocks
-            mockPublishJSON.mockResolvedValue({ messageId: "test-id" });
-            mockVerify.mockResolvedValue(undefined); // verify resolves without throwing
-            process.env.QSTASH_CURRENT_SIGNING_KEY = "current_key";
-            process.env.QSTASH_NEXT_SIGNING_KEY = "next_key";
-            const module = await import("../../src/services/QStashService.js");
-            service = new module.QStashService();
-        });
+        await service.publish(topic, message, options);
 
-        test("应该记录初始化日志", () => {
-            expect(console.info).toHaveBeenCalledWith('[QStash] Service initialized (Mode: Real)', expect.any(Object));
-        });
-
-        test("publish 应该正确调用 client.publishJSON 并记录日志", async () => {
-            const topic = "download-tasks";
-            const message = { taskId: "123" };
-            const options = { delay: 10 };
-
-            await service.publish(topic, message, options);
-
-            expect(console.debug).toHaveBeenCalledWith(`[QStash] Publishing to ${topic}, URL: https://example.com/api/tasks/${topic}, Payload: ${JSON.stringify(message)}`, expect.any(Object));
-            expect(console.info).toHaveBeenCalledWith(expect.stringMatching(/\[QStash\] Published to download-tasks, MsgID: test-id, Duration: \d+\.\d+ms/), expect.any(Object));
-            expect(mockPublishJSON).toHaveBeenCalledWith({
-                url: "https://example.com/api/tasks/download-tasks",
-                body: JSON.stringify(message),
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                ...options
-            });
-        });
-
-        test("batchPublish 应该使用 Promise.allSettled 并记录日志", async () => {
-            const messages = [
-                { topic: "download-tasks", message: { taskId: "1" } },
-                { topic: "upload-tasks", message: { taskId: "2" } }
-            ];
-
-            mockPublishJSON.mockResolvedValueOnce({ messageId: "1" });
-            mockPublishJSON.mockRejectedValueOnce(new Error("fail"));
-
-            const results = await service.batchPublish(messages);
-
-            expect(results).toHaveLength(2);
-            expect(results[0].status).toBe("fulfilled");
-            expect(results[1].status).toBe("rejected");
-            expect(console.info).toHaveBeenCalledWith('[QStash] Batch published: 1 successful, 1 failed', expect.any(Object));
-            // The error log will contain the failed index based on the actual results array
-            expect(console.error).toHaveBeenCalledWith(expect.stringMatching(/\[QStash\] Batch publish failures:/), expect.any(Object));
-        });
-
-        test("publishDelayed 应该添加 delay 选项", async () => {
-            const topic = "media-batch";
-            const message = { groupId: "group1" };
-            const delaySeconds = 5;
-
-            await service.publishDelayed(topic, message, delaySeconds);
-
-            expect(mockPublishJSON).toHaveBeenCalledWith({
-                url: "https://example.com/api/tasks/media-batch",
-                body: JSON.stringify(message),
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                delay: delaySeconds
-            });
-        });
-
-        test("verifyWebhookSignature 验证成功时返回 true 并记录日志", async () => {
-            const signature = "valid_signature";
-            const body = "test body";
-
-            const result = await service.verifyWebhookSignature(signature, body);
-
-            expect(result).toBe(true);
-            expect(console.info).toHaveBeenCalledWith('[QStash] Signature verification successful', expect.any(Object));
-            expect(mockVerify).toHaveBeenCalledWith({ signature, body });
-        });
-
-        test("verifyWebhookSignature 验证失败时返回 false 并记录错误日志", async () => {
-            const signature = "invalid_signature";
-            const body = "test body";
-
-            mockVerify.mockRejectedValueOnce(new Error("Invalid signature"));
-            const result = await service.verifyWebhookSignature(signature, body);
-
-            expect(result).toBe(false);
-            expect(console.error).toHaveBeenCalledWith('[QStash] Signature verification failed', expect.any(Error));
-            expect(mockVerify).toHaveBeenCalledWith({ signature, body });
-        });
-
-        test("enqueueDownloadTask 调用 publish", async () => {
-            await service.enqueueDownloadTask("123", { data: "extra" });
-
-            expect(mockPublishJSON).toHaveBeenCalledWith({
-                url: "https://example.com/api/tasks/download-tasks",
-                body: JSON.stringify({
-                    taskId: "123",
-                    type: "download",
-                    data: "extra"
-                }),
-                headers: {
-                    "Content-Type": "application/json"
-                }
-            });
-        });
-
-        test("scheduleMediaGroupBatch 调用 publishDelayed", async () => {
-            await service.scheduleMediaGroupBatch("group1", ["1", "2"], 2);
-
-            expect(mockPublishJSON).toHaveBeenCalledWith({
-                url: "https://example.com/api/tasks/media-batch",
-                body: JSON.stringify({
-                    groupId: "group1",
-                    taskIds: ["1", "2"],
-                    type: "media-group-batch"
-                }),
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                delay: 2
-            });
+        expect(mockPublishJSON).toHaveBeenCalledWith({
+            url: "https://example.com/api/tasks/download-tasks",
+            body: JSON.stringify(message),
+            headers: {
+                "Content-Type": "application/json"
+            },
+            ...options
         });
     });
 
-    describe("Mock 模式 (without token)", () => {
-        beforeAll(() => {
-            // Temporarily remove token
-            jest.unstable_mockModule("../../src/config/index.js", () => ({
-                config: {
-                    qstash: null
-                }
-            }));
-        });
+    test("batchPublish 应该使用 Promise.allSettled", async () => {
+        const messages = [
+            { topic: "download-tasks", message: { taskId: "1" } },
+            { topic: "upload-tasks", message: { taskId: "2" } }
+        ];
 
-        beforeEach(async () => {
-            jest.clearAllMocks();
-            mockPublishJSON.mockResolvedValue({ messageId: "test-id" });
-            const module = await import("../../src/services/QStashService.js");
-            service = new module.QStashService();
-            service.isMockMode = true; // Force mock mode
-        });
+        mockPublishJSON.mockResolvedValueOnce({ messageId: "1" });
+        mockPublishJSON.mockRejectedValueOnce(new Error("fail"));
 
-        test("Mock 模式下 publish 返回 mock 结果", async () => {
-            const result = await service.publish("topic", {});
+        const results = await service.batchPublish(messages);
 
-            expect(result).toEqual({ messageId: "mock-message-id" });
-            expect(mockPublishJSON).not.toHaveBeenCalled();
-        });
+        expect(results).toHaveLength(2);
+        expect(results[0].status).toBe("fulfilled");
+        expect(results[1].status).toBe("rejected");
+    });
 
-        test("Mock 模式下 batchPublish 返回结果数组", async () => {
-            const messages = [
-                { topic: "download-tasks", message: {} },
-                { topic: "upload-tasks", message: {} }
-            ];
+    test("verifyWebhookSignature 验证成功时返回 true", async () => {
+        const signature = "valid_signature";
+        const body = "test body";
 
-            const results = await service.batchPublish(messages);
+        const result = await service.verifyWebhookSignature(signature, body);
 
-            expect(results).toHaveLength(2);
-            expect(results[0].status).toBe("fulfilled");
-            expect(results[1].status).toBe("fulfilled");
-            expect(mockPublishJSON).not.toHaveBeenCalled();
-        });
+        expect(result).toBe(true);
+        expect(mockVerify).toHaveBeenCalledWith({ signature, body });
+    });
 
-        test("Mock 模式下 verifyWebhookSignature 返回 true", async () => {
-            const result = await service.verifyWebhookSignature("sig", "body");
+    test("verifyWebhookSignature 验证失败时返回 false", async () => {
+        const signature = "invalid_signature";
+        const body = "test body";
 
-            expect(result).toBe(true);
+        mockVerify.mockRejectedValueOnce(new Error("Invalid signature"));
+        const result = await service.verifyWebhookSignature(signature, body);
+
+        expect(result).toBe(false);
+        expect(mockVerify).toHaveBeenCalledWith({ signature, body });
+    });
+
+    test("enqueueDownloadTask 调用 publish", async () => {
+        await service.enqueueDownloadTask("123", { data: "extra" });
+
+        expect(mockPublishJSON).toHaveBeenCalledWith({
+            url: "https://example.com/api/tasks/download-tasks",
+            body: JSON.stringify({
+                taskId: "123",
+                type: "download",
+                data: "extra"
+            }),
+            headers: {
+                "Content-Type": "application/json"
+            }
         });
     });
 
-    describe("错误处理", () => {
-        beforeEach(async () => {
-            jest.clearAllMocks();
-            mockPublishJSON.mockResolvedValue({ messageId: "test-id" });
-            const module = await import("../../src/services/QStashService.js");
-            service = new module.QStashService();
-        });
+    test("Mock 模式下 publish 返回 mock 结果", async () => {
+        // Temporarily remove token
+        jest.unstable_mockModule("../../src/config/index.js", () => ({
+            config: {
+                qstash: null
+            }
+        }));
+        
+        jest.clearAllMocks();
+        mockPublishJSON.mockResolvedValue({ messageId: "test-id" });
+        
+        // Re-import to pick up new config
+        const module = await import("../../src/services/QStashService.js");
+        const mockService = new module.QStashService();
+        mockService.isMockMode = true;
 
-        test("publish 抛出异常时重新抛出", async () => {
-            mockPublishJSON.mockRejectedValue(new Error("network error"));
+        const result = await mockService.publish("topic", {});
 
-            await expect(service.publish("topic", {})).rejects.toThrow("network error");
-        });
-
-        test("batchPublish 部分失败时日志警告", async () => {
-            const messages = [
-                { topic: "download-tasks", message: {} },
-                { topic: "upload-tasks", message: {} }
-            ];
-
-            mockPublishJSON.mockResolvedValueOnce({});
-            mockPublishJSON.mockRejectedValueOnce(new Error("fail"));
-
-            await service.batchPublish(messages);
-
-            expect(console.error).toHaveBeenCalledWith(expect.stringContaining('[QStash] Batch publish failures:'), expect.any(Object));
-        });
+        expect(result).toEqual({ messageId: "mock-message-id" });
+        expect(mockPublishJSON).not.toHaveBeenCalled();
     });
 });

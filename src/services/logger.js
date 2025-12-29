@@ -11,6 +11,27 @@ let axiomInitialized = false;
 
 let config = null;
 
+// Version caching
+let version = 'unknown';
+
+const initVersion = async () => {
+    if (version !== 'unknown') return;
+    
+    try {
+        // 方案 A: 尝试通过环境变量读取（CI/CD 注入）
+        if (process.env.APP_VERSION) {
+            version = process.env.APP_VERSION;
+            return;
+        }
+        
+        // 方案 B: 动态读取 package.json
+        const { default: pkg } = await import('../../package.json', { assert: { type: 'json' } });
+        version = pkg.version || 'unknown';
+    } catch (e) {
+        console.debug('Logger: Failed to load version from package.json', e.message);
+    }
+};
+
 const initAxiom = async () => {
   if (axiomInitialized) return;
 
@@ -70,20 +91,26 @@ const serializeData = (data) => {
 };
 
 const log = async (instanceId, level, message, data = {}) => {
+  // 确保版本已初始化
+  await initVersion();
+
   if (!axiom) {
     await initAxiom();
   }
 
+  const displayMessage = `[v${version}] ${message}`;
+
   if (!axiom) {
     // Axiom 未初始化时，降级到 console
-    console[level](message, data);
+    console[level](displayMessage, data);
     return;
   }
 
   const payload = {
+    version,
     instanceId,
     level,
-    message,
+    message: displayMessage,
     ...serializeData(data),
     timestamp: new Date().toISOString(),
     // 在Cloudflare Worker环境下获取一些额外信息
@@ -128,6 +155,7 @@ export const logger = {
 export const resetLogger = () => {
   axiom = null;
   axiomInitialized = false;
+  version = 'unknown';
 };
 
 export default logger;

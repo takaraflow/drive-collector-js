@@ -54,44 +54,44 @@ describe('Logger Service', () => {
       logger = loggerModule.logger;
     });
 
-    test('logger.info falls back to console.info', async () => {
+    test('logger.info falls back to console.info with version prefix', async () => {
       const message = 'test info message';
       const data = { key: 'value' };
 
       await logger.info(message, data);
 
       expect(consoleInfoSpy).toHaveBeenCalledTimes(1);
-      expect(consoleInfoSpy).toHaveBeenCalledWith(message, data);
+      expect(consoleInfoSpy).toHaveBeenCalledWith(expect.stringContaining('[v'), data);
     });
 
-    test('logger.warn falls back to console.warn', async () => {
+    test('logger.warn falls back to console.warn with version prefix', async () => {
       const message = 'test warn message';
       const data = { error: 'something' };
 
       await logger.warn(message, data);
 
       expect(consoleWarnSpy).toHaveBeenCalledTimes(1);
-      expect(consoleWarnSpy).toHaveBeenCalledWith(message, data);
+      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('[v'), data);
     });
 
-    test('logger.error falls back to console.error', async () => {
+    test('logger.error falls back to console.error with version prefix', async () => {
       const message = 'test error message';
       const data = { stack: 'error stack' };
 
       await logger.error(message, data);
 
       expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
-      expect(consoleErrorSpy).toHaveBeenCalledWith(message, data);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('[v'), data);
     });
 
-    test('logger.debug falls back to console.debug', async () => {
+    test('logger.debug falls back to console.debug with version prefix', async () => {
       const message = 'test debug message';
       const data = { debug: true };
 
       await logger.debug(message, data);
 
       expect(consoleDebugSpy).toHaveBeenCalledTimes(1);
-      expect(consoleDebugSpy).toHaveBeenCalledWith(message, data);
+      expect(consoleDebugSpy).toHaveBeenCalledWith(expect.stringContaining('[v'), data);
     });
   });
 
@@ -112,7 +112,7 @@ describe('Logger Service', () => {
       logger = loggerModule.logger;
     });
 
-    test('logger.info calls axiom.ingest with correct payload', async () => {
+    test('logger.info calls axiom.ingest with correct payload including version', async () => {
       const message = 'structured info message';
       const data = { userId: 123, action: 'login' };
 
@@ -123,9 +123,10 @@ describe('Logger Service', () => {
 
       const payload = mockIngest.mock.calls[0][1][0];
       expect(payload).toMatchObject({
+        version: expect.any(String),
         instanceId: expect.any(String),
         level: 'info',
-        message,
+        message: expect.stringContaining('[v'),
         userId: 123,
         action: 'login'
       });
@@ -136,7 +137,7 @@ describe('Logger Service', () => {
       expect(consoleInfoSpy).not.toHaveBeenCalled();
     });
 
-    test('logger.warn calls axiom.ingest with correct payload', async () => {
+    test('logger.warn calls axiom.ingest with correct payload including version', async () => {
       const message = 'structured warn message';
       const data = { warning: 'deprecated' };
 
@@ -145,14 +146,15 @@ describe('Logger Service', () => {
       expect(mockIngest).toHaveBeenCalledTimes(1);
       const payload = mockIngest.mock.calls[0][1][0];
       expect(payload).toMatchObject({
+        version: expect.any(String),
         instanceId: expect.any(String),
         level: 'warn',
-        message,
+        message: expect.stringContaining('[v'),
         warning: 'deprecated'
       });
     });
 
-    test('logger.error calls axiom.ingest with correct payload', async () => {
+    test('logger.error calls axiom.ingest with correct payload including version', async () => {
       const message = 'structured error message';
       const error = new Error('test error');
       const data = { error };
@@ -162,9 +164,10 @@ describe('Logger Service', () => {
       expect(mockIngest).toHaveBeenCalledTimes(1);
       const payload = mockIngest.mock.calls[0][1][0];
       expect(payload).toMatchObject({
+        version: expect.any(String),
         instanceId: expect.any(String),
         level: 'error',
-        message,
+        message: expect.stringContaining('[v'),
         error: {
           name: 'Error',
           message: 'test error',
@@ -173,7 +176,7 @@ describe('Logger Service', () => {
       });
     });
 
-    test('logger.debug calls axiom.ingest with correct payload', async () => {
+    test('logger.debug calls axiom.ingest with correct payload including version', async () => {
       const message = 'structured debug message';
       const data = { debug: 'verbose' };
 
@@ -182,9 +185,10 @@ describe('Logger Service', () => {
       expect(mockIngest).toHaveBeenCalledTimes(1);
       const payload = mockIngest.mock.calls[0][1][0];
       expect(payload).toMatchObject({
+        version: expect.any(String),
         instanceId: expect.any(String),
         level: 'debug',
-        message,
+        message: expect.stringContaining('[v'),
         debug: 'verbose'
       });
     });
@@ -252,6 +256,68 @@ describe('Logger Service', () => {
       // Axiom should not be initialized
       const callCountAfter = mockAxiomConstructor.mock.calls.length;
       expect(callCountAfter - callCountBefore).toBe(0);
+    });
+  });
+
+  describe('Version handling', () => {
+    test('version is read from package.json when no env var is set', async () => {
+      // Ensure no APP_VERSION env var
+      const originalEnv = process.env.APP_VERSION;
+      delete process.env.APP_VERSION;
+
+      // Reset logger to pick up env change
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+
+      // Configure Axiom
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+
+      logger = loggerModule.logger;
+
+      await logger.info('test');
+
+      const payload = mockIngest.mock.calls[0][1][0];
+      expect(payload.version).toBe('3.0.2'); // From package.json
+
+      // Restore env
+      if (originalEnv) process.env.APP_VERSION = originalEnv;
+    });
+
+    test('version is read from APP_VERSION env var when set', async () => {
+      // Set APP_VERSION env var
+      const originalEnv = process.env.APP_VERSION;
+      process.env.APP_VERSION = 'test-version-1.2.3';
+
+      // Reset logger to pick up env change
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+
+      // Configure Axiom
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+
+      logger = loggerModule.logger;
+
+      await logger.info('test');
+
+      const payload = mockIngest.mock.calls[0][1][0];
+      expect(payload.version).toBe('test-version-1.2.3');
+
+      // Restore env
+      if (originalEnv) {
+        process.env.APP_VERSION = originalEnv;
+      } else {
+        delete process.env.APP_VERSION;
+      }
     });
   });
 });
