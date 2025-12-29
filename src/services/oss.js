@@ -90,9 +90,9 @@ class OSSService {
     async _uploadViaWorker(localPath, remoteName, fileSize, onProgress) {
         const formData = new FormData();
 
-        // 添加文件
-        const fileStream = fs.createReadStream(localPath);
-        const file = new File([fileStream], path.basename(localPath), {
+        // 添加文件 - 使用 fs.readFileSync 以确保 Node.js 18 兼容性
+        const fileBuffer = fs.readFileSync(localPath);
+        const file = new File([fileBuffer], path.basename(localPath), {
             type: 'application/octet-stream'
         });
         formData.append('file', file);
