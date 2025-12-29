@@ -5,7 +5,7 @@
 
 import { trace } from '@opentelemetry/api';
 import { instrument } from '@microlabs/otel-cf-workers';
-import { createHmac } from 'node:crypto';
+import { Receiver } from '@upstash/qstash';
 
 const config = {
   exporter: {
@@ -84,7 +84,7 @@ const logger = {
     }
     console.error(`ERROR: ${message}`, meta);
   },
-   
+    
   debug(message, meta = {}, ctx = null) {
     if (this.env !== 'production') {
       const span = trace.getActiveSpan();
@@ -92,7 +92,7 @@ const logger = {
       console.debug(`DEBUG: ${message}`, meta);
     }
   },
-   
+    
 
 };
 
@@ -263,7 +263,7 @@ async function upstash_get(env, key, options = {}) {
 
     const type = options.type || 'json';
     if (type === 'json') {
-        // 如果值已经是对象，直接返回
+        // 如果已经是对象，直接返回
         if (typeof value === 'object') return value;
         // 如果是字符串，尝试JSON解析
         return safeJsonParse(value, `upstash_get value for key ${key}`) || value;
@@ -400,92 +400,84 @@ function base64UrlEncode(buffer) {
 }
 
 /**
- * 验证QStash签名 (手动实现)
+ * 验证QStash签名 (使用官方SDK)
  */
 async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = null) {
-  console.log('=== QStash Signature Debug Start ===');
-  const headersLog = Object.fromEntries(request.headers.entries());
-  console.log('All request headers:', headersLog);
+  if (skipBodyRead) {
+    // 对于 GET/HEAD 请求，无需验证 body
+    return null;
+  }
+
+  if (env.SKIP_SIGNATURE_VERIFY === 'true') {
+    logger.info('SKIP_SIGNATURE_VERIFY=true，跳过签名验证', {}, ctx);
+    const body = await request.arrayBuffer();
+    return new Uint8Array(body);
+  }
+
   const signature = request.headers.get('Upstash-Signature');
   const timestamp = request.headers.get('Upstash-Timestamp');
 
-  console.log('Raw signature:', signature);
-  console.log('Raw timestamp:', timestamp);
-
-  let body;
-
   if (!signature || !timestamp) {
-    if (skipBodyRead) {
-      console.log('=== QStash Signature Skipped (no headers) ===');
-      return null;
+    throw new Error('Missing Upstash-Signature or Upstash-Timestamp header');
+  }
+
+  // 检查时间戳格式（SDK 要求秒级）
+  let timestampNum = parseInt(timestamp);
+  if (timestamp.length > 10) {
+    // 毫秒级转换为秒级
+    timestampNum = Math.floor(timestampNum / 1000);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const expirationWindow = env.SIGNATURE_EXPIRATION_WINDOW ? parseInt(env.SIGNATURE_EXPIRATION_WINDOW) : 15 * 60; // 15分钟
+
+  if (Math.abs(now - timestampNum) > expirationWindow) {
+    throw new Error('Signature expired');
+  }
+
+  const receiver = new Receiver({
+    currentSigningKey: env.QSTASH_CURRENT_SIGNING_KEY,
+    nextSigningKey: env.QSTASH_NEXT_SIGNING_KEY,
+  });
+
+  let rawBody;
+  try {
+    rawBody = await request.text();
+  } catch (e) {
+    throw new Error(`Failed to read request body: ${e.message}`);
+  }
+
+  try {
+    await receiver.verify({
+      signature,
+      body: rawBody,
+      url: request.url,
+    });
+    
+    // 验证通过，返回原始字节数组
+    return new Uint8Array(new TextEncoder().encode(rawBody));
+  } catch (e) {
+    // 仅捕获验证相关的错误，不掩盖系统错误
+    if (e.message === 'Signature expired' || e.message === 'Missing Upstash-Signature or Upstash-Timestamp header') {
+      throw e;
     }
-    if (env.SKIP_SIGNATURE_VERIFY === 'true') {
-      body = await request.arrayBuffer();
-      console.log('Request body length:', body.byteLength);
-      console.log('=== QStash Signature Verified OK (skipped) ===');
-      return new Uint8Array(body);
+    
+    // 处理签名验证失败的情况
+    let errorMessage = e.message;
+    
+    if (errorMessage.includes('Invalid Compact JWS') || errorMessage.includes('Invalid signature')) {
+      errorMessage = 'Invalid signature';
     }
-    const error = new Error('Missing Upstash-Signature or Upstash-Timestamp header');
+    
+    const finalErrorMsg = errorMessage.includes('Signature verification failed')
+      ? errorMessage
+      : `Signature verification failed: ${errorMessage}`;
+
+    logger.warn('签名验证失败', { error: finalErrorMsg }, ctx);
+    const error = new Error(finalErrorMsg);
     Object.assign(error, { status: 401 });
     throw error;
   }
-
-    // 有签名头，读取 body 并验证
-    body = await request.arrayBuffer();
-    const bodyUint8 = new Uint8Array(body);
-    console.log('Request body length:', body.byteLength);
-
-    // 2. 验证时间戳是否过期
-    const now = Math.floor(Date.now() / 1000);
-    let ts = parseInt(timestamp);
-  
-    // 兼容毫秒级时间戳 (如果 ts > 10^12，通常是毫秒)
-    console.log('Parsed timestamp (s):', ts);
-    if (ts > 1000000000000) {
-        ts = Math.floor(ts / 1000);
-    }
-
-    const window = parseInt(env.SIGNATURE_EXPIRATION_WINDOW) || 900; // 默认 15 分钟
-    const timeDiff = Math.abs(now - ts);
-    console.log('Current time (s):', now, 'Time diff (s):', timeDiff, 'Allowed window (s):', window);
-    if (timeDiff > window) {
-        const error = new Error(`Signature expired (now: ${now}, ts: ${ts}, window: ${window})`);
-        Object.assign(error, { status: 401 });
-        throw error;
-    }
-
-    if (!env.QSTASH_CURRENT_SIGNING_KEY) {
-      logger.error('缺少 QSTASH_CURRENT_SIGNING_KEY', {}, ctx);
-      if (env.SKIP_SIGNATURE_VERIFY === 'true') {
-        logger.info('SKIP_SIGNATURE_VERIFY=true，跳过签名验证', {}, ctx);
-        return bodyUint8;
-      }
-      const error = new Error('QSTASH_CURRENT_SIGNING_KEY 未设置，无法验证签名');
-      Object.assign(error, { status: 500 });
-      throw error;
-    }
-
-    // 计算预期签名
-    const hmac = createHmac('sha256', env.QSTASH_CURRENT_SIGNING_KEY);
-    hmac.update(`${timestamp}.`);
-    hmac.update(bodyUint8);
-    const expectedSignature = hmac.digest('base64url');
-
-    // 比较签名 (QStash使用 v1a=base64url 格式)
-    const providedSignature = signature.replace('v1a=', '').replace(/=+$/, '');
-    
-    if (providedSignature !== expectedSignature) {
-        logger.debug('签名验证失败详情', {
-            expectedSignature: expectedSignature,
-            providedSignature: providedSignature,
-            bodyLength: bodyUint8.length
-        }, ctx);
-        const error = new Error('Signature verification failed');
-        Object.assign(error, { status: 401 });
-        throw error;
-    }
-
-    return bodyUint8;
 }
 
 /**

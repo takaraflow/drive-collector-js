@@ -1,4 +1,35 @@
-import { describe, expect, it, beforeEach, afterEach, jest } from '@jest/globals';
+// 首先设置 mock，然后再导入模块
+import { jest } from '@jest/globals';
+
+// 确保全局 Web API 可用
+if (typeof globalThis.TextEncoder === 'undefined') {
+  const { TextEncoder, TextDecoder } = require('util');
+  globalThis.TextEncoder = TextEncoder;
+  globalThis.TextDecoder = TextDecoder;
+}
+
+// Mock global.fetch
+global.fetch = jest.fn();
+
+// Mock @upstash/qstash - 必须在导入源代码之前设置
+const mockVerify = jest.fn();
+const mockReceiver = jest.fn().mockImplementation(() => ({
+  verify: mockVerify,
+}));
+
+jest.mock('@upstash/qstash', () => ({
+  Receiver: mockReceiver,
+}));
+
+// Mock console methods
+global.console = {
+  log: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+};
+
+// 现在导入测试的函数
+import { describe, expect, it, beforeEach, afterEach } from '@jest/globals';
 import {
   verifyQStashSignature,
   getActiveInstances,
@@ -14,39 +45,6 @@ import {
   setCurrentProviderState,
   logger
 } from '../src/index.js';
-
-// Mock modules handled by jest.config.js moduleNameMapper
-
-import { Buffer } from 'node:buffer';
-import crypto from 'node:crypto'; // Import crypto
-
-// Mock global.fetch
-global.fetch = jest.fn();
-
-// Mock node:crypto createHmac
-const mockHmacUpdate = jest.fn();
-const mockHmacDigest = jest.fn();
-const mockCreateHmac = jest.fn().mockReturnValue({
-    update: mockHmacUpdate,
-    digest: mockHmacDigest
-});
-
-jest.mock('node:crypto', () => {
-  return {
-    __esModule: true,
-    ...jest.requireActual('node:crypto'),
-    createHmac: mockCreateHmac
-  };
-});
-
-import { createHmac } from 'node:crypto'; // Re-import to get the mocked version
-
-// Mock console methods
-global.console = {
-  log: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-};
 
 // Mock KV Storage
 const mockKV = {
@@ -71,6 +69,9 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       failureCount: 0,
       lastFailureTime: 0
     });
+    // 重置 mock 实现
+    mockVerify.mockReset();
+    mockReceiver.mockClear();
   });
 
   describe('verifyQStashSignature', () => {
@@ -85,14 +86,14 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           ['Upstash-Timestamp', timestamp],
         ]),
         text: jest.fn().mockResolvedValue(body),
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
+        url: 'https://test.url',
       };
 
-      // Mock Mocked createHmac behavior for this test
-      mockHmacDigest.mockReturnValue('ZXhwZWN0ZWQtc2lnbmF0dXJl'); // expected-signature in base64url
+      // mockVerify 返回 body，表示验证通过
+      mockVerify.mockResolvedValue(body);
 
       const result = await verifyQStashSignature(request, mockEnv);
-      expect(result).toEqual(new Uint8Array(Buffer.from(body)));
+      expect(new TextDecoder().decode(result)).toBe(body);
     });
 
     it('应该在缺少签名头时抛出错误', async () => {
@@ -106,34 +107,31 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
     });
 
     it('应该在签名不匹配时抛出错误', async () => {
-      const timestamp = Math.floor(Date.now() / 1000).toString();
       const request = {
         headers: new Map([
-          ['Upstash-Signature', 'v1a=wrong-signature'],
-          ['Upstash-Timestamp', timestamp],
+          ['Upstash-Signature', 'wrong-signature'],
+          ['Upstash-Timestamp', Math.floor(Date.now() / 1000).toString()],
         ]),
         text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
+        url: 'https://test.url/api',
       };
 
-      // Mock Mocked createHmac behavior for this test
-      mockHmacDigest.mockReturnValue('expected-signature');
-
-      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Signature verification failed');
+      mockVerify.mockRejectedValue(new Error('Invalid signature'));
+      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Signature verification failed: Invalid signature');
     });
 
     it('应该在时间戳过期时抛出错误', async () => {
-      const expiredTimestamp = (Math.floor(Date.now() / 1000) - 1000).toString(); // 过期1000秒，超过900秒窗口
+      const expiredTimestamp = (Math.floor(Date.now() / 1000) - 1000).toString(); // 过期1000秒
       const request = {
         headers: new Map([
-          ['Upstash-Signature', 'v1a=signature'],
+          ['Upstash-Signature', 'expired-signature'],
           ['Upstash-Timestamp', expiredTimestamp],
         ]),
         text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
+        url: 'https://test.url/api',
       };
 
-      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow(/Signature expired.*now.*ts.*window/);
+      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Signature expired');
     });
 
     it('应该在SKIP_SIGNATURE_VERIFY为true时跳过验证', async () => {
@@ -151,7 +149,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
     it('应该在签名包含填充字符=时正确验证', async () => {
       const body = 'test-body';
       const timestamp = Math.floor(Date.now() / 1000).toString();
-      const signature = 'v1a=c2lnXzVQZmtKeXhjajFCQzVYOVc1aDk0TWh4bmROZ0c='; // 带填充字符的base64url
+      const signature = 'v1a=c2lnXVZmtKeXhjajFCQzVYOVc1aDk0TWh4bmROZ0c='; // 带填充字符的base64url
 
       const request = {
         headers: new Map([
@@ -162,18 +160,15 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
       };
 
-      // Mock createHmac to return string that matches signature without v1a= and = padding
-      // signature payload: c2lnXzVQZmtKeXhjajFCQzVYOVc1aDk0TWh4bmROZ0c=
-      // expected: c2lnXzVQZmtKeXhjajFCQzVYOVc1aDk0TWh4bmROZ0c
-      mockHmacDigest.mockReturnValue('c2lnXzVQZmtKeXhjajFCQzVYOVc1aDk0TWh4bmROZ0c='); // mock return with padding to test removal
+      mockVerify.mockResolvedValue(body);
 
       const result = await verifyQStashSignature(request, mockEnv);
-      expect(result).toEqual(new Uint8Array(Buffer.from(body)));
+      expect(new TextDecoder().decode(result)).toBe(body);
     });
 
     it('应该支持毫秒级时间戳', async () => {
       const body = 'test-body';
-      const timestampMs = (Math.floor(Date.now() / 1000) * 1000).toString(); // 毫秒级时间戳
+      const timestampMs = Date.now().toString(); // 毫秒级时间戳
       const signature = 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'; // base64url of 'expected-signature'
 
       const request = {
@@ -182,13 +177,13 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           ['Upstash-Timestamp', timestampMs],
         ]),
         text: jest.fn().mockResolvedValue(body),
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
+        url: 'https://test.url',
       };
 
-      mockHmacDigest.mockReturnValue('ZXhwZWN0ZWQtc2lnbmF0dXJl');
+      mockVerify.mockResolvedValue(body);
 
       const result = await verifyQStashSignature(request, mockEnv);
-      expect(result).toEqual(new Uint8Array(Buffer.from(body)));
+      expect(new TextDecoder().decode(result)).toBe(body);
     });
 
     it('应该使用默认15分钟过期窗口', async () => {
@@ -206,6 +201,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
     });
 
     it('应该支持自定义过期窗口', async () => {
+      const body = 'test-body';
       const customEnv = { ...mockEnv, SIGNATURE_EXPIRATION_WINDOW: '1800' }; // 30分钟
       const expiredTimestamp = (Math.floor(Date.now() / 1000) - 1000).toString(); // 过期1000秒，小于1800秒
       const signature = 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl';
@@ -215,14 +211,14 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
           ['Upstash-Signature', signature],
           ['Upstash-Timestamp', expiredTimestamp],
         ]),
-        text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
+        text: jest.fn().mockResolvedValue(body),
+        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
       };
 
-      mockHmacDigest.mockReturnValue('ZXhwZWN0ZWQtc2lnbmF0dXJl');
+      mockVerify.mockResolvedValue(body);
 
       const result = await verifyQStashSignature(request, customEnv);
-      expect(result).toEqual(new Uint8Array(Buffer.from('body')));
+      expect(new TextDecoder().decode(result)).toBe(body);
     });
   });
 
@@ -545,8 +541,8 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
   // 集成测试
   describe('Integration Tests', () => {
     it('应该在集成测试中正确转发请求', async () => {
-      // Mock Hmac for integration test
-      mockHmacDigest.mockReturnValue('ZXhwZWN0ZWQtc2lnbmF0dXJl');
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      mockVerify.mockResolvedValue('body');
 
       // Mock KV
       mockKV.list.mockResolvedValue({
@@ -576,10 +572,10 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         method: 'POST',
         headers: new Map([
           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-          ['Upstash-Timestamp', Math.floor(Date.now() / 1000).toString()],
+          ['Upstash-Timestamp', timestamp],
         ]),
         text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
+        arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
       };
 
       const lb = await import('../src/index.js');
@@ -589,7 +585,8 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
     });
 
     it('应该在无活跃实例时返回503', async () => {
-      mockHmacDigest.mockReturnValue('ZXhwZWN0ZWQtc2lnbmF0dXJl');
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      mockVerify.mockResolvedValue('body');
 
       mockKV.list.mockResolvedValue({ keys: [] });
 
@@ -597,10 +594,10 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         url: 'https://lb.example.com/webhook',
         headers: new Map([
           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-          ['Upstash-Timestamp', Math.floor(Date.now() / 1000).toString()],
+          ['Upstash-Timestamp', timestamp],
         ]),
         text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
+        arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
       };
 
       const lb = await import('../src/index.js');
@@ -614,7 +611,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         url: 'https://lb.example.com/webhook',
         headers: new Map(),
         text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
+        arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
       };
 
       const lb = await import('../src/index.js');
@@ -635,8 +632,9 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
 
       expect(response.status).toBe(200);
     });
-
+    
     it('应该正确转发 type="download" 的 QStash 请求', async () => {
+      const timestamp = Math.floor(Date.now() / 1000).toString();
       const downloadBody = JSON.stringify({
         id: "task_123456789",
         chatId: "chat_987654321",
@@ -644,7 +642,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         type: "download"
       });
 
-      mockHmacDigest.mockReturnValue('ZXhwZWN0ZWQtc2lnbmF0dXJl');
+      mockVerify.mockResolvedValue(downloadBody);
 
       // Mock KV
       mockKV.list.mockResolvedValue({
@@ -679,10 +677,10 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         headers: new Map([
           ['Content-Type', 'application/json'],
           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-          ['Upstash-Timestamp', Math.floor(Date.now() / 1000).toString()],
+          ['Upstash-Timestamp', timestamp],
         ]),
         text: jest.fn().mockResolvedValue(downloadBody),
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(downloadBody)),
+        arrayBuffer: jest.fn().mockResolvedValue(new TextEncoder().encode(downloadBody)),
       };
 
       const lb = await import('../src/index.js');

@@ -5,6 +5,7 @@ interface Env {
 
   // QStash signature verification
   QSTASH_CURRENT_SIGNING_KEY: string;
+  QSTASH_NEXT_SIGNING_KEY: string;
   SKIP_SIGNATURE_VERIFY?: string;
 
   // Axiom logging
