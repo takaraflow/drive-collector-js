@@ -50,11 +50,24 @@ jobs:
         if: always()
         run: |
           if [ "${{ job.status }}" = "success" ]; then
-            TITLE="✅%20GHA%20部署成功"
+            TITLE="✅ GHA 部署成功"
           else
-            TITLE="❌%20GHA%20部署失败"
+            TITLE="❌ GHA 部署失败"
           fi
           
-          CONTENT="Workflow:%20${{ github.workflow }}%0AJob:%20${{ github.job }}%0AStatus:%20${{ job.status }}%0ACommit:%20${{ github.sha }}"
+          # Use printf to handle multiline content safely for JSON
+          CONTENT="Workflow: ${{ github.workflow }}\nJob: ${{ github.job }}\nStatus: ${{ job.status }}\nCommit: ${{ github.sha }}"
           
-          curl -L -X GET "${{ env.BARK_WEBHOOK_URL }}${{ env.BARK_DEVICE_TOKEN }}${TITLE}/${CONTENT}?group=GHA"
+          # Ensure BARK_WEBHOOK_URL ends with / if it's just the domain
+          BASE_URL="${{ env.BARK_WEBHOOK_URL }}"
+          BASE_URL="${BASE_URL%/}"
+          
+          # Construct JSON body for Bark POST API
+          curl -L -X POST "$BASE_URL/push" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{
+              \"title\": \"$TITLE\",
+              \"body\": \"$CONTENT\",
+              \"device_key\": \"${{ env.BARK_DEVICE_TOKEN }}\",
+              \"group\": \"GHA\"
+            }"
