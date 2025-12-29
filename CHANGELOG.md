@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [3.2.2](https://github.com/YoungSx/drive-collector-js/compare/v3.2.1...v3.2.2) (2025-12-29)
+
+
+### 🐛 问题修复
+
+* resolve 429 retry exhaustion on startup with improved rate limiting ([6961c5d](https://github.com/YoungSx/drive-collector-js/commit/6961c5d8d767439225ab904aaa13f6f75a3ea352))
+
 ### [3.2.1](https://github.com/YoungSx/drive-collector-js/compare/v3.2.0...v3.2.1) (2025-12-29)
 
 
