@@ -12,5 +12,21 @@
   "commitUrlFormat": "https://github.com/{{owner}}/{{repository}}/commit/{{hash}}",
   "compareUrlFormat": "https://github.com/{{owner}}/{{repository}}/compare/{{previousTag}}...{{currentTag}}",
   "issueUrlFormat": "https://github.com/{{owner}}/{{repository}}/issues/{{id}}",
-  "userUrlFormat": "https://github.com/{{user}}"
+  "userUrlFormat": "https://github.com/{{user}}",
+  "bumpFiles": [
+    {
+      "filename": "package.json",
+      "type": "json"
+    },
+    {
+      "filename": "manifest.json",
+      "type": "json"
+    }
+  ],
+  "packageFiles": [
+    {
+      "filename": "package.json",
+      "type": "json"
+    }
+  ]
 }

@@ -1,6 +1,6 @@
 {
   "name": "drive-collector-bot",
-  "version": "2.3.3",
+  "version": "3.0.1",
   "description": "A modular Telegram bot for transferring files to Rclone remotes",
   "main": "index.js",
   "type": "module",
@@ -18,7 +18,11 @@
     "test:perf": "node scripts/test-performance.js",
     "test:perf:report": "node scripts/test-performance.js --report",
     "test:fast": "node --experimental-vm-modules node_modules/jest/bin/jest.js --maxWorkers=50% --silent",
-    "release": "standard-version",
+    "release": "npm test && standard-version",
+    "release:patch": "npm test && standard-version --release-as patch",
+    "release:minor": "npm test && standard-version --release-as minor",
+    "release:major": "npm test && standard-version --release-as major",
+    "postrelease": "git push --follow-tags origin main",
     "release:ai": "node scripts/release-ai.js"
   },
   "keywords": [
