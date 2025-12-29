@@ -1,11 +1,18 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+### [0.1.2](https://github.com/YoungSx/lb-worker-js/compare/v0.1.1...v0.1.2) (2025-12-29)
 
-## [Unreleased]
+
+### 📝 Documentation
+
+* update CHANGELOG.md for v0.1.1 release ([b8f63af](https://github.com/YoungSx/lb-worker-js/commit/b8f63aff8721b3abe17227a5326dcd5423b2a68a))
+
+
+### 🐛 Bug Fixes
+
+* improve sync-manifest workflow with better error handling and variable usage ([fd3cc8a](https://github.com/YoungSx/lb-worker-js/commit/fd3cc8abbdf9ded52205cf14c9cc342674f340c2))
 
 ## [0.1.1] - 2025-12-29
 
