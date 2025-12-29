@@ -49,5 +49,12 @@ jobs:
       - name: Notify Bark result
         if: always()
         run: |
-          MESSAGE="GHA ${{ github.workflow }} - ${{ github.job }} 结果: ${{ job.status }} (Commit: ${{ github.sha }})"
-          curl -X GET "${{ env.BARK_WEBHOOK_URL }}${{ env.BARK_DEVICE_TOKEN }}/$(echo $MESSAGE | sed 's/ /%20/g')?group=GHA"
+          if [ "${{ job.status }}" = "success" ]; then
+            TITLE="✅%20GHA%20部署成功"
+          else
+            TITLE="❌%20GHA%20部署失败"
+          fi
+          
+          CONTENT="Workflow:%20${{ github.workflow }}%0AJob:%20${{ github.job }}%0AStatus:%20${{ job.status }}%0ACommit:%20${{ github.sha }}"
+          
+          curl -L -X GET "${{ env.BARK_WEBHOOK_URL }}${{ env.BARK_DEVICE_TOKEN }}${TITLE}/${CONTENT}?group=GHA"
