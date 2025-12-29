@@ -15,6 +15,9 @@
     "test:vitest": "vitest",
     "test:vitest:coverage": "vitest --coverage",
     "test:vitest:watch": "vitest --watch",
+    "test:perf": "node scripts/test-performance.js",
+    "test:perf:report": "node scripts/test-performance.js --report",
+    "test:fast": "node --experimental-vm-modules node_modules/jest/bin/jest.js --maxWorkers=50% --silent",
     "release": "standard-version",
     "release:ai": "node scripts/release-ai.js"
   },

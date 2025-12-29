@@ -83,10 +83,10 @@ describe("KVService Cache Optimization", () => {
                 text: () => Promise.resolve("value")
             });
 
-            await kv.get("test_key", "text", { cacheTtl: 100 });
+            await kv.get("test_key", "text", { cacheTtl: 20 });
             expect(mockFetch).toHaveBeenCalledTimes(1);
 
-            await new Promise(r => setTimeout(r, 150));
+            await new Promise(r => setTimeout(r, 25)); // 等待超过缓存TTL
 
             await kv.get("test_key", "text");
             expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -130,11 +130,11 @@ describe("KVService Cache Optimization", () => {
                 json: () => Promise.resolve({ success: true })
             });
 
-            kv.l1CacheTtl = 50;
+            kv.l1CacheTtl = 20; // 优化：减少缓存TTL
             await kv.set("test_key", "value");
             expect(mockFetch).toHaveBeenCalledTimes(1);
 
-            await new Promise(r => setTimeout(r, 100));
+            await new Promise(r => setTimeout(r, 30)); // 优化：减少等待时间
 
             await kv.set("test_key", "value");
             expect(mockFetch).toHaveBeenCalledTimes(2);

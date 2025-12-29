@@ -220,9 +220,13 @@ describe("Application Startup Resilience and Degradation", () => {
             .mockResolvedValueOnce("2"); // recent_crash_count: 2
         mockSettingsRepository.set.mockResolvedValue(undefined);
 
+        // 优化：直接测试退避逻辑，不等待实际时间
         const promise = simulateResilientStartup();
-        // Advance timers for backoff delay: calculated as 60s
-        await jest.advanceTimersByTimeAsync(60000);
+        
+        // 计算预期的退避时间: 10s * 3 + (60s - 30s) = 60s
+        // 但我们需要推进足够的时间让 promise 完成
+        await jest.advanceTimersByTimeAsync(60000); // 推进60秒
+        
         await promise;
 
         // Should have triggered backoff (30s ago < 60s threshold)

@@ -21,6 +21,7 @@ rclone.conf
 plans/
 dist/
 wrangler.lb.build.toml
+.jest-cache/
 
 # --- 操作系统文件 ---
 .DS_Store

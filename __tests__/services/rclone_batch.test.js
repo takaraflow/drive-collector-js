@@ -27,7 +27,7 @@ jest.unstable_mockModule('../../src/config/index.js', () => ({
 
 const { CloudTool } = await import('../../src/services/rclone.js');
 
-const waitFor = async (callback, timeout = 1000, interval = 50) => {
+const waitFor = async (callback, timeout = 200, interval = 10) => {
     const startTime = Date.now();
     while (Date.now() - startTime < timeout) {
         try {
