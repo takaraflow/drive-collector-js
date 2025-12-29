@@ -22,6 +22,7 @@ jest.unstable_mockModule('../../src/dispatcher/MessageHandler.js', () => ({
 jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () => ({
   instanceCoordinator: {
     acquireLock: jest.fn(),
+    hasLock: jest.fn(),
   }
 }));
 
@@ -83,6 +84,7 @@ describe('Dispatcher Bootstrap', () => {
   it('should handle AUTH_KEY_DUPLICATED error by clearing session and retry', async () => {
     const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
     mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
+    mockInstanceCoordinator.hasLock.mockResolvedValue(true);
 
     const mockTelegram = await import('../../src/services/telegram.js');
     mockTelegram.client.start
@@ -97,8 +99,35 @@ describe('Dispatcher Bootstrap', () => {
 
     await startDispatcher();
 
+    expect(mockInstanceCoordinator.hasLock).toHaveBeenCalledWith("telegram_client");
     expect(mockTelegram.clearSession).toHaveBeenCalled();
     expect(mockTelegram.resetClientSession).toHaveBeenCalled();
     expect(mockTelegram.client.start).toHaveBeenCalledTimes(2);
+  });
+
+  it('should stop retry if lock is lost during AUTH_KEY_DUPLICATED handling', async () => {
+    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
+    // 立即失去锁
+    mockInstanceCoordinator.hasLock.mockResolvedValue(false);
+
+    const mockTelegram = await import('../../src/services/telegram.js');
+    mockTelegram.client.start
+      .mockRejectedValueOnce({
+        code: 406,
+        errorMessage: 'AUTH_KEY_DUPLICATED'
+      });
+
+    mockTelegram.clearSession.mockResolvedValue();
+    mockTelegram.resetClientSession.mockResolvedValue();
+
+    await startDispatcher();
+
+    expect(mockInstanceCoordinator.hasLock).toHaveBeenCalledWith("telegram_client");
+    // 不应该调用这些，因为在检查锁时就失败了
+    expect(mockTelegram.clearSession).not.toHaveBeenCalled();
+    expect(mockTelegram.resetClientSession).not.toHaveBeenCalled();
+    // 应该只调用一次 start
+    expect(mockTelegram.client.start).toHaveBeenCalledTimes(1);
   });
 });

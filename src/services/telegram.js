@@ -2,6 +2,7 @@ import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import { config } from "../config/index.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
+import { instanceCoordinator } from "./InstanceCoordinator.js";
 import logger from "./logger.js";
 
 /**
@@ -163,6 +164,14 @@ client.on("error", (err) => {
  */
 async function handleConnectionIssue() {
     if (isReconnecting) return;
+    
+    // 关键：重连前必须确认自己仍然持有锁
+    const hasLock = await instanceCoordinator.hasLock("telegram_client");
+    if (!hasLock) {
+        logger.warn("🚨 失去锁，取消主动重连");
+        return;
+    }
+
     isReconnecting = true;
 
     try {
@@ -187,6 +196,9 @@ async function handleConnectionIssue() {
                 await client._sender.disconnect();
             } catch (e) {}
         }
+
+        // 清理旧状态
+        await resetClientSession();
 
         // 等待一段时间让网络资源释放
         const waitTime = 5000 + Math.random() * 5000;
@@ -243,9 +255,19 @@ export const startWatchdog = () => {
         } catch (e) {
             if (e.code === 406 && e.errorMessage?.includes("AUTH_KEY_DUPLICATED")) {
                 logger.error("🚨 检测到 AUTH_KEY_DUPLICATED，会话已在别处激活，本实例应停止连接");
-                // 这里不主动 disconnect，让 index.js 的锁续租失败来处理，
-                // 或者标记需要重置
+                // 标记需要重置，并释放本地状态
                 lastHeartbeat = 0; // 触发强制处理
+                // 主动断开连接
+                try {
+                    await client.disconnect();
+                } catch (disconnectError) {
+                    logger.warn("⚠️ 断开连接时出错:", disconnectError);
+                }
+                // 清理本地状态
+                await resetClientSession();
+                // 释放锁（如果持有）
+                await instanceCoordinator.releaseLock("telegram_client");
+                return;
             }
 
             logger.warn("💔 心跳检测失败:", e);

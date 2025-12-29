@@ -76,9 +76,19 @@ export async function startDispatcher() {
                     if (error.code === 406 && error.errorMessage?.includes('AUTH_KEY_DUPLICATED')) {
                         logger.warn(`⚠️ 检测到 AUTH_KEY_DUPLICATED 错误 (尝试 ${retryCount}/${maxRetries})，正在清除旧 Session 并重试...`);
                         if (retryCount < maxRetries) {
+                            // 在清除 Session 前，再次确认锁状态
+                            const stillHasLock = await instanceCoordinator.hasLock("telegram_client");
+                            if (!stillHasLock) {
+                                logger.warn("🚨 在处理 AUTH_KEY_DUPLICATED 时失去锁，停止重试");
+                                isClientActive = false;
+                                isClientStarting = false;
+                                return false;
+                            }
+                            
                             await clearSession();
-                            resetClientSession();
+                            await resetClientSession();
                             await new Promise(r => setTimeout(r, 2000));
+                            // 继续重试，不跳出循环
                             continue;
                         }
                     }
