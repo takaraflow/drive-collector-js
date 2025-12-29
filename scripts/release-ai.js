@@ -102,7 +102,7 @@ async function run() {
   console.log('1. Checking workspace status...');
   checkDirtyWorkspace();
   
-  // 2. Run tests (already handled by package.json script)
+  // 2. Run tests
   console.log('2. Tests will be run by npm script...');
   
   // 3. Extract commits
@@ -114,7 +114,7 @@ async function run() {
     return;
   }
   
-  // 4. AI Translation (Roo will handle this)
+  // 4. AI Translation
   console.log('4. AI Translation phase...');
   const chineseChangelog = generateChineseChangelog(gitData.commits);
   
@@ -123,12 +123,19 @@ async function run() {
   prependToChangelog(chineseChangelog);
   
   console.log('\n✅ AI changelog generation completed!');
-  console.log('6. Staging CHANGELOG.md and committing via standard-version...');
   
-  // 先 add，然后调用不带 --skip.changelog 的 standard-version
-  // standard-version 会自动 commit 暂存区的内容并更新 package.json
+  // 6. Integrate with standard-version
+  console.log('6. Committing version bump and changelog together...');
+  
+  // 先将手动修改的 CHANGELOG.md 加入暂存区
   execSync('git add CHANGELOG.md'); 
-  execSync('npx standard-version --commit-all', { stdio: 'inherit' }); 
+  
+  /**
+   * 核心逻辑：
+   * --skip.changelog: 防止 standard-version 自动生成内容覆盖你的 AI 内容
+   * --commit-all: 强制 standard-version 在执行版本 commit 时包含所有已暂存(staged)的文件
+   */
+  execSync('npx standard-version --skip.changelog --commit-all', { stdio: 'inherit' });
 }
 
 // Run if called directly
