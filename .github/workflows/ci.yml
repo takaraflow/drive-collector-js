@@ -8,23 +8,86 @@ on:
     branches: [main, develop]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate manifest.json
+        run: |
+          if [ ! -f "manifest.json" ]; then echo "manifest.json missing"; exit 1; fi
+          if [ ! -f "package.json" ]; then echo "package.json missing"; exit 1; fi
+          # Validate JSON syntax
+          jq . manifest.json > /dev/null
+          jq . package.json > /dev/null
+          # Check version consistency
+          PACKAGE_VERSION=$(jq -r .version package.json)
+          MANIFEST_VERSION=$(jq -r .version manifest.json)
+          if [ "$PACKAGE_VERSION" != "$MANIFEST_VERSION" ]; then
+            echo "Version mismatch: package.json=$PACKAGE_VERSION, manifest.json=$MANIFEST_VERSION"
+            exit 1
+          fi
+          echo "✅ Manifest validation passed (v$PACKAGE_VERSION)"
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: 'npm'
+      - run: npm ci
+      - name: Run ESLint (if available)
+        run: |
+          if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f "eslint.config.js" ]; then
+            npm run lint || echo "⚠️ ESLint configured but failed"
+          else
+            echo "ℹ️ No ESLint configuration found, skipping lint check"
+          fi
+      - name: Check code formatting
+        run: |
+          if command -v prettier &> /dev/null; then
+            npm run format:check || echo "⚠️ Prettier check failed"
+          else
+            echo "ℹ️ Prettier not configured, skipping format check"
+          fi
+
   test:
+    needs: [metadata, lint]
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [20.x]
+        node-version: [18.x, 20.x]
+        test-type: [jest]
     steps:
-    - uses: actions/checkout@v4
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-    - run: |
-        echo "Node version: $(node --version)"
-    - run: npm ci
-    - run: npm test
+      - uses: actions/checkout@v4
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ matrix.node-version }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ matrix.node-version }}-
+      - run: npm ci
+      - name: Run Tests (${{ matrix.test-type }})
+        run: npm test
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.node-version }}
+          path: coverage/
+          retention-days: 7
 
   build:
     needs: test
@@ -34,30 +97,73 @@ jobs:
       contents: read
       packages: write
     steps:
-    - uses: actions/checkout@v4
-    - name: Log in to the Container registry
-      uses: docker/login-action@v3
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    - name: Extract metadata (tags, labels) for Docker
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ghcr.io/${{ github.repository }}
-        tags: |
-          type=ref,event=branch
-          type=semver,pattern={{version}}
-          type=sha
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+      - uses: actions/checkout@v4
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  notify:
+    needs: [build]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Bark result
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            TITLE="✅ GHA CI/CD 成功"
+            STATUS="success"
+          else
+            TITLE="❌ GHA CI/CD 失败"
+            STATUS="failure"
+          fi
+          
+          # Use printf to handle multiline content safely for JSON
+          CONTENT="Workflow: ${{ github.workflow }}\nStatus: ${{ job.status }}\nCommit: ${{ github.sha }}\nRef: ${{ github.ref }}"
+          
+          # Ensure BARK_WEBHOOK_URL ends with / if it's just the domain
+          BASE_URL="${{ secrets.BARK_WEBHOOK_URL }}"
+          BASE_URL="${BASE_URL%/}"
+          
+          # Only send notification if secrets are configured
+          if [ -n "$BASE_URL" ] && [ -n "${{ secrets.BARK_DEVICE_TOKEN }}" ]; then
+            curl -L -X POST "$BASE_URL/push" \
+              -H "Content-Type: application/json; charset=utf-8" \
+              -d "{
+                \"title\": \"$TITLE\",
+                \"body\": \"$CONTENT\",
+                \"device_key\": \"${{ secrets.BARK_DEVICE_TOKEN }}\",
+                \"group\": \"GHA\"
+              }" || echo "⚠️ Bark notification failed (secrets may not be configured)"
+          else
+            echo "ℹ️ Bark notification skipped (secrets not configured)"
+          fi
