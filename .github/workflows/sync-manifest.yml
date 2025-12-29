@@ -1,0 +1,53 @@
+name: Sync Manifest to Contract Center
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'manifest.json'  # 只有当 manifest 文件变动时才上报，节省资源
+
+jobs:
+  update-registry:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. 获取临时访问令牌 (使用之前创建的 GitHub App)
+      - name: Generate Token
+        id: generate_token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.APP_ID }}
+          private_key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      # 2. 检出当前子仓库代码
+      - name: Checkout Sub-Repo
+        uses: actions/checkout@v4
+
+      # 3. 检出契约中心仓库
+      - name: Checkout Contract Center
+        uses: actions/checkout@v4
+        with:
+          repository: your-username/drive-collector-contract
+          token: ${{ steps.generate_token.outputs.token }}
+          path: contract-repo # 检出到子目录
+
+      # 4. 同步文件并提交
+      - name: Sync and Commit
+        run: |
+          # 获取当前仓库名称，作为注册表里的文件名
+          REPO_NAME=$(basename ${{ github.repository }})
+          
+          # 将本地 manifest 拷贝到契约仓的 registry 目录
+          cp manifest.json contract-repo/registry/${REPO_NAME}.json
+          
+          cd contract-repo
+          git config user.name "Manifest Bot"
+          git config user.email "bot@internal.local"
+          
+          # 检查是否有文件变动，防止空提交报错
+          if [[ -n $(git status -s) ]]; then
+            git add registry/${REPO_NAME}.json
+            git commit -m "chore: update manifest for ${REPO_NAME}"
+            git push
+          else
+            echo "No changes in manifest. Skipping push."
+          fi
