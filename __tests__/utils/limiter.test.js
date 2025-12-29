@@ -1,6 +1,6 @@
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 
- 
+  
 // Mock KV
 const mockKV = {
     get: jest.fn(),
@@ -20,11 +20,11 @@ jest.unstable_mockModule('../../src/services/logger.js', () => ({
   default: mockLogger
 }));
 
- 
+  
 // Import after mocking
 const { PRIORITY, runBotTask, handle429Error, botLimiter, runAuthTask, createAutoScalingLimiter } = await import('../../src/utils/limiter.js');
 
- 
+  
 describe('Limiter Priority & Distribution', () => {
     beforeEach(() => {
         jest.clearAllMocks();
@@ -139,11 +139,48 @@ describe('handle429Error', () => {
       return 'success';
     };
 
-    const result = await handle429Error(fn, 3);
+    const result = await handle429Error(fn, 10);
 
     expect(callCount).toBe(2);
     expect(result).toBe('success');
     expect(mockLogger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('should use increased maxRetries default of 10', async () => {
+    let callCount = 0;
+    const fn = async () => {
+      callCount++;
+      if (callCount < 5) {
+        throw { code: 429, retryAfter: 0.1 };
+      }
+      return 'success';
+    };
+
+    // Should succeed with default 10 retries
+    const result = await handle429Error(fn);
+
+    expect(callCount).toBe(5);
+    expect(result).toBe('success');
+  });
+
+  it('should use jittered exponential backoff without retry-after', async () => {
+    let callCount = 0;
+    const fn = async () => {
+      callCount++;
+      if (callCount < 3) {
+        const err = new Error('FloodWait');
+        err.code = 429;
+        throw err;
+      }
+      return 'success';
+    };
+
+    const result = await handle429Error(fn, 10);
+
+    expect(callCount).toBe(3);
+    expect(result).toBe('success');
+    // Verify warn was called for each retry
+    expect(mockLogger.warn).toHaveBeenCalledTimes(2);
   });
 
   it('should trigger global cooling for retryAfter > 60s', async () => {

@@ -258,7 +258,7 @@ const checkCooling = async () => {
 };
 
 // 429 错误处理和重试机制
-const handle429Error = async (fn, maxRetries = 3) => {
+const handle429Error = async (fn, maxRetries = 10) => {
     let retryCount = 0;
     let lastRetryAfter = 0;
     
@@ -294,8 +294,12 @@ const handle429Error = async (fn, maxRetries = 3) => {
                     retryAfter = match ? parseInt(match[1]) : 0;
                 }
                 
-                // 将秒转为毫秒，并加上一些抖动
-                const waitMs = (retryAfter > 0 ? retryAfter * 1000 : Math.min(1000 * (2 ** retryCount), 60000)) + Math.random() * 1000;
+                // 改进的等待逻辑：指数退避 + 抖动
+                // 如果有 retry-after，使用它；否则使用指数退避，最大 30 秒
+                const baseWait = retryAfter > 0 ? retryAfter * 1000 : Math.min(1000 * (2 ** retryCount), 30000);
+                // 增加抖动：0-2 秒随机
+                const jitter = Math.random() * 2000;
+                const waitMs = baseWait + jitter;
                 
                 if (retryAfter > 60) {
                     logger.error(`🚨 Large FloodWait detected (${retryAfter}s). Triggering GLOBAL cooling.`);
@@ -318,19 +322,19 @@ const handle429Error = async (fn, maxRetries = 3) => {
 };
 
 // 封装带重试的任务执行
-export const runBotTaskWithRetry = async (fn, userId, addOptions = {}, isFileUpload = false, maxRetries = 3) => {
+export const runBotTaskWithRetry = async (fn, userId, addOptions = {}, isFileUpload = false, maxRetries = 10) => {
     return handle429Error(() => runBotTask(fn, userId, addOptions, isFileUpload), maxRetries);
 };
 
-export const runMtprotoTaskWithRetry = async (fn, addOptions = {}, maxRetries = 3) => {
+export const runMtprotoTaskWithRetry = async (fn, addOptions = {}, maxRetries = 10) => {
     return handle429Error(() => runMtprotoTask(fn, addOptions), maxRetries);
 };
 
-export const runMtprotoFileTaskWithRetry = async (fn, addOptions = {}, maxRetries = 3) => {
+export const runMtprotoFileTaskWithRetry = async (fn, addOptions = {}, maxRetries = 10) => {
     return handle429Error(() => runMtprotoFileTask(fn, addOptions), maxRetries);
 };
 
-export const runAuthTaskWithRetry = async (fn, addOptions = {}, maxRetries = 3) => {
+export const runAuthTaskWithRetry = async (fn, addOptions = {}, maxRetries = 10) => {
     return handle429Error(() => runAuthTask(fn, addOptions), maxRetries);
 };
 

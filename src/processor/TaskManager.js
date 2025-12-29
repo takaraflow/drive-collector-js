@@ -148,11 +148,12 @@ export class TaskManager {
                 chatGroups.get(row.chat_id).push(row);
             }
 
-            // 并行恢复所有chat groups的任务
-            const restorePromises = Array.from(chatGroups.entries()).map(([chatId, rows]) =>
-                this._restoreBatchTasks(chatId, rows)
-            );
-            await Promise.allSettled(restorePromises);
+            // 顺序恢复所有chat groups的任务，避免并发冲击
+            for (const [chatId, rows] of chatGroups.entries()) {
+                await this._restoreBatchTasks(chatId, rows);
+                // 在会话间添加延迟，避免 API 限制
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
 
             this.updateQueueUI();
         } catch (e) {
@@ -284,11 +285,19 @@ export class TaskManager {
                 await this.batchUpdateStatus(failedUpdates);
             }
 
-            // 并发发送恢复消息（限制并发避免 API 限制）
-            const recoveryPromises = validTasks.map(task =>
-                updateStatus(task, "🔄 **系统重启，检测到任务中断，已自动恢复...**")
-            );
-            await Promise.allSettled(recoveryPromises);
+            // 限制并发发送恢复消息（使用小批量顺序处理）
+            const BATCH_SIZE = 3;
+            for (let i = 0; i < validTasks.length; i += BATCH_SIZE) {
+                const batch = validTasks.slice(i, i + BATCH_SIZE);
+                const recoveryPromises = batch.map(task =>
+                    updateStatus(task, "🔄 **系统重启，检测到任务中断，已自动恢复...**")
+                );
+                await Promise.allSettled(recoveryPromises);
+                // 小批量间添加延迟
+                if (i + BATCH_SIZE < validTasks.length) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+            }
 
             // 批量入队下载任务
             tasksToEnqueue.forEach(task => this._enqueueTask(task));
@@ -317,7 +326,7 @@ export class TaskManager {
             userId,
             { priority: PRIORITY.UI },
             false,
-            3
+            10
         );
 
         const info = getMediaInfo(mediaMessage);
@@ -367,7 +376,7 @@ export class TaskManager {
             userId,
             { priority: PRIORITY.UI },
             false,
-            3
+            10
         );
 
         const tasksData = [];
@@ -702,7 +711,7 @@ export class TaskManager {
                     }
                 };
 
-                await runMtprotoFileTaskWithRetry(() => client.downloadMedia(message, downloadOptions), {}, 5); // 增加重试次数到5次
+                await runMtprotoFileTaskWithRetry(() => client.downloadMedia(message, downloadOptions), {}, 10); // 增加重试次数到10次
 
                 // 下载完成，推入上传队列
                 await TaskRepository.updateStatus(task.id, 'downloaded');
