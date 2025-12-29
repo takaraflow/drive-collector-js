@@ -27,3 +27,16 @@ jobs:
         echo "Node version: $(node --version)"
     - run: npm ci
     - run: npm test
+
+  build:
+    needs: test
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    - name: Build Docker Image
+      run: |
+        docker build -t drive-collector-bot:${{ github.ref_name }} .
