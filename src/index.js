@@ -417,24 +417,36 @@ async function verifyQStashSignature(request, env, skipBodyRead = false, ctx = n
   const signature = request.headers.get('Upstash-Signature');
   const timestamp = request.headers.get('Upstash-Timestamp');
 
-  if (!signature || !timestamp) {
-    const error = new Error('Missing Upstash-Signature or Upstash-Timestamp header');
+  if (!signature) {
+    const error = new Error('Missing Upstash-Signature header');
     Object.assign(error, { status: 401 });
     throw error;
   }
 
-  // 检查时间戳格式（SDK 要求秒级）
-  const timestampNum = parseInt(timestamp);
+  // 判断是否为 JWT 格式 (JWT 包含两个点)
+  const isJwt = signature.split('.').length === 3;
 
-  const now = Math.floor(Date.now() / 1000);
-  const expirationWindow = env.SIGNATURE_EXPIRATION_WINDOW ? parseInt(env.SIGNATURE_EXPIRATION_WINDOW) : 15 * 60; // 15分钟
+  if (!isJwt) {
+    // 旧版签名逻辑：必须有时间戳
+    if (!timestamp) {
+      const error = new Error('Missing Upstash-Timestamp header');
+      Object.assign(error, { status: 401 });
+      throw error;
+    }
 
-  if (Math.abs(now - timestampNum) > expirationWindow) {
-    const error = new Error('Signature expired');
-    Object.assign(error, { status: 401 });
-    throw error;
+    // 手动检查时间戳过期 (仅针对旧版签名)
+    const timestampNum = parseInt(timestamp);
+    const now = Math.floor(Date.now() / 1000);
+    const expirationWindow = env.SIGNATURE_EXPIRATION_WINDOW ? parseInt(env.SIGNATURE_EXPIRATION_WINDOW) : 15 * 60;
+
+    if (Math.abs(now - timestampNum) > expirationWindow) {
+      const error = new Error('Signature expired');
+      Object.assign(error, { status: 401 });
+      throw error;
+    }
   }
 
+  // 调用 SDK 进行验证 (SDK 内部会自动处理 JWT 或 v1 签名)
   const receiver = new Receiver({
     currentSigningKey: env.QSTASH_CURRENT_SIGNING_KEY,
     nextSigningKey: env.QSTASH_NEXT_SIGNING_KEY,
