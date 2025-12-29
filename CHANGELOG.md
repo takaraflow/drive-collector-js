@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [3.2.1](https://github.com/YoungSx/drive-collector-js/compare/v3.2.0...v3.2.1) (2025-12-29)
+
+
+### 📝 文档更新
+
+* update CHANGELOG.md and fix test for release script ([0f5f12a](https://github.com/YoungSx/drive-collector-js/commit/0f5f12a91299e7494f5aa17a350d90241945a1d6))
+
+
+### ✨ 新特性
+
+* **scripts:** adapt release-ai to latest standards ([b53d6bb](https://github.com/YoungSx/drive-collector-js/commit/b53d6bb4f419281908d52e9a61d6036404ce75d1))
+
 ### [3.2.0](https://github.com/YoungSx/drive-collector-js/compare/v3.1.2...v3.2.0) (2025-12-30)
 
 #### ✨ Features
