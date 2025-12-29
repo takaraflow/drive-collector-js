@@ -136,6 +136,10 @@ jobs:
     needs: [build]
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
+    environment: production
+    env:
+      BARK_WEBHOOK_URL: ${{ secrets.BARK_WEBHOOK_URL }}
+      BARK_DEVICE_TOKEN: ${{ secrets.BARK_DEVICE_TOKEN }}
     steps:
       - name: Notify Bark result
         run: |
