@@ -9,6 +9,11 @@ on:
 jobs:
   update-registry:
     runs-on: ubuntu-latest
+    env:
+      # 将仓库地址和名称设为变量，方便后续脚本引用
+      CONTRACT_REPO: ${{ secrets.CONTRACT_REPO }}
+      REPO_DIR: "contract-repo"
+      REGISTRY_PATH: "registry"
     steps:
       # 1. 获取临时访问令牌 (使用之前创建的 GitHub App)
       - name: Generate Token
@@ -26,27 +31,31 @@ jobs:
       - name: Checkout Contract Center
         uses: actions/checkout@v4
         with:
-          repository: your-username/drive-collector-contract
+          repository: ${{ env.CONTRACT_REPO }}
           token: ${{ steps.generate_token.outputs.token }}
-          path: contract-repo # 检出到子目录
+          path: ${{ env.REPO_DIR }} # 检出到子目录
 
       # 4. 同步文件并提交
       - name: Sync and Commit
         run: |
           # 获取当前仓库名称，作为注册表里的文件名
-          REPO_NAME=$(basename ${{ github.repository }})
+          SELF_REPO_NAME=$(basename ${{ github.repository }})
           
+          # 【新增】确保目标目录存在，防止 cp 失败
+          mkdir -p ${{ env.REPO_DIR }}/${{ env.REGISTRY_PATH }}
+
           # 将本地 manifest 拷贝到契约仓的 registry 目录
-          cp manifest.json contract-repo/registry/${REPO_NAME}.json
-          
-          cd contract-repo
+          cp manifest.json ${{ env.REPO_DIR }}/${{ env.REGISTRY_PATH }}/${SELF_REPO_NAME}.json
+
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/${{ env.REPO_DIR }}"
+          cd ${{ env.REPO_DIR }}
           git config user.name "Manifest Bot"
           git config user.email "bot@internal.local"
           
           # 检查是否有文件变动，防止空提交报错
           if [[ -n $(git status -s) ]]; then
-            git add registry/${REPO_NAME}.json
-            git commit -m "chore: update manifest for ${REPO_NAME}"
+            git add ${{ env.REGISTRY_PATH }}/${SELF_REPO_NAME}.json
+            git commit -m "chore: update manifest for ${SELF_REPO_NAME}"
             git push
           else
             echo "No changes in manifest. Skipping push."
