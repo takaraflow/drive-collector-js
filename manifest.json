@@ -1,0 +1,201 @@
+{
+  "manifest_version": "1.1",
+  "id": "lb-worker-js",
+  "name": "QStash Load Balancer",
+  "version": "1.0.0",
+  "description": "专为 drive-collector-js 设计的高可用负载均衡器，支持 QStash 签名验证、动态实例发现与多层级故障转移。",
+  "type": "worker",
+  "capabilities": [
+    "load-balancing",
+    "dynamic-failover",
+    "signature-verification",
+    "instance-discovery",
+    "distributed-state-management"
+  ],
+  "behaviors": {
+    "webhookForwarder": {
+      "description": "接收并验证 QStash Webhook，根据轮询策略转发至活跃实例",
+      "input": "qstash-webhook",
+      "inputSchema": {
+        "type": "object",
+        "description": "接收任何有效的 QStash 负载并透传"
+      },
+      "forwarding": {
+        "strategy": "round-robin",
+        "targetHeader": "X-Load-Balancer",
+        "retryPolicy": "sequential-on-5xx"
+      },
+      "security": {
+        "mechanism": "qstash-signature-v2",
+        "headers": ["Upstash-Signature", "Upstash-Timestamp"]
+      },
+      "dependencies": [
+        "QStashService",
+        "InstanceProvider"
+      ],
+      "reliability": {
+        "timeout": 300,
+        "failover": "next-available-instance"
+      }
+    },
+    "instanceDiscovery": {
+      "description": "从存储后端发现活跃的 drive-collector-js 实例",
+      "storage": {
+        "primary": "Cloudflare KV",
+        "secondary": "Upstash Redis",
+        "prefix": "instance:",
+        "heartbeatThreshold": 1800000
+      },
+      "locking": {
+        "mechanism": "kv",
+        "key": "lb:round_robin_index",
+        "description": "维护全局轮询索引"
+      }
+    },
+    "healthChecker": {
+      "description": "提供 LB 运行状态检查",
+      "endpoints": {
+        "check": "/health"
+      }
+    }
+  },
+  "instanceRegistration": {
+    "mechanism": "Cloudflare KV",
+    "heartbeatInterval": 300,
+    "timeout": 900,
+    "keys": [
+      {
+        "pattern": "instance:{instanceId}",
+        "description": "实例元数据"
+      },
+      {
+        "pattern": "lb:round_robin_index",
+        "description": "全局轮询索引"
+      }
+    ],
+    "locking": {
+      "mechanism": "kv",
+      "operations": {
+        "acquire": "get-skip-cache-then-set-with-ttl",
+        "release": "delete",
+        "renew": "update-ttl"
+      },
+      "conflictResolution": "last-write-wins",
+      "description": "基于 KV 的分布式锁实现，用于轮询索引的并发控制"
+    },
+    "valueSchema": {
+      "instance": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "number"
+          },
+          "lastHeartbeat": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "offline"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "hostname",
+          "startedAt",
+          "lastHeartbeat",
+          "status"
+        ]
+      }
+    },
+    "reliability": {
+      "cleanupInterval": 60,
+      "maxLockHoldTime": 1800,
+      "lockRenewalThreshold": 0.7,
+      "failoverStrategy": "immediate-reacquire-on-timeout"
+    }
+  },
+  "entrypoint": "src/index.js",
+  "runtime": {
+    "type": "nodejs",
+    "version": ">=18.0.0"
+  },
+  "config": {
+    "env": {
+      "KV_STORAGE": {
+        "type": "kv-namespace",
+        "required": true,
+        "description": "用于存储实例信息和轮询索引的 Cloudflare KV 命名空间"
+      },
+      "QSTASH_CURRENT_SIGNING_KEY": {
+        "type": "string",
+        "required": true,
+        "description": "QStash 签名验证密钥"
+      },
+      "QSTASH_NEXT_SIGNING_KEY": {
+        "type": "string",
+        "required": false,
+        "description": "QStash 下一个签名验证密钥（用于密钥轮换）"
+      },
+      "UPSTASH_REDIS_REST_URL": {
+        "type": "string",
+        "required": false,
+        "description": "Upstash Redis API 地址，用于 KV 故障转移"
+      },
+      "UPSTASH_REDIS_REST_TOKEN": {
+        "type": "string",
+        "required": false,
+        "description": "Upstash Redis 访问令牌"
+      },
+      "AXIOM_TOKEN": {
+        "type": "string",
+        "required": false,
+        "description": "Axiom 日志令牌"
+      },
+      "AXIOM_DATASET": {
+        "type": "string",
+        "required": false,
+        "description": "Axiom 数据集名称"
+      },
+      "AXIOM_ORG_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Axiom 组织 ID"
+      },
+      "SIGNATURE_EXPIRATION_WINDOW": {
+        "type": "string",
+        "required": false,
+        "description": "签名过期窗口（秒），默认 900 秒（15 分钟）"
+      },
+      "SKIP_SIGNATURE_VERIFY": {
+        "type": "string",
+        "required": false,
+        "description": "跳过签名验证（仅用于测试环境）"
+      },
+      "NODE_ENV": {
+        "type": "string",
+        "required": false,
+        "description": "运行环境（production/development）"
+      }
+    }
+  },
+  "endpoints": {
+    "health": "/health",
+    "webhook": "/"
+  }
+}
