@@ -30,15 +30,20 @@ export async function startDispatcher() {
     const startTelegramClient = async () => {
         // 防止重入：如果正在启动中，直接返回
         if (isClientStarting) {
-            logger.info("⏳ 客户端正在启动中，跳过本次重试...");
+            logger.debug("⏳ 客户端正在启动中，跳过本次重试...");
             return false;
         }
 
+        // 检查是否已经持有锁（用于区分首次获取和续租）
+        const alreadyHasLock = await instanceCoordinator.hasLock("telegram_client");
+        
         // 尝试获取 Telegram 客户端专属锁 (增加 TTL 到 90s，减少因延迟导致的丢失)
         const hasLock = await instanceCoordinator.acquireLock("telegram_client", 90);
+        
         if (!hasLock) {
             if (isClientActive) {
-                logger.warn("🚨 失去 Telegram 锁或无法续租，正在断开连接...");
+                // 只有在真正失去锁时才记录警告日志
+                logger.warn("🚨 失去 Telegram 锁，正在断开连接...");
                 try {
                     // 强制断开，并设置较短的超时防止卡死在 disconnect
                     await Promise.race([
@@ -49,14 +54,30 @@ export async function startDispatcher() {
                     logger.error("⚠️ 断开连接时出错:", e.message);
                 }
                 isClientActive = false;
+            } else {
+                // 静默续租失败，但客户端未激活，只需调试日志
+                logger.debug("🔒 续租失败，客户端未激活");
             }
             return false;
         }
 
-        if (isClientActive) return true; // 已启动且持有锁
+        // 成功获取锁
+        if (isClientActive) {
+            // 续租成功，只在调试模式下记录
+            if (alreadyHasLock) {
+                logger.debug("🔒 静默续租成功");
+            }
+            return true;
+        }
 
         isClientStarting = true; // 标记开始启动
-        logger.info("👑 已获取 Telegram 锁，正在启动客户端...");
+        
+        // 首次获取锁，记录信息日志
+        if (!alreadyHasLock) {
+            logger.info("👑 已获取 Telegram 锁，正在启动客户端...");
+        } else {
+            logger.debug("🔒 续租成功，客户端已激活");
+        }
 
         let retryCount = 0;
         const maxRetries = 3;
@@ -120,10 +141,21 @@ export async function startDispatcher() {
     // 初始启动尝试
     await startTelegramClient();
 
-    // 定期检查/续租锁
-    setInterval(async () => {
-        await startTelegramClient();
-    }, 30000);
+    // 定期检查/续租锁，加入随机抖动防止多个实例同时触发
+    const startIntervalWithJitter = () => {
+        // 基础间隔 30s，加上 ±5s 的随机抖动
+        const jitter = Math.random() * 10000 - 5000; // -5000 到 +5000ms
+        const interval = 30000 + jitter;
+        
+        setTimeout(async () => {
+            await startTelegramClient();
+            // 递归调用以实现持续的带抖动的间隔
+            startIntervalWithJitter();
+        }, interval);
+    };
+    
+    // 启动带抖动的间隔
+    startIntervalWithJitter();
 
     // 4. 注册事件监听器 -> 交给 MessageHandler 处理
     // 初始化 MessageHandler (预加载 Bot ID)

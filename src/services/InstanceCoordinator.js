@@ -241,11 +241,11 @@ export class InstanceCoordinator {
     }
 
     /**
-     * 尝试获取分布式锁
-     * @param {string} lockKey - 锁的键
-     * @param {number} ttl - 锁的TTL（秒）
-     * @returns {boolean} 是否获取成功
-     */
+      * 尝试获取分布式锁
+      * @param {string} lockKey - 锁的键
+      * @param {number} ttl - 锁的TTL（秒）
+      * @returns {boolean} 是否获取成功
+      */
     async acquireLock(lockKey, ttl = 300) {
         const lockValue = {
             instanceId: this.instanceId,
@@ -271,7 +271,15 @@ export class InstanceCoordinator {
             // 设置锁，使用时间戳作为额外的验证
             lockValue.version = Date.now();
             await kv.set(`lock:${lockKey}`, lockValue, ttl, { skipCache: true });
-            return true;
+            
+            // 双重校验：写入后立即验证是否确实是自己的锁
+            const verified = await kv.get(`lock:${lockKey}`, "json", { skipCache: true });
+            if (verified && verified.instanceId === this.instanceId && verified.version === lockValue.version) {
+                return true;
+            }
+            
+            // 被其他实例抢先覆盖了
+            return false;
         } catch (e) {
             logger.error(`获取锁失败 ${lockKey}:`, e?.message || String(e));
             return false;

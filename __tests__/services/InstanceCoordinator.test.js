@@ -131,50 +131,115 @@ describe("InstanceCoordinator", () => {
   });
 
   describe("acquireLock", () => {
-    test("should acquire lock when no existing lock", async () => {
-      // Mock kv.get to return null (no existing lock)
-      const getSpy = jest.spyOn(kv, 'get').mockResolvedValue(null);
-      const setSpy = jest.spyOn(kv, 'set').mockResolvedValue(true);
+      test("should acquire lock when no existing lock", async () => {
+          // Mock kv.get to return null (no existing lock), then return verified lock
+          const expectedVersion = 1234567890;
+          const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedVersion);
+          
+          const getSpy = jest.spyOn(kv, 'get')
+              .mockResolvedValueOnce(null) // First call - no existing lock
+              .mockResolvedValueOnce({    // Second call - verification
+                  instanceId: "test_instance_123",
+                  acquiredAt: expectedVersion,
+                  ttl: 300,
+                  version: expectedVersion
+              });
+          const setSpy = jest.spyOn(kv, 'set').mockResolvedValue(true);
 
-      const result = await instanceCoordinator.acquireLock("test_lock");
-      expect(result).toBe(true);
+          const result = await instanceCoordinator.acquireLock("test_lock");
+          expect(result).toBe(true);
 
-      getSpy.mockRestore();
-      setSpy.mockRestore();
-    });
-
-    test("should fail to acquire lock when already held by another instance", async () => {
-      const existingLock = {
-        instanceId: "other_instance",
-        acquiredAt: Date.now(),
-        ttl: 300,
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        json: () => Promise.resolve(existingLock),
+          dateSpy.mockRestore();
+          getSpy.mockRestore();
+          setSpy.mockRestore();
       });
 
-      const result = await instanceCoordinator.acquireLock("test_lock");
-      expect(result).toBe(false);
-    });
+      test("should fail to acquire lock when already held by another instance", async () => {
+          const existingLock = {
+              instanceId: "other_instance",
+              acquiredAt: Date.now(),
+              ttl: 300,
+          };
 
-    test("should acquire lock when existing lock is expired", async () => {
-      const expiredLock = {
-        instanceId: "other_instance",
-        acquiredAt: Date.now() - 400000, // 400 seconds ago (TTL is 300)
-        ttl: 300,
-      };
+          const getSpy = jest.spyOn(kv, 'get').mockResolvedValue(existingLock);
 
-      // Mock kv.get to return expired lock
-      const getSpy = jest.spyOn(kv, 'get').mockResolvedValue(expiredLock);
-      const setSpy = jest.spyOn(kv, 'set').mockResolvedValue(true);
+          const result = await instanceCoordinator.acquireLock("test_lock");
+          expect(result).toBe(false);
 
-      const result = await instanceCoordinator.acquireLock("test_lock");
-      expect(result).toBe(true);
+          getSpy.mockRestore();
+      });
 
-      getSpy.mockRestore();
-      setSpy.mockRestore();
-    });
+      test("should acquire lock when existing lock is expired", async () => {
+          const expectedVersion = 1234567890;
+          const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedVersion);
+          
+          const expiredLock = {
+              instanceId: "other_instance",
+              acquiredAt: expectedVersion - 400000, // 400 seconds ago (TTL is 300)
+              ttl: 300,
+          };
+
+          // Mock kv.get to return expired lock, then return verified lock
+          const getSpy = jest.spyOn(kv, 'get')
+              .mockResolvedValueOnce(expiredLock) // First call - expired lock
+              .mockResolvedValueOnce({            // Second call - verification
+                  instanceId: "test_instance_123",
+                  acquiredAt: expectedVersion,
+                  ttl: 300,
+                  version: expectedVersion
+              });
+          const setSpy = jest.spyOn(kv, 'set').mockResolvedValue(true);
+
+          const result = await instanceCoordinator.acquireLock("test_lock");
+          expect(result).toBe(true);
+
+          dateSpy.mockRestore();
+          getSpy.mockRestore();
+          setSpy.mockRestore();
+      });
+
+      test("should fail when double-check verification fails (race condition)", async () => {
+          // Mock kv.get to return null initially, but verification shows different instance
+          const getSpy = jest.spyOn(kv, 'get')
+              .mockResolvedValueOnce(null) // First call - no existing lock
+              .mockResolvedValueOnce({    // Second call - verification shows race condition
+                  instanceId: "other_instance", // Different instance!
+                  acquiredAt: Date.now(),
+                  ttl: 300,
+                  version: 999 // Different version
+              });
+          const setSpy = jest.spyOn(kv, 'set').mockResolvedValue(true);
+
+          const result = await instanceCoordinator.acquireLock("test_lock");
+          expect(result).toBe(false); // Should fail due to race condition
+
+          getSpy.mockRestore();
+          setSpy.mockRestore();
+      });
+
+      test("should succeed when double-check verification passes", async () => {
+          const expectedVersion = 1234567890;
+          
+          // Mock Date.now to return consistent version
+          const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedVersion);
+          
+          const getSpy = jest.spyOn(kv, 'get')
+              .mockResolvedValueOnce(null) // First call - no existing lock
+              .mockResolvedValueOnce({    // Second call - verification passes
+                  instanceId: "test_instance_123",
+                  acquiredAt: expectedVersion,
+                  ttl: 300,
+                  version: expectedVersion
+              });
+          const setSpy = jest.spyOn(kv, 'set').mockResolvedValue(true);
+
+          const result = await instanceCoordinator.acquireLock("test_lock");
+          expect(result).toBe(true);
+
+          dateSpy.mockRestore();
+          getSpy.mockRestore();
+          setSpy.mockRestore();
+      });
   });
 
   describe("releaseLock", () => {

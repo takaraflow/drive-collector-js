@@ -36,6 +36,7 @@ const mockLogger = {
   info: jest.fn(),
   warn: jest.fn(),
   error: jest.fn(),
+  debug: jest.fn(),
 };
 
 jest.unstable_mockModule('../../src/services/logger.js', () => ({
@@ -53,6 +54,7 @@ describe('Dispatcher Bootstrap', () => {
 
   it('should start successfully when lock acquired', async () => {
     const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+    mockInstanceCoordinator.hasLock.mockResolvedValue(false);
     mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
 
     const mockTelegram = await import('../../src/services/telegram.js');
@@ -72,6 +74,7 @@ describe('Dispatcher Bootstrap', () => {
 
   it('should not start client when lock not acquired', async () => {
     const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+    mockInstanceCoordinator.hasLock.mockResolvedValue(false);
     mockInstanceCoordinator.acquireLock.mockResolvedValue(false);
 
     const mockTelegram = await import('../../src/services/telegram.js');

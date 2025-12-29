@@ -18,6 +18,7 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
 
         mockCoordinator = {
             acquireLock: jest.fn().mockResolvedValue(true),
+            hasLock: jest.fn().mockResolvedValue(false),
             instanceId: "inst_1"
         };
     });
@@ -27,13 +28,17 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
     });
 
     /**
-     * 模拟 index.js 中的 startTelegramClient 逻辑
+     * 模拟 index.js 中的 startTelegramClient 逻辑（适配新版本）
      */
     async function simulateStartTelegramClient(context) {
+        // 检查是否已经持有锁（用于区分首次获取和续租）
+        const alreadyHasLock = await mockCoordinator.hasLock("telegram_client");
+        
         const hasLock = await mockCoordinator.acquireLock("telegram_client", 90);
         
         if (!hasLock) {
             if (context.isClientActive) {
+                // 只有在真正失去锁时才记录警告日志
                 console.log("🚨 失去 Telegram 锁，正在断开连接...");
                 try {
                     // 核心逻辑：Promise.race 保护
@@ -45,11 +50,30 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
                     console.log("⚠️ 断开连接时出错:", e.message);
                 }
                 context.isClientActive = false;
+            } else {
+                // 静默续租失败，但客户端未激活，只需调试日志
+                console.log("🔒 续租失败，客户端未激活");
             }
+            context.hasLock = false;
             return false;
         }
 
-        if (context.isClientActive) return true;
+        // 成功获取锁
+        
+        if (context.isClientActive) {
+            // 续租成功，只在调试模式下记录
+            if (alreadyHasLock) {
+                console.log("🔒 静默续租成功");
+            }
+            return true;
+        }
+        
+        // 首次获取锁，记录信息日志
+        if (!alreadyHasLock) {
+            console.log("👑 已获取 Telegram 锁，正在启动客户端...");
+        } else {
+            console.log("🔒 续租成功，客户端已激活");
+        }
         
         await mockClient.start();
         context.isClientActive = true;
