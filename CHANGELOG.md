@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.0.1](https://github.com/YoungSx/drive-collector-js/compare/v4.0.0...v4.0.1) (2025-12-30)
+
+
+### 🔧 其他任务
+
+* update version and fix ci ([f2c96e0](https://github.com/YoungSx/drive-collector-js/commit/f2c96e04ab3137e0393d86cb6fdf106be7b7199f))
+
 ### [3.3.0](https://github.com/YoungSx/drive-collector-js/compare/v3.2.4...v3.3.0) (2025-12-30)
 
 #### ✨ Features
