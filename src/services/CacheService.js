@@ -13,12 +13,23 @@ export class CacheService {
         // L1 内存缓存配置
         this.l1CacheTtl = 10 * 1000; // 默认 10 秒内存缓存
 
-        // Redis 配置 (Northflank) - 添加防御性编程
+        // Redis 配置 - 支持多种环境变量格式
         const redisConfig = config.redis || {};
-        this.redisUrl = redisConfig.url;
-        this.redisHost = redisConfig.host;
-        this.redisPort = redisConfig.port || 6379;
-        this.redisPassword = redisConfig.password;
+        
+        // 优先使用标准环境变量
+        this.redisUrl = process.env.REDIS_URL || redisConfig.url;
+        this.redisHost = process.env.REDIS_HOST || redisConfig.host;
+        this.redisPort = parseInt(process.env.REDIS_PORT, 10) || redisConfig.port || 6379;
+        this.redisPassword = process.env.REDIS_PASSWORD || redisConfig.password;
+        
+        // 支持 Northflank 环境变量 (NF_ 前缀)
+        if (!this.redisUrl && !this.redisHost) {
+            this.redisUrl = process.env.NF_REDIS_URL;
+            this.redisHost = process.env.NF_REDIS_HOST;
+            this.redisPort = parseInt(process.env.NF_REDIS_PORT, 10) || this.redisPort;
+            this.redisPassword = process.env.NF_REDIS_PASSWORD || this.redisPassword;
+        }
+        
         this.hasRedis = !!(this.redisUrl || (this.redisHost && this.redisPort));
 
         // Cloudflare KV 配置 - 支持新旧变量名
@@ -110,6 +121,11 @@ export class CacheService {
                         logger.warn(`⚠️ Redis 重连错误: ${err.message}，将尝试重连`);
                     }
                     return shouldReconnect;
+                },
+                // TLS 配置 - 从环境变量读取 SNI 主机名
+                tls: {
+                    rejectUnauthorized: false, // 禁用证书验证（Northflank环境需要）
+                    servername: process.env.REDIS_SNI_SERVERNAME || process.env.REDIS_HOST || process.env.NF_REDIS_HOST || (this.redisUrl ? new URL(this.redisUrl).hostname : undefined), // SNI 主机名从环境变量读取
                 }
             };
 
