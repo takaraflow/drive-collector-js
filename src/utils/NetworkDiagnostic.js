@@ -6,6 +6,8 @@ import { DriveRepository } from "../repositories/DriveRepository.js";
 import { config } from "../config/index.js";
 import { spawnSync } from "child_process";
 import * as fs from "fs";
+import * as net from "net";
+import * as dns from "dns";
 
 /**
  * 网络诊断工具
@@ -27,8 +29,13 @@ export class NetworkDiagnostic {
         // 检查 Cloudflare D1
         results.services.d1 = await this._checkD1();
 
-        // 检查 Cloudflare KV
+        // 检查 Cache 存储 (Redis/KV)
         results.services.kv = await this._checkCache();
+
+        // 专门检查 Redis 连接 (如果使用 Redis)
+        if (cache.currentProvider === 'redis' && cache.redisClient) {
+            results.services.redis = await this._checkRedisConnection();
+        }
 
         // 检查 rclone
         results.services.rclone = await this._checkRclone();
@@ -153,6 +160,162 @@ export class NetworkDiagnostic {
                 status: 'error',
                 responseTime: `${Date.now() - startTime}ms`,
                 message: `${cacheProvider} 连接失败: ${error.message}`
+            };
+        }
+    }
+
+    /**
+     * 专门检查 Redis 连接质量和延迟
+     */
+    static async _checkRedisConnection() {
+        const startTime = Date.now();
+        const diagnostics = {
+            connectionTime: 0,
+            pingLatency: [],
+            operationsLatency: {},
+            dnsResolutionTime: null,
+            portReachability: null,
+            northflankEnv: {}
+        };
+
+        try {
+            if (!cache.redisClient) {
+                return {
+                    status: 'error',
+                    responseTime: '0ms',
+                    message: 'Redis 客户端未初始化'
+                };
+            }
+
+            // Northflank 环境变量检测
+            const northflankVars = ['NF_SERVICE_ID', 'NF_PROJECT_ID', 'NF_REGION', 'NF_IMAGE', 'NF_DEPLOYMENT_ID'];
+            northflankVars.forEach(varName => {
+                if (process.env[varName]) {
+                    diagnostics.northflankEnv[varName] = process.env[varName];
+                }
+            });
+
+            const connectionInfo = cache.redisClient.options || {};
+            const host = connectionInfo.host;
+            const port = connectionInfo.port || 6379;
+
+            // DNS 解析耗时检测
+            if (host && !net.isIP(host)) {
+                try {
+                    const dnsStart = Date.now();
+                    await new Promise((resolve, reject) => {
+                        dns.lookup(host, { family: 4 }, (err, address, family) => {
+                            if (err) reject(err);
+                            else resolve({ address, family });
+                        });
+                    });
+                    diagnostics.dnsResolutionTime = Date.now() - dnsStart;
+                } catch (dnsError) {
+                    diagnostics.dnsResolutionTime = `failed: ${dnsError.code || dnsError.message}`;
+                }
+            }
+
+            // Redis 节点可达性测试 (TCP 连接测试)
+            try {
+                const portTestStart = Date.now();
+                await new Promise((resolve, reject) => {
+                    const socket = net.createConnection({ host, port, timeout: 5000 });
+                    socket.on('connect', () => {
+                        socket.end();
+                        resolve();
+                    });
+                    socket.on('error', reject);
+                    socket.on('timeout', () => {
+                        socket.destroy();
+                        reject(new Error('Connection timeout'));
+                    });
+                });
+                diagnostics.portReachability = Date.now() - portTestStart;
+            } catch (portError) {
+                diagnostics.portReachability = `unreachable: ${portError.message}`;
+            }
+
+            // 1. 测试基础连接延迟
+            const pingStart = Date.now();
+            await cache.redisClient.ping();
+            diagnostics.connectionTime = Date.now() - pingStart;
+
+            // 2. 多次 ping 测试以获得平均延迟
+            for (let i = 0; i < 3; i++) {
+                const pingTime = Date.now();
+                await cache.redisClient.ping();
+                diagnostics.pingLatency.push(Date.now() - pingTime);
+                await new Promise(resolve => setTimeout(resolve, 100)); // 小延迟避免拥塞
+            }
+
+            // 3. 测试基本操作延迟
+            const testKey = `__redis_diag_${Date.now()}__`;
+
+            // SET 操作
+            const setStart = Date.now();
+            await cache.redisClient.set(testKey, 'diagnostic_test');
+            diagnostics.operationsLatency.set = Date.now() - setStart;
+
+            // GET 操作
+            const getStart = Date.now();
+            await cache.redisClient.get(testKey);
+            diagnostics.operationsLatency.get = Date.now() - getStart;
+
+            // DEL 操作
+            const delStart = Date.now();
+            await cache.redisClient.del(testKey);
+            diagnostics.operationsLatency.del = Date.now() - delStart;
+
+            const totalTime = Date.now() - startTime;
+            const avgPing = diagnostics.pingLatency.reduce((a, b) => a + b, 0) / diagnostics.pingLatency.length;
+
+            // 分析结果
+            let status = 'ok';
+            let performance = 'good';
+            let warnings = [];
+
+            if (avgPing > 100) performance = 'fair';
+            if (avgPing > 500) {
+                performance = 'poor';
+                warnings.push('高延迟连接');
+            }
+
+            if (diagnostics.operationsLatency.set > 50 || diagnostics.operationsLatency.get > 50) {
+                warnings.push('操作延迟较高');
+            }
+
+            const message = `Northflank Redis 连接正常 (延迟: ${avgPing.toFixed(1)}ms, 性能: ${performance})` +
+                           (warnings.length > 0 ? ` - 警告: ${warnings.join(', ')}` : '');
+
+            return {
+                status,
+                responseTime: `${totalTime}ms`,
+                message,
+                details: {
+                    host: connectionInfo.host || 'unknown',
+                    port: connectionInfo.port || 'unknown',
+                    avgPingMs: avgPing.toFixed(1),
+                    performance,
+                    operations: diagnostics.operationsLatency,
+                    connectionTimeMs: diagnostics.connectionTime,
+                    warnings: warnings.length > 0 ? warnings : null,
+                    dnsResolutionTime: diagnostics.dnsResolutionTime,
+                    portReachability: diagnostics.portReachability,
+                    northflankEnv: Object.keys(diagnostics.northflankEnv).length > 0 ? diagnostics.northflankEnv : null
+                }
+            };
+
+        } catch (error) {
+            const totalTime = Date.now() - startTime;
+            return {
+                status: 'error',
+                responseTime: `${totalTime}ms`,
+                message: `Northflank Redis 连接失败: ${error.message}`,
+                details: {
+                    error: error.message,
+                    code: error.code,
+                    errno: error.errno
+                }
             };
         }
     }

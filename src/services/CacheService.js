@@ -43,6 +43,7 @@ class CacheService {
 
         // 动态导入 ioredis (环境检测)
         this.redisClient = null;
+        this.heartbeatTimer = null; // 心跳定时器
         this._initRedis();
 
         // 设置默认提供商优先级
@@ -73,12 +74,14 @@ class CacheService {
             // 动态导入 ioredis
             const Redis = (await import('ioredis')).default;
             
-            // 构造连接配置
+            // 构造连接配置 - 优化TCP keepalive和连接参数
             const redisConfig = {
-                connectTimeout: 5000, // 5秒连接超时
+                connectTimeout: 10000, // 连接超时调整为10秒
                 maxRetriesPerRequest: 3,
+                keepAlive: 10000, // TCP keep-alive，每10秒发送一次
+                family: 4, // 强制使用IPv4
                 retryStrategy: (times) => {
-                    const delay = Math.min(times * 50, 2000);
+                    const delay = Math.min(times * 100, 5000); // 指数退避，最大5秒间隔
                     logger.warn(`⚠️ Redis 重试尝试 ${times}，延迟 ${delay}ms`);
                     return delay;
                 },
@@ -99,24 +102,112 @@ class CacheService {
                 }
             }
 
+            // 记录Redis配置信息（用于诊断）
+            logger.info('🔄 Redis 初始化配置', {
+                hasUrl: !!this.redisUrl,
+                hasHost: !!this.redisHost,
+                port: this.redisPort,
+                hasPassword: !!this.redisPassword,
+                connectTimeout: redisConfig.connectTimeout,
+                maxRetriesPerRequest: redisConfig.maxRetriesPerRequest,
+                node_env: process.env.NODE_ENV,
+                platform: process.platform
+            });
+
             this.redisClient = new Redis(redisConfig);
 
-            // 连接事件监听
+            // 连接事件监听 (增强诊断)
             this.redisClient.on('connect', () => {
-                logger.info('✅ Northflank Redis 连接成功');
+                this.connectTime = Date.now();
+                logger.info(`✅ Redis CONNECT: ${this.redisHost || this.redisUrl}:${this.redisPort} at ${new Date(this.connectTime).toISOString()}`, {
+                    host: this.redisHost,
+                    port: this.redisPort,
+                    url: this.redisUrl ? 'configured' : 'not configured',
+                    hasPassword: !!this.redisPassword,
+                    node_env: process.env.NODE_ENV,
+                    platform: process.platform
+                });
+            });
+
+            this.redisClient.on('ready', () => {
+                const connectDuration = Date.now() - this.connectTime;
+                logger.info(`✅ Redis READY: Connection established in ${connectDuration}ms`, {
+                    totalConnections: this.redisClient.options?.maxRetriesPerRequest || 'unknown',
+                    connectTimeout: this.redisClient.options?.connectTimeout || 'unknown'
+                });
+            });
+
+            this.redisClient.on('reconnecting', (ms) => {
+                logger.warn(`🔄 Redis RECONNECTING: Attempting reconnection in ${ms}ms`, {
+                    lastError: this.lastError,
+                    failureCount: this.failureCount,
+                    currentProvider: this.currentProvider
+                });
             });
 
             this.redisClient.on('error', (error) => {
-                logger.error(`🚨 Redis 连接错误: ${error.message}`);
+                const now = Date.now();
+                const uptime = this.connectTime ? Math.round((now - this.connectTime) / 1000) : 0;
+                logger.error(`🚨 Redis ERROR: ${error.message}`, {
+                    code: error.code,
+                    errno: error.errno,
+                    syscall: error.syscall,
+                    hostname: error.hostname,
+                    port: error.port,
+                    address: error.address,
+                    uptime: `${uptime}s`,
+                    node_env: process.env.NODE_ENV,
+                    platform: process.platform,
+                    stack: error.stack?.split('\n')[0] // 只记录第一行堆栈
+                });
+                this.lastRedisError = error.message;
             });
 
             this.redisClient.on('close', () => {
-                logger.warn('⚠️ Redis 连接已关闭');
+                const now = Date.now();
+                const duration = this.connectTime ? now - this.connectTime : 0;
+                logger.warn(`⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`, {
+                    durationMs: duration,
+                    lastError: this.lastRedisError || 'none',
+                    failureCount: this.failureCount,
+                    currentProvider: this.currentProvider,
+                    hasPassword: !!this.redisPassword,
+                    node_env: process.env.NODE_ENV,
+                    platform: process.platform
+                });
+                // 清理心跳定时器
+                this._stopHeartbeat();
             });
 
-            // 测试连接
-            await this.redisClient.ping();
-            logger.info('🔄 Cache服务：使用 Northflank Redis');
+            // 添加更多诊断事件
+            this.redisClient.on('wait', () => {
+                logger.debug('🔄 Redis WAIT: Command queued, waiting for connection');
+            });
+
+            this.redisClient.on('end', () => {
+                logger.warn('⚠️ Redis END: Connection ended by client');
+            });
+
+            this.redisClient.on('select', (db) => {
+                logger.debug(`🔄 Redis SELECT: Database ${db} selected`);
+            });
+
+            // 测试连接并测量延迟
+            const pingStart = Date.now();
+            const pingResult = await this.redisClient.ping();
+            const pingDuration = Date.now() - pingStart;
+
+            logger.info('🔄 Cache服务：使用 Northflank Redis', {
+                pingResult,
+                pingDurationMs: pingDuration,
+                pingThreshold: pingDuration > 1000 ? 'high' : pingDuration > 500 ? 'medium' : 'low',
+                connectionReady: this.redisClient.status === 'ready',
+                node_env: process.env.NODE_ENV,
+                platform: process.platform
+            });
+
+            // 启动应用层心跳机制 - 每2分钟执行一次PING
+            this._startHeartbeat();
 
         } catch (error) {
             logger.error(`🚨 Redis 初始化失败: ${error.message}`);
@@ -424,7 +515,18 @@ class CacheService {
                 }
 
                 if (this._shouldFailover(error)) {
-                    if (this._failover()) continue;
+                    logger.info(`🔄 检测到可恢复错误，准备故障转移`, {
+                        currentProvider: this.currentProvider,
+                        failureCount: this.failureCount,
+                        lastError: error.message,
+                        errorType: this._isRetryableError(error) ? 'retryable' : 'non-retryable'
+                    });
+                    if (this._failover()) {
+                        logger.info(`✅ 故障转移成功，现在使用 ${this.getCurrentProvider()}`);
+                        continue;
+                    } else {
+                        logger.warn(`❌ 故障转移失败，无可用后备提供商`);
+                    }
                 }
 
                 if (attempts >= maxAttempts) throw error;
@@ -468,17 +570,51 @@ class CacheService {
             throw new Error('Redis 客户端未初始化');
         }
 
-        const value = await this.redisClient.get(key);
-        if (value === null || value === undefined) return null;
+        const startTime = Date.now();
+        try {
+            const value = await this.redisClient.get(key);
+            const duration = Date.now() - startTime;
 
-        if (type === "json") {
-            try {
-                return JSON.parse(value);
-            } catch (e) {
-                return value;
+            if (value === null || value === undefined) {
+                logger.debug(`🔍 Redis GET: Key '${key}' not found`, {
+                    durationMs: duration,
+                    clientStatus: this.redisClient.status
+                });
+                return null;
             }
+
+            let parsedValue;
+            if (type === "json") {
+                try {
+                    parsedValue = JSON.parse(value);
+                } catch (e) {
+                    logger.warn(`⚠️ Redis GET: JSON parse failed for key '${key}', returning raw value`, {
+                        error: e.message,
+                        durationMs: duration
+                    });
+                    parsedValue = value;
+                }
+            } else {
+                parsedValue = value;
+            }
+
+            logger.debug(`✅ Redis GET: Key '${key}' retrieved`, {
+                durationMs: duration,
+                valueSize: value.length,
+                parsedType: type
+            });
+
+            return parsedValue;
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            logger.error(`🚨 Redis GET failed for key '${key}'`, {
+                error: error.message,
+                code: error.code,
+                durationMs: duration,
+                clientStatus: this.redisClient.status
+            });
+            throw error;
         }
-        return value;
     }
 
     /**
@@ -489,18 +625,54 @@ class CacheService {
             throw new Error('Redis 客户端未初始化');
         }
 
-        const valueStr = typeof value === "string" ? value : JSON.stringify(value);
+        const startTime = Date.now();
+        try {
+            const valueStr = typeof value === "string" ? value : JSON.stringify(value);
+            let result;
 
-        if (expirationTtl !== null && expirationTtl !== undefined) {
-            const ttl = parseInt(expirationTtl, 10);
-            if (!isNaN(ttl) && ttl > 0) {
-                return await this.redisClient.set(key, valueStr, 'EX', ttl);
-            } else if (ttl !== 0) {
-                logger.warn(`⚠️ Redis set: 无效的 TTL 值 ${expirationTtl}，跳过过期设置 (${key})`);
+            if (expirationTtl !== null && expirationTtl !== undefined) {
+                const ttl = parseInt(expirationTtl, 10);
+                if (!isNaN(ttl) && ttl > 0) {
+                    result = await this.redisClient.set(key, valueStr, 'EX', ttl);
+                    logger.debug(`✅ Redis SET with TTL: Key '${key}' set`, {
+                        durationMs: Date.now() - startTime,
+                        ttlSeconds: ttl,
+                        valueSize: valueStr.length,
+                        clientStatus: this.redisClient.status
+                    });
+                } else if (ttl !== 0) {
+                    logger.warn(`⚠️ Redis SET: Invalid TTL value ${expirationTtl}, skipping expiration (${key})`, {
+                        originalTtl: expirationTtl,
+                        parsedTtl: ttl
+                    });
+                    result = await this.redisClient.set(key, valueStr);
+                } else {
+                    result = await this.redisClient.set(key, valueStr);
+                }
+            } else {
+                result = await this.redisClient.set(key, valueStr);
             }
-        }
 
-        return await this.redisClient.set(key, valueStr);
+            const duration = Date.now() - startTime;
+            logger.debug(`✅ Redis SET: Key '${key}' set successfully`, {
+                durationMs: duration,
+                valueSize: valueStr.length,
+                hasTtl: expirationTtl !== null,
+                result
+            });
+
+            return result;
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            logger.error(`🚨 Redis SET failed for key '${key}'`, {
+                error: error.message,
+                code: error.code,
+                durationMs: duration,
+                valueSize: typeof value === "string" ? value.length : JSON.stringify(value).length,
+                clientStatus: this.redisClient.status
+            });
+            throw error;
+        }
     }
 
     /**
@@ -933,6 +1105,60 @@ class CacheService {
             localCache.set(`cache:${p.key}`, p.value, this.l1CacheTtl);
         });
         return await this._executeWithFailover('bulkSet', pairs);
+    }
+
+    /**
+     * 启动应用层心跳机制 - 每2分钟执行一次PING
+     */
+    _startHeartbeat() {
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+        }
+
+        const heartbeatInterval = 2 * 60 * 1000; // 2分钟
+        logger.info(`🫀 启动 Redis 心跳机制，间隔: ${heartbeatInterval / 1000} 秒`);
+
+        this.heartbeatTimer = setInterval(async () => {
+            if (!this.redisClient || this.redisClient.status !== 'ready') {
+                logger.debug('💔 心跳跳过：Redis 客户端未就绪');
+                return;
+            }
+
+            try {
+                const pingStart = Date.now();
+                const pingResult = await this.redisClient.ping();
+                const pingDuration = Date.now() - pingStart;
+
+                logger.debug('💓 Redis 心跳 PING', {
+                    result: pingResult,
+                    durationMs: pingDuration,
+                    status: this.redisClient.status
+                });
+
+                // 如果PING失败，记录错误但不强制重连（依赖ioredis内置重连）
+                if (pingResult !== 'PONG') {
+                    logger.warn('⚠️ Redis 心跳异常响应', { result: pingResult });
+                }
+            } catch (error) {
+                logger.warn('🚨 Redis 心跳失败', {
+                    error: error.message,
+                    code: error.code,
+                    clientStatus: this.redisClient?.status
+                });
+                // 不在这里触发重连，让ioredis的内置机制处理
+            }
+        }, heartbeatInterval);
+    }
+
+    /**
+     * 停止心跳机制
+     */
+    _stopHeartbeat() {
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+            logger.info('🛑 Redis 心跳机制已停止');
+        }
     }
 }
 
