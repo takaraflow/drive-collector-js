@@ -71,8 +71,17 @@ class CacheService {
                 return;
             }
 
-            // 动态导入 ioredis
-            const Redis = (await import('ioredis')).default;
+            // 动态导入 ioredis - 添加超时控制
+            console.log('[DEBUG] 开始导入 ioredis...');
+            const importStart = Date.now();
+            const importPromise = import('ioredis');
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('ioredis import timeout after 10 seconds')), 10000)
+            );
+
+            const ioredisModule = await Promise.race([importPromise, timeoutPromise]);
+            const Redis = ioredisModule.default;
+            console.log(`[DEBUG] ioredis 导入完成，耗时: ${Date.now() - importStart}ms`);
             
             // 构造连接配置 - 优化TCP keepalive和连接参数，适配Northflank环境
             const redisConfig = {
