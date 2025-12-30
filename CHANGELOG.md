@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.1.0](https://github.com/YoungSx/drive-collector-js/compare/v4.0.2...v4.1.0) (2025-12-30)
+
+
+### ✨ 新特性
+
+* add telegram proxy support and enhance connection stability ([5ddb672](https://github.com/YoungSx/drive-collector-js/commit/5ddb672eebb635dea3ecb54fd69f3a0479f8c906))
+
 ### [4.0.2](https://github.com/YoungSx/drive-collector-js/compare/v4.0.1...v4.0.2) (2025-12-30)
 
 

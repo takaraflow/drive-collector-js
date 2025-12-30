@@ -2,7 +2,7 @@
   "manifest_version": "1.1",
   "id": "drive-collector-js",
   "name": "Drive Collector Bot",
-  "version": "4.0.2",
+  "version": "4.1.0",
   "description": "基于 JSON Schema 契约中心的分布式转存项目，支持 Telegram 媒体转存至 Rclone/S3。",
   "type": "worker",
   "capabilities": [
@@ -557,7 +557,10 @@
       "TELEGRAM_PROXY_TYPE": {
         "type": "string",
         "required": false,
-        "enum": ["socks4", "socks5"],
+        "enum": [
+          "socks4",
+          "socks5"
+        ],
         "default": "socks5",
         "description": "Telegram 代理类型，支持 socks4 和 socks5"
       },
