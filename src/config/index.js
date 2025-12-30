@@ -16,7 +16,7 @@ function validateEnvironment() {
     
     // 在测试环境中跳过验证
     if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID) {
-        logger.warn('⚠️ 测试环境，跳过环境变量验证');
+        console.warn('⚠️ 测试环境，跳过环境变量验证');
         return {
             apiId: parseInt(process.env.API_ID || '0'),
             apiHash: process.env.API_HASH || 'test_hash',
@@ -58,7 +58,7 @@ export function isCacheConfigComplete() {
  */
 function validateCacheConfig() {
     if (!isCacheConfigComplete()) {
-        logger.warn('⚠️ No complete cache configuration found, cache service may not work properly');
+        console.warn('⚠️ No complete cache configuration found, cache service may not work properly');
     }
 }
 
