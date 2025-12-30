@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.2.2](https://github.com/YoungSx/drive-collector-js/compare/v4.2.1...v4.3.0) (2025-12-30)
+
+
+### 🔧 其他任务
+
+* install dotenv ([96190bc](https://github.com/YoungSx/drive-collector-js/commit/96190bc14735f86e87f6c7e831a9a6e205bdc126))
+
+
+### ✨ 新特性
+
+* enhance cache test coverage and improve provider handling ([6696d97](https://github.com/YoungSx/drive-collector-js/commit/6696d972acb49415a70872cf6786cf763ebb81d8))
+
+
+### ✅ 测试相关
+
+* add some test scripts to prod ([942afd9](https://github.com/YoungSx/drive-collector-js/commit/942afd90a4c05c44f5ab0da1109dd21b6a5cab3c))
+* adds comprehensive cache service test script ([ed879d5](https://github.com/YoungSx/drive-collector-js/commit/ed879d57c8a94f491dbc0daeb0f1d077a6f40f15))
+
+
+### 🐛 问题修复
+
+* adds error handling for InstanceCoordinator startup ([01852de](https://github.com/YoungSx/drive-collector-js/commit/01852de9a6ad386d07568adb7c7fad4fc7fcfe7f))
+* adds uncaught exception and unhandled rejection handlers ([0d0fb5f](https://github.com/YoungSx/drive-collector-js/commit/0d0fb5f225f96c15996a9444fe503c15f76d2e66))
+* consolidates TTL conversion logic across cache services ([bb8327b](https://github.com/YoungSx/drive-collector-js/commit/bb8327b8be1a5b053de4062fdf5ecaa653cf2285))
+* update TTL parameter in testTTLVerification to use seconds instead of milliseconds ([3f1c35f](https://github.com/YoungSx/drive-collector-js/commit/3f1c35f0219c72d55b959c9c2564307dc6f44e2c))
+
 ### [4.2.1](https://github.com/YoungSx/drive-collector-js/compare/v4.2.0...v4.2.1) (2025-12-30)
 
 
