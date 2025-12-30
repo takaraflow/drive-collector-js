@@ -12,6 +12,7 @@ const mockClientInstance = {
         }
     }),
     connect: jest.fn().mockResolvedValue(undefined),
+    start: jest.fn().mockResolvedValue(undefined),
     disconnect: jest.fn().mockImplementation(() => {
         // 模拟 disconnect 成功
         mockClientInstance.connected = false;
@@ -130,9 +131,10 @@ describe("Telegram Service Watchdog", () => {
         module.startWatchdog();
 
         // 热身：推进一次心跳
-        jest.advanceTimersByTime(60000);
+        jest.advanceTimersByTime(90000);
         await flushPromises();
         mockClientInstance.getMe.mockClear();
+        mockClientInstance.start.mockClear();
 
         // 关键：重新导入 InstanceCoordinator 以确保获取最新的 mock
         const icModule = await import("../../src/services/InstanceCoordinator.js");
@@ -173,8 +175,8 @@ describe("Telegram Service Watchdog", () => {
             })
         );
 
-        // 等待心跳检查（watchdog 每 60 秒运行一次）
-        jest.advanceTimersByTime(60000);
+        // 等待心跳检查（watchdog 每 90 秒运行一次）
+        jest.advanceTimersByTime(90000);
         await flushPromises();
 
         // 验证断开连接
@@ -189,7 +191,7 @@ describe("Telegram Service Watchdog", () => {
         expect(typeof capturedErrorCallback).toBe('function');
     });
 
-    test("应当在检测到 TIMEOUT 错误时触发重连", async () => {
+    test("应当在检测到 TIMEOUT 错误时触发重连并重新验证", async () => {
         await capturedErrorCallback(new Error("TIMEOUT"));
         jest.advanceTimersByTime(2001);
         await flushPromises();
@@ -197,6 +199,7 @@ describe("Telegram Service Watchdog", () => {
         jest.advanceTimersByTime(15000);
         await flushPromises();
         expect(mockClientInstance.connect).toHaveBeenCalled();
+        expect(mockClientInstance.start).toHaveBeenCalledWith({ botAuthToken: "mock_token" });
     });
 
     test("应当在检测到 Not connected 错误时触发重连", async () => {
@@ -206,6 +209,7 @@ describe("Telegram Service Watchdog", () => {
         jest.advanceTimersByTime(15000);
         await flushPromises();
         expect(mockClientInstance.connect).toHaveBeenCalled();
+        expect(mockClientInstance.start).toHaveBeenCalled();
     });
 
     test("应当在检测到 BinaryReader 相关的 TypeError 时触发重连 - readUInt32LE", async () => {
@@ -217,6 +221,7 @@ describe("Telegram Service Watchdog", () => {
         jest.advanceTimersByTime(15000);
         await flushPromises();
         expect(mockClientInstance.connect).toHaveBeenCalled();
+        expect(mockClientInstance.start).toHaveBeenCalled();
     });
 
     test("应当在检测到 BinaryReader 相关的 TypeError 时触发重连 - readInt32LE", async () => {
@@ -228,6 +233,7 @@ describe("Telegram Service Watchdog", () => {
         jest.advanceTimersByTime(15000);
         await flushPromises();
         expect(mockClientInstance.connect).toHaveBeenCalled();
+        expect(mockClientInstance.start).toHaveBeenCalled();
     });
 
     test("应当在检测到包含 'undefined' 的 TypeError 时触发重连", async () => {
@@ -239,6 +245,7 @@ describe("Telegram Service Watchdog", () => {
         jest.advanceTimersByTime(15000);
         await flushPromises();
         expect(mockClientInstance.connect).toHaveBeenCalled();
+        expect(mockClientInstance.start).toHaveBeenCalled();
     });
 
     test("不应为普通 TypeError 触发重连", async () => {
@@ -250,16 +257,17 @@ describe("Telegram Service Watchdog", () => {
         expect(mockClientInstance.connect).not.toHaveBeenCalled();
     });
 
-    test("心跳连续失败（5分钟）时触发强制重连", async () => {
+    test("心跳连续失败（5次）时触发强制重连", async () => {
         mockClientInstance.getMe.mockRejectedValue(new Error("Network Error"));
-        for(let i=0; i<8; i++) {
-             jest.advanceTimersByTime(60001);
+        for(let i=0; i<5; i++) {
+             jest.advanceTimersByTime(90001);
              await flushPromises();
         }
         expect(mockClientInstance.disconnect).toHaveBeenCalled();
-        jest.advanceTimersByTime(5000);
+        jest.advanceTimersByTime(15000);
         await flushPromises();
         expect(mockClientInstance.connect).toHaveBeenCalled();
+        expect(mockClientInstance.start).toHaveBeenCalled();
     });
 
     test("正在重连时应当防止并发调用 (isReconnecting 锁)", async () => {

@@ -130,26 +130,26 @@ async function initTelegramClient() {
             config.apiId,
             config.apiHash,
             {
-                connectionRetries: 20, // 增加连接重试次数到 20
-                floodSleepThreshold: 30, // 自动处理 30 秒内的 FloodWait，降低阈值让更多错误暴露给应用层
+                connectionRetries: 30, // 增加连接重试次数到 30
+                floodSleepThreshold: 60, // 自动处理 60 秒内的 FloodWait
                 deviceModel: "DriveCollector-Server",
                 systemVersion: "Linux",
-                appVersion: "2.3.3", // 更新版本号
-                useWSS: false, // 服务端环境下通常不需要 WSS
+                appVersion: "2.3.3",
+                useWSS: false,
                 autoReconnect: true,
                 // 增强连接稳定性设置
-                timeout: 30000, // 调整连接超时到 30 秒
-                requestRetries: 10, // 增加请求重试次数
+                timeout: 60000, // 调整连接超时到 60 秒
+                requestRetries: 15, // 增加请求重试次数
                 retryDelay: 3000, // 增加重试延迟
                 // 数据中心切换优化
-                dcId: undefined, // 让客户端自动选择最佳数据中心
-                useIPv6: false, // 禁用 IPv6 以提高兼容性
+                dcId: undefined,
+                useIPv6: false,
                 // 连接池设置
-                maxConcurrentDownloads: 3, // 限制并发下载数量
-                connectionPoolSize: 5, // 连接池大小
+                maxConcurrentDownloads: 3,
+                connectionPoolSize: 5,
                 // 添加基础日志记录器
                 baseLogger: logger,
-                ...proxyOptions // 合并代理配置
+                ...proxyOptions
             }
         );
         
@@ -196,15 +196,15 @@ function setupEventListeners(client) {
             logger.warn(`⚠️ Telegram 客户端更新循环超时 (TIMEOUT): ${errorMsg}，准备主动重连...`);
             // 增加延迟避免在网络波动时频繁重连
             if (reconnectTimeout) clearTimeout(reconnectTimeout);
-            reconnectTimeout = setTimeout(() => handleConnectionIssue(), 2000);
+            reconnectTimeout = setTimeout(() => handleConnectionIssue(true), 2000);
         } else if (errorMsg.includes("Not connected")) {
             logger.warn("⚠️ Telegram 客户端未连接，尝试重连...");
-            handleConnectionIssue();
+            handleConnectionIssue(true);
         } else if (isBinaryReaderError) {
             // 处理 BinaryReader 相关的 TypeError，这通常意味着内部状态已损坏
             logger.warn(`⚠️ Telegram 客户端发生 BinaryReader 错误 (${errorMsg})，准备主动重连...`);
             if (reconnectTimeout) clearTimeout(reconnectTimeout);
-            reconnectTimeout = setTimeout(() => handleConnectionIssue(), 2000);
+            reconnectTimeout = setTimeout(() => handleConnectionIssue(true), 2000);
         } else {
             logger.error("❌ Telegram 客户端发生错误:", err);
         }
@@ -280,10 +280,19 @@ export const ensureConnected = async () => {
 
 // --- 🛡️ 客户端监控与健康检查 (Watchdog) ---
 let lastHeartbeat = Date.now();
+let consecutiveFailures = 0;
 let isReconnecting = false;
 let connectionStatusCallback = null; // 连接状态变化回调
 let watchdogTimer = null;
 let reconnectTimeout = null;
+
+/**
+ * 重新连接 Telegram Bot (供外部调用)
+ * @param {boolean} lightweight - 是否轻量重连
+ */
+export const reconnectBot = async (lightweight = true) => {
+    await handleConnectionIssue(lightweight);
+};
 
 /**
  * 设置连接状态变化回调
@@ -298,7 +307,7 @@ export const setConnectionStatusCallback = (callback) => {
 /**
  * 处理连接异常情况
  */
-async function handleConnectionIssue() {
+async function handleConnectionIssue(lightweight = false) {
     if (isReconnecting) return;
     
     // 关键：重连前必须确认自己仍然持有锁
@@ -318,7 +327,7 @@ async function handleConnectionIssue() {
     try {
         const client = await getClient();
         // 记录客户端状态上下文
-        logger.info(`🔄 正在触发主动重连序列... [connected=${client.connected}, _sender=${!!client._sender}]`);
+        logger.info(`🔄 正在触发主动重连序列... [lightweight=${lightweight}, connected=${client.connected}, _sender=${!!client._sender}]`);
 
         // 尝试优雅断开（带超时）
         try {
@@ -345,16 +354,24 @@ async function handleConnectionIssue() {
             }
         }
 
-        // 清理旧状态
-        await resetClientSession();
+        // 根据重连模式决定是否重置 session
+        if (!lightweight) {
+            logger.info("🔄 执行完整重连（重置 Session）...");
+            await resetClientSession();
+        } else {
+            logger.info("🔄 执行轻量重连（保留 Session）...");
+        }
 
         // 增加冷却期以避免频繁重连（5-10秒随机延迟）
         const coolDownTime = 5000 + Math.random() * 5000;
         logger.info(`⏳ 冷却期 ${Math.floor(coolDownTime/1000)}s，避免频繁重连...`);
         await new Promise(r => setTimeout(r, coolDownTime));
 
-        // 重新连接
+        // 重新连接并验证机器人身份
         await client.connect();
+        await client.start({ botAuthToken: config.botToken });
+        await saveSession(); // 重新保存有效会话
+        
         logger.info("✅ 客户端主动重连成功");
         lastHeartbeat = Date.now(); // 重置心跳
         
@@ -388,6 +405,7 @@ export const startWatchdog = () => {
             logger.info(`🕒 检测到时间回拨，重置心跳时间: last=${lastHeartbeat}, now=${now}`);
             lastHeartbeat = now;
             isReconnecting = false;
+            consecutiveFailures = 0;
         }
 
         if (isReconnecting) {
@@ -398,18 +416,22 @@ export const startWatchdog = () => {
         try {
             const client = await getClient();
             if (!client.connected) {
+                consecutiveFailures++;
                 // 如果已断开连接且超过 5 分钟没有恢复，也触发强制重连
-                if (now - lastHeartbeat >= 5 * 60 * 1000) {
-                    logger.error(`🚨 客户端断开连接超过 5 分钟且未自动恢复，强制重启连接... (diff=${now - lastHeartbeat})`);
-                    handleConnectionIssue();
+                if (now - lastHeartbeat >= 5 * 60 * 1000 || consecutiveFailures >= 5) {
+                    logger.error(`🚨 客户端断开连接超过阈值，强制重启连接... (failures=${consecutiveFailures})`);
+                    handleConnectionIssue(true);
                 }
                 return;
             }
 
             await client.getMe();
             lastHeartbeat = Date.now();
+            consecutiveFailures = 0; // 成功后重置
             // console.log(`[DEBUG_FIX] Heartbeat success. lastHeartbeat updated to ${lastHeartbeat}`);
         } catch (e) {
+            consecutiveFailures++;
+
             if (e.code === 406 && e.errorMessage?.includes("AUTH_KEY_DUPLICATED")) {
                 logger.error("🚨 检测到 AUTH_KEY_DUPLICATED，会话已在别处激活，本实例应停止连接");
                 // 标记需要重置，并释放本地状态
@@ -428,19 +450,19 @@ export const startWatchdog = () => {
                 return;
             }
 
-            logger.warn("💔 心跳检测失败:", e);
+            logger.warn(`💔 心跳检测失败 (${consecutiveFailures}/5):`, e.message || e);
 
             // 使用当前时间再次检查差值，因为 await getMe() 可能经过了时间
             const currentNow = Date.now();
             const diff = currentNow - lastHeartbeat;
             // console.log(`[DEBUG_FIX] Heartbeat failed. Diff=${diff}`);
 
-            if (diff >= 5 * 60 * 1000) {
-                logger.error(`🚨 超过 5 分钟无心跳响应，强制重启连接... (diff=${diff})`);
-                handleConnectionIssue();
+            if (diff >= 5 * 60 * 1000 || consecutiveFailures >= 5) {
+                logger.error(`🚨 超过阈值无心跳响应，强制重启连接... (diff=${diff}, failures=${consecutiveFailures})`);
+                handleConnectionIssue(true);
             }
         }
-    }, 60 * 1000); // 每分钟检查一次
+    }, 90 * 1000); // 每 90 秒检查一次
 };
 
 /**
