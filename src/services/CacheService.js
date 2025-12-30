@@ -74,20 +74,29 @@ class CacheService {
             // 动态导入 ioredis
             const Redis = (await import('ioredis')).default;
             
-            // 构造连接配置 - 优化TCP keepalive和连接参数
+            // 构造连接配置 - 优化TCP keepalive和连接参数，适配Northflank环境
             const redisConfig = {
-                connectTimeout: 10000, // 连接超时调整为10秒
-                maxRetriesPerRequest: 3,
-                keepAlive: 10000, // TCP keep-alive，每10秒发送一次
+                connectTimeout: 15000, // Northflank环境连接超时调整为15秒
+                keepAlive: 30000, // TCP keep-alive，每30秒发送一次（Northflank优化）
                 family: 4, // 强制使用IPv4
+                lazyConnect: true, // 延迟连接，避免启动时的连接风暴
+                enableReadyCheck: true, // Northflank环境特定配置
                 retryStrategy: (times) => {
-                    const delay = Math.min(times * 100, 5000); // 指数退避，最大5秒间隔
+                    const delay = Math.min(times * 200, 10000); // 指数退避，最大10秒间隔（Northflank优化）
                     logger.warn(`⚠️ Redis 重试尝试 ${times}，延迟 ${delay}ms`);
                     return delay;
                 },
                 reconnectOnError: (err) => {
-                    logger.warn(`⚠️ Redis 重连错误: ${err.message}`);
-                    return true;
+                    const msg = err.message.toLowerCase();
+                    // Northflank环境特殊处理：对ECONNRESET和timeout错误更宽容
+                    const shouldReconnect = msg.includes('econnreset') ||
+                                           msg.includes('timeout') ||
+                                           msg.includes('network') ||
+                                           !msg.includes('auth');
+                    if (shouldReconnect) {
+                        logger.warn(`⚠️ Redis 重连错误: ${err.message}，将尝试重连`);
+                    }
+                    return shouldReconnect;
                 }
             };
 
@@ -1108,15 +1117,18 @@ class CacheService {
     }
 
     /**
-     * 启动应用层心跳机制 - 每2分钟执行一次PING
+     * 启动应用层心跳机制 - Northflank环境优化，每30秒执行一次PING
      */
     _startHeartbeat() {
         if (this.heartbeatTimer) {
             clearInterval(this.heartbeatTimer);
         }
 
-        const heartbeatInterval = 2 * 60 * 1000; // 2分钟
-        logger.info(`🫀 启动 Redis 心跳机制，间隔: ${heartbeatInterval / 1000} 秒`);
+        const heartbeatInterval = 30 * 1000; // Northflank环境：30秒间隔（从2分钟减少）
+        logger.info(`🫀 启动 Redis 心跳机制，间隔: ${heartbeatInterval / 1000} 秒 (Northflank优化)`);
+
+        let consecutiveFailures = 0;
+        const maxConsecutiveFailures = 3;
 
         this.heartbeatTimer = setInterval(async () => {
             if (!this.redisClient || this.redisClient.status !== 'ready') {
@@ -1129,23 +1141,53 @@ class CacheService {
                 const pingResult = await this.redisClient.ping();
                 const pingDuration = Date.now() - pingStart;
 
+                // Northflank环境：更详细的延迟监控
+                const isHighLatency = pingDuration > 200; // 200ms作为高延迟阈值
+
                 logger.debug('💓 Redis 心跳 PING', {
                     result: pingResult,
                     durationMs: pingDuration,
-                    status: this.redisClient.status
+                    status: this.redisClient.status,
+                    latencyLevel: isHighLatency ? 'high' : 'normal',
+                    node_env: process.env.NODE_ENV
                 });
+
+                // 重置连续失败计数
+                consecutiveFailures = 0;
+
+                // 如果PING延迟过高，在Northflank环境记录警告
+                if (isHighLatency) {
+                    logger.warn('⚠️ Redis 高延迟心跳', {
+                        durationMs: pingDuration,
+                        threshold: '200ms',
+                        environment: 'northflank'
+                    });
+                }
 
                 // 如果PING失败，记录错误但不强制重连（依赖ioredis内置重连）
                 if (pingResult !== 'PONG') {
                     logger.warn('⚠️ Redis 心跳异常响应', { result: pingResult });
                 }
             } catch (error) {
+                consecutiveFailures++;
                 logger.warn('🚨 Redis 心跳失败', {
                     error: error.message,
                     code: error.code,
-                    clientStatus: this.redisClient?.status
+                    clientStatus: this.redisClient?.status,
+                    consecutiveFailures,
+                    maxAllowed: maxConsecutiveFailures
                 });
-                // 不在这里触发重连，让ioredis的内置机制处理
+
+                // Northflank环境：如果连续失败超过阈值，记录更详细的诊断信息
+                if (consecutiveFailures >= maxConsecutiveFailures) {
+                    logger.error('🚨 Redis 心跳连续失败超过阈值', {
+                        consecutiveFailures,
+                        lastError: error.message,
+                        environment: 'northflank',
+                        recommendation: '检查网络连接和Redis服务状态'
+                    });
+                    // 不主动断开连接，让ioredis处理重连
+                }
             }
         }, heartbeatInterval);
     }

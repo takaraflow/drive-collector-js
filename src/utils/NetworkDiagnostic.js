@@ -165,6 +165,37 @@ export class NetworkDiagnostic {
     }
 
     /**
+     * 检查 Northflank 环境特定的连接问题
+     */
+    static async _checkNorthflankRedisIssues() {
+        const issues = {
+            connectionStability: null,
+            networkLatency: null,
+            sslHandshake: null,
+            environmentConfig: null
+        };
+
+        // 检查环境变量
+        const northflankVars = ['NF_SERVICE_ID', 'NF_PROJECT_ID', 'NF_REGION', 'NF_DEPLOYMENT_ID'];
+        const presentVars = northflankVars.filter(varName => process.env[varName]);
+
+        issues.environmentConfig = {
+            isNorthflank: presentVars.length > 0,
+            presentVars,
+            missingVars: northflankVars.filter(varName => !process.env[varName])
+        };
+
+        // 检查SSL配置（Northflank Redis使用SSL）
+        const redisUrl = process.env.NF_REDIS_URL || process.env.REDIS_URL;
+        issues.sslHandshake = {
+            usesSSL: redisUrl?.startsWith('rediss://'),
+            urlConfigured: !!redisUrl
+        };
+
+        return issues;
+    }
+
+    /**
      * 专门检查 Redis 连接质量和延迟
      */
     static async _checkRedisConnection() {
@@ -183,7 +214,11 @@ export class NetworkDiagnostic {
                 return {
                     status: 'error',
                     responseTime: '0ms',
-                    message: 'Redis 客户端未初始化'
+                    message: 'Redis 客户端未初始化',
+                    details: {
+                        northflankCheck: await this._checkNorthflankRedisIssues(),
+                        recommendation: '检查Redis连接配置和网络连接'
+                    }
                 };
             }
 
