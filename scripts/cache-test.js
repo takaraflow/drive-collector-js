@@ -187,7 +187,7 @@ class CacheTester {
             }
 
             // 设置带TTL的值
-            await this.cache.set(testKey, testValue, ttlSeconds * 1000);
+            await this.cache.set(testKey, testValue, ttlSeconds);
             
             // 立即检查，应该存在
             const immediate = await this.cache.get(testKey);
