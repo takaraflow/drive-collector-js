@@ -35,7 +35,7 @@ WORKDIR /app
 COPY package*.json ./
 
 RUN mkdir -p ./scripts
-COPY scripts/* ./scripts/
+COPY scripts ./scripts/
 
 # 安装生产依赖
 RUN npm ci --omit=dev && npm cache clean --force

@@ -6,4 +6,3 @@ coverage
 *.log
 vitest.config.js
 test_output.txt
-scripts
