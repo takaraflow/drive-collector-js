@@ -18,12 +18,13 @@ RUN npm test
 # --- 第二阶段：运行环境 ---
 FROM node:20-slim
 
-# 安装 rclone 和基础工具
-# 2. 修改点：安装完 curl/unzip 后立即卸载，只保留运行 rclone 所需的 ca-certificates
+# 安装 rclone 和基础工具，包括 ping 工具
+# 2. 修改点：安装完 curl/unzip 后立即卸载，只保留运行 rclone 所需的 ca-certificates 和 ping 工具
 RUN apt-get update && apt-get install -y \
     curl \
     unzip \
     ca-certificates \
+    iputils-ping \
     && curl https://rclone.org/install.sh | bash \
     && apt-get purge -y curl unzip \
     && apt-get autoremove -y \
