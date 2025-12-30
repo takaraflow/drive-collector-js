@@ -98,7 +98,7 @@ const logger = {
 
 // 常量
 const INSTANCE_PREFIX = 'instance:';
-const HEARTBEAT_TIMEOUT = 30 * 60 * 1000; // 30分钟
+const HEARTBEAT_TIMEOUT = 15 * 60 * 1000; // 15分钟
 const ROUND_ROBIN_KEY = 'lb:round_robin_index';
 
 // 故障转移配置增强

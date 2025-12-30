@@ -303,7 +303,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
             id: '3',
             url: 'https://instance3.com',
             status: 'active',
-            lastHeartbeat: now - 20 * 60 * 1000, // 20分钟前，过期
+            lastHeartbeat: now - 10 * 60 * 1000, // 10分钟前，未过期（新阈值15分钟）
           });
         }
       });
@@ -311,6 +311,23 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       const result = await getActiveInstances(mockEnv);
       expect(result).toHaveLength(2);
       expect(result.map(i => i.id).sort()).toEqual(['1', '3']);
+    });
+
+    it('应该过滤掉超过 15 分钟心跳的实例', async () => {
+      const now = Date.now();
+      mockKV.list.mockResolvedValue({
+        keys: [{ name: 'instance:expired' }]
+      });
+
+      mockKV.get.mockResolvedValue({
+        id: 'expired',
+        url: 'https://expired.com',
+        status: 'active',
+        lastHeartbeat: now - 16 * 60 * 1000, // 16分钟前，已过期
+      });
+
+      const result = await getActiveInstances(mockEnv);
+      expect(result).toHaveLength(0);
     });
 
     it('应该在KV错误时返回空数组', async () => {
