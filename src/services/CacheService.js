@@ -99,14 +99,15 @@ export class CacheService {
                 family: 4, // 强制使用IPv4
                 lazyConnect: true, // 延迟连接，避免启动时的连接风暴
                 enableReadyCheck: true, // Northflank环境特定配置
-                maxRetriesPerRequest: 3, // 新增：限制每请求最大重试次数
+                maxRetriesPerRequest: 5, // 新增：限制每请求最大重试次数，从3增至5
+                enableAutoPipelining: true, // 新增：优化批量操作
                 retryStrategy: (times) => {
-                    const maxRetries = 3; // 新增：限制重连尝试次数
+                    const maxRetries = process.env.REDIS_MAX_RETRIES || 5; // 新增：支持环境变量配置，从3增至5
                     if (times > maxRetries) {
                         logger.error(`🚨 Redis 重连超过最大次数 (${maxRetries})，停止重连`);
                         return null; // 停止重连，触发错误
                     }
-                    const delay = Math.min(times * 200, 10000); // 指数退避，最大10秒间隔（Northflank优化）
+                    const delay = Math.min(times * 500, 30000); // 新增：更保守退避，最大30秒间隔（Northflank优化）
                     logger.warn(`⚠️ Redis 重试尝试 ${times}/${maxRetries}，延迟 ${delay}ms`);
                     return delay;
                 },
@@ -205,7 +206,7 @@ export class CacheService {
                 this.lastRedisError = error.message;
             });
 
-            this.redisClient.on('close', () => {
+            this.redisClient.on('close', async () => {
                 const now = Date.now();
                 const duration = this.connectTime ? now - this.connectTime : 0;
                 logger.warn(`⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`, {
@@ -219,6 +220,8 @@ export class CacheService {
                 });
                 // 清理心跳定时器
                 this._stopHeartbeat();
+                // 触发自动重启
+                setTimeout(() => this._restartRedisClient(), 1000);
             });
 
             // 添加更多诊断事件
@@ -226,8 +229,10 @@ export class CacheService {
                 logger.debug('🔄 Redis WAIT: Command queued, waiting for connection');
             });
 
-            this.redisClient.on('end', () => {
+            this.redisClient.on('end', async () => {
                 logger.warn('⚠️ Redis END: Connection ended by client');
+                // 触发自动重启
+                setTimeout(() => this._restartRedisClient(), 1000);
             });
 
             this.redisClient.on('select', (db) => {
@@ -275,6 +280,49 @@ export class CacheService {
         } catch (error) {
             logger.error(`🚨 Redis 初始化失败: ${error.message}`);
             this.redisClient = null;
+        }
+    }
+
+    /**
+     * 重启 Redis 客户端 - 从 'end' 状态恢复
+     */
+    async _restartRedisClient() {
+        if (this.restarting) {
+            logger.debug('🔄 Redis 重启已在进行中，跳过重复调用');
+            return;
+        }
+        
+        this.restarting = true;
+        try {
+            logger.info('🔄 Redis 客户端重启中...');
+            
+            // 清理现有客户端
+            if (this.redisClient) {
+                try {
+                    await this.redisClient.quit().catch(() => {});
+                } catch (e) {
+                    // 忽略 quit 错误
+                }
+                this.redisClient.removeAllListeners();
+                this.redisClient = null;
+            }
+            
+            // 停止心跳
+            this._stopHeartbeat();
+            
+            // 等待延迟（可配置）
+            const restartDelay = parseInt(process.env.REDIS_RESTART_DELAY) || 5000;
+            logger.info(`🔄 等待 ${restartDelay}ms 后重新初始化 Redis...`);
+            await new Promise(resolve => setTimeout(resolve, restartDelay));
+            
+            // 重新初始化
+            await this._initRedis();
+            
+            logger.info('✅ Redis 客户端重启完成');
+        } catch (error) {
+            logger.error(`🚨 Redis 重启失败: ${error.message}`);
+        } finally {
+            this.restarting = false;
         }
     }
 
@@ -574,7 +622,9 @@ export class CacheService {
             'connection',
             'econnreset',
             'econnrefused',
-            'getaddrinfo'
+            'getaddrinfo',
+            'redis client not in ready state',
+            'client not in ready state'
         ];
         
         // 检查所有可能的错误类型
@@ -586,10 +636,12 @@ export class CacheService {
      * 执行操作并支持故障转移
      */
     async _executeWithFailover(operation, ...args) {
-        // 1. Redis 客户端不可用时的 Fallback
-        if (this.currentProvider === 'redis' && !this.redisClient) {
-            logger.warn('Redis client not initialized, fallback immediately');
-            return await this._fallbackToNextProvider(operation, ...args);
+        // 1. Redis 客户端不可用或处于断开状态时的 Fallback
+        if (this.currentProvider === 'redis') {
+            if (!this.redisClient || this.redisClient.status === 'end' || this.redisClient.status === 'close') {
+                logger.warn(`Redis client status is ${this.redisClient?.status || 'null'}, fallback immediately`);
+                return await this._fallbackToNextProvider(operation, ...args);
+            }
         }
 
         // 2. 主动健康检查 (仅对 Redis)
@@ -1376,6 +1428,13 @@ export class CacheService {
             }
 
             const status = this.redisClient.status;
+
+            // 新增：检测 end/close 状态并触发重启
+            if (status === 'end' || status === 'close') {
+                logger.warn(`💔 Redis ${status.toUpperCase()}: 触发重启`);
+                this._restartRedisClient().catch(() => {});
+                return;
+            }
 
             if (status !== 'ready') {
                 // 如果状态是 connecting，尝试触发连接

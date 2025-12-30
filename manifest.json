@@ -479,6 +479,16 @@
         "required": false,
         "description": "Legacy Redis password (deprecated, use NF_REDIS_PASSWORD)"
       },
+      "REDIS_MAX_RETRIES": {
+        "type": "number",
+        "default": 5,
+        "description": "Maximum number of Redis connection retry attempts before failing"
+      },
+      "REDIS_RESTART_DELAY": {
+        "type": "number",
+        "default": 5000,
+        "description": "Delay in milliseconds before restarting Redis client after connection loss"
+      },
       "CACHE_PROVIDER": {
         "type": "string",
         "required": false,
