@@ -5,6 +5,7 @@
  * 全面测试 CacheService 的 L1/L2 缓存、多提供商切换、故障转移恢复等功能
  */
 
+import 'dotenv/config';
 import { performance } from "perf_hooks";
 
 // 设置测试环境
@@ -114,16 +115,16 @@ class CacheTester {
     async testBasicSetGet() {
         const startTime = performance.now();
         const testKey = `${this.options.testPrefix}basic`;
-        const testValue = 'Hello Cache Service!';
+        const testValue = { message: 'Hello Cache Service!' }; // Use JSON object
 
         try {
             await this.cache.set(testKey, testValue);
             const retrieved = await this.cache.get(testKey);
             
-            const success = retrieved === testValue;
+            const success = JSON.stringify(retrieved) === JSON.stringify(testValue);
             const latency = performance.now() - startTime;
             
-            this.log('Basic Set/Get', success, success ? 'Value matched' : `Expected: ${testValue}, Got: ${retrieved}`, latency);
+            this.log('Basic Set/Get', success, success ? 'Value matched' : `Expected: ${JSON.stringify(testValue)}, Got: ${JSON.stringify(retrieved)}`, latency);
             
             await this.cache.delete(testKey);
         } catch (error) {
@@ -169,21 +170,33 @@ class CacheTester {
     async testTTLVerification() {
         const startTime = performance.now();
         const testKey = `${this.options.testPrefix}ttl`;
-        const testValue = 'TTL Test Value';
-        const ttlSeconds = 2; // 2秒过期
-
+        const testValue = { message: 'TTL Test Value' }; // Use JSON object
+        const provider = this.cache.getCurrentProvider();
+        
         try {
+            let ttlSeconds;
+            let waitTime;
+            
+            // Cloudflare KV has minimum TTL of 60 seconds, so adjust test accordingly
+            if (provider === 'Cloudflare KV') {
+                ttlSeconds = 65; // Use 65 seconds to account for minimum + buffer
+                waitTime = (ttlSeconds + 5) * 1000; // Wait 5 extra seconds
+            } else {
+                ttlSeconds = 2; // 2秒过期 for Redis/Upstash
+                waitTime = (ttlSeconds + 0.5) * 1000;
+            }
+
             // 设置带TTL的值
             await this.cache.set(testKey, testValue, ttlSeconds * 1000);
             
             // 立即检查，应该存在
             const immediate = await this.cache.get(testKey);
-            const immediateSuccess = immediate === testValue;
+            const immediateSuccess = JSON.stringify(immediate) === JSON.stringify(testValue);
             
-            this.debug(`TTL test - immediate check: ${immediateSuccess}`);
+            this.debug(`TTL test - immediate check: ${immediateSuccess}, provider: ${provider}`);
             
             // 等待过期时间 + 缓冲
-            await new Promise(resolve => setTimeout(resolve, (ttlSeconds + 0.5) * 1000));
+            await new Promise(resolve => setTimeout(resolve, waitTime));
             
             // 检查过期，应该为null
             const expired = await this.cache.get(testKey);
@@ -193,7 +206,7 @@ class CacheTester {
             const success = immediateSuccess && expiredSuccess;
             
             this.log('TTL Verification', success, 
-                success ? 'TTL working correctly' : `Immediate: ${immediateSuccess}, Expired: ${expiredSuccess}`, 
+                success ? 'TTL working correctly' : `Immediate: ${immediateSuccess}, Expired: ${expiredSuccess} (${provider})`, 
                 latency);
             
             await this.cache.delete(testKey).catch(() => {});
@@ -329,24 +342,27 @@ class CacheTester {
     async testL1CacheConsistency() {
         const startTime = performance.now();
         const testKey = `${this.options.testPrefix}l1cache`;
-        const testValue = 'L1 cache test';
+        const testValue = { message: 'L1 cache test' }; // Use JSON object
 
         try {
-            // 第一次获取 - 应该命中L2并缓存到L1
+            // First, set the value to ensure it exists
+            await this.cache.set(testKey, testValue);
+            
+            // Clear L1 cache to simulate cold start
+            // Note: We can't directly clear L1, but we can wait for TTL or use skipCache
+            // For testing, we'll use skipCache to force L2 read first
             const start1 = performance.now();
-            const firstGet = await this.cache.get(testKey);
+            const firstGet = await this.cache.get(testKey, 'json', { skipCache: true });
             const time1 = performance.now() - start1;
             
-            await this.cache.set(testKey, testValue); // 确保有值
-            
-            // 第二次获取 - 应该命中L1缓存
+            // Second get should use L1 cache
             const start2 = performance.now();
             const secondGet = await this.cache.get(testKey);
             const time2 = performance.now() - start2;
             
-            const success = firstGet === testValue && 
-                           secondGet === testValue && 
-                           time2 < time1; // L1应该更快
+            const success = JSON.stringify(firstGet) === JSON.stringify(testValue) && 
+                           JSON.stringify(secondGet) === JSON.stringify(testValue) && 
+                           time2 < time1; // L1 should be faster
             
             const latency = performance.now() - startTime;
             
@@ -355,7 +371,7 @@ class CacheTester {
                          `Times: ${time1.toFixed(2)}ms, ${time2.toFixed(2)}ms`, 
                 latency);
             
-            await cache.delete(testKey).catch(() => {});
+            await this.cache.delete(testKey).catch(() => {});
         } catch (error) {
             const latency = performance.now() - startTime;
             this.log('L1 Cache Consistency', false, error.message, latency);
@@ -368,7 +384,7 @@ class CacheTester {
     async testSkipCacheOption() {
         const startTime = performance.now();
         const testKey = `${this.options.testPrefix}skipcache`;
-        const testValue = 'skip cache test';
+        const testValue = { message: 'skip cache test' }; // Use JSON object
 
         try {
             // 设置值
@@ -380,15 +396,16 @@ class CacheTester {
             // 跳过缓存获取（强制穿透到L2）
             const skipCacheGet = await this.cache.get(testKey, 'json', { skipCache: true });
             
-            const success = normalGet === testValue && skipCacheGet === testValue;
+            const success = JSON.stringify(normalGet) === JSON.stringify(testValue) && 
+                           JSON.stringify(skipCacheGet) === JSON.stringify(testValue);
             const latency = performance.now() - startTime;
             
             this.log('Skip Cache Option', success, 
                 success ? 'Both normal and skip cache worked' : 
-                         `Normal: ${normalGet}, Skip: ${skipCacheGet}`, 
+                         `Normal: ${JSON.stringify(normalGet)}, Skip: ${JSON.stringify(skipCacheGet)}`, 
                 latency);
             
-            await cache.delete(testKey).catch(() => {});
+            await this.cache.delete(testKey).catch(() => {});
         } catch (error) {
             const latency = performance.now() - startTime;
             this.log('Skip Cache Option', false, error.message, latency);
@@ -434,7 +451,7 @@ class CacheTester {
                 success ? 'Provider switching mechanism works' : 'Provider switching failed', 
                 latency);
             
-            await cache.delete(testKey).catch(() => {});
+            await this.cache.delete(testKey).catch(() => {});
         } catch (error) {
             const latency = performance.now() - startTime;
             this.log('Failover Simulation', false, error.message, latency);
@@ -602,6 +619,22 @@ function parseArgs() {
                 }
                 break;
                 
+            case '--provider':
+            case '-pr':
+                const providerArg = args[i + 1];
+                if (providerArg && !providerArg.startsWith('--')) {
+                    const provider = providerArg.toLowerCase();
+                    if (['redis', 'cloudflare', 'upstash', 'local', 'auto'].includes(provider)) {
+                        options.provider = provider;
+                    } else {
+                        console.error(`Error: Invalid provider ${providerArg}`);
+                        console.error('Valid providers: redis, cloudflare, upstash, local, auto');
+                        process.exit(1);
+                    }
+                    i++; // 跳过下一个参数
+                }
+                break;
+                
             case '--help':
             case '-h':
                 console.log(`
@@ -613,12 +646,14 @@ Cache 服务测试脚本
   --verbose, -v        启用详细日志输出
   --concurrency N, -c N  设置并发测试数量 (默认: 1)
   --prefix PREFIX, -p PREFIX  设置测试键前缀 (默认: test:cache:)
+  --provider PROVIDER, -pr PROVIDER  强制指定缓存提供商 (redis/cloudflare/upstash/local/auto)
   --help, -h           显示此帮助信息
 
 示例:
   node cache-test.js                    # 基本测试
   node cache-test.js --verbose          # 详细输出
   node cache-test.js -c 50              # 并发50次
+  node cache-test.js --provider=cloudflare  # 强制使用 Cloudflare
   node cache-test.js -v -c 10 -p mytest:
                 `);
                 process.exit(0);
@@ -632,9 +667,15 @@ Cache 服务测试脚本
 /**
  * 设置测试环境
  */
-function setupTestEnvironment() {
-    process.env.NODE_ENV = 'test';
+function setupTestEnvironment(provider = 'auto') {
+    process.env.NODE_ENV = 'development';
     process.env.JEST_WORKER_ID = '1';
+    
+    // 如果指定了provider，强制设置CACHE_PROVIDER
+    if (provider && provider !== 'auto') {
+        process.env.CACHE_PROVIDER = provider;
+        console.log(`🔄 Cache服务：强制使用 ${provider.charAt(0).toUpperCase() + provider.slice(1)}`);
+    }
     
     // 设置模拟的缓存配置以避免网络错误
     if (!process.env.CF_CACHE_ACCOUNT_ID) {
@@ -646,6 +687,22 @@ function setupTestEnvironment() {
     if (!process.env.CF_CACHE_TOKEN) {
         process.env.CF_CACHE_TOKEN = 'test-token';
     }
+    
+    // 为特定provider设置默认配置
+    if (provider === 'redis') {
+        if (!process.env.REDIS_URL && !process.env.REDIS_HOST) {
+            process.env.REDIS_HOST = 'localhost';
+            process.env.REDIS_PORT = '6379';
+        }
+    } else if (provider === 'upstash') {
+        if (!process.env.UPSTASH_REDIS_REST_URL && !process.env.UPSTASH_REDIS_REST_TOKEN) {
+            process.env.UPSTASH_REDIS_REST_URL = 'https://test-upstash-url';
+            process.env.UPSTASH_REDIS_REST_TOKEN = 'test-upstash-token';
+        }
+    } else if (provider === 'local') {
+        // local 映射为 auto，使用默认的 local cache
+        process.env.CACHE_PROVIDER = 'local';
+    }
 }
 
 /**
@@ -655,7 +712,7 @@ async function main() {
     const options = parseArgs();
     
     // 设置测试环境
-    setupTestEnvironment();
+    setupTestEnvironment(options.provider);
     
     try {
         const tester = new CacheTester(options);
