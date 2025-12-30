@@ -6,6 +6,7 @@
 4. 规范化提交 (Conventional Commits)：使用英文 Conventional Commits 规范（如 `feat:`, `fix:`, `docs:` 等）提交代码，确保提交信息清晰、专业
 5. 配置同步更新：当代码接口、API 行为或功能逻辑发生改变后，必须及时更新 `manifest.json` 以保持一致
 6. 在执行 standard-version 之前，先运行 npm install --package-lock-only 以确保 package-lock.json 的版本号与代码库状态保持同步，防止发版后出现版本不一致的情况
+7. 当遇到复杂任务时，自动分解为更小的可执行步骤并直接输出。
 
 
 # 自动化测试编写规则

@@ -267,7 +267,7 @@ export class CacheService {
                     logger.warn('⚠️ Redis ping 测试失败，但继续初始化以支持延迟连接', {
                         error: pingError.message,
                         durationMs: pingDuration,
-                        clientStatus: this.redisClient.status,
+                        clientStatus: this.redisClient ? this.redisClient.status : 'null',
                         node_env: process.env.NODE_ENV,
                         platform: process.platform
                     });
@@ -357,7 +357,7 @@ export class CacheService {
         } catch (error) {
             logger.warn('⚠️ Redis 健康检查失败', {
                 error: error.message,
-                status: this.redisClient.status
+                status: this.redisClient ? this.redisClient.status : 'null'
             });
             return false;
         }
