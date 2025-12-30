@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.2.3](https://github.com/YoungSx/drive-collector-js/compare/v4.2.2...v4.2.3) (2025-12-30)
+
+
+### ✨ 新特性
+
+* add canSend method to logger service ([dde7eda](https://github.com/YoungSx/drive-collector-js/commit/dde7edaf0aca256b717312a56912eb9a96be66cb))
+* optimize Redis connection config for Northflank environment ([8143b03](https://github.com/YoungSx/drive-collector-js/commit/8143b030530f2a001dae240de31bf2019728aa7b))
+
+
+### 🔧 其他任务
+
+* install ping in Dockerfile ([de42fad](https://github.com/YoungSx/drive-collector-js/commit/de42fad9348ade811d93569d0ef9acaaefab823d))
+
+
+### 🐛 问题修复
+
+* adds cleanup and resource management for test and diagnostic scripts ([62f87f0](https://github.com/YoungSx/drive-collector-js/commit/62f87f0c94f9e45368eea94d3cf9945244c2f6ad))
+* adds waitForReady method for Redis client state management ([da76066](https://github.com/YoungSx/drive-collector-js/commit/da76066ebd403e38f3f33eaa6e17eec4657a2df0))
+* allow scripts in .dockerignore ([1a43bd1](https://github.com/YoungSx/drive-collector-js/commit/1a43bd117d58b76e821c83677ad9c39bf8830d09))
+* optimize CacheService failover and testing infrastructure ([5e5747e](https://github.com/YoungSx/drive-collector-js/commit/5e5747edb314f66a99e1bfb1e05e0df7a7902c48))
+* optimize redis connection parameters and add heartbeat for Northflank ([77a8544](https://github.com/YoungSx/drive-collector-js/commit/77a854401f7f9158308a6719a09d6fde06bdb180))
+* resolve container startup failure by fixing circular dependency and moving better-sqlite3 to dependencies ([cdd5e72](https://github.com/YoungSx/drive-collector-js/commit/cdd5e7221a729e81b3b4f59886322200e7a5985d))
+* resolve Redis connection diagnostic script hang issue ([69b11c5](https://github.com/YoungSx/drive-collector-js/commit/69b11c5aee665c3971f8092bbdc73bec4051f20b))
+* resolve Redis connection diagnostic script hang issue ([4abdde6](https://github.com/YoungSx/drive-collector-js/commit/4abdde6ced06ab6425f3d70457878bed4da82853))
+* resolve Redis connection diagnostic script hang issue ([dbde457](https://github.com/YoungSx/drive-collector-js/commit/dbde4572758da65a29bbb460eaeae3ae72edf47a))
+
 ## [4.2.2](https://github.com/YoungSx/drive-collector-js/compare/v4.2.1...v4.3.0) (2025-12-30)
 
 
