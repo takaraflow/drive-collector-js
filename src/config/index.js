@@ -104,6 +104,14 @@ export const config = {
         host: process.env.NF_REDIS_HOST || process.env.REDIS_HOST,
         port: process.env.NF_REDIS_PORT || process.env.REDIS_PORT || 6379,
         password: process.env.NF_REDIS_PASSWORD || process.env.REDIS_PASSWORD,
+        tls: {
+            enabled: !!process.env.REDIS_TLS_ENABLED || !!process.env.NF_REDIS_TLS_ENABLED || !!process.env.NF_REDIS_URL?.includes('rediss://') || !!process.env.REDIS_URL?.includes('rediss://'),
+            rejectUnauthorized: process.env.REDIS_TLS_REJECT_UNAUTHORIZED !== 'false' && process.env.NF_REDIS_TLS_REJECT_UNAUTHORIZED !== 'false',
+            ca: process.env.REDIS_TLS_CA || process.env.NF_REDIS_TLS_CA,  // Base64
+            cert: process.env.REDIS_TLS_CLIENT_CERT || process.env.NF_REDIS_TLS_CLIENT_CERT,  // Base64
+            key: process.env.REDIS_TLS_CLIENT_KEY || process.env.NF_REDIS_TLS_CLIENT_KEY,    // Base64
+            servername: process.env.REDIS_SNI_SERVERNAME || process.env.NF_REDIS_SNI_SERVERNAME
+        }
     },
     telegram: {
         proxy: {

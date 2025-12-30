@@ -124,10 +124,14 @@ export class CacheService {
                     return shouldReconnect;
                 },
                 // TLS 配置 - 从环境变量读取 SNI 主机名
-                tls: {
-                    rejectUnauthorized: false, // 禁用证书验证（Northflank环境需要）
-                    servername: process.env.REDIS_SNI_SERVERNAME || process.env.REDIS_HOST || process.env.NF_REDIS_HOST || (this.redisUrl ? new URL(this.redisUrl).hostname : undefined), // SNI 主机名从环境变量读取
-                }
+                // TLS 配置 - 从 config 读取完整 TLS 设置
+                tls: config.redis.tls.enabled ? {
+                    rejectUnauthorized: config.redis.tls.rejectUnauthorized,
+                    ca: config.redis.tls.ca ? Buffer.from(config.redis.tls.ca, 'base64') : undefined,
+                    cert: config.redis.tls.cert ? Buffer.from(config.redis.tls.cert, 'base64') : undefined,
+                    key: config.redis.tls.key ? Buffer.from(config.redis.tls.key, 'base64') : undefined,
+                    servername: config.redis.tls.servername || process.env.REDIS_HOST || process.env.NF_REDIS_HOST || (this.redisUrl ? new URL(this.redisUrl).hostname : undefined)
+                } : undefined
             };
 
             // 优先使用 URL，否则使用 host/port/password

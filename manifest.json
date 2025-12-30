@@ -489,6 +489,66 @@
         "default": 5000,
         "description": "Delay in milliseconds before restarting Redis client after connection loss"
       },
+      "REDIS_TLS_ENABLED": {
+        "type": "boolean",
+        "default": false,
+        "description": "启用 Redis TLS"
+      },
+      "REDIS_TLS_REJECT_UNAUTHORIZED": {
+        "type": "boolean",
+        "default": true,
+        "description": "TLS 证书严格验证"
+      },
+      "REDIS_TLS_CA": {
+        "type": "string",
+        "required": false,
+        "description": "CA 证书 (Base64)"
+      },
+      "REDIS_TLS_CLIENT_CERT": {
+        "type": "string",
+        "required": false,
+        "description": "客户端证书 (Base64)"
+      },
+      "REDIS_TLS_CLIENT_KEY": {
+        "type": "string",
+        "required": false,
+        "description": "客户端私钥 (Base64)"
+      },
+      "REDIS_SNI_SERVERNAME": {
+        "type": "string",
+        "required": false,
+        "description": "TLS SNI 主机名"
+      },
+      "NF_REDIS_TLS_ENABLED": {
+        "type": "boolean",
+        "default": false,
+        "description": "Northflank Redis TLS 启用开关"
+      },
+      "NF_REDIS_TLS_REJECT_UNAUTHORIZED": {
+        "type": "boolean",
+        "default": true,
+        "description": "Northflank Redis TLS 证书严格验证"
+      },
+      "NF_REDIS_TLS_CA": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis TLS CA 证书 (Base64)"
+      },
+      "NF_REDIS_TLS_CLIENT_CERT": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis TLS 客户端证书 (Base64)"
+      },
+      "NF_REDIS_TLS_CLIENT_KEY": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis TLS 客户端私钥 (Base64)"
+      },
+      "NF_REDIS_SNI_SERVERNAME": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis TLS SNI 主机名"
+      },
       "CACHE_PROVIDER": {
         "type": "string",
         "required": false,
