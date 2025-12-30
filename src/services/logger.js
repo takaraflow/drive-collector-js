@@ -149,7 +149,8 @@ export const logger = {
             axiomInitialized = false;
         }
     },
-    isInitialized: () => axiomInitialized
+    isInitialized: () => axiomInitialized,
+    canSend: (level) => true
 };
 
 export const resetLogger = () => {

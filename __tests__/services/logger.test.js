@@ -259,4 +259,14 @@ describe('Logger Service', () => {
     });
   });
 
+  describe('canSend method', () => {
+    test('canSend method exists and returns true', () => {
+      expect(typeof logger.canSend).toBe('function');
+      expect(logger.canSend('info')).toBe(true);
+      expect(logger.canSend('warn')).toBe(true);
+      expect(logger.canSend('error')).toBe(true);
+      expect(logger.canSend('debug')).toBe(true);
+    });
+  });
+
 });
