@@ -442,7 +442,7 @@ class CacheService {
             case 'set':
                 const value = args[1];
                 const ttl = args[2];
-                localCache.set(`cache:${key}`, value, ttl || 10 * 60 * 1000);
+                localCache.set(`cache:${key}`, value, (ttl || 10 * 60) * 1000);
                 return true;
             case 'get':
                 return localCache.get(`cache:${key}`);
@@ -494,9 +494,7 @@ class CacheService {
         if (expirationTtl !== null && expirationTtl !== undefined) {
             const ttl = parseInt(expirationTtl, 10);
             if (!isNaN(ttl) && ttl > 0) {
-                // Convert milliseconds to seconds for Redis EX command
-                const ttlSeconds = Math.ceil(ttl / 1000);
-                return await this.redisClient.set(key, valueStr, 'EX', ttlSeconds);
+                return await this.redisClient.set(key, valueStr, 'EX', ttl);
             } else if (ttl !== 0) {
                 logger.warn(`⚠️ Redis set: 无效的 TTL 值 ${expirationTtl}，跳过过期设置 (${key})`);
             }
@@ -565,17 +563,15 @@ class CacheService {
         if (!this.apiUrl || this.apiUrl.trim() === '') {
             throw new Error('Cloudflare KV API URL not configured. Please check CF_CACHE_ACCOUNT_ID and CF_CACHE_NAMESPACE_ID.');
         }
-        
+
         if (!this.token) {
             throw new Error('Cloudflare KV token not configured. Please check CF_CACHE_TOKEN.');
         }
-        
+
         const url = new URL(`${this.apiUrl}/values/${key}`);
         if (expirationTtl) {
-            // Convert milliseconds to seconds for Cloudflare KV
-            const ttlSeconds = Math.ceil(expirationTtl / 1000);
             // Cloudflare KV requires minimum TTL of 60 seconds
-            const minTtlSeconds = Math.max(ttlSeconds, 60);
+            const minTtlSeconds = Math.max(expirationTtl, 60);
             url.searchParams.set("expiration_ttl", minTtlSeconds);
         }
 
@@ -600,15 +596,13 @@ class CacheService {
      */
     async _upstash_set(key, value, expirationTtl = null) {
         const valueStr = typeof value === "string" ? value : JSON.stringify(value);
-        
+
         const command = ["SET", key, valueStr];
 
         if (expirationTtl !== null && expirationTtl !== undefined) {
             const ttl = parseInt(expirationTtl, 10);
             if (!isNaN(ttl) && ttl > 0) {
-                // Convert milliseconds to seconds for Upstash EX command
-                const ttlSeconds = Math.ceil(ttl / 1000);
-                command.push("EX", ttlSeconds.toString());
+                command.push("EX", ttl.toString());
             } else if (ttl !== 0) {
                 logger.warn(`⚠️ Upstash set: 无效的 TTL 值 ${expirationTtl}，跳过过期设置 (${key})`);
             }
