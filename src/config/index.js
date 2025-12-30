@@ -4,10 +4,74 @@ import path from "path";
 /**
  * --- 1. 基础配置与环境初始化 ---
  */
+/**
+ * 验证必需的环境变量
+ */
+function validateEnvironment() {
+    const required = [
+        { key: 'API_ID', name: 'API_ID' },
+        { key: 'API_HASH', name: 'API_HASH' },
+        { key: 'BOT_TOKEN', name: 'BOT_TOKEN' }
+    ];
+    
+    // 在测试环境中跳过验证
+    if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID) {
+        logger.warn('⚠️ 测试环境，跳过环境变量验证');
+        return {
+            apiId: parseInt(process.env.API_ID || '0'),
+            apiHash: process.env.API_HASH || 'test_hash',
+            botToken: process.env.BOT_TOKEN || 'test_token'
+        };
+    }
+    
+    for (const { key, name } of required) {
+        if (!process.env[key]) {
+            throw new Error(`Missing required environment variable: ${name}`);
+        }
+    }
+    
+    const apiId = parseInt(process.env.API_ID);
+    if (isNaN(apiId) || apiId <= 0) {
+        throw new Error(`Invalid API_ID: must be a positive number, got '${process.env.API_ID}'`);
+    }
+    
+    return {
+        apiId,
+        apiHash: process.env.API_HASH,
+        botToken: process.env.BOT_TOKEN
+    };
+}
+
+/**
+ * 检查缓存配置是否完整
+ */
+export function isCacheConfigComplete() {
+    const hasCloudflare = !!(process.env.CF_CACHE_ACCOUNT_ID && process.env.CF_CACHE_NAMESPACE_ID && process.env.CF_CACHE_TOKEN);
+    const hasRedis = !!(process.env.NF_REDIS_URL || (process.env.NF_REDIS_HOST && process.env.NF_REDIS_PORT));
+    const hasUpstash = !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+    
+    return hasCloudflare || hasRedis || hasUpstash;
+}
+
+/**
+ * 验证缓存配置
+ */
+function validateCacheConfig() {
+    if (!isCacheConfigComplete()) {
+        logger.warn('⚠️ No complete cache configuration found, cache service may not work properly');
+    }
+}
+
+// 验证环境变量
+const envConfig = validateEnvironment();
+
+import logger from "../services/logger.js";
+validateCacheConfig();
+
 export const config = {
-    apiId: parseInt(process.env.API_ID),
-    apiHash: process.env.API_HASH,
-    botToken: process.env.BOT_TOKEN,
+    apiId: envConfig.apiId,
+    apiHash: envConfig.apiHash,
+    botToken: envConfig.botToken,
     ownerId: process.env.OWNER_ID, // 7428626313
     remoteName: process.env.RCLONE_REMOTE || "mega",
     remoteFolder: process.env.REMOTE_FOLDER || "/DriveCollectorBot",

@@ -1,4 +1,4 @@
-import { client, saveSession, clearSession, resetClientSession, setConnectionStatusCallback } from "../services/telegram.js";
+import { getClient, saveSession, clearSession, resetClientSession, setConnectionStatusCallback } from "../services/telegram.js";
 import { MessageHandler } from "./MessageHandler.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { config } from "../config/index.js";
@@ -46,6 +46,7 @@ export async function startDispatcher() {
                 logger.warn("🚨 失去 Telegram 锁，正在断开连接...");
                 try {
                     // 强制断开，并设置较短的超时防止卡死在 disconnect
+                    const client = await getClient();
                     await Promise.race([
                         client.disconnect(),
                         new Promise((_, reject) => setTimeout(() => reject(new Error("Disconnect Timeout")), 5000))
@@ -85,6 +86,7 @@ export async function startDispatcher() {
         try {
             while (!isClientActive && retryCount < maxRetries) {
                 try {
+                    const client = await getClient();
                     await client.start({ botAuthToken: config.botToken });
                     await saveSession();
                     logger.info("🚀 Telegram 客户端已连接");
@@ -159,6 +161,7 @@ export async function startDispatcher() {
 
     // 4. 注册事件监听器 -> 交给 MessageHandler 处理
     // 初始化 MessageHandler (预加载 Bot ID)
+    const client = await getClient();
     client.addEventHandler(async (event) => {
         await MessageHandler.handleEvent(event, client);
     });
@@ -167,5 +170,5 @@ export async function startDispatcher() {
     setTimeout(() => MessageHandler.init(client), 5000);
 
     logger.info("🎉 Dispatcher 组件启动完成！");
-    return client;
+    return await getClient();
 }

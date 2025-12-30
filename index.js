@@ -179,12 +179,11 @@ export { handleQStashWebhook };
         }
 
         // 6. 设置优雅关闭处理
-// 新增：关闭 HTTP 服务器版本，遵循计划
         const gracefulShutdown = async (signal) => {
             logger.info(`\n📴 收到 ${signal} 信号，正在优雅关闭...`);
 
             try {
-                // 新增：关闭 HTTP 服务器
+                // 关闭 HTTP 服务器
                 server.close((err) => {
                     if (err) {
                         logger.error("❌ 服务器关闭失败:", err);

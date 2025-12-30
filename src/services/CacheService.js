@@ -504,6 +504,14 @@ class CacheService {
      * Cloudflare KV set 实现
      */
     async _cloudflare_set(key, value, expirationTtl = null) {
+        if (!this.apiUrl || this.apiUrl.trim() === '') {
+            throw new Error('Cloudflare KV API URL not configured. Please check CF_CACHE_ACCOUNT_ID and CF_CACHE_NAMESPACE_ID.');
+        }
+        
+        if (!this.token) {
+            throw new Error('Cloudflare KV token not configured. Please check CF_CACHE_TOKEN.');
+        }
+        
         const url = new URL(`${this.apiUrl}/values/${key}`);
         if (expirationTtl) {
             url.searchParams.set("expiration_ttl", expirationTtl);
@@ -563,6 +571,14 @@ class CacheService {
      * Cloudflare KV get 实现
      */
     async _cloudflare_get(key, type = "json") {
+        if (!this.apiUrl || this.apiUrl.trim() === '') {
+            throw new Error('Cloudflare KV API URL not configured. Please check CF_CACHE_ACCOUNT_ID and CF_CACHE_NAMESPACE_ID.');
+        }
+        
+        if (!this.token) {
+            throw new Error('Cloudflare KV token not configured. Please check CF_CACHE_TOKEN.');
+        }
+        
         const response = await fetch(`${this.apiUrl}/values/${key}`, {
             method: "GET",
             headers: {
@@ -615,6 +631,14 @@ class CacheService {
      * Cloudflare KV delete 实现
      */
     async _cloudflare_delete(key) {
+        if (!this.apiUrl || this.apiUrl.trim() === '') {
+            throw new Error('Cloudflare KV API URL not configured. Please check CF_CACHE_ACCOUNT_ID and CF_CACHE_NAMESPACE_ID.');
+        }
+        
+        if (!this.token) {
+            throw new Error('Cloudflare KV token not configured. Please check CF_CACHE_TOKEN.');
+        }
+        
         const response = await fetch(`${this.apiUrl}/values/${key}`, {
             method: "DELETE",
             headers: {
@@ -651,6 +675,14 @@ class CacheService {
      * Cloudflare KV bulkSet 实现
      */
     async _cloudflare_bulkSet(pairs) {
+        if (!this.apiUrl || this.apiUrl.trim() === '') {
+            throw new Error('Cloudflare KV API URL not configured. Please check CF_CACHE_ACCOUNT_ID and CF_CACHE_NAMESPACE_ID.');
+        }
+        
+        if (!this.token) {
+            throw new Error('Cloudflare KV token not configured. Please check CF_CACHE_TOKEN.');
+        }
+        
         const response = await fetch(`${this.apiUrl}/bulk`, {
             method: "PUT",
             headers: {
@@ -711,6 +743,14 @@ class CacheService {
      * Cloudflare KV listKeys 实现
      */
     async _cloudflare_listKeys(prefix = '') {
+        if (!this.apiUrl || this.apiUrl.trim() === '') {
+            throw new Error('Cloudflare KV API URL not configured. Please check CF_CACHE_ACCOUNT_ID and CF_CACHE_NAMESPACE_ID.');
+        }
+        
+        if (!this.token) {
+            throw new Error('Cloudflare KV token not configured. Please check CF_CACHE_TOKEN.');
+        }
+        
         const url = new URL(`${this.apiUrl}/keys`);
         if (prefix) {
             url.searchParams.set('prefix', prefix);

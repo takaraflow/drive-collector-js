@@ -37,6 +37,7 @@ export const clearSession = async (isLocal = false) => {
  * 保存当前的 Session 字符串
  */
 export const saveSession = async () => {
+    const client = await getClient();
     try {
         const sessionStr = client.session.save();
         if (sessionStr) {
@@ -53,6 +54,7 @@ export const saveSession = async () => {
  */
 export const resetClientSession = async () => {
     try {
+        const client = await getClient();
         if (client.connected) {
             logger.info("🔌 正在断开 Telegram 客户端连接...");
             await client.disconnect();
@@ -77,48 +79,204 @@ export const resetClientSession = async () => {
     }
 };
 
-// 初始化 Telegram 客户端单例
-// 优化配置以应对限流和连接问题：增加重试次数，模拟真实设备信息，设置 FloodWait 阈值
-// 增强连接稳定性和数据中心切换处理
+// Telegram 客户端初始化状态
+let telegramClient = null;
+let isClientInitializing = false;
 
-// 代理配置处理
-const proxyOptions = config.telegram?.proxy?.host ? {
-    proxy: {
-        ip: config.telegram.proxy.host,
-        port: parseInt(config.telegram.proxy.port),
-        socksType: config.telegram.proxy.type === 'socks5' ? 5 : 4,
-        username: config.telegram.proxy.username,
-        password: config.telegram.proxy.password,
+/**
+ * 初始化 Telegram 客户端（延迟初始化）
+ */
+async function initTelegramClient() {
+    if (telegramClient) {
+        return telegramClient;
     }
-} : {};
+    
+    if (isClientInitializing) {
+        // 等待初始化完成
+        return new Promise((resolve, reject) => {
+            const checkInit = setInterval(() => {
+                if (telegramClient) {
+                    clearInterval(checkInit);
+                    resolve(telegramClient);
+                }
+            }, 100);
+            
+            setTimeout(() => {
+                clearInterval(checkInit);
+                reject(new Error('Telegram client initialization timeout'));
+            }, 30000);
+        });
+    }
+    
+    isClientInitializing = true;
+    
+    try {
+        // 代理配置处理
+        const proxyOptions = config.telegram?.proxy?.host ? {
+            proxy: {
+                ip: config.telegram.proxy.host,
+                port: parseInt(config.telegram.proxy.port),
+                socksType: config.telegram.proxy.type === 'socks5' ? 5 : 4,
+                username: config.telegram.proxy.username,
+                password: config.telegram.proxy.password,
+            }
+        } : {};
+        
+        // 延迟获取session
+        const sessionString = await getSavedSession();
+        
+        telegramClient = new TelegramClient(
+            new StringSession(sessionString),
+            config.apiId,
+            config.apiHash,
+            {
+                connectionRetries: 20, // 增加连接重试次数到 20
+                floodSleepThreshold: 30, // 自动处理 30 秒内的 FloodWait，降低阈值让更多错误暴露给应用层
+                deviceModel: "DriveCollector-Server",
+                systemVersion: "Linux",
+                appVersion: "2.3.3", // 更新版本号
+                useWSS: false, // 服务端环境下通常不需要 WSS
+                autoReconnect: true,
+                // 增强连接稳定性设置
+                timeout: 30000, // 调整连接超时到 30 秒
+                requestRetries: 10, // 增加请求重试次数
+                retryDelay: 3000, // 增加重试延迟
+                // 数据中心切换优化
+                dcId: undefined, // 让客户端自动选择最佳数据中心
+                useIPv6: false, // 禁用 IPv6 以提高兼容性
+                // 连接池设置
+                maxConcurrentDownloads: 3, // 限制并发下载数量
+                connectionPoolSize: 5, // 连接池大小
+                // 添加基础日志记录器
+                baseLogger: logger,
+                ...proxyOptions // 合并代理配置
+            }
+        );
+        
+        // 设置事件监听器
+        setupEventListeners(telegramClient);
+        
+        return telegramClient;
+    } finally {
+        isClientInitializing = false;
+    }
+}
 
-export const client = new TelegramClient(
-    new StringSession(await getSavedSession()),
-    config.apiId,
-    config.apiHash,
-    {
-        connectionRetries: 20, // 增加连接重试次数到 20
-        floodSleepThreshold: 30, // 自动处理 30 秒内的 FloodWait，降低阈值让更多错误暴露给应用层
-        deviceModel: "DriveCollector-Server",
-        systemVersion: "Linux",
-        appVersion: "2.3.3", // 更新版本号
-        useWSS: false, // 服务端环境下通常不需要 WSS
-        autoReconnect: true,
-        // 增强连接稳定性设置
-        timeout: 30000, // 调整连接超时到 30 秒
-        requestRetries: 10, // 增加请求重试次数
-        retryDelay: 3000, // 增加重试延迟
-        // 数据中心切换优化
-        dcId: undefined, // 让客户端自动选择最佳数据中心
-        useIPv6: false, // 禁用 IPv6 以提高兼容性
-        // 连接池设置
-        maxConcurrentDownloads: 3, // 限制并发下载数量
-        connectionPoolSize: 5, // 连接池大小
-        // 添加基础日志记录器
-        baseLogger: logger,
-        ...proxyOptions // 合并代理配置
+/**
+ * 设置事件监听器
+ */
+function setupEventListeners(client) {
+    // 监听连接状态变化
+    client.on("connected", () => {
+        logger.info("🔗 Telegram 客户端连接已建立");
+        if (connectionStatusCallback) {
+            connectionStatusCallback(true);
+        }
+    });
+
+    client.on("disconnected", () => {
+        logger.info("🔌 Telegram 客户端连接已断开");
+        if (connectionStatusCallback) {
+            connectionStatusCallback(false);
+        }
+    });
+
+    // 监听错误以防止更新循环因超时而崩溃
+    client.on("error", (err) => {
+        const errorMsg = err?.message || "";
+        
+        // 识别 BinaryReader 相关的 TypeError
+        const isBinaryReaderError = 
+            errorMsg.includes("readUInt32LE") || 
+            errorMsg.includes("readInt32LE") ||
+            (err instanceof TypeError && errorMsg.includes("undefined"));
+        
+        if (errorMsg.includes("TIMEOUT")) {
+            // TIMEOUT 通常发生在 _updateLoop 中，GramJS 可能已经进入不可恢复状态
+            logger.warn(`⚠️ Telegram 客户端更新循环超时 (TIMEOUT): ${errorMsg}，准备主动重连...`);
+            // 增加延迟避免在网络波动时频繁重连
+            if (reconnectTimeout) clearTimeout(reconnectTimeout);
+            reconnectTimeout = setTimeout(() => handleConnectionIssue(), 2000);
+        } else if (errorMsg.includes("Not connected")) {
+            logger.warn("⚠️ Telegram 客户端未连接，尝试重连...");
+            handleConnectionIssue();
+        } else if (isBinaryReaderError) {
+            // 处理 BinaryReader 相关的 TypeError，这通常意味着内部状态已损坏
+            logger.warn(`⚠️ Telegram 客户端发生 BinaryReader 错误 (${errorMsg})，准备主动重连...`);
+            if (reconnectTimeout) clearTimeout(reconnectTimeout);
+            reconnectTimeout = setTimeout(() => handleConnectionIssue(), 2000);
+        } else {
+            logger.error("❌ Telegram 客户端发生错误:", err);
+        }
+    });
+}
+
+/**
+ * 获取 Telegram 客户端实例（延迟初始化）
+ */
+export const getClient = async () => {
+    return await initTelegramClient();
+};
+
+// 兼容性导出：保留原有的 client 导出指向（用于测试向后兼容）
+export const client = {
+    get connected() {
+        // 同步属性访问，返回当前客户端的连接状态（如果已初始化）
+        return telegramClient?.connected || false;
+    },
+    // 其他常用属性的代理
+    get session() {
+        return telegramClient?.session;
+    },
+    on: (...args) => {
+        // 如果客户端已初始化，代理事件监听器
+        if (telegramClient) {
+            return telegramClient.on(...args);
+        }
+        // 否则延迟到初始化后设置
+        const setupListener = () => {
+            if (telegramClient) {
+                telegramClient.on(...args);
+            }
+        };
+        // 简单的延迟设置
+        setTimeout(setupListener, 100);
     }
-);
+};
+
+/**
+ * 获取客户端活跃状态
+ */
+export const isClientActive = async () => {
+    const client = await getClient();
+    return client.connected;
+};
+
+/**
+ * 确保客户端已连接，如果未连接则等待连接建立
+ */
+export const ensureConnected = async () => {
+    const client = await getClient();
+    if (client.connected) return;
+
+    logger.info("⏳ 等待 Telegram 客户端连接...");
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            reject(new Error("Telegram client connection timeout after 30 seconds"));
+        }, 30000);
+
+        const checkConnected = () => {
+            if (client.connected) {
+                clearTimeout(timeout);
+                logger.info("✅ Telegram 客户端连接已确认");
+                resolve();
+            } else {
+                setTimeout(checkConnected, 1000);
+            }
+        };
+        checkConnected();
+    });
+};
 
 // --- 🛡️ 客户端监控与健康检查 (Watchdog) ---
 let lastHeartbeat = Date.now();
@@ -135,49 +293,7 @@ export const setConnectionStatusCallback = (callback) => {
     connectionStatusCallback = callback;
 };
 
-// 监听连接状态变化
-client.on("connected", () => {
-    logger.info("🔗 Telegram 客户端连接已建立");
-    if (connectionStatusCallback) {
-        connectionStatusCallback(true);
-    }
-});
 
-client.on("disconnected", () => {
-    logger.info("🔌 Telegram 客户端连接已断开");
-    if (connectionStatusCallback) {
-        connectionStatusCallback(false);
-    }
-});
-
-// 监听错误以防止更新循环因超时而崩溃
-client.on("error", (err) => {
-    const errorMsg = err?.message || "";
-    
-    // 识别 BinaryReader 相关的 TypeError
-    const isBinaryReaderError = 
-        errorMsg.includes("readUInt32LE") || 
-        errorMsg.includes("readInt32LE") ||
-        (err instanceof TypeError && errorMsg.includes("undefined"));
-    
-    if (errorMsg.includes("TIMEOUT")) {
-        // TIMEOUT 通常发生在 _updateLoop 中，GramJS 可能已经进入不可恢复状态
-        logger.warn(`⚠️ Telegram 客户端更新循环超时 (TIMEOUT): ${errorMsg}，准备主动重连...`);
-        // 增加延迟避免在网络波动时频繁重连
-        if (reconnectTimeout) clearTimeout(reconnectTimeout);
-        reconnectTimeout = setTimeout(() => handleConnectionIssue(), 2000);
-    } else if (errorMsg.includes("Not connected")) {
-        logger.warn("⚠️ Telegram 客户端未连接，尝试重连...");
-        handleConnectionIssue();
-    } else if (isBinaryReaderError) {
-        // 处理 BinaryReader 相关的 TypeError，这通常意味着内部状态已损坏
-        logger.warn(`⚠️ Telegram 客户端发生 BinaryReader 错误 (${errorMsg})，准备主动重连...`);
-        if (reconnectTimeout) clearTimeout(reconnectTimeout);
-        reconnectTimeout = setTimeout(() => handleConnectionIssue(), 2000);
-    } else {
-        logger.error("❌ Telegram 客户端发生错误:", err);
-    }
-});
 
 /**
  * 处理连接异常情况
@@ -200,6 +316,7 @@ async function handleConnectionIssue() {
     isReconnecting = true;
 
     try {
+        const client = await getClient();
         // 记录客户端状态上下文
         logger.info(`🔄 正在触发主动重连序列... [connected=${client.connected}, _sender=${!!client._sender}]`);
 
@@ -247,6 +364,7 @@ async function handleConnectionIssue() {
     } catch (e) {
         logger.error("❌ 主动重连失败，等待系统自动处理:", e);
         // 增加错误日志上下文
+        const client = await getClient();
         logger.error(`🔍 重连失败状态: connected=${client.connected}, _sender=${!!client._sender}, error=${e.message}`);
     } finally {
         isReconnecting = false;
@@ -262,7 +380,7 @@ export const startWatchdog = () => {
         const now = Date.now();
 
         // [DEBUG] 打印状态
-        // console.log(`[DEBUG_FIX] Watchdog check. now=${now}, last=${lastHeartbeat}, isReconnecting=${isReconnecting}, connected=${client.connected}`);
+        // console.log(`[DEBUG_FIX] Watchdog check. now=${now}, last=${lastHeartbeat}, isReconnecting=${isReconnecting}`);
 
         // 必须在 isReconnecting 检查之前处理时间回拨，防止测试环境下锁死
         // 处理时间回拨（如测试环境重置时间或系统时钟同步）
@@ -277,16 +395,17 @@ export const startWatchdog = () => {
             return;
         }
 
-        if (!client.connected) {
-            // 如果已断开连接且超过 5 分钟没有恢复，也触发强制重连
-            if (now - lastHeartbeat >= 5 * 60 * 1000) {
-                logger.error(`🚨 客户端断开连接超过 5 分钟且未自动恢复，强制重启连接... (diff=${now - lastHeartbeat})`);
-                handleConnectionIssue();
-            }
-            return;
-        }
-
         try {
+            const client = await getClient();
+            if (!client.connected) {
+                // 如果已断开连接且超过 5 分钟没有恢复，也触发强制重连
+                if (now - lastHeartbeat >= 5 * 60 * 1000) {
+                    logger.error(`🚨 客户端断开连接超过 5 分钟且未自动恢复，强制重启连接... (diff=${now - lastHeartbeat})`);
+                    handleConnectionIssue();
+                }
+                return;
+            }
+
             await client.getMe();
             lastHeartbeat = Date.now();
             // console.log(`[DEBUG_FIX] Heartbeat success. lastHeartbeat updated to ${lastHeartbeat}`);
@@ -297,6 +416,7 @@ export const startWatchdog = () => {
                 lastHeartbeat = 0; // 触发强制处理
                 // 主动断开连接
                 try {
+                    const client = await getClient();
                     await client.disconnect();
                 } catch (disconnectError) {
                     logger.warn("⚠️ 断开连接时出错:", disconnectError);
@@ -339,35 +459,7 @@ export const stopWatchdog = () => {
     lastHeartbeat = Date.now(); // 重置心跳时间
 };
 
-/**
- * 确保客户端已连接，如果未连接则等待连接建立
- */
-export const ensureConnected = async () => {
-    if (client.connected) return;
 
-    logger.info("⏳ 等待 Telegram 客户端连接...");
-    return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-            reject(new Error("Telegram client connection timeout after 30 seconds"));
-        }, 30000);
-
-        const checkConnected = () => {
-            if (client.connected) {
-                clearTimeout(timeout);
-                logger.info("✅ Telegram 客户端连接已确认");
-                resolve();
-            } else {
-                setTimeout(checkConnected, 1000);
-            }
-        };
-        checkConnected();
-    });
-};
-
-/**
- * 获取客户端活跃状态
- */
-export const isClientActive = () => client.connected;
 
 // 启动看门狗
 startWatchdog();
