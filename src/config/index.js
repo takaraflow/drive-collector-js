@@ -14,9 +14,9 @@ function validateEnvironment() {
         { key: 'BOT_TOKEN', name: 'BOT_TOKEN' }
     ];
     
-    // 在测试环境中跳过验证
-    if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID) {
-        console.warn('⚠️ 测试环境，跳过环境变量验证');
+    // 在测试环境或诊断模式中跳过验证
+    if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID || process.env.NODE_ENV === 'diagnostic') {
+        console.warn('⚠️ 测试环境或诊断模式，跳过环境变量验证');
         return {
             apiId: parseInt(process.env.API_ID || '0'),
             apiHash: process.env.API_HASH || 'test_hash',

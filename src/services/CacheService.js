@@ -201,22 +201,41 @@ class CacheService {
                 logger.debug(`🔄 Redis SELECT: Database ${db} selected`);
             });
 
-            // 测试连接并测量延迟
+            // 测试连接并测量延迟 - 添加超时控制避免卡死
             const pingStart = Date.now();
-            const pingResult = await this.redisClient.ping();
-            const pingDuration = Date.now() - pingStart;
+            try {
+                const pingPromise = this.redisClient.ping();
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Redis ping timeout after 10 seconds')), 10000)
+                );
 
-            logger.info('🔄 Cache服务：使用 Northflank Redis', {
-                pingResult,
-                pingDurationMs: pingDuration,
-                pingThreshold: pingDuration > 1000 ? 'high' : pingDuration > 500 ? 'medium' : 'low',
-                connectionReady: this.redisClient.status === 'ready',
-                node_env: process.env.NODE_ENV,
-                platform: process.platform
-            });
+                const pingResult = await Promise.race([pingPromise, timeoutPromise]);
+                const pingDuration = Date.now() - pingStart;
 
-            // 启动应用层心跳机制 - 每2分钟执行一次PING
-            this._startHeartbeat();
+                logger.info('🔄 Cache服务：使用 Northflank Redis', {
+                    pingResult,
+                    pingDurationMs: pingDuration,
+                    pingThreshold: pingDuration > 1000 ? 'high' : pingDuration > 500 ? 'medium' : 'low',
+                    connectionReady: this.redisClient.status === 'ready',
+                    node_env: process.env.NODE_ENV,
+                    platform: process.platform
+                });
+
+                // 启动应用层心跳机制 - 每2分钟执行一次PING
+                this._startHeartbeat();
+            } catch (pingError) {
+                const pingDuration = Date.now() - pingStart;
+                logger.warn('⚠️ Redis ping 测试失败，但继续初始化以支持延迟连接', {
+                    error: pingError.message,
+                    durationMs: pingDuration,
+                    clientStatus: this.redisClient.status,
+                    node_env: process.env.NODE_ENV,
+                    platform: process.platform
+                });
+
+                // 即使 ping 失败，也启动心跳机制（延迟连接时有用）
+                this._startHeartbeat();
+            }
 
         } catch (error) {
             logger.error(`🚨 Redis 初始化失败: ${error.message}`);

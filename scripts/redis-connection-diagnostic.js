@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 
+// 立即加载环境变量
+import dotenv from 'dotenv';
+const result = dotenv.config();
+console.log('[INIT] dotenv.config() result:', result.error ? `error: ${result.error.message}` : 'success');
+
+// 调试环境变量
+console.log('[INIT] API_ID:', process.env.API_ID ? `${process.env.API_ID.substring(0, 4)}...` : 'missing');
+console.log('[INIT] NF_REDIS_URL:', process.env.NF_REDIS_URL ? 'exists' : 'missing');
+
 /**
  * Redis 连接深度诊断脚本
  * 专门用于分析 Northflank 环境下的 Redis 连接问题
- *
- * 使用方法：
- * 1. 确保环境变量已正确配置
- * 2. 运行: node scripts/redis-connection-diagnostic.js
- * 3. 分析输出日志以确定连接问题根源
  */
 
 import { config } from "../src/config/index.js";
@@ -15,6 +19,7 @@ import { cache } from "../src/services/CacheService.js";
 import logger from "../src/services/logger.js";
 
 async function runRedisDiagnostics() {
+    console.log('[DEBUG] 脚本开始执行');
     console.log('🔍 开始 Redis 连接深度诊断...\n');
 
     // 1. 环境配置检查
@@ -33,7 +38,9 @@ async function runRedisDiagnostics() {
     }
 
     // 等待 CacheService 初始化
+    console.log('[DEBUG] 开始等待 CacheService 初始化 (2秒)');
     await new Promise(resolve => setTimeout(resolve, 2000));
+    console.log('[DEBUG] CacheService 初始化等待完成');
 
     // 2. 连接状态监控
     console.log('🔗 连接状态监控:');
@@ -62,9 +69,12 @@ async function runRedisDiagnostics() {
 
     // 3. 基础连接测试
     console.log('\n🏓 基础连接测试:');
+    console.log('[DEBUG] 开始 PING 测试');
     try {
         const pingStart = Date.now();
+        console.log('[DEBUG] 调用 cache.redisClient.ping()');
         const result = await cache.redisClient.ping();
+        console.log('[DEBUG] PING 完成');
         const pingTime = Date.now() - pingStart;
 
         console.log(`   PING 响应: ${result}`);
@@ -88,17 +98,22 @@ async function runRedisDiagnostics() {
 
     // 4. 网络延迟分析
     console.log('\n📊 网络延迟分析:');
+    console.log('[DEBUG] 开始 10 次延迟测试');
     const latencies = [];
     for (let i = 0; i < 10; i++) {
+        console.log(`[DEBUG] 第 ${i + 1} 次 PING 测试开始`);
         try {
             const start = Date.now();
             await cache.redisClient.ping();
             latencies.push(Date.now() - start);
+            console.log(`[DEBUG] 第 ${i + 1} 次 PING 测试完成: ${latencies[latencies.length - 1]}ms`);
             await new Promise(resolve => setTimeout(resolve, 200)); // 200ms 间隔
         } catch (error) {
+            console.log(`[DEBUG] 第 ${i + 1} 次 PING 测试失败: ${error.message}`);
             console.log(`   第${i + 1}次测试失败: ${error.message}`);
         }
     }
+    console.log('[DEBUG] 延迟测试循环完成');
 
     if (latencies.length > 0) {
         const avgLatency = latencies.reduce((a, b) => a + b, 0) / latencies.length;
@@ -136,10 +151,12 @@ async function runRedisDiagnostics() {
 
     // 5. 操作性能测试
     console.log('\n⚡ 操作性能测试:');
+    console.log('[DEBUG] 开始操作性能测试');
     const operations = ['SET', 'GET', 'DEL'];
     const results = {};
 
     for (const op of operations) {
+        console.log(`[DEBUG] 开始 ${op} 操作测试`);
         const testKey = `__diag_test_${op.toLowerCase()}_${Date.now()}__`;
         try {
             let start, duration;
@@ -163,13 +180,16 @@ async function runRedisDiagnostics() {
             }
 
             results[op] = duration;
+            console.log(`[DEBUG] ${op} 操作完成: ${duration}ms`);
             console.log(`   ${op} 操作: ${duration}ms`);
 
         } catch (error) {
+            console.log(`[DEBUG] ${op} 操作失败: ${error.message}`);
             console.log(`   ${op} 操作失败: ${error.message}`);
             results[op] = 'FAILED';
         }
     }
+    console.log('[DEBUG] 操作性能测试完成');
 
     // 6. 连接配置信息
     console.log('\n⚙️ 连接配置信息:');
@@ -205,7 +225,11 @@ async function runRedisDiagnostics() {
 
 // 只有当直接运行此脚本时才执行诊断
 if (import.meta.url === `file://${process.argv[1]}`) {
-    runRedisDiagnostics().catch(error => {
+    console.log('[DEBUG] 脚本入口条件满足，开始执行 runRedisDiagnostics');
+    runRedisDiagnostics().then(() => {
+        console.log('[DEBUG] runRedisDiagnostics 执行完成');
+    }).catch(error => {
+        console.log('[DEBUG] runRedisDiagnostics 执行失败');
         console.error('❌ 诊断脚本执行失败:', error.message);
         process.exit(1);
     });
