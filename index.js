@@ -1,3 +1,6 @@
+process.on('uncaughtException', (err) => { console.error('FATAL: Uncaught Exception:', err); process.exit(1); })
+process.on('unhandledRejection', (reason, promise) => { console.error('FATAL: Unhandled Rejection:', reason); process.exit(1); })
+
 import http from "http";
 import { config } from "./src/config/index.js";
 import { SettingsRepository } from "./src/repositories/SettingsRepository.js";
