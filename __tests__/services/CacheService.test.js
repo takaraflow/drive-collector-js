@@ -68,7 +68,7 @@ describe("Cache Service Full Suite", () => {
     });
 
     test("should return null on 404", async () => {
-      mockFetch.mockResolvedValueOnce({ status: 404 });
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 404, json: () => Promise.resolve({}) });
       expect(await cacheInstance.get("missing")).toBeNull();
     });
 
@@ -206,11 +206,32 @@ describe("Cache Service Full Suite", () => {
 
     test("should switch to Upstash after 3 rate limit errors", async () => {
       const rateLimitErr = { success: false, errors: [{ message: "rate limit" }] };
+      const mockHeaders = new Map();
+      mockHeaders.set('Retry-After', '0');
+      
       mockFetch
-        .mockResolvedValueOnce({ ok: false, status: 429, json: () => Promise.resolve(rateLimitErr) })
-        .mockResolvedValueOnce({ ok: false, status: 429, json: () => Promise.resolve(rateLimitErr) })
-        .mockResolvedValueOnce({ ok: false, status: 429, json: () => Promise.resolve(rateLimitErr) })
-        .mockResolvedValueOnce({ json: () => Promise.resolve({ result: "OK" }) });
+        .mockResolvedValueOnce({ 
+          ok: false, 
+          status: 429, 
+          headers: mockHeaders,
+          json: () => Promise.resolve(rateLimitErr) 
+        })
+        .mockResolvedValueOnce({ 
+          ok: false, 
+          status: 429, 
+          headers: mockHeaders,
+          json: () => Promise.resolve(rateLimitErr) 
+        })
+        .mockResolvedValueOnce({ 
+          ok: false, 
+          status: 429, 
+          headers: mockHeaders,
+          json: () => Promise.resolve(rateLimitErr) 
+        })
+        .mockResolvedValueOnce({ 
+          ok: true,
+          json: () => Promise.resolve({ result: "OK" }) 
+        });
 
       await cacheInstance.set("key", "val");
       expect(cacheInstance.currentProvider).toBe("upstash");

@@ -1,7 +1,27 @@
 # 代码修改原则
-1. 生产质量第一：始终以生产代码的稳定性和质量为核心。严禁为了通过测试而进行过度设计，确保代码逻辑简洁、高效。
-2. 测试同步与验证：每次修改代码时，必须同步更新对应的自动化测试。修改完成后，必须运行 `npm test` 确保所有测试用例 100% 通过。
-3. 自动化错误修复：若 `npm test` 未通过，必须自动分析原因并持续修复，直到测试完全通过为止。
-4. 规范化提交 (Conventional Commits)：使用英文 Conventional Commits 规范（如 `feat:`, `fix:`, `docs:` 等）提交代码，确保提交信息清晰、专业。
-5. 配置同步更新：当代码接口、API 行为或功能逻辑发生改变后，必须及时更新 `manifest.json` 以保持一致。
-6. 在执行 standard-version 之前，先运行 npm install --package-lock-only 以确保 package-lock.json 的版本号与代码库状态保持同步，防止发版后出现版本不一致的情况。
+
+1. 生产质量第一：始终以生产代码的稳定性和质量为核心。严禁为了通过测试而进行过度设计，确保代码逻辑简洁、高效
+2. 测试同步与验证：每次修改代码时，必须同步更新对应的自动化测试。修改完成后，必须运行 `npm test` 确保所有测试用例 100% 通过
+3. 自动化错误修复：若 `npm test` 未通过，必须自动分析原因并持续修复，直到测试完全通过为止
+4. 规范化提交 (Conventional Commits)：使用英文 Conventional Commits 规范（如 `feat:`, `fix:`, `docs:` 等）提交代码，确保提交信息清晰、专业
+5. 配置同步更新：当代码接口、API 行为或功能逻辑发生改变后，必须及时更新 `manifest.json` 以保持一致
+6. 在执行 standard-version 之前，先运行 npm install --package-lock-only 以确保 package-lock.json 的版本号与代码库状态保持同步，防止发版后出现版本不一致的情况
+
+
+# 自动化测试编写规则
+
+1. 单元测试中严禁任何真实 IO（DB / HTTP / FS / Redis / Queue）
+2. 禁止在 test / beforeAll / beforeEach 中启动 server 或监听端口
+3. 禁止使用真实时间（Date.now / setTimeout / setInterval），必须 mock 或 useFakeTimers
+4. 单个 test 用例执行时间不得超过 30ms
+5. 单个 test 文件执行时间不得超过 300ms
+6. 禁止在 beforeAll 中做全局初始化，必须使用最小化 per-test 构造
+7. 每个 test 必须 100% 可并行运行，不得依赖共享状态
+8. 测试中禁止使用随机数，必须 mock Math.random
+9. 所有 Promise 必须被 await，禁止 fire-and-forget
+10. 禁止 async test 中使用 done 回调
+11. 测试中不得读取真实 process.env，必须显式注入
+12. 禁止 snapshot 用于业务逻辑断言（仅限 UI / 结构性输出）
+13. 禁止 console.log，调试信息必须通过断言体现
+14. 所有 mock 必须在 test 内显式声明，禁止隐式自动 mock
+15. 测试结束后必须无 open handles（timer / socket / file）

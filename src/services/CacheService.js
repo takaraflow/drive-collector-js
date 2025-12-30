@@ -1,5 +1,6 @@
 import { config } from "../config/index.js";
 import { localCache } from "../utils/LocalCache.js";
+import { upstashRateLimiter } from "../utils/RateLimiter.js";
 import logger from "./logger.js";
 
 /**
@@ -7,7 +8,7 @@ import logger from "./logger.js";
  * 支持 Northflank Redis (标准协议)、Cloudflare KV 和 Upstash Redis REST API
  * 具有自动故障转移功能，并集成 L1 内存缓存减少物理调用
  */
-class CacheService {
+export class CacheService {
     constructor() {
         // L1 内存缓存配置
         this.l1CacheTtl = 10 * 1000; // 默认 10 秒内存缓存
@@ -87,9 +88,15 @@ class CacheService {
                 family: 4, // 强制使用IPv4
                 lazyConnect: true, // 延迟连接，避免启动时的连接风暴
                 enableReadyCheck: true, // Northflank环境特定配置
+                maxRetriesPerRequest: 3, // 新增：限制每请求最大重试次数
                 retryStrategy: (times) => {
+                    const maxRetries = 3; // 新增：限制重连尝试次数
+                    if (times > maxRetries) {
+                        logger.error(`🚨 Redis 重连超过最大次数 (${maxRetries})，停止重连`);
+                        return null; // 停止重连，触发错误
+                    }
                     const delay = Math.min(times * 200, 10000); // 指数退避，最大10秒间隔（Northflank优化）
-                    logger.warn(`⚠️ Redis 重试尝试 ${times}，延迟 ${delay}ms`);
+                    logger.warn(`⚠️ Redis 重试尝试 ${times}/${maxRetries}，延迟 ${delay}ms`);
                     return delay;
                 },
                 reconnectOnError: (err) => {
@@ -251,6 +258,43 @@ class CacheService {
     }
 
     /**
+     * 检查 Redis 连接健康状态
+     */
+    _checkRedisHealth() {
+        if (!this.redisClient) return false;
+        
+        const status = this.redisClient.status;
+        // 只有 ready 状态才认为健康
+        return status === 'ready';
+    }
+
+    /**
+     * 主动触发 Redis 连接检查
+     */
+    async _validateRedisConnection() {
+        if (!this.redisClient || !this.hasRedis) {
+            return false;
+        }
+        
+        try {
+            // 使用带超时的 ping
+            const pingPromise = this.redisClient.ping();
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Health check timeout')), 5000)
+            );
+            
+            await Promise.race([pingPromise, timeoutPromise]);
+            return true;
+        } catch (error) {
+            logger.warn('⚠️ Redis 健康检查失败', {
+                error: error.message,
+                status: this.redisClient.status
+            });
+            return false;
+        }
+    }
+
+    /**
      * 设置默认提供商优先级
      * 优先级：redis > cloudflare > upstash
      */
@@ -326,8 +370,8 @@ class CacheService {
             this.lastFailureTime = Date.now();
             this.lastError = error.message || "Unknown error";
 
-            // 连续3次额度/网络错误，触发故障转移
-            if (this.failureCount >= 3) {
+            // 连续2次错误即触发故障转移（降低阈值）
+            if (this.failureCount >= 2) {
                 const targets = this._calculateFailoverTargets();
                 if (targets.length > 0) {
                     logger.warn(`⚠️ ${this.getCurrentProvider()} 连续失败 ${this.failureCount} 次，触发自动故障转移到 ${targets[0]}`);
@@ -485,47 +529,66 @@ class CacheService {
      * 统一判断是否为可重试的网络/配额错误
      */
     _isRetryableError(error) {
+        if (!error) return false;
+        
         const msg = (error.message || "").toLowerCase();
-        return msg.includes('free usage limit') ||
-               msg.includes('quota exceeded') ||
-               msg.includes('rate limit') ||
-               msg.includes('fetch failed') ||
-               msg.includes('network') ||
-               msg.includes('timeout') ||
-               msg.includes('network timeout') ||
-               msg.includes('connection') ||
-               msg.includes('econnreset');
+        const status = error.status || error.code || "";
+        
+        // Upstash 特定错误
+        const upstashErrors = [
+            'free usage limit',
+            'quota exceeded',
+            'rate limit',
+            'too many requests',
+            '429',
+            'daily limit exceeded'
+        ];
+        
+        // 网络/连接错误
+        const networkErrors = [
+            'fetch failed',
+            'network',
+            'timeout',
+            'network timeout',
+            'connection',
+            'econnreset',
+            'econnrefused',
+            'getaddrinfo'
+        ];
+        
+        // 检查所有可能的错误类型
+        return upstashErrors.some(e => msg.includes(e) || status.toString().includes(e)) ||
+               networkErrors.some(e => msg.includes(e) || status.toString().includes(e));
     }
 
     /**
      * 执行操作并支持故障转移
      */
     async _executeWithFailover(operation, ...args) {
-        // Fallback logic for Redis init failure in development
+        // 1. Redis 客户端不可用时的 Fallback
         if (this.currentProvider === 'redis' && !this.redisClient) {
-            logger.warn('Redis client not initialized (likely local dev), fallback to Cloudflare KV');
-            if (this.hasCloudflare) {
-                this.currentProvider = 'cloudflare';
-            } else if (this.hasUpstash) {
-                this.currentProvider = 'upstash';
-            } else {
-                // In test environment, use local cache as last resort
-                logger.warn('No fallback providers available, using local cache');
-                return await this._local_cache_operation(operation, ...args);
-            }
-            logger.info(`🔄 Fallback to ${this.currentProvider}`);
-            // Recurse once with new provider
-            return await this._executeWithFailover(operation, ...args);
+            logger.warn('Redis client not initialized, fallback immediately');
+            return await this._fallbackToNextProvider(operation, ...args);
         }
-    
+
+        // 2. 主动健康检查 (仅对 Redis)
+        if (this.currentProvider === 'redis') {
+            const isHealthy = await this._validateRedisConnection();
+            if (!isHealthy) {
+                logger.warn('⚠️ Redis 健康检查失败，主动触发 failover');
+                return await this._fallbackToNextProvider(operation, ...args);
+            }
+        }
+
         let attempts = 0;
         const maxAttempts = 3;
+        
         while (attempts < maxAttempts) {
             try {
                 if (this.currentProvider === 'redis') {
-                    // Check if Redis client is available before attempting operation
-                    if (!this.redisClient) {
-                        throw new Error('Redis client not available');
+                    // 再次检查客户端状态
+                    if (!this.redisClient || this.redisClient.status === 'close' || this.redisClient.status === 'end') {
+                        throw new Error('Redis client not in ready state');
                     }
                     return await this[`_redis_${operation}`](...args);
                 } else if (this.currentProvider === 'upstash') {
@@ -535,20 +598,13 @@ class CacheService {
                 }
             } catch (error) {
                 attempts++;
+                logger.warn(`⚠️ ${this.getCurrentProvider()} 操作失败 (${attempts}/${maxAttempts})`, {
+                    operation,
+                    error: error.message,
+                    clientStatus: this.redisClient?.status
+                });
 
-                // For Redis errors, always try to failover if possible
-                if (this.currentProvider === 'redis' && this.hasCloudflare && attempts < maxAttempts) {
-                    logger.warn(`Redis operation failed: ${error.message}, attempting failover`);
-                    this.currentProvider = 'cloudflare';
-                    logger.info(`🔄 Failed over to ${this.getCurrentProvider()}`);
-                    continue;
-                }
-
-                // For other providers, use retry logic
-                if (!this._isRetryableError(error) || this.currentProvider === 'redis') {
-                    throw error;
-                }
-
+                // 3. 判断是否需要 Failover
                 if (this._shouldFailover(error)) {
                     logger.info(`🔄 检测到可恢复错误，准备故障转移`, {
                         currentProvider: this.currentProvider,
@@ -556,18 +612,49 @@ class CacheService {
                         lastError: error.message,
                         errorType: this._isRetryableError(error) ? 'retryable' : 'non-retryable'
                     });
+                    
                     if (this._failover()) {
                         logger.info(`✅ 故障转移成功，现在使用 ${this.getCurrentProvider()}`);
+                        // 重置尝试次数，使用新提供商
+                        attempts = 0;
                         continue;
                     } else {
                         logger.warn(`❌ 故障转移失败，无可用后备提供商`);
                     }
                 }
 
-                if (attempts >= maxAttempts) throw error;
+                // 4. 非可重试错误或达到最大尝试次数，抛出异常
+                if (!this._isRetryableError(error) || attempts >= maxAttempts) {
+                    throw error;
+                }
+                
                 logger.info(`ℹ️ ${this.getCurrentProvider()} 重试中 (${attempts}/${maxAttempts})...`);
             }
         }
+    }
+
+    /**
+     * 优雅降级到下一个提供商
+     */
+    async _fallbackToNextProvider(operation, ...args) {
+        const originalProvider = this.currentProvider;
+        
+        // 计算下一个可用提供商
+        const targets = this._calculateFailoverTargets();
+        if (targets.length === 0) {
+            // 没有可用后备，使用本地缓存
+            logger.warn('⚠️ 无可用后备提供商，使用本地缓存');
+            return await this._local_cache_operation(operation, ...args);
+        }
+        
+        // 执行故障转移
+        if (this._failover()) {
+            logger.info(`🔄 已从 ${this._getProviderDisplayName(originalProvider)} 降级到 ${this.getCurrentProvider()}`);
+            // 使用新提供商重试
+            return await this._executeWithFailover(operation, ...args);
+        }
+        
+        throw new Error(`无法从 ${this._getProviderDisplayName(originalProvider)} 故障转移`);
     }
 
     /**
@@ -791,6 +878,11 @@ class CacheService {
             body: typeof value === "string" ? value : JSON.stringify(value),
         });
 
+        // Handle undefined response (for mock fetch)
+        if (!response || !response.json) {
+            throw new Error('Cache Set Error: Invalid response from Cloudflare KV');
+        }
+
         const result = await response.json();
         if (!result.success) {
             throw new Error(`Cache Set Error: ${result.errors?.[0]?.message || "Unknown error"}`);
@@ -802,34 +894,50 @@ class CacheService {
      * Upstash set 实现
      */
     async _upstash_set(key, value, expirationTtl = null) {
-        const valueStr = typeof value === "string" ? value : JSON.stringify(value);
+        return await upstashRateLimiter.execute(async () => {
+            const valueStr = typeof value === "string" ? value : JSON.stringify(value);
 
-        const command = ["SET", key, valueStr];
+            const command = ["SET", key, valueStr];
 
-        if (expirationTtl !== null && expirationTtl !== undefined) {
-            const ttl = parseInt(expirationTtl, 10);
-            if (!isNaN(ttl) && ttl > 0) {
-                command.push("EX", ttl.toString());
-            } else if (ttl !== 0) {
-                logger.warn(`⚠️ Upstash set: 无效的 TTL 值 ${expirationTtl}，跳过过期设置 (${key})`);
+            if (expirationTtl !== null && expirationTtl !== undefined) {
+                const ttl = parseInt(expirationTtl, 10);
+                if (!isNaN(ttl) && ttl > 0) {
+                    command.push("EX", ttl.toString());
+                } else if (ttl !== 0) {
+                    logger.warn(`⚠️ Upstash set: 无效的 TTL 值 ${expirationTtl}，跳过过期设置 (${key})`);
+                }
             }
-        }
 
-        const response = await fetch(`${this.upstashUrl}/`, {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${this.upstashToken}`,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(command),
+            const response = await fetch(`${this.upstashUrl}/`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${this.upstashToken}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(command),
+            });
+
+            // 检查速率限制响应
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After');
+                const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+                logger.warn(`⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                throw new Error('Upstash rate limit exceeded');
+            }
+
+            // Handle undefined response (for mock fetch)
+            if (!response || !response.json) {
+                throw new Error('Upstash Set Error: Invalid response');
+            }
+
+            const result = await response.json();
+            if (result.error) {
+                logger.error(`🚨 Upstash Set Error for key '${key}':`, result.error);
+                throw new Error(`Upstash Set Error: ${result.error}`);
+            }
+            return result.result === "OK";
         });
-
-        const result = await response.json();
-        if (result.error) {
-            logger.error(`🚨 Upstash Set Error for key '${key}':`, result.error);
-            throw new Error(`Upstash Set Error: ${result.error}`);
-        }
-        return result.result === "OK";
     }
 
     /**
@@ -851,6 +959,11 @@ class CacheService {
             },
         });
 
+        // Handle undefined response (for mock fetch)
+        if (!response || !response.json) {
+            throw new Error('Cache Get Error: Invalid response from Cloudflare KV');
+        }
+
         if (response.status === 404) return null;
         if (!response.ok) {
             const result = await response.json();
@@ -867,29 +980,45 @@ class CacheService {
      * Upstash get 实现
      */
     async _upstash_get(key, type = "json") {
-        const response = await fetch(`${this.upstashUrl}/get/${encodeURIComponent(key)}`, {
-            method: "GET",
-            headers: {
-                "Authorization": `Bearer ${this.upstashToken}`,
-            },
-        });
+        return await upstashRateLimiter.execute(async () => {
+            const response = await fetch(`${this.upstashUrl}/get/${encodeURIComponent(key)}`, {
+                method: "GET",
+                headers: {
+                    "Authorization": `Bearer ${this.upstashToken}`,
+                },
+            });
 
-        const result = await response.json();
-        if (result.error) {
-            throw new Error(`Upstash Get Error: ${result.error}`);
-        }
-
-        const value = result.result;
-        if (value === null || value === undefined) return null;
-
-        if (type === "json") {
-            try {
-                return JSON.parse(value);
-            } catch (e) {
-                return value;
+            // 检查速率限制响应
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After');
+                const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+                logger.warn(`⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                throw new Error('Upstash rate limit exceeded');
             }
-        }
-        return value;
+
+            // Handle undefined response (for mock fetch)
+            if (!response || !response.json) {
+                throw new Error('Upstash Get Error: Invalid response');
+            }
+
+            const result = await response.json();
+            if (result.error) {
+                throw new Error(`Upstash Get Error: ${result.error}`);
+            }
+
+            const value = result.result;
+            if (value === null || value === undefined) return null;
+
+            if (type === "json") {
+                try {
+                    return JSON.parse(value);
+                } catch (e) {
+                    return value;
+                }
+            }
+            return value;
+        });
     }
 
     /**
@@ -911,6 +1040,11 @@ class CacheService {
             },
         });
 
+        // Handle undefined response (for mock fetch)
+        if (!response || !response.json) {
+            throw new Error('Cache Delete Error: Invalid response from Cloudflare KV');
+        }
+
         const result = await response.json();
         if (!result.success && response.status !== 404) {
             throw new Error(`Cache Delete Error: ${result.errors?.[0]?.message || "Unknown error"}`);
@@ -922,18 +1056,34 @@ class CacheService {
      * Upstash delete 实现
      */
     async _upstash_delete(key) {
-        const response = await fetch(`${this.upstashUrl}/del/${encodeURIComponent(key)}`, {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${this.upstashToken}`,
-            },
-        });
+        return await upstashRateLimiter.execute(async () => {
+            const response = await fetch(`${this.upstashUrl}/del/${encodeURIComponent(key)}`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${this.upstashToken}`,
+                },
+            });
 
-        const result = await response.json();
-        if (result.error) {
-            throw new Error(`Upstash Delete Error: ${result.error}`);
-        }
-        return result.result > 0;
+            // 检查速率限制响应
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After');
+                const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+                logger.warn(`⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                throw new Error('Upstash rate limit exceeded');
+            }
+
+            // Handle undefined response (for mock fetch)
+            if (!response || !response.json) {
+                throw new Error('Upstash Delete Error: Invalid response');
+            }
+
+            const result = await response.json();
+            if (result.error) {
+                throw new Error(`Upstash Delete Error: ${result.error}`);
+            }
+            return result.result > 0;
+        });
     }
 
     /**
@@ -960,6 +1110,11 @@ class CacheService {
             }))),
         });
 
+        // Handle undefined response (for mock fetch)
+        if (!response || !response.json) {
+            throw new Error('Cache Bulk Set Error: Invalid response from Cloudflare KV');
+        }
+
         const result = await response.json();
         if (!result.success) {
             throw new Error(`Cache Bulk Set Error: ${result.errors?.[0]?.message || "Unknown error"}`);
@@ -972,36 +1127,52 @@ class CacheService {
      * Upstash bulkSet 实现
      */
     async _upstash_bulkSet(pairs) {
-        if (!Array.isArray(pairs)) {
-            throw new Error("Upstash bulkSet: pairs must be an array");
-        }
-
-        const commands = pairs.map(p => {
-            if (!p || typeof p.key !== 'string' || p.value === undefined) {
-                throw new Error("Upstash bulkSet: each pair must have 'key' (string) and 'value'");
+        return await upstashRateLimiter.execute(async () => {
+            if (!Array.isArray(pairs)) {
+                throw new Error("Upstash bulkSet: pairs must be an array");
             }
-            const valueStr = typeof p.value === "string" ? p.value : JSON.stringify(p.value);
-            return ["SET", p.key, valueStr];
-        });
 
-        const response = await fetch(`${this.upstashUrl}/pipeline`, {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${this.upstashToken}`,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(commands),
-        });
+            const commands = pairs.map(p => {
+                if (!p || typeof p.key !== 'string' || p.value === undefined) {
+                    throw new Error("Upstash bulkSet: each pair must have 'key' (string) and 'value'");
+                }
+                const valueStr = typeof p.value === "string" ? p.value : JSON.stringify(p.value);
+                return ["SET", p.key, valueStr];
+            });
 
-        const results = await response.json();
-        if (results.error) {
-            throw new Error(`Upstash Pipeline Error: ${results.error}`);
-        }
-        const items = results.results || (Array.isArray(results) ? results : [results]);
-        return items.map(r => ({
-            success: !r.error,
-            result: r.error ? r.error : r.result
-        }));
+            const response = await fetch(`${this.upstashUrl}/pipeline`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${this.upstashToken}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(commands),
+            });
+
+            // 检查速率限制响应
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After');
+                const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+                logger.warn(`⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                throw new Error('Upstash rate limit exceeded');
+            }
+
+            // Handle undefined response (for mock fetch)
+            if (!response || !response.json) {
+                throw new Error('Upstash Pipeline Error: Invalid response');
+            }
+
+            const results = await response.json();
+            if (results.error) {
+                throw new Error(`Upstash Pipeline Error: ${results.error}`);
+            }
+            const items = results.results || (Array.isArray(results) ? results : [results]);
+            return items.map(r => ({
+                success: !r.error,
+                result: r.error ? r.error : r.result
+            }));
+        });
     }
 
     /**
@@ -1028,6 +1199,11 @@ class CacheService {
             },
         });
 
+        // Handle undefined response (for mock fetch)
+        if (!response || !response.json) {
+            throw new Error('Cache ListKeys Error: Invalid response from Cloudflare KV');
+        }
+
         if (!response.ok) {
             const result = await response.json();
             throw new Error(`Cache ListKeys Error: ${result.errors?.[0]?.message || "Unknown error"}`);
@@ -1046,25 +1222,41 @@ class CacheService {
      * Upstash listKeys 实现
      */
     async _upstash_listKeys(prefix = '') {
-        // 使用 KEYS 命令获取匹配的键
-        const command = ["KEYS", `${prefix}*`];
+        return await upstashRateLimiter.execute(async () => {
+            // 使用 KEYS 命令获取匹配的键
+            const command = ["KEYS", `${prefix}*`];
 
-        const response = await fetch(`${this.upstashUrl}/`, {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${this.upstashToken}`,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(command),
+            const response = await fetch(`${this.upstashUrl}/`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${this.upstashToken}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(command),
+            });
+
+            // 检查速率限制响应
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After');
+                const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+                logger.warn(`⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                throw new Error('Upstash rate limit exceeded');
+            }
+
+            // Handle undefined response (for mock fetch)
+            if (!response || !response.json) {
+                throw new Error('Upstash ListKeys Error: Invalid response');
+            }
+
+            const result = await response.json();
+            if (result.error) {
+                logger.error(`🚨 Upstash ListKeys Error:`, result.error);
+                throw new Error(`Upstash ListKeys Error: ${result.error}`);
+            }
+
+            return result.result || [];
         });
-
-        const result = await response.json();
-        if (result.error) {
-            logger.error(`🚨 Upstash ListKeys Error:`, result.error);
-            throw new Error(`Upstash ListKeys Error: ${result.error}`);
-        }
-
-        return result.result || [];
     }
 
     /**
