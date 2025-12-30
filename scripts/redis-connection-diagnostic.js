@@ -19,6 +19,7 @@ import { cache } from "../src/services/CacheService.js";
 import logger from "../src/services/logger.js";
 
 async function runRedisDiagnostics() {
+    console.log('[SCRIPT] runRedisDiagnostics 函数开始执行');
     console.log('[DEBUG] 脚本开始执行');
     console.log('🔍 开始 Redis 连接深度诊断...\n');
 
@@ -224,12 +225,15 @@ async function runRedisDiagnostics() {
 }
 
 // 只有当直接运行此脚本时才执行诊断
-if (import.meta.url === `file://${process.argv[1]}`) {
-    console.log('[DEBUG] 脚本入口条件满足，开始执行 runRedisDiagnostics');
-    runRedisDiagnostics().then(() => {
-        console.log('[DEBUG] runRedisDiagnostics 执行完成');
-    }).catch(error => {
-        console.log('[DEBUG] runRedisDiagnostics 执行失败');
+import { pathToFileURL } from 'url';
+import path from 'path';
+
+// 标准化路径比较，避免 Windows 路径格式问题
+const scriptPath = path.resolve(process.argv[1]);
+const scriptURL = pathToFileURL(scriptPath).href;
+
+if (import.meta.url === scriptURL) {
+    runRedisDiagnostics().catch(error => {
         console.error('❌ 诊断脚本执行失败:', error.message);
         process.exit(1);
     });
