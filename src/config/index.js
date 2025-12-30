@@ -40,6 +40,15 @@ export const config = {
         host: process.env.NF_REDIS_HOST || process.env.REDIS_HOST,
         port: process.env.NF_REDIS_PORT || process.env.REDIS_PORT || 6379,
         password: process.env.NF_REDIS_PASSWORD || process.env.REDIS_PASSWORD,
+    },
+    telegram: {
+        proxy: {
+            host: process.env.TELEGRAM_PROXY_HOST,
+            port: process.env.TELEGRAM_PROXY_PORT,
+            type: process.env.TELEGRAM_PROXY_TYPE,
+            username: process.env.TELEGRAM_PROXY_USERNAME,
+            password: process.env.TELEGRAM_PROXY_PASSWORD,
+        }
     }
 };
 

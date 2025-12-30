@@ -50,7 +50,16 @@ jest.unstable_mockModule("../../src/config/index.js", () => ({
     config: {
         apiId: 123,
         apiHash: "mock_hash",
-        botToken: "mock_token"
+        botToken: "mock_token",
+        telegram: {
+            proxy: {
+                host: "proxy.example.com",
+                port: "1080",
+                type: "socks5",
+                username: "proxy_user",
+                password: "proxy_pass",
+            }
+        }
     }
 }));
 

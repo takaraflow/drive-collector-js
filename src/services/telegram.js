@@ -80,12 +80,24 @@ export const resetClientSession = async () => {
 // 初始化 Telegram 客户端单例
 // 优化配置以应对限流和连接问题：增加重试次数，模拟真实设备信息，设置 FloodWait 阈值
 // 增强连接稳定性和数据中心切换处理
+
+// 代理配置处理
+const proxyOptions = config.telegram?.proxy?.host ? {
+    proxy: {
+        ip: config.telegram.proxy.host,
+        port: parseInt(config.telegram.proxy.port),
+        socksType: config.telegram.proxy.type === 'socks5' ? 5 : 4,
+        username: config.telegram.proxy.username,
+        password: config.telegram.proxy.password,
+    }
+} : {};
+
 export const client = new TelegramClient(
     new StringSession(await getSavedSession()),
     config.apiId,
     config.apiHash,
     {
-        connectionRetries: 15, // 增加连接重试次数
+        connectionRetries: 20, // 增加连接重试次数到 20
         floodSleepThreshold: 30, // 自动处理 30 秒内的 FloodWait，降低阈值让更多错误暴露给应用层
         deviceModel: "DriveCollector-Server",
         systemVersion: "Linux",
@@ -93,7 +105,7 @@ export const client = new TelegramClient(
         useWSS: false, // 服务端环境下通常不需要 WSS
         autoReconnect: true,
         // 增强连接稳定性设置
-        timeout: 60000, // 增加连接超时到 60 秒，减少 TIMEOUT 频率
+        timeout: 30000, // 调整连接超时到 30 秒
         requestRetries: 10, // 增加请求重试次数
         retryDelay: 3000, // 增加重试延迟
         // 数据中心切换优化
@@ -101,7 +113,10 @@ export const client = new TelegramClient(
         useIPv6: false, // 禁用 IPv6 以提高兼容性
         // 连接池设置
         maxConcurrentDownloads: 3, // 限制并发下载数量
-        connectionPoolSize: 5 // 连接池大小
+        connectionPoolSize: 5, // 连接池大小
+        // 添加基础日志记录器
+        baseLogger: logger,
+        ...proxyOptions // 合并代理配置
     }
 );
 
@@ -185,9 +200,10 @@ async function handleConnectionIssue() {
     isReconnecting = true;
 
     try {
-        logger.info("🔄 正在触发主动重连序列...");
+        // 记录客户端状态上下文
+        logger.info(`🔄 正在触发主动重连序列... [connected=${client.connected}, _sender=${!!client._sender}]`);
 
-        // 尝试优雅断开
+        // 尝试优雅断开（带超时）
         try {
             if (client.connected) {
                 // 给 disconnect 一个超时，防止它也卡死
@@ -204,22 +220,34 @@ async function handleConnectionIssue() {
         if (client._sender) {
             try {
                 await client._sender.disconnect();
-            } catch (e) {}
+                client._sender = undefined; // 清除引用
+                logger.info("✅ 已清理旧的 _sender 状态");
+            } catch (e) {
+                logger.warn("⚠️ 清理 _sender 失败:", e);
+                client._sender = undefined; // 即使失败也清除引用
+            }
         }
 
         // 清理旧状态
         await resetClientSession();
 
-        // 等待一段时间让网络资源释放
-        const waitTime = 5000 + Math.random() * 5000;
-        logger.info(`⏳ 等待 ${Math.floor(waitTime/1000)}s 后尝试重新建立连接...`);
-        await new Promise(r => setTimeout(r, waitTime));
+        // 增加冷却期以避免频繁重连（5-10秒随机延迟）
+        const coolDownTime = 5000 + Math.random() * 5000;
+        logger.info(`⏳ 冷却期 ${Math.floor(coolDownTime/1000)}s，避免频繁重连...`);
+        await new Promise(r => setTimeout(r, coolDownTime));
 
+        // 重新连接
         await client.connect();
         logger.info("✅ 客户端主动重连成功");
         lastHeartbeat = Date.now(); // 重置心跳
+        
+        // 记录连接后的状态
+        logger.info(`🔗 连接状态确认: connected=${client.connected}`);
+        
     } catch (e) {
         logger.error("❌ 主动重连失败，等待系统自动处理:", e);
+        // 增加错误日志上下文
+        logger.error(`🔍 重连失败状态: connected=${client.connected}, _sender=${!!client._sender}, error=${e.message}`);
     } finally {
         isReconnecting = false;
     }

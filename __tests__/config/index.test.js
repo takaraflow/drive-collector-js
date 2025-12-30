@@ -17,6 +17,11 @@ describe("Config Module", () => {
       RCLONE_REMOTE: "mega_test",
       REMOTE_FOLDER: "/test",
       PORT: "8080",
+      TELEGRAM_PROXY_HOST: "proxy.example.com",
+      TELEGRAM_PROXY_PORT: "1080",
+      TELEGRAM_PROXY_TYPE: "socks5",
+      TELEGRAM_PROXY_USERNAME: "proxy_user",
+      TELEGRAM_PROXY_PASSWORD: "proxy_pass",
     };
   });
 
@@ -39,6 +44,15 @@ describe("Config Module", () => {
     expect(config.remoteName).toBe("mega_test");
     expect(config.remoteFolder).toBe("/test");
     expect(config.port).toBe("8080");
+    
+    // Check telegram proxy configuration
+    expect(config.telegram).toBeDefined();
+    expect(config.telegram.proxy).toBeDefined();
+    expect(config.telegram.proxy.host).toBe("proxy.example.com");
+    expect(config.telegram.proxy.port).toBe("1080");
+    expect(config.telegram.proxy.type).toBe("socks5");
+    expect(config.telegram.proxy.username).toBe("proxy_user");
+    expect(config.telegram.proxy.password).toBe("proxy_pass");
   });
 
   test("should have the CACHE_TTL constant", async () => {

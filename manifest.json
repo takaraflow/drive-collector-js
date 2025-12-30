@@ -543,6 +543,33 @@
         "type": "number",
         "default": 8080,
         "description": "Server port for webhooks"
+      },
+      "TELEGRAM_PROXY_HOST": {
+        "type": "string",
+        "required": false,
+        "description": "Telegram 代理服务器地址"
+      },
+      "TELEGRAM_PROXY_PORT": {
+        "type": "number",
+        "required": false,
+        "description": "Telegram 代理服务器端口"
+      },
+      "TELEGRAM_PROXY_TYPE": {
+        "type": "string",
+        "required": false,
+        "enum": ["socks4", "socks5"],
+        "default": "socks5",
+        "description": "Telegram 代理类型，支持 socks4 和 socks5"
+      },
+      "TELEGRAM_PROXY_USERNAME": {
+        "type": "string",
+        "required": false,
+        "description": "Telegram 代理服务器用户名"
+      },
+      "TELEGRAM_PROXY_PASSWORD": {
+        "type": "string",
+        "required": false,
+        "description": "Telegram 代理服务器密码"
       }
     }
   },
