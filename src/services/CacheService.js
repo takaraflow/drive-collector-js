@@ -156,6 +156,11 @@ export class CacheService {
                     totalConnections: this.redisClient.options?.maxRetriesPerRequest || 'unknown',
                     connectTimeout: this.redisClient.options?.connectTimeout || 'unknown'
                 });
+                // Resolve any pending waitForReady promises
+                if (this._readyResolver) {
+                    this._readyResolver();
+                    this._readyResolver = null;
+                }
             });
 
             this.redisClient.on('reconnecting', (ms) => {
@@ -1349,8 +1354,26 @@ export class CacheService {
         const maxConsecutiveFailures = 3;
 
         this.heartbeatTimer = setInterval(async () => {
-            if (!this.redisClient || this.redisClient.status !== 'ready') {
-                logger.debug('💔 心跳跳过：Redis 客户端未就绪');
+            if (!this.redisClient) {
+                logger.debug('💔 心跳跳过：Redis 客户端未初始化');
+                return;
+            }
+
+            const status = this.redisClient.status;
+
+            if (status !== 'ready') {
+                // 如果状态是 connecting，尝试触发连接
+                if (status === 'connecting' || status === 'wait') {
+                    logger.warn(`💔 心跳检测到 Redis 状态为 ${status}，尝试触发连接...`);
+                    try {
+                        // 发送 ping 即使不是 ready 状态，可能帮助 ioredis 完成连接
+                        await this.redisClient.ping().catch(() => {});
+                    } catch (e) {
+                        // 忽略错误，让 ioredis 自己处理
+                    }
+                } else {
+                    logger.debug(`💔 心跳跳过：Redis 状态为 ${status} (非 ready)`);
+                }
                 return;
             }
 
@@ -1419,6 +1442,79 @@ export class CacheService {
             this.heartbeatTimer = null;
             logger.info('🛑 Redis 心跳机制已停止');
         }
+    }
+
+    /**
+     * 等待 Redis 客户端达到 ready 状态
+     * @param {number} timeout - 超时时间（毫秒），默认 30000
+     * @returns {Promise<boolean>} - 是否成功达到 ready 状态
+     */
+    async waitForReady(timeout = 30000) {
+        // 如果没有 Redis 配置，直接返回 false
+        if (!this.hasRedis) {
+            logger.debug('ℹ️ waitForReady: 未配置 Redis，跳过等待');
+            return false;
+        }
+
+        // 如果已经 ready，立即返回
+        if (this.redisClient && this.redisClient.status === 'ready') {
+            return true;
+        }
+
+        // 如果客户端未初始化，等待一段时间让初始化完成
+        if (!this.redisClient) {
+            logger.debug('ℹ️ waitForReady: Redis 客户端未初始化，等待 2 秒...');
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+
+        // 如果仍然没有客户端，返回 false
+        if (!this.redisClient) {
+            logger.warn('⚠️ waitForReady: Redis 客户端初始化失败');
+            return false;
+        }
+
+        // 如果已经 ready，返回 true
+        if (this.redisClient.status === 'ready') {
+            return true;
+        }
+
+        logger.info(`🔄 waitForReady: 等待 Redis 达到 ready 状态，当前状态: ${this.redisClient.status}`);
+
+        return new Promise((resolve) => {
+            const timeoutId = setTimeout(() => {
+                logger.warn(`⚠️ waitForReady: 等待超时 (${timeout}ms)，当前状态: ${this.redisClient.status}`);
+                cleanup();
+                resolve(false);
+            }, timeout);
+
+            const readyHandler = () => {
+                logger.info('✅ waitForReady: Redis 已达到 ready 状态');
+                cleanup();
+                resolve(true);
+            };
+
+            const errorHandler = (error) => {
+                logger.warn(`⚠️ waitForReady: Redis 错误: ${error.message}`);
+                // 不立即拒绝，继续等待
+            };
+
+            const cleanup = () => {
+                clearTimeout(timeoutId);
+                if (this.redisClient) {
+                    this.redisClient.removeListener('ready', readyHandler);
+                    this.redisClient.removeListener('error', errorHandler);
+                }
+            };
+
+            // 监听 ready 事件
+            this.redisClient.on('ready', readyHandler);
+            this.redisClient.on('error', errorHandler);
+
+            // 也监听 connect 事件，因为 ready 会在 connect 之后触发
+            this.redisClient.on('connect', () => {
+                logger.debug('🔄 waitForReady: Redis 已连接，等待 ready...');
+            });
+        });
     }
 }
 
