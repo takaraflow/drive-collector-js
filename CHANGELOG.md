@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.0.2](https://github.com/YoungSx/drive-collector-js/compare/v4.0.1...v4.0.2) (2025-12-30)
+
+
+### 🔧 其他任务
+
+* fix package-lock.json version ([c0cfeed](https://github.com/YoungSx/drive-collector-js/commit/c0cfeedbdde84d205c748a408582de32ccb0c67f))
+* update clinerules and versionrc configuration ([4c22b4f](https://github.com/YoungSx/drive-collector-js/commit/4c22b4f23b3b224b3c5c914c643b1168f6609ad7))
+
 ### [4.0.1](https://github.com/YoungSx/drive-collector-js/compare/v4.0.0...v4.0.1) (2025-12-30)
 
 
