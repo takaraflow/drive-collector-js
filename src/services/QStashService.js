@@ -9,8 +9,8 @@ import logger from "./logger.js";
 class QStashService {
     constructor() {
         // 检查 QStash 配置是否存在
-        if (!config.qstash) {
-            logger.warn('⚠️ QStash 配置未找到，使用模拟模式');
+        if (!config.qstash?.token) {
+            logger.warn('⚠️ QStash Token 未找到，使用模拟模式。请设置 QSTASH_TOKEN 环境变量以启用真实功能。');
             this.client = null;
             this.isMockMode = true;
         } else {
