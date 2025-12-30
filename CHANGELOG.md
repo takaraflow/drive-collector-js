@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.2.0](https://github.com/YoungSx/drive-collector-js/compare/v4.1.0...v4.2.0) (2025-12-30)
+
+
+### ✨ 新特性
+
+* unify QStash configuration and enhance validation ([cc64a8c](https://github.com/YoungSx/drive-collector-js/commit/cc64a8c783a3fad06d35cc339d54ee92f7df944b))
+
 ## [4.1.0](https://github.com/YoungSx/drive-collector-js/compare/v4.0.2...v4.1.0) (2025-12-30)
 
 
