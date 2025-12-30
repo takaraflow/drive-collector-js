@@ -4,19 +4,30 @@ import logger from "./logger.js";
 
 /**
  * --- KV 存储服务层 ---
- * 支持 Cloudflare KV 和 Upstash Redis REST API
+ * 支持 Northflank Redis (标准协议)、Cloudflare KV 和 Upstash Redis REST API
  * 具有自动故障转移功能，并集成 L1 内存缓存减少物理调用
  */
 class KVService {
     constructor() {
-        // 初始化配置
-        this.accountId = process.env.CF_ACCOUNT_ID;
-        this.namespaceId = process.env.CF_KV_NAMESPACE_ID;
-        this.token = process.env.CF_KV_TOKEN || process.env.CF_D1_TOKEN;
-        this.apiUrl = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/storage/kv/namespaces/${this.namespaceId}`;
-
         // L1 内存缓存配置
         this.l1CacheTtl = 10 * 1000; // 默认 10 秒内存缓存
+
+        // Redis 配置 (Northflank) - 添加防御性编程
+        const redisConfig = config.redis || {};
+        this.redisUrl = redisConfig.url;
+        this.redisHost = redisConfig.host;
+        this.redisPort = redisConfig.port || 6379;
+        this.redisPassword = redisConfig.password;
+        this.hasRedis = !!(this.redisUrl || (this.redisHost && this.redisPort));
+
+        // Cloudflare KV 配置 - 支持新旧变量名
+        this.accountId = process.env.CF_KV_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
+        this.namespaceId = process.env.CF_KV_NAMESPACE_ID || process.env.CF_KV_NAMESPACE_ID;
+        this.token = process.env.CF_KV_TOKEN || process.env.CF_D1_TOKEN || process.env.CF_KV_TOKEN;
+        this.apiUrl = this.accountId && this.namespaceId 
+            ? `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/storage/kv/namespaces/${this.namespaceId}`
+            : '';
+        this.hasCloudflare = !!(this.apiUrl && this.token);
 
         // Upstash备用配置
         this.upstashUrl = process.env.UPSTASH_REDIS_REST_URL ? process.env.UPSTASH_REDIS_REST_URL.replace(/\/$/, '') : '';
@@ -24,43 +35,164 @@ class KVService {
         this.hasUpstash = !!(this.upstashUrl && this.upstashToken);
 
         // 故障转移状态
-        this.currentProvider = 'cloudflare'; // 'cloudflare' | 'upstash'
+        this.currentProvider = 'cloudflare'; // 'redis' | 'cloudflare' | 'upstash'
         this.failureCount = 0;
         this.lastFailureTime = 0;
-        this.failoverEnabled = this.hasUpstash; // 只有配置了Upstash才启用故障转移
         this.lastError = null;
+        this.recoveryTimer = null;
 
-        // 如果环境变量强制指定使用Upstash
-        if (process.env.KV_PROVIDER === 'upstash') {
-            if (!this.hasUpstash) {
-                throw new Error('Upstash配置不完整，请设置 UPSTASH_REDIS_REST_URL 和 UPSTASH_REDIS_REST_TOKEN');
-            }
-            this.currentProvider = 'upstash';
-            logger.info('🔄 KV服务：强制使用 Upstash Redis');
-        } else {
-            logger.info(`🔄 KV服务：使用 Cloudflare KV${this.failoverEnabled ? ' (支持智能故障转移到 Upstash)' : ''}`);
-        }
+        // 动态导入 ioredis (环境检测)
+        this.redisClient = null;
+        this._initRedis();
+
+        // 设置默认提供商优先级
+        this._setDefaultProvider();
 
         // 设置便利属性
+        this.useRedis = this.currentProvider === 'redis';
         this.useUpstash = this.currentProvider === 'upstash';
+    }
+
+    /**
+     * 动态初始化 Redis 客户端
+     * 在不支持 TCP 的环境中不会导致崩溃
+     */
+    async _initRedis() {
+        if (!this.hasRedis) {
+            logger.info('ℹ️ 未配置 Redis，跳过初始化');
+            return;
+        }
+
+        try {
+            // 检测是否在 Node.js 环境
+            if (typeof process === 'undefined' || !process.versions || !process.versions.node) {
+                logger.warn('⚠️ 非 Node.js 环境，无法使用标准 Redis 客户端');
+                return;
+            }
+
+            // 动态导入 ioredis
+            const Redis = (await import('ioredis')).default;
+            
+            // 构造连接配置
+            const redisConfig = {
+                connectTimeout: 5000, // 5秒连接超时
+                maxRetriesPerRequest: 3,
+                retryStrategy: (times) => {
+                    const delay = Math.min(times * 50, 2000);
+                    logger.warn(`⚠️ Redis 重试尝试 ${times}，延迟 ${delay}ms`);
+                    return delay;
+                },
+                reconnectOnError: (err) => {
+                    logger.warn(`⚠️ Redis 重连错误: ${err.message}`);
+                    return true;
+                }
+            };
+
+            // 优先使用 URL，否则使用 host/port/password
+            if (this.redisUrl) {
+                redisConfig.url = this.redisUrl;
+            } else {
+                redisConfig.host = this.redisHost;
+                redisConfig.port = this.redisPort;
+                if (this.redisPassword) {
+                    redisConfig.password = this.redisPassword;
+                }
+            }
+
+            this.redisClient = new Redis(redisConfig);
+
+            // 连接事件监听
+            this.redisClient.on('connect', () => {
+                logger.info('✅ Northflank Redis 连接成功');
+            });
+
+            this.redisClient.on('error', (error) => {
+                logger.error(`🚨 Redis 连接错误: ${error.message}`);
+            });
+
+            this.redisClient.on('close', () => {
+                logger.warn('⚠️ Redis 连接已关闭');
+            });
+
+            // 测试连接
+            await this.redisClient.ping();
+            logger.info('🔄 KV服务：使用 Northflank Redis');
+
+        } catch (error) {
+            logger.error(`🚨 Redis 初始化失败: ${error.message}`);
+            this.redisClient = null;
+        }
+    }
+
+    /**
+     * 设置默认提供商优先级
+     * 优先级：redis > cloudflare > upstash
+     */
+    _setDefaultProvider() {
+        if (process.env.KV_PROVIDER) {
+            // 强制指定提供商
+            const provider = process.env.KV_PROVIDER;
+            if (provider === 'redis' && this.hasRedis) {
+                this.currentProvider = 'redis';
+                logger.info('🔄 KV服务：强制使用 Northflank Redis');
+            } else if (provider === 'cloudflare' && this.hasCloudflare) {
+                this.currentProvider = 'cloudflare';
+                logger.info('🔄 KV服务：强制使用 Cloudflare KV');
+            } else if (provider === 'upstash' && this.hasUpstash) {
+                this.currentProvider = 'upstash';
+                logger.info('🔄 KV服务：强制使用 Upstash Redis');
+            } else {
+                throw new Error(`强制使用 ${provider}，但该提供商未配置完整`);
+            }
+        } else {
+            // 自动选择优先级
+            if (this.hasRedis) {
+                this.currentProvider = 'redis';
+                logger.info('🔄 KV服务：使用 Northflank Redis');
+            } else if (this.hasCloudflare) {
+                this.currentProvider = 'cloudflare';
+                logger.info('🔄 KV服务：使用 Cloudflare KV');
+            } else if (this.hasUpstash) {
+                this.currentProvider = 'upstash';
+                logger.info('🔄 KV服务：使用 Upstash Redis');
+            } else {
+                // 在测试环境中，如果没有配置任何提供商，使用 cloudflare 作为默认值
+                this.currentProvider = 'cloudflare';
+                logger.info('🔄 KV服务：未配置任何提供商，使用 Cloudflare KV (默认)');
+            }
+        }
+
+        // 启用故障转移
+        this.failoverEnabled = this._calculateFailoverTargets().length > 0;
+    }
+
+    /**
+     * 计算可用的故障转移目标
+     */
+    _calculateFailoverTargets() {
+        const targets = [];
+        if (this.currentProvider === 'redis' && this.hasCloudflare) {
+            targets.push('cloudflare');
+        }
+        if (this.currentProvider === 'redis' && this.hasUpstash) {
+            targets.push('upstash');
+        }
+        if (this.currentProvider === 'cloudflare' && this.hasUpstash) {
+            targets.push('upstash');
+        }
+        return targets;
     }
 
     /**
      * 检查是否应该触发故障转移
      */
     _shouldFailover(error) {
-        if (!this.failoverEnabled || this.currentProvider === 'upstash') {
+        if (!this.failoverEnabled) {
             return false;
         }
 
         // 检查是否是额度限制错误或网络错误
-        const isQuotaError = error.message.includes('free usage limit') ||
-                            error.message.includes('quota exceeded') ||
-                            error.message.includes('rate limit') ||
-                            error.message.includes('fetch failed') ||
-                            error.message.includes('network') ||
-                            error.message.includes('timeout') ||
-                            error.message.includes('network timeout');
+        const isQuotaError = this._isRetryableError(error);
 
         if (isQuotaError) {
             this.failureCount++;
@@ -69,8 +201,11 @@ class KVService {
 
             // 连续3次额度/网络错误，触发故障转移
             if (this.failureCount >= 3) {
-                logger.warn(`⚠️ ${this.getCurrentProvider()} 连续失败 ${this.failureCount} 次，触发自动故障转移到 Upstash`);
-                return true;
+                const targets = this._calculateFailoverTargets();
+                if (targets.length > 0) {
+                    logger.warn(`⚠️ ${this.getCurrentProvider()} 连续失败 ${this.failureCount} 次，触发自动故障转移到 ${targets[0]}`);
+                    return true;
+                }
             }
         }
 
@@ -81,26 +216,42 @@ class KVService {
      * 执行故障转移
      */
     _failover() {
-        if (this.currentProvider === 'cloudflare' && this.hasUpstash) {
-            // 关键修复：在启动新检查任务前，必须先清理可能存在的旧定时器
-            if (this.recoveryTimer) {
-                clearInterval(this.recoveryTimer);
-                this.recoveryTimer = null;
-            }
-
-            this.currentProvider = 'upstash';
-            this.failureCount = 0; // 重置失败计数
-
-            // 设置故障转移时间戳，用于定期尝试恢复
-            this.failoverTime = Date.now();
-
-            // 启动定期恢复检查
-            this._startRecoveryCheck();
-
-            logger.info('✅ 已切换到 Upstash Redis');
-            return true;
+        const targets = this._calculateFailoverTargets();
+        if (targets.length === 0) {
+            return false;
         }
-        return false;
+
+        const nextProvider = targets[0];
+
+        // 关键修复：在启动新检查任务前，必须先清理可能存在的旧定时器
+        if (this.recoveryTimer) {
+            clearInterval(this.recoveryTimer);
+            this.recoveryTimer = null;
+        }
+
+        this.currentProvider = nextProvider;
+        this.failureCount = 0; // 重置失败计数
+
+        // 设置故障转移时间戳，用于定期尝试恢复
+        this.failoverTime = Date.now();
+
+        // 启动定期恢复检查
+        this._startRecoveryCheck();
+
+        logger.info(`✅ 已切换到 ${this._getProviderDisplayName(nextProvider)}`);
+        return true;
+    }
+
+    /**
+     * 获取提供商显示名称
+     */
+    _getProviderDisplayName(provider) {
+        switch (provider) {
+            case 'redis': return 'Northflank Redis';
+            case 'cloudflare': return 'Cloudflare KV';
+            case 'upstash': return 'Upstash Redis';
+            default: return provider;
+        }
     }
 
     /**
@@ -129,8 +280,6 @@ class KVService {
         }
 
         // 根据错误类型动态调整检查间隔
-        // 如果是因为配额限制(limit)，则等待更长时间(例如 12 小时)
-        // 否则使用较短间隔(30分钟)
         const isQuotaIssue = this.lastError && (
             this.lastError.includes('free usage limit') || 
             this.lastError.includes('quota exceeded')
@@ -140,9 +289,10 @@ class KVService {
         logger.info(`🕒 启动 KV 恢复检查，间隔: ${checkInterval / 60000} 分钟`);
 
         this.recoveryTimer = setInterval(async () => {
+            // 根据当前提供商决定恢复目标
             if (this.currentProvider === 'upstash') {
+                // 从 Upstash 恢复到 Cloudflare
                 try {
-                    // 尝试用主要提供商执行一个简单的操作
                     await this._cloudflare_get('__health_check__');
                     logger.info('🔄 Cloudflare KV 已恢复，切换回主要提供商...');
                     this.currentProvider = 'cloudflare';
@@ -157,8 +307,30 @@ class KVService {
 
                     logger.info('✅ 已恢复到 Cloudflare KV');
                 } catch (error) {
-                    // 恢复失败，继续使用Upstash
+                    // 恢复失败，继续使用当前提供商
                     logger.info('ℹ️ Cloudflare KV 仍不可用，继续使用 Upstash');
+                }
+            } else if (this.currentProvider === 'cloudflare' && this.hasRedis) {
+                // 从 Cloudflare 恢复到 Redis（如果 Redis 可用）
+                try {
+                    if (this.redisClient) {
+                        await this.redisClient.ping();
+                        logger.info('🔄 Northflank Redis 已恢复，切换回主要提供商...');
+                        this.currentProvider = 'redis';
+                        this.failureCount = 0;
+                        this.lastError = null;
+
+                        // 清理恢复检查定时器
+                        if (this.recoveryTimer) {
+                            clearInterval(this.recoveryTimer);
+                            this.recoveryTimer = null;
+                        }
+
+                        logger.info('✅ 已恢复到 Northflank Redis');
+                    }
+                } catch (error) {
+                    // 恢复失败，继续使用当前提供商
+                    logger.info('ℹ️ Northflank Redis 仍不可用，继续使用当前提供商');
                 }
             }
         }, checkInterval);
@@ -168,17 +340,17 @@ class KVService {
      * 获取当前使用的提供商名称
      */
     getCurrentProvider() {
-        return this.currentProvider === 'upstash' ? 'Upstash Redis' : 'Cloudflare KV';
+        return this._getProviderDisplayName(this.currentProvider);
     }
 
     /**
      * 检查是否处于故障转移模式
      */
     get isFailoverMode() {
-        if (process.env.KV_PROVIDER === 'upstash') {
-            return this.currentProvider !== 'upstash';
+        if (process.env.KV_PROVIDER) {
+            return this.currentProvider !== process.env.KV_PROVIDER;
         }
-        return this.currentProvider === 'upstash';
+        return this.currentProvider !== 'redis' && this.hasRedis;
     }
 
     /**
@@ -191,23 +363,32 @@ class KVService {
                msg.includes('rate limit') ||
                msg.includes('fetch failed') ||
                msg.includes('network') ||
-               msg.includes('timeout');
+               msg.includes('timeout') ||
+               msg.includes('network timeout') ||
+               msg.includes('connection') ||
+               msg.includes('econnreset');
     }
 
+    /**
+     * 执行操作并支持故障转移
+     */
     async _executeWithFailover(operation, ...args) {
         let attempts = 0;
         const maxAttempts = 3;
 
         while (attempts < maxAttempts) {
             try {
-                if (this.currentProvider === 'upstash') {
+                if (this.currentProvider === 'redis') {
+                    return await this[`_redis_${operation}`](...args);
+                } else if (this.currentProvider === 'upstash') {
                     return await this[`_upstash_${operation}`](...args);
+                } else {
+                    return await this[`_cloudflare_${operation}`](...args);
                 }
-                return await this[`_cloudflare_${operation}`](...args);
             } catch (error) {
                 attempts++;
 
-                if (!this._isRetryableError(error) || this.currentProvider === 'upstash') {
+                if (!this._isRetryableError(error) || this.currentProvider === 'redis') {
                     throw error;
                 }
 
@@ -219,6 +400,102 @@ class KVService {
                 logger.info(`ℹ️ ${this.getCurrentProvider()} 重试中 (${attempts}/${maxAttempts})...`);
             }
         }
+    }
+
+    /**
+     * Redis get 实现
+     */
+    async _redis_get(key, type = "json") {
+        if (!this.redisClient) {
+            throw new Error('Redis 客户端未初始化');
+        }
+
+        const value = await this.redisClient.get(key);
+        if (value === null || value === undefined) return null;
+
+        if (type === "json") {
+            try {
+                return JSON.parse(value);
+            } catch (e) {
+                return value;
+            }
+        }
+        return value;
+    }
+
+    /**
+     * Redis set 实现
+     */
+    async _redis_set(key, value, expirationTtl = null) {
+        if (!this.redisClient) {
+            throw new Error('Redis 客户端未初始化');
+        }
+
+        const valueStr = typeof value === "string" ? value : JSON.stringify(value);
+
+        if (expirationTtl !== null && expirationTtl !== undefined) {
+            const ttl = parseInt(expirationTtl, 10);
+            if (!isNaN(ttl) && ttl > 0) {
+                return await this.redisClient.set(key, valueStr, 'EX', ttl);
+            } else if (ttl !== 0) {
+                logger.warn(`⚠️ Redis set: 无效的 TTL 值 ${expirationTtl}，跳过过期设置 (${key})`);
+            }
+        }
+
+        return await this.redisClient.set(key, valueStr);
+    }
+
+    /**
+     * Redis delete 实现
+     */
+    async _redis_delete(key) {
+        if (!this.redisClient) {
+            throw new Error('Redis 客户端未初始化');
+        }
+
+        const result = await this.redisClient.del(key);
+        return result > 0;
+    }
+
+    /**
+     * Redis listKeys 实现
+     */
+    async _redis_listKeys(prefix = '') {
+        if (!this.redisClient) {
+            throw new Error('Redis 客户端未初始化');
+        }
+
+        const keys = await this.redisClient.keys(`${prefix}*`);
+        return keys;
+    }
+
+    /**
+     * Redis bulkSet 实现
+     */
+    async _redis_bulkSet(pairs) {
+        if (!this.redisClient) {
+            throw new Error('Redis 客户端未初始化');
+        }
+
+        if (!Array.isArray(pairs)) {
+            throw new Error("Redis bulkSet: pairs must be an array");
+        }
+
+        const pipeline = this.redisClient.pipeline();
+        
+        pairs.forEach(p => {
+            if (!p || typeof p.key !== 'string' || p.value === undefined) {
+                throw new Error("Redis bulkSet: each pair must have 'key' (string) and 'value'");
+            }
+            const valueStr = typeof p.value === "string" ? p.value : JSON.stringify(p.value);
+            pipeline.set(p.key, valueStr);
+        });
+
+        const results = await pipeline.exec();
+        return results.map(([error, result]) => ({
+            success: !error,
+            result: error ? error : result
+        }));
     }
 
     /**
@@ -248,15 +525,12 @@ class KVService {
 
     /**
      * Upstash set 实现
-     * 改为使用通用命令格式，避免 URL 路径参数可能导致的解析问题
      */
     async _upstash_set(key, value, expirationTtl = null) {
         const valueStr = typeof value === "string" ? value : JSON.stringify(value);
         
-        // 构造 Redis SET 命令: ["SET", key, value, "EX", ttl]
         const command = ["SET", key, valueStr];
 
-        // 验证并处理过期时间参数
         if (expirationTtl !== null && expirationTtl !== undefined) {
             const ttl = parseInt(expirationTtl, 10);
             if (!isNaN(ttl) && ttl > 0) {
@@ -278,33 +552,9 @@ class KVService {
         const result = await response.json();
         if (result.error) {
             logger.error(`🚨 Upstash Set Error for key '${key}':`, result.error);
-            logger.error(`   Command:`, JSON.stringify(command));
             throw new Error(`Upstash Set Error: ${result.error}`);
         }
         return result.result === "OK";
-    }
-
-    /**
-     * 写入键值对
-     * @param {string} key
-     * @param {any} value - 会被 JSON.stringify
-     * @param {number} expirationTtl - 过期时间（秒），最小 60 秒
-     * @param {Object} options - { skipCache: boolean }
-     */
-    async set(key, value, expirationTtl = null, options = {}) {
-        // 1. 检查 L1 缓存，如果值没变且未过期，跳过物理写入（减少 KV 调用）
-        if (!options.skipCache && cacheService.isUnchanged(`kv:${key}`, value)) {
-            return true;
-        }
-
-        const result = await this._executeWithFailover('set', key, value, expirationTtl);
-        
-        // 2. 更新 L1 缓存
-        if (result && !options.skipCache) {
-            cacheService.set(`kv:${key}`, value, this.l1CacheTtl);
-        }
-        
-        return result;
     }
 
     /**
@@ -360,29 +610,6 @@ class KVService {
     }
 
     /**
-     * 读取键值
-     * @param {string} key
-     * @param {string} type - 'text' | 'json'
-     * @param {Object} options - { skipCache: boolean, cacheTtl: number }
-     */
-    async get(key, type = "json", options = {}) {
-        // 1. 尝试从 L1 缓存获取
-        if (!options.skipCache) {
-            const cached = cacheService.get(`kv:${key}`);
-            if (cached !== null) return cached;
-        }
-
-        const value = await this._executeWithFailover('get', key, type);
-        
-        // 2. 写入 L1 缓存
-        if (value !== null && !options.skipCache) {
-            cacheService.set(`kv:${key}`, value, options.cacheTtl || this.l1CacheTtl);
-        }
-        
-        return value;
-    }
-
-    /**
      * Cloudflare KV delete 实现
      */
     async _cloudflare_delete(key) {
@@ -416,15 +643,6 @@ class KVService {
             throw new Error(`Upstash Delete Error: ${result.error}`);
         }
         return result.result > 0;
-    }
-
-    /**
-     * 删除键
-     * @param {string} key
-     */
-    async delete(key) {
-        cacheService.del(`kv:${key}`);
-        return await this._executeWithFailover('delete', key);
     }
 
     /**
@@ -540,6 +758,61 @@ class KVService {
         }
 
         return result.result || [];
+    }
+
+    /**
+     * 写入键值对
+     * @param {string} key
+     * @param {any} value - 会被 JSON.stringify
+     * @param {number} expirationTtl - 过期时间（秒），最小 60 秒
+     * @param {Object} options - { skipCache: boolean }
+     */
+    async set(key, value, expirationTtl = null, options = {}) {
+        // 1. 检查 L1 缓存，如果值没变且未过期，跳过物理写入（减少 KV 调用）
+        if (!options.skipCache && cacheService.isUnchanged(`kv:${key}`, value)) {
+            return true;
+        }
+
+        const result = await this._executeWithFailover('set', key, value, expirationTtl);
+        
+        // 2. 更新 L1 缓存
+        if (result && !options.skipCache) {
+            cacheService.set(`kv:${key}`, value, this.l1CacheTtl);
+        }
+        
+        return result;
+    }
+
+    /**
+     * 读取键值
+     * @param {string} key
+     * @param {string} type - 'text' | 'json'
+     * @param {Object} options - { skipCache: boolean, cacheTtl: number }
+     */
+    async get(key, type = "json", options = {}) {
+        // 1. 尝试从 L1 缓存获取
+        if (!options.skipCache) {
+            const cached = cacheService.get(`kv:${key}`);
+            if (cached !== null) return cached;
+        }
+
+        const value = await this._executeWithFailover('get', key, type);
+        
+        // 2. 写入 L1 缓存
+        if (value !== null && !options.skipCache) {
+            cacheService.set(`kv:${key}`, value, options.cacheTtl || this.l1CacheTtl);
+        }
+        
+        return value;
+    }
+
+    /**
+     * 删除键
+     * @param {string} key
+     */
+    async delete(key) {
+        cacheService.del(`kv:${key}`);
+        return await this._executeWithFailover('delete', key);
     }
 
     /**

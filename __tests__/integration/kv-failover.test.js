@@ -11,10 +11,10 @@ describe("KV Service Failover Integration", () => {
     let kvInstance;
 
     beforeEach(async () => {
-        // Set up mock environment variables for both providers
+        // Set up mock environment variables for both providers - 使用新的变量名
         process.env = {
             ...originalEnv,
-            CF_ACCOUNT_ID: "test_cf_account",
+            CF_KV_ACCOUNT_ID: "test_cf_account",
             CF_KV_NAMESPACE_ID: "test_cf_ns",
             CF_KV_TOKEN: "test_cf_token",
             UPSTASH_REDIS_REST_URL: "https://test.upstash.io",

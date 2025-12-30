@@ -11,10 +11,10 @@ let instanceCoordinator;
 
 describe("Multi-Instance Integration", () => {
   beforeAll(async () => {
-    // Set up mock environment variables
+    // Set up mock environment variables - 使用新的变量名
     process.env = {
       ...originalEnv,
-      CF_ACCOUNT_ID: "mock_account_id",
+      CF_KV_ACCOUNT_ID: "mock_account_id",
       CF_KV_NAMESPACE_ID: "mock_namespace_id",
       CF_KV_TOKEN: "mock_kv_token",
       CF_D1_DATABASE_ID: "mock_db_id",

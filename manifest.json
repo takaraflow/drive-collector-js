@@ -389,10 +389,125 @@
         "required": false,
         "description": "Rclone 配置文件的 Base64 编码"
       },
+      "OSS_WORKER_URL": {
+        "type": "string",
+        "required": false,
+        "description": "OSS Worker URL for object storage operations"
+      },
+      "OSS_WORKER_SECRET": {
+        "type": "string",
+        "required": false,
+        "description": "OSS Worker secret for authentication"
+      },
+      "R2_ENDPOINT": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare R2 endpoint"
+      },
+      "R2_ACCESS_KEY_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare R2 access key ID"
+      },
+      "R2_SECRET_ACCESS_KEY": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare R2 secret access key"
+      },
+      "R2_BUCKET": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare R2 bucket name"
+      },
+      "R2_PUBLIC_URL": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare R2 public URL"
+      },
       "AXIOM_TOKEN": {
         "type": "string",
         "required": false,
         "description": "Axiom 日志令牌"
+      },
+      "AXIOM_ORG_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Axiom organization ID"
+      },
+      "AXIOM_DATASET": {
+        "type": "string",
+        "required": false,
+        "description": "Axiom dataset name"
+      },
+      "NF_REDIS_URL": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis URL (priority over legacy REDIS_URL)"
+      },
+      "NF_REDIS_HOST": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis host"
+      },
+      "NF_REDIS_PORT": {
+        "type": "number",
+        "default": 6379,
+        "description": "Northflank Redis port"
+      },
+      "NF_REDIS_PASSWORD": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis password"
+      },
+      "REDIS_URL": {
+        "type": "string",
+        "required": false,
+        "description": "Legacy Redis URL (deprecated, use NF_REDIS_URL)"
+      },
+      "REDIS_HOST": {
+        "type": "string",
+        "required": false,
+        "description": "Legacy Redis host (deprecated, use NF_REDIS_HOST)"
+      },
+      "REDIS_PORT": {
+        "type": "number",
+        "default": 6379,
+        "description": "Legacy Redis port (deprecated, use NF_REDIS_PORT)"
+      },
+      "REDIS_PASSWORD": {
+        "type": "string",
+        "required": false,
+        "description": "Legacy Redis password (deprecated, use NF_REDIS_PASSWORD)"
+      },
+      "CF_KV_ACCOUNT_ID": {
+        "type": "string",
+        "required": true,
+        "description": "Cloudflare KV account ID"
+      },
+      "CF_KV_NAMESPACE_ID": {
+        "type": "string",
+        "required": true,
+        "description": "Cloudflare KV namespace ID"
+      },
+      "CF_KV_TOKEN": {
+        "type": "string",
+        "required": true,
+        "description": "Cloudflare KV API token"
+      },
+      "UPSTASH_REDIS_REST_URL": {
+        "type": "string",
+        "required": true,
+        "description": "Upstash Redis REST API URL"
+      },
+      "UPSTASH_REDIS_REST_TOKEN": {
+        "type": "string",
+        "required": true,
+        "description": "Upstash Redis REST API token"
+      },
+      "PORT": {
+        "type": "number",
+        "default": 8080,
+        "description": "Server port for webhooks"
       }
     }
   },

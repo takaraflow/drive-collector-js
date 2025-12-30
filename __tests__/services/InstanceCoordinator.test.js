@@ -35,10 +35,10 @@ jest.unstable_mockModule("../../src/services/logger.js", () => ({
 
 describe("InstanceCoordinator", () => {
   beforeAll(async () => {
-    // Set up mock environment variables
+    // Set up mock environment variables - 使用新的变量名
     process.env = {
       ...originalEnv,
-      CF_ACCOUNT_ID: "mock_account_id",
+      CF_KV_ACCOUNT_ID: "mock_account_id",
       CF_KV_NAMESPACE_ID: "mock_namespace_id",
       CF_KV_TOKEN: "mock_kv_token",
       INSTANCE_ID: "test_instance_123",

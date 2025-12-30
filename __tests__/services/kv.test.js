@@ -38,7 +38,7 @@ describe("KV Service Full Suite", () => {
   describe("Cloudflare Provider", () => {
     beforeAll(async () => {
       kvInstance = await reloadKVService({
-        CF_ACCOUNT_ID: "cf_acc",
+        CF_KV_ACCOUNT_ID: "cf_acc",
         CF_KV_NAMESPACE_ID: "cf_ns",
         CF_KV_TOKEN: "cf_token",
         KV_PROVIDER: "cloudflare"
@@ -188,7 +188,7 @@ describe("KV Service Full Suite", () => {
   describe("Failover Logic Deep Dive", () => {
     beforeAll(async () => {
       kvInstance = await reloadKVService({
-        CF_ACCOUNT_ID: "cf", CF_KV_NAMESPACE_ID: "ns", CF_KV_TOKEN: "tk",
+        CF_KV_ACCOUNT_ID: "cf", CF_KV_NAMESPACE_ID: "ns", CF_KV_TOKEN: "tk",
         UPSTASH_REDIS_REST_URL: "https://up.io", UPSTASH_REDIS_REST_TOKEN: "ut"
       });
     });

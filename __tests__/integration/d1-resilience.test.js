@@ -23,10 +23,10 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
     let d1Instance;
 
     beforeEach(async () => {
-        // Set up mock environment variables
+        // Set up mock environment variables - 使用新的变量名
         process.env = {
             ...originalEnv,
-            CF_ACCOUNT_ID: "test_account",
+            CF_D1_ACCOUNT_ID: "test_account",
             CF_D1_DATABASE_ID: "test_db",
             CF_D1_TOKEN: "test_token",
         };
@@ -156,10 +156,10 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
 
     test("should handle configuration missing gracefully", async () => {
         // Temporarily remove required env vars
-        const originalAccountId = process.env.CF_ACCOUNT_ID;
+        const originalAccountId = process.env.CF_D1_ACCOUNT_ID;
         const originalDbId = process.env.CF_D1_DATABASE_ID;
 
-        delete process.env.CF_ACCOUNT_ID;
+        delete process.env.CF_D1_ACCOUNT_ID;
         delete process.env.CF_D1_DATABASE_ID;
 
         // Re-import to get new instance without config
@@ -172,7 +172,7 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
         expect(mockFetch).not.toHaveBeenCalled(); // Should not attempt request
 
         // Restore env vars
-        process.env.CF_ACCOUNT_ID = originalAccountId;
+        process.env.CF_D1_ACCOUNT_ID = originalAccountId;
         process.env.CF_D1_DATABASE_ID = originalDbId;
     });
 

@@ -11,10 +11,10 @@ let d1Instance;
 
 describe("D1 Service", () => {
   beforeAll(async () => {
-    // Set up mock environment variables
+    // Set up mock environment variables - 使用新的变量名
     process.env = {
       ...originalEnv,
-      CF_ACCOUNT_ID: "mock_account_id",
+      CF_D1_ACCOUNT_ID: "mock_account_id",
       CF_D1_DATABASE_ID: "mock_database_id",
       CF_D1_TOKEN: "mock_token",
     };

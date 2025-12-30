@@ -7,13 +7,14 @@ import logger from "./logger.js";
  */
 class D1Service {
     constructor() {
-        this.accountId = process.env.CF_ACCOUNT_ID;
+        // 支持新旧变量名
+        this.accountId = process.env.CF_D1_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
         this.databaseId = process.env.CF_D1_DATABASE_ID;
-        this.token = process.env.CF_D1_TOKEN;
+        this.token = process.env.CF_D1_TOKEN || process.env.CF_KV_TOKEN;
 
         // 验证必要的配置
         if (!this.accountId || !this.databaseId || !this.token) {
-            logger.warn("⚠️ D1配置缺失: 请检查 CF_ACCOUNT_ID, CF_D1_DATABASE_ID, CF_D1_TOKEN");
+            logger.warn("⚠️ D1配置缺失: 请检查 CF_D1_ACCOUNT_ID, CF_D1_DATABASE_ID, CF_D1_TOKEN");
         }
 
         this.apiUrl = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/d1/database/${this.databaseId}/query`;

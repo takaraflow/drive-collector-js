@@ -13,7 +13,7 @@ describe("KV Service Failover", () => {
         // 配置环境：同时拥有 CF 和 Upstash，默认使用 CF
         process.env = {
             ...originalEnv,
-            CF_ACCOUNT_ID: "mock_cf_account",
+            CF_KV_ACCOUNT_ID: "mock_cf_account",
             CF_KV_NAMESPACE_ID: "mock_cf_ns",
             CF_KV_TOKEN: "mock_cf_token",
             UPSTASH_REDIS_REST_URL: "https://mock-upstash.com",

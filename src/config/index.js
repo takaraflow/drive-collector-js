@@ -34,6 +34,12 @@ export const config = {
         token: process.env.AXIOM_TOKEN,
         orgId: process.env.AXIOM_ORG_ID,
         dataset: process.env.AXIOM_DATASET || 'drive-collector',
+    },
+    redis: {
+        url: process.env.NF_REDIS_URL || process.env.REDIS_URL,
+        host: process.env.NF_REDIS_HOST || process.env.REDIS_HOST,
+        port: process.env.NF_REDIS_PORT || process.env.REDIS_PORT || 6379,
+        password: process.env.NF_REDIS_PASSWORD || process.env.REDIS_PASSWORD,
     }
 };
 
