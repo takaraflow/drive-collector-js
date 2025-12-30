@@ -151,7 +151,12 @@ export { handleQStashWebhook };
         });
 
         // 3. 初始化实例协调器（多实例支持）
-        await instanceCoordinator.start();
+        try {
+            await instanceCoordinator.start();
+            logger.info('InstanceCoordinator started');
+        } catch (e) {
+            logger.warn('InstanceCoordinator fail, continue standalone:', e.message);
+        }
 
         // 根据 NODE_MODE 调用相应引导函数
         if (nodeMode === 'all' || nodeMode === 'processor') {
