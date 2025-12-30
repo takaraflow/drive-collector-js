@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.2.1](https://github.com/YoungSx/drive-collector-js/compare/v4.2.0...v4.2.1) (2025-12-30)
+
+
+### 🐛 问题修复
+
+* improves Telegram client initialization and connection management ([4e6b53c](https://github.com/YoungSx/drive-collector-js/commit/4e6b53c3d1f0d654eeaa6fa0b447fa3e15a58984))
+
 ## [4.2.0](https://github.com/YoungSx/drive-collector-js/compare/v4.1.0...v4.2.0) (2025-12-30)
 
 
