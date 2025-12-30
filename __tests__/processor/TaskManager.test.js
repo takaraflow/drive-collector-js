@@ -35,11 +35,11 @@ jest.unstable_mockModule('../../src/services/rclone.js', () => ({
     }
 }));
 
-jest.unstable_mockModule('../../src/services/kv.js', () => ({
-    kv: {
+jest.unstable_mockModule('../../src/services/CacheService.js', () => ({
+    cache: {
         get: jest.fn().mockResolvedValue(null),
         set: jest.fn().mockResolvedValue(true),
-        del: jest.fn().mockResolvedValue(true),
+        delete: jest.fn().mockResolvedValue(true),
     }
 }));
 

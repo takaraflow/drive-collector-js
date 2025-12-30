@@ -1,8 +1,8 @@
-# Upstash KV 迁移指南
+# Upstash Cache 迁移指南
 
 ## 概述
 
-本项目现在支持使用 Upstash Redis 作为 KV 存储的后端替代方案，可以无缝替换 Cloudflare KV。
+本项目现在支持使用 Upstash Redis 作为 Cache 存储的后端替代方案，可以无缝替换 Cloudflare KV。
 
 更重要的是，系统引入了**智能故障转移 (Smart Failover)** 机制，可以在 Cloudflare KV 出现额度超限或网络故障时，自动无缝切换到 Upstash，确保高可用性。
 
@@ -25,7 +25,7 @@
 
 ```bash
 # [可选] 强制使用 Upstash (如果不设置，默认使用 Cloudflare KV，但在故障时自动切换)
-# KV_PROVIDER=upstash
+# CACHE_PROVIDER=upstash
 
 # Upstash 连接信息 (配置后自动开启故障转移功能)
 UPSTASH_REDIS_REST_URL=https://your-endpoint.upstash.io

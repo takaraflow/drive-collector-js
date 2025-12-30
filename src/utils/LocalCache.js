@@ -2,7 +2,7 @@
  * 通用缓存服务
  * 支持 TTL 和基础并发控制
  */
-class CacheService {
+class LocalCache {
     constructor() {
         this.cache = new Map();
         this.ttls = new Map();
@@ -88,4 +88,4 @@ class CacheService {
     }
 }
 
-export const cacheService = new CacheService();
+export const localCache = new LocalCache();

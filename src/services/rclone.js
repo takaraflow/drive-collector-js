@@ -4,8 +4,8 @@ import fs from "fs";
 import { config } from "../config/index.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { STRINGS } from "../locales/zh-CN.js";
-import { cacheService } from "../utils/CacheService.js";
-import { kv } from "./kv.js";
+import { localCache } from "../utils/LocalCache.js";
+import { cache } from "./CacheService.js";
 import logger from "./logger.js";
 
 // 确定 rclone 二进制路径 (兼容 Zeabur 和 本地)
@@ -259,21 +259,21 @@ export class CloudTool {
 
         if (!forceRefresh) {
             // 1. 尝试内存缓存
-            const memCached = cacheService.get(cacheKey);
+            const memCached = localCache.get(cacheKey);
             if (memCached) return memCached.files || memCached;
 
-            // 2. 尝试 KV 缓存 (持久化)
+            // 2. 尝试 Cache 缓存 (持久化)
             try {
-                const kvCached = await kv.get(cacheKey, "json");
-                if (kvCached) {
+                const cacheCached = await cache.get(cacheKey, "json");
+                if (cacheCached) {
                     // 根据文件新鲜度动态调整内存缓存时间
-                    const cacheAge = this._calculateOptimalCacheTime(kvCached.files || kvCached);
-                    cacheService.set(cacheKey, kvCached, cacheAge);
+                    const cacheAge = this._calculateOptimalCacheTime(cacheCached.files || cacheCached);
+                    localCache.set(cacheKey, cacheCached, cacheAge);
                     // 返回文件数组（兼容旧格式和新格式）
-                    return kvCached.files || kvCached;
+                    return cacheCached.files || cacheCached;
                 }
             } catch (e) {
-                logger.error("KV get files error:", e.message);
+                logger.error("Cache get files error:", e.message);
             }
         }
 
@@ -342,12 +342,12 @@ export class CloudTool {
             const optimalMemoryTTL = this._calculateOptimalCacheTime(files);
             const optimalKVTTL = Math.max(600, optimalMemoryTTL / 1000); // KV至少缓存10分钟
 
-            cacheService.set(cacheKey, cacheData, optimalMemoryTTL);
+            localCache.set(cacheKey, cacheData, optimalMemoryTTL);
             try {
-                // KV 缓存使用动态时间，应对重启
-                await kv.set(cacheKey, cacheData, optimalKVTTL);
+                // Cache 缓存使用动态时间，应对重启
+                await cache.set(cacheKey, cacheData, optimalKVTTL);
             } catch (e) {
-                logger.error("KV set files error:", e.message);
+                logger.error("Cache set files error:", e.message);
             }
 
             this.loading = false;

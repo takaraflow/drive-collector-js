@@ -1,19 +1,27 @@
 // Updated test file - V3
 import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 
-jest.unstable_mockModule("../../src/services/kv.js", () => ({
-    kv: {
-        get: jest.fn(),
-        set: jest.fn(),
-        delete: jest.fn(),
-    },
+const mockCache = {
+    get: jest.fn(),
+    set: jest.fn(),
+    delete: jest.fn(),
+    getOrSet: jest.fn(),
+    del: jest.fn(),
+};
+
+const mockLocalCache = {
+    get: jest.fn(),
+    set: jest.fn(),
+    del: jest.fn(),
+    getOrSet: jest.fn(),
+};
+
+jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+    cache: mockCache,
 }));
 
-jest.unstable_mockModule("../../src/utils/CacheService.js", () => ({
-    cacheService: {
-        getOrSet: jest.fn(),
-        del: jest.fn(),
-    },
+jest.unstable_mockModule("../../src/utils/LocalCache.js", () => ({
+    localCache: mockLocalCache,
 }));
 
 jest.unstable_mockModule("../../src/services/logger.js", () => ({
@@ -26,14 +34,14 @@ jest.unstable_mockModule("../../src/services/logger.js", () => ({
 }));
 
 const { DriveRepository } = await import("../../src/repositories/DriveRepository.js");
-const { kv } = await import("../../src/services/kv.js");
-const { cacheService } = await import("../../src/utils/CacheService.js");
+const { cache } = await import("../../src/services/CacheService.js");
+const { localCache } = await import("../../src/utils/LocalCache.js");
 const { default: logger } = await import("../../src/services/logger.js");
 
 describe("DriveRepository", () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        cacheService.getOrSet.mockImplementation(async (key, loader) => {
+        mockLocalCache.getOrSet.mockImplementation(async (key, loader) => {
             return await loader();
         });
     });
@@ -42,24 +50,24 @@ describe("DriveRepository", () => {
         it("should return null for invalid userId", async () => {
             const result = await DriveRepository.findByUserId(null);
             expect(result).toBeNull();
-            expect(cacheService.getOrSet).not.toHaveBeenCalled();
+            expect(mockLocalCache.getOrSet).not.toHaveBeenCalled();
         });
 
         it("should return cached drive data", async () => {
             const mockDrive = { id: "drive123", user_id: "user1", status: "active" };
-            cacheService.getOrSet.mockResolvedValue(mockDrive);
+            mockLocalCache.getOrSet.mockResolvedValue(mockDrive);
 
             const result = await DriveRepository.findByUserId("user1");
 
-            expect(cacheService.getOrSet).toHaveBeenCalledWith("drive_user1", expect.any(Function), 60 * 1000);
+            expect(mockLocalCache.getOrSet).toHaveBeenCalledWith("drive_user1", expect.any(Function), 60 * 1000);
             expect(result).toEqual(mockDrive);
         });
 
         it("should return null and log error on KV failure", async () => {
-            cacheService.getOrSet.mockImplementation(async (key, loader) => {
-                await loader(); // Call the loader function
+            mockLocalCache.getOrSet.mockImplementation(async (key, loader) => {
+                return await loader(); // Call the loader function
             });
-            kv.get.mockRejectedValue(new Error("KV Error"));
+            mockCache.get.mockRejectedValue(new Error("KV Error"));
 
             const result = await DriveRepository.findByUserId("user1");
 
@@ -70,18 +78,18 @@ describe("DriveRepository", () => {
 
     describe("create", () => {
         it("should throw error for missing required parameters", async () => {
-            await expect(DriveRepository.create(null, "name", {})).rejects.toThrow("DriveRepository.create: Missing required parameters.");
-            await expect(DriveRepository.create("user1", null, {})).rejects.toThrow("DriveRepository.create: Missing required parameters.");
-            await expect(DriveRepository.create("user1", "name", null)).rejects.toThrow("DriveRepository.create: Missing required parameters.");
+            await expect(DriveRepository.create(null, "name", "mega", {})).rejects.toThrow("DriveRepository.create: Missing required parameters.");
+            await expect(DriveRepository.create("user1", null, "mega", {})).rejects.toThrow("DriveRepository.create: Missing required parameters.");
+            await expect(DriveRepository.create("user1", "name", "mega", null)).rejects.toThrow("DriveRepository.create: Missing required parameters.");
         });
 
         it("should create drive successfully", async () => {
             const configData = { user: "test@example.com", pass: "password" };
-            kv.set.mockResolvedValue(true);
+            mockCache.set.mockResolvedValue(true);
 
             const result = await DriveRepository.create("user1", "Mega-test@example.com", "mega", configData);
 
-            expect(kv.set).toHaveBeenCalledWith("drive:user1", expect.objectContaining({
+            expect(mockCache.set).toHaveBeenCalledWith("drive:user1", expect.objectContaining({
                 id: expect.any(String),
                 user_id: "user1",
                 name: "Mega-test@example.com",
@@ -89,16 +97,16 @@ describe("DriveRepository", () => {
                 config_data: configData,
                 status: "active"
             }));
-            expect(kv.set).toHaveBeenCalledWith(expect.stringMatching(/^drive_id:.+/), expect.objectContaining({
+            expect(mockCache.set).toHaveBeenCalledWith(expect.stringMatching(/^drive_id:.+/), expect.objectContaining({
                 id: expect.any(String),
                 user_id: "user1"
             }));
-            expect(cacheService.del).toHaveBeenCalledWith("drive_user1");
+            expect(mockLocalCache.del).toHaveBeenCalledWith("drive_user1");
             expect(result).toBe(true);
         });
 
         it("should throw error on KV failure", async () => {
-            kv.set.mockRejectedValue(new Error("KV Error"));
+            mockCache.set.mockRejectedValue(new Error("KV Error"));
 
             await expect(DriveRepository.create("user1", "name", "mega", {})).rejects.toThrow("KV Error");
             expect(logger.error).toHaveBeenCalled();
@@ -108,27 +116,26 @@ describe("DriveRepository", () => {
     describe("deleteByUserId", () => {
         it("should return early for invalid userId", async () => {
             await DriveRepository.deleteByUserId(null);
-            expect(kv.get).not.toHaveBeenCalled();
+            expect(mockCache.get).not.toHaveBeenCalled();
         });
 
         it("should delete drive by userId successfully", async () => {
             const mockDrive = { id: "drive123", user_id: "user1" };
-            kv.get.mockResolvedValue(mockDrive);
-            kv.delete.mockResolvedValue(true);
+            mockLocalCache.getOrSet.mockResolvedValue(mockDrive);
+            mockCache.delete.mockResolvedValue(true);
 
             await DriveRepository.deleteByUserId("user1");
 
-            expect(kv.get).toHaveBeenCalledWith("drive:user1", "json");
-            expect(kv.delete).toHaveBeenCalledWith("drive:user1");
-            expect(kv.delete).toHaveBeenCalledWith("drive_id:drive123");
-            expect(cacheService.del).toHaveBeenCalledWith("drive_user1");
+            expect(mockCache.delete).toHaveBeenCalledWith("drive:user1");
+            expect(mockCache.delete).toHaveBeenCalledWith("drive_id:drive123");
+            expect(mockLocalCache.del).toHaveBeenCalledWith("drive_user1");
         });
 
         it("should throw error on KV failure during deletion", async () => {
             // Mock findByUserId success
-            kv.get.mockResolvedValue({ id: "drive123", user_id: "user1" });
+            mockLocalCache.getOrSet.mockResolvedValue({ id: "drive123", user_id: "user1" });
             // Mock delete failure
-            kv.delete.mockRejectedValue(new Error("KV Delete Error"));
+            mockCache.delete.mockRejectedValue(new Error("KV Delete Error"));
 
             await expect(DriveRepository.deleteByUserId("user1")).rejects.toThrow("KV Delete Error");
             expect(logger.error).toHaveBeenCalled();
@@ -138,27 +145,27 @@ describe("DriveRepository", () => {
     describe("delete", () => {
         it("should return early for invalid driveId", async () => {
             await DriveRepository.delete(null);
-            expect(kv.get).not.toHaveBeenCalled();
+            expect(mockCache.get).not.toHaveBeenCalled();
         });
 
         it("should delete drive by id successfully", async () => {
             const mockDrive = { id: "drive123", user_id: "user1" };
-            kv.get.mockResolvedValue(mockDrive);
-            kv.delete.mockResolvedValue(true);
+            mockCache.get.mockResolvedValue(mockDrive);
+            mockCache.delete.mockResolvedValue(true);
 
             await DriveRepository.delete("drive123");
 
-            expect(kv.get).toHaveBeenCalledWith("drive_id:drive123", "json");
-            expect(kv.delete).toHaveBeenCalledWith("drive:user1");
-            expect(kv.delete).toHaveBeenCalledWith("drive_id:drive123");
-            expect(cacheService.del).toHaveBeenCalledWith("drives:active");
+            expect(mockCache.get).toHaveBeenCalledWith("drive_id:drive123", "json");
+            expect(mockCache.delete).toHaveBeenCalledWith("drive:user1");
+            expect(mockCache.delete).toHaveBeenCalledWith("drive_id:drive123");
+            expect(mockLocalCache.del).toHaveBeenCalledWith("drives:active");
         });
 
         it("should throw error on KV failure during deletion", async () => {
             // Mock findById success
-            kv.get.mockResolvedValue({ id: "drive123", user_id: "user1" });
+            mockCache.get.mockResolvedValue({ id: "drive123", user_id: "user1" });
             // Mock delete failure
-            kv.delete.mockRejectedValue(new Error("KV Delete Error"));
+            mockCache.delete.mockRejectedValue(new Error("KV Delete Error"));
 
             await expect(DriveRepository.delete("drive123")).rejects.toThrow("KV Delete Error");
             expect(logger.error).toHaveBeenCalled();
@@ -169,21 +176,21 @@ describe("DriveRepository", () => {
         it("should return null for invalid driveId", async () => {
             const result = await DriveRepository.findById(null);
             expect(result).toBeNull();
-            expect(kv.get).not.toHaveBeenCalled();
+            expect(mockCache.get).not.toHaveBeenCalled();
         });
 
         it("should return drive by id", async () => {
             const mockDrive = { id: "drive123", user_id: "user1", status: "active" };
-            kv.get.mockResolvedValue(mockDrive);
+            mockCache.get.mockResolvedValue(mockDrive);
 
             const result = await DriveRepository.findById("drive123");
 
-            expect(kv.get).toHaveBeenCalledWith("drive_id:drive123", "json");
+            expect(mockCache.get).toHaveBeenCalledWith("drive_id:drive123", "json");
             expect(result).toEqual(mockDrive);
         });
 
         it("should return null and log error on KV failure", async () => {
-            kv.get.mockRejectedValue(new Error("KV Error"));
+            mockCache.get.mockRejectedValue(new Error("KV Error"));
 
             const result = await DriveRepository.findById("drive123");
 
@@ -195,7 +202,7 @@ describe("DriveRepository", () => {
     describe("findAll", () => {
         it("should return drives from the active list", async () => {
             const mockDrives = ["drive1", "drive2"];
-            kv.get.mockImplementation((key) => {
+            mockCache.get.mockImplementation((key) => {
                 if (key === "drives:active") return Promise.resolve(mockDrives);
                 if (key === "drive_id:drive1") return Promise.resolve({ id: "drive1", name: "Drive 1" });
                 if (key === "drive_id:drive2") return Promise.resolve({ id: "drive2", name: "Drive 2" });
@@ -209,7 +216,7 @@ describe("DriveRepository", () => {
         });
 
         it("should return empty array when no active drives", async () => {
-            kv.get.mockResolvedValue(null);
+            mockCache.get.mockResolvedValue(null);
             const result = await DriveRepository.findAll();
             expect(result).toEqual([]);
         });

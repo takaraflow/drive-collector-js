@@ -13,7 +13,7 @@ import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetr
 import { AuthGuard } from "../modules/AuthGuard.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
 import { d1 } from "../services/d1.js";
-import { kv } from "../services/kv.js";
+import { cache } from "../services/CacheService.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { qstashService } from "../services/QStashService.js";
 import { logger } from "../services/logger.js";
@@ -114,9 +114,9 @@ export class TaskManager {
     static async init() {
         logger.info("正在检查数据库中异常中断的任务");
 
-        // 安全检查：如果处于 KV 故障转移模式，延迟任务恢复以优先让主集群处理
-        if (kv.isFailoverMode) {
-            logger.warn("系统处于 KV 故障转移模式", { provider: 'upstash', delay: 30000 });
+        // 安全检查：如果处于 Cache 故障转移模式，延迟任务恢复以优先让主集群处理
+        if (cache.isFailoverMode) {
+            logger.warn("系统处于 Cache 故障转移模式", { provider: 'upstash', delay: 30000 });
 
             // 先预加载常用数据
             await this._preloadCommonData();
@@ -202,15 +202,15 @@ export class TaskManager {
                 }),
 
                 // 预热缓存服务
-                import("../utils/CacheService.js").then(({ cacheService }) => {
+                import("../utils/LocalCache.js").then(({ localCache }) => {
                     // 确保缓存服务已初始化
-                    return Promise.resolve(cacheService);
+                    return Promise.resolve(localCache);
                 }),
 
-                // 预加载 KV 服务
-                import("../services/kv.js").then(({ kv }) => {
-                    // 预热 KV 连接
-                    return kv.get("system:health_check", "text").catch(() => "ok");
+                // 预加载 Cache 服务
+                import("../services/CacheService.js").then(({ cache }) => {
+                    // 预热 Cache 连接
+                    return cache.get("system:health_check", "text").catch(() => "ok");
                 })
             );
 

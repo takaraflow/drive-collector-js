@@ -6,14 +6,14 @@ global.fetch = mockFetch;
 
 const originalEnv = process.env;
 
-describe("KV Service Full Suite", () => {
-  let kvInstance;
+describe("Cache Service Full Suite", () => {
+  let cacheInstance;
 
-  async function reloadKVService(env) {
+  async function reloadCacheService(env) {
     process.env = { ...originalEnv, ...env };
     jest.resetModules();
-    const module = await import("../../src/services/kv.js");
-    return module.kv;
+    const module = await import("../../src/services/CacheService.js");
+    return module.cache;
   }
 
   beforeEach(() => {
@@ -22,9 +22,9 @@ describe("KV Service Full Suite", () => {
 
   // ✨ 关键修复：解决测试卡死 (Hang)
   afterEach(() => {
-    if (kvInstance && kvInstance.recoveryTimer) {
-      clearInterval(kvInstance.recoveryTimer);
-      kvInstance.recoveryTimer = null;
+    if (cacheInstance && cacheInstance.recoveryTimer) {
+      clearInterval(cacheInstance.recoveryTimer);
+      cacheInstance.recoveryTimer = null;
     }
   });
 
@@ -37,44 +37,44 @@ describe("KV Service Full Suite", () => {
   // ==========================================
   describe("Cloudflare Provider", () => {
     beforeAll(async () => {
-      kvInstance = await reloadKVService({
-        CF_KV_ACCOUNT_ID: "cf_acc",
-        CF_KV_NAMESPACE_ID: "cf_ns",
-        CF_KV_TOKEN: "cf_token",
-        KV_PROVIDER: "cloudflare"
+      cacheInstance = await reloadCacheService({
+        CF_CACHE_ACCOUNT_ID: "cf_acc",
+        CF_CACHE_NAMESPACE_ID: "cf_ns",
+        CF_CACHE_TOKEN: "cf_token",
+        CACHE_PROVIDER: "cloudflare"
       });
     });
 
     test("should initialize Cloudflare correctly", () => {
-      expect(kvInstance.accountId).toBe("cf_acc");
-      expect(kvInstance.apiUrl).toContain("cf_acc/storage/kv/namespaces/cf_ns");
+      expect(cacheInstance.accountId).toBe("cf_acc");
+      expect(cacheInstance.apiUrl).toContain("cf_acc/storage/kv/namespaces/cf_ns");
     });
 
     test("should put a value via PUT method", async () => {
       mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ success: true }) });
-      await kvInstance.set("k1", { foo: "bar" });
+      await cacheInstance.set("k1", { foo: "bar" });
       expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining("/values/k1"), expect.objectContaining({ method: "PUT" }));
     });
 
     test("should handle expirationTtl in URL", async () => {
       mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ success: true }) });
-      await kvInstance.set("k1", "v1", 3600);
+      await cacheInstance.set("k1", "v1", 3600);
       expect(mockFetch.mock.calls[0][0]).toContain("expiration_ttl=3600");
     });
 
     test("should get JSON value successfully", async () => {
       mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ a: 1 }) });
-      expect(await kvInstance.get("key")).toEqual({ a: 1 });
+      expect(await cacheInstance.get("key")).toEqual({ a: 1 });
     });
 
     test("should return null on 404", async () => {
       mockFetch.mockResolvedValueOnce({ status: 404 });
-      expect(await kvInstance.get("missing")).toBeNull();
+      expect(await cacheInstance.get("missing")).toBeNull();
     });
 
     test("should delete a key successfully", async () => {
       mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ success: true }) });
-      expect(await kvInstance.delete("key")).toBe(true);
+      expect(await cacheInstance.delete("key")).toBe(true);
     });
 
     test("should list all keys successfully", async () => {
@@ -90,7 +90,7 @@ describe("KV Service Full Suite", () => {
           ]
         })
       });
-      const keys = await kvInstance.listKeys();
+      const keys = await cacheInstance.listKeys();
       expect(keys).toEqual(["key1", "key2", "prefix:key3"]);
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining("/keys"),
@@ -110,7 +110,7 @@ describe("KV Service Full Suite", () => {
           ]
         })
       });
-      const keys = await kvInstance.listKeys("prefix:");
+      const keys = await cacheInstance.listKeys("prefix:");
       expect(keys).toEqual(["prefix:key1", "prefix:key2"]);
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining("/keys?prefix=prefix%3A"),
@@ -124,8 +124,8 @@ describe("KV Service Full Suite", () => {
   // ==========================================
   describe("Upstash Provider", () => {
     beforeAll(async () => {
-      kvInstance = await reloadKVService({
-        KV_PROVIDER: "upstash",
+      cacheInstance = await reloadCacheService({
+        CACHE_PROVIDER: "upstash",
         UPSTASH_REDIS_REST_URL: "https://mock.upstash.io",
         UPSTASH_REDIS_REST_TOKEN: "up_token"
       });
@@ -133,7 +133,7 @@ describe("KV Service Full Suite", () => {
 
     test("should set value using command array format", async () => {
       mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ result: "OK" }) });
-      await kvInstance.set("k1", { x: 1 });
+      await cacheInstance.set("k1", { x: 1 });
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining("https://mock.upstash.io/"),
         expect.objectContaining({
@@ -145,13 +145,13 @@ describe("KV Service Full Suite", () => {
 
     test("should bulkSet using Pipeline API", async () => {
       mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve([{ result: "OK" }]) });
-      await kvInstance.bulkSet([{ key: "k1", value: "v1" }]);
+      await cacheInstance.bulkSet([{ key: "k1", value: "v1" }]);
       expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining("/pipeline"), expect.any(Object));
     });
 
     test("should list all keys using KEYS command", async () => {
       mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ result: ["key1", "key2", "prefix:key3"] }) });
-      const keys = await kvInstance.listKeys();
+      const keys = await cacheInstance.listKeys();
       expect(keys).toEqual(["key1", "key2", "prefix:key3"]);
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining("https://mock.upstash.io/"),
@@ -164,7 +164,7 @@ describe("KV Service Full Suite", () => {
 
     test("should list keys with prefix using KEYS command", async () => {
       mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ result: ["prefix:key1", "prefix:key2"] }) });
-      const keys = await kvInstance.listKeys("prefix:");
+      const keys = await cacheInstance.listKeys("prefix:");
       expect(keys).toEqual(["prefix:key1", "prefix:key2"]);
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining("https://mock.upstash.io/"),
@@ -177,7 +177,7 @@ describe("KV Service Full Suite", () => {
 
     test("should handle non-array result from Upstash KEYS", async () => {
       mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ result: null }) });
-      const keys = await kvInstance.listKeys();
+      const keys = await cacheInstance.listKeys();
       expect(keys).toEqual([]);
     });
   });
@@ -187,8 +187,8 @@ describe("KV Service Full Suite", () => {
   // ==========================================
   describe("Failover Logic Deep Dive", () => {
     beforeAll(async () => {
-      kvInstance = await reloadKVService({
-        CF_KV_ACCOUNT_ID: "cf", CF_KV_NAMESPACE_ID: "ns", CF_KV_TOKEN: "tk",
+      cacheInstance = await reloadCacheService({
+        CF_CACHE_ACCOUNT_ID: "cf", CF_CACHE_NAMESPACE_ID: "ns", CF_CACHE_TOKEN: "tk",
         UPSTASH_REDIS_REST_URL: "https://up.io", UPSTASH_REDIS_REST_TOKEN: "ut"
       });
     });
@@ -200,8 +200,8 @@ describe("KV Service Full Suite", () => {
         json: () => Promise.resolve({ success: false, errors: [{ message: "invalid key" }] })
       });
 
-      await expect(kvInstance.set("invalid", "v")).rejects.toThrow("KV Set Error");
-      expect(kvInstance.failureCount).toBe(0); // 验证没有累加错误计数
+      await expect(cacheInstance.set("invalid", "v")).rejects.toThrow("Cache Set Error");
+      expect(cacheInstance.failureCount).toBe(0); // 验证没有累加错误计数
     });
 
     test("should switch to Upstash after 3 rate limit errors", async () => {
@@ -212,8 +212,8 @@ describe("KV Service Full Suite", () => {
         .mockResolvedValueOnce({ ok: false, status: 429, json: () => Promise.resolve(rateLimitErr) })
         .mockResolvedValueOnce({ json: () => Promise.resolve({ result: "OK" }) });
 
-      await kvInstance.set("key", "val");
-      expect(kvInstance.currentProvider).toBe("upstash");
+      await cacheInstance.set("key", "val");
+      expect(cacheInstance.currentProvider).toBe("upstash");
     });
   });
 });

@@ -125,7 +125,7 @@ export async function cleanupSingletonTimers() {
 
   // 清理 KV 服务定时器
   try {
-    const { kv } = await import("../../src/services/kv.js");
+    const { cache } = await import("../../src/services/CacheService.js");
     if (kv && kv.stopRecoveryCheck) kv.stopRecoveryCheck();
   } catch (e) {
     // 忽略导入错误，可能被 mock

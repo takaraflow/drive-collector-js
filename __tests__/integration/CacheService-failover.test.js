@@ -23,8 +23,8 @@ describe("KV Service Failover Integration", () => {
         jest.resetModules();
 
         // Dynamically import kv after setting up mocks
-        const { kv: importedKV } = await import("../../src/services/kv.js");
-        kvInstance = importedKV;
+        const { cache } = await import("../../src/services/CacheService.js");
+        kvInstance = cache;
     });
 
     afterEach(() => {
@@ -279,7 +279,7 @@ describe("KV Service Failover Integration", () => {
 
         // Re-import kv
         jest.resetModules();
-        const { kv: kvNoFailover } = await import("../../src/services/kv.js");
+        const { cache: kvNoFailover } = await import("../../src/services/CacheService.js");
 
         expect(kvNoFailover.failoverEnabled).toBe(false);
         expect(kvNoFailover.hasUpstash).toBe(false);
@@ -297,7 +297,7 @@ describe("KV Service Failover Integration", () => {
         });
 
         await expect(kvInstance.set("invalid key", "value"))
-            .rejects.toThrow("KV Set Error");
+            .rejects.toThrow("Cache Set Error");
 
         // Should not have switched providers or incremented failure count
         expect(kvInstance.currentProvider).toBe("cloudflare");

@@ -83,8 +83,8 @@ jest.unstable_mockModule("../../src/services/d1.js", () => ({
     d1: { batch: jest.fn() }
 }));
 
-jest.unstable_mockModule("../../src/services/kv.js", () => ({
-    kv: {}
+jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+    cache: {}
 }));
 
 const mockQstashService = {

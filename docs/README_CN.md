@@ -213,7 +213,7 @@ npm test
 - **开发环境：** `develop` 分支 → `qstash-lb-dev` worker
 
 每个环境具有独立的：
-- KV 命名空间（PRODUCTION_NS、STAGING_NS）
+- Cache 命名空间（PRODUCTION_NS、STAGING_NS）
 - QStash 签名密钥
 - Upstash Redis 实例
 - Worker 名称

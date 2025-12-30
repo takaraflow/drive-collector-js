@@ -1,12 +1,12 @@
 import { jest, describe, test, expect, beforeEach, beforeAll, afterAll } from "@jest/globals";
-import { cacheService } from "../../src/utils/CacheService.js";
+import { localCache } from "../../src/utils/LocalCache.js";
 
 // Mock global fetch
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
 const originalEnv = process.env;
-let kvInstance;
+let cacheInstance;
 
 describe("KV Service Failover", () => {
     beforeAll(async () => {
@@ -18,13 +18,13 @@ describe("KV Service Failover", () => {
             CF_KV_TOKEN: "mock_cf_token",
             UPSTASH_REDIS_REST_URL: "https://mock-upstash.com",
             UPSTASH_REDIS_REST_TOKEN: "mock-upstash-token",
-            KV_PROVIDER: "cloudflare" // Default
+            CACHE_PROVIDER: "cloudflare" // Default
         };
 
-        // 重新导入 KV 服务以应用新环境变量
+        // 重新导入 Cache 服务以应用新环境变量
         jest.resetModules();
-        const { kv } = await import("../../src/services/kv.js");
-        kvInstance = kv;
+        const { cache } = await import("../../src/services/CacheService.js");
+        cacheInstance = cache;
     });
 
     afterAll(() => {
@@ -34,13 +34,13 @@ describe("KV Service Failover", () => {
     beforeEach(() => {
         mockFetch.mockClear();
         // 清空缓存
-        cacheService.clear();
-        // 重置 KV 实例内部状态 (hacky but necessary for singleton testing)
-        if (kvInstance) {
-            kvInstance.currentProvider = 'cloudflare';
-            kvInstance.failureCount = 0;
-            kvInstance.failoverEnabled = true;
-            kvInstance.hasUpstash = true;
+        localCache.clear();
+        // 重置 Cache 实例内部状态 (hacky but necessary for singleton testing)
+        if (cacheInstance) {
+            cacheInstance.currentProvider = 'cloudflare';
+            cacheInstance.failureCount = 0;
+            cacheInstance.failoverEnabled = true;
+            cacheInstance.hasUpstash = true;
         }
     });
 
@@ -49,11 +49,11 @@ describe("KV Service Failover", () => {
             json: () => Promise.resolve({ success: true })
         });
 
-        await kvInstance.set("key", "value", null, { skipCache: true });
+        await cacheInstance.set("key", "value", null, { skipCache: true });
 
         expect(mockFetch).toHaveBeenCalledTimes(1);
         expect(mockFetch.mock.calls[0][0]).toContain("api.cloudflare.com");
-        expect(kvInstance.getCurrentProvider()).toBe("Cloudflare KV");
+        expect(cacheInstance.getCurrentProvider()).toBe("Cloudflare KV");
     });
 
     test("should NOT failover on generic error", async () => {
@@ -61,16 +61,16 @@ describe("KV Service Failover", () => {
         mockFetch.mockResolvedValueOnce({
             ok: false, // 模拟失败响应
             status: 400,
-            json: () => Promise.resolve({ 
-                success: false, 
-                errors: [{ message: "Some logic error" }] 
+            json: () => Promise.resolve({
+                success: false,
+                errors: [{ message: "Some logic error" }]
             })
         });
 
-        await expect(kvInstance.set("key", "value", null, { skipCache: true })).rejects.toThrow("KV Set Error");
+        await expect(cacheInstance.set("key", "value", null, { skipCache: true })).rejects.toThrow("Cache Set Error");
 
-        expect(kvInstance.failureCount).toBe(0);
-        expect(kvInstance.getCurrentProvider()).toBe("Cloudflare KV");
+        expect(cacheInstance.failureCount).toBe(0);
+        expect(cacheInstance.getCurrentProvider()).toBe("Cloudflare KV");
     });
 
     test("should trigger failover after 3 quota errors", async () => {
@@ -85,23 +85,23 @@ describe("KV Service Failover", () => {
 
         // 第一次失败
         mockFetch.mockResolvedValueOnce(quotaErrorResponse);
-        await expect(kvInstance.set("k1", "v1", null, { skipCache: true })).rejects.toThrow();
-        expect(kvInstance.failureCount).toBe(1);
+        await expect(cacheInstance.set("k1", "v1", null, { skipCache: true })).rejects.toThrow();
+        expect(cacheInstance.failureCount).toBe(1);
 
         // 第二次失败
         mockFetch.mockResolvedValueOnce(quotaErrorResponse);
-        await expect(kvInstance.set("k2", "v2", null, { skipCache: true })).rejects.toThrow();
-        expect(kvInstance.failureCount).toBe(2);
+        await expect(cacheInstance.set("k2", "v2", null, { skipCache: true })).rejects.toThrow();
+        expect(cacheInstance.failureCount).toBe(2);
 
         // 第三次失败 -> 触发切换 -> 重试成功
         mockFetch
             .mockResolvedValueOnce(quotaErrorResponse) // CF 失败
             .mockResolvedValueOnce(upstashSuccessResponse); // Upstash 成功
 
-        await kvInstance.set("k3", "v3", null, { skipCache: true });
+        await cacheInstance.set("k3", "v3", null, { skipCache: true });
 
-        expect(kvInstance.failureCount).toBe(0); // 重置
-        expect(kvInstance.getCurrentProvider()).toBe("Upstash Redis");
+        expect(cacheInstance.failureCount).toBe(0); // 重置
+        expect(cacheInstance.getCurrentProvider()).toBe("Upstash Redis");
 
         // 验证最后一次调用是发给 Upstash 的
         const lastCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
@@ -110,13 +110,13 @@ describe("KV Service Failover", () => {
 
     test("should use Upstash after failover", async () => {
         // 手动设置状态为已切换
-        kvInstance.currentProvider = 'upstash';
+        cacheInstance.currentProvider = 'upstash';
 
         mockFetch.mockResolvedValueOnce({
             json: () => Promise.resolve({ result: "value" })
         });
 
-        await kvInstance.get("key", "json", { skipCache: true });
+        await cacheInstance.get("key", "json", { skipCache: true });
 
         expect(mockFetch).toHaveBeenCalledTimes(1);
         expect(mockFetch.mock.calls[0][0]).toContain("mock-upstash.com");
@@ -128,22 +128,22 @@ describe("KV Service Failover", () => {
 
         // 第一次失败
         mockFetch.mockRejectedValueOnce(networkErrorResponse);
-        await expect(kvInstance.set("k1", "v1", null, { skipCache: true })).rejects.toThrow();
-        expect(kvInstance.failureCount).toBe(1);
+        await expect(cacheInstance.set("k1", "v1", null, { skipCache: true })).rejects.toThrow();
+        expect(cacheInstance.failureCount).toBe(1);
 
         // 第二次失败
         mockFetch.mockRejectedValueOnce(networkErrorResponse);
-        await expect(kvInstance.set("k2", "v2", null, { skipCache: true })).rejects.toThrow();
-        expect(kvInstance.failureCount).toBe(2);
+        await expect(cacheInstance.set("k2", "v2", null, { skipCache: true })).rejects.toThrow();
+        expect(cacheInstance.failureCount).toBe(2);
 
         // 第三次失败 -> 触发切换 -> 重试成功
         mockFetch.mockRejectedValueOnce(networkErrorResponse); // CF 失败
         mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ result: "OK" }) }); // Upstash 成功
 
-        await kvInstance.set("k3", "v3", null, { skipCache: true });
+        await cacheInstance.set("k3", "v3", null, { skipCache: true });
 
-        expect(kvInstance.failureCount).toBe(0);
-        expect(kvInstance.getCurrentProvider()).toBe("Upstash Redis");
+        expect(cacheInstance.failureCount).toBe(0);
+        expect(cacheInstance.getCurrentProvider()).toBe("Upstash Redis");
     });
 
     test("should trigger failover on timeout errors", async () => {
@@ -152,22 +152,22 @@ describe("KV Service Failover", () => {
 
         // 第一次失败
         mockFetch.mockRejectedValueOnce(timeoutErrorResponse);
-        await expect(kvInstance.set("k1", "v1", null, { skipCache: true })).rejects.toThrow();
-        expect(kvInstance.failureCount).toBe(1);
+        await expect(cacheInstance.set("k1", "v1", null, { skipCache: true })).rejects.toThrow();
+        expect(cacheInstance.failureCount).toBe(1);
 
         // 第二次失败
         mockFetch.mockRejectedValueOnce(timeoutErrorResponse);
-        await expect(kvInstance.set("k2", "v2", null, { skipCache: true })).rejects.toThrow();
-        expect(kvInstance.failureCount).toBe(2);
+        await expect(cacheInstance.set("k2", "v2", null, { skipCache: true })).rejects.toThrow();
+        expect(cacheInstance.failureCount).toBe(2);
 
         // 第三次失败 -> 触发切换 -> 重试成功
         mockFetch.mockRejectedValueOnce(timeoutErrorResponse); // CF 失败
         mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ result: "OK" }) }); // Upstash 成功
 
-        await kvInstance.set("k3", "v3", null, { skipCache: true });
+        await cacheInstance.set("k3", "v3", null, { skipCache: true });
 
-        expect(kvInstance.failureCount).toBe(0);
-        expect(kvInstance.getCurrentProvider()).toBe("Upstash Redis");
+        expect(cacheInstance.failureCount).toBe(0);
+        expect(cacheInstance.getCurrentProvider()).toBe("Upstash Redis");
     });
 
     test("should maintain failover state across operations", async () => {
@@ -179,17 +179,17 @@ describe("KV Service Failover", () => {
         // 快速连续失败 3 次
         for (let i = 0; i < 3; i++) {
             mockFetch.mockResolvedValueOnce(quotaErrorResponse);
-            await expect(kvInstance.set(`k${i}`, `v${i}`, null, { skipCache: true })).rejects.toThrow();
+            await expect(cacheInstance.set(`k${i}`, `v${i}`, null, { skipCache: true })).rejects.toThrow();
         }
 
         mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ result: "OK" }) });
-        await kvInstance.set("k3", "v3", null, { skipCache: true });
+        await cacheInstance.set("k3", "v3", null, { skipCache: true });
 
-        expect(kvInstance.getCurrentProvider()).toBe("Upstash Redis");
+        expect(cacheInstance.getCurrentProvider()).toBe("Upstash Redis");
 
         // 后续操作应该继续使用 Upstash
         mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ result: "value" }) });
-        await kvInstance.get("key", "json", { skipCache: true });
+        await cacheInstance.get("key", "json", { skipCache: true });
 
         expect(mockFetch.mock.calls[mockFetch.mock.calls.length - 1][0]).toContain("mock-upstash.com");
     });
@@ -199,20 +199,20 @@ describe("KV Service Failover", () => {
         mockFetch.mockResolvedValueOnce({
             json: () => Promise.resolve({ success: false, errors: [{ message: "free usage limit exceeded" }] })
         });
-        await expect(kvInstance.set("k1", "v1", null, { skipCache: true })).rejects.toThrow();
-        expect(kvInstance.failureCount).toBe(1);
+        await expect(cacheInstance.set("k1", "v1", null, { skipCache: true })).rejects.toThrow();
+        expect(cacheInstance.failureCount).toBe(1);
 
         // 成功操作不重置计数（仅故障转移时重置）
         mockFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ success: true }) });
-        await kvInstance.set("k2", "v2", null, { skipCache: true });
-        expect(kvInstance.failureCount).toBe(1);
-        expect(kvInstance.getCurrentProvider()).toBe("Cloudflare KV");
+        await cacheInstance.set("k2", "v2", null, { skipCache: true });
+        expect(cacheInstance.failureCount).toBe(1);
+        expect(cacheInstance.getCurrentProvider()).toBe("Cloudflare KV");
     });
 
     test("should not failover if Upstash not configured", async () => {
         // 临时修改配置，模拟没有 Upstash
-        kvInstance.hasUpstash = false;
-        kvInstance.failoverEnabled = false;
+        cacheInstance.hasUpstash = false;
+        cacheInstance.failoverEnabled = false;
 
         const quotaErrorResponse = {
             json: () => Promise.resolve({ success: false, errors: [{ message: "free usage limit exceeded" }] })
@@ -221,37 +221,37 @@ describe("KV Service Failover", () => {
         // 连续失败多次
         for (let i = 0; i < 5; i++) {
             mockFetch.mockResolvedValueOnce(quotaErrorResponse);
-            await expect(kvInstance.set(`k${i}`, `v${i}`, null, { skipCache: true })).rejects.toThrow();
+            await expect(cacheInstance.set(`k${i}`, `v${i}`, null, { skipCache: true })).rejects.toThrow();
         }
 
         // 应该保持使用 Cloudflare KV，不切换
-        expect(kvInstance.getCurrentProvider()).toBe("Cloudflare KV");
+        expect(cacheInstance.getCurrentProvider()).toBe("Cloudflare KV");
         // 如果未启用故障转移，failureCount 不会增加
-        expect(kvInstance.failureCount).toBe(0);
+        expect(cacheInstance.failureCount).toBe(0);
 
         // 恢复配置
-        kvInstance.hasUpstash = true;
-        kvInstance.failoverEnabled = true;
+        cacheInstance.hasUpstash = true;
+        cacheInstance.failoverEnabled = true;
 
         // 恢复配置
-        kvInstance.hasUpstash = true;
-        kvInstance.failoverEnabled = true;
+        cacheInstance.hasUpstash = true;
+        cacheInstance.failoverEnabled = true;
     });
 
     test("should correctly identify failover mode", () => {
         // 默认状态
-        kvInstance.currentProvider = 'cloudflare';
-        expect(kvInstance.isFailoverMode).toBe(false);
+        cacheInstance.currentProvider = 'cloudflare';
+        expect(cacheInstance.isFailoverMode).toBe(false);
 
         // 切换到 Upstash
-        kvInstance.currentProvider = 'upstash';
-        expect(kvInstance.isFailoverMode).toBe(true);
+        cacheInstance.currentProvider = 'upstash';
+        expect(cacheInstance.isFailoverMode).toBe(true);
 
         // 强制设置为 Upstash（通过环境变量）
-        process.env.KV_PROVIDER = 'upstash';
-        kvInstance.currentProvider = 'upstash';
-        expect(kvInstance.isFailoverMode).toBe(false); // 不是故障转移，是强制配置
+        process.env.CACHE_PROVIDER = 'upstash';
+        cacheInstance.currentProvider = 'upstash';
+        expect(cacheInstance.isFailoverMode).toBe(false); // 不是故障转移，是强制配置
 
-        process.env.KV_PROVIDER = 'cloudflare';
+        process.env.CACHE_PROVIDER = 'cloudflare';
     });
 });

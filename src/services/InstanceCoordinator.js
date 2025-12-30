@@ -1,4 +1,4 @@
-import { kv } from "./kv.js";
+import { cache } from "./CacheService.js";
 import { d1 } from "./d1.js";
 import { qstashService } from "./QStashService.js";
 import { InstanceRepository } from "../repositories/InstanceRepository.js";
@@ -6,7 +6,7 @@ import logger, { setInstanceIdProvider } from "./logger.js";
 
 /**
  * --- 多实例协调服务 ---
- * 基于 Cloudflare KV 实现异地多实例支持
+ * 基于 Cloudflare Cache 实现异地多实例支持
  * 职责：实例注册、心跳、分布式锁、任务协调
  */
 export class InstanceCoordinator {
@@ -56,7 +56,7 @@ export class InstanceCoordinator {
     }
 
     /**
-     * 注册实例 (KV 存储，符合低频关键数据规则)
+     * 注册实例 (Cache 存储，符合低频关键数据规则)
      */
     async registerInstance() {
         const instanceData = {
@@ -69,13 +69,13 @@ export class InstanceCoordinator {
             status: 'active'
         };
 
-        // 写入 KV (核心 KV 模块，用于关键数据存储)
+        // 写入 Cache (核心 Cache 模块，用于关键数据存储)
         try {
-            await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
-            logger.info(`📝 实例已注册到 KV: ${this.instanceId}`);
-        } catch (kvError) {
-            logger.error(`❌ KV注册失败: ${kvError.message}`);
-            throw kvError; // KV 是主存储，失败时抛出异常
+            await cache.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
+            logger.info(`📝 实例已注册到 Cache: ${this.instanceId}`);
+        } catch (cacheError) {
+            logger.error(`❌ Cache注册失败: ${cacheError.message}`);
+            throw cacheError; // Cache 是主存储，失败时抛出异常
         }
     }
 
@@ -83,7 +83,7 @@ export class InstanceCoordinator {
      * 注销实例
      */
     async unregisterInstance() {
-        await kv.delete(`instance:${this.instanceId}`);
+        await cache.delete(`instance:${this.instanceId}`);
         logger.info(`📝 实例已注销: ${this.instanceId}`);
     }
 
@@ -95,8 +95,8 @@ export class InstanceCoordinator {
             const now = Date.now();
 
             try {
-                // 检查实例是否仍然存在于 KV 中
-                const existing = await kv.get(`instance:${this.instanceId}`);
+                // 检查实例是否仍然存在于 Cache 中
+                const existing = await cache.get(`instance:${this.instanceId}`);
                 if (!existing) {
                     // 实例不存在，重新注册
                     await this.registerInstance();
@@ -107,10 +107,10 @@ export class InstanceCoordinator {
                         lastHeartbeat: now,
                         status: 'active'
                     };
-                    await kv.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
+                    await cache.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
                 }
-            } catch (kvError) {
-                logger.error(`KV心跳更新失败: ${kvError.message}`);
+            } catch (cacheError) {
+                logger.error(`Cache心跳更新失败: ${cacheError.message}`);
             }
         }, this.heartbeatInterval);
     }
@@ -146,7 +146,7 @@ export class InstanceCoordinator {
      */
     async hasLock(lockKey) {
         try {
-            const existing = await kv.get(`lock:${lockKey}`, "json", { skipCache: true });
+            const existing = await cache.get(`lock:${lockKey}`, "json", { skipCache: true });
             const isOwner = existing && existing.instanceId === this.instanceId;
             if (existing && !isOwner) {
                 // 明确被其他实例持有
@@ -173,7 +173,7 @@ export class InstanceCoordinator {
     async getAllInstances() {
         try {
             // 使用 listKeys 主动发现所有实例键
-            const instanceKeys = await kv.listKeys('instance:');
+            const instanceKeys = await cache.listKeys('instance:');
             const instances = [];
 
             for (const key of instanceKeys) {
@@ -181,7 +181,7 @@ export class InstanceCoordinator {
                     // 从键名中提取实例ID
                     const instanceId = key.replace('instance:', '');
                     // 获取实例数据，使用缓存防止高频调用
-                    const instance = await kv.get(key, "json", { cacheTtl: 30000 });
+                    const instance = await cache.get(key, "json", { cacheTtl: 30000 });
                     if (instance) {
                         // 确保实例数据包含 id 字段
                         instances.push({
@@ -241,7 +241,7 @@ export class InstanceCoordinator {
 
             for (const instance of allInstances) {
                 if ((now - instance.lastHeartbeat) > this.instanceTimeout * 2) {
-                    await kv.delete(`instance:${instance.id}`);
+                    await cache.delete(`instance:${instance.id}`);
                     cleanedCount++;
                 }
             }
@@ -270,7 +270,7 @@ export class InstanceCoordinator {
         try {
             // 尝试原子性地设置锁，如果键不存在则成功
             // 锁的读取不使用 L1 缓存，确保实时性
-            const existing = await kv.get(`lock:${lockKey}`, "json", { skipCache: true });
+            const existing = await cache.get(`lock:${lockKey}`, "json", { skipCache: true });
 
             if (existing) {
                 // 检查锁是否仍然有效
@@ -284,10 +284,10 @@ export class InstanceCoordinator {
 
             // 设置锁，使用时间戳作为额外的验证
             lockValue.version = Date.now();
-            await kv.set(`lock:${lockKey}`, lockValue, ttl, { skipCache: true });
+            await cache.set(`lock:${lockKey}`, lockValue, ttl, { skipCache: true });
             
             // 双重校验：写入后立即验证是否确实是自己的锁
-            const verified = await kv.get(`lock:${lockKey}`, "json", { skipCache: true });
+            const verified = await cache.get(`lock:${lockKey}`, "json", { skipCache: true });
             if (verified && verified.instanceId === this.instanceId && verified.version === lockValue.version) {
                 return true;
             }
@@ -306,9 +306,9 @@ export class InstanceCoordinator {
      */
     async releaseLock(lockKey) {
         try {
-            const existing = await kv.get(`lock:${lockKey}`, "json", { skipCache: true });
+            const existing = await cache.get(`lock:${lockKey}`, "json", { skipCache: true });
             if (existing && existing.instanceId === this.instanceId) {
-                await kv.delete(`lock:${lockKey}`);
+                await cache.delete(`lock:${lockKey}`);
             }
         } catch (e) {
             logger.error(`释放锁失败 ${lockKey}:`, e?.message || String(e));

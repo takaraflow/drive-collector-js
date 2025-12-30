@@ -62,7 +62,7 @@ A Cloudflare Worker that distributes QStash webhooks across multiple bot instanc
 
 - **Load Distribution**: Routes incoming webhooks to active instances using round-robin algorithm
 - **Health Monitoring**: Tracks instance status via heartbeat mechanism
-- **Fault Tolerance**: Automatic failover between Cloudflare KV and Upstash Redis
+- **Fault Tolerance**: Automatic failover between Cloudflare Cache (KV) and Upstash Redis
 - **Signature Verification**: Validates QStash webhook signatures before forwarding
 
 ### Deployment via GitHub Actions
@@ -147,7 +147,7 @@ Using GitHub Actions with Node.js 20.x.
 | `CLOUDFLARE_API_TOKEN` | Required | Required | Cloudflare API token for deployment |
 | `CLOUDFLARE_ACCOUNT_ID` | Required | Required | Cloudflare account ID |
 | `WORKER_NAME` | `qstash-lb` | `qstash-lb-dev` | Worker name |
-| `CF_KV_NAMESPACE_ID` | Production NS | Staging NS | KV namespace ID |
+| `CF_CACHE_NAMESPACE_ID` | Production NS | Staging NS | Cache namespace ID |
 | `QSTASH_CURRENT_SIGNING_KEY` | Prod Key | Dev Key | Webhook signing key |
 | `UPSTASH_REDIS_REST_URL` | Prod URL | Dev URL | Redis REST URL |
 | `UPSTASH_REDIS_REST_TOKEN` | Prod Token | Dev Token | Redis REST token |
@@ -215,7 +215,7 @@ The project uses GitHub Environments for isolated production and development dep
 - **Development Environment:** `develop` branch → `qstash-lb-dev` worker
 
 Each environment has separate:
-- KV namespaces (PRODUCTION_NS, STAGING_NS)
+- Cache namespaces (PRODUCTION_NS, STAGING_NS)
 - QStash signing keys
 - Upstash Redis instances
 - Worker names

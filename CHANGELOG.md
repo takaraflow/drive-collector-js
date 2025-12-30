@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [3.3.0](https://github.com/YoungSx/drive-collector-js/compare/v3.2.4...v3.3.0) (2025-12-30)
+
+#### ✨ Features
+
+* **OSS Helper**: 新增 S3/R2 分片上传辅助工具，支持进度回调和公共 URL 生成 ([new file](src/utils/oss-helper.js))
+* **CI/CD Pipeline**: 完整的 GitHub Actions 工作流，包含测试、构建、Docker 镜像推送和通知 ([.github/workflows/ci.yml])
+* **Release Automation**: AI 驱动的发布脚本，支持语义化版本和 Conventional Commits ([scripts/release-ai.js])
+* **Environment Setup**: 新增完整的环境变量示例文件，包含所有支持的配置项 ([.env.example])
+* **Documentation**: 新增中文 README 文档，完善项目说明和使用指南 ([docs/README_CN.md])
+* **Configuration**: 新增 Wrangler 配置文件，支持 Cloudflare Workers 部署 ([wrangler.toml, wrangler.build.toml])
+* **Version Management**: 新增 .versionrc.json 配置，标准化版本发布流程
+
+#### 🔧 Improvements
+
+* **Rate Limiting**: 优化限流器自动扩缩容逻辑，增强 429 错误处理和断开连接检测
+  - 提升最大重试次数从 3 到 10
+  - 改进指数退避算法，增加抖动防止同步
+  - 优化本地冷却期检查，减少 KV 同步频率
+* **Logger**: 统一使用 logger 服务替代 console，增强日志结构和版本跟踪
+* **Dispatcher**: 改进消息编辑错误处理，使用 logger 替代 console.warn
+* **Dependencies**: 新增 AWS SDK 依赖 (@aws-sdk/client-s3, @aws-sdk/lib-storage) 用于 OSS 支持
+
+#### 📝 Documentation
+
+* **README**: 更新项目描述，添加功能特性和架构说明
+* **CI/CD**: 完善 CI 工作流文档，包含性能指标和构建优化说明
+
+#### 🔧 Maintenance
+
+* **Test Infrastructure**: 更新测试配置，确保与新功能兼容
+* **Docker**: 优化 .dockerignore，移除不必要的文件
+
 ### [3.2.4](https://github.com/YoungSx/drive-collector-js/compare/v3.2.2...v3.2.4) (2025-12-29)
 
 

@@ -30,16 +30,13 @@ jest.unstable_mockModule('../../src/config/index.js', () => ({
     }
 }));
 
-jest.unstable_mockModule('../../src/utils/CacheService.js', () => ({
-    cacheService: mockCacheService
-}));
-
 const mockKv = {
     get: jest.fn(),
     set: jest.fn().mockResolvedValue(true)
 };
-jest.unstable_mockModule('../../src/services/kv.js', () => ({
-    kv: mockKv
+
+jest.unstable_mockModule('../../src/services/CacheService.js', () => ({
+    cache: mockKv
 }));
 
 // --- Import under test ---
@@ -209,8 +206,7 @@ describe('CloudTool', () => {
         });
 
         it('should return files and cache them (Multi-level KV)', async () => {
-            const { kv } = await import('../../src/services/kv.js');
-            kv.get.mockResolvedValue(null);
+            mockKv.get.mockResolvedValue(null);
             const mockFiles = [{ Name: 'file1.txt', IsDir: false, ModTime: '2023-01-01T00:00:00Z' }];
             
             mockSpawn.mockImplementationOnce(() => createAutoProcess((p) => {
@@ -220,13 +216,12 @@ describe('CloudTool', () => {
 
             const files = await CloudTool.listRemoteFiles('user123');
             expect(files).toEqual(mockFiles);
-            expect(mockCacheService.set).toHaveBeenCalled();
+            expect(mockKv.set).toHaveBeenCalled();
         });
 
         it('should use KV cache if memory cache is empty', async () => {
-            const { kv } = await import('../../src/services/kv.js');
             const mockFiles = [{ Name: 'kv-file.txt', IsDir: false, ModTime: '2023-01-01T00:00:00Z' }];
-            kv.get.mockResolvedValue({ files: mockFiles }); 
+            mockKv.get.mockResolvedValue({ files: mockFiles }); 
             const files = await CloudTool.listRemoteFiles('user124');
             expect(files).toEqual(mockFiles);
             expect(mockSpawn).not.toHaveBeenCalled();
@@ -238,7 +233,7 @@ describe('CloudTool', () => {
                 p.emit('close', 0);
             }));
             await CloudTool.listRemoteFiles('user125');
-            mockCacheService.get.mockReturnValue([]);
+            mockKv.get.mockReturnValue([]);
             await CloudTool.listRemoteFiles('user125', true);
             expect(mockSpawn).toHaveBeenCalledTimes(2);
         });

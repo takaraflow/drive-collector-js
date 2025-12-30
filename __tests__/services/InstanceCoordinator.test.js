@@ -8,7 +8,7 @@ global.fetch = mockFetch;
 const originalEnv = process.env;
 
 let instanceCoordinator;
-let kv;
+let cache;
 
 // Mock InstanceRepository
 jest.unstable_mockModule("../../src/repositories/InstanceRepository.js", () => ({
@@ -38,12 +38,12 @@ describe("InstanceCoordinator", () => {
     // Set up mock environment variables - 使用新的变量名
     process.env = {
       ...originalEnv,
-      CF_KV_ACCOUNT_ID: "mock_account_id",
-      CF_KV_NAMESPACE_ID: "mock_namespace_id",
-      CF_KV_TOKEN: "mock_kv_token",
+      CF_CACHE_ACCOUNT_ID: "mock_account_id",
+      CF_CACHE_NAMESPACE_ID: "mock_namespace_id",
+      CF_CACHE_TOKEN: "mock_kv_token",
       INSTANCE_ID: "test_instance_123",
-      // Ensure KV is not forced to upstash
-      KV_PROVIDER: undefined,
+      // Ensure Cache is not forced to upstash
+      CACHE_PROVIDER: undefined,
     };
     jest.resetModules();
 
@@ -51,9 +51,9 @@ describe("InstanceCoordinator", () => {
     const { instanceCoordinator: importedIC } = await import("../../src/services/InstanceCoordinator.js");
     instanceCoordinator = importedIC;
 
-    // Also import kv for mocking
-    const { kv: importedKV } = await import("../../src/services/kv.js");
-    kv = importedKV;
+    // Also import cache for mocking
+    const { cache: importedCache } = await import("../../src/services/CacheService.js");
+    cache = importedCache;
   });
 
   afterAll(() => {
@@ -67,9 +67,9 @@ describe("InstanceCoordinator", () => {
     instanceCoordinator.isLeader = false;
     instanceCoordinator.activeInstances = new Set();
 
-    // Ensure KV is in normal mode for tests
-    const { kv } = await import("../../src/services/kv.js");
-    kv.currentProvider = 'cloudflare';
+    // Ensure Cache is in normal mode for tests
+    const { cache } = await import("../../src/services/CacheService.js");
+    cache.currentProvider = 'cloudflare';
   });
 
   afterEach(() => {
@@ -84,14 +84,14 @@ describe("InstanceCoordinator", () => {
   });
 
   describe("registerInstance", () => {
-    test("should register instance successfully (KV only)", async () => {
+    test("should register instance successfully (Cache only)", async () => {
       mockFetch.mockResolvedValueOnce({
         json: () => Promise.resolve({ success: true }),
       });
 
       await instanceCoordinator.registerInstance();
 
-      // Verify KV write only
+      // Verify Cache write only
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining("storage/kv/namespaces/mock_namespace_id/values/instance:test_instance_123"),
         expect.objectContaining({
@@ -101,14 +101,14 @@ describe("InstanceCoordinator", () => {
       );
     });
 
-    test("should throw error when KV registration fails", async () => {
-      // Mock KV failure
+    test("should throw error when Cache registration fails", async () => {
+      // Mock Cache failure
       mockFetch.mockResolvedValueOnce({
         json: () => Promise.resolve({ success: false, errors: [{ message: "Registration failed" }] }),
       });
 
-      // Should throw since KV is the primary storage
-      await expect(instanceCoordinator.registerInstance()).rejects.toThrow("KV Set Error: Registration failed");
+      // Should throw since Cache is the primary storage
+      await expect(instanceCoordinator.registerInstance()).rejects.toThrow("Cache Set Error: Registration failed");
     });
   });
 
@@ -132,11 +132,11 @@ describe("InstanceCoordinator", () => {
 
   describe("acquireLock", () => {
       test("should acquire lock when no existing lock", async () => {
-          // Mock kv.get to return null (no existing lock), then return verified lock
+          // Mock cache.get to return null (no existing lock), then return verified lock
           const expectedVersion = 1234567890;
           const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedVersion);
           
-          const getSpy = jest.spyOn(kv, 'get')
+          const getSpy = jest.spyOn(cache, 'get')
               .mockResolvedValueOnce(null) // First call - no existing lock
               .mockResolvedValueOnce({    // Second call - verification
                   instanceId: "test_instance_123",
@@ -144,7 +144,7 @@ describe("InstanceCoordinator", () => {
                   ttl: 300,
                   version: expectedVersion
               });
-          const setSpy = jest.spyOn(kv, 'set').mockResolvedValue(true);
+          const setSpy = jest.spyOn(cache, 'set').mockResolvedValue(true);
 
           const result = await instanceCoordinator.acquireLock("test_lock");
           expect(result).toBe(true);
@@ -161,7 +161,7 @@ describe("InstanceCoordinator", () => {
               ttl: 300,
           };
 
-          const getSpy = jest.spyOn(kv, 'get').mockResolvedValue(existingLock);
+          const getSpy = jest.spyOn(cache, 'get').mockResolvedValue(existingLock);
 
           const result = await instanceCoordinator.acquireLock("test_lock");
           expect(result).toBe(false);
@@ -179,8 +179,8 @@ describe("InstanceCoordinator", () => {
               ttl: 300,
           };
 
-          // Mock kv.get to return expired lock, then return verified lock
-          const getSpy = jest.spyOn(kv, 'get')
+          // Mock cache.get to return expired lock, then return verified lock
+          const getSpy = jest.spyOn(cache, 'get')
               .mockResolvedValueOnce(expiredLock) // First call - expired lock
               .mockResolvedValueOnce({            // Second call - verification
                   instanceId: "test_instance_123",
@@ -188,7 +188,7 @@ describe("InstanceCoordinator", () => {
                   ttl: 300,
                   version: expectedVersion
               });
-          const setSpy = jest.spyOn(kv, 'set').mockResolvedValue(true);
+          const setSpy = jest.spyOn(cache, 'set').mockResolvedValue(true);
 
           const result = await instanceCoordinator.acquireLock("test_lock");
           expect(result).toBe(true);
@@ -199,8 +199,8 @@ describe("InstanceCoordinator", () => {
       });
 
       test("should fail when double-check verification fails (race condition)", async () => {
-          // Mock kv.get to return null initially, but verification shows different instance
-          const getSpy = jest.spyOn(kv, 'get')
+          // Mock cache.get to return null initially, but verification shows different instance
+          const getSpy = jest.spyOn(cache, 'get')
               .mockResolvedValueOnce(null) // First call - no existing lock
               .mockResolvedValueOnce({    // Second call - verification shows race condition
                   instanceId: "other_instance", // Different instance!
@@ -208,7 +208,7 @@ describe("InstanceCoordinator", () => {
                   ttl: 300,
                   version: 999 // Different version
               });
-          const setSpy = jest.spyOn(kv, 'set').mockResolvedValue(true);
+          const setSpy = jest.spyOn(cache, 'set').mockResolvedValue(true);
 
           const result = await instanceCoordinator.acquireLock("test_lock");
           expect(result).toBe(false); // Should fail due to race condition
@@ -223,7 +223,7 @@ describe("InstanceCoordinator", () => {
           // Mock Date.now to return consistent version
           const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedVersion);
           
-          const getSpy = jest.spyOn(kv, 'get')
+          const getSpy = jest.spyOn(cache, 'get')
               .mockResolvedValueOnce(null) // First call - no existing lock
               .mockResolvedValueOnce({    // Second call - verification passes
                   instanceId: "test_instance_123",
@@ -231,7 +231,7 @@ describe("InstanceCoordinator", () => {
                   ttl: 300,
                   version: expectedVersion
               });
-          const setSpy = jest.spyOn(kv, 'set').mockResolvedValue(true);
+          const setSpy = jest.spyOn(cache, 'set').mockResolvedValue(true);
 
           const result = await instanceCoordinator.acquireLock("test_lock");
           expect(result).toBe(true);
@@ -244,13 +244,13 @@ describe("InstanceCoordinator", () => {
 
   describe("releaseLock", () => {
     test("should release lock held by current instance", async () => {
-      // Mock kv.get 返回当前实例持有的锁
-      const getSpy = jest.spyOn(kv, 'get').mockResolvedValue({
+      // Mock cache.get 返回当前实例持有的锁
+      const getSpy = jest.spyOn(cache, 'get').mockResolvedValue({
         instanceId: "test_instance_123",
         acquiredAt: Date.now(),
         ttl: 300,
       });
-      const deleteSpy = jest.spyOn(kv, 'delete').mockResolvedValue(true);
+      const deleteSpy = jest.spyOn(cache, 'delete').mockResolvedValue(true);
 
       await instanceCoordinator.releaseLock("test_lock");
 
@@ -261,7 +261,7 @@ describe("InstanceCoordinator", () => {
     });
 
     test("should not release lock held by another instance", async () => {
-      // Mock KV to return a lock held by another instance
+      // Mock Cache to return a lock held by another instance
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -366,16 +366,16 @@ describe("InstanceCoordinator", () => {
   });
 
   describe("getAllInstances", () => {
-    test("should discover all instances using kv.listKeys", async () => {
-      // Mock kv.listKeys to return instance keys
-      const mockListKeys = jest.spyOn(kv, 'listKeys').mockResolvedValue([
+    test("should discover all instances using cache.listKeys", async () => {
+      // Mock cache.listKeys to return instance keys
+      const mockListKeys = jest.spyOn(cache, 'listKeys').mockResolvedValue([
         'instance:inst1',
         'instance:inst2',
         'instance:inst3'
       ]);
 
       // Mock individual instance gets
-      const mockGet = jest.spyOn(kv, 'get')
+      const mockGet = jest.spyOn(cache, 'get')
         .mockResolvedValueOnce({
           id: 'inst1',
           hostname: 'host1',
@@ -413,25 +413,25 @@ describe("InstanceCoordinator", () => {
       mockGet.mockRestore();
     });
 
-    test("should handle kv.listKeys failure gracefully", async () => {
-      const mockListKeys = jest.spyOn(kv, 'listKeys').mockRejectedValue(new Error('KV ListKeys Error'));
+    test("should handle cache.listKeys failure gracefully", async () => {
+      const mockListKeys = jest.spyOn(cache, 'listKeys').mockRejectedValue(new Error('Cache ListKeys Error'));
 
       const instances = await instanceCoordinator.getAllInstances();
 
       expect(instances).toEqual([]);
-      expect(mockLogger.error).toHaveBeenCalledWith("获取所有实例失败:", "KV ListKeys Error");
+      expect(mockLogger.error).toHaveBeenCalledWith("获取所有实例失败:", "Cache ListKeys Error");
 
       mockListKeys.mockRestore();
     });
 
     test("should handle individual instance get failure", async () => {
-      const mockListKeys = jest.spyOn(kv, 'listKeys').mockResolvedValue([
+      const mockListKeys = jest.spyOn(cache, 'listKeys').mockResolvedValue([
         'instance:inst1',
         'instance:inst2'
       ]);
 
-      const mockGet = jest.spyOn(kv, 'get')
-        .mockRejectedValueOnce(new Error('KV Get Error')) // First instance fails
+      const mockGet = jest.spyOn(cache, 'get')
+        .mockRejectedValueOnce(new Error('Cache Get Error')) // First instance fails
         .mockResolvedValueOnce({
           id: 'inst2',
           hostname: 'host2',
@@ -443,14 +443,14 @@ describe("InstanceCoordinator", () => {
 
       expect(instances).toHaveLength(1); // Only successful instance
       expect(instances[0].id).toBe('inst2');
-      expect(mockLogger.warn).toHaveBeenCalledWith("获取实例 instance:inst1 失败，跳过:", "KV Get Error");
+      expect(mockLogger.warn).toHaveBeenCalledWith("获取实例 instance:inst1 失败，跳过:", "Cache Get Error");
 
       mockListKeys.mockRestore();
       mockGet.mockRestore();
     });
 
     test("should return empty array when no instances found", async () => {
-      const mockListKeys = jest.spyOn(kv, 'listKeys').mockResolvedValue([]);
+      const mockListKeys = jest.spyOn(cache, 'listKeys').mockResolvedValue([]);
 
       const instances = await instanceCoordinator.getAllInstances();
 

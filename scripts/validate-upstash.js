@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * Upstash KV 连接验证脚本
+ * Upstash Cache 连接验证脚本
  * 用于验证 Upstash Redis REST API 连接和配置
  *
  * 使用方法：
  * 1. 编辑下面的环境变量，填入你的 Upstash 连接信息
  * 2. 运行: node validate-upstash.js
- * 3. 脚本会执行基本的 KV 操作来验证连接
+ * 3. 脚本会执行基本的 Cache 操作来验证连接
  */
 
 // ===== 配置你的 Upstash 连接信息 =====
@@ -19,28 +19,28 @@ async function testUpstash() {
     try {
         console.log('🔄 开始测试 Upstash KV 集成...');
 
-        // 动态导入KV服务
-        const { kv } = await import('./src/services/kv.js');
+        // 动态导入Cache服务
+        const { cache } = await import('./src/services/CacheService.js');
 
         console.log('✅ KV服务初始化成功');
 
         // 测试SET操作
         console.log('📝 测试SET操作...');
-        const setResult = await kv.set('test_key', { message: 'Hello from Upstash!', timestamp: Date.now() });
+        const setResult = await cache.set('test_key', { message: 'Hello from Upstash!', timestamp: Date.now() });
         console.log('SET结果:', setResult);
 
         // 测试GET操作
         console.log('📖 测试GET操作...');
-        const getResult = await kv.get('test_key');
+        const getResult = await cache.get('test_key');
         console.log('GET结果:', getResult);
 
         // 测试DELETE操作
         console.log('🗑️  测试DELETE操作...');
-        const deleteResult = await kv.delete('test_key');
+        const deleteResult = await cache.delete('test_key');
         console.log('DELETE结果:', deleteResult);
 
         // 验证删除后获取
-        const getAfterDelete = await kv.get('test_key');
+        const getAfterDelete = await cache.get('test_key');
         console.log('删除后GET结果:', getAfterDelete);
 
         console.log('🎉 所有测试通过！Upstash集成正常工作');

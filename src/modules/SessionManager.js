@@ -1,4 +1,4 @@
-import { kv } from "../services/kv.js";
+import { cache } from "../services/CacheService.js";
 
 export class SessionManager {
     static getSessionKey(userId) {
@@ -8,7 +8,7 @@ export class SessionManager {
     // 获取用户当前状态
     static async get(userId) {
         // 使用 30 秒内存缓存，减少同一用户交互时的 KV 调用
-        return await kv.get(this.getSessionKey(userId), "json", { cacheTtl: 30000 });
+        return await cache.get(this.getSessionKey(userId), "json", { cacheTtl: 30000 });
     }
 
     // 开启新会话 (覆盖旧的)
@@ -21,7 +21,7 @@ export class SessionManager {
         };
         // 会话默认保留 24 小时 (86400 秒)
         // 写入时同时更新 L1 缓存
-        await kv.set(this.getSessionKey(userId), session, 86400);
+        await cache.set(this.getSessionKey(userId), session, 86400);
     }
 
     // 更新当前会话数据
@@ -37,12 +37,12 @@ export class SessionManager {
             updated_at: Date.now()
         };
         
-        await kv.set(this.getSessionKey(userId), updatedSession, 86400);
+        await cache.set(this.getSessionKey(userId), updatedSession, 86400);
         return mergedData;
     }
 
     // 结束会话
     static async clear(userId) {
-        await kv.delete(this.getSessionKey(userId));
+        await cache.delete(this.getSessionKey(userId));
     }
 }

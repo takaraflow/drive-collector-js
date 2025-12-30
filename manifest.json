@@ -2,7 +2,7 @@
   "manifest_version": "1.1",
   "id": "drive-collector-js",
   "name": "Drive Collector Bot",
-  "version": "3.2.4",
+  "version": "3.3.0",
   "description": "基于 JSON Schema 契约中心的分布式转存项目，支持 Telegram 媒体转存至 Rclone/S3。",
   "type": "worker",
   "capabilities": [
@@ -40,7 +40,7 @@
         ]
       },
       "locking": {
-        "mechanism": "kv",
+        "mechanism": "cache",
         "pattern": "msg_lock:{msgId}",
         "ttl": 60,
         "description": "基于消息 ID 的去重锁，防止重复处理"
@@ -92,7 +92,7 @@
         "batch": "/api/tasks/media-batch"
       },
       "locking": {
-        "mechanism": "kv",
+        "mechanism": "cache",
         "pattern": "task:{taskId}",
         "ttl": 600,
         "description": "任务级分布式锁，支持故障转移后的延迟恢复"
@@ -101,11 +101,11 @@
         "TaskManager",
         "QStashService",
         "D1",
-        "KV"
+        "Cache"
       ],
       "reliability": {
         "retry": "qstash-default",
-        "failover": "delayed-recovery-on-kv-error",
+        "failover": "delayed-recovery-on-cache-error",
         "maxRetries": 3,
         "timeout": 300
       }
@@ -182,17 +182,17 @@
         }
       },
       "locking": {
-        "mechanism": "kv-atomic",
+        "mechanism": "cache-atomic",
         "patterns": [
           "instance:{instanceId}",
           "lock:{lockKey}",
           "task:{taskId}"
         ],
         "ttl": 900,
-        "description": "基于 KV 的原子操作实现分布式锁，支持锁续约与自动过期"
+        "description": "基于 Cache 的原子操作实现分布式锁，支持锁续约与自动过期"
       },
       "dependencies": [
-        "Cloudflare KV"
+        "CacheService"
       ],
       "reliability": {
         "heartbeatInterval": 300,
@@ -206,23 +206,23 @@
     },
     "driveRepository": {
       "description": "网盘配置存储库，支持活跃网盘列表管理",
-      "input": "kv-storage",
+      "input": "cache-storage",
       "features": [
         "active-drives-list",
         "drive-id-lookup"
       ],
       "reliability": {
-        "cacheStrategy": "kv-with-json",
+        "cacheStrategy": "cache-with-json",
         "errorHandling": "graceful-degradation",
         "fallback": "empty-array"
       },
       "dependencies": [
-        "Cloudflare KV"
+        "CacheService"
       ]
     }
   },
   "instanceRegistration": {
-    "mechanism": "Cloudflare KV",
+    "mechanism": "Distributed Cache (Redis/KV/Upstash)",
     "heartbeatInterval": 300,
     "timeout": 900,
     "keys": [
@@ -244,14 +244,14 @@
       }
     ],
     "locking": {
-      "mechanism": "kv-atomic",
+      "mechanism": "cache-atomic",
       "operations": {
         "acquire": "get-skip-cache-then-set-with-ttl",
         "release": "delete",
         "renew": "update-ttl"
       },
       "conflictResolution": "last-write-wins-with-version-check",
-      "description": "基于 KV 的原子操作实现分布式锁，支持锁续约、自动过期与版本冲突检测"
+      "description": "基于 Cache 的原子操作实现分布式锁，支持锁续约、自动过期与版本冲突检测"
     },
     "valueSchema": {
       "instance": {
@@ -479,20 +479,55 @@
         "required": false,
         "description": "Legacy Redis password (deprecated, use NF_REDIS_PASSWORD)"
       },
-      "CF_KV_ACCOUNT_ID": {
+      "CACHE_PROVIDER": {
+        "type": "string",
+        "required": false,
+        "enum": [
+          "redis",
+          "cloudflare",
+          "upstash"
+        ],
+        "description": "强制指定缓存提供商 (优先级高于自动检测)"
+      },
+      "KV_PROVIDER": {
+        "type": "string",
+        "required": false,
+        "enum": [
+          "redis",
+          "cloudflare",
+          "upstash"
+        ],
+        "description": "Legacy 缓存提供商指定 (建议使用 CACHE_PROVIDER)"
+      },
+      "CF_CACHE_ACCOUNT_ID": {
         "type": "string",
         "required": true,
-        "description": "Cloudflare KV account ID"
+        "description": "Cloudflare Cache account ID (also supports CF_KV_ACCOUNT_ID for backward compatibility)"
+      },
+      "CF_CACHE_NAMESPACE_ID": {
+        "type": "string",
+        "required": true,
+        "description": "Cloudflare Cache namespace ID (also supports CF_KV_NAMESPACE_ID for backward compatibility)"
+      },
+      "CF_CACHE_TOKEN": {
+        "type": "string",
+        "required": true,
+        "description": "Cloudflare Cache API token (also supports CF_KV_TOKEN for backward compatibility)"
+      },
+      "CF_KV_ACCOUNT_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Legacy Cloudflare KV account ID (deprecated, use CF_CACHE_ACCOUNT_ID)"
       },
       "CF_KV_NAMESPACE_ID": {
         "type": "string",
-        "required": true,
-        "description": "Cloudflare KV namespace ID"
+        "required": false,
+        "description": "Legacy Cloudflare KV namespace ID (deprecated, use CF_CACHE_NAMESPACE_ID)"
       },
       "CF_KV_TOKEN": {
         "type": "string",
-        "required": true,
-        "description": "Cloudflare KV API token"
+        "required": false,
+        "description": "Legacy Cloudflare KV API token (deprecated, use CF_CACHE_TOKEN)"
       },
       "UPSTASH_REDIS_REST_URL": {
         "type": "string",

@@ -14,8 +14,8 @@ jest.unstable_mockModule('../../src/repositories/DriveRepository.js', () => ({
     }
 }));
 
-jest.unstable_mockModule('../../src/services/kv.js', () => ({
-    kv: jest.fn()
+jest.unstable_mockModule('../../src/services/CacheService.js', () => ({
+    cache: jest.fn()
 }));
 
 jest.unstable_mockModule('../../src/config/index.js', () => ({

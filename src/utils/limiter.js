@@ -1,5 +1,5 @@
 import PQueue from "p-queue";
-import { kv } from "../services/kv.js";
+import { cache } from "../services/CacheService.js";
 import logger from "../services/logger.js";
 
 const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -241,8 +241,8 @@ const checkCooling = async () => {
     // 2. 每 30 秒从 KV 同步一次全局冷却状态（延长同步间隔）
     if (now - lastKVCheck > 30000) {
         try {
-            // 使用缓存读取，虽然 kv.get 已经有了 L1，但这里显式设置较长 TTL
-            const remoteCooling = await kv.get("system:cooling_until", "text", { cacheTtl: 30000 });
+            // 使用缓存读取，虽然 cache.get 已经有了 L1，但这里显式设置较长 TTL
+            const remoteCooling = await cache.get("system:cooling_until", "text", { cacheTtl: 30000 });
             if (remoteCooling) {
                 globalCoolingUntil = Math.max(globalCoolingUntil, parseInt(remoteCooling));
             }
@@ -308,8 +308,8 @@ const handle429Error = async (fn, maxRetries = 10) => {
                 if (retryAfter > 60) {
                     logger.error(`🚨 Large FloodWait detected (${retryAfter}s). Triggering GLOBAL cooling.`);
                     globalCoolingUntil = Date.now() + waitMs;
-                    // 同步到 KV
-                    await kv.set("system:cooling_until", globalCoolingUntil.toString(), Math.ceil(waitMs / 1000) + 60).catch(() => {});
+                    // 同步到 Cache
+                    await cache.set("system:cooling_until", globalCoolingUntil.toString(), Math.ceil(waitMs / 1000) + 60).catch(() => {});
                 }
 
                 logger.warn(`⚠️ 429/FloodWait encountered, retrying after ${Math.round(waitMs)}ms (attempt ${retryCount + 1}/${maxRetries})`);

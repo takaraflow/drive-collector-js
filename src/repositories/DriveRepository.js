@@ -1,10 +1,10 @@
-import { kv } from "../services/kv.js";
-import { cacheService } from "../utils/CacheService.js";
+import { cache } from "../services/CacheService.js";
+import { localCache } from "../utils/LocalCache.js";
 import logger from "../services/logger.js";
 
 /**
  * 网盘配置仓储层
- * 使用 KV 存储作为主存储，符合低频关键数据规则
+ * 使用 Cache 存储作为主存储，符合低频关键数据规则
  */
 export class DriveRepository {
     static getDriveKey(userId) {
@@ -31,12 +31,12 @@ export class DriveRepository {
 
         try {
             if (skipCache) {
-                const drive = await kv.get(this.getDriveKey(userId), "json");
+                const drive = await cache.get(this.getDriveKey(userId), "json");
                 return drive || null;
             }
 
-            return await cacheService.getOrSet(cacheKey, async () => {
-                const drive = await kv.get(this.getDriveKey(userId), "json");
+            return await localCache.getOrSet(cacheKey, async () => {
+                const drive = await cache.get(this.getDriveKey(userId), "json");
                 return drive || null;
             }, 60 * 1000); // 缓存 1 分钟
         } catch (e) {
@@ -70,15 +70,15 @@ export class DriveRepository {
                 created_at: Date.now()
             };
 
-            // 存储到 KV
-            await kv.set(this.getDriveKey(userId), driveData);
-            await kv.set(this.getDriveIdKey(driveId), driveData);
+            // 存储到 Cache
+            await cache.set(this.getDriveKey(userId), driveData);
+            await cache.set(this.getDriveIdKey(driveId), driveData);
 
             // 更新活跃网盘列表
             await this._updateActiveDrivesList();
 
-            cacheService.del(`drive_${userId}`);
-            cacheService.del(this.getAllDrivesKey());
+            localCache.del(`drive_${userId}`);
+            localCache.del(this.getAllDrivesKey());
             return true;
         } catch (e) {
             logger.error(`DriveRepository.create failed for ${userId}:`, e);
@@ -96,12 +96,12 @@ export class DriveRepository {
         try {
             const drive = await this.findByUserId(userId);
             if (drive) {
-                await kv.delete(this.getDriveKey(userId));
-                await kv.delete(this.getDriveIdKey(drive.id));
+                await cache.delete(this.getDriveKey(userId));
+                await cache.delete(this.getDriveIdKey(drive.id));
                 await this._updateActiveDrivesList();
             }
-            cacheService.del(`drive_${userId}`);
-            cacheService.del(this.getAllDrivesKey());
+            localCache.del(`drive_${userId}`);
+            localCache.del(this.getAllDrivesKey());
         } catch (e) {
             logger.error(`DriveRepository.deleteByUserId failed for ${userId}:`, e);
             throw e;
@@ -118,11 +118,11 @@ export class DriveRepository {
         try {
             const drive = await this.findById(driveId);
             if (drive) {
-                await kv.delete(this.getDriveKey(drive.user_id));
-                await kv.delete(this.getDriveIdKey(driveId));
+                await cache.delete(this.getDriveKey(drive.user_id));
+                await cache.delete(this.getDriveIdKey(driveId));
                 await this._updateActiveDrivesList();
             }
-            cacheService.del(this.getAllDrivesKey());
+            localCache.del(this.getAllDrivesKey());
         } catch (e) {
             logger.error(`DriveRepository.delete failed for ${driveId}:`, e);
             throw e;
@@ -137,7 +137,7 @@ export class DriveRepository {
     static async findById(driveId) {
         if (!driveId) return null;
         try {
-            return await kv.get(this.getDriveIdKey(driveId), "json");
+            return await cache.get(this.getDriveIdKey(driveId), "json");
         } catch (e) {
             logger.error(`DriveRepository.findById error for ${driveId}:`, e);
             return null;
@@ -150,7 +150,7 @@ export class DriveRepository {
      */
     static async findAll() {
         try {
-            const activeIds = await kv.get(this.getAllDrivesKey(), "json") || [];
+            const activeIds = await cache.get(this.getAllDrivesKey(), "json") || [];
             if (activeIds.length === 0) return [];
 
             const drives = [];
@@ -172,17 +172,17 @@ export class DriveRepository {
     static async _updateActiveDrivesList() {
         try {
             // 使用 listKeys 发现所有驱动（前缀 drive: 但排除 drive_id:）
-            const keys = await kv.listKeys('drive:');
+            const keys = await cache.listKeys('drive:');
             const activeIds = [];
             
             for (const key of keys) {
-                const drive = await kv.get(key, "json");
+                const drive = await cache.get(key, "json");
                 if (drive && drive.id) {
                     activeIds.push(drive.id);
                 }
             }
             
-            await kv.set(this.getAllDrivesKey(), activeIds);
+            await cache.set(this.getAllDrivesKey(), activeIds);
             logger.info(`📝 已更新活跃网盘列表，共 ${activeIds.length} 个`);
         } catch (e) {
             logger.error("Failed to update active drives list:", e);

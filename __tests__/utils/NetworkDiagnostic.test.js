@@ -12,10 +12,12 @@ jest.unstable_mockModule("../../src/services/d1.js", () => ({
     },
 }));
 
-jest.unstable_mockModule("../../src/services/kv.js", () => ({
-    kv: {
-        get: jest.fn(),
-    },
+const mockCache = {
+    get: jest.fn(),
+};
+
+jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+    cache: mockCache,
 }));
 
 jest.unstable_mockModule("../../src/services/rclone.js", () => ({
@@ -47,7 +49,7 @@ jest.unstable_mockModule("fs", () => ({
 const { NetworkDiagnostic } = await import("../../src/utils/NetworkDiagnostic.js");
 const { client } = await import("../../src/services/telegram.js");
 const { d1 } = await import("../../src/services/d1.js");
-const { kv } = await import("../../src/services/kv.js");
+const { cache } = await import("../../src/services/CacheService.js");
 const { CloudTool } = await import("../../src/services/rclone.js");
 const { DriveRepository } = await import("../../src/repositories/DriveRepository.js");
 const { config } = await import("../../src/config/index.js");
@@ -70,7 +72,7 @@ describe("NetworkDiagnostic", () => {
             // Mock successful responses for all services
             client.getMe.mockResolvedValue({ id: 123 });
             d1.fetchAll.mockResolvedValue([]);
-            kv.get.mockResolvedValue(null);
+            mockCache.get.mockResolvedValue(null);
             spawnSync.mockReturnValue({
                 status: 0,
                 stdout: "rclone v1.60.0",
@@ -92,7 +94,7 @@ describe("NetworkDiagnostic", () => {
 
             expect(client.getMe).toHaveBeenCalled();
             expect(d1.fetchAll).toHaveBeenCalledWith("SELECT 1 as test");
-            expect(kv.get).toHaveBeenCalled();
+            expect(mockCache.get).toHaveBeenCalled();
             expect(spawnSync).toHaveBeenCalled();
             expect(DriveRepository.findAll).toHaveBeenCalled();
         });
@@ -101,7 +103,7 @@ describe("NetworkDiagnostic", () => {
             // Mock errors for all services
             client.getMe.mockRejectedValue(new Error("Connection failed"));
             d1.fetchAll.mockRejectedValue(new Error("DB error"));
-            kv.get.mockRejectedValue(new Error("KV error"));
+            mockCache.get.mockRejectedValue(new Error("KV error"));
             spawnSync.mockReturnValue({
                 status: 1,
                 stderr: "rclone not found",
@@ -194,20 +196,20 @@ describe("NetworkDiagnostic", () => {
         });
     });
 
-    describe("_checkKV", () => {
+    describe("_checkCache", () => {
         it("should return success when KV get succeeds", async () => {
-            kv.get.mockResolvedValue(null);
+            mockCache.get.mockResolvedValue(null);
 
-            const result = await NetworkDiagnostic._checkKV();
+            const result = await NetworkDiagnostic._checkCache();
 
             expect(result.status).toBe("ok");
             expect(result.message).toContain("正常");
         });
 
         it("should return error when KV get fails", async () => {
-            kv.get.mockRejectedValue(new Error("KV error"));
+            mockCache.get.mockRejectedValue(new Error("KV error"));
 
-            const result = await NetworkDiagnostic._checkKV();
+            const result = await NetworkDiagnostic._checkCache();
 
             expect(result.status).toBe("error");
             expect(result.message).toContain("失败");

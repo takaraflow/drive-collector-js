@@ -6,9 +6,9 @@ global.fetch = mockFetch;
 
 const originalEnv = process.env;
 
-describe("KVService Cache Optimization", () => {
-    let kv;
-    let cacheService;
+describe("CacheService Optimization", () => {
+    let cache;
+    let localCache;
 
     beforeAll(async () => {
         process.env = {
@@ -20,10 +20,10 @@ describe("KVService Cache Optimization", () => {
 
         // Re-import to ensure env vars are picked up
         jest.resetModules();
-        const kvModule = await import("../../src/services/kv.js");
-        kv = kvModule.kv;
-        const cacheModule = await import("../../src/utils/CacheService.js");
-        cacheService = cacheModule.cacheService;
+        const cacheModule = await import("../../src/services/CacheService.js");
+        cache = cacheModule.cache;
+        const localCacheModule = await import("../../src/utils/LocalCache.js");
+        localCache = localCacheModule.localCache;
     });
 
     afterAll(() => {
@@ -32,9 +32,9 @@ describe("KVService Cache Optimization", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        cacheService.clear();
+        localCache.clear();
         // 缩短 L1 TTL 方便测试
-        kv.l1CacheTtl = 1000; 
+        cache.l1CacheTtl = 1000;
     });
 
     describe("Read Cache (L1)", () => {
@@ -47,12 +47,12 @@ describe("KVService Cache Optimization", () => {
             });
 
             // First call - should trigger fetch
-            const val1 = await kv.get("test_key", "text");
+            const val1 = await cache.get("test_key", "text");
             expect(val1).toBe("cached_value");
             expect(mockFetch).toHaveBeenCalledTimes(1);
 
             // Second call - should return from L1 cache
-            const val2 = await kv.get("test_key", "text");
+            const val2 = await cache.get("test_key", "text");
             expect(val2).toBe("cached_value");
             expect(mockFetch).toHaveBeenCalledTimes(1);
         });
@@ -66,11 +66,11 @@ describe("KVService Cache Optimization", () => {
             });
 
             // First call to populate cache
-            await kv.get("test_key", "text");
+            await cache.get("test_key", "text");
             expect(mockFetch).toHaveBeenCalledTimes(1);
 
             // Second call with skipCache
-            const val = await kv.get("test_key", "text", { skipCache: true });
+            const val = await cache.get("test_key", "text", { skipCache: true });
             expect(val).toBe("fresh_value");
             expect(mockFetch).toHaveBeenCalledTimes(2);
         });
@@ -83,12 +83,12 @@ describe("KVService Cache Optimization", () => {
                 text: () => Promise.resolve("value")
             });
 
-            await kv.get("test_key", "text", { cacheTtl: 20 });
+            await cache.get("test_key", "text", { cacheTtl: 20 });
             expect(mockFetch).toHaveBeenCalledTimes(1);
 
             await new Promise(r => setTimeout(r, 25)); // 等待超过缓存TTL
 
-            await kv.get("test_key", "text");
+            await cache.get("test_key", "text");
             expect(mockFetch).toHaveBeenCalledTimes(2);
         });
     });
@@ -101,10 +101,10 @@ describe("KVService Cache Optimization", () => {
                 json: () => Promise.resolve({ success: true })
             });
 
-            await kv.set("test_key", "same_value");
+            await cache.set("test_key", "same_value");
             expect(mockFetch).toHaveBeenCalledTimes(1);
 
-            const result = await kv.set("test_key", "same_value");
+            const result = await cache.set("test_key", "same_value");
             expect(result).toBe(true);
             expect(mockFetch).toHaveBeenCalledTimes(1);
         });
@@ -116,10 +116,10 @@ describe("KVService Cache Optimization", () => {
                 json: () => Promise.resolve({ success: true })
             });
 
-            await kv.set("test_key", "old_value");
+            await cache.set("test_key", "old_value");
             expect(mockFetch).toHaveBeenCalledTimes(1);
 
-            await kv.set("test_key", "new_value");
+            await cache.set("test_key", "new_value");
             expect(mockFetch).toHaveBeenCalledTimes(2);
         });
 
@@ -130,13 +130,13 @@ describe("KVService Cache Optimization", () => {
                 json: () => Promise.resolve({ success: true })
             });
 
-            kv.l1CacheTtl = 20; // 优化：减少缓存TTL
-            await kv.set("test_key", "value");
+            cache.l1CacheTtl = 20; // 优化：减少缓存TTL
+            await cache.set("test_key", "value");
             expect(mockFetch).toHaveBeenCalledTimes(1);
 
             await new Promise(r => setTimeout(r, 30)); // 优化：减少等待时间
 
-            await kv.set("test_key", "value");
+            await cache.set("test_key", "value");
             expect(mockFetch).toHaveBeenCalledTimes(2);
         });
 
@@ -147,10 +147,10 @@ describe("KVService Cache Optimization", () => {
                 json: () => Promise.resolve({ success: true })
             });
 
-            await kv.set("test_key", "value");
+            await cache.set("test_key", "value");
             expect(mockFetch).toHaveBeenCalledTimes(1);
 
-            await kv.set("test_key", "value", null, { skipCache: true });
+            await cache.set("test_key", "value", null, { skipCache: true });
             expect(mockFetch).toHaveBeenCalledTimes(2);
         });
     });
@@ -164,14 +164,14 @@ describe("KVService Cache Optimization", () => {
                 text: () => Promise.resolve("value")
             });
 
-            await kv.get("test_key", "text");
+            await cache.get("test_key", "text");
             
             mockFetch.mockResolvedValueOnce({
                 ok: true,
                 status: 200,
                 json: () => Promise.resolve({ success: true })
             });
-            await kv.delete("test_key");
+            await cache.delete("test_key");
 
             mockFetch.mockResolvedValueOnce({
                 ok: true,
@@ -179,7 +179,7 @@ describe("KVService Cache Optimization", () => {
                 json: () => Promise.resolve("new_value"),
                 text: () => Promise.resolve("new_value")
             });
-            await kv.get("test_key", "text");
+            await cache.get("test_key", "text");
             expect(mockFetch).toHaveBeenCalledTimes(3);
         });
     });

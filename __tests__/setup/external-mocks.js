@@ -51,3 +51,22 @@ jest.unstable_mockModule('@aws-sdk/client-s3', () => ({
 jest.unstable_mockModule('@aws-sdk/lib-storage', () => ({
   Upload: mockUpload
 }));
+
+// Mock Cache Service
+export const mockCache = {
+    get: jest.fn(),
+    set: jest.fn(),
+    delete: jest.fn(),
+    listKeys: jest.fn(),
+    bulkSet: jest.fn(),
+    isFailoverMode: false,
+    getCurrentProvider: jest.fn().mockReturnValue('Cloudflare KV')
+};
+
+export const mockLocalCache = {
+    get: jest.fn(),
+    set: jest.fn(),
+    del: jest.fn(),
+    clear: jest.fn(),
+    isUnchanged: jest.fn().mockReturnValue(false)
+};

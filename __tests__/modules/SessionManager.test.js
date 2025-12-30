@@ -1,8 +1,8 @@
 import { jest, describe, test, expect, beforeEach } from "@jest/globals";
 
 // Mock kv service
-jest.unstable_mockModule("../../src/services/kv.js", () => ({
-  kv: {
+jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+  cache: {
     get: jest.fn(),
     set: jest.fn(),
     delete: jest.fn(),
@@ -10,7 +10,7 @@ jest.unstable_mockModule("../../src/services/kv.js", () => ({
 }));
 
 const { SessionManager } = await import("../../src/modules/SessionManager.js");
-const { kv } = await import("../../src/services/kv.js");
+const { cache: kv } = await import("../../src/services/CacheService.js");
 
 describe("SessionManager", () => {
   beforeEach(() => {

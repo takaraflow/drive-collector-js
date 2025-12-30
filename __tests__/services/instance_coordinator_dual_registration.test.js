@@ -8,6 +8,13 @@ global.fetch = mockFetch;
 const originalEnv = process.env;
 let instanceCoordinator;
 
+const mockCache = {
+    get: jest.fn(),
+    set: jest.fn(),
+    delete: jest.fn(),
+    isFailoverMode: true,
+};
+
 describe("InstanceCoordinator Heartbeat (KV Only)", () => {
     beforeAll(async () => {
         // Set up mock environment variables
@@ -33,13 +40,8 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
             },
         }));
 
-        jest.unstable_mockModule("../../src/services/kv.js", () => ({
-            kv: {
-                get: jest.fn(),
-                set: jest.fn(),
-                delete: jest.fn(),
-                isFailoverMode: true, // Force failover mode to trigger get operations
-            },
+        jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+            cache: mockCache,
         }));
 
         // Dynamically import after setting up mocks
@@ -63,16 +65,14 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
     });
 
     test("should send heartbeat to KV", async () => {
-        const { kv } = await import("../../src/services/kv.js");
-
         // Mock successful KV operations
         const instanceData = {
             id: "test_instance_heartbeat",
             status: "active",
             lastHeartbeat: Date.now() - 1000
         };
-        kv.get.mockResolvedValue(instanceData);
-        kv.set.mockResolvedValue(true);
+        mockCache.get.mockResolvedValue(instanceData);
+        mockCache.set.mockResolvedValue(true);
 
         // Start heartbeat manually
         instanceCoordinator.startHeartbeat();
@@ -81,8 +81,8 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         await jest.advanceTimersByTimeAsync(300000);
 
         // Verify KV heartbeat was sent
-        expect(kv.get).toHaveBeenCalledWith("instance:test_instance_heartbeat");
-        expect(kv.set).toHaveBeenCalledWith(
+        expect(mockCache.get).toHaveBeenCalledWith("instance:test_instance_heartbeat");
+        expect(mockCache.set).toHaveBeenCalledWith(
             "instance:test_instance_heartbeat",
             expect.objectContaining({
                 id: "test_instance_heartbeat",
@@ -93,11 +93,9 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
     });
 
     test("should re-register if instance data missing in KV", async () => {
-        const { kv } = await import("../../src/services/kv.js");
-
         // Mock instance not found in KV
-        kv.get.mockResolvedValue(null);
-        kv.set.mockResolvedValue(true);
+        mockCache.get.mockResolvedValue(null);
+        mockCache.set.mockResolvedValue(true);
 
         // Start heartbeat
         instanceCoordinator.startHeartbeat();
@@ -106,9 +104,9 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         await jest.advanceTimersByTimeAsync(300000);
 
         // Verify re-registration
-        expect(kv.get).toHaveBeenCalledWith("instance:test_instance_heartbeat");
+        expect(mockCache.get).toHaveBeenCalledWith("instance:test_instance_heartbeat");
         // Should call registerInstance logic (which does a set)
-        expect(kv.set).toHaveBeenCalledWith(
+        expect(mockCache.set).toHaveBeenCalledWith(
             "instance:test_instance_heartbeat",
             expect.objectContaining({
                 id: "test_instance_heartbeat",
@@ -123,11 +121,10 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
     });
 
     test("should handle KV errors gracefully", async () => {
-        const { kv } = await import("../../src/services/kv.js");
         const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
 
         // Mock KV error
-        kv.get.mockRejectedValue(new Error("KV Network Error"));
+        mockCache.get.mockRejectedValue(new Error("KV Network Error"));
 
         // Start heartbeat
         instanceCoordinator.startHeartbeat();

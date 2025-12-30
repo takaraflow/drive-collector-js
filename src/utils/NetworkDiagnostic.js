@@ -1,6 +1,6 @@
 import { client } from "../services/telegram.js";
 import { d1 } from "../services/d1.js";
-import { kv } from "../services/kv.js";
+import { cache } from "../services/CacheService.js";
 import { CloudTool } from "../services/rclone.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { config } from "../config/index.js";
@@ -28,7 +28,7 @@ export class NetworkDiagnostic {
         results.services.d1 = await this._checkD1();
 
         // 检查 Cloudflare KV
-        results.services.kv = await this._checkKV();
+        results.services.kv = await this._checkCache();
 
         // 检查 rclone
         results.services.rclone = await this._checkRclone();
@@ -130,29 +130,29 @@ export class NetworkDiagnostic {
     }
 
     /**
-     * 检查 KV 存储连通性 (Cloudflare KV 或 Upstash)
+     * 检查 Cache 存储连通性 (Cloudflare KV 或 Upstash)
      */
-    static async _checkKV() {
+    static async _checkCache() {
         const startTime = Date.now();
         try {
-            // 检测当前使用的KV提供商
-            const kvProvider = process.env.KV_PROVIDER === 'upstash' ? 'Upstash Redis' : 'Cloudflare KV';
+            // 检测当前使用的Cache提供商
+            const cacheProvider = process.env.CACHE_PROVIDER || process.env.KV_PROVIDER === 'upstash' ? 'Upstash Redis' : 'Cloudflare KV';
 
             // 尝试读取一个不存在的key，应该返回null但不报错
             const testKey = `__diagnostic_test_${Date.now()}__`;
-            await kv.get(testKey);
+            await cache.get(testKey);
             const responseTime = Date.now() - startTime;
             return {
                 status: 'ok',
                 responseTime: `${responseTime}ms`,
-                message: `${kvProvider} 连接正常`
+                message: `${cacheProvider} 连接正常`
             };
         } catch (error) {
-            const kvProvider = process.env.KV_PROVIDER === 'upstash' ? 'Upstash Redis' : 'Cloudflare KV';
+            const cacheProvider = process.env.CACHE_PROVIDER || process.env.KV_PROVIDER === 'upstash' ? 'Upstash Redis' : 'Cloudflare KV';
             return {
                 status: 'error',
                 responseTime: `${Date.now() - startTime}ms`,
-                message: `${kvProvider} 连接失败: ${error.message}`
+                message: `${cacheProvider} 连接失败: ${error.message}`
             };
         }
     }

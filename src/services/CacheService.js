@@ -1,13 +1,13 @@
 import { config } from "../config/index.js";
-import { cacheService } from "../utils/CacheService.js";
+import { localCache } from "../utils/LocalCache.js";
 import logger from "./logger.js";
 
 /**
- * --- KV 存储服务层 ---
+ * --- Cache 存储服务层 ---
  * 支持 Northflank Redis (标准协议)、Cloudflare KV 和 Upstash Redis REST API
  * 具有自动故障转移功能，并集成 L1 内存缓存减少物理调用
  */
-class KVService {
+class CacheService {
     constructor() {
         // L1 内存缓存配置
         this.l1CacheTtl = 10 * 1000; // 默认 10 秒内存缓存
@@ -21,9 +21,9 @@ class KVService {
         this.hasRedis = !!(this.redisUrl || (this.redisHost && this.redisPort));
 
         // Cloudflare KV 配置 - 支持新旧变量名
-        this.accountId = process.env.CF_KV_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
-        this.namespaceId = process.env.CF_KV_NAMESPACE_ID || process.env.CF_KV_NAMESPACE_ID;
-        this.token = process.env.CF_KV_TOKEN || process.env.CF_D1_TOKEN || process.env.CF_KV_TOKEN;
+        this.accountId = process.env.CF_CACHE_ACCOUNT_ID || process.env.CF_KV_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
+        this.namespaceId = process.env.CF_CACHE_NAMESPACE_ID || process.env.CF_KV_NAMESPACE_ID || process.env.CF_KV_NAMESPACE_ID;
+        this.token = process.env.CF_CACHE_TOKEN || process.env.CF_KV_TOKEN || process.env.CF_D1_TOKEN || process.env.CF_KV_TOKEN;
         this.apiUrl = this.accountId && this.namespaceId 
             ? `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/storage/kv/namespaces/${this.namespaceId}`
             : '';
@@ -116,7 +116,7 @@ class KVService {
 
             // 测试连接
             await this.redisClient.ping();
-            logger.info('🔄 KV服务：使用 Northflank Redis');
+            logger.info('🔄 Cache服务：使用 Northflank Redis');
 
         } catch (error) {
             logger.error(`🚨 Redis 初始化失败: ${error.message}`);
@@ -129,18 +129,19 @@ class KVService {
      * 优先级：redis > cloudflare > upstash
      */
     _setDefaultProvider() {
-        if (process.env.KV_PROVIDER) {
+        // 支持 CACHE_PROVIDER 和 KV_PROVIDER（兼容）
+        const provider = process.env.CACHE_PROVIDER || process.env.KV_PROVIDER;
+        if (provider) {
             // 强制指定提供商
-            const provider = process.env.KV_PROVIDER;
             if (provider === 'redis' && this.hasRedis) {
                 this.currentProvider = 'redis';
-                logger.info('🔄 KV服务：强制使用 Northflank Redis');
+                logger.info('🔄 Cache服务：强制使用 Northflank Redis');
             } else if (provider === 'cloudflare' && this.hasCloudflare) {
                 this.currentProvider = 'cloudflare';
-                logger.info('🔄 KV服务：强制使用 Cloudflare KV');
+                logger.info('🔄 Cache服务：强制使用 Cloudflare KV');
             } else if (provider === 'upstash' && this.hasUpstash) {
                 this.currentProvider = 'upstash';
-                logger.info('🔄 KV服务：强制使用 Upstash Redis');
+                logger.info('🔄 Cache服务：强制使用 Upstash Redis');
             } else {
                 throw new Error(`强制使用 ${provider}，但该提供商未配置完整`);
             }
@@ -148,17 +149,17 @@ class KVService {
             // 自动选择优先级
             if (this.hasRedis) {
                 this.currentProvider = 'redis';
-                logger.info('🔄 KV服务：使用 Northflank Redis');
+                logger.info('🔄 Cache服务：使用 Northflank Redis');
             } else if (this.hasCloudflare) {
                 this.currentProvider = 'cloudflare';
-                logger.info('🔄 KV服务：使用 Cloudflare KV');
+                logger.info('🔄 Cache服务：使用 Cloudflare KV');
             } else if (this.hasUpstash) {
                 this.currentProvider = 'upstash';
-                logger.info('🔄 KV服务：使用 Upstash Redis');
+                logger.info('🔄 Cache服务：使用 Upstash Redis');
             } else {
                 // 在测试环境中，如果没有配置任何提供商，使用 cloudflare 作为默认值
                 this.currentProvider = 'cloudflare';
-                logger.info('🔄 KV服务：未配置任何提供商，使用 Cloudflare KV (默认)');
+                logger.info('🔄 Cache服务：未配置任何提供商，使用 Cloudflare KV (默认)');
             }
         }
 
@@ -286,7 +287,7 @@ class KVService {
         );
         
         const checkInterval = isQuotaIssue ? 12 * 60 * 60 * 1000 : 30 * 60 * 1000;
-        logger.info(`🕒 启动 KV 恢复检查，间隔: ${checkInterval / 60000} 分钟`);
+        logger.info(`🕒 启动 Cache 恢复检查，间隔: ${checkInterval / 60000} 分钟`);
 
         this.recoveryTimer = setInterval(async () => {
             // 根据当前提供商决定恢复目标
@@ -347,8 +348,9 @@ class KVService {
      * 检查是否处于故障转移模式
      */
     get isFailoverMode() {
-        if (process.env.KV_PROVIDER) {
-            return this.currentProvider !== process.env.KV_PROVIDER;
+        const provider = process.env.CACHE_PROVIDER || process.env.KV_PROVIDER;
+        if (provider) {
+            return this.currentProvider !== provider;
         }
         return this.currentProvider !== 'redis' && this.hasRedis;
     }
@@ -518,7 +520,7 @@ class KVService {
 
         const result = await response.json();
         if (!result.success) {
-            throw new Error(`KV Set Error: ${result.errors?.[0]?.message || "Unknown error"}`);
+            throw new Error(`Cache Set Error: ${result.errors?.[0]?.message || "Unknown error"}`);
         }
         return true;
     }
@@ -571,7 +573,7 @@ class KVService {
         if (response.status === 404) return null;
         if (!response.ok) {
             const result = await response.json();
-            throw new Error(`KV Get Error: ${result.errors?.[0]?.message || "Unknown error"}`);
+            throw new Error(`Cache Get Error: ${result.errors?.[0]?.message || "Unknown error"}`);
         }
 
         if (type === "json") {
@@ -622,7 +624,7 @@ class KVService {
 
         const result = await response.json();
         if (!result.success && response.status !== 404) {
-            throw new Error(`KV Delete Error: ${result.errors?.[0]?.message || "Unknown error"}`);
+            throw new Error(`Cache Delete Error: ${result.errors?.[0]?.message || "Unknown error"}`);
         }
         return true;
     }
@@ -663,7 +665,7 @@ class KVService {
 
         const result = await response.json();
         if (!result.success) {
-            throw new Error(`KV Bulk Set Error: ${result.errors?.[0]?.message || "Unknown error"}`);
+            throw new Error(`Cache Bulk Set Error: ${result.errors?.[0]?.message || "Unknown error"}`);
         }
         // Cloudflare bulk API doesn't return per-item results, assume all successful
         return pairs.map(() => ({ success: true, result: "OK" }));
@@ -723,12 +725,12 @@ class KVService {
 
         if (!response.ok) {
             const result = await response.json();
-            throw new Error(`KV ListKeys Error: ${result.errors?.[0]?.message || "Unknown error"}`);
+            throw new Error(`Cache ListKeys Error: ${result.errors?.[0]?.message || "Unknown error"}`);
         }
 
         const result = await response.json();
         if (!result.success) {
-            throw new Error(`KV ListKeys Error: ${result.errors?.[0]?.message || "Unknown error"}`);
+            throw new Error(`Cache ListKeys Error: ${result.errors?.[0]?.message || "Unknown error"}`);
         }
 
         // 返回键名数组
@@ -768,8 +770,8 @@ class KVService {
      * @param {Object} options - { skipCache: boolean }
      */
     async set(key, value, expirationTtl = null, options = {}) {
-        // 1. 检查 L1 缓存，如果值没变且未过期，跳过物理写入（减少 KV 调用）
-        if (!options.skipCache && cacheService.isUnchanged(`kv:${key}`, value)) {
+        // 1. 检查 L1 缓存，如果值没变且未过期，跳过物理写入（减少 Cache 调用）
+        if (!options.skipCache && localCache.isUnchanged(`cache:${key}`, value)) {
             return true;
         }
 
@@ -777,7 +779,7 @@ class KVService {
         
         // 2. 更新 L1 缓存
         if (result && !options.skipCache) {
-            cacheService.set(`kv:${key}`, value, this.l1CacheTtl);
+            localCache.set(`cache:${key}`, value, this.l1CacheTtl);
         }
         
         return result;
@@ -792,7 +794,7 @@ class KVService {
     async get(key, type = "json", options = {}) {
         // 1. 尝试从 L1 缓存获取
         if (!options.skipCache) {
-            const cached = cacheService.get(`kv:${key}`);
+            const cached = localCache.get(`cache:${key}`);
             if (cached !== null) return cached;
         }
 
@@ -800,7 +802,7 @@ class KVService {
         
         // 2. 写入 L1 缓存
         if (value !== null && !options.skipCache) {
-            cacheService.set(`kv:${key}`, value, options.cacheTtl || this.l1CacheTtl);
+            localCache.set(`cache:${key}`, value, options.cacheTtl || this.l1CacheTtl);
         }
         
         return value;
@@ -811,7 +813,7 @@ class KVService {
      * @param {string} key
      */
     async delete(key) {
-        cacheService.del(`kv:${key}`);
+        localCache.del(`cache:${key}`);
         return await this._executeWithFailover('delete', key);
     }
 
@@ -830,10 +832,10 @@ class KVService {
      */
     async bulkSet(pairs) {
         pairs.forEach(p => {
-            cacheService.set(`kv:${p.key}`, p.value, this.l1CacheTtl);
+            localCache.set(`cache:${p.key}`, p.value, this.l1CacheTtl);
         });
         return await this._executeWithFailover('bulkSet', pairs);
     }
 }
 
-export const kv = new KVService();
+export const cache = new CacheService();

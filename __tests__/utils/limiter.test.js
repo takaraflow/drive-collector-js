@@ -1,13 +1,13 @@
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 
   
-// Mock KV
-const mockKV = {
+// Mock Cache
+const mockCache = {
     get: jest.fn(),
     set: jest.fn()
 };
-jest.unstable_mockModule('../../src/services/kv.js', () => ({
-    kv: mockKV
+jest.unstable_mockModule('../../src/services/CacheService.js', () => ({
+    cache: mockCache
 }));
 
 // Mock logger
@@ -110,18 +110,18 @@ describe('handle429Error', () => {
   let originalSetTimeout;
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    mockKV.get.mockResolvedValue(null);
-    mockLogger.warn.mockClear();
-    mockLogger.error.mockClear();
-    mockKV.set.mockClear();
-    jest.useFakeTimers('modern');
-    // Mock setTimeout to call immediately, skipping real waits
-    originalSetTimeout = global.setTimeout;
-    jest.spyOn(global, 'setTimeout').mockImplementation((fn) => {
-      fn();
-      return 1;
-    });
+      jest.clearAllMocks();
+      mockCache.get.mockResolvedValue(null);
+      mockLogger.warn.mockClear();
+      mockLogger.error.mockClear();
+      mockCache.set.mockClear();
+      jest.useFakeTimers('modern');
+      // Mock setTimeout to call immediately, skipping real waits
+      originalSetTimeout = global.setTimeout;
+      jest.spyOn(global, 'setTimeout').mockImplementation((fn) => {
+          fn();
+          return 1;
+      });
   });
 
   afterEach(() => {
@@ -191,7 +191,7 @@ describe('handle429Error', () => {
     const promise = handle429Error(fn, 1);
     await expect(promise).rejects.toThrow();
     expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('Large FloodWait'));
-    expect(mockKV.set).toHaveBeenCalledWith('system:cooling_until', expect.any(String), expect.any(Number));
+    expect(mockCache.set).toHaveBeenCalledWith('system:cooling_until', expect.any(String), expect.any(Number));
   }, 1000);
 
   it('should parse retryAfter from FloodWait message', async () => {

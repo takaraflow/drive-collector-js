@@ -5,8 +5,8 @@ const mockKV = {
     get: jest.fn(),
     set: jest.fn().mockResolvedValue(true)
 };
-jest.unstable_mockModule('../../src/services/kv.js', () => ({
-    kv: mockKV
+jest.unstable_mockModule('../../src/services/CacheService.js', () => ({
+    cache: mockKV
 }));
 
 // Mock logger

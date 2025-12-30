@@ -1,10 +1,10 @@
-import { kv } from "../services/kv.js";
-import { cacheService } from "../utils/CacheService.js";
+import { cache } from "../services/CacheService.js";
+import { localCache } from "../utils/LocalCache.js";
 import logger from "../services/logger.js";
 
 /**
  * 系统设置仓储层
- * 使用 KV 存储作为主存储，符合低频关键数据规则
+ * 使用 Cache 存储作为主存储，符合低频关键数据规则
  */
 export class SettingsRepository {
     static getSettingsKey(key) {
@@ -21,13 +21,13 @@ export class SettingsRepository {
         const cacheKey = this.getSettingsKey(key);
         try {
             // 0. 尝试从内存缓存获取
-            const memoryCached = cacheService.get(cacheKey);
+            const memoryCached = localCache.get(cacheKey);
             if (memoryCached !== null) return memoryCached;
 
-            // 1. 从 KV 获取（主存储）
-            const value = await kv.get(cacheKey, "text");
+            // 1. 从 Cache 获取（主存储）
+            const value = await cache.get(cacheKey, "text");
             if (value !== null) {
-                cacheService.set(cacheKey, value, 30 * 60 * 1000); // 内存缓存 30 分钟
+                localCache.set(cacheKey, value, 30 * 60 * 1000); // 内存缓存 30 分钟
                 return value;
             }
 
@@ -53,14 +53,14 @@ export class SettingsRepository {
 
         const cacheKey = this.getSettingsKey(key);
         try {
-            // 1. 更新 KV（主存储）
-            await kv.set(cacheKey, value);
-        } catch (kvError) {
-            logger.error(`SettingsRepository.set failed for ${key} (KV):`, kvError);
-            throw kvError; // KV是主存储，失败时抛出异常
+            // 1. 更新 Cache（主存储）
+            await cache.set(cacheKey, value);
+        } catch (cacheError) {
+            logger.error(`SettingsRepository.set failed for ${key} (Cache):`, cacheError);
+            throw cacheError; // Cache是主存储，失败时抛出异常
         }
 
         // 2. 更新内存缓存
-        cacheService.set(cacheKey, value, 30 * 60 * 1000);
+        localCache.set(cacheKey, value, 30 * 60 * 1000);
     }
 }

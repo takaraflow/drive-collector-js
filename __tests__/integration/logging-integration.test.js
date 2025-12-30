@@ -85,10 +85,10 @@ describe('Logger Integration Tests', () => {
       }));
 
       // Mock other dependencies that TaskManager.init uses
-      jest.doMock('../../src/services/kv.js', () => ({
-        kv: {
-          isFailoverMode: false
-        }
+      jest.doMock('../../src/services/CacheService.js', () => ({
+          cache: {
+              isFailoverMode: false
+          }
       }));
 
       // Reset modules to pick up the mocks
