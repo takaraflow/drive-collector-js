@@ -101,6 +101,8 @@ async function runRedisDiagnostics() {
     console.log('\n📊 网络延迟分析:');
     console.log('[DEBUG] 开始 10 次延迟测试');
     const latencies = [];
+    let avgLatency = 0;
+    let stdDev = 0;
     for (let i = 0; i < 10; i++) {
         console.log(`[DEBUG] 第 ${i + 1} 次 PING 测试开始`);
         try {
@@ -117,7 +119,7 @@ async function runRedisDiagnostics() {
     console.log('[DEBUG] 延迟测试循环完成');
 
     if (latencies.length > 0) {
-        const avgLatency = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+        avgLatency = latencies.reduce((a, b) => a + b, 0) / latencies.length;
         const minLatency = Math.min(...latencies);
         const maxLatency = Math.max(...latencies);
 
@@ -140,7 +142,7 @@ async function runRedisDiagnostics() {
 
         // 延迟稳定性分析
         const variance = latencies.reduce((acc, lat) => acc + Math.pow(lat - avgLatency, 2), 0) / latencies.length;
-        const stdDev = Math.sqrt(variance);
+        stdDev = Math.sqrt(variance);
 
         console.log(`   延迟标准差: ${stdDev.toFixed(1)}ms`);
         if (stdDev > 50) {
@@ -222,6 +224,9 @@ async function runRedisDiagnostics() {
     }
 
     console.log('\n🔍 诊断完成\n');
+
+    // 显式退出进程，确保脚本正常结束
+    process.exit(0);
 }
 
 // 只有当直接运行此脚本时才执行诊断

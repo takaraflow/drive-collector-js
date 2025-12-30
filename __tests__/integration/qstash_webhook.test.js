@@ -50,7 +50,9 @@ describe("QStash Webhook Integration", () => {
 
         // Import the handler function and mock all dependencies
         jest.unstable_mockModule("../../src/services/telegram.js", () => ({
-            client: mockClient
+            client: mockClient,
+            stopWatchdog: jest.fn(),
+            startWatchdog: jest.fn()
         }));
 
         jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
@@ -88,6 +90,24 @@ describe("QStash Webhook Integration", () => {
 
         // Restore process.exit
         process.exit = originalExit;
+    });
+
+    afterAll(async () => {
+        // Clean up any timers or connections
+        try {
+            const { stopWatchdog } = await import("../../src/services/telegram.js");
+            if (stopWatchdog) stopWatchdog();
+        } catch (e) {
+            // Ignore
+        }
+        
+        // Clear any pending timers
+        const timers = Object.keys(global).filter(k => k.startsWith('_'));
+        timers.forEach(timer => {
+            if (global[timer] && typeof global[timer].unref === 'function') {
+                global[timer].unref();
+            }
+        });
     });
 
     beforeEach(() => {
