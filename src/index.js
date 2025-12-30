@@ -62,38 +62,65 @@ const logger = {
 
   info(message, meta = {}, ctx = null) {
     const span = trace.getActiveSpan();
-    if (span) span.addEvent(message, meta);
+    if (span) {
+      // 添加事件到当前 span，这会发送到 Axiom
+      span.addEvent(message, {
+        ...meta,
+        'log.level': 'info',
+        'service.name': 'lb-worker-js'
+      });
+    }
+    // 同时输出到控制台用于调试 - 保持与测试兼容
     console.log(`INFO: ${message}`, meta);
   },
 
   warn(message, meta = {}, ctx = null) {
     const span = trace.getActiveSpan();
     if (span) {
-        span.setStatus({ code: 1, message: message }); // 1 = Error (in some OTel versions, or use attributes)
-        span.setAttribute('log.level', 'warn');
-        span.addEvent(message, meta);
+      span.setStatus({ code: 1, message: message });
+      span.setAttribute('log.level', 'warn');
+      span.addEvent(message, {
+        ...meta,
+        'log.level': 'warn',
+        'service.name': 'lb-worker-js'
+      });
     }
+    // 保持与测试兼容
     console.warn(`WARN: ${message}`, meta);
   },
 
   error(message, meta = {}, ctx = null) {
     const span = trace.getActiveSpan();
     if (span) {
-        span.recordException(message instanceof Error ? message : new Error(message));
-        span.setStatus({ code: 2 }); // 2 = Error
+      const error = message instanceof Error ? message : new Error(message);
+      span.recordException(error);
+      span.setStatus({ code: 2, message: error.message });
+      span.addEvent('error', {
+        ...meta,
+        'log.level': 'error',
+        'error.message': error.message,
+        'error.stack': error.stack,
+        'service.name': 'lb-worker-js'
+      });
     }
+    // 保持与测试兼容
     console.error(`ERROR: ${message}`, meta);
   },
     
   debug(message, meta = {}, ctx = null) {
     if (this.env !== 'production') {
       const span = trace.getActiveSpan();
-      if (span) span.addEvent(message, meta);
+      if (span) {
+        span.addEvent(message, {
+          ...meta,
+          'log.level': 'debug',
+          'service.name': 'lb-worker-js'
+        });
+      }
+      // 保持与测试兼容
       console.debug(`DEBUG: ${message}`, meta);
     }
-  },
-    
-
+  }
 };
 
 // 常量
@@ -126,233 +153,233 @@ class LBError extends Error {
  * 检查是否可以恢复到 Cloudflare KV
  */
 function checkRecovery(ctx) {
-    if (currentProvider !== 'upstash') return;
+  if (currentProvider !== 'upstash') return;
 
-    const now = Date.now();
-    const interval = failoverReason === 'quota' ? QUOTA_RECOVERY_INTERVAL : NETWORK_RECOVERY_INTERVAL;
+  const now = Date.now();
+  const interval = failoverReason === 'quota' ? QUOTA_RECOVERY_INTERVAL : NETWORK_RECOVERY_INTERVAL;
 
-    if (now - lastFailureTime > interval) {
-        logger.info(`达到恢复检查阈值，尝试切回 Cloudflare KV`, { 
-            reason: failoverReason,
-            lastFailure: new Date(lastFailureTime).toISOString()
-        }, ctx);
-        // 尝试切回，如果后续操作失败会再次触发 shouldFailover
-        currentProvider = 'cloudflare';
-        failureCount = 0;
-    }
+  if (now - lastFailureTime > interval) {
+    logger.info(`达到恢复检查阈值，尝试切回 Cloudflare KV`, { 
+        reason: failoverReason,
+        lastFailure: new Date(lastFailureTime).toISOString()
+    }, ctx);
+    // 尝试切回，如果后续操作失败会再次触发 shouldFailover
+    currentProvider = 'cloudflare';
+    failureCount = 0;
+  }
 }
 
 /**
  * 检查是否应该触发故障转移
  */
 function shouldFailover(error, env, ctx) {
-    if (currentProvider === 'upstash' || !env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) {
-        return false;
-    }
-
-    const msg = error.message.toLowerCase();
-    const isQuotaError = msg.includes('free usage limit') || msg.includes('quota exceeded') || msg.includes('rate limit');
-    const isNetworkError = msg.includes('fetch failed') || msg.includes('network') || msg.includes('timeout');
-
-    if (isQuotaError || isNetworkError) {
-        failoverReason = isQuotaError ? 'quota' : 'network';
-        lastFailureTime = Date.now();
-        logger.warn(`检测到 ${failoverReason} 错误，立即触发故障转移`, { 
-            error: error.message, 
-            provider: 'cloudflare' 
-        }, ctx);
-        return true;
-    }
-
-    // 其他错误仍走连续失败逻辑
-    failureCount++;
-    if (failureCount >= MAX_FAILURES) {
-        failoverReason = 'other';
-        lastFailureTime = Date.now();
-        logger.warn(`Cloudflare KV 连续失败，触发故障转移`, { failureCount, provider: 'cloudflare' }, ctx);
-        return true;
-    }
-
+  if (currentProvider === 'upstash' || !env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) {
     return false;
+  }
+
+  const msg = error.message.toLowerCase();
+  const isQuotaError = msg.includes('free usage limit') || msg.includes('quota exceeded') || msg.includes('rate limit');
+  const isNetworkError = msg.includes('fetch failed') || msg.includes('network') || msg.includes('timeout');
+
+  if (isQuotaError || isNetworkError) {
+    failoverReason = isQuotaError ? 'quota' : 'network';
+    lastFailureTime = Date.now();
+    logger.warn(`检测到 ${failoverReason} 错误，立即触发故障转移`, { 
+        error: error.message, 
+        provider: 'cloudflare' 
+    }, ctx);
+    return true;
+  }
+
+  // 其他错误仍走连续失败逻辑
+  failureCount++;
+  if (failureCount >= MAX_FAILURES) {
+    failoverReason = 'other';
+    lastFailureTime = Date.now();
+    logger.warn(`Cloudflare KV 连续失败，触发故障转移`, { failureCount, provider: 'cloudflare' }, ctx);
+    return true;
+  }
+
+  return false;
 }
 
 /**
  * 执行故障转移
  */
 function failover(env, ctx) {
-    if (currentProvider === 'cloudflare' && env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
-        currentProvider = 'upstash';
-        failureCount = 0;
-        logger.info('故障转移完成', { from: 'cloudflare', to: 'upstash' }, ctx);
-        return true;
-    }
-    return false;
+  if (currentProvider === 'cloudflare' && env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
+    currentProvider = 'upstash';
+    failureCount = 0;
+    logger.info('故障转移完成', { from: 'cloudflare', to: 'upstash' }, ctx);
+    return true;
+  }
+  return false;
 }
 
 /**
  * 获取当前使用的提供商名称
  */
 function getCurrentProvider() {
-    return currentProvider === 'upstash' ? 'Upstash Redis' : 'Cloudflare KV';
+  return currentProvider === 'upstash' ? 'Upstash Redis' : 'Cloudflare KV';
 }
 
 /**
  * 判断是否为可重试的网络/配额错误
  */
 function isRetryableError(error) {
-    const msg = (error.message || "").toLowerCase();
-    return msg.includes('free usage limit') ||
-           msg.includes('quota exceeded') ||
-           msg.includes('rate limit') ||
-           msg.includes('fetch failed') ||
-           msg.includes('network') ||
-           msg.includes('timeout');
+  const msg = (error.message || "").toLowerCase();
+  return msg.includes('free usage limit') ||
+         msg.includes('quota exceeded') ||
+         msg.includes('rate limit') ||
+         msg.includes('fetch failed') ||
+         msg.includes('network') ||
+         msg.includes('timeout');
 }
 
 /**
  * Upstash KV list 实现
  */
 async function upstash_list(env, options = {}) {
-    const url = `${env.UPSTASH_REDIS_REST_URL}/keys/${encodeURIComponent(options.prefix || '')}*`;
-    const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-            'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`,
-        },
-    });
+  const url = `${env.UPSTASH_REDIS_REST_URL}/keys/${encodeURIComponent(options.prefix || '')}*`;
+  const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+          'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`,
+      },
+  });
 
-    if (!response.ok) {
-        const responseText = await response.text();
-        throw new Error(`Upstash List Error: ${response.status} ${response.statusText}. Response: ${responseText.substring(0, 100)}`);
-    }
+  if (!response.ok) {
+      const responseText = await response.text();
+      throw new Error(`Upstash List Error: ${response.status} ${response.statusText}. Response: ${responseText.substring(0, 100)}`);
+  }
 
-    const responseText = await response.text();
-    const result = safeJsonParse(responseText, 'upstash_list');
-    if (!result) {
-        throw new Error(`Upstash List Parse Error: Failed to parse response. Response: ${responseText.substring(0, 100)}`);
-    }
+  const responseText = await response.text();
+  const result = safeJsonParse(responseText, 'upstash_list');
+  if (!result) {
+      throw new Error(`Upstash List Parse Error: Failed to parse response. Response: ${responseText.substring(0, 100)}`);
+  }
 
-    if (result.error) {
-        throw new Error(`Upstash List Error: ${result.error}`);
-    }
+  if (result.error) {
+      throw new Error(`Upstash List Error: ${result.error}`);
+  }
 
-    return {
-        keys: result.result.map(key => ({ name: key }))
-    };
+  return {
+      keys: result.result.map(key => ({ name: key }))
+  };
 }
 
 /**
  * Upstash KV get 实现
  */
 async function upstash_get(env, key, options = {}) {
-    const url = `${env.UPSTASH_REDIS_REST_URL}/get/${encodeURIComponent(key)}`;
-    const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-            'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`,
-        },
-    });
+  const url = `${env.UPSTASH_REDIS_REST_URL}/get/${encodeURIComponent(key)}`;
+  const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+          'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`,
+      },
+  });
 
-    if (!response.ok) {
-        if (response.status === 404) {
-            // 修复：取消 body 以防止泄漏
-            if (response.body) await response.body.cancel().catch(() => {});
-            return null;
-        }
-        const responseText = await response.text();
-        throw new Error(`Upstash Get Error: ${response.status} ${response.statusText}. Response: ${responseText.substring(0, 100)}`);
-    }
+  if (!response.ok) {
+      if (response.status === 404) {
+          // 修复：取消 body 以防止泄漏
+          if (response.body) await response.body.cancel().catch(() => {});
+          return null;
+      }
+      const responseText = await response.text();
+      throw new Error(`Upstash Get Error: ${response.status} ${response.statusText}. Response: ${responseText.substring(0, 100)}`);
+  }
 
-    const responseText = await response.text();
-    const result = safeJsonParse(responseText, 'upstash_get');
-    if (!result) {
-        throw new Error(`Upstash Get Parse Error: Failed to parse response. Response: ${responseText.substring(0, 100)}`);
-    }
+  const responseText = await response.text();
+  const result = safeJsonParse(responseText, 'upstash_get');
+  if (!result) {
+      throw new Error(`Upstash Get Parse Error: Failed to parse response. Response: ${responseText.substring(0, 100)}`);
+  }
 
-    if (result.error) {
-        throw new Error(`Upstash Get Error: ${result.error}`);
-    }
+  if (result.error) {
+      throw new Error(`Upstash Get Error: ${result.error}`);
+  }
 
-    const value = result.result;
-    if (value === null || value === undefined) return null;
+  const value = result.result;
+  if (value === null || value === undefined) return null;
 
-    const type = options.type || 'json';
-    if (type === 'json') {
-        // 如果已经是对象，直接返回
-        if (typeof value === 'object') return value;
-        // 如果是字符串，尝试JSON解析
-        return safeJsonParse(value, `upstash_get value for key ${key}`) || value;
-    }
-    return value;
+  const type = options.type || 'json';
+  if (type === 'json') {
+      // 如果已经是对象，直接返回
+      if (typeof value === 'object') return value;
+      // 如果是字符串，尝试JSON解析
+      return safeJsonParse(value, `upstash_get value for key ${key}`) || value;
+  }
+  return value;
 }
 
 /**
  * Upstash KV put 实现
  */
 async function upstash_put(env, key, value) {
-    const valueStr = typeof value === "string" ? value : JSON.stringify(value);
-    const command = ["SET", key, valueStr];
+  const valueStr = typeof value === "string" ? value : JSON.stringify(value);
+  const command = ["SET", key, valueStr];
 
-    const response = await fetch(`${env.UPSTASH_REDIS_REST_URL}/`, {
-        method: "POST",
-        headers: {
-            "Authorization": `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`,
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify(command),
-    });
+  const response = await fetch(`${env.UPSTASH_REDIS_REST_URL}/`, {
+      method: "POST",
+      headers: {
+          "Authorization": `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`,
+          "Content-Type": "application/json",
+      },
+      body: JSON.stringify(command),
+  });
 
-    if (!response.ok) {
-        const responseText = await response.text();
-        throw new Error(`Upstash Put Error: ${response.status} ${response.statusText}. Response: ${responseText.substring(0, 100)}`);
-    }
+  if (!response.ok) {
+      const responseText = await response.text();
+      throw new Error(`Upstash Put Error: ${response.status} ${response.statusText}. Response: ${responseText.substring(0, 100)}`);
+  }
 
-    const responseText = await response.text();
-    const result = safeJsonParse(responseText, 'upstash_put');
-    if (!result) {
-        throw new Error(`Upstash Put Parse Error: Failed to parse response. Response: ${responseText.substring(0, 100)}`);
-    }
+  const responseText = await response.text();
+  const result = safeJsonParse(responseText, 'upstash_put');
+  if (!result) {
+      throw new Error(`Upstash Put Parse Error: Failed to parse response. Response: ${responseText.substring(0, 100)}`);
+  }
 
-    if (result.error) {
-        throw new Error(`Upstash Put Error: ${result.error}`);
-    }
+  if (result.error) {
+      throw new Error(`Upstash Put Error: ${result.error}`);
+  }
 
-    return result.result === "OK";
+  return result.result === "OK";
 }
 
 /**
  * Upstash KV mget 批量获取实现
  */
 async function upstash_mget(env, keys) {
-    if (keys.length === 0) return [];
+  if (keys.length === 0) return [];
 
-    const body = JSON.stringify({ keys });
+  const body = JSON.stringify({ keys });
 
-    const response = await fetch(`${env.UPSTASH_REDIS_REST_URL}/mget`, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`,
-            'Content-Type': 'application/json',
-        },
-        body: body,
-    });
+  const response = await fetch(`${env.UPSTASH_REDIS_REST_URL}/mget`, {
+      method: 'POST',
+      headers: {
+          'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`,
+          'Content-Type': 'application/json',
+      },
+      body: body,
+  });
 
-    if (!response.ok) {
-        const responseText = await response.text();
-        throw new Error(`Upstash MGET Error: ${response.status} ${response.statusText}. Response: ${responseText.substring(0, 100)}`);
-    }
+  if (!response.ok) {
+      const responseText = await response.text();
+      throw new Error(`Upstash MGET Error: ${response.status} ${response.statusText}. Response: ${responseText.substring(0, 100)}`);
+  }
 
-    const responseText = await response.text();
-    const result = safeJsonParse(responseText, 'upstash_mget');
-    if (!result) {
-        throw new Error(`Upstash MGET Parse Error: Failed to parse response. Response: ${responseText.substring(0, 100)}`);
-    }
+  const responseText = await response.text();
+  const result = safeJsonParse(responseText, 'upstash_mget');
+  if (!result) {
+      throw new Error(`Upstash MGET Parse Error: Failed to parse response. Response: ${responseText.substring(0, 100)}`);
+  }
 
-    if (result.error) {
-        throw new Error(`Upstash MGET Error: ${result.error}`);
-    }
+  if (result.error) {
+      throw new Error(`Upstash MGET Error: ${result.error}`);
+  }
 
-    return result.result || [];
+  return result.result || [];
 }
 
 /**
@@ -950,14 +977,22 @@ const handler = {
     }
 };
 
-
-const configAxiom = {
-    serviceName: 'lb-worker-js',
-    exporter: {
-        url: 'https://api.axiom.co/v1/traces',
-        headers: {}
-    }
-};
+/**
+ * 动态创建 OpenTelemetry 配置
+ * 修复：配置需要在运行时根据环境变量动态设置
+ */
+function createConfigAxiom(env) {
+    return {
+        serviceName: 'lb-worker-js',
+        exporter: {
+            url: 'https://api.axiom.co/v1/traces',
+            headers: {
+                'Authorization': env?.AXIOM_TOKEN ? `Bearer ${env.AXIOM_TOKEN}` : '',
+                'X-Axiom-Dataset': env?.AXIOM_DATASET || ''
+            }
+        }
+    };
+}
 
 const configNoop = {
     serviceName: 'lb-worker-js',
@@ -967,12 +1002,32 @@ const configNoop = {
     }
 };
 
-// Create copies of handler to instrument differently
+// 创建 handler 副本，但不立即 instrument
 const handlerAxiom = { ...handler };
 const handlerNoop = { ...handler };
 
-instrument(handlerAxiom, configAxiom);
-instrument(handlerNoop, configNoop);
+// 标记是否已 instrument
+let isAxiomInstrumented = false;
+let isNoopInstrumented = false;
+
+/**
+ * 延迟 instrument，确保使用正确的配置
+ */
+function ensureAxiomInstrumented(env) {
+    if (!isAxiomInstrumented && env?.AXIOM_TOKEN && env?.AXIOM_DATASET) {
+        const config = createConfigAxiom(env);
+        instrument(handlerAxiom, config);
+        isAxiomInstrumented = true;
+        console.log('✅ Axiom OpenTelemetry instrumentation configured');
+    }
+}
+
+function ensureNoopInstrumented() {
+    if (!isNoopInstrumented) {
+        instrument(handlerNoop, configNoop);
+        isNoopInstrumented = true;
+    }
+}
 
 /**
  * 修复 @microlabs/otel-cf-workers 库的 Bug
@@ -996,14 +1051,26 @@ const createSafeEnv = (env) => {
 
 export default {
     async fetch(request, env, ctx) {
+        // 确保 instrument 已正确初始化
         if (env?.AXIOM_TOKEN && env?.AXIOM_DATASET) {
-            // Inject OTEL headers for Axiom
+            // 延迟 instrument，确保使用正确的配置
+            ensureAxiomInstrumented(env);
+            
+            // 为 OpenTelemetry SDK 注入必要的环境变量
             const enrichedEnv = { ...env };
             enrichedEnv['otel.headers.Authorization'] = `Bearer ${env.AXIOM_TOKEN}`;
             enrichedEnv['otel.headers.X-Axiom-Dataset'] = env.AXIOM_DATASET;
             
-            return handlerAxiom.fetch(request, createSafeEnv(enrichedEnv), ctx);
+            // 使用安全环境变量包装
+            const safeEnv = createSafeEnv(enrichedEnv);
+            
+            console.log('🚀 使用 Axiom OpenTelemetry 配置处理请求');
+            return handlerAxiom.fetch(request, safeEnv, ctx);
         } else {
+            // 确保 Noop handler 已 instrument
+            ensureNoopInstrumented();
+            
+            console.log('⚠️  Axiom 配置缺失，使用 Noop 配置');
             return handlerNoop.fetch(request, createSafeEnv(env), ctx);
         }
     }
