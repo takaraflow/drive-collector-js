@@ -193,6 +193,18 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
     throw new Error('Request must have arrayBuffer or text method');
   }
 
+  // ✅ 添加调试日志
+  const bodyText = new TextDecoder().decode(body);
+  console.log('🔍 Server received body:', bodyText);
+  console.log('🔍 Body length:', bodyText.length);
+  console.log('🔍 Body bytes:', Array.from(new Uint8Array(body)));
+  
+  // 计算 body hash（用于对比）
+  const bodyHashBuffer = await crypto.subtle.digest('SHA-256', body);
+  const bodyHashArray = Array.from(new Uint8Array(bodyHashBuffer));
+  const bodyHashBase64 = btoa(String.fromCharCode(...bodyHashArray));
+  console.log('🔍 Server calculated body hash:', bodyHashBase64);
+
   // 使用 Receiver 验证
   const Receiver = qstashModule.Receiver;
   const receiver = new Receiver({
