@@ -2,6 +2,9 @@ import { Axiom } from '@axiomhq/js';
 // Removed InstanceCoordinator dependency to avoid circular import
 let getInstanceIdFunc = () => 'unknown';
 
+// Local fallback ID based on startup timestamp and random string
+const localFallbackId = `boot_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
 export const setInstanceIdProvider = (provider) => {
     getInstanceIdFunc = provider;
 };
@@ -129,9 +132,16 @@ const log = async (instanceId, level, message, data = {}) => {
 
 const getSafeInstanceId = () => {
     try {
-        return getInstanceIdFunc();
-    } catch {
-        return 'unknown';
+        const id = getInstanceIdFunc();
+        if (id && typeof id === 'string' && id.trim() !== '' && id !== 'unknown') {
+            return id;
+        }
+        // 如果返回了 'unknown' 或无效值，使用本地 fallback
+        console.debug('Logger: Instance ID provider returned invalid value, using fallback', { received: id, fallback: localFallbackId });
+        return localFallbackId;
+    } catch (e) {
+        console.debug('Logger: Instance ID provider failed, using fallback', { error: e.message, fallback: localFallbackId });
+        return localFallbackId;
     }
 };
 

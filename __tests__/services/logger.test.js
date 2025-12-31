@@ -90,8 +90,12 @@ describe('Logger Service', () => {
 
       await logger.debug(message, data);
 
-      expect(consoleDebugSpy).toHaveBeenCalledTimes(1);
-      expect(consoleDebugSpy).toHaveBeenCalledWith(expect.stringContaining('[v'), data);
+      // Now console.debug is called twice: once for instance ID fallback, once for the actual log
+      expect(consoleDebugSpy).toHaveBeenCalledTimes(2);
+      // The second call should be the actual log message
+      const secondCall = consoleDebugSpy.mock.calls[1];
+      expect(secondCall[0]).toContain('[v');
+      expect(secondCall[1]).toEqual(data);
     });
   });
 
@@ -266,6 +270,269 @@ describe('Logger Service', () => {
       expect(logger.canSend('warn')).toBe(true);
       expect(logger.canSend('error')).toBe(true);
       expect(logger.canSend('debug')).toBe(true);
+    });
+  });
+
+  describe('Instance ID Fallback', () => {
+    test('should use fallback ID when provider returns null', async () => {
+      // Reset logger and set up Axiom config
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+      
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+
+      // Set provider that returns null
+      loggerModule.setInstanceIdProvider(() => null);
+      
+      logger = loggerModule.logger;
+
+      await logger.info('test message');
+
+      expect(mockIngest).toHaveBeenCalledTimes(1);
+      const payload = mockIngest.mock.calls[0][1][0];
+      
+      // Should use fallback ID (starts with 'boot_')
+      expect(payload.instanceId).toMatch(/^boot_\d+_/);
+      expect(payload.instanceId).not.toBe('unknown');
+    });
+
+    test('should use fallback ID when provider returns undefined', async () => {
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+      
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+
+      // Set provider that returns undefined
+      loggerModule.setInstanceIdProvider(() => undefined);
+      
+      logger = loggerModule.logger;
+
+      await logger.warn('test warning');
+
+      expect(mockIngest).toHaveBeenCalledTimes(1);
+      const payload = mockIngest.mock.calls[0][1][0];
+      
+      expect(payload.instanceId).toMatch(/^boot_\d+_/);
+      expect(payload.instanceId).not.toBe('unknown');
+    });
+
+    test('should use fallback ID when provider returns empty string', async () => {
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+      
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+
+      // Set provider that returns empty string
+      loggerModule.setInstanceIdProvider(() => '');
+      
+      logger = loggerModule.logger;
+
+      await logger.error('test error');
+
+      expect(mockIngest).toHaveBeenCalledTimes(1);
+      const payload = mockIngest.mock.calls[0][1][0];
+      
+      expect(payload.instanceId).toMatch(/^boot_\d+_/);
+      expect(payload.instanceId).not.toBe('unknown');
+    });
+
+    test('should use fallback ID when provider returns whitespace only', async () => {
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+      
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+
+      // Set provider that returns whitespace
+      loggerModule.setInstanceIdProvider(() => '   ');
+      
+      logger = loggerModule.logger;
+
+      await logger.debug('test debug');
+
+      expect(mockIngest).toHaveBeenCalledTimes(1);
+      const payload = mockIngest.mock.calls[0][1][0];
+      
+      expect(payload.instanceId).toMatch(/^boot_\d+_/);
+      expect(payload.instanceId).not.toBe('unknown');
+    });
+
+    test('should use fallback ID when provider returns "unknown"', async () => {
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+      
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+
+      // Set provider that returns 'unknown'
+      loggerModule.setInstanceIdProvider(() => 'unknown');
+      
+      logger = loggerModule.logger;
+
+      await logger.info('test message');
+
+      expect(mockIngest).toHaveBeenCalledTimes(1);
+      const payload = mockIngest.mock.calls[0][1][0];
+      
+      expect(payload.instanceId).toMatch(/^boot_\d+_/);
+      expect(payload.instanceId).not.toBe('unknown');
+    });
+
+    test('should use fallback ID when provider throws exception', async () => {
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+      
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+
+      // Set provider that throws
+      loggerModule.setInstanceIdProvider(() => {
+        throw new Error('Provider not ready');
+      });
+      
+      logger = loggerModule.logger;
+
+      await logger.info('test message');
+
+      expect(mockIngest).toHaveBeenCalledTimes(1);
+      const payload = mockIngest.mock.calls[0][1][0];
+      
+      expect(payload.instanceId).toMatch(/^boot_\d+_/);
+      expect(payload.instanceId).not.toBe('unknown');
+    });
+
+    test('should use fallback ID when provider returns non-string type', async () => {
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+      
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+
+      // Set provider that returns number
+      loggerModule.setInstanceIdProvider(() => 12345);
+      
+      logger = loggerModule.logger;
+
+      await logger.info('test message');
+
+      expect(mockIngest).toHaveBeenCalledTimes(1);
+      const payload = mockIngest.mock.calls[0][1][0];
+      
+      expect(payload.instanceId).toMatch(/^boot_\d+_/);
+      expect(payload.instanceId).not.toBe('unknown');
+    });
+
+    test('should call console.debug when provider returns invalid value', async () => {
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+      
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+
+      // Set provider that returns null
+      loggerModule.setInstanceIdProvider(() => null);
+      
+      logger = loggerModule.logger;
+
+      await logger.info('test message');
+
+      // Should have called console.debug with debug message
+      expect(consoleDebugSpy).toHaveBeenCalledWith(
+        'Logger: Instance ID provider returned invalid value, using fallback',
+        expect.objectContaining({
+          received: null,
+          fallback: expect.any(String)
+        })
+      );
+    });
+
+    test('should call console.debug when provider throws exception', async () => {
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+      
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+
+      // Set provider that throws
+      loggerModule.setInstanceIdProvider(() => {
+        throw new Error('Provider error');
+      });
+      
+      logger = loggerModule.logger;
+
+      await logger.info('test message');
+
+      // Should have called console.debug with debug message
+      expect(consoleDebugSpy).toHaveBeenCalledWith(
+        'Logger: Instance ID provider failed, using fallback',
+        expect.objectContaining({
+          error: 'Provider error',
+          fallback: expect.any(String)
+        })
+      );
+    });
+
+    test('should use fallback ID when provider is not registered (before setInstanceIdProvider)', async () => {
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+      
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+
+      // Don't register provider, use default 'unknown' function
+      logger = loggerModule.logger;
+
+      await logger.info('test message');
+
+      expect(mockIngest).toHaveBeenCalledTimes(1);
+      const payload = mockIngest.mock.calls[0][1][0];
+      
+      // Default provider returns 'unknown', so should use fallback
+      expect(payload.instanceId).toMatch(/^boot_\d+_/);
+      expect(payload.instanceId).not.toBe('unknown');
     });
   });
 
