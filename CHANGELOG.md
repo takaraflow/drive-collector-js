@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.3.1](https://github.com/YoungSx/drive-collector-js/compare/v4.3.0...v4.3.1) (2025-12-31)
+
+
+### 🚀 性能优化
+
+* optimize jest test performance with parallel execution and mock caching ([8993439](https://github.com/YoungSx/drive-collector-js/commit/89934395b04a657cc14136fd859f88ffbbba5d75))
+
+
+### 🐛 问题修复
+
+* improves Redis configuration validation and fallback handling ([c1fe663](https://github.com/YoungSx/drive-collector-js/commit/c1fe663612c1fcbb1cf71089af55633fafbc0a9d))
+* improves Telegram client proxy with better method delegation ([e64100b](https://github.com/YoungSx/drive-collector-js/commit/e64100b60c9363892752e25dc06aa5fea2aeacc9))
+* improves test reliability and performance ([ebc8259](https://github.com/YoungSx/drive-collector-js/commit/ebc8259bfbffaf43620434c2219194e9470afdb7))
+* **telegram:** unify TIMEOUT errors to Axiom with enhanced proxy and structured logging ([bd7c043](https://github.com/YoungSx/drive-collector-js/commit/bd7c043607d7af260475365d75c33d409cc50a9b))
+* unified telegram timeout logging to Axiom and resolved test memory leak ([f36ca41](https://github.com/YoungSx/drive-collector-js/commit/f36ca414574a8f4ed5e65c3c8fd51f5cc5a6e38d))
+
 ## [4.3.0](https://github.com/YoungSx/drive-collector-js/compare/v4.2.3...v4.3.0) (2025-12-31)
 
 
