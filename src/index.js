@@ -159,30 +159,17 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
     return new TextEncoder().encode(text);
   }
 
-  // 检查必需的环境变量
   if (!env.QSTASH_CURRENT_SIGNING_KEY) {
     throw new Error('QSTASH_CURRENT_SIGNING_KEY 未设置');
   }
 
   const signature = request.headers.get('Upstash-Signature');
-  const timestamp = request.headers.get('Upstash-Timestamp');
-
+  
   if (!signature) {
     throw new Error('Missing Upstash-Signature header');
   }
 
-  // 验证时间戳
-  if (timestamp) {
-    const now = Math.floor(Date.now() / 1000);
-    const timestampInt = parseInt(timestamp);
-    const expirationWindow = parseInt(env.SIGNATURE_EXPIRATION_WINDOW || '900'); // 默认15分钟
-
-    if (now - timestampInt > expirationWindow) {
-      throw new Error('Signature expired');
-    }
-  }
-
-  // 获取 body - 兼容测试环境
+  // 获取 body
   let body;
   if (request.arrayBuffer) {
     body = await request.arrayBuffer();
@@ -193,30 +180,20 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
     throw new Error('Request must have arrayBuffer or text method');
   }
 
-  // ✅ 添加调试日志
-  const bodyText = new TextDecoder().decode(body);
-  console.log('🔍 Server received body:', bodyText);
-  console.log('🔍 Body length:', bodyText.length);
-  console.log('🔍 Body bytes:', Array.from(new Uint8Array(body)));
-  
-  // 计算 body hash（用于对比）
-  const bodyHashBuffer = await crypto.subtle.digest('SHA-256', body);
-  const bodyHashArray = Array.from(new Uint8Array(bodyHashBuffer));
-  const bodyHashBase64 = btoa(String.fromCharCode(...bodyHashArray));
-  console.log('🔍 Server calculated body hash:', bodyHashBase64);
-
   // 使用 Receiver 验证
   const Receiver = qstashModule.Receiver;
   const receiver = new Receiver({
     currentSigningKey: env.QSTASH_CURRENT_SIGNING_KEY,
-    nextSigningKey: env.QSTASH_CURRENT_SIGNING_KEY // 简化处理
+    nextSigningKey: env.QSTASH_NEXT_SIGNING_KEY || env.QSTASH_CURRENT_SIGNING_KEY
   });
 
   try {
+    // ✅ 修改：传入完整的参数对象
     const isValid = await receiver.verify({
       signature: signature,
-      body: body,
-      url: request.url
+      body: new Uint8Array(body), // 确保是 Uint8Array
+      url: request.url,
+      clockTolerance: 300 // 添加时钟容差
     });
 
     if (!isValid) {
@@ -224,8 +201,9 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
     }
 
     await logger.debug('签名验证成功', { url: request.url }, ctx);
-    return body;
+    return new Uint8Array(body);
   } catch (error) {
+    await logger.error('Receiver 验证失败', { error: error.message, stack: error.stack }, ctx);
     throw new Error(`Signature verification failed: ${error.message}`);
   }
 }
