@@ -136,4 +136,5 @@ if grep -q '\${.*}' wrangler.toml; then
     exit 1
 fi
 
-echo "wrangler.toml updated successfully"
+# 自动更新 src/index.js 中的版本号
+echo "wrangler.toml updated successfully. VERSION will be injected dynamically via esbuild --define during build."

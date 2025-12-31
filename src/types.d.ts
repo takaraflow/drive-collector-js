@@ -34,6 +34,7 @@ interface Instance {
 
 // Extend global for worker context
 declare global {
+  declare const __VERSION__: string;
   // Worker ID for testing
   var WORKER_ID: string | undefined;
   var __QSTASH_MOCK_VERIFY__: any;

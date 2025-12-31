@@ -6,6 +6,11 @@
 // 检查是否在测试环境
 const isTestEnvironment = typeof process !== 'undefined' && process.env && (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID !== undefined);
 
+// 版本常量 - 构建时动态注入
+/** @type {string | undefined} __VERSION__ */
+/** @ts-expect-error __VERSION__ is injected at build time via esbuild --define */
+const VERSION = typeof __VERSION__ !== 'undefined' ? __VERSION__ : 'dev';
+
 // 全局状态
 let currentProvider = 'cloudflare';
 let failureCount = 0;
@@ -62,6 +67,7 @@ function detectCacheProvider(env) {
  */
 const logger = {
   env: 'production',
+  version: VERSION,
 
   configure({ env = 'production' }) {
     this.env = env;
@@ -72,6 +78,7 @@ const logger = {
     if (span) {
       const attributes = {
         'service.instance.id': "load_balancing",
+        version: this.version,
         ...meta,
         'log.level': 'info',
         'service.name': 'lb-worker-js'
@@ -86,6 +93,7 @@ const logger = {
         timestamp: new Date().toISOString(),
         service: 'lb-worker-js',
         'service.instance.id': 'load_balancing',
+        version: this.version,
         env: this.env,
         ...meta
       };
@@ -100,6 +108,7 @@ const logger = {
           timestamp: new Date().toISOString(),
           level: 'info',
           service: 'lb-worker-js',
+          version: this.version,
           env: this.env,
           message,
           ...meta
@@ -116,6 +125,7 @@ const logger = {
       span.setAttribute('log.level', 'warn');
       const attributes = {
         'service.instance.id': "load_balancing",
+        version: this.version,
         ...meta,
         'log.level': 'warn',
         'service.name': 'lb-worker-js'
@@ -130,6 +140,7 @@ const logger = {
         timestamp: new Date().toISOString(),
         service: 'lb-worker-js',
         'service.instance.id': 'load_balancing',
+        version: this.version,
         env: this.env,
         ...meta
       };
@@ -144,6 +155,7 @@ const logger = {
           timestamp: new Date().toISOString(),
           level: 'warn',
           service: 'lb-worker-js',
+          version: this.version,
           env: this.env,
           message,
           ...meta
@@ -161,6 +173,7 @@ const logger = {
       span.setStatus({ code: 2, message: error.message });
       const attributes = {
         'service.instance.id': "load_balancing",
+        version: this.version,
         ...meta,
         'log.level': 'error',
         'error.message': error.message,
@@ -178,6 +191,7 @@ const logger = {
         timestamp: new Date().toISOString(),
         service: 'lb-worker-js',
         'service.instance.id': 'load_balancing',
+        version: this.version,
         env: this.env,
         'error.message': errorObj.message,
         'error.stack': errorObj.stack,
@@ -194,6 +208,7 @@ const logger = {
           timestamp: new Date().toISOString(),
           level: 'error',
           service: 'lb-worker-js',
+          version: this.version,
           env: this.env,
           message: message instanceof Error ? message.message : message,
           ...meta
@@ -214,6 +229,7 @@ const logger = {
             timestamp: new Date().toISOString(),
             level: 'debug',
             service: 'lb-worker-js',
+            version: this.version,
             env: this.env,
             message,
             ...meta
@@ -1006,10 +1022,10 @@ async function handleRequest(request, env, ctx) {
 
   // 环境变量检查
   if (!env.AXIOM_TOKEN) {
-    console.warn('AXIOM_TOKEN 未设置，日志功能将被禁用');
+    await logger.warn('AXIOM_TOKEN 未设置，日志功能将被禁用', {}, ctx);
   }
   if (!env.QSTASH_CURRENT_SIGNING_KEY && env.SKIP_SIGNATURE_VERIFY !== 'true') {
-    console.warn('QSTASH_CURRENT_SIGNING_KEY 未设置，Webhook 请求将被拒绝');
+    await logger.warn('QSTASH_CURRENT_SIGNING_KEY 未设置，Webhook 请求将被拒绝', {}, ctx);
   }
 
   // 初始化日志配置

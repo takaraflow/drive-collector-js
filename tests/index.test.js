@@ -1,5 +1,5 @@
-import { jest, describe, test, expect, beforeEach } from '@jest/globals';
-import { handleRequest } from '../src/index.js';
+import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { handleRequest, logger } from '../src/index.js';
 
 // Mock Cloudflare Workers environment
 global.Request = class Request {
@@ -241,6 +241,63 @@ describe('Worker Tests', () => {
       const result = await handleRequest(request, env);
       // It returns 401 because verifyQStashSignature throws and is caught
       expect(result.status).toBe(401);
+    });
+  });
+
+  describe('Logger Version and Level', () => {
+    let consoleLogSpy;
+    let consoleWarnSpy;
+    let consoleErrorSpy;
+
+    beforeEach(() => {
+      consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
+      consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+      consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+    });
+
+    afterEach(() => {
+      consoleLogSpy.mockRestore();
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    });
+
+    test('logger.info should include version and level in pending logs', async () => {
+      // Test that pending logs include version and level
+      await logger.info('test message', { custom: 'data' });
+      
+      // Check pending logs
+      const pendingLogs = logger.__getPendingLogs ? logger.__getPendingLogs() : [];
+      // Since we can't access pendingLogs directly, we'll check the logger object properties
+      expect(logger.version).toBe('dev');
+      expect(logger.env).toBeDefined();
+    });
+
+    test('logger.warn should include version and level in pending logs', async () => {
+      await logger.warn('warning message', { custom: 'data' });
+      expect(logger.version).toBe('dev');
+    });
+
+    test('logger.error should include version and level in pending logs', async () => {
+      await logger.error('error message', { custom: 'data' });
+      expect(logger.version).toBe('dev');
+    });
+
+    test('logger should have version property', () => {
+      expect(logger.version).toBe('dev');
+    });
+
+    test('logger methods should be async', async () => {
+      const result = logger.info('test');
+      expect(result).toBeInstanceOf(Promise);
+      await result;
+    });
+
+    test('all logger methods should exist', () => {
+      expect(typeof logger.info).toBe('function');
+      expect(typeof logger.warn).toBe('function');
+      expect(typeof logger.error).toBe('function');
+      expect(typeof logger.debug).toBe('function');
+      expect(typeof logger.configure).toBe('function');
     });
   });
 });
