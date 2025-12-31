@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.2.0](https://github.com/YoungSx/lb-worker-js/compare/v0.1.6...v0.2.0) (2025-12-31)
+
+
+### ✨ Features
+
+* add native Axiom logs batching, retain OTel traces, fix semantic fields ([4baddfd](https://github.com/YoungSx/lb-worker-js/commit/4baddfd6355b1037fa9bd5694d29db4bb7167087))
+* adds consistent instanceId to tracing events ([e2ecc70](https://github.com/YoungSx/lb-worker-js/commit/e2ecc7070e0521fa40818e4f62f8ca7e1cf15cca))
+
 ### [0.1.6](https://github.com/YoungSx/lb-worker-js/compare/v0.1.5...v0.1.6) (2025-12-31)
 
 
