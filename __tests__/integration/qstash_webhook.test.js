@@ -85,8 +85,8 @@ describe("QStash Webhook Integration", () => {
         }));
 
         // Now import index.js
-        const indexModule = await import("../../index.js");
-        handleQStashWebhook = indexModule.handleQStashWebhook;
+        const { handleQStashWebhook: webhookHandler } = await import("../../index.js");
+        handleQStashWebhook = webhookHandler;
 
         // Restore process.exit
         process.exit = originalExit;

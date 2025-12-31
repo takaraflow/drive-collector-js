@@ -100,10 +100,10 @@ export const config = {
         dataset: process.env.AXIOM_DATASET || 'drive-collector',
     },
     redis: {
-        url: process.env.NF_REDIS_URL || process.env.REDIS_URL,
-        host: process.env.NF_REDIS_HOST || process.env.REDIS_HOST,
-        port: process.env.NF_REDIS_PORT || process.env.REDIS_PORT || 6379,
-        password: process.env.NF_REDIS_PASSWORD || process.env.REDIS_PASSWORD,
+        url: (process.env.NF_REDIS_URL && process.env.NF_REDIS_URL.trim() !== '') ? process.env.NF_REDIS_URL : (process.env.REDIS_URL || undefined),
+        host: (process.env.NF_REDIS_HOST && process.env.NF_REDIS_HOST.trim() !== '') ? process.env.NF_REDIS_HOST : (process.env.REDIS_HOST || undefined),
+        port: parseInt(process.env.NF_REDIS_PORT || process.env.REDIS_PORT || '6379', 10),
+        password: (process.env.NF_REDIS_PASSWORD && process.env.NF_REDIS_PASSWORD.trim() !== '') ? process.env.NF_REDIS_PASSWORD : (process.env.REDIS_PASSWORD || undefined),
         tls: {
             enabled: !!process.env.REDIS_TLS_ENABLED || !!process.env.NF_REDIS_TLS_ENABLED || !!process.env.NF_REDIS_URL?.includes('rediss://') || !!process.env.REDIS_URL?.includes('rediss://'),
             rejectUnauthorized: process.env.REDIS_TLS_REJECT_UNAUTHORIZED !== 'false' && process.env.NF_REDIS_TLS_REJECT_UNAUTHORIZED !== 'false',
@@ -129,3 +129,23 @@ if (process.env.RCLONE_CONF_BASE64) fs.writeFileSync(config.configPath, Buffer.f
 
 // 缓存有效期常量
 export const CACHE_TTL = 10 * 60 * 1000; // 缓存有效期 10 分钟
+
+// Export a function to create a default config for tests
+export function createDefaultConfig() {
+    return {
+        redis: {
+            url: undefined,
+            host: undefined,
+            port: 6379,
+            password: undefined,
+            tls: {
+                enabled: false,
+                rejectUnauthorized: true,
+                ca: undefined,
+                cert: undefined,
+                key: undefined,
+                servername: undefined
+            }
+        }
+    };
+}

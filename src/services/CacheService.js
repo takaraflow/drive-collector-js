@@ -13,24 +13,17 @@ export class CacheService {
         // L1 内存缓存配置
         this.l1CacheTtl = 10 * 1000; // 默认 10 秒内存缓存
 
-        // Redis 配置 - 支持多种环境变量格式
+        // Redis 配置 - 直接使用 config.redis 中已处理好优先级的配置
+        // 安全访问配置属性，处理可能的 undefined 情况
         const redisConfig = config.redis || {};
+        this.redisUrl = redisConfig.url;
+        this.redisHost = redisConfig.host;
+        this.redisPort = redisConfig.port || 6379;
+        this.redisPassword = redisConfig.password;
         
-        // 优先使用标准环境变量
-        this.redisUrl = process.env.REDIS_URL || redisConfig.url;
-        this.redisHost = process.env.REDIS_HOST || redisConfig.host;
-        this.redisPort = parseInt(process.env.REDIS_PORT, 10) || redisConfig.port || 6379;
-        this.redisPassword = process.env.REDIS_PASSWORD || redisConfig.password;
-        
-        // 支持 Northflank 环境变量 (NF_ 前缀)
-        if (!this.redisUrl && !this.redisHost) {
-            this.redisUrl = process.env.NF_REDIS_URL;
-            this.redisHost = process.env.NF_REDIS_HOST;
-            this.redisPort = parseInt(process.env.NF_REDIS_PORT, 10) || this.redisPort;
-            this.redisPassword = process.env.NF_REDIS_PASSWORD || this.redisPassword;
-        }
-        
-        this.hasRedis = !!(this.redisUrl || (this.redisHost && this.redisPort));
+        // 只有当明确配置了远程 Host 或提供了 URL 时才启用 Redis
+        // 避免在环境变量为空字符串时退化为 localhost 连接
+        this.hasRedis = !!(this.redisUrl || (this.redisHost && this.redisHost !== '127.0.0.1' && this.redisHost !== 'localhost'));
 
         // Cloudflare KV 配置 - 支持新旧变量名
         this.accountId = process.env.CF_CACHE_ACCOUNT_ID || process.env.CF_KV_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
@@ -136,28 +129,30 @@ export class CacheService {
 
             // 优先使用 URL，否则使用 host/port/password
             if (this.redisUrl) {
-                redisConfig.url = this.redisUrl;
+                // 单独将 URL 传递给 ioredis，避免与其他配置项冲突
+                // ioredis 会自动从 URL 中解析 host, port, password, db
+                this.redisClient = new Redis(this.redisUrl);
             } else {
+                // 使用 host/port/password 方式连接
                 redisConfig.host = this.redisHost;
                 redisConfig.port = this.redisPort;
                 if (this.redisPassword) {
                     redisConfig.password = this.redisPassword;
                 }
+                
+                // 记录Redis配置信息（用于诊断）
+                logger.info('🔄 Redis 初始化配置 (host/port模式)', {
+                    hasHost: !!this.redisHost,
+                    port: this.redisPort,
+                    hasPassword: !!this.redisPassword,
+                    connectTimeout: redisConfig.connectTimeout,
+                    maxRetriesPerRequest: redisConfig.maxRetriesPerRequest,
+                    node_env: process.env.NODE_ENV,
+                    platform: process.platform
+                });
+                
+                this.redisClient = new Redis(redisConfig);
             }
-
-            // 记录Redis配置信息（用于诊断）
-            logger.info('🔄 Redis 初始化配置', {
-                hasUrl: !!this.redisUrl,
-                hasHost: !!this.redisHost,
-                port: this.redisPort,
-                hasPassword: !!this.redisPassword,
-                connectTimeout: redisConfig.connectTimeout,
-                maxRetriesPerRequest: redisConfig.maxRetriesPerRequest,
-                node_env: process.env.NODE_ENV,
-                platform: process.platform
-            });
-
-            this.redisClient = new Redis(redisConfig);
             // 连接事件监听 (增强诊断)
             this.redisClient.on('connect', () => {
                 this.connectTime = Date.now();
