@@ -220,8 +220,21 @@ async function initTelegramClient() {
             connectionTimeout: 15000, // Connection establishment timeout
             socketTimeout: 20000, // Socket read/write timeout
             keepAliveTimeout: 30000, // Keep-alive ping interval
-            // Enhanced logger with timeout awareness
+            // Enhanced logger with timeout awareness - FIXED to include canSend method
             baseLogger: {
+                levels: ["error", "warn", "info", "debug"],
+                _logLevel: "info",
+                canSend: function(level) {
+                    return this._logLevel
+                        ? this.levels.indexOf(this._logLevel) >= this.levels.indexOf(level)
+                        : false;
+                },
+                setLevel: function(level) {
+                    this._logLevel = level;
+                },
+                get logLevel() {
+                    return this._logLevel;
+                },
                 info: logger.info.bind(logger),
                 warn: logger.warn.bind(logger),
                 error: (msg, ...args) => {
