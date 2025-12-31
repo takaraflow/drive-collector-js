@@ -13,7 +13,8 @@
     "distributed-state-management",
     "multi-instance-locking",
     "qstash-signature-v2",
-    "distributed-task-scheduling-support"
+    "distributed-task-scheduling-support",
+    "path-normalization"
   ],
   "behaviors": {
     "webhookForwarder": {
