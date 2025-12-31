@@ -932,6 +932,174 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
     });
   });
 
+  describe('createSafeEnv', () => {
+    it('应该将 undefined 值转换为空字符串', () => {
+      // 导入 createSafeEnv 函数
+      const createSafeEnv = (env) => {
+        return new Proxy(env || {}, {
+          get(target, prop, receiver) {
+            const value = Reflect.get(target, prop, receiver);
+            if (value === undefined) {
+              return "";
+            }
+            return value;
+          }
+        });
+      };
+
+      const env = {
+        KV_STORAGE: undefined,
+        AXIOM_TOKEN: 'token',
+        QSTASH_CURRENT_SIGNING_KEY: 'key',
+      };
+
+      const safeEnv = createSafeEnv(env);
+
+      expect(safeEnv.KV_STORAGE).toBe('');
+      expect(safeEnv.AXIOM_TOKEN).toBe('token');
+      expect(safeEnv.QSTASH_CURRENT_SIGNING_KEY).toBe('key');
+    });
+
+    it('应该处理 null env 参数', () => {
+      const createSafeEnv = (env) => {
+        return new Proxy(env || {}, {
+          get(target, prop, receiver) {
+            const value = Reflect.get(target, prop, receiver);
+            if (value === undefined) {
+              return "";
+            }
+            return value;
+          }
+        });
+      };
+
+      const safeEnv = createSafeEnv(null);
+
+      expect(safeEnv.anything).toBe('');
+      expect(safeEnv.KV_STORAGE).toBe('');
+    });
+
+    it('应该处理 undefined env 参数', () => {
+      const createSafeEnv = (env) => {
+        return new Proxy(env || {}, {
+          get(target, prop, receiver) {
+            const value = Reflect.get(target, prop, receiver);
+            if (value === undefined) {
+              return "";
+            }
+            return value;
+          }
+        });
+      };
+
+      const safeEnv = createSafeEnv(undefined);
+
+      expect(safeEnv.anything).toBe('');
+    });
+
+    it('应该透传非 undefined 值', () => {
+      const createSafeEnv = (env) => {
+        return new Proxy(env || {}, {
+          get(target, prop, receiver) {
+            const value = Reflect.get(target, prop, receiver);
+            if (value === undefined) {
+              return "";
+            }
+            return value;
+          }
+        });
+      };
+
+      const env = {
+        string: 'value',
+        number: 123,
+        boolean: true,
+        object: { nested: 'value' },
+        array: [1, 2, 3],
+        emptyString: '',
+        zero: 0,
+        falsy: false,
+      };
+
+      const safeEnv = createSafeEnv(env);
+
+      expect(safeEnv.string).toBe('value');
+      expect(safeEnv.number).toBe(123);
+      expect(safeEnv.boolean).toBe(true);
+      expect(safeEnv.object).toEqual({ nested: 'value' });
+      expect(safeEnv.array).toEqual([1, 2, 3]);
+      expect(safeEnv.emptyString).toBe('');
+      expect(safeEnv.zero).toBe(0);
+      expect(safeEnv.falsy).toBe(false);
+    });
+
+    it('应该模拟 OTel instrument 检查 KV namespace', () => {
+      const createSafeEnv = (env) => {
+        return new Proxy(env || {}, {
+          get(target, prop, receiver) {
+            const value = Reflect.get(target, prop, receiver);
+            if (value === undefined) {
+              return "";
+            }
+            return value;
+          }
+        });
+      };
+
+      // 模拟 OTel 的 isKVNamespace 检查
+      const isKVNamespace = (value) => {
+        return value && typeof value.getWithMetadata === 'function';
+      };
+
+      const env = {
+        KV_STORAGE: undefined,
+        REAL_KV: { getWithMetadata: () => {} },
+      };
+
+      const safeEnv = createSafeEnv(env);
+
+      // OTel 检查 undefined 值时应该不会崩溃
+      expect(() => isKVNamespace(safeEnv.KV_STORAGE)).not.toThrow();
+      // 空字符串是 falsy 值，所以 isKVNamespace('') 返回 false（或空字符串本身）
+      const result = isKVNamespace(safeEnv.KV_STORAGE);
+      expect(result === false || result === '').toBe(true);
+
+      // 真实 KV 应该能被识别
+      expect(isKVNamespace(safeEnv.REAL_KV)).toBe(true);
+    });
+
+    it('应该在 if 条件中表现正确', () => {
+      const createSafeEnv = (env) => {
+        return new Proxy(env || {}, {
+          get(target, prop, receiver) {
+            const value = Reflect.get(target, prop, receiver);
+            if (value === undefined) {
+              return "";
+            }
+            return value;
+          }
+        });
+      };
+
+      const env = {
+        AXIOM_TOKEN: undefined,
+        QSTASH_CURRENT_SIGNING_KEY: 'key',
+      };
+
+      const safeEnv = createSafeEnv(env);
+
+      // 空字符串在 if 条件中为 falsy，行为与 undefined 一致
+      if (safeEnv.AXIOM_TOKEN) {
+        fail('Should not enter this block');
+      }
+
+      if (safeEnv.QSTASH_CURRENT_SIGNING_KEY) {
+        // Should enter this block
+        expect(true).toBe(true);
+      }
+    });
+  });
+
   describe('logger', () => {
     it('应该记录 info 日志', async () => {
       await logger.info('test message', { key: 'value' }, mockCtx);

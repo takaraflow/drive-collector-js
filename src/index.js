@@ -667,10 +667,33 @@ const handler = {
 };
 
 /**
+ * 修复 @microlabs/otel-cf-workers 库的 Bug
+ * 该库在拦截环境变量访问时，如果值为 undefined 会导致 isKVNamespace 函数报错
+ * TypeError: Cannot read properties of undefined (reading 'getWithMetadata')
+ */
+const createSafeEnv = (env) => {
+  return new Proxy(env || {}, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      // 如果值为 undefined，返回空字符串
+      // 这样 isKVNamespace checks (value.getWithMetadata) 会变成 undefined (safe)
+      // 且空字符串是 falsy 值，不影响一般的 if (env.VAR) 判断
+      if (value === undefined) {
+        return "";
+      }
+      return value;
+    }
+  });
+};
+
+/**
  * Worker 主入口 - 使用 instrument 包装器
  */
 export default {
   async fetch(request, env, ctx) {
+    // 创建安全的环境变量包装器，防止 OTel 库访问 undefined 属性时崩溃
+    const safeEnv = createSafeEnv(env);
+    
     // 如果配置了 Axiom，使用 instrument 包装器
     if (!isTestEnvironment && env.AXIOM_TOKEN && env.AXIOM_DATASET) {
       const config = {
@@ -683,11 +706,11 @@ export default {
           }
         }
       };
-      return instrument(handler, config).fetch(request, env, ctx);
+      return instrument(handler, config).fetch(request, safeEnv, ctx);
     }
     
     // 没有 Axiom 配置，直接处理
-    return handler.fetch(request, env, ctx);
+    return handler.fetch(request, safeEnv, ctx);
   }
 };
 
