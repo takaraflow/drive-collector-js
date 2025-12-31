@@ -11,6 +11,7 @@ let currentProvider = 'cloudflare';
 let failureCount = 0;
 let lastFailureTime = 0;
 let failoverReason = '';
+let pendingLogs = []; // Per-request logs for native Axiom ingest
 
 // 常量
 const ROUND_ROBIN_KEY = 'lb:round_robin_index';
@@ -60,12 +61,25 @@ const logger = {
     const span = trace.getActiveSpan();
     if (span) {
       const attributes = {
-        instanceId: "load_balancing",
+        'service.instance.id': "load_balancing",
         ...meta,
         'log.level': 'info',
         'service.name': 'lb-worker-js'
       };
       span.addEvent(message, attributes);
+    }
+    // Push to pending logs for native Axiom ingest
+    if (typeof pendingLogs !== 'undefined') {
+      const logEntry = {
+        level: 'info',
+        message,
+        timestamp: new Date().toISOString(),
+        service: 'lb-worker-js',
+        'service.instance.id': 'load_balancing',
+        env: this.env,
+        ...meta
+      };
+      pendingLogs.push(logEntry);
     }
     // 使用 console，测试环境会 mock 它
     if (console && console.log) {
@@ -79,12 +93,25 @@ const logger = {
       span.setStatus({ code: 1, message: message });
       span.setAttribute('log.level', 'warn');
       const attributes = {
-        instanceId: "load_balancing",
+        'service.instance.id': "load_balancing",
         ...meta,
         'log.level': 'warn',
         'service.name': 'lb-worker-js'
       };
       span.addEvent(message, attributes);
+    }
+    // Push to pending logs for native Axiom ingest
+    if (typeof pendingLogs !== 'undefined') {
+      const logEntry = {
+        level: 'warn',
+        message,
+        timestamp: new Date().toISOString(),
+        service: 'lb-worker-js',
+        'service.instance.id': 'load_balancing',
+        env: this.env,
+        ...meta
+      };
+      pendingLogs.push(logEntry);
     }
     // 使用 console，测试环境会 mock 它
     if (console && console.warn) {
@@ -99,7 +126,7 @@ const logger = {
       span.recordException(error);
       span.setStatus({ code: 2, message: error.message });
       const attributes = {
-        instanceId: "load_balancing",
+        'service.instance.id': "load_balancing",
         ...meta,
         'log.level': 'error',
         'error.message': error.message,
@@ -107,6 +134,22 @@ const logger = {
         'service.name': 'lb-worker-js'
       };
       span.addEvent('error', attributes);
+    }
+    // Push to pending logs for native Axiom ingest
+    if (typeof pendingLogs !== 'undefined') {
+      const errorObj = message instanceof Error ? message : new Error(message);
+      const logEntry = {
+        level: 'error',
+        message: errorObj.message,
+        timestamp: new Date().toISOString(),
+        service: 'lb-worker-js',
+        'service.instance.id': 'load_balancing',
+        env: this.env,
+        'error.message': errorObj.message,
+        'error.stack': errorObj.stack,
+        ...meta
+      };
+      pendingLogs.push(logEntry);
     }
     // 使用 console，测试环境会 mock 它
     if (console && console.error) {
@@ -675,7 +718,8 @@ export default {
           url: 'https://api.axiom.co/v1/traces',
           headers: {
             'Authorization': `Bearer ${env.AXIOM_TOKEN}`,
-            'X-Axiom-Dataset': env.AXIOM_DATASET
+            'X-Axiom-Dataset': env.AXIOM_DATASET,
+            'X-Axiom-Org-Id': env.AXIOM_ORG_ID || ''
           }
         }
       };
@@ -688,9 +732,51 @@ export default {
 };
 
 /**
+ * Flush pending logs to Axiom
+ */
+async function flushLogs(env, ctx = null) {
+  if (!pendingLogs.length || !env.AXIOM_TOKEN || !env.AXIOM_DATASET) {
+    pendingLogs = [];
+    return;
+  }
+
+  const url = `https://api.axiom.co/v1/datasets/${env.AXIOM_DATASET}/ingest`;
+  const headers = {
+    'Authorization': `Bearer ${env.AXIOM_TOKEN}`,
+    'Content-Type': 'application/json',
+  };
+  if (env.AXIOM_ORG_ID) {
+    headers['X-Axiom-Org-Id'] = env.AXIOM_ORG_ID;
+  }
+
+  // Chunk if > 50 logs
+  const chunkSize = 50;
+  for (let i = 0; i < pendingLogs.length; i += chunkSize) {
+    const chunk = pendingLogs.slice(i, i + chunkSize);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(chunk)
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        await logger.warn('Axiom log ingest failed', { status: res.status, error: err, chunkIndex: i }, ctx);
+      }
+    } catch (e) {
+      await logger.warn('Axiom log flush error', { error: e.message, chunkIndex: i }, ctx);
+    }
+  }
+  pendingLogs = [];
+}
+
+/**
  * Worker 主逻辑
  */
 async function handleRequest(request, env, ctx) {
+  // Reset per-request logs
+  pendingLogs = [];
+
   const normalizedUrl = new URL(request.url);
   normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
 
@@ -787,6 +873,9 @@ async function handleRequest(request, env, ctx) {
   const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], normalizedUrl, request, env, body, ctx);
 
   await logger.debug('负载均衡请求完成', { status: response.status }, ctx);
+
+  // Flush logs to Axiom (fire-and-forget, non-blocking)
+  await flushLogs(env, ctx);
 
   return response;
 }
