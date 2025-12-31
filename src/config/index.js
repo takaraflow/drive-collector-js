@@ -78,7 +78,13 @@ const isRediss = nfRedisUrl.includes('rediss://') || redisUrl.includes('rediss:/
 const forceDisabled = process.env.REDIS_TLS_ENABLED === 'false' || process.env.NF_REDIS_TLS_ENABLED === 'false';
 const forceEnabled = process.env.REDIS_TLS_ENABLED === 'true' || process.env.NF_REDIS_TLS_ENABLED === 'true';
 
+// 优先级：强制禁用 > 强制启用 > URL 协议
 const tlsEnabled = forceDisabled ? false : (forceEnabled || isRediss);
+
+// 日志输出 TLS 配置决策
+if (process.env.NODE_ENV === 'diagnostic' || process.env.NODE_ENV === 'development') {
+    console.log(`[Config] Redis TLS Decision: forceDisabled=${forceDisabled}, forceEnabled=${forceEnabled}, isRediss=${isRediss} => tlsEnabled=${tlsEnabled}`);
+}
 
 export const config = {
     apiId: envConfig.apiId,

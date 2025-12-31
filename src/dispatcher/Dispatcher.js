@@ -40,32 +40,36 @@ export class Dispatcher {
      * @param {Api.TypeUpdate} event 
      */
     static async handle(event) {
-        // logger.debug(`[Dispatcher] 收到原始事件: ${event.className}`);
+        const start = Date.now();
+        
         // 1. 提取上下文信息
+        const ctxStart = Date.now();
         const ctx = this._extractContext(event);
+        const ctxTime = Date.now() - ctxStart;
         if (!ctx.userId) {
-            // logger.debug(`[Dispatcher] 无法提取用户ID: ${event.className}`);
             return;
         }
 
         // 2. 全局前置守卫 (权限、维护模式)
+        const guardStart = Date.now();
         const passed = await this._globalGuard(event, ctx);
+        const guardTime = Date.now() - guardStart;
         if (!passed) {
-            logger.info(`🛡️ 消息被全局守卫拦截 (User: ${ctx.userId})`);
+            logger.info(`[Dispatcher][PERF] 消息被全局守卫拦截 (User: ${ctx.userId}, guard: ${guardTime}ms, total: ${Date.now() - start}ms)`);
             return;
         }
 
         // 3. 路由分发
         // 使用 className 检查替代 instanceof，提高鲁棒性并方便测试
         if (event.className === 'UpdateBotCallbackQuery') {
-            logger.info(`🔘 处理回调: ${event.data?.toString() || '无数据'} (User: ${ctx.userId})`);
+            logger.info(`[Dispatcher][PERF] 回调处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
             await this._handleCallback(event, ctx);
         } else if (event.className === 'UpdateNewMessage' && event.message) {
-            logger.info(`💬 处理消息: ${event.message.message?.slice(0, 20) || '媒体内容'} (User: ${ctx.userId})`);
+            logger.info(`[Dispatcher][PERF] 消息处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
             await this._handleMessage(event, ctx);
-        } else {
-            // logger.debug(`[Dispatcher] 忽略不感兴趣的事件类: ${event.className}`);
         }
+        
+        logger.info(`[Dispatcher][PERF] 总耗时 ${Date.now() - start}ms`);
     }
 
     /**

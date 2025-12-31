@@ -759,7 +759,8 @@ describe("Dispatcher", () => {
       };
 
       await Dispatcher.handle(event);
-      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining("🛡️ 消息被全局守卫拦截"));
+      // Updated to match new log format with [PERF] tag
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining("[Dispatcher][PERF] 消息被全局守卫拦截"));
     });
 
     test("should route to callback handler", async () => {

@@ -69,17 +69,14 @@ export class MessageHandler {
      * @param {object} client - Telegram Client 实例 (用于获取 Bot ID)
      */
     static async handleEvent(event, client) {
+        const start = Date.now();
+        
         // 统一提取 message 对象 (兼容 UpdateNewMessage, Message, UpdateShortMessage 等)
         let message = event.message || event;
         
         // 特殊处理 UpdateBotCallbackQuery，它没有 message 属性，数据在 event 本身
         if (event.className === 'UpdateBotCallbackQuery') {
             message = event; // 暂时将 event 视为消息主体进行处理
-        }
-
-        // 基础事件记录
-        if (message && (message.className === 'Message' || event.className === 'UpdateNewMessage')) {
-            // logger.info(`📩 收到消息 ID: ${message.id}`);
         }
 
         // 0. 过滤自己发送的消息 (防止无限循环)
@@ -122,14 +119,17 @@ export class MessageHandler {
             const lockKey = `msg_lock:${msgId}`;
             
             try {
+                const lockStart = Date.now();
                 const hasLock = await instanceCoordinator.acquireLock(lockKey, 60);
+                const lockTime = Date.now() - lockStart;
                 
                 if (!hasLock) {
-                    logger.debug("跳过重复消息", { msgId, filter: 'distributed', reason: 'lock_unavailable' });
+                    logger.info(`[MessageHandler][PERF] 消息 ${msgId} 锁竞争失败 (lock: ${lockTime}ms)`);
                     // 标记为本地已处理，避免后续重复请求 KV
                     processedMessages.set(msgId, now);
                     return;
                 }
+                logger.info(`[MessageHandler][PERF] 消息 ${msgId} 获取锁耗时 ${lockTime}ms`);
             } catch (lockError) {
                 logger.error(`⚠️ 获取消息锁时发生异常, 降级处理继续执行`, lockError);
                 // 如果锁服务完全挂了，为了不丢消息，我们可以选择继续处理（但这可能导致重复回复）
@@ -148,9 +148,10 @@ export class MessageHandler {
         }
         
         try {
-            // 显式日志，确认进入分发阶段
-            // logger.debug("正在分发消息", { msgId: msgId || 'unknown' });
+            const dispatchStart = Date.now();
             await Dispatcher.handle(event);
+            const dispatchTime = Date.now() - dispatchStart;
+            logger.info(`[MessageHandler][PERF] 消息 ${msgId || 'unknown'} 分发完成，总耗时 ${Date.now() - start}ms (dispatch: ${dispatchTime}ms)`);
         } catch (e) {
             logger.error("Critical: Unhandled Dispatcher Error", e);
         }

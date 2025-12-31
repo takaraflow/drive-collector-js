@@ -61,4 +61,44 @@ describe("Config Module", () => {
     expect(typeof CACHE_TTL).toBe("number");
     expect(CACHE_TTL).toBe(10 * 60 * 1000);
   });
+
+  test("should respect REDIS_TLS_ENABLED=false to override rediss://", async () => {
+    // Test case 1: rediss:// URL with TLS disabled
+    process.env.NF_REDIS_URL = "rediss://user:pass@redis.example.com:6379";
+    process.env.REDIS_TLS_ENABLED = "false";
+    jest.resetModules();
+    
+    const { config: config1 } = await import("../../src/config/index.js");
+    expect(config1.redis.tls.enabled).toBe(false);
+    
+    // Clean up
+    delete process.env.NF_REDIS_URL;
+    delete process.env.REDIS_TLS_ENABLED;
+  });
+
+  test("should enable TLS for rediss:// URL when not explicitly disabled", async () => {
+    // Test case 2: rediss:// URL without TLS disabled
+    process.env.NF_REDIS_URL = "rediss://user:pass@redis.example.com:6379";
+    jest.resetModules();
+    
+    const { config: config2 } = await import("../../src/config/index.js");
+    expect(config2.redis.tls.enabled).toBe(true);
+    
+    // Clean up
+    delete process.env.NF_REDIS_URL;
+  });
+
+  test("should respect NF_REDIS_TLS_ENABLED=false", async () => {
+    // Test case 3: NF_REDIS_TLS_ENABLED=false
+    process.env.NF_REDIS_URL = "rediss://user:pass@redis.example.com:6379";
+    process.env.NF_REDIS_TLS_ENABLED = "false";
+    jest.resetModules();
+    
+    const { config: config3 } = await import("../../src/config/index.js");
+    expect(config3.redis.tls.enabled).toBe(false);
+    
+    // Clean up
+    delete process.env.NF_REDIS_URL;
+    delete process.env.NF_REDIS_TLS_ENABLED;
+  });
 });
