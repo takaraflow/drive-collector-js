@@ -48,6 +48,16 @@ function safeJsonParse(data, context = '') {
 }
 
 /**
+ * 检测缓存提供者
+ */
+function detectCacheProvider(env) {
+  if (env.CACHE_PROVIDER) return env.CACHE_PROVIDER;
+  if (env.CF_CACHE_NAMESPACE_ID) return 'cloudflare';
+  if (env.NF_REDIS_URL) return 'nf-redis';
+  return 'upstash';
+}
+
+/**
  * 日志记录器
  */
 const logger = {
@@ -301,20 +311,73 @@ function parseInstanceData(data) {
 }
 
 /**
+ * 扫描锁键（用于 leader election 提示）
+ */
+async function scanLockKeys(env, ctx = null) {
+  try {
+    const lockPrefixes = ['lock:', 'task:', 'msg_lock:'];
+    let lockCount = 0;
+    
+    for (const prefix of lockPrefixes) {
+      try {
+        const result = await executeWithFailover('_kv_list', env, ctx, prefix);
+        if (result && result.keys) {
+          lockCount += result.keys.length;
+        }
+      } catch (e) {
+        // 忽略单个前缀扫描失败
+        await logger.debug('锁键扫描失败', { prefix, error: e.message }, ctx);
+      }
+    }
+    
+    return lockCount;
+  } catch (error) {
+    await logger.debug('锁键扫描异常', { error: error.message }, ctx);
+    return 0;
+  }
+}
+
+/**
  * 获取活跃实例
  */
 async function getActiveInstances(env, ctx = null) {
   try {
-    const result = await executeWithFailover('_kv_list', env, ctx, 'instance:');
+    // 扫描所有契约键前缀
+    const prefixes = ['instance:', 'lock:', 'task:', 'msg_lock:'];
+    let allKeys = [];
     
-    if (!result || !result.keys) {
+    for (const prefix of prefixes) {
+      try {
+        const result = await executeWithFailover('_kv_list', env, ctx, prefix);
+        if (result && result.keys) {
+          allKeys.push(...result.keys);
+        }
+      } catch (e) {
+        // 忽略单个前缀扫描失败，继续其他前缀
+        await logger.debug('前缀扫描失败', { prefix, error: e.message }, ctx);
+      }
+    }
+
+    if (allKeys.length === 0) {
       return [];
     }
 
     const instances = [];
     const now = Date.now();
 
-    for (const key of result.keys) {
+    // 只处理 instance:* 键，并去重
+    const processedInstances = new Set();
+    for (const key of allKeys) {
+      if (!key.name.startsWith('instance:')) {
+        continue;
+      }
+
+      // 去重检查
+      if (processedInstances.has(key.name)) {
+        continue;
+      }
+      processedInstances.add(key.name);
+
       try {
         const data = await executeWithFailover('_kv_get', env, ctx, key.name);
         const instance = parseInstanceData(data);
@@ -332,7 +395,13 @@ async function getActiveInstances(env, ctx = null) {
       }
     }
 
-    await logger.debug('获取活跃实例', { count: instances.length }, ctx);
+    // 记录锁键数量（用于 leader election 监控）
+    const lockCount = await scanLockKeys(env, ctx);
+    if (lockCount > 0) {
+      await logger.debug('检测到锁键', { lockCount }, ctx);
+    }
+
+    await logger.debug('获取活跃实例', { count: instances.length, totalKeys: allKeys.length }, ctx);
     return instances;
   } catch (error) {
     await logger.error('获取活跃实例失败', { error: error.message }, ctx);
@@ -470,20 +539,24 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx)
  * 故障转移相关函数
  */
 function shouldFailover(error, env) {
-  if (!env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) {
+  // 检查是否有可用的故障转移提供者
+  const hasUpstash = env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN;
+  const hasNFRedis = env.NF_REDIS_URL && env.NF_REDIS_TOKEN;
+  
+  if (!hasUpstash && !hasNFRedis) {
     return false;
   }
 
-  // 如果当前已经是 Upstash 模式，不再故障转移
-  if (currentProvider === 'upstash') {
+  // 如果当前已经是故障转移模式，不再故障转移
+  if (currentProvider === 'upstash' || currentProvider === 'nf-redis') {
     return false;
   }
 
   const errorMessage = error.message.toLowerCase();
   
   // 配额错误或网络错误立即故障转移
-  if (errorMessage.includes('free usage limit') || 
-      errorMessage.includes('quota exceeded') || 
+  if (errorMessage.includes('free usage limit') ||
+      errorMessage.includes('quota exceeded') ||
       errorMessage.includes('rate limit') ||
       errorMessage.includes('fetch failed') ||
       errorMessage.includes('network')) {
@@ -508,18 +581,28 @@ function shouldFailover(error, env) {
 }
 
 function failover(env) {
-  if (!env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) {
-    return false;
+  const hasUpstash = env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN;
+  const hasNFRedis = env.NF_REDIS_URL && env.NF_REDIS_TOKEN;
+  
+  // 优先级：Upstash > NF Redis
+  if (hasUpstash) {
+    currentProvider = 'upstash';
+    logger.info('故障转移到 Upstash Redis', { reason: failoverReason });
+    return true;
+  } else if (hasNFRedis) {
+    currentProvider = 'nf-redis';
+    logger.info('故障转移到 NF Redis', { reason: failoverReason });
+    return true;
   }
-
-  currentProvider = 'upstash';
-  logger.info('故障转移到 Upstash Redis', { reason: failoverReason });
-  return true;
+  
+  return false;
 }
 
 function getCurrentProvider() {
   if (currentProvider === 'upstash') {
     return 'Upstash Redis';
+  } else if (currentProvider === 'nf-redis') {
+    return 'NF Redis';
   }
   return 'Cloudflare KV';
 }
@@ -533,6 +616,53 @@ function isRetryableError(error) {
     msg.includes('network timeout') ||
     msg.includes('fetch failed')
   );
+}
+
+/**
+ * 执行 NF Redis 操作
+ */
+async function executeNFRedis(operation, env, key, value = null) {
+  const baseUrl = env.NF_REDIS_URL;
+  const token = env.NF_REDIS_TOKEN;
+  
+  if (!baseUrl || !token) {
+    throw new Error('NF Redis not configured');
+  }
+
+  const headers = {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  };
+
+  if (operation === '_nf_redis_get') {
+    // GET 请求不需要 Content-Type
+    const getHeaders = { 'Authorization': `Bearer ${token}` };
+    const response = await fetch(`${baseUrl}/get/${key}`, { headers: getHeaders });
+    
+    if (response.status === 404) {
+      await response.body.cancel();
+      return null;
+    }
+    
+    if (!response.ok) {
+      throw new Error(`NF Redis Get Error: ${response.status} ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    return data.result;
+  } else if (operation === '_nf_redis_put') {
+    const response = await fetch(`${baseUrl}/set/${key}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ value })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`NF Redis Put Error: ${response.status} ${response.statusText}`);
+    }
+    
+    return true;
+  }
 }
 
 /**
@@ -578,7 +708,7 @@ async function executeWithFailover(operation, env, ctx, ...args) {
     '_upstash_put': async () => {
       const response = await fetch(`${env.UPSTASH_REDIS_REST_URL}/set/${args[0]}`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`,
           'Content-Type': 'application/json'
         },
@@ -590,12 +720,18 @@ async function executeWithFailover(operation, env, ctx, ...args) {
       }
 
       return true;
+    },
+    '_nf_redis_get': async () => {
+      return await executeNFRedis('_nf_redis_get', env, args[0]);
+    },
+    '_nf_redis_put': async () => {
+      return await executeNFRedis('_nf_redis_put', env, args[0], args[1]);
     }
   };
 
   const operationMap = {
-    '_kv_get': '_upstash_get',
-    '_kv_put': '_upstash_put',
+    '_kv_get': ['_upstash_get', '_nf_redis_get'],
+    '_kv_put': ['_upstash_put', '_nf_redis_put'],
     '_kv_list': null // 不支持 list 的故障转移
   };
 
@@ -609,13 +745,20 @@ async function executeWithFailover(operation, env, ctx, ...args) {
     if (shouldFailover(error, env) && operationMap[operation]) {
       failover(env);
       
-      // 尝试故障转移
-      try {
-        return await operations[operationMap[operation]]();
-      } catch (failoverError) {
-        await logger.error('Failover operation also failed', { operation: operationMap[operation], error: failoverError.message }, ctx);
-        throw failoverError;
+      // 尝试故障转移（按优先级：Upstash -> NF Redis）
+      const failoverOps = operationMap[operation];
+      for (const failoverOp of failoverOps) {
+        try {
+          await logger.info('尝试故障转移', { from: operation, to: failoverOp }, ctx);
+          return await operations[failoverOp]();
+        } catch (failoverError) {
+          await logger.warn('故障转移失败', { operation: failoverOp, error: failoverError.message }, ctx);
+          continue; // 继续尝试下一个
+        }
       }
+      
+      // 所有故障转移都失败
+      throw new Error('All failover operations failed');
     }
 
     throw error;
@@ -659,7 +802,12 @@ export {
   isRetryableError,
   executeWithFailover,
   logger,
-  upstash_get
+  upstash_get,
+  detectCacheProvider,
+  normalizePath,
+  executeNFRedis,
+  scanLockKeys,
+  handleRequest
 };
 
 // 状态访问器（供测试使用）
@@ -771,6 +919,22 @@ async function flushLogs(env, ctx = null) {
 }
 
 /**
+ * 路径映射 - 将契约路径映射到实际路径
+ */
+const PATH_MAP = {
+  '/api/tasks/download-tasks': '/api/tasks/download',
+  '/api/tasks/upload-tasks': '/api/tasks/upload',
+  '/api/tasks/media-batch': '/api/tasks/media-batch'
+};
+
+/**
+ * 规范化路径
+ */
+function normalizePath(pathname) {
+  return PATH_MAP[pathname] || pathname;
+}
+
+/**
  * Worker 主逻辑
  */
 async function handleRequest(request, env, ctx) {
@@ -779,6 +943,18 @@ async function handleRequest(request, env, ctx) {
 
   const normalizedUrl = new URL(request.url);
   normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
+  
+  // 路径规范化：将契约路径映射到实际路径
+  const originalPath = normalizedUrl.pathname;
+  normalizedUrl.pathname = normalizePath(normalizedUrl.pathname);
+  
+  // 记录路径映射（如果发生映射）
+  if (originalPath !== normalizedUrl.pathname) {
+    await logger.info('路径规范化', {
+      original: originalPath,
+      normalized: normalizedUrl.pathname
+    }, ctx);
+  }
 
   // 环境变量检查
   if (!env.AXIOM_TOKEN) {

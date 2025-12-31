@@ -2,7 +2,7 @@
   "manifest_version": "1.1",
   "id": "lb-worker-js",
   "name": "QStash Load Balancer",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "专为 drive-collector-js 设计的高可用负载均衡器，支持 QStash 签名验证、动态实例发现与多层级故障转移。",
   "type": "worker",
   "capabilities": [
@@ -10,7 +10,10 @@
     "dynamic-failover",
     "signature-verification",
     "instance-discovery",
-    "distributed-state-management"
+    "distributed-state-management",
+    "multi-instance-locking",
+    "qstash-signature-v2",
+    "distributed-task-scheduling-support"
   ],
   "behaviors": {
     "webhookForwarder": {
@@ -70,6 +73,18 @@
       {
         "pattern": "instance:{instanceId}",
         "description": "实例元数据"
+      },
+      {
+        "pattern": "lock:*",
+        "description": "分布式锁键"
+      },
+      {
+        "pattern": "task:*",
+        "description": "任务键"
+      },
+      {
+        "pattern": "msg_lock:*",
+        "description": "消息锁键"
       },
       {
         "pattern": "lb:round_robin_index",
@@ -194,6 +209,31 @@
         "type": "string",
         "required": false,
         "description": "运行环境（production/development）"
+      },
+      "CACHE_PROVIDER": {
+        "type": "string",
+        "required": false,
+        "description": "缓存提供者（cloudflare/upstash/nf-redis），自动检测"
+      },
+      "CF_CACHE_NAMESPACE_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare Cache API 命名空间 ID"
+      },
+      "NF_REDIS_URL": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis URL"
+      },
+      "NF_REDIS_TOKEN": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis Token"
+      },
+      "REDIS_TLS": {
+        "type": "string",
+        "required": false,
+        "description": "Redis TLS 配置"
       }
     }
   },

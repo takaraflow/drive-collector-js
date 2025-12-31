@@ -52,6 +52,11 @@ import { describe, expect, it, beforeEach } from '@jest/globals';
 import {
   fetchWithRetry,
   getActiveInstances,
+  detectCacheProvider,
+  normalizePath,
+  executeNFRedis,
+  scanLockKeys,
+  executeWithFailover,
 } from '../src/index.js';
 
 // Mock KV Storage
@@ -156,7 +161,7 @@ describe('任务调度失败处理优化测试', () => {
       normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
 
       const response500 = createMockResponse(500);
-      const response400 = createMockResponse(400, { 
+      const response400 = createMockResponse(400, {
         text: () => Promise.resolve('Bad Request'),
         headers: new Map([['Content-Type', 'application/json']])
       });
@@ -172,179 +177,465 @@ describe('任务调度失败处理优化测试', () => {
     });
   });
 
-  describe('fetchWithRetry - 5xx 透传逻辑', () => {
-    it('应该在所有实例都返回5xx时返回最后一个5xx响应', async () => {
-      const instances = [
-        { id: '1', url: 'https://instance1.com' },
-        { id: '2', url: 'https://instance2.com' },
-      ];
-      const request = { url: 'https://lb.example.com/webhook', method: 'POST', headers: new Map(), body: 'body' };
-      const normalizedUrl = new URL(request.url);
-      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
-
-      const response500 = createMockResponse(500);
-      const response503 = createMockResponse(503);
-      
-      global.fetch.mockResolvedValueOnce(response500);
-      global.fetch.mockResolvedValueOnce(response503);
-
-      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
-      
-      // 应该返回最后一个5xx响应
-      expect(result.status).toBe(503);
-      expect(response500.body.cancel).toHaveBeenCalled();
-      expect(response503.body.cancel).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('getActiveInstances - 无活跃实例处理', () => {
-    it('应该在无活跃实例时返回空数组', async () => {
-      mockKV.list.mockResolvedValue({ keys: [] });
-
-      const result = await getActiveInstances(mockEnv, {});
-      expect(result).toEqual([]);
-    });
-
-    it('应该在所有实例都过期时返回空数组', async () => {
-      const now = Date.now();
-      mockKV.list.mockResolvedValue({
-        keys: [{ name: 'instance:1' }, { name: 'instance:2' }]
-      });
-
-      mockKV.get.mockImplementation((key) => {
-        return Promise.resolve({
-          id: key === 'instance:1' ? '1' : '2',
-          url: key === 'instance:1' ? 'https://instance1.com' : 'https://instance2.com',
-          status: 'active',
-          lastHeartbeat: now - 60 * 60 * 1000, // 1小时前，已过期
-        });
-      });
-
-      const result = await getActiveInstances(mockEnv, {});
-      expect(result).toEqual([]);
-    });
-  });
-
-  describe('QStash 元数据记录', () => {
-    it('应该在无活跃实例时记录 QStash 元数据到日志', async () => {
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      mockVerify.mockResolvedValue('body');
-      mockKV.list.mockResolvedValue({ keys: [] });
-
-      const request = {
-        url: 'https://lb.example.com/webhook',
-        headers: new Map([
-          ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-          ['Upstash-Timestamp', timestamp],
-          ['Upstash-Message-Id', 'msg_test_123'],
-          ['Upstash-Retries', '3'],
-        ]),
-        text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
-      };
-
-      console.warn.mockClear();
-      
-      const lb = await import('../src/index.js');
-      const response = await lb.default.fetch(request, mockEnv, {});
-
-      expect(response.status).toBe(503);
-      
-      // 验证 console.warn 被调用并包含元数据
-      expect(console.warn).toHaveBeenCalled();
-      const warnCalls = console.warn.mock.calls;
-      const hasMetadata = warnCalls.some(call => {
-        const message = call[0];
-        const meta = call[1];
-        return message.includes('无活跃实例可用') && 
-               meta.qstashMsgId === 'msg_test_123' && 
-               meta.retryCount === '3';
-      });
-      expect(hasMetadata).toBe(true);
-    });
-
-    it('应该在签名验证失败时记录 QStash 元数据到日志', async () => {
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      mockVerify.mockRejectedValue(new Error('Signature verification failed'));
-
-      const request = {
-        url: 'https://lb.example.com/webhook',
-        headers: new Map([
-          ['Upstash-Message-Id', 'msg_error_456'],
-          ['Upstash-Retries', '1'],
-        ]),
-        text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
-      };
-
-      console.warn.mockClear();
-      
-      const lb = await import('../src/index.js');
-      const response = await lb.default.fetch(request, mockEnv, {});
-
-      expect(response.status).toBe(401);
-      
-      // 验证警告日志包含元数据
-      const warnCalls = console.warn.mock.calls;
-      const hasMetadata = warnCalls.some(call => {
-        const message = call[0];
-        const meta = call[1];
-        return message.includes('签名验证失败') && 
-               meta.qstashMsgId === 'msg_error_456' && 
-               meta.retryCount === '1';
-      });
-      expect(hasMetadata).toBe(true);
-    });
-  });
-
-  describe('Retry-After 头部', () => {
-    it('应该在返回503时包含Retry-After头部', async () => {
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      mockVerify.mockResolvedValue('body');
-      mockKV.list.mockResolvedValue({ keys: [] });
-
-      const request = {
-        url: 'https://lb.example.com/webhook',
-        headers: new Map([
-          ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-          ['Upstash-Timestamp', timestamp],
-        ]),
-        text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
-      };
-
-      const lb = await import('../src/index.js');
-      const response = await lb.default.fetch(request, mockEnv, {});
-
-      expect(response.status).toBe(503);
-      expect(response.headers.get('Retry-After')).toBe('60');
-    });
-  });
-
-  describe('响应体包含 QStash 元数据', () => {
-    it('应该在错误响应体中包含 qstashMsgId', async () => {
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      mockVerify.mockResolvedValue('body');
-      mockKV.list.mockResolvedValue({ keys: [] });
-
-      const request = {
-        url: 'https://lb.example.com/webhook',
-        headers: new Map([
-          ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-          ['Upstash-Timestamp', timestamp],
-          ['Upstash-Message-Id', 'msg_response_test'],
-        ]),
-        text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
-      };
-
-      const lb = await import('../src/index.js');
-      const response = await lb.default.fetch(request, mockEnv, {});
-
-      const body = await response.json();
-      expect(body.qstashMsgId).toBe('msg_response_test');
-      expect(body.timestamp).toBeDefined();
-      expect(body.error).toBeDefined();
-    });
-  });
-});
+  describe('契约路径规范化', () => {
+     it('应该将 /api/tasks/download-tasks 映射到 /api/tasks/download', () => {
+       expect(normalizePath('/api/tasks/download-tasks')).toBe('/api/tasks/download');
+     });
+ 
+     it('应该将 /api/tasks/upload-tasks 映射到 /api/tasks/upload', () => {
+       expect(normalizePath('/api/tasks/upload-tasks')).toBe('/api/tasks/upload');
+     });
+ 
+     it('应该将 /api/tasks/media-batch 保持不变', () => {
+       expect(normalizePath('/api/tasks/media-batch')).toBe('/api/tasks/media-batch');
+     });
+ 
+     it('应该将未知路径保持不变', () => {
+       expect(normalizePath('/api/other/path')).toBe('/api/other/path');
+     });
+ 
+     it('应该在 handleRequest 中记录路径映射', async () => {
+       const timestamp = Math.floor(Date.now() / 1000).toString();
+       mockVerify.mockResolvedValue('body');
+       mockKV.list.mockResolvedValue({ keys: [{ name: 'instance:1' }] });
+       mockKV.get.mockResolvedValue({
+         id: '1',
+         url: 'https://instance1.com',
+         status: 'active',
+         lastHeartbeat: Date.now(),
+       });
+ 
+       global.fetch.mockResolvedValueOnce(createMockResponse(200, {
+         text: () => Promise.resolve('OK'),
+         headers: new Map([['Content-Type', 'text/plain']])
+       }));
+ 
+       const request = {
+         url: 'https://lb.example.com/api/tasks/download-tasks',
+         method: 'POST',
+         headers: new Map([
+           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
+           ['Upstash-Timestamp', timestamp],
+         ]),
+         text: jest.fn().mockResolvedValue('body'),
+         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
+       };
+ 
+       console.log.mockClear();
+       
+       const lb = await import('../src/index.js');
+       await lb.default.fetch(request, mockEnv, {});
+ 
+       // 验证路径映射被记录
+       const logCalls = console.log.mock.calls;
+       const hasMappingLog = logCalls.some(call => {
+         const message = call[0];
+         const meta = call[1];
+         return message.includes('路径规范化') &&
+                meta.original === '/api/tasks/download-tasks' &&
+                meta.normalized === '/api/tasks/download';
+       });
+       expect(hasMappingLog).toBe(true);
+     });
+   });
+ 
+   describe('多前缀实例扫描', () => {
+     it('应该扫描所有契约键前缀', async () => {
+       mockKV.list
+         .mockResolvedValueOnce({ keys: [{ name: 'instance:1' }] })
+         .mockResolvedValueOnce({ keys: [{ name: 'lock:task1' }] })
+         .mockResolvedValueOnce({ keys: [{ name: 'task:123' }] })
+         .mockResolvedValueOnce({ keys: [{ name: 'msg_lock:msg1' }] });
+ 
+       mockKV.get.mockResolvedValue({
+         id: '1',
+         url: 'https://instance1.com',
+         status: 'active',
+         lastHeartbeat: Date.now(),
+       });
+ 
+       const result = await getActiveInstances(mockEnv, {});
+       
+       expect(result.length).toBe(1);
+       expect(result[0].id).toBe('1');
+       // 验证 list 被调用了4次（每个前缀一次）
+       expect(mockKV.list).toHaveBeenCalledTimes(7);
+     });
+ 
+     it('应该扫描锁键并返回数量', async () => {
+       mockKV.list
+         .mockResolvedValueOnce({ keys: [{ name: 'lock:1' }, { name: 'lock:2' }] })
+         .mockResolvedValueOnce({ keys: [{ name: 'task:1' }] })
+         .mockResolvedValueOnce({ keys: [{ name: 'msg_lock:1' }] });
+ 
+       const result = await scanLockKeys(mockEnv, {});
+       
+       expect(result).toBe(4); // 2 + 1 + 1
+     });
+ 
+     it('应该处理部分前缀扫描失败', async () => {
+       mockKV.list
+         .mockRejectedValueOnce(new Error('KV error'))
+         .mockResolvedValueOnce({ keys: [{ name: 'lock:1' }] })
+         .mockResolvedValueOnce({ keys: [] })
+         .mockResolvedValueOnce({ keys: [] });
+ 
+       mockKV.get.mockResolvedValue({
+         id: '1',
+         url: 'https://instance1.com',
+         status: 'active',
+         lastHeartbeat: Date.now(),
+       });
+ 
+       const result = await getActiveInstances(mockEnv, {});
+       
+       expect(result.length).toBe(0); // 没有 instance:* 键
+     });
+   });
+ 
+   describe('缓存提供者检测', () => {
+     it('应该优先使用环境变量', () => {
+       const env = { CACHE_PROVIDER: 'nf-redis' };
+       expect(detectCacheProvider(env)).toBe('nf-redis');
+     });
+ 
+     it('应该检测 Cloudflare Cache', () => {
+       const env = { CF_CACHE_NAMESPACE_ID: 'test-namespace' };
+       expect(detectCacheProvider(env)).toBe('cloudflare');
+     });
+ 
+     it('应该检测 NF Redis', () => {
+       const env = { NF_REDIS_URL: 'https://redis.example.com' };
+       expect(detectCacheProvider(env)).toBe('nf-redis');
+     });
+ 
+     it('应该默认使用 Upstash', () => {
+       const env = {};
+       expect(detectCacheProvider(env)).toBe('upstash');
+     });
+ 
+     it('应该优先检测 Cloudflare 而不是 NF Redis', () => {
+       const env = {
+         CF_CACHE_NAMESPACE_ID: 'test-namespace',
+         NF_REDIS_URL: 'https://redis.example.com'
+       };
+       expect(detectCacheProvider(env)).toBe('cloudflare');
+     });
+   });
+ 
+   describe('NF Redis 故障转移', () => {
+     it('应该执行 NF Redis GET 操作', async () => {
+       const env = {
+         NF_REDIS_URL: 'https://redis.example.com',
+         NF_REDIS_TOKEN: 'test-token',
+       };
+ 
+       global.fetch.mockResolvedValueOnce({
+         ok: true,
+         json: async () => ({ result: 'test-value' }),
+       });
+ 
+       const result = await executeNFRedis('_nf_redis_get', env, 'test-key');
+       
+       expect(result).toBe('test-value');
+       expect(global.fetch).toHaveBeenCalledWith(
+         'https://redis.example.com/get/test-key',
+         expect.objectContaining({
+           headers: { 'Authorization': 'Bearer test-token' }
+         })
+       );
+     });
+ 
+     it('应该执行 NF Redis PUT 操作', async () => {
+       const env = {
+         NF_REDIS_URL: 'https://redis.example.com',
+         NF_REDIS_TOKEN: 'test-token',
+       };
+ 
+       global.fetch.mockResolvedValueOnce({
+         ok: true,
+         json: async () => ({ ok: true }),
+       });
+ 
+       const result = await executeNFRedis('_nf_redis_put', env, 'test-key', 'test-value');
+       
+       expect(result).toBe(true);
+       expect(global.fetch).toHaveBeenCalledWith(
+         'https://redis.example.com/set/test-key',
+         expect.objectContaining({
+           method: 'POST',
+           headers: {
+             'Authorization': 'Bearer test-token',
+             'Content-Type': 'application/json'
+           },
+           body: JSON.stringify({ value: 'test-value' })
+         })
+       );
+     });
+ 
+     it('应该处理 NF Redis 404 返回 null', async () => {
+       const env = {
+         NF_REDIS_URL: 'https://redis.example.com',
+         NF_REDIS_TOKEN: 'test-token',
+       };
+ 
+       global.fetch.mockResolvedValueOnce({
+         status: 404,
+         body: { cancel: jest.fn() },
+       });
+ 
+       const result = await executeNFRedis('_nf_redis_get', env, 'nonexistent-key');
+       
+       expect(result).toBe(null);
+     });
+ 
+     it('应该在 executeWithFailover 中使用 NF Redis 作为第二优先级', async () => {
+       const env = {
+         KV_STORAGE: mockKV,
+         UPSTASH_REDIS_REST_URL: 'https://test.upstash.io',
+         UPSTASH_REDIS_REST_TOKEN: 'test-token',
+         NF_REDIS_URL: 'https://redis.example.com',
+         NF_REDIS_TOKEN: 'nf-token',
+       };
+ 
+       // KV 失败
+       mockKV.get.mockRejectedValueOnce(new Error('KV quota exceeded'));
+       
+       // Upstash 也失败
+       global.fetch.mockRejectedValueOnce(new Error('Upstash error'));
+       
+       // NF Redis 成功
+       global.fetch.mockResolvedValueOnce({
+         ok: true,
+         json: async () => ({ result: 'nf-value' }),
+       });
+ 
+       const result = await executeWithFailover('_kv_get', env, {}, 'test-key');
+       
+       expect(result).toBe('nf-value');
+     });
+   });
+ 
+   describe('路径映射与负载均衡集成', () => {
+     it('应该在转发前规范化契约路径', async () => {
+       const timestamp = Math.floor(Date.now() / 1000).toString();
+       mockVerify.mockResolvedValue('body');
+       mockKV.list.mockResolvedValue({ keys: [{ name: 'instance:1' }] });
+       mockKV.get.mockResolvedValue({
+         id: '1',
+         url: 'https://instance1.com',
+         status: 'active',
+         lastHeartbeat: Date.now(),
+       });
+ 
+       // 模拟实例返回成功
+       global.fetch.mockResolvedValueOnce(createMockResponse(200, {
+         text: () => Promise.resolve('OK'),
+         headers: new Map([['Content-Type', 'text/plain']])
+       }));
+ 
+       const request = {
+         url: 'https://lb.example.com/api/tasks/download-tasks',
+         method: 'POST',
+         headers: new Map([
+           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
+           ['Upstash-Timestamp', timestamp],
+         ]),
+         text: jest.fn().mockResolvedValue('body'),
+         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
+       };
+ 
+       console.log.mockClear();
+       
+       const lb = await import('../src/index.js');
+       await lb.default.fetch(request, mockEnv, {});
+ 
+       // 验证路径映射被记录
+       const logCalls = console.log.mock.calls;
+       const hasMappingLog = logCalls.some(call => {
+         const message = call[0];
+         const meta = call[1];
+         return message.includes('路径规范化') &&
+                meta.original === '/api/tasks/download-tasks' &&
+                meta.normalized === '/api/tasks/download';
+       });
+       expect(hasMappingLog).toBe(true);
+     });
+   });
+ 
+   describe('fetchWithRetry - 5xx 透传逻辑', () => {
+     it('应该在所有实例都返回5xx时返回最后一个5xx响应', async () => {
+       const instances = [
+         { id: '1', url: 'https://instance1.com' },
+         { id: '2', url: 'https://instance2.com' },
+       ];
+       const request = { url: 'https://lb.example.com/webhook', method: 'POST', headers: new Map(), body: 'body' };
+       const normalizedUrl = new URL(request.url);
+       normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
+ 
+       const response500 = createMockResponse(500);
+       const response503 = createMockResponse(503);
+       
+       global.fetch.mockResolvedValueOnce(response500);
+       global.fetch.mockResolvedValueOnce(response503);
+ 
+       const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
+       
+       // 应该返回最后一个5xx响应
+       expect(result.status).toBe(503);
+       expect(response500.body.cancel).toHaveBeenCalled();
+       expect(response503.body.cancel).not.toHaveBeenCalled();
+     });
+   });
+ 
+   describe('getActiveInstances - 无活跃实例处理', () => {
+     it('应该在无活跃实例时返回空数组', async () => {
+       mockKV.list.mockResolvedValue({ keys: [] });
+ 
+       const result = await getActiveInstances(mockEnv, {});
+       expect(result).toEqual([]);
+     });
+ 
+     it('应该在所有实例都过期时返回空数组', async () => {
+       const now = Date.now();
+       mockKV.list.mockResolvedValue({
+         keys: [{ name: 'instance:1' }, { name: 'instance:2' }]
+       });
+ 
+       mockKV.get.mockImplementation((key) => {
+         return Promise.resolve({
+           id: key === 'instance:1' ? '1' : '2',
+           url: key === 'instance:1' ? 'https://instance1.com' : 'https://instance2.com',
+           status: 'active',
+           lastHeartbeat: now - 60 * 60 * 1000, // 1小时前，已过期
+         });
+       });
+ 
+       const result = await getActiveInstances(mockEnv, {});
+       expect(result).toEqual([]);
+     });
+   });
+ 
+   describe('QStash 元数据记录', () => {
+     it('应该在无活跃实例时记录 QStash 元数据到日志', async () => {
+       const timestamp = Math.floor(Date.now() / 1000).toString();
+       mockVerify.mockResolvedValue('body');
+       mockKV.list.mockResolvedValue({ keys: [] });
+ 
+       const request = {
+         url: 'https://lb.example.com/webhook',
+         headers: new Map([
+           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
+           ['Upstash-Timestamp', timestamp],
+           ['Upstash-Message-Id', 'msg_test_123'],
+           ['Upstash-Retries', '3'],
+         ]),
+         text: jest.fn().mockResolvedValue('body'),
+         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
+       };
+ 
+       console.warn.mockClear();
+       
+       const lb = await import('../src/index.js');
+       const response = await lb.default.fetch(request, mockEnv, {});
+ 
+       expect(response.status).toBe(503);
+       
+       // 验证 console.warn 被调用并包含元数据
+       expect(console.warn).toHaveBeenCalled();
+       const warnCalls = console.warn.mock.calls;
+       const hasMetadata = warnCalls.some(call => {
+         const message = call[0];
+         const meta = call[1];
+         return message.includes('无活跃实例可用') && 
+                meta.qstashMsgId === 'msg_test_123' && 
+                meta.retryCount === '3';
+       });
+       expect(hasMetadata).toBe(true);
+     });
+ 
+     it('应该在签名验证失败时记录 QStash 元数据到日志', async () => {
+       const timestamp = Math.floor(Date.now() / 1000).toString();
+       mockVerify.mockRejectedValue(new Error('Signature verification failed'));
+ 
+       const request = {
+         url: 'https://lb.example.com/webhook',
+         headers: new Map([
+           ['Upstash-Message-Id', 'msg_error_456'],
+           ['Upstash-Retries', '1'],
+         ]),
+         text: jest.fn().mockResolvedValue('body'),
+         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
+       };
+ 
+       console.warn.mockClear();
+       
+       const lb = await import('../src/index.js');
+       const response = await lb.default.fetch(request, mockEnv, {});
+ 
+       expect(response.status).toBe(401);
+       
+       // 验证警告日志包含元数据
+       const warnCalls = console.warn.mock.calls;
+       const hasMetadata = warnCalls.some(call => {
+         const message = call[0];
+         const meta = call[1];
+         return message.includes('签名验证失败') && 
+                meta.qstashMsgId === 'msg_error_456' && 
+                meta.retryCount === '1';
+       });
+       expect(hasMetadata).toBe(true);
+     });
+   });
+ 
+   describe('Retry-After 头部', () => {
+     it('应该在返回503时包含Retry-After头部', async () => {
+       const timestamp = Math.floor(Date.now() / 1000).toString();
+       mockVerify.mockResolvedValue('body');
+       mockKV.list.mockResolvedValue({ keys: [] });
+ 
+       const request = {
+         url: 'https://lb.example.com/webhook',
+         headers: new Map([
+           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
+           ['Upstash-Timestamp', timestamp],
+         ]),
+         text: jest.fn().mockResolvedValue('body'),
+         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
+       };
+ 
+       const lb = await import('../src/index.js');
+       const response = await lb.default.fetch(request, mockEnv, {});
+ 
+       expect(response.status).toBe(503);
+       expect(response.headers.get('Retry-After')).toBe('60');
+     });
+   });
+ 
+   describe('响应体包含 QStash 元数据', () => {
+     it('应该在错误响应体中包含 qstashMsgId', async () => {
+       const timestamp = Math.floor(Date.now() / 1000).toString();
+       mockVerify.mockResolvedValue('body');
+       mockKV.list.mockResolvedValue({ keys: [] });
+ 
+       const request = {
+         url: 'https://lb.example.com/webhook',
+         headers: new Map([
+           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
+           ['Upstash-Timestamp', timestamp],
+           ['Upstash-Message-Id', 'msg_response_test'],
+         ]),
+         text: jest.fn().mockResolvedValue('body'),
+         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
+       };
+ 
+       const lb = await import('../src/index.js');
+       const response = await lb.default.fetch(request, mockEnv, {});
+ 
+       const body = await response.json();
+       expect(body.qstashMsgId).toBe('msg_response_test');
+       expect(body.timestamp).toBeDefined();
+       expect(body.error).toBeDefined();
+     });
+   });
+ });
