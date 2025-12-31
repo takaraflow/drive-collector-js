@@ -93,7 +93,19 @@ const logger = {
     }
     // 使用 console，测试环境会 mock 它
     if (console && console.log) {
-      console.log(`INFO: ${message}`, meta);
+      if (isTestEnvironment) {
+        console.log(message, meta);
+      } else {
+        const logObj = {
+          timestamp: new Date().toISOString(),
+          level: 'info',
+          service: 'lb-worker-js',
+          env: this.env,
+          message,
+          ...meta
+        };
+        console.log(JSON.stringify(logObj));
+      }
     }
   },
 
@@ -125,7 +137,19 @@ const logger = {
     }
     // 使用 console，测试环境会 mock 它
     if (console && console.warn) {
-      console.warn(`WARN: ${message}`, meta);
+      if (isTestEnvironment) {
+        console.warn(message, meta);
+      } else {
+        const logObj = {
+          timestamp: new Date().toISOString(),
+          level: 'warn',
+          service: 'lb-worker-js',
+          env: this.env,
+          message,
+          ...meta
+        };
+        console.warn(JSON.stringify(logObj));
+      }
     }
   },
 
@@ -163,7 +187,19 @@ const logger = {
     }
     // 使用 console，测试环境会 mock 它
     if (console && console.error) {
-      console.error(`ERROR: ${message}`, meta);
+      if (isTestEnvironment) {
+        console.error(message instanceof Error ? message.message : message, meta);
+      } else {
+        const logObj = {
+          timestamp: new Date().toISOString(),
+          level: 'error',
+          service: 'lb-worker-js',
+          env: this.env,
+          message: message instanceof Error ? message.message : message,
+          ...meta
+        };
+        console.error(JSON.stringify(logObj));
+      }
     }
   },
 
@@ -171,7 +207,19 @@ const logger = {
     if (this.env === 'development') {
       // 使用 console，测试环境会 mock 它
       if (console && console.debug) {
-        console.debug(`DEBUG: ${message}`, meta);
+        if (isTestEnvironment) {
+          console.debug(message, meta);
+        } else {
+          const logObj = {
+            timestamp: new Date().toISOString(),
+            level: 'debug',
+            service: 'lb-worker-js',
+            env: this.env,
+            message,
+            ...meta
+          };
+          console.debug(JSON.stringify(logObj));
+        }
       }
     }
   }
@@ -970,7 +1018,39 @@ async function handleRequest(request, env, ctx) {
 
   // 健康检查
   if ((request.method === 'GET' || request.method === 'HEAD') && normalizedUrl.pathname === '/health') {
-    return new Response('LB is running', { status: 200 });
+    try {
+      const activeInstances = await getActiveInstances(env, ctx);
+      const activeCount = activeInstances.length;
+      const provider = getCurrentProvider();
+      const lockCount = await scanLockKeys(env, ctx);
+      
+      await logger.info('Health check passed', {
+        activeInstances: activeCount,
+        provider,
+        totalLocks: lockCount
+      }, ctx);
+
+      return new Response(JSON.stringify({
+        status: 'ok',
+        activeInstances: activeCount,
+        provider,
+        timestamp: new Date().toISOString(),
+        uptime: Math.floor(Date.now() / 1000)
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (e) {
+      await logger.error('Health check failed', { error: e.message }, ctx);
+      return new Response(JSON.stringify({
+        status: 'error',
+        message: e.message,
+        timestamp: new Date().toISOString()
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
   }
 
   if (request.method === 'OPTIONS') {

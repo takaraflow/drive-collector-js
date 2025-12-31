@@ -21,7 +21,7 @@ global.Response = class Response {
   constructor(body, options) {
     this.body = body;
     this.status = options?.status || 200;
-    this.headers = new Map(Object.entries(options?.headers || {}));
+    this.headers = new Headers(options?.headers || {});
   }
   async json() {
     return JSON.parse(this.body);
@@ -153,8 +153,11 @@ describe('Worker Tests', () => {
       const request = new Request('https://test.url/health');
       const result = await handleRequest(request, env);
       expect(result.status).toBe(200);
-      const text = await result.text();
-      expect(text).toBe('LB is running');
+      expect(result.headers.get('content-type')).toContain('application/json');
+      const json = await result.json();
+      expect(json.status).toBe('ok');
+      expect(json.activeInstances).toBeGreaterThanOrEqual(0);
+      expect(json.timestamp).toBeDefined();
     });
 
     test('should handle root path (forwarded)', async () => {
