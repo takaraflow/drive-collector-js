@@ -30,9 +30,10 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@microlabs/otel-cf-workers": "^0.1.0",
+    "@microlabs/otel-cf-workers": "^0.1.1",
     "@opentelemetry/api": "^1.9.0",
-    "@upstash/qstash": "^2.6.1"
+    "@upstash/qstash": "^2.6.1",
+    "node-fetch": "^3.3.2"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241205.0",

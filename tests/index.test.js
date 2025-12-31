@@ -95,7 +95,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
     mockVerify.mockReset();
     mockVerify.mockImplementation(async (options) => {
       // 模拟验证成功，返回传入的 body
-      return options.body;
+      return true;
     });
     // 确保全局 mock 存在
     global.__QSTASH_MOCK_VERIFY__ = mockVerify;
@@ -116,15 +116,15 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         url: 'https://test.url',
       };
 
-      // mockVerify 返回 body，表示验证通过
-      mockVerify.mockResolvedValue(body);
+      // mockVerify 返回 true，表示验证通过
+      mockVerify.mockResolvedValue(true);
 
       const result = await verifyQStashSignature(request, mockEnv);
       
       // 验证 mock 被调用
       expect(mockVerify).toHaveBeenCalledWith({
         signature,
-        body,
+        body: new TextEncoder().encode(body),
         url: 'https://test.url',
       });
       
@@ -135,7 +135,6 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       const request = {
         headers: new Map(),
         text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
       };
 
       await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Missing Upstash-Signature header');
@@ -195,7 +194,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
       };
 
-      mockVerify.mockResolvedValue(body);
+      mockVerify.mockResolvedValue(true);
 
       const result = await verifyQStashSignature(request, mockEnv);
       expect(new TextDecoder().decode(result)).toBe(body);
@@ -230,7 +229,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
       };
 
-      mockVerify.mockResolvedValue(body);
+      mockVerify.mockResolvedValue(true);
 
       const result = await verifyQStashSignature(request, customEnv);
       expect(new TextDecoder().decode(result)).toBe(body);
@@ -250,13 +249,13 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         url: 'https://test.url',
       };
 
-      mockVerify.mockResolvedValue(body);
+      mockVerify.mockResolvedValue(true);
 
       const result = await verifyQStashSignature(request, mockEnv);
       
       expect(mockVerify).toHaveBeenCalledWith({
         signature: jwtSignature,
-        body,
+        body: new TextEncoder().encode(body),
         url: 'https://test.url',
       });
       expect(new TextDecoder().decode(result)).toBe(body);
@@ -699,7 +698,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
   describe('Integration Tests', () => {
     it('应该在集成测试中正确转发请求', async () => {
       const timestamp = Math.floor(Date.now() / 1000).toString();
-      mockVerify.mockResolvedValue('body');
+      mockVerify.mockResolvedValue(true);
 
       // Mock KV
       mockKV.list.mockResolvedValue({
@@ -743,7 +742,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
 
     it('应该在无活跃实例时返回503', async () => {
       const timestamp = Math.floor(Date.now() / 1000).toString();
-      mockVerify.mockResolvedValue('body');
+      mockVerify.mockResolvedValue(true);
 
       mockKV.list.mockResolvedValue({ keys: [] });
 
@@ -799,7 +798,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         type: "download"
       });
 
-      mockVerify.mockResolvedValue(downloadBody);
+      mockVerify.mockResolvedValue(true);
 
       // Mock KV
       mockKV.list.mockResolvedValue({
