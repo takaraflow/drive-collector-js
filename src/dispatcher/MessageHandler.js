@@ -151,7 +151,12 @@ export class MessageHandler {
             const dispatchStart = Date.now();
             await Dispatcher.handle(event);
             const dispatchTime = Date.now() - dispatchStart;
-            logger.info(`[MessageHandler][PERF] 消息 ${msgId || 'unknown'} 分发完成，总耗时 ${Date.now() - start}ms (dispatch: ${dispatchTime}ms)`);
+            const totalTime = Date.now() - start;
+            logger.info(`[MessageHandler][PERF] 消息 ${msgId || 'unknown'} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+            // 性能监控：如果总耗时超过 500ms，记录警告
+            if (totalTime > 500) {
+                logger.warn(`[MessageHandler][PERF] 慢响应警告: 消息处理耗时 ${totalTime}ms，超过阈值 500ms`);
+            }
         } catch (e) {
             logger.error("Critical: Unhandled Dispatcher Error", e);
         }

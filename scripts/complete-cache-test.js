@@ -5,12 +5,39 @@
  * 一次性运行所有诊断，检查 Redis 连接、TLS 配置和消息响应性能
  */
 
-import { config } from '../src/config/index.js';
-import { createClient } from 'redis';
-import { logger } from '../src/services/logger.js';
+import ioredis from 'ioredis';
 
-// 模拟环境变量用于测试
-process.env.NODE_ENV = 'diagnostic';
+// 模拟环境变量用于测试 - 如果没有设置则使用 .env 中的值
+if (!process.env.NODE_ENV) process.env.NODE_ENV = 'production';
+if (!process.env.API_ID) process.env.API_ID = '123123';
+if (!process.env.API_HASH) process.env.API_HASH = '123123131231';
+if (!process.env.BOT_TOKEN) process.env.BOT_TOKEN = '12312:123123-123123';
+
+// 如果 .env 文件存在，加载它
+try {
+    const fs = await import('fs');
+    const path = await import('path');
+    const envPath = path.join(process.cwd(), '.env');
+    if (fs.existsSync(envPath)) {
+        const envContent = fs.readFileSync(envPath, 'utf8');
+        const envLines = envContent.split('\n');
+        for (const line of envLines) {
+            const trimmed = line.trim();
+            if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+                const [key, ...valueParts] = trimmed.split('=');
+                const value = valueParts.join('=').replace(/^"|"$/g, '').replace(/^'|'$/g, '');
+                if (!process.env[key.trim()]) {
+                    process.env[key.trim()] = value;
+                }
+            }
+        }
+    }
+} catch (e) {
+    console.log('⚠️ 无法加载 .env 文件:', e.message);
+}
+
+// 动态导入 config，确保环境变量已设置
+const { config } = await import('../src/config/index.js');
 
 async function testConfig() {
     console.log('\n=== 1. 配置诊断 ===');
@@ -27,6 +54,19 @@ async function testConfig() {
     if (process.env.REDIS_TLS_ENABLED === 'false' || process.env.NF_REDIS_TLS_ENABLED === 'false') {
         console.log('✅  强制禁用 TLS 已设置');
     }
+    
+    // 检查是否有 Redis 配置
+    if (!config.redis.host && !config.redis.url) {
+        console.log('❌ 未配置 Redis，无法进行后续测试');
+        return false;
+    }
+    
+    // 检查是否有 Redis 密码
+    if (!config.redis.password) {
+        console.log('⚠️  未配置 Redis 密码，可能无法连接');
+    }
+    
+    return true;
 }
 
 async function testConnection() {
@@ -37,23 +77,37 @@ async function testConnection() {
         return;
     }
     
-    const client = createClient({
-        socket: {
-            host: config.redis.host,
-            port: config.redis.port,
-            tls: config.redis.tls.enabled,
+    // 使用 ioredis 的标准配置方式
+    const client = new ioredis({
+        host: config.redis.host,
+        port: config.redis.port,
+        password: config.redis.password,
+        // 如果有 URL，优先使用 URL
+        ...(config.redis.url ? { url: config.redis.url } : {}),
+        // TLS 配置
+        tls: config.redis.tls.enabled ? {
             rejectUnauthorized: config.redis.tls.rejectUnauthorized,
             ca: config.redis.tls.ca,
             cert: config.redis.tls.cert,
             key: config.redis.tls.key,
             servername: config.redis.tls.servername
-        },
-        password: config.redis.password,
-        url: config.redis.url
+        } : undefined,
+        // 连接优化参数
+        connectTimeout: 15000,
+        maxRetriesPerRequest: 5,
+        lazyConnect: true
     });
     
     try {
         console.log('正在连接...');
+        console.log('配置详情:', {
+            host: config.redis.host,
+            port: config.redis.port,
+            hasPassword: !!config.redis.password,
+            tlsEnabled: config.redis.tls.enabled,
+            tlsRejectUnauthorized: config.redis.tls.rejectUnauthorized
+        });
+        
         const start = Date.now();
         await client.connect();
         const connectTime = Date.now() - start;
@@ -68,7 +122,7 @@ async function testConnection() {
         // 测试 Set/Get
         const testKey = 'diag:test:' + Date.now();
         const setStart = Date.now();
-        await client.set(testKey, 'test_value', { EX: 10 });
+        await client.set(testKey, 'test_value', 'EX', 10);
         const setTime = Date.now() - setStart;
         
         const getStart = Date.now();
@@ -88,7 +142,14 @@ async function testConnection() {
         if (error.message.includes('AUTH')) {
             console.log('   提示: 认证失败，请检查密码');
         }
-        await client.quit();
+        if (error.message.includes('ETIMEDOUT')) {
+            console.log('   提示: 连接超时，请检查网络和 Redis 服务状态');
+        }
+        try {
+            await client.quit();
+        } catch (e) {
+            // 忽略 quit 错误
+        }
         throw error;
     }
 }
@@ -101,15 +162,17 @@ async function testPerformance() {
         return;
     }
     
-    const client = createClient({
-        socket: {
-            host: config.redis.host,
-            port: config.redis.port,
-            tls: config.redis.tls.enabled,
-            rejectUnauthorized: config.redis.tls.rejectUnauthorized
-        },
+    const client = new ioredis({
+        host: config.redis.host,
+        port: config.redis.port,
         password: config.redis.password,
-        url: config.redis.url
+        ...(config.redis.url ? { url: config.redis.url } : {}),
+        tls: config.redis.tls.enabled ? {
+            rejectUnauthorized: config.redis.tls.rejectUnauthorized
+        } : undefined,
+        connectTimeout: 15000,
+        maxRetriesPerRequest: 5,
+        lazyConnect: true
     });
     
     try {
@@ -118,14 +181,14 @@ async function testPerformance() {
         // 模拟消息锁竞争
         const lockKey = 'perf:test:lock';
         const start = Date.now();
-        const lock = await client.set(lockKey, 'instance1', { NX: true, EX: 5 });
+        const lock = await client.set(lockKey, 'instance1', 'NX', 'EX', 5);
         const lockTime = Date.now() - start;
         console.log(`✅ 消息锁获取: ${lockTime}ms (结果: ${lock})`);
         
         // 模拟去重检查
         const msgKey = 'perf:test:msg:12345';
         const setStart = Date.now();
-        await client.set(msgKey, Date.now(), { EX: 60 });
+        await client.set(msgKey, Date.now().toString(), 'EX', 60);
         const setMsgTime = Date.now() - setStart;
         
         const getStart = Date.now();
