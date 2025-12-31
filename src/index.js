@@ -194,7 +194,8 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
   const Receiver = qstashModule.Receiver;
   const receiver = new Receiver({
     currentSigningKey: env.QSTASH_CURRENT_SIGNING_KEY,
-    nextSigningKey: env.QSTASH_NEXT_SIGNING_KEY || env.QSTASH_CURRENT_SIGNING_KEY
+    nextSigningKey: env.QSTASH_NEXT_SIGNING_KEY || env.QSTASH_CURRENT_SIGNING_KEY,
+    disableReplayProtection: true
   });
 
   try {
@@ -213,8 +214,15 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
     await logger.debug('签名验证成功', { url: request.url }, ctx);
     return new Uint8Array(body);
   } catch (error) {
-    await logger.error('Receiver 验证失败', { error: error.message, stack: error.stack }, ctx);
-    throw new Error(`Signature verification failed: ${error.message}`);
+    const isInfraError = error.message.includes('getWithMetadata');
+
+    await logger.error(
+      isInfraError ? 'QStash Receiver 内部错误' : 'QStash 签名校验失败',
+      { error: error.message },
+      ctx
+    );
+
+    throw error;
   }
 }
 
