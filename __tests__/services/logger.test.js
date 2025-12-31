@@ -197,16 +197,22 @@ describe('Logger Service', () => {
       });
     });
 
-    test('when axiom.ingest fails, console.error is called', async () => {
-      mockIngest.mockRejectedValueOnce(new Error('Axiom ingest failed'));
+    test('when axiom.ingest fails, retry and fallback to console + structured error', async () => {
+      // Mock ingest to fail 3 times then succeed (or fail all)
+      mockIngest.mockRejectedValue(new Error('Axiom ingest failed'));
 
       const message = 'test message';
       const data = { test: true };
 
       await logger.error(message, data);
 
-      expect(mockIngest).toHaveBeenCalledTimes(1);
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Axiom ingest error:', 'Axiom ingest failed');
+      // Should retry 3 times (initial + 3 retries = 4 calls)
+      expect(mockIngest).toHaveBeenCalledTimes(4);
+      // Should log to console.error for the final failure
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Axiom ingest failed after retries:', 'Axiom ingest failed');
+      // Should also call logger.error for structured fallback (which will try to ingest again, but since we're in test, it'll fallback to console)
+      // The second logger.error call is from the fallback logic, which will also fail and log to console
+      expect(consoleErrorSpy).toHaveBeenCalled();
     });
   });
 
@@ -270,6 +276,121 @@ describe('Logger Service', () => {
       expect(logger.canSend('warn')).toBe(true);
       expect(logger.canSend('error')).toBe(true);
       expect(logger.canSend('debug')).toBe(true);
+    });
+  });
+
+  describe('Telegram Console Proxy', () => {
+    let enableTelegramConsoleProxy;
+    let originalConsoleError;
+    let originalConsoleWarn;
+    let originalConsoleLog;
+
+    beforeEach(async () => {
+      // Import the proxy function
+      const loggerModule = await import('../../src/services/logger.js');
+      enableTelegramConsoleProxy = loggerModule.enableTelegramConsoleProxy;
+      
+      // Save original console methods
+      originalConsoleError = console.error;
+      originalConsoleWarn = console.warn;
+      originalConsoleLog = console.log;
+    });
+
+    afterEach(() => {
+      // Restore original console methods
+      console.error = originalConsoleError;
+      console.warn = originalConsoleWarn;
+      console.log = originalConsoleLog;
+    });
+
+    test('proxy captures TIMEOUT in updates.js and calls logger.error with service: telegram', async () => {
+      // Setup Axiom config
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+      logger = loggerModule.logger;
+
+      // Enable proxy
+      enableTelegramConsoleProxy();
+
+      // Mock console.error to capture the proxy call
+      const mockConsoleError = jest.fn();
+      console.error = mockConsoleError;
+
+      // Simulate Telegram library error
+      console.error('TIMEOUT in updates.js', 'some args');
+
+      // Wait for async logger call
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Verify logger.error was called with correct payload
+      expect(mockIngest).toHaveBeenCalledTimes(1);
+      const payload = mockIngest.mock.calls[0][1][0];
+      expect(payload.level).toBe('error');
+      expect(payload.service).toBe('telegram');
+      expect(payload.source).toBe('console_proxy');
+      expect(payload.message).toContain('Telegram library TIMEOUT captured');
+      expect(payload.message).toContain('TIMEOUT in updates.js');
+    });
+
+    test('proxy captures timeout patterns and calls logger.error', async () => {
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+      logger = loggerModule.logger;
+
+      enableTelegramConsoleProxy();
+      const mockConsoleError = jest.fn();
+      console.error = mockConsoleError;
+
+      // Various timeout patterns
+      console.error('ETIMEDOUT');
+      console.error('ECONNRESET');
+      console.error('Connection timed out');
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(mockIngest).toHaveBeenCalledTimes(3);
+      mockIngest.mock.calls.forEach(call => {
+        const payload = call[1][0];
+        expect(payload.level).toBe('error');
+        expect(payload.service).toBe('telegram');
+        expect(payload.source).toBe('console_proxy');
+      });
+    });
+
+    test('proxy does not capture non-timeout errors', async () => {
+      const loggerModule = await import('../../src/services/logger.js');
+      loggerModule.resetLogger();
+      const configModule = await import('../../src/config/index.js');
+      configModule.config.axiom = {
+        token: 'test-token',
+        orgId: 'test-org',
+        dataset: 'test-dataset'
+      };
+      logger = loggerModule.logger;
+
+      enableTelegramConsoleProxy();
+      const mockConsoleError = jest.fn();
+      console.error = mockConsoleError;
+
+      // Non-timeout error
+      console.error('Some other error');
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Should not call logger.error (no ingest)
+      expect(mockIngest).not.toHaveBeenCalled();
     });
   });
 

@@ -126,7 +126,27 @@ const log = async (instanceId, level, message, data = {}) => {
   try {
     await axiom.ingest(config.axiom.dataset, [payload]);
   } catch (err) {
-    console.error('Axiom ingest error:', err.message);
+    // Retry logic with exponential backoff (max 3 attempts)
+    let retries = 0;
+    let lastError = err;
+    while (retries < 3) {
+      const delay = Math.pow(2, retries) * 1000; // 1s, 2s, 4s
+      await new Promise(resolve => setTimeout(resolve, delay));
+      try {
+        await axiom.ingest(config.axiom.dataset, [payload]);
+        return; // Success
+      } catch (retryErr) {
+        lastError = retryErr;
+        retries++;
+      }
+    }
+    // Fallback: log to console and structured error
+    console.error('Axiom ingest failed after retries:', lastError.message);
+    logger.error('Axiom ingest failed for telegram timeout', {
+      service: 'telegram',
+      error: serializeError(lastError),
+      payload: payload
+    });
   }
 };
 
@@ -180,21 +200,21 @@ export const enableTelegramConsoleProxy = () => {
   // Proxy console.error to capture Telegram library errors
   console.error = (...args) => {
     const msg = args[0]?.toString() || '';
+    const msgLower = msg.toLowerCase();
     
-    // Detect Telegram timeout errors from _updateLoop
-    if (msg.includes('TIMEOUT') && msg.includes('updates.js')) {
-      logger.error('Telegram _updateLoop TIMEOUT captured', {
-        message: msg,
-        fullArgs: args.length > 1 ? args.slice(1) : undefined,
-        source: 'console_proxy'
-      });
-    }
-    // Detect other timeout patterns
-    else if (msg.includes('timeout') || msg.includes('ETIMEDOUT') || msg.includes('ECONNRESET')) {
-      logger.warn('Telegram network error captured', {
-        message: msg,
-        fullArgs: args.length > 1 ? args.slice(1) : undefined,
-        source: 'console_proxy'
+    // Detect Telegram timeout errors (case-insensitive, broader patterns)
+    const isTimeoutPattern =
+      msgLower.includes('timeout') ||
+      msg.includes('ETIMEDOUT') ||
+      msg.includes('ECONNRESET') ||
+      msg.includes('timed out');
+    
+    if (isTimeoutPattern) {
+      logger.error(`Telegram library TIMEOUT captured: ${msg}`, {
+        service: 'telegram',
+        source: 'console_proxy',
+        args: args.length > 1 ? args.slice(1) : undefined,
+        timestamp: Date.now()
       });
     }
     

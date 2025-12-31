@@ -255,7 +255,7 @@ async function initTelegramClient() {
                     // Enhanced error logging for timeout patterns
                     const msgStr = msg?.toString() || '';
                     if (msgStr.includes('TIMEOUT') || msgStr.includes('timeout') || msgStr.includes('ETIMEDOUT')) {
-                        logger.warn(`⚠️ Telegram timeout detected: ${msgStr}`, ...args);
+                        logger.error(`⚠️ Telegram timeout detected: ${msgStr}`, { service: 'telegram', ...args });
                         // Trigger circuit breaker
                         telegramCircuitBreaker.onFailure();
                     } else {
@@ -277,6 +277,9 @@ async function initTelegramClient() {
             ...proxyOptions
         };
 
+        // Enable console proxy early to capture library errors
+        enableTelegramConsoleProxy();
+        
         // Use circuit breaker for client creation
         telegramClient = await telegramCircuitBreaker.execute(async () => {
             return new TelegramClient(
@@ -289,9 +292,6 @@ async function initTelegramClient() {
         
         // 设置事件监听器
         setupEventListeners(telegramClient);
-        
-        // 在client.start()后调用enableTelegramConsoleProxy()
-        // 这将在后续的connectAndStart函数中处理
         
         return telegramClient;
     } finally {
@@ -342,7 +342,7 @@ function setupEventListeners(client) {
             errorMsg.includes("RPCError");
         
         if (isTimeoutError) {
-            logger.warn(`⚠️ Telegram TIMEOUT error detected: ${errorMsg}`);
+            logger.error(`⚠️ Telegram TIMEOUT error detected: ${errorMsg}`, { service: 'telegram' });
             telegramCircuitBreaker.onFailure();
             
             // Enhanced reconnection with exponential backoff
@@ -351,17 +351,17 @@ function setupEventListeners(client) {
             reconnectTimeout = setTimeout(() => handleConnectionIssue(true), backoffDelay);
             
         } else if (isConnectionError) {
-            logger.warn(`⚠️ Telegram connection error: ${errorMsg}`);
+            logger.warn(`⚠️ Telegram connection error: ${errorMsg}`, { service: 'telegram' });
             handleConnectionIssue(true);
             
         } else if (isBinaryReaderError) {
-            logger.warn(`⚠️ Telegram BinaryReader error: ${errorMsg}`);
+            logger.error(`⚠️ Telegram BinaryReader error: ${errorMsg}`, { service: 'telegram' });
             telegramCircuitBreaker.onFailure();
             if (reconnectTimeout) clearTimeout(reconnectTimeout);
             reconnectTimeout = setTimeout(() => handleConnectionIssue(true), 2000);
             
         } else {
-            logger.error("❌ Telegram client error:", err);
+            logger.error("❌ Telegram client error:", { service: 'telegram', error: err });
         }
     });
 
@@ -401,8 +401,7 @@ function setupEventListeners(client) {
             }
             // If no updates for 120 seconds, consider update loop stuck and reset
             else if (timeSinceLastUpdate > 120000) {
-                logger.error(`🚨 Update loop STUCK (${Math.floor(timeSinceLastUpdate / 1000)}s), triggering full reset`);
-                logger.error('Update loop STUCK', { duration: timeSinceLastUpdate });
+                logger.error(`🚨 Update loop STUCK (${Math.floor(timeSinceLastUpdate / 1000)}s), triggering full reset`, { service: 'telegram', duration: timeSinceLastUpdate });
                 telegramCircuitBreaker.onFailure();
                 consecutiveUpdateTimeouts++;
                 

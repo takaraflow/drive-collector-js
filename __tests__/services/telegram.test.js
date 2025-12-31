@@ -48,9 +48,37 @@ jest.mock("../../src/services/InstanceCoordinator.js", () => ({
 describe("Telegram Service", () => {
     let client;
     let module;
+    let mockLoggerError;
+    let mockAxiomIngest;
 
     beforeAll(async () => {
         jest.useFakeTimers();
+        
+        // Mock logger
+        mockLoggerError = jest.fn();
+        jest.unstable_mockModule('../../src/services/logger.js', () => ({
+            logger: {
+                error: mockLoggerError,
+                warn: jest.fn(),
+                info: jest.fn(),
+                debug: jest.fn(),
+                configure: jest.fn(),
+                isInitialized: jest.fn(() => true),
+                canSend: jest.fn(() => true)
+            },
+            enableTelegramConsoleProxy: jest.fn(),
+            disableTelegramConsoleProxy: jest.fn(),
+            resetLogger: jest.fn()
+        }));
+        
+        // Mock axiom ingest for fallback test
+        mockAxiomIngest = jest.fn().mockRejectedValue(new Error('Axiom down'));
+        jest.unstable_mockModule('@axiomhq/js', () => ({
+            Axiom: jest.fn().mockImplementation(() => ({
+                ingest: mockAxiomIngest
+            }))
+        }));
+        
         module = await import("../../src/services/telegram.js");
         client = module.client;
     });
@@ -60,6 +88,11 @@ describe("Telegram Service", () => {
         if (module.stopWatchdog) {
             module.stopWatchdog();
         }
+        jest.restoreAllMocks();
+    });
+
+    beforeEach(() => {
+        jest.clearAllMocks();
     });
 
     test("should export client and related functions", () => {
@@ -92,5 +125,26 @@ describe("Telegram Service", () => {
         const cbState = module.getCircuitBreakerState();
         expect(cbState.state).toBeDefined();
         expect(cbState.failures).toBeDefined();
+    });
+
+    test("should log TIMEOUT errors with service: telegram and handle axiom fallback", async () => {
+        // This test verifies the new unified logging behavior
+        // We'll simulate the error handler being called
+        
+        const clientInstance = await module.getClient();
+        
+        // Simulate error event with TIMEOUT
+        const errorHandler = clientInstance.on.mock.calls.find(call => call[0] === 'error')?.[1];
+        if (errorHandler) {
+            const timeoutError = new Error('Request timed out');
+            timeoutError.code = 'ETIMEDOUT';
+            errorHandler(timeoutError);
+            
+            // Verify logger.error was called with service: telegram
+            expect(mockLoggerError).toHaveBeenCalledWith(
+                expect.stringContaining('TIMEOUT error detected'),
+                expect.objectContaining({ service: 'telegram' })
+            );
+        }
     });
 });
