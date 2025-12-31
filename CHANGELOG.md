@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.3.0](https://github.com/YoungSx/drive-collector-js/compare/v4.2.3...v4.3.0) (2025-12-31)
+
+
+### 🔧 其他任务
+
+* improves logger instance ID fallback handling ([3e6e726](https://github.com/YoungSx/drive-collector-js/commit/3e6e7265f9bcc1c8b20bee02b60995976030e770))
+
+
+### ✨ 新特性
+
+* add Redis TLS configuration and connection diagnostics ([668e07d](https://github.com/YoungSx/drive-collector-js/commit/668e07d7e28cccca0bf41ede8e186cd39eb92fa9))
+* enhances Telegram client stability with circuit breaker pattern ([673ff08](https://github.com/YoungSx/drive-collector-js/commit/673ff080e659f467cb53e9a5a94b88bc1d1a98bc))
+* improves Redis configuration flexibility and TLS support ([094fd3c](https://github.com/YoungSx/drive-collector-js/commit/094fd3c075d877c9c373b99db58b4e476fe6b3bc))
+* **telegram:** enhance timeout config and monitoring ([22d2174](https://github.com/YoungSx/drive-collector-js/commit/22d217497a136eaedb8af136e670ae331d288854))
+
+
+### 🐛 问题修复
+
+* enhances Redis configuration and test setup for CacheService ([fe54a7b](https://github.com/YoungSx/drive-collector-js/commit/fe54a7b6ba66409642ba6314b492c886bc06cc1e))
+* enhances Telegram client stability with health monitoring and error handling ([b33738a](https://github.com/YoungSx/drive-collector-js/commit/b33738afa2fdbf7ad88502c85bba9d970bb361d2))
+* improves Redis connection resilience with configurable retry and restart logic ([6cf6ca2](https://github.com/YoungSx/drive-collector-js/commit/6cf6ca2de66989840ae3d646b0c55c6ad7ee77ac))
+* removes Redis and Telegram debugging scripts ([1cf8390](https://github.com/YoungSx/drive-collector-js/commit/1cf839055feb75f607842235de2f49f215cdb0b8))
+* resolve Telegram updates timeout by improving reconnection logic and watchdog ([814d5d8](https://github.com/YoungSx/drive-collector-js/commit/814d5d82dfbb69afa36eee14eb25803d053850f8))
+* updates cache service to handle null Redis client safely ([f2ac271](https://github.com/YoungSx/drive-collector-js/commit/f2ac271e21579317eca762ffe35ee618f0ce710d))
+
+
+### ♻️ 代码重构
+
+* improves error handling and retry logic across services ([78223ad](https://github.com/YoungSx/drive-collector-js/commit/78223ad5b96c35b19e4f60700c3b7b9d160f507c))
+
 ### [4.2.3](https://github.com/YoungSx/drive-collector-js/compare/v4.2.2...v4.2.3) (2025-12-30)
 
 
