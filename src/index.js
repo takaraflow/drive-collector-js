@@ -16,58 +16,11 @@ let failoverReason = '';
 const ROUND_ROBIN_KEY = 'lb:round_robin_index';
 const HEARTBEAT_TIMEOUT = 15 * 60 * 1000; // 15分钟
 
-// 模块缓存
-let qstashModule = null;
-
 // 静态导入 OpenTelemetry API
 import { trace } from '@opentelemetry/api';
 import { instrument } from '@microlabs/otel-cf-workers';
-
-/**
- * 动态导入模块（用于测试兼容）
- */
-async function importModules() {
-  if (isTestEnvironment) {
-    // 测试环境：使用 mock
-    if (!qstashModule) {
-      qstashModule = {
-        Receiver: class {
-          constructor(options) {
-            this.currentSigningKey = options.currentSigningKey;
-            this.nextSigningKey = options.nextSigningKey;
-          }
-          async verify(options) {
-            // 检查是否有全局 mock 验证器
-            if (global.__QSTASH_MOCK_VERIFY__) {
-              return global.__QSTASH_MOCK_VERIFY__(options);
-            }
-            // 默认验证成功
-            return true;
-          }
-        },
-        SignatureError: class SignatureError extends Error {
-          constructor(message) {
-            super(message);
-            this.name = 'SignatureError';
-          }
-        }
-      };
-    }
-    return;
-  }
-
-  // 生产环境：导入真实模块
-  if (!qstashModule) {
-    try {
-      // 强制使用 @upstash/qstash/cloudflare 导出的 serve 逻辑
-      // 虽然它只导出 serve，但我们可以通过它来验证
-      const { serve } = await import('@upstash/qstash/cloudflare');
-      qstashModule = { serve };
-    } catch (e) {
-      console.warn('QStash Cloudflare not available:', e.message);
-    }
-  }
-}
+// 静态导入 QStash Receiver（生产环境使用）
+import { Receiver } from '@upstash/qstash';
 
 /**
  * 稳健的 JSON 解析函数，支持自动修复无引号键
@@ -166,7 +119,7 @@ const logger = {
 };
 
 /**
- * 验证 QStash 签名
+ * 验证 QStash 签名 - 重构版本
  */
 async function verifyQStashSignature(request, env, isGetRequest = false, ctx = null) {
   // 跳过签名验证
@@ -179,84 +132,99 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
     return new TextEncoder().encode(text);
   }
 
+  // 检查密钥配置
   if (!env.QSTASH_CURRENT_SIGNING_KEY) {
     throw new Error('QSTASH_CURRENT_SIGNING_KEY 未设置');
   }
 
+  // 获取签名头
   const signature = request.headers.get('Upstash-Signature');
-  if (!signature) throw new Error('Missing Upstash-Signature header');
-
-  const timestamp = request.headers.get('Upstash-Timestamp');
-  if (timestamp) {
-    const now = Math.floor(Date.now() / 1000);
-    const expWindow = parseInt(env.SIGNATURE_EXPIRATION_WINDOW || '900');
-    if (now - parseInt(timestamp) > expWindow) throw new Error('Signature expired');
+  if (!signature) {
+    throw new Error('Missing Upstash-Signature header');
   }
 
-  // 如果是 GET 请求，直接返回 null，不读取 body
+  // 检测签名类型（JWT 或 HMAC）
+  const isJwt = signature.split('.').length === 3;
+
+  // 获取时间戳并检查过期（仅对非 JWT 签名）
+  const timestamp = request.headers.get('Upstash-Timestamp');
+  if (!isJwt && timestamp) {
+    const now = Math.floor(Date.now() / 1000);
+    const expWindow = parseInt(env.SIGNATURE_EXPIRATION_WINDOW || '900');
+    if (now - parseInt(timestamp) > expWindow) {
+      throw new Error('Signature expired');
+    }
+  }
+
+  // GET/HEAD 请求不读取 body
   if (isGetRequest) {
     return null;
   }
 
-  // 读取 body
-  let body;
-  if (request.arrayBuffer) {
+  // 读取 body 数据（支持 mock 和真实 Request）
+  let bodyData;
+  let bodyString;
+  
+  if (request.text) {
+    // 真实 Request 对象
+    bodyString = await request.text();
+    bodyData = new TextEncoder().encode(bodyString);
+  } else if (request.arrayBuffer) {
+    // Mock 对象
     const buffer = await request.arrayBuffer();
-    body = new Uint8Array(buffer);
+    bodyData = new Uint8Array(buffer);
+    bodyString = new TextDecoder().decode(bodyData);
   } else {
-    const text = await request.text();
-    body = new TextEncoder().encode(text);
+    throw new Error('Request object must have text() or arrayBuffer() method');
   }
 
-  // 在测试环境中使用 mock 验证
-  if (global.__QSTASH_MOCK_VERIFY__) {
+  // 测试环境 mock 验证
+  if (isTestEnvironment && typeof globalThis !== 'undefined' && globalThis.__QSTASH_MOCK_VERIFY__) {
     try {
-      // 测试期望 body 是 Uint8Array，所以传递 Uint8Array
-      const isValid = await global.__QSTASH_MOCK_VERIFY__({
+      const isValid = await globalThis.__QSTASH_MOCK_VERIFY__({
         signature,
-        body: body,
+        body: bodyData, // 测试期望 Uint8Array
         url: request.url,
         clockTolerance: 300
       });
       if (!isValid) throw new Error('Signature verification failed');
       // 返回 Uint8Array 以匹配测试期望
-      return body;
+      return bodyData;
     } catch (e) {
       await logger.error('QStash mock 验证失败', { error: e.message }, ctx);
       throw e;
     }
   }
 
-  // 尝试从 @upstash/qstash 导入
+  // 生产环境：使用静态导入的 Receiver
   try {
-    const { Receiver } = await import('@upstash/qstash');
     const receiver = new Receiver({
       currentSigningKey: env.QSTASH_CURRENT_SIGNING_KEY,
       nextSigningKey: env.QSTASH_NEXT_SIGNING_KEY || env.QSTASH_CURRENT_SIGNING_KEY,
     });
-    const bodyString = new TextDecoder().decode(body);
+
+    // SDK 期望 string 类型的 body
     const isValid = await receiver.verify({
       signature,
       body: bodyString,
       url: request.url,
       clockTolerance: 300
     });
-    if (!isValid) throw new Error('Signature verification failed');
+
+    if (!isValid) {
+      throw new Error('Signature verification failed');
+    }
+
     // 返回 Uint8Array 以匹配测试期望
-    return body instanceof Uint8Array ? body : new Uint8Array(body);
+    return bodyData;
   } catch (e) {
     // 如果是签名验证失败，直接抛出
     if (e.message === 'Signature verification failed') {
       throw e;
     }
-    // 如果导入失败，提供更友好的错误信息
-    if (e.message.includes('Cannot find module') || e.message.includes('Invalid Compact JWS')) {
-      await logger.error('QStash 模块加载失败，请检查依赖安装', { error: e.message }, ctx);
-      throw new Error('QStash 模块不可用，请检查 @upstash/qstash 是否正确安装');
-    }
-    // 其他错误
+    // 其他错误（如密钥无效、格式错误等）
     await logger.error('QStash 验证失败', { error: e.message }, ctx);
-    throw e;
+    throw new Error(`Signature verification failed: ${e.message}`);
   }
 }
 
@@ -661,7 +629,6 @@ export { getCurrentProviderState, setCurrentProviderState };
  */
 const handler = {
   async fetch(request, env, ctx) {
-    await importModules();
     return handleRequest(request, env, ctx);
   }
 };
