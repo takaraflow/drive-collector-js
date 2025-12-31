@@ -27,6 +27,9 @@ describe('Logger Service', () => {
     // Reset modules to ensure clean state
     jest.resetModules();
 
+    // Reset Axiom mock implementation to default successful state
+    mockIngest.mockResolvedValue(undefined);
+
     // Spy on console methods
     consoleInfoSpy = jest.spyOn(console, 'info').mockImplementation();
     consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
@@ -210,9 +213,8 @@ describe('Logger Service', () => {
       expect(mockIngest).toHaveBeenCalledTimes(4);
       // Should log to console.error for the final failure
       expect(consoleErrorSpy).toHaveBeenCalledWith('Axiom ingest failed after retries:', 'Axiom ingest failed');
-      // Should also call logger.error for structured fallback (which will try to ingest again, but since we're in test, it'll fallback to console)
-      // The second logger.error call is from the fallback logic, which will also fail and log to console
-      expect(consoleErrorSpy).toHaveBeenCalled();
+      // Should also call console.error for structured fallback (using originalConsoleError now)
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Failed payload:', expect.objectContaining({ service: 'unknown' }));
     });
   });
 
@@ -281,14 +283,16 @@ describe('Logger Service', () => {
 
   describe('Telegram Console Proxy', () => {
     let enableTelegramConsoleProxy;
+    let disableTelegramConsoleProxy;
     let originalConsoleError;
     let originalConsoleWarn;
     let originalConsoleLog;
 
     beforeEach(async () => {
-      // Import the proxy function
+      // Import the proxy functions
       const loggerModule = await import('../../src/services/logger.js');
       enableTelegramConsoleProxy = loggerModule.enableTelegramConsoleProxy;
+      disableTelegramConsoleProxy = loggerModule.disableTelegramConsoleProxy;
       
       // Save original console methods
       originalConsoleError = console.error;
@@ -301,6 +305,8 @@ describe('Logger Service', () => {
       console.error = originalConsoleError;
       console.warn = originalConsoleWarn;
       console.log = originalConsoleLog;
+      // Disable proxy if enabled
+      disableTelegramConsoleProxy();
     });
 
     test('proxy captures TIMEOUT in updates.js and calls logger.error with service: telegram', async () => {
@@ -317,10 +323,6 @@ describe('Logger Service', () => {
 
       // Enable proxy
       enableTelegramConsoleProxy();
-
-      // Mock console.error to capture the proxy call
-      const mockConsoleError = jest.fn();
-      console.error = mockConsoleError;
 
       // Simulate Telegram library error
       console.error('TIMEOUT in updates.js', 'some args');
@@ -350,8 +352,6 @@ describe('Logger Service', () => {
       logger = loggerModule.logger;
 
       enableTelegramConsoleProxy();
-      const mockConsoleError = jest.fn();
-      console.error = mockConsoleError;
 
       // Various timeout patterns
       console.error('ETIMEDOUT');
@@ -381,8 +381,6 @@ describe('Logger Service', () => {
       logger = loggerModule.logger;
 
       enableTelegramConsoleProxy();
-      const mockConsoleError = jest.fn();
-      console.error = mockConsoleError;
 
       // Non-timeout error
       console.error('Some other error');

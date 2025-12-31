@@ -140,10 +140,11 @@ const log = async (instanceId, level, message, data = {}) => {
         retries++;
       }
     }
-    // Fallback: log to console and structured error
-    console.error('Axiom ingest failed after retries:', lastError.message);
-    logger.error('Axiom ingest failed for telegram timeout', {
-      service: 'telegram',
+    // Fallback: log to console only (avoid recursive calls)
+    // Use original console.error to avoid proxy recursion
+    originalConsoleError.call(console, 'Axiom ingest failed after retries:', lastError.message);
+    originalConsoleError.call(console, 'Failed payload:', {
+      service: data.service || 'unknown',
       error: serializeError(lastError),
       payload: payload
     });
@@ -202,12 +203,13 @@ export const enableTelegramConsoleProxy = () => {
     const msg = args[0]?.toString() || '';
     const msgLower = msg.toLowerCase();
     
-    // Detect Telegram timeout errors (case-insensitive, broader patterns)
+    // Enhanced timeout detection - covers all variants from the plan
     const isTimeoutPattern =
       msgLower.includes('timeout') ||
       msg.includes('ETIMEDOUT') ||
       msg.includes('ECONNRESET') ||
-      msg.includes('timed out');
+      msg.includes('timed out') ||
+      msg.includes('TIMEOUT');
     
     if (isTimeoutPattern) {
       logger.error(`Telegram library TIMEOUT captured: ${msg}`, {

@@ -68,7 +68,17 @@ describe("Telegram Service", () => {
             },
             enableTelegramConsoleProxy: jest.fn(),
             disableTelegramConsoleProxy: jest.fn(),
-            resetLogger: jest.fn()
+            resetLogger: jest.fn(),
+            setInstanceIdProvider: jest.fn(),
+            default: {
+                error: mockLoggerError,
+                warn: jest.fn(),
+                info: jest.fn(),
+                debug: jest.fn(),
+                configure: jest.fn(),
+                isInitialized: jest.fn(() => true),
+                canSend: jest.fn(() => true)
+            }
         }));
         
         // Mock axiom ingest for fallback test
