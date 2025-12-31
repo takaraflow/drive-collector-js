@@ -4,6 +4,10 @@ jest.unstable_mockModule("../../src/services/telegram.js", () => ({
     client: {
         getMe: jest.fn(),
     },
+    getUpdateHealth: jest.fn(() => ({
+        lastUpdate: Date.now() - 30000,
+        timeSince: 30000
+    })),
 }));
 
 jest.unstable_mockModule("../../src/services/d1.js", () => ({
@@ -255,6 +259,48 @@ describe("NetworkDiagnostic", () => {
             NetworkDiagnostic._checkRclone();
 
             expect(spawnSync).toHaveBeenCalledWith("rclone", ["version"], expect.any(Object));
+        });
+    });
+
+    describe("_checkUpdateLoopHealth", () => {
+        it("should return ok when update loop is healthy", async () => {
+            const mockGetUpdateHealth = await import("../../src/services/telegram.js").then(m => m.getUpdateHealth);
+            mockGetUpdateHealth.mockReturnValue({
+                lastUpdate: Date.now() - 30000,
+                timeSince: 30000
+            });
+
+            const result = await NetworkDiagnostic._checkUpdateLoopHealth();
+
+            expect(result.status).toBe("ok");
+            expect(result.message).toContain("更新循环正常");
+            expect(result.details.timeSinceSeconds).toBe(30);
+        });
+
+        it("should return warning when update loop is slow", async () => {
+            const mockGetUpdateHealth = await import("../../src/services/telegram.js").then(m => m.getUpdateHealth);
+            mockGetUpdateHealth.mockReturnValue({
+                lastUpdate: Date.now() - 95000,
+                timeSince: 95000
+            });
+
+            const result = await NetworkDiagnostic._checkUpdateLoopHealth();
+
+            expect(result.status).toBe("warning");
+            expect(result.message).toContain("可能卡住");
+            expect(result.details.timeSinceSeconds).toBe(95);
+        });
+
+        it("should return error when getUpdateHealth throws", async () => {
+            const mockGetUpdateHealth = await import("../../src/services/telegram.js").then(m => m.getUpdateHealth);
+            mockGetUpdateHealth.mockImplementation(() => {
+                throw new Error("Health check failed");
+            });
+
+            const result = await NetworkDiagnostic._checkUpdateLoopHealth();
+
+            expect(result.status).toBe("error");
+            expect(result.message).toContain("无法检查");
         });
     });
 

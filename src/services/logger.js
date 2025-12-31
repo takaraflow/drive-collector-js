@@ -163,10 +163,91 @@ export const logger = {
     canSend: (level) => true
 };
 
+/**
+ * Enable console proxy for Telegram library errors
+ * Captures console.error calls from GramJS and routes them to structured logging
+ */
+let consoleProxyEnabled = false;
+const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
+const originalConsoleLog = console.log;
+
+export const enableTelegramConsoleProxy = () => {
+  if (consoleProxyEnabled) return;
+  
+  consoleProxyEnabled = true;
+  
+  // Proxy console.error to capture Telegram library errors
+  console.error = (...args) => {
+    const msg = args[0]?.toString() || '';
+    
+    // Detect Telegram timeout errors from _updateLoop
+    if (msg.includes('TIMEOUT') && msg.includes('updates.js')) {
+      logger.error('Telegram _updateLoop TIMEOUT captured', {
+        message: msg,
+        fullArgs: args.length > 1 ? args.slice(1) : undefined,
+        source: 'console_proxy'
+      });
+    }
+    // Detect other timeout patterns
+    else if (msg.includes('timeout') || msg.includes('ETIMEDOUT') || msg.includes('ECONNRESET')) {
+      logger.warn('Telegram network error captured', {
+        message: msg,
+        fullArgs: args.length > 1 ? args.slice(1) : undefined,
+        source: 'console_proxy'
+      });
+    }
+    
+    // Call original
+    originalConsoleError.call(console, ...args);
+  };
+  
+  // Proxy console.warn for completeness
+  console.warn = (...args) => {
+    const msg = args[0]?.toString() || '';
+    
+    if (msg.includes('TIMEOUT') || msg.includes('timeout')) {
+      logger.warn('Telegram timeout warning captured', {
+        message: msg,
+        source: 'console_proxy'
+      });
+    }
+    
+    originalConsoleWarn.call(console, ...args);
+  };
+  
+  console.log = (...args) => {
+    const msg = args[0]?.toString() || '';
+    
+    // Capture connection state logs
+    if (msg.includes('connected') || msg.includes('disconnected') || msg.includes('connection')) {
+      logger.info('Telegram connection event captured', {
+        message: msg,
+        source: 'console_proxy'
+      });
+    }
+    
+    originalConsoleLog.call(console, ...args);
+  };
+};
+
+export const disableTelegramConsoleProxy = () => {
+  if (!consoleProxyEnabled) return;
+  
+  console.error = originalConsoleError;
+  console.warn = originalConsoleWarn;
+  console.log = originalConsoleLog;
+  consoleProxyEnabled = false;
+};
+
 export const resetLogger = () => {
   axiom = null;
   axiomInitialized = false;
   version = 'unknown';
+  // Reset console proxy if enabled
+  if (consoleProxyEnabled) {
+    disableTelegramConsoleProxy();
+  }
 };
 
 export default logger;

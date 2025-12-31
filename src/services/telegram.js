@@ -3,7 +3,7 @@ import { StringSession } from "telegram/sessions/index.js";
 import { config } from "../config/index.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
-import logger from "./logger.js";
+import logger, { enableTelegramConsoleProxy } from "./logger.js";
 
 // Circuit Breaker for Telegram Client
 class TelegramCircuitBreaker {
@@ -200,30 +200,41 @@ async function initTelegramClient() {
         // 延迟获取session
         const sessionString = await getSavedSession();
         
-        // Enhanced configuration with better timeout management
+        // Enhanced configuration with optimized timeout and retry settings
         const clientConfig = {
-            connectionRetries: 15, // Reduced from 30 to prevent extended retry storms
+            // Connection and retry configuration
+            connectionRetries: 3, // Optimized: 3 retries to balance reliability and performance
+            requestRetries: 3, // Optimized: 3 retries for API requests
+            retryDelay: { 
+                min: 5000,    // Minimum 5s delay between retries
+                max: 15000    // Maximum 15s delay with exponential backoff
+            },
+            
+            // Timeout configuration (increased for high-latency environments)
+            timeout: 120000, // Global timeout: 120s for complete operation
+            connectionTimeout: 60000, // Connection establishment: 60s
+            socketTimeout: 90000,     // Socket read/write: 90s
+            
+            // Concurrency and resource limits
+            maxConcurrentDownloads: 2, // Limit concurrent downloads for stability
+            connectionPoolSize: 3,     // Connection pool size
+            
+            // Update loop optimization
+            updateGetIntervalMs: 15000, // Poll updates every 15s (reduced frequency)
+            pingIntervalMs: 45000,      // Ping every 45s to detect stale connections
+            keepAliveTimeout: 45000,    // Keep-alive ping interval
+            
+            // Additional stability settings
             floodSleepThreshold: 60,
             deviceModel: "DriveCollector-Server",
             systemVersion: "Linux",
             appVersion: "2.3.3",
             useWSS: false,
             autoReconnect: true,
-            timeout: 60000, // Increased to 60s for high-latency environments (proxy/Cloudflare)
-            requestRetries: 10, // Reduced from 15
-            retryDelay: 2000, // Reduced from 3s to 2s
             dcId: undefined,
             useIPv6: false,
-            maxConcurrentDownloads: 3,
-            connectionPoolSize: 5,
-            // NEW: Additional stability settings
-            connectionTimeout: 30000, // Increased: Connection establishment timeout
-            socketTimeout: 45000, // Increased: Socket read/write timeout
-            keepAliveTimeout: 30000, // Keep-alive ping interval
-            // NEW: Update loop tuning to reduce _updateLoop frequency and timeout pressure
-            updateGetIntervalMs: 10000, // Poll updates every 10s (default 1s can cause timeouts)
-            pingIntervalMs: 30000, // Ping every 30s to detect stale connections
-            // Enhanced logger with timeout awareness - FIXED to include canSend method
+            
+            // Enhanced logger with full coverage for timeout detection
             baseLogger: {
                 levels: ["error", "warn", "info", "debug"],
                 _logLevel: "info",
@@ -242,8 +253,9 @@ async function initTelegramClient() {
                 warn: logger.warn.bind(logger),
                 error: (msg, ...args) => {
                     // Enhanced error logging for timeout patterns
-                    if (msg.includes('TIMEOUT') || msg.includes('timeout')) {
-                        logger.warn(`⚠️ Telegram timeout detected: ${msg}`, ...args);
+                    const msgStr = msg?.toString() || '';
+                    if (msgStr.includes('TIMEOUT') || msgStr.includes('timeout') || msgStr.includes('ETIMEDOUT')) {
+                        logger.warn(`⚠️ Telegram timeout detected: ${msgStr}`, ...args);
                         // Trigger circuit breaker
                         telegramCircuitBreaker.onFailure();
                     } else {
@@ -251,6 +263,16 @@ async function initTelegramClient() {
                     }
                 },
                 debug: logger.debug.bind(logger),
+                // NEW: Raw method for direct capture
+                raw: (level, msg, ...args) => {
+                    if (level === 'error') {
+                        logger.error(msg, ...args);
+                    } else if (level === 'warn') {
+                        logger.warn(msg, ...args);
+                    } else {
+                        logger.info(msg, ...args);
+                    }
+                }
             },
             ...proxyOptions
         };
@@ -267,6 +289,9 @@ async function initTelegramClient() {
         
         // 设置事件监听器
         setupEventListeners(telegramClient);
+        
+        // 在client.start()后调用enableTelegramConsoleProxy()
+        // 这将在后续的connectAndStart函数中处理
         
         return telegramClient;
     } finally {
@@ -340,10 +365,10 @@ function setupEventListeners(client) {
         }
     });
 
-    // NEW: Add update loop health monitoring
-    let lastUpdateTimestamp = Date.now();
+    // NEW: Add update loop health monitoring with enhanced thresholds
+    // Use module-level lastUpdateTimestamp instead of local variable
     let updateHealthMonitor = null;
-    let consecutiveUpdateTimeouts = 0; // NEW: Track consecutive update timeouts
+    let consecutiveUpdateTimeouts = 0; // Track consecutive update timeouts
 
     // Track update timestamps to detect stuck update loops
     client.addEventHandler((update) => {
@@ -362,21 +387,29 @@ function setupEventListeners(client) {
     client.on("connected", () => {
         if (updateHealthMonitor) clearInterval(updateHealthMonitor);
         
-        updateHealthMonitor = setInterval(() => {
+        updateHealthMonitor = setInterval(async () => {
             const timeSinceLastUpdate = Date.now() - lastUpdateTimestamp;
             
-            // If no updates for 90 seconds, consider update loop stuck
-            if (timeSinceLastUpdate > 90000) {
-                logger.warn(`⚠️ Update loop appears stuck (no updates for ${Math.floor(timeSinceLastUpdate / 1000)}s)`);
+            // If no updates for 60 seconds, warn
+            if (timeSinceLastUpdate > 60000 && timeSinceLastUpdate <= 120000) {
+                logger.warn(`⚠️ Update loop slow (no updates for ${Math.floor(timeSinceLastUpdate / 1000)}s)`);
                 consecutiveUpdateTimeouts++;
                 
-                if (consecutiveUpdateTimeouts > 3) {
-                    logger.error(`🚨 Multiple update timeouts (${consecutiveUpdateTimeouts}), triggering circuit breaker and session reset`);
-                    telegramCircuitBreaker.onFailure();
-                    handleConnectionIssue(false); // Full reconnection with session reset
-                    consecutiveUpdateTimeouts = 0;
-                } else if (!isReconnecting) {
+                if (!isReconnecting) {
                     handleConnectionIssue(true); // Lightweight reconnection
+                }
+            }
+            // If no updates for 120 seconds, consider update loop stuck and reset
+            else if (timeSinceLastUpdate > 120000) {
+                logger.error(`🚨 Update loop STUCK (${Math.floor(timeSinceLastUpdate / 1000)}s), triggering full reset`);
+                logger.error('Update loop STUCK', { duration: timeSinceLastUpdate });
+                telegramCircuitBreaker.onFailure();
+                consecutiveUpdateTimeouts++;
+                
+                if (consecutiveUpdateTimeouts > 2) {
+                    await resetClientSession(); // Reset session
+                    await handleConnectionIssue(false); // Full reconnection
+                    consecutiveUpdateTimeouts = 0;
                 }
                 
                 // Reset timestamp to prevent repeated triggers
@@ -734,9 +767,8 @@ export const resetCircuitBreaker = () => {
  * 获取更新循环健康状态（用于监控）
  */
 export const getUpdateHealth = () => {
-    // Note: lastUpdateTimestamp is defined in setupEventListeners scope
-    // We need to expose it via a closure or global. For now, we'll use a module-level variable.
-    // Since lastUpdateTimestamp is inside setupEventListeners, we'll track it at module level.
+    // Access the lastUpdateTimestamp from the module scope
+    // This will be updated by the event handler in setupEventListeners
     return {
         lastUpdate: lastUpdateTimestamp,
         timeSince: Date.now() - lastUpdateTimestamp
@@ -745,6 +777,35 @@ export const getUpdateHealth = () => {
 
 // Module-level variable to track update health (exposed from setupEventListeners)
 let lastUpdateTimestamp = Date.now();
+
+/**
+ * 连接并启动 Telegram 客户端，同时启用控制台代理
+ */
+export const connectAndStart = async () => {
+    try {
+        const client = await getClient();
+        
+        if (!client.connected) {
+            logger.info("🔌 正在连接 Telegram 客户端...");
+            await client.connect();
+            
+            logger.info("🤖 正在启动 Telegram Bot...");
+            await client.start({ botAuthToken: config.botToken });
+            
+            // 保存 session
+            await saveSession();
+            
+            // 在 client.start() 后调用 enableTelegramConsoleProxy()
+            enableTelegramConsoleProxy();
+            logger.info("✅ Telegram 控制台代理已启用");
+        }
+        
+        return client;
+    } catch (error) {
+        logger.error("❌ Telegram 客户端连接启动失败:", error);
+        throw error;
+    }
+};
 
 // 启动看门狗
 startWatchdog();
