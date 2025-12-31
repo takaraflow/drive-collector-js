@@ -87,14 +87,14 @@ export class CacheService {
      */
     async _initRedis() {
         if (!this.hasRedis) {
-            logger.info('ℹ️ 未配置 Redis，跳过初始化');
+            logger.info(`[${this.getCurrentProvider()}] ℹ️ 未配置 Redis，跳过初始化`);
             return;
         }
 
         try {
             // 检测是否在 Node.js 环境
             if (typeof process === 'undefined' || !process.versions || !process.versions.node) {
-                logger.warn('⚠️ 非 Node.js 环境，无法使用标准 Redis 客户端');
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ 非 Node.js 环境，无法使用标准 Redis 客户端`);
                 return;
             }
 
@@ -119,11 +119,11 @@ export class CacheService {
                 retryStrategy: (times) => {
                     const maxRetries = process.env.REDIS_MAX_RETRIES || 5; // 新增：支持环境变量配置，从3增至5
                     if (times > maxRetries) {
-                        logger.error(`🚨 Redis 重连超过最大次数 (${maxRetries})，停止重连`);
+                        logger.error(`[${this.getCurrentProvider()}] 🚨 Redis 重连超过最大次数 (${maxRetries})，停止重连`);
                         return null; // 停止重连，触发错误
                     }
                     const delay = Math.min(times * 500, 30000); // 新增：更保守退避，最大30秒间隔（Northflank优化）
-                    logger.warn(`⚠️ Redis 重试尝试 ${times}/${maxRetries}，延迟 ${delay}ms`);
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis 重试尝试 ${times}/${maxRetries}，延迟 ${delay}ms`);
                     return delay;
                 },
                 reconnectOnError: (err) => {
@@ -134,7 +134,7 @@ export class CacheService {
                                            msg.includes('network') ||
                                            !msg.includes('auth');
                     if (shouldReconnect) {
-                        logger.warn(`⚠️ Redis 重连错误: ${err.message}，将尝试重连`);
+                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis 重连错误: ${err.message}，将尝试重连`);
                     }
                     return shouldReconnect;
                 },
@@ -163,7 +163,7 @@ export class CacheService {
                 }
                 
                 // 记录Redis配置信息（用于诊断）
-                logger.info('🔄 Redis 初始化配置 (host/port模式)', {
+                logger.info(`[${this.getCurrentProvider()}] 🔄 Redis 初始化配置 (host/port模式)`, {
                     hasHost: !!this.redisHost,
                     port: this.redisPort,
                     hasPassword: !!this.redisPassword,
@@ -178,7 +178,7 @@ export class CacheService {
             // 连接事件监听 (增强诊断)
             this.redisClient.on('connect', () => {
                 this.connectTime = Date.now();
-                logger.info(`✅ Redis CONNECT: ${this.redisHost || this.redisUrl}:${this.redisPort} at ${new Date(this.connectTime).toISOString()}`, {
+                logger.info(`[${this.getCurrentProvider()}] ✅ Redis CONNECT: ${this.redisHost || this.redisUrl}:${this.redisPort} at ${new Date(this.connectTime).toISOString()}`, {
                     host: this.redisHost,
                     port: this.redisPort,
                     url: this.redisUrl ? 'configured' : 'not configured',
@@ -190,7 +190,7 @@ export class CacheService {
 
             this.redisClient.on('ready', () => {
                 const connectDuration = Date.now() - this.connectTime;
-                logger.info(`✅ Redis READY: Connection established in ${connectDuration}ms`, {
+                logger.info(`[${this.getCurrentProvider()}] ✅ Redis READY: Connection established in ${connectDuration}ms`, {
                     totalConnections: this.redisClient.options?.maxRetriesPerRequest || 'unknown',
                     connectTimeout: this.redisClient.options?.connectTimeout || 'unknown'
                 });
@@ -202,7 +202,7 @@ export class CacheService {
             });
 
             this.redisClient.on('reconnecting', (ms) => {
-                logger.warn(`🔄 Redis RECONNECTING: Attempting reconnection in ${ms}ms`, {
+                logger.warn(`[${this.getCurrentProvider()}] 🔄 Redis RECONNECTING: Attempting reconnection in ${ms}ms`, {
                     lastError: this.lastError,
                     failureCount: this.failureCount,
                     currentProvider: this.currentProvider
@@ -212,7 +212,7 @@ export class CacheService {
             this.redisClient.on('error', (error) => {
                 const now = Date.now();
                 const uptime = this.connectTime ? Math.round((now - this.connectTime) / 1000) : 0;
-                logger.error(`🚨 Redis ERROR: ${error.message}`, {
+                logger.error(`[${this.getCurrentProvider()}] 🚨 Redis ERROR: ${error.message}`, {
                     code: error.code,
                     errno: error.errno,
                     syscall: error.syscall,
@@ -230,7 +230,7 @@ export class CacheService {
             this.redisClient.on('close', async () => {
                 const now = Date.now();
                 const duration = this.connectTime ? now - this.connectTime : 0;
-                logger.warn(`⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`, {
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`, {
                     durationMs: duration,
                     lastError: this.lastRedisError || 'none',
                     failureCount: this.failureCount,
@@ -247,17 +247,17 @@ export class CacheService {
 
             // 添加更多诊断事件
             this.redisClient.on('wait', () => {
-                logger.debug('🔄 Redis WAIT: Command queued, waiting for connection');
+                logger.debug(`[${this.getCurrentProvider()}] 🔄 Redis WAIT: Command queued, waiting for connection`);
             });
 
             this.redisClient.on('end', async () => {
-                logger.warn('⚠️ Redis END: Connection ended by client');
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis END: Connection ended by client`);
                 // 触发自动重启
                 setTimeout(() => this._restartRedisClient(), 1000);
             });
 
             this.redisClient.on('select', (db) => {
-                logger.debug(`🔄 Redis SELECT: Database ${db} selected`);
+                logger.debug(`[${this.getCurrentProvider()}] 🔄 Redis SELECT: Database ${db} selected`);
             });
 
             // 异步测试连接，不阻塞初始化 - 避免卡死
@@ -272,7 +272,7 @@ export class CacheService {
                     const pingResult = await Promise.race([pingPromise, timeoutPromise]);
                     const pingDuration = Date.now() - pingStart;
 
-                    logger.info('🔄 Cache服务：使用 Northflank Redis', {
+                    logger.info(`[${this.getCurrentProvider()}] 🔄 Cache服务：使用 Northflank Redis`, {
                         pingResult,
                         pingDurationMs: pingDuration,
                         pingThreshold: pingDuration > 1000 ? 'high' : pingDuration > 500 ? 'medium' : 'low',
@@ -285,7 +285,7 @@ export class CacheService {
                     this._startHeartbeat();
                 } catch (pingError) {
                     const pingDuration = Date.now() - pingStart;
-                    logger.warn('⚠️ Redis ping 测试失败，但继续初始化以支持延迟连接', {
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis ping 测试失败，但继续初始化以支持延迟连接`, {
                         error: pingError.message,
                         durationMs: pingDuration,
                         clientStatus: this.redisClient ? this.redisClient.status : 'null',
@@ -299,7 +299,7 @@ export class CacheService {
             })();
 
         } catch (error) {
-            logger.error(`🚨 Redis 初始化失败: ${error.message}`);
+            logger.error(`[${this.getCurrentProvider()}] 🚨 Redis 初始化失败: ${error.message}`);
             this.redisClient = null;
         }
     }
@@ -309,13 +309,13 @@ export class CacheService {
      */
     async _restartRedisClient() {
         if (this.restarting) {
-            logger.debug('🔄 Redis 重启已在进行中，跳过重复调用');
+            logger.debug(`[${this.getCurrentProvider()}] 🔄 Redis 重启已在进行中，跳过重复调用`);
             return;
         }
         
         this.restarting = true;
         try {
-            logger.info('🔄 Redis 客户端重启中...');
+            logger.info(`[${this.getCurrentProvider()}] 🔄 Redis 客户端重启中...`);
             
             // 清理现有客户端
             if (this.redisClient) {
@@ -333,15 +333,15 @@ export class CacheService {
             
             // 等待延迟（可配置）
             const restartDelay = parseInt(process.env.REDIS_RESTART_DELAY) || 5000;
-            logger.info(`🔄 等待 ${restartDelay}ms 后重新初始化 Redis...`);
+            logger.info(`[${this.getCurrentProvider()}] 🔄 等待 ${restartDelay}ms 后重新初始化 Redis...`);
             await new Promise(resolve => setTimeout(resolve, restartDelay));
             
             // 重新初始化
             await this._initRedis();
             
-            logger.info('✅ Redis 客户端重启完成');
+            logger.info(`[${this.getCurrentProvider()}] ✅ Redis 客户端重启完成`);
         } catch (error) {
-            logger.error(`🚨 Redis 重启失败: ${error.message}`);
+            logger.error(`[${this.getCurrentProvider()}] 🚨 Redis 重启失败: ${error.message}`);
         } finally {
             this.restarting = false;
         }
@@ -376,7 +376,7 @@ export class CacheService {
             await Promise.race([pingPromise, timeoutPromise]);
             return true;
         } catch (error) {
-            logger.warn('⚠️ Redis 健康检查失败', {
+            logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis 健康检查失败`, {
                 error: error.message,
                 status: this.redisClient ? this.redisClient.status : 'null'
             });
@@ -395,13 +395,13 @@ export class CacheService {
             // 强制指定提供商
             if (provider === 'redis' && this.hasRedis) {
                 this.currentProvider = 'redis';
-                logger.info('🔄 Cache服务：强制使用 Northflank Redis');
+                logger.info(`[${this.getCurrentProvider()}] 🔄 Cache服务：强制使用 Northflank Redis`);
             } else if (provider === 'cloudflare' && this.hasCloudflare) {
                 this.currentProvider = 'cloudflare';
-                logger.info('🔄 Cache服务：强制使用 Cloudflare KV');
+                logger.info(`[${this.getCurrentProvider()}] 🔄 Cache服务：强制使用 Cloudflare KV`);
             } else if (provider === 'upstash' && this.hasUpstash) {
                 this.currentProvider = 'upstash';
-                logger.info('🔄 Cache服务：强制使用 Upstash Redis');
+                logger.info(`[${this.getCurrentProvider()}] 🔄 Cache服务：强制使用 Upstash Redis`);
             } else {
                 throw new Error(`强制使用 ${provider}，但该提供商未配置完整`);
             }
@@ -409,17 +409,17 @@ export class CacheService {
             // 自动选择优先级
             if (this.hasRedis) {
                 this.currentProvider = 'redis';
-                logger.info('🔄 Cache服务：使用 Northflank Redis');
+                logger.info(`[${this.getCurrentProvider()}] 🔄 Cache服务：使用 Northflank Redis`);
             } else if (this.hasCloudflare) {
                 this.currentProvider = 'cloudflare';
-                logger.info('🔄 Cache服务：使用 Cloudflare KV');
+                logger.info(`[${this.getCurrentProvider()}] 🔄 Cache服务：使用 Cloudflare KV`);
             } else if (this.hasUpstash) {
                 this.currentProvider = 'upstash';
-                logger.info('🔄 Cache服务：使用 Upstash Redis');
+                logger.info(`[${this.getCurrentProvider()}] 🔄 Cache服务：使用 Upstash Redis`);
             } else {
                 // 默认使用 cloudflare (即使配置不完整，这也是系统设计的最终回退)
                 this.currentProvider = 'cloudflare';
-                logger.info('🔄 Cache服务：未配置任何提供商，回退到 Cloudflare KV (默认)');
+                logger.info(`[${this.getCurrentProvider()}] 🔄 Cache服务：未配置任何提供商，回退到 Cloudflare KV (默认)`);
             }
         }
 
@@ -464,7 +464,7 @@ export class CacheService {
             if (this.failureCount >= 2) {
                 const targets = this._calculateFailoverTargets();
                 if (targets.length > 0) {
-                    logger.warn(`⚠️ ${this.getCurrentProvider()} 连续失败 ${this.failureCount} 次，触发自动故障转移到 ${targets[0]}`);
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ 连续失败 ${this.failureCount} 次，触发自动故障转移到 ${targets[0]}`);
                     return true;
                 }
             }
@@ -499,7 +499,7 @@ export class CacheService {
         // 启动定期恢复检查
         this._startRecoveryCheck();
 
-        logger.info(`✅ 已切换到 ${this._getProviderDisplayName(nextProvider)}`);
+        logger.info(`[${this.getCurrentProvider()}] ✅ 已切换到 ${this._getProviderDisplayName(nextProvider)}`);
         return true;
     }
 
@@ -547,7 +547,7 @@ export class CacheService {
         );
         
         const checkInterval = isQuotaIssue ? 12 * 60 * 60 * 1000 : 30 * 60 * 1000;
-        logger.info(`🕒 启动 Cache 恢复检查，间隔: ${checkInterval / 60000} 分钟`);
+        logger.info(`[${this.getCurrentProvider()}] 🕒 启动 Cache 恢复检查，间隔: ${checkInterval / 60000} 分钟`);
 
         this.recoveryTimer = setInterval(async () => {
             // 根据当前提供商决定恢复目标
@@ -555,7 +555,7 @@ export class CacheService {
                 // 从 Upstash 恢复到 Cloudflare
                 try {
                     await this._cloudflare_get('__health_check__');
-                    logger.info('🔄 Cloudflare KV 已恢复，切换回主要提供商...');
+                    logger.info(`[${this.getCurrentProvider()}] 🔄 Cloudflare KV 已恢复，切换回主要提供商...`);
                     this.currentProvider = 'cloudflare';
                     this.failureCount = 0;
                     this.lastError = null;
@@ -566,17 +566,17 @@ export class CacheService {
                         this.recoveryTimer = null;
                     }
 
-                    logger.info('✅ 已恢复到 Cloudflare KV');
+                    logger.info(`[${this.getCurrentProvider()}] ✅ 已恢复到 Cloudflare KV`);
                 } catch (error) {
                     // 恢复失败，继续使用当前提供商
-                    logger.info('ℹ️ Cloudflare KV 仍不可用，继续使用 Upstash');
+                    logger.info(`[${this.getCurrentProvider()}] ℹ️ Cloudflare KV 仍不可用，继续使用 Upstash`);
                 }
             } else if (this.currentProvider === 'cloudflare' && this.hasRedis) {
                 // 从 Cloudflare 恢复到 Redis（如果 Redis 可用）
                 try {
                     if (this.redisClient) {
                         await this.redisClient.ping();
-                        logger.info('🔄 Northflank Redis 已恢复，切换回主要提供商...');
+                        logger.info(`[${this.getCurrentProvider()}] 🔄 Northflank Redis 已恢复，切换回主要提供商...`);
                         this.currentProvider = 'redis';
                         this.failureCount = 0;
                         this.lastError = null;
@@ -587,11 +587,11 @@ export class CacheService {
                             this.recoveryTimer = null;
                         }
 
-                        logger.info('✅ 已恢复到 Northflank Redis');
+                        logger.info(`[${this.getCurrentProvider()}] ✅ 已恢复到 Northflank Redis`);
                     }
                 } catch (error) {
                     // 恢复失败，继续使用当前提供商
-                    logger.info('ℹ️ Northflank Redis 仍不可用，继续使用当前提供商');
+                    logger.info(`[${this.getCurrentProvider()}] ℹ️ Northflank Redis 仍不可用，继续使用当前提供商`);
                 }
             }
         }, checkInterval);
@@ -660,7 +660,7 @@ export class CacheService {
         // 1. Redis 客户端不可用或处于断开状态时的 Fallback
         if (this.currentProvider === 'redis') {
             if (!this.redisClient || this.redisClient.status === 'end' || this.redisClient.status === 'close') {
-                logger.warn(`Redis client status is ${this.redisClient?.status || 'null'}, fallback immediately`);
+                logger.warn(`[${this.getCurrentProvider()}] Redis client status is ${this.redisClient?.status || 'null'}, fallback immediately`);
                 return await this._fallbackToNextProvider(operation, ...args);
             }
         }
@@ -669,7 +669,7 @@ export class CacheService {
         if (this.currentProvider === 'redis') {
             const isHealthy = await this._validateRedisConnection();
             if (!isHealthy) {
-                logger.warn('⚠️ Redis 健康检查失败，主动触发 failover');
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis 健康检查失败，主动触发 failover`);
                 return await this._fallbackToNextProvider(operation, ...args);
             }
         }
@@ -692,7 +692,7 @@ export class CacheService {
                 }
             } catch (error) {
                 attempts++;
-                logger.warn(`⚠️ ${this.getCurrentProvider()} 操作失败 (${attempts}/${maxAttempts})`, {
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ 操作失败 (${attempts}/${maxAttempts})`, {
                     operation,
                     error: error.message,
                     clientStatus: this.redisClient?.status
@@ -700,7 +700,7 @@ export class CacheService {
 
                 // 3. 判断是否需要 Failover
                 if (this._shouldFailover(error)) {
-                    logger.info(`🔄 检测到可恢复错误，准备故障转移`, {
+                    logger.info(`[${this.getCurrentProvider()}] 🔄 检测到可恢复错误，准备故障转移`, {
                         currentProvider: this.currentProvider,
                         failureCount: this.failureCount,
                         lastError: error.message,
@@ -708,12 +708,12 @@ export class CacheService {
                     });
                     
                     if (this._failover()) {
-                        logger.info(`✅ 故障转移成功，现在使用 ${this.getCurrentProvider()}`);
+                        logger.info(`[${this.getCurrentProvider()}] ✅ 故障转移成功，现在使用 ${this.getCurrentProvider()}`);
                         // 重置尝试次数，使用新提供商
                         attempts = 0;
                         continue;
                     } else {
-                        logger.warn(`❌ 故障转移失败，无可用后备提供商`);
+                        logger.warn(`[${this.getCurrentProvider()}] ❌ 故障转移失败，无可用后备提供商`);
                     }
                 }
 
@@ -722,7 +722,7 @@ export class CacheService {
                     throw error;
                 }
                 
-                logger.info(`ℹ️ ${this.getCurrentProvider()} 重试中 (${attempts}/${maxAttempts})...`);
+                logger.info(`[${this.getCurrentProvider()}] ℹ️ 重试中 (${attempts}/${maxAttempts})...`);
             }
         }
     }
@@ -737,13 +737,13 @@ export class CacheService {
         const targets = this._calculateFailoverTargets();
         if (targets.length === 0) {
             // 没有可用后备，使用本地缓存
-            logger.warn('⚠️ 无可用后备提供商，使用本地缓存');
+            logger.warn(`[${this.getCurrentProvider()}] ⚠️ 无可用后备提供商，使用本地缓存`);
             return await this._local_cache_operation(operation, ...args);
         }
         
         // 执行故障转移
         if (this._failover()) {
-            logger.info(`🔄 已从 ${this._getProviderDisplayName(originalProvider)} 降级到 ${this.getCurrentProvider()}`);
+            logger.info(`[${this.getCurrentProvider()}] 🔄 已从 ${this._getProviderDisplayName(originalProvider)} 降级到 ${this.getCurrentProvider()}`);
             // 使用新提供商重试
             return await this._executeWithFailover(operation, ...args);
         }
@@ -792,7 +792,7 @@ export class CacheService {
             const duration = Date.now() - startTime;
 
             if (value === null || value === undefined) {
-                logger.debug(`🔍 Redis GET: Key '${key}' not found`, {
+                logger.debug(`[${this.getCurrentProvider()}] 🔍 Redis GET: Key '${key}' not found`, {
                     durationMs: duration,
                     clientStatus: this.redisClient.status
                 });
@@ -804,7 +804,7 @@ export class CacheService {
                 try {
                     parsedValue = JSON.parse(value);
                 } catch (e) {
-                    logger.warn(`⚠️ Redis GET: JSON parse failed for key '${key}', returning raw value`, {
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis GET: JSON parse failed for key '${key}', returning raw value`, {
                         error: e.message,
                         durationMs: duration
                     });
@@ -814,7 +814,7 @@ export class CacheService {
                 parsedValue = value;
             }
 
-            logger.debug(`✅ Redis GET: Key '${key}' retrieved`, {
+            logger.debug(`[${this.getCurrentProvider()}] ✅ Redis GET: Key '${key}' retrieved`, {
                 durationMs: duration,
                 valueSize: value.length,
                 parsedType: type
@@ -823,7 +823,7 @@ export class CacheService {
             return parsedValue;
         } catch (error) {
             const duration = Date.now() - startTime;
-            logger.error(`🚨 Redis GET failed for key '${key}'`, {
+            logger.error(`[${this.getCurrentProvider()}] 🚨 Redis GET failed for key '${key}'`, {
                 error: error.message,
                 code: error.code,
                 durationMs: duration,
@@ -850,14 +850,14 @@ export class CacheService {
                 const ttl = parseInt(expirationTtl, 10);
                 if (!isNaN(ttl) && ttl > 0) {
                     result = await this.redisClient.set(key, valueStr, 'EX', ttl);
-                    logger.debug(`✅ Redis SET with TTL: Key '${key}' set`, {
+                    logger.debug(`[${this.getCurrentProvider()}] ✅ Redis SET with TTL: Key '${key}' set`, {
                         durationMs: Date.now() - startTime,
                         ttlSeconds: ttl,
                         valueSize: valueStr.length,
                         clientStatus: this.redisClient.status
                     });
                 } else if (ttl !== 0) {
-                    logger.warn(`⚠️ Redis SET: Invalid TTL value ${expirationTtl}, skipping expiration (${key})`, {
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis SET: Invalid TTL value ${expirationTtl}, skipping expiration (${key})`, {
                         originalTtl: expirationTtl,
                         parsedTtl: ttl
                     });
@@ -870,7 +870,7 @@ export class CacheService {
             }
 
             const duration = Date.now() - startTime;
-            logger.debug(`✅ Redis SET: Key '${key}' set successfully`, {
+            logger.debug(`[${this.getCurrentProvider()}] ✅ Redis SET: Key '${key}' set successfully`, {
                 durationMs: duration,
                 valueSize: valueStr.length,
                 hasTtl: expirationTtl !== null,
@@ -880,7 +880,7 @@ export class CacheService {
             return result;
         } catch (error) {
             const duration = Date.now() - startTime;
-            logger.error(`🚨 Redis SET failed for key '${key}'`, {
+            logger.error(`[${this.getCurrentProvider()}] 🚨 Redis SET failed for key '${key}'`, {
                 error: error.message,
                 code: error.code,
                 durationMs: duration,
@@ -998,7 +998,7 @@ export class CacheService {
                 if (!isNaN(ttl) && ttl > 0) {
                     command.push("EX", ttl.toString());
                 } else if (ttl !== 0) {
-                    logger.warn(`⚠️ Upstash set: 无效的 TTL 值 ${expirationTtl}，跳过过期设置 (${key})`);
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash set: 无效的 TTL 值 ${expirationTtl}，跳过过期设置 (${key})`);
                 }
             }
 
@@ -1015,7 +1015,7 @@ export class CacheService {
             if (response.status === 429) {
                 const retryAfter = response.headers.get('Retry-After');
                 const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                logger.warn(`⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
                 throw new Error('Upstash rate limit exceeded');
             }
@@ -1027,7 +1027,7 @@ export class CacheService {
 
             const result = await response.json();
             if (result.error) {
-                logger.error(`🚨 Upstash Set Error for key '${key}':`, result.error);
+                logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash Set Error for key '${key}':`, result.error);
                 throw new Error(`Upstash Set Error: ${result.error}`);
             }
             return result.result === "OK";
@@ -1086,7 +1086,7 @@ export class CacheService {
             if (response.status === 429) {
                 const retryAfter = response.headers.get('Retry-After');
                 const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                logger.warn(`⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
                 throw new Error('Upstash rate limit exceeded');
             }
@@ -1162,7 +1162,7 @@ export class CacheService {
             if (response.status === 429) {
                 const retryAfter = response.headers.get('Retry-After');
                 const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                logger.warn(`⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
                 throw new Error('Upstash rate limit exceeded');
             }
@@ -1247,7 +1247,7 @@ export class CacheService {
             if (response.status === 429) {
                 const retryAfter = response.headers.get('Retry-After');
                 const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                logger.warn(`⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
                 throw new Error('Upstash rate limit exceeded');
             }
@@ -1333,7 +1333,7 @@ export class CacheService {
             if (response.status === 429) {
                 const retryAfter = response.headers.get('Retry-After');
                 const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                logger.warn(`⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
                 throw new Error('Upstash rate limit exceeded');
             }
@@ -1345,7 +1345,7 @@ export class CacheService {
 
             const result = await response.json();
             if (result.error) {
-                logger.error(`🚨 Upstash ListKeys Error:`, result.error);
+                logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash ListKeys Error:`, result.error);
                 throw new Error(`Upstash ListKeys Error: ${result.error}`);
             }
 
@@ -1437,14 +1437,14 @@ export class CacheService {
         }
 
         const heartbeatInterval = 30 * 1000; // Northflank环境：30秒间隔（从2分钟减少）
-        logger.info(`🫀 启动 Redis 心跳机制，间隔: ${heartbeatInterval / 1000} 秒 (Northflank优化)`);
+        logger.info(`[${this.getCurrentProvider()}] 🫀 启动 Redis 心跳机制，间隔: ${heartbeatInterval / 1000} 秒 (Northflank优化)`);
 
         let consecutiveFailures = 0;
         const maxConsecutiveFailures = 3;
 
         this.heartbeatTimer = setInterval(async () => {
             if (!this.redisClient) {
-                logger.debug('💔 心跳跳过：Redis 客户端未初始化');
+                logger.debug(`[${this.getCurrentProvider()}] 💔 心跳跳过：Redis 客户端未初始化`);
                 return;
             }
 
@@ -1452,7 +1452,7 @@ export class CacheService {
 
             // 新增：检测 end/close 状态并触发重启
             if (status === 'end' || status === 'close') {
-                logger.warn(`💔 Redis ${status.toUpperCase()}: 触发重启`);
+                logger.warn(`[${this.getCurrentProvider()}] 💔 Redis ${status.toUpperCase()}: 触发重启`);
                 this._restartRedisClient().catch(() => {});
                 return;
             }
@@ -1460,7 +1460,7 @@ export class CacheService {
             if (status !== 'ready') {
                 // 如果状态是 connecting，尝试触发连接
                 if (status === 'connecting' || status === 'wait') {
-                    logger.warn(`💔 心跳检测到 Redis 状态为 ${status}，尝试触发连接...`);
+                    logger.warn(`[${this.getCurrentProvider()}] 💔 心跳检测到 Redis 状态为 ${status}，尝试触发连接...`);
                     try {
                         // 发送 ping 即使不是 ready 状态，可能帮助 ioredis 完成连接
                         await this.redisClient.ping().catch(() => {});
@@ -1468,7 +1468,7 @@ export class CacheService {
                         // 忽略错误，让 ioredis 自己处理
                     }
                 } else {
-                    logger.debug(`💔 心跳跳过：Redis 状态为 ${status} (非 ready)`);
+                    logger.debug(`[${this.getCurrentProvider()}] 💔 心跳跳过：Redis 状态为 ${status} (非 ready)`);
                 }
                 return;
             }
@@ -1481,7 +1481,7 @@ export class CacheService {
                 // Northflank环境：更详细的延迟监控
                 const isHighLatency = pingDuration > 200; // 200ms作为高延迟阈值
 
-                logger.debug('💓 Redis 心跳 PING', {
+                logger.debug(`[${this.getCurrentProvider()}] 💓 Redis 心跳 PING`, {
                     result: pingResult,
                     durationMs: pingDuration,
                     status: this.redisClient.status,
@@ -1494,7 +1494,7 @@ export class CacheService {
 
                 // 如果PING延迟过高，在Northflank环境记录警告
                 if (isHighLatency) {
-                    logger.warn('⚠️ Redis 高延迟心跳', {
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis 高延迟心跳`, {
                         durationMs: pingDuration,
                         threshold: '200ms',
                         environment: 'northflank'
@@ -1503,11 +1503,11 @@ export class CacheService {
 
                 // 如果PING失败，记录错误但不强制重连（依赖ioredis内置重连）
                 if (pingResult !== 'PONG') {
-                    logger.warn('⚠️ Redis 心跳异常响应', { result: pingResult });
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis 心跳异常响应`, { result: pingResult });
                 }
             } catch (error) {
                 consecutiveFailures++;
-                logger.warn('🚨 Redis 心跳失败', {
+                logger.warn(`[${this.getCurrentProvider()}] 🚨 Redis 心跳失败`, {
                     error: error.message,
                     code: error.code,
                     clientStatus: this.redisClient?.status,
@@ -1517,7 +1517,7 @@ export class CacheService {
 
                 // Northflank环境：如果连续失败超过阈值，记录更详细的诊断信息
                 if (consecutiveFailures >= maxConsecutiveFailures) {
-                    logger.error('🚨 Redis 心跳连续失败超过阈值', {
+                    logger.error(`[${this.getCurrentProvider()}] 🚨 Redis 心跳连续失败超过阈值`, {
                         consecutiveFailures,
                         lastError: error.message,
                         environment: 'northflank',
@@ -1536,7 +1536,7 @@ export class CacheService {
         if (this.heartbeatTimer) {
             clearInterval(this.heartbeatTimer);
             this.heartbeatTimer = null;
-            logger.info('🛑 Redis 心跳机制已停止');
+            logger.info(`[${this.getCurrentProvider()}] 🛑 Redis 心跳机制已停止`);
         }
     }
 
@@ -1548,7 +1548,7 @@ export class CacheService {
     async waitForReady(timeout = 30000) {
         // 如果没有 Redis 配置，直接返回 false
         if (!this.hasRedis) {
-            logger.debug('ℹ️ waitForReady: 未配置 Redis，跳过等待');
+            logger.debug(`[${this.getCurrentProvider()}] ℹ️ waitForReady: 未配置 Redis，跳过等待`);
             return false;
         }
 
@@ -1559,13 +1559,13 @@ export class CacheService {
 
         // 如果客户端未初始化，等待一段时间让初始化完成
         if (!this.redisClient) {
-            logger.debug('ℹ️ waitForReady: Redis 客户端未初始化，等待 2 秒...');
+            logger.debug(`[${this.getCurrentProvider()}] ℹ️ waitForReady: Redis 客户端未初始化，等待 2 秒...`);
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
 
         // 如果仍然没有客户端，返回 false
         if (!this.redisClient) {
-            logger.warn('⚠️ waitForReady: Redis 客户端初始化失败');
+            logger.warn(`[${this.getCurrentProvider()}] ⚠️ waitForReady: Redis 客户端初始化失败`);
             return false;
         }
 
@@ -1574,23 +1574,23 @@ export class CacheService {
             return true;
         }
 
-        logger.info(`🔄 waitForReady: 等待 Redis 达到 ready 状态，当前状态: ${this.redisClient.status}`);
+        logger.info(`[${this.getCurrentProvider()}] 🔄 waitForReady: 等待 Redis 达到 ready 状态，当前状态: ${this.redisClient.status}`);
 
         return new Promise((resolve) => {
             const timeoutId = setTimeout(() => {
-                logger.warn(`⚠️ waitForReady: 等待超时 (${timeout}ms)，当前状态: ${this.redisClient.status}`);
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ waitForReady: 等待超时 (${timeout}ms)，当前状态: ${this.redisClient.status}`);
                 cleanup();
                 resolve(false);
             }, timeout);
 
             const readyHandler = () => {
-                logger.info('✅ waitForReady: Redis 已达到 ready 状态');
+                logger.info(`[${this.getCurrentProvider()}] ✅ waitForReady: Redis 已达到 ready 状态`);
                 cleanup();
                 resolve(true);
             };
 
             const errorHandler = (error) => {
-                logger.warn(`⚠️ waitForReady: Redis 错误: ${error.message}`);
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ waitForReady: Redis 错误: ${error.message}`);
                 // 不立即拒绝，继续等待
             };
 
@@ -1608,7 +1608,7 @@ export class CacheService {
 
             // 也监听 connect 事件，因为 ready 会在 connect 之后触发
             this.redisClient.on('connect', () => {
-                logger.debug('🔄 waitForReady: Redis 已连接，等待 ready...');
+                logger.debug(`[${this.getCurrentProvider()}] 🔄 waitForReady: Redis 已连接，等待 ready...`);
             });
         });
     }

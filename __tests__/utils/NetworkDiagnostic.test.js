@@ -18,6 +18,7 @@ jest.unstable_mockModule("../../src/services/d1.js", () => ({
 
 const mockCache = {
     get: jest.fn(),
+    getCurrentProvider: jest.fn().mockReturnValue("Cloudflare KV"),
 };
 
 jest.unstable_mockModule("../../src/services/CacheService.js", () => ({

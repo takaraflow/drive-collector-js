@@ -13,6 +13,7 @@ const mockCache = {
     set: jest.fn(),
     delete: jest.fn(),
     isFailoverMode: true,
+    getCurrentProvider: jest.fn().mockReturnValue("Cloudflare KV"),
 };
 
 describe("InstanceCoordinator Heartbeat (KV Only)", () => {
@@ -126,15 +127,18 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         // Mock KV error
         mockCache.get.mockRejectedValue(new Error("KV Network Error"));
 
+        // Mock getCurrentProvider to return Cloudflare KV
+        mockCache.getCurrentProvider = jest.fn().mockReturnValue("Cloudflare KV");
+
         // Start heartbeat
         instanceCoordinator.startHeartbeat();
 
         // Advance timer (heartbeat interval is 5 minutes)
         await jest.advanceTimersByTimeAsync(300000);
 
-        // Should log error but not crash
-        // Use English matching to avoid encoding issues with Chinese characters
-        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("KV Network Error"), expect.anything());
+        // Should log error with provider prefix but not crash
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("[Cloudflare KV]"), expect.anything());
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Cache心跳更新失败"), expect.anything());
         consoleSpy.mockRestore();
     });
 });

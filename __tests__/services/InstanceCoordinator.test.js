@@ -382,7 +382,7 @@ describe("InstanceCoordinator", () => {
       await newIC.broadcast("instance_failed", { error: "test" });
 
       expect(mockBroadcastSystemEvent).toHaveBeenCalled();
-      expect(logger.error).toHaveBeenCalledWith("❌ 广播事件失败 instance_failed:", expect.anything());
+      expect(logger.error).toHaveBeenCalledWith("[Cloudflare KV] ❌ 广播事件失败 instance_failed:", expect.anything());
     });
   });
 
@@ -440,7 +440,7 @@ describe("InstanceCoordinator", () => {
       const instances = await instanceCoordinator.getAllInstances();
 
       expect(instances).toEqual([]);
-      expect(mockLogger.error).toHaveBeenCalledWith("获取所有实例失败:", "Cache ListKeys Error");
+      expect(mockLogger.error).toHaveBeenCalledWith("[Cloudflare KV] 获取所有实例失败:", "Cache ListKeys Error");
 
       mockListKeys.mockRestore();
     });
@@ -464,7 +464,7 @@ describe("InstanceCoordinator", () => {
 
       expect(instances).toHaveLength(1); // Only successful instance
       expect(instances[0].id).toBe('inst2');
-      expect(mockLogger.warn).toHaveBeenCalledWith("获取实例 instance:inst1 失败，跳过:", "Cache Get Error");
+      expect(mockLogger.warn).toHaveBeenCalledWith("[Cloudflare KV] 获取实例 instance:inst1 失败，跳过:", "Cache Get Error");
 
       mockListKeys.mockRestore();
       mockGet.mockRestore();

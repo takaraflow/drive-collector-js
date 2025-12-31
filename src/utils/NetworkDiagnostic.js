@@ -185,8 +185,8 @@ export class NetworkDiagnostic {
     static async _checkCache() {
         const startTime = Date.now();
         try {
-            // 检测当前使用的Cache提供商
-            const cacheProvider = process.env.CACHE_PROVIDER || process.env.KV_PROVIDER === 'upstash' ? 'Upstash Redis' : 'Cloudflare KV';
+            // 使用 cache.getCurrentProvider() 获取当前提供商
+            const cacheProvider = cache.getCurrentProvider();
 
             // 尝试读取一个不存在的key，应该返回null但不报错
             const testKey = `__diagnostic_test_${Date.now()}__`;
@@ -198,7 +198,7 @@ export class NetworkDiagnostic {
                 message: `${cacheProvider} 连接正常`
             };
         } catch (error) {
-            const cacheProvider = process.env.CACHE_PROVIDER || process.env.KV_PROVIDER === 'upstash' ? 'Upstash Redis' : 'Cloudflare KV';
+            const cacheProvider = cache.getCurrentProvider();
             return {
                 status: 'error',
                 responseTime: `${Date.now() - startTime}ms`,

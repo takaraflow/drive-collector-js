@@ -33,7 +33,7 @@ export class SettingsRepository {
 
             return defaultValue;
         } catch (e) {
-            logger.error(`SettingsRepository.get failed for ${key}:`, e);
+            logger.error(`[${cache.getCurrentProvider()}] SettingsRepository.get failed for ${key}:`, e);
             return defaultValue;
         }
     }
@@ -56,7 +56,7 @@ export class SettingsRepository {
             // 1. 更新 Cache（主存储）
             await cache.set(cacheKey, value);
         } catch (cacheError) {
-            logger.error(`SettingsRepository.set failed for ${key} (Cache):`, cacheError);
+            logger.error(`[${cache.getCurrentProvider()}] SettingsRepository.set failed for ${key} (Cache):`, cacheError);
             throw cacheError; // Cache是主存储，失败时抛出异常
         }
 

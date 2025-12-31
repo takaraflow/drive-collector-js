@@ -3,7 +3,8 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 // Mock dependencies
 const mockCache = {
     get: jest.fn(),
-    set: jest.fn().mockResolvedValue(undefined)
+    set: jest.fn().mockResolvedValue(undefined),
+    getCurrentProvider: jest.fn().mockReturnValue("Cloudflare KV")
 };
 
 const mockLocalCache = {
