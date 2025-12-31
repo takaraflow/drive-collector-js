@@ -757,16 +757,22 @@ async function executeWithFailover(operation, env, ctx, ...args) {
         headers: { 'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}` }
       });
 
+      await logger.debug(`Upstash GET ${args[0]}: status ${response.status}`, {}, ctx);
+
       if (response.status === 404) {
+        await logger.debug(`Upstash GET 404 for ${args[0]}, canceling body`, {}, ctx);
         await response.body.cancel();
         return null;
       }
 
       if (!response.ok) {
+        await logger.debug(`Upstash GET error ${response.status} for ${args[0]}, canceling body`, {}, ctx);
+        await response.body?.cancel();
         throw new Error(`Upstash Get Error: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
+      await logger.debug(`Upstash GET ${args[0]} success`, {}, ctx);
       return data.result;
     },
     '_upstash_put': async () => {
@@ -779,10 +785,15 @@ async function executeWithFailover(operation, env, ctx, ...args) {
         body: JSON.stringify({ value: args[1] })
       });
 
+      await logger.debug(`Upstash PUT ${args[0]}: status ${response.status}`, {}, ctx);
+
       if (!response.ok) {
+        await logger.debug(`Upstash PUT error ${response.status} for ${args[0]}, canceling body`, {}, ctx);
+        await response.body?.cancel();
         throw new Error(`Upstash Put Error: ${response.status} ${response.statusText}`);
       }
 
+      await logger.debug(`Upstash PUT ${args[0]} success`, {}, ctx);
       return true;
     },
     '_nf_redis_get': async () => {
