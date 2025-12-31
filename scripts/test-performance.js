@@ -17,9 +17,11 @@ class TestPerformanceMonitor {
 
     async runTests() {
         console.log('🚀 开始测试性能监控...\n');
+        const startUsage = process.cpuUsage();
+        const startMem = process.memoryUsage().heapUsed;
 
         return new Promise((resolve, reject) => {
-            const testProcess = spawn('npm', ['test', '--silent'], {
+            const testProcess = spawn('npm', ['run', 'test:full-optimized'], {
                 cwd: process.cwd(),
                 shell: true,
                 stdio: ['inherit', 'pipe', 'pipe']

@@ -47,6 +47,7 @@ jest.unstable_mockModule("../../src/services/logger.js", () => ({
 describe("QStashService - Retry Logic", () => {
     let QStashService;
     let qstashService;
+    let setTimeoutSpy;
 
     beforeAll(async () => {
         const module = await import("../../src/services/QStashService.js");
@@ -55,8 +56,17 @@ describe("QStashService - Retry Logic", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        // Mock setTimeout to execute immediately to speed up tests
+        setTimeoutSpy = jest.spyOn(global, 'setTimeout').mockImplementation((fn) => {
+            fn();
+            return {};
+        });
         // Create a fresh instance for each test
         qstashService = new QStashService();
+    });
+
+    afterEach(() => {
+        setTimeoutSpy.mockRestore();
     });
 
     describe("publish - Retry Logic", () => {

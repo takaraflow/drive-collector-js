@@ -1,5 +1,19 @@
 import { jest } from "@jest/globals";
 
+// Move http mock to top level for ESM
+const mockServer = {
+    listen: jest.fn().mockReturnThis(),
+    on: jest.fn().mockReturnThis(),
+    close: jest.fn(cb => { if (cb) cb(); return mockServer; })
+};
+
+jest.unstable_mockModule("http", () => ({
+    default: {
+        createServer: jest.fn(() => mockServer)
+    },
+    createServer: jest.fn(() => mockServer)
+}));
+
 // Mock QStashService
 const mockVerifySignature = jest.fn().mockResolvedValue(true);
 const mockQstashService = {
@@ -36,14 +50,6 @@ describe("QStash Webhook Integration", () => {
     let handleQStashWebhook;
 
     beforeAll(async () => {
-        // Mock http to prevent server creation
-        jest.mock("http", () => ({
-            createServer: jest.fn(() => ({
-                listen: jest.fn(),
-                on: jest.fn()
-            }))
-        }));
-
         // Mock process methods to prevent exit
         const originalExit = process.exit;
         process.exit = jest.fn();

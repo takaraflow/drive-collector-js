@@ -134,11 +134,23 @@ export async function cleanupSingletonTimers() {
   cleanupPromises.push(
     import("../../src/services/CacheService.js")
       .then(module => {
-        if (module.kv && module.kv.stopRecoveryCheck) {
-          module.kv.stopRecoveryCheck();
+        if (module.kv) {
+          if (module.kv.stopRecoveryCheck) module.kv.stopRecoveryCheck();
+          if (module.kv._stopHeartbeat) module.kv._stopHeartbeat();
         }
       })
       .catch(() => {}) // 忽略导入错误
+  );
+
+  // 清理 InstanceCoordinator 定时器
+  cleanupPromises.push(
+    import("../../src/services/InstanceCoordinator.js")
+      .then(module => {
+        if (module.instanceCoordinator && module.instanceCoordinator.stopHeartbeat) {
+          module.instanceCoordinator.stopHeartbeat();
+        }
+      })
+      .catch(() => {})
   );
 
   // 并行执行所有清理操作

@@ -139,7 +139,7 @@ describe('Dispatcher Bootstrap', () => {
     expect(mockTelegram.resetClientSession).not.toHaveBeenCalled();
     expect(mockTelegram.clearSession).not.toHaveBeenCalled();
     // 应该只调用一次 start
-    expect(mockTelegram.client.start).toHaveBeenCalledTimes(2);
+    expect(mockTelegram.client.start).toHaveBeenCalledTimes(1);
   });
 
   it('should clear global session after multiple AUTH_KEY_DUPLICATED failures', async () => {
@@ -174,6 +174,6 @@ describe('Dispatcher Bootstrap', () => {
     // clearSession 应该在第三次重试失败后被调用（retryCount = 3，达到 maxRetries）
     expect(mockTelegram.clearSession).toHaveBeenCalled();
     // 三次失败后，retryCount = 3，不满足 retryCount < maxRetries，循环退出
-    expect(mockTelegram.client.start).toHaveBeenCalledTimes(4);
+    expect(mockTelegram.client.start).toHaveBeenCalledTimes(3);
   });
 });

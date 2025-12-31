@@ -114,14 +114,18 @@ export async function startDispatcher() {
                         // 3. 如果重试次数未达到上限，继续尝试（不清除全局 Session）
                         if (retryCount < maxRetries) {
                             logger.info("🔄 尝试重新连接（保持全局 Session 不变）...");
-                            await new Promise(r => setTimeout(r, 2000));
+                            if (process.env.NODE_ENV !== 'test') {
+                                await new Promise(r => setTimeout(r, 2000));
+                            }
                             continue;
                         }
                         
                         // 4. 如果多次重试仍然失败，说明全局 Session 已损坏，清除全局 Session
                         logger.warn("🚨 多次重试后仍然 AUTH_KEY_DUPLICATED，清除全局 Session");
                         await clearSession(); // 清除全局 Session
-                        await new Promise(r => setTimeout(r, 2000));
+                        if (process.env.NODE_ENV !== 'test') {
+                            await new Promise(r => setTimeout(r, 2000));
+                        }
                         continue;
                     }
 
@@ -129,7 +133,9 @@ export async function startDispatcher() {
 
                     // 如果不是 Auth Key 问题，增加一点延迟再重试，避免瞬间刷爆
                     if (retryCount < maxRetries) {
-                        await new Promise(r => setTimeout(r, 3000));
+                        if (process.env.NODE_ENV !== 'test') {
+                            await new Promise(r => setTimeout(r, 3000));
+                        }
                     }
                 }
             }
@@ -156,8 +162,10 @@ export async function startDispatcher() {
         }, interval);
     };
     
-    // 启动带抖动的间隔
-    startIntervalWithJitter();
+    // 启动带抖动的间隔 (在测试环境下禁用自动循环)
+    if (process.env.NODE_ENV !== 'test') {
+        startIntervalWithJitter();
+    }
 
     // 4. 注册事件监听器 -> 交给 MessageHandler 处理
     // 初始化 MessageHandler (预加载 Bot ID)

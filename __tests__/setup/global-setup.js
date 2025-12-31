@@ -7,14 +7,14 @@ import { cleanupDatabaseState, closeSharedDatabase } from './test-db.js';
  * 在每个测试用例结束后清理单例服务定时器和 mock 状态
  */
 afterEach(async () => {
-  // 快速清理 mock 状态
+  // 快速清理 mock 状态 - 仅清理调用历史，保留实现
   quickMockCleanup();
   
-  // 清理数据库状态（但不关闭连接）
-  cleanupDatabaseState();
-  
-  // 清理定时器
+  // 清理单例服务定时器
   await cleanupSingletonTimers();
+  
+  // 清理数据库状态（仅在必要时执行或使用更高效的清理）
+  cleanupDatabaseState();
 });
 
 /**

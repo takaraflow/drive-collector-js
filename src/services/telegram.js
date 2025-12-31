@@ -806,5 +806,7 @@ export const connectAndStart = async () => {
     }
 };
 
-// 启动看门狗
-startWatchdog();
+// 启动看门狗 (在测试环境下不自动启动，除非显式调用)
+if (process.env.NODE_ENV !== 'test') {
+    startWatchdog();
+}

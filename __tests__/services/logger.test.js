@@ -22,6 +22,7 @@ describe('Logger Service', () => {
   let consoleDebugSpy;
 
   beforeEach(async () => {
+    jest.useFakeTimers();
     jest.clearAllMocks();
 
     // Reset modules to ensure clean state
@@ -42,6 +43,7 @@ describe('Logger Service', () => {
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     jest.restoreAllMocks();
   });
 
@@ -207,7 +209,14 @@ describe('Logger Service', () => {
       const message = 'test message';
       const data = { test: true };
 
-      await logger.error(message, data);
+      const logPromise = logger.error(message, data);
+
+      // Advance timers for retries: 1s, 2s, 4s
+      for (let i = 0; i < 3; i++) {
+          await jest.advanceTimersByTimeAsync(Math.pow(2, i) * 1000);
+      }
+
+      await logPromise;
 
       // Should retry 3 times (initial + 3 retries = 4 calls)
       expect(mockIngest).toHaveBeenCalledTimes(4);
@@ -327,8 +336,8 @@ describe('Logger Service', () => {
       // Simulate Telegram library error
       console.error('TIMEOUT in updates.js', 'some args');
 
-      // Wait for async logger call
-      await new Promise(resolve => setTimeout(resolve, 10));
+      // Advance timers for async logger call
+      await jest.advanceTimersByTimeAsync(10);
 
       // Verify logger.error was called with correct payload
       expect(mockIngest).toHaveBeenCalledTimes(1);
@@ -358,7 +367,7 @@ describe('Logger Service', () => {
       console.error('ECONNRESET');
       console.error('Connection timed out');
 
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await jest.advanceTimersByTimeAsync(10);
 
       expect(mockIngest).toHaveBeenCalledTimes(3);
       mockIngest.mock.calls.forEach(call => {
@@ -380,12 +389,16 @@ describe('Logger Service', () => {
       };
       logger = loggerModule.logger;
 
+      // Clear any potential initialization logs
+      await jest.advanceTimersByTimeAsync(100);
+      mockIngest.mockClear();
+
       enableTelegramConsoleProxy();
 
       // Non-timeout error
       console.error('Some other error');
 
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await jest.advanceTimersByTimeAsync(10);
 
       // Should not call logger.error (no ingest)
       expect(mockIngest).not.toHaveBeenCalled();
