@@ -53,7 +53,7 @@ async function importModules() {
   // 生产环境：导入真实模块
   if (!qstashModule) {
     try {
-      const qstash = await import('@upstash/qstash');
+      const qstash = await import('@upstash/qstash/cloudflare');
       qstashModule = qstash;
     } catch (e) {
       console.warn('QStash not available:', e.message);
