@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.3.1](https://github.com/YoungSx/lb-worker-js/compare/v0.3.0...v0.3.1) (2025-12-31)
+
+
+### 🐛 Bug Fixes
+
+* wrangler ([9548252](https://github.com/YoungSx/lb-worker-js/commit/9548252036342e9fceb57a79c2f5d9ae6b5802f1))
+
 ## [0.3.0](https://github.com/YoungSx/lb-worker-js/compare/v0.2.1...v0.3.0) (2025-12-31)
 
 
