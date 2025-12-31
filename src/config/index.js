@@ -100,17 +100,17 @@ export const config = {
         dataset: process.env.AXIOM_DATASET || 'drive-collector',
     },
     redis: {
-        url: (process.env.NF_REDIS_URL && process.env.NF_REDIS_URL.trim() !== '') ? process.env.NF_REDIS_URL : (process.env.REDIS_URL || undefined),
-        host: (process.env.NF_REDIS_HOST && process.env.NF_REDIS_HOST.trim() !== '') ? process.env.NF_REDIS_HOST : (process.env.REDIS_HOST || undefined),
-        port: parseInt(process.env.NF_REDIS_PORT || process.env.REDIS_PORT || '6379', 10),
-        password: (process.env.NF_REDIS_PASSWORD && process.env.NF_REDIS_PASSWORD.trim() !== '') ? process.env.NF_REDIS_PASSWORD : (process.env.REDIS_PASSWORD || undefined),
+        url: (process.env.NF_REDIS_URL && process.env.NF_REDIS_URL.trim() !== '') ? process.env.NF_REDIS_URL : ((process.env.REDIS_URL && process.env.REDIS_URL.trim() !== '') ? process.env.REDIS_URL : undefined),
+        host: (process.env.NF_REDIS_HOST && process.env.NF_REDIS_HOST.trim() !== '') ? process.env.NF_REDIS_HOST : ((process.env.REDIS_HOST && process.env.REDIS_HOST.trim() !== '') ? process.env.REDIS_HOST : undefined),
+        port: (process.env.NF_REDIS_PORT && process.env.NF_REDIS_PORT.trim() !== '') ? parseInt(process.env.NF_REDIS_PORT, 10) : ((process.env.REDIS_PORT && process.env.REDIS_PORT.trim() !== '') ? parseInt(process.env.REDIS_PORT, 10) : 6379),
+        password: (process.env.NF_REDIS_PASSWORD && process.env.NF_REDIS_PASSWORD.trim() !== '') ? process.env.NF_REDIS_PASSWORD : ((process.env.REDIS_PASSWORD && process.env.REDIS_PASSWORD.trim() !== '') ? process.env.REDIS_PASSWORD : undefined),
         tls: {
-            enabled: !!process.env.REDIS_TLS_ENABLED || !!process.env.NF_REDIS_TLS_ENABLED || !!process.env.NF_REDIS_URL?.includes('rediss://') || !!process.env.REDIS_URL?.includes('rediss://'),
+            enabled: !!(process.env.REDIS_TLS_ENABLED === 'true' || process.env.NF_REDIS_TLS_ENABLED === 'true' || (process.env.NF_REDIS_URL && process.env.NF_REDIS_URL.includes('rediss://')) || (process.env.REDIS_URL && process.env.REDIS_URL.includes('rediss://'))),
             rejectUnauthorized: process.env.REDIS_TLS_REJECT_UNAUTHORIZED !== 'false' && process.env.NF_REDIS_TLS_REJECT_UNAUTHORIZED !== 'false',
-            ca: process.env.REDIS_TLS_CA || process.env.NF_REDIS_TLS_CA,  // Base64
-            cert: process.env.REDIS_TLS_CLIENT_CERT || process.env.NF_REDIS_TLS_CLIENT_CERT,  // Base64
-            key: process.env.REDIS_TLS_CLIENT_KEY || process.env.NF_REDIS_TLS_CLIENT_KEY,    // Base64
-            servername: process.env.REDIS_SNI_SERVERNAME || process.env.NF_REDIS_SNI_SERVERNAME
+            ca: (process.env.REDIS_TLS_CA && process.env.REDIS_TLS_CA.trim() !== '') ? process.env.REDIS_TLS_CA : ((process.env.NF_REDIS_TLS_CA && process.env.NF_REDIS_TLS_CA.trim() !== '') ? process.env.NF_REDIS_TLS_CA : undefined),
+            cert: (process.env.REDIS_TLS_CLIENT_CERT && process.env.REDIS_TLS_CLIENT_CERT.trim() !== '') ? process.env.REDIS_TLS_CLIENT_CERT : ((process.env.NF_REDIS_TLS_CLIENT_CERT && process.env.NF_REDIS_TLS_CLIENT_CERT.trim() !== '') ? process.env.NF_REDIS_TLS_CLIENT_CERT : undefined),
+            key: (process.env.REDIS_TLS_CLIENT_KEY && process.env.REDIS_TLS_CLIENT_KEY.trim() !== '') ? process.env.REDIS_TLS_CLIENT_KEY : ((process.env.NF_REDIS_TLS_CLIENT_KEY && process.env.NF_REDIS_TLS_CLIENT_KEY.trim() !== '') ? process.env.NF_REDIS_TLS_CLIENT_KEY : undefined),
+            servername: (process.env.REDIS_SNI_SERVERNAME && process.env.REDIS_SNI_SERVERNAME.trim() !== '') ? process.env.REDIS_SNI_SERVERNAME : ((process.env.NF_REDIS_SNI_SERVERNAME && process.env.NF_REDIS_SNI_SERVERNAME.trim() !== '') ? process.env.NF_REDIS_SNI_SERVERNAME : undefined)
         }
     },
     telegram: {
