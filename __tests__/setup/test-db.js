@@ -1,17 +1,22 @@
 import Database from 'better-sqlite3';
 
+// 共享数据库实例 - 在测试套件间复用
+let sharedDbInstance = null;
+let dbUsageCount = 0;
+
 /**
- * 创建内存数据库用于集成测试
- * 模拟D1数据库的行为，但使用本地SQLite
+ * 获取共享的内存数据库实例
+ * 首次调用时创建，后续调用返回同一实例
  * @returns {Database} SQLite内存数据库实例
  */
-export function createTestDatabase() {
-  const db = new Database(':memory:');
-
-  // 创建必要的表结构
-  createTables(db);
-
-  return db;
+export function getSharedDatabase() {
+  if (!sharedDbInstance) {
+    sharedDbInstance = new Database(':memory:');
+    createTables(sharedDbInstance);
+    console.log('📦 共享数据库实例已创建');
+  }
+  dbUsageCount++;
+  return sharedDbInstance;
 }
 
 /**
@@ -21,7 +26,7 @@ export function createTestDatabase() {
 function createTables(db) {
   // tasks表 - 基于实际TaskRepository使用的字段
   db.exec(`
-    CREATE TABLE tasks (
+    CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       chat_id TEXT,
@@ -38,7 +43,7 @@ function createTables(db) {
 
   // drives表
   db.exec(`
-    CREATE TABLE drives (
+    CREATE TABLE IF NOT EXISTS drives (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       provider TEXT NOT NULL,
@@ -51,7 +56,7 @@ function createTables(db) {
 
   // settings表
   db.exec(`
-    CREATE TABLE settings (
+    CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
@@ -61,7 +66,7 @@ function createTables(db) {
 
   // sessions表
   db.exec(`
-    CREATE TABLE sessions (
+    CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       data TEXT NOT NULL,
@@ -69,6 +74,44 @@ function createTables(db) {
       expires_at INTEGER
     )
   `);
+}
+
+/**
+ * 为每个测试创建事务包装器
+ * 使用事务实现测试隔离，避免数据污染
+ * @param {Function} testFn - 测试函数
+ * @returns {Function} 包装后的测试函数
+ */
+export function withTransaction(testFn) {
+  return async function () {
+    const db = getSharedDatabase();
+    const transaction = db.transaction(() => {
+      return testFn(db);
+    });
+    
+    try {
+      await transaction();
+    } finally {
+      // 事务结束后自动回滚，保持数据库干净
+      db.exec('ROLLBACK');
+    }
+  };
+}
+
+/**
+ * 清理数据库状态（但不关闭连接）
+ * 用于测试后的数据清理
+ */
+export function cleanupDatabaseState() {
+  if (sharedDbInstance) {
+    // 清理所有表数据
+    sharedDbInstance.exec(`
+      DELETE FROM tasks;
+      DELETE FROM drives;
+      DELETE FROM settings;
+      DELETE FROM sessions;
+    `);
+  }
 }
 
 /**
@@ -124,11 +167,23 @@ export function createMockD1Service(db) {
 }
 
 /**
- * 清理测试数据库
- * @param {Database} db
+ * 关闭共享数据库实例
+ * 在所有测试完成后调用
  */
-export function cleanupTestDatabase(db) {
-  if (db && db.open) {
-    db.close();
+export function closeSharedDatabase() {
+  if (sharedDbInstance && dbUsageCount === 0) {
+    sharedDbInstance.close();
+    sharedDbInstance = null;
+    console.log('✅ 共享数据库实例已关闭');
   }
+}
+
+/**
+ * 获取数据库使用统计
+ */
+export function getDbStats() {
+  return {
+    instanceExists: !!sharedDbInstance,
+    usageCount: dbUsageCount
+  };
 }

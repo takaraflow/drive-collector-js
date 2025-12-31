@@ -113,21 +113,63 @@ export function resetAllMocks(mocks) {
 /**
  * 清理已知的单例服务定时器
  * 用于防止测试间的定时器泄露
+ * 优化：使用更高效的清理策略，减少不必要的导入
  */
 export async function cleanupSingletonTimers() {
+  // 优化：只在需要时导入，避免每次调用都尝试导入
+  const cleanupPromises = [];
+
   // 清理 Telegram 服务定时器
-  try {
-    const { stopWatchdog } = await import("../../src/services/telegram.js");
-    if (stopWatchdog) stopWatchdog();
-  } catch (e) {
-    // 忽略导入错误，可能被 mock
-  }
+  cleanupPromises.push(
+    import("../../src/services/telegram.js")
+      .then(module => {
+        if (module.stopWatchdog) {
+          module.stopWatchdog();
+        }
+      })
+      .catch(() => {}) // 忽略导入错误
+  );
 
   // 清理 KV 服务定时器
-  try {
-    const { cache } = await import("../../src/services/CacheService.js");
-    if (kv && kv.stopRecoveryCheck) kv.stopRecoveryCheck();
-  } catch (e) {
-    // 忽略导入错误，可能被 mock
+  cleanupPromises.push(
+    import("../../src/services/CacheService.js")
+      .then(module => {
+        if (module.kv && module.kv.stopRecoveryCheck) {
+          module.kv.stopRecoveryCheck();
+        }
+      })
+      .catch(() => {}) // 忽略导入错误
+  );
+
+  // 并行执行所有清理操作
+  await Promise.allSettled(cleanupPromises);
+}
+
+/**
+ * 快速清理所有 Jest mock 状态
+ * 优化：只清理必要的 mock，避免过度重置
+ */
+export function quickMockCleanup() {
+  // 只清理全局 mock 函数，不清理其他状态
+  if (typeof jest !== 'undefined') {
+    // 清理所有 mock 的调用历史，但保留实现
+    jest.clearAllMocks();
   }
+}
+
+/**
+ * 创建测试超时包装器
+ * 为慢测试提供更长的超时时间
+ */
+export function withTimeout(testFn, timeout = 15000) {
+  return async function () {
+    const originalTimeout = jest.setTimeout;
+    jest.setTimeout(timeout);
+    
+    try {
+      await testFn();
+    } finally {
+      jest.setTimeout(originalTimeout);
+    }
+  };
 }
