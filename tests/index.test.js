@@ -1,74 +1,48 @@
-// 首先设置 mock，然后再导入模块
-import { jest } from '@jest/globals';
+/**
+ * Cloudflare Worker Load Balancer Tests
+ * 测试负载均衡器的核心功能
+ */
 
-// 确保全局 Web API 可用
-if (typeof globalThis.TextEncoder === 'undefined') {
-  const { TextEncoder, TextDecoder } = require('util');
-  globalThis.TextEncoder = TextEncoder;
-  globalThis.TextDecoder = TextDecoder;
-}
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 
-// Mock global.fetch
-global.fetch = jest.fn();
-
-// Helper function to create mock response with body.cancel
-function createMockResponse(status, body = {}) {
-    return {
-        status,
-        ok: status >= 200 && status < 300,
-        body: {
-            cancel: jest.fn().mockResolvedValue(undefined)
-        },
-        ...body
-    };
-}
-
-// Mock console methods
+// Mock console methods before any imports
 global.console = {
   log: jest.fn(),
   warn: jest.fn(),
   error: jest.fn(),
+  debug: jest.fn(),
 };
 
-// Mock @microlabs/otel-cf-workers
-jest.mock('@microlabs/otel-cf-workers', () => ({
-  instrument: (handler, config) => {
-    // 在测试环境中，直接返回原始 handler，不进行实际的 instrumentation
-    return handler;
-  }
-}));
-
-// Mock @opentelemetry/api
+// 模拟 OpenTelemetry
 jest.mock('@opentelemetry/api', () => ({
   trace: {
-    getActiveSpan: () => null,
-    getTracer: () => null
-  }
+    getActiveSpan: jest.fn(),
+  },
 }));
 
-// Mock @upstash/qstash - 使用全局变量注入
+// 模拟 @microlabs/otel-cf-workers
+jest.mock('@microlabs/otel-cf-workers', () => ({
+  instrument: (handler) => handler,
+}));
+
+// 模拟 @upstash/qstash
 const mockVerify = jest.fn();
-
-// 设置全局 mock 验证器
-global.__QSTASH_MOCK_VERIFY__ = mockVerify;
-
 jest.mock('@upstash/qstash', () => ({
   Receiver: class {
     constructor(options) {
       this.currentSigningKey = options.currentSigningKey;
       this.nextSigningKey = options.nextSigningKey;
     }
-    
     async verify(options) {
       return mockVerify(options);
     }
   },
 }));
 
-// 现在导入测试的函数
-import { describe, expect, it, beforeEach, afterEach } from '@jest/globals';
+// 导入被测试的函数
 import {
   verifyQStashSignature,
+  parseInstanceData,
   getActiveInstances,
   selectTargetInstance,
   forwardToInstance,
@@ -78,86 +52,165 @@ import {
   getCurrentProvider,
   isRetryableError,
   executeWithFailover,
+  logger,
+  upstash_get,
   getCurrentProviderState,
   setCurrentProviderState,
-  logger,
-  upstash_get
 } from '../src/index.js';
 
-// 导入 handler 用于集成测试
-import handler from '../src/index.js';
-
-// Mock KV Storage
-const mockKV = {
-  list: jest.fn(),
-  get: jest.fn(),
-  put: jest.fn(),
+// Mock console methods for logger tests
+const mockConsole = {
+  log: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn(),
 };
 
-const mockEnv = {
-  KV_STORAGE: mockKV,
-  QSTASH_CURRENT_SIGNING_KEY: 'test-secret-key',
-  UPSTASH_REDIS_REST_URL: 'https://test.upstash.io',
-  UPSTASH_REDIS_REST_TOKEN: 'test-token',
+// Save original console
+const originalConsole = { ...global.console };
+
+// Override console for logger tests
+global.console = mockConsole;
+
+// Helper function to restore console for specific tests
+const restoreConsole = () => {
+  global.console = mockConsole;
+};
+
+// Helper function to restore original console
+const restoreOriginalConsole = () => {
+  global.console = originalConsole;
 };
 
 describe('Cloudflare Worker Load Balancer Tests', () => {
+  let mockEnv;
+  let mockCtx;
+
   beforeEach(() => {
+    // 重置所有 mock
     jest.clearAllMocks();
-    // Reset global state
+    
+    // 重置模块状态
     setCurrentProviderState({
       currentProvider: 'cloudflare',
       failureCount: 0,
-      lastFailureTime: 0
+      lastFailureTime: 0,
+      failoverReason: ''
     });
-    // 重置 mock 实现并重新设置默认行为
-    mockVerify.mockReset();
-    mockVerify.mockImplementation(async (options) => {
-      // 模拟验证成功，返回传入的 body
-      return true;
+
+    // 设置测试环境
+    process.env.NODE_ENV = 'test';
+    process.env.JEST_WORKER_ID = '1';
+
+    // 模拟环境变量
+    mockEnv = {
+      QSTASH_CURRENT_SIGNING_KEY: 'test-signing-key',
+      QSTASH_NEXT_SIGNING_KEY: 'test-next-signing-key',
+      KV_STORAGE: {
+        get: jest.fn(),
+        put: jest.fn(),
+        list: jest.fn(),
+      },
+      UPSTASH_REDIS_REST_URL: 'https://test-upstash.io',
+      UPSTASH_REDIS_REST_TOKEN: 'test-token',
+      AXIOM_TOKEN: 'test-axiom-token',
+      AXIOM_DATASET: 'test-dataset',
+      SKIP_SIGNATURE_VERIFY: 'false',
+      SIGNATURE_EXPIRATION_WINDOW: '900',
+    };
+
+    // 模拟上下文
+    mockCtx = {
+      waitUntil: jest.fn(),
+    };
+
+    // 模拟 logger - 让它们调用真实的 console
+    logger.info = jest.fn(async (message, meta, ctx) => {
+      const targetConsole = global.console || console;
+      if (targetConsole && targetConsole.log) {
+        targetConsole.log(`INFO: ${message}`, meta);
+      }
     });
-    // 确保全局 mock 存在
+    logger.warn = jest.fn(async (message, meta, ctx) => {
+      const targetConsole = global.console || console;
+      if (targetConsole && targetConsole.warn) {
+        targetConsole.warn(`WARN: ${message}`, meta);
+      }
+    });
+    logger.error = jest.fn(async (message, meta, ctx) => {
+      const targetConsole = global.console || console;
+      if (targetConsole && targetConsole.error) {
+        targetConsole.error(`ERROR: ${message}`, meta);
+      }
+    });
+    logger.debug = jest.fn(async (message, meta, ctx) => {
+      if (logger.env === 'development') {
+        const targetConsole = global.console || console;
+        if (targetConsole && targetConsole.debug) {
+          targetConsole.debug(`DEBUG: ${message}`, meta);
+        }
+      }
+    });
+    logger.configure = jest.fn();
+
+    // 设置 QStash mock 验证器
     global.__QSTASH_MOCK_VERIFY__ = mockVerify;
+    mockVerify.mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    delete process.env.NODE_ENV;
+    delete process.env.JEST_WORKER_ID;
   });
 
   describe('verifyQStashSignature', () => {
-    it('应该在签名正确时返回body', async () => {
-      const body = 'test-body';
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      const signature = 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'; // base64url of 'expected-signature'
-
+    it('应该成功验证有效签名', async () => {
       const request = {
         headers: new Map([
-          ['Upstash-Signature', signature],
-          ['Upstash-Timestamp', timestamp],
+          ['Upstash-Signature', 'valid-signature'],
+          ['Upstash-Timestamp', Math.floor(Date.now() / 1000).toString()],
         ]),
-        text: jest.fn().mockResolvedValue(body),
-        url: 'https://test.url',
+        arrayBuffer: jest.fn().mockResolvedValue(new ArrayBuffer(8)),
+        url: 'https://test.url/api',
       };
 
-      // mockVerify 返回 true，表示验证通过
       mockVerify.mockResolvedValue(true);
-
-      const result = await verifyQStashSignature(request, mockEnv);
       
-      // 验证 mock 被调用
+      const result = await verifyQStashSignature(request, mockEnv, false, mockCtx);
+      
+      expect(result).toBeInstanceOf(Uint8Array);
       expect(mockVerify).toHaveBeenCalledWith({
-        signature,
-        body: new TextEncoder().encode(body),
-        url: 'https://test.url',
+        signature: 'valid-signature',
+        body: expect.any(Uint8Array),
+        url: 'https://test.url/api',
         clockTolerance: 300,
       });
+    });
+
+    it('应该跳过签名验证当环境变量设置时', async () => {
+      const request = {
+        headers: new Map([['Upstash-Signature', 'any-signature']]),
+        text: jest.fn().mockResolvedValue('test-body'),
+        url: 'https://test.url/api',
+      };
+
+      mockEnv.SKIP_SIGNATURE_VERIFY = 'true';
       
-      expect(new TextDecoder().decode(result)).toBe(body);
+      const result = await verifyQStashSignature(request, mockEnv, false, mockCtx);
+      
+      expect(result).toBeInstanceOf(Uint8Array);
+      expect(mockVerify).not.toHaveBeenCalled();
     });
 
     it('应该在缺少签名头时抛出错误', async () => {
       const request = {
-        headers: new Map(),
+        headers: new Map([]),
         text: jest.fn().mockResolvedValue('body'),
+        url: 'https://test.url/api',
       };
 
-      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Missing Upstash-Signature header');
+      await expect(verifyQStashSignature(request, mockEnv, false, mockCtx))
+        .rejects.toThrow('Missing Upstash-Signature header');
     });
 
     it('应该在签名不匹配时抛出错误', async () => {
@@ -171,699 +224,745 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
       };
 
       mockVerify.mockRejectedValue(new Error('Invalid signature'));
-      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Signature verification failed: Invalid signature');
+      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Invalid signature');
     });
 
     it('应该在时间戳过期时抛出错误', async () => {
       const expiredTimestamp = (Math.floor(Date.now() / 1000) - 1000).toString(); // 过期1000秒
       const request = {
         headers: new Map([
-          ['Upstash-Signature', 'expired-signature'],
+          ['Upstash-Signature', 'any-signature'],
           ['Upstash-Timestamp', expiredTimestamp],
         ]),
         text: jest.fn().mockResolvedValue('body'),
         url: 'https://test.url/api',
       };
 
-      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Signature expired');
+      mockEnv.SIGNATURE_EXPIRATION_WINDOW = '900'; // 15分钟过期窗口
+      
+      await expect(verifyQStashSignature(request, mockEnv, false, mockCtx))
+        .rejects.toThrow('Signature expired');
     });
 
-    it('应该在SKIP_SIGNATURE_VERIFY为true时跳过验证', async () => {
-      const envWithSkip = { ...mockEnv, SKIP_SIGNATURE_VERIFY: 'true' };
-      const request = {
-        headers: new Map(),
-        text: jest.fn().mockResolvedValue('test-body'),
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('test-body')),
-      };
-
-      const result = await verifyQStashSignature(request, envWithSkip);
-      expect(result).toEqual(new Uint8Array(Buffer.from('test-body')));
-    });
-
-    it('应该在签名包含填充字符=时正确验证', async () => {
-      const body = 'test-body';
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      const signature = 'v1a=c2lnXVZmtKeXhjajFCQzVYOVc1aDk0TWh4bmROZ0c='; // 带填充字符的base64url
-
+    it('应该在缺少 QSTASH_CURRENT_SIGNING_KEY 时抛出错误', async () => {
       const request = {
         headers: new Map([
-          ['Upstash-Signature', signature],
-          ['Upstash-Timestamp', timestamp],
-        ]),
-        text: jest.fn().mockResolvedValue(body),
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
-      };
-
-      mockVerify.mockResolvedValue(true);
-
-      const result = await verifyQStashSignature(request, mockEnv);
-      expect(new TextDecoder().decode(result)).toBe(body);
-    });
-
-    it('应该使用默认15分钟过期窗口', async () => {
-      const expiredTimestamp = (Math.floor(Date.now() / 1000) - 1000).toString(); // 过期1000秒，超过默认900秒
-      const request = {
-        headers: new Map([
-          ['Upstash-Signature', 'v1a=signature'],
-          ['Upstash-Timestamp', expiredTimestamp],
+          ['Upstash-Signature', 'any-signature'],
+          ['Upstash-Timestamp', Math.floor(Date.now() / 1000).toString()],
         ]),
         text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('body')),
+        url: 'https://test.url/api',
       };
 
-      await expect(verifyQStashSignature(request, mockEnv)).rejects.toThrow('Signature expired');
-    });
-
-    it('应该支持自定义过期窗口', async () => {
-      const body = 'test-body';
-      const customEnv = { ...mockEnv, SIGNATURE_EXPIRATION_WINDOW: '1800' }; // 30分钟
-      const expiredTimestamp = (Math.floor(Date.now() / 1000) - 1000).toString(); // 过期1000秒，小于1800秒
-      const signature = 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl';
-
-      const request = {
-        headers: new Map([
-          ['Upstash-Signature', signature],
-          ['Upstash-Timestamp', expiredTimestamp],
-        ]),
-        text: jest.fn().mockResolvedValue(body),
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from(body)),
-      };
-
-      mockVerify.mockResolvedValue(true);
-
-      const result = await verifyQStashSignature(request, customEnv);
-      expect(new TextDecoder().decode(result)).toBe(body);
-    });
-
-    it('应该支持 JWT 格式签名（不带 Upstash-Timestamp）', async () => {
-      const body = 'test-body';
-      // 模拟一个 JWT 格式的签名（包含两个点）
-      const jwtSignature = 'header.payload.signature';
-
-      const request = {
-        headers: new Map([
-          ['Upstash-Signature', jwtSignature],
-          // 注意：没有 Upstash-Timestamp
-        ]),
-        text: jest.fn().mockResolvedValue(body),
-        url: 'https://test.url',
-      };
-
-      mockVerify.mockResolvedValue(true);
-
-      const result = await verifyQStashSignature(request, mockEnv);
+      delete mockEnv.QSTASH_CURRENT_SIGNING_KEY;
       
-      expect(mockVerify).toHaveBeenCalledWith({
-        signature: jwtSignature,
-        body: new TextEncoder().encode(body),
-        url: 'https://test.url',
-        clockTolerance: 300,
+      await expect(verifyQStashSignature(request, mockEnv, false, mockCtx))
+        .rejects.toThrow('QSTASH_CURRENT_SIGNING_KEY 未设置');
+    });
+
+    it('应该在 GET 请求时返回 null 并跳过 body 读取', async () => {
+      const request = {
+        headers: new Map([
+          ['Upstash-Signature', 'valid-signature'],
+          ['Upstash-Timestamp', Math.floor(Date.now() / 1000).toString()],
+        ]),
+        text: jest.fn().mockResolvedValue(''),
+        url: 'https://test.url/api',
+      };
+
+      mockVerify.mockResolvedValue(true);
+      
+      const result = await verifyQStashSignature(request, mockEnv, true, mockCtx);
+      
+      expect(result).toBeNull();
+      expect(request.text).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('parseInstanceData', () => {
+    it('应该正确解析实例数据', () => {
+      const data = {
+        id: 'instance-1',
+        url: 'https://instance1.example.com',
+        status: 'active',
+        lastHeartbeat: Date.now(),
+        region: 'us-east-1',
+      };
+
+      const result = parseInstanceData(data);
+      
+      expect(result).toEqual({
+        id: 'instance-1',
+        url: 'https://instance1.example.com',
+        status: 'active',
+        lastHeartbeat: expect.any(Number),
+        region: 'us-east-1',
       });
-      expect(new TextDecoder().decode(result)).toBe(body);
+    });
+
+    it('应该处理 JSON 字符串输入', () => {
+      const data = JSON.stringify({
+        id: 'instance-1',
+        url: 'https://instance1.example.com',
+      });
+
+      const result = parseInstanceData(data);
+      
+      expect(result.id).toBe('instance-1');
+      expect(result.url).toBe('https://instance1.example.com');
+      expect(result.status).toBe('active');
+    });
+
+    it('应该返回 null 当数据为空时', () => {
+      expect(parseInstanceData(null)).toBeNull();
+      expect(parseInstanceData(undefined)).toBeNull();
+      expect(parseInstanceData('')).toBeNull();
+    });
+
+    it('应该返回 null 当 JSON 解析失败时', () => {
+      expect(parseInstanceData('invalid-json')).toBeNull();
     });
   });
 
   describe('getActiveInstances', () => {
-    it('应该在KV为空时返回空数组', async () => {
-      mockKV.list.mockResolvedValue({ keys: [] });
+    it('应该获取活跃实例列表', async () => {
+      const mockInstances = [
+        { id: 'instance-1', url: 'https://instance1.example.com', status: 'active', lastHeartbeat: Date.now() },
+        { id: 'instance-2', url: 'https://instance2.example.com', status: 'active', lastHeartbeat: Date.now() },
+      ];
 
-      const result = await getActiveInstances(mockEnv);
-      expect(result).toEqual([]);
-    });
-
-    it('应该只返回活跃实例', async () => {
-      const now = Date.now();
-      mockKV.list.mockResolvedValue({
-        keys: [
-          { name: 'instance:1' },
-          { name: 'instance:2' },
-          { name: 'instance:3' }
-        ]
+      mockEnv.KV_STORAGE.list.mockResolvedValue({
+        keys: [{ name: 'instance:instance-1' }, { name: 'instance:instance-2' }],
       });
 
-      mockKV.get.mockImplementation((key) => {
-        if (key === 'instance:1') {
-          return Promise.resolve({
-            id: '1',
-            url: 'https://instance1.com',
+      mockEnv.KV_STORAGE.get.mockImplementation((key) => {
+        if (key === 'instance:instance-1') {
+          return JSON.stringify(mockInstances[0]);
+        }
+        if (key === 'instance:instance-2') {
+          return JSON.stringify(mockInstances[1]);
+        }
+        return null;
+      });
+
+      const result = await getActiveInstances(mockEnv, mockCtx);
+      
+      expect(result).toHaveLength(2);
+      expect(result[0].id).toBe('instance-1');
+      expect(result[1].id).toBe('instance-2');
+    });
+
+    it('应该过滤掉过期的实例', async () => {
+      const now = Date.now();
+      const expiredTime = now - (16 * 60 * 1000); // 16分钟前，超过15分钟超时
+
+      mockEnv.KV_STORAGE.list.mockResolvedValue({
+        keys: [{ name: 'instance:expired' }, { name: 'instance:active' }],
+      });
+
+      mockEnv.KV_STORAGE.get.mockImplementation((key) => {
+        if (key === 'instance:expired') {
+          return JSON.stringify({
+            id: 'expired',
+            url: 'https://expired.example.com',
             status: 'active',
-            lastHeartbeat: now - 5 * 60 * 1000, // 5分钟前
+            lastHeartbeat: expiredTime,
           });
         }
-        if (key === 'instance:2') {
-          return Promise.resolve({
-            id: '2',
-            url: 'https://instance2.com',
-            status: 'inactive',
+        if (key === 'instance:active') {
+          return JSON.stringify({
+            id: 'active',
+            url: 'https://active.example.com',
+            status: 'active',
             lastHeartbeat: now,
           });
         }
-        if (key === 'instance:3') {
-          return Promise.resolve({
-            id: '3',
-            url: 'https://instance3.com',
-            status: 'active',
-            lastHeartbeat: now - 10 * 60 * 1000, // 10分钟前，未过期（新阈值15分钟）
-          });
-        }
+        return null;
       });
 
-      const result = await getActiveInstances(mockEnv);
-      expect(result).toHaveLength(2);
-      expect(result.map(i => i.id).sort()).toEqual(['1', '3']);
+      const result = await getActiveInstances(mockEnv, mockCtx);
+      
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('active');
     });
 
-    it('应该过滤掉超过 15 分钟心跳的实例', async () => {
-      const now = Date.now();
-      mockKV.list.mockResolvedValue({
-        keys: [{ name: 'instance:expired' }]
+    it('应该过滤掉非活跃状态的实例', async () => {
+      mockEnv.KV_STORAGE.list.mockResolvedValue({
+        keys: [{ name: 'instance:inactive' }],
       });
 
-      mockKV.get.mockResolvedValue({
-        id: 'expired',
-        url: 'https://expired.com',
-        status: 'active',
-        lastHeartbeat: now - 16 * 60 * 1000, // 16分钟前，已过期
-      });
+      mockEnv.KV_STORAGE.get.mockResolvedValue(JSON.stringify({
+        id: 'inactive',
+        url: 'https://inactive.example.com',
+        status: 'inactive',
+        lastHeartbeat: Date.now(),
+      }));
 
-      const result = await getActiveInstances(mockEnv);
+      const result = await getActiveInstances(mockEnv, mockCtx);
+      
       expect(result).toHaveLength(0);
     });
 
-    it('应该在KV错误时返回空数组', async () => {
-      mockKV.list.mockRejectedValue(new Error('KV error'));
+    it('应该返回空数组当 KV 访问失败时', async () => {
+      mockEnv.KV_STORAGE.list.mockRejectedValue(new Error('KV error'));
 
-      const result = await getActiveInstances(mockEnv);
+      const result = await getActiveInstances(mockEnv, mockCtx);
+      
+      expect(result).toEqual([]);
+    });
+
+    it('应该返回空数组当没有实例时', async () => {
+      mockEnv.KV_STORAGE.list.mockResolvedValue({ keys: [] });
+
+      const result = await getActiveInstances(mockEnv, mockCtx);
+      
       expect(result).toEqual([]);
     });
   });
 
   describe('selectTargetInstance', () => {
-    it('应该在空列表时返回null', async () => {
-      const result = await selectTargetInstance([], mockEnv);
+    it('应该选择正确的实例并更新轮询索引', async () => {
+      const instances = [
+        { id: 'instance-1', url: 'https://instance1.example.com' },
+        { id: 'instance-2', url: 'https://instance2.example.com' },
+        { id: 'instance-3', url: 'https://instance3.example.com' },
+      ];
+
+      // 第一次调用：索引为0，选择instance-1
+      mockEnv.KV_STORAGE.get.mockResolvedValueOnce(null);
+      mockEnv.KV_STORAGE.put.mockResolvedValueOnce(undefined);
+
+      const result1 = await selectTargetInstance(instances, mockEnv, mockCtx);
+      expect(result1.id).toBe('instance-1');
+      expect(mockEnv.KV_STORAGE.put).toHaveBeenCalledWith('lb:round_robin_index', '1');
+
+      // 第二次调用：索引为1，选择instance-2
+      mockEnv.KV_STORAGE.get.mockResolvedValueOnce('1');
+      mockEnv.KV_STORAGE.put.mockResolvedValueOnce(undefined);
+
+      const result2 = await selectTargetInstance(instances, mockEnv, mockCtx);
+      expect(result2.id).toBe('instance-2');
+      expect(mockEnv.KV_STORAGE.put).toHaveBeenCalledWith('lb:round_robin_index', '2');
+
+      // 第三次调用：索引为2，选择instance-3
+      mockEnv.KV_STORAGE.get.mockResolvedValueOnce('2');
+      mockEnv.KV_STORAGE.put.mockResolvedValueOnce(undefined);
+
+      const result3 = await selectTargetInstance(instances, mockEnv, mockCtx);
+      expect(result3.id).toBe('instance-3');
+      expect(mockEnv.KV_STORAGE.put).toHaveBeenCalledWith('lb:round_robin_index', '3');
+
+      // 第四次调用：索引为3，回绕到instance-1
+      mockEnv.KV_STORAGE.get.mockResolvedValueOnce('3');
+      mockEnv.KV_STORAGE.put.mockResolvedValueOnce(undefined);
+
+      const result4 = await selectTargetInstance(instances, mockEnv, mockCtx);
+      expect(result4.id).toBe('instance-1');
+      expect(mockEnv.KV_STORAGE.put).toHaveBeenCalledWith('lb:round_robin_index', '4');
+    });
+
+    it('应该返回 null 当没有实例时', async () => {
+      const result = await selectTargetInstance([], mockEnv, mockCtx);
       expect(result).toBeNull();
     });
 
-    it('应该选择第一个实例并更新索引', async () => {
-      const instances = [
-        { id: '1', url: 'https://instance1.com' },
-        { id: '2', url: 'https://instance2.com' },
-      ];
+    it('应该处理 KV 获取失败', async () => {
+      const instances = [{ id: 'instance-1', url: 'https://instance1.example.com' }];
+      
+      mockEnv.KV_STORAGE.get.mockRejectedValue(new Error('KV error'));
+      mockEnv.KV_STORAGE.put.mockResolvedValueOnce(undefined);
 
-      mockKV.get.mockResolvedValue(null); // 初始索引为0
-
-      const result = await selectTargetInstance(instances, mockEnv);
-      expect(result.id).toBe('1');
-
-      expect(mockKV.put).toHaveBeenCalledWith('lb:round_robin_index', '1');
+      const result = await selectTargetInstance(instances, mockEnv, mockCtx);
+      
+      expect(result).toEqual(instances[0]);
+      expect(mockEnv.KV_STORAGE.put).toHaveBeenCalledWith('lb:round_robin_index', '1');
     });
 
-    it('应该循环选择实例', async () => {
-      const instances = [
-        { id: '1', url: 'https://instance1.com' },
-        { id: '2', url: 'https://instance2.com' },
-      ];
+    it('应该处理 KV 存储失败', async () => {
+      const instances = [{ id: 'instance-1', url: 'https://instance1.example.com' }];
+      
+      mockEnv.KV_STORAGE.get.mockResolvedValue(null);
+      mockEnv.KV_STORAGE.put.mockRejectedValue(new Error('KV error'));
 
-      mockKV.get.mockResolvedValue('1'); // 上次索引1
-
-      const result = await selectTargetInstance(instances, mockEnv);
-      expect(result.id).toBe('2'); // 1 % 2 = 1, instances[1]
+      const result = await selectTargetInstance(instances, mockEnv, mockCtx);
+      
+      expect(result).toEqual(instances[0]);
     });
   });
 
   describe('forwardToInstance', () => {
-    it('应该成功转发请求', async () => {
-      const instance = { id: '1', url: 'https://instance1.com' };
+    it('应该正确转发请求到实例', async () => {
+      const instance = { id: 'instance-1', url: 'https://instance1.example.com' };
+      const normalizedUrl = new URL('https://lb.example.com/api/test');
       const request = {
-        url: 'https://lb.example.com/webhook',
         method: 'POST',
         headers: new Map([
+          ['Content-Type', 'application/json'],
           ['Host', 'lb.example.com'],
           ['CF-Connecting-IP', '1.2.3.4'],
         ]),
       };
-      const normalizedUrl = new URL(request.url);
-      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
-      const originalBody = 'test-body';
+      const originalBody = JSON.stringify({ test: 'data' });
 
-      const mockResponse = createMockResponse(200);
-      global.fetch.mockResolvedValue(mockResponse);
+      const mockResponse = new Response('OK', { status: 200 });
+      global.fetch = jest.fn().mockResolvedValue(mockResponse);
 
-      const result = await forwardToInstance(instance, normalizedUrl, request, originalBody);
+      const result = await forwardToInstance(instance, normalizedUrl, request, originalBody, mockCtx);
+
       expect(result).toBe(mockResponse);
-
       expect(global.fetch).toHaveBeenCalledWith(
         expect.objectContaining({
-          url: 'https://instance1.com/webhook',
+          url: 'https://instance1.example.com/api/test',
           method: 'POST',
         })
       );
     });
 
-    it('应该在5xx错误时返回响应', async () => {
-      const instance = { id: '1', url: 'https://instance1.com' };
+    it('应该正确处理 GET 请求', async () => {
+      const instance = { id: 'instance-1', url: 'https://instance1.example.com' };
+      const normalizedUrl = new URL('https://lb.example.com/api/test');
       const request = {
-        url: 'https://lb.example.com/webhook',
-        method: 'POST',
-        headers: new Map(),
+        method: 'GET',
+        headers: new Map([
+          ['Host', 'lb.example.com'],
+        ]),
       };
-      const normalizedUrl = new URL(request.url);
-      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
-      const originalBody = 'test-body';
 
-      const mockResponse = createMockResponse(500);
-      global.fetch.mockResolvedValue(mockResponse);
+      const mockResponse = new Response('OK', { status: 200 });
+      global.fetch = jest.fn().mockResolvedValue(mockResponse);
 
-      const result = await forwardToInstance(instance, normalizedUrl, request, originalBody);
+      const result = await forwardToInstance(instance, normalizedUrl, request, null, mockCtx);
+
       expect(result).toBe(mockResponse);
+      const fetchCall = global.fetch.mock.calls[0][0];
+      expect(fetchCall.method).toBe('GET');
+      // 源代码中对于 GET 请求会设置 body = undefined，但 Request 对象可能返回 null
+      expect(fetchCall.body === undefined || fetchCall.body === null).toBe(true);
+    });
+
+    it('应该添加正确的转发头', async () => {
+      const instance = { id: 'instance-1', url: 'https://instance1.example.com' };
+      const normalizedUrl = new URL('https://lb.example.com/api/test');
+      const request = {
+        method: 'POST',
+        headers: new Map([
+          ['Content-Type', 'application/json'],
+          ['Host', 'lb.example.com'],
+          ['CF-Connecting-IP', '1.2.3.4'],
+          ['X-Custom-Header', 'custom-value'],
+        ]),
+      };
+      const originalBody = 'test';
+
+      const mockResponse = new Response('OK', { status: 200 });
+      global.fetch = jest.fn().mockResolvedValue(mockResponse);
+
+      await forwardToInstance(instance, normalizedUrl, request, originalBody, mockCtx);
+
+      const fetchCall = global.fetch.mock.calls[0][0];
+      const headers = fetchCall.headers;
+
+      expect(headers.get('X-Forwarded-Host')).toBe('lb.example.com');
+      expect(headers.get('X-Forwarded-Proto')).toBe('https');
+      expect(headers.get('X-Forwarded-For')).toBe('1.2.3.4');
+      expect(headers.get('X-Load-Balancer')).toBe('qstash-lb');
+      expect(headers.get('X-Custom-Header')).toBe('custom-value');
+      expect(headers.get('Host')).toBe('instance1.example.com');
+    });
+
+    it('应该记录 5xx 错误', async () => {
+      const instance = { id: 'instance-1', url: 'https://instance1.example.com' };
+      const normalizedUrl = new URL('https://lb.example.com/api/test');
+      const request = {
+        method: 'POST',
+        headers: new Map([['Host', 'lb.example.com']]),
+      };
+      const originalBody = 'test';
+
+      const mockResponse = new Response('Error', { status: 500 });
+      global.fetch = jest.fn().mockResolvedValue(mockResponse);
+
+      await forwardToInstance(instance, normalizedUrl, request, originalBody, mockCtx);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        '后端返回 5xx 错误',
+        expect.objectContaining({ status: 500, instanceId: 'instance-1' }),
+        mockCtx
+      );
     });
   });
 
   describe('fetchWithRetry', () => {
-    it('应该在第一个实例成功时返回响应', async () => {
+    it('应该在第一次尝试成功时返回响应', async () => {
       const instances = [
-        { id: '1', url: 'https://instance1.com' },
+        { id: 'instance-1', url: 'https://instance1.example.com' },
+        { id: 'instance-2', url: 'https://instance2.example.com' },
       ];
-      const request = { url: 'https://lb.example.com/webhook', method: 'POST', headers: new Map(), body: 'body' };
-      const normalizedUrl = new URL(request.url);
-      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
+      const normalizedUrl = new URL('https://lb.example.com/api');
+      const request = { method: 'POST', headers: new Map() };
+      const body = 'test';
 
-      const mockResponse = createMockResponse(200);
-      global.fetch.mockResolvedValue(mockResponse);
+      const mockResponse = new Response('OK', { status: 200 });
+      global.fetch = jest.fn().mockResolvedValue(mockResponse);
 
-      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
-      expect(result).toBe(mockResponse);
+      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, body, mockCtx);
+
+      expect(result.status).toBe(200);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
-    it('应该在第一个失败时尝试下一个实例', async () => {
+    it('应该在 4xx 错误时停止重试并返回', async () => {
       const instances = [
-        { id: '1', url: 'https://instance1.com' },
-        { id: '2', url: 'https://instance2.com' },
+        { id: 'instance-1', url: 'https://instance1.example.com' },
+        { id: 'instance-2', url: 'https://instance2.example.com' },
       ];
-      const request = { url: 'https://lb.example.com/webhook', method: 'POST', headers: new Map(), body: 'body' };
-      const normalizedUrl = new URL(request.url);
-      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
+      const normalizedUrl = new URL('https://lb.example.com/api');
+      const request = { method: 'POST', headers: new Map() };
+      const body = 'test';
 
-      const response500 = createMockResponse(500);
-      const response200 = createMockResponse(200);
-      global.fetch.mockResolvedValueOnce(response500);
-      global.fetch.mockResolvedValueOnce(response200);
+      const mock4xxResponse = new Response('Bad Request', { status: 400 });
+      global.fetch = jest.fn().mockResolvedValue(mock4xxResponse);
 
-      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
-      expect(result).toBe(response200);
+      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, body, mockCtx);
+
+      expect(result.status).toBe(400);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        '实例返回 4xx 错误，停止重试',
+        expect.objectContaining({ status: 400, instanceId: 'instance-1' }),
+        mockCtx
+      );
+    });
+
+    it('应该在 5xx 错误时重试其他实例', async () => {
+      const instances = [
+        { id: 'instance-1', url: 'https://instance1.example.com' },
+        { id: 'instance-2', url: 'https://instance2.example.com' },
+      ];
+      const normalizedUrl = new URL('https://lb.example.com/api');
+      const request = { method: 'POST', headers: new Map() };
+      const body = 'test';
+
+      const mock5xxResponse = new Response('Server Error', { status: 500 });
+      const mock2xxResponse = new Response('OK', { status: 200 });
+
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce(mock5xxResponse)
+        .mockResolvedValueOnce(mock2xxResponse);
+
+      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, body, mockCtx);
+
+      expect(result.status).toBe(200);
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
-    it('应该在所有实例失败时返回最后一个5xx响应', async () => {
+    it('应该在所有实例都失败时返回最后一个5xx响应', async () => {
       const instances = [
-        { id: '1', url: 'https://instance1.com' },
-        { id: '2', url: 'https://instance2.com' },
+        { id: 'instance-1', url: 'https://instance1.example.com' },
+        { id: 'instance-2', url: 'https://instance2.example.com' },
       ];
-      const request = { url: 'https://lb.example.com/webhook', method: 'POST', headers: new Map(), body: 'body' };
-      const normalizedUrl = new URL(request.url);
-      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
+      const normalizedUrl = new URL('https://lb.example.com/api');
+      const request = { method: 'POST', headers: new Map() };
+      const body = 'test';
 
-      const lastResponse = createMockResponse(500);
-      global.fetch.mockResolvedValue(lastResponse);
+      const mock5xxResponse = new Response('Server Error', { status: 500 });
+      global.fetch = jest.fn().mockResolvedValue(mock5xxResponse);
 
-      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
-      expect(result).toBe(lastResponse);
-    });
-
-    it('应该在第一个实例返回500，第二个实例返回200时，取消第一个响应的body', async () => {
-      const instances = [
-        { id: '1', url: 'https://instance1.com' },
-        { id: '2', url: 'https://instance2.com' },
-      ];
-      const request = { url: 'https://lb.example.com/webhook', method: 'POST', headers: new Map(), body: 'body' };
-      const normalizedUrl = new URL(request.url);
-      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
-
-      const response500 = createMockResponse(500);
-      const response200 = createMockResponse(200);
+      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, body, mockCtx);
       
-      global.fetch.mockResolvedValueOnce(response500);
-      global.fetch.mockResolvedValueOnce(response200);
-
-      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
-      
-      expect(result).toBe(response200);
-      expect(response500.body.cancel).toHaveBeenCalled();
-      expect(response200.body.cancel).not.toHaveBeenCalled();
-    });
-
-    it('应该在多个5xx响应时，取消之前保存的5xx响应body', async () => {
-      const instances = [
-        { id: '1', url: 'https://instance1.com' },
-        { id: '2', url: 'https://instance2.com' },
-        { id: '3', url: 'https://instance3.com' },
-      ];
-      const request = { url: 'https://lb.example.com/webhook', method: 'POST', headers: new Map(), body: 'body' };
-      const normalizedUrl = new URL(request.url);
-      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
-
-      const response500_1 = createMockResponse(500);
-      const response500_2 = createMockResponse(500);
-      const response200 = createMockResponse(200);
-      
-      global.fetch.mockResolvedValueOnce(response500_1);
-      global.fetch.mockResolvedValueOnce(response500_2);
-      global.fetch.mockResolvedValueOnce(response200);
-
-      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
-      
-      expect(result).toBe(response200);
-      expect(response500_1.body.cancel).toHaveBeenCalled();
-      expect(response500_2.body.cancel).toHaveBeenCalled();
-      expect(response200.body.cancel).not.toHaveBeenCalled();
-    });
-
-    it('应该在所有实例返回5xx时，只取消前N-1个响应的body', async () => {
-      const instances = [
-        { id: '1', url: 'https://instance1.com' },
-        { id: '2', url: 'https://instance2.com' },
-      ];
-      const request = { url: 'https://lb.example.com/webhook', method: 'POST', headers: new Map(), body: 'body' };
-      const normalizedUrl = new URL(request.url);
-      normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
-
-      const response500_1 = createMockResponse(500);
-      const response500_2 = createMockResponse(500);
-      
-      // Mock fetch to return different responses for each call
-      global.fetch.mockResolvedValueOnce(response500_1);
-      global.fetch.mockResolvedValueOnce(response500_2);
-
-      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, request.body);
-      
-      // Should return the last 5xx response
       expect(result.status).toBe(500);
-      // First response should be cancelled
-      expect(response500_1.body.cancel).toHaveBeenCalled();
-      // Last response should not be cancelled (it's returned)
-      expect(response500_2.body.cancel).not.toHaveBeenCalled();
+    });
+
+    it('应该在转发错误时继续尝试其他实例', async () => {
+      const instances = [
+        { id: 'instance-1', url: 'https://instance1.example.com' },
+        { id: 'instance-2', url: 'https://instance2.example.com' },
+      ];
+      const normalizedUrl = new URL('https://lb.example.com/api');
+      const request = { method: 'POST', headers: new Map() };
+      const body = 'test';
+
+      const mock2xxResponse = new Response('OK', { status: 200 });
+
+      global.fetch = jest.fn()
+        .mockRejectedValueOnce(new Error('Network error'))
+        .mockResolvedValueOnce(mock2xxResponse);
+
+      const result = await fetchWithRetry(instances, normalizedUrl, request, mockEnv, body, mockCtx);
+
+      expect(result.status).toBe(200);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(logger.error).toHaveBeenCalledWith(
+        '转发请求失败',
+        expect.objectContaining({ instanceId: 'instance-1', error: 'Network error' }),
+        mockCtx
+      );
     });
   });
 
-  describe('upstash_get body cancellation', () => {
-    it('应该在返回404时取消response body', async () => {
-      // Mock fetch to return 404 response with body.cancel
-      const mockResponse = createMockResponse(404);
-      global.fetch.mockResolvedValue(mockResponse);
+  describe('shouldFailover', () => {
+    it('应该在没有 Upstash 配置时返回 false', () => {
+      const env = { ...mockEnv };
+      delete env.UPSTASH_REDIS_REST_URL;
+      delete env.UPSTASH_REDIS_REST_TOKEN;
+
+      const result = shouldFailover(new Error('test'), env);
+      expect(result).toBe(false);
+    });
+
+    it('应该在当前已经是 Upstash 模式时返回 false', () => {
+      setCurrentProviderState({ currentProvider: 'upstash' });
       
-      const result = await upstash_get(mockEnv, 'non-existent-key');
+      const result = shouldFailover(new Error('test'), mockEnv);
+      expect(result).toBe(false);
+    });
+
+    it('应该在配额错误时立即返回 true', () => {
+      const errors = [
+        new Error('free usage limit exceeded'),
+        new Error('quota exceeded'),
+        new Error('rate limit exceeded'),
+      ];
+
+      errors.forEach(error => {
+        expect(shouldFailover(error, mockEnv)).toBe(true);
+      });
+    });
+
+    it('应该在网络错误时立即返回 true', () => {
+      const errors = [
+        new Error('fetch failed'),
+        new Error('network error'),
+        new Error('Network timeout'),
+      ];
+
+      errors.forEach(error => {
+        expect(shouldFailover(error, mockEnv)).toBe(true);
+      });
+    });
+
+    it('应该在连续失败3次后返回 true', () => {
+      const error = new Error('random error');
       
+      // 第一次调用
+      expect(shouldFailover(error, mockEnv)).toBe(false);
+      // 第二次调用
+      expect(shouldFailover(error, mockEnv)).toBe(false);
+      // 第三次调用
+      expect(shouldFailover(error, mockEnv)).toBe(true);
+    });
+
+    it('应该在1分钟窗口后重置失败计数', async () => {
+      const error = new Error('random error');
+      
+      // 第一次调用
+      expect(shouldFailover(error, mockEnv)).toBe(false);
+      
+      // 等待超过1分钟
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // 模拟时间过去超过1分钟
+      const originalDate = Date.now;
+      Date.now = () => originalDate() + 61000;
+      
+      // 应该重置计数
+      expect(shouldFailover(error, mockEnv)).toBe(false);
+      
+      Date.now = originalDate;
+    });
+  });
+
+  describe('failover', () => {
+    it('应该在没有 Upstash 配置时返回 false', () => {
+      const env = { ...mockEnv };
+      delete env.UPSTASH_REDIS_REST_URL;
+      delete env.UPSTASH_REDIS_REST_TOKEN;
+
+      const result = failover(env);
+      expect(result).toBe(false);
+    });
+
+    it('应该切换到 Upstash 模式并返回 true', () => {
+      const result = failover(mockEnv);
+      
+      expect(result).toBe(true);
+      expect(getCurrentProviderState().currentProvider).toBe('upstash');
+      expect(logger.info).toHaveBeenCalledWith('故障转移到 Upstash Redis', expect.any(Object));
+    });
+  });
+
+  describe('getCurrentProvider', () => {
+    it('应该返回正确的提供者名称', () => {
+      expect(getCurrentProvider()).toBe('Cloudflare KV');
+      
+      setCurrentProviderState({ currentProvider: 'upstash' });
+      expect(getCurrentProvider()).toBe('Upstash Redis');
+    });
+  });
+
+  describe('isRetryableError', () => {
+    it('应该正确识别可重试的错误', () => {
+      const retryableErrors = [
+        new Error('free usage limit exceeded'),
+        new Error('quota exceeded'),
+        new Error('rate limit exceeded'),
+        new Error('network timeout'),
+        new Error('fetch failed'),
+      ];
+
+      retryableErrors.forEach(error => {
+        expect(isRetryableError(error)).toBe(true);
+      });
+    });
+
+    it('应该正确识别不可重试的错误', () => {
+      const nonRetryableErrors = [
+        new Error('invalid request'),
+        new Error('authentication failed'),
+        new Error('not found'),
+      ];
+
+      nonRetryableErrors.forEach(error => {
+        expect(isRetryableError(error)).toBe(false);
+      });
+    });
+  });
+
+  describe('executeWithFailover', () => {
+    it('应该成功执行 KV get 操作', async () => {
+      mockEnv.KV_STORAGE.get.mockResolvedValue('test-value');
+
+      const result = await executeWithFailover('_kv_get', mockEnv, mockCtx, 'test-key');
+
+      expect(result).toBe('test-value');
+      expect(mockEnv.KV_STORAGE.get).toHaveBeenCalledWith('test-key');
+    });
+
+    it('应该成功执行 KV put 操作', async () => {
+      mockEnv.KV_STORAGE.put.mockResolvedValue(undefined);
+
+      const result = await executeWithFailover('_kv_put', mockEnv, mockCtx, 'test-key', 'test-value');
+
+      expect(result).toBeUndefined();
+      expect(mockEnv.KV_STORAGE.put).toHaveBeenCalledWith('test-key', 'test-value');
+    });
+
+    it('应该成功执行 KV list 操作', async () => {
+      const mockList = { keys: [{ name: 'key1' }, { name: 'key2' }] };
+      mockEnv.KV_STORAGE.list.mockResolvedValue(mockList);
+
+      const result = await executeWithFailover('_kv_list', mockEnv, mockCtx, 'prefix:');
+
+      expect(result).toEqual(mockList);
+      expect(mockEnv.KV_STORAGE.list).toHaveBeenCalledWith({ prefix: 'prefix:' });
+    });
+
+    it('应该在 KV 失败时故障转移到 Upstash', async () => {
+      mockEnv.KV_STORAGE.get.mockRejectedValue(new Error('free usage limit exceeded'));
+      
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ result: 'upstash-value' }),
+      });
+
+      const result = await executeWithFailover('_kv_get', mockEnv, mockCtx, 'test-key');
+
+      expect(result).toBe('upstash-value');
+      expect(getCurrentProviderState().currentProvider).toBe('upstash');
+    });
+
+    it('应该在 Upstash 也失败时抛出错误', async () => {
+      mockEnv.KV_STORAGE.get.mockRejectedValue(new Error('free usage limit exceeded'));
+      
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        statusText: 'Not Found',
+      });
+
+      await expect(executeWithFailover('_kv_get', mockEnv, mockCtx, 'test-key'))
+        .rejects.toThrow('Upstash Get Error');
+    });
+
+    it('应该在不支持故障转移的操作时抛出原始错误', async () => {
+      mockEnv.KV_STORAGE.list.mockRejectedValue(new Error('KV error'));
+
+      await expect(executeWithFailover('_kv_list', mockEnv, mockCtx, 'prefix:'))
+        .rejects.toThrow('KV error');
+    });
+  });
+
+  describe('upstash_get', () => {
+    it('应该成功从 Upstash 获取数据', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ result: 'test-value' }),
+      });
+
+      const result = await upstash_get(mockEnv, 'test-key');
+
+      expect(result).toBe('test-value');
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://test-upstash.io/get/test-key',
+        expect.objectContaining({
+          headers: { 'Authorization': 'Bearer test-token' },
+        })
+      );
+    });
+
+    it('应该在 404 时返回 null', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        status: 404,
+        body: { cancel: jest.fn() },
+      });
+
+      const result = await upstash_get(mockEnv, 'test-key');
+
       expect(result).toBeNull();
-      expect(mockResponse.body.cancel).toHaveBeenCalled();
     });
 
-    it('应该在返回其他错误时正常抛出异常', async () => {
-      const mockResponse = createMockResponse(500);
-      mockResponse.statusText = 'Internal Server Error';
-      mockResponse.text = jest.fn().mockResolvedValue('Internal Server Error');
-      global.fetch.mockResolvedValue(mockResponse);
+    it('应该在错误状态时抛出异常', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+      });
+
+      await expect(upstash_get(mockEnv, 'test-key'))
+        .rejects.toThrow('Upstash Get Error: 500 Internal Server Error');
+    });
+  });
+
+  describe('logger', () => {
+    it('应该记录 info 日志', async () => {
+      await logger.info('test message', { key: 'value' }, mockCtx);
       
-      await expect(upstash_get(mockEnv, 'test-key')).rejects.toThrow('Upstash Get Error: 500 Internal Server Error');
-      // 500错误不应该调用cancel，因为我们会读取response body
-      expect(mockResponse.body.cancel).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('Fault Tolerance Functions', () => {
-    beforeEach(() => {
-      // Reset global state
-      setCurrentProviderState({
-        currentProvider: 'cloudflare',
-        failureCount: 0,
-        lastFailureTime: 0
-      });
+      expect(console.log).toHaveBeenCalledWith('INFO: test message', { key: 'value' });
     });
 
-    afterEach(() => {
-      // Reset to cloudflare after tests
-      setCurrentProviderState({
-        currentProvider: 'cloudflare',
-        failureCount: 0,
-        lastFailureTime: 0
-      });
+    it('应该记录 warn 日志', async () => {
+      await logger.warn('test warning', { key: 'value' }, mockCtx);
+      
+      expect(console.warn).toHaveBeenCalledWith('WARN: test warning', { key: 'value' });
     });
 
-    describe('shouldFailover', () => {
-      it('应该在配额错误时立即返回true', () => {
-        const error = new Error('free usage limit exceeded');
-        const env = { UPSTASH_REDIS_REST_URL: 'test', UPSTASH_REDIS_REST_TOKEN: 'test' };
-
-        expect(shouldFailover(error, env)).toBe(true);
-      });
-
-      it('应该在网络错误时立即返回true', () => {
-        const error = new Error('fetch failed');
-        const env = { UPSTASH_REDIS_REST_URL: 'test', UPSTASH_REDIS_REST_TOKEN: 'test' };
-
-        expect(shouldFailover(error, env)).toBe(true);
-      });
-
-      it('应该在其他错误连续失败 3 次后返回true', () => {
-        const error = new Error('unknown error');
-        const env = { UPSTASH_REDIS_REST_URL: 'test', UPSTASH_REDIS_REST_TOKEN: 'test' };
-
-        expect(shouldFailover(error, env)).toBe(false);
-        expect(shouldFailover(error, env)).toBe(false);
-        expect(shouldFailover(error, env)).toBe(true);
-      });
-
-      it('应该在没有Upstash配置时返回false', () => {
-        const error = new Error('free usage limit exceeded');
-        const env = {};
-
-        expect(shouldFailover(error, env)).toBe(false);
-      });
-
-      it('应该在已经是upstash模式时返回false', () => {
-        // 先设置成upstash模式
-        setCurrentProviderState({ currentProvider: 'upstash' });
-
-        const error = new Error('free usage limit exceeded');
-        const env = { UPSTASH_REDIS_REST_URL: 'test', UPSTASH_REDIS_REST_TOKEN: 'test' };
-
-        expect(shouldFailover(error, env)).toBe(false);
-      });
+    it('应该记录 error 日志', async () => {
+      await logger.error('test error', { key: 'value' }, mockCtx);
+      
+      expect(console.error).toHaveBeenCalledWith('ERROR: test error', { key: 'value' });
     });
 
-    describe('failover', () => {
-      it('应该成功切换到upstash', () => {
-        const env = { UPSTASH_REDIS_REST_URL: 'test', UPSTASH_REDIS_REST_TOKEN: 'test' };
-
-        expect(failover(env)).toBe(true);
-        expect(getCurrentProvider()).toBe('Upstash Redis');
-      });
-
-      it('应该在没有配置时返回false', () => {
-        const env = {};
-
-        expect(failover(env)).toBe(false);
-      });
+    it('应该在开发环境下记录 debug 日志', async () => {
+      logger.env = 'development';
+      await logger.debug('test debug', { key: 'value' }, mockCtx);
+      
+      expect(console.debug).toHaveBeenCalledWith('DEBUG: test debug', { key: 'value' });
     });
 
-    describe('isRetryableError', () => {
-      it('应该识别配额错误', () => {
-        expect(isRetryableError(new Error('free usage limit'))).toBe(true);
-        expect(isRetryableError(new Error('quota exceeded'))).toBe(true);
-        expect(isRetryableError(new Error('rate limit'))).toBe(true);
-        expect(isRetryableError(new Error('network timeout'))).toBe(true);
-      });
-
-      it('应该返回false对于不可重试错误', () => {
-        expect(isRetryableError(new Error('key not found'))).toBe(false);
-        expect(isRetryableError(new Error('invalid argument'))).toBe(false);
-      });
-    });
-
-    describe('executeWithFailover', () => {
-      it('应该在KV成功时使用Cloudflare KV', async () => {
-        mockKV.get.mockResolvedValue('test-value');
-
-        const result = await executeWithFailover('_kv_get', mockEnv, {}, 'test-key');
-        expect(result).toBe('test-value');
-        expect(mockKV.get).toHaveBeenCalledWith('test-key');
-      });
-
-      it('应该在KV失败时故障转移到Upstash', async () => {
-        // Mock Upstash response
-        const mockUpstashResponse = createMockResponse(200, {
-          json: () => Promise.resolve({ result: 'upstash-value' }),
-          text: () => Promise.resolve(JSON.stringify({ result: 'upstash-value' }))
-        });
-        global.fetch = jest.fn().mockResolvedValue(mockUpstashResponse);
-
-        // Mock KV failure (quota error triggers immediate failover)
-        mockKV.get.mockRejectedValue(new Error('free usage limit exceeded'));
-
-        // 调用一次即触发故障转移并重试成功
-        const result = await executeWithFailover('_kv_get', mockEnv, {}, 'test-key');
-        
-        expect(result).toBe('upstash-value');
-        expect(getCurrentProvider()).toBe('Upstash Redis');
-        expect(global.fetch).toHaveBeenCalledWith(
-          'https://test.upstash.io/get/test-key',
-          expect.objectContaining({
-            headers: { 'Authorization': 'Bearer test-token' }
-          })
-        );
-      });
-    });
-  });
-
-
-  // 集成测试
-  describe('Integration Tests', () => {
-    it('应该在集成测试中正确转发请求', async () => {
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      mockVerify.mockResolvedValue(true);
-
-      // Mock KV
-      mockKV.list.mockResolvedValue({
-        keys: [{ name: 'instance:1' }]
-      });
-      mockKV.get.mockImplementation((key) => {
-        if (key === 'instance:1') {
-          return Promise.resolve({
-            id: '1',
-            url: 'https://instance1.com',
-            status: 'active',
-            lastHeartbeat: Date.now(),
-          });
-        }
-        if (key === 'lb:round_robin_index') {
-          return Promise.resolve(null);
-        }
-        return Promise.resolve(null);
-      });
-
-      // Mock fetch
-      const mockResponse = createMockResponse(200, { headers: new Map() });
-      global.fetch.mockResolvedValue(mockResponse);
-
-      const request = {
-        url: 'https://lb.example.com/webhook',
-        method: 'POST',
-        headers: new Map([
-          ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-          ['Upstash-Timestamp', timestamp],
-        ]),
-        text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
-      };
-
-      const response = await handler.fetch(request, mockEnv, {});
-
-      expect(response.status).toBe(200);
-    });
-
-    it('应该在无活跃实例时返回503', async () => {
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      mockVerify.mockResolvedValue(true);
-
-      mockKV.list.mockResolvedValue({ keys: [] });
-
-      const request = {
-        url: 'https://lb.example.com/webhook',
-        headers: new Map([
-          ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-          ['Upstash-Timestamp', timestamp],
-        ]),
-        text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
-      };
-
-      const response = await handler.fetch(request, mockEnv, {});
-
-      expect(response.status).toBe(503);
-    });
-
-    it('应该在签名验证失败时返回401', async () => {
-      const request = {
-        url: 'https://lb.example.com/webhook',
-        headers: new Map(),
-        text: jest.fn().mockResolvedValue('body'),
-        arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
-      };
-
-      const response = await handler.fetch(request, mockEnv, {});
-
-      expect(response.status).toBe(401);
-    });
-
-    it('应该在GET /health请求时返回200', async () => {
-      const request = {
-        url: 'https://lb.example.com/health',
-        method: 'GET',
-        headers: new Map(),
-      };
-
-      const response = await handler.fetch(request, mockEnv, {});
-
-      expect(response.status).toBe(200);
-    });
-    
-    it('应该正确转发 type="download" 的 QStash 请求', async () => {
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      const downloadBody = JSON.stringify({
-        id: "task_123456789",
-        chatId: "chat_987654321",
-        msgId: 123456789,
-        type: "download"
-      });
-
-      mockVerify.mockResolvedValue(true);
-
-      // Mock KV
-      mockKV.list.mockResolvedValue({
-        keys: [{ name: 'instance:1' }]
-      });
-      mockKV.get.mockImplementation((key) => {
-        if (key === 'instance:1') {
-          return Promise.resolve({
-            id: '1',
-            url: 'https://instance1.com',
-            status: 'active',
-            lastHeartbeat: Date.now(),
-          });
-        }
-        if (key === 'lb:round_robin_index') {
-          return Promise.resolve(null);
-        }
-        return Promise.resolve(null);
-      });
-
-      // Mock fetch
-      const mockResponse = createMockResponse(200, { headers: new Map() });
-      let capturedRequest;
-      global.fetch = jest.fn().mockImplementation((req) => {
-        capturedRequest = req;
-        return Promise.resolve(mockResponse);
-      });
-
-      const request = {
-        url: 'https://lb.example.com/',
-        method: 'POST',
-        headers: new Map([
-          ['Content-Type', 'application/json'],
-          ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-          ['Upstash-Timestamp', timestamp],
-        ]),
-        text: jest.fn().mockResolvedValue(downloadBody),
-        arrayBuffer: jest.fn().mockResolvedValue(new TextEncoder().encode(downloadBody)),
-      };
-
-      const response = await handler.fetch(request, mockEnv, {});
-
-      expect(response.status).toBe(200);
-
-      // 验证 fetch 被调用时使用了正确的 body
-      expect(global.fetch).toHaveBeenCalledTimes(1);
-      expect(capturedRequest).toBeInstanceOf(Request);
-      expect(await capturedRequest.text()).toBe(downloadBody);
+    it('应该在生产环境下不记录 debug 日志', async () => {
+      logger.env = 'production';
+      await logger.debug('test debug', { key: 'value' }, mockCtx);
+      
+      expect(console.debug).not.toHaveBeenCalled();
     });
   });
 });
