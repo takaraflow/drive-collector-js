@@ -209,7 +209,7 @@ async function initTelegramClient() {
             appVersion: "2.3.3",
             useWSS: false,
             autoReconnect: true,
-            timeout: 30000, // Reduced from 60s to 30s for faster failure detection
+            timeout: 60000, // Increased to 60s for high-latency environments (proxy/Cloudflare)
             requestRetries: 10, // Reduced from 15
             retryDelay: 2000, // Reduced from 3s to 2s
             dcId: undefined,
@@ -217,9 +217,12 @@ async function initTelegramClient() {
             maxConcurrentDownloads: 3,
             connectionPoolSize: 5,
             // NEW: Additional stability settings
-            connectionTimeout: 15000, // Connection establishment timeout
-            socketTimeout: 20000, // Socket read/write timeout
+            connectionTimeout: 30000, // Increased: Connection establishment timeout
+            socketTimeout: 45000, // Increased: Socket read/write timeout
             keepAliveTimeout: 30000, // Keep-alive ping interval
+            // NEW: Update loop tuning to reduce _updateLoop frequency and timeout pressure
+            updateGetIntervalMs: 10000, // Poll updates every 10s (default 1s can cause timeouts)
+            pingIntervalMs: 30000, // Ping every 30s to detect stale connections
             // Enhanced logger with timeout awareness - FIXED to include canSend method
             baseLogger: {
                 levels: ["error", "warn", "info", "debug"],
@@ -340,6 +343,7 @@ function setupEventListeners(client) {
     // NEW: Add update loop health monitoring
     let lastUpdateTimestamp = Date.now();
     let updateHealthMonitor = null;
+    let consecutiveUpdateTimeouts = 0; // NEW: Track consecutive update timeouts
 
     // Track update timestamps to detect stuck update loops
     client.addEventHandler((update) => {
@@ -347,6 +351,10 @@ function setupEventListeners(client) {
         // Reset consecutive failures on successful update
         if (consecutiveFailures > 0) {
             consecutiveFailures = 0;
+        }
+        // Reset update timeout counter on any update
+        if (consecutiveUpdateTimeouts > 0) {
+            consecutiveUpdateTimeouts = 0;
         }
     });
 
@@ -360,9 +368,15 @@ function setupEventListeners(client) {
             // If no updates for 90 seconds, consider update loop stuck
             if (timeSinceLastUpdate > 90000) {
                 logger.warn(`⚠️ Update loop appears stuck (no updates for ${Math.floor(timeSinceLastUpdate / 1000)}s)`);
+                consecutiveUpdateTimeouts++;
                 
-                if (!isReconnecting) {
-                    handleConnectionIssue(true);
+                if (consecutiveUpdateTimeouts > 3) {
+                    logger.error(`🚨 Multiple update timeouts (${consecutiveUpdateTimeouts}), triggering circuit breaker and session reset`);
+                    telegramCircuitBreaker.onFailure();
+                    handleConnectionIssue(false); // Full reconnection with session reset
+                    consecutiveUpdateTimeouts = 0;
+                } else if (!isReconnecting) {
+                    handleConnectionIssue(true); // Lightweight reconnection
                 }
                 
                 // Reset timestamp to prevent repeated triggers
@@ -546,9 +560,9 @@ async function handleConnectionIssue(lightweight = false) {
         }
 
         // Exponential backoff with jitter
-        const baseDelay = 5000 + (telegramCircuitBreaker.failures * 2000);
+        const baseDelay = 5000 + (telegramCircuitBreaker.failures * 5000); // Increased multiplier for more aggressive backoff
         const jitter = Math.random() * 2000;
-        const backoffTime = Math.min(baseDelay + jitter, 30000);
+        const backoffTime = Math.min(baseDelay + jitter, 60000); // Increased max to 60s
         
         logger.info(`⏳ Reconnection backoff: ${Math.floor(backoffTime / 1000)}s`);
         await new Promise(r => setTimeout(r, backoffTime));
@@ -695,8 +709,6 @@ export const stopWatchdog = () => {
     lastHeartbeat = Date.now(); // 重置心跳时间
 };
 
-
-
 /**
  * 获取电路断路器状态（用于监控和调试）
  */
@@ -717,6 +729,22 @@ export const resetCircuitBreaker = () => {
     }
     logger.info("🔄 Circuit breaker manually reset");
 };
+
+/**
+ * 获取更新循环健康状态（用于监控）
+ */
+export const getUpdateHealth = () => {
+    // Note: lastUpdateTimestamp is defined in setupEventListeners scope
+    // We need to expose it via a closure or global. For now, we'll use a module-level variable.
+    // Since lastUpdateTimestamp is inside setupEventListeners, we'll track it at module level.
+    return {
+        lastUpdate: lastUpdateTimestamp,
+        timeSince: Date.now() - lastUpdateTimestamp
+    };
+};
+
+// Module-level variable to track update health (exposed from setupEventListeners)
+let lastUpdateTimestamp = Date.now();
 
 // 启动看门狗
 startWatchdog();

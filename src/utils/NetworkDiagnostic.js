@@ -1,4 +1,4 @@
-import { client } from "../services/telegram.js";
+import { client, getUpdateHealth } from "../services/telegram.js";
 import { d1 } from "../services/d1.js";
 import { cache } from "../services/CacheService.js";
 import { CloudTool } from "../services/rclone.js";
@@ -25,6 +25,9 @@ export class NetworkDiagnostic {
 
         // 检查 Telegram Bot API
         results.services.telegramBot = await this._checkTelegramBot();
+
+        // 检查 Telegram 更新循环健康
+        results.services.telegramUpdateHealth = await this._checkUpdateLoopHealth();
 
         // 检查 Cloudflare D1
         results.services.d1 = await this._checkD1();
@@ -109,6 +112,46 @@ export class NetworkDiagnostic {
                 status: 'error',
                 responseTime: `${Date.now() - startTime}ms`,
                 message: `Telegram Bot API 连接失败: ${error.message}`
+            };
+        }
+    }
+
+    /**
+     * 检查 Telegram 更新循环健康状态
+     */
+    static async _checkUpdateLoopHealth() {
+        const startTime = Date.now();
+        try {
+            const health = getUpdateHealth();
+            const timeSince = health.timeSince;
+            
+            // 如果超过 90 秒没有更新，认为更新循环可能卡住
+            if (timeSince > 90000) {
+                return {
+                    status: 'warning',
+                    responseTime: `${Date.now() - startTime}ms`,
+                    message: `更新循环可能卡住 (最后更新: ${Math.floor(timeSince / 1000)}s 前)`,
+                    details: {
+                        lastUpdate: new Date(health.lastUpdate).toISOString(),
+                        timeSinceSeconds: Math.floor(timeSince / 1000)
+                    }
+                };
+            }
+            
+            return {
+                status: 'ok',
+                responseTime: `${Date.now() - startTime}ms`,
+                message: `更新循环正常 (最后更新: ${Math.floor(timeSince / 1000)}s 前)`,
+                details: {
+                    lastUpdate: new Date(health.lastUpdate).toISOString(),
+                    timeSinceSeconds: Math.floor(timeSince / 1000)
+                }
+            };
+        } catch (error) {
+            return {
+                status: 'error',
+                responseTime: `${Date.now() - startTime}ms`,
+                message: `无法检查更新循环健康: ${error.message}`
             };
         }
     }

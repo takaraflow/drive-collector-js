@@ -500,6 +500,50 @@ describe('TelegramCircuitBreaker Unit Tests', () => {
             // Should be back to OPEN
             expect(circuitBreaker.getState().state).toBe('OPEN');
         });
+
+        test('should transition back to OPEN on consecutive TIMEOUT in HALF_OPEN', async () => {
+            // Open circuit
+            for (let i = 0; i < 5; i++) {
+                try {
+                    await circuitBreaker.execute(() => {
+                        throw new Error("TIMEOUT");
+                    });
+                } catch (e) {
+                    // Expected
+                }
+            }
+            
+            // Advance to HALF_OPEN
+            jest.advanceTimersByTime(60001);
+            
+            // First failure in HALF_OPEN
+            try {
+                await circuitBreaker.execute(() => {
+                    throw new Error("TIMEOUT");
+                });
+            } catch (e) {
+                // Expected
+            }
+            
+            // Should be back to OPEN
+            expect(circuitBreaker.getState().state).toBe('OPEN');
+            
+            // Advance to HALF_OPEN again
+            jest.advanceTimersByTime(60001);
+            
+            // Second consecutive failure
+            try {
+                await circuitBreaker.execute(() => {
+                    throw new Error("TIMEOUT");
+                });
+            } catch (e) {
+                // Expected
+            }
+            
+            // Should still be OPEN (consecutive failures)
+            expect(circuitBreaker.getState().state).toBe('OPEN');
+            expect(circuitBreaker.getState().failures).toBe(7); // 5 + 2
+        });
     });
 
     describe('Execute Method Behavior', () => {
