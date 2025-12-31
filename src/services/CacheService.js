@@ -79,6 +79,35 @@ export class CacheService {
         // 设置便利属性
         this.useRedis = this.currentProvider === 'redis';
         this.useUpstash = this.currentProvider === 'upstash';
+
+        // 🔍 DEBUG: Cache 配置诊断日志
+        logger.info('[CacheService DEBUG] 配置诊断:', {
+            hasRedis: this.hasRedis,
+            hasCloudflare: this.hasCloudflare,
+            hasUpstash: this.hasUpstash,
+            currentProvider: this.currentProvider,
+            cf_accountId_exists: !!this.accountId,
+            cf_namespaceId_exists: !!this.namespaceId,
+            cf_token_exists: !!this.token,
+            apiUrl_set: !!this.apiUrl,
+            redisUrl_exists: !!this.redisUrl,
+            redisHost_exists: !!this.redisHost,
+            upstashUrl_exists: !!this.upstashUrl,
+            cache_provider_env: process.env.CACHE_PROVIDER || 'unset',
+            env_vars_detected: {
+                CF_CACHE_ACCOUNT_ID: !!process.env.CF_CACHE_ACCOUNT_ID,
+                CF_KV_ACCOUNT_ID: !!process.env.CF_KV_ACCOUNT_ID,
+                CF_ACCOUNT_ID: !!process.env.CF_ACCOUNT_ID,
+                CF_CACHE_NAMESPACE_ID: !!process.env.CF_CACHE_NAMESPACE_ID,
+                CF_KV_NAMESPACE_ID: !!process.env.CF_KV_NAMESPACE_ID,
+                CF_CACHE_TOKEN: !!process.env.CF_CACHE_TOKEN,
+                CF_KV_TOKEN: !!process.env.CF_KV_TOKEN,
+                CF_D1_TOKEN: !!process.env.CF_D1_TOKEN,
+                NF_REDIS_URL: !!process.env.NF_REDIS_URL,
+                REDIS_URL: !!process.env.REDIS_URL,
+                UPSTASH_REDIS_REST_URL: !!process.env.UPSTASH_REDIS_REST_URL
+            }
+        });
     }
 
     /**
