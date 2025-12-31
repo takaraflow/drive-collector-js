@@ -16,8 +16,8 @@ export class CacheService {
         // 为了在 constructor 中安全检查提供商配置，先提取配置变量
         const redisConfig = config.redis || {};
         const cf_accountId = process.env.CF_CACHE_ACCOUNT_ID || process.env.CF_KV_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
-        const cf_namespaceId = process.env.CF_CACHE_NAMESPACE_ID || process.env.CF_KV_NAMESPACE_ID || process.env.CF_KV_NAMESPACE_ID;
-        const cf_token = process.env.CF_CACHE_TOKEN || process.env.CF_KV_TOKEN || process.env.CF_D1_TOKEN || process.env.CF_KV_TOKEN;
+        const cf_namespaceId = process.env.CF_CACHE_NAMESPACE_ID || process.env.CF_KV_NAMESPACE_ID;
+        const cf_token = process.env.CF_CACHE_TOKEN || process.env.CF_KV_TOKEN; // 修复：移除 CF_D1_TOKEN（D1 token 非 KV token），避免误判 hasCloudflare
         const up_url = process.env.UPSTASH_REDIS_REST_URL ? process.env.UPSTASH_REDIS_REST_URL.replace(/\/$/, '') : '';
         const up_token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
