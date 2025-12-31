@@ -433,30 +433,37 @@ export const getClient = async () => {
 };
 
 // 兼容性导出：保留原有的 client 导出指向（用于测试向后兼容）
-export const client = {
-    get connected() {
-        // 同步属性访问，返回当前客户端的连接状态（如果已初始化）
-        return telegramClient?.connected || false;
-    },
-    // 其他常用属性的代理
-    get session() {
-        return telegramClient?.session;
-    },
-    on: (...args) => {
-        // 如果客户端已初始化，代理事件监听器
-        if (telegramClient) {
-            return telegramClient.on(...args);
+export const client = new Proxy({}, {
+    get: (target, prop) => {
+        if (prop === 'connected') {
+            return telegramClient?.connected || false;
         }
-        // 否则延迟到初始化后设置
-        const setupListener = () => {
-            if (telegramClient) {
-                telegramClient.on(...args);
+        if (prop === 'session') {
+            return telegramClient?.session;
+        }
+        if (prop === 'on') {
+            return (...args) => {
+                if (telegramClient) {
+                    return telegramClient.on(...args);
+                }
+                setTimeout(() => telegramClient?.on(...args), 100);
+            };
+        }
+        // 关键修复：代理所有其他方法到 telegramClient
+        if (telegramClient && typeof telegramClient[prop] === 'function') {
+            return telegramClient[prop].bind(telegramClient);
+        }
+        
+        // 如果 client 还没初始化，返回一个异步执行的包装函数（或者抛出更有意义的错误）
+        return async (...args) => {
+            const c = await getClient();
+            if (typeof c[prop] === 'function') {
+                return c[prop](...args);
             }
+            throw new TypeError(`client.${prop.toString()} is not a function`);
         };
-        // 简单的延迟设置
-        setTimeout(setupListener, 100);
     }
-};
+});
 
 /**
  * 获取客户端活跃状态
