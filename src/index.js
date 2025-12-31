@@ -17,8 +17,11 @@ const ROUND_ROBIN_KEY = 'lb:round_robin_index';
 const HEARTBEAT_TIMEOUT = 15 * 60 * 1000; // 15分钟
 
 // 模块缓存
-let otelModules = null;
 let qstashModule = null;
+
+// 静态导入 OpenTelemetry API
+import { trace } from '@opentelemetry/api';
+import { instrument } from '@microlabs/otel-cf-workers';
 
 /**
  * 动态导入模块（用于测试兼容）
@@ -48,29 +51,6 @@ async function importModules() {
   }
 
   // 生产环境：导入真实模块
-  if (!otelModules) {
-    try {
-      const [otelApi, otelResources, otelSemantic, otelSdk, otelExporter] = await Promise.all([
-        import('@opentelemetry/api'),
-        import('@opentelemetry/resources'),
-        import('@opentelemetry/semantic-conventions'),
-        import('@opentelemetry/sdk-trace-base'),
-        import('@opentelemetry/exporter-trace-otlp-http')
-      ]);
-
-      otelModules = {
-        trace: otelApi.trace,
-        Resource: otelResources.Resource,
-        SemanticResourceAttributes: otelSemantic.SemanticResourceAttributes,
-        BasicTracerProvider: otelSdk.BasicTracerProvider,
-        SimpleSpanProcessor: otelSdk.SimpleSpanProcessor,
-        OTLPTraceExporter: otelExporter.OTLPTraceExporter
-      };
-    } catch (e) {
-      console.warn('OpenTelemetry not available:', e.message);
-    }
-  }
-
   if (!qstashModule) {
     try {
       const qstash = await import('@upstash/qstash');
@@ -106,46 +86,6 @@ function safeJsonParse(data, context = '') {
 }
 
 /**
- * OpenTelemetry 初始化函数（修复版本）
- */
-async function initOtel(env) {
-  await importModules();
-  
-  if (!otelModules || !env.AXIOM_TOKEN || !env.AXIOM_DATASET) {
-    console.log('OpenTelemetry: Missing configuration or library');
-    return null;
-  }
-
-  try {
-    const exporter = new otelModules.OTLPTraceExporter({
-      url: 'https://api.axiom.co/v1/traces',
-      headers: {
-        'Authorization': `Bearer ${env.AXIOM_TOKEN}`,
-        'Content-Type': 'application/json',
-        'X-Axiom-Dataset': env.AXIOM_DATASET
-      }
-    });
-
-    const provider = new otelModules.BasicTracerProvider({
-      resource: new otelModules.Resource({
-        [otelModules.SemanticResourceAttributes.SERVICE_NAME]: 'lb-worker-js',
-        [otelModules.SemanticResourceAttributes.SERVICE_VERSION]: '1.0.0'
-      })
-    });
-
-    provider.addSpanProcessor(new otelModules.SimpleSpanProcessor(exporter));
-    provider.register();
-    otelModules.trace.setGlobalTracerProvider(provider);
-
-    console.log('✅ OpenTelemetry initialized with Axiom');
-    return provider;
-  } catch (error) {
-    console.error('❌ OpenTelemetry initialization failed:', error.message);
-    return null;
-  }
-}
-
-/**
  * 日志记录器
  */
 const logger = {
@@ -156,51 +96,42 @@ const logger = {
   },
 
   async info(message, meta = {}, ctx = null) {
-    await importModules();
-    if (otelModules && otelModules.trace) {
-      const span = otelModules.trace.getActiveSpan();
-      if (span) {
-        span.addEvent(message, {
-          ...meta,
-          'log.level': 'info',
-          'service.name': 'lb-worker-js'
-        });
-      }
+    const span = trace.getActiveSpan();
+    if (span) {
+      span.addEvent(message, {
+        ...meta,
+        'log.level': 'info',
+        'service.name': 'lb-worker-js'
+      });
     }
     console.log(`INFO: ${message}`, meta);
   },
 
   async warn(message, meta = {}, ctx = null) {
-    await importModules();
-    if (otelModules && otelModules.trace) {
-      const span = otelModules.trace.getActiveSpan();
-      if (span) {
-        span.setStatus({ code: 1, message: message });
-        span.setAttribute('log.level', 'warn');
-        span.addEvent(message, {
-          ...meta,
-          'log.level': 'warn',
-          'service.name': 'lb-worker-js'
-        });
-      }
+    const span = trace.getActiveSpan();
+    if (span) {
+      span.setStatus({ code: 1, message: message });
+      span.setAttribute('log.level', 'warn');
+      span.addEvent(message, {
+        ...meta,
+        'log.level': 'warn',
+        'service.name': 'lb-worker-js'
+      });
     }
     console.warn(`WARN: ${message}`, meta);
   },
 
   async error(message, meta = {}, ctx = null) {
-    await importModules();
-    if (otelModules && otelModules.trace) {
-      const span = otelModules.trace.getActiveSpan();
-      if (span) {
-        const error = message instanceof Error ? message : new Error(message);
-        span.recordException(error);
-        span.setStatus({ code: 2, message: error.message });
-        span.addEvent('error', {
-          ...meta,
-          'log.level': 'error',
-          'service.name': 'lb-worker-js'
-        });
-      }
+    const span = trace.getActiveSpan();
+    if (span) {
+      const error = message instanceof Error ? message : new Error(message);
+      span.recordException(error);
+      span.setStatus({ code: 2, message: error.message });
+      span.addEvent('error', {
+        ...meta,
+        'log.level': 'error',
+        'service.name': 'lb-worker-js'
+      });
     }
     console.error(`ERROR: ${message}`, meta);
   },
@@ -674,46 +605,37 @@ const setCurrentProviderState = (state) => {
 export { getCurrentProviderState, setCurrentProviderState };
 
 /**
- * Worker 主入口 - 支持 OpenTelemetry
+ * Worker 处理器
+ */
+const handler = {
+  async fetch(request, env, ctx) {
+    await importModules();
+    return handleRequest(request, env, ctx);
+  }
+};
+
+/**
+ * Worker 主入口 - 使用 instrument 包装器
  */
 export default {
   async fetch(request, env, ctx) {
-    await importModules();
-
-    // 初始化 OpenTelemetry（如果配置了 Axiom）
-    let otelProvider = null;
+    // 如果配置了 Axiom，使用 instrument 包装器
     if (!isTestEnvironment && env.AXIOM_TOKEN && env.AXIOM_DATASET) {
-      otelProvider = await initOtel(env);
-    }
-
-    // 创建 span 并处理请求
-    const tracer = otelProvider && otelModules ? otelModules.trace.getTracer('lb-worker') : null;
-    
-    if (tracer) {
-      return tracer.startActiveSpan('lb-handler', async (span) => {
-        try {
-          // 添加请求属性
-          span.setAttribute('http.method', request.method);
-          span.setAttribute('http.url', request.url);
-          span.setAttribute('service.name', 'lb-worker-js');
-          
-          const response = await handleRequest(request, env, ctx);
-          
-          span.setAttribute('http.status_code', response.status);
-          span.end();
-          
-          return response;
-        } catch (error) {
-          span.recordException(error);
-          span.setStatus({ code: 2, message: error.message });
-          span.end();
-          throw error;
+      const config = {
+        serviceName: 'lb-worker-js',
+        exporter: {
+          url: 'https://api.axiom.co/v1/traces',
+          headers: {
+            'Authorization': `Bearer ${env.AXIOM_TOKEN}`,
+            'X-Axiom-Dataset': env.AXIOM_DATASET
+          }
         }
-      });
-    } else {
-      // 没有 OpenTelemetry，直接处理
-      return handleRequest(request, env, ctx);
+      };
+      return instrument(handler, config).fetch(request, env, ctx);
     }
+    
+    // 没有 Axiom 配置，直接处理
+    return handler.fetch(request, env, ctx);
   }
 };
 

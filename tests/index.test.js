@@ -30,6 +30,22 @@ global.console = {
   error: jest.fn(),
 };
 
+// Mock @microlabs/otel-cf-workers
+jest.mock('@microlabs/otel-cf-workers', () => ({
+  instrument: (handler, config) => {
+    // 在测试环境中，直接返回原始 handler，不进行实际的 instrumentation
+    return handler;
+  }
+}));
+
+// Mock @opentelemetry/api
+jest.mock('@opentelemetry/api', () => ({
+  trace: {
+    getActiveSpan: () => null,
+    getTracer: () => null
+  }
+}));
+
 // Mock @upstash/qstash - 使用全局变量注入
 const mockVerify = jest.fn();
 
