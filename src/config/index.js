@@ -68,6 +68,18 @@ const envConfig = validateEnvironment();
 import { logger } from "../services/logger.js";
 validateCacheConfig();
 
+/**
+ * TLS 逻辑判断
+ * 规则：如果显式设置了 REDIS_TLS_ENABLED=false，则强制禁用，无论 URL 是什么
+ */
+const nfRedisUrl = process.env.NF_REDIS_URL || '';
+const redisUrl = process.env.REDIS_URL || '';
+const isRediss = nfRedisUrl.includes('rediss://') || redisUrl.includes('rediss://');
+const forceDisabled = process.env.REDIS_TLS_ENABLED === 'false' || process.env.NF_REDIS_TLS_ENABLED === 'false';
+const forceEnabled = process.env.REDIS_TLS_ENABLED === 'true' || process.env.NF_REDIS_TLS_ENABLED === 'true';
+
+const tlsEnabled = forceDisabled ? false : (forceEnabled || isRediss);
+
 export const config = {
     apiId: envConfig.apiId,
     apiHash: envConfig.apiHash,
@@ -105,7 +117,7 @@ export const config = {
         port: (process.env.NF_REDIS_PORT && process.env.NF_REDIS_PORT.trim() !== '') ? parseInt(process.env.NF_REDIS_PORT, 10) : ((process.env.REDIS_PORT && process.env.REDIS_PORT.trim() !== '') ? parseInt(process.env.REDIS_PORT, 10) : 6379),
         password: (process.env.NF_REDIS_PASSWORD && process.env.NF_REDIS_PASSWORD.trim() !== '') ? process.env.NF_REDIS_PASSWORD : ((process.env.REDIS_PASSWORD && process.env.REDIS_PASSWORD.trim() !== '') ? process.env.REDIS_PASSWORD : undefined),
         tls: {
-            enabled: !!(process.env.REDIS_TLS_ENABLED === 'true' || process.env.NF_REDIS_TLS_ENABLED === 'true' || (process.env.NF_REDIS_URL && process.env.NF_REDIS_URL.includes('rediss://')) || (process.env.REDIS_URL && process.env.REDIS_URL.includes('rediss://'))),
+            enabled: tlsEnabled,
             rejectUnauthorized: process.env.REDIS_TLS_REJECT_UNAUTHORIZED !== 'false' && process.env.NF_REDIS_TLS_REJECT_UNAUTHORIZED !== 'false',
             ca: (process.env.REDIS_TLS_CA && process.env.REDIS_TLS_CA.trim() !== '') ? process.env.REDIS_TLS_CA : ((process.env.NF_REDIS_TLS_CA && process.env.NF_REDIS_TLS_CA.trim() !== '') ? process.env.NF_REDIS_TLS_CA : undefined),
             cert: (process.env.REDIS_TLS_CLIENT_CERT && process.env.REDIS_TLS_CLIENT_CERT.trim() !== '') ? process.env.REDIS_TLS_CLIENT_CERT : ((process.env.NF_REDIS_TLS_CLIENT_CERT && process.env.NF_REDIS_TLS_CLIENT_CERT.trim() !== '') ? process.env.NF_REDIS_TLS_CLIENT_CERT : undefined),
