@@ -59,11 +59,13 @@ const logger = {
   async info(message, meta = {}, ctx = null) {
     const span = trace.getActiveSpan();
     if (span) {
-      span.addEvent(message, {
+      const attributes = {
+        instanceId: "load_balancing",
         ...meta,
         'log.level': 'info',
         'service.name': 'lb-worker-js'
-      });
+      };
+      span.addEvent(message, attributes);
     }
     // 使用 console，测试环境会 mock 它
     if (console && console.log) {
@@ -76,11 +78,13 @@ const logger = {
     if (span) {
       span.setStatus({ code: 1, message: message });
       span.setAttribute('log.level', 'warn');
-      span.addEvent(message, {
+      const attributes = {
+        instanceId: "load_balancing",
         ...meta,
         'log.level': 'warn',
         'service.name': 'lb-worker-js'
-      });
+      };
+      span.addEvent(message, attributes);
     }
     // 使用 console，测试环境会 mock 它
     if (console && console.warn) {
@@ -94,13 +98,15 @@ const logger = {
       const error = message instanceof Error ? message : new Error(message);
       span.recordException(error);
       span.setStatus({ code: 2, message: error.message });
-      span.addEvent('error', {
+      const attributes = {
+        instanceId: "load_balancing",
         ...meta,
         'log.level': 'error',
         'error.message': error.message,
         'error.stack': error.stack,
         'service.name': 'lb-worker-js'
-      });
+      };
+      span.addEvent('error', attributes);
     }
     // 使用 console，测试环境会 mock 它
     if (console && console.error) {
