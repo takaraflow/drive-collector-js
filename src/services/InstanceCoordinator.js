@@ -262,7 +262,7 @@ export class InstanceCoordinator {
       */
     async acquireLock(lockKey, ttl = 300) {
         const maxAttempts = 3;
-        const backoffDelays = [100, 200, 500]; // 指数退避延迟
+        const backoffDelays = [100, 500, 1000]; // 指数退避延迟
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             const success = await this._tryAcquire(lockKey, ttl);
@@ -305,18 +305,24 @@ export class InstanceCoordinator {
                 const now = Date.now();
                 if (existing.instanceId !== this.instanceId &&
                     (now - existing.acquiredAt) < (existing.ttl * 1000)) {
+                    // logger.debug(`[Lock] ${lockKey} is held by ${existing.instanceId}`);
                     return false; // 锁被其他实例持有且未过期
                 }
                 // 如果锁过期或被当前实例持有，允许重新获取
             }
 
-            // 设置锁，使用时间戳作为额外的验证
-            lockValue.version = Date.now();
+            // 设置锁
+            // 注意：移除 version 字段以解决 Cloudflare KV 最终一致性导致的 verify 失败问题
+            // 在续租场景下，即使读到旧值，只要 instanceId 匹配即认为成功
             await cache.set(`lock:${lockKey}`, lockValue, ttl, { skipCache: true });
             
-            // 双重校验：写入后立即验证是否确实是自己的锁
+            // 双重校验：写入后验证是否确实是自己的锁
             const verified = await cache.get(`lock:${lockKey}`, "json", { skipCache: true });
-            if (verified && verified.instanceId === this.instanceId && verified.version === lockValue.version) {
+            
+            // 记录详细日志便于排查 KV 延迟问题
+            logger.debug(`[Lock verify] key=${lockKey}, existing=${existing?.instanceId}, verified=${verified?.instanceId}, self=${this.instanceId}`);
+
+            if (verified && verified.instanceId === this.instanceId) {
                 return true;
             }
             

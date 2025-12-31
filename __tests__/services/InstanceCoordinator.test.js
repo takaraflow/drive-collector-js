@@ -134,16 +134,15 @@ describe("InstanceCoordinator", () => {
   describe("acquireLock", () => {
       test("should acquire lock when no existing lock", async () => {
           // Mock cache.get to return null (no existing lock), then return verified lock
-          const expectedVersion = 1234567890;
-          const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedVersion);
+          const expectedTime = 1234567890;
+          const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
           
           const getSpy = jest.spyOn(cache, 'get')
               .mockResolvedValueOnce(null) // First call - no existing lock
               .mockResolvedValueOnce({    // Second call - verification
                   instanceId: "test_instance_123",
-                  acquiredAt: expectedVersion,
-                  ttl: 300,
-                  version: expectedVersion
+                  acquiredAt: expectedTime,
+                  ttl: 300
               });
           const setSpy = jest.spyOn(cache, 'set').mockResolvedValue(true);
 
@@ -171,12 +170,12 @@ describe("InstanceCoordinator", () => {
       });
 
       test("should acquire lock when existing lock is expired", async () => {
-          const expectedVersion = 1234567890;
-          const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedVersion);
+          const expectedTime = 1234567890;
+          const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
           
           const expiredLock = {
               instanceId: "other_instance",
-              acquiredAt: expectedVersion - 400000, // 400 seconds ago (TTL is 300)
+              acquiredAt: expectedTime - 400000, // 400 seconds ago (TTL is 300)
               ttl: 300,
           };
 
@@ -185,9 +184,8 @@ describe("InstanceCoordinator", () => {
               .mockResolvedValueOnce(expiredLock) // First call - expired lock
               .mockResolvedValueOnce({            // Second call - verification
                   instanceId: "test_instance_123",
-                  acquiredAt: expectedVersion,
-                  ttl: 300,
-                  version: expectedVersion
+                  acquiredAt: expectedTime,
+                  ttl: 300
               });
           const setSpy = jest.spyOn(cache, 'set').mockResolvedValue(true);
 
@@ -206,8 +204,7 @@ describe("InstanceCoordinator", () => {
               .mockResolvedValueOnce({    // Second call - verification shows race condition
                   instanceId: "other_instance", // Different instance!
                   acquiredAt: Date.now(),
-                  ttl: 300,
-                  version: 999 // Different version
+                  ttl: 300
               });
           const setSpy = jest.spyOn(cache, 'set').mockResolvedValue(true);
 
@@ -218,19 +215,42 @@ describe("InstanceCoordinator", () => {
           setSpy.mockRestore();
       });
 
+      test("should succeed even if KV returns old self-owned lock (KV eventual consistency)", async () => {
+          const expectedTime = 1234567890;
+          const oldTime = expectedTime - 30000; // 30s ago
+          
+          const getSpy = jest.spyOn(cache, 'get')
+              .mockResolvedValueOnce({          // First call: current lock
+                  instanceId: "test_instance_123",
+                  acquiredAt: oldTime,
+                  ttl: 300
+              })
+              .mockResolvedValueOnce({          // Second call (verify): still returns old lock due to KV delay
+                  instanceId: "test_instance_123",
+                  acquiredAt: oldTime,
+                  ttl: 300
+              });
+          const setSpy = jest.spyOn(cache, 'set').mockResolvedValue(true);
+
+          const result = await instanceCoordinator.acquireLock("test_lock");
+          expect(result).toBe(true); // Should succeed because instanceId matches
+
+          getSpy.mockRestore();
+          setSpy.mockRestore();
+      });
+
       test("should succeed when double-check verification passes", async () => {
-          const expectedVersion = 1234567890;
+          const expectedTime = 1234567890;
           
           // Mock Date.now to return consistent version
-          const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedVersion);
+          const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
           
           const getSpy = jest.spyOn(cache, 'get')
               .mockResolvedValueOnce(null) // First call - no existing lock
               .mockResolvedValueOnce({    // Second call - verification passes
                   instanceId: "test_instance_123",
-                  acquiredAt: expectedVersion,
-                  ttl: 300,
-                  version: expectedVersion
+                  acquiredAt: expectedTime,
+                  ttl: 300
               });
           const setSpy = jest.spyOn(cache, 'set').mockResolvedValue(true);
 

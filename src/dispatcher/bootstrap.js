@@ -151,9 +151,10 @@ export async function startDispatcher() {
 
     // 定期检查/续租锁，加入随机抖动防止多个实例同时触发
     const startIntervalWithJitter = () => {
-        // 基础间隔 30s，加上 ±5s 的随机抖动
-        const jitter = Math.random() * 10000 - 5000; // -5000 到 +5000ms
-        const interval = 30000 + jitter;
+        // 基础间隔 60s，加上 ±10s 的随机抖动
+        // 间隔时间应小于锁的 TTL (90s)，但足够长以减少 KV 调用
+        const jitter = Math.random() * 20000 - 10000; // -10000 到 +10000ms
+        const interval = 60000 + jitter;
         
         setTimeout(async () => {
             await startTelegramClient();
