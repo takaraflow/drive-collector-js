@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.6](https://github.com/YoungSx/lb-worker-js/compare/v0.1.5...v0.1.6) (2025-12-31)
+
+
+### ✅ Testing
+
+* add body log ([de736b3](https://github.com/YoungSx/lb-worker-js/commit/de736b34fa810185c582a279d8e5ff88f1c8a8ba))
+
+
+### 🔧 Maintenance
+
+* refactors OpenTelemetry initialization to use static imports and instrumentation wrapper ([56e9b16](https://github.com/YoungSx/lb-worker-js/commit/56e9b1655f3c129e5afba50f2c5b5860e523d611))
+* updates QStash import path to use Cloudflare-specific module ([2064e20](https://github.com/YoungSx/lb-worker-js/commit/2064e208c6f1d65c95082e243129e51a91173e5b))
+
+
+### 🐛 Bug Fixes
+
+* axiom ([73f1126](https://github.com/YoungSx/lb-worker-js/commit/73f1126befa8ef14aff4e59c9f5fbc5128c862e4))
+* enables replay protection bypass for QStash signature verification ([4a13f38](https://github.com/YoungSx/lb-worker-js/commit/4a13f38148192cb8e3d0bd5c2de811bca776bafe))
+* logger ([5a95b79](https://github.com/YoungSx/lb-worker-js/commit/5a95b79c106ebcf118d03e270c375f59d6da8b3c))
+* manual timestamp expiration check in verifyQStashSignature ([0ef9890](https://github.com/YoungSx/lb-worker-js/commit/0ef9890fcba9195ec61df43ddd46fc5e8fbf8fb0))
+* OTel library crash when accessing undefined env variables ([721772c](https://github.com/YoungSx/lb-worker-js/commit/721772cf9ab2caf874dc60db3f2358ca2f736ef6))
+* resolve global reference and qstash signature verification in CF Worker ([265d75f](https://github.com/YoungSx/lb-worker-js/commit/265d75f7069ac08b1974b446472b330534c97bec))
+* sign ([9268118](https://github.com/YoungSx/lb-worker-js/commit/92681181122866e73016ae05a1fdf68ada9829fa))
+* update QStash dependency and improve signature verification ([26ab01f](https://github.com/YoungSx/lb-worker-js/commit/26ab01f58049d964d22e45d362905d24c996da6c))
+
 ### [0.1.5](https://github.com/YoungSx/lb-worker-js/compare/v0.1.4...v0.1.5) (2025-12-30)
 
 ### [0.1.4](https://github.com/YoungSx/lb-worker-js/compare/v0.1.3...v0.1.4) (2025-12-30)
