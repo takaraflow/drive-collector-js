@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.3.0](https://github.com/YoungSx/lb-worker-js/compare/v0.2.1...v0.3.0) (2025-12-31)
+
+
+### 🔧 Maintenance
+
+* adds path normalization and Northflank/Cloudflare cache configurations ([591fc2a](https://github.com/YoungSx/lb-worker-js/commit/591fc2a41dfca92c46cb3cf04480b6b41ed4168d))
+
 ### [0.2.1](https://github.com/YoungSx/lb-worker-js/compare/v0.2.0...v0.2.1) (2025-12-31)
 
 
