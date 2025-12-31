@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.2.1](https://github.com/YoungSx/lb-worker-js/compare/v0.2.0...v0.2.1) (2025-12-31)
+
+
+### ✨ Features
+
+* add version tracking to build and logging system ([ce04abf](https://github.com/YoungSx/lb-worker-js/commit/ce04abf6fb20b270ea339d281a7ed514e807dfd4))
+
+
+### 🐛 Bug Fixes
+
+* enhances logging and health check with structured output ([308f846](https://github.com/YoungSx/lb-worker-js/commit/308f846348c4459a9cad9b1ad1e213a3805d6621))
+* health ([7b06466](https://github.com/YoungSx/lb-worker-js/commit/7b0646654c91ec41705cbd304d5f23155bfa2692))
+
 ## [0.2.0](https://github.com/YoungSx/lb-worker-js/compare/v0.1.6...v0.2.0) (2025-12-31)
 
 
