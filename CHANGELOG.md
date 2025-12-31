@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.4.0](https://github.com/YoungSx/drive-collector-js/compare/v4.3.1...v4.4.0) (2025-12-31)
+
+
+### 🐛 问题修复
+
+* resolve telegram lock false loss due to KV eventual consistency ([02d07cf](https://github.com/YoungSx/drive-collector-js/commit/02d07cf11f2b1f0a8b05669ea00398636e6ea866))
+
+
+### ✨ 新特性
+
+* add cache provider identification to log messages ([023d2ff](https://github.com/YoungSx/drive-collector-js/commit/023d2ff1328768e61213a72c7a0f9536028769f0))
+
 ### [4.3.1](https://github.com/YoungSx/drive-collector-js/compare/v4.3.0...v4.3.1) (2025-12-31)
 
 
