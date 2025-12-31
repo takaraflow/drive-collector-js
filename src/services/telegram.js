@@ -5,6 +5,81 @@ import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
 import logger from "./logger.js";
 
+// Circuit Breaker for Telegram Client
+class TelegramCircuitBreaker {
+    constructor() {
+        this.state = 'CLOSED'; // CLOSED, OPEN, HALF_OPEN
+        this.failures = 0;
+        this.lastFailure = null;
+        this.threshold = 5; // Open after 5 failures
+        this.timeout = 60000; // 1 minute before attempting half-open
+        this.resetTimer = null;
+    }
+
+    async execute(fn) {
+        if (this.state === 'OPEN') {
+            const timeSinceFailure = Date.now() - this.lastFailure;
+            if (timeSinceFailure < this.timeout) {
+                const waitTime = Math.ceil((this.timeout - timeSinceFailure) / 1000);
+                throw new Error(`Circuit breaker OPEN. Wait ${waitTime}s more`);
+            }
+            // Transition to HALF_OPEN
+            this.state = 'HALF_OPEN';
+            logger.info('🔄 Circuit breaker: HALF_OPEN state');
+        }
+
+        try {
+            const result = await fn();
+            this.onSuccess();
+            return result;
+        } catch (error) {
+            this.onFailure();
+            throw error;
+        }
+    }
+
+    onSuccess() {
+        if (this.state === 'HALF_OPEN') {
+            logger.info('✅ Circuit breaker: Connection restored');
+        }
+        this.state = 'CLOSED';
+        this.failures = 0;
+        if (this.resetTimer) {
+            clearTimeout(this.resetTimer);
+            this.resetTimer = null;
+        }
+    }
+
+    onFailure() {
+        this.failures++;
+        this.lastFailure = Date.now();
+
+        if (this.failures >= this.threshold) {
+            this.state = 'OPEN';
+            logger.error(`🚨 Circuit breaker OPENED after ${this.failures} failures`);
+            
+            if (this.resetTimer) clearTimeout(this.resetTimer);
+            this.resetTimer = setTimeout(() => {
+                if (this.state === 'OPEN') {
+                    this.state = 'HALF_OPEN';
+                    logger.info('🔄 Circuit breaker: Attempting recovery');
+                }
+            }, this.timeout);
+        }
+    }
+
+    getState() {
+        return {
+            state: this.state,
+            failures: this.failures,
+            lastFailure: this.lastFailure,
+            timeSinceLastFailure: this.lastFailure ? Date.now() - this.lastFailure : null
+        };
+    }
+}
+
+const telegramCircuitBreaker = new TelegramCircuitBreaker();
+
 /**
  * 获取持久化的 Session 字符串
  */
@@ -125,33 +200,54 @@ async function initTelegramClient() {
         // 延迟获取session
         const sessionString = await getSavedSession();
         
-        telegramClient = new TelegramClient(
-            new StringSession(sessionString),
-            config.apiId,
-            config.apiHash,
-            {
-                connectionRetries: 30, // 增加连接重试次数到 30
-                floodSleepThreshold: 60, // 自动处理 60 秒内的 FloodWait
-                deviceModel: "DriveCollector-Server",
-                systemVersion: "Linux",
-                appVersion: "2.3.3",
-                useWSS: false,
-                autoReconnect: true,
-                // 增强连接稳定性设置
-                timeout: 60000, // 调整连接超时到 60 秒
-                requestRetries: 15, // 增加请求重试次数
-                retryDelay: 3000, // 增加重试延迟
-                // 数据中心切换优化
-                dcId: undefined,
-                useIPv6: false,
-                // 连接池设置
-                maxConcurrentDownloads: 3,
-                connectionPoolSize: 5,
-                // 添加基础日志记录器
-                baseLogger: logger,
-                ...proxyOptions
-            }
-        );
+        // Enhanced configuration with better timeout management
+        const clientConfig = {
+            connectionRetries: 15, // Reduced from 30 to prevent extended retry storms
+            floodSleepThreshold: 60,
+            deviceModel: "DriveCollector-Server",
+            systemVersion: "Linux",
+            appVersion: "2.3.3",
+            useWSS: false,
+            autoReconnect: true,
+            timeout: 30000, // Reduced from 60s to 30s for faster failure detection
+            requestRetries: 10, // Reduced from 15
+            retryDelay: 2000, // Reduced from 3s to 2s
+            dcId: undefined,
+            useIPv6: false,
+            maxConcurrentDownloads: 3,
+            connectionPoolSize: 5,
+            // NEW: Additional stability settings
+            connectionTimeout: 15000, // Connection establishment timeout
+            socketTimeout: 20000, // Socket read/write timeout
+            keepAliveTimeout: 30000, // Keep-alive ping interval
+            // Enhanced logger with timeout awareness
+            baseLogger: {
+                info: logger.info.bind(logger),
+                warn: logger.warn.bind(logger),
+                error: (msg, ...args) => {
+                    // Enhanced error logging for timeout patterns
+                    if (msg.includes('TIMEOUT') || msg.includes('timeout')) {
+                        logger.warn(`⚠️ Telegram timeout detected: ${msg}`, ...args);
+                        // Trigger circuit breaker
+                        telegramCircuitBreaker.onFailure();
+                    } else {
+                        logger.error(msg, ...args);
+                    }
+                },
+                debug: logger.debug.bind(logger),
+            },
+            ...proxyOptions
+        };
+
+        // Use circuit breaker for client creation
+        telegramClient = await telegramCircuitBreaker.execute(async () => {
+            return new TelegramClient(
+                new StringSession(sessionString),
+                config.apiId,
+                config.apiHash,
+                clientConfig
+            );
+        });
         
         // 设置事件监听器
         setupEventListeners(telegramClient);
@@ -181,32 +277,91 @@ function setupEventListeners(client) {
         }
     });
 
-    // 监听错误以防止更新循环因超时而崩溃
+    // Enhanced error handling with timeout detection and circuit breaker
     client.on("error", (err) => {
         const errorMsg = err?.message || "";
         
-        // 识别 BinaryReader 相关的 TypeError
-        const isBinaryReaderError = 
-            errorMsg.includes("readUInt32LE") || 
+        // Enhanced timeout detection
+        const isTimeoutError =
+            errorMsg.includes("TIMEOUT") ||
+            errorMsg.includes("timeout") ||
+            errorMsg.includes("timed out") ||
+            errorMsg.includes("ETIMEDOUT") ||
+            errorMsg.includes("ECONNRESET") ||
+            (err.code === 'ETIMEDOUT');
+        
+        const isBinaryReaderError =
+            errorMsg.includes("readUInt32LE") ||
             errorMsg.includes("readInt32LE") ||
             (err instanceof TypeError && errorMsg.includes("undefined"));
         
-        if (errorMsg.includes("TIMEOUT")) {
-            // TIMEOUT 通常发生在 _updateLoop 中，GramJS 可能已经进入不可恢复状态
-            logger.warn(`⚠️ Telegram 客户端更新循环超时 (TIMEOUT): ${errorMsg}，准备主动重连...`);
-            // 增加延迟避免在网络波动时频繁重连
+        const isConnectionError =
+            errorMsg.includes("Not connected") ||
+            errorMsg.includes("Connection closed") ||
+            errorMsg.includes("RPCError");
+        
+        if (isTimeoutError) {
+            logger.warn(`⚠️ Telegram TIMEOUT error detected: ${errorMsg}`);
+            telegramCircuitBreaker.onFailure();
+            
+            // Enhanced reconnection with exponential backoff
             if (reconnectTimeout) clearTimeout(reconnectTimeout);
-            reconnectTimeout = setTimeout(() => handleConnectionIssue(true), 2000);
-        } else if (errorMsg.includes("Not connected")) {
-            logger.warn("⚠️ Telegram 客户端未连接，尝试重连...");
+            const backoffDelay = Math.min(1000 * Math.pow(2, telegramCircuitBreaker.failures), 30000);
+            reconnectTimeout = setTimeout(() => handleConnectionIssue(true), backoffDelay);
+            
+        } else if (isConnectionError) {
+            logger.warn(`⚠️ Telegram connection error: ${errorMsg}`);
             handleConnectionIssue(true);
+            
         } else if (isBinaryReaderError) {
-            // 处理 BinaryReader 相关的 TypeError，这通常意味着内部状态已损坏
-            logger.warn(`⚠️ Telegram 客户端发生 BinaryReader 错误 (${errorMsg})，准备主动重连...`);
+            logger.warn(`⚠️ Telegram BinaryReader error: ${errorMsg}`);
+            telegramCircuitBreaker.onFailure();
             if (reconnectTimeout) clearTimeout(reconnectTimeout);
             reconnectTimeout = setTimeout(() => handleConnectionIssue(true), 2000);
+            
         } else {
-            logger.error("❌ Telegram 客户端发生错误:", err);
+            logger.error("❌ Telegram client error:", err);
+        }
+    });
+
+    // NEW: Add update loop health monitoring
+    let lastUpdateTimestamp = Date.now();
+    let updateHealthMonitor = null;
+
+    // Track update timestamps to detect stuck update loops
+    client.addEventHandler((update) => {
+        lastUpdateTimestamp = Date.now();
+        // Reset consecutive failures on successful update
+        if (consecutiveFailures > 0) {
+            consecutiveFailures = 0;
+        }
+    });
+
+    // Start health monitor when connected
+    client.on("connected", () => {
+        if (updateHealthMonitor) clearInterval(updateHealthMonitor);
+        
+        updateHealthMonitor = setInterval(() => {
+            const timeSinceLastUpdate = Date.now() - lastUpdateTimestamp;
+            
+            // If no updates for 90 seconds, consider update loop stuck
+            if (timeSinceLastUpdate > 90000) {
+                logger.warn(`⚠️ Update loop appears stuck (no updates for ${Math.floor(timeSinceLastUpdate / 1000)}s)`);
+                
+                if (!isReconnecting) {
+                    handleConnectionIssue(true);
+                }
+                
+                // Reset timestamp to prevent repeated triggers
+                lastUpdateTimestamp = Date.now();
+            }
+        }, 30000); // Check every 30 seconds
+    });
+
+    client.on("disconnected", () => {
+        if (updateHealthMonitor) {
+            clearInterval(updateHealthMonitor);
+            updateHealthMonitor = null;
         }
     });
 }
@@ -308,81 +463,113 @@ export const setConnectionStatusCallback = (callback) => {
  * 处理连接异常情况
  */
 async function handleConnectionIssue(lightweight = false) {
-    if (isReconnecting) return;
+    if (isReconnecting) {
+        logger.debug("🔄 Reconnection already in progress, skipping duplicate");
+        return;
+    }
     
-    // 关键：重连前必须确认自己仍然持有锁
+    // Check circuit breaker state
+    if (telegramCircuitBreaker.state === 'OPEN') {
+        logger.warn("🚨 Circuit breaker is OPEN, blocking reconnection attempts");
+        return;
+    }
+    
+    // Verify lock ownership
     try {
         const hasLock = await instanceCoordinator.hasLock("telegram_client");
         if (!hasLock) {
-            logger.warn("🚨 明确失去锁，取消主动重连");
+            logger.warn("🚨 Lost lock ownership, cancelling reconnection");
             return;
         }
     } catch (e) {
-        logger.warn(`⚠️ 检查锁状态失败（KV 异常），暂缓重连以防竞争: ${e.message}`);
-        return; // 暂缓，等待下一轮 watchdog 或系统重试
+        logger.warn(`⚠️ Lock check failed: ${e.message},暂缓重连`);
+        return;
     }
 
     isReconnecting = true;
-
+    
     try {
         const client = await getClient();
-        // 记录客户端状态上下文
-        logger.info(`🔄 正在触发主动重连序列... [lightweight=${lightweight}, connected=${client.connected}, _sender=${!!client._sender}]`);
-
-        // 尝试优雅断开（带超时）
+        logger.info(`🔄 Starting enhanced reconnection sequence [lightweight=${lightweight}]`);
+        
+        // Enhanced disconnection with timeout
         try {
             if (client.connected) {
-                // 给 disconnect 一个超时，防止它也卡死
                 await Promise.race([
                     client.disconnect(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error("Disconnect Timeout")), 5000))
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("Disconnect Timeout")), 8000)
+                    )
                 ]);
+                logger.info("✅ Client disconnected gracefully");
             }
         } catch (de) {
-            logger.warn("⚠️ 断开连接时异常（可能是已断开）:", de);
+            logger.warn("⚠️ Disconnect timeout or error:", de.message);
         }
 
-        // 彻底销毁旧的连接器状态 (如果是 TIMEOUT 错误，可能内部状态已损坏)
+        // Enhanced sender cleanup
         if (client._sender) {
             try {
-                await client._sender.disconnect();
-                client._sender = undefined; // 清除引用
-                logger.info("✅ 已清理旧的 _sender 状态");
+                await Promise.race([
+                    client._sender.disconnect(),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("Sender disconnect timeout")), 5000)
+                    )
+                ]);
+                client._sender = undefined;
+                logger.info("✅ Sender state cleaned");
             } catch (e) {
-                logger.warn("⚠️ 清理 _sender 失败:", e);
-                client._sender = undefined; // 即使失败也清除引用
+                logger.warn("⚠️ Sender cleanup failed:", e.message);
+                client._sender = undefined;
             }
         }
 
-        // 根据重连模式决定是否重置 session
+        // Session management
         if (!lightweight) {
-            logger.info("🔄 执行完整重连（重置 Session）...");
+            logger.info("🔄 Full reconnection - resetting session");
             await resetClientSession();
         } else {
-            logger.info("🔄 执行轻量重连（保留 Session）...");
+            logger.info("🔄 Lightweight reconnection - preserving session");
         }
 
-        // 增加冷却期以避免频繁重连（5-10秒随机延迟）
-        const coolDownTime = 5000 + Math.random() * 5000;
-        logger.info(`⏳ 冷却期 ${Math.floor(coolDownTime/1000)}s，避免频繁重连...`);
-        await new Promise(r => setTimeout(r, coolDownTime));
+        // Exponential backoff with jitter
+        const baseDelay = 5000 + (telegramCircuitBreaker.failures * 2000);
+        const jitter = Math.random() * 2000;
+        const backoffTime = Math.min(baseDelay + jitter, 30000);
+        
+        logger.info(`⏳ Reconnection backoff: ${Math.floor(backoffTime / 1000)}s`);
+        await new Promise(r => setTimeout(r, backoffTime));
 
-        // 重新连接并验证机器人身份
-        await client.connect();
-        await client.start({ botAuthToken: config.botToken });
-        await saveSession(); // 重新保存有效会话
-        
-        logger.info("✅ 客户端主动重连成功");
-        lastHeartbeat = Date.now(); // 重置心跳
-        
-        // 记录连接后的状态
-        logger.info(`🔗 连接状态确认: connected=${client.connected}`);
+        // Reconnect with circuit breaker protection
+        await telegramCircuitBreaker.execute(async () => {
+            await client.connect();
+            await client.start({ botAuthToken: config.botToken });
+            await saveSession();
+            
+            logger.info("✅ Enhanced reconnection successful");
+            lastHeartbeat = Date.now();
+            consecutiveFailures = 0;
+            
+            // Verify connection health
+            const healthCheck = await client.getMe().catch(e => {
+                logger.error("❌ Health check failed after reconnection:", e);
+                throw e;
+            });
+            
+            if (healthCheck) {
+                logger.info("✅ Connection health verified");
+            }
+        });
         
     } catch (e) {
-        logger.error("❌ 主动重连失败，等待系统自动处理:", e);
-        // 增加错误日志上下文
-        const client = await getClient();
-        logger.error(`🔍 重连失败状态: connected=${client.connected}, _sender=${!!client._sender}, error=${e.message}`);
+        logger.error("❌ Enhanced reconnection failed:", e);
+        consecutiveFailures++;
+        
+        // Force circuit breaker open if too many failures
+        if (consecutiveFailures >= 3) {
+            logger.error("🚨 Multiple reconnection failures, opening circuit breaker");
+            telegramCircuitBreaker.onFailure();
+        }
     } finally {
         isReconnecting = false;
     }
@@ -392,14 +579,12 @@ async function handleConnectionIssue(lightweight = false) {
  * 启动看门狗定时器
  */
 export const startWatchdog = () => {
+    if (watchdogTimer) clearInterval(watchdogTimer);
+    
     // 定时检查心跳（通过获取自身信息）
     watchdogTimer = setInterval(async () => {
         const now = Date.now();
 
-        // [DEBUG] 打印状态
-        // console.log(`[DEBUG_FIX] Watchdog check. now=${now}, last=${lastHeartbeat}, isReconnecting=${isReconnecting}`);
-
-        // 必须在 isReconnecting 检查之前处理时间回拨，防止测试环境下锁死
         // 处理时间回拨（如测试环境重置时间或系统时钟同步）
         if (lastHeartbeat > now) {
             logger.info(`🕒 检测到时间回拨，重置心跳时间: last=${lastHeartbeat}, now=${now}`);
@@ -409,7 +594,14 @@ export const startWatchdog = () => {
         }
 
         if (isReconnecting) {
-            // console.log(`[DEBUG_FIX] Skipping check because isReconnecting=true`);
+            return;
+        }
+
+        // Check circuit breaker state
+        const cbState = telegramCircuitBreaker.getState();
+        if (cbState.state === 'OPEN') {
+            const waitTime = Math.ceil((cbState.timeout - (now - cbState.lastFailure)) / 1000);
+            logger.warn(`⏸️ Watchdog paused - circuit breaker OPEN (${waitTime}s remaining)`);
             return;
         }
 
@@ -417,21 +609,31 @@ export const startWatchdog = () => {
             const client = await getClient();
             if (!client.connected) {
                 consecutiveFailures++;
-                // 如果已断开连接且超过 5 分钟没有恢复，也触发强制重连
-                if (now - lastHeartbeat >= 5 * 60 * 1000 || consecutiveFailures >= 5) {
-                    logger.error(`🚨 客户端断开连接超过阈值，强制重启连接... (failures=${consecutiveFailures})`);
+                logger.warn(`💔 Client disconnected, failure count: ${consecutiveFailures}`);
+                
+                // 如果已断开连接且超过 5 分钟没有恢复，或连续失败 3 次，触发强制重连
+                if (now - lastHeartbeat >= 5 * 60 * 1000 || consecutiveFailures >= 3) {
+                    logger.error(`🚨 Reconnection threshold reached, triggering recovery (failures=${consecutiveFailures})`);
                     handleConnectionIssue(true);
                 }
                 return;
             }
 
-            await client.getMe();
+            // Enhanced health check with timeout
+            await Promise.race([
+                client.getMe(),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error("Health check timeout")), 10000)
+                )
+            ]);
+            
             lastHeartbeat = Date.now();
             consecutiveFailures = 0; // 成功后重置
-            // console.log(`[DEBUG_FIX] Heartbeat success. lastHeartbeat updated to ${lastHeartbeat}`);
+            
         } catch (e) {
             consecutiveFailures++;
 
+            // Special handling for AUTH_KEY_DUPLICATED
             if (e.code === 406 && e.errorMessage?.includes("AUTH_KEY_DUPLICATED")) {
                 logger.error("🚨 检测到 AUTH_KEY_DUPLICATED，会话已在别处激活，本实例应停止连接");
                 // 标记需要重置，并释放本地状态
@@ -450,19 +652,18 @@ export const startWatchdog = () => {
                 return;
             }
 
-            logger.warn(`💔 心跳检测失败 (${consecutiveFailures}/5):`, e.message || e);
+            logger.warn(`💔 Heartbeat failed (${consecutiveFailures}/3): ${e.message || e}`);
 
             // 使用当前时间再次检查差值，因为 await getMe() 可能经过了时间
             const currentNow = Date.now();
             const diff = currentNow - lastHeartbeat;
-            // console.log(`[DEBUG_FIX] Heartbeat failed. Diff=${diff}`);
 
-            if (diff >= 5 * 60 * 1000 || consecutiveFailures >= 5) {
-                logger.error(`🚨 超过阈值无心跳响应，强制重启连接... (diff=${diff}, failures=${consecutiveFailures})`);
+            if (diff >= 5 * 60 * 1000 || consecutiveFailures >= 3) {
+                logger.error(`🚨 Heartbeat threshold exceeded, triggering reconnection... (diff=${diff}, failures=${consecutiveFailures})`);
                 handleConnectionIssue(true);
             }
         }
-    }, 90 * 1000); // 每 90 秒检查一次
+    }, 60 * 1000); // 每 60 秒检查一次（更频繁的监控）
 };
 
 /**
@@ -482,6 +683,27 @@ export const stopWatchdog = () => {
 };
 
 
+
+/**
+ * 获取电路断路器状态（用于监控和调试）
+ */
+export const getCircuitBreakerState = () => {
+    return telegramCircuitBreaker.getState();
+};
+
+/**
+ * 手动重置电路断路器（用于维护操作）
+ */
+export const resetCircuitBreaker = () => {
+    telegramCircuitBreaker.state = 'CLOSED';
+    telegramCircuitBreaker.failures = 0;
+    telegramCircuitBreaker.lastFailure = null;
+    if (telegramCircuitBreaker.resetTimer) {
+        clearTimeout(telegramCircuitBreaker.resetTimer);
+        telegramCircuitBreaker.resetTimer = null;
+    }
+    logger.info("🔄 Circuit breaker manually reset");
+};
 
 // 启动看门狗
 startWatchdog();

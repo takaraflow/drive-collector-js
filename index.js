@@ -20,12 +20,42 @@ process.on("unhandledRejection", (reason, promise) => {
 
 process.on("uncaughtException", (err) => {
     logger.error("🚨 未捕获的异常:", err);
-    // 对于 TIMEOUT 错误，我们通常希望程序继续运行并由 Watchdog 处理
-    if (err?.message?.includes("TIMEOUT")) {
-        logger.warn("⚠️ 忽略 TIMEOUT 导致的进程崩溃风险...");
+    
+    // Enhanced timeout error handling
+    const errorMsg = err?.message || "";
+    const isTelegramTimeout =
+        errorMsg.includes("TIMEOUT") ||
+        errorMsg.includes("timeout") ||
+        errorMsg.includes("ETIMEDOUT") ||
+        (err.code === 'ETIMEDOUT') ||
+        (err.stack && err.stack.includes("telegram") && errorMsg.includes("timeout"));
+    
+    if (isTelegramTimeout) {
+        logger.warn("⚠️ Telegram TIMEOUT detected in uncaught exception - allowing watchdog to handle");
+        // Import circuit breaker to trigger failure
+        import("./src/services/telegram.js").then(module => {
+            if (module.getCircuitBreakerState) {
+                const state = module.getCircuitBreakerState();
+                if (state.state === 'CLOSED') {
+                    module.resetCircuitBreaker();
+                }
+            }
+        }).catch(() => {});
+    } else if (errorMsg.includes("AUTH_KEY_DUPLICATED")) {
+        logger.error("🚨 AUTH_KEY_DUPLICATED in uncaught exception - this should be handled by watchdog");
     } else {
-        // 其他严重错误建议安全退出
-        // process.exit(1);
+        logger.warn("⚠️ Non-timeout uncaught exception - process will continue but may be unstable");
+        // process.exit(1); // Commented out to allow watchdog recovery
+    }
+});
+
+// Enhanced unhandled rejection handler
+process.on("unhandledRejection", (reason, promise) => {
+    logger.error("🚨 未捕获的 Promise 拒绝:", reason);
+    
+    const reasonStr = String(reason);
+    if (reasonStr.includes("TIMEOUT") || reasonStr.includes("timeout")) {
+        logger.warn("⚠️ Timeout in unhandled rejection - allowing watchdog to handle");
     }
 });
 
