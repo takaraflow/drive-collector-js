@@ -169,6 +169,16 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
     throw new Error('Missing Upstash-Signature header');
   }
 
+  // ✅ 新增：显式的时间戳过期检查
+  const timestamp = request.headers.get('Upstash-Timestamp');
+  if (timestamp) {
+    const now = Math.floor(Date.now() / 1000);
+    const expWindow = parseInt(env.SIGNATURE_EXPIRATION_WINDOW || '900');
+    if (now - parseInt(timestamp) > expWindow) {
+      throw new Error('Signature expired');
+    }
+  }
+
   // 获取 body
   let body;
   if (request.arrayBuffer) {

@@ -14,5 +14,5 @@ export default {
   testTimeout: 30000,
   clearMocks: true,
   restoreMocks: true,
-  maxWorkers: 4,
+  maxWorkers: '50%',
 };

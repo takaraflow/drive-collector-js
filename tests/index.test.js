@@ -84,6 +84,9 @@ import {
   upstash_get
 } from '../src/index.js';
 
+// 导入 handler 用于集成测试
+import handler from '../src/index.js';
+
 // Mock KV Storage
 const mockKV = {
   list: jest.fn(),
@@ -142,6 +145,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         signature,
         body: new TextEncoder().encode(body),
         url: 'https://test.url',
+        clockTolerance: 300,
       });
       
       expect(new TextDecoder().decode(result)).toBe(body);
@@ -273,6 +277,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         signature: jwtSignature,
         body: new TextEncoder().encode(body),
         url: 'https://test.url',
+        clockTolerance: 300,
       });
       expect(new TextDecoder().decode(result)).toBe(body);
     });
@@ -750,8 +755,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
       };
 
-      const lb = await import('../src/index.js');
-      const response = await lb.default.fetch(request, mockEnv, {});
+      const response = await handler.fetch(request, mockEnv, {});
 
       expect(response.status).toBe(200);
     });
@@ -772,8 +776,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
       };
 
-      const lb = await import('../src/index.js');
-      const response = await lb.default.fetch(request, mockEnv, {});
+      const response = await handler.fetch(request, mockEnv, {});
 
       expect(response.status).toBe(503);
     });
@@ -786,8 +789,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
       };
 
-      const lb = await import('../src/index.js');
-      const response = await lb.default.fetch(request, mockEnv, {});
+      const response = await handler.fetch(request, mockEnv, {});
 
       expect(response.status).toBe(401);
     });
@@ -799,8 +801,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         headers: new Map(),
       };
 
-      const lb = await import('../src/index.js');
-      const response = await lb.default.fetch(request, mockEnv, {});
+      const response = await handler.fetch(request, mockEnv, {});
 
       expect(response.status).toBe(200);
     });
@@ -855,8 +856,7 @@ describe('Cloudflare Worker Load Balancer Tests', () => {
         arrayBuffer: jest.fn().mockResolvedValue(new TextEncoder().encode(downloadBody)),
       };
 
-      const lb = await import('../src/index.js');
-      const response = await lb.default.fetch(request, mockEnv, {});
+      const response = await handler.fetch(request, mockEnv, {});
 
       expect(response.status).toBe(200);
 
