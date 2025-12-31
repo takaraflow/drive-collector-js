@@ -1,6 +1,6 @@
 import { Client, Receiver } from "@upstash/qstash";
 import { config } from "../config/index.js";
-import logger from "./logger.js";
+import { logger } from "./logger.js";
 
 /**
  * QStash 服务层
@@ -48,7 +48,7 @@ class QStashService {
     }
 
     /**
-     * 发布消息到指定 topic
+     * 发布消息到指定 topic（带重试逻辑）
      * @param {string} topic - 目标 topic
      * @param {object} message - 消息内容
      * @param {object} options - 发布选项（延迟等）
@@ -58,6 +58,41 @@ class QStashService {
             return { messageId: "mock-message-id" };
         }
 
+        const maxAttempts = 3;
+        const baseDelay = 500;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                const result = await this._tryPublish(topic, message, options);
+                return result;
+            } catch (error) {
+                // 如果是 4xx 错误（客户端错误），不重试
+                if (error.message && (error.message.includes('400') || error.message.includes('401') || error.message.includes('403') || error.message.includes('422'))) {
+                    logger.error(`[QStash] Publish failed with 4xx error, not retrying: ${error.message}`);
+                    throw error;
+                }
+
+                // 如果是最后一次尝试，抛出错误
+                if (attempt === maxAttempts) {
+                    logger.error(`[QStash] Publish failed after ${maxAttempts} attempts: ${error.message}`);
+                    throw error;
+                }
+
+                // 计算延迟时间：500ms * attempt
+                const delay = baseDelay * attempt;
+                logger.warn(`[QStash] Publish attempt ${attempt}/${maxAttempts} failed, retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+
+    /**
+     * 内部方法：单次尝试发布
+     * @param {string} topic - 目标 topic
+     * @param {object} message - 消息内容
+     * @param {object} options - 发布选项
+     */
+    async _tryPublish(topic, message, options = {}) {
         const url = `${config.qstash.webhookUrl}/api/tasks/${topic}`;
 
         const publishOptions = {
@@ -85,7 +120,7 @@ class QStashService {
     }
 
     /**
-     * 批量发布消息
+     * 批量发布消息（带重试逻辑）
      * @param {Array<{topic: string, message: object, options?: object}>} messages
      */
     async batchPublish(messages) {
@@ -93,8 +128,75 @@ class QStashService {
             return messages.map(() => ({ status: "fulfilled", value: { messageId: "mock-message-id" } }));
         }
 
+        const maxAttempts = 3;
+        const baseDelay = 500;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                const results = await this._tryBatchPublish(messages);
+                
+                // Check if any results are rejected
+                const hasFailures = results.some(r => r.status === 'rejected');
+                
+                if (hasFailures) {
+                    // Check if any failures are 4xx errors
+                    const has4xxError = results.some(r => 
+                        r.status === 'rejected' && 
+                        r.reason?.message && 
+                        (r.reason.message.includes('400') || r.reason.message.includes('401') || 
+                         r.reason.message.includes('403') || r.reason.message.includes('422'))
+                    );
+                    
+                    if (has4xxError) {
+                        const firstError = results.find(r => r.status === 'rejected');
+                        logger.error(`[QStash] Batch publish failed with 4xx error, not retrying: ${firstError.reason.message}`);
+                        throw firstError.reason;
+                    }
+                    
+                    // If it's the last attempt, throw error
+                    if (attempt === maxAttempts) {
+                        const firstError = results.find(r => r.status === 'rejected');
+                        logger.error(`[QStash] Batch publish failed after ${maxAttempts} attempts`);
+                        throw firstError.reason;
+                    }
+                    
+                    // Retry
+                    const delay = baseDelay * attempt;
+                    logger.warn(`[QStash] Batch publish attempt ${attempt}/${maxAttempts} failed, retrying in ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                } else {
+                    // All succeeded
+                    return results;
+                }
+            } catch (error) {
+                // This catches errors from _tryBatchPublish itself (not individual message failures)
+                // If it's a 4xx error, don't retry
+                if (error.message && (error.message.includes('400') || error.message.includes('401') || error.message.includes('403') || error.message.includes('422'))) {
+                    logger.error(`[QStash] Batch publish failed with 4xx error, not retrying: ${error.message}`);
+                    throw error;
+                }
+
+                // If it's the last attempt, throw
+                if (attempt === maxAttempts) {
+                    logger.error(`[QStash] Batch publish failed after ${maxAttempts} attempts: ${error.message}`);
+                    throw error;
+                }
+
+                // Retry
+                const delay = baseDelay * attempt;
+                logger.warn(`[QStash] Batch publish attempt ${attempt}/${maxAttempts} failed, retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+
+    /**
+     * 内部方法：单次尝试批量发布
+     * @param {Array<{topic: string, message: object, options?: object}>} messages
+     */
+    async _tryBatchPublish(messages) {
         const publishPromises = messages.map(({ topic, message, options = {} }) =>
-            this.publish(topic, message, options)
+            this._tryPublish(topic, message, options)
         );
 
         try {

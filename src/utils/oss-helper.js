@@ -1,7 +1,7 @@
 import { S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { config } from '../config/index.js';
-import logger from '../services/logger.js';
+import { logger } from '../services/logger.js';
 import fs from 'fs';
 
 /**

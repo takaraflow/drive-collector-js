@@ -517,12 +517,58 @@ export class TaskManager {
     }
 
     /**
+     * [私有] 错误分类函数 - 根据错误类型返回对应的 HTTP 状态码
+     * @param {Error} error - 错误对象
+     * @returns {number} HTTP 状态码
+     */
+    static _classifyError(error) {
+        const msg = error.message || '';
+        const code = error.code || '';
+        
+        // 任务不存在或无效参数 -> 404
+        if (msg.includes('not found') || msg.includes('not found in database') || 
+            msg.includes('Source msg missing') || msg.includes('Local file not found') ||
+            msg.includes('invalid') || msg.includes('invalid task')) {
+            return 404;
+        }
+        
+        // Telegram 或网络超时 -> 503 (Service Unavailable)
+        if (msg.includes('timeout') || msg.includes('TIMEOUT') || msg.includes('ETIMEDOUT') ||
+            msg.includes('network') || msg.includes('Network') || 
+            msg.includes('fetch failed') || msg.includes('ECONNRESET') || msg.includes('ECONNREFUSED') ||
+            msg.includes('getaddrinfo') || msg.includes('rate limit') || msg.includes('429')) {
+            return 503;
+        }
+        
+        // Cache/锁相关 -> 503
+        if (msg.includes('lock') || msg.includes('Lock') || 
+            msg.includes('cache') || msg.includes('Cache') || 
+            msg.includes('kv') || msg.includes('KV') ||
+            msg.includes('upstash') || msg.includes('Upstash') ||
+            msg.includes('cloudflare') || msg.includes('Cloudflare')) {
+            return 503;
+        }
+        
+        // DB 操作失败 -> 500
+        if (msg.includes('database') || msg.includes('Database') || 
+            msg.includes('d1') || msg.includes('D1') || 
+            msg.includes('sql') || msg.includes('SQL') ||
+            msg.includes('batch') || msg.includes('update')) {
+            return 500;
+        }
+        
+        // 其他内部错误 -> 500
+        return 500;
+    }
+
+    /**
      * 处理下载 Webhook - QStash 事件驱动
+     * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
     static async handleDownloadWebhook(taskId) {
         // Leader 状态校验：只有持有 telegram_client 锁的实例才能处理任务
         if (!(await instanceCoordinator.hasLock("telegram_client"))) {
-            throw new Error("NOT_LEADER");
+            return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
         }
 
         try {
@@ -532,7 +578,7 @@ export class TaskManager {
             const dbTask = await TaskRepository.findById(taskId);
             if (!dbTask) {
                 logger.error(`❌ Task ${taskId} not found in database`);
-                return;
+                return { success: false, statusCode: 404, message: "Task not found" };
             }
 
             // 获取原始消息
@@ -543,7 +589,7 @@ export class TaskManager {
             const message = messages[0];
             if (!message || !message.media) {
                 await TaskRepository.updateStatus(taskId, 'failed', 'Source msg missing');
-                return;
+                return { success: false, statusCode: 404, message: "Source message missing" };
             }
 
             // 创建任务对象
@@ -552,20 +598,24 @@ export class TaskManager {
 
             // 执行下载逻辑
             await this.downloadTask(task);
+            return { success: true, statusCode: 200 };
 
         } catch (error) {
             logger.error("Download webhook failed", { taskId, error });
+            const code = this._classifyError(error);
             await TaskRepository.updateStatus(taskId, 'failed', error.message);
+            return { success: false, statusCode: code, message: error.message };
         }
     }
 
     /**
      * 处理上传 Webhook - QStash 事件驱动
+     * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
     static async handleUploadWebhook(taskId) {
         // Leader 状态校验：只有持有 telegram_client 锁的实例才能处理任务
         if (!(await instanceCoordinator.hasLock("telegram_client"))) {
-            throw new Error("NOT_LEADER");
+            return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
         }
 
         try {
@@ -575,14 +625,14 @@ export class TaskManager {
             const dbTask = await TaskRepository.findById(taskId);
             if (!dbTask) {
                 logger.error(`❌ Task ${taskId} not found in database`);
-                return;
+                return { success: false, statusCode: 404, message: "Task not found" };
             }
 
             // 验证本地文件存在
             const localPath = path.join(config.downloadDir, dbTask.file_name);
             if (!fs.existsSync(localPath)) {
                 await TaskRepository.updateStatus(taskId, 'failed', 'Local file not found');
-                return;
+                return { success: false, statusCode: 404, message: "Local file not found" };
             }
 
             // 获取原始消息
@@ -593,7 +643,7 @@ export class TaskManager {
             const message = messages[0];
             if (!message || !message.media) {
                 await TaskRepository.updateStatus(taskId, 'failed', 'Source msg missing');
-                return;
+                return { success: false, statusCode: 404, message: "Source message missing" };
             }
 
             // 创建任务对象
@@ -603,15 +653,19 @@ export class TaskManager {
 
             // 执行上传逻辑
             await this.uploadTask(task);
+            return { success: true, statusCode: 200 };
 
         } catch (error) {
             logger.error("Upload webhook failed", { taskId, error });
+            const code = this._classifyError(error);
             await TaskRepository.updateStatus(taskId, 'failed', error.message);
+            return { success: false, statusCode: code, message: error.message };
         }
     }
 
     /**
      * 处理媒体组批处理 Webhook - QStash 事件驱动
+     * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
     static async handleMediaBatchWebhook(groupId, taskIds) {
         try {
@@ -619,11 +673,18 @@ export class TaskManager {
 
             // 这里可以实现批处理逻辑，目前先逐个处理
             for (const taskId of taskIds) {
-                await this.handleDownloadWebhook(taskId);
+                const result = await this.handleDownloadWebhook(taskId);
+                if (!result.success) {
+                    // 如果任何一个失败，返回第一个错误
+                    return result;
+                }
             }
+            return { success: true, statusCode: 200 };
 
         } catch (error) {
             logger.error("Media batch webhook failed", { groupId, error });
+            const code = this._classifyError(error);
+            return { success: false, statusCode: code, message: error.message };
         }
     }
 

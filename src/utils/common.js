@@ -1,7 +1,7 @@
 import { Button } from "telegram/tl/custom/button.js";
 import { runBotTask, runBotTaskWithRetry } from "./limiter.js";
 import { STRINGS } from "../locales/zh-CN.js";
-import logger from "../services/logger.js";
+import { logger } from "../services/logger.js";
 
 /**
  * --- 辅助工具函数 (Internal Helpers) ---

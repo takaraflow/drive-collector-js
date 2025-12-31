@@ -3,7 +3,7 @@ import { ossHelper } from '../utils/oss-helper.js';
 import fs from 'fs';
 import path from 'path';
 import { CloudTool } from './rclone.js';
-import logger from './logger.js';
+import { logger } from './logger.js';
 
 /**
  * --- OSS 服务层 ---

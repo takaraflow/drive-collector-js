@@ -65,7 +65,7 @@ function validateCacheConfig() {
 // 验证环境变量
 const envConfig = validateEnvironment();
 
-import logger from "../services/logger.js";
+import { logger } from "../services/logger.js";
 validateCacheConfig();
 
 export const config = {

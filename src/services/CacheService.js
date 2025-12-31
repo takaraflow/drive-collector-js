@@ -1,7 +1,7 @@
 import { config } from "../config/index.js";
 import { localCache } from "../utils/LocalCache.js";
 import { upstashRateLimiter } from "../utils/RateLimiter.js";
-import logger from "./logger.js";
+import { logger } from "./logger.js";
 
 /**
  * --- Cache 存储服务层 ---

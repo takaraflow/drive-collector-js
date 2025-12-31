@@ -1,6 +1,6 @@
 import { TaskManager } from "./TaskManager.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
-import logger from "../services/logger.js";
+import { logger } from "../services/logger.js";
 
 /**
  * Processor 引导模块：负责 TaskManager 初始化、任务轮询、文件预热等逻辑

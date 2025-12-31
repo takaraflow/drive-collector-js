@@ -15,11 +15,17 @@ jest.unstable_mockModule("../../src/services/logger.js", () => ({
         warn: jest.fn(),
         debug: jest.fn(),
     },
+    logger: {
+        info: jest.fn(),
+        error: jest.fn(),
+        warn: jest.fn(),
+        debug: jest.fn(),
+    }
 }));
 
 const { InstanceRepository } = await import("../../src/repositories/InstanceRepository.js");
 const { d1 } = await import("../../src/services/d1.js");
-const { default: logger } = await import("../../src/services/logger.js");
+const { logger } = await import("../../src/services/logger.js");
 
 describe("InstanceRepository", () => {
     beforeEach(() => {

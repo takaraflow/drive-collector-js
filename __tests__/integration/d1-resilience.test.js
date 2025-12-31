@@ -17,6 +17,7 @@ const mockLogger = {
 
 jest.unstable_mockModule("../../src/services/logger.js", () => ({
     default: mockLogger,
+    logger: mockLogger
 }));
 
 describe("D1 Service Resilience and Retry Mechanisms", () => {

@@ -1,6 +1,6 @@
 import { config } from "../config/index.js";
 import { d1 } from "../services/d1.js";
-import logger from "../services/logger.js";
+import { logger } from "../services/logger.js";
 
 const ROLE_ORDER = ["user", "vip", "admin", "owner"];
 const DEFAULT_ROLE = "user";

@@ -17,7 +17,7 @@ import { STRINGS, format } from "../locales/zh-CN.js";
 import { NetworkDiagnostic } from "../utils/NetworkDiagnostic.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { qstashService } from "../services/QStashService.js";
-import logger from "../services/logger.js";
+import { logger } from "../services/logger.js";
 import fs from "fs";
 import path from "path";
 

@@ -60,19 +60,31 @@ describe("QStash Webhook Integration", () => {
         }));
 
         jest.unstable_mockModule("../../src/processor/TaskManager.js", () => ({
-            TaskManager: mockTaskManager
+            TaskManager: {
+                handleDownloadWebhook: mockHandleDownloadWebhook,
+                handleUploadWebhook: mockHandleUploadWebhook,
+                handleMediaBatchWebhook: mockHandleMediaBatchWebhook
+            }
         }));
 
         jest.unstable_mockModule("../../src/services/InstanceCoordinator.js", () => ({
-            instanceCoordinator: {}
+            instanceCoordinator: {
+                start: jest.fn().mockResolvedValue(undefined),
+                stop: jest.fn().mockResolvedValue(undefined)
+            }
         }));
 
         jest.unstable_mockModule("../../src/repositories/SettingsRepository.js", () => ({
-            SettingsRepository: {}
+            SettingsRepository: {
+                get: jest.fn().mockResolvedValue("0"),
+                set: jest.fn().mockResolvedValue(undefined)
+            }
         }));
 
         jest.unstable_mockModule("../../src/services/d1.js", () => ({
-            d1: {}
+            d1: {
+                batch: jest.fn().mockResolvedValue(undefined)
+            }
         }));
 
         jest.unstable_mockModule("../../src/dispatcher/bootstrap.js", () => ({
@@ -82,6 +94,33 @@ describe("QStash Webhook Integration", () => {
         jest.unstable_mockModule("../../src/processor/bootstrap.js", () => ({
             startProcessor: jest.fn(),
             stopProcessor: jest.fn()
+        }));
+
+        jest.unstable_mockModule("../../src/repositories/DriveRepository.js", () => ({
+            DriveRepository: {
+                findAll: jest.fn().mockResolvedValue([])
+            }
+        }));
+
+        jest.unstable_mockModule("../../src/services/rclone.js", () => ({
+            CloudTool: {
+                listRemoteFiles: jest.fn().mockResolvedValue([])
+            }
+        }));
+
+        jest.unstable_mockModule("../../src/services/logger.js", () => ({
+            logger: {
+                info: jest.fn(),
+                error: jest.fn(),
+                warn: jest.fn(),
+                debug: jest.fn()
+            }
+        }));
+
+        jest.unstable_mockModule("../../src/config/index.js", () => ({
+            config: {
+                port: 3000
+            }
         }));
 
         // Now import index.js
@@ -113,6 +152,10 @@ describe("QStash Webhook Integration", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockVerifySignature.mockResolvedValue(true);
+        // Set up default successful returns for TaskManager methods
+        mockHandleDownloadWebhook.mockResolvedValue({ success: true, statusCode: 200 });
+        mockHandleUploadWebhook.mockResolvedValue({ success: true, statusCode: 200 });
+        mockHandleMediaBatchWebhook.mockResolvedValue({ success: true, statusCode: 200 });
     });
 
     const createMockRequest = (url, body = {}, headers = {}) => {

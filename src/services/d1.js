@@ -1,5 +1,5 @@
 import { config } from "../config/index.js";
-import logger from "./logger.js";
+import { logger } from "./logger.js";
 
 /**
  * --- D1 数据库服务层 ---

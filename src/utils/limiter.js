@@ -1,6 +1,6 @@
 import PQueue from "p-queue";
 import { cache } from "../services/CacheService.js";
-import logger from "../services/logger.js";
+import { logger } from "../services/logger.js";
 
 const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 

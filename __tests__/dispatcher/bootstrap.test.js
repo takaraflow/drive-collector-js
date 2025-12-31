@@ -45,7 +45,8 @@ const mockLogger = {
 };
 
 jest.unstable_mockModule('../../src/services/logger.js', () => ({
-  default: mockLogger
+   default: mockLogger,
+   logger: mockLogger
 }));
 
 const { startDispatcher } = await import('../../src/dispatcher/bootstrap.js');

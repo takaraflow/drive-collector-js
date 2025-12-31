@@ -250,4 +250,5 @@ export const resetLogger = () => {
   }
 };
 
+// 确保同时支持 named export 和 default export
 export default logger;

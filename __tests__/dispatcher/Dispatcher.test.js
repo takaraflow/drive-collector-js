@@ -116,13 +116,14 @@ jest.unstable_mockModule("../../src/utils/NetworkDiagnostic.js", () => ({
 }));
 
 const mockLogger = {
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
 };
 jest.unstable_mockModule("../../src/services/logger.js", () => ({
-  default: mockLogger,
+    default: mockLogger,
+    logger: mockLogger
 }));
 
 const mockDriveRepository = {

@@ -29,8 +29,9 @@ const mockLogger = {
 };
 
 jest.unstable_mockModule("../../src/services/logger.js", () => ({
-  default: mockLogger,
-  setInstanceIdProvider: jest.fn(),
+   default: mockLogger,
+   logger: mockLogger,
+   setInstanceIdProvider: jest.fn(),
 }));
 
 describe("InstanceCoordinator", () => {

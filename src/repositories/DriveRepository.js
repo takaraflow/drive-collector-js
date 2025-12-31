@@ -1,6 +1,6 @@
 import { cache } from "../services/CacheService.js";
 import { localCache } from "../utils/LocalCache.js";
-import logger from "../services/logger.js";
+import { logger } from "../services/logger.js";
 
 /**
  * 网盘配置仓储层

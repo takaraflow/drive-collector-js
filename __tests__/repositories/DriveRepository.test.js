@@ -31,12 +31,18 @@ jest.unstable_mockModule("../../src/services/logger.js", () => ({
         warn: jest.fn(),
         debug: jest.fn(),
     },
+    logger: {
+        info: jest.fn(),
+        error: jest.fn(),
+        warn: jest.fn(),
+        debug: jest.fn(),
+    }
 }));
 
 const { DriveRepository } = await import("../../src/repositories/DriveRepository.js");
 const { cache } = await import("../../src/services/CacheService.js");
 const { localCache } = await import("../../src/utils/LocalCache.js");
-const { default: logger } = await import("../../src/services/logger.js");
+const { logger } = await import("../../src/services/logger.js");
 
 describe("DriveRepository", () => {
     beforeEach(() => {

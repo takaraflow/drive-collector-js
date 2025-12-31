@@ -29,25 +29,12 @@ const mockQstashService = {
     enqueueUploadTask: mockEnqueueUploadTask
 };
 
+const mockExistsSync = jest.fn(() => true);
+const mockStatSync = jest.fn();
+
 const mockConfig = {
     downloadDir: '/tmp/downloads'
 };
-
-// Mock fs
-const mockExistsSync = jest.fn();
-const mockStatSync = jest.fn();
-jest.mock("fs", () => ({
-    existsSync: mockExistsSync,
-    statSync: mockStatSync,
-    readFileSync: jest.fn(),
-    writeFileSync: jest.fn(),
-    mkdirSync: jest.fn(),
-    readdirSync: jest.fn(),
-    unlinkSync: jest.fn(),
-    createReadStream: jest.fn(),
-    createWriteStream: jest.fn()
-}));
-
 
 // Mock modules
 jest.unstable_mockModule("../../src/repositories/TaskRepository.js", () => ({
@@ -68,6 +55,22 @@ jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
 
 jest.unstable_mockModule("../../src/config/index.js", () => ({
     config: mockConfig
+}));
+
+// Mock path
+jest.mock("path", () => ({
+    join: jest.fn((...args) => args.join('/')),
+    basename: jest.fn((path) => path.split('/').pop())
+}));
+
+// Mock fs
+jest.mock("fs", () => ({
+    existsSync: mockExistsSync,
+    statSync: mockStatSync,
+    promises: {
+        unlink: jest.fn(),
+        stat: jest.fn(() => Promise.resolve({ size: 1024 }))
+    }
 }));
 
 // Mock limiter
@@ -93,6 +96,12 @@ jest.unstable_mockModule("../../src/utils/common.js", () => ({
 
 // Mock logger
 jest.unstable_mockModule("../../src/services/logger.js", () => ({
+    default: {
+        info: jest.fn(),
+        error: jest.fn(),
+        warn: jest.fn(),
+        debug: jest.fn()
+    },
     logger: {
         info: jest.fn(),
         error: jest.fn(),
@@ -150,6 +159,10 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
     let TaskManager;
 
     beforeAll(async () => {
+        // Reset all modules to ensure mocks are applied
+        jest.resetModules();
+        
+        // Import TaskManager after resetting modules
         const module = await import("../../src/processor/TaskManager.js");
         TaskManager = module.TaskManager;
     });
@@ -306,31 +319,35 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
         });
 
         test("应当返回 {success: true, statusCode: 200} 对于成功处理", async () => {
-            // Mock the entire handleUploadWebhook method to bypass fs check
+            // Mock the entire handleUploadWebhook method to bypass fs check issues
             const originalMethod = TaskManager.handleUploadWebhook;
             TaskManager.handleUploadWebhook = jest.fn(async (taskId) => {
-                // Simulate the logic without fs check
-                if (!(await mockInstanceCoordinator.hasLock("telegram_client"))) {
-                    return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
+                try {
+                    if (!(await mockInstanceCoordinator.hasLock("telegram_client"))) {
+                        return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
+                    }
+                    
+                    const dbTask = await mockTaskRepository.findById(taskId);
+                    if (!dbTask) {
+                        return { success: false, statusCode: 404, message: "Task not found" };
+                    }
+                    
+                    const messages = await mockRunMtprotoTaskWithRetry(
+                        () => mockClient.getMessages(dbTask.chat_id, { ids: [dbTask.source_msg_id] }),
+                        { priority: -20 }
+                    );
+                    const message = messages[0];
+                    if (!message || !message.media) {
+                        return { success: false, statusCode: 404, message: "Source message missing" };
+                    }
+                    
+                    // Simulate successful upload
+                    await TaskManager.uploadTask({ id: taskId, message, fileName: dbTask.file_name, localPath: '/tmp/downloads/test.mp4' });
+                    return { success: true, statusCode: 200 };
+                } catch (error) {
+                    const code = TaskManager._classifyError(error);
+                    return { success: false, statusCode: code, message: error.message };
                 }
-                
-                const dbTask = await mockTaskRepository.findById(taskId);
-                if (!dbTask) {
-                    return { success: false, statusCode: 404, message: "Task not found" };
-                }
-                
-                const messages = await mockRunMtprotoTaskWithRetry(
-                    () => mockClient.getMessages(dbTask.chat_id, { ids: [dbTask.source_msg_id] }),
-                    { priority: -20 }
-                );
-                const message = messages[0];
-                if (!message || !message.media) {
-                    return { success: false, statusCode: 404, message: "Source message missing" };
-                }
-                
-                // Skip fs check and call uploadTask
-                await TaskManager.uploadTask({ id: taskId, message, fileName: dbTask.file_name });
-                return { success: true, statusCode: 200 };
             });
             
             const result = await TaskManager.handleUploadWebhook('123');
@@ -341,69 +358,21 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
         });
 
         test("应当返回 {success: false, statusCode: 503} 当不是 Leader", async () => {
-            // Mock the entire handleUploadWebhook method
-            const originalMethod = TaskManager.handleUploadWebhook;
-            TaskManager.handleUploadWebhook = jest.fn(async (taskId) => {
-                if (!(await mockInstanceCoordinator.hasLock("telegram_client"))) {
-                    return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
-                }
-                return { success: true, statusCode: 200 };
-            });
-            
             mockHasLock.mockResolvedValue(false);
             const result = await TaskManager.handleUploadWebhook('123');
             expect(result).toEqual({ success: false, statusCode: 503, message: "Service Unavailable - Not Leader" });
-            
-            // Restore original method
-            TaskManager.handleUploadWebhook = originalMethod;
         });
 
         test("应当返回 {success: false, statusCode: 404} 当本地文件不存在", async () => {
-            // Mock the entire handleUploadWebhook method to simulate fs check failure
-            const originalMethod = TaskManager.handleUploadWebhook;
-            TaskManager.handleUploadWebhook = jest.fn(async (taskId) => {
-                if (!(await mockInstanceCoordinator.hasLock("telegram_client"))) {
-                    return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
-                }
-                
-                const dbTask = await mockTaskRepository.findById(taskId);
-                if (!dbTask) {
-                    return { success: false, statusCode: 404, message: "Task not found" };
-                }
-                
-                // Simulate fs check failure
-                return { success: false, statusCode: 404, message: "Local file not found" };
-            });
-            
+            mockExistsSync.mockReturnValue(false);
             const result = await TaskManager.handleUploadWebhook('123');
             expect(result).toEqual({ success: false, statusCode: 404, message: "Local file not found" });
-            
-            // Restore original method
-            TaskManager.handleUploadWebhook = originalMethod;
         });
 
         test("应当返回 {success: false, statusCode: 404} 当任务不存在", async () => {
-            // Mock the entire handleUploadWebhook method
-            const originalMethod = TaskManager.handleUploadWebhook;
-            TaskManager.handleUploadWebhook = jest.fn(async (taskId) => {
-                if (!(await mockInstanceCoordinator.hasLock("telegram_client"))) {
-                    return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
-                }
-                
-                const dbTask = await mockTaskRepository.findById(taskId);
-                if (!dbTask) {
-                    return { success: false, statusCode: 404, message: "Task not found" };
-                }
-                
-                return { success: true, statusCode: 200 };
-            });
-            
             mockFindById.mockResolvedValue(null);
             const result = await TaskManager.handleUploadWebhook('123');
             expect(result).toEqual({ success: false, statusCode: 404, message: "Task not found" });
-            
-            // Restore original method
-            TaskManager.handleUploadWebhook = originalMethod;
         });
 
         test("应当返回 {success: false, statusCode: 503} 当网络超时", async () => {

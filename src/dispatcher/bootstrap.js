@@ -2,7 +2,7 @@ import { getClient, saveSession, clearSession, resetClientSession, setConnection
 import { MessageHandler } from "./MessageHandler.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { config } from "../config/index.js";
-import logger from "../services/logger.js";
+import { logger } from "../services/logger.js";
 
 /**
  * Dispatcher 引导模块：负责 Telegram 客户端的启动、锁管理和消息处理

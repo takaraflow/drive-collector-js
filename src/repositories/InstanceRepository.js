@@ -1,5 +1,5 @@
 import { d1 } from "../services/d1.js";
-import logger from "../services/logger.js";
+import { logger } from "../services/logger.js";
 
 /**
  * 实例数据仓储层

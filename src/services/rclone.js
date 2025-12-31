@@ -6,7 +6,7 @@ import { DriveRepository } from "../repositories/DriveRepository.js";
 import { STRINGS } from "../locales/zh-CN.js";
 import { localCache } from "../utils/LocalCache.js";
 import { cache } from "./CacheService.js";
-import logger from "./logger.js";
+import { logger } from "./logger.js";
 
 // 确定 rclone 二进制路径 (兼容 Zeabur 和 本地)
 const rcloneBinary = fs.existsSync("/app/rclone/rclone") 

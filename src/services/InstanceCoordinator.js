@@ -255,12 +255,40 @@ export class InstanceCoordinator {
     }
 
     /**
-      * 尝试获取分布式锁
+      * 尝试获取分布式锁（带重试逻辑）
       * @param {string} lockKey - 锁的键
       * @param {number} ttl - 锁的TTL（秒）
       * @returns {boolean} 是否获取成功
       */
     async acquireLock(lockKey, ttl = 300) {
+        const maxAttempts = 3;
+        const backoffDelays = [100, 200, 500]; // 指数退避延迟
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            const success = await this._tryAcquire(lockKey, ttl);
+            if (success) {
+                return true;
+            }
+
+            // 如果不是最后一次尝试，等待退避延迟
+            if (attempt < maxAttempts) {
+                const delay = backoffDelays[attempt - 1];
+                logger.warn(`🔒 锁获取失败，尝试 ${attempt}/${maxAttempts}，等待 ${delay}ms 后重试...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+
+        logger.error(`🔒 锁获取失败，已达到最大重试次数: ${lockKey}`);
+        return false;
+    }
+
+    /**
+     * 内部方法：单次尝试获取锁
+     * @param {string} lockKey - 锁的键
+     * @param {number} ttl - 锁的TTL（秒）
+     * @returns {boolean} 是否获取成功
+     */
+    async _tryAcquire(lockKey, ttl) {
         const lockValue = {
             instanceId: this.instanceId,
             acquiredAt: Date.now(),
