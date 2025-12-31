@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.4.1](https://github.com/YoungSx/drive-collector-js/compare/v4.4.0...v4.4.1) (2025-12-31)
+
+
+### ✅ 测试相关
+
+* cache provider ([1e33566](https://github.com/YoungSx/drive-collector-js/commit/1e3356672fe90434e133349ffd8a30303b2ef9c2))
+
+
+### 🐛 问题修复
+
+* Fixes Cloudflare token configuration to avoid incorrect provider detection ([0101401](https://github.com/YoungSx/drive-collector-js/commit/0101401480424a273aed0449625b512252b8e58a))
+
 ## [4.4.0](https://github.com/YoungSx/drive-collector-js/compare/v4.3.1...v4.4.0) (2025-12-31)
 
 
