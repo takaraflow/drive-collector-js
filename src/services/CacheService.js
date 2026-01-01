@@ -66,6 +66,8 @@ export class CacheService {
 
         // 动态导入 ioredis (环境检测)
         this.redisClient = null;
+        this.redisInitPromise = null; // 追踪初始化 Promise
+        this.isRedisInitializing = false; // 明确的状态标志
         this.heartbeatTimer = null; // 心跳定时器
 
         // 1. 先设置提供商优先级
@@ -127,214 +129,230 @@ export class CacheService {
             return;
         }
 
-        try {
-            // 检测是否在 Node.js 环境
-            if (typeof process === 'undefined' || !process.versions || !process.versions.node) {
-                logger.warn(`[${this.getCurrentProvider()}] ⚠️ 非 Node.js 环境，无法使用标准 Redis 客户端`);
-                return;
-            }
-
-            // 动态导入 ioredis - 添加超时控制
-            const importPromise = import('ioredis');
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('ioredis import timeout after 10 seconds')), 10000)
-            );
-
-            const ioredisModule = await Promise.race([importPromise, timeoutPromise]);
-            const Redis = ioredisModule.default;
-            
-            // 关键：统一使用 config/index.js 中的配置生成逻辑
-            const { getRedisConnectionConfig } = await import("../config/index.js");
-            const { url, options: redisOptions } = getRedisConnectionConfig();
-
-            // 记录Redis配置信息（用于诊断）
-            if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                console.log(`[CacheService] 🔄 Redis 客户端初始化...`, {
-                    url: url ? 'PRESENT' : 'MISSING',
-                    host: redisOptions.host,
-                    port: redisOptions.port,
-                    tlsEnabled: !!redisOptions.tls,
-                    servername: redisOptions.tls?.servername
-                });
-            }
-            logger.info(`[${this.getCurrentProvider()}] 🔄 Redis 客户端初始化...`, {
-                hasUrl: !!url,
-                hasHost: !!redisOptions.host,
-                port: redisOptions.port,
-                hasPassword: !!redisOptions.password,
-                tlsEnabled: !!redisOptions.tls,
-                servername: redisOptions.tls?.servername,
-                family: redisOptions.family,
-                node_env: process.env.NODE_ENV
-            });
-
-            // 实例化客户端
-            if (redisOptions.tls) {
-                // 加密连接优先使用 options 对象实例化，避免 URL 字符串导致的协议解析冲突
-                this.redisClient = new Redis(redisOptions);
-                this.redisHost = redisOptions.host;
-                this.redisPort = redisOptions.port;
-            } else if (url) {
-                // 必须传入 options 以支持配置，否则 new Redis(url) 会忽略 options
-                this.redisClient = new Redis(url, redisOptions);
-                // 关键修复：确保 CacheService 实例上的 host/port 被正确同步
-                this.redisHost = redisOptions.host || this.redisHost;
-                this.redisPort = redisOptions.port || this.redisPort;
-            } else {
-                this.redisClient = new Redis(redisOptions);
-                this.redisHost = redisOptions.host;
-                this.redisPort = redisOptions.port;
-            }
-
-            // 连接事件监听 (增强诊断)
-            this.redisClient.on('connect', () => {
-                this.connectTime = Date.now();
-                const displayHost = this.redisHost || (url ? 'from-url' : 'unknown');
-                if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                    console.log(`[CacheService] ✅ Redis CONNECT: ${displayHost}:${this.redisPort}`);
-                }
-                logger.info(`[${this.getCurrentProvider()}] ✅ Redis CONNECT: ${displayHost}:${this.redisPort} at ${new Date(this.connectTime).toISOString()}`, {
-                    host: this.redisHost,
-                    port: this.redisPort,
-                    url: url ? 'configured' : 'not configured',
-                    hasPassword: !!redisOptions.password,
-                    node_env: process.env.NODE_ENV,
-                    platform: process.platform
-                });
-            });
-
-            this.redisClient.on('ready', () => {
-                const connectDuration = Date.now() - this.connectTime;
-                if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                    console.log(`[CacheService] ✅ Redis READY: Connection established in ${connectDuration}ms`);
-                }
-                logger.info(`[${this.getCurrentProvider()}] ✅ Redis READY: Connection established in ${connectDuration}ms`, {
-                    totalConnections: this.redisClient.options?.maxRetriesPerRequest || 'unknown',
-                    connectTimeout: this.redisClient.options?.connectTimeout || 'unknown'
-                });
-                // Resolve any pending waitForReady promises
-                if (this._readyResolver) {
-                    this._readyResolver();
-                    this._readyResolver = null;
-                }
-            });
-
-            this.redisClient.on('reconnecting', (ms) => {
-                if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                    console.log(`[CacheService] 🔄 Redis RECONNECTING: Attempting reconnection in ${ms}ms`);
-                }
-                logger.warn(`[${this.getCurrentProvider()}] 🔄 Redis RECONNECTING: Attempting reconnection in ${ms}ms`, {
-                    lastError: this.lastError,
-                    failureCount: this.failureCount,
-                    currentProvider: this.currentProvider
-                });
-            });
-
-            this.redisClient.on('error', (error) => {
-                const now = Date.now();
-                const uptime = this.connectTime ? Math.round((now - this.connectTime) / 1000) : 0;
-                if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                    console.error(`[CacheService] 🚨 Redis ERROR: ${error.message}`, {
-                        code: error.code,
-                        host: error.hostname || error.address,
-                        port: error.port
-                    });
-                }
-                logger.error(`[${this.getCurrentProvider()}] 🚨 Redis ERROR: ${error.message}`, {
-                    code: error.code,
-                    errno: error.errno,
-                    syscall: error.syscall,
-                    hostname: error.hostname,
-                    port: error.port,
-                    address: error.address,
-                    uptime: `${uptime}s`,
-                    node_env: process.env.NODE_ENV,
-                    platform: process.platform,
-                    stack: error.stack?.split('\n')[0] // 只记录第一行堆栈
-                });
-                this.lastRedisError = error.message;
-            });
-
-            this.redisClient.on('close', async () => {
-                const now = Date.now();
-                const duration = this.connectTime ? now - this.connectTime : 0;
-                if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                    console.warn(`[CacheService] ⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`);
-                }
-                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`, {
-                    durationMs: duration,
-                    lastError: this.lastRedisError || 'none',
-                    failureCount: this.failureCount,
-                    currentProvider: this.currentProvider,
-                    hasPassword: !!this.redisPassword,
-                    node_env: process.env.NODE_ENV,
-                    platform: process.platform
-                });
-                
-                // 不再立即清理心跳或触发重启，让 ioredis 自动重连
-                // 只有在明确收到 'end' 事件时才考虑重启或降级
-            });
-
-            // 添加更多诊断事件
-            this.redisClient.on('wait', () => {
-                logger.debug(`[${this.getCurrentProvider()}] 🔄 Redis WAIT: Command queued, waiting for connection`);
-            });
-
-            this.redisClient.on('end', async () => {
-                if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                    console.warn(`[CacheService] ⚠️ Redis END: Connection ended by client`);
-                }
-                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis END: Connection ended by client`);
-                // 触发自动重启
-                setTimeout(() => this._restartRedisClient(), 1000);
-            });
-
-            this.redisClient.on('select', (db) => {
-                logger.debug(`[${this.getCurrentProvider()}] 🔄 Redis SELECT: Database ${db} selected`);
-            });
-
-            // 异步测试连接，不阻塞初始化 - 避免卡死
-            (async () => {
-                const pingStart = Date.now();
-                try {
-                    const pingPromise = this.redisClient.ping();
-                    const timeoutPromise = new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('Redis ping timeout after 10 seconds')), 10000)
-                    );
-
-                    const pingResult = await Promise.race([pingPromise, timeoutPromise]);
-                    const pingDuration = Date.now() - pingStart;
-
-                    logger.info(`[${this.getCurrentProvider()}] 🔄 Cache服务：使用 Northflank Redis`, {
-                        pingResult,
-                        pingDurationMs: pingDuration,
-                        pingThreshold: pingDuration > 1000 ? 'high' : pingDuration > 500 ? 'medium' : 'low',
-                        connectionReady: this.redisClient.status === 'ready',
-                        node_env: process.env.NODE_ENV,
-                        platform: process.platform
-                    });
-
-                    // 启动应用层心跳机制 - 每2分钟执行一次PING
-                    this._startHeartbeat();
-                } catch (pingError) {
-                    const pingDuration = Date.now() - pingStart;
-                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis ping 测试失败，但继续初始化以支持延迟连接`, {
-                        error: pingError.message,
-                        durationMs: pingDuration,
-                        clientStatus: this.redisClient ? this.redisClient.status : 'null',
-                        node_env: process.env.NODE_ENV,
-                        platform: process.platform
-                    });
-
-                    // 即使 ping 失败，也启动心跳机制（延迟连接时有用）
-                    this._startHeartbeat();
-                }
-            })();
-
-        } catch (error) {
-            logger.error(`[${this.getCurrentProvider()}] 🚨 Redis 初始化失败: ${error.message}`);
-            this.redisClient = null;
+        // 防止重复初始化
+        if (this.isRedisInitializing && this.redisInitPromise) {
+            return this.redisInitPromise;
         }
+
+        this.isRedisInitializing = true;
+
+        // 创建一个新的 Promise 赋值给 this.redisInitPromise
+        this.redisInitPromise = (async () => {
+            try {
+                // 检测是否在 Node.js 环境
+                if (typeof process === 'undefined' || !process.versions || !process.versions.node) {
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ 非 Node.js 环境，无法使用标准 Redis 客户端`);
+                    this.isRedisInitializing = false;
+                    return;
+                }
+
+                // 动态导入 ioredis - 添加超时控制
+                const importPromise = import('ioredis');
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('ioredis import timeout after 10 seconds')), 10000)
+                );
+
+                const ioredisModule = await Promise.race([importPromise, timeoutPromise]);
+                const Redis = ioredisModule.default;
+                
+                // 关键：统一使用 config/index.js 中的配置生成逻辑
+                const { getRedisConnectionConfig } = await import("../config/index.js");
+                const { url, options: redisOptions } = getRedisConnectionConfig();
+
+                // 记录Redis配置信息（用于诊断）
+                if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
+                    console.log(`[CacheService] 🔄 Redis 客户端初始化...`, {
+                        url: url ? 'PRESENT' : 'MISSING',
+                        host: redisOptions.host,
+                        port: redisOptions.port,
+                        tlsEnabled: !!redisOptions.tls,
+                        servername: redisOptions.tls?.servername
+                    });
+                }
+                logger.info(`[${this.getCurrentProvider()}] 🔄 Redis 客户端初始化...`, {
+                    hasUrl: !!url,
+                    hasHost: !!redisOptions.host,
+                    port: redisOptions.port,
+                    hasPassword: !!redisOptions.password,
+                    tlsEnabled: !!redisOptions.tls,
+                    servername: redisOptions.tls?.servername,
+                    family: redisOptions.family,
+                    node_env: process.env.NODE_ENV
+                });
+
+                // 实例化客户端
+                if (redisOptions.tls) {
+                    // 加密连接优先使用 options 对象实例化，避免 URL 字符串导致的协议解析冲突
+                    this.redisClient = new Redis(redisOptions);
+                    this.redisHost = redisOptions.host;
+                    this.redisPort = redisOptions.port;
+                } else if (url) {
+                    // 必须传入 options 以支持配置，否则 new Redis(url) 会忽略 options
+                    this.redisClient = new Redis(url, redisOptions);
+                    // 关键修复：确保 CacheService 实例上的 host/port 被正确同步
+                    this.redisHost = redisOptions.host || this.redisHost;
+                    this.redisPort = redisOptions.port || this.redisPort;
+                } else {
+                    this.redisClient = new Redis(redisOptions);
+                    this.redisHost = redisOptions.host;
+                    this.redisPort = redisOptions.port;
+                }
+
+                // 连接事件监听 (增强诊断)
+                this.redisClient.on('connect', () => {
+                    this.connectTime = Date.now();
+                    const displayHost = this.redisHost || (url ? 'from-url' : 'unknown');
+                    if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
+                        console.log(`[CacheService] ✅ Redis CONNECT: ${displayHost}:${this.redisPort}`);
+                    }
+                    logger.info(`[${this.getCurrentProvider()}] ✅ Redis CONNECT: ${displayHost}:${this.redisPort} at ${new Date(this.connectTime).toISOString()}`, {
+                        host: this.redisHost,
+                        port: this.redisPort,
+                        url: url ? 'configured' : 'not configured',
+                        hasPassword: !!redisOptions.password,
+                        node_env: process.env.NODE_ENV,
+                        platform: process.platform
+                    });
+                });
+
+                this.redisClient.on('ready', () => {
+                    const connectDuration = Date.now() - this.connectTime;
+                    if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
+                        console.log(`[CacheService] ✅ Redis READY: Connection established in ${connectDuration}ms`);
+                    }
+                    logger.info(`[${this.getCurrentProvider()}] ✅ Redis READY: Connection established in ${connectDuration}ms`, {
+                        totalConnections: this.redisClient.options?.maxRetriesPerRequest || 'unknown',
+                        connectTimeout: this.redisClient.options?.connectTimeout || 'unknown'
+                    });
+                    // Resolve any pending waitForReady promises
+                    if (this._readyResolver) {
+                        this._readyResolver();
+                        this._readyResolver = null;
+                    }
+                });
+
+                this.redisClient.on('reconnecting', (ms) => {
+                    if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
+                        console.log(`[CacheService] 🔄 Redis RECONNECTING: Attempting reconnection in ${ms}ms`);
+                    }
+                    logger.warn(`[${this.getCurrentProvider()}] 🔄 Redis RECONNECTING: Attempting reconnection in ${ms}ms`, {
+                        lastError: this.lastError,
+                        failureCount: this.failureCount,
+                        currentProvider: this.currentProvider
+                    });
+                });
+
+                this.redisClient.on('error', (error) => {
+                    const now = Date.now();
+                    const uptime = this.connectTime ? Math.round((now - this.connectTime) / 1000) : 0;
+                    if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
+                        console.error(`[CacheService] 🚨 Redis ERROR: ${error.message}`, {
+                            code: error.code,
+                            host: error.hostname || error.address,
+                            port: error.port
+                        });
+                    }
+                    logger.error(`[${this.getCurrentProvider()}] 🚨 Redis ERROR: ${error.message}`, {
+                        code: error.code,
+                        errno: error.errno,
+                        syscall: error.syscall,
+                        hostname: error.hostname,
+                        port: error.port,
+                        address: error.address,
+                        uptime: `${uptime}s`,
+                        node_env: process.env.NODE_ENV,
+                        platform: process.platform,
+                        stack: error.stack?.split('\n')[0] // 只记录第一行堆栈
+                    });
+                    this.lastRedisError = error.message;
+                });
+
+                this.redisClient.on('close', async () => {
+                    const now = Date.now();
+                    const duration = this.connectTime ? now - this.connectTime : 0;
+                    if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
+                        console.warn(`[CacheService] ⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`);
+                    }
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`, {
+                        durationMs: duration,
+                        lastError: this.lastRedisError || 'none',
+                        failureCount: this.failureCount,
+                        currentProvider: this.currentProvider,
+                        hasPassword: !!this.redisPassword,
+                        node_env: process.env.NODE_ENV,
+                        platform: process.platform
+                    });
+                    
+                    // 不再立即清理心跳或触发重启，让 ioredis 自动重连
+                    // 只有在明确收到 'end' 事件时才考虑重启或降级
+                });
+
+                // 添加更多诊断事件
+                this.redisClient.on('wait', () => {
+                    logger.debug(`[${this.getCurrentProvider()}] 🔄 Redis WAIT: Command queued, waiting for connection`);
+                });
+
+                this.redisClient.on('end', async () => {
+                    if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
+                        console.warn(`[CacheService] ⚠️ Redis END: Connection ended by client`);
+                    }
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis END: Connection ended by client`);
+                    // 触发自动重启
+                    setTimeout(() => this._restartRedisClient(), 1000);
+                });
+
+                this.redisClient.on('select', (db) => {
+                    logger.debug(`[${this.getCurrentProvider()}] 🔄 Redis SELECT: Database ${db} selected`);
+                });
+
+                // 异步测试连接，不阻塞初始化 - 避免卡死
+                (async () => {
+                    const pingStart = Date.now();
+                    try {
+                        const pingPromise = this.redisClient.ping();
+                        const timeoutPromise = new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('Redis ping timeout after 10 seconds')), 10000)
+                        );
+
+                        const pingResult = await Promise.race([pingPromise, timeoutPromise]);
+                        const pingDuration = Date.now() - pingStart;
+
+                        logger.info(`[${this.getCurrentProvider()}] 🔄 Cache服务：使用 Northflank Redis`, {
+                            pingResult,
+                            pingDurationMs: pingDuration,
+                            pingThreshold: pingDuration > 1000 ? 'high' : pingDuration > 500 ? 'medium' : 'low',
+                            connectionReady: this.redisClient.status === 'ready',
+                            node_env: process.env.NODE_ENV,
+                            platform: process.platform
+                        });
+
+                        // 启动应用层心跳机制 - 每2分钟执行一次PING
+                        this._startHeartbeat();
+                    } catch (pingError) {
+                        const pingDuration = Date.now() - pingStart;
+                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis ping 测试失败，但继续初始化以支持延迟连接`, {
+                            error: pingError.message,
+                            durationMs: pingDuration,
+                            clientStatus: this.redisClient ? this.redisClient.status : 'null',
+                            node_env: process.env.NODE_ENV,
+                            platform: process.platform
+                        });
+
+                        // 即使 ping 失败，也启动心跳机制（延迟连接时有用）
+                        this._startHeartbeat();
+                    }
+                })();
+
+                this.isRedisInitializing = false;
+            } catch (error) {
+                logger.error(`[${this.getCurrentProvider()}] 🚨 Redis 初始化失败: ${error.message}`);
+                this.redisClient = null;
+                this.isRedisInitializing = false;
+                throw error;
+            }
+        })();
+
+        return this.redisInitPromise;
     }
 
     /**
@@ -377,6 +395,35 @@ export class CacheService {
             logger.error(`[${this.getCurrentProvider()}] 🚨 Redis 重启失败: ${error.message}`);
         } finally {
             this.restarting = false;
+        }
+    }
+
+    /**
+     * 辅助方法：等待 Redis 初始化完成
+     * @param {number} timeoutMs - 超时时间（毫秒）
+     */
+    async _waitForRedisInit(timeoutMs = 2000) {
+        const startTime = Date.now();
+        
+        // 如果有 active promise，等待它
+        if (this.redisInitPromise) {
+            try {
+                await Promise.race([
+                    this.redisInitPromise,
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Init timeout')), timeoutMs))
+                ]);
+            } catch (e) {
+                // 忽略 promise 本身的错误，我们只关心是否超时或完成
+            }
+        }
+        
+        // 轮询检查 client 是否 ready (处理 restartDelay 期间没有 promise 的情况)
+        while (!this.redisClient && (Date.now() - startTime < timeoutMs)) {
+            await new Promise(r => setTimeout(r, 100));
+        }
+        
+        if (!this.redisClient) {
+            throw new Error('Redis client still null after wait');
         }
     }
 
@@ -692,6 +739,18 @@ export class CacheService {
     async _executeWithFailover(operation, ...args) {
         // 1. Redis 客户端不可用或处于断开状态时的 Fallback
         if (this.currentProvider === 'redis') {
+            // 场景 1: 客户端为 null，但正在初始化/重启
+            if (!this.redisClient && (this.isRedisInitializing || this.restarting)) {
+                logger.info(`[CacheService] ⏳ Redis 正在初始化/重启，请求等待中...`);
+                try {
+                    // 等待初始化完成，或者超时（例如 2000ms）
+                    await this._waitForRedisInit(2000);
+                } catch (e) {
+                    logger.warn(`[CacheService] ⚠️ 等待 Redis 初始化超时: ${e.message}`);
+                    // 超时后继续执行，将触发下方的 fallback 逻辑
+                }
+            }
+
             // 优化：不再对 close 或 end 立即降级，因为 ioredis 会尝试重连
             // 只有当 redisClient 为 null 时（未初始化）才降级
             if (!this.redisClient) {
