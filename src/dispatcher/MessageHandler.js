@@ -162,23 +162,13 @@ export class MessageHandler {
                     try {
                         if (!ev) return '{}';
                         const safeEvent = {
-                            className: ev.className,
-                            id: ev.id || ev.queryId || ev.message?.id,
-                            peerId: ev.peerId || ev.message?.peerId,
-                            senderId: ev.senderId || ev.message?.senderId,
-                            messageId: ev.message?.id,
-                            text: ev.message?.message?.substring(0, 200),
-                            mediaType: ev.message?.media?.className,
-                            timestamp: ev.date,
-                            keys: Object.keys(ev).slice(0, 20)
+                            className: ev?.className || 'unknown',
+                            id: (ev?.id || ev?.queryId || ev?.message?.id || 'no-id')?.toString?.() || 'no-id',
+                            text: (ev?.message?.message || '').substring(0, 100),
+                            timestamp: ev?.date,
+                            mediaType: ev?.message?.media?.className || 'none'
                         };
-                        // 显式过滤可能包含循环引用的 GramJS 内部对象
-                        for (const key in safeEvent) {
-                            if (safeEvent[key]?.client || safeEvent[key]?._eventBuilders) {
-                                safeEvent[key] = '[CIRCULAR_REF]';
-                            }
-                        }
-                        return JSON.stringify(safeEvent, (k, v) => typeof v === 'bigint' ? v.toString() : v).substring(0, 1000);
+                        return JSON.stringify(safeEvent, (k, v) => typeof v === 'bigint' ? v.toString() : v).substring(0, 500);
                     } catch (err) {
                         return '[SERIALIZE_ERROR]';
                     }

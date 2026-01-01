@@ -174,26 +174,34 @@ describe('MessageHandler Integration Tests', () => {
 
     describe('Safe Serialization', () => {
         it('should safely serialize unknown events with circular references', async () => {
-            const circularObj = {};
-            circularObj.self = circularObj;
+            // 模拟包含深层循环引用的 GramJS 对象结构
+            const circularObj = { className: 'PeerUser' };
+            circularObj.client = { _eventBuilders: [] };
+            circularObj.client._eventBuilders.push({ raw: circularObj }); // 形成循环
 
             const event = {
                 className: 'UnknownEvent',
-                circular: circularObj,
-                bigIntVal: BigInt(9007199254740991)
+                message: {
+                    id: 123,
+                    message: 'test circular',
+                    peerId: circularObj
+                }
             };
 
             // 应该不抛出 TypeError: Converting circular structure to JSON
-            await expect(MessageHandler.handleEvent(event, mockClient)).resolves.not.toThrow();
+            // 并且 Dispatcher.handle 应该仍然被调用 (说明序列化异常没中断流程)
+            await MessageHandler.handleEvent(event, mockClient);
+            expect(Dispatcher.handle).toHaveBeenCalled();
         });
 
-        it('should handle BigInt and null in safeSerializeEvent', async () => {
+        it('should handle BigInt and missing fields in safeSerializeEvent', async () => {
             const event = {
-                className: 'BigIntEvent',
-                id: BigInt(123456789)
+                className: 'MinimalEvent',
+                id: BigInt(9876543210)
             };
 
-            await expect(MessageHandler.handleEvent(event, mockClient)).resolves.not.toThrow();
+            await MessageHandler.handleEvent(event, mockClient);
+            expect(Dispatcher.handle).toHaveBeenCalled();
         });
     });
 });
