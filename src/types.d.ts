@@ -20,6 +20,10 @@ interface Env {
   // Upstash Redis fallback
   UPSTASH_REDIS_REST_URL?: string;
   UPSTASH_REDIS_REST_TOKEN?: string;
+
+  // Northflank Redis
+  NF_REDIS_URL?: string;
+  NF_REDIS_TOKEN?: string;
 }
 
 interface Instance {
