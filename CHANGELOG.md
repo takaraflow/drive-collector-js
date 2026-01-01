@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.5.1](https://github.com/YoungSx/drive-collector-js/compare/v4.5.0...v4.5.1) (2026-01-01)
+
+
+### 🐛 问题修复
+
+* enhances QStash publish test script with verbose debugging and raw HTTPS testing ([c336e8f](https://github.com/YoungSx/drive-collector-js/commit/c336e8f438d2fc5ab54649928580e480b6dd8733))
+
 ## [4.5.0](https://github.com/YoungSx/drive-collector-js/compare/v4.4.5...v4.5.0) (2026-01-01)
 
 
