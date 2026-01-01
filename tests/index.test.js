@@ -297,17 +297,20 @@ describe('Worker Tests', () => {
     let consoleLogSpy;
     let consoleWarnSpy;
     let consoleErrorSpy;
+    let consoleDebugSpy;
 
     beforeEach(() => {
       consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
       consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
       consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+      consoleDebugSpy = jest.spyOn(console, 'debug').mockImplementation();
     });
 
     afterEach(() => {
       consoleLogSpy.mockRestore();
       consoleWarnSpy.mockRestore();
       consoleErrorSpy.mockRestore();
+      consoleDebugSpy.mockRestore();
     });
 
     test('logger.info should include version and level in pending logs', async () => {
@@ -347,6 +350,143 @@ describe('Worker Tests', () => {
       expect(typeof logger.error).toBe('function');
       expect(typeof logger.debug).toBe('function');
       expect(typeof logger.configure).toBe('function');
+    });
+  });
+
+  describe('Logging and Diagnostics', () => {
+    let consoleLogSpy;
+    let consoleWarnSpy;
+    let consoleErrorSpy;
+    let consoleDebugSpy;
+
+    beforeEach(() => {
+      consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
+      consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+      consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+      consoleDebugSpy = jest.spyOn(console, 'debug').mockImplementation();
+    });
+
+    afterEach(() => {
+      consoleLogSpy.mockRestore();
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+      consoleDebugSpy.mockRestore();
+    });
+
+    test('handleRequest should log initialization diagnostics', async () => {
+      const request = new Request('https://test.url/health');
+      await handleRequest(request, env);
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Cache provider 初始化诊断'),
+        expect.objectContaining({
+          providers: expect.any(Array),
+          nf_configured: true,
+          cf_kv_available: true,
+          upstash_configured: true,
+          detect_primary: 'nf-redis'
+        })
+      );
+    });
+
+    test('executeWithPriorityFallback should log fallback with duration and error info', async () => {
+      const envWithNF = {
+        NF_REDIS_URL: 'https://nf.url',
+        NF_REDIS_TOKEN: 'nf-token',
+        KV_STORAGE: mockKV
+      };
+
+      // Mock NF failure
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        status: 500,
+        ok: false,
+        statusText: 'Internal Server Error',
+        body: { cancel: jest.fn() }
+      });
+
+      mockKV.get.mockResolvedValue('cf-value');
+
+      await executeWithFailover('_kv_get', envWithNF, null, 'test-key');
+
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[nf-redis] _kv_get 失败'),
+        expect.any(Object)
+      );
+      
+      const logCall = consoleWarnSpy.mock.calls.find(call => call[0].includes('[nf-redis] _kv_get 失败'));
+      expect(logCall[0]).toContain('code:500');
+      expect(logCall[0]).toContain('fallback');
+    });
+
+    test('executeNFRedis operations should log timing info', async () => {
+      const envWithNF = {
+        NF_REDIS_URL: 'https://nf.url',
+        NF_REDIS_TOKEN: 'nf-token',
+        NODE_ENV: 'development'
+      };
+
+      global.fetch = jest.fn().mockResolvedValue({
+        status: 200,
+        ok: true,
+        json: async () => ({ result: 'ok', keys: [], cursor: 0 })
+      });
+
+      // Override environment detection for logger inside the test
+      const originalEnv = logger.env;
+      logger.configure({ env: 'development' });
+
+      try {
+        // Test GET log
+        await executeWithFailover('_kv_get', envWithNF, null, 'test-key');
+        expect(consoleDebugSpy).toHaveBeenCalledWith(
+          expect.stringContaining('NF Redis GET: key=test-key success'),
+          expect.any(Object)
+        );
+
+        // Test PUT log
+        await executeWithFailover('_kv_put', envWithNF, null, 'test-key', 'val');
+        expect(consoleDebugSpy).toHaveBeenCalledWith(
+          expect.stringContaining('NF Redis PUT: key=test-key success'),
+          expect.any(Object)
+        );
+
+        // Test SCAN log
+        await executeWithFailover('_kv_list', envWithNF, null, 'prefix');
+        expect(consoleDebugSpy).toHaveBeenCalledWith(
+          expect.stringContaining('NF Scan: prefix=prefix success'),
+          expect.any(Object)
+        );
+      } finally {
+        logger.configure({ env: originalEnv });
+      }
+    });
+
+    test('executeUpstashScan should log timing info', async () => {
+      const envWithUpstash = {
+        UPSTASH_REDIS_REST_URL: 'https://upstash.url',
+        UPSTASH_REDIS_REST_TOKEN: 'token',
+        NODE_ENV: 'development'
+      };
+
+      global.fetch = jest.fn().mockResolvedValue({
+        status: 200,
+        ok: true,
+        json: async () => ({ keys: [], cursor: 0 })
+      });
+
+      // Override environment detection for logger inside the test
+      const originalEnv = logger.env;
+      logger.configure({ env: 'development' });
+
+      try {
+        await executeUpstashScan(envWithUpstash, 'prefix');
+        expect(consoleDebugSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Upstash Scan: prefix=prefix success'),
+          expect.any(Object)
+        );
+      } finally {
+        logger.configure({ env: originalEnv });
+      }
     });
   });
 

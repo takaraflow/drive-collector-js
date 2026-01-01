@@ -709,32 +709,47 @@ async function executeNFRedis(operation, env, key, value = null) {
   };
 
   if (operation === '_nf_redis_get') {
+    await logger.debug(`NF Redis GET: key=${key}`, {}, null);
+    const start = Date.now();
     // GET 请求不需要 Content-Type
     const getHeaders = { 'Authorization': `Bearer ${token}` };
     const response = await fetch(`${baseUrl}/get/${key}`, { headers: getHeaders });
+    const duration = Date.now() - start;
     
     if (response.status === 404) {
+      await logger.debug(`NF Redis GET: key=${key} not found (404), duration=${duration}ms`, {}, null);
       await response.body.cancel();
       return null;
     }
     
     if (!response.ok) {
-      throw new Error(`NF Redis Get Error: ${response.status} ${response.statusText}`);
+      const duration = Date.now() - start;
+      await logger.warn(`NF Redis GET: key=${key} failed status=${response.status}, duration=${duration}ms`, {}, null);
+      const err = new Error(`NF Redis Get Error: ${response.status} ${response.statusText}`);
+      // @ts-ignore
+      err.status = response.status;
+      throw err;
     }
     
     const data = await response.json();
+    await logger.debug(`NF Redis GET: key=${key} success, duration=${duration}ms`, {}, null);
     return data.result;
   } else if (operation === '_nf_redis_put') {
+    await logger.debug(`NF Redis PUT: key=${key}`, {}, null);
+    const start = Date.now();
     const response = await fetch(`${baseUrl}/set/${key}`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ value })
     });
+    const duration = Date.now() - start;
     
     if (!response.ok) {
+      await logger.warn(`NF Redis PUT: key=${key} failed status=${response.status}, duration=${duration}ms`, {}, null);
       throw new Error(`NF Redis Put Error: ${response.status} ${response.statusText}`);
     }
     
+    await logger.debug(`NF Redis PUT: key=${key} success, duration=${duration}ms`, {}, null);
     return true;
   }
 }
@@ -752,6 +767,7 @@ async function executeNFRedisScan(env, prefix) {
 
   let keys = [];
   let cursor = 0;
+  const start = Date.now();
   
   while (true) {
     const url = `${baseUrl}/scan/${cursor}?match=${encodeURIComponent(prefix + '*')}&count=100`;
@@ -760,7 +776,12 @@ async function executeNFRedisScan(env, prefix) {
     });
     
     if (!res.ok) {
-      throw new Error(`NF Scan Error: ${res.status}`);
+      const duration = Date.now() - start;
+      await logger.warn(`NF Scan Error: status=${res.status}, duration=${duration}ms`, {}, null);
+      const err = new Error(`NF Scan Error: ${res.status}`);
+      // @ts-ignore
+      err.status = res.status;
+      throw err;
     }
     
     const data = await res.json();
@@ -772,6 +793,8 @@ async function executeNFRedisScan(env, prefix) {
     if (cursor === 0) break;
   }
   
+  const totalDuration = Date.now() - start;
+  await logger.debug(`NF Scan: prefix=${prefix} success, keys=${keys.length}, duration=${totalDuration}ms`, {}, null);
   return { keys: keys.map(name => ({ name })) };
 }
 
@@ -788,6 +811,7 @@ async function executeUpstashScan(env, prefix) {
 
   let keys = [];
   let cursor = 0;
+  const start = Date.now();
   
   while (true) {
     const url = `${baseUrl}/scan/${cursor}?match=${encodeURIComponent(prefix + '*')}&count=100`;
@@ -796,6 +820,8 @@ async function executeUpstashScan(env, prefix) {
     });
     
     if (!res.ok) {
+      const duration = Date.now() - start;
+      await logger.warn(`Upstash Scan Error: status=${res.status}, duration=${duration}ms`, {}, null);
       throw new Error(`Upstash Scan Error: ${res.status}`);
     }
     
@@ -808,6 +834,8 @@ async function executeUpstashScan(env, prefix) {
     if (cursor === 0) break;
   }
   
+  const totalDuration = Date.now() - start;
+  await logger.debug(`Upstash Scan: prefix=${prefix} success, keys=${keys.length}, duration=${totalDuration}ms`, {}, null);
   return { keys: keys.map(name => ({ name })) };
 }
 
@@ -816,6 +844,7 @@ async function executeUpstashScan(env, prefix) {
  */
 async function executeWithPriorityFallback(operation, env, ctx, ...args) {
   const providers = getProviderPriority(env);
+  await logger.debug(`执行 ${operation}，优先级: ${JSON.stringify(providers)}`, { args: args.slice(0, 1) }, ctx);
   
   const providerOps = {
     'nf-redis': {
@@ -826,30 +855,41 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
     'cloudflare': {
       '_kv_get': async () => {
         if (env.KV_STORAGE) {
-          return await env.KV_STORAGE.get(args[0]);
+          const start = Date.now();
+          const res = await env.KV_STORAGE.get(args[0]);
+          await logger.debug(`Cloudflare KV GET: key=${args[0]} success, duration=${Date.now() - start}ms`, {}, ctx);
+          return res;
         }
         throw new Error('KV_STORAGE not available');
       },
       '_kv_put': async () => {
         if (env.KV_STORAGE) {
-          return await env.KV_STORAGE.put(args[0], args[1]);
+          const start = Date.now();
+          await env.KV_STORAGE.put(args[0], args[1]);
+          await logger.debug(`Cloudflare KV PUT: key=${args[0]} success, duration=${Date.now() - start}ms`, {}, ctx);
+          return true;
         }
         throw new Error('KV_STORAGE not available');
       },
       '_kv_list': async () => {
         if (env.KV_STORAGE) {
-          return await env.KV_STORAGE.list({ prefix: args[0] });
+          const start = Date.now();
+          const res = await env.KV_STORAGE.list({ prefix: args[0] });
+          await logger.debug(`Cloudflare KV LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, {}, ctx);
+          return res;
         }
         throw new Error('KV_STORAGE not available');
       }
     },
     'upstash': {
       '_kv_get': async () => {
+        const start = Date.now();
         const response = await fetch(`${env.UPSTASH_REDIS_REST_URL}/get/${args[0]}`, {
           headers: { 'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}` }
         });
+        const duration = Date.now() - start;
 
-        await logger.debug(`Upstash GET ${args[0]}: status ${response.status}`, {}, ctx);
+        await logger.debug(`Upstash GET ${args[0]}: status ${response.status}, duration=${duration}ms`, {}, ctx);
 
         if (response.status === 404) {
           await logger.debug(`Upstash GET 404 for ${args[0]}, canceling body`, {}, ctx);
@@ -868,6 +908,7 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         return data.result;
       },
       '_kv_put': async () => {
+        const start = Date.now();
         const response = await fetch(`${env.UPSTASH_REDIS_REST_URL}/set/${args[0]}`, {
           method: 'POST',
           headers: {
@@ -876,8 +917,9 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
           },
           body: JSON.stringify({ value: args[1] })
         });
+        const duration = Date.now() - start;
 
-        await logger.debug(`Upstash PUT ${args[0]}: status ${response.status}`, {}, ctx);
+        await logger.debug(`Upstash PUT ${args[0]}: status ${response.status}, duration=${duration}ms`, {}, ctx);
 
         if (!response.ok) {
           await logger.debug(`Upstash PUT error ${response.status} for ${args[0]}, canceling body`, {}, ctx);
@@ -888,18 +930,32 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         await logger.debug(`Upstash PUT ${args[0]} success`, {}, ctx);
         return true;
       },
-      '_kv_list': async () => await executeUpstashScan(env, args[0])
+      '_kv_list': async () => {
+        const start = Date.now();
+        const res = await executeUpstashScan(env, args[0]);
+        await logger.debug(`Upstash LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, {}, ctx);
+        return res;
+      }
     }
   };
 
   // 按优先级顺序尝试每个提供者
+  let lastUsedProvider = null;
   for (const p of providers) {
     if (!providerOps[p][operation]) continue;
     
+    const start = Date.now();
     try {
-      return await providerOps[p][operation]();
+      await logger.debug(`尝试 ${p} ${operation} ${args[0] || ''}`, {}, ctx);
+      const result = await providerOps[p][operation]();
+      const duration = Date.now() - start;
+      await logger.debug(`使用 ${p} ${operation} 成功, duration=${duration}ms`, {}, ctx);
+      lastUsedProvider = p;
+      return result;
     } catch (e) {
-      await logger.warn(`Provider ${p} failed: ${e.message}`, {}, ctx);
+      const duration = Date.now() - start;
+      const errorCode = e.status || e.code || 'unknown';
+      await logger.warn(`[${p}] ${operation} 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, fallback`, {}, ctx);
       // 继续尝试下一个提供者
       continue;
     }
@@ -1121,6 +1177,16 @@ async function handleRequest(request, env, ctx) {
 
   // 初始化日志配置
   logger.configure({ env: env.NODE_ENV || 'production' });
+  
+  const prios = getProviderPriority(env);
+  await logger.info('Cache provider 初始化诊断', {
+    providers: prios,
+    nf_configured: !!(env.NF_REDIS_URL && env.NF_REDIS_TOKEN),
+    cf_kv_available: !!env.KV_STORAGE,
+    upstash_configured: !!(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN),
+    detect_primary: detectCacheProvider(env)
+  }, ctx);
+
   await logger.info('环境初始化', { nodeEnv: env.NODE_ENV || 'production', hasKv: !!env.KV_STORAGE }, ctx);
 
   // 健康检查
