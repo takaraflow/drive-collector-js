@@ -150,7 +150,7 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
         });
 
         await expect(d1Instance.run("SELECT * FROM restricted"))
-            .rejects.toThrow("HTTP 403: Forbidden");
+            .rejects.toThrow("D1 HTTP 403 [N/A]: Forbidden");
 
         expect(mockFetch).toHaveBeenCalledTimes(1); // No retry for 403
     });
@@ -182,7 +182,7 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
             ok: false,
             status: 400,
             statusText: "Bad Request",
-            text: () => Promise.resolve('{"errors":[{"message":"Invalid SQL syntax"}]}')
+            text: () => Promise.resolve('{"success":false,"errors":[{"message":"Invalid SQL syntax"}]}')
         });
 
         // Re-import to get updated mock
@@ -191,17 +191,17 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
         const { default: logger } = await import("../../src/services/logger.js");
 
         await expect(newD1Instance.run("INVALID SQL"))
-            .rejects.toThrow("HTTP 400: Bad Request");
+            .rejects.toThrow("D1 HTTP 400 [N/A]: Invalid SQL syntax");
 
         // Check that detailed error info was logged
         expect(logger.error).toHaveBeenCalledWith(
-            expect.stringContaining("🚨 D1 HTTP Error"),
+            expect.stringContaining("🚨 D1 HTTP 400"),
         );
         expect(logger.error).toHaveBeenCalledWith(
+            expect.stringContaining("Invalid SQL syntax")
+        );
+        expect(logger.error).not.toHaveBeenCalledWith(
             expect.stringContaining("URL: https://api.cloudflare.com")
-        );
-        expect(logger.error).toHaveBeenCalledWith(
-            expect.stringContaining('Response: {"errors":[{"message":"Invalid SQL syntax"}]}')
         );
     });
 

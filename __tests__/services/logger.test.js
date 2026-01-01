@@ -22,6 +22,7 @@ describe('Logger Service', () => {
   let consoleDebugSpy;
 
   beforeEach(async () => {
+    process.env.DEBUG = 'true';
     jest.useFakeTimers();
     jest.clearAllMocks();
 
@@ -43,6 +44,7 @@ describe('Logger Service', () => {
   });
 
   afterEach(() => {
+    delete process.env.DEBUG;
     jest.useRealTimers();
     jest.restoreAllMocks();
   });

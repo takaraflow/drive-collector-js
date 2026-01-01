@@ -63,6 +63,7 @@ export class CacheService {
         this.lastFailureTime = 0;
         this.lastError = null;
         this.recoveryTimer = null;
+        this.destroyed = false; // 销毁标志
 
         // 动态导入 ioredis (环境检测)
         this.redisClient = null;
@@ -158,6 +159,13 @@ export class CacheService {
                 // 关键：统一使用 config/index.js 中的配置生成逻辑
                 const { getRedisConnectionConfig } = await import("../config/index.js");
                 const { url, options: redisOptions } = getRedisConnectionConfig();
+
+                // 在测试环境下，限制重试次数和连接超时，防止异步泄漏
+                if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID) {
+                    redisOptions.maxRetriesPerRequest = 0;
+                    redisOptions.retryStrategy = () => null;
+                    redisOptions.connectTimeout = 500; // 快速超时
+                }
 
                 // 记录Redis配置信息（用于诊断）
                 if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
@@ -297,8 +305,10 @@ export class CacheService {
                         console.warn(`[CacheService] ⚠️ Redis END: Connection ended by client`);
                     }
                     logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis END: Connection ended by client`);
-                    // 触发自动重启
-                    setTimeout(() => this._restartRedisClient(), 1000);
+                    // 触发自动重启 (如果未被销毁)
+                    if (!this.destroyed) {
+                        setTimeout(() => this._restartRedisClient(), 1000);
+                    }
                 });
 
                 this.redisClient.on('select', (db) => {
@@ -310,9 +320,10 @@ export class CacheService {
                     const pingStart = Date.now();
                     try {
                         const pingPromise = this.redisClient.ping();
-                        const timeoutPromise = new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error('Redis ping timeout after 10 seconds')), 10000)
-                        );
+                        const timeoutPromise = new Promise((_, reject) => {
+                            const t = setTimeout(() => reject(new Error('Redis ping timeout after 10 seconds')), 10000);
+                            if (t.unref) t.unref(); // 允许测试环境下快速结束
+                        });
 
                         const pingResult = await Promise.race([pingPromise, timeoutPromise]);
                         const pingDuration = Date.now() - pingStart;
@@ -359,8 +370,8 @@ export class CacheService {
      * 重启 Redis 客户端 - 从 'end' 状态恢复
      */
     async _restartRedisClient() {
-        if (this.restarting) {
-            logger.debug(`[${this.getCurrentProvider()}] 🔄 Redis 重启已在进行中，跳过重复调用`);
+        if (this.restarting || this.destroyed) {
+            logger.debug(`[${this.getCurrentProvider()}] 🔄 Redis 重启已在进行中或实例已销毁，跳过重复调用`);
             return;
         }
         
@@ -1639,6 +1650,36 @@ export class CacheService {
             this.heartbeatTimer = null;
             logger.info(`[${this.getCurrentProvider()}] 🛑 Redis 心跳机制已停止`);
         }
+    }
+
+    /**
+     * 销毁实例，清理所有资源
+     * 用于测试环境清理，防止异步泄漏
+     */
+    async destroy() {
+        this.destroyed = true;
+        logger.info(`[${this.getCurrentProvider()}] 🛑 正在销毁 CacheService 实例...`);
+        
+        this._stopHeartbeat();
+        this.stopRecoveryCheck();
+
+        if (this.redisClient) {
+            try {
+                // 使用带超时的 quit
+                const quitPromise = this.redisClient.quit();
+                const timeoutPromise = new Promise(resolve => setTimeout(resolve, 1000));
+                await Promise.race([quitPromise, timeoutPromise]);
+            } catch (e) {
+                // 忽略错误
+            }
+            this.redisClient.removeAllListeners();
+            this.redisClient = null;
+        }
+
+        this.redisInitPromise = null;
+        this.isRedisInitializing = false;
+        
+        logger.info(`[${this.getCurrentProvider()}] ✅ CacheService 实例销毁完成`);
     }
 
     /**

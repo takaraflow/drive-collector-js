@@ -134,9 +134,12 @@ export async function cleanupSingletonTimers() {
   cleanupPromises.push(
     import("../../src/services/CacheService.js")
       .then(module => {
-        if (module.kv) {
-          if (module.kv.stopRecoveryCheck) module.kv.stopRecoveryCheck();
-          if (module.kv._stopHeartbeat) module.kv._stopHeartbeat();
+        if (module.cache) {
+          if (module.cache.destroy) {
+            return module.cache.destroy();
+          }
+          if (module.cache.stopRecoveryCheck) module.cache.stopRecoveryCheck();
+          if (module.cache._stopHeartbeat) module.cache._stopHeartbeat();
         }
       })
       .catch(() => {}) // 忽略导入错误

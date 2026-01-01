@@ -94,6 +94,9 @@ const serializeData = (data) => {
 };
 
 const log = async (instanceId, level, message, data = {}) => {
+  // 在测试环境下，如果 getInstanceIdFunc 返回 unknown，减少 debug 日志输出频率
+  // 避免干扰测试结果
+
   // 确保版本已初始化
   await initVersion();
 
@@ -158,10 +161,15 @@ const getSafeInstanceId = () => {
             return id;
         }
         // 如果返回了 'unknown' 或无效值，使用本地 fallback
-        console.debug('Logger: Instance ID provider returned invalid value, using fallback', { received: id, fallback: localFallbackId });
+        // 在测试环境下减少此类日志输出，除非显式开启 DEBUG
+        if (process.env.NODE_ENV !== 'test' || process.env.DEBUG === 'true') {
+            console.debug('Logger: Instance ID provider returned invalid value, using fallback', { received: id, fallback: localFallbackId });
+        }
         return localFallbackId;
     } catch (e) {
-        console.debug('Logger: Instance ID provider failed, using fallback', { error: e.message, fallback: localFallbackId });
+        if (process.env.NODE_ENV !== 'test' || process.env.DEBUG === 'true') {
+            console.debug('Logger: Instance ID provider failed, using fallback', { error: e.message, fallback: localFallbackId });
+        }
         return localFallbackId;
     }
 };

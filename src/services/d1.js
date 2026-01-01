@@ -49,15 +49,40 @@ class D1Service {
                 });
 
                 if (!response.ok) {
-                    // 如果是服务器错误 (5xx) 或特定的 4xx 错误，尝试读取 body 判断是否可重试
-                    const isServerError = response.status >= 500;
+                    // 解析错误响应体，获取具体错误信息
+                    let errorDetails = { code: null, message: response.statusText };
                     let errorBody = "";
+                    
                     try {
                         errorBody = await response.text();
-                    } catch (e) {}
+                        const errorJson = JSON.parse(errorBody);
+                        if (errorJson.success === false && errorJson.errors?.[0]) {
+                            errorDetails.code = errorJson.errors[0].code;
+                            errorDetails.message = errorJson.errors[0].message;
+                        }
+                    } catch (parseErr) {
+                        // 如果解析 JSON 失败，保留原始 body 文本（如果非空）作为补充信息
+                        if (errorBody) errorDetails.extra = errorBody;
+                    }
 
-                    // 检查是否是 "Network connection lost" (Code 7500)
-                    const isNetworkLost = errorBody.includes('"code":7500') || errorBody.includes('Network connection lost');
+                    // 记录详细日志（脱敏处理）
+                    const safeSql = sql.replace(/[\n\r]/g, ' ').slice(0, 200) + (sql.length > 200 ? '...' : '');
+                    const paramTypes = params.map(p => {
+                        if (p === null) return 'null';
+                        if (p === undefined) return 'undefined';
+                        return typeof p === 'object' ? (p.constructor?.name || 'Object') : typeof p;
+                    });
+                    
+                    logger.error(`🚨 D1 HTTP ${response.status}: ${errorDetails.message} (code:${errorDetails.code || 'N/A'})`);
+                    logger.error(`   SQL: ${safeSql}`);
+                    logger.error(`   Params types: [${paramTypes.join(', ')}]`);
+                    if (errorDetails.extra) logger.error(`   Raw Body: ${errorDetails.extra}`);
+
+                    // 检查是否是 "Network connection lost" (Code 7500) 或服务器错误
+                    const isServerError = response.status >= 500;
+                    const isNetworkLost = (errorDetails.code === 7500) || 
+                                          (errorDetails.message && errorDetails.message.includes('Network connection lost')) ||
+                                          (errorBody && errorBody.includes('Network connection lost'));
                     
                     if ((isServerError || isNetworkLost) && attempts < maxAttempts - 1) {
                         attempts++;
@@ -66,18 +91,14 @@ class D1Service {
                         await new Promise(r => setTimeout(r, delay));
                         continue;
                     }
-
-                    // 详细的错误诊断
-                    logger.error(`🚨 D1 HTTP Error ${response.status}: ${response.statusText}`);
-                    logger.error(`   URL: ${this.apiUrl}`);
-                    if (errorBody) logger.error(`   Response: ${errorBody}`);
                     
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    // 抛出包含详细信息的错误
+                    throw new Error(`D1 HTTP ${response.status} [${errorDetails.code || 'N/A'}]: ${errorDetails.message}`);
                 }
 
                 const result = await response.json();
                 if (!result.success) {
-                    throw new Error(`D1 Error: ${result.errors[0]?.message || "Unknown error"}`);
+                    throw new Error(`D1 SQL Error [${result.errors[0]?.code || 'N/A'}]: ${result.errors[0]?.message || "Unknown error"}`);
                 }
                 // 兼容标准 Cloudflare D1 格式和扁平化 Mock 格式
                 return result.result ? result.result[0] : result;
@@ -99,6 +120,13 @@ class D1Service {
                 throw error;
             }
         }
+    }
+
+    /**
+     * 健康检查：简单的 SELECT 1 查询，用于验证连接
+     */
+    async healthCheck() {
+        return await this.fetchOne('SELECT 1 as health');
     }
 
     /**
