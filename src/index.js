@@ -709,22 +709,21 @@ async function executeNFRedis(operation, env, key, value = null) {
   };
 
   if (operation === '_nf_redis_get') {
-    await logger.debug(`NF Redis GET: key=${key}`, {}, null);
     const start = Date.now();
+    await logger.info(`NF Redis GET key=${key} status=pending`, {}, null);
     // GET 请求不需要 Content-Type
     const getHeaders = { 'Authorization': `Bearer ${token}` };
     const response = await fetch(`${baseUrl}/get/${key}`, { headers: getHeaders });
     const duration = Date.now() - start;
     
     if (response.status === 404) {
-      await logger.debug(`NF Redis GET: key=${key} not found (404), duration=${duration}ms`, {}, null);
+      await logger.info(`NF Redis GET key=${key} status=404 duration=${duration}ms`, {}, null);
       await response.body.cancel();
       return null;
     }
     
     if (!response.ok) {
-      const duration = Date.now() - start;
-      await logger.warn(`NF Redis GET: key=${key} failed status=${response.status}, duration=${duration}ms`, {}, null);
+      await logger.warn(`NF Redis GET key=${key} status=${response.status} duration=${duration}ms`, {}, null);
       const err = new Error(`NF Redis Get Error: ${response.status} ${response.statusText}`);
       // @ts-ignore
       err.status = response.status;
@@ -732,11 +731,11 @@ async function executeNFRedis(operation, env, key, value = null) {
     }
     
     const data = await response.json();
-    await logger.debug(`NF Redis GET: key=${key} success, duration=${duration}ms`, {}, null);
+    await logger.info(`NF Redis GET key=${key} status=200 duration=${duration}ms`, {}, null);
     return data.result;
   } else if (operation === '_nf_redis_put') {
-    await logger.debug(`NF Redis PUT: key=${key}`, {}, null);
     const start = Date.now();
+    await logger.info(`NF Redis PUT key=${key} status=pending`, {}, null);
     const response = await fetch(`${baseUrl}/set/${key}`, {
       method: 'POST',
       headers,
@@ -745,11 +744,11 @@ async function executeNFRedis(operation, env, key, value = null) {
     const duration = Date.now() - start;
     
     if (!response.ok) {
-      await logger.warn(`NF Redis PUT: key=${key} failed status=${response.status}, duration=${duration}ms`, {}, null);
+      await logger.warn(`NF Redis PUT key=${key} status=${response.status} duration=${duration}ms`, {}, null);
       throw new Error(`NF Redis Put Error: ${response.status} ${response.statusText}`);
     }
     
-    await logger.debug(`NF Redis PUT: key=${key} success, duration=${duration}ms`, {}, null);
+    await logger.info(`NF Redis PUT key=${key} status=200 duration=${duration}ms`, {}, null);
     return true;
   }
 }
@@ -768,6 +767,7 @@ async function executeNFRedisScan(env, prefix) {
   let keys = [];
   let cursor = 0;
   const start = Date.now();
+  await logger.info(`NF Redis SCAN prefix=${prefix} status=pending`, {}, null);
   
   while (true) {
     const url = `${baseUrl}/scan/${cursor}?match=${encodeURIComponent(prefix + '*')}&count=100`;
@@ -777,7 +777,7 @@ async function executeNFRedisScan(env, prefix) {
     
     if (!res.ok) {
       const duration = Date.now() - start;
-      await logger.warn(`NF Scan Error: status=${res.status}, duration=${duration}ms`, {}, null);
+      await logger.warn(`NF Redis SCAN status=${res.status} duration=${duration}ms`, {}, null);
       const err = new Error(`NF Scan Error: ${res.status}`);
       // @ts-ignore
       err.status = res.status;
@@ -794,7 +794,7 @@ async function executeNFRedisScan(env, prefix) {
   }
   
   const totalDuration = Date.now() - start;
-  await logger.debug(`NF Scan: prefix=${prefix} success, keys=${keys.length}, duration=${totalDuration}ms`, {}, null);
+  await logger.info(`NF Redis SCAN prefix=${prefix} status=200 keys=${keys.length} duration=${totalDuration}ms`, {}, null);
   return { keys: keys.map(name => ({ name })) };
 }
 
@@ -941,7 +941,8 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
 
   // 按优先级顺序尝试每个提供者
   let lastUsedProvider = null;
-  for (const p of providers) {
+  for (let i = 0; i < providers.length; i++) {
+    const p = providers[i];
     if (!providerOps[p][operation]) continue;
     
     const start = Date.now();
@@ -954,8 +955,19 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
       return result;
     } catch (e) {
       const duration = Date.now() - start;
-      const errorCode = e.status || e.code || 'unknown';
-      await logger.warn(`[${p}] ${operation} 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, fallback`, {}, ctx);
+      let errorCode = e.status || e.code || 'unknown';
+      
+      // 修复 CF KV "KV list() limit exceeded" 的 code 解析
+      if (p === 'cloudflare' && e.message && e.message.includes('limit exceeded')) {
+        errorCode = 'quota_exceeded';
+      }
+
+      const nextProvider = providers[i + 1];
+      if (nextProvider) {
+        await logger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, fallback to ${nextProvider}`, {}, ctx);
+      } else {
+        await logger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, no more fallbacks`, {}, ctx);
+      }
       // 继续尝试下一个提供者
       continue;
     }

@@ -409,13 +409,42 @@ describe('Worker Tests', () => {
       await executeWithFailover('_kv_get', envWithNF, null, 'test-key');
 
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[nf-redis] _kv_get 失败'),
+        expect.stringContaining('尝试 nf-redis → 失败'),
         expect.any(Object)
       );
       
-      const logCall = consoleWarnSpy.mock.calls.find(call => call[0].includes('[nf-redis] _kv_get 失败'));
+      const logCall = consoleWarnSpy.mock.calls.find(call => call[0].includes('尝试 nf-redis → 失败'));
       expect(logCall[0]).toContain('code:500');
-      expect(logCall[0]).toContain('fallback');
+      expect(logCall[0]).toContain('fallback to cloudflare');
+    });
+
+    test('executeWithPriorityFallback should parse CF KV limit exceeded error code', async () => {
+      const envWithCF = {
+        KV_STORAGE: mockKV,
+        UPSTASH_REDIS_REST_URL: 'https://redis.url',
+        UPSTASH_REDIS_REST_TOKEN: 'token'
+      };
+
+      // Mock CF KV failure with limit exceeded message
+      mockKV.get.mockRejectedValueOnce(new Error('KV list() limit exceeded'));
+
+      // Mock Upstash success
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({ result: 'upstash-value' })
+      });
+
+      await executeWithFailover('_kv_get', envWithCF, null, 'test-key');
+
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('尝试 cloudflare → 失败'),
+        expect.any(Object)
+      );
+      
+      const logCall = consoleWarnSpy.mock.calls.find(call => call[0].includes('尝试 cloudflare → 失败'));
+      expect(logCall[0]).toContain('code:quota_exceeded');
+      expect(logCall[0]).toContain('fallback to upstash');
     });
 
     test('executeNFRedis operations should log timing info', async () => {
@@ -438,22 +467,22 @@ describe('Worker Tests', () => {
       try {
         // Test GET log
         await executeWithFailover('_kv_get', envWithNF, null, 'test-key');
-        expect(consoleDebugSpy).toHaveBeenCalledWith(
-          expect.stringContaining('NF Redis GET: key=test-key success'),
+        expect(consoleLogSpy).toHaveBeenCalledWith(
+          expect.stringContaining('NF Redis GET key=test-key status=200'),
           expect.any(Object)
         );
 
         // Test PUT log
         await executeWithFailover('_kv_put', envWithNF, null, 'test-key', 'val');
-        expect(consoleDebugSpy).toHaveBeenCalledWith(
-          expect.stringContaining('NF Redis PUT: key=test-key success'),
+        expect(consoleLogSpy).toHaveBeenCalledWith(
+          expect.stringContaining('NF Redis PUT key=test-key status=200'),
           expect.any(Object)
         );
 
         // Test SCAN log
         await executeWithFailover('_kv_list', envWithNF, null, 'prefix');
-        expect(consoleDebugSpy).toHaveBeenCalledWith(
-          expect.stringContaining('NF Scan: prefix=prefix success'),
+        expect(consoleLogSpy).toHaveBeenCalledWith(
+          expect.stringContaining('NF Redis SCAN prefix=prefix status=200'),
           expect.any(Object)
         );
       } finally {
