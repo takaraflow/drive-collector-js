@@ -71,7 +71,7 @@ describe('Dispatcher Bootstrap', () => {
 
     await startDispatcher();
 
-    expect(mockInstanceCoordinator.acquireLock).toHaveBeenCalledWith('telegram_client', 90);
+    expect(mockInstanceCoordinator.acquireLock).toHaveBeenCalledWith('telegram_client', 90, expect.objectContaining({ maxAttempts: 5 }));
     expect(mockTelegram.client.start).toHaveBeenCalledWith({ botAuthToken: 'test-bot-token' });
     expect(mockTelegram.saveSession).toHaveBeenCalled();
     expect(mockTelegram.client.addEventHandler).toHaveBeenCalled();

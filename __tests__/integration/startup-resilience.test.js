@@ -130,7 +130,7 @@ describe("Application Startup Resilience and Degradation", () => {
                 return false;
             }
 
-            const hasLock = await mockInstanceCoordinator.acquireLock("telegram_client", 90);
+            const hasLock = await mockInstanceCoordinator.acquireLock("telegram_client", 90, { maxAttempts: 5 });
             if (!hasLock) {
                 if (isClientActive) {
                     await mockClient.disconnect();
@@ -268,7 +268,7 @@ describe("Application Startup Resilience and Degradation", () => {
         expect(mockInstanceCoordinator.start).toHaveBeenCalled();
 
         // Should still have attempted Telegram client startup
-        expect(mockInstanceCoordinator.acquireLock).toHaveBeenCalledWith("telegram_client", 90);
+        expect(mockInstanceCoordinator.acquireLock).toHaveBeenCalledWith("telegram_client", 90, expect.objectContaining({ maxAttempts: 5 }));
     });
 
     test("should handle complete infrastructure failure gracefully", async () => {

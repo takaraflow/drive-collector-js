@@ -76,7 +76,7 @@ describe("Telegram Startup Protection and Re-entrance Prevention", () => {
             }
 
             // 尝试获取 Telegram 客户端专属锁
-            const hasLock = await mockCoordinator.acquireLock("telegram_client", 90);
+            const hasLock = await mockCoordinator.acquireLock("telegram_client", 90, { maxAttempts: 5 });
             if (!hasLock) {
                 if (isClientActive) {
                     console.log("🚨 失去 Telegram 锁，正在断开连接...");
@@ -161,7 +161,7 @@ describe("Telegram Startup Protection and Re-entrance Prevention", () => {
         expect(result).toBe(false);
         expect(getClientState().isClientActive).toBe(false);
         expect(getClientState().isClientStarting).toBe(false); // 应该被清除
-        expect(mockCoordinator.acquireLock).toHaveBeenCalledWith("telegram_client", 90);
+        expect(mockCoordinator.acquireLock).toHaveBeenCalledWith("telegram_client", 90, expect.objectContaining({ maxAttempts: 5 }));
     });
 
     test("should handle lock acquisition failure", async () => {
