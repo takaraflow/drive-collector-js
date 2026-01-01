@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.4.5](https://github.com/YoungSx/drive-collector-js/compare/v4.4.4...v4.4.5) (2026-01-01)
+
+
+### ✅ 测试相关
+
+* enhances DriveRepository with improved cache handling and error resilience ([067e466](https://github.com/YoungSx/drive-collector-js/commit/067e4668640a37abf41bb884c84f2579fd746ad6))
+
+
+### 🐛 问题修复
+
+* implement Read-Through and Write-Through caching with D1 persistence ([eec639a](https://github.com/YoungSx/drive-collector-js/commit/eec639aad52026778bcbe93ced9ef4077f57bf79))
+* improves DriveRepository error handling and type safety ([fdf77a9](https://github.com/YoungSx/drive-collector-js/commit/fdf77a97f5b2962dd4a020f06961581126173f8e))
+
 ### [4.4.4](https://github.com/YoungSx/drive-collector-js/compare/v4.4.3...v4.4.4) (2026-01-01)
 
 
