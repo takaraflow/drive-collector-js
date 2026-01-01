@@ -168,10 +168,10 @@ export function detectCacheProviders() {
  * 使用原始的 NF Redis URL，保持原样
  */
 export function getRedisConnectionConfig() {
-    const redisConfig = {
+    const redisOptions = {
         connectTimeout: parseInt(process.env.REDIS_CONNECT_TIMEOUT || '15000', 10),
         keepAlive: parseInt(process.env.REDIS_KEEP_ALIVE || '30000', 10),
-        family: process.env.REDIS_FAMILY === '6' ? 6 : 4,
+        family: 4, // 强制 IPv4 避免 Northflank IPv6 解析问题
         lazyConnect: process.env.REDIS_LAZY_CONNECT !== 'false',
         enableReadyCheck: process.env.REDIS_ENABLE_READY_CHECK !== 'false',
         maxRetriesPerRequest: parseInt(process.env.REDIS_MAX_RETRIES_PER_REQUEST || '5', 10),
@@ -196,46 +196,68 @@ export function getRedisConnectionConfig() {
         }
     };
 
-    // TLS 配置
-    if (config.redis.tls.enabled) {
-        redisConfig.tls = {
-            rejectUnauthorized: config.redis.tls.rejectUnauthorized,
-            ca: config.redis.tls.ca ? Buffer.from(config.redis.tls.ca, 'base64') : undefined,
-            cert: config.redis.tls.cert ? Buffer.from(config.redis.tls.cert, 'base64') : undefined,
-            key: config.redis.tls.key ? Buffer.from(config.redis.tls.key, 'base64') : undefined,
-            servername: config.redis.tls.servername || process.env.REDIS_HOST || process.env.NF_REDIS_HOST || (config.redis.url ? new URL(config.redis.url).hostname : undefined)
-        };
-    }
-
-    // NF 特殊处理：如果同时设置了 NF 环境变量，使用精确匹配配置
-    if (process.env.NF_REDIS_URL && process.env.NF_REDIS_SNI_SERVERNAME) {
-        const nfUrl = process.env.NF_REDIS_URL;
-        const nfSni = process.env.NF_REDIS_SNI_SERVERNAME;
-        const nfTlsEnabled = process.env.NF_REDIS_TLS_ENABLED === 'true';
-        
-        return {
-            ...redisConfig,
-            url: nfUrl,
-            maxRetriesPerRequest: parseInt(process.env.NF_REDIS_MAX_RETRIES_PER_REQUEST || '0', 10),
-            tls: {
-                servername: nfSni,
-                rejectUnauthorized: nfTlsEnabled
-            }
-        };
-    }
-
-    // 标准配置：URL 优先，保持原样
-    if (config.redis.url) {
-        redisConfig.url = config.redis.url;
-    } else {
-        redisConfig.host = config.redis.host;
-        redisConfig.port = config.redis.port;
-        if (config.redis.password) {
-            redisConfig.password = config.redis.password;
+    // 提取 URL
+    const urlString = config.redis.url || process.env.NF_REDIS_URL || process.env.REDIS_URL || '';
+    let extractedHost = '';
+    let extractedPort = 6379;
+    
+    if (urlString) {
+        try {
+            // 处理 ioredis 特有的 redis:// 或 rediss:// 格式
+            const parsed = new URL(urlString.includes('://') ? urlString : `redis://${urlString}`);
+            extractedHost = parsed.hostname;
+            extractedPort = parsed.port ? parseInt(parsed.port, 10) : (parsed.protocol === 'rediss:' ? 6379 : 6379);
+        } catch (e) {
+            console.warn(`[Config] Failed to parse Redis URL: ${urlString}`, e.message);
         }
     }
 
-    return redisConfig;
+    // TLS 配置决策
+    if (config.redis.tls.enabled) {
+        // 关键修复：servername 必须正确设置，否则 TLS 握手会失败 (ETIMEDOUT)
+        const servername = config.redis.tls.servername || 
+                          process.env.NF_REDIS_SNI_SERVERNAME || 
+                          process.env.REDIS_SNI_SERVERNAME || 
+                          extractedHost || 
+                          config.redis.host;
+
+        redisOptions.tls = {
+            servername,
+            rejectUnauthorized: config.redis.tls.rejectUnauthorized,
+            ca: config.redis.tls.ca ? Buffer.from(config.redis.tls.ca, 'base64') : undefined,
+            cert: config.redis.tls.cert ? Buffer.from(config.redis.tls.cert, 'base64') : undefined,
+            key: config.redis.tls.key ? Buffer.from(config.redis.tls.key, 'base64') : undefined
+        };
+
+        if (process.env.NODE_ENV === 'diagnostic' || process.env.DEBUG === 'true') {
+            console.log(`[Config] Redis TLS detail: rejectUnauthorized=${redisOptions.tls.rejectUnauthorized}, servername=${servername}, hasCA=${!!redisOptions.tls.ca}`);
+        }
+    }
+
+    // 返回格式统一：{ url, options }
+    // 如果有 URL 则优先使用 URL 实例化
+    if (urlString) {
+        // Northflank 特殊优化
+        if (urlString.includes('northflank') || process.env.NF_REDIS_URL) {
+            redisOptions.maxRetriesPerRequest = parseInt(process.env.NF_REDIS_MAX_RETRIES_PER_REQUEST || '0', 10);
+        }
+        
+        // 补全 options 中的 host 和 port，确保 CacheService 日志能正确显示
+        redisOptions.host = extractedHost || config.redis.host;
+        redisOptions.port = extractedPort || config.redis.port;
+        
+        return { url: urlString, options: redisOptions };
+    }
+
+    // 否则返回 host/port 配置
+    return {
+        options: {
+            ...redisOptions,
+            host: config.redis.host,
+            port: config.redis.port,
+            password: config.redis.password
+        }
+    };
 }
 
 /**
