@@ -1249,7 +1249,17 @@ async function handleRequest(request, env, ctx) {
   // 初始化日志配置
   logger.configure({ env: env.NODE_ENV || 'production' });
   
+  // 设置初始提供者
+  currentProvider = detectCacheProvider(env);
+  
   const prios = getProviderPriority(env);
+  
+  // 打印初始状态诊断
+  await logger.info('Cache provider 状态诊断', {
+    initialProvider: currentProvider,
+    nf_url: env.NF_REDIS_URL ? `${env.NF_REDIS_URL.slice(0, 10)}...` : 'missing',
+    has_nf_pass: !!env.NF_REDIS_PASSWORD
+  }, ctx);
   
   // NF Redis 诊断详情
   let nfConfigStatus = !!(env.NF_REDIS_URL && env.NF_REDIS_PASSWORD);
