@@ -1,5 +1,5 @@
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { getProviderPriority, detectCacheProvider, executeWithFailover, executeNFRedisScan, executeUpstashScan } from '../src/index.js';
+import { getProviderPriority, detectCacheProvider, executeWithFailover, executeNFRedisScan, executeUpstashScan, handleRequest, checkNFHealth } from '../src/index.js';
 
 // Mock Cloudflare Workers environment
 global.Request = class Request {
@@ -823,6 +823,121 @@ describe('NF Redis Enhanced Tests', () => {
       const env = {};
       const provider = detectCacheProvider(env);
       expect(provider).toBe('none');
+    });
+  });
+
+  describe('NF Redis Initialization Diagnosis Logs', () => {
+    let consoleLogSpy;
+    let consoleWarnSpy;
+    let consoleErrorSpy;
+
+    beforeEach(() => {
+      consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
+      consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+      consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+    });
+
+    afterEach(() => {
+      consoleLogSpy.mockRestore();
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    });
+
+    test('Diagnosis: All config missing', async () => {
+      const request = new Request('https://test.url/health');
+      const emptyEnv = { KV_STORAGE: mockKV };
+      await handleRequest(request, emptyEnv);
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Cache provider 初始化诊断'),
+        expect.objectContaining({
+          nf_configured: false,
+          nf_diagnosis: '配置缺失'
+        })
+      );
+    });
+
+    test('Diagnosis: NF_REDIS_URL missing', async () => {
+      const request = new Request('https://test.url/health');
+      const missingUrlEnv = { NF_REDIS_TOKEN: 'token', KV_STORAGE: mockKV };
+      await handleRequest(request, missingUrlEnv);
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Cache provider 初始化诊断'),
+        expect.objectContaining({
+          nf_configured: false,
+          nf_diagnosis: 'NF_REDIS_URL 缺失'
+        })
+      );
+    });
+
+    test('Diagnosis: NF_REDIS_TOKEN missing', async () => {
+      const request = new Request('https://test.url/health');
+      const missingTokenEnv = { NF_REDIS_URL: 'https://nf.url', KV_STORAGE: mockKV };
+      await handleRequest(request, missingTokenEnv);
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Cache provider 初始化诊断'),
+        expect.objectContaining({
+          nf_configured: false,
+          nf_diagnosis: 'NF_REDIS_TOKEN 缺失'
+        })
+      );
+    });
+
+    test('Diagnosis: Configured correctly', async () => {
+      const request = new Request('https://test.url/health');
+      const fullEnv = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_TOKEN: 'token', KV_STORAGE: mockKV };
+      const ctx = { waitUntil: jest.fn() };
+      await handleRequest(request, fullEnv, ctx);
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Cache provider 初始化诊断'),
+        expect.objectContaining({
+          nf_configured: true,
+          nf_diagnosis: '配置完整'
+        })
+      );
+      expect(ctx.waitUntil).toHaveBeenCalled();
+    });
+
+    test('checkNFHealth: Connection error should be caught in handleRequest', async () => {
+      const request = new Request('https://test.url/health');
+      const fullEnv = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_TOKEN: 'token', KV_STORAGE: mockKV };
+      const ctx = { waitUntil: (p) => p.catch(() => {}) }; // Simulate catch in handleRequest
+      
+      global.fetch = jest.fn().mockRejectedValue(new Error('Fatal error'));
+      
+      // Should not throw
+      await handleRequest(request, fullEnv, ctx);
+      expect(global.fetch).toHaveBeenCalled();
+    });
+
+    test('checkNFHealth: Success case (404 expected)', async () => {
+      const fullEnv = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_TOKEN: 'token' };
+      global.fetch = jest.fn().mockResolvedValue({
+        status: 404,
+        ok: false
+      });
+
+      await checkNFHealth(fullEnv, null);
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('NF Redis 健康检查成功'),
+        expect.objectContaining({ status: 404 })
+      );
+    });
+
+    test('checkNFHealth: Connection failure', async () => {
+      const fullEnv = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_TOKEN: 'token' };
+      global.fetch = jest.fn().mockRejectedValue(new Error('Network error'));
+
+      await checkNFHealth(fullEnv, null);
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('NF Redis 健康检查连接失败'),
+        expect.objectContaining({ error: 'Network error' })
+      );
     });
   });
 

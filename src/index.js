@@ -799,6 +799,33 @@ async function executeNFRedisScan(env, prefix) {
 }
 
 /**
+ * 检查 NF Redis 健康状况 (非阻塞)
+ */
+async function checkNFHealth(env, ctx) {
+  const baseUrl = env.NF_REDIS_URL;
+  const token = env.NF_REDIS_TOKEN;
+  
+  if (!baseUrl || !token) return;
+
+  try {
+    const start = Date.now();
+    // 尝试获取一个不存在的 key 来验证连接和权限
+    const res = await fetch(`${baseUrl}/get/healthcheck_ping`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const duration = Date.now() - start;
+
+    if (res.status === 404 || res.ok) {
+      await logger.info(`NF Redis 健康检查成功`, { status: res.status, duration: `${duration}ms` }, ctx);
+    } else {
+      await logger.warn(`NF Redis 健康检查异常`, { status: res.status, statusText: res.statusText, duration: `${duration}ms` }, ctx);
+    }
+  } catch (e) {
+    await logger.error(`NF Redis 健康检查连接失败`, { error: e.message }, ctx);
+  }
+}
+
+/**
  * 执行 Upstash Redis Scan 操作
  */
 async function executeUpstashScan(env, prefix) {
@@ -1030,6 +1057,7 @@ export {
   executeNFRedisScan,
   executeUpstashScan,
   scanLockKeys,
+  checkNFHealth,
   handleRequest
 };
 
@@ -1222,13 +1250,35 @@ async function handleRequest(request, env, ctx) {
   logger.configure({ env: env.NODE_ENV || 'production' });
   
   const prios = getProviderPriority(env);
+  
+  // NF Redis 诊断详情
+  let nfConfigStatus = !!(env.NF_REDIS_URL && env.NF_REDIS_TOKEN);
+  let nfDiagnosis = "configured";
+  if (!env.NF_REDIS_URL && !env.NF_REDIS_TOKEN) {
+    nfDiagnosis = "配置缺失";
+  } else if (!env.NF_REDIS_URL) {
+    nfDiagnosis = "NF_REDIS_URL 缺失";
+  } else if (!env.NF_REDIS_TOKEN) {
+    nfDiagnosis = "NF_REDIS_TOKEN 缺失";
+  } else {
+    nfDiagnosis = "配置完整";
+  }
+
   await logger.info('Cache provider 初始化诊断', {
     providers: prios,
-    nf_configured: !!(env.NF_REDIS_URL && env.NF_REDIS_TOKEN),
+    nf_configured: nfConfigStatus,
+    nf_diagnosis: nfDiagnosis,
     cf_kv_available: !!env.KV_STORAGE,
     upstash_configured: !!(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN),
     detect_primary: detectCacheProvider(env)
   }, ctx);
+
+  // 如果配置了 NF Redis，启动后台健康检查
+  if (nfConfigStatus && ctx && ctx.waitUntil) {
+    ctx.waitUntil(checkNFHealth(env, ctx).catch(e => {
+      // 捕获异常，防止影响主流程
+    }));
+  }
 
   await logger.info('环境初始化', { nodeEnv: env.NODE_ENV || 'production', hasKv: !!env.KV_STORAGE }, ctx);
 
