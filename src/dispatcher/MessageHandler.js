@@ -155,8 +155,20 @@ export class MessageHandler {
             
             // 增强消息标识：优先使用 msgId，其次尝试从 event 中提取类型
             const msgIdentifier = msgId || (event.className ? `[${event.className}]` : 'unknown');
-            
-            logger.info(`[MessageHandler][PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+
+            if (msgIdentifier === 'unknown') {
+                logger.debug("[MessageHandler] 收到未知类型事件，详细内容:", {
+                    className: event.className,
+                    constructorName: event.constructor?.name,
+                    keys: Object.keys(event),
+                    event: JSON.stringify(event, (key, value) => typeof value === 'bigint' ? value.toString() : value).substring(0, 500)
+                });
+                // 未知类型事件降级为 debug 日志，减少噪音
+                logger.debug(`[MessageHandler][PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+            } else {
+                // 已知类型事件保留 info 日志
+                logger.info(`[MessageHandler][PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+            }
             // 性能监控：如果总耗时超过 500ms，记录警告
             if (totalTime > 500) {
                 logger.warn(`[MessageHandler][PERF] 慢响应警告: 消息处理耗时 ${totalTime}ms，超过阈值 500ms`);
