@@ -152,7 +152,11 @@ export class MessageHandler {
             await Dispatcher.handle(event);
             const dispatchTime = Date.now() - dispatchStart;
             const totalTime = Date.now() - start;
-            logger.info(`[MessageHandler][PERF] 消息 ${msgId || 'unknown'} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+            
+            // 增强消息标识：优先使用 msgId，其次尝试从 event 中提取类型
+            const msgIdentifier = msgId || (event.className ? `[${event.className}]` : 'unknown');
+            
+            logger.info(`[MessageHandler][PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
             // 性能监控：如果总耗时超过 500ms，记录警告
             if (totalTime > 500) {
                 logger.warn(`[MessageHandler][PERF] 慢响应警告: 消息处理耗时 ${totalTime}ms，超过阈值 500ms`);
