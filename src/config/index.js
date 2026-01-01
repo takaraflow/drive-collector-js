@@ -97,7 +97,7 @@ export const config = {
     configPath: "/tmp/rclone.conf",
     port: process.env.PORT || 7860,
     qstash: {
-        token: process.env.QSTASH_TOKEN,
+        token: process.env.QSTASH_AUTH_TOKEN || process.env.QSTASH_TOKEN,
         url: process.env.QSTASH_URL,
         webhookUrl: process.env.LB_WEBHOOK_URL
     },
