@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.4.2](https://github.com/YoungSx/drive-collector-js/compare/v4.4.1...v4.4.2) (2026-01-01)
+
+
+### 🚀 性能优化
+
+* add performance monitoring logs for message processing latency ([27333ec](https://github.com/YoungSx/drive-collector-js/commit/27333ecfafa94ac784e59a58fe71916c534951b9))
+
+
+### 🔧 其他任务
+
+* improves cache system resilience and reduces error verbosity ([18b3536](https://github.com/YoungSx/drive-collector-js/commit/18b3536b03004b396c660b436825c4ca2296df9d))
+
+
+### 🐛 问题修复
+
+* adds explicit TLS configuration logic for Redis ([6da1f9b](https://github.com/YoungSx/drive-collector-js/commit/6da1f9b37beb41a23b7b271c98c3ef27525fa3b8))
+* cache test script ([c53fd6d](https://github.com/YoungSx/drive-collector-js/commit/c53fd6d048e4e13ba4dd5409ffea04a125623154))
+* complete cache test script ([06940e5](https://github.com/YoungSx/drive-collector-js/commit/06940e566c358ed7c6f59d02319fad3d9741b3ff))
+* enhance Redis TLS configuration and add performance diagnostics ([c085540](https://github.com/YoungSx/drive-collector-js/commit/c085540eb651d2675e33d843c821c89566c8ad76))
+* revert removal of default username in Redis URL to ensure compatibility ([f675c38](https://github.com/YoungSx/drive-collector-js/commit/f675c38d6f203118b3cb33bdf10d7143a43da8df))
+* unifies Redis configuration and improves TLS/SNI handling ([8e53bb2](https://github.com/YoungSx/drive-collector-js/commit/8e53bb2ad6d3701b1800a22930dceb925b17060b))
+
 ### [4.4.1](https://github.com/YoungSx/drive-collector-js/compare/v4.4.0...v4.4.1) (2025-12-31)
 
 
