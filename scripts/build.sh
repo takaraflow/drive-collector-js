@@ -38,6 +38,9 @@ if command -v jq >/dev/null 2>&1; then
     # 过滤掉 binding (type=kv-namespace 等)
     RAW_VARS=$(jq -r '.config.env | to_entries[] | select(.value.type? | IN("string","number","boolean")) | .key' manifest.json)
     
+    # 手动添加不在 manifest.json config.env 中的关键部署变量
+    RAW_VARS="${RAW_VARS}"$'\n'"WORKER_NAME"$'\n'"CLOUDFLARE_ACCOUNT_ID"$'\n'"CF_KV_NAMESPACE_ID"$'\n'"KV_PREVIEW_ID"
+
     if [ -n "$RAW_VARS" ]; then
         # 转换为 bash 数组
         IFS=$'\n' read -r -d '' -a VARS_TO_SUBST <<< "$RAW_VARS"
@@ -189,16 +192,15 @@ elif [ "$WRANGLER_MODE" = "remote" ]; then
 fi
 
 # 校验构建结果：检查是否还有未替换的占位符
+# 排除掉允许为空且在 .env 中明确说明是可选的变量
+# 在 GHA 中，如果这些变量未设置，它们将被替换为空字符串，这在 TOML 中是允许的
 if grep -q '\${.*}' wrangler.toml; then
+    echo "检查未替换的占位符..."
+    # 允许这些变量在没有值的情况下被替换为空字符串，而不是导致构建失败
+    # 如果占位符仍然存在，说明它们甚至没有被加入到待替换列表或者替换逻辑失效了
     echo "错误: wrangler.toml 中仍存在未替换的占位符变量"
     # 打印出具体的未替换变量，方便调试
     grep -o '\${[^}]*}' wrangler.toml
-    
-    # 增强检查：列出 manifest 中存在但在 wrangler.toml 中未被替换的变量（可能是大小写不匹配或拼写错误）
-    echo "调试信息：尝试匹配的变量列表："
-    for var in "${VARS_TO_SUBST[@]}"; do
-        echo "  - $var (Value: '${!var}')"
-    done
     exit 1
 fi
 
