@@ -171,4 +171,29 @@ describe('MessageHandler Integration Tests', () => {
             expect(instanceCoordinator.acquireLock).toHaveBeenCalledTimes(1); // 仍然是 1
         });
     });
+
+    describe('Safe Serialization', () => {
+        it('should safely serialize unknown events with circular references', async () => {
+            const circularObj = {};
+            circularObj.self = circularObj;
+
+            const event = {
+                className: 'UnknownEvent',
+                circular: circularObj,
+                bigIntVal: BigInt(9007199254740991)
+            };
+
+            // 应该不抛出 TypeError: Converting circular structure to JSON
+            await expect(MessageHandler.handleEvent(event, mockClient)).resolves.not.toThrow();
+        });
+
+        it('should handle BigInt and null in safeSerializeEvent', async () => {
+            const event = {
+                className: 'BigIntEvent',
+                id: BigInt(123456789)
+            };
+
+            await expect(MessageHandler.handleEvent(event, mockClient)).resolves.not.toThrow();
+        });
+    });
 });

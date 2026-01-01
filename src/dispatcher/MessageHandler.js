@@ -157,11 +157,38 @@ export class MessageHandler {
             const msgIdentifier = msgId || (event.className ? `[${event.className}]` : 'unknown');
 
             if (msgIdentifier === 'unknown') {
+                // 安全序列化 Telegram 事件，防止循环引用导致崩溃
+                const safeSerializeEvent = (ev) => {
+                    try {
+                        if (!ev) return '{}';
+                        const safeEvent = {
+                            className: ev.className,
+                            id: ev.id || ev.queryId || ev.message?.id,
+                            peerId: ev.peerId || ev.message?.peerId,
+                            senderId: ev.senderId || ev.message?.senderId,
+                            messageId: ev.message?.id,
+                            text: ev.message?.message?.substring(0, 200),
+                            mediaType: ev.message?.media?.className,
+                            timestamp: ev.date,
+                            keys: Object.keys(ev).slice(0, 20)
+                        };
+                        // 显式过滤可能包含循环引用的 GramJS 内部对象
+                        for (const key in safeEvent) {
+                            if (safeEvent[key]?.client || safeEvent[key]?._eventBuilders) {
+                                safeEvent[key] = '[CIRCULAR_REF]';
+                            }
+                        }
+                        return JSON.stringify(safeEvent, (k, v) => typeof v === 'bigint' ? v.toString() : v).substring(0, 1000);
+                    } catch (err) {
+                        return '[SERIALIZE_ERROR]';
+                    }
+                };
+
                 logger.debug("[MessageHandler] 收到未知类型事件，详细内容:", {
                     className: event.className,
                     constructorName: event.constructor?.name,
                     keys: Object.keys(event),
-                    event: JSON.stringify(event, (key, value) => typeof value === 'bigint' ? value.toString() : value).substring(0, 500)
+                    event: safeSerializeEvent(event)
                 });
                 // 未知类型事件降级为 debug 日志，减少噪音
                 logger.debug(`[MessageHandler][PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
