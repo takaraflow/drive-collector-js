@@ -13,7 +13,7 @@
     "distributed-state-management",
     "multi-instance-locking",
     "qstash-signature-v2",
-    "distributed-task-scheduling-support",
+    "distributed-task-scheduling",
     "path-normalization"
   ],
   "behaviors": {
@@ -42,7 +42,9 @@
       ],
       "reliability": {
         "timeout": 300,
-        "failover": "next-available-instance"
+        "failover": "next-available-instance",
+        "retryPolicy": "exponential-backoff",
+        "maxRetries": 3
       }
     },
     "instanceDiscovery": {
@@ -54,9 +56,10 @@
         "heartbeatThreshold": 900000
       },
       "locking": {
-        "mechanism": "kv",
+        "mechanism": "cache-atomic",
         "key": "lb:round_robin_index",
-        "description": "维护全局轮询索引"
+        "description": "基于分布式缓存的并发控制，确保轮询索引的一致性",
+        "conflictResolution": "last-write-wins-with-version-check"
       }
     },
     "healthChecker": {
@@ -67,7 +70,7 @@
     }
   },
   "instanceRegistration": {
-    "mechanism": "Cloudflare KV",
+    "mechanism": "Distributed Cache (Redis/KV/Upstash)",
     "heartbeatInterval": 300,
     "timeout": 900,
     "keys": [
@@ -76,15 +79,15 @@
         "description": "实例元数据"
       },
       {
-        "pattern": "lock:*",
+        "pattern": "lock:{lockKey}",
         "description": "分布式锁键"
       },
       {
-        "pattern": "task:*",
+        "pattern": "task:{taskId}",
         "description": "任务键"
       },
       {
-        "pattern": "msg_lock:*",
+        "pattern": "msg_lock:{msgId}",
         "description": "消息锁键"
       },
       {
@@ -92,15 +95,21 @@
         "description": "全局轮询索引"
       }
     ],
+    "leaderElection": {
+      "mechanism": "cache-atomic",
+      "key": "lb:leader",
+      "ttl": 300,
+      "description": "负载均衡器领导者选举机制，用于协调多实例操作"
+    },
     "locking": {
-      "mechanism": "kv",
+      "mechanism": "cache-atomic",
       "operations": {
         "acquire": "get-skip-cache-then-set-with-ttl",
         "release": "delete",
         "renew": "update-ttl"
       },
-      "conflictResolution": "last-write-wins",
-      "description": "基于 KV 的分布式锁实现，用于轮询索引的并发控制"
+      "conflictResolution": "last-write-wins-with-version-check",
+      "description": "基于分布式缓存的锁实现，用于轮询索引的并发控制"
     },
     "valueSchema": {
       "instance": {
@@ -140,6 +149,29 @@
           "lastHeartbeat",
           "status"
         ]
+      },
+      "lock": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "number"
+          },
+          "ttl": {
+            "type": "number"
+          },
+          "version": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "owner",
+          "timestamp",
+          "ttl",
+          "version"
+        ]
       }
     },
     "reliability": {
@@ -152,7 +184,7 @@
   "entrypoint": "src/index.js",
   "runtime": {
     "type": "nodejs",
-    "version": ">=18.0.0"
+    "version": "nodejs20"
   },
   "config": {
     "env": {
@@ -216,6 +248,16 @@
         "required": false,
         "description": "缓存提供者（cloudflare/upstash/nf-redis），自动检测"
       },
+      "CF_CACHE_ACCOUNT_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare Cache 账户 ID"
+      },
+      "CF_CACHE_TOKEN": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare Cache API 令牌"
+      },
       "CF_CACHE_NAMESPACE_ID": {
         "type": "string",
         "required": false,
@@ -226,15 +268,136 @@
         "required": false,
         "description": "Northflank Redis URL"
       },
+      "NF_REDIS_PASSWORD": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis 密码"
+      },
       "NF_REDIS_TOKEN": {
         "type": "string",
         "required": false,
-        "description": "Northflank Redis Token"
+        "description": "Northflank Redis Token（向后兼容）"
+      },
+      "REDIS_TLS_ENABLED": {
+        "type": "boolean",
+        "required": false,
+        "description": "启用 Redis TLS 连接"
+      },
+      "REDIS_TLS_REJECT_UNAUTHORIZED": {
+        "type": "boolean",
+        "required": false,
+        "description": "是否拒绝未授权的 TLS 证书"
+      },
+      "REDIS_TLS_CA": {
+        "type": "string",
+        "required": false,
+        "description": "自定义 Redis TLS CA 证书"
       },
       "REDIS_TLS": {
         "type": "string",
         "required": false,
-        "description": "Redis TLS 配置"
+        "description": "Redis TLS 配置（向后兼容）"
+      },
+      "R2_ENDPOINT": {
+        "type": "string",
+        "required": false,
+        "description": "R2 endpoint URL"
+      },
+      "R2_ACCESS_KEY_ID": {
+        "type": "string",
+        "required": false,
+        "description": "R2 access key ID"
+      },
+      "R2_SECRET_ACCESS_KEY": {
+        "type": "string",
+        "required": false,
+        "description": "R2 secret access key"
+      },
+      "R2_BUCKET": {
+        "type": "string",
+        "required": false,
+        "description": "R2 bucket name"
+      },
+      "R2_PUBLIC_URL": {
+        "type": "string",
+        "required": false,
+        "description": "R2 public URL"
+      },
+      "NF_REDIS_HOST": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis host"
+      },
+      "NF_REDIS_PORT": {
+        "type": "number",
+        "required": false,
+        "default": 6379,
+        "description": "Northflank Redis port"
+      },
+      "NF_REDIS_TLS_ENABLED": {
+        "type": "boolean",
+        "required": false,
+        "default": false,
+        "description": "Enable TLS for Northflank Redis"
+      },
+      "NF_REDIS_TLS_REJECT_UNAUTHORIZED": {
+        "type": "boolean",
+        "required": false,
+        "default": true,
+        "description": "Reject unauthorized TLS certificates for Northflank Redis"
+      },
+      "NF_REDIS_TLS_CA": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis TLS CA certificate"
+      },
+      "NF_REDIS_TLS_CLIENT_CERT": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis TLS client certificate"
+      },
+      "NF_REDIS_TLS_CLIENT_KEY": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis TLS client key"
+      },
+      "NF_REDIS_SNI_SERVERNAME": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank Redis TLS SNI servername"
+      },
+      "REDIS_HOST": {
+        "type": "string",
+        "required": false,
+        "description": "Legacy Redis host"
+      },
+      "REDIS_PORT": {
+        "type": "number",
+        "required": false,
+        "default": 6379,
+        "description": "Legacy Redis port"
+      },
+      "REDIS_MAX_RETRIES": {
+        "type": "number",
+        "required": false,
+        "default": 5,
+        "description": "Legacy Redis max retries"
+      },
+      "REDIS_RESTART_DELAY": {
+        "type": "number",
+        "required": false,
+        "default": 5000,
+        "description": "Legacy Redis restart delay"
+      },
+      "OSS_WORKER_URL": {
+        "type": "string",
+        "required": false,
+        "description": "OSS worker URL"
+      },
+      "OSS_WORKER_SECRET": {
+        "type": "string",
+        "required": false,
+        "description": "OSS worker secret"
       }
     }
   },
