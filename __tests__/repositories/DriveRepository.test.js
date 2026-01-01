@@ -153,6 +153,32 @@ describe("DriveRepository", () => {
             expect(result).toEqual(mockDrive);
         });
 
+        it("should handle invalid types passed to _findDriveInD1 gracefully", async () => {
+             // 通过 skipCache=true 强制直接调用 _findDriveInD1
+             const resultNum = await DriveRepository.findByUserId(12345, true);
+             expect(mockD1.fetchOne).toHaveBeenCalledWith(
+                 expect.stringContaining("WHERE user_id = ?"),
+                 ["12345"] // Should be stringified
+             );
+
+             // Test with object (although findByUserId usually filters, simulate direct internal call logic)
+             // We can't call _findDriveInD1 directly as it is private, but we can verify behavior if passed through
+             // If findByUserId allows it (e.g. if we remove the check there or if we test the private method implicitly)
+        });
+
+        it("should handle non-primitive types by converting to string to avoid D1 400 errors", async () => {
+             // Directly mocking what would happen if a complex object bypassed initial checks
+             const complexObj = { toString: () => "complex-user-id" };
+             mockD1.fetchOne.mockResolvedValue(null);
+             
+             await DriveRepository.findByUserId(complexObj, true);
+             
+             expect(mockD1.fetchOne).toHaveBeenCalledWith(
+                 expect.any(String),
+                 ["complex-user-id"] // toString() called
+             );
+        });
+
         it("should continue if cache.set fails in findByUserId", async () => {
             const mockDrive = { id: "drive123", user_id: "user1", status: "active" };
             mockCache.get.mockResolvedValue(null);

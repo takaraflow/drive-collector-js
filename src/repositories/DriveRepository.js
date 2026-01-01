@@ -233,14 +233,22 @@ export class DriveRepository {
      * @returns {Promise<Object|null>}
      */
     static async _findDriveInD1(userId) {
+        // 🛡️ 防御性编程：确保 userId 有效
+        if (userId === undefined || userId === null) {
+            return null;
+        }
+
+        // 强制转换为字符串，避免对象或 undefined 传入 D1
+        const safeUserId = String(userId);
+
         try {
             const result = await d1.fetchOne(
                 "SELECT id, user_id, name, type, config_data, status, created_at FROM drives WHERE user_id = ? AND status = 'active'",
-                [userId]
+                [safeUserId]
             );
             return result;
         } catch (e) {
-            logger.error(`DriveRepository._findDriveInD1 error for ${userId}:`, e);
+            logger.error(`DriveRepository._findDriveInD1 error for ${safeUserId}:`, e);
             return null;
         }
     }
