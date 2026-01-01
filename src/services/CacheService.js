@@ -169,8 +169,13 @@ export class CacheService {
             });
 
             // 实例化客户端
-            if (url) {
-                // 必须传入 options 以支持 TLS/SNI 等配置，否则 new Redis(url) 会忽略 options
+            if (redisOptions.tls) {
+                // 加密连接优先使用 options 对象实例化，避免 URL 字符串导致的协议解析冲突
+                this.redisClient = new Redis(redisOptions);
+                this.redisHost = redisOptions.host;
+                this.redisPort = redisOptions.port;
+            } else if (url) {
+                // 必须传入 options 以支持配置，否则 new Redis(url) 会忽略 options
                 this.redisClient = new Redis(url, redisOptions);
                 // 关键修复：确保 CacheService 实例上的 host/port 被正确同步
                 this.redisHost = redisOptions.host || this.redisHost;
@@ -265,10 +270,9 @@ export class CacheService {
                     node_env: process.env.NODE_ENV,
                     platform: process.platform
                 });
-                // 清理心跳定时器
-                this._stopHeartbeat();
-                // 触发自动重启
-                setTimeout(() => this._restartRedisClient(), 1000);
+                
+                // 不再立即清理心跳或触发重启，让 ioredis 自动重连
+                // 只有在明确收到 'end' 事件时才考虑重启或降级
             });
 
             // 添加更多诊断事件
@@ -688,14 +692,23 @@ export class CacheService {
     async _executeWithFailover(operation, ...args) {
         // 1. Redis 客户端不可用或处于断开状态时的 Fallback
         if (this.currentProvider === 'redis') {
-            if (!this.redisClient || this.redisClient.status === 'end' || this.redisClient.status === 'close') {
-                logger.warn(`[${this.getCurrentProvider()}] Redis client status is ${this.redisClient?.status || 'null'}, fallback immediately`);
+            // 优化：不再对 close 或 end 立即降级，因为 ioredis 会尝试重连
+            // 只有当 redisClient 为 null 时（未初始化）才降级
+            if (!this.redisClient) {
+                logger.warn(`[${this.getCurrentProvider()}] Redis client is null, fallback immediately`);
+                return await this._fallbackToNextProvider(operation, ...args);
+            }
+            
+            // 如果处于 reconnecting 状态，我们继续尝试执行，让 ioredis 的队列机制处理
+            // 但如果 status 是 end，说明已经彻底放弃重连，需要 fallback
+            if (this.redisClient.status === 'end') {
+                logger.warn(`[${this.getCurrentProvider()}] Redis client status is end, fallback immediately`);
                 return await this._fallbackToNextProvider(operation, ...args);
             }
         }
 
         // 2. 主动健康检查 (仅对 Redis)
-        if (this.currentProvider === 'redis') {
+        if (this.currentProvider === 'redis' && this.redisClient?.status === 'ready') {
             const isHealthy = await this._validateRedisConnection();
             if (!isHealthy) {
                 logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis 健康检查失败，主动触发 failover`);

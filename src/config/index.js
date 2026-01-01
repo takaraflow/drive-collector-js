@@ -197,18 +197,32 @@ export function getRedisConnectionConfig() {
     };
 
     // 提取 URL
-    const urlString = config.redis.url || process.env.NF_REDIS_URL || process.env.REDIS_URL || '';
+    const rawUrl = config.redis.url || process.env.NF_REDIS_URL || process.env.REDIS_URL || '';
+    let urlString = rawUrl;
     let extractedHost = '';
     let extractedPort = 6379;
     
-    if (urlString) {
+    if (rawUrl) {
         try {
             // 处理 ioredis 特有的 redis:// 或 rediss:// 格式
-            const parsed = new URL(urlString.includes('://') ? urlString : `redis://${urlString}`);
+            // 如果开启了 TLS 且没有协议头，强制使用 rediss://
+            const protocol = config.redis.tls.enabled ? 'rediss://' : 'redis://';
+            const normalizedUrl = rawUrl.includes('://') ? rawUrl : `${protocol}${rawUrl}`;
+            
+            // 关键：如果已经有端口号，不要重复添加
+            // 改进：使用更严谨的正则匹配
+            const finalUrl = /:\d+$/.test(normalizedUrl) 
+                ? normalizedUrl 
+                : `${normalizedUrl}:6379`;
+
+            // 更新最终使用的 urlString
+            urlString = finalUrl;
+            
+            const parsed = new URL(finalUrl);
             extractedHost = parsed.hostname;
             extractedPort = parsed.port ? parseInt(parsed.port, 10) : (parsed.protocol === 'rediss:' ? 6379 : 6379);
         } catch (e) {
-            console.warn(`[Config] Failed to parse Redis URL: ${urlString}`, e.message);
+            console.warn(`[Config] Failed to parse Redis URL: ${rawUrl}`, e.message);
         }
     }
 
@@ -229,8 +243,12 @@ export function getRedisConnectionConfig() {
             key: config.redis.tls.key ? Buffer.from(config.redis.tls.key, 'base64') : undefined
         };
 
+        // 确保 ioredis 选项中也包含必要的字段
+        redisOptions.host = extractedHost || config.redis.host;
+        redisOptions.port = extractedPort || config.redis.port;
+
         if (process.env.NODE_ENV === 'diagnostic' || process.env.DEBUG === 'true') {
-            console.log(`[Config] Redis TLS detail: rejectUnauthorized=${redisOptions.tls.rejectUnauthorized}, servername=${servername}, hasCA=${!!redisOptions.tls.ca}`);
+            console.log(`[Config] Redis TLS detail: rejectUnauthorized=${redisOptions.tls.rejectUnauthorized}, servername=${servername}, host=${redisOptions.host}, port=${redisOptions.port}`);
         }
     }
 
@@ -246,6 +264,12 @@ export function getRedisConnectionConfig() {
         redisOptions.host = extractedHost || config.redis.host;
         redisOptions.port = extractedPort || config.redis.port;
         
+        // 关键修复：如果 URL 中没有密码（Northflank 常见情况），必须从环境变量注入
+        // ioredis 优先使用 URL 中的密码，如果 URL 无密码则使用 options.password
+        if (config.redis.password) {
+            redisOptions.password = config.redis.password;
+        }
+
         return { url: urlString, options: redisOptions };
     }
 
