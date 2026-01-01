@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.5.3](https://github.com/YoungSx/drive-collector-js/compare/v4.5.2...v4.5.3) (2026-01-01)
+
+
+### 🐛 问题修复
+
+* improves event serialization robustness ([4ce9d8c](https://github.com/YoungSx/drive-collector-js/commit/4ce9d8c999bd47367b71f44ded6d9ad19a7abde3))
+
 ### [4.5.2](https://github.com/YoungSx/drive-collector-js/compare/v4.5.1...v4.5.2) (2026-01-01)
 
 
