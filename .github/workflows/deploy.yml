@@ -15,29 +15,6 @@ jobs:
     env:
       BARK_WEBHOOK_URL: ${{ secrets.BARK_WEBHOOK_URL }}
       BARK_DEVICE_TOKEN: ${{ secrets.BARK_DEVICE_TOKEN }}
-      
-      # 显式注入 manifest 定义的所有潜在变量，以便 scripts/generate-wrangler-vars.js 能从 process.env 获取
-      # 虽然不能直接遍历 Context，但通过预定义映射，确保只要填了就能导入
-      AXIOM_TOKEN: ${{ secrets.AXIOM_TOKEN }}
-      AXIOM_ORG_ID: ${{ vars.AXIOM_ORG_ID }}
-      AXIOM_DATASET: ${{ vars.AXIOM_DATASET }}
-      QSTASH_CURRENT_SIGNING_KEY: ${{ secrets.QSTASH_CURRENT_SIGNING_KEY }}
-      QSTASH_NEXT_SIGNING_KEY: ${{ secrets.QSTASH_NEXT_SIGNING_KEY }}
-      UPSTASH_REDIS_REST_URL: ${{ vars.UPSTASH_REDIS_REST_URL }}
-      UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
-      NF_REDIS_URL: ${{ vars.NF_REDIS_URL }}
-      NF_REDIS_PASSWORD: ${{ secrets.NF_REDIS_PASSWORD }}
-      SKIP_SIGNATURE_VERIFY: ${{ vars.SKIP_SIGNATURE_VERIFY }}
-      NODE_ENV: ${{ vars.NODE_ENV }}
-      R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
-      R2_ACCESS_KEY_ID: ${{ vars.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      OSS_WORKER_URL: ${{ vars.OSS_WORKER_URL }}
-      OSS_WORKER_SECRET: ${{ secrets.OSS_WORKER_SECRET }}
-      SIGNATURE_EXPIRATION_WINDOW: ${{ vars.SIGNATURE_EXPIRATION_WINDOW }}
-      CF_CACHE_ACCOUNT_ID: ${{ vars.CF_CACHE_ACCOUNT_ID }}
-      CF_CACHE_TOKEN: ${{ secrets.CF_CACHE_TOKEN }}
-      CF_CACHE_NAMESPACE_ID: ${{ vars.CF_CACHE_NAMESPACE_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
