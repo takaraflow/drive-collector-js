@@ -31,67 +31,125 @@ if [ -z "$AXIOM_ORG_ID" ] || [ "$AXIOM_ORG_ID" = '${AXIOM_ORG_ID}' ]; then
     echo "警告: AXIOM_ORG_ID 未设置，日志功能可能受限"
 fi
 
-# 清理可能误传为占位符字符串的变量
-for var in AXIOM_TOKEN AXIOM_ORG_ID QSTASH_CURRENT_SIGNING_KEY UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN WORKER_NAME AXIOM_DATASET NODE_ENV SIGNATURE_EXPIRATION_WINDOW CF_KV_NAMESPACE_ID KV_PREVIEW_ID CLOUDFLARE_ACCOUNT_ID; do
+# 定义所有需要替换的变量列表
+if command -v jq >/dev/null 2>&1; then
+    echo "使用 jq 从 manifest.json 动态提取环境变量..."
+    # 提取类型为 string, number, boolean 的配置项键名
+    # 过滤掉 binding (type=kv-namespace 等)
+    RAW_VARS=$(jq -r '.config.env | to_entries[] | select(.value.type? | IN("string","number","boolean")) | .key' manifest.json)
+    
+    if [ -n "$RAW_VARS" ]; then
+        # 转换为 bash 数组
+        IFS=$'\n' read -r -d '' -a VARS_TO_SUBST <<< "$RAW_VARS"
+    else
+        echo "警告: 无法从 manifest.json 提取变量，回退到硬编码列表"
+        FALLBACK_NEEDED=true
+    fi
+else
+    echo "警告: jq 未安装，回退到硬编码列表"
+    FALLBACK_NEEDED=true
+fi
+
+if [ "$FALLBACK_NEEDED" = "true" ]; then
+    VARS_TO_SUBST=(
+    "AXIOM_DATASET"
+    "AXIOM_ORG_ID"
+    "AXIOM_TOKEN"
+    "CF_CACHE_ACCOUNT_ID"
+    "CF_CACHE_NAMESPACE_ID"
+    "CF_CACHE_TOKEN"
+    "CF_KV_NAMESPACE_ID"
+    "CLOUDFLARE_ACCOUNT_ID"
+    "KV_PREVIEW_ID"
+    "NF_REDIS_HOST"
+    "NF_REDIS_PORT"
+    "NF_REDIS_SNI_SERVERNAME"
+    "NF_REDIS_TLS_CA"
+    "NF_REDIS_TLS_CLIENT_CERT"
+    "NF_REDIS_TLS_CLIENT_KEY"
+    "NF_REDIS_TLS_ENABLED"
+    "NF_REDIS_TLS_REJECT_UNAUTHORIZED"
+    "NF_REDIS_TOKEN"
+    "NF_REDIS_URL"
+    "NODE_ENV"
+    "OSS_WORKER_SECRET"
+    "OSS_WORKER_URL"
+    "QSTASH_CURRENT_SIGNING_KEY"
+    "QSTASH_NEXT_SIGNING_KEY"
+    "R2_ACCESS_KEY_ID"
+    "R2_BUCKET"
+    "R2_ENDPOINT"
+    "R2_PUBLIC_URL"
+    "R2_SECRET_ACCESS_KEY"
+    "REDIS_HOST"
+    "REDIS_MAX_RETRIES"
+    "REDIS_PORT"
+    "REDIS_RESTART_DELAY"
+    "SIGNATURE_EXPIRATION_WINDOW"
+    "SKIP_SIGNATURE_VERIFY"
+    "UPSTASH_REDIS_REST_TOKEN"
+    "UPSTASH_REDIS_REST_URL"
+    "WORKER_NAME"
+    )
+fi
+
+# 清理可能误传为占位符字符串的变量，并设置默认值
+for var in "${VARS_TO_SUBST[@]}"; do
+    # 如果变量值等于其占位符形式（例如 AXIOM_TOKEN 等于 ${AXIOM_TOKEN}），则清空该变量
     if [ "${!var}" = "\${$var}" ]; then
         unset "$var"
     fi
+    
+    # 尝试从 manifest.json 获取默认值（仅当 jq 可用时）
+    MANIFEST_DEFAULT=""
+    if command -v jq >/dev/null 2>&1; then
+        MANIFEST_DEFAULT=$(jq -r --arg v "$var" '.config.env[$v].default // empty' manifest.json)
+    fi
+
+    # 优先级：环境变量 > Manifest 默认值 > 空字符串
+    # 注意：bash 变量扩展 ${!var:-$MANIFEST_DEFAULT} 会在变量未设置或为空时使用默认值
+    export "$var"="${!var:-$MANIFEST_DEFAULT}"
 done
 
-# 设置环境变量默认值
-# 敏感变量如果未设置，则设为空字符串
-AXIOM_TOKEN=${AXIOM_TOKEN:-}
-AXIOM_ORG_ID=${AXIOM_ORG_ID:-}
-QSTASH_CURRENT_SIGNING_KEY=${QSTASH_CURRENT_SIGNING_KEY:-}
-UPSTASH_REDIS_REST_URL=${UPSTASH_REDIS_REST_URL:-}
-UPSTASH_REDIS_REST_TOKEN=${UPSTASH_REDIS_REST_TOKEN:-}
-
-# 可选变量设置默认值
-WORKER_NAME=${WORKER_NAME:-drive-collector-lb}
-AXIOM_DATASET=${AXIOM_DATASET:-drive-collector}
-NODE_ENV=${NODE_ENV:-production}
-SIGNATURE_EXPIRATION_WINDOW=${SIGNATURE_EXPIRATION_WINDOW:-900}
-CF_KV_NAMESPACE_ID=${CF_KV_NAMESPACE_ID:-}
-KV_PREVIEW_ID=${KV_PREVIEW_ID:-}
+# 特殊默认值设置
+export WORKER_NAME=${WORKER_NAME:-drive-collector-lb}
+export AXIOM_DATASET=${AXIOM_DATASET:-drive-collector}
+export NODE_ENV=${NODE_ENV:-production}
+export SIGNATURE_EXPIRATION_WINDOW=${SIGNATURE_EXPIRATION_WINDOW:-900}
 
 # 根据 WRANGLER_MODE 设置 CLOUDFLARE_ACCOUNT_ID
 if [ "$WRANGLER_MODE" = "local" ]; then
-    CLOUDFLARE_ACCOUNT_ID="unused-in-local-dev"
+    export CLOUDFLARE_ACCOUNT_ID="unused-in-local-dev"
 elif [ "$WRANGLER_MODE" = "remote" ]; then
     if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
         echo "错误: 远程开发模式需要 CLOUDFLARE_ACCOUNT_ID"
         echo "请在 .env 文件中设置此变量"
         exit 1
     fi
-else
-    CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:-}
 fi
 
-# 导出变量供 envsubst 使用
-export AXIOM_TOKEN AXIOM_ORG_ID QSTASH_CURRENT_SIGNING_KEY SIGNATURE_EXPIRATION_WINDOW UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN
-export WORKER_NAME AXIOM_DATASET NODE_ENV CF_KV_NAMESPACE_ID KV_PREVIEW_ID CLOUDFLARE_ACCOUNT_ID
+# 构建 envsubst 的变量列表字符串
+ENVSUBST_VARS=""
+for var in "${VARS_TO_SUBST[@]}"; do
+    ENVSUBST_VARS="$ENVSUBST_VARS \${$var}"
+done
 
 # 使用 envsubst 替换占位符
 if command -v envsubst >/dev/null 2>&1; then
-  envsubst '${AXIOM_TOKEN} ${AXIOM_ORG_ID} ${QSTASH_CURRENT_SIGNING_KEY} ${SIGNATURE_EXPIRATION_WINDOW} ${UPSTASH_REDIS_REST_URL} ${UPSTASH_REDIS_REST_TOKEN} ${WORKER_NAME} ${AXIOM_DATASET} ${NODE_ENV} ${CF_KV_NAMESPACE_ID} ${KV_PREVIEW_ID} ${CLOUDFLARE_ACCOUNT_ID}' < wrangler.build.toml > wrangler.toml
+  # 确保所有变量都已导出，以便 envsubst 能读取到
+  envsubst "$ENVSUBST_VARS" < wrangler.build.toml > wrangler.toml
 else
   echo "envsubst not found, falling back to sed"
-  # 回退到改进的 sed 逻辑，先复制模板
+  # 回退到 sed 逻辑
   cp wrangler.build.toml wrangler.toml
-  sed -i \
-    -e "s|\${WORKER_NAME}|$WORKER_NAME|g" \
-    -e "s|\${AXIOM_TOKEN}|$AXIOM_TOKEN|g" \
-    -e 's/${AXIOM_ORG_ID}/'"$AXIOM_ORG_ID"'/g' \
-    -e 's/${AXIOM_DATASET}/'"$AXIOM_DATASET"'/g' \
-    -e 's/${QSTASH_CURRENT_SIGNING_KEY}/'"$QSTASH_CURRENT_SIGNING_KEY"'/g' \
-    -e 's/${SIGNATURE_EXPIRATION_WINDOW}/'"$SIGNATURE_EXPIRATION_WINDOW"'/g' \
-    -e "s|\${UPSTASH_REDIS_REST_URL}|$UPSTASH_REDIS_REST_URL|g" \
-    -e 's/${UPSTASH_REDIS_REST_TOKEN}/'"$UPSTASH_REDIS_REST_TOKEN"'/g' \
-    -e 's/${NODE_ENV}/'"$NODE_ENV"'/g' \
-    -e 's/${CF_KV_NAMESPACE_ID}/'"$CF_KV_NAMESPACE_ID"'/g' \
-    -e 's/${KV_PREVIEW_ID}/'"$KV_PREVIEW_ID"'/g' \
-    -e 's/${CLOUDFLARE_ACCOUNT_ID}/'"$CLOUDFLARE_ACCOUNT_ID"'/g' \
-    wrangler.toml
+  for var in "${VARS_TO_SUBST[@]}"; do
+      # 获取变量值
+      val="${!var}"
+      # 使用 sed 替换，注意处理斜杠等特殊字符
+      # 这里使用 | 作为分隔符，并尝试转义
+      # 注意：sed 在处理包含换行符或复杂字符的值时可能脆弱
+      sed -i "s|\${$var}|$val|g" wrangler.toml
+  done
 fi
 
 # 处理 preview_id
@@ -133,6 +191,14 @@ fi
 # 校验构建结果：检查是否还有未替换的占位符
 if grep -q '\${.*}' wrangler.toml; then
     echo "错误: wrangler.toml 中仍存在未替换的占位符变量"
+    # 打印出具体的未替换变量，方便调试
+    grep -o '\${[^}]*}' wrangler.toml
+    
+    # 增强检查：列出 manifest 中存在但在 wrangler.toml 中未被替换的变量（可能是大小写不匹配或拼写错误）
+    echo "调试信息：尝试匹配的变量列表："
+    for var in "${VARS_TO_SUBST[@]}"; do
+        echo "  - $var (Value: '${!var}')"
+    done
     exit 1
 fi
 
