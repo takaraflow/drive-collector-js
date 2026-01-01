@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.4.2](https://github.com/YoungSx/lb-worker-js/compare/v0.4.1...v0.4.2) (2026-01-01)
+
+
+### 🐛 Bug Fixes
+
+* improves logging consistency and error handling in Redis operations ([ceadfb9](https://github.com/YoungSx/lb-worker-js/commit/ceadfb9357999ce3acd25c9bf959446e559ddb49))
+
 ### [0.4.1](https://github.com/YoungSx/lb-worker-js/compare/v0.4.0...v0.4.1) (2026-01-01)
 
 ## [0.4.0](https://github.com/YoungSx/lb-worker-js/compare/v0.3.1...v0.4.0) (2026-01-01)
