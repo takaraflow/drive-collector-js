@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.4.0](https://github.com/YoungSx/lb-worker-js/compare/v0.3.1...v0.4.0) (2026-01-01)
+
+
+### 🐛 Bug Fixes
+
+* adds missing wrangler.toml to .gitignore and improves build validation ([65fb1d2](https://github.com/YoungSx/lb-worker-js/commit/65fb1d2b64e9a37f4171eb778aad345c8fc1cb05))
+* build ([fca3a61](https://github.com/YoungSx/lb-worker-js/commit/fca3a615aaa344a7173a4592fa9339cdd5d27321))
+* build error ([b832cf7](https://github.com/YoungSx/lb-worker-js/commit/b832cf7d986ec7bf0b810f660083076aebefca04))
+* correct syntax error in jest.config.js moduleNameMapper ([c5fcf8e](https://github.com/YoungSx/lb-worker-js/commit/c5fcf8e5079a9ce116ba6af2f391fd1c7dfe873e))
+* standardize env vars, migrate from wrangler.toml to .env, fix NF_REDIS config, update types ([d2ef91d](https://github.com/YoungSx/lb-worker-js/commit/d2ef91dd53c1c74118c011b21402adc2d918cfbc))
+
+
+### ✨ Features
+
+* add test:optimized and test:full-optimized scripts to package.json ([3c358af](https://github.com/YoungSx/lb-worker-js/commit/3c358af50ce3f9d8612ecf29f635c2af285e7de2))
+* adds provider priority system with NF Redis > CF KV > Upstash fallback ([aff7d63](https://github.com/YoungSx/lb-worker-js/commit/aff7d631123a9f43b5afeee6e239186415860f2f))
+* supplement missing NF Redis, legacy Redis, and R2 environment variables in manifest, env.example, and wrangler files ([3b0447b](https://github.com/YoungSx/lb-worker-js/commit/3b0447bebf40a80a2172601a3b6cdc9a6dab36ee))
+* sync .clinerules with drive-collector-js standards ([9026dff](https://github.com/YoungSx/lb-worker-js/commit/9026dffbe92e4e81463710c6f76011d0909a222f))
+* upgrade jest.config.js with performance optimizations from drive-collector-js ([0c67bc2](https://github.com/YoungSx/lb-worker-js/commit/0c67bc28a80e9f6f550c1cace3c5e66809da8567))
+
 ### [0.3.1](https://github.com/YoungSx/lb-worker-js/compare/v0.3.0...v0.3.1) (2025-12-31)
 
 
