@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.5.0](https://github.com/YoungSx/drive-collector-js/compare/v4.4.5...v4.5.0) (2026-01-01)
+
+
+### 🐛 问题修复
+
+* improves D1 error handling and logging with detailed error information ([4cf2a05](https://github.com/YoungSx/drive-collector-js/commit/4cf2a05903523608b8af793c850093640c04b288))
+* improves test robustness by filtering irrelevant log calls ([ce23902](https://github.com/YoungSx/drive-collector-js/commit/ce23902c71e6c825eb53449de64ed4c62d447a0d))
+
+
+### 🔧 其他任务
+
+* cleanup wrangler.toml unused lb configs ([b91ffa3](https://github.com/YoungSx/drive-collector-js/commit/b91ffa349ff7024513afa35548195bc88fd64968))
+
+
+### ✅ 测试相关
+
+* qstash ([b033a1b](https://github.com/YoungSx/drive-collector-js/commit/b033a1b5d04a3e4000a74fde3e43ff4c2c40a336))
+
 ### [4.4.5](https://github.com/YoungSx/drive-collector-js/compare/v4.4.4...v4.4.5) (2026-01-01)
 
 
