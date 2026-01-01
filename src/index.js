@@ -57,7 +57,7 @@ function safeJsonParse(data, context = '') {
  */
 function getProviderPriority(env) {
   const prios = [];
-  if (env.NF_REDIS_URL && env.NF_REDIS_TOKEN) prios.push('nf-redis');
+  if (env.NF_REDIS_URL && env.NF_REDIS_PASSWORD) prios.push('nf-redis');
   if (env.KV_STORAGE) prios.push('cloudflare');
   if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) prios.push('upstash');
   return prios;
@@ -615,7 +615,7 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx)
 function shouldFailover(error, env) {
   // 检查是否有可用的故障转移提供者
   const hasUpstash = env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN;
-  const hasNFRedis = env.NF_REDIS_URL && env.NF_REDIS_TOKEN;
+  const hasNFRedis = env.NF_REDIS_URL && env.NF_REDIS_PASSWORD;
   
   if (!hasUpstash && !hasNFRedis) {
     return false;
@@ -656,7 +656,7 @@ function shouldFailover(error, env) {
 
 function failover(env) {
   const hasUpstash = env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN;
-  const hasNFRedis = env.NF_REDIS_URL && env.NF_REDIS_TOKEN;
+  const hasNFRedis = env.NF_REDIS_URL && env.NF_REDIS_PASSWORD;
   
   // 优先级：Upstash > NF Redis
   if (hasUpstash) {
@@ -697,7 +697,7 @@ function isRetryableError(error) {
  */
 async function executeNFRedis(operation, env, key, value = null) {
   const baseUrl = env.NF_REDIS_URL;
-  const token = env.NF_REDIS_TOKEN;
+  const token = env.NF_REDIS_PASSWORD;
   
   if (!baseUrl || !token) {
     throw new Error('NF Redis not configured');
@@ -758,7 +758,7 @@ async function executeNFRedis(operation, env, key, value = null) {
  */
 async function executeNFRedisScan(env, prefix) {
   const baseUrl = env.NF_REDIS_URL;
-  const token = env.NF_REDIS_TOKEN;
+  const token = env.NF_REDIS_PASSWORD;
   
   if (!baseUrl || !token) {
     throw new Error('NF Redis not configured');
@@ -803,7 +803,7 @@ async function executeNFRedisScan(env, prefix) {
  */
 async function checkNFHealth(env, ctx) {
   const baseUrl = env.NF_REDIS_URL;
-  const token = env.NF_REDIS_TOKEN;
+  const token = env.NF_REDIS_PASSWORD;
   
   if (!baseUrl || !token) return;
 
@@ -1252,14 +1252,14 @@ async function handleRequest(request, env, ctx) {
   const prios = getProviderPriority(env);
   
   // NF Redis 诊断详情
-  let nfConfigStatus = !!(env.NF_REDIS_URL && env.NF_REDIS_TOKEN);
+  let nfConfigStatus = !!(env.NF_REDIS_URL && env.NF_REDIS_PASSWORD);
   let nfDiagnosis = "configured";
-  if (!env.NF_REDIS_URL && !env.NF_REDIS_TOKEN) {
+  if (!env.NF_REDIS_URL && !env.NF_REDIS_PASSWORD) {
     nfDiagnosis = "配置缺失";
   } else if (!env.NF_REDIS_URL) {
     nfDiagnosis = "NF_REDIS_URL 缺失";
-  } else if (!env.NF_REDIS_TOKEN) {
-    nfDiagnosis = "NF_REDIS_TOKEN 缺失";
+  } else if (!env.NF_REDIS_PASSWORD) {
+    nfDiagnosis = "NF_REDIS_PASSWORD 缺失";
   } else {
     nfDiagnosis = "配置完整";
   }

@@ -148,7 +148,7 @@ describe('Worker Tests', () => {
       UPSTASH_REDIS_REST_URL: 'https://redis.url',
       UPSTASH_REDIS_REST_TOKEN: 'redis-token',
       NF_REDIS_URL: 'https://nf-redis.url',
-      NF_REDIS_TOKEN: 'nf-token',
+      NF_REDIS_PASSWORD: 'nf-password',
       SKIP_SIGNATURE_VERIFY: 'true',
     };
   });
@@ -392,7 +392,7 @@ describe('Worker Tests', () => {
     test('executeWithPriorityFallback should log fallback with duration and error info', async () => {
       const envWithNF = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 
@@ -450,7 +450,7 @@ describe('Worker Tests', () => {
     test('executeNFRedis operations should log timing info', async () => {
       const envWithNF = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         NODE_ENV: 'development'
       };
 
@@ -572,17 +572,17 @@ describe('Worker Tests', () => {
   describe('Provider Priority and Fallback', () => {
     test('getProviderPriority should return correct priority order', () => {
       // NF Redis only
-      const env1 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_TOKEN: 'token' };
+      const env1 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_PASSWORD: 'token' };
       expect(getProviderPriority(env1)).toEqual(['nf-redis']);
 
       // NF Redis + CF KV
-      const env2 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_TOKEN: 'token', KV_STORAGE: mockKV };
+      const env2 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_PASSWORD: 'token', KV_STORAGE: mockKV };
       expect(getProviderPriority(env2)).toEqual(['nf-redis', 'cloudflare']);
 
       // All three
       const env3 = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'token',
+        NF_REDIS_PASSWORD: 'token',
         KV_STORAGE: mockKV,
         UPSTASH_REDIS_REST_URL: 'https://redis.url',
         UPSTASH_REDIS_REST_TOKEN: 'token'
@@ -607,7 +607,7 @@ describe('Worker Tests', () => {
 
     test('detectCacheProvider should return first available provider', () => {
       // NF Redis first
-      const env1 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_TOKEN: 'token', KV_STORAGE: mockKV };
+      const env1 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_PASSWORD: 'token', KV_STORAGE: mockKV };
       expect(detectCacheProvider(env1)).toBe('nf-redis');
 
       // CF KV first
@@ -626,7 +626,7 @@ describe('Worker Tests', () => {
     test('NF primary: should use NF Redis when configured', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 
@@ -643,7 +643,7 @@ describe('Worker Tests', () => {
       expect(global.fetch).toHaveBeenCalledWith(
         'https://nf.url/get/test-key',
         expect.objectContaining({
-          headers: { Authorization: 'Bearer nf-token' }
+          headers: { Authorization: 'Bearer nf-password' }
         })
       );
     });
@@ -651,7 +651,7 @@ describe('Worker Tests', () => {
     test('NF fallback: should fallback to CF KV when NF fails', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 
@@ -673,7 +673,7 @@ describe('Worker Tests', () => {
     test('NF fallback: should fallback to Upstash when NF fails and CF not available', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         UPSTASH_REDIS_REST_URL: 'https://redis.url',
         UPSTASH_REDIS_REST_TOKEN: 'upstash-token'
       };
@@ -705,7 +705,7 @@ describe('Worker Tests', () => {
     test('Config incomplete: should skip NF when token missing', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        // NF_REDIS_TOKEN missing
+        // NF_REDIS_PASSWORD missing
         KV_STORAGE: mockKV
       };
 
@@ -721,7 +721,7 @@ describe('Worker Tests', () => {
     test('List scan: should use NF scan when primary', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 
@@ -754,7 +754,7 @@ describe('Worker Tests', () => {
     test('NF scan error: should fallback to CF list', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 

@@ -70,7 +70,7 @@ const mockEnv = {
   KV_STORAGE: mockKV,
   QSTASH_CURRENT_SIGNING_KEY: 'test-secret-key',
   UPSTASH_REDIS_REST_URL: 'https://test.upstash.io',
-  UPSTASH_REDIS_REST_TOKEN: 'test-token',
+  UPSTASH_REDIS_REST_TOKEN: 'test-password',
 };
 
 describe('任务调度失败处理优化测试', () => {
@@ -299,8 +299,8 @@ describe('任务调度失败处理优化测试', () => {
        expect(detectCacheProvider(env)).toBe('nf-redis');
      });
 
-     it('应该检测 NF Redis (需要 token)', () => {
-       const env = { NF_REDIS_URL: 'https://redis.example.com', NF_REDIS_TOKEN: 'token' };
+     it('应该检测 NF Redis (需要 password)', () => {
+       const env = { NF_REDIS_URL: 'https://redis.example.com', NF_REDIS_PASSWORD: 'password' };
        expect(detectCacheProvider(env)).toBe('nf-redis');
      });
 
@@ -320,7 +320,7 @@ describe('任务调度失败处理优化测试', () => {
          UPSTASH_REDIS_REST_URL: 'https://redis.example.com',
          UPSTASH_REDIS_REST_TOKEN: 'token',
          NF_REDIS_URL: 'https://nf.example.com',
-         NF_REDIS_TOKEN: 'token'
+         NF_REDIS_PASSWORD: 'password'
        };
        expect(detectCacheProvider(env)).toBe('nf-redis');
      });
@@ -344,7 +344,7 @@ describe('任务调度失败处理优化测试', () => {
      it('应该执行 NF Redis GET 操作', async () => {
        const env = {
          NF_REDIS_URL: 'https://redis.example.com',
-         NF_REDIS_TOKEN: 'test-token',
+         NF_REDIS_PASSWORD: 'test-password',
        };
  
        global.fetch.mockResolvedValueOnce({
@@ -358,7 +358,7 @@ describe('任务调度失败处理优化测试', () => {
        expect(global.fetch).toHaveBeenCalledWith(
          'https://redis.example.com/get/test-key',
          expect.objectContaining({
-           headers: { 'Authorization': 'Bearer test-token' }
+           headers: { 'Authorization': 'Bearer test-password' }
          })
        );
      });
@@ -366,7 +366,7 @@ describe('任务调度失败处理优化测试', () => {
      it('应该执行 NF Redis PUT 操作', async () => {
        const env = {
          NF_REDIS_URL: 'https://redis.example.com',
-         NF_REDIS_TOKEN: 'test-token',
+         NF_REDIS_PASSWORD: 'test-password',
        };
  
        global.fetch.mockResolvedValueOnce({
@@ -382,7 +382,7 @@ describe('任务调度失败处理优化测试', () => {
          expect.objectContaining({
            method: 'POST',
            headers: {
-             'Authorization': 'Bearer test-token',
+             'Authorization': 'Bearer test-password',
              'Content-Type': 'application/json'
            },
            body: JSON.stringify({ value: 'test-value' })
@@ -393,7 +393,7 @@ describe('任务调度失败处理优化测试', () => {
      it('应该处理 NF Redis 404 返回 null', async () => {
        const env = {
          NF_REDIS_URL: 'https://redis.example.com',
-         NF_REDIS_TOKEN: 'test-token',
+         NF_REDIS_PASSWORD: 'test-password',
        };
  
        global.fetch.mockResolvedValueOnce({
@@ -410,9 +410,9 @@ describe('任务调度失败处理优化测试', () => {
        const env = {
          KV_STORAGE: mockKV,
          UPSTASH_REDIS_REST_URL: 'https://test.upstash.io',
-         UPSTASH_REDIS_REST_TOKEN: 'test-token',
+         UPSTASH_REDIS_REST_TOKEN: 'test-password',
          NF_REDIS_URL: 'https://redis.example.com',
-         NF_REDIS_TOKEN: 'nf-token',
+         NF_REDIS_PASSWORD: 'nf-password',
        };
 
        // NF Redis 成功
@@ -430,7 +430,7 @@ describe('任务调度失败处理优化测试', () => {
        const env = {
          KV_STORAGE: mockKV,
          NF_REDIS_URL: 'https://redis.example.com',
-         NF_REDIS_TOKEN: 'nf-token',
+         NF_REDIS_PASSWORD: 'nf-password',
        };
 
        // NF Redis 失败
@@ -448,9 +448,9 @@ describe('任务调度失败处理优化测试', () => {
        const env = {
          KV_STORAGE: mockKV,
          UPSTASH_REDIS_REST_URL: 'https://test.upstash.io',
-         UPSTASH_REDIS_REST_TOKEN: 'test-token',
+         UPSTASH_REDIS_REST_TOKEN: 'test-password',
          NF_REDIS_URL: 'https://redis.example.com',
-         NF_REDIS_TOKEN: 'nf-token',
+         NF_REDIS_PASSWORD: 'nf-password',
        };
 
        // NF Redis 失败

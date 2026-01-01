@@ -23,7 +23,7 @@ interface Env {
 
   // Northflank Redis
   NF_REDIS_URL?: string;
-  NF_REDIS_TOKEN?: string;
+  NF_REDIS_PASSWORD?: string;
 }
 
 interface Instance {

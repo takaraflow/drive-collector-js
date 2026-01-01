@@ -269,16 +269,11 @@
         "priority": "highest",
         "description": "Northflank Redis URL (优先级最高，若配置完整则作为 primary)"
       },
-      "NF_REDIS_TOKEN": {
-        "type": "string",
-        "required": false,
-        "priority": "highest",
-        "description": "Northflank Redis Token（优先级最高，与 URL 配合使用）"
-      },
       "NF_REDIS_PASSWORD": {
         "type": "string",
         "required": false,
-        "description": "Northflank Redis 密码"
+        "priority": "highest",
+        "description": "Northflank Redis Password（优先级最高，与 URL 配合使用）"
       },
       "REDIS_TLS_ENABLED": {
         "type": "boolean",

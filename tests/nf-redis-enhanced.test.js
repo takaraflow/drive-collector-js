@@ -135,7 +135,7 @@ describe('NF Redis Enhanced Tests', () => {
       UPSTASH_REDIS_REST_URL: 'https://redis.url',
       UPSTASH_REDIS_REST_TOKEN: 'redis-token',
       NF_REDIS_URL: 'https://nf-redis.url',
-      NF_REDIS_TOKEN: 'nf-token',
+      NF_REDIS_PASSWORD: 'nf-password',
     };
   });
 
@@ -143,7 +143,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('Config incomplete: only URL provided (missing token)', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        // NF_REDIS_TOKEN missing
+        // NF_REDIS_PASSWORD missing
         KV_STORAGE: mockKV
       };
 
@@ -158,7 +158,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('Config incomplete: only token provided (missing URL)', async () => {
       const env = {
         // NF_REDIS_URL missing
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 
@@ -199,7 +199,7 @@ describe('NF Redis Enhanced Tests', () => {
       const env = {
         // All incomplete
         NF_REDIS_URL: 'https://nf.url',
-        // NF_REDIS_TOKEN missing
+        // NF_REDIS_PASSWORD missing
         UPSTASH_REDIS_REST_URL: 'https://redis.url',
         // UPSTASH_REDIS_REST_TOKEN missing
         KV_STORAGE: null
@@ -214,7 +214,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF fails -> CF fails -> Upstash succeeds', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV,
         UPSTASH_REDIS_REST_URL: 'https://redis.url',
         UPSTASH_REDIS_REST_TOKEN: 'upstash-token'
@@ -245,7 +245,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF fails -> CF succeeds', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV,
         UPSTASH_REDIS_REST_URL: 'https://redis.url',
         UPSTASH_REDIS_REST_TOKEN: 'upstash-token'
@@ -270,7 +270,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('All providers fail with different error types', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV,
         UPSTASH_REDIS_REST_URL: 'https://redis.url',
         UPSTASH_REDIS_REST_TOKEN: 'upstash-token'
@@ -298,7 +298,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF timeout -> CF success', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 
@@ -317,7 +317,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF scan: empty list', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token'
+        NF_REDIS_PASSWORD: 'nf-password'
       };
 
       global.fetch = jest.fn()
@@ -334,7 +334,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF scan: match prefix with no results', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token'
+        NF_REDIS_PASSWORD: 'nf-password'
       };
 
       global.fetch = jest.fn()
@@ -351,7 +351,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF scan: no cursor returned (single page)', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token'
+        NF_REDIS_PASSWORD: 'nf-password'
       };
 
       global.fetch = jest.fn()
@@ -369,7 +369,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF scan: multi-page with cursor 0 termination', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token'
+        NF_REDIS_PASSWORD: 'nf-password'
       };
 
       global.fetch = jest.fn()
@@ -398,7 +398,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF scan: mixed cursor scenarios (undefined, null, 0)', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token'
+        NF_REDIS_PASSWORD: 'nf-password'
       };
 
       global.fetch = jest.fn()
@@ -461,7 +461,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF scan: large list mock (1000+ keys)', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token'
+        NF_REDIS_PASSWORD: 'nf-password'
       };
 
       // Generate large list
@@ -483,7 +483,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF scan: multiple large pages', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token'
+        NF_REDIS_PASSWORD: 'nf-password'
       };
 
       // Page 1: 500 keys
@@ -542,7 +542,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF scan: large list fallback to CF on failure', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 
@@ -568,7 +568,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF Redis GET with 404 returns null', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token'
+        NF_REDIS_PASSWORD: 'nf-password'
       };
 
       global.fetch = jest.fn()
@@ -585,7 +585,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF Redis PUT operation', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token'
+        NF_REDIS_PASSWORD: 'nf-password'
       };
 
       global.fetch = jest.fn()
@@ -602,7 +602,7 @@ describe('NF Redis Enhanced Tests', () => {
         expect.objectContaining({
           method: 'POST',
           headers: {
-            'Authorization': 'Bearer nf-token',
+            'Authorization': 'Bearer nf-password',
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({ value: 'test-value' })
@@ -613,7 +613,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF Redis scan with match prefix', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token'
+        NF_REDIS_PASSWORD: 'nf-password'
       };
 
       global.fetch = jest.fn()
@@ -636,7 +636,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF Redis scan with different prefix', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token'
+        NF_REDIS_PASSWORD: 'nf-password'
       };
 
       global.fetch = jest.fn()
@@ -659,7 +659,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF Redis network error fallback', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 
@@ -675,7 +675,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF Redis HTTP 500 fallback to CF', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 
@@ -695,7 +695,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF Redis HTTP 401 should not fallback (auth error)', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 
@@ -716,7 +716,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF Redis scan network error fallback', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 
@@ -732,7 +732,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('NF Redis scan HTTP 500 fallback', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 
@@ -754,7 +754,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('Priority: NF Redis > CF KV > Upstash', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV,
         UPSTASH_REDIS_REST_URL: 'https://redis.url',
         UPSTASH_REDIS_REST_TOKEN: 'upstash-token'
@@ -778,7 +778,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('Priority: NF Redis > Upstash (no CF)', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         UPSTASH_REDIS_REST_URL: 'https://redis.url',
         UPSTASH_REDIS_REST_TOKEN: 'upstash-token'
       };
@@ -790,7 +790,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('detectCacheProvider returns NF Redis when available', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token',
+        NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 
@@ -859,7 +859,7 @@ describe('NF Redis Enhanced Tests', () => {
 
     test('Diagnosis: NF_REDIS_URL missing', async () => {
       const request = new Request('https://test.url/health');
-      const missingUrlEnv = { NF_REDIS_TOKEN: 'token', KV_STORAGE: mockKV };
+      const missingUrlEnv = { NF_REDIS_PASSWORD: 'token', KV_STORAGE: mockKV };
       await handleRequest(request, missingUrlEnv);
 
       expect(consoleLogSpy).toHaveBeenCalledWith(
@@ -871,7 +871,7 @@ describe('NF Redis Enhanced Tests', () => {
       );
     });
 
-    test('Diagnosis: NF_REDIS_TOKEN missing', async () => {
+    test('Diagnosis: NF_REDIS_PASSWORD missing', async () => {
       const request = new Request('https://test.url/health');
       const missingTokenEnv = { NF_REDIS_URL: 'https://nf.url', KV_STORAGE: mockKV };
       await handleRequest(request, missingTokenEnv);
@@ -880,14 +880,14 @@ describe('NF Redis Enhanced Tests', () => {
         expect.stringContaining('Cache provider 初始化诊断'),
         expect.objectContaining({
           nf_configured: false,
-          nf_diagnosis: 'NF_REDIS_TOKEN 缺失'
+          nf_diagnosis: 'NF_REDIS_PASSWORD 缺失'
         })
       );
     });
 
     test('Diagnosis: Configured correctly', async () => {
       const request = new Request('https://test.url/health');
-      const fullEnv = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_TOKEN: 'token', KV_STORAGE: mockKV };
+      const fullEnv = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_PASSWORD: 'token', KV_STORAGE: mockKV };
       const ctx = { waitUntil: jest.fn() };
       await handleRequest(request, fullEnv, ctx);
 
@@ -903,7 +903,7 @@ describe('NF Redis Enhanced Tests', () => {
 
     test('checkNFHealth: Connection error should be caught in handleRequest', async () => {
       const request = new Request('https://test.url/health');
-      const fullEnv = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_TOKEN: 'token', KV_STORAGE: mockKV };
+      const fullEnv = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_PASSWORD: 'token', KV_STORAGE: mockKV };
       const ctx = { waitUntil: (p) => p.catch(() => {}) }; // Simulate catch in handleRequest
       
       global.fetch = jest.fn().mockRejectedValue(new Error('Fatal error'));
@@ -914,7 +914,7 @@ describe('NF Redis Enhanced Tests', () => {
     });
 
     test('checkNFHealth: Success case (404 expected)', async () => {
-      const fullEnv = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_TOKEN: 'token' };
+      const fullEnv = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_PASSWORD: 'token' };
       global.fetch = jest.fn().mockResolvedValue({
         status: 404,
         ok: false
@@ -929,7 +929,7 @@ describe('NF Redis Enhanced Tests', () => {
     });
 
     test('checkNFHealth: Connection failure', async () => {
-      const fullEnv = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_TOKEN: 'token' };
+      const fullEnv = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_PASSWORD: 'token' };
       global.fetch = jest.fn().mockRejectedValue(new Error('Network error'));
 
       await checkNFHealth(fullEnv, null);
@@ -945,7 +945,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('executeNFRedisScan: multi-page with cursor', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token'
+        NF_REDIS_PASSWORD: 'nf-password'
       };
 
       global.fetch = jest.fn()
@@ -969,7 +969,7 @@ describe('NF Redis Enhanced Tests', () => {
     test('executeNFRedisScan: empty result', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_TOKEN: 'nf-token'
+        NF_REDIS_PASSWORD: 'nf-password'
       };
 
       global.fetch = jest.fn()
