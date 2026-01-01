@@ -34,7 +34,9 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
         // 检查是否已经持有锁（用于区分首次获取和续租）
         const alreadyHasLock = await mockCoordinator.hasLock("telegram_client");
         
-        const hasLock = await mockCoordinator.acquireLock("telegram_client", 90);
+        // 尝试获取 Telegram 客户端专属锁 (增加 TTL 到 90s，减少因延迟导致的丢失)
+        // 增加重试次数到 5 次，以应对发版时新旧实例交替的短暂冲突
+        const hasLock = await mockCoordinator.acquireLock("telegram_client", 90, { maxAttempts: 5 });
         
         if (!hasLock) {
             if (context.isClientActive) {
@@ -121,9 +123,28 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
         console.log = originalLog;
     });
 
-    test("should use 90s TTL for lock", async () => {
+    test("should use 90s TTL for lock and 5 max attempts", async () => {
         const context = { isClientActive: false };
         await simulateStartTelegramClient(context);
-        expect(mockCoordinator.acquireLock).toHaveBeenCalledWith("telegram_client", 90);
+        expect(mockCoordinator.acquireLock).toHaveBeenCalledWith("telegram_client", 90, expect.objectContaining({ maxAttempts: 5 }));
+    });
+
+    test("should release lock during graceful shutdown (index.js logic)", async () => {
+        const mockReleaseLock = jest.fn().mockResolvedValue(undefined);
+        const coordinator = {
+            releaseLock: mockReleaseLock
+        };
+
+        // 模拟 index.js 中的 gracefulShutdown 逻辑片段
+        const gracefulShutdownFragment = async () => {
+            try {
+                await coordinator.releaseLock("telegram_client");
+            } catch (e) {
+                // ignore
+            }
+        };
+
+        await gracefulShutdownFragment();
+        expect(mockReleaseLock).toHaveBeenCalledWith("telegram_client");
     });
 });

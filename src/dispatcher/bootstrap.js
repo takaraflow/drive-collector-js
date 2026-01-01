@@ -38,7 +38,8 @@ export async function startDispatcher() {
         const alreadyHasLock = await instanceCoordinator.hasLock("telegram_client");
         
         // 尝试获取 Telegram 客户端专属锁 (增加 TTL 到 90s，减少因延迟导致的丢失)
-        const hasLock = await instanceCoordinator.acquireLock("telegram_client", 90);
+        // 增加重试次数到 5 次，以应对发版时新旧实例交替的短暂冲突
+        const hasLock = await instanceCoordinator.acquireLock("telegram_client", 90, { maxAttempts: 5 });
         
         if (!hasLock) {
             if (isClientActive) {

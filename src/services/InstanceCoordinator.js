@@ -258,11 +258,13 @@ export class InstanceCoordinator {
       * 尝试获取分布式锁（带重试逻辑）
       * @param {string} lockKey - 锁的键
       * @param {number} ttl - 锁的TTL（秒）
+      * @param {Object} options - 配置选项
+      * @param {number} options.maxAttempts - 最大重试次数
       * @returns {boolean} 是否获取成功
       */
-    async acquireLock(lockKey, ttl = 300) {
-        const maxAttempts = 3;
-        const backoffDelays = [100, 500, 1000]; // 指数退避延迟
+    async acquireLock(lockKey, ttl = 300, options = {}) {
+        const maxAttempts = options.maxAttempts || 3;
+        const backoffDelays = [100, 500, 1000, 2000, 5000]; // 指数退避延迟
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             const success = await this._tryAcquire(lockKey, ttl);
@@ -272,7 +274,7 @@ export class InstanceCoordinator {
 
             // 如果不是最后一次尝试，等待退避延迟
             if (attempt < maxAttempts) {
-                const delay = backoffDelays[attempt - 1];
+                const delay = backoffDelays[Math.min(attempt - 1, backoffDelays.length - 1)];
                 logger.warn(`[${cache.getCurrentProvider()}] 🔒 锁获取失败，尝试 ${attempt}/${maxAttempts}，等待 ${delay}ms 后重试...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
@@ -305,10 +307,21 @@ export class InstanceCoordinator {
                 const now = Date.now();
                 if (existing.instanceId !== this.instanceId &&
                     (now - existing.acquiredAt) < (existing.ttl * 1000)) {
-                    // logger.debug(`[Lock] ${lockKey} is held by ${existing.instanceId}`);
-                    return false; // 锁被其他实例持有且未过期
+                    
+                    // 检查锁持有者是否真的活跃（抢占逻辑）
+                    const ownerKey = `instance:${existing.instanceId}`;
+                    const ownerData = await cache.get(ownerKey, "json", { skipCache: true });
+                    
+                    if (ownerData) {
+                        // 锁被其他活跃实例持有且未过期
+                        // logger.debug(`[Lock] ${lockKey} is held by active instance ${existing.instanceId}`);
+                        return false;
+                    }
+                    
+                    // 锁持有者已下线，允许抢占
+                    logger.info(`[${cache.getCurrentProvider()}] 🔒 发现残留锁 ${lockKey} (持有者 ${existing.instanceId} 已下线)，允许抢占`);
                 }
-                // 如果锁过期或被当前实例持有，允许重新获取
+                // 如果锁过期、被当前实例持有、或持有者已下线，允许重新获取
             }
 
             // 设置锁

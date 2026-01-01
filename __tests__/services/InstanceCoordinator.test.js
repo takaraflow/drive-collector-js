@@ -197,6 +197,39 @@ describe("InstanceCoordinator", () => {
           setSpy.mockRestore();
       });
 
+      test("should acquire lock when existing lock owner is offline (preemption)", async () => {
+          const expectedTime = 1234567890;
+          const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
+          
+          const existingLock = {
+              instanceId: "offline_instance",
+              acquiredAt: expectedTime - 100, // Not expired by TTL
+              ttl: 300,
+          };
+
+          const getSpy = jest.spyOn(cache, 'get')
+              .mockResolvedValueOnce(existingLock) // First call in _tryAcquire - see existing lock
+              .mockResolvedValueOnce(null)         // Preemption check - ownerKey is null (offline)
+              .mockResolvedValueOnce({             // Verification after set
+                  instanceId: "test_instance_123",
+                  acquiredAt: expectedTime,
+                  ttl: 300
+              });
+          const setSpy = jest.spyOn(cache, 'set').mockResolvedValue(true);
+
+          const result = await instanceCoordinator.acquireLock("test_lock");
+          expect(result).toBe(true);
+          
+          // Verify set was called
+          expect(setSpy).toHaveBeenCalled();
+          // Verify preemption check was done for the correct instance
+          expect(getSpy).toHaveBeenCalledWith("instance:offline_instance", "json", expect.any(Object));
+
+          dateSpy.mockRestore();
+          getSpy.mockRestore();
+          setSpy.mockRestore();
+      });
+
       test("should fail when double-check verification fails (race condition)", async () => {
           // Mock cache.get to return null initially, but verification shows different instance
           const getSpy = jest.spyOn(cache, 'get')

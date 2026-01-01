@@ -239,7 +239,15 @@ export { handleQStashWebhook };
             logger.info(`\n📴 收到 ${signal} 信号，正在优雅关闭...`);
 
             try {
-                // 关闭 HTTP 服务器
+                // 1. 释放关键资源锁 (Telegram)
+                try {
+                    await instanceCoordinator.releaseLock("telegram_client");
+                    logger.info("🔓 已主动释放 Telegram 锁");
+                } catch (e) {
+                    logger.warn("⚠️ 释放 Telegram 锁失败:", e.message);
+                }
+
+                // 2. 关闭 HTTP 服务器
                 server.close((err) => {
                     if (err) {
                         logger.error("❌ 服务器关闭失败:", err);
