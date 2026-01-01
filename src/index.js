@@ -53,13 +53,23 @@ function safeJsonParse(data, context = '') {
 }
 
 /**
+ * 获取提供者优先级
+ */
+function getProviderPriority(env) {
+  const prios = [];
+  if (env.NF_REDIS_URL && env.NF_REDIS_TOKEN) prios.push('nf-redis');
+  if (env.KV_STORAGE) prios.push('cloudflare');
+  if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) prios.push('upstash');
+  return prios;
+}
+
+/**
  * 检测缓存提供者
  */
 function detectCacheProvider(env) {
   if (env.CACHE_PROVIDER) return env.CACHE_PROVIDER;
-  if (env.CF_CACHE_NAMESPACE_ID) return 'cloudflare';
-  if (env.NF_REDIS_URL) return 'nf-redis';
-  return 'upstash';
+  const prios = getProviderPriority(env);
+  return prios[0] || 'none';
 }
 
 /**
@@ -730,114 +740,180 @@ async function executeNFRedis(operation, env, key, value = null) {
 }
 
 /**
- * 执行操作并支持故障转移
+ * 执行 NF Redis Scan 操作
+ */
+async function executeNFRedisScan(env, prefix) {
+  const baseUrl = env.NF_REDIS_URL;
+  const token = env.NF_REDIS_TOKEN;
+  
+  if (!baseUrl || !token) {
+    throw new Error('NF Redis not configured');
+  }
+
+  let keys = [];
+  let cursor = 0;
+  
+  while (true) {
+    const url = `${baseUrl}/scan/${cursor}?match=${encodeURIComponent(prefix + '*')}&count=100`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    
+    if (!res.ok) {
+      throw new Error(`NF Scan Error: ${res.status}`);
+    }
+    
+    const data = await res.json();
+    if (data.keys) {
+      keys.push(...data.keys);
+    }
+    
+    cursor = data.cursor || 0;
+    if (cursor === 0) break;
+  }
+  
+  return { keys: keys.map(name => ({ name })) };
+}
+
+/**
+ * 执行 Upstash Redis Scan 操作
+ */
+async function executeUpstashScan(env, prefix) {
+  const baseUrl = env.UPSTASH_REDIS_REST_URL;
+  const token = env.UPSTASH_REDIS_REST_TOKEN;
+  
+  if (!baseUrl || !token) {
+    throw new Error('Upstash Redis not configured');
+  }
+
+  let keys = [];
+  let cursor = 0;
+  
+  while (true) {
+    const url = `${baseUrl}/scan/${cursor}?match=${encodeURIComponent(prefix + '*')}&count=100`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    
+    if (!res.ok) {
+      throw new Error(`Upstash Scan Error: ${res.status}`);
+    }
+    
+    const data = await res.json();
+    if (data.keys) {
+      keys.push(...data.keys);
+    }
+    
+    cursor = data.cursor || 0;
+    if (cursor === 0) break;
+  }
+  
+  return { keys: keys.map(name => ({ name })) };
+}
+
+/**
+ * 执行操作并支持优先级故障转移
+ */
+async function executeWithPriorityFallback(operation, env, ctx, ...args) {
+  const providers = getProviderPriority(env);
+  
+  const providerOps = {
+    'nf-redis': {
+      '_kv_get': async () => await executeNFRedis('_nf_redis_get', env, args[0]),
+      '_kv_put': async () => await executeNFRedis('_nf_redis_put', env, args[0], args[1]),
+      '_kv_list': async () => await executeNFRedisScan(env, args[0])
+    },
+    'cloudflare': {
+      '_kv_get': async () => {
+        if (env.KV_STORAGE) {
+          return await env.KV_STORAGE.get(args[0]);
+        }
+        throw new Error('KV_STORAGE not available');
+      },
+      '_kv_put': async () => {
+        if (env.KV_STORAGE) {
+          return await env.KV_STORAGE.put(args[0], args[1]);
+        }
+        throw new Error('KV_STORAGE not available');
+      },
+      '_kv_list': async () => {
+        if (env.KV_STORAGE) {
+          return await env.KV_STORAGE.list({ prefix: args[0] });
+        }
+        throw new Error('KV_STORAGE not available');
+      }
+    },
+    'upstash': {
+      '_kv_get': async () => {
+        const response = await fetch(`${env.UPSTASH_REDIS_REST_URL}/get/${args[0]}`, {
+          headers: { 'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}` }
+        });
+
+        await logger.debug(`Upstash GET ${args[0]}: status ${response.status}`, {}, ctx);
+
+        if (response.status === 404) {
+          await logger.debug(`Upstash GET 404 for ${args[0]}, canceling body`, {}, ctx);
+          await response.body.cancel();
+          return null;
+        }
+
+        if (!response.ok) {
+          await logger.debug(`Upstash GET error ${response.status} for ${args[0]}, canceling body`, {}, ctx);
+          await response.body?.cancel();
+          throw new Error(`Upstash Get Error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        await logger.debug(`Upstash GET ${args[0]} success`, {}, ctx);
+        return data.result;
+      },
+      '_kv_put': async () => {
+        const response = await fetch(`${env.UPSTASH_REDIS_REST_URL}/set/${args[0]}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ value: args[1] })
+        });
+
+        await logger.debug(`Upstash PUT ${args[0]}: status ${response.status}`, {}, ctx);
+
+        if (!response.ok) {
+          await logger.debug(`Upstash PUT error ${response.status} for ${args[0]}, canceling body`, {}, ctx);
+          await response.body?.cancel();
+          throw new Error(`Upstash Put Error: ${response.status} ${response.statusText}`);
+        }
+
+        await logger.debug(`Upstash PUT ${args[0]} success`, {}, ctx);
+        return true;
+      },
+      '_kv_list': async () => await executeUpstashScan(env, args[0])
+    }
+  };
+
+  // 按优先级顺序尝试每个提供者
+  for (const p of providers) {
+    if (!providerOps[p][operation]) continue;
+    
+    try {
+      return await providerOps[p][operation]();
+    } catch (e) {
+      await logger.warn(`Provider ${p} failed: ${e.message}`, {}, ctx);
+      // 继续尝试下一个提供者
+      continue;
+    }
+  }
+
+  // 所有提供者都失败
+  throw new Error(`All providers failed for ${operation}`);
+}
+
+/**
+ * 执行操作并支持故障转移（向后兼容）
  */
 async function executeWithFailover(operation, env, ctx, ...args) {
-  const operations = {
-    '_kv_get': async () => {
-      if (env.KV_STORAGE) {
-        return await env.KV_STORAGE.get(args[0]);
-      }
-      throw new Error('KV_STORAGE not available');
-    },
-    '_kv_put': async () => {
-      if (env.KV_STORAGE) {
-        return await env.KV_STORAGE.put(args[0], args[1]);
-      }
-      throw new Error('KV_STORAGE not available');
-    },
-    '_kv_list': async () => {
-      if (env.KV_STORAGE) {
-        return await env.KV_STORAGE.list({ prefix: args[0] });
-      }
-      throw new Error('KV_STORAGE not available');
-    },
-    '_upstash_get': async () => {
-      const response = await fetch(`${env.UPSTASH_REDIS_REST_URL}/get/${args[0]}`, {
-        headers: { 'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}` }
-      });
-
-      await logger.debug(`Upstash GET ${args[0]}: status ${response.status}`, {}, ctx);
-
-      if (response.status === 404) {
-        await logger.debug(`Upstash GET 404 for ${args[0]}, canceling body`, {}, ctx);
-        await response.body.cancel();
-        return null;
-      }
-
-      if (!response.ok) {
-        await logger.debug(`Upstash GET error ${response.status} for ${args[0]}, canceling body`, {}, ctx);
-        await response.body?.cancel();
-        throw new Error(`Upstash Get Error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      await logger.debug(`Upstash GET ${args[0]} success`, {}, ctx);
-      return data.result;
-    },
-    '_upstash_put': async () => {
-      const response = await fetch(`${env.UPSTASH_REDIS_REST_URL}/set/${args[0]}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ value: args[1] })
-      });
-
-      await logger.debug(`Upstash PUT ${args[0]}: status ${response.status}`, {}, ctx);
-
-      if (!response.ok) {
-        await logger.debug(`Upstash PUT error ${response.status} for ${args[0]}, canceling body`, {}, ctx);
-        await response.body?.cancel();
-        throw new Error(`Upstash Put Error: ${response.status} ${response.statusText}`);
-      }
-
-      await logger.debug(`Upstash PUT ${args[0]} success`, {}, ctx);
-      return true;
-    },
-    '_nf_redis_get': async () => {
-      return await executeNFRedis('_nf_redis_get', env, args[0]);
-    },
-    '_nf_redis_put': async () => {
-      return await executeNFRedis('_nf_redis_put', env, args[0], args[1]);
-    }
-  };
-
-  const operationMap = {
-    '_kv_get': ['_upstash_get', '_nf_redis_get'],
-    '_kv_put': ['_upstash_put', '_nf_redis_put'],
-    '_kv_list': null // 不支持 list 的故障转移
-  };
-
-  // 第一次尝试
-  try {
-    return await operations[operation]();
-  } catch (error) {
-    await logger.error('Primary operation failed', { operation, error: error.message }, ctx);
-
-    // 检查是否应该故障转移
-    if (shouldFailover(error, env) && operationMap[operation]) {
-      failover(env);
-      
-      // 尝试故障转移（按优先级：Upstash -> NF Redis）
-      const failoverOps = operationMap[operation];
-      for (const failoverOp of failoverOps) {
-        try {
-          await logger.info('尝试故障转移', { from: operation, to: failoverOp }, ctx);
-          return await operations[failoverOp]();
-        } catch (failoverError) {
-          await logger.warn('故障转移失败', { operation: failoverOp, error: failoverError.message }, ctx);
-          continue; // 继续尝试下一个
-        }
-      }
-      
-      // 所有故障转移都失败
-      throw new Error('All failover operations failed');
-    }
-
-    throw error;
-  }
+  return await executeWithPriorityFallback(operation, env, ctx, ...args);
 }
 
 /**
@@ -876,11 +952,15 @@ export {
   getCurrentProvider,
   isRetryableError,
   executeWithFailover,
+  executeWithPriorityFallback,
   logger,
   upstash_get,
   detectCacheProvider,
+  getProviderPriority,
   normalizePath,
   executeNFRedis,
+  executeNFRedisScan,
+  executeUpstashScan,
   scanLockKeys,
   handleRequest
 };

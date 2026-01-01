@@ -1,5 +1,5 @@
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { handleRequest, logger } from '../src/index.js';
+import { handleRequest, logger, getProviderPriority, detectCacheProvider, executeWithFailover, executeNFRedisScan, executeUpstashScan } from '../src/index.js';
 
 // Mock Cloudflare Workers environment
 global.Request = class Request {
@@ -114,7 +114,18 @@ describe('Worker Tests', () => {
     });
 
     // Default KV state: one active instance
-    mockKV.list.mockImplementation(async () => {
+    mockKV.list.mockImplementation(async (options) => {
+      if (options && options.prefix) {
+        if (options.prefix === 'lb:round_robin_index') {
+          return { keys: [] };
+        }
+        if (options.prefix.startsWith('instance:')) {
+          return { keys: [{ name: 'instance:server1' }] };
+        }
+        if (options.prefix.startsWith('lock:') || options.prefix.startsWith('task:') || options.prefix.startsWith('msg_lock:')) {
+          return { keys: [] };
+        }
+      }
       return { keys: [{ name: 'instance:server1' }] };
     });
     mockKV.get.mockImplementation(async (key) => {
@@ -144,8 +155,16 @@ describe('Worker Tests', () => {
 
   describe('Basic Functionality', () => {
     test('should return 200 for unknown routes (forwarded)', async () => {
+      // Use CF KV only for this basic test
+      const basicEnv = {
+        KV_STORAGE: mockKV,
+        QSTASH_CURRENT_SIGNING_KEY: 'test-key',
+        QSTASH_NEXT_SIGNING_KEY: 'next-key',
+        QSTASH_URL: 'https://qstash.url',
+        SKIP_SIGNATURE_VERIFY: 'true',
+      };
       const request = new Request('https://test.url/unknown');
-      const result = await handleRequest(request, env);
+      const result = await handleRequest(request, basicEnv);
       expect(result.status).toBe(200);
     });
 
@@ -161,8 +180,16 @@ describe('Worker Tests', () => {
     });
 
     test('should handle root path (forwarded)', async () => {
+      // Use CF KV only for this basic test
+      const basicEnv = {
+        KV_STORAGE: mockKV,
+        QSTASH_CURRENT_SIGNING_KEY: 'test-key',
+        QSTASH_NEXT_SIGNING_KEY: 'next-key',
+        QSTASH_URL: 'https://qstash.url',
+        SKIP_SIGNATURE_VERIFY: 'true',
+      };
       const request = new Request('https://test.url/');
-      const result = await handleRequest(request, env);
+      const result = await handleRequest(request, basicEnv);
       expect(result.status).toBe(200);
     });
   });
@@ -185,7 +212,13 @@ describe('Worker Tests', () => {
     });
 
     test('should accept valid QStash signature', async () => {
-      delete env.SKIP_SIGNATURE_VERIFY;
+      // Use CF KV only for this test
+      const basicEnv = {
+        KV_STORAGE: mockKV,
+        QSTASH_CURRENT_SIGNING_KEY: 'test-key',
+        QSTASH_NEXT_SIGNING_KEY: 'next-key',
+        QSTASH_URL: 'https://qstash.url',
+      };
       mockVerify.mockResolvedValue(true);
 
       const request = new Request('https://test.url/api/qstash/webhook', {
@@ -196,7 +229,7 @@ describe('Worker Tests', () => {
         body: JSON.stringify({ test: 'data' }),
       });
 
-      const result = await handleRequest(request, env);
+      const result = await handleRequest(request, basicEnv);
       expect(result.status).toBe(200);
     });
   });
@@ -205,20 +238,36 @@ describe('Worker Tests', () => {
 
   describe('Task Operations', () => {
     test('should download tasks', async () => {
+      // Use CF KV only for this test
+      const basicEnv = {
+        KV_STORAGE: mockKV,
+        QSTASH_CURRENT_SIGNING_KEY: 'test-key',
+        QSTASH_NEXT_SIGNING_KEY: 'next-key',
+        QSTASH_URL: 'https://qstash.url',
+        SKIP_SIGNATURE_VERIFY: 'true',
+      };
       const request = new Request('https://test.url/api/tasks/download-tasks');
-      const result = await handleRequest(request, env);
+      const result = await handleRequest(request, basicEnv);
       expect(result.status).toBe(200);
       const data = await result.json();
       expect(data.tasks).toBeDefined(); // Assumes default mock fetch returns { tasks: [] }
     });
 
     test('should handle task upload', async () => {
+      // Use CF KV only for this test
+      const basicEnv = {
+        KV_STORAGE: mockKV,
+        QSTASH_CURRENT_SIGNING_KEY: 'test-key',
+        QSTASH_NEXT_SIGNING_KEY: 'next-key',
+        QSTASH_URL: 'https://qstash.url',
+        SKIP_SIGNATURE_VERIFY: 'true',
+      };
       const request = new Request('https://test.url/api/tasks/upload', {
         method: 'POST',
         body: JSON.stringify({ tasks: [{ id: 'task1' }] }),
       });
 
-      const result = await handleRequest(request, env);
+      const result = await handleRequest(request, basicEnv);
       expect(result.status).toBe(200);
       // It forwards, so mockKV.put is NOT called on the worker (it's called on backend)
       // But verifyQStashSignature is skipped, so it just works.
@@ -298,6 +347,229 @@ describe('Worker Tests', () => {
       expect(typeof logger.error).toBe('function');
       expect(typeof logger.debug).toBe('function');
       expect(typeof logger.configure).toBe('function');
+    });
+  });
+
+  describe('Provider Priority and Fallback', () => {
+    test('getProviderPriority should return correct priority order', () => {
+      // NF Redis only
+      const env1 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_TOKEN: 'token' };
+      expect(getProviderPriority(env1)).toEqual(['nf-redis']);
+
+      // NF Redis + CF KV
+      const env2 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_TOKEN: 'token', KV_STORAGE: mockKV };
+      expect(getProviderPriority(env2)).toEqual(['nf-redis', 'cloudflare']);
+
+      // All three
+      const env3 = {
+        NF_REDIS_URL: 'https://nf.url',
+        NF_REDIS_TOKEN: 'token',
+        KV_STORAGE: mockKV,
+        UPSTASH_REDIS_REST_URL: 'https://redis.url',
+        UPSTASH_REDIS_REST_TOKEN: 'token'
+      };
+      expect(getProviderPriority(env3)).toEqual(['nf-redis', 'cloudflare', 'upstash']);
+
+      // CF KV only
+      const env4 = { KV_STORAGE: mockKV };
+      expect(getProviderPriority(env4)).toEqual(['cloudflare']);
+
+      // Upstash only
+      const env5 = {
+        UPSTASH_REDIS_REST_URL: 'https://redis.url',
+        UPSTASH_REDIS_REST_TOKEN: 'token'
+      };
+      expect(getProviderPriority(env5)).toEqual(['upstash']);
+
+      // No providers
+      const env6 = {};
+      expect(getProviderPriority(env6)).toEqual([]);
+    });
+
+    test('detectCacheProvider should return first available provider', () => {
+      // NF Redis first
+      const env1 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_TOKEN: 'token', KV_STORAGE: mockKV };
+      expect(detectCacheProvider(env1)).toBe('nf-redis');
+
+      // CF KV first
+      const env2 = { KV_STORAGE: mockKV, UPSTASH_REDIS_REST_URL: 'https://redis.url', UPSTASH_REDIS_REST_TOKEN: 'token' };
+      expect(detectCacheProvider(env2)).toBe('cloudflare');
+
+      // Upstash only
+      const env3 = { UPSTASH_REDIS_REST_URL: 'https://redis.url', UPSTASH_REDIS_REST_TOKEN: 'token' };
+      expect(detectCacheProvider(env3)).toBe('upstash');
+
+      // No providers
+      const env4 = {};
+      expect(detectCacheProvider(env4)).toBe('none');
+    });
+
+    test('NF primary: should use NF Redis when configured', async () => {
+      const env = {
+        NF_REDIS_URL: 'https://nf.url',
+        NF_REDIS_TOKEN: 'nf-token',
+        KV_STORAGE: mockKV
+      };
+
+      // Mock NF Redis success
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          status: 200,
+          ok: true,
+          json: async () => ({ result: 'nf-value' })
+        });
+
+      const result = await executeWithFailover('_kv_get', env, null, 'test-key');
+      expect(result).toBe('nf-value');
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://nf.url/get/test-key',
+        expect.objectContaining({
+          headers: { Authorization: 'Bearer nf-token' }
+        })
+      );
+    });
+
+    test('NF fallback: should fallback to CF KV when NF fails', async () => {
+      const env = {
+        NF_REDIS_URL: 'https://nf.url',
+        NF_REDIS_TOKEN: 'nf-token',
+        KV_STORAGE: mockKV
+      };
+
+      mockKV.get.mockResolvedValue('cf-value');
+
+      // Mock NF Redis failure
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          status: 500,
+          ok: false,
+          body: { cancel: jest.fn() }
+        });
+
+      const result = await executeWithFailover('_kv_get', env, null, 'test-key');
+      expect(result).toBe('cf-value');
+      expect(mockKV.get).toHaveBeenCalledWith('test-key');
+    });
+
+    test('NF fallback: should fallback to Upstash when NF fails and CF not available', async () => {
+      const env = {
+        NF_REDIS_URL: 'https://nf.url',
+        NF_REDIS_TOKEN: 'nf-token',
+        UPSTASH_REDIS_REST_URL: 'https://redis.url',
+        UPSTASH_REDIS_REST_TOKEN: 'upstash-token'
+      };
+
+      // Mock NF Redis failure
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          status: 500,
+          ok: false,
+          body: { cancel: jest.fn() }
+        })
+        // Upstash success
+        .mockResolvedValueOnce({
+          status: 200,
+          ok: true,
+          json: async () => ({ result: 'upstash-value' })
+        });
+
+      const result = await executeWithFailover('_kv_get', env, null, 'test-key');
+      expect(result).toBe('upstash-value');
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://redis.url/get/test-key',
+        expect.objectContaining({
+          headers: { Authorization: 'Bearer upstash-token' }
+        })
+      );
+    });
+
+    test('Config incomplete: should skip NF when token missing', async () => {
+      const env = {
+        NF_REDIS_URL: 'https://nf.url',
+        // NF_REDIS_TOKEN missing
+        KV_STORAGE: mockKV
+      };
+
+      mockKV.get.mockResolvedValue('cf-value');
+
+      const result = await executeWithFailover('_kv_get', env, null, 'test-key');
+      expect(result).toBe('cf-value');
+      expect(mockKV.get).toHaveBeenCalledWith('test-key');
+      // Should not call NF
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    test('List scan: should use NF scan when primary', async () => {
+      const env = {
+        NF_REDIS_URL: 'https://nf.url',
+        NF_REDIS_TOKEN: 'nf-token',
+        KV_STORAGE: mockKV
+      };
+
+      // Mock multi-cursor scan
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          status: 200,
+          ok: true,
+          json: async () => ({ keys: ['instance:server1', 'instance:server2'], cursor: 123 })
+        })
+        .mockResolvedValueOnce({
+          status: 200,
+          ok: true,
+          json: async () => ({ keys: ['instance:server3'], cursor: 0 })
+        });
+
+      const result = await executeWithFailover('_kv_list', env, null, 'instance:');
+      expect(result.keys).toHaveLength(3);
+      expect(result.keys[0].name).toBe('instance:server1');
+      expect(result.keys[2].name).toBe('instance:server3');
+    });
+
+    test('No providers: should throw error', async () => {
+      const env = {};
+
+      await expect(executeWithFailover('_kv_get', env, null, 'test-key'))
+        .rejects.toThrow('All providers failed for _kv_get');
+    });
+
+    test('NF scan error: should fallback to CF list', async () => {
+      const env = {
+        NF_REDIS_URL: 'https://nf.url',
+        NF_REDIS_TOKEN: 'nf-token',
+        KV_STORAGE: mockKV
+      };
+
+      // Mock NF scan failure
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          status: 500,
+          ok: false
+        });
+
+      mockKV.list.mockResolvedValue({ keys: [{ name: 'instance:server1' }] });
+
+      const result = await executeWithFailover('_kv_list', env, null, 'instance:');
+      expect(result.keys).toHaveLength(1);
+      expect(result.keys[0].name).toBe('instance:server1');
+    });
+
+    test('Upstash scan: should work when primary', async () => {
+      const env = {
+        UPSTASH_REDIS_REST_URL: 'https://redis.url',
+        UPSTASH_REDIS_REST_TOKEN: 'upstash-token'
+      };
+
+      // Mock scan
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          status: 200,
+          ok: true,
+          json: async () => ({ keys: ['instance:server1'], cursor: 0 })
+        });
+
+      const result = await executeWithFailover('_kv_list', env, null, 'instance:');
+      expect(result.keys).toHaveLength(1);
+      expect(result.keys[0].name).toBe('instance:server1');
     });
   });
 });

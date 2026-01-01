@@ -298,28 +298,45 @@ describe('任务调度失败处理优化测试', () => {
        const env = { CACHE_PROVIDER: 'nf-redis' };
        expect(detectCacheProvider(env)).toBe('nf-redis');
      });
- 
-     it('应该检测 Cloudflare Cache', () => {
-       const env = { CF_CACHE_NAMESPACE_ID: 'test-namespace' };
-       expect(detectCacheProvider(env)).toBe('cloudflare');
-     });
- 
-     it('应该检测 NF Redis', () => {
-       const env = { NF_REDIS_URL: 'https://redis.example.com' };
+
+     it('应该检测 NF Redis (需要 token)', () => {
+       const env = { NF_REDIS_URL: 'https://redis.example.com', NF_REDIS_TOKEN: 'token' };
        expect(detectCacheProvider(env)).toBe('nf-redis');
      });
- 
-     it('应该默认使用 Upstash', () => {
-       const env = {};
+
+     it('应该检测 Cloudflare KV', () => {
+       const env = { KV_STORAGE: mockKV };
+       expect(detectCacheProvider(env)).toBe('cloudflare');
+     });
+
+     it('应该检测 Upstash', () => {
+       const env = { UPSTASH_REDIS_REST_URL: 'https://redis.example.com', UPSTASH_REDIS_REST_TOKEN: 'token' };
        expect(detectCacheProvider(env)).toBe('upstash');
      });
- 
-     it('应该优先检测 Cloudflare 而不是 NF Redis', () => {
+
+     it('应该优先 NF Redis > Cloudflare KV > Upstash', () => {
        const env = {
-         CF_CACHE_NAMESPACE_ID: 'test-namespace',
-         NF_REDIS_URL: 'https://redis.example.com'
+         KV_STORAGE: mockKV,
+         UPSTASH_REDIS_REST_URL: 'https://redis.example.com',
+         UPSTASH_REDIS_REST_TOKEN: 'token',
+         NF_REDIS_URL: 'https://nf.example.com',
+         NF_REDIS_TOKEN: 'token'
+       };
+       expect(detectCacheProvider(env)).toBe('nf-redis');
+     });
+
+     it('应该优先 Cloudflare KV > Upstash', () => {
+       const env = {
+         KV_STORAGE: mockKV,
+         UPSTASH_REDIS_REST_URL: 'https://redis.example.com',
+         UPSTASH_REDIS_REST_TOKEN: 'token'
        };
        expect(detectCacheProvider(env)).toBe('cloudflare');
+     });
+
+     it('应该返回 none 当无提供者', () => {
+       const env = {};
+       expect(detectCacheProvider(env)).toBe('none');
      });
    });
  
@@ -389,7 +406,7 @@ describe('任务调度失败处理优化测试', () => {
        expect(result).toBe(null);
      });
  
-     it('应该在 executeWithFailover 中使用 NF Redis 作为第二优先级', async () => {
+     it('应该在 executeWithFailover 中使用 NF Redis 作为第一优先级', async () => {
        const env = {
          KV_STORAGE: mockKV,
          UPSTASH_REDIS_REST_URL: 'https://test.upstash.io',
@@ -397,22 +414,60 @@ describe('任务调度失败处理优化测试', () => {
          NF_REDIS_URL: 'https://redis.example.com',
          NF_REDIS_TOKEN: 'nf-token',
        };
- 
-       // KV 失败
-       mockKV.get.mockRejectedValueOnce(new Error('KV quota exceeded'));
-       
-       // Upstash 也失败
-       global.fetch.mockRejectedValueOnce(new Error('Upstash error'));
-       
+
        // NF Redis 成功
        global.fetch.mockResolvedValueOnce({
          ok: true,
          json: async () => ({ result: 'nf-value' }),
        });
- 
+
        const result = await executeWithFailover('_kv_get', env, {}, 'test-key');
        
        expect(result).toBe('nf-value');
+     });
+
+     it('应该在 NF Redis 失败时 fallback 到 CF KV', async () => {
+       const env = {
+         KV_STORAGE: mockKV,
+         NF_REDIS_URL: 'https://redis.example.com',
+         NF_REDIS_TOKEN: 'nf-token',
+       };
+
+       // NF Redis 失败
+       global.fetch.mockRejectedValueOnce(new Error('NF error'));
+       
+       // CF KV 成功
+       mockKV.get.mockResolvedValueOnce('cf-value');
+
+       const result = await executeWithFailover('_kv_get', env, {}, 'test-key');
+       
+       expect(result).toBe('cf-value');
+     });
+
+     it('应该在 NF Redis 和 CF KV 都失败时 fallback 到 Upstash', async () => {
+       const env = {
+         KV_STORAGE: mockKV,
+         UPSTASH_REDIS_REST_URL: 'https://test.upstash.io',
+         UPSTASH_REDIS_REST_TOKEN: 'test-token',
+         NF_REDIS_URL: 'https://redis.example.com',
+         NF_REDIS_TOKEN: 'nf-token',
+       };
+
+       // NF Redis 失败
+       global.fetch.mockRejectedValueOnce(new Error('NF error'));
+       
+       // CF KV 失败
+       mockKV.get.mockRejectedValueOnce(new Error('KV error'));
+       
+       // Upstash 成功
+       global.fetch.mockResolvedValueOnce({
+         ok: true,
+         json: async () => ({ result: 'upstash-value' }),
+       });
+
+       const result = await executeWithFailover('_kv_get', env, {}, 'test-key');
+       
+       expect(result).toBe('upstash-value');
      });
    });
  
