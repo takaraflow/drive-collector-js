@@ -1132,10 +1132,18 @@ async function flushLogs(env, ctx = null) {
       });
       if (!res.ok) {
         const err = await res.text();
-        await logger.warn('Axiom log ingest failed', { status: res.status, error: err, chunkIndex: i }, ctx);
+        if (ctx && ctx.waitUntil) {
+          ctx.waitUntil(logger.warn('Axiom log ingest failed', { status: res.status, error: err, chunkIndex: i }, ctx));
+        } else {
+          await logger.warn('Axiom log ingest failed', { status: res.status, error: err, chunkIndex: i }, ctx);
+        }
       }
     } catch (e) {
-      await logger.warn('Axiom log flush error', { error: e.message, chunkIndex: i }, ctx);
+      if (ctx && ctx.waitUntil) {
+        ctx.waitUntil(logger.warn('Axiom log flush error', { error: e.message, chunkIndex: i }, ctx));
+      } else {
+        await logger.warn('Axiom log flush error', { error: e.message, chunkIndex: i }, ctx);
+      }
     }
   }
   pendingLogs = [];
@@ -1339,7 +1347,11 @@ async function handleRequest(request, env, ctx) {
   await logger.debug('负载均衡请求完成', { status: response.status }, ctx);
 
   // Flush logs to Axiom (fire-and-forget, non-blocking)
-  await flushLogs(env, ctx);
+  if (ctx && ctx.waitUntil) {
+    ctx.waitUntil(flushLogs(env, ctx));
+  } else {
+    await flushLogs(env, ctx);
+  }
 
   return response;
 }
