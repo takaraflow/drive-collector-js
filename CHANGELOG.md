@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.6.0](https://github.com/YoungSx/lb-worker-js/compare/v0.5.0...v0.6.0) (2026-01-01)
+
+
+### ✨ Features
+
+* **gha:** dynamic wrangler vars generation from manifest.json ([0341828](https://github.com/YoungSx/lb-worker-js/commit/0341828a4a6d50d6a36466f9ab7a193f45310e34))
+* **gha:** ultimate dynamic secrets/vars import via GHA context JSON ([5659f9f](https://github.com/YoungSx/lb-worker-js/commit/5659f9fbf0a60492b1a0d0526ac490ff94c24d4b))
+
+
+### 🐛 Bug Fixes
+
+* **gha:** add NF_REDIS_PASSWORD and NF_REDIS_URL to deploy workflow ([c2a5d0c](https://github.com/YoungSx/lb-worker-js/commit/c2a5d0cf860f8dd307693289af7f9f2bd6620a86))
+* **gha:** remove hardcoded env list from deploy workflow ([5c93e58](https://github.com/YoungSx/lb-worker-js/commit/5c93e58f78925fb69366a3bb6858b7d48c0e3638))
+
 ## [0.5.0](https://github.com/YoungSx/lb-worker-js/compare/v0.4.3...v0.5.0) (2026-01-01)
 
 
