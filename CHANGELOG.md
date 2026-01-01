@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.5.2](https://github.com/YoungSx/drive-collector-js/compare/v4.5.1...v4.5.2) (2026-01-01)
+
+
+### 🔧 其他任务
+
+* improves message handling logging for unknown events ([06a88d5](https://github.com/YoungSx/drive-collector-js/commit/06a88d5c5fcdd4cee5140bcd5690b7d07bcb0712))
+
+
+### 🐛 问题修复
+
+* adds retry limit to Telegram client lock acquisition ([bfd61ab](https://github.com/YoungSx/drive-collector-js/commit/bfd61ab12eacb741614b16666b7fa92316e7602b))
+* adds safe serialization for unknown events ([3214a82](https://github.com/YoungSx/drive-collector-js/commit/3214a8257865a04978d5707efb989ab909d3aee4))
+
 ### [4.5.1](https://github.com/YoungSx/drive-collector-js/compare/v4.5.0...v4.5.1) (2026-01-01)
 
 
