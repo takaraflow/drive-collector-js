@@ -1164,6 +1164,19 @@ async function handleRequest(request, env, ctx) {
   // Reset per-request logs
   pendingLogs = [];
 
+  // Axiom 初始化诊断日志
+  const axiomToken = env.AXIOM_TOKEN;
+  const axiomDataset = env.AXIOM_DATASET;
+  const maskToken = (token) => token ? `${token.slice(0, 4)}...${token.slice(-4)}` : 'missing';
+  
+  if (axiomToken && axiomDataset) {
+    await logger.info(`Axiom logger 初始化成功, dataset=${axiomDataset}, token=${maskToken(axiomToken)}, version=${VERSION}`, {}, ctx);
+    // Worker startup test log - 仅在第一次 handleRequest 或定期发送，但这里为了诊断每次请求开头发送一个测试日志（pipeline确认）
+    await logger.info('Worker startup test log', { type: 'diagnostic' }, ctx);
+  } else {
+    await logger.warn(`Axiom init 失败: ${!axiomToken ? 'AXIOM_TOKEN 缺失' : ''} ${!axiomDataset ? 'AXIOM_DATASET 缺失' : ''}`.trim(), {}, ctx);
+  }
+
   const normalizedUrl = new URL(request.url);
   normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
   
@@ -1183,6 +1196,16 @@ async function handleRequest(request, env, ctx) {
   if (!env.AXIOM_TOKEN) {
     await logger.warn('AXIOM_TOKEN 未设置，日志功能将被禁用', {}, ctx);
   }
+  
+  // 检查 Axiom binding 状态 (manifest.json 对应的 binding 通常在 env 中体现为变量)
+  // 在 Cloudflare Workers 中，binding 表现为 env 上的属性
+  const hasAxiomBinding = !!(env.AXIOM_TOKEN && env.AXIOM_DATASET);
+  await logger.info(`Axiom binding status: ${hasAxiomBinding ? 'active' : 'inactive'}`, {
+    hasToken: !!env.AXIOM_TOKEN,
+    hasDataset: !!env.AXIOM_DATASET,
+    hasOrgId: !!env.AXIOM_ORG_ID
+  }, ctx);
+
   if (!env.QSTASH_CURRENT_SIGNING_KEY && env.SKIP_SIGNATURE_VERIFY !== 'true') {
     await logger.warn('QSTASH_CURRENT_SIGNING_KEY 未设置，Webhook 请求将被拒绝', {}, ctx);
   }

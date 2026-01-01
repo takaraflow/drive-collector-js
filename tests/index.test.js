@@ -517,6 +517,56 @@ describe('Worker Tests', () => {
         logger.configure({ env: originalEnv });
       }
     });
+
+    test('handleRequest should log Axiom initialization success', async () => {
+      const axiomEnv = {
+        ...env,
+        AXIOM_TOKEN: 'test-token-123456789',
+        AXIOM_DATASET: 'test-dataset'
+      };
+      const request = new Request('https://test.url/health');
+      await handleRequest(request, axiomEnv);
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Axiom logger 初始化成功'),
+        expect.any(Object)
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('dataset=test-dataset'),
+        expect.any(Object)
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('token=test...6789'),
+        expect.any(Object)
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Worker startup test log'),
+        expect.objectContaining({ type: 'diagnostic' })
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Axiom binding status: active'),
+        expect.objectContaining({ hasToken: true, hasDataset: true })
+      );
+    });
+
+    test('handleRequest should log Axiom initialization failure when token missing', async () => {
+      const invalidEnv = {
+        ...env,
+        AXIOM_DATASET: 'test-dataset'
+        // AXIOM_TOKEN missing
+      };
+      const request = new Request('https://test.url/health');
+      await handleRequest(request, invalidEnv);
+
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Axiom init 失败: AXIOM_TOKEN 缺失'),
+        expect.any(Object)
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Axiom binding status: inactive'),
+        expect.objectContaining({ hasToken: false, hasDataset: true })
+      );
+    });
   });
 
   describe('Provider Priority and Fallback', () => {
