@@ -148,7 +148,158 @@ if (process.env.RCLONE_CONF_BASE64) fs.writeFileSync(config.configPath, Buffer.f
 // 缓存有效期常量
 export const CACHE_TTL = 10 * 60 * 1000; // 缓存有效期 10 分钟
 
-// Export a function to create a default config for tests
+/**
+ * 检测缓存提供商可用性
+ */
+export function detectCacheProviders() {
+    const hasCloudflare = !!(process.env.CF_CACHE_ACCOUNT_ID && process.env.CF_CACHE_NAMESPACE_ID && process.env.CF_CACHE_TOKEN);
+    const hasRedis = !!(process.env.NF_REDIS_URL || (process.env.NF_REDIS_HOST && process.env.NF_REDIS_PORT));
+    const hasUpstash = !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+    
+    return {
+        hasCloudflare,
+        hasRedis,
+        hasUpstash
+    };
+}
+
+/**
+ * 获取 Redis 连接配置
+ * 使用原始的 NF Redis URL，保持原样
+ */
+export function getRedisConnectionConfig() {
+    const redisConfig = {
+        connectTimeout: parseInt(process.env.REDIS_CONNECT_TIMEOUT || '15000', 10),
+        keepAlive: parseInt(process.env.REDIS_KEEP_ALIVE || '30000', 10),
+        family: process.env.REDIS_FAMILY === '6' ? 6 : 4,
+        lazyConnect: process.env.REDIS_LAZY_CONNECT !== 'false',
+        enableReadyCheck: process.env.REDIS_ENABLE_READY_CHECK !== 'false',
+        maxRetriesPerRequest: parseInt(process.env.REDIS_MAX_RETRIES_PER_REQUEST || '5', 10),
+        enableAutoPipelining: process.env.REDIS_ENABLE_AUTO_PIPELINING !== 'false',
+        retryStrategy: (times) => {
+            const maxRetries = parseInt(process.env.REDIS_MAX_RETRIES || '5', 10);
+            if (times > maxRetries) {
+                return null;
+            }
+            const baseDelay = parseInt(process.env.REDIS_RETRY_BASE_DELAY || '500', 10);
+            const maxDelay = parseInt(process.env.REDIS_RETRY_MAX_DELAY || '30000', 10);
+            const delay = Math.min(times * baseDelay, maxDelay);
+            return delay;
+        },
+        reconnectOnError: (err) => {
+            const msg = err.message.toLowerCase();
+            const shouldReconnect = msg.includes('econnreset') ||
+                                   msg.includes('timeout') ||
+                                   msg.includes('network') ||
+                                   !msg.includes('auth');
+            return shouldReconnect;
+        }
+    };
+
+    // TLS 配置
+    if (config.redis.tls.enabled) {
+        redisConfig.tls = {
+            rejectUnauthorized: config.redis.tls.rejectUnauthorized,
+            ca: config.redis.tls.ca ? Buffer.from(config.redis.tls.ca, 'base64') : undefined,
+            cert: config.redis.tls.cert ? Buffer.from(config.redis.tls.cert, 'base64') : undefined,
+            key: config.redis.tls.key ? Buffer.from(config.redis.tls.key, 'base64') : undefined,
+            servername: config.redis.tls.servername || process.env.REDIS_HOST || process.env.NF_REDIS_HOST || (config.redis.url ? new URL(config.redis.url).hostname : undefined)
+        };
+    }
+
+    // NF 特殊处理：如果同时设置了 NF 环境变量，使用精确匹配配置
+    if (process.env.NF_REDIS_URL && process.env.NF_REDIS_SNI_SERVERNAME) {
+        const nfUrl = process.env.NF_REDIS_URL;
+        const nfSni = process.env.NF_REDIS_SNI_SERVERNAME;
+        const nfTlsEnabled = process.env.NF_REDIS_TLS_ENABLED === 'true';
+        
+        return {
+            ...redisConfig,
+            url: nfUrl,
+            maxRetriesPerRequest: parseInt(process.env.NF_REDIS_MAX_RETRIES_PER_REQUEST || '0', 10),
+            tls: {
+                servername: nfSni,
+                rejectUnauthorized: nfTlsEnabled
+            }
+        };
+    }
+
+    // 标准配置：URL 优先，保持原样
+    if (config.redis.url) {
+        redisConfig.url = config.redis.url;
+    } else {
+        redisConfig.host = config.redis.host;
+        redisConfig.port = config.redis.port;
+        if (config.redis.password) {
+            redisConfig.password = config.redis.password;
+        }
+    }
+
+    return redisConfig;
+}
+
+/**
+ * 获取 Cloudflare KV 配置
+ */
+export function getCloudflareKVConfig() {
+    const accountId = process.env.CF_CACHE_ACCOUNT_ID || process.env.CF_KV_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
+    const namespaceId = process.env.CF_CACHE_NAMESPACE_ID || process.env.CF_KV_NAMESPACE_ID;
+    const token = process.env.CF_CACHE_TOKEN || process.env.CF_KV_TOKEN || process.env.CF_D1_TOKEN;
+    
+    if (!accountId || !namespaceId || !token) {
+        return null;
+    }
+    
+    return {
+        accountId,
+        namespaceId,
+        token,
+        apiUrl: `https://api.cloudflare.com/client/v4/accounts/${accountId}/storage/kv/namespaces/${namespaceId}`
+    };
+}
+
+/**
+ * 获取 Upstash Redis 配置
+ */
+export function getUpstashConfig() {
+    const url = process.env.UPSTASH_REDIS_REST_URL;
+    const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+    
+    if (!url || !token) {
+        return null;
+    }
+    
+    return {
+        url,
+        token
+    };
+}
+
+/**
+ * 诊断 Redis 配置
+ */
+export function diagnoseRedisConfig() {
+    const config = getRedisConnectionConfig();
+    const providers = detectCacheProviders();
+    
+    return {
+        providers,
+        redisConfig: {
+            url: config.url,
+            host: config.host,
+            port: config.port,
+            password: config.password ? '***' : undefined,
+            tls: config.tls,
+            connectTimeout: config.connectTimeout,
+            keepAlive: config.keepAlive,
+            maxRetriesPerRequest: config.maxRetriesPerRequest
+        }
+    };
+}
+
+/**
+ * Export a function to create a default config for tests
+ */
 export function createDefaultConfig() {
     return {
         redis: {
