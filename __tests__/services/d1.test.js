@@ -41,6 +41,7 @@ describe("D1 Service", () => {
   });
 
   afterEach(() => {
+    jest.runOnlyPendingTimers();
     jest.useRealTimers();
     jest.restoreAllMocks();
   });

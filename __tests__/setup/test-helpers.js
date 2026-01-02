@@ -121,39 +121,62 @@ export async function cleanupSingletonTimers() {
 
   // 清理 Telegram 服务定时器
   cleanupPromises.push(
-    import("../../src/services/telegram.js")
-      .then(module => {
+    (async () => {
+      try {
+        const module = await import("../../src/services/telegram.js");
         if (module.stopWatchdog) {
           module.stopWatchdog();
         }
-      })
-      .catch(() => {}) // 忽略导入错误
+      } catch (error) {
+        console.warn('Failed to cleanup Telegram timers:', error.message);
+      }
+    })()
   );
 
   // 清理 KV 服务定时器
   cleanupPromises.push(
-    import("../../src/services/CacheService.js")
-      .then(module => {
+    (async () => {
+      try {
+        const module = await import("../../src/services/CacheService.js");
         if (module.cache) {
           if (module.cache.destroy) {
-            return module.cache.destroy();
+            await module.cache.destroy();
           }
           if (module.cache.stopRecoveryCheck) module.cache.stopRecoveryCheck();
           if (module.cache._stopHeartbeat) module.cache._stopHeartbeat();
         }
-      })
-      .catch(() => {}) // 忽略导入错误
+      } catch (error) {
+        console.warn('Failed to cleanup CacheService timers:', error.message);
+      }
+    })()
   );
 
   // 清理 InstanceCoordinator 定时器
   cleanupPromises.push(
-    import("../../src/services/InstanceCoordinator.js")
-      .then(module => {
+    (async () => {
+      try {
+        const module = await import("../../src/services/InstanceCoordinator.js");
         if (module.instanceCoordinator && module.instanceCoordinator.stopHeartbeat) {
           module.instanceCoordinator.stopHeartbeat();
         }
-      })
-      .catch(() => {})
+      } catch (error) {
+        console.warn('Failed to cleanup InstanceCoordinator timers:', error.message);
+      }
+    })()
+  );
+
+  // 清理 Redis mock listeners
+  cleanupPromises.push(
+    (async () => {
+      try {
+        const mocks = await import("./external-mocks.js");
+        if (mocks.mockRedisClient) {
+          mocks.mockRedisClient.removeAllListeners();
+        }
+      } catch (error) {
+        console.warn('Failed to cleanup Redis listeners:', error.message);
+      }
+    })()
   );
 
   // 并行执行所有清理操作

@@ -39,6 +39,27 @@ const initAxiom = async () => {
   if (axiomInitialized) return;
 
   try {
+    // 优先使用环境变量（支持测试环境）
+    const envToken = process.env.AXIOM_TOKEN;
+    const envOrgId = process.env.AXIOM_ORG_ID;
+    const envDataset = process.env.AXIOM_DATASET;
+
+    if (envToken && envOrgId) {
+      axiom = new Axiom({
+        token: envToken,
+        orgId: envOrgId,
+      });
+      config = config || {};
+      config.axiom = {
+        token: envToken,
+        orgId: envOrgId,
+        dataset: envDataset || 'drive-collector'
+      };
+      axiomInitialized = true;
+      return;
+    }
+
+    // 回退到 config 模块
     if (!config) {
       try {
         const configModule = await import('../config/index.js');

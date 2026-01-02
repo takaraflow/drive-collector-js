@@ -171,9 +171,10 @@ export function createMockD1Service(db) {
  * 在所有测试完成后调用
  */
 export function closeSharedDatabase() {
-  if (sharedDbInstance && dbUsageCount === 0) {
+  if (sharedDbInstance) {
     sharedDbInstance.close();
     sharedDbInstance = null;
+    dbUsageCount = 0;  // Reset
     console.log('✅ 共享数据库实例已关闭');
   }
 }
