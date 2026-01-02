@@ -2,6 +2,9 @@ import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globa
 import { handleRequest, logger, getProviderPriority, detectCacheProvider, executeWithFailover, executeRedisScan, executeUpstashScan } from '../src/index.js';
 import { createRedis, __mockSend } from 'redis-on-workers';
 
+// Enable fake timers
+jest.useFakeTimers();
+
 // Mock Cloudflare Workers environment
 global.Request = class Request {
   constructor(url, options) {
@@ -94,9 +97,14 @@ jest.mock('@opentelemetry/api', () => ({
 
 describe('Worker Tests', () => {
   let env;
+  let consoleLogSpy;
+  let consoleWarnSpy;
+  let consoleErrorSpy;
+  let consoleDebugSpy;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.clearAllTimers();
     __mockSend.mockReset(); // Reset the mock from redis-on-workers
     
     // Reset mocks to ensure clean state
@@ -156,6 +164,19 @@ describe('Worker Tests', () => {
       NF_REDIS_PASSWORD: 'nf-password',
       SKIP_SIGNATURE_VERIFY: 'true',
     };
+
+    // Global console spies to suppress output and allow assertions
+    consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
+    consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+    consoleDebugSpy = jest.spyOn(console, 'debug').mockImplementation();
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    consoleDebugSpy.mockRestore();
   });
 
   describe('Basic Functionality', () => {
@@ -299,25 +320,6 @@ describe('Worker Tests', () => {
   });
 
   describe('Logger Version and Level', () => {
-    let consoleLogSpy;
-    let consoleWarnSpy;
-    let consoleErrorSpy;
-    let consoleDebugSpy;
-
-    beforeEach(() => {
-      consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
-      consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
-      consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
-      consoleDebugSpy = jest.spyOn(console, 'debug').mockImplementation();
-    });
-
-    afterEach(() => {
-      consoleLogSpy.mockRestore();
-      consoleWarnSpy.mockRestore();
-      consoleErrorSpy.mockRestore();
-      consoleDebugSpy.mockRestore();
-    });
-
     test('logger.info should include version and level in pending logs', async () => {
       // Test that pending logs include version and level
       await logger.info('test message', { custom: 'data' });
@@ -359,25 +361,6 @@ describe('Worker Tests', () => {
   });
 
   describe('Logging and Diagnostics', () => {
-    let consoleLogSpy;
-    let consoleWarnSpy;
-    let consoleErrorSpy;
-    let consoleDebugSpy;
-
-    beforeEach(() => {
-      consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
-      consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
-      consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
-      consoleDebugSpy = jest.spyOn(console, 'debug').mockImplementation();
-    });
-
-    afterEach(() => {
-      consoleLogSpy.mockRestore();
-      consoleWarnSpy.mockRestore();
-      consoleErrorSpy.mockRestore();
-      consoleDebugSpy.mockRestore();
-    });
-
     test('handleRequest should log initialization diagnostics', async () => {
       const request = new Request('https://test.url/health');
       await handleRequest(request, env);

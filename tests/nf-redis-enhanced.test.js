@@ -19,6 +19,10 @@ async function advanceTimers(ms) {
 }
 
 describe('Redis TCP Adaptation', () => {
+  let consoleLogSpy;
+  let consoleWarnSpy;
+  let consoleErrorSpy;
+
   beforeEach(() => {
     __mockSend.mockReset();
     __test_setRedisClient(null);
@@ -26,6 +30,17 @@ describe('Redis TCP Adaptation', () => {
     
     const mockClient = createRedis({});
     __test_setRedisClient(mockClient);
+
+    // Suppress console output during tests
+    consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
+    consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
   });
 
   describe('executeRedis', () => {

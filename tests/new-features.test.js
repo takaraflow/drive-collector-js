@@ -1,6 +1,9 @@
 // 新功能测试 - 任务调度失败处理优化
 import { jest } from '@jest/globals';
 
+// Enable fake timers
+jest.useFakeTimers();
+
 // 确保全局 Web API 可用
 if (typeof globalThis.TextEncoder === 'undefined') {
   const { TextEncoder, TextDecoder } = require('util');
@@ -22,13 +25,6 @@ function createMockResponse(status, body = {}) {
         ...body
     };
 }
-
-// Mock console methods
-global.console = {
-  log: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-};
 
 // Mock @upstash/qstash
 const mockVerify = jest.fn();
@@ -76,8 +72,13 @@ const mockEnv = {
 };
 
 describe('任务调度失败处理优化测试', () => {
+  let consoleLogSpy;
+  let consoleWarnSpy;
+  let consoleErrorSpy;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.clearAllTimers();
     __mockSend.mockReset();
     mockVerify.mockReset();
     mockVerify.mockImplementation(async (options) => {
@@ -89,10 +90,18 @@ describe('任务调度失败处理优化测试', () => {
     // Pre-mock the redis client for all tests in this suite
     const mockClient = createRedis({});
     __test_setRedisClient(mockClient);
+
+    // Suppress console output during tests
+    consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
+    consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
   });
   
   afterEach(() => {
     __test_setRedisClient(null);
+    consoleLogSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
   });
 
   describe('fetchWithRetry - 4xx 停止重试逻辑', () => {
@@ -232,13 +241,13 @@ describe('任务调度失败处理优化测试', () => {
          arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
        };
  
-       console.log.mockClear();
+       consoleLogSpy.mockClear();
        
        const lb = await import('../src/index.js');
        await lb.default.fetch(request, mockEnv, {});
  
        // 验证路径映射被记录
-       const logCalls = console.log.mock.calls;
+       const logCalls = consoleLogSpy.mock.calls;
        const hasMappingLog = logCalls.some(call => {
          const message = call[0];
          const meta = call[1];
@@ -250,7 +259,7 @@ describe('任务调度失败处理优化测试', () => {
      });
    });
  
-   describe('多前缀实例扫描', () => {
+    describe('多前缀实例扫描', () => {
      it('应该扫描所有契约键前缀', async () => {
        mockKV.list
          .mockResolvedValueOnce({ keys: [{ name: 'instance:1' }] })
@@ -304,27 +313,27 @@ describe('任务调度失败处理优化测试', () => {
      });
    });
  
-   describe('缓存提供者检测', () => {
+    describe('缓存提供者检测', () => {
      it('应该优先使用环境变量', () => {
        const env = { CACHE_PROVIDER: 'redis' };
        expect(detectCacheProvider(env)).toBe('redis');
      });
-
+ 
      it('应该检测 NF Redis (需要 password)', () => {
        const env = { NF_REDIS_URL: 'https://redis.example.com', NF_REDIS_PASSWORD: 'password' };
        expect(detectCacheProvider(env)).toBe('redis');
      });
-
+ 
      it('应该检测 Cloudflare KV', () => {
        const env = { KV_STORAGE: mockKV };
        expect(detectCacheProvider(env)).toBe('cloudflare');
      });
-
+ 
      it('应该检测 Upstash', () => {
        const env = { UPSTASH_REDIS_REST_URL: 'https://redis.example.com', UPSTASH_REDIS_REST_TOKEN: 'token' };
        expect(detectCacheProvider(env)).toBe('upstash');
      });
-
+ 
      it('应该优先 NF Redis > Cloudflare KV > Upstash', () => {
        const env = {
          KV_STORAGE: mockKV,
@@ -335,7 +344,7 @@ describe('任务调度失败处理优化测试', () => {
        };
        expect(detectCacheProvider(env)).toBe('redis');
      });
-
+ 
      it('应该优先 Cloudflare KV > Upstash', () => {
        const env = {
          KV_STORAGE: mockKV,
@@ -344,14 +353,14 @@ describe('任务调度失败处理优化测试', () => {
        };
        expect(detectCacheProvider(env)).toBe('cloudflare');
      });
-
+ 
      it('应该返回 none 当无提供者', () => {
        const env = {};
        expect(detectCacheProvider(env)).toBe('none');
      });
    });
  
-   describe('Redis 故障转移', () => {
+    describe('Redis 故障转移', () => {
      it('应该执行 Redis GET 操作', async () => {
        const env = {
          NF_REDIS_URL: 'https://redis.example.com',
@@ -401,31 +410,31 @@ describe('任务调度失败处理优化测试', () => {
          NF_REDIS_URL: 'https://redis.example.com',
          NF_REDIS_PASSWORD: 'nf-password',
        };
-
+ 
        __mockSend.mockResolvedValueOnce('nf-value');
-
+ 
        const result = await executeWithFailover('_kv_get', env, {}, 'test-key');
        
        expect(result).toBe('nf-value');
      });
-
+ 
      it('应该在 Redis 失败时 fallback 到 CF KV', async () => {
        const env = {
          KV_STORAGE: mockKV,
          NF_REDIS_URL: 'https://redis.example.com',
          NF_REDIS_PASSWORD: 'nf-password',
        };
-
+ 
        __mockSend.mockRejectedValueOnce(new Error('NF error'));
        
        // CF KV 成功
        mockKV.get.mockResolvedValueOnce('cf-value');
-
+ 
        const result = await executeWithFailover('_kv_get', env, {}, 'test-key');
        
        expect(result).toBe('cf-value');
      });
-
+ 
      it('应该在 NF Redis 和 CF KV 都失败时 fallback 到 Upstash', async () => {
        const env = {
          KV_STORAGE: mockKV,
@@ -434,7 +443,7 @@ describe('任务调度失败处理优化测试', () => {
          NF_REDIS_URL: 'https://redis.example.com',
          NF_REDIS_PASSWORD: 'nf-password',
        };
-
+ 
        __mockSend.mockRejectedValueOnce(new Error('NF error'));
        
        // CF KV 失败
@@ -445,14 +454,14 @@ describe('任务调度失败处理优化测试', () => {
          ok: true,
          json: async () => ({ result: 'upstash-value' }),
        });
-
+ 
        const result = await executeWithFailover('_kv_get', env, {}, 'test-key');
        
        expect(result).toBe('upstash-value');
      });
    });
  
-   describe('路径映射与负载均衡集成', () => {
+    describe('路径映射与负载均衡集成', () => {
      it('应该在转发前规范化契约路径', async () => {
        const timestamp = Math.floor(Date.now() / 1000).toString();
        mockVerify.mockResolvedValue('body');
@@ -481,13 +490,13 @@ describe('任务调度失败处理优化测试', () => {
          arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
        };
  
-       console.log.mockClear();
+       consoleLogSpy.mockClear();
        
        const lb = await import('../src/index.js');
        await lb.default.fetch(request, mockEnv, {});
  
        // 验证路径映射被记录
-       const logCalls = console.log.mock.calls;
+       const logCalls = consoleLogSpy.mock.calls;
        const hasMappingLog = logCalls.some(call => {
          const message = call[0];
          const meta = call[1];
@@ -499,7 +508,7 @@ describe('任务调度失败处理优化测试', () => {
      });
    });
  
-   describe('fetchWithRetry - 5xx 透传逻辑', () => {
+    describe('fetchWithRetry - 5xx 透传逻辑', () => {
      it('应该在所有实例都返回5xx时返回最后一个5xx响应', async () => {
        const instances = [
          { id: '1', url: 'https://instance1.com' },
@@ -524,7 +533,7 @@ describe('任务调度失败处理优化测试', () => {
      });
    });
  
-   describe('getActiveInstances - 无活跃实例处理', () => {
+    describe('getActiveInstances - 无活跃实例处理', () => {
      it('应该在无活跃实例时返回空数组', async () => {
        mockKV.list.mockResolvedValue({ keys: [] });
  
@@ -552,7 +561,7 @@ describe('任务调度失败处理优化测试', () => {
      });
    });
  
-   describe('QStash 元数据记录', () => {
+    describe('QStash 元数据记录', () => {
      it('应该在无活跃实例时记录 QStash 元数据到日志', async () => {
        const timestamp = Math.floor(Date.now() / 1000).toString();
        mockVerify.mockResolvedValue('body');
@@ -570,7 +579,7 @@ describe('任务调度失败处理优化测试', () => {
          arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
        };
  
-       console.warn.mockClear();
+       consoleWarnSpy.mockClear();
        
        const lb = await import('../src/index.js');
        const response = await lb.default.fetch(request, mockEnv, {});
@@ -578,8 +587,8 @@ describe('任务调度失败处理优化测试', () => {
        expect(response.status).toBe(503);
        
        // 验证 console.warn 被调用并包含元数据
-       expect(console.warn).toHaveBeenCalled();
-       const warnCalls = console.warn.mock.calls;
+       expect(consoleWarnSpy).toHaveBeenCalled();
+       const warnCalls = consoleWarnSpy.mock.calls;
        const hasMetadata = warnCalls.some(call => {
          const message = call[0];
          const meta = call[1];
@@ -604,7 +613,7 @@ describe('任务调度失败处理优化测试', () => {
          arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
        };
  
-       console.warn.mockClear();
+       consoleWarnSpy.mockClear();
        
        const lb = await import('../src/index.js');
        const response = await lb.default.fetch(request, mockEnv, {});
@@ -612,7 +621,7 @@ describe('任务调度失败处理优化测试', () => {
        expect(response.status).toBe(401);
        
        // 验证警告日志包含元数据
-       const warnCalls = console.warn.mock.calls;
+       const warnCalls = consoleWarnSpy.mock.calls;
        const hasMetadata = warnCalls.some(call => {
          const message = call[0];
          const meta = call[1];
@@ -624,7 +633,7 @@ describe('任务调度失败处理优化测试', () => {
      });
    });
  
-   describe('Retry-After 头部', () => {
+    describe('Retry-After 头部', () => {
      it('应该在返回503时包含Retry-After头部', async () => {
        const timestamp = Math.floor(Date.now() / 1000).toString();
        mockVerify.mockResolvedValue('body');
@@ -648,7 +657,7 @@ describe('任务调度失败处理优化测试', () => {
      });
    });
  
-   describe('响应体包含 QStash 元数据', () => {
+    describe('响应体包含 QStash 元数据', () => {
      it('应该在错误响应体中包含 qstashMsgId', async () => {
        const timestamp = Math.floor(Date.now() / 1000).toString();
        mockVerify.mockResolvedValue('body');
