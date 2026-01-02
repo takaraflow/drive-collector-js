@@ -38,7 +38,7 @@
   },
   "dependencies": {
     "@microlabs/otel-cf-workers": "^0.1.1",
-    "@opentelemetry/api": "^1.4.1",
+    "@opentelemetry/api": "1.4.1",
     "@upstash/qstash": "^2.8.4",
     "redis-on-workers": "^0.4.1"
   },
@@ -55,6 +55,10 @@
     "vitest": "^4.0.16",
     "wrangler": "^4.56.0",
     "yargs": "^18.0.0"
+  },
+  "overrides": {
+    "@opentelemetry/api": "1.4.1",
+    "glob": "^9.0.0"
   },
   "standard-version": {
     "skip": {
