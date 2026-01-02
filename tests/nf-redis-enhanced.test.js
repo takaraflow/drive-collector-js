@@ -1,6 +1,6 @@
 import { jest } from '@jest/globals';
-import { executeRedis, executeRedisScan, checkRedisHealth, logger } from '../src/index.js';
-import { __mockSend } from 'redis-on-workers';
+import { executeRedis, executeRedisScan, checkRedisHealth, logger, __test_setRedisClient } from '../src/index.js';
+import { createRedis, __mockSend } from 'redis-on-workers';
 
 // Mock logger
 logger.warn = jest.fn();
@@ -21,13 +21,19 @@ async function advanceTimers(ms) {
 
 describe('Redis TCP Adaptation', () => {
   beforeEach(() => {
-    // IMPORTANT: Reset mockSend
+    // IMPORTANT: Reset mockSend and redisClient
     __mockSend.mockReset();
+    __test_setRedisClient(null);
+    
     logger.warn.mockClear();
     logger.info.mockClear();
     logger.error.mockClear();
     logger.debug.mockClear();
     jest.clearAllTimers();
+    
+    // Pre-mock the client for all tests
+    const mockClient = createRedis({});
+    __test_setRedisClient(mockClient);
   });
 
   describe('executeRedis', () => {

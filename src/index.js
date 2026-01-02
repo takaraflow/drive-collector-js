@@ -787,6 +787,11 @@ async function retryRedisCommand(client, command, args = [], maxRetries = 3, ini
 let redisClient = null;
 
 async function getRedisClient(env, ctx) {
+  // 如果是测试环境，并且 redisClient 已经被 mock，则直接返回
+  if (isTestEnvironment && redisClient) {
+    return redisClient;
+  }
+  
   if (redisClient) return redisClient;
 
   const urlStr = env.NF_REDIS_URL;
@@ -1012,10 +1017,6 @@ async function executeUpstashScan(env, prefix) {
   return { keys: keys.map(name => ({ name })) };
 }
 
-async function getIoRedisClient(env) {
-  return null;
-}
-
 /**
  * 执行操作并支持优先级故障转移
  */
@@ -1220,7 +1221,12 @@ const setCurrentProviderState = (state) => {
   if (state.failoverReason !== undefined) failoverReason = state.failoverReason;
 };
 
-export { getCurrentProviderState, setCurrentProviderState };
+// 暴露 redisClient 的 setter 供测试使用
+const __test_setRedisClient = (client) => {
+  redisClient = client;
+};
+
+export { getCurrentProviderState, setCurrentProviderState, __test_setRedisClient };
 
 /**
  * Worker 处理器

@@ -48,7 +48,7 @@ jest.mock('@upstash/qstash', () => ({
 }));
 
 // 导入需要测试的函数
-import { describe, expect, it, beforeEach } from '@jest/globals';
+import { describe, expect, it, beforeEach, afterEach } from '@jest/globals';
 import {
   fetchWithRetry,
   getActiveInstances,
@@ -57,8 +57,9 @@ import {
   executeRedis,
   scanLockKeys,
   executeWithFailover,
+  __test_setRedisClient
 } from '../src/index.js';
-import { __mockSend } from 'redis-on-workers';
+import { __mockSend, createRedis } from 'redis-on-workers';
 
 // Mock KV Storage
 const mockKV = {
@@ -84,6 +85,14 @@ describe('任务调度失败处理优化测试', () => {
     });
     global.__QSTASH_MOCK_VERIFY__ = mockVerify;
     global.fetch.mockReset();
+    
+    // Pre-mock the redis client for all tests in this suite
+    const mockClient = createRedis({});
+    __test_setRedisClient(mockClient);
+  });
+  
+  afterEach(() => {
+    __test_setRedisClient(null);
   });
 
   describe('fetchWithRetry - 4xx 停止重试逻辑', () => {
@@ -665,4 +674,4 @@ describe('任务调度失败处理优化测试', () => {
        expect(body.error).toBeDefined();
      });
    });
- });
+});
