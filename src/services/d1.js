@@ -10,7 +10,7 @@ class D1Service {
         // 支持新旧变量名
         this.accountId = process.env.CF_D1_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
         this.databaseId = process.env.CF_D1_DATABASE_ID;
-        this.token = process.env.CF_D1_TOKEN || process.env.CF_KV_TOKEN;
+        this.token = process.env.CF_D1_TOKEN; // D1 dedicated token, no KV fallback
 
         // 验证必要的配置
         if (!this.accountId || !this.databaseId || !this.token) {

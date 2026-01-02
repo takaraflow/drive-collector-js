@@ -65,6 +65,53 @@ describe("D1 Service", () => {
     expect(typeof d1Instance.batch).toBe("function");
   });
 
+  describe("Token initialization", () => {
+    test("should use CF_D1_TOKEN when CF_D1_TOKEN is set and CF_KV_TOKEN is also set", async () => {
+      // Set up environment with both tokens
+      const testEnv = {
+        ...originalEnv,
+        CF_D1_ACCOUNT_ID: "test_account",
+        CF_D1_DATABASE_ID: "test_db",
+        CF_D1_TOKEN: "valid_d1_token",
+        CF_KV_TOKEN: "invalid_kv_token",
+      };
+      
+      process.env = testEnv;
+      jest.resetModules();
+      
+      const { d1: testD1 } = await import("../../src/services/d1.js");
+      
+      // Should use CF_D1_TOKEN, not CF_KV_TOKEN
+      expect(testD1.token).toBe("valid_d1_token");
+      expect(testD1.token).not.toBe("invalid_kv_token");
+      
+      // Restore original env
+      process.env = originalEnv;
+    });
+
+    test("should throw error when CF_D1_TOKEN is missing", async () => {
+      // Set up environment without CF_D1_TOKEN
+      const testEnv = {
+        ...originalEnv,
+        CF_D1_ACCOUNT_ID: "test_account",
+        CF_D1_DATABASE_ID: "test_db",
+        // CF_D1_TOKEN is missing
+        CF_KV_TOKEN: "some_kv_token", // This should NOT be used as fallback
+      };
+      
+      process.env = testEnv;
+      jest.resetModules();
+      
+      const { d1: testD1 } = await import("../../src/services/d1.js");
+      
+      // Should have undefined token (no fallback)
+      expect(testD1.token).toBeUndefined();
+      
+      // Restore original env
+      process.env = originalEnv;
+    });
+  });
+
   describe("_execute", () => {
     test("should execute SQL successfully", async () => {
       const mockResponse = {
