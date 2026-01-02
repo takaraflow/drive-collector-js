@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.9](https://github.com/YoungSx/lb-worker-js/compare/v0.7.8...v0.7.9) (2026-01-02)
+
+
+### ✅ Testing
+
+* hard code log test ([e51114b](https://github.com/YoungSx/lb-worker-js/commit/e51114b146036a68f8a1ceac3c6e4e50cf92672b))
+
+
+### 🐛 Bug Fixes
+
+* add context object to handleRequest calls in tests ([5affe47](https://github.com/YoungSx/lb-worker-js/commit/5affe4741646ae5a73582fb0ca0a36c1af827dc5))
+* logger ([12f761b](https://github.com/YoungSx/lb-worker-js/commit/12f761b9774d4a41486b68efd2c241dbf0e79e44))
+
 ### [0.7.8](https://github.com/YoungSx/lb-worker-js/compare/v0.7.7...v0.7.8) (2026-01-02)
 
 
