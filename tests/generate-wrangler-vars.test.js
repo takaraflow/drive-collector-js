@@ -42,6 +42,12 @@ describe('generate-wrangler-vars.js (Unit)', () => {
         NODE_ENV: { type: "string" },
         WORKER_NAME: { type: "string" }
       }
+    },
+    infrastructure: {
+      CLOUDFLARE_ACCOUNT_ID: { type: "string", required: true },
+      WORKER_NAME: { type: "string", required: true },
+      CF_KV_NAMESPACE_ID: { type: "string", required: true },
+      KV_PREVIEW_ID: { type: "string", required: false }
     }
   };
 
@@ -116,6 +122,25 @@ describe('generate-wrangler-vars.js (Unit)', () => {
     const output = generateWranglerCommand(mockEnv);
     expect(output).toContain('--var AXIOM_TOKEN:"token\\"with\\"quotes"');
   });
+
+
+  test('should prepend exports for infrastructure vars found in GHA JSON contexts', () => {
+    const mockEnv = {
+      GHA_VARS_JSON: JSON.stringify({
+        CLOUDFLARE_ACCOUNT_ID: 'test-account-id',
+        WORKER_NAME: 'test-worker',
+        QSTASH_CURRENT_SIGNING_KEY: 'test-key' // Added required var
+      }),
+      NODE_ENV: 'test'
+    };
+
+    const output = generateWranglerCommand(mockEnv);
+    
+    expect(output).toContain('export CLOUDFLARE_ACCOUNT_ID="test-account-id"');
+    expect(output).toContain('export WORKER_NAME="test-worker"');
+    expect(output).toContain('npx wrangler deploy');
+  });
+
 
   test('should throw error if required variable is missing', () => {
     const mockEnv = {

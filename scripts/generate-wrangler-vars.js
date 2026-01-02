@@ -17,18 +17,25 @@ export function generateWranglerCommand(env = process.env) {
 
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     const envConfig = manifest.config?.env || {};
+    const infraConfig = manifest.infrastructure || {};
 
     // 解析 GHA Context
     const secretsJson = env.GHA_SECRETS_JSON ? JSON.parse(env.GHA_SECRETS_JSON) : {};
     const varsJson = env.GHA_VARS_JSON ? JSON.parse(env.GHA_VARS_JSON) : {};
 
-    // 合并所有来源 (优先级: Secrets > Vars > Process Env)
     const allAvailableVars = {
       ...env,
       ...varsJson,
       ...secretsJson
     };
 
+    const extraExports = [];
+    for (const key of Object.keys(infraConfig)) {
+        if (allAvailableVars[key] !== undefined && env[key] === undefined) {
+             extraExports.push(`export ${key}="${allAvailableVars[key]}"`);
+        }
+    }
+    
     const args = [];
     const vars = [];
 
@@ -68,6 +75,13 @@ export function generateWranglerCommand(env = process.env) {
     // 添加所有 --var 参数
     if (vars.length > 0) {
       command += ' ' + vars.join(' ');
+    }
+
+    // 如果有额外的 exports，将它们前置到命令中
+    // 注意：eval 会执行整个字符串。
+    // 格式：export A="b"; export C="d"; npx wrangler ...
+    if (extraExports.length > 0) {
+        command = extraExports.join('; ') + '; ' + command;
     }
 
     return command;

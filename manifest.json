@@ -401,5 +401,27 @@
   "endpoints": {
     "health": "/health",
     "webhook": "/"
+  },
+  "infrastructure": {
+    "CLOUDFLARE_ACCOUNT_ID": {
+      "type": "string",
+      "required": true,
+      "description": "Cloudflare 账户 ID"
+    },
+    "WORKER_NAME": {
+      "type": "string",
+      "required": true,
+      "description": "Worker 名称"
+    },
+    "CF_KV_NAMESPACE_ID": {
+      "type": "string",
+      "required": true,
+      "description": "Cloudflare KV 命名空间 ID"
+    },
+    "KV_PREVIEW_ID": {
+      "type": "string",
+      "required": false,
+      "description": "预览环境的 KV 命名空间 ID"
+    }
   }
 }
