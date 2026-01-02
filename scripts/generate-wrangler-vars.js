@@ -8,7 +8,7 @@ import path from 'path';
  * 3. 根据 manifest.json 定义自动匹配并注入
  * 4. 支持 KV 命名空间绑定
  */
-function generateWranglerCommand() {
+export function generateWranglerCommand(env = process.env) {
   try {
     const manifestPath = path.resolve(process.cwd(), 'manifest.json');
     if (!fs.existsSync(manifestPath)) {
@@ -19,12 +19,12 @@ function generateWranglerCommand() {
     const envConfig = manifest.config?.env || {};
 
     // 解析 GHA Context
-    const secretsJson = process.env.GHA_SECRETS_JSON ? JSON.parse(process.env.GHA_SECRETS_JSON) : {};
-    const varsJson = process.env.GHA_VARS_JSON ? JSON.parse(process.env.GHA_VARS_JSON) : {};
+    const secretsJson = env.GHA_SECRETS_JSON ? JSON.parse(env.GHA_SECRETS_JSON) : {};
+    const varsJson = env.GHA_VARS_JSON ? JSON.parse(env.GHA_VARS_JSON) : {};
 
     // 合并所有来源 (优先级: Secrets > Vars > Process Env)
     const allAvailableVars = {
-      ...process.env,
+      ...env,
       ...varsJson,
       ...secretsJson
     };
@@ -42,6 +42,10 @@ function generateWranglerCommand() {
       // 检查是否为必需变量
       if (config.required && (value === undefined || value === '')) {
         console.error(`错误: 缺少必需的环境变量 ${key}`);
+        // In test mode, we might want to throw instead of exit
+        if (env.NODE_ENV === 'test') {
+          throw new Error(`缺少必需的环境变量 ${key}`);
+        }
         process.exit(1);
       }
 
@@ -69,8 +73,13 @@ function generateWranglerCommand() {
     return command;
   } catch (error) {
     console.error('Error generating wrangler command:', error.message);
+    if (env.NODE_ENV === 'test') throw error;
     return 'npx wrangler deploy';
   }
 }
 
-console.log(generateWranglerCommand());
+// Only execute if running directly
+import { fileURLToPath } from 'url';
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  console.log(generateWranglerCommand());
+}

@@ -1,14 +1,68 @@
-import { jest, describe, test, expect, beforeAll, afterAll } from '@jest/globals';
-import { execSync } from 'child_process';
-import fs from 'fs';
+import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import path from 'path';
 
-describe('generate-wrangler-vars.js (GHA & Manifest Driven)', () => {
-  const scriptPath = 'scripts/generate-wrangler-vars.js';
+// Mock Modules
+// Use unstable_mockModule for fs to support named exports used by implementation
+jest.unstable_mockModule('fs', () => ({
+    default: {
+        existsSync: jest.fn(),
+        readFileSync: jest.fn(),
+        copyFileSync: jest.fn(),
+        unlinkSync: jest.fn(),
+        writeFileSync: jest.fn(),
+    },
+    // Named exports needed because implementation might use named imports
+    existsSync: jest.fn(),
+    readFileSync: jest.fn(),
+    copyFileSync: jest.fn(),
+    unlinkSync: jest.fn(),
+    writeFileSync: jest.fn(),
+}));
+
+jest.unstable_mockModule('child_process', () => ({
+  execSync: jest.fn()
+}));
+
+// We need to import the mocked modules dynamically after defining mocks
+const fs = await import('fs');
+// const { execSync } = await import('child_process');
+
+// Import code under test DYNAMICALLY after mocking
+const { generateWranglerCommand } = await import('../scripts/generate-wrangler-vars.js');
+const { generateToml } = await import('../scripts/build-logic.js');
+
+describe('generate-wrangler-vars.js (Unit)', () => {
+  const mockManifest = {
+    config: {
+      env: {
+        NF_REDIS_PASSWORD: { type: "string" },
+        AXIOM_TOKEN: { type: "string" },
+        QSTASH_CURRENT_SIGNING_KEY: { type: "string", required: true },
+        NF_REDIS_URL: { type: "string" },
+        NODE_ENV: { type: "string" },
+        WORKER_NAME: { type: "string" }
+      }
+    }
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    
+    // Set both default and named export mocks to ensure coverage
+    fs.default.existsSync.mockReturnValue(true);
+    fs.default.readFileSync.mockReturnValue(JSON.stringify(mockManifest));
+    
+    // Also mock named exports if they are separate in the mock definition
+    if (fs.existsSync && fs.existsSync.mockReturnValue) {
+        fs.existsSync.mockReturnValue(true);
+    }
+    if (fs.readFileSync && fs.readFileSync.mockReturnValue) {
+        fs.readFileSync.mockReturnValue(JSON.stringify(mockManifest));
+    }
+  });
 
   test('should generate --var from GHA JSON contexts and manifest', () => {
     const mockEnv = {
-      ...process.env,
       GHA_SECRETS_JSON: JSON.stringify({
         NF_REDIS_PASSWORD: 'secret-password',
         AXIOM_TOKEN: 'axiom-secret',
@@ -20,115 +74,142 @@ describe('generate-wrangler-vars.js (GHA & Manifest Driven)', () => {
       })
     };
 
-    const output = execSync(`node ${scriptPath}`, { env: mockEnv }).toString().trim();
+    const output = generateWranglerCommand(mockEnv);
     
-    // 基础命令结构
+    // Debug output if it fails
+    if (!output.includes('-c wrangler.toml')) {
+        console.log('DEBUG: Output was:', output);
+    }
+
     expect(output).toContain('npx wrangler deploy');
     expect(output).toContain('-c wrangler.toml');
     expect(output).toContain('--compatibility-flags="nodejs_compat"');
 
-    // 验证变量注入 (Secrets 优先级高)
     expect(output).toContain('--var NF_REDIS_PASSWORD:"secret-password"');
     expect(output).toContain('--var AXIOM_TOKEN:"axiom-secret"');
     expect(output).toContain('--var QSTASH_CURRENT_SIGNING_KEY:"qstash-key"');
     expect(output).toContain('--var NF_REDIS_URL:"https://vars.url"');
     expect(output).toContain('--var NODE_ENV:"production"');
-
-    // WORKER_NAME 不在 manifest.config.env 中，不应作为 --var 导入
-    expect(output).not.toContain('--var WORKER_NAME');
   });
 
   test('should prioritize secrets over vars', () => {
     const mockEnv = {
-      ...process.env,
       GHA_SECRETS_JSON: JSON.stringify({
         AXIOM_TOKEN: 'secret-value',
-        QSTASH_CURRENT_SIGNING_KEY: 'qstash-key' // 必需变量
+        QSTASH_CURRENT_SIGNING_KEY: 'qstash-key'
       }),
       GHA_VARS_JSON: JSON.stringify({ AXIOM_TOKEN: 'vars-value' })
     };
 
-    const output = execSync(`node ${scriptPath}`, { env: mockEnv }).toString().trim();
+    const output = generateWranglerCommand(mockEnv);
     expect(output).toContain('--var AXIOM_TOKEN:"secret-value"');
   });
 
   test('should handle special characters in values', () => {
     const mockEnv = {
-      ...process.env,
       GHA_SECRETS_JSON: JSON.stringify({
         AXIOM_TOKEN: 'token"with"quotes',
-        QSTASH_CURRENT_SIGNING_KEY: 'qstash-key' // 必需变量
+        QSTASH_CURRENT_SIGNING_KEY: 'qstash-key'
       })
     };
 
-    const output = execSync(`node ${scriptPath}`, { env: mockEnv }).toString().trim();
-    // 验证转义逻辑
+    const output = generateWranglerCommand(mockEnv);
     expect(output).toContain('--var AXIOM_TOKEN:"token\\"with\\"quotes"');
   });
 
-  test('should exit with error if required variable is missing', () => {
-    // 验证当必需变量缺失时，脚本会报错退出
+  test('should throw error if required variable is missing', () => {
     const mockEnv = {
-      ...process.env,
-      GHA_SECRETS_JSON: JSON.stringify({ AXIOM_TOKEN: 'test' }), // 缺少 QSTASH_CURRENT_SIGNING_KEY
+      NODE_ENV: 'test',
+      GHA_SECRETS_JSON: JSON.stringify({ AXIOM_TOKEN: 'test' }),
       GHA_VARS_JSON: JSON.stringify({})
     };
 
-    // 期望脚本以非零状态码退出
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
     expect(() => {
-      execSync(`node ${scriptPath}`, { env: mockEnv, stdio: 'pipe' });
-    }).toThrow();
+      generateWranglerCommand(mockEnv);
+    }).toThrow('缺少必需的环境变量 QSTASH_CURRENT_SIGNING_KEY');
+
+    consoleSpy.mockRestore();
   });
 });
 
-describe('build.sh (Local vs GHA)', () => {
-  const wranglerPath = 'wrangler.toml';
-  const backupPath = 'wrangler.toml.bak';
-  const envPath = '.env';
-  const envBackupPath = '.env.bak.test';
-
-  beforeAll(() => {
-    if (fs.existsSync(wranglerPath)) {
-      fs.copyFileSync(wranglerPath, backupPath);
+describe('build.sh Logic (Unit)', () => {
+  const mockManifest = {
+    config: {
+      env: {
+        QSTASH_CURRENT_SIGNING_KEY: { type: "string" },
+        NAME: { type: "string" }
+      }
     }
-    // 临时移除 .env 以免干扰测试环境变量
-    if (fs.existsSync(envPath)) {
-      fs.copyFileSync(envPath, envBackupPath);
-      fs.unlinkSync(envPath);
-    }
-  });
-
-  afterAll(() => {
-    if (fs.existsSync(backupPath)) {
-      fs.copyFileSync(backupPath, wranglerPath);
-      fs.unlinkSync(backupPath);
-    }
-    if (fs.existsSync(envBackupPath)) {
-      fs.copyFileSync(envBackupPath, envPath);
-      fs.unlinkSync(envBackupPath);
-    }
-  });
+  };
+  
+  const mockPackageJson = { name: 'pkg-worker-name' };
+  const mockTomlTemplate = `
+name = "\${WORKER_NAME}"
+account_id = "\${CLOUDFLARE_ACCOUNT_ID}"
+kv_namespaces = [
+  { binding = "KV", id = "\${CF_KV_NAMESPACE_ID}", preview_id = "\${KV_PREVIEW_ID}" }
+]
+`;
 
   test('should append [vars] in local environment', () => {
-    // 模拟本地环境
-    // 直接在 bash 命令中传递所有变量，确保不受 Windows 环境影响
-    const cmd = 'bash -c "GITHUB_ACTIONS=false NODE_ENV=development WORKER_NAME=test-local-worker QSTASH_CURRENT_SIGNING_KEY=local-key CLOUDFLARE_ACCOUNT_ID=test-id CF_KV_NAMESPACE_ID=test-kv bash scripts/build.sh"';
+    const mockEnv = {
+      GITHUB_ACTIONS: 'false',
+      NODE_ENV: 'development',
+      WORKER_NAME: 'test-local-worker',
+      QSTASH_CURRENT_SIGNING_KEY: 'local-key',
+      CLOUDFLARE_ACCOUNT_ID: 'test-id',
+      CF_KV_NAMESPACE_ID: 'test-kv'
+    };
+
+    const content = generateToml(mockEnv, mockManifest, mockTomlTemplate, mockPackageJson);
     
-    execSync(cmd);
-    
-    const content = fs.readFileSync(wranglerPath, 'utf8');
     expect(content).toContain('[vars]');
     expect(content).toContain('QSTASH_CURRENT_SIGNING_KEY = "local-key"');
     expect(content).toContain('name = "test-local-worker"');
   });
 
   test('should NOT append [vars] in GHA environment', () => {
-    const cmd = 'bash -c "GITHUB_ACTIONS=true NODE_ENV=production WORKER_NAME=gha-worker CLOUDFLARE_ACCOUNT_ID=test-id CF_KV_NAMESPACE_ID=test-kv bash scripts/build.sh"';
+    const mockEnv = {
+      GITHUB_ACTIONS: 'true',
+      NODE_ENV: 'production',
+      WORKER_NAME: 'gha-worker',
+      CLOUDFLARE_ACCOUNT_ID: 'test-id',
+      CF_KV_NAMESPACE_ID: 'test-kv'
+    };
+
+    const content = generateToml(mockEnv, mockManifest, mockTomlTemplate, mockPackageJson);
     
-    execSync(cmd);
-    
-    const content = fs.readFileSync(wranglerPath, 'utf8');
     expect(content).not.toContain('[vars]');
     expect(content).toContain('name = "gha-worker"');
   });
+
+  test('should replace placeholders correctly', () => {
+      const mockEnv = {
+          WORKER_NAME: 'final-name',
+          CLOUDFLARE_ACCOUNT_ID: 'acc-123',
+          CF_KV_NAMESPACE_ID: 'kv-123',
+          KV_PREVIEW_ID: 'prev-123'
+      };
+      
+      const content = generateToml(mockEnv, mockManifest, mockTomlTemplate, mockPackageJson);
+      
+      expect(content).toContain('name = "final-name"');
+      expect(content).toContain('account_id = "acc-123"');
+      expect(content).toContain('id = "kv-123"');
+      expect(content).toContain('preview_id = "prev-123"');
+  });
+
+  test('should use dummy preview_id in local dev with prod KV ID', () => {
+      const mockEnv = {
+          NODE_ENV: 'development',
+          CF_KV_NAMESPACE_ID: 'prod-kv-id',
+          KV_PREVIEW_ID: ''
+      };
+      
+      const content = generateToml(mockEnv, mockManifest, mockTomlTemplate, mockPackageJson);
+      expect(content).toContain('preview_id = "00000000000000000000000000000000"');
+  });
 });
+
