@@ -364,13 +364,19 @@ describe('Worker Tests', () => {
       await handleRequest(request, env);
 
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Cache provider 初始化诊断'),
+        expect.stringContaining('LB Request Started'),
         expect.objectContaining({
-          providers: expect.any(Array),
-          redis_configured: true,
-          cf_kv_available: true,
-          upstash_configured: true,
-          detect_primary: 'redis'
+          path: '/health',
+          method: 'GET',
+          version: 'dev'
+        })
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Provider Status'),
+        expect.objectContaining({
+          primary: 'redis',
+          hasKv: true,
+          hasRedis: true
         })
       );
     });
@@ -500,24 +506,16 @@ describe('Worker Tests', () => {
       await handleRequest(request, axiomEnv);
 
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Axiom logger 初始化成功'),
+        expect.stringContaining('LB Request Started'),
         expect.any(Object)
       );
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('dataset=test-dataset'),
+        expect.stringContaining('Provider Status'),
         expect.any(Object)
       );
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('token=test...6789'),
+        expect.stringContaining('Health check passed'),
         expect.any(Object)
-      );
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Worker startup test log'),
-        expect.objectContaining({ type: 'diagnostic' })
-      );
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Axiom binding status: active'),
-        expect.objectContaining({ hasToken: true, hasDataset: true })
       );
     });
 
@@ -530,13 +528,15 @@ describe('Worker Tests', () => {
       const request = new Request('https://test.url/health');
       await handleRequest(request, invalidEnv);
 
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Axiom init 失败: AXIOM_TOKEN 缺失'),
+      // Should not have any Axiom-specific initialization warnings since we removed them
+      // Just ensure the request is processed normally
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('LB Request Started'),
         expect.any(Object)
       );
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Axiom binding status: inactive'),
-        expect.objectContaining({ hasToken: false, hasDataset: true })
+        expect.stringContaining('Provider Status'),
+        expect.any(Object)
       );
     });
   });

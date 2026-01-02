@@ -668,53 +668,41 @@ async function retryRedisCommand(client, command, args = [], maxRetries = 3, ini
  * 注意：Cloudflare Workers 中全局变量在请求间可能复用，但连接可能中断。redis-on-workers 应该处理重连。
  */
 let redisClient = null;
+let redisInitPromise = null; // 新增：用于锁定初始化过程
 
 async function getRedisClient(env, ctx) {
-  // 如果是测试环境，并且 redisClient 已经被 mock，则直接返回
-  if (isTestEnvironment && redisClient) {
-    return redisClient;
-  }
-  
+  if (isTestEnvironment && redisClient) return redisClient;
   if (redisClient) return redisClient;
 
-  const urlStr = env.NF_REDIS_URL;
-  if (!urlStr) throw new Error('NF Redis URL not configured');
+  // 如果已经在初始化了，直接返回同一个 Promise
+  if (redisInitPromise) return redisInitPromise;
 
-  const redisOptions = {
-    url: urlStr,
-    password: env.NF_REDIS_PASSWORD,
-    tls: {
-      servername: new URL(urlStr).hostname
-    }
-  };
+  redisInitPromise = (async () => {
+    const urlStr = env.NF_REDIS_URL;
+    if (!urlStr) throw new Error('NF Redis URL not configured');
 
-  try {
-    const creationPromise = (async () => {
-      // @ts-expect-error - redis-on-workers types are wrong, tls options are passed to node:tls
-      const client = createRedis(redisOptions);
-      // PING to force connection
-      await client.send('PING');
-      return client;
-    })();
-
-    let timeoutId;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error('Redis client creation timed out')), 5000);
-    });
+    const redisOptions = {
+      url: urlStr,
+      password: env.NF_REDIS_PASSWORD,
+      tls: { servername: new URL(urlStr).hostname }
+    };
 
     try {
-      redisClient = await Promise.race([creationPromise, timeoutPromise]);
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
+      // @ts-expect-error - redis-on-workers types are wrong, tls options are passed to node:tls
+      const client = createRedis(redisOptions);
+      await client.send('PING'); // 强制握手
+      redisClient = client;
+      await logger.info('Redis Client 初始化成功', { host: redisOptions.tls.servername }, ctx);
+      return client;
+    } catch (e) {
+      redisClient = null;
+      redisInitPromise = null; // 失败后允许下次重试
+      await logger.error('Redis Client 初始化失败', { error: e.message }, ctx);
+      throw e;
     }
-    
-    await logger.info('Redis Client 初始化成功', { url: urlStr.replace(/:[^:@]*@/, ':***@') }, ctx);
-    return redisClient;
-  } catch (e) {
-    await logger.error('Redis Client 初始化失败', { error: e.message }, ctx);
-    redisClient = null; // 确保失败后 client 为 null
-    return null;
-  }
+  })();
+
+  return redisInitPromise;
 }
 
 /**
@@ -1197,42 +1185,22 @@ async function handleRequest(request, env, ctx) {
     }, ctx);
   }
 
-  // 设置 logger 环境
+  // 1. 初始化基础状态
   logger.env = env.NODE_ENV || 'production';
 
-  // Cache provider 初始化诊断（保持向后兼容测试）
-  const prios = getProviderPriority(env);
-  await logger.info('Cache provider 初始化诊断', {
-    providers: prios,
-    redis_configured: !!(env.NF_REDIS_URL && env.NF_REDIS_PASSWORD),
-    redis_diagnosis: (env.NF_REDIS_URL && env.NF_REDIS_PASSWORD) ? "配置完整" : (!env.NF_REDIS_URL ? "NF_REDIS_URL 缺失" : "NF_REDIS_PASSWORD 缺失"),
-    cf_kv_available: !!env.KV_STORAGE,
-    upstash_configured: !!(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN),
-    detect_primary: detectCacheProvider(env)
-  }, ctx);
-
-  // Axiom 初始化状态（保持向后兼容测试）
-  const hasAxiomBinding = !!(env.AXIOM_TOKEN && env.AXIOM_DATASET);
-  await logger.info(`Axiom binding status: ${hasAxiomBinding ? 'active' : 'inactive'}`, {
-    hasToken: !!env.AXIOM_TOKEN,
-    hasDataset: !!env.AXIOM_DATASET,
-    hasOrgId: !!env.AXIOM_ORG_ID
-  }, ctx);
-  if (hasAxiomBinding) {
-    const tokenPreview = env.AXIOM_TOKEN ? `${env.AXIOM_TOKEN.slice(0, 4)}...${env.AXIOM_TOKEN.slice(-4)}` : 'undefined';
-    await logger.info(`Axiom logger 初始化成功 dataset=${env.AXIOM_DATASET} token=${tokenPreview}`, {}, ctx);
-  } else if (!env.AXIOM_TOKEN) {
-    await logger.warn('Axiom init 失败: AXIOM_TOKEN 缺失', {}, ctx);
-  }
-
-  // Worker 启动测试日志（保持向后兼容）
-  await logger.info('Worker startup test log', { type: 'diagnostic' }, ctx);
-
-  // 简单的启动标记
-  await logger.info('Request start', {
-    path: request.url,
+  // 2. 简洁的启动日志（这会被 Axiom 捕获并关联到当前 Trace）
+  await logger.info('LB Request Started', {
+    path: normalizedUrl.pathname,
     method: request.method,
+    rayId: request.headers.get('cf-ray'), // 记录 RayID 方便排查
     version: VERSION
+  }, ctx);
+
+  // 3. 诊断信息（合并原有的分散日志，减少事件数量节省额度）
+  await logger.info('Provider Status', {
+    primary: detectCacheProvider(env),
+    hasKv: !!env.KV_STORAGE,
+    hasRedis: !!(env.NF_REDIS_URL && env.NF_REDIS_PASSWORD)
   }, ctx);
 
   // 健康检查
