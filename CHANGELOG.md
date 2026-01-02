@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.1](https://github.com/YoungSx/lb-worker-js/compare/v0.7.0...v0.7.1) (2026-01-02)
+
+
+### 🐛 Bug Fixes
+
+* updates Redis health check to use HTTP-based provider ([2e144c1](https://github.com/YoungSx/lb-worker-js/commit/2e144c1ef0472d360be4dd79349cd98378364f6d))
+
 ## [0.7.0](https://github.com/YoungSx/lb-worker-js/compare/v0.6.0...v0.7.0) (2026-01-02)
 
 
