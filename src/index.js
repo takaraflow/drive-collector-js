@@ -1,15 +1,4 @@
-/**
- * Cloudflare Worker - QStash Webhook Load Balancer with Axiom OpenTelemetry
- * 负载均衡器，接收QStash Webhook，转发到活跃实例
- */
-
-// 检查是否在测试环境
-const isTestEnvironment = typeof process !== 'undefined' && process.env && (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID !== undefined);
-
-// 版本常量 - 构建时动态注入
-/** @type {string | undefined} __VERSION__ */
-/** @ts-expect-error __VERSION__ is injected at build time via esbuild --define */
-const VERSION = typeof __VERSION__ !== 'undefined' ? __VERSION__ : 'dev';
+import { logger, configureBaseLoggerTransport, isTestEnvironment, VERSION } from './logger.js';
 
 // 全局状态
 let currentProvider = 'cloudflare';
@@ -30,6 +19,7 @@ import { Receiver } from '@upstash/qstash';
 
 // 静态导入 Redis client
 import { createRedis } from 'redis-on-workers';
+
 
 /**
  * 稳健的 JSON 解析函数，支持自动修复无引号键
@@ -75,83 +65,16 @@ function detectCacheProvider(env) {
   return prios[0] || 'none';
 }
 
-const getFormattedTime = () => new Date().toISOString().slice(11, 23);
-const EMOJI_MAP = {
-  info: '✅',
-  warn: '⚠️',
-  error: '❌',
-  debug: '🔍'
-};
 
-/**
- * 日志记录器
- */
-const logger = {
-  version: VERSION,
-  env: 'production',
-
-  configure(options = {}) {
-    if (options.env !== undefined) {
-      this.env = options.env;
-    }
-  },
-
-  async info(message, meta = {}, ctx = null, span = null) {
-    const activeSpan = span || trace.getActiveSpan();
-    if (activeSpan) {
-      activeSpan.addEvent(message, {
-        'log.level': 'info',
-        'service.name': 'lb-worker-js',
-        version: this.version,
-        ...meta
-      });
-    }
-    // 保持 console 输出，方便在 Cloudflare 仪表盘实时查看
-    console.log(`${EMOJI_MAP.info} [INFO ${getFormattedTime()}] [${meta.module || 'core'}] ${message}`, meta);
-  },
-
-  async warn(message, meta = {}, ctx = null, span = null) {
-    const activeSpan = span || trace.getActiveSpan();
-    if (activeSpan) {
-      activeSpan.setStatus({ code: 1, message }); // Set status to Warning
-      activeSpan.addEvent(message, {
-        'log.level': 'warn',
-        'service.name': 'lb-worker-js',
-        ...meta
-      });
-    }
-    console.warn(`${EMOJI_MAP.warn} [WARN ${getFormattedTime()}] [${meta.module || 'core'}] ${message}`, meta);
-  },
-
-  async error(message, meta = {}, ctx = null, span = null) {
-    const activeSpan = span || trace.getActiveSpan();
-    const errorObj = message instanceof Error ? message : new Error(message);
-    if (activeSpan) {
-      activeSpan.recordException(errorObj);
-      activeSpan.setStatus({ code: 2, message: errorObj.message }); // Set status to Error
-      activeSpan.addEvent('exception', {
-        'log.level': 'error',
-        ...meta
-      });
-    }
-    console.error(`${EMOJI_MAP.error} [ERROR ${getFormattedTime()}] [${meta.module || 'core'}] ${errorObj.message}`, meta);
-  },
-
-  async debug(message, meta = {}, ctx = null, span = null) {
-    // 仅在开发环境打印 console，不发送到 OTel 以节省额度
-    if (this.env === 'development') {
-      console.debug(`${EMOJI_MAP.debug} [DEBUG ${getFormattedTime()}] [${meta.module || 'core'}] ${message}`, meta);
-    }
-  }
-};
 
 /**
  * 验证 QStash 签名 - 重构版本
  */
 async function verifyQStashSignature(request, env, isGetRequest = false, ctx = null) {
+  const verifyQStashSignatureLogger = logger.child({ module: 'QStashSignature' });
   // 跳过签名验证
   if (env.SKIP_SIGNATURE_VERIFY === 'true') {
-    await logger.debug('跳过签名验证', {}, ctx);
+    await verifyQStashSignatureLogger.debug('跳过签名验证', {}, ctx);
     if (isGetRequest) {
       return null;
     }
@@ -218,7 +141,7 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
       // 返回 Uint8Array 以匹配测试期望
       return bodyData;
     } catch (e) {
-      await logger.error('QStash mock 验证失败', { error: e.message }, ctx);
+      await verifyQStashSignatureLogger.error('QStash mock 验证失败', { error: e.message }, ctx);
       throw e;
     }
   }
@@ -250,7 +173,7 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
       throw e;
     }
     // 其他错误（如密钥无效、格式错误等）
-    await logger.error('QStash 验证失败', { error: e.message }, ctx);
+    await verifyQStashSignatureLogger.error('QStash 验证失败', { error: e.message }, ctx);
     throw new Error(`Signature verification failed: ${e.message}`);
   }
 }
@@ -282,6 +205,7 @@ function parseInstanceData(data) {
  * 扫描锁键（用于 leader election 提示）
  */
 async function scanLockKeys(env, ctx = null) {
+  const scanLockKeysLogger = logger.child({ module: 'scanLockKeys' });
   try {
     const lockPrefixes = ['lock:', 'task:', 'msg_lock:'];
     let lockCount = 0;
@@ -290,7 +214,7 @@ async function scanLockKeys(env, ctx = null) {
     const results = await Promise.all(lockPrefixes.map(prefix => 
       executeWithFailover('_kv_list', env, ctx, prefix)
         .catch(e => {
-          logger.debug('锁键扫描失败', { prefix, error: e.message }, ctx);
+          scanLockKeysLogger.debug('锁键扫描失败', { prefix, error: e.message }, ctx);
           return { keys: [] };
         })
     ));
@@ -303,7 +227,7 @@ async function scanLockKeys(env, ctx = null) {
     
     return lockCount;
   } catch (error) {
-    await logger.debug('锁键扫描异常', { error: error.message }, ctx);
+    await scanLockKeysLogger.debug('锁键扫描异常', { error: error.message }, ctx);
     return 0;
   }
 }
@@ -312,6 +236,7 @@ async function scanLockKeys(env, ctx = null) {
  * 获取活跃实例
  */
 async function getActiveInstances(env, ctx = null) {
+  const getActiveInstancesLogger = logger.child({ module: 'getActiveInstances' });
   try {
     // 扫描所有契约键前缀
     const prefixes = ['instance:', 'lock:', 'task:', 'msg_lock:'];
@@ -320,7 +245,7 @@ async function getActiveInstances(env, ctx = null) {
     const prefixResults = await Promise.all(prefixes.map(prefix =>
       executeWithFailover('_kv_list', env, ctx, prefix)
         .catch(e => {
-          logger.debug('前缀扫描失败', { prefix, error: e.message }, ctx);
+          getActiveInstancesLogger.debug('前缀扫描失败', { prefix, error: e.message }, ctx);
           return { keys: [] };
         })
     ));
@@ -353,7 +278,7 @@ async function getActiveInstances(env, ctx = null) {
     const instanceDataResults = await Promise.all(instanceKeys.map(keyName =>
       executeWithFailover('_kv_get', env, ctx, keyName)
         .catch(e => {
-          logger.error('读取实例数据失败', { key: keyName, error: e.message }, ctx);
+          getActiveInstancesLogger.error('读取实例数据失败', { key: keyName, error: e.message }, ctx);
           return null;
         })
     ));
@@ -365,7 +290,7 @@ async function getActiveInstances(env, ctx = null) {
         if (now - instance.lastHeartbeat <= HEARTBEAT_TIMEOUT) {
           instances.push(instance);
         } else {
-          await logger.debug('实例已过期', { instanceId: instance.id, lastHeartbeat: instance.lastHeartbeat }, ctx);
+          await getActiveInstancesLogger.debug('实例已过期', { instanceId: instance.id, lastHeartbeat: instance.lastHeartbeat }, ctx);
         }
       }
     }
@@ -375,7 +300,7 @@ async function getActiveInstances(env, ctx = null) {
     const lockCount = lockKeys.length;
     
     if (lockCount > 0) {
-      await logger.debug('检测到锁键', { lockCount }, ctx);
+      await getActiveInstancesLogger.debug('检测到锁键', { lockCount }, ctx);
     }
 
     // 为了兼容测试：测试期望 scanLockKeys 被调用，从而触发额外的 KV.list
@@ -383,10 +308,10 @@ async function getActiveInstances(env, ctx = null) {
       await scanLockKeys(env, ctx);
     }
 
-    await logger.debug('获取活跃实例', { count: instances.length, totalKeys: allKeys.length }, ctx);
+    await getActiveInstancesLogger.debug('获取活跃实例', { count: instances.length, totalKeys: allKeys.length }, ctx);
     return instances;
   } catch (error) {
-    await logger.error('获取活跃实例失败', { error: error.message }, ctx);
+    await getActiveInstancesLogger.error('获取活跃实例失败', { error: error.message }, ctx);
     return [];
   }
 }
@@ -395,6 +320,7 @@ async function getActiveInstances(env, ctx = null) {
  * 选择目标实例 (轮询)
  */
 async function selectTargetInstance(instances, env, ctx) {
+  const selectTargetInstanceLogger = logger.child({ module: 'selectTargetInstance' });
   if (instances.length === 0) {
     return null;
   }
@@ -404,7 +330,7 @@ async function selectTargetInstance(instances, env, ctx) {
     const stored = await executeWithFailover('_kv_get', env, ctx, ROUND_ROBIN_KEY);
     currentIndex = stored ? parseInt(stored) : 0;
   } catch (e) {
-    await logger.error('轮询索引获取失败', { error: e.message }, ctx);
+    await selectTargetInstanceLogger.error('轮询索引获取失败', { error: e.message }, ctx);
   }
 
   const targetIndex = currentIndex % instances.length;
@@ -413,7 +339,7 @@ async function selectTargetInstance(instances, env, ctx) {
   try {
     await executeWithFailover('_kv_put', env, ctx, ROUND_ROBIN_KEY, (currentIndex + 1).toString());
   } catch (e) {
-    await logger.error('轮询索引更新失败', { error: e.message }, ctx);
+    await selectTargetInstanceLogger.error('轮询索引更新失败', { error: e.message }, ctx);
   }
 
   return targetInstance;
@@ -423,6 +349,7 @@ async function selectTargetInstance(instances, env, ctx) {
  * 转发请求到目标实例
  */
 async function forwardToInstance(instance, normalizedUrl, request, originalBody, ctx = null) {
+  const forwardToInstanceLogger = logger.child({ module: 'forwardToInstance' });
   const url = new URL(normalizedUrl.href);
   url.host = new URL(instance.url).host;
   url.protocol = new URL(instance.url).protocol;
@@ -456,7 +383,7 @@ async function forwardToInstance(instance, normalizedUrl, request, originalBody,
   const response = await fetch(forwardRequest);
 
   if (response.status >= 500) {
-    await logger.warn('后端返回 5xx 错误', { status: response.status, instanceId: instance.id }, ctx);
+    await forwardToInstanceLogger.warn('后端返回 5xx 错误', { status: response.status, instanceId: instance.id }, ctx);
   }
 
   return response;
@@ -466,6 +393,7 @@ async function forwardToInstance(instance, normalizedUrl, request, originalBody,
  * 带重试的转发逻辑
  */
 async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx) {
+  const fetchWithRetryLogger = logger.child({ module: 'fetchWithRetry' });
   let lastError;
   let last5xxResponse = null;
 
@@ -475,7 +403,7 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx)
       
       // 4xx 错误：直接透传，不再重试其他实例
       if (response.status >= 400 && response.status < 500) {
-        await logger.warn('实例返回 4xx 错误，停止重试', { status: response.status, instanceId: instance.id }, ctx);
+        await fetchWithRetryLogger.warn('实例返回 4xx 错误，停止重试', { status: response.status, instanceId: instance.id }, ctx);
         if (last5xxResponse && last5xxResponse.body) {
           await last5xxResponse.body.cancel().catch(() => {});
         }
@@ -497,14 +425,14 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx)
       }
       return response;
     } catch (error) {
-      await logger.error('转发请求失败', { instanceId: instance.id, error: error.message }, ctx);
+      await fetchWithRetryLogger.error('转发请求失败', { instanceId: instance.id, error: error.message }, ctx);
       lastError = error;
     }
   }
 
   // 如果有 5xx 响应，返回最后一个 5xx 响应（new-features 测试期望）
   if (last5xxResponse) {
-    await logger.warn('所有实例均返回 5xx', { status: last5xxResponse.status }, ctx);
+    await fetchWithRetryLogger.warn('所有实例均返回 5xx', { status: last5xxResponse.status }, ctx);
     return last5xxResponse;
   }
 
@@ -563,17 +491,18 @@ function shouldFailover(error, env) {
 }
 
 function failover(env) {
+  const failoverLogger = logger.child({ module: 'failover' });
   const hasUpstash = env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN;
   const hasNFRedis = env.NF_REDIS_URL && env.NF_REDIS_PASSWORD;
   
   // 优先级：Upstash > NF Redis
   if (hasUpstash) {
     currentProvider = 'upstash';
-    logger.info('故障转移到 Upstash Redis', { reason: failoverReason });
+    failoverLogger.info('故障转移到 Upstash Redis', { reason: failoverReason });
     return true;
   } else if (hasNFRedis) {
     currentProvider = 'redis';
-    logger.info('故障转移到 Redis', { reason: failoverReason });
+    failoverLogger.info('故障转移到 Redis', { reason: failoverReason });
     return true;
   }
   
@@ -604,6 +533,7 @@ function isRetryableError(error) {
  * 带有重试逻辑的 Redis 命令执行器
  */
 async function retryRedisCommand(client, command, args = [], maxRetries = 3, initialDelay = 100, ctx = null) {
+  const retryRedisCommandLogger = logger.child({ module: 'retryRedisCommand' });
   let retries = 0;
   let delay = initialDelay;
   let timerId = null;
@@ -613,7 +543,7 @@ async function retryRedisCommand(client, command, args = [], maxRetries = 3, ini
     while (retries < maxRetries && !isDone) {
       try {
         if (retries > 0) {
-          await logger.warn(`Redis 命令重试: ${command} (尝试 ${retries + 1}/${maxRetries})`, { delay: `${delay}ms` }, ctx);
+          await retryRedisCommandLogger.warn(`Redis 命令重试: ${command} (尝试 ${retries + 1}/${maxRetries})`, { delay: `${delay}ms` }, ctx);
           let retryTimerId = null;
           try {
             await new Promise((resolve) => {
@@ -679,6 +609,7 @@ let redisClient = null;
 let redisInitPromise = null; // 新增：用于锁定初始化过程
 
 async function getRedisClient(env, ctx) {
+  const getRedisClientLogger = logger.child({ module: 'getRedisClient' });
   if (isTestEnvironment && redisClient) return redisClient;
   if (redisClient) return redisClient;
 
@@ -700,12 +631,12 @@ async function getRedisClient(env, ctx) {
       const client = createRedis(redisOptions);
       await client.send('PING'); // 强制握手
       redisClient = client;
-      await logger.info('Redis Client 初始化成功', { host: redisOptions.tls.servername }, ctx);
+      await getRedisClientLogger.info('Redis Client 初始化成功', { host: redisOptions.tls.servername }, ctx);
       return client;
     } catch (e) {
       redisClient = null;
       redisInitPromise = null; // 失败后允许下次重试
-      await logger.error('Redis Client 初始化失败', { error: e.message }, ctx);
+      await getRedisClientLogger.error('Redis Client 初始化失败', { error: e.message }, ctx);
       throw e;
     }
   })();
@@ -784,6 +715,7 @@ async function executeRedisScan(env, prefix, ctx = null) {
  * 检查 NF Redis 健康状况 (非阻塞)
  */
 async function checkRedisHealth(env, ctx, executor = executeWithPriorityFallback) {
+  const checkRedisHealthLogger = logger.child({ module: 'checkRedisHealth' });
   try {
     // 之前基于 TCP PING 的健康检查在 Cloudflare Workers 中不可行
     // 改为尝试通过 executeWithPriorityFallback 读取一个预设的键，
@@ -791,10 +723,10 @@ async function checkRedisHealth(env, ctx, executor = executeWithPriorityFallback
     const start = Date.now();
     await executor('_kv_get', env, ctx, 'healthcheck_ping');
     const duration = Date.now() - start;
-    await logger.info(`Redis provider 健康检查成功 (通过 _kv_get)`, { duration: `${duration}ms` }, ctx);
+    await checkRedisHealthLogger.info(`Redis provider 健康检查成功 (通过 _kv_get)`, { duration: `${duration}ms` }, ctx);
     return true;
   } catch (e) {
-    await logger.error(`Redis provider 健康检查失败`, { error: e.message }, ctx);
+    await checkRedisHealthLogger.error(`Redis provider 健康检查失败`, { error: e.message }, ctx);
     return false;
   }
 }
@@ -803,6 +735,7 @@ async function checkRedisHealth(env, ctx, executor = executeWithPriorityFallback
  * 执行 Upstash Redis Scan 操作
  */
 async function executeUpstashScan(env, prefix) {
+  const executeUpstashScanLogger = logger.child({ module: 'executeUpstashScan' });
   const baseUrl = env.UPSTASH_REDIS_REST_URL;
   const token = env.UPSTASH_REDIS_REST_TOKEN;
   
@@ -822,7 +755,7 @@ async function executeUpstashScan(env, prefix) {
     
     if (!res.ok) {
       const duration = Date.now() - start;
-      await logger.warn(`Upstash Scan Error: status=${res.status}, duration=${duration}ms`, {}, null);
+      await executeUpstashScanLogger.warn(`Upstash Scan Error: status=${res.status}, duration=${duration}ms`, {}, null);
       throw new Error(`Upstash Scan Error: ${res.status}`);
     }
     
@@ -836,7 +769,7 @@ async function executeUpstashScan(env, prefix) {
   }
   
   const totalDuration = Date.now() - start;
-  await logger.debug(`Upstash Scan: prefix=${prefix} success, keys=${keys.length}, duration=${totalDuration}ms`, {}, null);
+  await executeUpstashScanLogger.debug(`Upstash Scan: prefix=${prefix} success, keys=${keys.length}, duration=${totalDuration}ms`, {}, null);
   return { keys: keys.map(name => ({ name })) };
 }
 
@@ -844,8 +777,9 @@ async function executeUpstashScan(env, prefix) {
  * 执行操作并支持优先级故障转移
  */
 async function executeWithPriorityFallback(operation, env, ctx, ...args) {
+  const executeWithPriorityFallbackLogger = logger.child({ module: 'executeWithPriorityFallback' });
   const providers = getProviderPriority(env);
-  await logger.debug(`执行 ${operation}，优先级: ${JSON.stringify(providers)}`, { args: args.slice(0, 1) }, ctx);
+  await executeWithPriorityFallbackLogger.debug(`执行 ${operation}，优先级: ${JSON.stringify(providers)}`, { args: args.slice(0, 1) }, ctx);
   
   const providerOps = {
     'redis': {
@@ -858,7 +792,7 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         if (env.KV_STORAGE) {
           const start = Date.now();
           const res = await env.KV_STORAGE.get(args[0]);
-          await logger.debug(`Cloudflare KV GET: key=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' }, ctx);
+          await executeWithPriorityFallbackLogger.debug(`Cloudflare KV GET: key=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' }, ctx);
           return res;
         }
         throw new Error('KV_STORAGE not available');
@@ -867,7 +801,7 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         if (env.KV_STORAGE) {
           const start = Date.now();
           await env.KV_STORAGE.put(args[0], args[1]);
-          await logger.debug(`Cloudflare KV PUT: key=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' }, ctx);
+          await executeWithPriorityFallbackLogger.debug(`Cloudflare KV PUT: key=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' }, ctx);
           return true;
         }
         throw new Error('KV_STORAGE not available');
@@ -876,7 +810,7 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         if (env.KV_STORAGE) {
           const start = Date.now();
           const res = await env.KV_STORAGE.list({ prefix: args[0] });
-          await logger.debug(`Cloudflare KV LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' }, ctx);
+          await executeWithPriorityFallbackLogger.debug(`Cloudflare KV LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' }, ctx);
           return res;
         }
         throw new Error('KV_STORAGE not available');
@@ -890,22 +824,22 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         });
         const duration = Date.now() - start;
 
-        await logger.debug(`Upstash GET ${args[0]}: status ${response.status}, duration=${duration}ms`, { cache: true, provider: 'Upstash' }, ctx);
+        await executeWithPriorityFallbackLogger.debug(`Upstash GET ${args[0]}: status ${response.status}, duration=${duration}ms`, { cache: true, provider: 'Upstash' }, ctx);
 
         if (response.status === 404) {
-          await logger.debug(`Upstash GET 404 for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' }, ctx);
+          await executeWithPriorityFallbackLogger.debug(`Upstash GET 404 for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' }, ctx);
           await response.body.cancel();
           return null;
         }
 
         if (!response.ok) {
-          await logger.debug(`Upstash GET error ${response.status} for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' }, ctx);
+          await executeWithPriorityFallbackLogger.debug(`Upstash GET error ${response.status} for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' }, ctx);
           await response.body?.cancel();
           throw new Error(`Upstash Get Error: ${response.status} ${response.statusText}`);
         }
 
         const data = await response.json();
-        await logger.debug(`Upstash GET ${args[0]} success`, { cache: true, provider: 'Upstash' }, ctx);
+        await executeWithPriorityFallbackLogger.debug(`Upstash GET ${args[0]} success`, { cache: true, provider: 'Upstash' }, ctx);
         return data.result;
       },
       '_kv_put': async () => {
@@ -920,21 +854,21 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         });
         const duration = Date.now() - start;
 
-        await logger.debug(`Upstash PUT ${args[0]}: status ${response.status}, duration=${duration}ms`, { cache: true, provider: 'Upstash' }, ctx);
+        await executeWithPriorityFallbackLogger.debug(`Upstash PUT ${args[0]}: status ${response.status}, duration=${duration}ms`, { cache: true, provider: 'Upstash' }, ctx);
 
         if (!response.ok) {
-          await logger.debug(`Upstash PUT error ${response.status} for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' }, ctx);
+          await executeWithPriorityFallbackLogger.debug(`Upstash PUT error ${response.status} for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' }, ctx);
           await response.body?.cancel();
           throw new Error(`Upstash Put Error: ${response.status} ${response.statusText}`);
         }
 
-        await logger.debug(`Upstash PUT ${args[0]} success`, { cache: true, provider: 'Upstash' }, ctx);
+        await executeWithPriorityFallbackLogger.debug(`Upstash PUT ${args[0]} success`, { cache: true, provider: 'Upstash' }, ctx);
         return true;
       },
       '_kv_list': async () => {
         const start = Date.now();
         const res = await executeUpstashScan(env, args[0]);
-        await logger.debug(`Upstash LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'Upstash' }, ctx);
+        await executeWithPriorityFallbackLogger.debug(`Upstash LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'Upstash' }, ctx);
         return res;
       }
     }
@@ -948,10 +882,10 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
     
     const start = Date.now();
     try {
-      await logger.debug(`尝试 ${p} ${operation} ${args[0] || ''}`, { cache: true, provider: p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis' }, ctx);
+      await executeWithPriorityFallbackLogger.debug(`尝试 ${p} ${operation} ${args[0] || ''}`, { cache: true, provider: p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis' }, ctx);
       const result = await providerOps[p][operation]();
       const duration = Date.now() - start;
-      await logger.debug(`使用 ${p} ${operation} 成功, duration=${duration}ms`, { cache: true, provider: p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis' }, ctx);
+      await executeWithPriorityFallbackLogger.debug(`使用 ${p} ${operation} 成功, duration=${duration}ms`, { cache: true, provider: p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis' }, ctx);
       lastUsedProvider = p;
       return result;
     } catch (e) {
@@ -966,9 +900,9 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
       const nextProvider = providers[i + 1];
       const providerName = p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis';
       if (nextProvider) {
-        await logger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, fallback to ${nextProvider}`, { cache: true, provider: providerName }, ctx);
+        await executeWithPriorityFallbackLogger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, fallback to ${nextProvider}`, { cache: true, provider: providerName }, ctx);
       } else {
-        await logger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, no more fallbacks`, { cache: true, provider: providerName }, ctx);
+        await executeWithPriorityFallbackLogger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, no more fallbacks`, { cache: true, provider: providerName }, ctx);
       }
       // 继续尝试下一个提供者
       continue;
@@ -1086,7 +1020,10 @@ export default {
     // 1. 创建安全环境，防止 OTel 扫描 undefined 变量时崩溃
     const safeEnv = createSafeEnv(env);
 
-    // 2. 判定是否启用 Axiom 导出器
+    // 2. 配置基础 Logger 的 transport
+    configureBaseLoggerTransport(safeEnv);
+
+    // 3. 判定是否启用 Axiom 导出器
     const useAxiom = !isTestEnvironment && safeEnv.AXIOM_TOKEN && safeEnv.AXIOM_DATASET;
 
     if (useAxiom) {
@@ -1104,7 +1041,7 @@ export default {
       }).fetch(request, safeEnv, ctx);
     }
 
-    // 3. 回退模式：直接运行业务逻辑
+    // 4. 回退模式：直接运行业务逻辑
     return handler.fetch(request, safeEnv, ctx);
   }
 };
@@ -1131,17 +1068,12 @@ function normalizePath(pathname) {
  * Worker 主逻辑
  */
 async function handleRequest(request, env, ctx) {
-  logger.debug('Request Received', { method: request.method, url: request.url, module: 'handleRequest' });
-
-  // 检查环境变量是否为占位符 (防止 GHA 注入失败)
   const token = env.AXIOM_TOKEN;
   const dataset = env.AXIOM_DATASET;
-  logger.debug('Config Check', {
-    token_prefix: token ? token.slice(0, 10) + "..." : "MISSING",
-    dataset: dataset || "MISSING",
-    is_test: isTestEnvironment,
-    module: 'handleRequest'
-  });
+  const requestLogger = logger.child({ module: 'handleRequest' });
+  requestLogger.debug('Request Received', { method: request.method, url: request.url });
+
+
 
   // 1. 提前解构环境变量（在任何异步操作前）
   const axiomToken = env.AXIOM_TOKEN;
@@ -1153,32 +1085,8 @@ async function handleRequest(request, env, ctx) {
 
   // 1. 在上下文还在时，显式捕获顶级 Span
   const rootSpan = trace.getActiveSpan();
-  const logBuffer = [];
 
-  // 2. 局部日志对象：强制透传 rootSpan
-  const requestLogger = {
-    info: async (msg, meta = {}) => {
-      const entry = { _time: new Date().toISOString(), level: 'info', message: msg, module: meta.module || 'lb-core', ...meta };
-      logBuffer.push(entry);
-      // 显式传入 rootSpan，确保跨异步流依然能挂载 OTel 事件
-      await logger.info(msg, meta, ctx, rootSpan);
-    },
-    warn: async (msg, meta = {}) => {
-      const entry = { _time: new Date().toISOString(), level: 'warn', message: msg, module: meta.module || 'lb-core', ...meta };
-      logBuffer.push(entry);
-      await logger.warn(msg, meta, ctx, rootSpan);
-    },
-    error: async (msg, meta = {}) => {
-      const entry = { _time: new Date().toISOString(), level: 'error', message: msg, module: meta.module || 'lb-core', ...meta };
-      logBuffer.push(entry);
-      await logger.error(msg, meta, ctx, rootSpan);
-    },
-    debug: async (msg, meta = {}) => {
-      if (logger.env === 'development') {
-        await logger.debug(msg, meta, ctx, rootSpan);
-      }
-    }
-  };
+
 
   const normalizedUrl = new URL(request.url);
   normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
@@ -1196,7 +1104,7 @@ async function handleRequest(request, env, ctx) {
   }
 
   // 1. 初始化基础状态
-  logger.env = env.NODE_ENV || 'production';
+  logger.configure({ env: env.NODE_ENV || 'production' });
 
   await requestLogger.debug('Axiom 配置检查', {
     axiomEnabled,
@@ -1300,89 +1208,70 @@ async function handleRequest(request, env, ctx) {
 
   let result;
   try {
-  // 获取活跃实例
-  const activeInstances = await getActiveInstances(env, ctx);
-  await requestLogger.debug('getActiveInstances complete', { count: activeInstances.length, module: 'instanceSelector' });
-  await requestLogger.info('活跃实例查询完成', { count: activeInstances.length });
-  await requestLogger.info('存活标记: getActiveInstances 完成', {
-    alive: true,
-    count: activeInstances.length,
-    timestamp: Date.now()
-  });
-
-  if (activeInstances.length === 0) {
-    const qstashMsgId = request.headers.get('Upstash-Message-Id');
-    const retryCount = request.headers.get('Upstash-Retries');
-
-    await requestLogger.warn('无活跃实例可用', {
-      qstashMsgId,
-      retryCount,
-      path: normalizedUrl.pathname
+    // 获取活跃实例
+    const activeInstances = await getActiveInstances(env, ctx);
+    await requestLogger.debug('getActiveInstances complete', { count: activeInstances.length, module: 'instanceSelector' });
+    await requestLogger.info('活跃实例查询完成', { count: activeInstances.length });
+    await requestLogger.info('存活标记: getActiveInstances 完成', {
+      alive: true,
+      count: activeInstances.length,
+      timestamp: Date.now()
     });
 
+    if (activeInstances.length === 0) {
+      const qstashMsgId = request.headers.get('Upstash-Message-Id');
+      const retryCount = request.headers.get('Upstash-Retries');
+
+      await requestLogger.warn('无活跃实例可用', {
+        qstashMsgId,
+        retryCount,
+        path: normalizedUrl.pathname
+      });
+
+      result = new Response(JSON.stringify({
+        error: 'No active instances available',
+        qstashMsgId,
+        timestamp: new Date().toISOString()
+      }), {
+        status: 503,
+        headers: {
+          'Content-Type': 'application/json',
+          'Retry-After': '60'
+        }
+      });
+    } else {
+      // 选择目标实例
+      const targetInstance = await selectTargetInstance(activeInstances, env, ctx);
+      await requestLogger.debug('targetInstance selected', { id: targetInstance?.id || 'NONE', module: 'instanceSelector' });
+      if (!targetInstance) {
+        result = new Response('No target instance selected', { status: 503 });
+      } else {
+        // 转发请求
+        const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], normalizedUrl, request, env, body, ctx);
+
+        await requestLogger.debug('负载均衡请求完成', { status: response.status });
+
+        await requestLogger.info('核心 Fetch 诊断', {
+          finalStatus: response.status,
+          finalStatusText: response.statusText,
+          instanceId: targetInstance.id,
+          path: normalizedUrl.pathname,
+          alive: true
+        });
+
+        result = response;
+      }
+    }
+  } catch (error) {
+    await requestLogger.error('handleRequest 处理失败', { error: error.message });
     result = new Response(JSON.stringify({
-      error: 'No active instances available',
-      qstashMsgId,
+      error: 'Internal Server Error',
+      message: error.message,
       timestamp: new Date().toISOString()
     }), {
-      status: 503,
-      headers: {
-        'Content-Type': 'application/json',
-        'Retry-After': '60'
-      }
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
     });
-  } else {
-
-  // 选择目标实例
-  const targetInstance = await selectTargetInstance(activeInstances, env, ctx);
-  await requestLogger.debug('targetInstance selected', { id: targetInstance?.id || 'NONE', module: 'instanceSelector' });
-  if (!targetInstance) {
-    result = new Response('No target instance selected', { status: 503 });
-  } else {
-    // 转发请求
-    const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], normalizedUrl, request, env, body, ctx);
-
-    await requestLogger.debug('负载均衡请求完成', { status: response.status });
-
-    await requestLogger.info('核心 Fetch 诊断', {
-      finalStatus: response.status,
-      finalStatusText: response.statusText,
-      instanceId: targetInstance.id,
-      path: normalizedUrl.pathname,
-      alive: true
-    });
-
-    result = response;
-  }
-
-  }
-  } finally {
-    // 在 handleRequest 的 return 之前
-    requestLogger.debug('Entering log flush logic', { bufferSize: logBuffer.length, module: 'axiomFlush' }); // 非 await
-
-    if (ctx && ctx.waitUntil && token && dataset) {
-      requestLogger.debug('Triggering ctx.waitUntil fetch', { module: 'axiomFlush' });
-
-      ctx.waitUntil(
-        fetch(`https://api.axiom.co/v1/datasets/${dataset}/ingest`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(logBuffer)
-        })
-        .then(async (res) => {
-          const text = await res.text();
-          logger.info('Axiom ingest feedback', { status: res.status, bodyPreview: text.slice(0,100), module: 'axiomFlush' }); // 非 await
-        })
-        .catch((err) => {
-          logger.error('Axiom ingest fetch error', { error: err.message, module: 'axiomFlush' });
-        })
-      );
-    } else {
-      logger.debug('Skip axiom flush', { reason: 'ctx/token/dataset invalid', module: 'axiomFlush' });
-    }
   }
 
   return result;

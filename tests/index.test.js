@@ -353,7 +353,11 @@ describe('Worker Tests', () => {
       const result = await handleRequest(request, axiomEnv, ctx);
 
       expect(result.status).toBe(503);
-      expect(ctx.waitUntil).toHaveBeenCalledTimes(1);
+      // The new logger uses warn level for "no active instances", which routes to console.warn in test environment
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('无活跃实例'),
+        expect.any(Object)
+      );
     });
   });
 
@@ -404,20 +408,23 @@ describe('Worker Tests', () => {
       const ctx = { waitUntil: jest.fn() };
       await handleRequest(request, env, ctx);
 
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('LB Request Started'),
+      // The new logger uses console.debug for debug-level logs
+      expect(consoleDebugSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Request Received'),
         expect.objectContaining({
-          path: '/health',
+          url: 'https://test.url/health',
           method: 'GET',
-          version: 'dev'
+          module: 'handleRequest'
         })
       );
+      // Provider Status is logged at info level, not debug
       expect(consoleLogSpy).toHaveBeenCalledWith(
         expect.stringContaining('Provider Status'),
         expect.objectContaining({
           primary: 'redis',
           hasKv: true,
-          hasRedis: true
+          hasRedis: true,
+          module: 'handleRequest'
         })
       );
     });

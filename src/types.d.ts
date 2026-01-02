@@ -50,4 +50,6 @@ declare global {
   // Worker ID for testing
   var WORKER_ID: string | undefined;
   var __QSTASH_MOCK_VERIFY__: any;
+  // Jest global for testing
+  var jest: any;
 }
