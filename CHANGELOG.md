@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.7.0](https://github.com/YoungSx/lb-worker-js/compare/v0.6.0...v0.7.0) (2026-01-02)
+
+
+### 🔧 Maintenance
+
+* implement Redis TCP client with enhanced reliability ([293f4b9](https://github.com/YoungSx/lb-worker-js/commit/293f4b91051c38b7c44afc2538d09e5de06fc1ed))
+
+
+### 🐛 Bug Fixes
+
+* improve Redis connection reliability and add TLS workaround ([223f28b](https://github.com/YoungSx/lb-worker-js/commit/223f28bbffe1e3ba35a1800ad92d704ab79887fd))
+* improves Redis command retry logic and adds timeout handling ([b241d69](https://github.com/YoungSx/lb-worker-js/commit/b241d69b8e96559c68f8e88d8aa3d49785e48cc6))
+* updates Redis client initialization with improved TLS configuration ([b1cdad1](https://github.com/YoungSx/lb-worker-js/commit/b1cdad1c68733fa4f96b99702c41a7d4cd58574c))
+
 ## [0.6.0](https://github.com/YoungSx/lb-worker-js/compare/v0.5.0...v0.6.0) (2026-01-01)
 
 
