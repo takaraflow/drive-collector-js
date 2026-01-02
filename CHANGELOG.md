@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.8.1](https://github.com/YoungSx/lb-worker-js/compare/v0.8.0...v0.8.1) (2026-01-02)
+
+
+### 🐛 Bug Fixes
+
+* 添加RequestInitializerDict错误分类到日志系统 ([90de0b7](https://github.com/YoungSx/lb-worker-js/commit/90de0b7309084221bef29ff17acab6ba4de2f543))
+* enhances logging with OpenTelemetry span integration ([222d3c0](https://github.com/YoungSx/lb-worker-js/commit/222d3c00c618782bf085a50ad24e3790e24f8f97))
+* improve OpenTelemetry span context handling in logger ([9232249](https://github.com/YoungSx/lb-worker-js/commit/923224940b4187332404cd7653983f8685358e05))
+
+
+### 🔧 Maintenance
+
+* replaces Axiom SDK with direct HTTP API calls ([2cc4bd6](https://github.com/YoungSx/lb-worker-js/commit/2cc4bd6d6f110b619600c08a4244881ee8e992dd))
+
 ## [0.8.0](https://github.com/YoungSx/lb-worker-js/compare/v0.7.10...v0.8.0) (2026-01-02)
 
 
