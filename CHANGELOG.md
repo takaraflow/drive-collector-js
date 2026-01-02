@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.5](https://github.com/YoungSx/lb-worker-js/compare/v0.7.4...v0.7.5) (2026-01-02)
+
+
+### 🐛 Bug Fixes
+
+* dynamically parse GHA JSON for infra vars ([cbf1049](https://github.com/YoungSx/lb-worker-js/commit/cbf10495be75a96aad4a5ec5e42be1558a3757a7))
+* improve Jest configuration and build process reliability ([b16f14f](https://github.com/YoungSx/lb-worker-js/commit/b16f14f4ed36326395851a61c90ece5f0e0d676a))
+* replaces build.sh with cross-platform Node.js build logic ([6355e54](https://github.com/YoungSx/lb-worker-js/commit/6355e5415aea523dd1c94baa9b8f23b0ead03a0b))
+
 ### [0.7.4](https://github.com/YoungSx/lb-worker-js/compare/v0.7.3...v0.7.4) (2026-01-02)
 
 
