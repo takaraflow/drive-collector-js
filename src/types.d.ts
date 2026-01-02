@@ -36,8 +36,16 @@ interface Instance {
   status: 'active' | 'offline';
 }
 
+interface ProcessEnv {
+  NODE_ENV?: string;
+  JEST_WORKER_ID?: string;
+}
+
 // Extend global for worker context
 declare global {
+  var process: {
+    env?: ProcessEnv;
+  } | undefined;
   declare const __VERSION__: string;
   // Worker ID for testing
   var WORKER_ID: string | undefined;
