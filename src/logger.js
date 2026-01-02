@@ -11,6 +11,13 @@ const jest = typeof globalThis.jest !== 'undefined' ? globalThis.jest : undefine
 export const VERSION = __VERSION__;
 export const isTestEnvironment = process.env.NODE_ENV === 'test' || typeof jest !== 'undefined';
 
+// 定义 LoggerContext 类型
+/**
+ * @typedef {Object} LoggerContext
+ * @property {string} env - 环境 (production, development, test)
+ * @property {Array<Object>} [logBuffer] - 当前请求的日志缓冲
+ */
+
 // 全局基础 logger 配置
 /** @type {Axiom | null} */
 let axiomClient = null;
@@ -42,9 +49,10 @@ export function configureBaseLoggerTransport(env) {
 /**
  * 发送日志到 Axiom
  * @param {Object} logData - 日志数据
+ * @param {Array<Object>} logBuffer - 当前请求的日志缓冲
  * @param {Object} ctx - Cloudflare context (可选)
  */
-async function sendToAxiom(logData, ctx = null) {
+async function sendToAxiom(logData, logBuffer, ctx = null) {
   if (isTestEnvironment) {
     // 测试环境：输出到控制台供测试用例捕获
     const level = logData.level || 'info';
@@ -54,7 +62,7 @@ async function sendToAxiom(logData, ctx = null) {
     delete data.message;
     delete data.timestamp;
     delete data.version;
-    
+
     if (level === 'info') {
       console.log(message, data);
     } else if (level === 'warn') {
@@ -67,19 +75,29 @@ async function sendToAxiom(logData, ctx = null) {
     return;
   }
 
-  if (!axiomClient || !baseLoggerConfig.dataset) {
-    // 未配置 Axiom 时，输出到控制台
-    console.log(JSON.stringify(logData));
+  // 将日志添加到缓冲
+  logBuffer.push(logData);
+}
+
+/**
+ * 刷新日志缓冲，将所有待发送日志发送到 Axiom
+ * @param {Array<Object>} logBuffer - 当前请求的日志缓冲
+ * @param {Object} ctx - Cloudflare context (可选)
+ */
+export async function flushLogs(logBuffer, ctx = null) {
+  if (isTestEnvironment || !axiomClient || !baseLoggerConfig.dataset) {
+    // 测试环境或未配置Axiom时，不进行实际发送
     return;
   }
 
   try {
-    // Axiom 的 ingest 方法是异步的，但返回 void
-    // 我们需要手动处理 flush 来确保日志发送
-    axiomClient.ingest(baseLoggerConfig.dataset, [logData]);
-    
+    if (logBuffer.length === 0) return; // 没有日志需要发送
+
+    axiomClient.ingest(baseLoggerConfig.dataset, logBuffer);
+    logBuffer.length = 0; // 清空缓冲
+
     if (ctx && ctx.waitUntil) {
-      // 使用 ctx.waitUntil 确保日志发送不阻塞响应
+      // 使用 ctx.waitUntil 确保日志批量发送不阻塞响应
       ctx.waitUntil(
         axiomClient.flush().catch(err => {
           console.error('Axiom 日志发送失败:', err.message);
@@ -119,14 +137,14 @@ function addOtelEvent(level, message, data = {}) {
 
 /**
  * 创建日志记录器工厂函数
- * @param {Object} baseConfig - 基础配置
+ * @param {LoggerContext} context - 日志器上下文
  * @param {Object} bindings - 绑定的上下文数据
  */
-function createLoggerFactory(baseConfig, bindings = {}) {
+function createLoggerFactory(context, bindings = {}) {
   const logger = {
     // 基础属性
     version: VERSION,
-    env: baseConfig.env || 'production',
+    env: context.env || 'production',
     bindings: bindings,
 
     /**
@@ -143,10 +161,10 @@ function createLoggerFactory(baseConfig, bindings = {}) {
       };
       
       addOtelEvent('info', message, logData);
-      await sendToAxiom(logData, ctx);
-      
+      await sendToAxiom(logData, context.logBuffer, ctx);
+
       // 开发环境同时输出到控制台
-      if (baseConfig.env === 'development' && !isTestEnvironment) {
+      if (context.env === 'development' && !isTestEnvironment) {
         console.log(`[INFO] ${message}`, { ...bindings, ...data, version: VERSION });
       }
     },
@@ -165,9 +183,9 @@ function createLoggerFactory(baseConfig, bindings = {}) {
       };
       
       addOtelEvent('warn', message, logData);
-      await sendToAxiom(logData, ctx);
-      
-      if (baseConfig.env === 'development' && !isTestEnvironment) {
+      await sendToAxiom(logData, context.logBuffer, ctx);
+
+      if (context.env === 'development' && !isTestEnvironment) {
         console.warn(`[WARN] ${message}`, { ...bindings, ...data, version: VERSION });
       }
     },
@@ -186,9 +204,9 @@ function createLoggerFactory(baseConfig, bindings = {}) {
       };
       
       addOtelEvent('error', message, logData);
-      await sendToAxiom(logData, ctx);
-      
-      if (baseConfig.env === 'development' && !isTestEnvironment) {
+      await sendToAxiom(logData, context.logBuffer, ctx);
+
+      if (context.env === 'development' && !isTestEnvironment) {
         console.error(`[ERROR] ${message}`, { ...bindings, ...data, version: VERSION });
       }
     },
@@ -207,11 +225,11 @@ function createLoggerFactory(baseConfig, bindings = {}) {
       };
       
       addOtelEvent('debug', message, logData);
-      
-      // Debug 日志只在开发环境或测试环境发送到 Axiom
-      if (baseConfig.env === 'development' || isTestEnvironment) {
-        await sendToAxiom(logData, ctx);
-        
+
+      // Debug 日志只在开发环境或测试环境添加到缓冲
+      if (context.env === 'development' || isTestEnvironment) {
+        await sendToAxiom(logData, context.logBuffer, ctx);
+
         if (!isTestEnvironment) {
           console.debug(`[DEBUG] ${message}`, { ...bindings, ...data, version: VERSION });
         }
@@ -223,7 +241,7 @@ function createLoggerFactory(baseConfig, bindings = {}) {
      */
     child: function(bindings) {
       const mergedBindings = { ...logger.bindings, ...bindings };
-      return createLoggerFactory(baseConfig, mergedBindings);
+      return createLoggerFactory(context, mergedBindings);
     },
 
     /**
@@ -231,7 +249,7 @@ function createLoggerFactory(baseConfig, bindings = {}) {
      */
     configure: function(config) {
       if (config.env) {
-        baseConfig.env = config.env;
+        context.env = config.env;
         logger.env = config.env;
       }
     }
@@ -241,7 +259,7 @@ function createLoggerFactory(baseConfig, bindings = {}) {
 }
 
 // 基础 logger 实例
-export const logger = createLoggerFactory(baseLoggerConfig);
+export const logger = createLoggerFactory({ env: baseLoggerConfig.env, logBuffer: [] }); // 初始 logger 实例带有自己的缓冲
 
 // 导出配置函数供外部使用
 export default logger;

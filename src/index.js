@@ -1,4 +1,4 @@
-import { logger, configureBaseLoggerTransport, isTestEnvironment, VERSION } from './logger.js';
+import { logger, configureBaseLoggerTransport, isTestEnvironment, VERSION, flushLogs } from './logger.js';
 
 // 全局状态
 let currentProvider = 'cloudflare';
@@ -1068,9 +1068,8 @@ function normalizePath(pathname) {
  * Worker 主逻辑
  */
 async function handleRequest(request, env, ctx) {
-  const token = env.AXIOM_TOKEN;
-  const dataset = env.AXIOM_DATASET;
-  const requestLogger = logger.child({ module: 'handleRequest' });
+  const requestLogBuffer = []; // 为每个请求创建独立的日志缓冲
+  const requestLogger = logger.child({ module: 'handleRequest', logBuffer: requestLogBuffer }); // 将缓冲传递给子 logger
   requestLogger.debug('Request Received', { method: request.method, url: request.url });
 
 
@@ -1272,6 +1271,9 @@ async function handleRequest(request, env, ctx) {
       status: 500,
       headers: { 'Content-Type': 'application/json' }
     });
+  } finally {
+    // 确保在请求结束时，所有缓冲的日志都被发送
+    await flushLogs(requestLogBuffer, ctx);
   }
 
   return result;
