@@ -10,6 +10,6 @@ id = "${CF_KV_NAMESPACE_ID}"
 preview_id = "${KV_PREVIEW_ID}"
 
 [observability]
-enabled = true
+enabled = false
 # 采样率：1.0 表示 100% 记录，0.1 表示记录 10%
 head_sampling_rate = 1

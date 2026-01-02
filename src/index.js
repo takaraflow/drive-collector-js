@@ -16,7 +16,7 @@ let currentProvider = 'cloudflare';
 let failureCount = 0;
 let lastFailureTime = 0;
 let failoverReason = '';
-let pendingLogs = []; // Per-request logs for native Axiom ingest
+
 
 // 常量
 const ROUND_ROBIN_KEY = 'lb:round_robin_index';
@@ -79,177 +79,60 @@ function detectCacheProvider(env) {
  * 日志记录器
  */
 const logger = {
-  env: 'production',
   version: VERSION,
+  env: 'production',
 
-  configure({ env = 'production' }) {
-    this.env = env;
+  configure(options = {}) {
+    if (options.env !== undefined) {
+      this.env = options.env;
+    }
   },
 
   async info(message, meta = {}, ctx = null) {
     const span = trace.getActiveSpan();
     if (span) {
-      const attributes = {
-        'service.instance.id': "load_balancing",
-        version: this.version,
-        ...meta,
+      span.addEvent(message, {
         'log.level': 'info',
-        'service.name': 'lb-worker-js'
-      };
-      span.addEvent(message, attributes);
-    }
-    // Push to pending logs for native Axiom ingest
-    if (typeof pendingLogs !== 'undefined') {
-      const logEntry = {
-        level: 'info',
-        message,
-        timestamp: new Date().toISOString(),
-        service: 'lb-worker-js',
-        'service.instance.id': 'load_balancing',
+        'service.name': 'lb-worker-js',
         version: this.version,
-        env: this.env,
         ...meta
-      };
-      pendingLogs.push(logEntry);
+      });
     }
-    // 使用 console，测试环境会 mock 它
-    if (console && console.log) {
-      if (isTestEnvironment) {
-        console.log(message, meta);
-      } else {
-        const logObj = {
-          timestamp: new Date().toISOString(),
-          level: 'info',
-          service: 'lb-worker-js',
-          version: this.version,
-          env: this.env,
-          message,
-          ...meta
-        };
-        console.log(JSON.stringify(logObj));
-      }
-    }
+    // 保持 console 输出，方便在 Cloudflare 仪表盘实时查看
+    console.log(`[INFO] ${message}`, meta);
   },
 
   async warn(message, meta = {}, ctx = null) {
     const span = trace.getActiveSpan();
     if (span) {
-      span.setStatus({ code: 1, message: message });
-      span.setAttribute('log.level', 'warn');
-      const attributes = {
-        'service.instance.id': "load_balancing",
-        version: this.version,
-        ...meta,
+      span.setStatus({ code: 1, message }); // Set status to Warning
+      span.addEvent(message, {
         'log.level': 'warn',
-        'service.name': 'lb-worker-js'
-      };
-      span.addEvent(message, attributes);
-    }
-    // Push to pending logs for native Axiom ingest
-    if (typeof pendingLogs !== 'undefined') {
-      const logEntry = {
-        level: 'warn',
-        message,
-        timestamp: new Date().toISOString(),
-        service: 'lb-worker-js',
-        'service.instance.id': 'load_balancing',
-        version: this.version,
-        env: this.env,
+        'service.name': 'lb-worker-js',
         ...meta
-      };
-      pendingLogs.push(logEntry);
+      });
     }
-    // 使用 console，测试环境会 mock 它
-    if (console && console.warn) {
-      if (isTestEnvironment) {
-        console.warn(message, meta);
-      } else {
-        const logObj = {
-          timestamp: new Date().toISOString(),
-          level: 'warn',
-          service: 'lb-worker-js',
-          version: this.version,
-          env: this.env,
-          message,
-          ...meta
-        };
-        console.warn(JSON.stringify(logObj));
-      }
-    }
+    console.warn(`[WARN] ${message}`, meta);
   },
 
   async error(message, meta = {}, ctx = null) {
     const span = trace.getActiveSpan();
+    const errorObj = message instanceof Error ? message : new Error(message);
     if (span) {
-      const error = message instanceof Error ? message : new Error(message);
-      span.recordException(error);
-      span.setStatus({ code: 2, message: error.message });
-      const attributes = {
-        'service.instance.id': "load_balancing",
-        version: this.version,
-        ...meta,
+      span.recordException(errorObj);
+      span.setStatus({ code: 2, message: errorObj.message }); // Set status to Error
+      span.addEvent('exception', {
         'log.level': 'error',
-        'error.message': error.message,
-        'error.stack': error.stack,
-        'service.name': 'lb-worker-js'
-      };
-      span.addEvent('error', attributes);
-    }
-    // Push to pending logs for native Axiom ingest
-    if (typeof pendingLogs !== 'undefined') {
-      const errorObj = message instanceof Error ? message : new Error(message);
-      const logEntry = {
-        level: 'error',
-        message: errorObj.message,
-        timestamp: new Date().toISOString(),
-        service: 'lb-worker-js',
-        'service.instance.id': 'load_balancing',
-        version: this.version,
-        env: this.env,
-        'error.message': errorObj.message,
-        'error.stack': errorObj.stack,
         ...meta
-      };
-      pendingLogs.push(logEntry);
+      });
     }
-    // 使用 console，测试环境会 mock 它
-    if (console && console.error) {
-      if (isTestEnvironment) {
-        console.error(message instanceof Error ? message.message : message, meta);
-      } else {
-        const logObj = {
-          timestamp: new Date().toISOString(),
-          level: 'error',
-          service: 'lb-worker-js',
-          version: this.version,
-          env: this.env,
-          message: message instanceof Error ? message.message : message,
-          ...meta
-        };
-        console.error(JSON.stringify(logObj));
-      }
-    }
+    console.error(`[ERROR] ${errorObj.message}`, meta);
   },
 
   async debug(message, meta = {}, ctx = null) {
+    // 仅在开发环境打印 console，不发送到 OTel 以节省额度
     if (this.env === 'development') {
-      // 使用 console，测试环境会 mock 它
-      if (console && console.debug) {
-        if (isTestEnvironment) {
-          console.debug(message, meta);
-        } else {
-          const logObj = {
-            timestamp: new Date().toISOString(),
-            level: 'debug',
-            service: 'lb-worker-js',
-            version: this.version,
-            env: this.env,
-            message,
-            ...meta
-          };
-          console.debug(JSON.stringify(logObj));
-        }
-      }
+      console.debug(`[DEBUG] ${message}`, meta);
     }
   }
 };
@@ -1249,93 +1132,35 @@ const createSafeEnv = (env) => {
   });
 };
 
-/**
- * Worker 主入口 - 使用 instrument 包装器
- */
 export default {
   async fetch(request, env, ctx) {
-    // 创建安全的环境变量包装器，防止 OTel 库访问 undefined 属性时崩溃
+    // 1. 创建安全环境，防止 OTel 扫描 undefined 变量时崩溃
     const safeEnv = createSafeEnv(env);
-    
-    // 如果配置了 Axiom，使用 instrument 包装器
-    if (!isTestEnvironment && env.AXIOM_TOKEN && env.AXIOM_DATASET) {
-      const config = {
+
+    // 2. 判定是否启用 Axiom 导出器
+    const useAxiom = !isTestEnvironment && safeEnv.AXIOM_TOKEN && safeEnv.AXIOM_DATASET;
+
+    if (useAxiom) {
+      return instrument(handler, {
         serviceName: 'lb-worker-js',
         exporter: {
           url: 'https://api.axiom.co/v1/traces',
           headers: {
-            'Authorization': `Bearer ${env.AXIOM_TOKEN}`,
-            'X-Axiom-Dataset': env.AXIOM_DATASET,
-            'X-Axiom-Org-Id': env.AXIOM_ORG_ID || ''
+            'Authorization': `Bearer ${safeEnv.AXIOM_TOKEN}`,
+            'X-Axiom-Dataset': safeEnv.AXIOM_DATASET,
+            // 如果有 Org ID 则添加
+            ...(safeEnv.AXIOM_ORG_ID ? { 'X-Axiom-Org-Id': safeEnv.AXIOM_ORG_ID } : {})
           }
-        }
-      };
-      return instrument(handler, config).fetch(request, safeEnv, ctx);
+        },
+      }).fetch(request, safeEnv, ctx);
     }
-    
-    // 没有 Axiom 配置，直接处理
+
+    // 3. 回退模式：直接运行业务逻辑
     return handler.fetch(request, safeEnv, ctx);
   }
 };
 
-/**
- * Flush pending logs to Axiom
- */
-async function flushLogs(env, ctx = null) {
-  if (!pendingLogs.length || !env.AXIOM_TOKEN || !env.AXIOM_DATASET) {
-    pendingLogs = [];
-    return;
-  }
 
-  const url = `https://api.axiom.co/v1/datasets/${env.AXIOM_DATASET}/ingest`;
-  const headers = {
-    'Authorization': `Bearer ${env.AXIOM_TOKEN}`,
-    'Content-Type': 'application/json',
-  };
-  if (env.AXIOM_ORG_ID) {
-    headers['X-Axiom-Org-Id'] = env.AXIOM_ORG_ID;
-  }
-
-  // Chunk if > 50 logs
-  const chunkSize = 50;
-  for (let i = 0; i < pendingLogs.length; i += chunkSize) {
-    const chunk = pendingLogs.slice(i, i + chunkSize);
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(chunk)
-      });
-      // 必须显式消耗 body，否则会导致连接挂起
-      if (res.body) {
-        await res.text().catch(() => {});
-      }
-      if (!res.ok) {
-        const err = `Log ingest failed with status ${res.status}`;
-        if (ctx && ctx.waitUntil) {
-          ctx.waitUntil((async () => {
-            try {
-              await logger.warn('Axiom log ingest failed', { status: res.status, error: err, chunkIndex: i }, ctx);
-            } catch (e) {}
-          })());
-        } else {
-          await logger.warn('Axiom log ingest failed', { status: res.status, error: err, chunkIndex: i }, ctx);
-        }
-      }
-    } catch (e) {
-      if (ctx && ctx.waitUntil) {
-        ctx.waitUntil((async () => {
-          try {
-            await logger.warn('Axiom log flush error', { error: e.message, chunkIndex: i }, ctx);
-          } catch (ex) {}
-        })());
-      } else {
-        await logger.warn('Axiom log flush error', { error: e.message, chunkIndex: i }, ctx);
-      }
-    }
-  }
-  pendingLogs = [];
-}
 
 /**
  * 路径映射 - 将契约路径映射到实际路径
@@ -1357,29 +1182,13 @@ function normalizePath(pathname) {
  * Worker 主逻辑
  */
 async function handleRequest(request, env, ctx) {
-  // Reset per-request logs
-  pendingLogs = [];
-
-  // Axiom 初始化诊断日志
-  const axiomToken = env.AXIOM_TOKEN;
-  const axiomDataset = env.AXIOM_DATASET;
-  const maskToken = (token) => token ? `${token.slice(0, 4)}...${token.slice(-4)}` : 'missing';
-  
-  if (axiomToken && axiomDataset) {
-    await logger.info(`Axiom logger 初始化成功, dataset=${axiomDataset}, token=${maskToken(axiomToken)}, version=${VERSION}`, {}, ctx);
-    // Worker startup test log - 仅在第一次 handleRequest 或定期发送，但这里为了诊断每次请求开头发送一个测试日志（pipeline确认）
-    await logger.info('Worker startup test log', { type: 'diagnostic' }, ctx);
-  } else {
-    await logger.warn(`Axiom init 失败: ${!axiomToken ? 'AXIOM_TOKEN 缺失' : ''} ${!axiomDataset ? 'AXIOM_DATASET 缺失' : ''}`.trim(), {}, ctx);
-  }
-
   const normalizedUrl = new URL(request.url);
   normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
-  
+
   // 路径规范化：将契约路径映射到实际路径
   const originalPath = normalizedUrl.pathname;
   normalizedUrl.pathname = normalizePath(normalizedUrl.pathname);
-  
+
   // 记录路径映射（如果发生映射）
   if (originalPath !== normalizedUrl.pathname) {
     await logger.info('路径规范化', {
@@ -1388,73 +1197,43 @@ async function handleRequest(request, env, ctx) {
     }, ctx);
   }
 
-  // 环境变量检查
-  if (!env.AXIOM_TOKEN) {
-    await logger.warn('AXIOM_TOKEN 未设置，日志功能将被禁用', {}, ctx);
-  }
-  
-  // 检查 Axiom binding 状态 (manifest.json 对应的 binding 通常在 env 中体现为变量)
-  // 在 Cloudflare Workers 中，binding 表现为 env 上的属性
+  // 设置 logger 环境
+  logger.env = env.NODE_ENV || 'production';
+
+  // Cache provider 初始化诊断（保持向后兼容测试）
+  const prios = getProviderPriority(env);
+  await logger.info('Cache provider 初始化诊断', {
+    providers: prios,
+    redis_configured: !!(env.NF_REDIS_URL && env.NF_REDIS_PASSWORD),
+    redis_diagnosis: (env.NF_REDIS_URL && env.NF_REDIS_PASSWORD) ? "配置完整" : (!env.NF_REDIS_URL ? "NF_REDIS_URL 缺失" : "NF_REDIS_PASSWORD 缺失"),
+    cf_kv_available: !!env.KV_STORAGE,
+    upstash_configured: !!(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN),
+    detect_primary: detectCacheProvider(env)
+  }, ctx);
+
+  // Axiom 初始化状态（保持向后兼容测试）
   const hasAxiomBinding = !!(env.AXIOM_TOKEN && env.AXIOM_DATASET);
   await logger.info(`Axiom binding status: ${hasAxiomBinding ? 'active' : 'inactive'}`, {
     hasToken: !!env.AXIOM_TOKEN,
     hasDataset: !!env.AXIOM_DATASET,
     hasOrgId: !!env.AXIOM_ORG_ID
   }, ctx);
-
-  if (!env.QSTASH_CURRENT_SIGNING_KEY && env.SKIP_SIGNATURE_VERIFY !== 'true') {
-    await logger.warn('QSTASH_CURRENT_SIGNING_KEY 未设置，Webhook 请求将被拒绝', {}, ctx);
+  if (hasAxiomBinding) {
+    const tokenPreview = env.AXIOM_TOKEN ? `${env.AXIOM_TOKEN.slice(0, 4)}...${env.AXIOM_TOKEN.slice(-4)}` : 'undefined';
+    await logger.info(`Axiom logger 初始化成功 dataset=${env.AXIOM_DATASET} token=${tokenPreview}`, {}, ctx);
+  } else if (!env.AXIOM_TOKEN) {
+    await logger.warn('Axiom init 失败: AXIOM_TOKEN 缺失', {}, ctx);
   }
 
-  // 初始化日志配置
-  logger.configure({ env: env.NODE_ENV || 'production' });
-  
-  // 设置初始提供者
-  currentProvider = detectCacheProvider(env);
-  
-  const prios = getProviderPriority(env);
-  
-  // 打印初始状态诊断
-  await logger.info('Cache provider 状态诊断', {
-    initialProvider: currentProvider,
-    nf_url: env.NF_REDIS_URL ? `${env.NF_REDIS_URL.slice(0, 10)}...` : 'missing',
-    has_nf_pass: !!env.NF_REDIS_PASSWORD
+  // Worker 启动测试日志（保持向后兼容）
+  await logger.info('Worker startup test log', { type: 'diagnostic' }, ctx);
+
+  // 简单的启动标记
+  await logger.info('Request start', {
+    path: request.url,
+    method: request.method,
+    version: VERSION
   }, ctx);
-  
-  // NF Redis 诊断详情
-  let redisConfigStatus = !!(env.NF_REDIS_URL && env.NF_REDIS_PASSWORD);
-  let redisDiagnosis = "configured";
-  if (!env.NF_REDIS_URL && !env.NF_REDIS_PASSWORD) {
-    redisDiagnosis = "配置缺失";
-  } else if (!env.NF_REDIS_URL) {
-    redisDiagnosis = "NF_REDIS_URL 缺失";
-  } else if (!env.NF_REDIS_PASSWORD) {
-    redisDiagnosis = "NF_REDIS_PASSWORD 缺失";
-  } else {
-    redisDiagnosis = "配置完整";
-  }
-
-  await logger.info('Cache provider 初始化诊断', {
-    providers: prios,
-    redis_configured: redisConfigStatus,
-    redis_diagnosis: redisDiagnosis,
-    cf_kv_available: !!env.KV_STORAGE,
-    upstash_configured: !!(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN),
-    detect_primary: detectCacheProvider(env)
-  }, ctx);
-
-  // 如果配置了 NF Redis，启动后台健康检查
-  if (redisConfigStatus && ctx && ctx.waitUntil) {
-    ctx.waitUntil((async () => {
-      try {
-        await checkRedisHealth(env, ctx);
-      } catch (e) {
-        // 捕获异常，防止影响主流程
-      }
-    })());
-  }
-
-  await logger.info('环境初始化', { nodeEnv: env.NODE_ENV || 'production', hasKv: !!env.KV_STORAGE }, ctx);
 
   // 健康检查
   if ((request.method === 'GET' || request.method === 'HEAD') && normalizedUrl.pathname === '/health') {
@@ -1569,19 +1348,6 @@ async function handleRequest(request, env, ctx) {
   const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], normalizedUrl, request, env, body, ctx);
 
   await logger.debug('负载均衡请求完成', { status: response.status }, ctx);
-
-  // Flush logs to Axiom (fire-and-forget, non-blocking)
-  if (ctx && ctx.waitUntil) {
-    ctx.waitUntil((async () => {
-      try {
-        await flushLogs(env, ctx);
-      } catch (e) {
-        // Ignore flush errors in background
-      }
-    })());
-  } else {
-    await flushLogs(env, ctx);
-  }
 
   return response;
 }
