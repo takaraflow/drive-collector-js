@@ -2,7 +2,7 @@
   "manifest_version": "1.1",
   "id": "lb-worker-js",
   "name": "QStash Load Balancer",
-  "version": "0.7.10",
+  "version": "0.8.0",
   "description": "专为 drive-collector-js 设计的高可用负载均衡器，支持 QStash 签名验证、动态实例发现与多层级故障转移。",
   "type": "worker",
   "capabilities": [

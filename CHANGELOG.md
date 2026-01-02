@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.8.0](https://github.com/YoungSx/lb-worker-js/compare/v0.7.10...v0.8.0) (2026-01-02)
+
+
+### ✨ Features
+
+* implement pino-based logging system ([2757dd1](https://github.com/YoungSx/lb-worker-js/commit/2757dd11a8f37c9032feb219333a9784b15b8016))
+
 ### [0.7.10](https://github.com/YoungSx/lb-worker-js/compare/v0.7.9...v0.7.10) (2026-01-02)
 
 
