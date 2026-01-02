@@ -31,7 +31,7 @@ describe('diagnose-axiom-logs.js', () => {
   let mockAxiomClient;
 
   beforeEach(() => {
-    jest.useFakeTimers();
+    // Use global fake timers from setup, but set system time for this test
     jest.setSystemTime(new Date('2026-01-01T12:00:00Z'));
     
     consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -49,7 +49,12 @@ describe('diagnose-axiom-logs.js', () => {
   });
 
   afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
     jest.restoreAllMocks();
+  });
+
+  afterAll(() => {
     jest.useRealTimers();
   });
 

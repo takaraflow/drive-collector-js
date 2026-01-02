@@ -58,7 +58,9 @@ function loadEnvFile(fileSystem = fs) {
                 value = value.trim().replace(/^["']|["']$/g, '');
                 
                 const keyTrim = key.trim();
-                if (!process.env[keyTrim]) {
+                const currentVal = process.env[keyTrim];
+                // 只有当环境变量不存在，或者是 ${VAR} 这种占位符时，才从 .env 加载
+                if (!currentVal || currentVal === `\${${keyTrim}}`) {
                     process.env[keyTrim] = value;
                 }
             }
@@ -111,7 +113,7 @@ function extractVariablesFromManifest() {
     // 清理可能误传为占位符字符串的变量，并设置默认值
     for (const varName of allVars) {
         // 如果变量值等于其占位符形式，则清空该变量
-        if (process.env[varName] === `\${${varName}}`) {
+        if (!process.env[varName] || process.env[varName] === `\${${varName}}`) {
             delete process.env[varName];
         }
         
@@ -283,7 +285,23 @@ function generateWranglerToml() {
 function main() {
     try {
         loadEnvFile();
+
+        ['GHA_SECRETS_JSON', 'GHA_VARS_JSON'].forEach(key => {
+            if (process.env[key]) {
+                try {
+                    const data = JSON.parse(process.env[key]);
+                    Object.entries(data).forEach(([k, v]) => {
+                        // 只要有真实值 v，就强制覆盖当前的占位符
+                        if (v !== undefined && v !== null && v !== '') {
+                            process.env[k] = String(v);
+                        }
+                    });
+                } catch (e) { console.warn(`解析 ${key} 失败:`, e.message); }
+            }
+        });
+
         checkRequiredVariables();
+
         extractVariablesFromManifest();
         generateWranglerToml();
     } catch (error) {

@@ -1,9 +1,6 @@
 // 新功能测试 - 任务调度失败处理优化
 import { jest } from '@jest/globals';
 
-// Enable fake timers
-jest.useFakeTimers();
-
 // 确保全局 Web API 可用
 if (typeof globalThis.TextEncoder === 'undefined') {
   const { TextEncoder, TextDecoder } = require('util');
@@ -11,8 +8,8 @@ if (typeof globalThis.TextEncoder === 'undefined') {
   globalThis.TextDecoder = TextDecoder;
 }
 
-// Mock global.fetch
-global.fetch = jest.fn();
+// Mock global.fetch (already in setup, but per-test override if needed)
+// Note: global.fetch is already mocked in jest.setup.js
 
 // Helper function to create mock response with body.cancel
 function createMockResponse(status, body = {}) {
@@ -44,7 +41,7 @@ jest.mock('@upstash/qstash', () => ({
 }));
 
 // 导入需要测试的函数
-import { describe, expect, it, beforeEach, afterEach } from '@jest/globals';
+import { describe, expect, it, beforeEach, afterEach, afterAll } from '@jest/globals';
 import {
   fetchWithRetry,
   getActiveInstances,
@@ -98,10 +95,17 @@ describe('任务调度失败处理优化测试', () => {
   });
   
   afterEach(() => {
-    __test_setRedisClient(null);
+    if (typeof __test_setRedisClient === 'function') {
+      __test_setRedisClient(null);
+    }
     consoleLogSpy.mockRestore();
     consoleWarnSpy.mockRestore();
     consoleErrorSpy.mockRestore();
+    jest.clearAllTimers();
+  });
+
+  afterAll(() => {
+    jest.useRealTimers();
   });
 
   describe('fetchWithRetry - 4xx 停止重试逻辑', () => {
@@ -683,4 +687,4 @@ describe('任务调度失败处理优化测试', () => {
        expect(body.error).toBeDefined();
      });
    });
-});
+ });

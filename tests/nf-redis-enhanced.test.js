@@ -1,21 +1,18 @@
 import { jest } from '@jest/globals';
-import { 
-  executeRedis, 
-  executeRedisScan, 
-  checkRedisHealth, 
-  __test_setRedisClient 
+import {
+  executeRedis,
+  executeRedisScan,
+  checkRedisHealth,
+  __test_setRedisClient
 } from '../src/index.js';
 import { createRedis, __mockSend } from 'redis-on-workers';
-
-// Mock timers to speed up retry tests
-jest.useFakeTimers();
 
 // Helper function to advance timers and flush promise queue
 async function advanceTimers(ms) {
   jest.advanceTimersByTime(ms);
+  // 等待所有 Promise 微任务完成
   await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  await Promise.resolve(); // 双重等待确保队列清空
 }
 
 describe('Redis TCP Adaptation', () => {
@@ -25,11 +22,14 @@ describe('Redis TCP Adaptation', () => {
 
   beforeEach(() => {
     __mockSend.mockReset();
-    __test_setRedisClient(null);
-    jest.clearAllTimers();
+    if (typeof __test_setRedisClient === 'function') {
+      __test_setRedisClient(null);
+    }
     
     const mockClient = createRedis({});
-    __test_setRedisClient(mockClient);
+    if (typeof __test_setRedisClient === 'function') {
+      __test_setRedisClient(mockClient);
+    }
 
     // Suppress console output during tests
     consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
@@ -41,6 +41,14 @@ describe('Redis TCP Adaptation', () => {
     consoleLogSpy.mockRestore();
     consoleWarnSpy.mockRestore();
     consoleErrorSpy.mockRestore();
+    if (typeof __test_setRedisClient === 'function') {
+      __test_setRedisClient(null);
+    }
+    jest.clearAllTimers();
+  });
+
+  afterAll(() => {
+    jest.useRealTimers();
   });
 
   describe('executeRedis', () => {

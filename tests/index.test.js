@@ -1,9 +1,6 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { handleRequest, logger, getProviderPriority, detectCacheProvider, executeWithFailover, executeRedisScan, executeUpstashScan } from '../src/index.js';
+import { jest, describe, test, expect, beforeEach, afterEach, afterAll } from '@jest/globals';
+import { handleRequest, logger, getProviderPriority, detectCacheProvider, executeWithFailover, executeRedisScan, executeUpstashScan, __test_setRedisClient } from '../src/index.js';
 import { createRedis, __mockSend } from 'redis-on-workers';
-
-// Enable fake timers
-jest.useFakeTimers();
 
 // Mock Cloudflare Workers environment
 global.Request = class Request {
@@ -90,11 +87,6 @@ jest.mock('@opentelemetry/api', () => ({
   },
 }));
 
-// Mock redis-on-workers
-// Use manual mock from __mocks__ via jest.mock if possible, 
-// or rely on moduleNameMapper in jest.config.js which maps 'redis-on-workers' to 'tests/mocks/redis-on-workers.js'
-// Since we have moduleNameMapper, we don't need jest.mock factory here, but we need to reset mocks.
-
 describe('Worker Tests', () => {
   let env;
   let consoleLogSpy;
@@ -116,7 +108,7 @@ describe('Worker Tests', () => {
 
     mockVerify.mockResolvedValue(true);
 
-    // Mock fetch globally
+    // Mock fetch globally (already in setup, but per-test override if needed)
     global.fetch = jest.fn().mockResolvedValue({
       status: 200,
       ok: true,
@@ -177,6 +169,16 @@ describe('Worker Tests', () => {
     consoleWarnSpy.mockRestore();
     consoleErrorSpy.mockRestore();
     consoleDebugSpy.mockRestore();
+    // Ensure Redis client is cleaned up
+    if (typeof __test_setRedisClient === 'function') {
+      __test_setRedisClient(null);
+    }
+    jest.clearAllTimers();
+  });
+
+  afterAll(() => {
+    // Restore real timers after all tests in this file
+    jest.useRealTimers();
   });
 
   describe('Basic Functionality', () => {
@@ -260,8 +262,6 @@ describe('Worker Tests', () => {
     });
   });
 
-
-
   describe('Task Operations', () => {
     test('should download tasks', async () => {
       // Use CF KV only for this test
@@ -299,8 +299,6 @@ describe('Worker Tests', () => {
       // But verifyQStashSignature is skipped, so it just works.
     });
   });
-
-
 
   describe('Error Handling', () => {
     test('should handle missing environment variables', async () => {
@@ -437,6 +435,7 @@ describe('Worker Tests', () => {
       };
 
       const mockClient = createRedis({ url: '...' });
+      __test_setRedisClient(mockClient);
       
       __mockSend.mockImplementation(async (cmd) => {
         if (cmd === 'GET') return 'ok';
@@ -605,6 +604,7 @@ describe('Worker Tests', () => {
 
       // Mock Redis success
       const mockClient = createRedis({ url: '...' });
+      __test_setRedisClient(mockClient);
       __mockSend.mockResolvedValueOnce('nf-value');
 
       const result = await executeWithFailover('_kv_get', env, null, 'test-key');
@@ -623,6 +623,7 @@ describe('Worker Tests', () => {
 
       // Mock Redis failure
       const mockClient = createRedis({ url: '...' });
+      __test_setRedisClient(mockClient);
       __mockSend.mockRejectedValueOnce(new Error('Connection failed'));
 
       const result = await executeWithFailover('_kv_get', env, null, 'test-key');
@@ -640,6 +641,7 @@ describe('Worker Tests', () => {
 
       // Mock Redis failure
       const mockClient = createRedis({ url: '...' });
+      __test_setRedisClient(mockClient);
       __mockSend.mockRejectedValueOnce(new Error('Connection failed'));
       
       // Upstash success
@@ -668,6 +670,7 @@ describe('Worker Tests', () => {
       };
       
       const mockClient = createRedis({ url: '...' });
+      __test_setRedisClient(mockClient);
 
       mockKV.get.mockResolvedValue('cf-value');
 
@@ -688,6 +691,7 @@ describe('Worker Tests', () => {
       // Mock multi-cursor scan
       // SCAN returns [cursor, [keys]]
       const mockClient = createRedis({ url: '...' });
+      __test_setRedisClient(mockClient);
       __mockSend
         .mockResolvedValueOnce(['123', ['instance:server1', 'instance:server2']])
         .mockResolvedValueOnce(['0', ['instance:server3']]);
@@ -714,6 +718,7 @@ describe('Worker Tests', () => {
 
       // Mock NF scan failure
       const mockClient = createRedis({ url: '...' });
+      __test_setRedisClient(mockClient);
       __mockSend.mockRejectedValueOnce(new Error('Connection failed'));
 
       mockKV.list.mockResolvedValue({ keys: [{ name: 'instance:server1' }] });
