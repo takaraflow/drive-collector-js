@@ -1,4 +1,3 @@
-import { Axiom } from '@axiomhq/js';
 import { trace, context } from '@opentelemetry/api';
 
 // 全局类型定义（解决 TypeScript 警告）
@@ -19,11 +18,10 @@ export const isTestEnvironment = process.env.NODE_ENV === 'test' || typeof jest 
  */
 
 // 全局基础 logger 配置
-/** @type {Axiom | null} */
-let axiomClient = null;
 let baseLoggerConfig = {
   dataset: null,
   token: null,
+  orgId: null,
   env: 'production'
 };
 
@@ -33,16 +31,12 @@ let baseLoggerConfig = {
  */
 export function configureBaseLoggerTransport(env) {
   if (isTestEnvironment) return;
-  
+
   if (env.AXIOM_TOKEN && env.AXIOM_DATASET) {
     baseLoggerConfig.dataset = env.AXIOM_DATASET;
     baseLoggerConfig.token = env.AXIOM_TOKEN;
+    baseLoggerConfig.orgId = env.AXIOM_ORG_ID || null;
     baseLoggerConfig.env = env.NODE_ENV || 'production';
-    
-    axiomClient = new Axiom({
-      token: env.AXIOM_TOKEN,
-      orgId: env.AXIOM_ORG_ID
-    });
   }
 }
 
@@ -88,48 +82,66 @@ async function sendToAxiom(logData, logBuffer, ctx = null) {
  * @param {Object} ctx - Cloudflare context (可选)
  */
 export async function flushLogs(logBuffer, ctx = null) {
-  const requestId = ctx?._axiomDebugRequestId || 'unknown';
-  console.log(`[AXIOM_DEBUG] ${requestId}: flushLogs called, buffer size=${logBuffer.length}`);
-
-  if (isTestEnvironment || !axiomClient || !baseLoggerConfig.dataset) {
-    console.log(`[AXIOM_DEBUG] ${requestId}: flushLogs skipped - testEnv=${isTestEnvironment}, hasClient=${!!axiomClient}, hasDataset=${!!baseLoggerConfig.dataset}`);
-    // 测试环境或未配置Axiom时，不进行实际发送
+  // 1. 基础防御检查
+  // baseLoggerConfig 需要你在 logger.js 顶部定义好(包含 token, dataset 等)
+  if (!baseLoggerConfig.token || !baseLoggerConfig.dataset) {
+    console.warn('[Axiom] Config missing, skipping flush');
     return;
   }
 
-  try {
-    if (logBuffer.length === 0) {
-      console.log(`[AXIOM_DEBUG] ${requestId}: flushLogs skipped - empty buffer`);
-      return; // 没有日志需要发送
-    }
+  if (!logBuffer || logBuffer.length === 0) {
+    return;
+  }
 
-    console.log(`[AXIOM_DEBUG] ${requestId}: axiomClient.ingest called with ${logBuffer.length} logs`);
-    axiomClient.ingest(baseLoggerConfig.dataset, logBuffer);
-    logBuffer.length = 0; // 清空缓冲
+  // 2. 关键步骤：冻结并清空缓冲区 (防止引用问题)
+  // 必须使用副本发送，因为异步过程中原数组可能会变
+  const logsToSend = [...logBuffer];
+  logBuffer.length = 0; // 立即清空原数组
 
-    if (ctx && ctx.waitUntil) {
-      console.log(`[AXIOM_DEBUG] ${requestId}: calling axiomClient.flush() in ctx.waitUntil`);
-      // 使用 ctx.waitUntil 确保日志批量发送不阻塞响应
-      ctx.waitUntil(
-        axiomClient.flush().then(() => {
-          console.log(`[AXIOM_DEBUG] ${requestId}: axiomClient.flush() completed successfully`);
-        }).catch(err => {
-          console.error(`[AXIOM_DEBUG] ${requestId}: axiomClient.flush() failed:`, err.message);
-          console.error('Axiom 日志发送失败:', err.message);
-        })
-      );
+  console.log(`[Axiom] Preparing to send ${logsToSend.length} events...`);
+
+  // 3. 构造请求参数
+  const url = `https://api.axiom.co/v1/datasets/${baseLoggerConfig.dataset}/ingest`;
+
+  const headers = {
+    'Authorization': `Bearer ${baseLoggerConfig.token}`,
+    'Content-Type': 'application/json',
+    'User-Agent': 'cf-worker-custom-logger/1.0'
+  };
+
+  // 如果有 Org ID，加上它
+  if (baseLoggerConfig.orgId) {
+    headers['X-Axiom-Org-Id'] = baseLoggerConfig.orgId;
+  }
+
+  // 4. 执行原生 Fetch (这是解决报错的核心)
+  // 注意：这里绝对不要传 'cache' 参数
+  const uploadTask = fetch(url, {
+    method: 'POST',
+    headers: headers,
+    body: JSON.stringify(logsToSend)
+  })
+  .then(async (res) => {
+    // 5. 调试回显 (查看 CF 实时日志)
+    if (res.ok) {
+      console.log(`[Axiom] Success: ${res.status} OK. Ingested ${logsToSend.length} logs.`);
     } else {
-      console.log(`[AXIOM_DEBUG] ${requestId}: calling axiomClient.flush() synchronously`);
-      // 没有 context 时同步发送（主要用于测试）
-      await axiomClient.flush();
-      console.log(`[AXIOM_DEBUG] ${requestId}: axiomClient.flush() completed synchronously`);
+      // 只有报错时才读取 text，节省资源
+      const errText = await res.text();
+      console.error(`[Axiom] Failed: Status ${res.status} - ${errText}`);
     }
-  } catch (error) {
-    if (error.message.includes('RequestInitializerDict')) {
-      console.error('Cache初始化失败:', error.stack);
-    }
-    console.error(`[AXIOM_DEBUG] ${requestId}: flushLogs exception:`, error.message);
-    console.error('Axiom 日志发送失败:', error.message);
+  })
+  .catch((error) => {
+    // 捕获网络层面的错误 (如 DNS 解析失败, 连接超时)
+    console.error(`[Axiom] Network Error: ${error.message}`);
+  });
+
+  // 6. 生命周期管理 (防止 Worker 提前结束)
+  if (ctx && ctx.waitUntil) {
+    ctx.waitUntil(uploadTask);
+  } else {
+    // 本地测试环境可能没有 waitUntil，使用 await
+    await uploadTask;
   }
 }
 
@@ -138,11 +150,11 @@ export async function flushLogs(logBuffer, ctx = null) {
  * @param {string} level - 日志级别
  * @param {string} message - 消息
  * @param {Object} data - 附加数据
- * @param {Object} span - 指定的 span
+ * @param {Object} providedSpan - 指定的 span
  */
-function addOtelEvent(level, message, data = {}, span = null) {
+function addOtelEvent(level, message, data = {}, providedSpan = null) {
   try {
-    const activeSpan = span || trace.getActiveSpan();
+    const activeSpan = providedSpan || trace.getActiveSpan();
     if (activeSpan) {
       activeSpan.addEvent('log', {
         'log.level': level,
