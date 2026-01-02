@@ -5,4 +5,10 @@ export const trace = {
     setAttribute: () => {},
     recordException: () => {},
   }),
+  setSpan: () => ({}),
+};
+
+export const context = {
+  active: () => ({}),
+  with: (ctx, fn) => fn(),
 };

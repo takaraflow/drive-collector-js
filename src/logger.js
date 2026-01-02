@@ -117,12 +117,13 @@ export async function flushLogs(logBuffer, ctx = null) {
  * @param {string} level - 日志级别
  * @param {string} message - 消息
  * @param {Object} data - 附加数据
+ * @param {Object} span - 指定的 span
  */
-function addOtelEvent(level, message, data = {}) {
+function addOtelEvent(level, message, data = {}, span = null) {
   try {
-    const span = trace.getActiveSpan();
-    if (span) {
-      span.addEvent('log', {
+    const activeSpan = span || trace.getActiveSpan();
+    if (activeSpan) {
+      activeSpan.addEvent('log', {
         'log.level': level,
         'log.message': message,
         'log.version': VERSION,
@@ -150,7 +151,7 @@ function createLoggerFactory(context, bindings = {}) {
     /**
      * 记录 info 级别日志
      */
-    info: async function(message, data = {}, ctx = null) {
+    info: async function(message, data = {}, span = null, ctx = null) {
       const logData = {
         level: 'info',
         message,
@@ -159,8 +160,8 @@ function createLoggerFactory(context, bindings = {}) {
         version: VERSION,
         timestamp: new Date().toISOString()
       };
-      
-      addOtelEvent('info', message, logData);
+
+      addOtelEvent('info', message, logData, span);
       await sendToAxiom(logData, context.logBuffer, ctx);
 
       // 开发环境同时输出到控制台
@@ -172,7 +173,7 @@ function createLoggerFactory(context, bindings = {}) {
     /**
      * 记录 warn 级别日志
      */
-    warn: async function(message, data = {}, ctx = null) {
+    warn: async function(message, data = {}, span = null, ctx = null) {
       const logData = {
         level: 'warn',
         message,
@@ -181,8 +182,8 @@ function createLoggerFactory(context, bindings = {}) {
         version: VERSION,
         timestamp: new Date().toISOString()
       };
-      
-      addOtelEvent('warn', message, logData);
+
+      addOtelEvent('warn', message, logData, span);
       await sendToAxiom(logData, context.logBuffer, ctx);
 
       if (context.env === 'development' && !isTestEnvironment) {
@@ -193,7 +194,7 @@ function createLoggerFactory(context, bindings = {}) {
     /**
      * 记录 error 级别日志
      */
-    error: async function(message, data = {}, ctx = null) {
+    error: async function(message, data = {}, span = null, ctx = null) {
       const logData = {
         level: 'error',
         message,
@@ -202,8 +203,8 @@ function createLoggerFactory(context, bindings = {}) {
         version: VERSION,
         timestamp: new Date().toISOString()
       };
-      
-      addOtelEvent('error', message, logData);
+
+      addOtelEvent('error', message, logData, span);
       await sendToAxiom(logData, context.logBuffer, ctx);
 
       if (context.env === 'development' && !isTestEnvironment) {
@@ -214,7 +215,7 @@ function createLoggerFactory(context, bindings = {}) {
     /**
      * 记录 debug 级别日志
      */
-    debug: async function(message, data = {}, ctx = null) {
+    debug: async function(message, data = {}, span = null, ctx = null) {
       const logData = {
         level: 'debug',
         message,
@@ -223,8 +224,8 @@ function createLoggerFactory(context, bindings = {}) {
         version: VERSION,
         timestamp: new Date().toISOString()
       };
-      
-      addOtelEvent('debug', message, logData);
+
+      addOtelEvent('debug', message, logData, span);
 
       // Debug 日志只在开发环境或测试环境添加到缓冲
       if (context.env === 'development' || isTestEnvironment) {
@@ -241,7 +242,11 @@ function createLoggerFactory(context, bindings = {}) {
      */
     child: function(bindings) {
       const mergedBindings = { ...logger.bindings, ...bindings };
-      return createLoggerFactory(context, mergedBindings);
+      const newContext = { ...context };
+      if (bindings.logBuffer !== undefined) {
+        newContext.logBuffer = bindings.logBuffer;
+      }
+      return createLoggerFactory(newContext, mergedBindings);
     },
 
     /**

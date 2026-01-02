@@ -1070,7 +1070,19 @@ function normalizePath(pathname) {
 async function handleRequest(request, env, ctx) {
   const requestLogBuffer = []; // 为每个请求创建独立的日志缓冲
   const requestLogger = logger.child({ module: 'handleRequest', logBuffer: requestLogBuffer }); // 将缓冲传递给子 logger
-  requestLogger.debug('Request Received', { method: request.method, url: request.url });
+
+  // 1. 在上下文还在时，显式捕获顶级 Span
+  const rootSpan = trace.getActiveSpan();
+
+  // 创建封装的 log 助手
+  const log = {
+    info: (message, data = {}) => requestLogger.info(message, data, rootSpan, ctx),
+    warn: (message, data = {}) => requestLogger.warn(message, data, rootSpan, ctx),
+    error: (message, data = {}) => requestLogger.error(message, data, rootSpan, ctx),
+    debug: (message, data = {}) => requestLogger.debug(message, data, rootSpan, ctx),
+  };
+
+  log.debug('Request Received', { method: request.method, url: request.url });
 
 
 
@@ -1081,9 +1093,6 @@ async function handleRequest(request, env, ctx) {
   
   // 2. 验证配置
   const axiomEnabled = !isTestEnvironment && axiomToken && axiomDataset;
-
-  // 1. 在上下文还在时，显式捕获顶级 Span
-  const rootSpan = trace.getActiveSpan();
 
 
 
@@ -1273,7 +1282,11 @@ async function handleRequest(request, env, ctx) {
     });
   } finally {
     // 确保在请求结束时，所有缓冲的日志都被发送
-    await flushLogs(requestLogBuffer, ctx);
+    if (ctx && ctx.waitUntil) {
+      ctx.waitUntil(flushLogs(requestLogBuffer, ctx));
+    } else {
+      await flushLogs(requestLogBuffer, ctx);
+    }
   }
 
   return result;
