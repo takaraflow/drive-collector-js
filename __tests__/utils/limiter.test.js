@@ -1,6 +1,5 @@
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
-  
 // Mock Cache
 const mockCache = {
     get: jest.fn(),
@@ -21,21 +20,23 @@ jest.unstable_mockModule('../../src/services/logger.js', () => ({
   logger: mockLogger
 }));
 
-  
 // Import after mocking
 const { PRIORITY, runBotTask, handle429Error, botLimiter, runAuthTask, createAutoScalingLimiter } = await import('../../src/utils/limiter.js');
 
-  
 describe('Limiter Priority & Distribution', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        jest.useFakeTimers('modern');
+    });
+
+    afterEach(() => {
+        jest.useRealTimers();
     });
 
     it('should respect priority in p-queue', async () => {
         const results = [];
         const task = (id) => async () => {
-            // 使用 0 延迟消除 10ms 的硬等待，同时保留异步切换特性
-            await new Promise(r => setTimeout(r, 0));
+            // 直接推入结果，避免异步开销
             results.push(id);
         };
 
@@ -49,6 +50,8 @@ describe('Limiter Priority & Distribution', () => {
         // 提交一个 BACKGROUND 任务 (最低优先级)
         const p3 = runBotTask(task(3), userId, { priority: PRIORITY.BACKGROUND });
 
+        // 立即推进定时器并等待所有任务完成
+        await jest.runAllTimersAsync();
         await Promise.all([p1, p2, p3]);
 
         expect(results).toContain(2);
@@ -61,6 +64,7 @@ describe('Limiter Priority & Distribution', () => {
 describe('AutoScalingLimiter', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.useFakeTimers('modern');
   });
 
   afterEach(() => {
@@ -68,7 +72,6 @@ describe('AutoScalingLimiter', () => {
   });
 
   it('should increase concurrency on high success rate', async () => {
-    jest.useFakeTimers('modern');
     const testLimiter = createAutoScalingLimiter({ concurrency: 2 }, { min: 1, max: 10, factor: 0.5, interval: 5000 });
     const initialConcurrency = testLimiter.queue.concurrency;
     // 简化：直接设置计数器模拟高成功率
@@ -81,7 +84,6 @@ describe('AutoScalingLimiter', () => {
   });
 
   it('should decrease concurrency on high failure rate', async () => {
-    jest.useFakeTimers('modern');
     const testLimiter = createAutoScalingLimiter({ concurrency: 5 }, { min: 1, max: 10, factor: 0.8, interval: 5000 });
     const initialConcurrency = testLimiter.queue.concurrency;
     // 简化：直接设置计数器模拟高失败率
@@ -94,22 +96,28 @@ describe('AutoScalingLimiter', () => {
 });
 
 describe('TokenBucketLimiter', () => {
-  it('should limit auth tasks with token bucket and async wait', async () => {
+  beforeEach(() => {
     jest.useFakeTimers('modern');
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('should limit auth tasks with token bucket and async wait', async () => {
     const fn = jest.fn().mockResolvedValue('auth ok');
     const promises = [];
     for (let i = 0; i < 5; i++) {
       promises.push(runAuthTask(fn));
     }
-    jest.advanceTimersByTime(10000);
+    // 使用 runAllTimersAsync 替代固定时间推进
+    await jest.runAllTimersAsync();
     await Promise.all(promises);
     expect(fn).toHaveBeenCalledTimes(5);
   });
 });
 
 describe('handle429Error', () => {
-  let originalSetTimeout;
-
   beforeEach(() => {
       jest.clearAllMocks();
       mockCache.get.mockResolvedValue(null);
@@ -117,16 +125,10 @@ describe('handle429Error', () => {
       mockLogger.error.mockClear();
       mockCache.set.mockClear();
       jest.useFakeTimers('modern');
-      // Mock setTimeout to call immediately, skipping real waits
-      originalSetTimeout = global.setTimeout;
-      jest.spyOn(global, 'setTimeout').mockImplementation((fn) => {
-          fn();
-          return 1;
-      });
+      // No longer need to mock setTimeout directly, fakeTimers will handle it.
   });
 
   afterEach(() => {
-    global.setTimeout = originalSetTimeout;
     jest.useRealTimers();
   });
 
@@ -135,12 +137,14 @@ describe('handle429Error', () => {
     const fn = async () => {
       callCount++;
       if (callCount < 2) {
-        throw { code: 429, retryAfter: 1 };
+        throw { code: 429, retryAfter: 0.001 }; // 使用1ms延迟
       }
       return 'success';
     };
 
-    const result = await handle429Error(fn, 10);
+    const promise = handle429Error(fn, 10);
+    await jest.runAllTimersAsync();
+    const result = await promise;
 
     expect(callCount).toBe(2);
     expect(result).toBe('success');
@@ -152,13 +156,15 @@ describe('handle429Error', () => {
     const fn = async () => {
       callCount++;
       if (callCount < 5) {
-        throw { code: 429, retryAfter: 0.1 };
+        throw { code: 429, retryAfter: 0.001 }; // 使用1ms延迟
       }
       return 'success';
     };
 
     // Should succeed with default 10 retries
-    const result = await handle429Error(fn);
+    const promise = handle429Error(fn);
+    await jest.runAllTimersAsync();
+    const result = await promise;
 
     expect(callCount).toBe(5);
     expect(result).toBe('success');
@@ -176,7 +182,9 @@ describe('handle429Error', () => {
       return 'success';
     };
 
-    const result = await handle429Error(fn, 10);
+    const promise = handle429Error(fn, 10);
+    await jest.runAllTimersAsync();
+    const result = await promise;
 
     expect(callCount).toBe(3);
     expect(result).toBe('success');
@@ -193,17 +201,29 @@ describe('handle429Error', () => {
     await expect(promise).rejects.toThrow();
     expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('Large FloodWait'));
     expect(mockCache.set).toHaveBeenCalledWith('system:cooling_until', expect.any(String), expect.any(Number));
-  }, 1000);
+  }, 100);
 
   it('should parse retryAfter from FloodWait message', async () => {
+    let callCount = 0;
     const fn = async () => {
-      const err = new Error('FloodWait 10 seconds');
-      err.message = 'FloodWait 10 seconds';
-      throw err;
+      callCount++;
+      if (callCount < 2) {
+        const err = new Error('FloodWait 0.001 seconds');
+        err.message = 'FloodWait 0.001 seconds';
+        throw err;
+      }
+      return 'success';
     };
 
+    // Mock cache.get to return null immediately to avoid cooling delays
+    mockCache.get.mockResolvedValue(null);
+    
     const promise = handle429Error(fn, 2);
-    await expect(promise).rejects.toThrow();
+    await jest.runAllTimersAsync();
+    const result = await promise;
+    
+    expect(callCount).toBe(2);
+    expect(result).toBe('success');
     expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('429/FloodWait'));
-  }, 1000);
+  }, 100);
 });
