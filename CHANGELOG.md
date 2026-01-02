@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.5.5](https://github.com/YoungSx/drive-collector-js/compare/v4.5.4...v4.5.5) (2026-01-02)
+
+
+### 🐛 问题修复
+
+* **cache:** resolve Upstash WRONGPASS auth failure with fallback ([a249a74](https://github.com/YoungSx/drive-collector-js/commit/a249a74b5bcd9e3730765f953fbb5cc9a1ccbd54))
+* moves ioredis from devDependencies to dependencies ([acc6769](https://github.com/YoungSx/drive-collector-js/commit/acc676962f884846d4c639441d46f792540d7eb1))
+
+
+### 🔧 其他任务
+
+* remove backup file ([20511de](https://github.com/YoungSx/drive-collector-js/commit/20511de642a52cf0b6e6bfe2d1036880720b129a))
+
 ### [4.5.4](https://github.com/YoungSx/drive-collector-js/compare/v4.5.1...v4.5.4) (2026-01-02)
 
 
