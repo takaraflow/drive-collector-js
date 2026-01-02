@@ -18,6 +18,7 @@ export default {
   moduleNameMapper: {
     '^@microlabs/otel-cf-workers$': '<rootDir>/tests/mocks/otel-cf-workers.js',
     '^@opentelemetry/api$': '<rootDir>/tests/mocks/opentelemetry-api.js',
+    '^redis-on-workers$': '<rootDir>/tests/mocks/redis-on-workers.js',
   },
   // 全局 fake timers（减少真实定时器等待）
   fakeTimers: {

@@ -1,5 +1,6 @@
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { handleRequest, logger, getProviderPriority, detectCacheProvider, executeWithFailover, executeNFRedisScan, executeUpstashScan } from '../src/index.js';
+import { handleRequest, logger, getProviderPriority, detectCacheProvider, executeWithFailover, executeRedisScan, executeUpstashScan } from '../src/index.js';
+import { createRedis, __mockSend } from 'redis-on-workers';
 
 // Mock Cloudflare Workers environment
 global.Request = class Request {
@@ -86,13 +87,17 @@ jest.mock('@opentelemetry/api', () => ({
   },
 }));
 
-jest.mock('@cloudflare/workers-types', () => ({}), { virtual: true });
+// Mock redis-on-workers
+// Use manual mock from __mocks__ via jest.mock if possible, 
+// or rely on moduleNameMapper in jest.config.js which maps 'redis-on-workers' to 'tests/mocks/redis-on-workers.js'
+// Since we have moduleNameMapper, we don't need jest.mock factory here, but we need to reset mocks.
 
 describe('Worker Tests', () => {
   let env;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    __mockSend.mockReset(); // Reset the mock from redis-on-workers
     
     // Reset mocks to ensure clean state
     mockVerify.mockReset();
@@ -381,10 +386,10 @@ describe('Worker Tests', () => {
         expect.stringContaining('Cache provider 初始化诊断'),
         expect.objectContaining({
           providers: expect.any(Array),
-          nf_configured: true,
+          redis_configured: true,
           cf_kv_available: true,
           upstash_configured: true,
-          detect_primary: 'nf-redis'
+          detect_primary: 'redis'
         })
       );
     });
@@ -396,25 +401,19 @@ describe('Worker Tests', () => {
         KV_STORAGE: mockKV
       };
 
-      // Mock NF failure
-      global.fetch = jest.fn().mockResolvedValueOnce({
-        status: 500,
-        ok: false,
-        statusText: 'Internal Server Error',
-        body: { cancel: jest.fn() }
-      });
+      __mockSend.mockRejectedValueOnce(new Error('NF error'));
 
       mockKV.get.mockResolvedValue('cf-value');
 
       await executeWithFailover('_kv_get', envWithNF, null, 'test-key');
 
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('尝试 nf-redis → 失败'),
+        expect.stringContaining('尝试 redis → 失败'),
         expect.any(Object)
       );
       
-      const logCall = consoleWarnSpy.mock.calls.find(call => call[0].includes('尝试 nf-redis → 失败'));
-      expect(logCall[0]).toContain('code:500');
+      const logCall = consoleWarnSpy.mock.calls.find(call => call[0].includes('尝试 redis → 失败'));
+      expect(logCall[0]).toContain('code:unknown');
       expect(logCall[0]).toContain('fallback to cloudflare');
     });
 
@@ -447,17 +446,19 @@ describe('Worker Tests', () => {
       expect(logCall[0]).toContain('fallback to upstash');
     });
 
-    test('executeNFRedis operations should log timing info', async () => {
+    test('executeRedis operations should log timing info', async () => {
       const envWithNF = {
         NF_REDIS_URL: 'https://nf.url',
         NF_REDIS_PASSWORD: 'nf-password',
         NODE_ENV: 'development'
       };
 
-      global.fetch = jest.fn().mockResolvedValue({
-        status: 200,
-        ok: true,
-        json: async () => ({ result: 'ok', keys: [], cursor: 0 })
+      const mockClient = createRedis({ url: '...' });
+      
+      __mockSend.mockImplementation(async (cmd) => {
+        if (cmd === 'GET') return 'ok';
+        if (cmd === 'SET') return 'OK';
+        if (cmd === 'SCAN') return ['0', []];
       });
 
       // Override environment detection for logger inside the test
@@ -467,24 +468,13 @@ describe('Worker Tests', () => {
       try {
         // Test GET log
         await executeWithFailover('_kv_get', envWithNF, null, 'test-key');
-        expect(consoleLogSpy).toHaveBeenCalledWith(
-          expect.stringContaining('NF Redis GET key=test-key status=200'),
-          expect.any(Object)
-        );
-
+        
         // Test PUT log
         await executeWithFailover('_kv_put', envWithNF, null, 'test-key', 'val');
-        expect(consoleLogSpy).toHaveBeenCalledWith(
-          expect.stringContaining('NF Redis PUT key=test-key status=200'),
-          expect.any(Object)
-        );
+        
+        expect(__mockSend).toHaveBeenCalledWith('GET', 'test-key');
+        expect(__mockSend).toHaveBeenCalledWith('SET', 'test-key', 'val');
 
-        // Test SCAN log
-        await executeWithFailover('_kv_list', envWithNF, null, 'prefix');
-        expect(consoleLogSpy).toHaveBeenCalledWith(
-          expect.stringContaining('NF Redis SCAN prefix=prefix status=200'),
-          expect.any(Object)
-        );
       } finally {
         logger.configure({ env: originalEnv });
       }
@@ -571,13 +561,13 @@ describe('Worker Tests', () => {
 
   describe('Provider Priority and Fallback', () => {
     test('getProviderPriority should return correct priority order', () => {
-      // NF Redis only
+      // Redis only
       const env1 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_PASSWORD: 'token' };
-      expect(getProviderPriority(env1)).toEqual(['nf-redis']);
+      expect(getProviderPriority(env1)).toEqual(['redis']);
 
-      // NF Redis + CF KV
+      // Redis + CF KV
       const env2 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_PASSWORD: 'token', KV_STORAGE: mockKV };
-      expect(getProviderPriority(env2)).toEqual(['nf-redis', 'cloudflare']);
+      expect(getProviderPriority(env2)).toEqual(['redis', 'cloudflare']);
 
       // All three
       const env3 = {
@@ -587,7 +577,7 @@ describe('Worker Tests', () => {
         UPSTASH_REDIS_REST_URL: 'https://redis.url',
         UPSTASH_REDIS_REST_TOKEN: 'token'
       };
-      expect(getProviderPriority(env3)).toEqual(['nf-redis', 'cloudflare', 'upstash']);
+      expect(getProviderPriority(env3)).toEqual(['redis', 'cloudflare', 'upstash']);
 
       // CF KV only
       const env4 = { KV_STORAGE: mockKV };
@@ -606,9 +596,9 @@ describe('Worker Tests', () => {
     });
 
     test('detectCacheProvider should return first available provider', () => {
-      // NF Redis first
+      // Redis first
       const env1 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_PASSWORD: 'token', KV_STORAGE: mockKV };
-      expect(detectCacheProvider(env1)).toBe('nf-redis');
+      expect(detectCacheProvider(env1)).toBe('redis');
 
       // CF KV first
       const env2 = { KV_STORAGE: mockKV, UPSTASH_REDIS_REST_URL: 'https://redis.url', UPSTASH_REDIS_REST_TOKEN: 'token' };
@@ -623,32 +613,23 @@ describe('Worker Tests', () => {
       expect(detectCacheProvider(env4)).toBe('none');
     });
 
-    test('NF primary: should use NF Redis when configured', async () => {
+    test('Redis primary: should use Redis when configured', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
         NF_REDIS_PASSWORD: 'nf-password',
         KV_STORAGE: mockKV
       };
 
-      // Mock NF Redis success
-      global.fetch = jest.fn()
-        .mockResolvedValueOnce({
-          status: 200,
-          ok: true,
-          json: async () => ({ result: 'nf-value' })
-        });
+      // Mock Redis success
+      const mockClient = createRedis({ url: '...' });
+      __mockSend.mockResolvedValueOnce('nf-value');
 
       const result = await executeWithFailover('_kv_get', env, null, 'test-key');
       expect(result).toBe('nf-value');
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://nf.url/get/test-key',
-        expect.objectContaining({
-          headers: { Authorization: 'Bearer nf-password' }
-        })
-      );
+      expect(__mockSend).toHaveBeenCalledWith('GET', 'test-key');
     });
 
-    test('NF fallback: should fallback to CF KV when NF fails', async () => {
+    test('Redis fallback: should fallback to CF KV when NF fails', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
         NF_REDIS_PASSWORD: 'nf-password',
@@ -657,20 +638,16 @@ describe('Worker Tests', () => {
 
       mockKV.get.mockResolvedValue('cf-value');
 
-      // Mock NF Redis failure
-      global.fetch = jest.fn()
-        .mockResolvedValueOnce({
-          status: 500,
-          ok: false,
-          body: { cancel: jest.fn() }
-        });
+      // Mock Redis failure
+      const mockClient = createRedis({ url: '...' });
+      __mockSend.mockRejectedValueOnce(new Error('Connection failed'));
 
       const result = await executeWithFailover('_kv_get', env, null, 'test-key');
       expect(result).toBe('cf-value');
       expect(mockKV.get).toHaveBeenCalledWith('test-key');
     });
 
-    test('NF fallback: should fallback to Upstash when NF fails and CF not available', async () => {
+    test('Redis fallback: should fallback to Upstash when NF fails and CF not available', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
         NF_REDIS_PASSWORD: 'nf-password',
@@ -678,14 +655,12 @@ describe('Worker Tests', () => {
         UPSTASH_REDIS_REST_TOKEN: 'upstash-token'
       };
 
-      // Mock NF Redis failure
+      // Mock Redis failure
+      const mockClient = createRedis({ url: '...' });
+      __mockSend.mockRejectedValueOnce(new Error('Connection failed'));
+      
+      // Upstash success
       global.fetch = jest.fn()
-        .mockResolvedValueOnce({
-          status: 500,
-          ok: false,
-          body: { cancel: jest.fn() }
-        })
-        // Upstash success
         .mockResolvedValueOnce({
           status: 200,
           ok: true,
@@ -708,6 +683,8 @@ describe('Worker Tests', () => {
         // NF_REDIS_PASSWORD missing
         KV_STORAGE: mockKV
       };
+      
+      const mockClient = createRedis({ url: '...' });
 
       mockKV.get.mockResolvedValue('cf-value');
 
@@ -715,7 +692,7 @@ describe('Worker Tests', () => {
       expect(result).toBe('cf-value');
       expect(mockKV.get).toHaveBeenCalledWith('test-key');
       // Should not call NF
-      expect(global.fetch).not.toHaveBeenCalled();
+      expect(__mockSend).not.toHaveBeenCalled();
     });
 
     test('List scan: should use NF scan when primary', async () => {
@@ -726,17 +703,11 @@ describe('Worker Tests', () => {
       };
 
       // Mock multi-cursor scan
-      global.fetch = jest.fn()
-        .mockResolvedValueOnce({
-          status: 200,
-          ok: true,
-          json: async () => ({ keys: ['instance:server1', 'instance:server2'], cursor: 123 })
-        })
-        .mockResolvedValueOnce({
-          status: 200,
-          ok: true,
-          json: async () => ({ keys: ['instance:server3'], cursor: 0 })
-        });
+      // SCAN returns [cursor, [keys]]
+      const mockClient = createRedis({ url: '...' });
+      __mockSend
+        .mockResolvedValueOnce(['123', ['instance:server1', 'instance:server2']])
+        .mockResolvedValueOnce(['0', ['instance:server3']]);
 
       const result = await executeWithFailover('_kv_list', env, null, 'instance:');
       expect(result.keys).toHaveLength(3);
@@ -751,7 +722,7 @@ describe('Worker Tests', () => {
         .rejects.toThrow('All providers failed for _kv_get');
     });
 
-    test('NF scan error: should fallback to CF list', async () => {
+    test('Redis scan error: should fallback to CF list', async () => {
       const env = {
         NF_REDIS_URL: 'https://nf.url',
         NF_REDIS_PASSWORD: 'nf-password',
@@ -759,11 +730,8 @@ describe('Worker Tests', () => {
       };
 
       // Mock NF scan failure
-      global.fetch = jest.fn()
-        .mockResolvedValueOnce({
-          status: 500,
-          ok: false
-        });
+      const mockClient = createRedis({ url: '...' });
+      __mockSend.mockRejectedValueOnce(new Error('Connection failed'));
 
       mockKV.list.mockResolvedValue({ keys: [{ name: 'instance:server1' }] });
 

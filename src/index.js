@@ -28,6 +28,9 @@ import { instrument } from '@microlabs/otel-cf-workers';
 // 静态导入 QStash Receiver（生产环境使用）
 import { Receiver } from '@upstash/qstash';
 
+// 静态导入 Redis client
+import { createRedis } from 'redis-on-workers';
+
 /**
  * 稳健的 JSON 解析函数，支持自动修复无引号键
  */
@@ -57,7 +60,7 @@ function safeJsonParse(data, context = '') {
  */
 function getProviderPriority(env) {
   const prios = [];
-  if (env.NF_REDIS_URL && env.NF_REDIS_PASSWORD) prios.push('nf-redis');
+  if (env.NF_REDIS_URL && env.NF_REDIS_PASSWORD) prios.push('redis');
   if (env.KV_STORAGE) prios.push('cloudflare');
   if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) prios.push('upstash');
   return prios;
@@ -622,7 +625,7 @@ function shouldFailover(error, env) {
   }
 
   // 如果当前已经是故障转移模式，不再故障转移
-  if (currentProvider === 'upstash' || currentProvider === 'nf-redis') {
+  if (currentProvider === 'upstash' || currentProvider === 'redis') {
     return false;
   }
 
@@ -664,8 +667,8 @@ function failover(env) {
     logger.info('故障转移到 Upstash Redis', { reason: failoverReason });
     return true;
   } else if (hasNFRedis) {
-    currentProvider = 'nf-redis';
-    logger.info('故障转移到 NF Redis', { reason: failoverReason });
+    currentProvider = 'redis';
+    logger.info('故障转移到 Redis', { reason: failoverReason });
     return true;
   }
   
@@ -675,8 +678,8 @@ function failover(env) {
 function getCurrentProvider() {
   if (currentProvider === 'upstash') {
     return 'Upstash Redis';
-  } else if (currentProvider === 'nf-redis') {
-    return 'NF Redis';
+  } else if (currentProvider === 'redis') {
+    return 'Redis';
   }
   return 'Cloudflare KV';
 }
@@ -693,135 +696,223 @@ function isRetryableError(error) {
 }
 
 /**
- * 执行 NF Redis 操作
+ * 带有重试逻辑的 Redis 命令执行器
  */
-async function executeNFRedis(operation, env, key, value = null) {
-  const baseUrl = env.NF_REDIS_URL;
-  const token = env.NF_REDIS_PASSWORD;
-  
-  if (!baseUrl || !token) {
-    throw new Error('NF Redis not configured');
-  }
+async function retryRedisCommand(client, command, args = [], maxRetries = 3, initialDelay = 100, ctx = null) {
+  let retries = 0;
+  let delay = initialDelay;
 
-  const headers = {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json'
+  while (retries < maxRetries) {
+    try {
+      if (retries > 0) {
+        await logger.warn(`Redis 命令重试: ${command} (尝试 ${retries + 1}/${maxRetries})`, { delay: `${delay}ms` }, ctx);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+      const result = await client.send(command, ...args);
+      return result;
+    } catch (e) {
+      const errorMessage = e.message.toLowerCase();
+      if (
+        errorMessage.includes('econnreset') ||
+        errorMessage.includes('etimedout') ||
+        errorMessage.includes('socketer') || // 包括 @arrowood.dev/socket 的 SocketError
+        errorMessage.includes('network error')
+      ) {
+        retries++;
+        delay *= 2; // 指数退避
+        if (retries >= maxRetries) {
+          await logger.error(`Redis 命令重试失败: ${command} 达到最大重试次数`, { error: e.message }, ctx);
+          throw e;
+        }
+      } else {
+        // 非可重试错误，直接抛出
+        await logger.error(`Redis 命令执行失败: ${command} (非可重试错误)`, { error: e.message }, ctx);
+        throw e;
+      }
+    }
+  }
+}
+
+/**
+ * 获取 NF Redis Client (Singleton pattern per-request scope recommended, but for simplicity we use global lazy init with caution in serverless)
+ * 注意：Cloudflare Workers 中全局变量在请求间可能复用，但连接可能中断。redis-on-workers 应该处理重连。
+ */
+let redisClient = null;
+
+async function getRedisClient(env, ctx) {
+  if (redisClient) return redisClient;
+
+  const urlStr = env.NF_REDIS_URL;
+  if (!urlStr) throw new Error('NF Redis URL not configured');
+
+  // 解析 URL
+  // 支持 redis:// 和 rediss://
+  // rediss:// 默认开启 TLS
+  
+  // redis-on-workers 的 createRedis 支持传入 connection options
+  // 我们手动解析以确保兼容性，特别是 rediss 协议
+  
+  let redisOptions = {
+    url: urlStr,
+    password: env.NF_REDIS_PASSWORD
   };
 
-  if (operation === '_nf_redis_get') {
+  // 如果是 rediss:// 协议，redis-on-workers 会自动识别 tls: true
+  // 但为了保险，我们可以显式检查
+  if (urlStr.startsWith('rediss://')) {
+    redisOptions.tls = true;
+  }
+  
+  try {
+    redisClient = createRedis(redisOptions);
+    
+    // 监听错误，避免未捕获异常导致 crash
+    // 注意：redis-on-workers 可能没有直接的 on('error')，这里主要依靠 try-catch 操作
+    
+    await logger.info('Redis Client 初始化成功', { url: urlStr.replace(/:[^:@]*@/, ':***@') }, ctx);
+    return redisClient;
+  } catch (e) {
+    await logger.error('Redis Client 初始化失败', { error: e.message }, ctx);
+    throw e;
+  }
+}
+
+/**
+ * 执行 NF Redis 操作 (适配新 TCP client)
+ */
+async function executeRedis(operation, env, key, value = null, ctx = null) {
+  // 保持函数签名兼容，但内部逻辑完全重写为使用 TCP client
+  // ctx 并没有传递给 executeNFRedis，这是一个遗留问题。
+  // 我们尝试从全局获取或者这可能需要重构调用方传递 ctx。
+  // 鉴于 executeWithPriorityFallback 调用 executeNFRedis 时也没有传 ctx，我们先假设 ctx 为 null 或尽量不依赖 ctx 记录非关键日志
+  // 为了能写日志，我们暂且传 null 给 logger，或者修改调用处。
+  // 查看调用链：executeWithPriorityFallback -> executeNFRedis
+  // executeWithPriorityFallback 接收了 ctx。
+  // 修改 executeNFRedis 签名会影响 tests。
+  // 我们先保持签名，内部尝试获取 client。
+  // 注意：executeNFRedis 的参数是 (operation, env, key, value)
+  
+  // 为了能在 executeNFRedis 里使用 ctx，我们需要修改调用链，或者...
+  // 实际上 executeWithPriorityFallback 里的调用是：
+  // '_kv_get': async () => await executeNFRedis('_redis_get', env, args[0]),
+  // 我们可以在这里修改，把 ctx 闭包进去？不，executeNFRedis 是独立导出的。
+  
+  // 让我们修改 executeNFRedis 签名，增加可选 ctx 参数，并在调用处传入。
+  // 但这会破坏现有测试。
+  // 更好的方式：
+  // 1. 修改 executeNFRedis 内部实现。
+  // 2. 注意调用处。
+  
+  // 等等，executeNFRedis 被 export 供测试。
+  // 让我们看看 executeWithPriorityFallback 的调用：
+  // '_kv_get': async () => await executeNFRedis('_redis_get', env, args[0]),
+  // 这里确实没传 ctx。
+  
+  // 鉴于我们要做 TCP 适配，这是个 Breaking Change 无论如何。
+  // 让我们尽量保持签名，但在内部使用 getRedisClient(env, null)。
+  
+  const client = await getRedisClient(env, ctx);
+  
+  if (operation === '_redis_get') {
     const start = Date.now();
-    await logger.info(`NF Redis GET key=${key} status=pending`, {}, null);
-    // GET 请求不需要 Content-Type
-    const getHeaders = { 'Authorization': `Bearer ${token}` };
-    const response = await fetch(`${baseUrl}/get/${key}`, { headers: getHeaders });
-    const duration = Date.now() - start;
+    // await logger.info(`NF Redis GET key=${key} status=pending`, {}, null); // 缺少 ctx，暂不 log 或 log null
     
-    if (response.status === 404) {
-      await logger.info(`NF Redis GET key=${key} status=404 duration=${duration}ms`, {}, null);
-      await response.body.cancel();
-      return null;
+    try {
+      // redis-on-workers get 返回 string | null
+      const result = await retryRedisCommand(client, 'GET', [key], 3, 100, ctx);
+      
+      const duration = Date.now() - start;
+      // await logger.info(`NF Redis GET key=${key} status=200 duration=${duration}ms`, {}, null);
+      
+      // 如果结果是 JSON 字符串，尝试解析？
+      // 原有 fetch 逻辑：const data = await response.json(); return data.result;
+      // 注意：原有 fetch 返回的是 { result: "value" } 结构？
+      // 不，Northflank Redis over HTTP (如果它存在) 可能返回 { result: ... }
+      // 但标准 Redis TCP GET 返回的就是 value 字符串。
+      // 这里的语义是 KV get。
+      // 如果存储的是 JSON 字符串，我们应该解析它吗？
+      // 查看 `executeWithPriorityFallback` 的 Upstash 实现：它返回 data.result。
+      // Cloudflare KV .get() 返回 string。
+      // 我们的 `parseInstanceData` 能够处理 string 或 object。
+      // 所以返回 string 即可。
+      
+      // 需要注意的是，redis-on-workers 返回的可能是 string, number, null 等。
+      // 我们统一转为 null 或 string。
+      if (result === null) return null;
+      return String(result);
+      
+    } catch (e) {
+      // await logger.warn(`NF Redis GET key=${key} failed`, { error: e.message }, null);
+      throw e;
     }
-    
-    if (!response.ok) {
-      await logger.warn(`NF Redis GET key=${key} status=${response.status} duration=${duration}ms`, {}, null);
-      const err = new Error(`NF Redis Get Error: ${response.status} ${response.statusText}`);
-      // @ts-ignore
-      err.status = response.status;
-      throw err;
-    }
-    
-    const data = await response.json();
-    await logger.info(`NF Redis GET key=${key} status=200 duration=${duration}ms`, {}, null);
-    return data.result;
-  } else if (operation === '_nf_redis_put') {
+  } else if (operation === '_redis_put') {
     const start = Date.now();
-    await logger.info(`NF Redis PUT key=${key} status=pending`, {}, null);
-    const response = await fetch(`${baseUrl}/set/${key}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ value })
-    });
-    const duration = Date.now() - start;
     
-    if (!response.ok) {
-      await logger.warn(`NF Redis PUT key=${key} status=${response.status} duration=${duration}ms`, {}, null);
-      throw new Error(`NF Redis Put Error: ${response.status} ${response.statusText}`);
+    try {
+      // set key value
+      // 值必须是 string
+      const valStr = typeof value === 'string' ? value : JSON.stringify(value);
+      await retryRedisCommand(client, 'SET', [key, valStr], 3, 100, ctx);
+      
+      const duration = Date.now() - start;
+      return true;
+    } catch (e) {
+      throw e;
     }
-    
-    await logger.info(`NF Redis PUT key=${key} status=200 duration=${duration}ms`, {}, null);
-    return true;
   }
 }
 
 /**
  * 执行 NF Redis Scan 操作
  */
-async function executeNFRedisScan(env, prefix) {
-  const baseUrl = env.NF_REDIS_URL;
-  const token = env.NF_REDIS_PASSWORD;
+async function executeRedisScan(env, prefix, ctx = null) {
+  const client = await getRedisClient(env, ctx);
+  const keys = [];
+  let cursor = '0';
   
-  if (!baseUrl || !token) {
-    throw new Error('NF Redis not configured');
-  }
-
-  let keys = [];
-  let cursor = 0;
-  const start = Date.now();
-  await logger.info(`NF Redis SCAN prefix=${prefix} status=pending`, {}, null);
-  
-  while (true) {
-    const url = `${baseUrl}/scan/${cursor}?match=${encodeURIComponent(prefix + '*')}&count=100`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    
-    if (!res.ok) {
-      const duration = Date.now() - start;
-      await logger.warn(`NF Redis SCAN status=${res.status} duration=${duration}ms`, {}, null);
-      const err = new Error(`NF Scan Error: ${res.status}`);
-      // @ts-ignore
-      err.status = res.status;
-      throw err;
+  do {
+    // SCAN cursor MATCH prefix* COUNT 100
+    const res = await retryRedisCommand(client, 'SCAN', [cursor, 'MATCH', `${prefix}*`, 'COUNT', '100'], 3, 100, ctx);
+    // res 结构: [nextCursor, [key1, key2, ...]]
+    if (!Array.isArray(res) || res.length !== 2) {
+      throw new Error('Invalid SCAN response');
     }
     
-    const data = await res.json();
-    if (data.keys) {
-      keys.push(...data.keys);
-    }
+    cursor = String(res[0]);
+    const batchKeys = res[1];
     
-    cursor = data.cursor || 0;
-    if (cursor === 0) break;
-  }
+    if (Array.isArray(batchKeys)) {
+      for (const k of batchKeys) {
+        keys.push({ name: String(k) });
+      }
+    }
+  } while (cursor !== '0');
   
-  const totalDuration = Date.now() - start;
-  await logger.info(`NF Redis SCAN prefix=${prefix} status=200 keys=${keys.length} duration=${totalDuration}ms`, {}, null);
-  return { keys: keys.map(name => ({ name })) };
+  return { keys };
 }
 
 /**
  * 检查 NF Redis 健康状况 (非阻塞)
  */
-async function checkNFHealth(env, ctx) {
-  const baseUrl = env.NF_REDIS_URL;
-  const token = env.NF_REDIS_PASSWORD;
-  
-  if (!baseUrl || !token) return;
-
+async function checkRedisHealth(env, ctx) {
   try {
+    const client = await getRedisClient(env, ctx);
+    // 延迟 200ms 再 PING，确保 socket 完全建立
+    await new Promise(resolve => setTimeout(resolve, 200));
     const start = Date.now();
-    // 尝试获取一个不存在的 key 来验证连接和权限
-    const res = await fetch(`${baseUrl}/get/healthcheck_ping`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const res = await retryRedisCommand(client, 'PING', [], 3, 100, ctx);
     const duration = Date.now() - start;
-
-    if (res.status === 404 || res.ok) {
-      await logger.info(`NF Redis 健康检查成功`, { status: res.status, duration: `${duration}ms` }, ctx);
+    
+    if (res === 'PONG') {
+       await logger.info(`Redis 健康检查成功`, { duration: `${duration}ms` }, ctx);
+       return true;
     } else {
-      await logger.warn(`NF Redis 健康检查异常`, { status: res.status, statusText: res.statusText, duration: `${duration}ms` }, ctx);
+       await logger.warn(`Redis 健康检查异常`, { response: res, duration: `${duration}ms` }, ctx);
+       return false;
     }
   } catch (e) {
-    await logger.error(`NF Redis 健康检查连接失败`, { error: e.message }, ctx);
+    await logger.error(`Redis 健康检查连接失败`, { error: e.message }, ctx);
+    return false;
   }
 }
 
@@ -866,6 +957,10 @@ async function executeUpstashScan(env, prefix) {
   return { keys: keys.map(name => ({ name })) };
 }
 
+async function getIoRedisClient(env) {
+  return null;
+}
+
 /**
  * 执行操作并支持优先级故障转移
  */
@@ -874,10 +969,10 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
   await logger.debug(`执行 ${operation}，优先级: ${JSON.stringify(providers)}`, { args: args.slice(0, 1) }, ctx);
   
   const providerOps = {
-    'nf-redis': {
-      '_kv_get': async () => await executeNFRedis('_nf_redis_get', env, args[0]),
-      '_kv_put': async () => await executeNFRedis('_nf_redis_put', env, args[0], args[1]),
-      '_kv_list': async () => await executeNFRedisScan(env, args[0])
+    'redis': {
+      '_kv_get': async () => await executeRedis('_redis_get', env, args[0], null, ctx),
+      '_kv_put': async () => await executeRedis('_redis_put', env, args[0], args[1], ctx),
+      '_kv_list': async () => await executeRedisScan(env, args[0], ctx)
     },
     'cloudflare': {
       '_kv_get': async () => {
@@ -1053,11 +1148,11 @@ export {
   detectCacheProvider,
   getProviderPriority,
   normalizePath,
-  executeNFRedis,
-  executeNFRedisScan,
+  executeRedis,
+  executeRedisScan,
   executeUpstashScan,
   scanLockKeys,
-  checkNFHealth,
+  checkRedisHealth,
   handleRequest
 };
 
@@ -1262,30 +1357,30 @@ async function handleRequest(request, env, ctx) {
   }, ctx);
   
   // NF Redis 诊断详情
-  let nfConfigStatus = !!(env.NF_REDIS_URL && env.NF_REDIS_PASSWORD);
-  let nfDiagnosis = "configured";
+  let redisConfigStatus = !!(env.NF_REDIS_URL && env.NF_REDIS_PASSWORD);
+  let redisDiagnosis = "configured";
   if (!env.NF_REDIS_URL && !env.NF_REDIS_PASSWORD) {
-    nfDiagnosis = "配置缺失";
+    redisDiagnosis = "配置缺失";
   } else if (!env.NF_REDIS_URL) {
-    nfDiagnosis = "NF_REDIS_URL 缺失";
+    redisDiagnosis = "NF_REDIS_URL 缺失";
   } else if (!env.NF_REDIS_PASSWORD) {
-    nfDiagnosis = "NF_REDIS_PASSWORD 缺失";
+    redisDiagnosis = "NF_REDIS_PASSWORD 缺失";
   } else {
-    nfDiagnosis = "配置完整";
+    redisDiagnosis = "配置完整";
   }
 
   await logger.info('Cache provider 初始化诊断', {
     providers: prios,
-    nf_configured: nfConfigStatus,
-    nf_diagnosis: nfDiagnosis,
+    redis_configured: redisConfigStatus,
+    redis_diagnosis: redisDiagnosis,
     cf_kv_available: !!env.KV_STORAGE,
     upstash_configured: !!(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN),
     detect_primary: detectCacheProvider(env)
   }, ctx);
 
   // 如果配置了 NF Redis，启动后台健康检查
-  if (nfConfigStatus && ctx && ctx.waitUntil) {
-    ctx.waitUntil(checkNFHealth(env, ctx).catch(e => {
+  if (redisConfigStatus && ctx && ctx.waitUntil) {
+    ctx.waitUntil(checkRedisHealth(env, ctx).catch(e => {
       // 捕获异常，防止影响主流程
     }));
   }

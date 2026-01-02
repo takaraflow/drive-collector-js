@@ -54,10 +54,11 @@ import {
   getActiveInstances,
   detectCacheProvider,
   normalizePath,
-  executeNFRedis,
+  executeRedis,
   scanLockKeys,
   executeWithFailover,
 } from '../src/index.js';
+import { __mockSend } from 'redis-on-workers';
 
 // Mock KV Storage
 const mockKV = {
@@ -76,6 +77,7 @@ const mockEnv = {
 describe('任务调度失败处理优化测试', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    __mockSend.mockReset();
     mockVerify.mockReset();
     mockVerify.mockImplementation(async (options) => {
       return options.body;
@@ -295,13 +297,13 @@ describe('任务调度失败处理优化测试', () => {
  
    describe('缓存提供者检测', () => {
      it('应该优先使用环境变量', () => {
-       const env = { CACHE_PROVIDER: 'nf-redis' };
-       expect(detectCacheProvider(env)).toBe('nf-redis');
+       const env = { CACHE_PROVIDER: 'redis' };
+       expect(detectCacheProvider(env)).toBe('redis');
      });
 
      it('应该检测 NF Redis (需要 password)', () => {
        const env = { NF_REDIS_URL: 'https://redis.example.com', NF_REDIS_PASSWORD: 'password' };
-       expect(detectCacheProvider(env)).toBe('nf-redis');
+       expect(detectCacheProvider(env)).toBe('redis');
      });
 
      it('应该检测 Cloudflare KV', () => {
@@ -322,7 +324,7 @@ describe('任务调度失败处理优化测试', () => {
          NF_REDIS_URL: 'https://nf.example.com',
          NF_REDIS_PASSWORD: 'password'
        };
-       expect(detectCacheProvider(env)).toBe('nf-redis');
+       expect(detectCacheProvider(env)).toBe('redis');
      });
 
      it('应该优先 Cloudflare KV > Upstash', () => {
@@ -340,73 +342,49 @@ describe('任务调度失败处理优化测试', () => {
      });
    });
  
-   describe('NF Redis 故障转移', () => {
-     it('应该执行 NF Redis GET 操作', async () => {
+   describe('Redis 故障转移', () => {
+     it('应该执行 Redis GET 操作', async () => {
        const env = {
          NF_REDIS_URL: 'https://redis.example.com',
          NF_REDIS_PASSWORD: 'test-password',
        };
  
-       global.fetch.mockResolvedValueOnce({
-         ok: true,
-         json: async () => ({ result: 'test-value' }),
-       });
+       __mockSend.mockResolvedValueOnce('test-value');
  
-       const result = await executeNFRedis('_nf_redis_get', env, 'test-key');
+       const result = await executeRedis('_redis_get', env, 'test-key');
        
        expect(result).toBe('test-value');
-       expect(global.fetch).toHaveBeenCalledWith(
-         'https://redis.example.com/get/test-key',
-         expect.objectContaining({
-           headers: { 'Authorization': 'Bearer test-password' }
-         })
-       );
+       expect(__mockSend).toHaveBeenCalledWith('GET', 'test-key');
      });
  
-     it('应该执行 NF Redis PUT 操作', async () => {
+     it('应该执行 Redis PUT 操作', async () => {
        const env = {
          NF_REDIS_URL: 'https://redis.example.com',
          NF_REDIS_PASSWORD: 'test-password',
        };
  
-       global.fetch.mockResolvedValueOnce({
-         ok: true,
-         json: async () => ({ ok: true }),
-       });
+       __mockSend.mockResolvedValueOnce('OK');
  
-       const result = await executeNFRedis('_nf_redis_put', env, 'test-key', 'test-value');
+       const result = await executeRedis('_redis_put', env, 'test-key', 'test-value');
        
        expect(result).toBe(true);
-       expect(global.fetch).toHaveBeenCalledWith(
-         'https://redis.example.com/set/test-key',
-         expect.objectContaining({
-           method: 'POST',
-           headers: {
-             'Authorization': 'Bearer test-password',
-             'Content-Type': 'application/json'
-           },
-           body: JSON.stringify({ value: 'test-value' })
-         })
-       );
+       expect(__mockSend).toHaveBeenCalledWith('SET', 'test-key', 'test-value');
      });
  
-     it('应该处理 NF Redis 404 返回 null', async () => {
+     it('应该处理 Redis 404 返回 null', async () => {
        const env = {
          NF_REDIS_URL: 'https://redis.example.com',
          NF_REDIS_PASSWORD: 'test-password',
        };
  
-       global.fetch.mockResolvedValueOnce({
-         status: 404,
-         body: { cancel: jest.fn() },
-       });
+       __mockSend.mockResolvedValueOnce(null);
  
-       const result = await executeNFRedis('_nf_redis_get', env, 'nonexistent-key');
+       const result = await executeRedis('_redis_get', env, 'nonexistent-key');
        
        expect(result).toBe(null);
      });
  
-     it('应该在 executeWithFailover 中使用 NF Redis 作为第一优先级', async () => {
+     it('应该在 executeWithFailover 中使用 Redis 作为第一优先级', async () => {
        const env = {
          KV_STORAGE: mockKV,
          UPSTASH_REDIS_REST_URL: 'https://test.upstash.io',
@@ -415,26 +393,21 @@ describe('任务调度失败处理优化测试', () => {
          NF_REDIS_PASSWORD: 'nf-password',
        };
 
-       // NF Redis 成功
-       global.fetch.mockResolvedValueOnce({
-         ok: true,
-         json: async () => ({ result: 'nf-value' }),
-       });
+       __mockSend.mockResolvedValueOnce('nf-value');
 
        const result = await executeWithFailover('_kv_get', env, {}, 'test-key');
        
        expect(result).toBe('nf-value');
      });
 
-     it('应该在 NF Redis 失败时 fallback 到 CF KV', async () => {
+     it('应该在 Redis 失败时 fallback 到 CF KV', async () => {
        const env = {
          KV_STORAGE: mockKV,
          NF_REDIS_URL: 'https://redis.example.com',
          NF_REDIS_PASSWORD: 'nf-password',
        };
 
-       // NF Redis 失败
-       global.fetch.mockRejectedValueOnce(new Error('NF error'));
+       __mockSend.mockRejectedValueOnce(new Error('NF error'));
        
        // CF KV 成功
        mockKV.get.mockResolvedValueOnce('cf-value');
@@ -453,8 +426,7 @@ describe('任务调度失败处理优化测试', () => {
          NF_REDIS_PASSWORD: 'nf-password',
        };
 
-       // NF Redis 失败
-       global.fetch.mockRejectedValueOnce(new Error('NF error'));
+       __mockSend.mockRejectedValueOnce(new Error('NF error'));
        
        // CF KV 失败
        mockKV.get.mockRejectedValueOnce(new Error('KV error'));

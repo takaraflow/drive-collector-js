@@ -267,7 +267,7 @@
         "type": "string",
         "required": false,
         "priority": "highest",
-        "description": "Northflank Redis URL (优先级最高，若配置完整则作为 primary)"
+        "description": "Northflank Redis URL (redis://host:port 或 rediss://host:port, 支持 TCP+TLS)"
       },
       "NF_REDIS_PASSWORD": {
         "type": "string",
