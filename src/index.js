@@ -716,63 +716,71 @@ async function retryRedisCommand(client, command, args = [], maxRetries = 3, ini
   let retries = 0;
   let delay = initialDelay;
   let timerId = null;
+  let isDone = false;
 
   const executeWithRetries = async () => {
-    try {
-      while (retries < maxRetries) {
-        try {
-          if (retries > 0) {
-            await logger.warn(`Redis 命令重试: ${command} (尝试 ${retries + 1}/${maxRetries})`, { delay: `${delay}ms` }, ctx);
-            // 手动管理重试延迟的 timer 以确保清理
-            let retryTimerId = null;
-            try {
-              await new Promise((resolve) => {
-                retryTimerId = setTimeout(resolve, delay);
-              });
-            } finally {
-              if (retryTimerId) clearTimeout(retryTimerId);
-            }
-          }
-          const result = await client.send(command, ...args);
-          return result;
-        } catch (e) {
-          const errorMessage = e.message.toLowerCase();
-          if (
-            errorMessage.includes('econnreset') ||
-            errorMessage.includes('etimedout') ||
-            errorMessage.includes('socketer') || // 包括 @arrowood.dev/socket 的 SocketError
-            errorMessage.includes('network error')
-          ) {
-            retries++;
-            delay *= 2; // 指数退避
-            if (retries >= maxRetries) {
-              await logger.error(`Redis 命令重试失败: ${command} 达到最大重试次数`, { error: e.message }, ctx);
-              throw e;
-            }
-          } else {
-            // 非可重试错误，直接抛出
-            await logger.error(`Redis 命令执行失败: ${command} (非可重试错误)`, { error: e.message }, ctx);
-            throw e;
+    while (retries < maxRetries && !isDone) {
+      try {
+        if (retries > 0) {
+          await logger.warn(`Redis 命令重试: ${command} (尝试 ${retries + 1}/${maxRetries})`, { delay: `${delay}ms` }, ctx);
+          let retryTimerId = null;
+          try {
+            await new Promise((resolve) => {
+              retryTimerId = setTimeout(resolve, delay);
+            });
+          } finally {
+            if (retryTimerId) clearTimeout(retryTimerId);
           }
         }
-      }
-    } finally {
-      if (timerId) {
-        clearTimeout(timerId);
-        timerId = null;
+        
+        if (isDone) throw new Error('Abort'); // 快速退出
+
+        return await client.send(command, ...args);
+      } catch (e) {
+        if (isDone || e.message === 'Abort') throw e;
+
+        const errorMessage = e.message.toLowerCase();
+        if (
+          errorMessage.includes('econnreset') ||
+          errorMessage.includes('etimedout') ||
+          errorMessage.includes('socketer') || 
+          errorMessage.includes('network error')
+        ) {
+          retries++;
+          delay *= 2; // 指数退避
+          if (retries >= maxRetries) {
+            throw e;
+          }
+        } else {
+          throw e;
+        }
       }
     }
   };
 
-  // 为每个命令设置总体超时，防止 hang
   const timeoutPromise = new Promise((_, reject) => {
     timerId = setTimeout(() => {
       timerId = null;
-      reject(new Error(`Redis command ${command} timed out after 5000ms`));
-    }, 5000);
+      isDone = true; // 标记已超时，中止循环
+      reject(new Error(`Redis command ${command} timed out after 10000ms`));
+    }, 10000);
+    // 允许 Node.js/Worker 进程在只剩下这个 timer 时退出
+    if (timerId && typeof timerId.unref === 'function') {
+      timerId.unref();
+    }
   });
 
-  return Promise.race([executeWithRetries(), timeoutPromise]);
+  try {
+    const result = await Promise.race([executeWithRetries(), timeoutPromise]);
+    isDone = true; // 成功后也要标记
+    return result;
+  } finally {
+    isDone = true; 
+    if (timerId) {
+      clearTimeout(timerId);
+      timerId = null;
+    }
+  }
 }
 
 /**
@@ -1303,8 +1311,12 @@ async function flushLogs(env, ctx = null) {
         headers,
         body: JSON.stringify(chunk)
       });
+      // 必须显式消耗 body，否则会导致连接挂起
+      if (res.body) {
+        await res.text().catch(() => {});
+      }
       if (!res.ok) {
-        const err = await res.text();
+        const err = `Log ingest failed with status ${res.status}`;
         if (ctx && ctx.waitUntil) {
           ctx.waitUntil((async () => {
             try {
