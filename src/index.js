@@ -1017,6 +1017,11 @@ const createSafeEnv = (env) => {
 
 export default {
   async fetch(request, env, ctx) {
+    // [AXIOM_DEBUG] Request lifecycle tracing
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    ctx._axiomDebugRequestId = requestId; // Attach to context for tracing
+    console.log(`[AXIOM_DEBUG] ${requestId}: export.default.fetch entered`);
+
     // 1. 创建安全环境，防止 OTel 扫描 undefined 变量时崩溃
     const safeEnv = createSafeEnv(env);
 
@@ -1025,8 +1030,10 @@ export default {
 
     // 3. 判定是否启用 Axiom 导出器
     const useAxiom = !isTestEnvironment && safeEnv.AXIOM_TOKEN && safeEnv.AXIOM_DATASET;
+    console.log(`[AXIOM_DEBUG] ${requestId}: Axiom decision - useAxiom=${useAxiom}, isTest=${isTestEnvironment}, hasToken=${!!safeEnv.AXIOM_TOKEN}, hasDataset=${!!safeEnv.AXIOM_DATASET}`);
 
     if (useAxiom) {
+      console.log(`[AXIOM_DEBUG] ${requestId}: instrument() called with Axiom config`);
       return instrument(handler, {
         serviceName: 'lb-worker-js',
         exporter: {
@@ -1042,6 +1049,7 @@ export default {
     }
 
     // 4. 回退模式：直接运行业务逻辑
+    console.log(`[AXIOM_DEBUG] ${requestId}: fallback mode - calling handler.fetch directly`);
     return handler.fetch(request, safeEnv, ctx);
   }
 };
@@ -1068,6 +1076,9 @@ function normalizePath(pathname) {
  * Worker 主逻辑
  */
 async function handleRequest(request, env, ctx) {
+  const requestId = ctx._axiomDebugRequestId || 'unknown';
+  console.log(`[AXIOM_DEBUG] ${requestId}: handleRequest started`);
+
   const requestLogBuffer = []; // 为每个请求创建独立的日志缓冲
   const requestLogger = logger.child({ module: 'handleRequest', logBuffer: requestLogBuffer }); // 将缓冲传递给子 logger
 
@@ -1216,8 +1227,10 @@ async function handleRequest(request, env, ctx) {
 
   let result;
   try {
+    console.log(`[AXIOM_DEBUG] ${requestId}: Before getActiveInstances, buffer size=${requestLogBuffer.length}`);
     // 获取活跃实例
     const activeInstances = await getActiveInstances(env, ctx);
+    console.log(`[AXIOM_DEBUG] ${requestId}: After getActiveInstances, found ${activeInstances.length} instances, buffer size=${requestLogBuffer.length}`);
     await requestLogger.debug('getActiveInstances complete', { count: activeInstances.length, module: 'instanceSelector' });
     await requestLogger.info('活跃实例查询完成', { count: activeInstances.length });
     await requestLogger.info('存活标记: getActiveInstances 完成', {
@@ -1281,10 +1294,13 @@ async function handleRequest(request, env, ctx) {
       headers: { 'Content-Type': 'application/json' }
     });
   } finally {
+    console.log(`[AXIOM_DEBUG] ${requestId}: finally block entered, buffer size=${requestLogBuffer.length}`);
     // 确保在请求结束时，所有缓冲的日志都被发送
     if (ctx && ctx.waitUntil) {
+      console.log(`[AXIOM_DEBUG] ${requestId}: calling ctx.waitUntil(flushLogs)`);
       ctx.waitUntil(flushLogs(requestLogBuffer, ctx));
     } else {
+      console.log(`[AXIOM_DEBUG] ${requestId}: calling flushLogs synchronously`);
       await flushLogs(requestLogBuffer, ctx);
     }
   }
