@@ -709,68 +709,21 @@ async function getRedisClient(env, ctx) {
  * 执行 NF Redis 操作 (适配新 TCP client)
  */
 async function executeRedis(operation, env, key, value = null, ctx = null) {
-  // 保持函数签名兼容，但内部逻辑完全重写为使用 TCP client
-  // ctx 并没有传递给 executeNFRedis，这是一个遗留问题。
-  // 我们尝试从全局获取或者这可能需要重构调用方传递 ctx。
-  // 鉴于 executeWithPriorityFallback 调用 executeNFRedis 时也没有传 ctx，我们先假设 ctx 为 null 或尽量不依赖 ctx 记录非关键日志
-  // 为了能写日志，我们暂且传 null 给 logger，或者修改调用处。
-  // 查看调用链：executeWithPriorityFallback -> executeNFRedis
-  // executeWithPriorityFallback 接收了 ctx。
-  // 修改 executeNFRedis 签名会影响 tests。
-  // 我们先保持签名，内部尝试获取 client。
-  // 注意：executeNFRedis 的参数是 (operation, env, key, value)
-  
-  // 为了能在 executeNFRedis 里使用 ctx，我们需要修改调用链，或者...
-  // 实际上 executeWithPriorityFallback 里的调用是：
-  // '_kv_get': async () => await executeNFRedis('_redis_get', env, args[0]),
-  // 我们可以在这里修改，把 ctx 闭包进去？不，executeNFRedis 是独立导出的。
-  
-  // 让我们修改 executeNFRedis 签名，增加可选 ctx 参数，并在调用处传入。
-  // 但这会破坏现有测试。
-  // 更好的方式：
-  // 1. 修改 executeNFRedis 内部实现。
-  // 2. 注意调用处。
-  
-  // 等等，executeNFRedis 被 export 供测试。
-  // 让我们看看 executeWithPriorityFallback 的调用：
-  // '_kv_get': async () => await executeNFRedis('_redis_get', env, args[0]),
-  // 这里确实没传 ctx。
-  
-  // 鉴于我们要做 TCP 适配，这是个 Breaking Change 无论如何。
-  // 让我们尽量保持签名，但在内部使用 getRedisClient(env, null)。
-  
   const client = await getRedisClient(env, ctx);
   
   if (operation === '_redis_get') {
     const start = Date.now();
-    // await logger.info(`NF Redis GET key=${key} status=pending`, {}, null); // 缺少 ctx，暂不 log 或 log null
     
     try {
       // redis-on-workers get 返回 string | null
       const result = await retryRedisCommand(client, 'GET', [key], 3, 100, ctx);
       
       const duration = Date.now() - start;
-      // await logger.info(`NF Redis GET key=${key} status=200 duration=${duration}ms`, {}, null);
       
-      // 如果结果是 JSON 字符串，尝试解析？
-      // 原有 fetch 逻辑：const data = await response.json(); return data.result;
-      // 注意：原有 fetch 返回的是 { result: "value" } 结构？
-      // 不，Northflank Redis over HTTP (如果它存在) 可能返回 { result: ... }
-      // 但标准 Redis TCP GET 返回的就是 value 字符串。
-      // 这里的语义是 KV get。
-      // 如果存储的是 JSON 字符串，我们应该解析它吗？
-      // 查看 `executeWithPriorityFallback` 的 Upstash 实现：它返回 data.result。
-      // Cloudflare KV .get() 返回 string。
-      // 我们的 `parseInstanceData` 能够处理 string 或 object。
-      // 所以返回 string 即可。
-      
-      // 需要注意的是，redis-on-workers 返回的可能是 string, number, null 等。
-      // 我们统一转为 null 或 string。
       if (result === null) return null;
       return String(result);
       
     } catch (e) {
-      // await logger.warn(`NF Redis GET key=${key} failed`, { error: e.message }, null);
       throw e;
     }
   } else if (operation === '_redis_put') {
@@ -1170,6 +1123,14 @@ function normalizePath(pathname) {
  * Worker 主逻辑
  */
 async function handleRequest(request, env, ctx) {
+  // 1. 提前解构环境变量（在任何异步操作前）
+  const axiomToken = env.AXIOM_TOKEN;
+  const axiomDataset = env.AXIOM_DATASET;
+  const axiomOrg = env.AXIOM_ORG_ID;
+  
+  // 2. 验证配置
+  const axiomEnabled = !isTestEnvironment && axiomToken && axiomDataset;
+
   // 1. 在上下文还在时，显式捕获顶级 Span
   const rootSpan = trace.getActiveSpan();
   const logBuffer = [];
@@ -1349,42 +1310,41 @@ async function handleRequest(request, env, ctx) {
 
   await requestLogger.debug('负载均衡请求完成', { status: response.status });
 
-  // 3. 环境变量"硬解构"与 Ingest 保护
-  // 在 handleRequest 结尾 return 之前
-  const axiomToken = env.AXIOM_TOKEN; // 同步解构，防止异步失效
-  const axiomDataset = env.AXIOM_DATASET;
-  const axiomOrg = env.AXIOM_ORG_ID;
-
-  if (ctx?.waitUntil && logBuffer.length > 0 && !isTestEnvironment && axiomToken && axiomDataset) {
-    const logsToSend = [...logBuffer];
+  // 3. 改进的日志发送逻辑
+  if (ctx?.waitUntil && logBuffer.length > 0 && axiomEnabled) {
+    // 创建日志副本，防止引用问题
+    const logsToSend = JSON.parse(JSON.stringify(logBuffer));
+    
     ctx.waitUntil(
-      fetch(`https://api.axiom.co/v1/datasets/${axiomDataset}/ingest`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${axiomToken}`,
-          'Content-Type': 'application/json',
-          'X-Axiom-Org-Id': axiomOrg || ''
-        },
-        body: JSON.stringify(logsToSend)
-      }).catch(e => console.error('Axiom Post Error:', e.message))
+      (async () => {
+        try {
+          const ingestUrl = `https://api.axiom.co/v1/datasets/${axiomDataset}/ingest`;
+          const headers = {
+            'Authorization': `Bearer ${axiomToken}`,
+            'Content-Type': 'application/json'
+          };
+          
+          if (axiomOrg) {
+            headers['X-Axiom-Org-Id'] = axiomOrg;
+          }
+          
+          const axiomResponse = await fetch(ingestUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(logsToSend)
+          });
+          
+          const responseText = await axiomResponse.text();
+          
+          if (!axiomResponse.ok) {
+            console.error(`[AXIOM] Ingest failed: ${axiomResponse.status} - ${responseText}`);
+          }
+        } catch (error) {
+          console.error('[AXIOM] Send error:', error.message);
+        }
+      })()
     );
   }
-
-  const diagnosticLog = { message: "HARD_CORE_DIAGNOSTIC", timestamp: Date.now() };
-  ctx.waitUntil(
-    fetch(`https://api.axiom.co/v1/datasets/${axiomDataset}/ingest`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${axiomToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: `[${JSON.stringify(diagnosticLog)}]` // 强制手动数组包装
-    }).then(r => {
-      // 关键：在 Cloudflare 实时日志中输出 Axiom 的真实反馈
-      console.log(`DIAGNOSTIC_STATUS: ${r.status}`);
-      return r.text().then(t => console.log(`DIAGNOSTIC_RESPONSE: ${t}`));
-    })
-  );
 
   return response;
 }
