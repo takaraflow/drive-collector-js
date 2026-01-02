@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.8](https://github.com/YoungSx/lb-worker-js/compare/v0.7.7...v0.7.8) (2026-01-02)
+
+
+### 🐛 Bug Fixes
+
+* improves OTel span propagation in logger methods ([abb8b38](https://github.com/YoungSx/lb-worker-js/commit/abb8b3875d5161fc2cd60c1313c2569b6fbc4c23))
+
 ### [0.7.7](https://github.com/YoungSx/lb-worker-js/compare/v0.7.6...v0.7.7) (2026-01-02)
 
 
