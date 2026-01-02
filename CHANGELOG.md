@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.10](https://github.com/YoungSx/lb-worker-js/compare/v0.7.9...v0.7.10) (2026-01-02)
+
+
+### ✨ Features
+
+* add debug logging for request flow and axiom diagnostics ([79f26e9](https://github.com/YoungSx/lb-worker-js/commit/79f26e9fd1a073b26b5f717fd36b8aa8a46b13fc))
+
 ### [0.7.9](https://github.com/YoungSx/lb-worker-js/compare/v0.7.8...v0.7.9) (2026-01-02)
 
 
