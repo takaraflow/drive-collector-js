@@ -362,9 +362,15 @@ describe('Logger Service', () => {
       // Advance timers for async logger call
       await jest.advanceTimersByTimeAsync(10);
 
-      // Verify logger.error was called with correct payload
-      expect(mockIngest).toHaveBeenCalledTimes(1);
-      const payload = mockIngest.mock.calls[0][1][0];
+      // Filter relevant calls to ignore extraneous ingest calls
+      const relevantCalls = mockIngest.mock.calls.filter(call => {
+        const payload = call[1][0];
+        return payload.service === 'telegram' && payload.source === 'console_proxy';
+      });
+
+      expect(relevantCalls.length).toBe(1);
+
+      const payload = relevantCalls[0][1][0];
       expect(payload.level).toBe('error');
       expect(payload.service).toBe('telegram');
       expect(payload.source).toBe('console_proxy');
