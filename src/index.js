@@ -75,6 +75,14 @@ function detectCacheProvider(env) {
   return prios[0] || 'none';
 }
 
+const getFormattedTime = () => new Date().toISOString().slice(11, 23);
+const EMOJI_MAP = {
+  info: '✅',
+  warn: '⚠️',
+  error: '❌',
+  debug: '🔍'
+};
+
 /**
  * 日志记录器
  */
@@ -99,7 +107,7 @@ const logger = {
       });
     }
     // 保持 console 输出，方便在 Cloudflare 仪表盘实时查看
-    console.log(`[INFO] ${message}`, meta);
+    console.log(`${EMOJI_MAP.info} [INFO ${getFormattedTime()}] [${meta.module || 'core'}] ${message}`, meta);
   },
 
   async warn(message, meta = {}, ctx = null, span = null) {
@@ -112,7 +120,7 @@ const logger = {
         ...meta
       });
     }
-    console.warn(`[WARN] ${message}`, meta);
+    console.warn(`${EMOJI_MAP.warn} [WARN ${getFormattedTime()}] [${meta.module || 'core'}] ${message}`, meta);
   },
 
   async error(message, meta = {}, ctx = null, span = null) {
@@ -126,13 +134,13 @@ const logger = {
         ...meta
       });
     }
-    console.error(`[ERROR] ${errorObj.message}`, meta);
+    console.error(`${EMOJI_MAP.error} [ERROR ${getFormattedTime()}] [${meta.module || 'core'}] ${errorObj.message}`, meta);
   },
 
   async debug(message, meta = {}, ctx = null, span = null) {
     // 仅在开发环境打印 console，不发送到 OTel 以节省额度
     if (this.env === 'development') {
-      console.debug(`[DEBUG] ${message}`, meta);
+      console.debug(`${EMOJI_MAP.debug} [DEBUG ${getFormattedTime()}] [${meta.module || 'core'}] ${message}`, meta);
     }
   }
 };
@@ -1123,15 +1131,16 @@ function normalizePath(pathname) {
  * Worker 主逻辑
  */
 async function handleRequest(request, env, ctx) {
-  console.log(">>> [DEBUG] Request Received:", request.method, request.url);
+  logger.debug('Request Received', { method: request.method, url: request.url, module: 'handleRequest' });
 
   // 检查环境变量是否为占位符 (防止 GHA 注入失败)
   const token = env.AXIOM_TOKEN;
   const dataset = env.AXIOM_DATASET;
-  console.log(">>> [DEBUG] Config Check:", {
+  logger.debug('Config Check', {
     token_prefix: token ? token.slice(0, 10) + "..." : "MISSING",
     dataset: dataset || "MISSING",
-    is_test: isTestEnvironment
+    is_test: isTestEnvironment,
+    module: 'handleRequest'
   });
 
   // 1. 提前解构环境变量（在任何异步操作前）
@@ -1293,7 +1302,7 @@ async function handleRequest(request, env, ctx) {
   try {
   // 获取活跃实例
   const activeInstances = await getActiveInstances(env, ctx);
-  console.log(">>> [DEBUG] getActiveInstances complete, count:", activeInstances.length);
+  await requestLogger.debug('getActiveInstances complete', { count: activeInstances.length, module: 'instanceSelector' });
   await requestLogger.info('活跃实例查询完成', { count: activeInstances.length });
   await requestLogger.info('存活标记: getActiveInstances 完成', {
     alive: true,
@@ -1326,7 +1335,7 @@ async function handleRequest(request, env, ctx) {
 
   // 选择目标实例
   const targetInstance = await selectTargetInstance(activeInstances, env, ctx);
-  console.log(">>> [DEBUG] targetInstance selected:", targetInstance?.id || "NONE");
+  await requestLogger.debug('targetInstance selected', { id: targetInstance?.id || 'NONE', module: 'instanceSelector' });
   if (!targetInstance) {
     result = new Response('No target instance selected', { status: 503 });
   } else {
@@ -1349,10 +1358,10 @@ async function handleRequest(request, env, ctx) {
   }
   } finally {
     // 在 handleRequest 的 return 之前
-    console.log(">>> [DEBUG] Entering log flush logic, buffer size:", logBuffer.length);
+    requestLogger.debug('Entering log flush logic', { bufferSize: logBuffer.length, module: 'axiomFlush' }); // 非 await
 
     if (ctx && ctx.waitUntil && token && dataset) {
-      console.log(">>> [DEBUG] Triggering ctx.waitUntil fetch...");
+      requestLogger.debug('Triggering ctx.waitUntil fetch', { module: 'axiomFlush' });
 
       ctx.waitUntil(
         fetch(`https://api.axiom.co/v1/datasets/${dataset}/ingest`, {
@@ -1365,14 +1374,14 @@ async function handleRequest(request, env, ctx) {
         })
         .then(async (res) => {
           const text = await res.text();
-          console.log(`>>> [AXIOM_FEEDBACK] Status: ${res.status}, Body: ${text.slice(0, 100)}`);
+          logger.info('Axiom ingest feedback', { status: res.status, bodyPreview: text.slice(0,100), module: 'axiomFlush' }); // 非 await
         })
         .catch((err) => {
-          console.log(">>> [AXIOM_CRASH] Fetch Error:", err.message);
+          logger.error('Axiom ingest fetch error', { error: err.message, module: 'axiomFlush' });
         })
       );
     } else {
-      console.log(">>> [DEBUG] Skip flush: ctx, token or dataset invalid");
+      logger.debug('Skip axiom flush', { reason: 'ctx/token/dataset invalid', module: 'axiomFlush' });
     }
   }
 
