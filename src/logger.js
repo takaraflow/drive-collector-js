@@ -125,6 +125,9 @@ export async function flushLogs(logBuffer, ctx = null) {
       console.log(`[AXIOM_DEBUG] ${requestId}: axiomClient.flush() completed synchronously`);
     }
   } catch (error) {
+    if (error.message.includes('RequestInitializerDict')) {
+      console.error('Cache初始化失败:', error.stack);
+    }
     console.error(`[AXIOM_DEBUG] ${requestId}: flushLogs exception:`, error.message);
     console.error('Axiom 日志发送失败:', error.message);
   }
