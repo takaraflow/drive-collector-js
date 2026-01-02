@@ -946,33 +946,19 @@ async function executeRedisScan(env, prefix, ctx = null) {
 /**
  * 检查 NF Redis 健康状况 (非阻塞)
  */
-async function checkRedisHealth(env, ctx) {
-  let healthTimerId = null;
+async function checkRedisHealth(env, ctx, executor = executeWithPriorityFallback) {
   try {
-    const client = await getRedisClient(env, ctx);
-    // 延迟 200ms 再 PING，确保 socket 完全建立
-    await new Promise((resolve) => {
-      healthTimerId = setTimeout(resolve, 200);
-    });
-    if (healthTimerId) clearTimeout(healthTimerId);
-    healthTimerId = null;
-
+    // 之前基于 TCP PING 的健康检查在 Cloudflare Workers 中不可行
+    // 改为尝试通过 executeWithPriorityFallback 读取一个预设的键，
+    // 这将使用可用的、基于 HTTP 的 provider (如 Upstash)
     const start = Date.now();
-    const res = await retryRedisCommand(client, 'PING', [], 3, 100, ctx);
+    await executor('_kv_get', env, ctx, 'healthcheck_ping');
     const duration = Date.now() - start;
-    
-    if (res === 'PONG') {
-       await logger.info(`Redis 健康检查成功`, { duration: `${duration}ms` }, ctx);
-       return true;
-    } else {
-       await logger.warn(`Redis 健康检查异常`, { response: res, duration: `${duration}ms` }, ctx);
-       return false;
-    }
+    await logger.info(`Redis provider 健康检查成功 (通过 _kv_get)`, { duration: `${duration}ms` }, ctx);
+    return true;
   } catch (e) {
-    await logger.error(`Redis 健康检查连接失败`, { error: e.message }, ctx);
+    await logger.error(`Redis provider 健康检查失败`, { error: e.message }, ctx);
     return false;
-  } finally {
-    if (healthTimerId) clearTimeout(healthTimerId);
   }
 }
 
