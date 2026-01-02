@@ -37,7 +37,7 @@ function generateWranglerCommand() {
       }
     }
 
-    return `npx wrangler deploy -c wrangler.build.toml --compatibility-flags="nodejs_compat" ${vars.join(' ')}`;
+    return `npx wrangler deploy -c wrangler.toml --compatibility-flags="nodejs_compat" ${vars.join(' ')}`;
   } catch (error) {
     console.error('Error generating wrangler command:', error.message);
     return 'npx wrangler deploy';

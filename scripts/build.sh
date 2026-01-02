@@ -115,7 +115,13 @@ for var in "${VARS_TO_SUBST[@]}"; do
 done
 
 # 特殊默认值设置
-export WORKER_NAME=${WORKER_NAME:-drive-collector-lb}
+# 从 package.json 提取 name 作为 WORKER_NAME 的默认值
+if command -v jq >/dev/null 2>&1; then
+    PKG_NAME=$(jq -r '.name' package.json)
+else
+    PKG_NAME=$(grep '"name":' package.json | head -1 | cut -d'"' -f4)
+fi
+export WORKER_NAME=${WORKER_NAME:-$PKG_NAME}
 export AXIOM_DATASET=${AXIOM_DATASET:-drive-collector}
 export NODE_ENV=${NODE_ENV:-production}
 export SIGNATURE_EXPIRATION_WINDOW=${SIGNATURE_EXPIRATION_WINDOW:-900}

@@ -20,7 +20,7 @@ describe('generate-wrangler-vars.js (Ultimate Dynamic)', () => {
     const output = execSync(`node ${scriptPath}`, { env: mockEnv }).toString().trim();
     
     expect(output).toContain('npx wrangler deploy');
-    expect(output).toContain('-c wrangler.build.toml');
+    expect(output).toContain('-c wrangler.toml');
     expect(output).toContain('--var NF_REDIS_PASSWORD:"secret-password"');
     expect(output).toContain('--var AXIOM_TOKEN:"axiom-secret"');
     expect(output).toContain('--var NF_REDIS_URL:"https://vars.url"');
