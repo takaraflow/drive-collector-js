@@ -348,6 +348,11 @@ describe('Logger Service', () => {
       };
       logger = loggerModule.logger;
 
+// Ensure ingest is successful for this test
+      mockIngest.mockResolvedValue(undefined);
+// Clear any previous calls from initialization
+      mockIngest.mockClear();
+
       // Enable proxy
       enableTelegramConsoleProxy();
 
