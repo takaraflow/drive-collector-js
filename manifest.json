@@ -459,6 +459,11 @@
         "required": false,
         "description": "Northflank Redis password"
       },
+      "REDIS_TOKEN": {
+        "type": "string",
+        "required": false,
+        "description": "General Redis authentication token (used if password is not provided in URL or other variables)"
+      },
       "REDIS_URL": {
         "type": "string",
         "required": false,

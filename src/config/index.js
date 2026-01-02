@@ -121,7 +121,10 @@ export const config = {
         url: (process.env.NF_REDIS_URL && process.env.NF_REDIS_URL.trim() !== '') ? process.env.NF_REDIS_URL : ((process.env.REDIS_URL && process.env.REDIS_URL.trim() !== '') ? process.env.REDIS_URL : undefined),
         host: (process.env.NF_REDIS_HOST && process.env.NF_REDIS_HOST.trim() !== '') ? process.env.NF_REDIS_HOST : ((process.env.REDIS_HOST && process.env.REDIS_HOST.trim() !== '') ? process.env.REDIS_HOST : undefined),
         port: (process.env.NF_REDIS_PORT && process.env.NF_REDIS_PORT.trim() !== '') ? parseInt(process.env.NF_REDIS_PORT, 10) : ((process.env.REDIS_PORT && process.env.REDIS_PORT.trim() !== '') ? parseInt(process.env.REDIS_PORT, 10) : 6379),
-        password: (process.env.NF_REDIS_PASSWORD && process.env.NF_REDIS_PASSWORD.trim() !== '') ? process.env.NF_REDIS_PASSWORD : ((process.env.REDIS_PASSWORD && process.env.REDIS_PASSWORD.trim() !== '') ? process.env.REDIS_PASSWORD : undefined),
+        password: (process.env.NF_REDIS_PASSWORD && process.env.NF_REDIS_PASSWORD.trim() !== '') ? process.env.NF_REDIS_PASSWORD : 
+                 ((process.env.REDIS_PASSWORD && process.env.REDIS_PASSWORD.trim() !== '') ? process.env.REDIS_PASSWORD : 
+                 ((process.env.REDIS_TOKEN && process.env.REDIS_TOKEN.trim() !== '') ? process.env.REDIS_TOKEN :
+                 ((process.env.UPSTASH_REDIS_REST_TOKEN && process.env.UPSTASH_REDIS_REST_TOKEN.trim() !== '') ? process.env.UPSTASH_REDIS_REST_TOKEN : undefined))),
         tls: {
             enabled: tlsEnabled,
             rejectUnauthorized: process.env.REDIS_TLS_REJECT_UNAUTHORIZED !== 'false' && process.env.NF_REDIS_TLS_REJECT_UNAUTHORIZED !== 'false',

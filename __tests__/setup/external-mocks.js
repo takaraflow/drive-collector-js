@@ -89,6 +89,39 @@ export {
   globalMocks
 };
 
+// Mock ioredis
+globalMocks.redisClient = {
+  on: jest.fn().mockReturnThis(),
+  once: jest.fn().mockReturnThis(),
+  removeListener: jest.fn().mockReturnThis(),
+  removeAllListeners: jest.fn().mockReturnThis(),
+  quit: jest.fn().mockResolvedValue('OK'),
+  ping: jest.fn().mockResolvedValue('PONG'),
+  get: jest.fn(),
+  set: jest.fn(),
+  del: jest.fn(),
+  keys: jest.fn(),
+  pipeline: jest.fn(() => ({
+    set: jest.fn().mockReturnThis(),
+    exec: jest.fn().mockResolvedValue([])
+  })),
+  status: 'ready',
+  options: {
+    maxRetriesPerRequest: 5,
+    connectTimeout: 15000
+  }
+};
+
+const RedisMock = jest.fn().mockImplementation((config) => {
+  RedisMock.mock.calls.push([config]);
+  return globalMocks.redisClient;
+});
+RedisMock.mock = { calls: [] };
+
+jest.unstable_mockModule('ioredis', () => ({
+  default: RedisMock
+}));
+
 // 导出单个 mock 函数（向后兼容）
 export const mockAxiomIngest = globalMocks.axiomIngest;
 export const mockAxiomConstructor = globalMocks.axiomConstructor;
@@ -98,3 +131,5 @@ export const mockS3Send = globalMocks.s3Send;
 export const mockUpload = globalMocks.upload;
 export const mockCache = globalMocks.cache;
 export const mockLocalCache = globalMocks.localCache;
+export const mockRedisClient = globalMocks.redisClient;
+export const mockRedisConstructor = RedisMock;

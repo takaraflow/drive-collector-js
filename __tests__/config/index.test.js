@@ -101,4 +101,48 @@ describe("Config Module", () => {
     delete process.env.NF_REDIS_URL;
     delete process.env.NF_REDIS_TLS_ENABLED;
   });
+
+  test("should use REDIS_TOKEN when password is not provided in URL", async () => {
+    process.env.REDIS_URL = "redis://redis.example.com:6379";
+    process.env.REDIS_TOKEN = "test_token_123";
+    jest.resetModules();
+
+    const { getRedisConnectionConfig } = await import("../../src/config/index.js");
+    const { options } = getRedisConnectionConfig();
+    expect(options.password).toBe("test_token_123");
+
+    // Clean up
+    delete process.env.REDIS_URL;
+    delete process.env.REDIS_TOKEN;
+  });
+
+  test("should use UPSTASH_REDIS_REST_TOKEN as fallback for Redis password", async () => {
+    process.env.REDIS_URL = "redis://redis.example.com:6379";
+    process.env.UPSTASH_REDIS_REST_TOKEN = "upstash_token_123";
+    jest.resetModules();
+
+    const { getRedisConnectionConfig } = await import("../../src/config/index.js");
+    const { options } = getRedisConnectionConfig();
+    expect(options.password).toBe("upstash_token_123");
+
+    // Clean up
+    delete process.env.REDIS_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  });
+
+  test("should prioritize REDIS_TOKEN over UPSTASH_REDIS_REST_TOKEN", async () => {
+    process.env.REDIS_URL = "redis://redis.example.com:6379";
+    process.env.REDIS_TOKEN = "priority_token";
+    process.env.UPSTASH_REDIS_REST_TOKEN = "upstash_token_123";
+    jest.resetModules();
+
+    const { getRedisConnectionConfig } = await import("../../src/config/index.js");
+    const { options } = getRedisConnectionConfig();
+    expect(options.password).toBe("priority_token");
+
+    // Clean up
+    delete process.env.REDIS_URL;
+    delete process.env.REDIS_TOKEN;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  });
 });
