@@ -110,6 +110,16 @@ export async function getRedisClient(env, ctx) {
   //   redisOptions.tls = true;
   // }
   
+  if (urlStr.startsWith('rediss://')) {
+    // 在 Node.js 环境下，如果遇到 SocketError: read ECONNRESET，通常意味着 TLS 握手失败
+    // 或服务端拒绝了非授权连接。尝试强制开启 tls 选项并禁用证书验证。
+    redisOptions.tls = {
+      servername: new URL(urlStr).hostname,
+      rejectUnauthorized: false
+    };
+    console.log(`[DEBUG] Node.js environment detected. Applied TLS workaround for ${redisOptions.tls.servername}`);
+  }
+  
   try {
     redisClient = createRedis(redisOptions);
     await logger.info('Redis Client 初始化成功', { url: urlStr.replace(/:[^:@]*@/, ':***@') });

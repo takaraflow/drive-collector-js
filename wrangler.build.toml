@@ -2,7 +2,7 @@ name = "${WORKER_NAME}"
 account_id = "${CLOUDFLARE_ACCOUNT_ID}"
 main = "dist/index.js"
 compatibility_date = "2023-01-01"
-compatibility_flags = ["nodejs_compat", "nodejs_compat_v2"]
+compatibility_flags = ["nodejs_compat"]
 
 [[kv_namespaces]]
 binding = "KV_STORAGE"
