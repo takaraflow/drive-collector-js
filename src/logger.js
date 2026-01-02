@@ -1,5 +1,5 @@
 import { Axiom } from '@axiomhq/js';
-import { trace } from '@opentelemetry/api';
+import { trace, context } from '@opentelemetry/api';
 
 // 全局类型定义（解决 TypeScript 警告）
 /** @type {string} */
@@ -125,9 +125,9 @@ function addOtelEvent(level, message, data = {}) {
       span.addEvent('log', {
         'log.level': level,
         'log.message': message,
-        'log.data': JSON.stringify(data),
         'log.version': VERSION,
-        'log.module': data.module || 'unknown'
+        'log.module': data.module || 'unknown',
+        ...data
       });
     }
   } catch (error) {
