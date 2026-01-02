@@ -1021,7 +1021,7 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         if (env.KV_STORAGE) {
           const start = Date.now();
           const res = await env.KV_STORAGE.get(args[0]);
-          await logger.debug(`Cloudflare KV GET: key=${args[0]} success, duration=${Date.now() - start}ms`, {}, ctx);
+          await logger.debug(`Cloudflare KV GET: key=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' }, ctx);
           return res;
         }
         throw new Error('KV_STORAGE not available');
@@ -1030,7 +1030,7 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         if (env.KV_STORAGE) {
           const start = Date.now();
           await env.KV_STORAGE.put(args[0], args[1]);
-          await logger.debug(`Cloudflare KV PUT: key=${args[0]} success, duration=${Date.now() - start}ms`, {}, ctx);
+          await logger.debug(`Cloudflare KV PUT: key=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' }, ctx);
           return true;
         }
         throw new Error('KV_STORAGE not available');
@@ -1039,7 +1039,7 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         if (env.KV_STORAGE) {
           const start = Date.now();
           const res = await env.KV_STORAGE.list({ prefix: args[0] });
-          await logger.debug(`Cloudflare KV LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, {}, ctx);
+          await logger.debug(`Cloudflare KV LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' }, ctx);
           return res;
         }
         throw new Error('KV_STORAGE not available');
@@ -1053,22 +1053,22 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         });
         const duration = Date.now() - start;
 
-        await logger.debug(`Upstash GET ${args[0]}: status ${response.status}, duration=${duration}ms`, {}, ctx);
+        await logger.debug(`Upstash GET ${args[0]}: status ${response.status}, duration=${duration}ms`, { cache: true, provider: 'Upstash' }, ctx);
 
         if (response.status === 404) {
-          await logger.debug(`Upstash GET 404 for ${args[0]}, canceling body`, {}, ctx);
+          await logger.debug(`Upstash GET 404 for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' }, ctx);
           await response.body.cancel();
           return null;
         }
 
         if (!response.ok) {
-          await logger.debug(`Upstash GET error ${response.status} for ${args[0]}, canceling body`, {}, ctx);
+          await logger.debug(`Upstash GET error ${response.status} for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' }, ctx);
           await response.body?.cancel();
           throw new Error(`Upstash Get Error: ${response.status} ${response.statusText}`);
         }
 
         const data = await response.json();
-        await logger.debug(`Upstash GET ${args[0]} success`, {}, ctx);
+        await logger.debug(`Upstash GET ${args[0]} success`, { cache: true, provider: 'Upstash' }, ctx);
         return data.result;
       },
       '_kv_put': async () => {
@@ -1083,21 +1083,21 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         });
         const duration = Date.now() - start;
 
-        await logger.debug(`Upstash PUT ${args[0]}: status ${response.status}, duration=${duration}ms`, {}, ctx);
+        await logger.debug(`Upstash PUT ${args[0]}: status ${response.status}, duration=${duration}ms`, { cache: true, provider: 'Upstash' }, ctx);
 
         if (!response.ok) {
-          await logger.debug(`Upstash PUT error ${response.status} for ${args[0]}, canceling body`, {}, ctx);
+          await logger.debug(`Upstash PUT error ${response.status} for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' }, ctx);
           await response.body?.cancel();
           throw new Error(`Upstash Put Error: ${response.status} ${response.statusText}`);
         }
 
-        await logger.debug(`Upstash PUT ${args[0]} success`, {}, ctx);
+        await logger.debug(`Upstash PUT ${args[0]} success`, { cache: true, provider: 'Upstash' }, ctx);
         return true;
       },
       '_kv_list': async () => {
         const start = Date.now();
         const res = await executeUpstashScan(env, args[0]);
-        await logger.debug(`Upstash LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, {}, ctx);
+        await logger.debug(`Upstash LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'Upstash' }, ctx);
         return res;
       }
     }
@@ -1111,26 +1111,27 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
     
     const start = Date.now();
     try {
-      await logger.debug(`尝试 ${p} ${operation} ${args[0] || ''}`, {}, ctx);
+      await logger.debug(`尝试 ${p} ${operation} ${args[0] || ''}`, { cache: true, provider: p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis' }, ctx);
       const result = await providerOps[p][operation]();
       const duration = Date.now() - start;
-      await logger.debug(`使用 ${p} ${operation} 成功, duration=${duration}ms`, {}, ctx);
+      await logger.debug(`使用 ${p} ${operation} 成功, duration=${duration}ms`, { cache: true, provider: p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis' }, ctx);
       lastUsedProvider = p;
       return result;
     } catch (e) {
       const duration = Date.now() - start;
       let errorCode = e.status || e.code || 'unknown';
-      
+
       // 修复 CF KV "KV list() limit exceeded" 的 code 解析
       if (p === 'cloudflare' && e.message && e.message.includes('limit exceeded')) {
         errorCode = 'quota_exceeded';
       }
 
       const nextProvider = providers[i + 1];
+      const providerName = p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis';
       if (nextProvider) {
-        await logger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, fallback to ${nextProvider}`, {}, ctx);
+        await logger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, fallback to ${nextProvider}`, { cache: true, provider: providerName }, ctx);
       } else {
-        await logger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, no more fallbacks`, {}, ctx);
+        await logger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, no more fallbacks`, { cache: true, provider: providerName }, ctx);
       }
       // 继续尝试下一个提供者
       continue;
