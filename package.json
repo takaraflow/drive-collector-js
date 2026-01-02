@@ -45,7 +45,7 @@
     "@opentelemetry/api": "^1.4.1",
     "@upstash/qstash": "^2.8.4",
     "dotenv": "^17.2.3",
-    "ioredis": "^5.4.1",
+    "ioredis": "^5.8.2",
     "node-fetch": "^3.3.2",
     "redis-on-workers": "^0.4.1",
     "yargs": "^18.0.0"

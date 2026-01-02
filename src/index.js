@@ -762,17 +762,14 @@ async function retryRedisCommand(client, command, args = [], maxRetries = 3, ini
     timerId = setTimeout(() => {
       timerId = null;
       isDone = true; // 标记已超时，中止循环
-      reject(new Error(`Redis command ${command} timed out after 10000ms`));
-    }, 10000);
-    // 允许 Node.js/Worker 进程在只剩下这个 timer 时退出
-    if (timerId && typeof timerId.unref === 'function') {
-      timerId.unref();
-    }
+      reject(new Error(`Redis command ${command} timed out after 15000ms`));
+    }, 15000);
   });
 
   try {
     const result = await Promise.race([executeWithRetries(), timeoutPromise]);
     isDone = true; // 成功后也要标记
+    clearTimeout(timerId); // 清理定时器
     return result;
   } finally {
     isDone = true; 
@@ -795,35 +792,35 @@ async function getRedisClient(env, ctx) {
   const urlStr = env.NF_REDIS_URL;
   if (!urlStr) throw new Error('NF Redis URL not configured');
 
-  // 解析 URL
-  // 支持 redis:// 和 rediss://
-  // rediss:// 默认开启 TLS
-  
-  // redis-on-workers 的 createRedis 支持传入 connection options
-  // 我们手动解析以确保兼容性，特别是 rediss 协议
-  
-  let redisOptions = {
+  const redisOptions = {
     url: urlStr,
-    password: env.NF_REDIS_PASSWORD
+    password: env.NF_REDIS_PASSWORD,
+    tls: {
+      servername: new URL(urlStr).hostname
+    }
   };
 
-  // 如果是 rediss:// 协议，redis-on-workers 会自动识别 tls: true
-  // 但为了保险，我们可以显式检查
-  if (urlStr.startsWith('rediss://')) {
-    redisOptions.tls = true;
-  }
-  
   try {
-    redisClient = createRedis(redisOptions);
-    
-    // 监听错误，避免未捕获异常导致 crash
-    // 注意：redis-on-workers 可能没有直接的 on('error')，这里主要依靠 try-catch 操作
+    const creationPromise = (async () => {
+      // @ts-expect-error - redis-on-workers types are wrong, tls options are passed to node:tls
+      const client = createRedis(redisOptions);
+      // PING to force connection
+      await client.send('PING');
+      return client;
+    })();
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Redis client creation timed out')), 5000);
+    });
+
+    redisClient = await Promise.race([creationPromise, timeoutPromise]);
     
     await logger.info('Redis Client 初始化成功', { url: urlStr.replace(/:[^:@]*@/, ':***@') }, ctx);
     return redisClient;
   } catch (e) {
     await logger.error('Redis Client 初始化失败', { error: e.message }, ctx);
-    throw e;
+    redisClient = null; // 确保失败后 client 为 null
+    return null;
   }
 }
 
