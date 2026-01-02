@@ -881,11 +881,12 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
     if (!providerOps[p][operation]) continue;
     
     const start = Date.now();
+    const providerName = p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis';
     try {
-      await executeWithPriorityFallbackLogger.debug(`尝试 ${p} ${operation} ${args[0] || ''}`, { cache: true, provider: p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis' }, ctx);
+      await executeWithPriorityFallbackLogger.info(`尝试 ${p} ${operation} ${args[0] || ''}`, { cache: true, provider: providerName }, ctx);
       const result = await providerOps[p][operation]();
       const duration = Date.now() - start;
-      await executeWithPriorityFallbackLogger.debug(`使用 ${p} ${operation} 成功, duration=${duration}ms`, { cache: true, provider: p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis' }, ctx);
+      await executeWithPriorityFallbackLogger.info(`使用 ${p} ${operation} 成功, duration=${duration}ms`, { cache: true, provider: providerName }, ctx);
       lastUsedProvider = p;
       return result;
     } catch (e) {
@@ -1145,7 +1146,8 @@ async function handleRequest(request, env, ctx) {
   await requestLogger.info('Provider Status', {
     primary: detectCacheProvider(env),
     hasKv: !!env.KV_STORAGE,
-    hasRedis: !!(env.NF_REDIS_URL && env.NF_REDIS_PASSWORD)
+    hasRedis: !!(env.NF_REDIS_URL && env.NF_REDIS_PASSWORD),
+    hasUpstash: !!(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN)
   });
 
   // 健康检查 - 增加日志采样过滤
@@ -1260,6 +1262,7 @@ async function handleRequest(request, env, ctx) {
           'Retry-After': '60'
         }
       });
+      await requestLogger.warn('返回 503 响应：无活跃实例可用', { qstashMsgId, retryCount, path: normalizedUrl.pathname, status: 503 });
     } else {
       // 选择目标实例
       const targetInstance = await selectTargetInstance(activeInstances, env, ctx);
