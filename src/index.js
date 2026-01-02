@@ -814,11 +814,16 @@ async function getRedisClient(env, ctx) {
       return client;
     })();
 
+    let timeoutId;
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Redis client creation timed out')), 5000);
+      timeoutId = setTimeout(() => reject(new Error('Redis client creation timed out')), 5000);
     });
 
-    redisClient = await Promise.race([creationPromise, timeoutPromise]);
+    try {
+      redisClient = await Promise.race([creationPromise, timeoutPromise]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
     
     await logger.info('Redis Client 初始化成功', { url: urlStr.replace(/:[^:@]*@/, ':***@') }, ctx);
     return redisClient;
