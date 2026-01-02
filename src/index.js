@@ -1370,5 +1370,21 @@ async function handleRequest(request, env, ctx) {
     );
   }
 
+  const diagnosticLog = { message: "HARD_CORE_DIAGNOSTIC", timestamp: Date.now() };
+  ctx.waitUntil(
+    fetch(`https://api.axiom.co/v1/datasets/${axiomDataset}/ingest`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${axiomToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: `[${JSON.stringify(diagnosticLog)}]` // 强制手动数组包装
+    }).then(r => {
+      // 关键：在 Cloudflare 实时日志中输出 Axiom 的真实反馈
+      console.log(`DIAGNOSTIC_STATUS: ${r.status}`);
+      return r.text().then(t => console.log(`DIAGNOSTIC_RESPONSE: ${t}`));
+    })
+  );
+
   return response;
 }
