@@ -1123,6 +1123,17 @@ function normalizePath(pathname) {
  * Worker 主逻辑
  */
 async function handleRequest(request, env, ctx) {
+  console.log(">>> [DEBUG] Request Received:", request.method, request.url);
+
+  // 检查环境变量是否为占位符 (防止 GHA 注入失败)
+  const token = env.AXIOM_TOKEN;
+  const dataset = env.AXIOM_DATASET;
+  console.log(">>> [DEBUG] Config Check:", {
+    token_prefix: token ? token.slice(0, 10) + "..." : "MISSING",
+    dataset: dataset || "MISSING",
+    is_test: isTestEnvironment
+  });
+
   // 1. 提前解构环境变量（在任何异步操作前）
   const axiomToken = env.AXIOM_TOKEN;
   const axiomDataset = env.AXIOM_DATASET;
@@ -1177,6 +1188,14 @@ async function handleRequest(request, env, ctx) {
 
   // 1. 初始化基础状态
   logger.env = env.NODE_ENV || 'production';
+
+  await requestLogger.debug('Axiom 配置检查', {
+    axiomEnabled,
+    hasToken: !!axiomToken,
+    hasDataset: !!axiomDataset,
+    isTestEnvironment,
+    hasOrgId: !!axiomOrg
+  });
 
   // 2. 简洁的启动日志（这会被 Axiom 捕获并关联到当前 Trace）
   await requestLogger.info('LB Request Started', {
@@ -1272,7 +1291,13 @@ async function handleRequest(request, env, ctx) {
 
   // 获取活跃实例
   const activeInstances = await getActiveInstances(env, ctx);
+  console.log(">>> [DEBUG] getActiveInstances complete, count:", activeInstances.length);
   await requestLogger.info('活跃实例查询完成', { count: activeInstances.length });
+  await requestLogger.info('存活标记: getActiveInstances 完成', {
+    alive: true,
+    count: activeInstances.length,
+    timestamp: Date.now()
+  });
 
   if (activeInstances.length === 0) {
     const qstashMsgId = request.headers.get('Upstash-Message-Id');
@@ -1299,9 +1324,17 @@ async function handleRequest(request, env, ctx) {
 
   // 选择目标实例
   const targetInstance = await selectTargetInstance(activeInstances, env, ctx);
+  console.log(">>> [DEBUG] targetInstance selected:", targetInstance?.id || "NONE");
   if (!targetInstance) {
     return new Response('No target instance selected', { status: 503 });
   }
+
+  await requestLogger.info('存活标记: selectTargetInstance 完成', {
+    alive: true,
+    targetId: targetInstance.id,
+    targetUrl: targetInstance.url,
+    timestamp: Date.now()
+  });
 
   await requestLogger.info('开始转发请求', { instanceId: targetInstance.id, url: targetInstance.url });
 
@@ -1310,40 +1343,39 @@ async function handleRequest(request, env, ctx) {
 
   await requestLogger.debug('负载均衡请求完成', { status: response.status });
 
-  // 3. 改进的日志发送逻辑
-  if (ctx?.waitUntil && logBuffer.length > 0 && axiomEnabled) {
-    // 创建日志副本，防止引用问题
-    const logsToSend = JSON.parse(JSON.stringify(logBuffer));
-    
+  await requestLogger.info('核心 Fetch 诊断', {
+    finalStatus: response.status,
+    finalStatusText: response.statusText,
+    instanceId: targetInstance.id,
+    path: normalizedUrl.pathname,
+    alive: true
+  });
+
+  // 在 handleRequest 的 return 之前
+  console.log(">>> [DEBUG] Entering log flush logic, buffer size:", logBuffer.length);
+
+  if (ctx && ctx.waitUntil && token && dataset) {
+    console.log(">>> [DEBUG] Triggering ctx.waitUntil fetch...");
+
     ctx.waitUntil(
-      (async () => {
-        try {
-          const ingestUrl = `https://api.axiom.co/v1/datasets/${axiomDataset}/ingest`;
-          const headers = {
-            'Authorization': `Bearer ${axiomToken}`,
-            'Content-Type': 'application/json'
-          };
-          
-          if (axiomOrg) {
-            headers['X-Axiom-Org-Id'] = axiomOrg;
-          }
-          
-          const axiomResponse = await fetch(ingestUrl, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(logsToSend)
-          });
-          
-          const responseText = await axiomResponse.text();
-          
-          if (!axiomResponse.ok) {
-            console.error(`[AXIOM] Ingest failed: ${axiomResponse.status} - ${responseText}`);
-          }
-        } catch (error) {
-          console.error('[AXIOM] Send error:', error.message);
-        }
-      })()
+      fetch(`https://api.axiom.co/v1/datasets/${dataset}/ingest`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(logBuffer)
+      })
+      .then(async (res) => {
+        const text = await res.text();
+        console.log(`>>> [AXIOM_FEEDBACK] Status: ${res.status}, Body: ${text.slice(0, 100)}`);
+      })
+      .catch((err) => {
+        console.log(">>> [AXIOM_CRASH] Fetch Error:", err.message);
+      })
     );
+  } else {
+    console.log(">>> [DEBUG] Skip flush: ctx, token or dataset invalid");
   }
 
   return response;
