@@ -137,11 +137,41 @@ elif [ "$WRANGLER_MODE" = "remote" ]; then
     fi
 fi
 
-# 构建 envsubst 的变量列表字符串
-ENVSUBST_VARS=""
-for var in "${VARS_TO_SUBST[@]}"; do
-    ENVSUBST_VARS="$ENVSUBST_VARS \${$var}"
-done
+# 检查是否在 GitHub Actions 环境中
+if [ "$GITHUB_ACTIONS" = "true" ]; then
+    echo "检测到 GitHub Actions 环境..."
+    # 在 GHA 中，我们依赖 generate-wrangler-vars.js 通过 --var 注入业务变量
+    # build.sh 主要负责生成基础的 wrangler.toml 结构
+    # 确保基础变量存在，否则 wrangler.toml 会无效
+    if [ -z "$WORKER_NAME" ]; then
+        # 尝试从 package.json 获取
+        if command -v jq >/dev/null 2>&1; then
+            WORKER_NAME=$(jq -r '.name' package.json)
+        else
+            WORKER_NAME=$(grep '"name":' package.json | head -1 | cut -d'"' -f4)
+        fi
+        export WORKER_NAME
+        echo "GHA: 默认设置 WORKER_NAME 为 $WORKER_NAME"
+    fi
+    
+    if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+        echo "错误: GHA 环境下需要 CLOUDFLARE_ACCOUNT_ID"
+        exit 1
+    fi
+    
+    if [ -z "$CF_KV_NAMESPACE_ID" ]; then
+        echo "警告: GHA 环境下 CF_KV_NAMESPACE_ID 为空，KV 绑定可能失效"
+        # 如果是生产部署，这通常是错误的
+        if [ "$NODE_ENV" = "production" ]; then
+             echo "错误: 生产部署需要 CF_KV_NAMESPACE_ID"
+             exit 1
+        fi
+    fi
+fi
+
+# 构建 envsubst 的变量列表字符串 (仅针对 wrangler.build.toml 中剩余的占位符)
+# 现在只包含: WORKER_NAME, CLOUDFLARE_ACCOUNT_ID, CF_KV_NAMESPACE_ID, KV_PREVIEW_ID
+ENVSUBST_VARS=" \${WORKER_NAME} \${CLOUDFLARE_ACCOUNT_ID} \${CF_KV_NAMESPACE_ID} \${KV_PREVIEW_ID}"
 
 # 使用 envsubst 替换占位符
 if command -v envsubst >/dev/null 2>&1; then
@@ -151,12 +181,10 @@ else
   echo "envsubst not found, falling back to sed"
   # 回退到 sed 逻辑
   cp wrangler.build.toml wrangler.toml
-  for var in "${VARS_TO_SUBST[@]}"; do
+  for var in WORKER_NAME CLOUDFLARE_ACCOUNT_ID CF_KV_NAMESPACE_ID KV_PREVIEW_ID; do
       # 获取变量值
       val="${!var}"
-      # 使用 sed 替换，注意处理斜杠等特殊字符
-      # 这里使用 | 作为分隔符，并尝试转义
-      # 注意：sed 在处理包含换行符或复杂字符的值时可能脆弱
+      # 使用 sed 替换
       sed -i "s|\${$var}|$val|g" wrangler.toml
   done
 fi
@@ -208,6 +236,62 @@ if grep -q '\${.*}' wrangler.toml; then
     # 打印出具体的未替换变量，方便调试
     grep -o '\${[^}]*}' wrangler.toml
     exit 1
+fi
+
+# 如果是非 GHA 环境（本地），追加 [vars] 块到 wrangler.toml
+if [ "$GITHUB_ACTIONS" != "true" ]; then
+    echo "" >> wrangler.toml
+    echo "[vars]" >> wrangler.toml
+    echo "正在本地环境中向 wrangler.toml 追加业务变量..."
+    
+    # 重新从 manifest.json 提取业务变量列表（非 binding 类型）
+    if command -v jq >/dev/null 2>&1; then
+        # 提取类型为 string, number, boolean 的配置项
+        # 我们使用 jq 提取 key 和 type，以便正确格式化 TOML
+        while IFS=$'\t' read -r key type; do
+            # 获取当前环境中的变量值
+            val="${!key}"
+            
+            # 如果值不存在，尝试从 manifest.json 获取默认值
+            if [ -z "$val" ]; then
+                val=$(jq -r --arg k "$key" '.config.env[$k].default // empty' manifest.json)
+            fi
+
+            # 如果最终有值，则写入 wrangler.toml
+            if [ -n "$val" ]; then
+                if [ "$type" = "string" ]; then
+                    # 字符串加引号并转义可能存在的双引号
+                    # 使用 sed 处理转义
+                    escaped_val=$(echo "$val" | sed 's/"/\\"/g')
+                    echo "$key = \"$escaped_val\"" >> wrangler.toml
+                else
+                    # number 或 boolean 不加引号
+                    echo "$key = $val" >> wrangler.toml
+                fi
+            fi
+        done < <(jq -r '.config.env | to_entries[] | select(.value.type? | IN("string","number","boolean")) | "\(.key)\t\(.value.type)"' manifest.json)
+    else
+        # 如果没有 jq，回退到简单的环境变量遍历（之前的 VARS_TO_SUBST）
+        for var in "${VARS_TO_SUBST[@]}"; do
+            # 排除基础设施变量
+            case "$var" in
+                WORKER_NAME|CLOUDFLARE_ACCOUNT_ID|CF_KV_NAMESPACE_ID|KV_PREVIEW_ID)
+                    continue
+                    ;;
+            esac
+            
+            val="${!var}"
+            if [ -n "$val" ]; then
+                # 简单处理：如果是数字或布尔值字符串，尝试不加引号（不完美但可行）
+                if [[ "$val" =~ ^[0-9]+$ ]] || [[ "$val" == "true" ]] || [[ "$val" == "false" ]]; then
+                    echo "$var = $val" >> wrangler.toml
+                else
+                    escaped_val=$(echo "$val" | sed 's/"/\\"/g')
+                    echo "$var = \"$escaped_val\"" >> wrangler.toml
+                fi
+            fi
+        done
+    fi
 fi
 
 # 自动更新 src/index.js 中的版本号
