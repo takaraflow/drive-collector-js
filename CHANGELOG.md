@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.7](https://github.com/YoungSx/lb-worker-js/compare/v0.7.6...v0.7.7) (2026-01-02)
+
+
+### 🐛 Bug Fixes
+
+* correct Axiom exporter headers configuration by removing optional Org ID ([f0cfd47](https://github.com/YoungSx/lb-worker-js/commit/f0cfd47f76b50a52884528331c08c4ccf5637ad1))
+
 ### [0.7.6](https://github.com/YoungSx/lb-worker-js/compare/v0.7.5...v0.7.6) (2026-01-02)
 
 
