@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.5.4](https://github.com/YoungSx/drive-collector-js/compare/v4.5.1...v4.5.4) (2026-01-02)
+
+
+### 🔧 其他任务
+
+* improves message handling logging for unknown events ([06a88d5](https://github.com/YoungSx/drive-collector-js/commit/06a88d5c5fcdd4cee5140bcd5690b7d07bcb0712))
+* **release:** 4.5.2 ([de741ac](https://github.com/YoungSx/drive-collector-js/commit/de741ac20a282e16af97e406a6df1514617b3a3b))
+* **release:** 4.5.3 ([9911217](https://github.com/YoungSx/drive-collector-js/commit/99112172cd691f060a4d7eb8bb1effd9ec55220c))
+
+
+### 🐛 问题修复
+
+* add mockClear and mockResolvedValue in logger.test.js for test isolation ([41eb86f](https://github.com/YoungSx/drive-collector-js/commit/41eb86f19459bd044e41362379c9255b707bd7b6))
+* adds Redis token authentication support ([df726e9](https://github.com/YoungSx/drive-collector-js/commit/df726e9b90eb021822d5f34df66fb795b013adcf))
+* adds retry limit to Telegram client lock acquisition ([bfd61ab](https://github.com/YoungSx/drive-collector-js/commit/bfd61ab12eacb741614b16666b7fa92316e7602b))
+* adds safe serialization for unknown events ([3214a82](https://github.com/YoungSx/drive-collector-js/commit/3214a8257865a04978d5707efb989ab909d3aee4))
+* improves event serialization robustness ([4ce9d8c](https://github.com/YoungSx/drive-collector-js/commit/4ce9d8c999bd47367b71f44ded6d9ad19a7abde3))
+* robustify logger telegram proxy test against extraneous ingest calls ([4f950f6](https://github.com/YoungSx/drive-collector-js/commit/4f950f6662a05f4c655f9428eeba7b606ff26c35))
+
 ### [4.5.3](https://github.com/YoungSx/drive-collector-js/compare/v4.5.2...v4.5.3) (2026-01-01)
 
 
