@@ -217,13 +217,13 @@ export async function executeRedisScan(env, prefix) {
   let cursor = '0';
   
   do {
-    const res = await retryRedisCommand(client, 'SCAN', [cursor, 'MATCH', `${prefix}*`, 'COUNT', '100']);
-    if (!Array.isArray(res) || res.length !== 2) {
+    const scanResult = await retryRedisCommand(client, 'SCAN', [cursor, 'MATCH', `${prefix}*`, 'COUNT', '100']);
+    if (!Array.isArray(scanResult) || scanResult.length !== 2) {
       throw new Error('Invalid SCAN response');
     }
-    
-    cursor = String(res[0]);
-    const batchKeys = res[1];
+
+    cursor = String(scanResult[0]);
+    const batchKeys = scanResult[1];
     
     if (Array.isArray(batchKeys)) {
       for (const k of batchKeys) {
@@ -241,13 +241,13 @@ export async function checkRedisHealth(env, ctx) {
     // 健康检查前短暂延迟，避免连接刚建立时的不稳定
     await new Promise(resolve => setTimeout(resolve, 200));
     
-    const res = await retryRedisCommand(client, 'PING', []);
-    
-    if (res === 'PONG') {
+    const pingResult = await retryRedisCommand(client, 'PING', []);
+
+    if (pingResult === 'PONG') {
        await logger.info('Redis 健康检查成功');
        return true;
     } else {
-       await logger.warn('Redis 健康检查异常', { response: res });
+       await logger.warn('Redis 健康检查异常', { response: pingResult });
        return false;
     }
   } catch (e) {

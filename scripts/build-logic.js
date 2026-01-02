@@ -32,10 +32,10 @@ function loadEnvFile(fileSystem = fs) {
                 let quoteChar = null;
                 let commentStart = -1;
                 
-                for (let i = 0; i < value.length; i++) {
-                    const char = value[i];
-                    
-                    if ((char === '"' || char === "'") && (i === 0 || value[i-1] !== '\\')) {
+                for (let charIndex = 0; charIndex < value.length; charIndex++) {
+                    const char = value[charIndex];
+
+                    if ((char === '"' || char === "'") && (charIndex === 0 || value[charIndex-1] !== '\\')) {
                         if (!inQuotes) {
                             inQuotes = true;
                             quoteChar = char;
@@ -44,7 +44,7 @@ function loadEnvFile(fileSystem = fs) {
                             quoteChar = null;
                         }
                     } else if (char === '#' && !inQuotes) {
-                        commentStart = i;
+                        commentStart = charIndex;
                         break;
                     }
                 }

@@ -93,7 +93,7 @@ describe('Redis TCP Adaptation', () => {
       const env = { NF_REDIS_URL: 'redis://example.com:6379', NF_REDIS_PASSWORD: 'pass' };
       __mockSend.mockRejectedValueOnce(new Error('ECONNRESET')).mockResolvedValueOnce('value');
       const resultPromise = executeRedis('_redis_get', env, 'key');
-      for (let i = 0; i < 10; i++) { await advanceTimers(100); }
+      for (let index = 0; index < 10; index++) { await advanceTimers(100); }
       const result = await resultPromise;
       expect(result).toBe('value');
       expect(__mockSend).toHaveBeenCalledTimes(2);
