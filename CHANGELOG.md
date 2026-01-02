@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.2](https://github.com/YoungSx/lb-worker-js/compare/v0.7.1...v0.7.2) (2026-01-02)
+
+
+### 🐛 Bug Fixes
+
+* resolve process.env TS error in Worker context ([bdcc488](https://github.com/YoungSx/lb-worker-js/commit/bdcc488221e0a24172f83bd4f8a12a635658fcde))
+* update @opentelemetry/api to exact version and add overrides ([2cce5ec](https://github.com/YoungSx/lb-worker-js/commit/2cce5ec30570422429080595dcdaa703fc2ac67d))
+* updates build script to use dynamic version from package.json ([154982c](https://github.com/YoungSx/lb-worker-js/commit/154982c05f79503b80ec0600df6f63fc6524312b))
+
 ### [0.7.1](https://github.com/YoungSx/lb-worker-js/compare/v0.7.0...v0.7.1) (2026-01-02)
 
 
