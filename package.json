@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "cross-env WRANGLER_MODE=local npm run build && cross-env WRANGLER_SEND_METRICS=false WRANGLER_SKIP_UPDATE_CHECK=true WRANGLER_OFFLINE=true wrangler dev --local --ip 127.0.0.1",
     "dev:remote": "cross-env WRANGLER_MODE=remote npm run build && cross-env WRANGLER_SEND_METRICS=false WRANGLER_SKIP_UPDATE_CHECK=true wrangler dev --remote",
-    "build": "bash scripts/build.sh && esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:* --define:__VERSION__=\"'0.6.0'\"",
+    "build": "bash scripts/build.sh && node --input-type=module -e \"import { build } from 'esbuild'; import { readFileSync } from 'fs'; const pkgStr = readFileSync('./package.json', 'utf8'); const pkg = JSON.parse(pkgStr); await build({ entryPoints: ['src/index.js'], bundle: true, format: 'esm', outdir: 'dist', external: ['node:*'], define: { __VERSION__: JSON.stringify(pkg.version) } });\"",
     "deploy": "npm run build && eval \"$(node scripts/generate-wrangler-vars.js)\"",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
