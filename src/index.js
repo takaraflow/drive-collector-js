@@ -1135,7 +1135,9 @@ export default {
           url: 'https://api.axiom.co/v1/traces',
           headers: {
             'Authorization': `Bearer ${safeEnv.AXIOM_TOKEN}`,
-            'X-Axiom-Dataset': safeEnv.AXIOM_DATASET
+            'X-Axiom-Dataset': safeEnv.AXIOM_DATASET,
+            // 显式加上 Organization ID，这是解决 Dataset 为 0 的杀手锏
+            ...(safeEnv.AXIOM_ORG_ID ? { 'X-Axiom-Org-Id': safeEnv.AXIOM_ORG_ID } : {})
           }
         },
       }).fetch(request, safeEnv, ctx);
@@ -1168,6 +1170,55 @@ function normalizePath(pathname) {
  * Worker 主逻辑
  */
 async function handleRequest(request, env, ctx) {
+  // --- 新增：日志缓冲区 ---
+  const logBuffer = [];
+
+  // 覆盖局部变量 logger，使其同时写入缓冲区
+  const requestLogger = {
+    info: async (msg, meta = {}) => {
+      // 自动添加模块标记，优先使用 meta 里的 module 字段
+      const entry = { 
+        _time: new Date().toISOString(), 
+        level: 'info', 
+        message: msg, 
+        module: meta.module || 'lb-core', // 默认 lb-core
+        ...meta 
+      };
+      logBuffer.push(entry);
+      await logger.info(msg, meta, ctx);
+      console.log(`[INFO][${entry.module}] ${msg}`);
+    },
+    warn: async (msg, meta = {}) => {
+      const entry = { 
+        _time: new Date().toISOString(), 
+        level: 'warn', 
+        message: msg, 
+        module: meta.module || 'lb-core',
+        ...meta 
+      };
+      logBuffer.push(entry);
+      await logger.warn(msg, meta, ctx);
+      console.warn(`[WARN][${entry.module}] ${msg}`);
+    },
+    error: async (msg, meta = {}) => {
+      const entry = { 
+        _time: new Date().toISOString(), 
+        level: 'error', 
+        message: msg, 
+        module: meta.module || 'lb-core',
+        ...meta 
+      };
+      logBuffer.push(entry);
+      await logger.error(msg, meta, ctx);
+      console.error(`[ERROR][${entry.module}] ${msg}`);
+    },
+    debug: async (msg, meta = {}) => {
+      if (logger.env === 'development') {
+        await logger.debug(msg, meta, ctx);
+      }
+    }
+  };
+
   const normalizedUrl = new URL(request.url);
   normalizedUrl.pathname = normalizedUrl.pathname.replace(/\/+/g, '/');
 
@@ -1177,31 +1228,31 @@ async function handleRequest(request, env, ctx) {
 
   // 记录路径映射（如果发生映射）
   if (originalPath !== normalizedUrl.pathname) {
-    await logger.info('路径规范化', {
+    await requestLogger.info('路径规范化', {
       original: originalPath,
       normalized: normalizedUrl.pathname
-    }, ctx);
+    });
   }
 
   // 1. 初始化基础状态
   logger.env = env.NODE_ENV || 'production';
 
   // 2. 简洁的启动日志（这会被 Axiom 捕获并关联到当前 Trace）
-  await logger.info('LB Request Started', {
+  await requestLogger.info('LB Request Started', {
     path: normalizedUrl.pathname,
     method: request.method,
     rayId: request.headers.get('cf-ray'), // 记录 RayID 方便排查
     version: VERSION
-  }, ctx);
+  });
 
   // 3. 诊断信息（合并原有的分散日志，减少事件数量节省额度）
-  await logger.info('Provider Status', {
+  await requestLogger.info('Provider Status', {
     primary: detectCacheProvider(env),
     hasKv: !!env.KV_STORAGE,
     hasRedis: !!(env.NF_REDIS_URL && env.NF_REDIS_PASSWORD)
-  }, ctx);
+  });
 
-  // 健康检查
+  // 健康检查 - 增加日志采样过滤
   if ((request.method === 'GET' || request.method === 'HEAD') && normalizedUrl.pathname === '/health') {
     try {
       const activeInstances = await getActiveInstances(env, ctx);
@@ -1209,11 +1260,14 @@ async function handleRequest(request, env, ctx) {
       const provider = getCurrentProvider();
       const lockCount = await scanLockKeys(env, ctx);
       
-      await logger.info('Health check passed', {
-        activeInstances: activeCount,
-        provider,
-        totalLocks: lockCount
-      }, ctx);
+      // 健康检查日志采样：仅在非生产环境或特定条件下记录详细信息
+      if (env.NODE_ENV !== 'production' || activeCount === 0 || lockCount > 0) {
+        await requestLogger.info('Health check passed', {
+          activeInstances: activeCount,
+          provider,
+          totalLocks: lockCount
+        });
+      }
 
       return new Response(JSON.stringify({
         status: 'ok',
@@ -1226,7 +1280,7 @@ async function handleRequest(request, env, ctx) {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (e) {
-      await logger.error('Health check failed', { error: e.message }, ctx);
+      await requestLogger.error('Health check failed', { error: e.message });
       return new Response(JSON.stringify({
         status: 'error',
         message: e.message,
@@ -1256,12 +1310,12 @@ async function handleRequest(request, env, ctx) {
     const qstashMsgId = request.headers.get('Upstash-Message-Id');
     const retryCount = request.headers.get('Upstash-Retries');
     
-    await logger.warn('签名验证失败', { 
-      error: error.message, 
+    await requestLogger.warn('签名验证失败', {
+      error: error.message,
       url: request.url,
       qstashMsgId,
       retryCount
-    }, ctx);
+    });
     
     return new Response(JSON.stringify({
       error: 'Signature verification failed',
@@ -1277,17 +1331,17 @@ async function handleRequest(request, env, ctx) {
 
   // 获取活跃实例
   const activeInstances = await getActiveInstances(env, ctx);
-  await logger.info('活跃实例查询完成', { count: activeInstances.length }, ctx);
+  await requestLogger.info('活跃实例查询完成', { count: activeInstances.length });
 
   if (activeInstances.length === 0) {
     const qstashMsgId = request.headers.get('Upstash-Message-Id');
     const retryCount = request.headers.get('Upstash-Retries');
     
-    await logger.warn('无活跃实例可用', {
+    await requestLogger.warn('无活跃实例可用', {
       qstashMsgId,
       retryCount,
       path: normalizedUrl.pathname
-    }, ctx);
+    });
     
     return new Response(JSON.stringify({
       error: 'No active instances available',
@@ -1308,12 +1362,32 @@ async function handleRequest(request, env, ctx) {
     return new Response('No target instance selected', { status: 503 });
   }
 
-  await logger.info('开始转发请求', { instanceId: targetInstance.id, url: targetInstance.url }, ctx);
+  await requestLogger.info('开始转发请求', { instanceId: targetInstance.id, url: targetInstance.url });
 
   // 转发请求
   const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], normalizedUrl, request, env, body, ctx);
 
-  await logger.debug('负载均衡请求完成', { status: response.status }, ctx);
+  await requestLogger.debug('负载均衡请求完成', { status: response.status });
+
+  // --- 新增：异步刷新日志缓冲区到 Axiom ---
+  // 增强防御性处理：确保 env.AXIOM_TOKEN 存在且 logBuffer 不为空
+  if (ctx && ctx.waitUntil && logBuffer.length > 0 && !isTestEnvironment && env.AXIOM_TOKEN && env.AXIOM_DATASET) {
+    // 克隆缓冲区防止并发干扰
+    const logsToSend = [...logBuffer];
+    ctx.waitUntil(
+      fetch(`https://api.axiom.co/v1/datasets/${env.AXIOM_DATASET}/ingest`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${env.AXIOM_TOKEN}`,
+          'Content-Type': 'application/json',
+          'X-Axiom-Org-Id': env.AXIOM_ORG_ID || ''
+        },
+        body: JSON.stringify(logsToSend)
+      }).then(async r => {
+        if (!r.ok) console.error(`Axiom Ingest Error: ${r.status} ${await r.text()}`);
+      }).catch(e => console.error('Axiom Network Failed', e))
+    );
+  }
 
   return response;
 }
