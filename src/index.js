@@ -1289,6 +1289,8 @@ async function handleRequest(request, env, ctx) {
     });
   }
 
+  let result;
+  try {
   // 获取活跃实例
   const activeInstances = await getActiveInstances(env, ctx);
   console.log(">>> [DEBUG] getActiveInstances complete, count:", activeInstances.length);
@@ -1302,14 +1304,14 @@ async function handleRequest(request, env, ctx) {
   if (activeInstances.length === 0) {
     const qstashMsgId = request.headers.get('Upstash-Message-Id');
     const retryCount = request.headers.get('Upstash-Retries');
-    
+
     await requestLogger.warn('无活跃实例可用', {
       qstashMsgId,
       retryCount,
       path: normalizedUrl.pathname
     });
-    
-    return new Response(JSON.stringify({
+
+    result = new Response(JSON.stringify({
       error: 'No active instances available',
       qstashMsgId,
       timestamp: new Date().toISOString()
@@ -1320,63 +1322,59 @@ async function handleRequest(request, env, ctx) {
         'Retry-After': '60'
       }
     });
-  }
+  } else {
 
   // 选择目标实例
   const targetInstance = await selectTargetInstance(activeInstances, env, ctx);
   console.log(">>> [DEBUG] targetInstance selected:", targetInstance?.id || "NONE");
   if (!targetInstance) {
-    return new Response('No target instance selected', { status: 503 });
-  }
-
-  await requestLogger.info('存活标记: selectTargetInstance 完成', {
-    alive: true,
-    targetId: targetInstance.id,
-    targetUrl: targetInstance.url,
-    timestamp: Date.now()
-  });
-
-  await requestLogger.info('开始转发请求', { instanceId: targetInstance.id, url: targetInstance.url });
-
-  // 转发请求
-  const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], normalizedUrl, request, env, body, ctx);
-
-  await requestLogger.debug('负载均衡请求完成', { status: response.status });
-
-  await requestLogger.info('核心 Fetch 诊断', {
-    finalStatus: response.status,
-    finalStatusText: response.statusText,
-    instanceId: targetInstance.id,
-    path: normalizedUrl.pathname,
-    alive: true
-  });
-
-  // 在 handleRequest 的 return 之前
-  console.log(">>> [DEBUG] Entering log flush logic, buffer size:", logBuffer.length);
-
-  if (ctx && ctx.waitUntil && token && dataset) {
-    console.log(">>> [DEBUG] Triggering ctx.waitUntil fetch...");
-
-    ctx.waitUntil(
-      fetch(`https://api.axiom.co/v1/datasets/${dataset}/ingest`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(logBuffer)
-      })
-      .then(async (res) => {
-        const text = await res.text();
-        console.log(`>>> [AXIOM_FEEDBACK] Status: ${res.status}, Body: ${text.slice(0, 100)}`);
-      })
-      .catch((err) => {
-        console.log(">>> [AXIOM_CRASH] Fetch Error:", err.message);
-      })
-    );
+    result = new Response('No target instance selected', { status: 503 });
   } else {
-    console.log(">>> [DEBUG] Skip flush: ctx, token or dataset invalid");
+    // 转发请求
+    const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], normalizedUrl, request, env, body, ctx);
+
+    await requestLogger.debug('负载均衡请求完成', { status: response.status });
+
+    await requestLogger.info('核心 Fetch 诊断', {
+      finalStatus: response.status,
+      finalStatusText: response.statusText,
+      instanceId: targetInstance.id,
+      path: normalizedUrl.pathname,
+      alive: true
+    });
+
+    result = response;
   }
 
-  return response;
+  }
+  } finally {
+    // 在 handleRequest 的 return 之前
+    console.log(">>> [DEBUG] Entering log flush logic, buffer size:", logBuffer.length);
+
+    if (ctx && ctx.waitUntil && token && dataset) {
+      console.log(">>> [DEBUG] Triggering ctx.waitUntil fetch...");
+
+      ctx.waitUntil(
+        fetch(`https://api.axiom.co/v1/datasets/${dataset}/ingest`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(logBuffer)
+        })
+        .then(async (res) => {
+          const text = await res.text();
+          console.log(`>>> [AXIOM_FEEDBACK] Status: ${res.status}, Body: ${text.slice(0, 100)}`);
+        })
+        .catch((err) => {
+          console.log(">>> [AXIOM_CRASH] Fetch Error:", err.message);
+        })
+      );
+    } else {
+      console.log(">>> [DEBUG] Skip flush: ctx, token or dataset invalid");
+    }
+  }
+
+  return result;
 }

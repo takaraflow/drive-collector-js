@@ -311,7 +311,7 @@ describe('Worker Tests', () => {
     test('should handle missing environment variables', async () => {
       delete env.QSTASH_CURRENT_SIGNING_KEY;
       delete env.SKIP_SIGNATURE_VERIFY;
-      
+
       const request = new Request('https://test.url/api/qstash/webhook', {
         method: 'POST',
         headers: { 'upstash-signature': 'test' },
@@ -322,6 +322,38 @@ describe('Worker Tests', () => {
       const result = await handleRequest(request, env, ctx);
       // It returns 401 because verifyQStashSignature throws and is caught
       expect(result.status).toBe(401);
+    });
+
+    test('should return 503 and flush logs when no active instances', async () => {
+      // Mock KV to return no instances
+      mockKV.list.mockImplementation(async (options) => {
+        if (options && options.prefix) {
+          if (options.prefix.startsWith('instance:')) {
+            return { keys: [] }; // No instances
+          }
+          if (options.prefix.startsWith('lock:') || options.prefix.startsWith('task:') || options.prefix.startsWith('msg_lock:')) {
+            return { keys: [] };
+          }
+        }
+        return { keys: [] };
+      });
+
+      const axiomEnv = {
+        ...env,
+        AXIOM_TOKEN: 'test-axiom-token',
+        AXIOM_DATASET: 'test-dataset'
+      };
+
+      const request = new Request('https://test.url/api/qstash/webhook', {
+        method: 'POST',
+        body: JSON.stringify({ test: 'data' }),
+      });
+
+      const ctx = { waitUntil: jest.fn() };
+      const result = await handleRequest(request, axiomEnv, ctx);
+
+      expect(result.status).toBe(503);
+      expect(ctx.waitUntil).toHaveBeenCalledTimes(1);
     });
   });
 
