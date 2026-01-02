@@ -88,10 +88,10 @@ const logger = {
     }
   },
 
-  async info(message, meta = {}, ctx = null) {
-    const span = trace.getActiveSpan();
-    if (span) {
-      span.addEvent(message, {
+  async info(message, meta = {}, ctx = null, span = null) {
+    const activeSpan = span || trace.getActiveSpan();
+    if (activeSpan) {
+      activeSpan.addEvent(message, {
         'log.level': 'info',
         'service.name': 'lb-worker-js',
         version: this.version,
@@ -102,11 +102,11 @@ const logger = {
     console.log(`[INFO] ${message}`, meta);
   },
 
-  async warn(message, meta = {}, ctx = null) {
-    const span = trace.getActiveSpan();
-    if (span) {
-      span.setStatus({ code: 1, message }); // Set status to Warning
-      span.addEvent(message, {
+  async warn(message, meta = {}, ctx = null, span = null) {
+    const activeSpan = span || trace.getActiveSpan();
+    if (activeSpan) {
+      activeSpan.setStatus({ code: 1, message }); // Set status to Warning
+      activeSpan.addEvent(message, {
         'log.level': 'warn',
         'service.name': 'lb-worker-js',
         ...meta
@@ -115,13 +115,13 @@ const logger = {
     console.warn(`[WARN] ${message}`, meta);
   },
 
-  async error(message, meta = {}, ctx = null) {
-    const span = trace.getActiveSpan();
+  async error(message, meta = {}, ctx = null, span = null) {
+    const activeSpan = span || trace.getActiveSpan();
     const errorObj = message instanceof Error ? message : new Error(message);
-    if (span) {
-      span.recordException(errorObj);
-      span.setStatus({ code: 2, message: errorObj.message }); // Set status to Error
-      span.addEvent('exception', {
+    if (activeSpan) {
+      activeSpan.recordException(errorObj);
+      activeSpan.setStatus({ code: 2, message: errorObj.message }); // Set status to Error
+      activeSpan.addEvent('exception', {
         'log.level': 'error',
         ...meta
       });
@@ -129,7 +129,7 @@ const logger = {
     console.error(`[ERROR] ${errorObj.message}`, meta);
   },
 
-  async debug(message, meta = {}, ctx = null) {
+  async debug(message, meta = {}, ctx = null, span = null) {
     // 仅在开发环境打印 console，不发送到 OTel 以节省额度
     if (this.env === 'development') {
       console.debug(`[DEBUG] ${message}`, meta);
@@ -1170,51 +1170,31 @@ function normalizePath(pathname) {
  * Worker 主逻辑
  */
 async function handleRequest(request, env, ctx) {
-  // --- 新增：日志缓冲区 ---
+  // 1. 在上下文还在时，显式捕获顶级 Span
+  const rootSpan = trace.getActiveSpan();
   const logBuffer = [];
 
-  // 覆盖局部变量 logger，使其同时写入缓冲区
+  // 2. 局部日志对象：强制透传 rootSpan
   const requestLogger = {
     info: async (msg, meta = {}) => {
-      // 自动添加模块标记，优先使用 meta 里的 module 字段
-      const entry = { 
-        _time: new Date().toISOString(), 
-        level: 'info', 
-        message: msg, 
-        module: meta.module || 'lb-core', // 默认 lb-core
-        ...meta 
-      };
+      const entry = { _time: new Date().toISOString(), level: 'info', message: msg, module: meta.module || 'lb-core', ...meta };
       logBuffer.push(entry);
-      await logger.info(msg, meta, ctx);
-      console.log(`[INFO][${entry.module}] ${msg}`);
+      // 显式传入 rootSpan，确保跨异步流依然能挂载 OTel 事件
+      await logger.info(msg, meta, ctx, rootSpan);
     },
     warn: async (msg, meta = {}) => {
-      const entry = { 
-        _time: new Date().toISOString(), 
-        level: 'warn', 
-        message: msg, 
-        module: meta.module || 'lb-core',
-        ...meta 
-      };
+      const entry = { _time: new Date().toISOString(), level: 'warn', message: msg, module: meta.module || 'lb-core', ...meta };
       logBuffer.push(entry);
-      await logger.warn(msg, meta, ctx);
-      console.warn(`[WARN][${entry.module}] ${msg}`);
+      await logger.warn(msg, meta, ctx, rootSpan);
     },
     error: async (msg, meta = {}) => {
-      const entry = { 
-        _time: new Date().toISOString(), 
-        level: 'error', 
-        message: msg, 
-        module: meta.module || 'lb-core',
-        ...meta 
-      };
+      const entry = { _time: new Date().toISOString(), level: 'error', message: msg, module: meta.module || 'lb-core', ...meta };
       logBuffer.push(entry);
-      await logger.error(msg, meta, ctx);
-      console.error(`[ERROR][${entry.module}] ${msg}`);
+      await logger.error(msg, meta, ctx, rootSpan);
     },
     debug: async (msg, meta = {}) => {
       if (logger.env === 'development') {
-        await logger.debug(msg, meta, ctx);
+        await logger.debug(msg, meta, ctx, rootSpan);
       }
     }
   };
@@ -1369,23 +1349,24 @@ async function handleRequest(request, env, ctx) {
 
   await requestLogger.debug('负载均衡请求完成', { status: response.status });
 
-  // --- 新增：异步刷新日志缓冲区到 Axiom ---
-  // 增强防御性处理：确保 env.AXIOM_TOKEN 存在且 logBuffer 不为空
-  if (ctx && ctx.waitUntil && logBuffer.length > 0 && !isTestEnvironment && env.AXIOM_TOKEN && env.AXIOM_DATASET) {
-    // 克隆缓冲区防止并发干扰
+  // 3. 环境变量"硬解构"与 Ingest 保护
+  // 在 handleRequest 结尾 return 之前
+  const axiomToken = env.AXIOM_TOKEN; // 同步解构，防止异步失效
+  const axiomDataset = env.AXIOM_DATASET;
+  const axiomOrg = env.AXIOM_ORG_ID;
+
+  if (ctx?.waitUntil && logBuffer.length > 0 && !isTestEnvironment && axiomToken && axiomDataset) {
     const logsToSend = [...logBuffer];
     ctx.waitUntil(
-      fetch(`https://api.axiom.co/v1/datasets/${env.AXIOM_DATASET}/ingest`, {
+      fetch(`https://api.axiom.co/v1/datasets/${axiomDataset}/ingest`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${env.AXIOM_TOKEN}`,
+          'Authorization': `Bearer ${axiomToken}`,
           'Content-Type': 'application/json',
-          'X-Axiom-Org-Id': env.AXIOM_ORG_ID || ''
+          'X-Axiom-Org-Id': axiomOrg || ''
         },
         body: JSON.stringify(logsToSend)
-      }).then(async r => {
-        if (!r.ok) console.error(`Axiom Ingest Error: ${r.status} ${await r.text()}`);
-      }).catch(e => console.error('Axiom Network Failed', e))
+      }).catch(e => console.error('Axiom Post Error:', e.message))
     );
   }
 
