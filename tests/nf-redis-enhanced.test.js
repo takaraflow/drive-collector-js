@@ -44,6 +44,7 @@ describe('Redis TCP Adaptation', () => {
     if (typeof __test_setRedisClient === 'function') {
       __test_setRedisClient(null);
     }
+    jest.runOnlyPendingTimers();
     jest.clearAllTimers();
   });
 

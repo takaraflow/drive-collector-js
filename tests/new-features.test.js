@@ -19,6 +19,8 @@ function createMockResponse(status, body = {}) {
         body: {
             cancel: jest.fn().mockResolvedValue(undefined)
         },
+        text: jest.fn(() => '{}'),
+        json: jest.fn(() => ({})),
         ...body
     };
 }

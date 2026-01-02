@@ -7,10 +7,7 @@ jest.useFakeTimers('modern');
 global.fetch = jest.fn();
 
 // 全局 mock console（可选，根据需求）
-global.console = {
-  ...console,
-  log: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  debug: jest.fn(),
-};
+jest.spyOn(console, 'log').mockImplementation(() => {});
+jest.spyOn(console, 'warn').mockImplementation(() => {});
+jest.spyOn(console, 'error').mockImplementation(() => {});
+jest.spyOn(console, 'debug').mockImplementation(() => {});

@@ -192,13 +192,15 @@ describe('Worker Tests', () => {
         SKIP_SIGNATURE_VERIFY: 'true',
       };
       const request = new Request('https://test.url/unknown');
-      const result = await handleRequest(request, basicEnv);
+      const ctx = { waitUntil: jest.fn() };
+      const result = await handleRequest(request, basicEnv, ctx);
       expect(result.status).toBe(200);
     });
 
     test('should handle health check', async () => {
       const request = new Request('https://test.url/health');
-      const result = await handleRequest(request, env);
+      const ctx = { waitUntil: jest.fn() };
+      const result = await handleRequest(request, env, ctx);
       expect(result.status).toBe(200);
       expect(result.headers.get('content-type')).toContain('application/json');
       const json = await result.json();
@@ -217,7 +219,8 @@ describe('Worker Tests', () => {
         SKIP_SIGNATURE_VERIFY: 'true',
       };
       const request = new Request('https://test.url/');
-      const result = await handleRequest(request, basicEnv);
+      const ctx = { waitUntil: jest.fn() };
+      const result = await handleRequest(request, basicEnv, ctx);
       expect(result.status).toBe(200);
     });
   });
@@ -235,7 +238,8 @@ describe('Worker Tests', () => {
         body: JSON.stringify({ test: 'data' }),
       });
 
-      const result = await handleRequest(request, env);
+      const ctx = { waitUntil: jest.fn() };
+      const result = await handleRequest(request, env, ctx);
       expect(result.status).toBe(401);
     });
 
@@ -257,7 +261,8 @@ describe('Worker Tests', () => {
         body: JSON.stringify({ test: 'data' }),
       });
 
-      const result = await handleRequest(request, basicEnv);
+      const ctx = { waitUntil: jest.fn() };
+      const result = await handleRequest(request, basicEnv, ctx);
       expect(result.status).toBe(200);
     });
   });
@@ -273,7 +278,8 @@ describe('Worker Tests', () => {
         SKIP_SIGNATURE_VERIFY: 'true',
       };
       const request = new Request('https://test.url/api/tasks/download-tasks');
-      const result = await handleRequest(request, basicEnv);
+      const ctx = { waitUntil: jest.fn() };
+      const result = await handleRequest(request, basicEnv, ctx);
       expect(result.status).toBe(200);
       const data = await result.json();
       expect(data.tasks).toBeDefined(); // Assumes default mock fetch returns { tasks: [] }
@@ -293,7 +299,8 @@ describe('Worker Tests', () => {
         body: JSON.stringify({ tasks: [{ id: 'task1' }] }),
       });
 
-      const result = await handleRequest(request, basicEnv);
+      const ctx = { waitUntil: jest.fn() };
+      const result = await handleRequest(request, basicEnv, ctx);
       expect(result.status).toBe(200);
       // It forwards, so mockKV.put is NOT called on the worker (it's called on backend)
       // But verifyQStashSignature is skipped, so it just works.
@@ -311,7 +318,8 @@ describe('Worker Tests', () => {
         body: JSON.stringify({}),
       });
 
-      const result = await handleRequest(request, env);
+      const ctx = { waitUntil: jest.fn() };
+      const result = await handleRequest(request, env, ctx);
       // It returns 401 because verifyQStashSignature throws and is caught
       expect(result.status).toBe(401);
     });
@@ -361,7 +369,8 @@ describe('Worker Tests', () => {
   describe('Logging and Diagnostics', () => {
     test('handleRequest should log initialization diagnostics', async () => {
       const request = new Request('https://test.url/health');
-      await handleRequest(request, env);
+      const ctx = { waitUntil: jest.fn() };
+      await handleRequest(request, env, ctx);
 
       expect(consoleLogSpy).toHaveBeenCalledWith(
         expect.stringContaining('LB Request Started'),
@@ -503,7 +512,8 @@ describe('Worker Tests', () => {
         AXIOM_DATASET: 'test-dataset'
       };
       const request = new Request('https://test.url/health');
-      await handleRequest(request, axiomEnv);
+      const ctx = { waitUntil: jest.fn() };
+      await handleRequest(request, axiomEnv, ctx);
 
       expect(consoleLogSpy).toHaveBeenCalledWith(
         expect.stringContaining('LB Request Started'),
@@ -526,7 +536,8 @@ describe('Worker Tests', () => {
         // AXIOM_TOKEN missing
       };
       const request = new Request('https://test.url/health');
-      await handleRequest(request, invalidEnv);
+      const ctx = { waitUntil: jest.fn() };
+      await handleRequest(request, invalidEnv, ctx);
 
       // Should not have any Axiom-specific initialization warnings since we removed them
       // Just ensure the request is processed normally
