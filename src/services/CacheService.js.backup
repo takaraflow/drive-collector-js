@@ -147,16 +147,6 @@ export class CacheService {
                     return;
                 }
 
-                // 🔍 预连接验证：检查配置有效性
-                const validationError = await this._validateRedisConfig();
-                if (validationError) {
-                    logger.error(`[${this.getCurrentProvider()}] 🚨 Redis 配置验证失败: ${validationError}`);
-                    // 配置无效，直接故障转移
-                    this.isRedisInitializing = false;
-                    await this._handleAuthFailure();
-                    return;
-                }
-
                 // 动态导入 ioredis - 添加超时控制
                 const importPromise = import('ioredis');
                 const timeoutPromise = new Promise((_, reject) =>
@@ -263,21 +253,15 @@ export class CacheService {
                 this.redisClient.on('error', (error) => {
                     const now = Date.now();
                     const uptime = this.connectTime ? Math.round((now - this.connectTime) / 1000) : 0;
-                    const errorMsg = error.message || '';
-                    const errorCode = error.code || '';
-                    
                     if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                        console.error(`[CacheService] 🚨 Redis ERROR: ${errorMsg}`, {
-                            code: errorCode,
+                        console.error(`[CacheService] 🚨 Redis ERROR: ${error.message}`, {
+                            code: error.code,
                             host: error.hostname || error.address,
                             port: error.port
                         });
                     }
-                    
-                    // 增强错误日志：暴露具体错误但不泄露凭证
-                    const safeError = {
-                        message: errorMsg,
-                        code: errorCode,
+                    logger.error(`[${this.getCurrentProvider()}] 🚨 Redis ERROR: ${error.message}`, {
+                        code: error.code,
                         errno: error.errno,
                         syscall: error.syscall,
                         hostname: error.hostname,
@@ -286,50 +270,17 @@ export class CacheService {
                         uptime: `${uptime}s`,
                         node_env: process.env.NODE_ENV,
                         platform: process.platform,
-                        stack: error.stack?.split('\n')[0]
-                    };
+                        stack: error.stack?.split('\n')[0] // 只记录第一行堆栈
+                    });
+                    this.lastRedisError = error.message;
                     
-                    // 移除可能包含凭证的敏感信息
-                    if (safeError.message) {
-                        safeError.message = safeError.message.replace(/password=[^&\s]*/g, 'password=***');
-                        safeError.message = safeError.message.replace(/token=[^&\s]*/g, 'token=***');
-                        safeError.message = safeError.message.replace(/Bearer [^\s]*/g, 'Bearer ***');
-                    }
-                    
-                    logger.error(`[${this.getCurrentProvider()}] 🚨 Redis ERROR: ${safeError.message}`, safeError);
-                    this.lastRedisError = errorMsg;
-                    
-                    // 关键：检测 WRONGPASS 和各种认证错误
-                    const authErrorPatterns = [
-                        'WRONGPASS',
-                        'authentication failed',
-                        'invalid password',
-                        'NOAUTH',
-                        'WRONGPASS invalid username-password pair',
-                        'Client sent AUTH, but no password is set',
-                        'Operation not permitted',
-                        'ERR invalid password',
-                        'ERR AUTH <password> called without any password configured'
-                    ];
-                    
-                    const isAuthError = authErrorPatterns.some(pattern =>
-                        errorMsg.includes(pattern) || errorCode.includes(pattern)
-                    );
-                    
-                    if (isAuthError) {
-                        logger.error(`[${this.getCurrentProvider()}] 🚨 Redis 认证失败检测到，准备故障转移`, {
-                            error: errorMsg,
-                            code: errorCode,
-                            recommendation: '检查 Redis 密码/凭证配置',
-                            action: '触发故障转移至后备提供商'
+                    // 关键：检测 WRONGPASS 认证错误
+                    if (error.message.includes('WRONGPASS') || error.message.includes('authentication failed')) {
+                        logger.error(`[${this.getCurrentProvider()}] 🚨 Redis 认证失败 (WRONGPASS)，准备故障转移`, {
+                            error: error.message,
+                            recommendation: '检查 Redis 密码配置'
                         });
                         // 触发故障转移
-                        this._handleAuthFailure();
-                    } else if (errorMsg.includes('free usage limit') || errorMsg.includes('quota exceeded')) {
-                        // Upstash 配额错误也触发故障转移
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 配额限制，准备故障转移`, {
-                            error: errorMsg
-                        });
                         this._handleAuthFailure();
                     }
                 });
@@ -423,110 +374,6 @@ export class CacheService {
         })();
 
         return this.redisInitPromise;
-    }
-
-    /**
-     * 预连接验证：检查 Redis 配置有效性
-     * 在建立连接前验证凭证，捕获 WRONGPASS 错误
-     * @returns {string|null} - 如果验证失败返回错误信息，否则返回 null
-     */
-    async _validateRedisConfig() {
-        try {
-            // 获取配置
-            const { getRedisConnectionConfig } = await import("../config/index.js");
-            const { url, options: redisOptions } = getRedisConnectionConfig();
-
-            // 检查基本配置
-            if (!url && !redisOptions.host) {
-                return "Redis URL 或 Host 未配置";
-            }
-
-            // 检查密码（如果需要认证）
-            if (!redisOptions.password && !redisOptions.url?.includes('@')) {
-                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis 配置未提供密码，可能无法连接到需要认证的实例`);
-                // 不返回错误，允许尝试连接（可能连接到不需要密码的实例）
-            }
-
-            // 对于 Upstash，验证 URL 和 Token 格式
-            if (this.currentProvider === 'upstash' || this.upstashUrl) {
-                if (!this.upstashUrl || !this.upstashToken) {
-                    return "Upstash 配置不完整（缺少 URL 或 Token）";
-                }
-                
-                // 验证 Upstash URL 格式
-                if (!this.upstashUrl.includes('upstash.io')) {
-                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash URL 格式异常: ${this.upstashUrl}`);
-                }
-            }
-
-            // 尝试快速连接测试（仅用于认证验证）
-            if (process.env.NODE_ENV !== 'test') {
-                const testResult = await this._testRedisConnection();
-                if (!testResult.success) {
-                    return testResult.error;
-                }
-            }
-
-            return null; // 验证通过
-        } catch (error) {
-            logger.error(`[${this.getCurrentProvider()}] 🚨 配置验证异常: ${error.message}`);
-            return `配置验证异常: ${error.message}`;
-        }
-    }
-
-    /**
-     * 快速连接测试 - 用于预验证认证
-     * @returns {Promise<{success: boolean, error: string|null}>}
-     */
-    async _testRedisConnection() {
-        try {
-            // 对于 Upstash，使用快速的 GET 请求测试认证
-            if (this.currentProvider === 'upstash' || this.upstashUrl) {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 3000); // 3秒超时
-
-                const response = await fetch(`${this.upstashUrl}/get/__test_auth__`, {
-                    method: "GET",
-                    headers: {
-                        "Authorization": `Bearer ${this.upstashToken}`,
-                    },
-                    signal: controller.signal
-                });
-
-                clearTimeout(timeoutId);
-
-                // 检查认证错误
-                if (response.status === 401 || response.status === 403) {
-                    const errorData = await response.json().catch(() => ({}));
-                    const errorMsg = errorData.error || `HTTP ${response.status}: 认证失败`;
-                    
-                    logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证测试失败: ${errorMsg}`);
-                    return { success: false, error: `Upstash 认证失败: ${errorMsg}` };
-                }
-
-                // 其他状态码（如 404）表示认证成功但键不存在，这是正常的
-                return { success: true, error: null };
-            }
-
-            // 对于标准 Redis，使用 ping 测试
-            if (this.currentProvider === 'redis' && this.hasRedis) {
-                // 这里我们不实际创建客户端，只是验证配置存在
-                // 真正的连接测试在 _initRedis 中进行
-                return { success: true, error: null };
-            }
-
-            return { success: true, error: null };
-        } catch (error) {
-            // 网络错误或超时
-            if (error.name === 'AbortError' || error.name === 'TypeError' && error.message.includes('fetch')) {
-                logger.warn(`[${this.getCurrentProvider()}] ⚠️ 连接测试超时或网络错误: ${error.message}`);
-                // 不视为认证失败，可能是网络问题
-                return { success: true, error: null };
-            }
-
-            logger.error(`[${this.getCurrentProvider()}] 🚨 连接测试异常: ${error.message}`);
-            return { success: false, error: `连接测试失败: ${error.message}` };
-        }
     }
 
     /**
@@ -1292,7 +1139,7 @@ export class CacheService {
     }
 
     /**
-     * Upstash set 实现 - 增强错误处理和重试
+     * Upstash set 实现
      */
     async _upstash_set(key, value, expirationTtl = null) {
         return await upstashRateLimiter.execute(async () => {
@@ -1309,103 +1156,35 @@ export class CacheService {
                 }
             }
 
-            const maxRetries = 3;
-            let lastError;
+            const response = await fetch(`${this.upstashUrl}/`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${this.upstashToken}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(command),
+            });
 
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    const response = await fetch(`${this.upstashUrl}/`, {
-                        method: "POST",
-                        headers: {
-                            "Authorization": `Bearer ${this.upstashToken}`,
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify(command),
-                    });
-
-                    // 检查认证错误 (401/403)
-                    if (response.status === 401 || response.status === 403) {
-                        const errorData = await response.json().catch(() => ({}));
-                        const errorMsg = errorData.error || `HTTP ${response.status}: 认证失败`;
-                        logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证失败: ${errorMsg}`);
-                        // 立即触发故障转移，不重试
-                        await this._handleAuthFailure();
-                        throw new Error(`Upstash 认证失败: ${errorMsg}`);
-                    }
-
-                    // 检查速率限制响应
-                    if (response.status === 429) {
-                        const retryAfter = response.headers.get('Retry-After');
-                        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
-                        await new Promise(resolve => setTimeout(resolve, waitTime));
-                        if (attempt < maxRetries) continue;
-                        throw new Error('Upstash rate limit exceeded');
-                    }
-
-                    // 检查配额错误
-                    if (response.status === 402 || response.status === 429) {
-                        const errorData = await response.json().catch(() => ({}));
-                        if (errorData.error && (errorData.error.includes('limit') || errorData.error.includes('quota'))) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 配额限制: ${errorData.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 配额限制: ${errorData.error}`);
-                        }
-                    }
-
-                    // Handle undefined response (for mock fetch)
-                    if (!response || !response.json) {
-                        throw new Error('Upstash Set Error: Invalid response');
-                    }
-
-                    const result = await response.json();
-                    if (result.error) {
-                        // 检查是否是认证相关的错误
-                        if (result.error.includes('auth') || result.error.includes('token') || result.error.includes('permission')) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证错误: ${result.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 认证错误: ${result.error}`);
-                        }
-                        
-                        logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash Set Error for key '${key}':`, result.error);
-                        throw new Error(`Upstash Set Error: ${result.error}`);
-                    }
-                    return result.result === "OK";
-                } catch (error) {
-                    lastError = error;
-                    
-                    // 网络错误，重试
-                    if (error.message.includes('fetch failed') ||
-                        error.message.includes('network') ||
-                        error.message.includes('timeout') ||
-                        error.code === 'ECONNRESET' ||
-                        error.code === 'ECONNREFUSED') {
-                        
-                        if (attempt < maxRetries) {
-                            const waitTime = 1000 * attempt; // 指数退避
-                            logger.warn(`[${this.getCurrentProvider()}] ⚠️ 网络错误，第 ${attempt}/${maxRetries} 次重试，等待 ${waitTime}ms`);
-                            await new Promise(resolve => setTimeout(resolve, waitTime));
-                            continue;
-                        }
-                    }
-                    
-                    // 认证错误不重试
-                    if (error.message.includes('认证失败') || error.message.includes('auth')) {
-                        throw error;
-                    }
-                    
-                    // 其他错误，如果还有重试次数则重试
-                    if (attempt < maxRetries) {
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 操作失败，第 ${attempt}/${maxRetries} 次重试: ${error.message}`);
-                        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-                        continue;
-                    }
-                    
-                    throw lastError;
-                }
+            // 检查速率限制响应
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After');
+                const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                throw new Error('Upstash rate limit exceeded');
             }
-            
-            throw lastError;
+
+            // Handle undefined response (for mock fetch)
+            if (!response || !response.json) {
+                throw new Error('Upstash Set Error: Invalid response');
+            }
+
+            const result = await response.json();
+            if (result.error) {
+                logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash Set Error for key '${key}':`, result.error);
+                throw new Error(`Upstash Set Error: ${result.error}`);
+            }
+            return result.result === "OK";
         });
     }
 
@@ -1446,112 +1225,47 @@ export class CacheService {
     }
 
     /**
-     * Upstash get 实现 - 增强错误处理和重试
+     * Upstash get 实现
      */
     async _upstash_get(key, type = "json") {
         return await upstashRateLimiter.execute(async () => {
-            const maxRetries = 3;
-            let lastError;
+            const response = await fetch(`${this.upstashUrl}/get/${encodeURIComponent(key)}`, {
+                method: "GET",
+                headers: {
+                    "Authorization": `Bearer ${this.upstashToken}`,
+                },
+            });
 
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            // 检查速率限制响应
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After');
+                const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                throw new Error('Upstash rate limit exceeded');
+            }
+
+            // Handle undefined response (for mock fetch)
+            if (!response || !response.json) {
+                throw new Error('Upstash Get Error: Invalid response');
+            }
+
+            const result = await response.json();
+            if (result.error) {
+                throw new Error(`Upstash Get Error: ${result.error}`);
+            }
+
+            const value = result.result;
+            if (value === null || value === undefined) return null;
+
+            if (type === "json") {
                 try {
-                    const response = await fetch(`${this.upstashUrl}/get/${encodeURIComponent(key)}`, {
-                        method: "GET",
-                        headers: {
-                            "Authorization": `Bearer ${this.upstashToken}`,
-                        },
-                    });
-
-                    // 检查认证错误 (401/403)
-                    if (response.status === 401 || response.status === 403) {
-                        const errorData = await response.json().catch(() => ({}));
-                        const errorMsg = errorData.error || `HTTP ${response.status}: 认证失败`;
-                        logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证失败: ${errorMsg}`);
-                        await this._handleAuthFailure();
-                        throw new Error(`Upstash 认证失败: ${errorMsg}`);
-                    }
-
-                    // 检查速率限制响应
-                    if (response.status === 429) {
-                        const retryAfter = response.headers.get('Retry-After');
-                        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
-                        await new Promise(resolve => setTimeout(resolve, waitTime));
-                        if (attempt < maxRetries) continue;
-                        throw new Error('Upstash rate limit exceeded');
-                    }
-
-                    // 检查配额错误
-                    if (response.status === 402 || response.status === 429) {
-                        const errorData = await response.json().catch(() => ({}));
-                        if (errorData.error && (errorData.error.includes('limit') || errorData.error.includes('quota'))) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 配额限制: ${errorData.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 配额限制: ${errorData.error}`);
-                        }
-                    }
-
-                    // Handle undefined response (for mock fetch)
-                    if (!response || !response.json) {
-                        throw new Error('Upstash Get Error: Invalid response');
-                    }
-
-                    const result = await response.json();
-                    if (result.error) {
-                        // 检查是否是认证相关的错误
-                        if (result.error.includes('auth') || result.error.includes('token') || result.error.includes('permission')) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证错误: ${result.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 认证错误: ${result.error}`);
-                        }
-                        throw new Error(`Upstash Get Error: ${result.error}`);
-                    }
-
-                    const value = result.result;
-                    if (value === null || value === undefined) return null;
-
-                    if (type === "json") {
-                        try {
-                            return JSON.parse(value);
-                        } catch (e) {
-                            return value;
-                        }
-                    }
+                    return JSON.parse(value);
+                } catch (e) {
                     return value;
-                } catch (error) {
-                    lastError = error;
-                    
-                    // 认证错误不重试
-                    if (error.message.includes('认证失败') || error.message.includes('auth')) {
-                        throw error;
-                    }
-                    
-                    // 网络错误，重试
-                    if (error.message.includes('fetch failed') ||
-                        error.message.includes('network') ||
-                        error.message.includes('timeout') ||
-                        error.code === 'ECONNRESET' ||
-                        error.code === 'ECONNREFUSED') {
-                        
-                        if (attempt < maxRetries) {
-                            const waitTime = 1000 * attempt;
-                            logger.warn(`[${this.getCurrentProvider()}] ⚠️ 网络错误，第 ${attempt}/${maxRetries} 次重试，等待 ${waitTime}ms`);
-                            await new Promise(resolve => setTimeout(resolve, waitTime));
-                            continue;
-                        }
-                    }
-                    
-                    if (attempt < maxRetries) {
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 操作失败，第 ${attempt}/${maxRetries} 次重试: ${error.message}`);
-                        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-                        continue;
-                    }
-                    
-                    throw lastError;
                 }
             }
-            
-            throw lastError;
+            return value;
         });
     }
 
@@ -1587,101 +1301,36 @@ export class CacheService {
     }
 
     /**
-     * Upstash delete 实现 - 增强错误处理和重试
+     * Upstash delete 实现
      */
     async _upstash_delete(key) {
         return await upstashRateLimiter.execute(async () => {
-            const maxRetries = 3;
-            let lastError;
+            const response = await fetch(`${this.upstashUrl}/del/${encodeURIComponent(key)}`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${this.upstashToken}`,
+                },
+            });
 
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    const response = await fetch(`${this.upstashUrl}/del/${encodeURIComponent(key)}`, {
-                        method: "POST",
-                        headers: {
-                            "Authorization": `Bearer ${this.upstashToken}`,
-                        },
-                    });
-
-                    // 检查认证错误 (401/403)
-                    if (response.status === 401 || response.status === 403) {
-                        const errorData = await response.json().catch(() => ({}));
-                        const errorMsg = errorData.error || `HTTP ${response.status}: 认证失败`;
-                        logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证失败: ${errorMsg}`);
-                        await this._handleAuthFailure();
-                        throw new Error(`Upstash 认证失败: ${errorMsg}`);
-                    }
-
-                    // 检查速率限制响应
-                    if (response.status === 429) {
-                        const retryAfter = response.headers.get('Retry-After');
-                        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
-                        await new Promise(resolve => setTimeout(resolve, waitTime));
-                        if (attempt < maxRetries) continue;
-                        throw new Error('Upstash rate limit exceeded');
-                    }
-
-                    // 检查配额错误
-                    if (response.status === 402 || response.status === 429) {
-                        const errorData = await response.json().catch(() => ({}));
-                        if (errorData.error && (errorData.error.includes('limit') || errorData.error.includes('quota'))) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 配额限制: ${errorData.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 配额限制: ${errorData.error}`);
-                        }
-                    }
-
-                    // Handle undefined response (for mock fetch)
-                    if (!response || !response.json) {
-                        throw new Error('Upstash Delete Error: Invalid response');
-                    }
-
-                    const result = await response.json();
-                    if (result.error) {
-                        // 检查是否是认证相关的错误
-                        if (result.error.includes('auth') || result.error.includes('token') || result.error.includes('permission')) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证错误: ${result.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 认证错误: ${result.error}`);
-                        }
-                        throw new Error(`Upstash Delete Error: ${result.error}`);
-                    }
-                    return result.result > 0;
-                } catch (error) {
-                    lastError = error;
-                    
-                    // 认证错误不重试
-                    if (error.message.includes('认证失败') || error.message.includes('auth')) {
-                        throw error;
-                    }
-                    
-                    // 网络错误，重试
-                    if (error.message.includes('fetch failed') ||
-                        error.message.includes('network') ||
-                        error.message.includes('timeout') ||
-                        error.code === 'ECONNRESET' ||
-                        error.code === 'ECONNREFUSED') {
-                        
-                        if (attempt < maxRetries) {
-                            const waitTime = 1000 * attempt;
-                            logger.warn(`[${this.getCurrentProvider()}] ⚠️ 网络错误，第 ${attempt}/${maxRetries} 次重试，等待 ${waitTime}ms`);
-                            await new Promise(resolve => setTimeout(resolve, waitTime));
-                            continue;
-                        }
-                    }
-                    
-                    if (attempt < maxRetries) {
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 操作失败，第 ${attempt}/${maxRetries} 次重试: ${error.message}`);
-                        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-                        continue;
-                    }
-                    
-                    throw lastError;
-                }
+            // 检查速率限制响应
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After');
+                const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                throw new Error('Upstash rate limit exceeded');
             }
-            
-            throw lastError;
+
+            // Handle undefined response (for mock fetch)
+            if (!response || !response.json) {
+                throw new Error('Upstash Delete Error: Invalid response');
+            }
+
+            const result = await response.json();
+            if (result.error) {
+                throw new Error(`Upstash Delete Error: ${result.error}`);
+            }
+            return result.result > 0;
         });
     }
 
@@ -1723,7 +1372,7 @@ export class CacheService {
     }
 
     /**
-     * Upstash bulkSet 实现 - 增强错误处理和重试
+     * Upstash bulkSet 实现
      */
     async _upstash_bulkSet(pairs) {
         return await upstashRateLimiter.execute(async () => {
@@ -1739,103 +1388,38 @@ export class CacheService {
                 return ["SET", p.key, valueStr];
             });
 
-            const maxRetries = 3;
-            let lastError;
+            const response = await fetch(`${this.upstashUrl}/pipeline`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${this.upstashToken}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(commands),
+            });
 
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    const response = await fetch(`${this.upstashUrl}/pipeline`, {
-                        method: "POST",
-                        headers: {
-                            "Authorization": `Bearer ${this.upstashToken}`,
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify(commands),
-                    });
-
-                    // 检查认证错误 (401/403)
-                    if (response.status === 401 || response.status === 403) {
-                        const errorData = await response.json().catch(() => ({}));
-                        const errorMsg = errorData.error || `HTTP ${response.status}: 认证失败`;
-                        logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证失败: ${errorMsg}`);
-                        await this._handleAuthFailure();
-                        throw new Error(`Upstash 认证失败: ${errorMsg}`);
-                    }
-
-                    // 检查速率限制响应
-                    if (response.status === 429) {
-                        const retryAfter = response.headers.get('Retry-After');
-                        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
-                        await new Promise(resolve => setTimeout(resolve, waitTime));
-                        if (attempt < maxRetries) continue;
-                        throw new Error('Upstash rate limit exceeded');
-                    }
-
-                    // 检查配额错误
-                    if (response.status === 402 || response.status === 429) {
-                        const errorData = await response.json().catch(() => ({}));
-                        if (errorData.error && (errorData.error.includes('limit') || errorData.error.includes('quota'))) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 配额限制: ${errorData.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 配额限制: ${errorData.error}`);
-                        }
-                    }
-
-                    // Handle undefined response (for mock fetch)
-                    if (!response || !response.json) {
-                        throw new Error('Upstash Pipeline Error: Invalid response');
-                    }
-
-                    const results = await response.json();
-                    if (results.error) {
-                        // 检查是否是认证相关的错误
-                        if (results.error.includes('auth') || results.error.includes('token') || results.error.includes('permission')) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证错误: ${results.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 认证错误: ${results.error}`);
-                        }
-                        throw new Error(`Upstash Pipeline Error: ${results.error}`);
-                    }
-                    const items = results.results || (Array.isArray(results) ? results : [results]);
-                    return items.map(r => ({
-                        success: !r.error,
-                        result: r.error ? r.error : r.result
-                    }));
-                } catch (error) {
-                    lastError = error;
-                    
-                    // 认证错误不重试
-                    if (error.message.includes('认证失败') || error.message.includes('auth')) {
-                        throw error;
-                    }
-                    
-                    // 网络错误，重试
-                    if (error.message.includes('fetch failed') ||
-                        error.message.includes('network') ||
-                        error.message.includes('timeout') ||
-                        error.code === 'ECONNRESET' ||
-                        error.code === 'ECONNREFUSED') {
-                        
-                        if (attempt < maxRetries) {
-                            const waitTime = 1000 * attempt;
-                            logger.warn(`[${this.getCurrentProvider()}] ⚠️ 网络错误，第 ${attempt}/${maxRetries} 次重试，等待 ${waitTime}ms`);
-                            await new Promise(resolve => setTimeout(resolve, waitTime));
-                            continue;
-                        }
-                    }
-                    
-                    if (attempt < maxRetries) {
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 操作失败，第 ${attempt}/${maxRetries} 次重试: ${error.message}`);
-                        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-                        continue;
-                    }
-                    
-                    throw lastError;
-                }
+            // 检查速率限制响应
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After');
+                const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                throw new Error('Upstash rate limit exceeded');
             }
-            
-            throw lastError;
+
+            // Handle undefined response (for mock fetch)
+            if (!response || !response.json) {
+                throw new Error('Upstash Pipeline Error: Invalid response');
+            }
+
+            const results = await response.json();
+            if (results.error) {
+                throw new Error(`Upstash Pipeline Error: ${results.error}`);
+            }
+            const items = results.results || (Array.isArray(results) ? results : [results]);
+            return items.map(r => ({
+                success: !r.error,
+                result: r.error ? r.error : r.result
+            }));
         });
     }
 
@@ -1883,108 +1467,43 @@ export class CacheService {
     }
 
     /**
-     * Upstash listKeys 实现 - 增强错误处理和重试
+     * Upstash listKeys 实现
      */
     async _upstash_listKeys(prefix = '') {
         return await upstashRateLimiter.execute(async () => {
-            const maxRetries = 3;
-            let lastError;
+            // 使用 KEYS 命令获取匹配的键
+            const command = ["KEYS", `${prefix}*`];
 
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    // 使用 KEYS 命令获取匹配的键
-                    const command = ["KEYS", `${prefix}*`];
+            const response = await fetch(`${this.upstashUrl}/`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${this.upstashToken}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(command),
+            });
 
-                    const response = await fetch(`${this.upstashUrl}/`, {
-                        method: "POST",
-                        headers: {
-                            "Authorization": `Bearer ${this.upstashToken}`,
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify(command),
-                    });
-
-                    // 检查认证错误 (401/403)
-                    if (response.status === 401 || response.status === 403) {
-                        const errorData = await response.json().catch(() => ({}));
-                        const errorMsg = errorData.error || `HTTP ${response.status}: 认证失败`;
-                        logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证失败: ${errorMsg}`);
-                        await this._handleAuthFailure();
-                        throw new Error(`Upstash 认证失败: ${errorMsg}`);
-                    }
-
-                    // 检查速率限制响应
-                    if (response.status === 429) {
-                        const retryAfter = response.headers.get('Retry-After');
-                        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
-                        await new Promise(resolve => setTimeout(resolve, waitTime));
-                        if (attempt < maxRetries) continue;
-                        throw new Error('Upstash rate limit exceeded');
-                    }
-
-                    // 检查配额错误
-                    if (response.status === 402 || response.status === 429) {
-                        const errorData = await response.json().catch(() => ({}));
-                        if (errorData.error && (errorData.error.includes('limit') || errorData.error.includes('quota'))) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 配额限制: ${errorData.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 配额限制: ${errorData.error}`);
-                        }
-                    }
-
-                    // Handle undefined response (for mock fetch)
-                    if (!response || !response.json) {
-                        throw new Error('Upstash ListKeys Error: Invalid response');
-                    }
-
-                    const result = await response.json();
-                    if (result.error) {
-                        // 检查是否是认证相关的错误
-                        if (result.error.includes('auth') || result.error.includes('token') || result.error.includes('permission')) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证错误: ${result.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 认证错误: ${result.error}`);
-                        }
-                        logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash ListKeys Error:`, result.error);
-                        throw new Error(`Upstash ListKeys Error: ${result.error}`);
-                    }
-
-                    return result.result || [];
-                } catch (error) {
-                    lastError = error;
-                    
-                    // 认证错误不重试
-                    if (error.message.includes('认证失败') || error.message.includes('auth')) {
-                        throw error;
-                    }
-                    
-                    // 网络错误，重试
-                    if (error.message.includes('fetch failed') ||
-                        error.message.includes('network') ||
-                        error.message.includes('timeout') ||
-                        error.code === 'ECONNRESET' ||
-                        error.code === 'ECONNREFUSED') {
-                        
-                        if (attempt < maxRetries) {
-                            const waitTime = 1000 * attempt;
-                            logger.warn(`[${this.getCurrentProvider()}] ⚠️ 网络错误，第 ${attempt}/${maxRetries} 次重试，等待 ${waitTime}ms`);
-                            await new Promise(resolve => setTimeout(resolve, waitTime));
-                            continue;
-                        }
-                    }
-                    
-                    if (attempt < maxRetries) {
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 操作失败，第 ${attempt}/${maxRetries} 次重试: ${error.message}`);
-                        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-                        continue;
-                    }
-                    
-                    throw lastError;
-                }
+            // 检查速率限制响应
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After');
+                const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                throw new Error('Upstash rate limit exceeded');
             }
-            
-            throw lastError;
+
+            // Handle undefined response (for mock fetch)
+            if (!response || !response.json) {
+                throw new Error('Upstash ListKeys Error: Invalid response');
+            }
+
+            const result = await response.json();
+            if (result.error) {
+                logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash ListKeys Error:`, result.error);
+                throw new Error(`Upstash ListKeys Error: ${result.error}`);
+            }
+
+            return result.result || [];
         });
     }
 
