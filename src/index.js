@@ -1135,9 +1135,7 @@ export default {
           url: 'https://api.axiom.co/v1/traces',
           headers: {
             'Authorization': `Bearer ${safeEnv.AXIOM_TOKEN}`,
-            'X-Axiom-Dataset': safeEnv.AXIOM_DATASET,
-            // 如果有 Org ID 则添加
-            ...(safeEnv.AXIOM_ORG_ID ? { 'X-Axiom-Org-Id': safeEnv.AXIOM_ORG_ID } : {})
+            'X-Axiom-Dataset': safeEnv.AXIOM_DATASET
           }
         },
       }).fetch(request, safeEnv, ctx);
