@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.4](https://github.com/YoungSx/lb-worker-js/compare/v0.7.3...v0.7.4) (2026-01-02)
+
+
+### ✨ Features
+
+* support full business vars in wrangler.toml during local build ([f1660ea](https://github.com/YoungSx/lb-worker-js/commit/f1660eabd170ade9b121b55103704ad607234364))
+
+
+### 🐛 Bug Fixes
+
+* improve test stability and deployment configuration ([6ae2793](https://github.com/YoungSx/lb-worker-js/commit/6ae2793194f22a2135e1d71e50e47fb038a47cc6))
+* optimize generate-wrangler-vars.test.js performance, remove real IO and use fake timers/mocks ([ae9887b](https://github.com/YoungSx/lb-worker-js/commit/ae9887b42a39aa801960b00b0927fdeae98bd95b))
+* updates WORKER_NAME default to use package.json name ([1dd73c7](https://github.com/YoungSx/lb-worker-js/commit/1dd73c7ff5b3c9b32812885839048295159ad37c))
+
 ### [0.7.3](https://github.com/YoungSx/lb-worker-js/compare/v0.7.2...v0.7.3) (2026-01-02)
 
 ### [0.7.2](https://github.com/YoungSx/lb-worker-js/compare/v0.7.1...v0.7.2) (2026-01-02)
