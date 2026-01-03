@@ -1,6 +1,6 @@
 {
   "name": "drive-collector-bot",
-  "version": "4.5.7",
+  "version": "4.6.0",
   "description": "A modular Telegram bot for transferring files to Rclone remotes",
   "main": "index.js",
   "type": "module",

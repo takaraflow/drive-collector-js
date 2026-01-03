@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.6.0](https://github.com/YoungSx/drive-collector-js/compare/v4.5.7...v4.6.0) (2026-01-03)
+
+
+### ♻️ 代码重构
+
+* CacheService ([517248c](https://github.com/YoungSx/drive-collector-js/commit/517248cdf37f293c9340db67b78b33a07c37dc85))
+
+
+### 🐛 问题修复
+
+* CacheService.test.js ([3c70848](https://github.com/YoungSx/drive-collector-js/commit/3c708487cd729f7aa73efded424e0ca29993a4e5))
+* recursive call output ([6468fb7](https://github.com/YoungSx/drive-collector-js/commit/6468fb7fa615a88954e06d489421c4d7f93a0afc))
+
+
+### ✅ 测试相关
+
+* improve test reliability and fix mocking issues ([3e351b4](https://github.com/YoungSx/drive-collector-js/commit/3e351b46f9641b2eaf719bd27534cf0cabb08df1))
+
 ### [4.5.7](https://github.com/YoungSx/drive-collector-js/compare/v4.5.6...v4.5.7) (2026-01-03)
 
 
