@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.6.1](https://github.com/YoungSx/drive-collector-js/compare/v4.6.0...v4.6.1) (2026-01-03)
+
+
+### ✅ 测试相关
+
+* adds tests for logger field limiting and payload security ([63f8c9c](https://github.com/YoungSx/drive-collector-js/commit/63f8c9c6bfc1302075d6935ed87d38de5a14249e))
+* improves test and service cleanup for Redis and Telegram clients ([46d5778](https://github.com/YoungSx/drive-collector-js/commit/46d5778bc91ab009fa197d87e6a64d18c7395448))
+
+
+### 🐛 问题修复
+
+* enhance Telegram error handling with comprehensive classification and recovery strategies ([b4c503e](https://github.com/YoungSx/drive-collector-js/commit/b4c503e2f1d07c1cca9bed37d3d0532229a959c5))
+* enhances Axiom logging with field limits and error handling ([1a747b7](https://github.com/YoungSx/drive-collector-js/commit/1a747b71a3b0edd5afefa4aa5b8d0accfd69ed93))
+
 ## [4.6.0](https://github.com/YoungSx/drive-collector-js/compare/v4.5.7...v4.6.0) (2026-01-03)
 
 
