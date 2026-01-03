@@ -2261,11 +2261,15 @@ export class CacheService {
 
         if (this.redisClient) {
             try {
-                // 先尝试 disconnect (立即断开)
+                // 强制重置重试策略，防止在销毁过程中继续重连
+                this.redisClient.options.maxRetriesPerRequest = 0;
+                this.redisClient.options.retryStrategy = () => null;
+
+                // 先尝试 disconnect (立即断开 TCP 连接)
                 this.redisClient.disconnect();
                 
                 // 备用: quit (优雅关闭,但可能卡住)
-                const quitPromise = this.redisClient.quit();
+                const quitPromise = this.redisClient.quit().catch(() => {});
                 const timeoutPromise = new Promise(resolve => setTimeout(resolve, 500));
                 await Promise.race([quitPromise, timeoutPromise]);
             } catch (e) {
@@ -2275,10 +2279,14 @@ export class CacheService {
             this.redisClient = null;
         }
 
-        // 重置标志
-        this._redisListenersBound = false;
+        // 清理任何悬挂的 Promise
         this.redisInitPromise = null;
         this.isRedisInitializing = false;
+        this._authFailurePromise = null;
+        this._readyResolver = null;
+
+        // 重置标志
+        this._redisListenersBound = false;
         
         logger.info(`[${this.getCurrentProvider()}] ✅ CacheService 实例销毁完成`);
     }

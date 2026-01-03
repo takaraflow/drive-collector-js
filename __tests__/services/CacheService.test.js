@@ -17,6 +17,31 @@ jest.mock("../../src/utils/RateLimiter.js", () => ({
     }
 }));
 
+// Mock ioredis
+jest.mock("ioredis", () => {
+    return jest.fn().mockImplementation(() => {
+        return {
+            on: jest.fn(),
+            once: jest.fn(),
+            quit: jest.fn().mockResolvedValue("OK"),
+            disconnect: jest.fn(),
+            get: jest.fn(),
+            set: jest.fn(),
+            del: jest.fn(),
+            keys: jest.fn(),
+            pipeline: jest.fn().mockReturnValue({
+                set: jest.fn(),
+                exec: jest.fn().mockResolvedValue([])
+            }),
+            ping: jest.fn().mockResolvedValue("PONG"),
+            status: "ready",
+            removeAllListeners: jest.fn(),
+            removeListener: jest.fn(),
+            options: {}
+        };
+    });
+});
+
 // Mock global fetch
 const mockFetch = jest.fn();
 global.fetch = mockFetch;

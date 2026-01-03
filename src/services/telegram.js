@@ -299,6 +299,10 @@ async function initTelegramClient() {
     }
 }
 
+// Module-level variable to track update health (exposed from setupEventListeners)
+let lastUpdateTimestamp = Date.now();
+let updateHealthMonitor = null;
+
 /**
  * 设置事件监听器
  */
@@ -365,12 +369,8 @@ function setupEventListeners(client) {
         }
     });
 
-    // NEW: Add update loop health monitoring with enhanced thresholds
-    // Use module-level lastUpdateTimestamp instead of local variable
-    let updateHealthMonitor = null;
-    let consecutiveUpdateTimeouts = 0; // Track consecutive update timeouts
-
     // Track update timestamps to detect stuck update loops
+    let consecutiveUpdateTimeouts = 0; // Track consecutive update timeouts
     client.addEventHandler((update) => {
         lastUpdateTimestamp = Date.now();
         // Reset consecutive failures on successful update
@@ -740,6 +740,10 @@ export const stopWatchdog = () => {
         clearInterval(watchdogTimer);
         watchdogTimer = null;
     }
+    if (updateHealthMonitor) {
+        clearInterval(updateHealthMonitor);
+        updateHealthMonitor = null;
+    }
     if (reconnectTimeout) {
         clearTimeout(reconnectTimeout);
         reconnectTimeout = null;
@@ -780,9 +784,6 @@ export const getUpdateHealth = () => {
         timeSince: Date.now() - lastUpdateTimestamp
     };
 };
-
-// Module-level variable to track update health (exposed from setupEventListeners)
-let lastUpdateTimestamp = Date.now();
 
 /**
  * 连接并启动 Telegram 客户端，同时启用控制台代理

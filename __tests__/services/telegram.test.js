@@ -113,11 +113,28 @@ describe("Telegram Service", () => {
         if (module.stopWatchdog) {
             module.stopWatchdog();
         }
+        // Attempt to disconnect client if initialized to clear any pending timers in library
+        try {
+            const clientInstance = await module.getClient();
+            if (clientInstance && typeof clientInstance.disconnect === 'function') {
+                await clientInstance.disconnect();
+            }
+        } catch (e) {
+            // ignore
+        }
         jest.restoreAllMocks();
     });
 
     beforeEach(() => {
         jest.clearAllMocks();
+        jest.clearAllTimers();
+    });
+
+    afterEach(async () => {
+        if (module.stopWatchdog) {
+            module.stopWatchdog();
+        }
+        jest.clearAllTimers();
     });
 
     test("should export client and related functions", () => {
