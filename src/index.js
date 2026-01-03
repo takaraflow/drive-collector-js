@@ -257,6 +257,9 @@ async function getActiveInstances(env, ctx = null) {
       }
     }
 
+    // 新增日志：记录扫描到的所有原始键
+    await getActiveInstancesLogger.debug('扫描到所有原始键', { keys: allKeys.map(k => k.name) }, ctx);
+
     if (allKeys.length === 0) {
       return [];
     }
@@ -282,6 +285,9 @@ async function getActiveInstances(env, ctx = null) {
           return null;
         })
     ));
+
+    // 新增日志：记录获取到的原始实例数据
+    await getActiveInstancesLogger.debug('获取到原始实例数据', { rawData: instanceDataResults }, ctx);
 
     for (const data of instanceDataResults) {
       const instance = parseInstanceData(data);
