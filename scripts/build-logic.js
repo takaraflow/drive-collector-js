@@ -307,7 +307,10 @@ function main() {
                             while (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
                                 value = value.substring(1, value.length - 1);
                             }
-                            process.env[k] = value;
+                             // 仅当环境变量尚未被外部（如 Infisical）设置时，才从 GHA JSON 中加载
+                    if (!process.env[k]) {
+                        process.env[k] = value;
+                    }
                         }
                     });
                 } catch (e) { console.warn(`解析 ${key} 失败:`, e.message); }
