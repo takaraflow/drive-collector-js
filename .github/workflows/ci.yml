@@ -111,12 +111,45 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+      
+      # 统一方案：从 Infisical 同步环境变量
+      # INFISICAL_TOKEN 使用 secrets (敏感信息)
+      # INFISICAL_PROJECT_ID 使用 vars (非敏感配置)
+      - name: Sync environment variables from Infisical
+        env:
+          INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
+          INFISICAL_PROJECT_ID: ${{ vars.INFISICAL_PROJECT_ID }}
+          INFISICAL_ENV: prod
+          INFISICAL_SECRET_PATH: /
+        run: npm run sync:env
+        continue-on-error: true  # 允许降级到本地缓存或云配置
+      
+      # 处理环境变量中的多余引号（Infisical 可能返回带引号的值）
+      - name: Clean up quotes in environment variables
+        if: success() || failure()  # 即使 sync 失败也要执行，因为可能有本地 .env
+        run: |
+          if [ -f .env ]; then
+            echo "Cleaning up quotes in .env file..."
+            # 移除值中的外层引号（单引号或双引号）
+            sed -i 's/="\([^"]*\)"/=\1/g' .env
+            sed -i "s/='\([^']*\)'/=\1/g" .env
+            # 移除值开头和结尾的引号（处理特殊情况）
+            sed -i 's/^"\(.*\)"$/\1/' .env
+            sed -i "s/^'\(.*\)'$/\1/" .env
+            echo "✅ Quotes cleaned up"
+            # 显示前几行用于验证
+            head -5 .env
+          else
+            echo "ℹ️ No .env file found, skipping quote cleanup"
+          fi
+      
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
@@ -126,8 +159,10 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=sha
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      
       - name: Cache Docker layers
         uses: actions/cache@v4
         with:
@@ -135,6 +170,7 @@ jobs:
           key: ${{ runner.os }}-buildx-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-buildx-
+      
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -142,6 +178,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # 关键点：将 Infisical 凭据传递给 Docker 构建过程
+          # 这样 Dockerfile 内部的 sync-env.js 才能获取变量
+          build-args: |
+            INFISICAL_TOKEN=${{ secrets.INFISICAL_TOKEN }}
+            INFISICAL_PROJECT_ID=${{ vars.INFISICAL_PROJECT_ID }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

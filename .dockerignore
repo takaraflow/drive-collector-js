@@ -1,8 +1,152 @@
-node_modules
-npm-debug.log
+# Git
 .git
-.env
+.gitignore
+
+# Dependencies
+node_modules
+npm-debug.log*
+
+# Testing
 coverage
+.nyc_output
+*.test.js
+*.test.ts
+
+# Build artifacts
+dist
+build
+*.tgz
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
 *.log
+logs
+
+# Runtime
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# Dependency directories
+node_modules/
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment variables file
+# 注释掉这一行，允许在运行时生成 .env
+# .env
+
+# parcel-bundler cache (https://parceljs.org/)
+.cache
+.parcel-cache
+
+# Next.js build output
+.next
+
+# Nuxt.js build / generate output
+.nuxt
+
+# Gatsby files
+.cache
+public
+
+# Storybook build outputs
+.out
+.storybook-out
+
+# Temporary folders
+tmp
+temp
+
+# Editor files
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Docker
+.dockerignore
+Dockerfile
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+.circleci
+
+# Documentation
+docs
+README.md
+CHANGELOG.md
+
+# Scripts (except sync-env.js)
+scripts/*
+!scripts/sync-env.js
+
+# Tests (keep for potential debugging)
+__tests__
+test
+tests
+
+# Configuration files that might contain secrets
+wrangler.toml
+*.local
+.env.local
+.env.*.local
+
+# Zeabur
+.zeabur
+
+# Wrangler
+.wrangler
+
+# Screenshot
+screenshot_config.png
+
+# Version control
+.versionrc.json
+
+# Jest
+jest.config.js
+jest-sequencer.js
+
+# Vitest
 vitest.config.js
-test_output.txt
+
+# zbpack
+zbpack.json
+
+# Rules
+.clinerules
