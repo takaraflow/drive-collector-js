@@ -804,6 +804,14 @@ export const reconnectBot = async (lightweight = true) => {
     await handleConnectionIssue(lightweight, TelegramErrorClassifier.ERROR_TYPES.UNKNOWN);
 };
 
+/**
+ * 设置连接状态回调函数
+ * @param {Function} callback - 回调函数，接收一个布尔值参数表示连接状态
+ */
+export const setConnectionStatusCallback = (callback) => {
+    connectionStatusCallback = callback;
+};
+
 // 启动看门狗 (在测试环境下不自动启动)
 if (process.env.NODE_ENV !== 'test') {
     startWatchdog();
