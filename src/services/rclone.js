@@ -354,7 +354,7 @@ export class CloudTool {
             return files;
 
         } catch (e) {
-            logger.error("List files error (Detail):", e.message);
+            logger.error("List files error (Detail):", e);
             this.loading = false;
             return [];
         }

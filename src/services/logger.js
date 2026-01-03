@@ -241,8 +241,13 @@ const serializeData = (data) => {
 };
 
 const log = async (instanceId, level, message, data = {}) => {
-  // 在测试环境下，如果 getInstanceIdFunc 返回 unknown，减少 debug 日志输出频率
-  // 避免干扰测试结果
+  // 确保 data 是一个对象且不是 Error 实例
+  let finalData = data;
+  if (data && typeof data !== 'object') {
+      finalData = { value: data };
+  } else if (data instanceof Error) {
+      finalData = serializeError(data);
+  }
 
   // 确保版本已初始化
   await initVersion();
@@ -256,12 +261,12 @@ const log = async (instanceId, level, message, data = {}) => {
   if (!axiom) {
     // Axiom 未初始化时，降级到原生 console，防止触发 Proxy 递归
     const fallback = { error: originalConsoleError, warn: originalConsoleWarn, log: originalConsoleLog }[level] || originalConsoleLog;
-    fallback.call(console, displayMessage, data);
+    fallback.call(console, displayMessage, finalData);
     return;
   }
 
   // 序列化数据并限制字段数量
-  const serializedData = serializeData(data);
+  const serializedData = serializeData(finalData);
   const limitedData = limitFields(serializedData);
   
   const payload = {
