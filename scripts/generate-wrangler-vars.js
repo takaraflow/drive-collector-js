@@ -11,14 +11,12 @@ function redactSensitiveInfo(str) {
     
     // 脱敏常见的敏感信息模式
     const patterns = [
-        // API Keys (通常较长，包含字母数字)
-        { regex: /--var\s+([^=]+)="([^"]*)"/g, replacement: (match, key, value) => `--var ${key}="***REDACTED***"` },
+        // API Keys/Vars (处理 --var key=value 格式)
+        { regex: /(--var\s+[^=]+=)([^ ]+)/g, replacement: (match, prefix, value) => `${prefix}***REDACTED***` },
         // 环境变量值 (引号内的内容)
-        { regex: /export\s+(\w+)="([^"]{10,})"/g, replacement: (match, key, value) => `export ${key}="***REDACTED***"` },
-        // Account IDs (32位十六进制)
-        { regex: /\b[a-f0-9]{32}\b/g, replacement: '***ACCOUNT_ID***' },
-        // Tokens (通常包含特殊字符)
-        { regex: /"[a-zA-Z0-9_\-\.]{20,}"/g, replacement: '"***REDACTED***"' },
+        { regex: /(export\s+\w+=)"([^"]{10,})"/g, replacement: (match, prefix, value) => `${prefix}"***REDACTED***"` },
+        // Tokens (引号内且较长的内容)
+        { regex: /"[a-zA-Z0-9_\-\.]{40,}"/g, replacement: '"***REDACTED***"' },
     ];
     
     let result = str;
