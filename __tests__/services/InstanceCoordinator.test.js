@@ -113,21 +113,30 @@ describe("InstanceCoordinator", () => {
     });
   });
 
-  // Skip unregisterInstance test - not critical for main functionality
-  describe.skip("unregisterInstance", () => {
+  describe("unregisterInstance", () => {
     test("should unregister instance successfully", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ success: true }),
-      });
+      // Mock cache.delete to return true
+      const deleteSpy = jest.spyOn(cache, 'delete').mockResolvedValue(true);
 
       await instanceCoordinator.unregisterInstance();
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining("/values/instance:test_instance_123"),
-        expect.objectContaining({ method: "DELETE" })
-      );
+      // Verify cache.delete was called with correct key
+      expect(deleteSpy).toHaveBeenCalledWith("instance:test_instance_123");
+
+      deleteSpy.mockRestore();
+    });
+
+    test("should handle unregister instance failure gracefully", async () => {
+      // Mock cache.delete to throw error
+      const deleteSpy = jest.spyOn(cache, 'delete')
+        .mockRejectedValue(new Error('Cache Delete Error'));
+
+      // Should not throw, just log error
+      await expect(instanceCoordinator.unregisterInstance()).resolves.not.toThrow();
+
+      expect(deleteSpy).toHaveBeenCalledWith("instance:test_instance_123");
+
+      deleteSpy.mockRestore();
     });
   });
 

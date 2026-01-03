@@ -83,8 +83,12 @@ export class InstanceCoordinator {
      * 注销实例
      */
     async unregisterInstance() {
-        await cache.delete(`instance:${this.instanceId}`);
-        logger.info(`[${cache.getCurrentProvider()}] 📝 实例已注销: ${this.instanceId}`);
+        try {
+            await cache.delete(`instance:${this.instanceId}`);
+            logger.info(`[${cache.getCurrentProvider()}] 📝 实例已注销: ${this.instanceId}`);
+        } catch (error) {
+            logger.error(`[${cache.getCurrentProvider()}] ❌ 实例注销失败: ${error.message}`);
+        }
     }
 
     /**
