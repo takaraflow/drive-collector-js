@@ -8,12 +8,40 @@
 import { generateWranglerCommand } from './generate-wrangler-vars.js';
 import { execSync } from 'child_process';
 
+/**
+ * 脱敏敏感信息
+ * @param {string} str - 需要脱敏的字符串
+ * @returns {string} - 脱敏后的字符串
+ */
+function redactSensitiveInfo(str) {
+    if (!str) return str;
+    
+    // 脱敏常见的敏感信息模式
+    const patterns = [
+        // API Keys (通常较长，包含字母数字)
+        { regex: /--var\s+(\w+):"([a-zA-Z0-9_-]{20,})"/g, replacement: (match, key, value) => `--var ${key}:"***REDACTED***"` },
+        // 环境变量值 (引号内的内容)
+        { regex: /export\s+(\w+)="([^"]{10,})"/g, replacement: (match, key, value) => `export ${key}="***REDACTED***"` },
+        // Account IDs (32位十六进制)
+        { regex: /\b[a-f0-9]{32}\b/g, replacement: '***ACCOUNT_ID***' },
+        // Tokens (通常包含特殊字符)
+        { regex: /"[a-zA-Z0-9_\-\.]{20,}"/g, replacement: '"***REDACTED***"' },
+    ];
+    
+    let result = str;
+    for (const { regex, replacement } of patterns) {
+        result = result.replace(regex, replacement);
+    }
+    return result;
+}
+
 function main() {
     try {
         // 生成 wrangler 命令
         const command = generateWranglerCommand();
         
-        console.log('Generated command:', command);
+        // 脱敏后输出命令
+        console.log('Generated command:', redactSensitiveInfo(command));
         
         // 执行命令
         // 注意：在 Windows 下，export 语法可能不兼容，所以这里只执行 wrangler 部分
@@ -37,7 +65,8 @@ function main() {
                         // 移除引号
                         const cleanValue = value.replace(/^"|"$/g, '').replace(/^'|'$/g, '');
                         process.env[key] = cleanValue;
-                        console.log(`Set env: ${key}=${cleanValue}`);
+                        // 脱敏后输出环境变量设置
+                        console.log(`Set env: ${key}=***REDACTED***`);
                     }
                 }
             }
@@ -45,8 +74,8 @@ function main() {
             wranglerCmd = cmd;
         }
         
-        // 执行 wrangler 命令
-        console.log('Executing:', wranglerCmd);
+        // 执行 wrangler 命令（脱敏后输出）
+        console.log('Executing:', redactSensitiveInfo(wranglerCmd));
         execSync(wranglerCmd, { stdio: 'inherit' });
         
     } catch (error) {

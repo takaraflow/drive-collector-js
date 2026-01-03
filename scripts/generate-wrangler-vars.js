@@ -2,6 +2,33 @@ import fs from 'fs';
 import path from 'path';
 
 /**
+ * 脱敏敏感信息
+ * @param {string} str - 需要脱敏的字符串
+ * @returns {string} - 脱敏后的字符串
+ */
+function redactSensitiveInfo(str) {
+    if (!str) return str;
+    
+    // 脱敏常见的敏感信息模式
+    const patterns = [
+        // API Keys (通常较长，包含字母数字)
+        { regex: /--var\s+(\w+):"([a-zA-Z0-9_-]{20,})"/g, replacement: (match, key, value) => `--var ${key}:"***REDACTED***"` },
+        // 环境变量值 (引号内的内容)
+        { regex: /export\s+(\w+)="([^"]{10,})"/g, replacement: (match, key, value) => `export ${key}="***REDACTED***"` },
+        // Account IDs (32位十六进制)
+        { regex: /\b[a-f0-9]{32}\b/g, replacement: '***ACCOUNT_ID***' },
+        // Tokens (通常包含特殊字符)
+        { regex: /"[a-zA-Z0-9_\-\.]{20,}"/g, replacement: '"***REDACTED***"' },
+    ];
+    
+    let result = str;
+    for (const { regex, replacement } of patterns) {
+        result = result.replace(regex, replacement);
+    }
+    return result;
+}
+
+/**
  * 动态生成 wrangler deploy 命令
  * 1. 从 GHA Context JSON (GHA_SECRETS_JSON, GHA_VARS_JSON) 解析所有变量
  * 2. 结合当前 process.env
@@ -95,5 +122,6 @@ export function generateWranglerCommand(env = process.env) {
 // Only execute if running directly
 import { fileURLToPath } from 'url';
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  console.log(generateWranglerCommand());
+  // 脱敏后输出命令
+  console.log(redactSensitiveInfo(generateWranglerCommand()));
 }

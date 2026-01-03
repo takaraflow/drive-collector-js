@@ -239,7 +239,9 @@ function generateWranglerToml() {
     if (/\$\{[^}]+\}/.test(tomlContent)) {
         console.error('错误: wrangler.toml 中仍存在未替换的占位符变量');
         const matches = tomlContent.match(/\$\{[^}]+\}/g);
-        console.error('未替换的变量:', matches);
+        // 脱敏：只输出变量名，不输出完整内容
+        const varNames = matches ? matches.map(m => m.replace(/^\$\{|\}$/g, '')) : [];
+        console.error('未替换的变量:', varNames.join(', '));
         process.exit(1);
     }
     
