@@ -85,14 +85,8 @@ export function generateWranglerCommand(env = process.env) {
 
       // 只有当值存在且不为空时才添加
       if (value !== undefined && value !== '') {
-        // 移除环境变量值两端的单引号或双引号
-        let cleanValue = String(value);
-        if ((cleanValue.startsWith("'") && cleanValue.endsWith("'")) || (cleanValue.startsWith('"') && cleanValue.endsWith('"'))) {
-          cleanValue = cleanValue.substring(1, cleanValue.length - 1);
-        }
-        
         // 使用双引号包裹值，处理特殊字符
-        const escapedValue = cleanValue.replace(/"/g, '\\"');
+        const escapedValue = String(value).replace(/"/g, '\\"');
         vars.push(`--var ${key}:"${escapedValue}"`);
       }
     }
