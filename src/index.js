@@ -889,10 +889,19 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
     const start = Date.now();
     const providerName = p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis';
     try {
-      await executeWithPriorityFallbackLogger.info(`尝试 ${p} ${operation} ${args[0] || ''}`, { cache: true, provider: providerName }, ctx);
+      await executeWithPriorityFallbackLogger.info(`尝试 ${p} ${operation} ${args[0] || ''}`, { 
+        cache: true, 
+        provider: providerName,
+        providerType: p,
+        priorityIndex: i
+      }, ctx);
       const result = await providerOps[p][operation]();
       const duration = Date.now() - start;
-      await executeWithPriorityFallbackLogger.info(`使用 ${p} ${operation} 成功, duration=${duration}ms`, { cache: true, provider: providerName }, ctx);
+      await executeWithPriorityFallbackLogger.info(`使用 ${p} ${operation} 成功, duration=${duration}ms`, { 
+        cache: true, 
+        provider: providerName,
+        actualProvider: p
+      }, ctx);
       lastUsedProvider = p;
       return result;
     } catch (e) {
@@ -1149,11 +1158,16 @@ async function handleRequest(request, env, ctx) {
   });
 
   // 3. 诊断信息（合并原有的分散日志，减少事件数量节省额度）
+  const primaryProvider = detectCacheProvider(env);
+  const priorities = getProviderPriority(env);
+  
   await requestLogger.info('Provider Status', {
-    primary: detectCacheProvider(env),
+    primary: primaryProvider,
+    priorities: priorities,
     hasKv: !!env.KV_STORAGE,
     hasRedis: !!(env.NF_REDIS_URL && env.NF_REDIS_PASSWORD),
-    hasUpstash: !!(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN)
+    hasUpstash: !!(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN),
+    envOverride: env.CACHE_PROVIDER || 'none'
   });
 
   // 健康检查 - 增加日志采样过滤
