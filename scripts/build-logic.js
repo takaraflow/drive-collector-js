@@ -51,11 +51,15 @@ function loadEnvFile(fileSystem = fs) {
                 
                 // 移除注释部分
                 if (commentStart !== -1) {
-                    value = value.substring(0, commentStart);
+                    value = value.substring(0, commentStart).trim();
+                } else {
+                    value = value.trim();
                 }
                 
-                // 去除首尾空格和包围引号
-                value = value.trim().replace(/^["']|["']$/g, '');
+                // 循环去除所有包围的引号
+                while (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+                    value = value.substring(1, value.length - 1);
+                }
                 
                 const keyTrim = key.trim();
                 const currentVal = process.env[keyTrim];
@@ -296,8 +300,9 @@ function main() {
                         // 只要有真实值 v，就强制覆盖当前的占位符
                         if (v !== undefined && v !== null && v !== '') {
                             let value = String(v);
-                            if (typeof value === 'string') {
-                                value = value.trim().replace(/^['"]|['"]$/g, '');
+                            // 循环去除所有包围的引号
+                            while (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+                                value = value.substring(1, value.length - 1);
                             }
                             process.env[k] = value;
                         }

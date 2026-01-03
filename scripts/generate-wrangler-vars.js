@@ -12,7 +12,7 @@ function redactSensitiveInfo(str) {
     // 脱敏常见的敏感信息模式
     const patterns = [
         // API Keys (通常较长，包含字母数字)
-        { regex: /--var\s+(\w+):"([a-zA-Z0-9_-]{20,})"/g, replacement: (match, key, value) => `--var ${key}:"***REDACTED***"` },
+        { regex: /--var\s+([^=]+)="([^"]*)"/g, replacement: (match, key, value) => `--var ${key}="***REDACTED***"` },
         // 环境变量值 (引号内的内容)
         { regex: /export\s+(\w+)="([^"]{10,})"/g, replacement: (match, key, value) => `export ${key}="***REDACTED***"` },
         // Account IDs (32位十六进制)
@@ -85,9 +85,8 @@ export function generateWranglerCommand(env = process.env) {
 
       // 只有当值存在且不为空时才添加
       if (value !== undefined && value !== '') {
-        // 使用双引号包裹值，处理特殊字符
         const escapedValue = String(value).replace(/"/g, '\\"');
-        vars.push(`--var ${key}:"${escapedValue}"`);
+        vars.push(`--var`, `${key}=${escapedValue}`);
       }
     }
 
