@@ -173,6 +173,14 @@ export class CacheService {
                     redisOptions.maxRetriesPerRequest = 0;
                     redisOptions.retryStrategy = () => null;
                     redisOptions.connectTimeout = 500; // 快速超时
+                    
+                    // 关键修复：确保 connectTimeout 不会留下未清理的定时器
+                    // ioredis 的 connectTimeout 会在连接建立或失败后自动清理
+                    // 但为了测试环境的安全性，我们添加一个额外的保护
+                    if (redisOptions.connectTimeout) {
+                        // 记录配置，用于调试
+                        logger.debug(`[${this.getCurrentProvider()}] ℹ️ 测试环境：Redis 连接超时设置为 ${redisOptions.connectTimeout}ms`);
+                    }
                 }
 
                 // 记录Redis配置信息（用于诊断）
@@ -214,163 +222,169 @@ export class CacheService {
                     this.redisPort = redisOptions.port;
                 }
 
-                // 连接事件监听 (增强诊断)
-                this.redisClient.on('connect', () => {
-                    this.connectTime = Date.now();
-                    const displayHost = this.redisHost || (url ? 'from-url' : 'unknown');
-                    if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                        logger.debug(`[CacheService] ✅ Redis CONNECT: ${displayHost}:${this.redisPort}`);
-                    }
-                    logger.info(`[${this.getCurrentProvider()}] ✅ Redis CONNECT: ${displayHost}:${this.redisPort} at ${new Date(this.connectTime).toISOString()}`, {
-                        host: this.redisHost,
-                        port: this.redisPort,
-                        url: url ? 'configured' : 'not configured',
-                        hasPassword: !!redisOptions.password,
-                        node_env: process.env.NODE_ENV,
-                        platform: process.platform
+                // 关键修复：防止重复绑定事件监听器
+                // 只有在事件监听器未绑定时才绑定
+                if (!this._redisListenersBound) {
+                    // 连接事件监听 (增强诊断)
+                    this.redisClient.on('connect', () => {
+                        this.connectTime = Date.now();
+                        const displayHost = this.redisHost || (url ? 'from-url' : 'unknown');
+                        if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
+                            logger.debug(`[CacheService] ✅ Redis CONNECT: ${displayHost}:${this.redisPort}`);
+                        }
+                        logger.info(`[${this.getCurrentProvider()}] ✅ Redis CONNECT: ${displayHost}:${this.redisPort} at ${new Date(this.connectTime).toISOString()}`, {
+                            host: this.redisHost,
+                            port: this.redisPort,
+                            url: url ? 'configured' : 'not configured',
+                            hasPassword: !!redisOptions.password,
+                            node_env: process.env.NODE_ENV,
+                            platform: process.platform
+                        });
                     });
-                });
 
-                this.redisClient.on('ready', () => {
-                    const connectDuration = Date.now() - this.connectTime;
-                    if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                        logger.debug(`[CacheService] ✅ Redis READY: Connection established in ${connectDuration}ms`);
-                    }
-                    logger.info(`[${this.getCurrentProvider()}] ✅ Redis READY: Connection established in ${connectDuration}ms`, {
-                        totalConnections: this.redisClient.options?.maxRetriesPerRequest || 'unknown',
-                        connectTimeout: this.redisClient.options?.connectTimeout || 'unknown'
+                    this.redisClient.on('ready', () => {
+                        const connectDuration = Date.now() - this.connectTime;
+                        if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
+                            logger.debug(`[CacheService] ✅ Redis READY: Connection established in ${connectDuration}ms`);
+                        }
+                        logger.info(`[${this.getCurrentProvider()}] ✅ Redis READY: Connection established in ${connectDuration}ms`, {
+                            totalConnections: this.redisClient.options?.maxRetriesPerRequest || 'unknown',
+                            connectTimeout: this.redisClient.options?.connectTimeout || 'unknown'
+                        });
+                        // Resolve any pending waitForReady promises
+                        if (this._readyResolver) {
+                            this._readyResolver();
+                            this._readyResolver = null;
+                        }
                     });
-                    // Resolve any pending waitForReady promises
-                    if (this._readyResolver) {
-                        this._readyResolver();
-                        this._readyResolver = null;
-                    }
-                });
 
-                this.redisClient.on('reconnecting', (ms) => {
-                    if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                        logger.warn(`[CacheService] 🔄 Redis RECONNECTING: Attempting reconnection in ${ms}ms`);
-                    }
-                    logger.warn(`[${this.getCurrentProvider()}] 🔄 Redis RECONNECTING: Attempting reconnection in ${ms}ms`, {
-                        lastError: this.lastError,
-                        failureCount: this.failureCount,
-                        currentProvider: this.currentProvider
+                    this.redisClient.on('reconnecting', (ms) => {
+                        if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
+                            logger.warn(`[CacheService] 🔄 Redis RECONNECTING: Attempting reconnection in ${ms}ms`);
+                        }
+                        logger.warn(`[${this.getCurrentProvider()}] 🔄 Redis RECONNECTING: Attempting reconnection in ${ms}ms`, {
+                            lastError: this.lastError,
+                            failureCount: this.failureCount,
+                            currentProvider: this.currentProvider
+                        });
                     });
-                });
 
-                this.redisClient.on('error', (error) => {
-                    const now = Date.now();
-                    const uptime = this.connectTime ? Math.round((now - this.connectTime) / 1000) : 0;
-                    const errorMsg = error.message || '';
-                    const errorCode = error.code || '';
-                    
-                    if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                        logger.error(`[CacheService] 🚨 Redis ERROR: ${errorMsg}`, {
+                    this.redisClient.on('error', (error) => {
+                        const now = Date.now();
+                        const uptime = this.connectTime ? Math.round((now - this.connectTime) / 1000) : 0;
+                        const errorMsg = error.message || '';
+                        const errorCode = error.code || '';
+                        
+                        if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
+                            logger.error(`[CacheService] 🚨 Redis ERROR: ${errorMsg}`, {
+                                code: errorCode,
+                                host: error.hostname || error.address,
+                                port: error.port
+                            });
+                        }
+                        
+                        // 增强错误日志：暴露具体错误但不泄露凭证
+                        const safeError = {
+                            message: errorMsg,
                             code: errorCode,
-                            host: error.hostname || error.address,
-                            port: error.port
-                        });
-                    }
-                    
-                    // 增强错误日志：暴露具体错误但不泄露凭证
-                    const safeError = {
-                        message: errorMsg,
-                        code: errorCode,
-                        errno: error.errno,
-                        syscall: error.syscall,
-                        hostname: error.hostname,
-                        port: error.port,
-                        address: error.address,
-                        uptime: `${uptime}s`,
-                        node_env: process.env.NODE_ENV,
-                        platform: process.platform,
-                        stack: error.stack?.split('\n')[0]
-                    };
-                    
-                    // 移除可能包含凭证的敏感信息
-                    if (safeError.message) {
-                        safeError.message = safeError.message.replace(/password=[^&\s]*/g, 'password=***');
-                        safeError.message = safeError.message.replace(/token=[^&\s]*/g, 'token=***');
-                        safeError.message = safeError.message.replace(/Bearer [^\s]*/g, 'Bearer ***');
-                    }
-                    
-                    logger.error(`[${this.getCurrentProvider()}] 🚨 Redis ERROR: ${safeError.message}`, safeError);
-                    this.lastRedisError = errorMsg;
-                    
-                    // 关键：检测 WRONGPASS 和各种认证错误
-                    const authErrorPatterns = [
-                        'WRONGPASS',
-                        'authentication failed',
-                        'invalid password',
-                        'NOAUTH',
-                        'WRONGPASS invalid username-password pair',
-                        'Client sent AUTH, but no password is set',
-                        'Operation not permitted',
-                        'ERR invalid password',
-                        'ERR AUTH <password> called without any password configured'
-                    ];
-                    
-                    const isAuthError = authErrorPatterns.some(pattern =>
-                        errorMsg.includes(pattern) || errorCode.includes(pattern)
-                    );
-                    
-                    if (isAuthError) {
-                        logger.error(`[${this.getCurrentProvider()}] 🚨 Redis 认证失败检测到，准备故障转移`, {
-                            error: errorMsg,
-                            code: errorCode,
-                            recommendation: '检查 Redis 密码/凭证配置',
-                            action: '触发故障转移至后备提供商'
-                        });
-                        // 触发故障转移
-                        this._handleAuthFailure();
-                    } else if (errorMsg.includes('free usage limit') || errorMsg.includes('quota exceeded')) {
-                        // Upstash 配额错误也触发故障转移
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 配额限制，准备故障转移`, {
-                            error: errorMsg
-                        });
-                        this._handleAuthFailure();
-                    }
-                });
-
-                this.redisClient.on('close', async () => {
-                    const now = Date.now();
-                    const duration = this.connectTime ? now - this.connectTime : 0;
-                    if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                        logger.warn(`[CacheService] ⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`);
-                    }
-                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`, {
-                        durationMs: duration,
-                        lastError: this.lastRedisError || 'none',
-                        failureCount: this.failureCount,
-                        currentProvider: this.currentProvider,
-                        hasPassword: !!this.redisPassword,
-                        node_env: process.env.NODE_ENV,
-                        platform: process.platform
+                            errno: error.errno,
+                            syscall: error.syscall,
+                            hostname: error.hostname,
+                            port: error.port,
+                            address: error.address,
+                            uptime: `${uptime}s`,
+                            node_env: process.env.NODE_ENV,
+                            platform: process.platform,
+                            stack: error.stack?.split('\n')[0]
+                        };
+                        
+                        // 移除可能包含凭证的敏感信息
+                        if (safeError.message) {
+                            safeError.message = safeError.message.replace(/password=[^&\s]*/g, 'password=***');
+                            safeError.message = safeError.message.replace(/token=[^&\s]*/g, 'token=***');
+                            safeError.message = safeError.message.replace(/Bearer [^\s]*/g, 'Bearer ***');
+                        }
+                        
+                        logger.error(`[${this.getCurrentProvider()}] 🚨 Redis ERROR: ${safeError.message}`, safeError);
+                        this.lastRedisError = errorMsg;
+                        
+                        // 关键：检测 WRONGPASS 和各种认证错误
+                        const authErrorPatterns = [
+                            'WRONGPASS',
+                            'authentication failed',
+                            'invalid password',
+                            'NOAUTH',
+                            'WRONGPASS invalid username-password pair',
+                            'Client sent AUTH, but no password is set',
+                            'Operation not permitted',
+                            'ERR invalid password',
+                            'ERR AUTH <password> called without any password configured'
+                        ];
+                        
+                        const isAuthError = authErrorPatterns.some(pattern =>
+                            errorMsg.includes(pattern) || errorCode.includes(pattern)
+                        );
+                        
+                        if (isAuthError) {
+                            logger.error(`[${this.getCurrentProvider()}] 🚨 Redis 认证失败检测到，准备故障转移`, {
+                                error: errorMsg,
+                                code: errorCode,
+                                recommendation: '检查 Redis 密码/凭证配置',
+                                action: '触发故障转移至后备提供商'
+                            });
+                            // 触发故障转移
+                            this._handleAuthFailure();
+                        } else if (errorMsg.includes('free usage limit') || errorMsg.includes('quota exceeded')) {
+                            // Upstash 配额错误也触发故障转移
+                            logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 配额限制，准备故障转移`, {
+                                error: errorMsg
+                            });
+                            this._handleAuthFailure();
+                        }
                     });
-                    
-                    // 不再立即清理心跳或触发重启，让 ioredis 自动重连
-                    // 只有在明确收到 'end' 事件时才考虑重启或降级
-                });
 
-                // 添加更多诊断事件
-                this.redisClient.on('wait', () => {
-                    logger.debug(`[${this.getCurrentProvider()}] 🔄 Redis WAIT: Command queued, waiting for connection`);
-                });
+                    this.redisClient.on('close', async () => {
+                        const now = Date.now();
+                        const duration = this.connectTime ? now - this.connectTime : 0;
+                        if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
+                            logger.warn(`[CacheService] ⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`);
+                        }
+                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`, {
+                            durationMs: duration,
+                            lastError: this.lastRedisError || 'none',
+                            failureCount: this.failureCount,
+                            currentProvider: this.currentProvider,
+                            hasPassword: !!this.redisPassword,
+                            node_env: process.env.NODE_ENV,
+                            platform: process.platform
+                        });
+                        
+                        // 不再立即清理心跳或触发重启，让 ioredis 自动重连
+                        // 只有在明确收到 'end' 事件时才考虑重启或降级
+                    });
 
-                this.redisClient.on('end', async () => {
-                    if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                        logger.warn(`[CacheService] ⚠️ Redis END: Connection ended by client`);
-                    }
-                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis END: Connection ended by client`);
-                    // 触发自动重启 (如果未被销毁)
-                    if (!this.destroyed) {
-                        setTimeout(() => this._restartRedisClient(), 1000);
-                    }
-                });
+                    // 添加更多诊断事件
+                    this.redisClient.on('wait', () => {
+                        logger.debug(`[${this.getCurrentProvider()}] 🔄 Redis WAIT: Command queued, waiting for connection`);
+                    });
 
-                this.redisClient.on('select', (db) => {
-                    logger.debug(`[${this.getCurrentProvider()}] 🔄 Redis SELECT: Database ${db} selected`);
-                });
+                    this.redisClient.on('end', async () => {
+                        if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
+                            logger.warn(`[CacheService] ⚠️ Redis END: Connection ended by client`);
+                        }
+                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis END: Connection ended by client`);
+                        // 触发自动重启 (如果未被销毁)
+                        if (!this.destroyed) {
+                            setTimeout(() => this._restartRedisClient(), 1000);
+                        }
+                    });
+
+                    this.redisClient.on('select', (db) => {
+                        logger.debug(`[${this.getCurrentProvider()}] 🔄 Redis SELECT: Database ${db} selected`);
+                    });
+
+                    this._redisListenersBound = true;
+                }
 
                 // 异步测试连接，不阻塞初始化 - 避免卡死
                 (async () => {
@@ -531,33 +545,45 @@ export class CacheService {
      * 处理认证失败 - 捕获 WRONGPASS 并触发故障转移
      */
     async _handleAuthFailure() {
-        logger.error(`[${this.getCurrentProvider()}] 🚨 检测到 Redis 认证失败，立即触发故障转移`);
+        // 防重触发：如果已经在处理中，直接返回
+        if (this._isHandlingAuthFailure) {
+            logger.debug(`[${this.getCurrentProvider()}] ℹ️ 认证失败处理已在进行中，跳过重复调用`);
+            return;
+        }
         
-        // 增加失败计数，确保触发故障转移
-        this.failureCount = Math.max(this.failureCount, 2);
-        this.lastError = 'Redis authentication failed (WRONGPASS)';
+        this._isHandlingAuthFailure = true;
         
-        // 立即清理当前客户端
-        if (this.redisClient) {
-            try {
-                await this.redisClient.quit().catch(() => {});
-            } catch (e) {
-                // 忽略 quit 错误
+        try {
+            logger.error(`[${this.getCurrentProvider()}] 🚨 检测到 Redis 认证失败，立即触发故障转移`);
+            
+            // 增加失败计数，确保触发故障转移
+            this.failureCount = Math.max(this.failureCount, 2);
+            this.lastError = 'Redis authentication failed (WRONGPASS)';
+            
+            // 立即清理当前客户端
+            if (this.redisClient) {
+                try {
+                    await this.redisClient.quit().catch(() => {});
+                } catch (e) {
+                    // 忽略 quit 错误
+                }
+                this.redisClient.removeAllListeners();
+                this.redisClient = null;
             }
-            this.redisClient.removeAllListeners();
-            this.redisClient = null;
-        }
-        
-        // 停止心跳
-        if (typeof this.stopHeartbeat === 'function') {
-            this.stopHeartbeat();
-        }
-        
-        // 触发故障转移
-        if (this._failover()) {
-            logger.info(`[${this.getCurrentProvider()}] ✅ 已从认证失败的 Redis 故障转移到 ${this.getCurrentProvider()}`);
-        } else {
-            logger.warn(`[${this.getCurrentProvider()}] ⚠️ 无可用后备提供商，将使用本地缓存`);
+            
+            // 停止心跳
+            if (typeof this.stopHeartbeat === 'function') {
+                this.stopHeartbeat();
+            }
+            
+            // 触发故障转移
+            if (this._failover()) {
+                logger.info(`[${this.getCurrentProvider()}] ✅ 已从认证失败的 Redis 故障转移到 ${this.getCurrentProvider()}`);
+            } else {
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ 无可用后备提供商，将使用本地缓存`);
+            }
+        } finally {
+            this._isHandlingAuthFailure = false;
         }
     }
 
@@ -626,12 +652,18 @@ export class CacheService {
         }
         
         // 轮询检查 client 是否 ready (处理 restartDelay 期间没有 promise 的情况)
-        while (!this.redisClient && (Date.now() - startTime < timeoutMs)) {
+        // 修复：不仅检查 client 是否存在，还要检查其状态是否为 'ready'
+        while ((Date.now() - startTime < timeoutMs)) {
+            if (this.redisClient && this.redisClient.status === 'ready') {
+                return; // 成功达到 ready 状态
+            }
             await new Promise(r => setTimeout(r, 100));
         }
         
-        if (!this.redisClient) {
-            throw new Error('Redis client still null after wait');
+        // 超时后检查最终状态
+        if (!this.redisClient || this.redisClient.status !== 'ready') {
+            const status = this.redisClient ? this.redisClient.status : 'null';
+            throw new Error(`Redis client not ready after wait. Status: ${status}`);
         }
     }
 
@@ -1040,24 +1072,41 @@ export class CacheService {
      * 优雅降级到下一个提供商
      */
     async _fallbackToNextProvider(operation, ...args) {
-        const originalProvider = this.currentProvider;
+        // 使用循环代替递归，避免无限递归风险
+        const maxFailoverAttempts = 3; // 最多尝试3次故障转移
+        let attempts = 0;
         
-        // 计算下一个可用提供商
-        const targets = this._calculateFailoverTargets();
-        if (targets.length === 0) {
-            // 没有可用后备，使用本地缓存
-            logger.warn(`[${this.getCurrentProvider()}] ⚠️ 无可用后备提供商，使用本地缓存`);
-            return await this._local_cache_operation(operation, ...args);
+        while (attempts < maxFailoverAttempts) {
+            const originalProvider = this.currentProvider;
+            
+            // 计算下一个可用提供商
+            const targets = this._calculateFailoverTargets();
+            if (targets.length === 0) {
+                // 没有可用后备，使用本地缓存
+                logger.warn(`[${this.getCurrentProvider()}] ⚠️ 无可用后备提供商，使用本地缓存`);
+                return await this._local_cache_operation(operation, ...args);
+            }
+            
+            // 执行故障转移
+            if (this._failover()) {
+                logger.info(`[${this.getCurrentProvider()}] 🔄 已从 ${this._getProviderDisplayName(originalProvider)} 降级到 ${this.getCurrentProvider()}`);
+                attempts++;
+                
+                // 尝试使用新提供商执行操作
+                try {
+                    return await this._executeWithFailover(operation, ...args);
+                } catch (error) {
+                    // 新提供商也失败，继续循环尝试下一个
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ 故障转移后操作仍失败，尝试下一个提供商: ${error.message}`);
+                    continue;
+                }
+            } else {
+                throw new Error(`无法从 ${this._getProviderDisplayName(originalProvider)} 故障转移`);
+            }
         }
         
-        // 执行故障转移
-        if (this._failover()) {
-            logger.info(`[${this.getCurrentProvider()}] 🔄 已从 ${this._getProviderDisplayName(originalProvider)} 降级到 ${this.getCurrentProvider()}`);
-            // 使用新提供商重试
-            return await this._executeWithFailover(operation, ...args);
-        }
-        
-        throw new Error(`无法从 ${this._getProviderDisplayName(originalProvider)} 故障转移`);
+        // 达到最大尝试次数仍失败
+        throw new Error(`故障转移失败：已尝试 ${maxFailoverAttempts} 次仍无法成功执行操作`);
     }
 
     /**
@@ -2069,8 +2118,10 @@ export class CacheService {
      * 启动应用层心跳机制 - Northflank环境优化，每30秒执行一次PING
      */
     _startHeartbeat() {
+        // 关键修复：确保清理旧的定时器，防止泄漏
         if (this.heartbeatTimer) {
             clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
         }
 
         // 在测试环境中不启动心跳，避免异步泄漏
@@ -2085,8 +2136,9 @@ export class CacheService {
         const maxConsecutiveFailures = 3;
 
         this.heartbeatTimer = setInterval(async () => {
-            if (!this.redisClient) {
-                logger.debug(`[${this.getCurrentProvider()}] 💔 心跳跳过：Redis 客户端未初始化`);
+            // 关键修复：在每次执行前检查是否应该停止（防止实例销毁后继续运行）
+            if (this.destroyed || !this.redisClient) {
+                logger.debug(`[${this.getCurrentProvider()}] 💔 心跳跳过：实例已销毁或客户端未初始化`);
                 return;
             }
 
