@@ -13,7 +13,6 @@
     "distributed-state-management",
     "multi-instance-locking",
     "qstash-signature-v2",
-    "distributed-task-scheduling",
     "path-normalization"
   ],
   "behaviors": {
@@ -295,31 +294,6 @@
         "required": false,
         "description": "Redis TLS 配置（向后兼容）"
       },
-      "R2_ENDPOINT": {
-        "type": "string",
-        "required": false,
-        "description": "R2 endpoint URL"
-      },
-      "R2_ACCESS_KEY_ID": {
-        "type": "string",
-        "required": false,
-        "description": "R2 access key ID"
-      },
-      "R2_SECRET_ACCESS_KEY": {
-        "type": "string",
-        "required": false,
-        "description": "R2 secret access key"
-      },
-      "R2_BUCKET": {
-        "type": "string",
-        "required": false,
-        "description": "R2 bucket name"
-      },
-      "R2_PUBLIC_URL": {
-        "type": "string",
-        "required": false,
-        "description": "R2 public URL"
-      },
       "NF_REDIS_HOST": {
         "type": "string",
         "required": false,
@@ -362,39 +336,6 @@
         "type": "string",
         "required": false,
         "description": "Northflank Redis TLS SNI servername"
-      },
-      "REDIS_HOST": {
-        "type": "string",
-        "required": false,
-        "description": "Legacy Redis host"
-      },
-      "REDIS_PORT": {
-        "type": "number",
-        "required": false,
-        "default": 6379,
-        "description": "Legacy Redis port"
-      },
-      "REDIS_MAX_RETRIES": {
-        "type": "number",
-        "required": false,
-        "default": 5,
-        "description": "Legacy Redis max retries"
-      },
-      "REDIS_RESTART_DELAY": {
-        "type": "number",
-        "required": false,
-        "default": 5000,
-        "description": "Legacy Redis restart delay"
-      },
-      "OSS_WORKER_URL": {
-        "type": "string",
-        "required": false,
-        "description": "OSS worker URL"
-      },
-      "OSS_WORKER_SECRET": {
-        "type": "string",
-        "required": false,
-        "description": "OSS worker secret"
       }
     }
   },
