@@ -159,8 +159,8 @@ export class TaskManager {
             // 顺序恢复所有chat groups的任务，避免并发冲击
             for (const [chatId, rows] of chatGroups.entries()) {
                 await this._restoreBatchTasks(chatId, rows);
-                // 在会话间添加延迟，避免 API 限制
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                // 在会话间添加较长的延迟，避免启动时的流量峰值导致 429
+                await new Promise(resolve => setTimeout(resolve, 3000));
             }
 
             this.updateQueueUI();

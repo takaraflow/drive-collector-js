@@ -284,19 +284,24 @@ const handle429Error = async (fn, maxRetries = 10) => {
 
             if (isDisconnected) {
                 logger.warn(`🔌 Disconnected error detected, waiting 3 seconds for reconnection (attempt ${retryCount + 1}/${maxRetries})`);
+                lastRetryAfter = 3000; // 记录断开连接的等待时间
                 await sleep(3000);
                 retryCount++;
             } else if (isFlood) {
                 // 提取等待时间，如果大于 60 秒，触发全局冷静期
                 let retryAfter = error.retryAfter || error.seconds || 0;
+                
+                // 记录原始错误信息以便调试 (logger 可能没有 debug 方法，使用 info)
+                logger.info(`[Limiter] 429 Error Details: code=${error.code}, name=${error.name}, msg=${error.message}, rawRetryAfter=${retryAfter}`);
+
                 if (!retryAfter) {
-                    const match = error.message.match(/wait (\d+) seconds?/);
+                    const match = error.message.match(/wait (\d+) seconds?/i);
                     retryAfter = match ? parseInt(match[1]) : 0;
                 }
                 
                 // 强制最小退避机制：当 retry-after <=0 时，确保至少 2s 递增退避
                 if (retryAfter <= 0) {
-                    retryAfter = Math.min(Math.pow(2, retryCount + 1), 10);
+                    retryAfter = Math.min(Math.pow(2, retryCount + 1), 30); // 增加上限到 30s
                 }
                 
                 // 改进的等待逻辑：指数退避 + 抖动
@@ -305,6 +310,8 @@ const handle429Error = async (fn, maxRetries = 10) => {
                 const jitter = Math.random() * 2000;
                 const waitMs = baseWait + jitter;
                 
+                lastRetryAfter = waitMs; // 确保在 sleep 之前赋值，防止在 sleep 期间出错导致丢失
+
                 if (retryAfter > 60) {
                     logger.error(`🚨 Large FloodWait detected (${retryAfter}s). Triggering GLOBAL cooling.`);
                     globalCoolingUntil = Date.now() + waitMs;
@@ -315,7 +322,6 @@ const handle429Error = async (fn, maxRetries = 10) => {
                 logger.warn(`⚠️ 429/FloodWait encountered, retrying after ${Math.round(waitMs)}ms (attempt ${retryCount + 1}/${maxRetries})`);
                 await sleep(waitMs);
                 retryCount++;
-                lastRetryAfter = waitMs;
             } else {
                 throw error;
             }
