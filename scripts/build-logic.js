@@ -195,7 +195,7 @@ function generateWranglerToml() {
     const varsToReplace = ['WORKER_NAME', 'CLOUDFLARE_ACCOUNT_ID', 'CF_KV_NAMESPACE_ID', 'KV_PREVIEW_ID'];
     
     for (const varName of varsToReplace) {
-        const value = process.env[varName] || '';
+        const value = (process.env[varName] || '').trim().replace(/^['"]|['"]$/g, '');
         const regex = new RegExp(`\\$\\{${varName}\\}`, 'g');
         tomlContent = tomlContent.replace(regex, value);
     }
@@ -295,7 +295,11 @@ function main() {
                     Object.entries(data).forEach(([k, v]) => {
                         // 只要有真实值 v，就强制覆盖当前的占位符
                         if (v !== undefined && v !== null && v !== '') {
-                            process.env[k] = String(v);
+                            let value = String(v);
+                            if (typeof value === 'string') {
+                                value = value.trim().replace(/^['"]|['"]$/g, '');
+                            }
+                            process.env[k] = value;
                         }
                     });
                 } catch (e) { console.warn(`解析 ${key} 失败:`, e.message); }
