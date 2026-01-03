@@ -166,8 +166,9 @@ const log = async (instanceId, level, message, data = {}) => {
   const displayMessage = `[v${version}] ${message}`;
 
   if (!axiom) {
-    // Axiom 未初始化时，降级到 console
-    console[level](displayMessage, data);
+    // Axiom 未初始化时，降级到原生 console，防止触发 Proxy 递归
+    const fallback = { error: originalConsoleError, warn: originalConsoleWarn, log: originalConsoleLog }[level] || originalConsoleLog;
+    fallback.call(console, displayMessage, data);
     return;
   }
 
