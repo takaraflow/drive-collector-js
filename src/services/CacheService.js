@@ -9,12 +9,23 @@ import { logger } from "./logger.js";
  * 具有自动故障转移功能，并集成 L1 内存缓存减少物理调用
  */
 export class CacheService {
-    constructor() {
+    /**
+     * @param {Object} configOverride - 可选的配置覆盖对象，用于测试和依赖注入
+     * @param {Object} configOverride.env - 覆盖环境变量
+     * @param {Object} configOverride.redis - 覆盖 Redis 配置
+     */
+    constructor(configOverride = null) {
+        // 保存配置覆盖对象
+        this.configOverride = configOverride;
+        
         // L1 内存缓存配置
         this.l1CacheTtl = 10 * 1000; // 默认 10 秒内存缓存
 
+        // 获取环境变量（支持测试注入）
+        const env = configOverride?.env || process.env;
+
         // 为了在 constructor 中安全检查提供商配置，先提取配置变量
-        const redisConfig = config.redis || {};
+        const redisConfig = configOverride?.redis || config.redis || {};
 
         // Redis 配置赋值
         this.redisUrl = redisConfig.url;
@@ -23,17 +34,17 @@ export class CacheService {
         this.redisPassword = redisConfig.password;
 
         // Cloudflare KV 配置赋值
-        this.cfAccountId = process.env.CF_CACHE_ACCOUNT_ID || process.env.CF_KV_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
-        this.cfNamespaceId = process.env.CF_CACHE_NAMESPACE_ID || process.env.CF_KV_NAMESPACE_ID;
-        this.cfCachetoken = process.env.CF_CACHE_TOKEN || process.env.CF_KV_TOKEN;
+        this.cfAccountId = env.CF_CACHE_ACCOUNT_ID || env.CF_KV_ACCOUNT_ID || env.CF_ACCOUNT_ID;
+        this.cfNamespaceId = env.CF_CACHE_NAMESPACE_ID || env.CF_KV_NAMESPACE_ID;
+        this.cfCachetoken = env.CF_CACHE_TOKEN || env.CF_KV_TOKEN;
         const hasCfConfig = !!(this.cfAccountId && this.cfNamespaceId && this.cfCachetoken);
         this.apiUrl = hasCfConfig
             ? `https://api.cloudflare.com/client/v4/accounts/${this.cfAccountId}/storage/kv/namespaces/${this.cfNamespaceId}`
             : '';
 
         // Upstash 备用配置赋值
-        this.upstashUrl = process.env.UPSTASH_REDIS_REST_URL ? process.env.UPSTASH_REDIS_REST_URL.replace(/\/$/, '') : '';
-        this.upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+        this.upstashUrl = env.UPSTASH_REDIS_REST_URL ? env.UPSTASH_REDIS_REST_URL.replace(/\/$/, '') : '';
+        this.upstashToken = env.UPSTASH_REDIS_REST_TOKEN;
 
         // 故障转移状态
         this.currentProvider = 'cloudflare'; // 默认值
@@ -53,8 +64,8 @@ export class CacheService {
         this._handleAuthFailure = this._handleAuthFailure.bind(this);
         this._restartRedisClient = this._restartRedisClient.bind(this);
 
-        // 1. 先设置提供商优先级
-        this._setDefaultProvider();
+        // 1. 先设置提供商优先级（传入 env 以支持测试）
+        this._setDefaultProvider(env);
 
         // 2. 如果选择了 redis，则初始化它
         if (this.currentProvider === 'redis') {
@@ -79,19 +90,19 @@ export class CacheService {
             redisUrl_exists: !!this.redisUrl,
             redisHost_exists: !!this.redisHost,
             upstashUrl_exists: !!this.upstashUrl,
-            cache_provider_env: process.env.CACHE_PROVIDER || 'unset',
+            cache_provider_env: env.CACHE_PROVIDER || 'unset',
             env_vars_detected: {
-                CF_CACHE_ACCOUNT_ID: !!process.env.CF_CACHE_ACCOUNT_ID,
-                CF_KV_ACCOUNT_ID: !!process.env.CF_KV_ACCOUNT_ID,
-                CF_ACCOUNT_ID: !!process.env.CF_ACCOUNT_ID,
-                CF_CACHE_NAMESPACE_ID: !!process.env.CF_CACHE_NAMESPACE_ID,
-                CF_KV_NAMESPACE_ID: !!process.env.CF_KV_NAMESPACE_ID,
-                CF_CACHE_TOKEN: !!process.env.CF_CACHE_TOKEN,
-                CF_KV_TOKEN: !!process.env.CF_KV_TOKEN,
-                CF_D1_TOKEN: !!process.env.CF_D1_TOKEN,
-                NF_REDIS_URL: !!process.env.NF_REDIS_URL,
-                REDIS_URL: !!process.env.REDIS_URL,
-                UPSTASH_REDIS_REST_URL: !!process.env.UPSTASH_REDIS_REST_URL
+                CF_CACHE_ACCOUNT_ID: !!env.CF_CACHE_ACCOUNT_ID,
+                CF_KV_ACCOUNT_ID: !!env.CF_KV_ACCOUNT_ID,
+                CF_ACCOUNT_ID: !!env.CF_ACCOUNT_ID,
+                CF_CACHE_NAMESPACE_ID: !!env.CF_CACHE_NAMESPACE_ID,
+                CF_KV_NAMESPACE_ID: !!env.CF_KV_NAMESPACE_ID,
+                CF_CACHE_TOKEN: !!env.CF_CACHE_TOKEN,
+                CF_KV_TOKEN: !!env.CF_KV_TOKEN,
+                CF_D1_TOKEN: !!env.CF_D1_TOKEN,
+                NF_REDIS_URL: !!env.NF_REDIS_URL,
+                REDIS_URL: !!env.REDIS_URL,
+                UPSTASH_REDIS_REST_URL: !!env.UPSTASH_REDIS_REST_URL
             }
         });
     }
@@ -423,21 +434,33 @@ export class CacheService {
     }
 
     get hasRedis() {
+        // 1. 优先检查注入的环境变量（测试环境）
+        const env = this.configOverride?.env || process.env;
+        const envUrl = env.NF_REDIS_URL || env.REDIS_URL;
+        if (envUrl) return true;
+
+        // 2. 检查注入的 Redis 配置对象
+        if (this.configOverride?.redis?.host && this.configOverride.redis.host !== '127.0.0.1' && this.configOverride.redis.host !== 'localhost') {
+            return true;
+        }
+
+        // 3. 回退到全局配置检查
         const redisConfig = config.redis || {};
-        const envUrl = process.env.NF_REDIS_URL || process.env.REDIS_URL;
-        return !!(envUrl || (redisConfig.host && redisConfig.host !== '127.0.0.1' && redisConfig.host !== 'localhost'));
+        return !!(redisConfig.host && redisConfig.host !== '127.0.0.1' && redisConfig.host !== 'localhost');
     }
 
     get hasCloudflare() {
-        const cf_accountId = process.env.CF_CACHE_ACCOUNT_ID || process.env.CF_KV_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
-        const cf_namespaceId = process.env.CF_CACHE_NAMESPACE_ID || process.env.CF_KV_NAMESPACE_ID;
-        const cf_token = process.env.CF_CACHE_TOKEN || process.env.CF_KV_TOKEN;
+        const env = this.configOverride?.env || process.env;
+        const cf_accountId = env.CF_CACHE_ACCOUNT_ID || env.CF_KV_ACCOUNT_ID || env.CF_ACCOUNT_ID;
+        const cf_namespaceId = env.CF_CACHE_NAMESPACE_ID || env.CF_KV_NAMESPACE_ID;
+        const cf_token = env.CF_CACHE_TOKEN || env.CF_KV_TOKEN;
         return !!(cf_accountId && cf_namespaceId && cf_token);
     }
 
     get hasUpstash() {
-        const up_url = process.env.UPSTASH_REDIS_REST_URL ? process.env.UPSTASH_REDIS_REST_URL.replace(/\/$/, '') : '';
-        const up_token = process.env.UPSTASH_REDIS_REST_TOKEN;
+        const env = this.configOverride?.env || process.env;
+        const up_url = env.UPSTASH_REDIS_REST_URL ? env.UPSTASH_REDIS_REST_URL.replace(/\/$/, '') : '';
+        const up_token = env.UPSTASH_REDIS_REST_TOKEN;
         return !!(up_url && up_url.trim() !== '' && up_token && up_token.trim() !== '');
     }
 
@@ -725,9 +748,9 @@ export class CacheService {
      * 设置默认提供商优先级
      * 优先级：redis > cloudflare > upstash
      */
-    _setDefaultProvider() {
+    _setDefaultProvider(env = process.env) {
         // 支持 CACHE_PROVIDER 和 KV_PROVIDER（兼容）
-        const provider = process.env.CACHE_PROVIDER || process.env.KV_PROVIDER;
+        const provider = env.CACHE_PROVIDER || env.KV_PROVIDER;
         if (provider) {
             // 强制指定提供商
             if (provider === 'redis' && this.hasRedis) {
@@ -801,7 +824,7 @@ export class CacheService {
             if (this.failureCount >= 2) {
                 const targets = this._calculateFailoverTargets();
                 if (targets.length > 0) {
-                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ 连续失败 ${this.failureCount} 次，触发自动故障转移到 ${targets[0]}`);
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ 连续失败 ${this.failureCount} 次，自动故障转移到 ${targets[0]}`);
                     return true;
                 }
             }

@@ -1,5 +1,6 @@
-import { jest, describe, it, expect, beforeEach } from "@jest/globals";
+import { jest, describe, it, expect, beforeEach, beforeAll } from "@jest/globals";
 
+// Mock d1 和 logger
 jest.unstable_mockModule("../../src/services/d1.js", () => ({
     d1: {
         fetchAll: jest.fn(),
@@ -23,11 +24,22 @@ jest.unstable_mockModule("../../src/services/logger.js", () => ({
     }
 }));
 
-const { InstanceRepository } = await import("../../src/repositories/InstanceRepository.js");
-const { d1 } = await import("../../src/services/d1.js");
-const { logger } = await import("../../src/services/logger.js");
-
 describe("InstanceRepository", () => {
+    let InstanceRepository, d1, logger;
+
+    // 【修复】使用 beforeAll + resetModules 确保 Mock 生效
+    beforeAll(async () => {
+        jest.resetModules();
+        
+        const d1Module = await import("../../src/services/d1.js");
+        const loggerModule = await import("../../src/services/logger.js");
+        const repoModule = await import("../../src/repositories/InstanceRepository.js");
+
+        d1 = d1Module.d1;
+        logger = loggerModule.logger;
+        InstanceRepository = repoModule.InstanceRepository;
+    });
+
     beforeEach(() => {
         jest.clearAllMocks();
     });

@@ -43,4 +43,6 @@ export default {
     '!src/**/*.test.js',
     '!**/node_modules/**'
   ],
+  moduleDirectories: ["node_modules"],
+  testEnvironment: "node",
 };

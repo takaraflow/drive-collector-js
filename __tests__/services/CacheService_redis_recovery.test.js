@@ -379,7 +379,10 @@ describe('Redis Recovery and Heartbeat Enhancements', () => {
             
             cache.currentProvider = 'redis';
             cache.failoverEnabled = true;
-            cache.hasCloudflare = true;
+            Object.defineProperty(cache, 'hasCloudflare', {
+                get: jest.fn(() => true),
+                configurable: true,
+            });
             
             // Use direct property override
             const mockCloudflareSet = jest.fn().mockResolvedValue(true);
@@ -394,17 +397,31 @@ describe('Redis Recovery and Heartbeat Enhancements', () => {
 
     describe('Recovery from end state', () => {
         test('should maintain operation during recovery', async () => {
+            // 确保 failoverEnabled 为 true
+            cache.failoverEnabled = true;
             cache.currentProvider = 'redis';
-            cache.hasCloudflare = true;
             
-            // Use direct property override
+            // 修复：使用 Object.defineProperty 来覆盖 Getter
+            Object.defineProperty(cache, 'hasCloudflare', {
+                get: jest.fn(() => true),
+                configurable: true,
+            });
+            
+            // 模拟 Redis 处于 'end' 状态
+            mockClient.status = 'end';
+            cache.redisClient = mockClient;
+
+            // 使用直接属性覆盖来 Mock Cloudflare 方法
             const mockCloudflareSet = jest.fn().mockResolvedValue(true);
             cache._cloudflare_set = mockCloudflareSet;
             
-            mockClient.status = 'end';
+            // 重要：由于 localCache.isUnchanged 的优化，我们需要一个不同的 key 或确保它认为值已改变
+            const testKey = `test_${Date.now()}`;
             
-            const result = await cache.set('test', 'value');
+            // 执行操作
+            const result = await cache.set(testKey, 'value');
             
+            // 验证
             expect(mockCloudflareSet).toHaveBeenCalled();
             expect(result).toBe(true);
             expect(cache.currentProvider).toBe('cloudflare');

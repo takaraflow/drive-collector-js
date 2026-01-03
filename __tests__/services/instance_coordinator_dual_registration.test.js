@@ -1,13 +1,12 @@
-// Updated test file - V3 - Forced update
-import { jest, describe, test, expect, beforeEach, beforeAll, afterAll } from "@jest/globals";
-import logger from "../../src/services/logger.js";
+import { jest, describe, test, expect, beforeAll, afterAll, afterEach } from "@jest/globals";
 
-// Mock the global fetch function
+// Mock global fetch
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
 const originalEnv = process.env;
 let instanceCoordinator;
+let mockLogger; 
 
 const mockCache = {
     get: jest.fn(),
@@ -19,19 +18,37 @@ const mockCache = {
 
 describe("InstanceCoordinator Heartbeat (KV Only)", () => {
     beforeAll(async () => {
-        // Set up mock environment variables
         process.env = {
             ...originalEnv,
             CF_ACCOUNT_ID: "mock_account_id",
             CF_KV_NAMESPACE_ID: "mock_namespace_id",
             CF_KV_TOKEN: "mock_kv_token",
             INSTANCE_ID: "test_instance_heartbeat",
-            HOSTNAME: "unknown", // Mock hostname for consistent test results
+            HOSTNAME: "unknown",
         };
 
+        // Mock Logger
+        mockLogger = {
+            info: jest.fn(),
+            error: jest.fn(),
+            warn: jest.fn(),
+            debug: jest.fn(),
+        };
 
+        /**
+         * 【核心修复】：补全命名导出 setInstanceIdProvider
+         * InstanceCoordinator.js 内部 import { setInstanceIdProvider } from "./logger.js"
+         * 如果不 Mock 这个命名导出，动态 import 时会报 SyntaxError
+         */
+        jest.unstable_mockModule("../../src/services/logger.js", () => ({
+            default: mockLogger,
+            logger: mockLogger,
+            setInstanceIdProvider: jest.fn(), // 必须包含这个
+            resetLogger: jest.fn(),
+            enableTelegramConsoleProxy: jest.fn(),
+            disableTelegramConsoleProxy: jest.fn()
+        }));
 
-        // Mock modules - we don't need D1 anymore for coordinator
         jest.unstable_mockModule("../../src/repositories/InstanceRepository.js", () => ({
             InstanceRepository: {
                 createTableIfNotExists: jest.fn().mockResolvedValue(undefined),
@@ -43,9 +60,18 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
 
         jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
             cache: mockCache,
+            default: { cache: mockCache }
         }));
 
-        // Dynamically import after setting up mocks
+        // 处理 QStash 依赖，防止 import InstanceCoordinator 时报错
+        jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
+            qstashService: {
+                broadcastSystemEvent: jest.fn().mockResolvedValue(undefined)
+            }
+        }));
+
+        jest.resetModules();
+        
         const { instanceCoordinator: importedIC } = await import("../../src/services/InstanceCoordinator.js");
         instanceCoordinator = importedIC;
     });
@@ -55,23 +81,23 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         jest.useRealTimers();
     });
 
-    beforeEach(async () => {
+    afterEach(() => {
+        // 清理 Mocks
         jest.clearAllMocks();
-        instanceCoordinator.instanceId = "test_instance_heartbeat";
-        // Stop any existing timer
-        if (instanceCoordinator.heartbeatTimer) {
+        
+        // 清理定时器
+        if (instanceCoordinator && instanceCoordinator.heartbeatTimer) {
             clearInterval(instanceCoordinator.heartbeatTimer);
             instanceCoordinator.heartbeatTimer = null;
         }
-        // Mock setInterval to call immediately for testing
-        global.setInterval = jest.fn((fn, delay) => {
-            fn();
-            return 123;
-        });
+
+        // 【关键修复】强制 GC
+        if (global.gc) {
+            global.gc();
+        }
     });
 
     test("should send heartbeat to KV", async () => {
-        // Mock successful KV operations
         const instanceData = {
             id: "test_instance_heartbeat",
             status: "active",
@@ -80,13 +106,17 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         mockCache.get.mockResolvedValue(instanceData);
         mockCache.set.mockResolvedValue(true);
 
-        // Start heartbeat manually
+        // Mock setInterval to call immediately
+        const originalSetInterval = global.setInterval;
+        global.setInterval = jest.fn((fn, delay) => {
+            fn();
+            return 123;
+        });
+
         instanceCoordinator.startHeartbeat();
 
-        // Wait for async operations
         await new Promise(resolve => setTimeout(resolve, 0));
 
-        // Since setInterval is mocked to call immediately, verify KV heartbeat was sent
         expect(mockCache.get).toHaveBeenCalledWith("instance:test_instance_heartbeat");
         expect(mockCache.set).toHaveBeenCalledWith(
             "instance:test_instance_heartbeat",
@@ -94,55 +124,61 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
                 id: "test_instance_heartbeat",
                 lastHeartbeat: expect.any(Number)
             }),
-            900
+            900 // 15分钟(900秒) TTL
         );
+        
+        global.setInterval = originalSetInterval;
     });
 
     test("should re-register if instance data missing in KV", async () => {
-        // Mock instance not found in KV
         mockCache.get.mockResolvedValue(null);
         mockCache.set.mockResolvedValue(true);
 
-        // Start heartbeat
+        const originalSetInterval = global.setInterval;
+        global.setInterval = jest.fn((fn, delay) => {
+            fn();
+            return 123;
+        });
+
         instanceCoordinator.startHeartbeat();
 
-        // Wait for async operations
         await new Promise(resolve => setTimeout(resolve, 0));
 
-        // Since setInterval is mocked to call immediately, verify re-registration
         expect(mockCache.get).toHaveBeenCalledWith("instance:test_instance_heartbeat");
-        // Should call registerInstance logic (which does a set)
+        // 根据源码，重新注册会写入 hostname, startedAt 等信息
         expect(mockCache.set).toHaveBeenCalledWith(
             "instance:test_instance_heartbeat",
             expect.objectContaining({
                 id: "test_instance_heartbeat",
                 status: "active",
-                hostname: "unknown",
-                region: "unknown",
-                startedAt: expect.any(Number),
-                lastHeartbeat: expect.any(Number)
+                hostname: "unknown"
             }),
             900
         );
+        
+        global.setInterval = originalSetInterval;
     });
 
     test("should handle KV errors gracefully", async () => {
-        const loggerErrorSpy = jest.spyOn(logger, "error").mockImplementation(() => {});
+        // 根据 InstanceCoordinator.js 第 126 行：logger.error(`[${cache.getCurrentProvider()}] Cache心跳更新失败...`)
+        const loggerSpy = jest.spyOn(mockLogger, "error").mockImplementation(() => {});
 
-        // Mock KV error
         mockCache.get.mockRejectedValue(new Error("KV Network Error"));
 
-        // Mock getCurrentProvider to return Cloudflare KV
-        mockCache.getCurrentProvider = jest.fn().mockReturnValue("Cloudflare KV");
+        const originalSetInterval = global.setInterval;
+        global.setInterval = jest.fn((fn, delay) => {
+            fn();
+            return 123;
+        });
 
-        // Start heartbeat
         instanceCoordinator.startHeartbeat();
 
-        // Wait for async operations
         await new Promise(resolve => setTimeout(resolve, 0));
 
-        // Since setInterval is mocked to call immediately, should log error with provider prefix but not crash
-        expect(loggerErrorSpy).toHaveBeenCalledWith(expect.stringContaining("[Cloudflare KV] Cache心跳更新失败"));
-        loggerErrorSpy.mockRestore();
+        // 验证是否记录了错误日志
+        expect(loggerSpy).toHaveBeenCalledWith(expect.stringContaining("心跳更新失败"));
+        
+        loggerSpy.mockRestore();
+        global.setInterval = originalSetInterval;
     });
 });

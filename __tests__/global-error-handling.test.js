@@ -7,21 +7,16 @@ const mockConsole = {
     log: jest.fn()
 };
 
-global.console = mockConsole;
+// 保存原始的 console
+const originalConsole = global.console;
 
-// Mock process
-const mockProcess = {
-    on: jest.fn(),
-    exit: jest.fn()
-};
-
-// 模拟全局错误处理逻辑（从 index.js 中提取）
-function setupGlobalErrorHandling() {
-    process.on("unhandledRejection", (reason, promise) => {
+// 模拟全局错误处理逻辑（接受 processObj 参数以便测试）
+function setupGlobalErrorHandling(processObj) {
+    processObj.on("unhandledRejection", (reason, promise) => {
         console.error("🚨 未捕获的 Promise 拒绝:", reason);
     });
 
-    process.on("uncaughtException", (err) => {
+    processObj.on("uncaughtException", (err) => {
         console.error("🚨 未捕获的异常:", err);
         // 对于 TIMEOUT 错误，我们通常希望程序继续运行并由 Watchdog 处理
         if (err?.message?.includes("TIMEOUT")) {
@@ -34,31 +29,40 @@ function setupGlobalErrorHandling() {
 }
 
 describe("Global Error Handling", () => {
+    let mockProcess;
+
     beforeEach(() => {
+        // 【修复点】不再尝试复制 originalProcess 的属性。
+        // 原始的 process 包含 stdin/stdout 等系统资源，复制它们会导致 TTYWRAP 错误。
+        // 这里我们只需要 mock 函数中实际用到的 'on' 和 'exit' 方法。
+        mockProcess = {
+            on: jest.fn(),
+            exit: jest.fn(),
+        };
+
+        // 替换 console
+        global.console = mockConsole;
+
         // 重置 mocks
-        mockProcess.on.mockClear();
         mockConsole.error.mockClear();
         mockConsole.warn.mockClear();
-        mockProcess.exit.mockClear();
-
-        // 替换全局 process
-        global.process = { ...mockProcess };
+        mockConsole.log.mockClear();
     });
 
     afterEach(() => {
-        // 恢复原始 process
-        delete global.process;
+        // 恢复原始的 console
+        global.console = originalConsole;
     });
 
     test("应当能够设置全局错误处理程序", () => {
-        setupGlobalErrorHandling();
+        setupGlobalErrorHandling(mockProcess);
 
         expect(mockProcess.on).toHaveBeenCalledWith("unhandledRejection", expect.any(Function));
         expect(mockProcess.on).toHaveBeenCalledWith("uncaughtException", expect.any(Function));
     });
 
     test("应当在 unhandledRejection 时记录错误", () => {
-        setupGlobalErrorHandling();
+        setupGlobalErrorHandling(mockProcess);
 
         const rejectionHandler = mockProcess.on.mock.calls.find(
             ([event]) => event === "unhandledRejection"
@@ -73,7 +77,7 @@ describe("Global Error Handling", () => {
     });
 
     test("应当在 uncaughtException 时记录错误", () => {
-        setupGlobalErrorHandling();
+        setupGlobalErrorHandling(mockProcess);
 
         const exceptionHandler = mockProcess.on.mock.calls.find(
             ([event]) => event === "uncaughtException"
@@ -86,7 +90,7 @@ describe("Global Error Handling", () => {
     });
 
     test("应当在 TIMEOUT uncaughtException 时仅记录警告而不退出进程", () => {
-        setupGlobalErrorHandling();
+        setupGlobalErrorHandling(mockProcess);
 
         const exceptionHandler = mockProcess.on.mock.calls.find(
             ([event]) => event === "uncaughtException"
@@ -101,7 +105,7 @@ describe("Global Error Handling", () => {
     });
 
     test("应当在非 TIMEOUT uncaughtException 时不自动退出进程（注释掉的逻辑）", () => {
-        setupGlobalErrorHandling();
+        setupGlobalErrorHandling(mockProcess);
 
         const exceptionHandler = mockProcess.on.mock.calls.find(
             ([event]) => event === "uncaughtException"
@@ -117,7 +121,7 @@ describe("Global Error Handling", () => {
     });
 
     test("应当正确识别 TIMEOUT 错误消息", () => {
-        setupGlobalErrorHandling();
+        setupGlobalErrorHandling(mockProcess);
 
         const exceptionHandler = mockProcess.on.mock.calls.find(
             ([event]) => event === "uncaughtException"

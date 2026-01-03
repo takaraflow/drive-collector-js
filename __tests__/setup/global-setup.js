@@ -1,7 +1,15 @@
-import { afterEach, afterAll, jest } from '@jest/globals';
+import { afterEach, afterAll, jest, beforeEach } from '@jest/globals';
 import { cleanupSingletonTimers, quickMockCleanup } from './test-helpers.js';
-import { cleanupDatabaseState, closeSharedDatabase } from './test-db.js';
+import { cleanupDatabaseState, closeSharedDatabase, resetDbTracking } from './test-db.js';
 import { disableTelegramConsoleProxy, resetLogger } from '../../src/services/logger.js';
+
+/**
+ * 每个测试开始前重置数据库跟踪
+ * 确保每个测试都能准确跟踪其使用的表
+ */
+beforeEach(() => {
+  resetDbTracking();
+});
 
 /**
  * 全局测试清理
@@ -14,7 +22,7 @@ afterEach(async () => {
   // 清理单例服务定时器
   await cleanupSingletonTimers();
   
-  // 清理数据库状态（仅在必要时执行或使用更高效的清理）
+  // 清理数据库状态（优化：只清理实际被使用的表）
   cleanupDatabaseState();
   
   // 重置 logger 状态（包括 console proxy）
@@ -32,6 +40,11 @@ afterEach(async () => {
     disableTelegramConsoleProxy();
   } catch (e) {
     // ignore
+  }
+
+  // 【关键修复】手动触发垃圾回收以防止 OOM (配合 --expose-gc 参数)
+  if (global.gc) {
+    global.gc();
   }
 });
 
@@ -61,5 +74,10 @@ afterAll(async () => {
     resetLogger();
   } catch (e) {
     // ignore
+  }
+
+  // 最终清理内存
+  if (global.gc) {
+    global.gc();
   }
 });

@@ -1,5 +1,11 @@
 import { jest } from "@jest/globals";
 
+// 独立的配置变量，用于动态 Mock
+let qstashConfig = {
+    token: 'test-token',
+    webhookUrl: 'https://example.com'
+};
+
 // Mock dependencies
 const mockPublishJSON = jest.fn();
 const mockClient = {
@@ -11,10 +17,13 @@ const mockReceiver = {
     verify: mockVerify
 };
 
+// 使用 Getter/Setter 包装 Mock Config，确保引用正确
 const mockConfig = {
-    qstash: {
-        token: 'test-token',
-        webhookUrl: 'https://example.com'
+    get qstash() {
+        return qstashConfig;
+    },
+    set qstash(val) {
+        qstashConfig = val;
     }
 };
 
@@ -24,8 +33,10 @@ jest.unstable_mockModule("@upstash/qstash", () => ({
     Receiver: jest.fn(() => mockReceiver)
 }));
 
+// 兼容命名导入和默认导入
 jest.unstable_mockModule("../../src/config/index.js", () => ({
-    config: mockConfig
+    config: mockConfig,
+    default: { config: mockConfig }
 }));
 
 // Mock logger
@@ -50,17 +61,28 @@ describe("QStashService - Retry Logic", () => {
     let setTimeoutSpy;
 
     beforeAll(async () => {
+        // ================== 关键修复 ==================
+        // 清空所有模块缓存，防止其他测试文件（如 SettingsRepository）的 Mock 污染当前测试
+        jest.resetModules();
+        // ==============================================
+
         const module = await import("../../src/services/QStashService.js");
         QStashService = module.QStashService;
     });
 
     beforeEach(() => {
         jest.clearAllMocks();
+        
+        // 每次测试前确保 Token 存在
+        qstashConfig.token = 'test-token';
+        qstashConfig.webhookUrl = 'https://example.com';
+
         // Mock setTimeout to execute immediately to speed up tests
         setTimeoutSpy = jest.spyOn(global, 'setTimeout').mockImplementation((fn) => {
             fn();
             return {};
         });
+        
         // Create a fresh instance for each test
         qstashService = new QStashService();
     });
@@ -236,19 +258,19 @@ describe("QStashService - Retry Logic", () => {
 
         beforeAll(() => {
             // Save original token
-            originalToken = mockConfig.qstash.token;
-            // Set token to empty to enable mock mode
-            mockConfig.qstash.token = '';
-        });
-
-        afterAll(() => {
-            // Restore original token
-            mockConfig.qstash.token = originalToken;
+            originalToken = qstashConfig.token;
         });
 
         beforeEach(() => {
+            // Set token to empty to enable mock mode
+            qstashConfig.token = '';
             // Create a new instance with mock mode
             mockQStashService = new QStashService();
+        });
+
+        afterEach(() => {
+            // Restore token after mock mode tests
+            qstashConfig.token = originalToken;
         });
 
         test("应当在模拟模式下跳过重试", async () => {

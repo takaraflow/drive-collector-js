@@ -1,5 +1,9 @@
 import { jest } from '@jest/globals';
 import { Api } from 'telegram';
+import { stopWatchdog as stopTelegramWatchdog } from "../../src/services/telegram.js";
+import { cache as cacheService } from "../../src/services/CacheService.js";
+import { instanceCoordinator } from "../../src/services/InstanceCoordinator.js";
+import { mockRedisClient } from "./external-mocks.js";
 
 /**
  * 创建模拟的Telegram消息事件
@@ -113,19 +117,17 @@ export function resetAllMocks(mocks) {
 /**
  * 清理已知的单例服务定时器
  * 用于防止测试间的定时器泄露
- * 优化：使用更高效的清理策略，减少不必要的导入
+ * 优化：使用静态导入，避免动态导入的开销
  */
 export async function cleanupSingletonTimers() {
-  // 优化：只在需要时导入，避免每次调用都尝试导入
   const cleanupPromises = [];
 
-  // 清理 Telegram 服务定时器
+  // 清理 Telegram 服务定时器 - 使用静态导入的函数
   cleanupPromises.push(
     (async () => {
       try {
-        const module = await import("../../src/services/telegram.js");
-        if (module.stopWatchdog) {
-          module.stopWatchdog();
+        if (stopTelegramWatchdog) {
+          stopTelegramWatchdog();
         }
       } catch (error) {
         // console.warn('Failed to cleanup Telegram timers:', error.message);
@@ -133,17 +135,16 @@ export async function cleanupSingletonTimers() {
     })()
   );
 
-  // 清理 KV 服务定时器
+  // 清理 KV 服务定时器 - 使用静态导入的缓存实例
   cleanupPromises.push(
     (async () => {
       try {
-        const module = await import("../../src/services/CacheService.js");
-        if (module.cache) {
-          if (module.cache.destroy) {
-            await module.cache.destroy();
+        if (cacheService) {
+          if (cacheService.destroy) {
+            await cacheService.destroy();
           }
-          if (module.cache.stopRecoveryCheck) module.cache.stopRecoveryCheck();
-          if (module.cache.stopHeartbeat) module.cache.stopHeartbeat(); // 使用公共方法
+          if (cacheService.stopRecoveryCheck) cacheService.stopRecoveryCheck();
+          if (cacheService.stopHeartbeat) cacheService.stopHeartbeat();
         }
       } catch (error) {
         // console.warn('Failed to cleanup CacheService timers:', error.message);
@@ -151,13 +152,12 @@ export async function cleanupSingletonTimers() {
     })()
   );
 
-  // 清理 InstanceCoordinator 定时器
+  // 清理 InstanceCoordinator 定时器 - 使用静态导入的实例
   cleanupPromises.push(
     (async () => {
       try {
-        const module = await import("../../src/services/InstanceCoordinator.js");
-        if (module.instanceCoordinator && module.instanceCoordinator.stopHeartbeat) {
-          module.instanceCoordinator.stopHeartbeat();
+        if (instanceCoordinator && instanceCoordinator.stopHeartbeat) {
+          instanceCoordinator.stopHeartbeat();
         }
       } catch (error) {
         // console.warn('Failed to cleanup InstanceCoordinator timers:', error.message);
@@ -165,13 +165,12 @@ export async function cleanupSingletonTimers() {
     })()
   );
 
-  // 清理 Redis mock listeners
+  // 清理 Redis mock listeners - 使用静态导入的 mock
   cleanupPromises.push(
     (async () => {
       try {
-        const mocks = await import("./external-mocks.js");
-        if (mocks.mockRedisClient) {
-          mocks.mockRedisClient.removeAllListeners();
+        if (mockRedisClient) {
+          mockRedisClient.removeAllListeners();
         }
       } catch (error) {
         // console.warn('Failed to cleanup Redis listeners:', error.message);

@@ -1,23 +1,57 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import { jest, describe, test, expect, beforeEach, afterEach, beforeAll } from "@jest/globals";
+
+// 【关键修复】Mock ioredis 库
+// CacheService 在检测到 Redis 环境变量时会尝试 new Redis()，如果不 Mock 会导致初始化失败或超时
+jest.mock('ioredis', () => {
+    return class MockRedis {
+        constructor() {
+            this.status = 'ready'; // 默认 ready 状态
+            this.connect = jest.fn().mockResolvedValue(undefined);
+            this.disconnect = jest.fn().mockResolvedValue(undefined);
+            this.quit = jest.fn().mockResolvedValue(undefined);
+            // 模拟常用方法
+            this.get = jest.fn();
+            this.set = jest.fn();
+            this.del = jest.fn();
+        }
+    };
+});
 
 // Mock global fetch
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
 const originalEnv = process.env;
+let CacheServiceClass;
 
 describe('CacheService Provider Priority', () => {
     let cacheInstance;
 
+    // 【修复】在 beforeAll 中预加载模块，但在测试中通过 resetModules 重新加载
+    beforeAll(async () => {
+        // 预加载模块类引用
+        const module = await import("../../src/services/CacheService.js");
+        CacheServiceClass = module.CacheService;
+    });
+
+    // 重新加载模块的辅助函数
     async function reloadCacheService(env) {
         process.env = { ...originalEnv, ...env };
-        // 使用查询字符串参数绕过 ESM 模块缓存
-        const { CacheService } = await import(`../../src/services/CacheService.js?t=${Date.now()}`);
-        return new CacheService();
+        // 【修复】使用 resetModules 清除缓存的模块实例
+        jest.resetModules();
+        
+        // 重新导入
+        const module = await import("../../src/services/CacheService.js");
+        const Service = module.CacheService;
+        
+        return new Service();
     }
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockFetch.mockClear();
+        mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ result: "OK" }) });
+        
         // 清除所有相关的环境变量
         const cleanEnv = { ...originalEnv };
         delete cleanEnv.CACHE_PROVIDER;

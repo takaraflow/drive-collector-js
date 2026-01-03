@@ -1,4 +1,3 @@
-// __tests__/setup/external-mocks.js
 import { jest } from '@jest/globals';
 
 // 全局 mock 对象 - 在测试套件间共享，减少重复创建
@@ -10,7 +9,8 @@ const globalMocks = {
   s3Send: null,
   upload: null,
   cache: null,
-  localCache: null
+  localCache: null,
+  redisClient: null // 声明 redisClient 的位置
 };
 
 // 创建 mock 函数（只创建一次）
@@ -44,8 +44,13 @@ globalMocks.cache = {
     delete: jest.fn(),
     listKeys: jest.fn(),
     bulkSet: jest.fn(),
-    isFailoverMode: false,
-    getCurrentProvider: jest.fn().mockReturnValue('Cloudflare KV')
+    stopRecoveryCheck: jest.fn(), 
+    destroy: jest.fn().mockResolvedValue(undefined),
+    getCurrentProvider: jest.fn().mockReturnValue('Cloudflare KV'),
+    get hasRedis() { return false; },
+    get hasCloudflare() { return true; },
+    get hasUpstash() { return false; },
+    get providerName() { return 'cloudflare'; }
 };
 
 globalMocks.localCache = {
@@ -121,6 +126,17 @@ RedisMock.mock = { calls: [] };
 jest.unstable_mockModule('ioredis', () => ({
   default: RedisMock
 }));
+
+// ❌ 【Commented out】Mock CacheService - Removed to allow real class usage in tests
+// jest.unstable_mockModule('../../src/services/CacheService.js', () => {
+//   const MockCacheService = jest.fn().mockImplementation(() => globalMocks.cache);
+// 
+//   return {
+//     cache: globalMocks.cache,
+//     CacheService: MockCacheService,
+//     default: globalMocks.cache
+//   };
+// });
 
 // 导出单个 mock 函数（向后兼容）
 export const mockAxiomIngest = globalMocks.axiomIngest;

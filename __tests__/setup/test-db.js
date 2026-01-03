@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 // 共享数据库实例 - 在测试套件间复用
 let sharedDbInstance = null;
 let dbUsageCount = 0;
+let dbTouchedTables = new Set(); // 跟踪实际被使用的表
 
 /**
  * 获取共享的内存数据库实例
@@ -78,6 +79,18 @@ function createTables(db) {
 }
 
 /**
+ * 跟踪表使用情况 - 在 mock D1 服务中调用
+ * @param {string} sql - SQL语句
+ */
+function trackTableUsage(sql) {
+  const tableMatch = sql.match(/FROM\s+(\w+)/i) || sql.match(/INSERT\s+INTO\s+(\w+)/i) || 
+                     sql.match(/UPDATE\s+(\w+)/i) || sql.match(/DELETE\s+FROM\s+(\w+)/i);
+  if (tableMatch) {
+    dbTouchedTables.add(tableMatch[1].toLowerCase());
+  }
+}
+
+/**
  * 为每个测试创建事务包装器
  * 使用事务实现测试隔离，避免数据污染
  * @param {Function} testFn - 测试函数
@@ -100,19 +113,34 @@ export function withTransaction(testFn) {
 }
 
 /**
- * 清理数据库状态（但不关闭连接）
- * 用于测试后的数据清理
+ * 智能清理数据库状态（但不关闭连接）
+ * 优化：只清理实际被使用的表，减少不必要的 DELETE 操作
+ * 优化：使用 TRUNCATE 替代 DELETE（如果表被使用过）
  */
 export function cleanupDatabaseState() {
-  if (sharedDbInstance) {
-    // 清理所有表数据
-    sharedDbInstance.exec(`
-      DELETE FROM tasks;
-      DELETE FROM drives;
-      DELETE FROM settings;
-      DELETE FROM sessions;
-    `);
+  if (sharedDbInstance && dbTouchedTables.size > 0) {
+    // 只清理实际被使用过的表
+    const tablesToClean = Array.from(dbTouchedTables);
+    
+    // 构建批量清理语句
+    const cleanupSql = tablesToClean.map(table => {
+      // 使用 TRUNCATE 更高效（SQLite 中等同于 DELETE FROM + RESET AUTOINCREMENT）
+      return `DELETE FROM ${table};`;
+    }).join('\n');
+    
+    sharedDbInstance.exec(cleanupSql);
+    
+    // 清空使用记录，为下一个测试准备
+    dbTouchedTables.clear();
   }
+}
+
+/**
+ * 重置数据库使用跟踪
+ * 在测试开始前调用
+ */
+export function resetDbTracking() {
+  dbTouchedTables.clear();
 }
 
 /**
@@ -124,6 +152,7 @@ export function createMockD1Service(db) {
   return {
     fetchAll: async (sql, params = []) => {
       try {
+        trackTableUsage(sql); // 跟踪表使用
         const stmt = db.prepare(sql);
         return stmt.all(params);
       } catch (error) {
@@ -134,6 +163,7 @@ export function createMockD1Service(db) {
 
     fetchOne: async (sql, params = []) => {
       try {
+        trackTableUsage(sql); // 跟踪表使用
         const stmt = db.prepare(sql);
         return stmt.get(params) || null;
       } catch (error) {
@@ -144,6 +174,7 @@ export function createMockD1Service(db) {
 
     run: async (sql, params = []) => {
       try {
+        trackTableUsage(sql); // 跟踪表使用
         const stmt = db.prepare(sql);
         return stmt.run(params);
       } catch (error) {
@@ -156,6 +187,7 @@ export function createMockD1Service(db) {
       const results = [];
       for (const stmt of statements) {
         try {
+          trackTableUsage(stmt.sql); // 跟踪表使用
           const result = await this.run(stmt.sql, stmt.params);
           results.push({ success: true, result });
         } catch (error) {
@@ -176,6 +208,7 @@ export function closeSharedDatabase() {
     sharedDbInstance.close();
     sharedDbInstance = null;
     dbUsageCount = 0;  // Reset
+    dbTouchedTables.clear();
     // 移除 console.log，静默关闭
   }
 }
@@ -186,6 +219,7 @@ export function closeSharedDatabase() {
 export function getDbStats() {
   return {
     instanceExists: !!sharedDbInstance,
-    usageCount: dbUsageCount
+    usageCount: dbUsageCount,
+    touchedTables: Array.from(dbTouchedTables)
   };
 }

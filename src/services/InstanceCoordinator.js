@@ -1,5 +1,4 @@
 import { cache } from "./CacheService.js";
-import { d1 } from "./d1.js";
 import { qstashService } from "./QStashService.js";
 import { InstanceRepository } from "../repositories/InstanceRepository.js";
 import logger, { setInstanceIdProvider } from "./logger.js";

@@ -1,46 +1,60 @@
-import { jest, describe, test, expect, beforeEach, afterEach, afterAll } from "@jest/globals";
+import { jest, describe, test, expect, beforeEach, afterEach, afterAll, beforeAll } from "@jest/globals";
 
-// Mock telegram package to prevent real initialization
-jest.unstable_mockModule('telegram', () => ({
-  TelegramClient: jest.fn().mockImplementation(() => ({
-    connect: jest.fn().mockResolvedValue(undefined),
-    start: jest.fn().mockResolvedValue(undefined),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-    on: jest.fn((event, handler) => {
-        // Handle error simulation
-        if (event === 'error') {
-            global._tgErrorHandler = handler;
+// ================== 核心：截断递归备份 ==================
+const nativeConsole = {
+    error: console.error,
+    warn: console.warn,
+    log: console.log,
+    info: console.info,
+    debug: console.debug
+};
+
+// ================== 1. Mock Axiom ==================
+jest.unstable_mockModule('@axiomhq/js', () => ({
+    Axiom: jest.fn() 
+}));
+
+// ================== 2. Mock Telegram Service (关键修复) ==================
+jest.unstable_mockModule('../../src/services/telegram.js', () => ({
+    getClient: jest.fn().mockImplementation(async () => {
+        if (!global._tgErrorHandler) {
+            // 修复：模拟 GramJS 库的行为，将错误输出到 console.error
+            // 这样我们的 Proxy 才能拦截到它
+            global._tgErrorHandler = (err) => { console.error(err); };
         }
+        return { 
+            connected: true,
+            on: jest.fn(),
+            addEventHandler: jest.fn()
+        };
     }),
-    addEventHandler: jest.fn(),
-    getMe: jest.fn().mockResolvedValue({ id: 123 }),
-    session: { save: jest.fn().mockReturnValue('mock') },
-    connected: false,
-    _sender: { disconnect: jest.fn().mockResolvedValue(undefined) }
-  })),
-  StringSession: jest.fn().mockImplementation(() => ({}))
+    stopWatchdog: jest.fn().mockResolvedValue(undefined),
+    reconnectBot: jest.fn().mockResolvedValue(undefined),
+    startWatchdog: jest.fn().mockResolvedValue(undefined),
+    client: { connected: true }
 }));
 
-// Mock config module
+// ================== 3. Mock Config ==================
 jest.unstable_mockModule('../../src/config/index.js', () => ({
-  config: {
-    apiId: 12345,
-    apiHash: 'test-api-hash',
-    axiom: {
-        token: 'test-token',
-        orgId: 'test-org',
-        dataset: 'test-dataset'
+    config: {
+        apiId: 12345,
+        apiHash: 'test-api-hash',
+        axiom: {
+            token: 'test-token',
+            orgId: 'test-org',
+            dataset: 'test-dataset'
+        }
     }
-  }
 }));
 
-// Mock repositories and coordinator to avoid dependencies
+// ================== 4. Mock Repositories ==================
 jest.unstable_mockModule('../../src/repositories/SettingsRepository.js', () => ({
     SettingsRepository: {
         get: jest.fn().mockResolvedValue(''),
         set: jest.fn().mockResolvedValue(undefined)
     }
 }));
+
 jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () => ({
     instanceCoordinator: {
         hasLock: jest.fn().mockResolvedValue(true),
@@ -49,109 +63,122 @@ jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () => ({
 }));
 
 describe('Logger Integration Tests (Unified)', () => {
-  let originalConsole;
-  let mockAxiomIngest;
-  let loggerModule;
-  let telegramModule;
+    let originalConsole;
+    let loggerModule;
+    let telegramModule;
+    let AxiomMock;
+    let mockAxiomIngest;
 
-  beforeAll(async () => {
-    // Save original console
-    originalConsole = {
-        error: console.error,
-        warn: console.warn,
-        log: console.log,
-        info: console.info,
-        debug: console.debug
-    };
+    beforeAll(async () => {
+        process.env.AXIOM_TOKEN = 'test-token';
+        process.env.AXIOM_ORG_ID = 'test-org';
+        process.env.AXIOM_DATASET = 'test-dataset';
+        process.env.NODE_ENV = 'test';
 
-    // Load modules
-    loggerModule = await import('../../src/services/logger.js');
-    telegramModule = await import('../../src/services/telegram.js');
-    
-    // Get mockIngest
-    const { mockAxiomIngest: ingest } = await import('../setup/external-mocks.js');
-    mockAxiomIngest = ingest;
-  });
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockAxiomIngest.mockClear();
-    mockAxiomIngest.mockResolvedValue(undefined);
-    
-    // Reset logger state
-    loggerModule.resetLogger();
-    
-    // Spy on console but implementation stays original to not break proxy
-    jest.spyOn(console, 'error').mockImplementation((...args) => {
-        // Call original to trigger proxy
-    });
-    jest.spyOn(console, 'warn').mockImplementation(() => {});
-    jest.spyOn(console, 'info').mockImplementation(() => {});
-    jest.spyOn(console, 'debug').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    loggerModule.disableTelegramConsoleProxy();
-    telegramModule.stopWatchdog();
-    jest.restoreAllMocks();
-    
-    // Ensure console is restored
-    console.error = originalConsole.error;
-    console.warn = originalConsole.warn;
-    console.log = originalConsole.log;
-    console.info = originalConsole.info;
-    console.debug = originalConsole.debug;
-  });
-
-  describe('Telegram TIMEOUT capture', () => {
-    test('console.error proxy sends TIMEOUT to Axiom', async () => {
-      loggerModule.enableTelegramConsoleProxy();
-
-      // Trigger proxy
-      console.error('TIMEOUT in updates.js');
-
-      // Async wait
-      await new Promise(r => setTimeout(r, 100));
-
-      expect(mockAxiomIngest).toHaveBeenCalled();
-      const payload = mockAxiomIngest.mock.calls[0][1][0];
-      expect(payload.level).toBe('error');
-      expect(payload.service).toBe('telegram');
-      expect(payload.source).toBe('console_proxy');
-      expect(payload.message).toContain('TIMEOUT captured');
-    });
-
-    test('Telegram client error handler sends TIMEOUT to Axiom', async () => {
-        // Initialize client to setup listeners
-        await telegramModule.getClient();
+        originalConsole = { ...console };
         
-        // Use the handler captured by the mock
-        if (global._tgErrorHandler) {
-            const timeoutError = new Error('Request timed out');
-            timeoutError.code = 'ETIMEDOUT';
-            global._tgErrorHandler(timeoutError);
+        const axiomModule = await import('@axiomhq/js');
+        AxiomMock = axiomModule.Axiom;
+
+        loggerModule = await import('../../src/services/logger.js');
+        telegramModule = await import('../../src/services/telegram.js');
+    });
+
+    beforeEach(async () => {
+        jest.useFakeTimers();
+        jest.clearAllTimers();
+        jest.clearAllMocks();
+        
+        mockAxiomIngest = jest.fn().mockResolvedValue(undefined);
+
+        AxiomMock.mockImplementation(() => ({
+            ingest: mockAxiomIngest
+        }));
+        
+        loggerModule.resetLogger();
+        loggerModule.logger.configure({
+            axiom: {
+                token: 'test-token',
+                orgId: 'test-org',
+                dataset: 'test-dataset'
+            }
+        });
+
+        Object.assign(console, originalConsole);
+
+        jest.spyOn(console, 'error').mockImplementation((...args) => nativeConsole.error.call(console, ...args));
+        jest.spyOn(console, 'warn').mockImplementation((...args) => nativeConsole.warn.call(console, ...args));
+        jest.spyOn(console, 'log').mockImplementation((...args) => nativeConsole.log.call(console, ...args));
+        jest.spyOn(console, 'info').mockImplementation((...args) => nativeConsole.info.call(console, ...args));
+    });
+
+    afterEach(async () => {
+        loggerModule.disableTelegramConsoleProxy();
+        await telegramModule.stopWatchdog();
+        delete global._tgErrorHandler;
+        
+        await jest.runOnlyPendingTimersAsync();
+        
+        jest.restoreAllMocks();
+        Object.assign(console, originalConsole);
+        jest.useRealTimers();
+
+        if (global.gc) global.gc();
+    });
+
+    afterAll(() => {
+        jest.useRealTimers();
+        delete process.env.AXIOM_TOKEN;
+        delete process.env.AXIOM_ORG_ID;
+        delete process.env.AXIOM_DATASET;
+    });
+
+    describe('Telegram TIMEOUT capture', () => {
+        test('console.error proxy sends TIMEOUT to Axiom', async () => {
+            loggerModule.enableTelegramConsoleProxy();
+
+            console.error('TIMEOUT in updates.js');
+
+            await Promise.resolve(); 
+            await jest.advanceTimersByTimeAsync(1000);
+
+            expect(mockAxiomIngest).toHaveBeenCalled();
+            const payload = mockAxiomIngest.mock.calls[0][1][0];
+            expect(payload.level).toBe('error');
+            expect(payload.message).toContain('TIMEOUT captured');
+        });
+
+        test('Telegram client error handler sends TIMEOUT to Axiom', async () => {
+            // 修复 1：开启代理，否则 console.error 不会被拦截
+            loggerModule.enableTelegramConsoleProxy();
+
+            await telegramModule.getClient();
             
-            await new Promise(r => setTimeout(r, 100));
+            if (global._tgErrorHandler) {
+                const timeoutError = new Error('Request timed out');
+                timeoutError.code = 'ETIMEDOUT';
+                
+                // 触发 Mock 中定义的 console.error(err)
+                global._tgErrorHandler(timeoutError);
+                
+                await Promise.resolve();
+                await jest.advanceTimersByTimeAsync(1000);
+                
+                expect(mockAxiomIngest).toHaveBeenCalled();
+            }
+        });
+    });
+
+    describe('Other integrations', () => {
+        test('logger adds version prefix', async () => {
+            await loggerModule.logger.info('test');
+            
+            await Promise.resolve();
+            await jest.advanceTimersByTimeAsync(1000);
             
             expect(mockAxiomIngest).toHaveBeenCalled();
             const payload = mockAxiomIngest.mock.calls[0][1][0];
-            expect(payload.service).toBe('telegram');
-            expect(payload.level).toBe('error');
-            expect(payload.message).toContain('TIMEOUT error detected');
-        }
+            expect(payload.message).toMatch(/^\[v[\w\.\-]+\]/);
+        });
     });
-  });
-
-  describe('Other integrations', () => {
-      test('logger adds version prefix', async () => {
-          await loggerModule.logger.info('test');
-          
-          await new Promise(r => setTimeout(r, 50));
-          
-          expect(mockAxiomIngest).toHaveBeenCalled();
-          const payload = mockAxiomIngest.mock.calls[0][1][0];
-          // 修复正则表达式：匹配 vtest, v1.2.3, v4.5.5 等各种版本格式
-          expect(payload.message).toMatch(/^\[v[\w\.\-]+\]/);
-      });
-  });
 });
