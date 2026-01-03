@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.9.0](https://github.com/YoungSx/lb-worker-js/compare/v0.8.1...v0.9.0) (2026-01-03)
+
+
+### 🔧 Maintenance
+
+* **ci:** integrate Infisical for centralized secret management ([e43a050](https://github.com/YoungSx/lb-worker-js/commit/e43a050cd8211ac9287f15b43a1dc0021505cc7c))
+* **ci:** integrate Infisical for centralized secret management ([5b1bc3a](https://github.com/YoungSx/lb-worker-js/commit/5b1bc3ab67f0e8249e45ae8538baa73136849b10))
+* updates workflow to trigger on all branches ([10e7ad9](https://github.com/YoungSx/lb-worker-js/commit/10e7ad955a727ce080405f77210c96b6a9846da2))
+
+
+### 🐛 Bug Fixes
+
+* updates Infisical CLI installation URL ([12510d1](https://github.com/YoungSx/lb-worker-js/commit/12510d1265110be8bd1721b964a529dc9933c833))
+* updates variable escaping to use double quotes ([1d0c342](https://github.com/YoungSx/lb-worker-js/commit/1d0c342d181c52324d4982261cc5a61db23d25f5))
+* updates variable escaping to use single quotes ([f3b397f](https://github.com/YoungSx/lb-worker-js/commit/f3b397f3a682b2b65bcdce99f1c195296cab9935))
+
 ### [0.8.1](https://github.com/YoungSx/lb-worker-js/compare/v0.8.0...v0.8.1) (2026-01-02)
 
 
