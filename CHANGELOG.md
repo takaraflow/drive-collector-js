@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.7.0](https://github.com/YoungSx/drive-collector-js/compare/v4.6.1...v4.7.0) (2026-01-03)
+
+
+### 🐛 问题修复
+
+* adds connection status callback functionality ([5b2c95c](https://github.com/YoungSx/drive-collector-js/commit/5b2c95c6abe1c33f128e1493cbb506c7dcf11f72))
+
+
+### ✨ 新特性
+
+* enhance environment variable management and Docker configuration ([d284986](https://github.com/YoungSx/drive-collector-js/commit/d28498636a8a336bdfb6ca77f9201bed86428ec0))
+
 ### [4.6.1](https://github.com/YoungSx/drive-collector-js/compare/v4.6.0...v4.6.1) (2026-01-03)
 
 
