@@ -242,7 +242,7 @@ describe('Redis Recovery and Heartbeat Enhancements', () => {
             expect(true).toBe(true);
         });
 
-        test.skip('should prevent concurrent restarts', async () => {
+        test('should prevent concurrent restarts', async () => {
             jest.useFakeTimers({ legacyFakeTimers: true });
 
             const cleanCache = new CacheServiceClass();
