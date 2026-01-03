@@ -997,10 +997,15 @@ export class CacheService {
     /**
      * 执行操作并支持故障转移
      * @param {string} operation
-     * @param {number} depth - 递归深度，防止无限循环 (Bug #2)
      * @param {any[]} args
      */
-    async _executeWithFailover(operation, depth = 0, ...args) {
+    async _executeWithFailover(operation, ...args) {
+        // 从 args 中提取 depth 配置对象
+        const lastArg = args[args.length - 1];
+        const depth = (typeof lastArg === 'object' && lastArg !== null && lastArg._depth !== undefined)
+            ? args.pop()._depth
+            : 0;
+
         if (depth > 5) {
             throw new Error(`[CacheService] Max failover depth reached for ${operation}`);
         }
@@ -1023,14 +1028,14 @@ export class CacheService {
             // 只有当 redisClient 为 null 时（未初始化）才降级
             if (!this.redisClient) {
                 logger.warn(`[${this.getCurrentProvider()}] Redis client is null, fallback immediately`);
-                return await this._fallbackToNextProvider(operation, depth + 1, ...args);
+                return await this._fallbackToNextProvider(operation, ...args, { _depth: depth + 1 });
             }
             
             // 如果处于 reconnecting 状态，我们继续尝试执行，让 ioredis 的队列机制处理
             // 但如果 status 是 end，说明已经彻底放弃重连，需要 fallback
             if (this.redisClient.status === 'end') {
                 logger.warn(`[${this.getCurrentProvider()}] Redis client status is end, fallback immediately`);
-                return await this._fallbackToNextProvider(operation, depth + 1, ...args);
+                return await this._fallbackToNextProvider(operation, ...args, { _depth: depth + 1 });
             }
         }
 
@@ -1040,7 +1045,7 @@ export class CacheService {
             const isHealthy = await this._validateRedisConnection();
             if (!isHealthy) {
                 logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis 健康检查失败，主动触发 failover`);
-                return await this._fallbackToNextProvider(operation, depth + 1, ...args);
+                return await this._fallbackToNextProvider(operation, ...args, { _depth: depth + 1 });
             }
         }
 
@@ -1101,32 +1106,45 @@ export class CacheService {
      * 优雅降级到下一个提供商
      */
     async _fallbackToNextProvider(operation, ...args) {
-        // 使用循环代替递归，避免无限递归风险
-        const maxFailoverAttempts = 3; // 最多尝试3次故障转移
+        // 提取 depth 配置
+        const lastArg = args[args.length - 1];
+        const depth = (typeof lastArg === 'object' && lastArg !== null && lastArg._depth !== undefined)
+            ? args.pop()._depth
+            : 0;
+
+        if (depth > 5) {
+            throw new Error(`[CacheService] Max failover depth reached in _fallbackToNextProvider`);
+        }
+
+        const maxFailoverAttempts = 3;
         let attempts = 0;
         
         while (attempts < maxFailoverAttempts) {
             const originalProvider = this.currentProvider;
-            
-            // 计算下一个可用提供商
             const targets = this._calculateFailoverTargets();
+            
             if (targets.length === 0) {
-                // 没有可用后备，使用本地缓存
                 logger.warn(`[${this.getCurrentProvider()}] ⚠️ 无可用后备提供商，使用本地缓存`);
                 return await this._local_cache_operation(operation, ...args);
             }
             
-            // 执行故障转移
             if (this._failover()) {
-                logger.info(`[${this.getCurrentProvider()}] 🔄 已从 ${this._getProviderDisplayName(originalProvider)} 降级到 ${this.getCurrentProvider()}`);
                 attempts++;
                 
-                // 尝试使用新提供商执行操作
+                // 直接调用新提供商的方法，不再走 _executeWithFailover
                 try {
-                    return await this._executeWithFailover(operation, ...args);
+                    if (this.currentProvider === 'redis') {
+                        if (!this.redisClient || this.redisClient.status !== 'ready') {
+                            throw new Error('Redis client not ready after failover');
+                        }
+                        return await this[`_redis_${operation}`](...args);
+                    } else if (this.currentProvider === 'upstash') {
+                        return await this[`_upstash_${operation}`](...args);
+                    } else {
+                        return await this[`_cloudflare_${operation}`](...args);
+                    }
                 } catch (error) {
-                    // 新提供商也失败，继续循环尝试下一个
-                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ 故障转移后操作仍失败，尝试下一个提供商: ${error.message}`);
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ 故障转移后操作仍失败: ${error.message}`);
                     continue;
                 }
             } else {
@@ -1134,7 +1152,6 @@ export class CacheService {
             }
         }
         
-        // 达到最大尝试次数仍失败
         throw new Error(`故障转移失败：已尝试 ${maxFailoverAttempts} 次仍无法成功执行操作`);
     }
 
@@ -1372,6 +1389,49 @@ export class CacheService {
     }
 
     /**
+     * 检查并处理 Upstash 响应错误
+     * @param {Response} response - Fetch 响应对象
+     * @param {number} attempt - 当前尝试次数
+     * @param {number} maxRetries - 最大重试次数
+     * @returns {Promise<boolean>} - 是否应该重试
+     */
+    async _handleUpstashResponse(response, attempt, maxRetries) {
+        // 认证错误 - 不重试
+        if (response.status === 401 || response.status === 403) {
+            const errorData = await response.json().catch(() => ({}));
+            const errorMsg = errorData.error || `HTTP ${response.status}: 认证失败`;
+            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证失败: ${errorMsg}`);
+            await this._handleAuthFailure();
+            throw new Error(`Upstash 认证失败: ${errorMsg}`);
+        }
+
+        // 速率限制 - 可重试
+        if (response.status === 429) {
+            const retryAfter = response.headers.get('Retry-After');
+            const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+            logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
+
+            if (attempt < maxRetries) {
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                return true; // 应该重试
+            }
+            throw new Error('Upstash rate limit exceeded');
+        }
+
+        // 配额错误 - 触发故障转移
+        if (response.status === 402) {
+            const errorData = await response.json().catch(() => ({}));
+            if (errorData.error?.includes('limit') || errorData.error?.includes('quota')) {
+                logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 配额限制: ${errorData.error}`);
+                await this._handleAuthFailure();
+                throw new Error(`Upstash 配额限制: ${errorData.error}`);
+            }
+        }
+
+        return false; // 不需要重试
+    }
+
+    /**
      * Upstash set 实现 - 增强错误处理和重试
      */
     async _upstash_set(key, value, expirationTtl = null) {
@@ -1403,35 +1463,8 @@ export class CacheService {
                         body: JSON.stringify(command),
                     });
 
-                    // 检查认证错误 (401/403)
-                    if (response.status === 401 || response.status === 403) {
-                        const errorData = await response.json().catch(() => ({}));
-                        const errorMsg = errorData.error || `HTTP ${response.status}: 认证失败`;
-                        logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证失败: ${errorMsg}`);
-                        // 立即触发故障转移，不重试
-                        await this._handleAuthFailure();
-                        throw new Error(`Upstash 认证失败: ${errorMsg}`);
-                    }
-
-                    // 检查速率限制响应
-                    if (response.status === 429) {
-                        const retryAfter = response.headers.get('Retry-After');
-                        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
-                        await new Promise(resolve => setTimeout(resolve, waitTime));
-                        if (attempt < maxRetries) continue;
-                        throw new Error('Upstash rate limit exceeded');
-                    }
-
-                    // 检查配额错误
-                    if (response.status === 402 || response.status === 429) {
-                        const errorData = await response.json().catch(() => ({}));
-                        if (errorData.error && (errorData.error.includes('limit') || errorData.error.includes('quota'))) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 配额限制: ${errorData.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 配额限制: ${errorData.error}`);
-                        }
-                    }
+                    const shouldRetry = await this._handleUpstashResponse(response, attempt, maxRetries);
+                    if (shouldRetry) continue;
 
                     // Handle undefined response (for mock fetch)
                     if (!response || !response.json) {
@@ -1542,34 +1575,8 @@ export class CacheService {
                         },
                     });
 
-                    // 检查认证错误 (401/403)
-                    if (response.status === 401 || response.status === 403) {
-                        const errorData = await response.json().catch(() => ({}));
-                        const errorMsg = errorData.error || `HTTP ${response.status}: 认证失败`;
-                        logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证失败: ${errorMsg}`);
-                        await this._handleAuthFailure();
-                        throw new Error(`Upstash 认证失败: ${errorMsg}`);
-                    }
-
-                    // 检查速率限制响应
-                    if (response.status === 429) {
-                        const retryAfter = response.headers.get('Retry-After');
-                        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
-                        await new Promise(resolve => setTimeout(resolve, waitTime));
-                        if (attempt < maxRetries) continue;
-                        throw new Error('Upstash rate limit exceeded');
-                    }
-
-                    // 检查配额错误
-                    if (response.status === 402 || response.status === 429) {
-                        const errorData = await response.json().catch(() => ({}));
-                        if (errorData.error && (errorData.error.includes('limit') || errorData.error.includes('quota'))) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 配额限制: ${errorData.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 配额限制: ${errorData.error}`);
-                        }
-                    }
+                    const shouldRetry = await this._handleUpstashResponse(response, attempt, maxRetries);
+                    if (shouldRetry) continue;
 
                     // Handle undefined response (for mock fetch)
                     if (!response || !response.json) {
@@ -1683,34 +1690,8 @@ export class CacheService {
                         },
                     });
 
-                    // 检查认证错误 (401/403)
-                    if (response.status === 401 || response.status === 403) {
-                        const errorData = await response.json().catch(() => ({}));
-                        const errorMsg = errorData.error || `HTTP ${response.status}: 认证失败`;
-                        logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证失败: ${errorMsg}`);
-                        await this._handleAuthFailure();
-                        throw new Error(`Upstash 认证失败: ${errorMsg}`);
-                    }
-
-                    // 检查速率限制响应
-                    if (response.status === 429) {
-                        const retryAfter = response.headers.get('Retry-After');
-                        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
-                        await new Promise(resolve => setTimeout(resolve, waitTime));
-                        if (attempt < maxRetries) continue;
-                        throw new Error('Upstash rate limit exceeded');
-                    }
-
-                    // 检查配额错误
-                    if (response.status === 402 || response.status === 429) {
-                        const errorData = await response.json().catch(() => ({}));
-                        if (errorData.error && (errorData.error.includes('limit') || errorData.error.includes('quota'))) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 配额限制: ${errorData.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 配额限制: ${errorData.error}`);
-                        }
-                    }
+                    const shouldRetry = await this._handleUpstashResponse(response, attempt, maxRetries);
+                    if (shouldRetry) continue;
 
                     // Handle undefined response (for mock fetch)
                     if (!response || !response.json) {
@@ -1833,34 +1814,8 @@ export class CacheService {
                         body: JSON.stringify(commands),
                     });
 
-                    // 检查认证错误 (401/403)
-                    if (response.status === 401 || response.status === 403) {
-                        const errorData = await response.json().catch(() => ({}));
-                        const errorMsg = errorData.error || `HTTP ${response.status}: 认证失败`;
-                        logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证失败: ${errorMsg}`);
-                        await this._handleAuthFailure();
-                        throw new Error(`Upstash 认证失败: ${errorMsg}`);
-                    }
-
-                    // 检查速率限制响应
-                    if (response.status === 429) {
-                        const retryAfter = response.headers.get('Retry-After');
-                        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
-                        await new Promise(resolve => setTimeout(resolve, waitTime));
-                        if (attempt < maxRetries) continue;
-                        throw new Error('Upstash rate limit exceeded');
-                    }
-
-                    // 检查配额错误
-                    if (response.status === 402 || response.status === 429) {
-                        const errorData = await response.json().catch(() => ({}));
-                        if (errorData.error && (errorData.error.includes('limit') || errorData.error.includes('quota'))) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 配额限制: ${errorData.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 配额限制: ${errorData.error}`);
-                        }
-                    }
+                    const shouldRetry = await this._handleUpstashResponse(response, attempt, maxRetries);
+                    if (shouldRetry) continue;
 
                     // Handle undefined response (for mock fetch)
                     if (!response || !response.json) {
@@ -1984,34 +1939,8 @@ export class CacheService {
                         body: JSON.stringify(command),
                     });
 
-                    // 检查认证错误 (401/403)
-                    if (response.status === 401 || response.status === 403) {
-                        const errorData = await response.json().catch(() => ({}));
-                        const errorMsg = errorData.error || `HTTP ${response.status}: 认证失败`;
-                        logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 认证失败: ${errorMsg}`);
-                        await this._handleAuthFailure();
-                        throw new Error(`Upstash 认证失败: ${errorMsg}`);
-                    }
-
-                    // 检查速率限制响应
-                    if (response.status === 429) {
-                        const retryAfter = response.headers.get('Retry-After');
-                        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-                        logger.warn(`[${this.getCurrentProvider()}] ⚠️ Upstash 速率限制，等待 ${waitTime}ms`);
-                        await new Promise(resolve => setTimeout(resolve, waitTime));
-                        if (attempt < maxRetries) continue;
-                        throw new Error('Upstash rate limit exceeded');
-                    }
-
-                    // 检查配额错误
-                    if (response.status === 402 || response.status === 429) {
-                        const errorData = await response.json().catch(() => ({}));
-                        if (errorData.error && (errorData.error.includes('limit') || errorData.error.includes('quota'))) {
-                            logger.error(`[${this.getCurrentProvider()}] 🚨 Upstash 配额限制: ${errorData.error}`);
-                            await this._handleAuthFailure();
-                            throw new Error(`Upstash 配额限制: ${errorData.error}`);
-                        }
-                    }
+                    const shouldRetry = await this._handleUpstashResponse(response, attempt, maxRetries);
+                    if (shouldRetry) continue;
 
                     // Handle undefined response (for mock fetch)
                     if (!response || !response.json) {
@@ -2070,6 +1999,11 @@ export class CacheService {
 
     /**
      * 写入键值对
+     * 
+     * 注意: 依赖 localCache.isUnchanged() 进行去重优化
+     * 该方法应该使用 JSON.stringify 或浅比较来判断值是否变化
+     * 建议对大对象(>1MB)限制比较深度,避免性能问题
+     * 
      * @param {string} key
      * @param {any} value - 会被 JSON.stringify
      * @param {number} expirationTtl - 过期时间（秒），最小 60 秒
@@ -2283,9 +2217,12 @@ export class CacheService {
 
         if (this.redisClient) {
             try {
-                // 使用带超时的 quit
+                // 先尝试 disconnect (立即断开)
+                this.redisClient.disconnect();
+                
+                // 备用: quit (优雅关闭,但可能卡住)
                 const quitPromise = this.redisClient.quit();
-                const timeoutPromise = new Promise(resolve => setTimeout(resolve, 1000));
+                const timeoutPromise = new Promise(resolve => setTimeout(resolve, 500));
                 await Promise.race([quitPromise, timeoutPromise]);
             } catch (e) {
                 // 忽略错误
@@ -2294,6 +2231,8 @@ export class CacheService {
             this.redisClient = null;
         }
 
+        // 重置标志
+        this._redisListenersBound = false;
         this.redisInitPromise = null;
         this.isRedisInitializing = false;
         
