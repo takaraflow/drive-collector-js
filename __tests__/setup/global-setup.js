@@ -1,6 +1,7 @@
-import { afterEach, afterAll } from '@jest/globals';
+import { afterEach, afterAll, jest } from '@jest/globals';
 import { cleanupSingletonTimers, quickMockCleanup } from './test-helpers.js';
 import { cleanupDatabaseState, closeSharedDatabase } from './test-db.js';
+import { disableTelegramConsoleProxy, resetLogger } from '../../src/services/logger.js';
 
 /**
  * 全局测试清理
@@ -15,6 +16,23 @@ afterEach(async () => {
   
   // 清理数据库状态（仅在必要时执行或使用更高效的清理）
   cleanupDatabaseState();
+  
+  // 重置 logger 状态（包括 console proxy）
+  resetLogger();
+  
+  // 确保恢复 real timers（如果测试中使用了 fakeTimers）
+  try {
+    jest.useRealTimers();
+  } catch (e) {
+    // ignore if not in test environment
+  }
+  
+  // 禁用 Telegram console proxy（如果启用）
+  try {
+    disableTelegramConsoleProxy();
+  } catch (e) {
+    // ignore
+  }
 });
 
 /**
@@ -23,4 +41,25 @@ afterEach(async () => {
 afterAll(async () => {
   // 关闭共享数据库连接
   closeSharedDatabase();
+  
+  // 最终确保恢复 real timers
+  try {
+    jest.useRealTimers();
+  } catch (e) {
+    // ignore
+  }
+  
+  // 最终禁用 console proxy
+  try {
+    disableTelegramConsoleProxy();
+  } catch (e) {
+    // ignore
+  }
+  
+  // 最终重置 logger
+  try {
+    resetLogger();
+  } catch (e) {
+    // ignore
+  }
 });

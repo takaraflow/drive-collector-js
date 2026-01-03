@@ -88,13 +88,18 @@ describe('TelegramCircuitBreaker Unit Tests', () => {
 
     beforeEach(async () => {
         jest.clearAllMocks();
-        jest.useFakeTimers();
+        jest.useFakeTimers('modern');
         
         // Create fresh circuit breaker instance
         circuitBreaker = new TelegramCircuitBreaker();
     });
 
     afterEach(() => {
+        // 清理所有定时器
+        if (circuitBreaker.resetTimer) {
+            clearTimeout(circuitBreaker.resetTimer);
+            circuitBreaker.resetTimer = null;
+        }
         jest.useRealTimers();
     });
 

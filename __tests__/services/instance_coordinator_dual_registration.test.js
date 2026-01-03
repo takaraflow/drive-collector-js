@@ -1,5 +1,6 @@
 // Updated test file - V3 - Forced update
 import { jest, describe, test, expect, beforeEach, beforeAll, afterAll } from "@jest/globals";
+import logger from "../../src/services/logger.js";
 
 // Mock the global fetch function
 const mockFetch = jest.fn();
@@ -28,8 +29,7 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
             HOSTNAME: "unknown", // Mock hostname for consistent test results
         };
 
-        // Enable fake timers for testing
-        jest.useFakeTimers();
+
 
         // Mock modules - we don't need D1 anymore for coordinator
         jest.unstable_mockModule("../../src/repositories/InstanceRepository.js", () => ({
@@ -63,6 +63,11 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
             clearInterval(instanceCoordinator.heartbeatTimer);
             instanceCoordinator.heartbeatTimer = null;
         }
+        // Mock setInterval to call immediately for testing
+        global.setInterval = jest.fn((fn, delay) => {
+            fn();
+            return 123;
+        });
     });
 
     test("should send heartbeat to KV", async () => {
@@ -78,10 +83,10 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         // Start heartbeat manually
         instanceCoordinator.startHeartbeat();
 
-        // Advance timer (heartbeat interval is 5 minutes)
-        await jest.advanceTimersByTimeAsync(300000);
+        // Wait for async operations
+        await new Promise(resolve => setTimeout(resolve, 0));
 
-        // Verify KV heartbeat was sent
+        // Since setInterval is mocked to call immediately, verify KV heartbeat was sent
         expect(mockCache.get).toHaveBeenCalledWith("instance:test_instance_heartbeat");
         expect(mockCache.set).toHaveBeenCalledWith(
             "instance:test_instance_heartbeat",
@@ -101,10 +106,10 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         // Start heartbeat
         instanceCoordinator.startHeartbeat();
 
-        // Advance timer (heartbeat interval is 5 minutes)
-        await jest.advanceTimersByTimeAsync(300000);
+        // Wait for async operations
+        await new Promise(resolve => setTimeout(resolve, 0));
 
-        // Verify re-registration
+        // Since setInterval is mocked to call immediately, verify re-registration
         expect(mockCache.get).toHaveBeenCalledWith("instance:test_instance_heartbeat");
         // Should call registerInstance logic (which does a set)
         expect(mockCache.set).toHaveBeenCalledWith(
@@ -122,7 +127,7 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
     });
 
     test("should handle KV errors gracefully", async () => {
-        const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const loggerErrorSpy = jest.spyOn(logger, "error").mockImplementation(() => {});
 
         // Mock KV error
         mockCache.get.mockRejectedValue(new Error("KV Network Error"));
@@ -133,12 +138,11 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         // Start heartbeat
         instanceCoordinator.startHeartbeat();
 
-        // Advance timer (heartbeat interval is 5 minutes)
-        await jest.advanceTimersByTimeAsync(300000);
+        // Wait for async operations
+        await new Promise(resolve => setTimeout(resolve, 0));
 
-        // Should log error with provider prefix but not crash
-        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("[Cloudflare KV]"), expect.anything());
-        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Cache心跳更新失败"), expect.anything());
-        consoleSpy.mockRestore();
+        // Since setInterval is mocked to call immediately, should log error with provider prefix but not crash
+        expect(loggerErrorSpy).toHaveBeenCalledWith(expect.stringContaining("[Cloudflare KV] Cache心跳更新失败"));
+        loggerErrorSpy.mockRestore();
     });
 });

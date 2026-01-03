@@ -18,10 +18,11 @@ export default {
   // 优先快测试
   testSequencer: '<rootDir>/jest-sequencer.js',
   // 全局 fake timers（减少真实定时器等待）
-  fakeTimers: {
-    enableGlobally: false, // 不全局启用，避免破坏依赖真实时间的集成测试
-    legacyFakeTimers: false
-  },
+  // 全局 fake timers（减少真实定时器等待）
+  // fakeTimers: {
+  //   enableGlobally: true, // 为特定测试文件启用
+  //   legacyFakeTimers: false
+  // },
   // 优化全局设置
   setupFilesAfterEnv: [
     '<rootDir>/__tests__/setup/external-mocks.js',

@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { logger } from "../services/logger.js";
 
 /**
  * --- 1. 基础配置与环境初始化 ---
@@ -16,7 +17,7 @@ function validateEnvironment() {
     
     // 在测试环境或诊断模式中跳过验证
     if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID || process.env.NODE_ENV === 'diagnostic') {
-        console.warn('⚠️ 测试环境或诊断模式，跳过环境变量验证');
+        logger.warn('⚠️ 测试环境或诊断模式，跳过环境变量验证');
         return {
             apiId: parseInt(process.env.API_ID || '0'),
             apiHash: process.env.API_HASH || 'test_hash',
@@ -58,14 +59,13 @@ export function isCacheConfigComplete() {
  */
 function validateCacheConfig() {
     if (!isCacheConfigComplete()) {
-        console.warn('⚠️ No complete cache configuration found, cache service may not work properly');
+        logger.warn('⚠️ No complete cache configuration found, cache service may not work properly');
     }
 }
 
 // 验证环境变量
 const envConfig = validateEnvironment();
 
-import { logger } from "../services/logger.js";
 validateCacheConfig();
 
 /**
@@ -83,7 +83,7 @@ const tlsEnabled = forceDisabled ? false : (forceEnabled || isRediss);
 
 // 日志输出 TLS 配置决策
 if (process.env.NODE_ENV === 'diagnostic' || process.env.NODE_ENV === 'development') {
-    console.log(`[Config] Redis TLS Decision: forceDisabled=${forceDisabled}, forceEnabled=${forceEnabled}, isRediss=${isRediss} => tlsEnabled=${tlsEnabled}`);
+    logger.debug(`[Config] Redis TLS Decision: forceDisabled=${forceDisabled}, forceEnabled=${forceEnabled}, isRediss=${isRediss} => tlsEnabled=${tlsEnabled}`);
 }
 
 export const config = {
@@ -225,7 +225,7 @@ export function getRedisConnectionConfig() {
             extractedHost = parsed.hostname;
             extractedPort = parsed.port ? parseInt(parsed.port, 10) : (parsed.protocol === 'rediss:' ? 6379 : 6379);
         } catch (e) {
-            console.warn(`[Config] Failed to parse Redis URL: ${rawUrl}`, e.message);
+            logger.warn(`[Config] Failed to parse Redis URL: ${rawUrl}`, e.message);
         }
     }
 
@@ -251,7 +251,7 @@ export function getRedisConnectionConfig() {
         redisOptions.port = extractedPort || config.redis.port;
 
         if (process.env.NODE_ENV === 'diagnostic' || process.env.DEBUG === 'true') {
-            console.log(`[Config] Redis TLS detail: rejectUnauthorized=${redisOptions.tls.rejectUnauthorized}, servername=${servername}, host=${redisOptions.host}, port=${redisOptions.port}`);
+            logger.debug(`[Config] Redis TLS detail: rejectUnauthorized=${redisOptions.tls.rejectUnauthorized}, servername=${servername}, host=${redisOptions.host}, port=${redisOptions.port}`);
         }
     }
 

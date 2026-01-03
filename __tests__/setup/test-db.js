@@ -13,7 +13,8 @@ export function getSharedDatabase() {
   if (!sharedDbInstance) {
     sharedDbInstance = new Database(':memory:');
     createTables(sharedDbInstance);
-    console.log('📦 共享数据库实例已创建');
+    // 移除 console.log，用 expect.assertions 静默验证
+    expect.assertions(0); // 表明无断言期望，静默成功
   }
   dbUsageCount++;
   return sharedDbInstance;
@@ -126,8 +127,8 @@ export function createMockD1Service(db) {
         const stmt = db.prepare(sql);
         return stmt.all(params);
       } catch (error) {
-        console.error('Mock D1 fetchAll error:', error);
-        return [];
+        // 移除 console.error，抛出错误让测试捕获
+        throw new Error(`Mock D1 fetchAll error: ${error.message}`);
       }
     },
 
@@ -136,8 +137,8 @@ export function createMockD1Service(db) {
         const stmt = db.prepare(sql);
         return stmt.get(params) || null;
       } catch (error) {
-        console.error('Mock D1 fetchOne error:', error);
-        return null;
+        // 移除 console.error，抛出错误让测试捕获
+        throw new Error(`Mock D1 fetchOne error: ${error.message}`);
       }
     },
 
@@ -146,7 +147,7 @@ export function createMockD1Service(db) {
         const stmt = db.prepare(sql);
         return stmt.run(params);
       } catch (error) {
-        console.error('Mock D1 run error:', error);
+        // 移除 console.error，直接抛出
         throw error;
       }
     },
@@ -175,7 +176,7 @@ export function closeSharedDatabase() {
     sharedDbInstance.close();
     sharedDbInstance = null;
     dbUsageCount = 0;  // Reset
-    console.log('✅ 共享数据库实例已关闭');
+    // 移除 console.log，静默关闭
   }
 }
 

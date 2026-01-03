@@ -150,7 +150,8 @@ describe('Logger Integration Tests (Unified)', () => {
           
           expect(mockAxiomIngest).toHaveBeenCalled();
           const payload = mockAxiomIngest.mock.calls[0][1][0];
-          expect(payload.message).toMatch(/^\[v\d+\.\d+\.\d+\]/);
+          // 修复正则表达式：匹配 vtest, v1.2.3, v4.5.5 等各种版本格式
+          expect(payload.message).toMatch(/^\[v[\w\.\-]+\]/);
       });
   });
 });

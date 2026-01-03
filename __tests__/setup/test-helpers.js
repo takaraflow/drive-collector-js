@@ -128,7 +128,7 @@ export async function cleanupSingletonTimers() {
           module.stopWatchdog();
         }
       } catch (error) {
-        console.warn('Failed to cleanup Telegram timers:', error.message);
+        // console.warn('Failed to cleanup Telegram timers:', error.message);
       }
     })()
   );
@@ -143,10 +143,10 @@ export async function cleanupSingletonTimers() {
             await module.cache.destroy();
           }
           if (module.cache.stopRecoveryCheck) module.cache.stopRecoveryCheck();
-          if (module.cache._stopHeartbeat) module.cache._stopHeartbeat();
+          if (module.cache.stopHeartbeat) module.cache.stopHeartbeat(); // 使用公共方法
         }
       } catch (error) {
-        console.warn('Failed to cleanup CacheService timers:', error.message);
+        // console.warn('Failed to cleanup CacheService timers:', error.message);
       }
     })()
   );
@@ -160,7 +160,7 @@ export async function cleanupSingletonTimers() {
           module.instanceCoordinator.stopHeartbeat();
         }
       } catch (error) {
-        console.warn('Failed to cleanup InstanceCoordinator timers:', error.message);
+        // console.warn('Failed to cleanup InstanceCoordinator timers:', error.message);
       }
     })()
   );
@@ -174,7 +174,7 @@ export async function cleanupSingletonTimers() {
           mocks.mockRedisClient.removeAllListeners();
         }
       } catch (error) {
-        console.warn('Failed to cleanup Redis listeners:', error.message);
+        // console.warn('Failed to cleanup Redis listeners:', error.message);
       }
     })()
   );

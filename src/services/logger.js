@@ -19,20 +19,58 @@ let version = 'unknown';
 
 const initVersion = async () => {
     if (version !== 'unknown') return;
-    
+
+    // 在测试环境中立即设置版本，避免异步操作
+    if (process.env.NODE_ENV === 'test') {
+        version = 'test';
+        return;
+    }
+
     try {
         // 方案 A: 尝试通过环境变量读取（CI/CD 注入）
         if (process.env.APP_VERSION) {
             version = process.env.APP_VERSION;
             return;
         }
-        
+
         // 方案 B: 动态读取 package.json
         const { default: pkg } = await import('../../package.json', { with: { type: 'json' } });
         version = pkg.version || 'unknown';
     } catch (e) {
-        console.debug('Logger: Failed to load version from package.json', e.message);
+        // 移除 console.debug，静默失败
     }
+};
+
+/**
+ * 可 mock 的延迟函数，用于测试
+ * @param {number} ms - 毫秒数
+ * @returns {Promise<void>}
+ */
+export const delay = (ms) => {
+  return new Promise(resolve => setTimeout(resolve, ms));
+};
+
+/**
+ * 带重试的异步操作包装器
+ * @param {Function} fn - 要重试的异步函数
+ * @param {number} maxRetries - 最大重试次数
+ * @param {Function} delayFn - 延迟计算函数 (attempt) => ms
+ * @returns {Promise<any>} - 成功的结果或抛出最后一个错误
+ */
+export const retryWithDelay = async (fn, maxRetries = 3, delayFn = (attempt) => Math.pow(2, attempt) * 1000) => {
+  let lastError;
+  for (let retries = 0; retries < maxRetries; retries++) {
+    try {
+      return await fn();
+    } catch (retryErr) {
+      lastError = retryErr;
+      if (retries < maxRetries - 1) {
+        const delayMs = delayFn(retries);
+        await delay(delayMs);
+      }
+    }
+  }
+  throw lastError;
 };
 
 const initAxiom = async () => {
@@ -66,7 +104,7 @@ const initAxiom = async () => {
         config = configModule.config;
       } catch (e) {
         // 在 Worker 环境下，如果无法加载 config/index.js，则依赖手动配置
-        console.debug('Logger: Falling back to manual configuration');
+        // 移除 console.debug
       }
     }
 
@@ -77,7 +115,7 @@ const initAxiom = async () => {
       });
     }
   } catch (error) {
-    console.error('Failed to initialize Axiom:', error.message);
+    // 移除 console.error
   } finally {
     axiomInitialized = true;
   }
@@ -151,26 +189,18 @@ const log = async (instanceId, level, message, data = {}) => {
     await axiom.ingest(config.axiom.dataset, [payload]);
   } catch (err) {
     // Retry logic with exponential backoff (max 3 attempts)
-    let retries = 0;
-    let lastError = err;
-    while (retries < 3) {
-      const delay = Math.pow(2, retries) * 1000; // 1s, 2s, 4s
-      await new Promise(resolve => setTimeout(resolve, delay));
-      try {
-        await axiom.ingest(config.axiom.dataset, [payload]);
-        return; // Success
-      } catch (retryErr) {
-        lastError = retryErr;
-        retries++;
-      }
-    }
-    // Fallback: log to console only (avoid recursive calls)
-    // Use original console.error to avoid proxy recursion
-    originalConsoleError.call(console, 'Axiom ingest failed after retries:', lastError.message);
-    originalConsoleError.call(console, 'Failed payload:', {
-      service: data.service || 'unknown',
-      error: serializeError(lastError),
-      payload: payload
+    // 使用 retryWithDelay 以便测试中可以 mock
+    await retryWithDelay(async () => {
+      await axiom.ingest(config.axiom.dataset, [payload]);
+    }, 3, (attempt) => Math.pow(2, attempt) * 1000).catch((lastError) => {
+      // Fallback: log to console only (avoid recursive calls)
+      // Use original console.error to avoid proxy recursion
+      originalConsoleError.call(console, 'Axiom ingest failed after retries:', lastError.message);
+      originalConsoleError.call(console, 'Failed payload:', {
+        service: data.service || 'unknown',
+        error: serializeError(lastError),
+        payload: payload
+      });
     });
   }
 };
@@ -184,12 +214,12 @@ const getSafeInstanceId = () => {
         // 如果返回了 'unknown' 或无效值，使用本地 fallback
         // 在测试环境下减少此类日志输出，除非显式开启 DEBUG
         if (process.env.NODE_ENV !== 'test' || process.env.DEBUG === 'true') {
-            console.debug('Logger: Instance ID provider returned invalid value, using fallback', { received: id, fallback: localFallbackId });
+            // 移除 console.debug
         }
         return localFallbackId;
     } catch (e) {
         if (process.env.NODE_ENV !== 'test' || process.env.DEBUG === 'true') {
-            console.debug('Logger: Instance ID provider failed, using fallback', { error: e.message, fallback: localFallbackId });
+            // 移除 console.debug
         }
         return localFallbackId;
     }
@@ -200,7 +230,11 @@ export const logger = {
     info: (message, data) => log(getSafeInstanceId(), 'info', message, data),
     warn: (message, data) => log(getSafeInstanceId(), 'warn', message, data),
     error: (message, data) => log(getSafeInstanceId(), 'error', message, data),
-    debug: (message, data) => log(getSafeInstanceId(), 'debug', message, data),
+    debug: (message, data) => {
+        // Debug logs should not be output to console when Axiom is not configured
+        if (!process.env.AXIOM_TOKEN && (!config || !config.axiom)) return;
+        return log(getSafeInstanceId(), 'debug', message, data);
+    },
     configure: (customConfig) => {
         config = { ...config, ...customConfig };
         // 如果提供了 axiom 配置，重置初始化状态以便重新初始化

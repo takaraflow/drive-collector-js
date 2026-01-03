@@ -43,6 +43,7 @@ jest.unstable_mockModule('../../src/services/CacheService.js', () => ({
 const { CloudTool } = await import('../../src/services/rclone.js');
 
 // --- Helper: 创建自动触发事件的 Mock 进程 ---
+// 融合优点：emit 'exit' + stream end/close + process.nextTick
 const createAutoProcess = (onSpawn) => {
     const proc = new EventEmitter();
     proc.stdout = new EventEmitter();
@@ -50,25 +51,45 @@ const createAutoProcess = (onSpawn) => {
     proc.stdin = { write: jest.fn(), end: jest.fn() };
     proc.kill = jest.fn();
 
-    setImmediate(() => {
-        if (onSpawn) onSpawn(proc);
+    // 更完整模拟真实 child_process
+    proc.on('close', (code, signal) => {
+        proc.emit('exit', code || 0, signal);
+        proc.stdout.emit('end');
+        proc.stdout.emit('close');
+        proc.stderr.emit('end');
+        proc.stderr.emit('close');
     });
+
+    if (onSpawn) {
+        process.nextTick(() => onSpawn(proc));
+    }
 
     return proc;
 };
 
 describe('CloudTool', () => {
-    // 使用 fakeTimers 替代自定义 setTimeout 拦截
     beforeEach(() => {
-        jest.useFakeTimers('modern');
+        jest.useRealTimers();
         jest.clearAllMocks();
         mockCache.clear();
+        mockKv.get.mockClear();
+        mockKv.set.mockClear();
         CloudTool.loading = false;
         mockSpawnSync.mockReturnValue({ status: 0, stdout: 'obscured\n', stderr: '' });
         mockKv.get.mockResolvedValue(null);
+        mockSpawn.mockReset();
     });
 
     afterEach(() => {
+        // 核弹级清理：所有模拟进程的监听器
+        mockSpawn.mock.instances.forEach((proc) => {
+            if (proc) {
+                proc.removeAllListeners();
+                proc.stdout?.removeAllListeners();
+                proc.stderr?.removeAllListeners();
+                proc.stdin?.write?.mockClear(); // stdin 是对象，不需要 remove listeners
+            }
+        });
         jest.useRealTimers();
     });
 
@@ -128,7 +149,6 @@ describe('CloudTool', () => {
     describe('validateConfig', () => {
         it('should resolve success true when rclone returns 0', async () => {
             mockSpawn.mockImplementation(() => createAutoProcess((p) => p.emit('close', 0)));
-            jest.advanceTimersByTime(0); // Process initial queue
             const result = await CloudTool.validateConfig('mega', { user: 'u', pass: 'p' });
             expect(result.success).toBe(true);
         });
@@ -136,9 +156,8 @@ describe('CloudTool', () => {
         it('should resolve success false with reason 2FA on specific error', async () => {
             mockSpawn.mockImplementation(() => createAutoProcess((p) => {
                 p.stderr.emit('data', Buffer.from('Multi-factor authentication required\n'));
-                p.emit('close', 1); // Remove async wrapper
+                p.emit('close', 1);
             }));
-            jest.advanceTimersByTime(0); // Process initial queue
             const result = await CloudTool.validateConfig('mega', { user: 'u', pass: 'p' });
             expect(result.success).toBe(false);
             expect(result.reason).toBe('2FA');
@@ -153,7 +172,6 @@ describe('CloudTool', () => {
     });
 
     describe('uploadFile', () => {
-        jest.setTimeout(10000); // Allow more time for async ops
         beforeEach(() => {
             mockFindByUserId.mockResolvedValue({
                 type: 'drive',
@@ -163,7 +181,7 @@ describe('CloudTool', () => {
 
         it('should handle successful upload', async () => {
             mockSpawn.mockImplementation(() => createAutoProcess((p) => p.emit('close', 0)));
-            const task = { userId: 'user123', id: 'task1' };
+            const task = { userId: 'user123' }; // 移除 id，避免潜在全局存储
             const result = await CloudTool.uploadFile('/local/path', task);
             expect(result.success).toBe(true);
             expect(task.proc).toBeDefined();
@@ -171,11 +189,9 @@ describe('CloudTool', () => {
 
         it('should handle upload failure and return error log', async () => {
             mockSpawn.mockImplementationOnce(() => createAutoProcess((p) => {
-                // 【关键修复】必须加换行符 \n，否则会被业务代码的 stderrBuffer 截留
                 p.stderr.emit('data', Buffer.from('Upload failed because of disk full\n'));
-                p.emit('close', 1); // Remove async wrapper
+                p.emit('close', 1);
             }));
-            jest.advanceTimersByTime(0); // Process initial queue
             const result = await CloudTool.uploadFile('/local/path', { userId: 'user123' });
             expect(result.success).toBe(false);
             expect(result.error).toContain('disk full');
@@ -185,11 +201,11 @@ describe('CloudTool', () => {
             mockSpawn.mockImplementation(() => createAutoProcess((p) => {
                 const log = { msg: "Status update", stats: { transferring: [{ name: "path", percentage: 10 }] } };
                 p.stderr.emit('data', Buffer.from(JSON.stringify(log) + '\n'));
-                p.emit('close', 0); // Remove async wrapper
+                p.emit('close', 0);
             }));
             const onProgress = jest.fn();
-            jest.advanceTimersByTime(0); // Process initial queue
-            await CloudTool.uploadFile('/local/path', { userId: 'user123', localPath: '/local/path' }, onProgress);
+            const task = { userId: 'user123', localPath: '/local/path' }; // 移除 id
+            await CloudTool.uploadFile('/local/path', task, onProgress);
             expect(onProgress).toHaveBeenCalled();
         });
     });
@@ -205,13 +221,12 @@ describe('CloudTool', () => {
         it('should return files and cache them (Multi-level KV)', async () => {
             mockKv.get.mockResolvedValue(null);
             const mockFiles = [{ Name: 'file1.txt', IsDir: false, ModTime: '2023-01-01T00:00:00Z' }];
-            
+
             mockSpawn.mockImplementationOnce(() => createAutoProcess((p) => {
                 p.stdout.emit('data', Buffer.from(JSON.stringify(mockFiles)));
                 p.emit('close', 0);
             }));
 
-            jest.advanceTimersByTime(0); // Process initial queue
             const files = await CloudTool.listRemoteFiles('user123');
             expect(files).toEqual(mockFiles);
             expect(mockKv.set).toHaveBeenCalled();
@@ -220,7 +235,6 @@ describe('CloudTool', () => {
         it('should use KV cache if memory cache is empty', async () => {
             const mockFiles = [{ Name: 'kv-file.txt', IsDir: false, ModTime: '2023-01-01T00:00:00Z' }];
             mockKv.get.mockResolvedValue({ files: mockFiles });
-            jest.advanceTimersByTime(0); // Process initial queue
             const files = await CloudTool.listRemoteFiles('user124');
             expect(files).toEqual(mockFiles);
             expect(mockSpawn).not.toHaveBeenCalled();
@@ -231,10 +245,8 @@ describe('CloudTool', () => {
                 p.stdout.emit('data', Buffer.from('[]'));
                 p.emit('close', 0);
             }));
-            jest.advanceTimersByTime(0); // Process initial queue
             await CloudTool.listRemoteFiles('user125');
             mockKv.get.mockReturnValue([]);
-            jest.advanceTimersByTime(0); // Process initial queue
             await CloudTool.listRemoteFiles('user125', true);
             expect(mockSpawn).toHaveBeenCalledTimes(2);
         });
@@ -242,9 +254,8 @@ describe('CloudTool', () => {
         it('should handle rclone error and return empty array', async () => {
             mockSpawn.mockImplementation(() => createAutoProcess((p) => {
                 p.stderr.emit('data', Buffer.from('error listing\n'));
-                p.emit('close', 1); // Remove async wrapper
+                p.emit('close', 1);
             }));
-            jest.advanceTimersByTime(0); // Process initial queue
             const files = await CloudTool.listRemoteFiles('user126');
             expect(files).toEqual([]);
         });
@@ -263,7 +274,6 @@ describe('CloudTool', () => {
                 p.stdout.emit('data', Buffer.from(JSON.stringify([mockFileInfo])));
                 p.emit('close', 0);
             }));
-            jest.advanceTimersByTime(0); // Process initial queue
             const info = await CloudTool.getRemoteFileInfo('test.txt', 'user123');
             expect(info.Name).toBe('test.txt');
         });
@@ -278,33 +288,70 @@ describe('CloudTool', () => {
                     p.emit('close', 0);
                 }));
 
-            jest.advanceTimersByTime(0); // Process initial queue
-            const info = await CloudTool.getRemoteFileInfo('retry.txt', 'user123', 3);
+            jest.useFakeTimers();
+
+            const infoPromise = CloudTool.getRemoteFileInfo('retry.txt', 'user123', 3);
+
+            for (let i = 0; i < 20; i++) {
+                jest.advanceTimersByTime(10000);
+                await Promise.resolve();
+                await Promise.resolve();
+            }
+
+            const info = await infoPromise;
+
             expect(info.Name).toBe('retry.txt');
             expect(mockSpawn).toHaveBeenCalledTimes(3);
+
+            jest.useRealTimers();
         });
 
         it('should return null after all retries fail', async () => {
             mockSpawn.mockImplementation(() => createAutoProcess((p) => p.emit('close', 1)));
-            jest.advanceTimersByTime(0); // Process initial queue
-            const info = await CloudTool.getRemoteFileInfo('missing.txt', 'user123', 2);
+
+            jest.useFakeTimers();
+
+            const infoPromise = CloudTool.getRemoteFileInfo('missing.txt', 'user123', 2);
+
+            for (let i = 0; i < 20; i++) {
+                jest.advanceTimersByTime(10000);
+                await Promise.resolve();
+                await Promise.resolve();
+            }
+
+            const info = await infoPromise;
+
             expect(info).toBeNull();
+
+            jest.useRealTimers();
         });
 
         it('should handle JSON parsing errors and retry', async () => {
             mockSpawn
                 .mockImplementationOnce(() => createAutoProcess((p) => {
                     p.stdout.emit('data', Buffer.from('invalid-json\n'));
-                    p.emit('close', 0); // Remove async wrapper
+                    p.emit('close', 0);
                 }))
                 .mockImplementationOnce(() => createAutoProcess((p) => {
                     p.stdout.emit('data', Buffer.from(JSON.stringify([{ Name: 'ok.txt' }])));
                     p.emit('close', 0);
                 }));
 
-            jest.advanceTimersByTime(0); // Process initial queue
-            const info = await CloudTool.getRemoteFileInfo('ok.txt', 'user123', 2);
+            jest.useFakeTimers();
+
+            const infoPromise = CloudTool.getRemoteFileInfo('ok.txt', 'user123', 2);
+
+            for (let i = 0; i < 20; i++) {
+                jest.advanceTimersByTime(10000);
+                await Promise.resolve();
+                await Promise.resolve();
+            }
+
+            const info = await infoPromise;
+
             expect(info.Name).toBe('ok.txt');
+
+            jest.useRealTimers();
         });
     });
 

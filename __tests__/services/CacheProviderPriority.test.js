@@ -11,11 +11,7 @@ describe('CacheService Provider Priority', () => {
 
     async function reloadCacheService(env) {
         process.env = { ...originalEnv, ...env };
-        // 重要：在 ESM 中 jest.resetModules() 可能不按预期工作
-        // 这里的 CacheService 是类，我们可以直接创建实例，
-        // 但它在 constructor 中读取 config.js。
-        // config.js 在被导入时会运行逻辑。
-        // 为了真正测试优先级逻辑，我们需要一个新的 CacheService 实例。
+        // 使用查询字符串参数绕过 ESM 模块缓存
         const { CacheService } = await import(`../../src/services/CacheService.js?t=${Date.now()}`);
         return new CacheService();
     }
@@ -40,9 +36,22 @@ describe('CacheService Provider Priority', () => {
         process.env = cleanEnv;
     });
 
-    afterEach(() => {
-        if (cacheInstance && cacheInstance.recoveryTimer) {
-            clearInterval(cacheInstance.recoveryTimer);
+    afterEach(async () => {
+        if (cacheInstance) {
+            try {
+                // 清理所有可能的定时器
+                if (cacheInstance.recoveryTimer) {
+                    clearInterval(cacheInstance.recoveryTimer);
+                }
+                
+                // 安全调用 destroy
+                if (typeof cacheInstance.destroy === 'function') {
+                    await cacheInstance.destroy();
+                }
+            } catch (error) {
+                // 防止清理时报错影响测试结果
+                console.warn('Cleanup warning:', error.message);
+            }
         }
         process.env = originalEnv;
     });

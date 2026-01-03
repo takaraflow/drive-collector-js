@@ -84,13 +84,7 @@ export class CacheService {
         this.useUpstash = this.currentProvider === 'upstash';
 
         // 🔍 DEBUG: Cache 配置诊断日志
-        if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-            console.log('[CacheService] 🛠️ 准备实例化 Redis 客户端...', {
-                hasRedis: this.hasRedis,
-                currentProvider: this.currentProvider,
-                node_env: process.env.NODE_ENV
-            });
-        }
+
         logger.info('[CacheService DEBUG] 配置诊断:', {
             hasRedis: this.hasRedis,
             hasCloudflare: this.hasCloudflare,
@@ -221,7 +215,7 @@ export class CacheService {
                     this.connectTime = Date.now();
                     const displayHost = this.redisHost || (url ? 'from-url' : 'unknown');
                     if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                        console.log(`[CacheService] ✅ Redis CONNECT: ${displayHost}:${this.redisPort}`);
+                        logger.debug(`[CacheService] ✅ Redis CONNECT: ${displayHost}:${this.redisPort}`);
                     }
                     logger.info(`[${this.getCurrentProvider()}] ✅ Redis CONNECT: ${displayHost}:${this.redisPort} at ${new Date(this.connectTime).toISOString()}`, {
                         host: this.redisHost,
@@ -236,7 +230,7 @@ export class CacheService {
                 this.redisClient.on('ready', () => {
                     const connectDuration = Date.now() - this.connectTime;
                     if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                        console.log(`[CacheService] ✅ Redis READY: Connection established in ${connectDuration}ms`);
+                        logger.debug(`[CacheService] ✅ Redis READY: Connection established in ${connectDuration}ms`);
                     }
                     logger.info(`[${this.getCurrentProvider()}] ✅ Redis READY: Connection established in ${connectDuration}ms`, {
                         totalConnections: this.redisClient.options?.maxRetriesPerRequest || 'unknown',
@@ -251,7 +245,7 @@ export class CacheService {
 
                 this.redisClient.on('reconnecting', (ms) => {
                     if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                        console.log(`[CacheService] 🔄 Redis RECONNECTING: Attempting reconnection in ${ms}ms`);
+                        logger.warn(`[CacheService] 🔄 Redis RECONNECTING: Attempting reconnection in ${ms}ms`);
                     }
                     logger.warn(`[${this.getCurrentProvider()}] 🔄 Redis RECONNECTING: Attempting reconnection in ${ms}ms`, {
                         lastError: this.lastError,
@@ -267,7 +261,7 @@ export class CacheService {
                     const errorCode = error.code || '';
                     
                     if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                        console.error(`[CacheService] 🚨 Redis ERROR: ${errorMsg}`, {
+                        logger.error(`[CacheService] 🚨 Redis ERROR: ${errorMsg}`, {
                             code: errorCode,
                             host: error.hostname || error.address,
                             port: error.port
@@ -338,7 +332,7 @@ export class CacheService {
                     const now = Date.now();
                     const duration = this.connectTime ? now - this.connectTime : 0;
                     if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                        console.warn(`[CacheService] ⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`);
+                        logger.warn(`[CacheService] ⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`);
                     }
                     logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis CLOSE: Connection closed after ${Math.round(duration / 1000)}s`, {
                         durationMs: duration,
@@ -361,7 +355,7 @@ export class CacheService {
 
                 this.redisClient.on('end', async () => {
                     if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'diagnostic') {
-                        console.warn(`[CacheService] ⚠️ Redis END: Connection ended by client`);
+                        logger.warn(`[CacheService] ⚠️ Redis END: Connection ended by client`);
                     }
                     logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis END: Connection ended by client`);
                     // 触发自动重启 (如果未被销毁)
@@ -2071,6 +2065,11 @@ export class CacheService {
             clearInterval(this.heartbeatTimer);
         }
 
+        // 在测试环境中不启动心跳，避免异步泄漏
+        if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID) {
+            return;
+        }
+
         const heartbeatInterval = 30 * 1000; // Northflank环境：30秒间隔（从2分钟减少）
         logger.info(`[${this.getCurrentProvider()}] 🫀 启动 Redis 心跳机制，间隔: ${heartbeatInterval / 1000} 秒 (Northflank优化)`);
 
@@ -2167,7 +2166,7 @@ export class CacheService {
     /**
      * 停止心跳机制
      */
-    _stopHeartbeat() {
+    stopHeartbeat() {
         if (this.heartbeatTimer) {
             clearInterval(this.heartbeatTimer);
             this.heartbeatTimer = null;
