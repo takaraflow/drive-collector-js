@@ -608,4 +608,69 @@ describe('Logger Service', () => {
     });
   });
 
+  describe('Field Limiting and Payload Security', () => {
+    beforeEach(async () => {
+        // 确保环境变量存在，否则 logger.debug 等不会发送到 Axiom
+        process.env.AXIOM_TOKEN = 'test-token';
+        process.env.AXIOM_ORG_ID = 'test-org';
+        process.env.AXIOM_DATASET = 'test-dataset';
+        
+        // 显式重置并重新初始化，确保测试环境干净
+        const loggerModule = await import('../../src/services/logger.js');
+        loggerModule.resetLogger();
+        logger = loggerModule.logger;
+        
+        // 清理之前的 mock 调用记录
+        mockIngest.mockClear();
+    });
+
+    test('should truncate fields when data exceeds maxFields limit', async () => {
+        const largeData = {};
+        for (let i = 0; i < 300; i++) {
+            largeData[`key_${i}`] = 'value';
+        }
+
+        await logger.info('large payload test', largeData);
+        await jest.runAllTimersAsync();
+
+        // 安全检查：确保 mockIngest 真的被调用了
+        expect(mockIngest).toHaveBeenCalled();
+
+        // 获取第一个调用的第二个参数 (payload 数组) 的第一个元素 (log payload)
+        const call = mockIngest.mock.calls[0];
+        const payload = call[1][0];
+        
+        // 根据你采用的方案（是否封装在 fields 字段中）进行断言
+        // 如果你采用了 fields: limitedData 封装：
+        if (payload.fields) {
+            const fieldsCount = Object.keys(payload.fields).length;
+            expect(fieldsCount).toBeLessThanOrEqual(201); // 200个字段 + 1个 _truncated
+            expect(payload.fields._truncated).toBe(true);
+        } else {
+            // 如果你仍然使用展开运算符 ...limitedData
+            const rootKeysCount = Object.keys(payload).length;
+            expect(rootKeysCount).toBeLessThanOrEqual(210); // 基础字段 + 200限制
+        }
+    });
+
+    test('should handle nested Error objects without losing critical info', async () => {
+        const complexData = {
+            error: new Error('inner error'),
+            meta: { reason: 'testing' }
+        };
+
+        await logger.error('complex data test', complexData);
+        await jest.runAllTimersAsync();
+
+        expect(mockIngest).toHaveBeenCalled();
+        const payload = mockIngest.mock.calls[0][1][0];
+
+        // 兼容性检查：如果是 fields 模式
+        const dataContainer = payload.fields || payload;
+        
+        expect(dataContainer.error).toHaveProperty('stack');
+        expect(dataContainer.meta.reason).toBe('testing');
+    });
+  });
+
 });
