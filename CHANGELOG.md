@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.5.7](https://github.com/YoungSx/drive-collector-js/compare/v4.5.6...v4.5.7) (2026-01-03)
+
+
+### 🐛 问题修复
+
+* enables concurrent restart prevention test ([84a24e2](https://github.com/YoungSx/drive-collector-js/commit/84a24e229037e0e3df758a160b85ea2e9aba2b5c))
+* improve CacheService reliability and fix race conditions ([2dfb12d](https://github.com/YoungSx/drive-collector-js/commit/2dfb12d9f00a896f20447d47b5dd1ee8fd011bc8))
+* improves failover mechanism and error handling for Upstash integration ([35ebe8f](https://github.com/YoungSx/drive-collector-js/commit/35ebe8fc56088c26113b3db3abfe04e545373c71))
+* improves instance unregistration error handling ([0f72b85](https://github.com/YoungSx/drive-collector-js/commit/0f72b85f182629a62f711db2dabc035387c878ff))
+* Redis connection management and event handling ([ad78d68](https://github.com/YoungSx/drive-collector-js/commit/ad78d68ef3412a8f1f2f24a71399401345ca642e))
+
 ### [4.5.6](https://github.com/YoungSx/drive-collector-js/compare/v4.5.5...v4.5.6) (2026-01-03)
 
 
