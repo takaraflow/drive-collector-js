@@ -121,6 +121,94 @@ const initAxiom = async () => {
   }
 };
 
+/**
+ * 限制对象字段数量，防止超过 Axiom 的列数限制
+ * @param {Object} obj - 要限制的对象
+ * @param {number} maxFields - 最大字段数，默认 200（留出安全余量）
+ * @returns {Object} - 限制后的对象
+ */
+const limitFields = (obj, maxFields = 200) => {
+  if (!obj || typeof obj !== 'object') return obj;
+  
+  const result = {};
+  let count = 0;
+  
+  for (const key in obj) {
+    if (count >= maxFields) {
+      // 添加一个标记表示字段被截断
+      result._truncated = true;
+      break;
+    }
+    
+    if (obj.hasOwnProperty(key)) {
+      result[key] = obj[key];
+      count++;
+    }
+  }
+  
+  return result;
+};
+
+/**
+ * 安全地检查和获取数据集名称
+ * @returns {string} - 数据集名称
+ */
+const getSafeDatasetName = () => {
+  // 优先使用环境变量
+  if (process.env.AXIOM_DATASET) {
+    return process.env.AXIOM_DATASET;
+  }
+  
+  // 其次使用 config 中的值
+  if (config && config.axiom && config.axiom.dataset) {
+    return config.axiom.dataset;
+  }
+  
+  // 最后使用默认值
+  return 'drive-collector';
+};
+
+/**
+ * 安全的 Axiom ingest 调用，包含错误处理和响应验证
+ * @param {string} dataset - 数据集名称
+ * @param {Array} payload - 要发送的数据
+ * @returns {Promise<boolean>} - 是否成功
+ */
+const safeAxiomIngest = async (dataset, payload) => {
+  if (!axiom || !dataset) {
+    return false;
+  }
+
+  try {
+    const result = await axiom.ingest(dataset, payload);
+    
+    // 验证响应：Axiom ingest 通常返回 undefined 或成功响应
+    // 如果返回了响应对象，检查是否有错误字段
+    if (result && typeof result === 'object') {
+      if (result.error || result.status === 'error') {
+        throw new Error(result.error || 'Axiom ingest returned error status');
+      }
+    }
+    
+    return true;
+  } catch (error) {
+    // 检查是否是 JSON 解析错误
+    if (error instanceof SyntaxError && error.message.includes('JSON')) {
+      // JSON 解析错误，可能是空响应或非 JSON 响应
+      // 这种情况下我们认为是网络问题，应该重试
+      throw new Error(`Axiom JSON parsing failed: ${error.message}`);
+    }
+    
+    // 检查是否是字段超限错误
+    if (error.message && error.message.includes('column limit')) {
+      throw new Error(`Axiom column limit exceeded: ${error.message}`);
+    }
+    
+    // 其他错误直接抛出
+    throw error;
+  }
+};
+
 const serializeError = (err) => {
   if (!(err instanceof Error)) return err;
   const serialized = {
@@ -172,12 +260,16 @@ const log = async (instanceId, level, message, data = {}) => {
     return;
   }
 
+  // 序列化数据并限制字段数量
+  const serializedData = serializeData(data);
+  const limitedData = limitFields(serializedData);
+  
   const payload = {
     version,
     instanceId,
     level,
     message: displayMessage,
-    ...serializeData(data),
+    ...limitedData,
     timestamp: new Date().toISOString(),
     // 在Cloudflare Worker环境下获取一些额外信息
     worker: {
@@ -186,13 +278,21 @@ const log = async (instanceId, level, message, data = {}) => {
     }
   };
 
+  // 再次限制总字段数，确保不超过限制
+  const finalPayload = limitFields(payload, 200);
+
   try {
-    await axiom.ingest(config.axiom.dataset, [payload]);
+    const dataset = getSafeDatasetName();
+    await safeAxiomIngest(dataset, [finalPayload]);
   } catch (err) {
     // Retry logic with exponential backoff (max 3 attempts)
     // 使用 retryWithDelay 以便测试中可以 mock
     await retryWithDelay(async () => {
-      await axiom.ingest(config.axiom.dataset, [payload]);
+      const dataset = getSafeDatasetName(); // 每次重试都重新获取数据集名称
+      if (!dataset || !axiom) {
+        throw new Error('Axiom not properly configured for retry');
+      }
+      await safeAxiomIngest(dataset, [finalPayload]);
     }, 3, (attempt) => Math.pow(2, attempt) * 1000).catch((lastError) => {
       // Fallback: log to console only (avoid recursive calls)
       // Use original console.error to avoid proxy recursion
@@ -200,7 +300,7 @@ const log = async (instanceId, level, message, data = {}) => {
       originalConsoleError.call(console, 'Failed payload:', {
         service: data.service || 'unknown',
         error: serializeError(lastError),
-        payload: payload
+        payload: finalPayload
       });
     });
   }
