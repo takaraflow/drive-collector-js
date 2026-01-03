@@ -49,7 +49,7 @@ export class CacheService {
         this.accountId = cf_accountId;
         this.namespaceId = cf_namespaceId;
         this.token = cf_token;
-        this.apiUrl = this.hasCloudflare 
+        this.apiUrl = this.hasCloudflare
             ? `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/storage/kv/namespaces/${this.namespaceId}`
             : '';
 
@@ -70,6 +70,11 @@ export class CacheService {
         this.redisInitPromise = null; // 追踪初始化 Promise
         this.isRedisInitializing = false; // 明确的状态标志
         this.heartbeatTimer = null; // 心跳定时器
+
+        // 关键修复：绑定 this 上下文，防止异步回调中丢失
+        this._handleAuthFailure = this._handleAuthFailure.bind(this);
+        this._stopHeartbeat = this._stopHeartbeat.bind(this);
+        this._restartRedisClient = this._restartRedisClient.bind(this);
 
         // 1. 先设置提供商优先级
         this._setDefaultProvider();
