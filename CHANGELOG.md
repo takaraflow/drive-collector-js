@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.5.6](https://github.com/YoungSx/drive-collector-js/compare/v4.5.5...v4.5.6) (2026-01-03)
+
+
+### 🔧 其他任务
+
+* add d1 disgnostic scripts ([d12dad2](https://github.com/YoungSx/drive-collector-js/commit/d12dad25987a96d2a6b93055a92bc1032710f643))
+
+
+### 🐛 问题修复
+
+* context binding for async callbacks in CacheService ([f0878c3](https://github.com/YoungSx/drive-collector-js/commit/f0878c3f08d6fc073c3c966268ba7e52c9c549c1))
+* improves Redis recovery test stability and adds heartbeat stop method ([4c2065e](https://github.com/YoungSx/drive-collector-js/commit/4c2065e986b2add766447fb70ec3932d53f4dd5e))
+* improves test cleanup and logger initialization robustness ([39365fb](https://github.com/YoungSx/drive-collector-js/commit/39365fbfc1bb184ce4f4eacda7335628902fe6ac))
+* resolve test timeouts in rclone.test.js by adjusting event timing with Jest fake timers ([1d02ba5](https://github.com/YoungSx/drive-collector-js/commit/1d02ba5ad01751f16b01402c5959c7197fe93d6f))
+* **services/d1:** remove incorrect KV token fallback ([9f12366](https://github.com/YoungSx/drive-collector-js/commit/9f123669788f9a83029c48ba6548c208460a21cd))
+* **tests:** resolve limiter.test.js timeout via timer mocks and advancement ([1a20b78](https://github.com/YoungSx/drive-collector-js/commit/1a20b78a26d92d8592daab32156ebbd7e60b458a))
+
 ### [4.5.5](https://github.com/YoungSx/drive-collector-js/compare/v4.5.4...v4.5.5) (2026-01-02)
 
 
