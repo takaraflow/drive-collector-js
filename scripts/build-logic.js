@@ -116,8 +116,9 @@ function extractVariablesFromManifest() {
     
     // 清理可能误传为占位符字符串的变量，并设置默认值
     for (const varName of allVars) {
-        // 如果变量值等于其占位符形式，则清空该变量
-        if (!process.env[varName] || process.env[varName] === `\${${varName}}`) {
+        // 仅当环境变量的值明确等于其占位符形式 (e.g., VAR="${VAR}") 时，才删除它
+        // 这样可以避免意外删除由外部环境（如 Infisical 或 GHA secrets）注入的、值为空字符串的变量
+        if (process.env[varName] === `\${${varName}}`) {
             delete process.env[varName];
         }
         
@@ -125,12 +126,14 @@ function extractVariablesFromManifest() {
         const defaultValue = envConfig[varName]?.default || '';
         
         // 优先级：环境变量 > Manifest 默认值 > 空字符串
-        if (!process.env[varName] && defaultValue) {
+        // 只有当环境变量不存在时才设置默认值
+        if (process.env[varName] === undefined && defaultValue) {
             process.env[varName] = defaultValue;
         }
     }
     
     // 特殊默认值设置
+    // ... (后续代码)
     // 从 package.json 提取 name 作为 WORKER_NAME 的默认值
     const pkgPath = path.join(projectRoot, 'package.json');
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
