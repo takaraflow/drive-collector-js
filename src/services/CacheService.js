@@ -15,29 +15,6 @@ export class CacheService {
 
         // 为了在 constructor 中安全检查提供商配置，先提取配置变量
         const redisConfig = config.redis || {};
-        const cf_accountId = process.env.CF_CACHE_ACCOUNT_ID || process.env.CF_KV_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
-        const cf_namespaceId = process.env.CF_CACHE_NAMESPACE_ID || process.env.CF_KV_NAMESPACE_ID;
-        const cf_token = process.env.CF_CACHE_TOKEN || process.env.CF_KV_TOKEN; // 修复：移除 CF_D1_TOKEN（D1 token 非 KV token），避免误判 hasCloudflare
-        const up_url = process.env.UPSTASH_REDIS_REST_URL ? process.env.UPSTASH_REDIS_REST_URL.replace(/\/$/, '') : '';
-        const up_token = process.env.UPSTASH_REDIS_REST_TOKEN;
-
-        // 设置配置检测属性
-        this.hasRedis = !!((redisConfig.url && redisConfig.url.trim() !== '') || (redisConfig.host && redisConfig.host.trim() !== '' && redisConfig.host !== '127.0.0.1' && redisConfig.host !== 'localhost'));
-        this.hasCloudflare = !!(cf_accountId && cf_accountId.trim() !== '' && cf_namespaceId && cf_namespaceId.trim() !== '' && cf_token && cf_token.trim() !== '');
-        this.hasUpstash = !!(up_url && up_url.trim() !== '' && up_token && up_token.trim() !== '');
-
-        // 特殊处理测试环境：如果正在运行测试，且显式删除了环境变量，则强制为 false
-        if (process.env.JEST_WORKER_ID || process.env.NODE_ENV === 'test') {
-            if (!process.env.NF_REDIS_URL && !process.env.NF_REDIS_HOST && !process.env.REDIS_URL && !process.env.REDIS_HOST) {
-                this.hasRedis = false;
-            }
-            if (!process.env.CF_CACHE_ACCOUNT_ID && !process.env.CF_KV_ACCOUNT_ID && !process.env.CF_ACCOUNT_ID) {
-                this.hasCloudflare = false;
-            }
-            if (!process.env.UPSTASH_REDIS_REST_URL) {
-                this.hasUpstash = false;
-            }
-        }
 
         // Redis 配置赋值
         this.redisUrl = redisConfig.url;
@@ -46,16 +23,17 @@ export class CacheService {
         this.redisPassword = redisConfig.password;
 
         // Cloudflare KV 配置赋值
-        this.accountId = cf_accountId;
-        this.namespaceId = cf_namespaceId;
-        this.token = cf_token;
-        this.apiUrl = this.hasCloudflare
-            ? `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/storage/kv/namespaces/${this.namespaceId}`
+        this.cfAccountId = process.env.CF_CACHE_ACCOUNT_ID || process.env.CF_KV_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
+        this.cfNamespaceId = process.env.CF_CACHE_NAMESPACE_ID || process.env.CF_KV_NAMESPACE_ID;
+        this.cfCachetoken = process.env.CF_CACHE_TOKEN || process.env.CF_KV_TOKEN;
+        const hasCfConfig = !!(this.cfAccountId && this.cfNamespaceId && this.cfCachetoken);
+        this.apiUrl = hasCfConfig
+            ? `https://api.cloudflare.com/client/v4/accounts/${this.cfAccountId}/storage/kv/namespaces/${this.cfNamespaceId}`
             : '';
 
         // Upstash 备用配置赋值
-        this.upstashUrl = up_url;
-        this.upstashToken = up_token;
+        this.upstashUrl = process.env.UPSTASH_REDIS_REST_URL ? process.env.UPSTASH_REDIS_REST_URL.replace(/\/$/, '') : '';
+        this.upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN;
 
         // 故障转移状态
         this.currentProvider = 'cloudflare'; // 默认值
@@ -94,9 +72,9 @@ export class CacheService {
             hasCloudflare: this.hasCloudflare,
             hasUpstash: this.hasUpstash,
             currentProvider: this.currentProvider,
-            cf_accountId_exists: !!this.accountId,
-            cf_namespaceId_exists: !!this.namespaceId,
-            cf_token_exists: !!this.token,
+            cf_accountId_exists: !!this.cfAccountId,
+            cf_namespaceId_exists: !!this.cfNamespaceId,
+            cf_token_exists: !!this.cfCachetoken,
             apiUrl_set: !!this.apiUrl,
             redisUrl_exists: !!this.redisUrl,
             redisHost_exists: !!this.redisHost,
@@ -438,6 +416,29 @@ export class CacheService {
         })();
 
         return this.redisInitPromise;
+    }
+
+    get providerName() {
+        return this.currentProvider;
+    }
+
+    get hasRedis() {
+        const redisConfig = config.redis || {};
+        const envUrl = process.env.NF_REDIS_URL || process.env.REDIS_URL;
+        return !!(envUrl || (redisConfig.host && redisConfig.host !== '127.0.0.1' && redisConfig.host !== 'localhost'));
+    }
+
+    get hasCloudflare() {
+        const cf_accountId = process.env.CF_CACHE_ACCOUNT_ID || process.env.CF_KV_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
+        const cf_namespaceId = process.env.CF_CACHE_NAMESPACE_ID || process.env.CF_KV_NAMESPACE_ID;
+        const cf_token = process.env.CF_CACHE_TOKEN || process.env.CF_KV_TOKEN;
+        return !!(cf_accountId && cf_namespaceId && cf_token);
+    }
+
+    get hasUpstash() {
+        const up_url = process.env.UPSTASH_REDIS_REST_URL ? process.env.UPSTASH_REDIS_REST_URL.replace(/\/$/, '') : '';
+        const up_token = process.env.UPSTASH_REDIS_REST_TOKEN;
+        return !!(up_url && up_url.trim() !== '' && up_token && up_token.trim() !== '');
     }
 
     /**
@@ -865,6 +866,7 @@ export class CacheService {
         if (this.recoveryTimer) {
             clearInterval(this.recoveryTimer);
             this.recoveryTimer = null;
+            logger.info(`[${this.getCurrentProvider()}] 🛑 恢复检查定时器已停止`);
         }
     }
 
@@ -1012,16 +1014,35 @@ export class CacheService {
 
         // 1. Redis 客户端不可用 or 处于断开状态时的 Fallback
         if (this.currentProvider === 'redis') {
-            // 场景 1: 客户端为 null，但正在初始化/重启
+            // 1. 如果正在初始化，先抢救（等待）
             if (!this.redisClient && (this.isRedisInitializing || this.restarting)) {
                 logger.info(`[CacheService] ⏳ Redis 正在初始化/重启，请求等待中...`);
                 try {
-                    // 等待初始化完成，或者超时（例如 2000ms）
                     await this._waitForRedisInit(2000);
                 } catch (e) {
                     logger.warn(`[CacheService] ⚠️ 等待 Redis 初始化超时: ${e.message}`);
-                    // 超时后继续执行，将触发下方的 fallback 逻辑
                 }
+            }
+
+            // 2. 状态判定：必须确保 redisClient 存在
+            const isClientDead = !this.redisClient || 
+                                 (this.redisClient.status === 'end' || this.redisClient.status === 'close');
+            
+            if (isClientDead) {
+                logger.warn(`[${this.getCurrentProvider()}] Redis 客户端不可用(null或已关闭)，立即触发降级`);
+                return await this._fallbackToNextProvider(operation, ...args, { _depth: depth + 1 });
+            }
+
+            // 3. 执行
+            try {
+                return await this[`_redis_${operation}`](...args);
+            } catch (error) {
+                if (this._shouldFailover(error)) {
+                    if (this._failover()) {
+                        return await this._executeWithFailover(operation, ...args, { _depth: depth + 1 });
+                    }
+                }
+                throw error;
             }
 
             // 优化：不再对 close 或 end 立即降级，因为 ioredis 会尝试重连
@@ -1356,7 +1377,7 @@ export class CacheService {
             throw new Error('Cloudflare KV API URL not configured. Please check CF_CACHE_ACCOUNT_ID and CF_CACHE_NAMESPACE_ID.');
         }
 
-        if (!this.token) {
+        if (!this.cfCachetoken) {
             throw new Error('Cloudflare KV token not configured. Please check CF_CACHE_TOKEN.');
         }
 
@@ -1370,7 +1391,7 @@ export class CacheService {
         const response = await fetch(url.toString(), {
             method: "PUT",
             headers: {
-                "Authorization": `Bearer ${this.token}`,
+                "Authorization": `Bearer ${this.cfCachetoken}`,
                 "Content-Type": "application/json",
             },
             body: typeof value === "string" ? value : JSON.stringify(value),
@@ -1530,14 +1551,14 @@ export class CacheService {
             throw new Error('Cloudflare KV API URL not configured. Please check CF_CACHE_ACCOUNT_ID and CF_CACHE_NAMESPACE_ID.');
         }
         
-        if (!this.token) {
+        if (!this.cfCachetoken) {
             throw new Error('Cloudflare KV token not configured. Please check CF_CACHE_TOKEN.');
         }
         
         const response = await fetch(`${this.apiUrl}/values/${key}`, {
             method: "GET",
             headers: {
-                "Authorization": `Bearer ${this.token}`,
+                "Authorization": `Bearer ${this.cfCachetoken}`,
             },
         });
 
@@ -1650,14 +1671,14 @@ export class CacheService {
             throw new Error('Cloudflare KV API URL not configured. Please check CF_CACHE_ACCOUNT_ID and CF_CACHE_NAMESPACE_ID.');
         }
         
-        if (!this.token) {
+        if (!this.cfCachetoken) {
             throw new Error('Cloudflare KV token not configured. Please check CF_CACHE_TOKEN.');
         }
         
         const response = await fetch(`${this.apiUrl}/values/${key}`, {
             method: "DELETE",
             headers: {
-                "Authorization": `Bearer ${this.token}`,
+                "Authorization": `Bearer ${this.cfCachetoken}`,
             },
         });
 
@@ -1754,14 +1775,14 @@ export class CacheService {
             throw new Error('Cloudflare KV API URL not configured. Please check CF_CACHE_ACCOUNT_ID and CF_CACHE_NAMESPACE_ID.');
         }
         
-        if (!this.token) {
+        if (!this.cfCachetoken) {
             throw new Error('Cloudflare KV token not configured. Please check CF_CACHE_TOKEN.');
         }
         
         const response = await fetch(`${this.apiUrl}/bulk`, {
             method: "PUT",
             headers: {
-                "Authorization": `Bearer ${this.token}`,
+                "Authorization": `Bearer ${this.cfCachetoken}`,
                 "Content-Type": "application/json",
             },
             body: JSON.stringify(pairs.map(p => ({
@@ -1882,7 +1903,7 @@ export class CacheService {
             throw new Error('Cloudflare KV API URL not configured. Please check CF_CACHE_ACCOUNT_ID and CF_CACHE_NAMESPACE_ID.');
         }
         
-        if (!this.token) {
+        if (!this.cfCachetoken) {
             throw new Error('Cloudflare KV token not configured. Please check CF_CACHE_TOKEN.');
         }
         
@@ -1894,7 +1915,7 @@ export class CacheService {
         const response = await fetch(url.toString(), {
             method: "GET",
             headers: {
-                "Authorization": `Bearer ${this.token}`,
+                "Authorization": `Bearer ${this.cfCachetoken}`,
             },
         });
 
@@ -2198,7 +2219,7 @@ export class CacheService {
         if (this.heartbeatTimer) {
             clearInterval(this.heartbeatTimer);
             this.heartbeatTimer = null;
-            logger.info(`[${this.getCurrentProvider()}] 🛑 Redis 心跳机制已停止`);
+            logger.info(`[${this.getCurrentProvider()}] 🛑 Redis 心跳定时器已停止`);
         }
     }
 
