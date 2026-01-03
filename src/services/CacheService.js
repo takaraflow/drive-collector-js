@@ -423,7 +423,10 @@ export class CacheService {
                         // 即使 ping 失败，也启动心跳机制（延迟连接时有用）
                         this._startHeartbeat();
                     }
-                })();
+                })().catch(pingError => {
+                    // 捕获 IIFE 中的未处理错误，防止 unhandled promise rejection
+                    logger.error(`[${this.getCurrentProvider()}] 🚨 异步 ping 测试发生未预期错误: ${pingError.message}`);
+                });
 
                 this.isRedisInitializing = false;
             } catch (error) {
@@ -545,46 +548,51 @@ export class CacheService {
      * 处理认证失败 - 捕获 WRONGPASS 并触发故障转移
      */
     async _handleAuthFailure() {
-        // 防重触发：如果已经在处理中，直接返回
-        if (this._isHandlingAuthFailure) {
-            logger.debug(`[${this.getCurrentProvider()}] ℹ️ 认证失败处理已在进行中，跳过重复调用`);
-            return;
+        // 修复 Bug #4: 使用 Promise 缓存防止并发处理
+        if (this._authFailurePromise) {
+            logger.debug(`[${this.getCurrentProvider()}] ℹ️ 认证失败处理已在进行中，等待完成`);
+            return this._authFailurePromise;
         }
         
-        this._isHandlingAuthFailure = true;
-        
-        try {
-            logger.error(`[${this.getCurrentProvider()}] 🚨 检测到 Redis 认证失败，立即触发故障转移`);
-            
-            // 增加失败计数，确保触发故障转移
-            this.failureCount = Math.max(this.failureCount, 2);
-            this.lastError = 'Redis authentication failed (WRONGPASS)';
-            
-            // 立即清理当前客户端
-            if (this.redisClient) {
-                try {
-                    await this.redisClient.quit().catch(() => {});
-                } catch (e) {
-                    // 忽略 quit 错误
+        this._authFailurePromise = (async () => {
+            try {
+                logger.error(`[${this.getCurrentProvider()}] 🚨 检测到 Redis 认证失败，立即触发故障转移`);
+                
+                // 增加失败计数，确保触发故障转移
+                this.failureCount = Math.max(this.failureCount, 2);
+                this.lastError = 'Redis authentication failed (WRONGPASS)';
+                
+                // 立即清理当前客户端
+                if (this.redisClient) {
+                    try {
+                        await this.redisClient.quit().catch(() => {});
+                    } catch (e) {
+                        // 忽略 quit 错误
+                    }
+                    this.redisClient.removeAllListeners();
+                    this.redisClient = null;
                 }
-                this.redisClient.removeAllListeners();
-                this.redisClient = null;
+                
+                // 修复 Bug #1: 重置监听器绑定标志
+                this._redisListenersBound = false;
+                
+                // 停止心跳
+                if (typeof this.stopHeartbeat === 'function') {
+                    this.stopHeartbeat();
+                }
+                
+                // 触发故障转移
+                if (this._failover()) {
+                    logger.info(`[${this.getCurrentProvider()}] ✅ 已从认证失败的 Redis 故障转移到 ${this.getCurrentProvider()}`);
+                } else {
+                    logger.warn(`[${this.getCurrentProvider()}] ⚠️ 无可用后备提供商，将使用本地缓存`);
+                }
+            } finally {
+                this._authFailurePromise = null;
             }
-            
-            // 停止心跳
-            if (typeof this.stopHeartbeat === 'function') {
-                this.stopHeartbeat();
-            }
-            
-            // 触发故障转移
-            if (this._failover()) {
-                logger.info(`[${this.getCurrentProvider()}] ✅ 已从认证失败的 Redis 故障转移到 ${this.getCurrentProvider()}`);
-            } else {
-                logger.warn(`[${this.getCurrentProvider()}] ⚠️ 无可用后备提供商，将使用本地缓存`);
-            }
-        } finally {
-            this._isHandlingAuthFailure = false;
-        }
+        })();
+        
+        return this._authFailurePromise;
     }
 
     /**
@@ -610,6 +618,9 @@ export class CacheService {
                 this.redisClient.removeAllListeners();
                 this.redisClient = null;
             }
+            
+            // 修复 Bug #1: 重置监听器绑定标志
+            this._redisListenersBound = false;
             
             // 停止心跳
             if (typeof this.stopHeartbeat === 'function') {
@@ -654,6 +665,11 @@ export class CacheService {
         // 轮询检查 client 是否 ready (处理 restartDelay 期间没有 promise 的情况)
         // 修复：不仅检查 client 是否存在，还要检查其状态是否为 'ready'
         while ((Date.now() - startTime < timeoutMs)) {
+            // 修复 Bug #6: 检查 isRedisInitializing 状态，如果初始化已完成但客户端仍未就绪，立即退出
+            if (!this.isRedisInitializing && (!this.redisClient || this.redisClient.status !== 'ready')) {
+                throw new Error(`Redis initialization completed but client not ready. Status: ${this.redisClient ? this.redisClient.status : 'null'}`);
+            }
+            
             if (this.redisClient && this.redisClient.status === 'ready') {
                 return; // 成功达到 ready 状态
             }
@@ -915,6 +931,11 @@ export class CacheService {
                 }
             }
         }, checkInterval);
+        
+        // 避免阻止进程退出
+        if (this.recoveryTimer && typeof this.recoveryTimer.unref === 'function') {
+            this.recoveryTimer.unref();
+        }
     }
 
     /**
@@ -975,9 +996,16 @@ export class CacheService {
 
     /**
      * 执行操作并支持故障转移
+     * @param {string} operation
+     * @param {number} depth - 递归深度，防止无限循环 (Bug #2)
+     * @param {any[]} args
      */
-    async _executeWithFailover(operation, ...args) {
-        // 1. Redis 客户端不可用或处于断开状态时的 Fallback
+    async _executeWithFailover(operation, depth = 0, ...args) {
+        if (depth > 5) {
+            throw new Error(`[CacheService] Max failover depth reached for ${operation}`);
+        }
+
+        // 1. Redis 客户端不可用 or 处于断开状态时的 Fallback
         if (this.currentProvider === 'redis') {
             // 场景 1: 客户端为 null，但正在初始化/重启
             if (!this.redisClient && (this.isRedisInitializing || this.restarting)) {
@@ -995,23 +1023,24 @@ export class CacheService {
             // 只有当 redisClient 为 null 时（未初始化）才降级
             if (!this.redisClient) {
                 logger.warn(`[${this.getCurrentProvider()}] Redis client is null, fallback immediately`);
-                return await this._fallbackToNextProvider(operation, ...args);
+                return await this._fallbackToNextProvider(operation, depth + 1, ...args);
             }
             
             // 如果处于 reconnecting 状态，我们继续尝试执行，让 ioredis 的队列机制处理
             // 但如果 status 是 end，说明已经彻底放弃重连，需要 fallback
             if (this.redisClient.status === 'end') {
                 logger.warn(`[${this.getCurrentProvider()}] Redis client status is end, fallback immediately`);
-                return await this._fallbackToNextProvider(operation, ...args);
+                return await this._fallbackToNextProvider(operation, depth + 1, ...args);
             }
         }
 
-        // 2. 主动健康检查 (仅对 Redis)
-        if (this.currentProvider === 'redis' && this.redisClient?.status === 'ready') {
+        // 2. 主动健康检查 (仅对 Redis) - 修复 Bug #11: 在 fallback 后跳过健康检查
+        // 如果当前 provider 不是 redis，或者正在故障转移过程中，跳过健康检查
+        if (this.currentProvider === 'redis' && this.redisClient?.status === 'ready' && depth === 0) {
             const isHealthy = await this._validateRedisConnection();
             if (!isHealthy) {
                 logger.warn(`[${this.getCurrentProvider()}] ⚠️ Redis 健康检查失败，主动触发 failover`);
-                return await this._fallbackToNextProvider(operation, ...args);
+                return await this._fallbackToNextProvider(operation, depth + 1, ...args);
             }
         }
 
@@ -2221,6 +2250,11 @@ export class CacheService {
                 }
             }
         }, heartbeatInterval);
+        
+        // 避免阻止进程退出
+        if (this.heartbeatTimer && typeof this.heartbeatTimer.unref === 'function') {
+            this.heartbeatTimer.unref();
+        }
     }
 
     /**
@@ -2320,22 +2354,26 @@ export class CacheService {
                 // 不立即拒绝，继续等待
             };
 
-            const cleanup = () => {
-                clearTimeout(timeoutId);
-                if (this.redisClient) {
-                    this.redisClient.removeListener('ready', readyHandler);
-                    this.redisClient.removeListener('error', errorHandler);
-                }
+            // 修复 Bug #8: 将 connect 回调存储为命名函数，以便在 cleanup 中移除
+            const connectHandler = () => {
+                logger.debug(`[${this.getCurrentProvider()}] 🔄 waitForReady: Redis 已连接，等待 ready...`);
             };
 
             // 监听 ready 事件
             this.redisClient.on('ready', readyHandler);
             this.redisClient.on('error', errorHandler);
-
             // 也监听 connect 事件，因为 ready 会在 connect 之后触发
-            this.redisClient.on('connect', () => {
-                logger.debug(`[${this.getCurrentProvider()}] 🔄 waitForReady: Redis 已连接，等待 ready...`);
-            });
+            this.redisClient.on('connect', connectHandler);
+
+            // 修复 cleanup 函数，移除所有监听器
+            const cleanup = () => {
+                clearTimeout(timeoutId);
+                if (this.redisClient) {
+                    this.redisClient.removeListener('ready', readyHandler);
+                    this.redisClient.removeListener('error', errorHandler);
+                    this.redisClient.removeListener('connect', connectHandler);
+                }
+            };
         });
     }
 
