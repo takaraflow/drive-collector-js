@@ -86,8 +86,8 @@ export function generateWranglerCommand(env = process.env) {
       // 只有当值存在且不为空时才添加
       if (value !== undefined && value !== '') {
         // 使用双引号包裹值，处理特殊字符
-        const escapedValue = String(value).replace(/'/g, "''");
-        vars.push(`--var ${key}:'${escapedValue}'`);
+        const escapedValue = String(value).replace(/"/g, '\\"');
+        vars.push(`--var ${key}:"${escapedValue}"`);
       }
     }
 
