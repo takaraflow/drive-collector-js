@@ -11,7 +11,7 @@ function redactSensitiveInfo(str) {
     
     // 脱敏常见的敏感信息模式
     const patterns = [
-        // API Keys/Vars (处理 --var key=value 格式)
+        // API Keys/Vars (处理 --var key="value" 或 --var key=value 格式)
         { regex: /(--var\s+[^=]+=)([^ ]+)/g, replacement: (match, prefix, value) => `${prefix}***REDACTED***` },
         // 环境变量值 (引号内的内容)
         { regex: /(export\s+\w+=)"([^"]{10,})"/g, replacement: (match, prefix, value) => `${prefix}"***REDACTED***"` },
@@ -84,7 +84,7 @@ export function generateWranglerCommand(env = process.env) {
       // 只有当值存在且不为空时才添加
       if (value !== undefined && value !== '') {
         const escapedValue = String(value).replace(/"/g, '\\"');
-        vars.push(`--var`, `${key}=${escapedValue}`);
+        vars.push(`--var`, `${key}="${escapedValue}"`);
       }
     }
 
