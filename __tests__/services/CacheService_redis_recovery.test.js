@@ -273,7 +273,9 @@ describe('Redis Recovery and Heartbeat Enhancements', () => {
 
     describe('Enhanced event handlers', () => {
         test('should trigger restart on "end" event', async () => {
-            const restartSpy = jest.spyOn(cache, '_restartRedisClient').mockResolvedValue();
+            // Use direct property override instead of jest.spyOn to avoid `this` binding issues
+            const mockRestart = jest.fn().mockResolvedValue();
+            cache._restartRedisClient = mockRestart;
             
             // Find the 'end' handler
             const endCall = mockClient.on.mock.calls.find(call => call[0] === 'end');
@@ -290,7 +292,7 @@ describe('Redis Recovery and Heartbeat Enhancements', () => {
                    // If real timers, we wait
                    await new Promise(r => setTimeout(r, 1100));
                 }
-                expect(restartSpy).toHaveBeenCalled();
+                expect(mockRestart).toHaveBeenCalled();
             }
         });
 
@@ -312,7 +314,9 @@ describe('Redis Recovery and Heartbeat Enhancements', () => {
 
     describe('Enhanced heartbeat logic', () => {
         test('should detect "end" state and trigger restart', async () => {
-            const restartSpy = jest.spyOn(cache, '_restartRedisClient').mockResolvedValue();
+            // Use direct property override instead of jest.spyOn
+            const mockRestart = jest.fn().mockResolvedValue();
+            cache._restartRedisClient = mockRestart;
             
             // Manually trigger heartbeat logic without using _startHeartbeat
             // since it's disabled in test environment
@@ -324,7 +328,7 @@ describe('Redis Recovery and Heartbeat Enhancements', () => {
                 await cache._restartRedisClient();
             }
             
-            expect(restartSpy).toHaveBeenCalled();
+            expect(mockRestart).toHaveBeenCalled();
         });
 
         test('should track consecutive failures and log diagnostics', async () => {
@@ -377,7 +381,9 @@ describe('Redis Recovery and Heartbeat Enhancements', () => {
             cache.failoverEnabled = true;
             cache.hasCloudflare = true;
             
-            const mockCloudflareSet = jest.spyOn(cache, '_cloudflare_set').mockResolvedValue(true);
+            // Use direct property override
+            const mockCloudflareSet = jest.fn().mockResolvedValue(true);
+            cache._cloudflare_set = mockCloudflareSet;
             
             const result = await cache.set('test', 'value');
             
@@ -390,12 +396,16 @@ describe('Redis Recovery and Heartbeat Enhancements', () => {
         test('should maintain operation during recovery', async () => {
             cache.currentProvider = 'redis';
             cache.hasCloudflare = true;
-            jest.spyOn(cache, '_cloudflare_set').mockResolvedValue(true);
+            
+            // Use direct property override
+            const mockCloudflareSet = jest.fn().mockResolvedValue(true);
+            cache._cloudflare_set = mockCloudflareSet;
             
             mockClient.status = 'end';
             
             const result = await cache.set('test', 'value');
             
+            expect(mockCloudflareSet).toHaveBeenCalled();
             expect(result).toBe(true);
             expect(cache.currentProvider).toBe('cloudflare');
         });

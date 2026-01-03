@@ -2281,6 +2281,17 @@ export class CacheService {
             });
         });
     }
+
+    /**
+     * 停止心跳 - 内部方法（已绑定 this）
+     */
+    _stopHeartbeat() {
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+            logger.info(`[${this.getCurrentProvider()}] 🛑 Redis 心跳机制已停止`);
+        }
+    }
 }
 
 export const cache = new CacheService();
