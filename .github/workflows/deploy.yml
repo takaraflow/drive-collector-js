@@ -12,9 +12,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: Actions
-    env:
-      BARK_WEBHOOK_URL: ${{ secrets.BARK_WEBHOOK_URL }}
-      BARK_DEVICE_TOKEN: ${{ secrets.BARK_DEVICE_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,17 +28,36 @@ jobs:
       - name: Install build tools
         run: npm install --no-save esbuild wrangler
 
+      - name: Install Infisical CLI
+        run: |
+          curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | sudo -E bash
+          sudo apt-get update && sudo apt-get install -y infisical
+
+      - name: Fetch secrets via Infisical CLI
+        env:
+          INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
+        run: |
+          # Determine environment based on branch
+          # main -> prod, develop -> dev, others -> staging
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            INFISICAL_ENV="prod"
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            INFISICAL_ENV="dev"
+          else
+            INFISICAL_ENV="staging"
+          fi
+          
+          echo "Fetching secrets for environment: $INFISICAL_ENV"
+          
+          # Export secrets to GITHUB_ENV
+          # We use the project ID from GitHub Variables.
+          infisical export --env="$INFISICAL_ENV" --projectId="${{ vars.INFISICAL_PROJECT_ID }}" --format=dotenv >> $GITHUB_ENV
+
       - name: Validate Manifest
         run: npm run validate:manifest
 
       - name: Deploy
-        env:
-          # 动态注入所有 Secrets 和 Vars (通过 JSON 字符串传递，避免手动列表)
-          GHA_SECRETS_JSON: ${{ toJson(secrets) }}
-          GHA_VARS_JSON: ${{ toJson(vars) }}
-          
-          # 核心必需环境变量 (Wrangler Auth 等)
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        # CLOUDFLARE_API_TOKEN is now fetched from Infisical and available in the environment
         run: npm run deploy
 
       - name: Notify Bark result
@@ -56,8 +72,14 @@ jobs:
           # Use printf to handle multiline content safely for JSON
           CONTENT="Workflow: ${{ github.workflow }}\nJob: ${{ github.job }}\nStatus: ${{ job.status }}\nCommit: ${{ github.sha }}"
           
+          # Check if Bark environment variables are available
+          if [ -z "$BARK_WEBHOOK_URL" ] || [ -z "$BARK_DEVICE_TOKEN" ]; then
+            echo "BARK_WEBHOOK_URL or BARK_DEVICE_TOKEN not set, skipping notification"
+            exit 0
+          fi
+          
           # Ensure BARK_WEBHOOK_URL ends with / if it's just the domain
-          BASE_URL="${{ env.BARK_WEBHOOK_URL }}"
+          BASE_URL="$BARK_WEBHOOK_URL"
           BASE_URL="${BASE_URL%/}"
           
           # Construct JSON body for Bark POST API
@@ -66,6 +88,6 @@ jobs:
             -d "{
               \"title\": \"$TITLE\",
               \"body\": \"$CONTENT\",
-              \"device_key\": \"${{ env.BARK_DEVICE_TOKEN }}\",
+              \"device_key\": \"$BARK_DEVICE_TOKEN\",
               \"group\": \"GHA\"
             }"
