@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.9.2](https://github.com/YoungSx/lb-worker-js/compare/v0.9.1...v0.9.2) (2026-01-03)
+
+
+### 🐛 Bug Fixes
+
+* improves environment variable handling logic ([37663bc](https://github.com/YoungSx/lb-worker-js/commit/37663bcfaa282063caa371fabec8dbe82e4d5c48))
+* improves environment variable parsing and security ([b1c8e38](https://github.com/YoungSx/lb-worker-js/commit/b1c8e386fc75b6de2e018918887213e79d0becae))
+
+
+### 📝 Documentation
+
+* removes deprecated R2 and legacy Redis configurations ([e849fde](https://github.com/YoungSx/lb-worker-js/commit/e849fde4109653fd58eeebcaae9a786247e863d7))
+
 ### [0.9.1](https://github.com/YoungSx/lb-worker-js/compare/v0.9.0...v0.9.1) (2026-01-03)
 
 
