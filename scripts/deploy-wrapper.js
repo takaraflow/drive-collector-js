@@ -73,7 +73,7 @@ function main() {
         }
         
         // 执行 wrangler 命令（脱敏后输出）
-        console.log('Executing:', redactSensitiveInfo(wranglerCmd));
+        console.log('Executing wrangler command...');
         execSync(wranglerCmd, { stdio: 'inherit' });
         
     } catch (error) {
