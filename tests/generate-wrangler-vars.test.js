@@ -91,11 +91,11 @@ describe('generate-wrangler-vars.js (Unit)', () => {
     expect(output).toContain('-c wrangler.toml');
     expect(output).toContain('--compatibility-flags="nodejs_compat"');
 
-    expect(output).toContain('--var NF_REDIS_PASSWORD=secret-password');
-    expect(output).toContain('--var AXIOM_TOKEN=axiom-secret');
-    expect(output).toContain('--var QSTASH_CURRENT_SIGNING_KEY=qstash-key');
-    expect(output).toContain('--var NF_REDIS_URL=https://vars.url');
-    expect(output).toContain('--var NODE_ENV=production');
+    expect(output).toContain('--var NF_REDIS_PASSWORD="secret-password"');
+    expect(output).toContain('--var AXIOM_TOKEN="axiom-secret"');
+    expect(output).toContain('--var QSTASH_CURRENT_SIGNING_KEY="qstash-key"');
+    expect(output).toContain('--var NF_REDIS_URL="https://vars.url"');
+    expect(output).toContain('--var NODE_ENV="production"');
   });
 
   test('should prioritize secrets over vars', () => {
@@ -108,7 +108,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
     };
 
     const output = generateWranglerCommand(mockEnv);
-    expect(output).toContain('--var AXIOM_TOKEN=secret-value');
+    expect(output).toContain('--var AXIOM_TOKEN="secret-value"');
   });
 
   test('should handle special characters in values', () => {
@@ -120,7 +120,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
     };
 
     const output = generateWranglerCommand(mockEnv);
-    expect(output).toContain('--var AXIOM_TOKEN=token\\"with\\"quotes');
+    expect(output).toContain('--var AXIOM_TOKEN="token\\"with\\"quotes"');
   });
 
 
