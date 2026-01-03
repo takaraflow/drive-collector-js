@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.7.1](https://github.com/YoungSx/drive-collector-js/compare/v4.7.0...v4.7.1) (2026-01-03)
+
+
+### 🐛 问题修复
+
+* improves error handling and data serialization in logger service ([49ff0ee](https://github.com/YoungSx/drive-collector-js/commit/49ff0ee9ccd24f99303da8b136f2593296780260))
+* improves rate limiting and recovery strategies ([60e400c](https://github.com/YoungSx/drive-collector-js/commit/60e400cd7c36d964a94924f374f25d4011743a6e))
+
 ## [4.7.0](https://github.com/YoungSx/drive-collector-js/compare/v4.6.1...v4.7.0) (2026-01-03)
 
 
