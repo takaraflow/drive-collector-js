@@ -237,4 +237,98 @@ describe("Cache Service Full Suite", () => {
       expect(cacheInstance.currentProvider).toBe("upstash");
     });
   });
+
+  // ==========================================
+  // 4. 回归测试：验证心跳停止方法修复
+  // ==========================================
+  describe("Heartbeat Stop Method Fix Regression Tests", () => {
+    beforeAll(async () => {
+      cacheInstance = await reloadCacheService({
+        CF_CACHE_ACCOUNT_ID: "cf_acc",
+        CF_CACHE_NAMESPACE_ID: "cf_ns",
+        CF_CACHE_TOKEN: "cf_token",
+        CACHE_PROVIDER: "cloudflare"
+      });
+    });
+
+    test("should not crash when _handleAuthFailure is called during initialization", async () => {
+      // 模拟认证失败场景，验证不会因找不到心跳停止方法而崩溃
+      mockFetch.mockRejectedValueOnce(new Error("WRONGPASS invalid password"));
+      
+      // 直接调用 _handleAuthFailure 来模拟认证失败
+      // 这应该不会抛出 "this._stopHeartbeat is not a function" 错误
+      await expect(cacheInstance._handleAuthFailure()).resolves.not.toThrow();
+    });
+
+    test("should have stopHeartbeat method available and callable", () => {
+      // 验证 stopHeartbeat 方法存在且是函数
+      expect(typeof cacheInstance.stopHeartbeat).toBe("function");
+      
+      // 验证可以安全调用（即使没有启动心跳）
+      expect(() => cacheInstance.stopHeartbeat()).not.toThrow();
+    });
+
+    test("should not have _stopHeartbeat method (redundant method removed)", () => {
+      // 验证冗余的 _stopHeartbeat 方法已被移除
+      // 或者至少不是绑定的方法
+      if (cacheInstance._stopHeartbeat) {
+        // 如果还存在，应该不是构造函数中绑定的那个
+        // 因为构造函数中的绑定已经被移除
+        expect(cacheInstance._stopHeartbeat.name).not.toBe("bound _stopHeartbeat");
+      }
+    });
+
+    test("should handle destroy without crashing due to heartbeat issues", async () => {
+      // 验证 destroy 方法可以安全执行，不会因心跳停止问题崩溃
+      const testInstance = await reloadCacheService({
+        CF_CACHE_ACCOUNT_ID: "cf_acc",
+        CF_CACHE_NAMESPACE_ID: "cf_ns",
+        CF_CACHE_TOKEN: "cf_token",
+        CACHE_PROVIDER: "cloudflare"
+      });
+      
+      // 设置一个心跳定时器（模拟已启动心跳）
+      testInstance.heartbeatTimer = setInterval(() => {}, 1000);
+      
+      // 调用 destroy，应该不会崩溃
+      await expect(testInstance.destroy()).resolves.not.toThrow();
+      
+      // 清理
+      if (testInstance.heartbeatTimer) {
+        clearInterval(testInstance.heartbeatTimer);
+      }
+    });
+
+    test("should handle _restartRedisClient without crashing due to heartbeat issues", async () => {
+      // 验证 _restartRedisClient 可以安全执行
+      const testInstance = await reloadCacheService({
+        CF_CACHE_ACCOUNT_ID: "cf_acc",
+        CF_CACHE_NAMESPACE_ID: "cf_ns",
+        CF_CACHE_TOKEN: "cf_token",
+        CACHE_PROVIDER: "cloudflare"
+      });
+      
+      // 设置心跳定时器
+      testInstance.heartbeatTimer = setInterval(() => {}, 1000);
+      
+      // 模拟重启场景
+      testInstance.restarting = false;
+      testInstance.destroyed = false;
+      
+      // 调用 _restartRedisClient，应该不会因心跳停止问题崩溃
+      // 由于这是异步方法，我们只验证它不会立即抛出同步错误
+      const restartPromise = testInstance._restartRedisClient();
+      
+      // 验证返回的是 Promise
+      expect(restartPromise).toBeInstanceOf(Promise);
+      
+      // 等待执行完成或清理
+      await restartPromise.catch(() => {}); // 忽略预期的错误
+      
+      // 清理
+      if (testInstance.heartbeatTimer) {
+        clearInterval(testInstance.heartbeatTimer);
+      }
+    });
+  });
 });

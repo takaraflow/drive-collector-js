@@ -73,7 +73,6 @@ export class CacheService {
 
         // 关键修复：绑定 this 上下文，防止异步回调中丢失
         this._handleAuthFailure = this._handleAuthFailure.bind(this);
-        this._stopHeartbeat = this._stopHeartbeat.bind(this);
         this._restartRedisClient = this._restartRedisClient.bind(this);
 
         // 1. 先设置提供商优先级
@@ -550,7 +549,9 @@ export class CacheService {
         }
         
         // 停止心跳
-        this._stopHeartbeat();
+        if (typeof this.stopHeartbeat === 'function') {
+            this.stopHeartbeat();
+        }
         
         // 触发故障转移
         if (this._failover()) {
@@ -585,7 +586,9 @@ export class CacheService {
             }
             
             // 停止心跳
-            this._stopHeartbeat();
+            if (typeof this.stopHeartbeat === 'function') {
+                this.stopHeartbeat();
+            }
             
             // 等待延迟（可配置）
             const restartDelay = parseInt(process.env.REDIS_RESTART_DELAY) || 5000;
@@ -2187,7 +2190,9 @@ export class CacheService {
         this.destroyed = true;
         logger.info(`[${this.getCurrentProvider()}] 🛑 正在销毁 CacheService 实例...`);
         
-        this._stopHeartbeat();
+        if (typeof this.stopHeartbeat === 'function') {
+            this.stopHeartbeat();
+        }
         this.stopRecoveryCheck();
 
         if (this.redisClient) {
@@ -2282,16 +2287,6 @@ export class CacheService {
         });
     }
 
-    /**
-     * 停止心跳 - 内部方法（已绑定 this）
-     */
-    _stopHeartbeat() {
-        if (this.heartbeatTimer) {
-            clearInterval(this.heartbeatTimer);
-            this.heartbeatTimer = null;
-            logger.info(`[${this.getCurrentProvider()}] 🛑 Redis 心跳机制已停止`);
-        }
-    }
 }
 
 export const cache = new CacheService();
