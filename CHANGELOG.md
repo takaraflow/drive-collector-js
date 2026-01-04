@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.10.1](https://github.com/YoungSx/lb-worker-js/compare/v0.10.0...v0.10.1) (2026-01-04)
+
+
+### ✨ Features
+
+* standardizes environment configuration and build process ([2ddb261](https://github.com/YoungSx/lb-worker-js/commit/2ddb261bb13088cfc3859f2a38c3178966173813))
+
+
+### ✅ Testing
+
+* improves environment variable handling and testing ([72460dc](https://github.com/YoungSx/lb-worker-js/commit/72460dce14469c3e26f597f1776a585cb04d5168))
+
 ## [0.10.0](https://github.com/YoungSx/lb-worker-js/compare/v0.9.3...v0.10.0) (2026-01-04)
 
 
