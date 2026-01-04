@@ -139,21 +139,43 @@ describe('Redis TCP Adaptation', () => {
   });
 
   describe('checkRedisHealth', () => {
-    test('should use _kv_get on a healthcheck key and succeed', async () => {
+    test('should use PING command for NF Redis and succeed', async () => {
+      const env = { NF_REDIS_URL: 'rediss://example.com:6380', NF_REDIS_PASSWORD: 'pass' };
+      const ctx = {};
+      
+      // Mock the PING command to return 'PONG'
+      __mockSend.mockResolvedValueOnce('PONG');
+      
+      const result = await checkRedisHealth(env, ctx);
+      expect(result).toBe(true);
+      expect(__mockSend).toHaveBeenCalledWith('PING');
+    });
+
+    test('should return false when PING fails', async () => {
+      const env = { NF_REDIS_URL: 'rediss://example.com:6380', NF_REDIS_PASSWORD: 'pass' };
+      const ctx = {};
+      
+      // Mock the PING command to fail
+      __mockSend.mockRejectedValueOnce(new Error('Connection failed'));
+      
+      // Mock the fallback executor to also fail
+      const mockExecutor = jest.fn().mockRejectedValue(new Error('Provider failed'));
+      
+      const result = await checkRedisHealth(env, ctx, mockExecutor);
+      expect(result).toBe(false);
+    });
+
+    test('should fallback to _kv_get when PING fails', async () => {
       const env = { NF_REDIS_URL: 'rediss://example.com:6380', NF_REDIS_PASSWORD: 'pass' };
       const ctx = {};
       const mockExecutor = jest.fn().mockResolvedValue(true);
+      
+      // Mock PING to fail, then fallback to executor
+      __mockSend.mockRejectedValueOnce(new Error('PING failed'));
+      
       const result = await checkRedisHealth(env, ctx, mockExecutor);
       expect(result).toBe(true);
       expect(mockExecutor).toHaveBeenCalledWith('_kv_get', env, ctx, 'healthcheck_ping');
-    });
-
-    test('should return false when executor fails', async () => {
-      const env = { NF_REDIS_URL: 'rediss://example.com:6380', NF_REDIS_PASSWORD: 'pass' };
-      const ctx = {};
-      const mockExecutor = jest.fn().mockRejectedValue(new Error('Provider failed'));
-      const result = await checkRedisHealth(env, ctx, mockExecutor);
-      expect(result).toBe(false);
     });
   });
 });

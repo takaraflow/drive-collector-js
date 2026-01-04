@@ -28,11 +28,11 @@
     "gha:list": "act --list",
     "gha:clean": "docker container prune -f --filter label=type=act",
     "gha:debug": "node scripts/deploy-wrapper.js",
-    "release": "npm test && standard-version",
-    "release:patch": "npm test && standard-version --release-as patch",
-    "release:minor": "npm test && standard-version --release-as minor",
-    "release:major": "npm test && standard-version --release-as major",
-    "release:ai": "npm test && node scripts/release-ai.js && npx standard-version --skip.changelog && node --input-type=module -e \"import { syncManifestVersion } from './scripts/release-ai.js'; syncManifestVersion()\"",
+    "release": "npm run validate:manifest && npm test && standard-version",
+    "release:patch": "npm run validate:manifest && npm test && standard-version --release-as patch",
+    "release:minor": "npm run validate:manifest && npm test && standard-version --release-as minor",
+    "release:major": "npm run validate:manifest && npm test && standard-version --release-as major",
+    "release:ai": "npm run validate:manifest && npm test && node scripts/release-ai.js && npx standard-version --skip.changelog && node --input-type=module -e \"import { syncManifestVersion } from './scripts/release-ai.js'; syncManifestVersion()\"",
     "postrelease": "git push --follow-tags origin main"
   },
   "keywords": [

@@ -433,12 +433,18 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx)
     } catch (error) {
       await fetchWithRetryLogger.error('转发请求失败', { instanceId: instance.id, error: error.message }, ctx);
       lastError = error;
+      // 新增：在每次请求失败时，也尝试取消之前保存的 5xx 响应体，防止泄漏
+      if (last5xxResponse && last5xxResponse.body) {
+        await last5xxResponse.body.cancel().catch(() => {});
+      }
     }
   }
 
   // 如果有 5xx 响应，返回最后一个 5xx 响应（new-features 测试期望）
   if (last5xxResponse) {
     await fetchWithRetryLogger.warn('所有实例均返回 5xx', { status: last5xxResponse.status }, ctx);
+    // 注意：这里不取消 last5xxResponse.body，因为需要返回给调用者
+    // 调用者负责在使用完响应后调用 cancel()
     return last5xxResponse;
   }
 
@@ -723,9 +729,27 @@ async function executeRedisScan(env, prefix, ctx = null) {
 async function checkRedisHealth(env, ctx, executor = executeWithPriorityFallback) {
   const checkRedisHealthLogger = logger.child({ module: 'checkRedisHealth' });
   try {
-    // 之前基于 TCP PING 的健康检查在 Cloudflare Workers 中不可行
-    // 改为尝试通过 executeWithPriorityFallback 读取一个预设的键，
-    // 这将使用可用的、基于 HTTP 的 provider (如 Upstash)
+    // 如果配置了 NF Redis，直接通过 PING 命令检查健康状况
+    if (env.NF_REDIS_URL && env.NF_REDIS_PASSWORD) {
+      try {
+        const client = await getRedisClient(env, ctx);
+        const start = Date.now();
+        const pong = await retryRedisCommand(client, 'PING', [], 1, 0, ctx); // 尝试 PING，不重试
+        const duration = Date.now() - start;
+        if (pong === 'PONG') {
+          await checkRedisHealthLogger.info(`NF Redis 健康检查成功 (通过 PING)`, { duration: `${duration}ms` }, ctx);
+          return true;
+        } else {
+          await checkRedisHealthLogger.warn(`NF Redis 健康检查失败 (PING 响应: ${pong})`, { duration: `${duration}ms` }, ctx);
+          return false;
+        }
+      } catch (pingError) {
+        await checkRedisHealthLogger.warn(`NF Redis PING 健康检查失败: ${pingError.message}`, {}, ctx);
+        // 如果直接 PING 失败，不立即返回 false，而是继续尝试通过 _kv_get 进行检查
+      }
+    }
+
+    // 回退：通过 executeWithPriorityFallback 读取一个预设的键，检查可用的、基于 HTTP 的 provider (如 Upstash)
     const start = Date.now();
     await executor('_kv_get', env, ctx, 'healthcheck_ping');
     const duration = Date.now() - start;
@@ -882,6 +906,9 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
 
   // 按优先级顺序尝试每个提供者
   let lastUsedProvider = null;
+  /** @type {Array<{ provider: string; error: string; errorCode: string; duration: number; }>} */
+  const failedProviders = []; // 新增：收集所有失败的提供者信息
+
   for (let i = 0; i < providers.length; i++) {
     const p = providers[i];
     if (!providerOps[p][operation]) continue;
@@ -889,16 +916,16 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
     const start = Date.now();
     const providerName = p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis';
     try {
-      await executeWithPriorityFallbackLogger.info(`尝试 ${p} ${operation} ${args[0] || ''}`, { 
-        cache: true, 
+      await executeWithPriorityFallbackLogger.info(`尝试 ${p} ${operation} ${args[0] || ''}`, {
+        cache: true,
         provider: providerName,
         providerType: p,
         priorityIndex: i
       }, ctx);
       const result = await providerOps[p][operation]();
       const duration = Date.now() - start;
-      await executeWithPriorityFallbackLogger.info(`使用 ${p} ${operation} 成功, duration=${duration}ms`, { 
-        cache: true, 
+      await executeWithPriorityFallbackLogger.info(`使用 ${p} ${operation} 成功, duration=${duration}ms`, {
+        cache: true,
         provider: providerName,
         actualProvider: p
       }, ctx);
@@ -913,19 +940,24 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         errorCode = 'quota_exceeded';
       }
 
+      // 新增：收集失败信息
+      failedProviders.push({ provider: p, error: e.message, errorCode, duration });
+
       const nextProvider = providers[i + 1];
       const providerName = p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis';
       if (nextProvider) {
-        await executeWithPriorityFallbackLogger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, fallback to ${nextProvider}`, { cache: true, provider: providerName }, ctx);
+        await executeWithPriorityFallbackLogger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, fallback to ${nextProvider}`, { cache: true, provider: providerName, failedProviders }, ctx);
       } else {
-        await executeWithPriorityFallbackLogger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, no more fallbacks`, { cache: true, provider: providerName }, ctx);
+        // 新增：在所有提供者失败时记录更详细的错误日志
+        await executeWithPriorityFallbackLogger.error(`所有提供者失败，操作 ${operation}，所有提供者尝试结果:`, { args: args.slice(0, 1), failedAttempts: failedProviders }, ctx);
+        throw new Error(`All providers failed for ${operation}`);
       }
       // 继续尝试下一个提供者
       continue;
     }
   }
 
-  // 所有提供者都失败
+  // 所有提供者都失败 (理论上不会执行到这里，因为上面的 catch 块会抛出错误)
   throw new Error(`All providers failed for ${operation}`);
 }
 
