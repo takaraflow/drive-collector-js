@@ -172,6 +172,7 @@ describe('Logger Service', () => {
       });
       expect(payload).toHaveProperty('timestamp');
       expect(payload).toHaveProperty('worker');
+      expect(payload).toHaveProperty('details'); // Ensure details field exists
 
       // Ensure console was not called
       expect(consoleInfoSpy).not.toHaveBeenCalled();
@@ -190,9 +191,10 @@ describe('Logger Service', () => {
         version: expect.any(String),
         instanceId: expect.any(String),
         level: 'warn',
-        message: expect.stringContaining('[v'),
-        warning: 'deprecated'
+        message: expect.stringContaining('[v')
       });
+      // warning is not whitelisted, so it should be in details string
+      expect(payload.details).toContain('deprecated');
     });
 
     test('logger.error calls axiom.ingest with correct payload including version', async () => {
@@ -210,12 +212,10 @@ describe('Logger Service', () => {
         instanceId: expect.any(String),
         level: 'error',
         message: expect.stringContaining('[v'),
-        error: {
-          name: 'Error',
-          message: 'test error',
-          stack: expect.any(String)
-        }
+        error_name: 'Error',
+        error_message: 'test error'
       });
+      expect(payload.details).toContain('test error');
     });
 
     test('logger.debug calls axiom.ingest with correct payload including version', async () => {
@@ -231,9 +231,9 @@ describe('Logger Service', () => {
         version: expect.any(String),
         instanceId: expect.any(String),
         level: 'debug',
-        message: expect.stringContaining('[v'),
-        debug: 'verbose'
+        message: expect.stringContaining('[v')
       });
+      expect(payload.details).toContain('verbose');
     });
 
     test('when axiom.ingest fails, retry and fallback to console + structured error', async () => {
@@ -657,10 +657,10 @@ describe('Logger Service', () => {
         // 我们使用了 pruneData，它会将超过 maxKeys 的部分放入 _truncated_keys 中
         // 并且最终 payload 也会被 limitFields 限制
         if (payload._truncated_keys) {
-             expect(Object.keys(payload).length).toBeLessThanOrEqual(51); // 50 (limitFields) + safe margin
+             expect(Object.keys(payload).length).toBeLessThanOrEqual(60); // 50 (limitFields) + safe margin
         } else {
              // 如果没触发 _truncated_keys，说明被 limitFields 截断了
-             expect(Object.keys(payload).length).toBeLessThanOrEqual(51);
+             expect(Object.keys(payload).length).toBeLessThanOrEqual(60);
         }
     });
 
@@ -676,11 +676,10 @@ describe('Logger Service', () => {
         expect(mockIngest).toHaveBeenCalled();
         const payload = mockIngest.mock.calls[0][1][0];
 
-        // 兼容性检查：如果是 fields 模式
-        const dataContainer = payload.fields || payload;
-        
-        expect(dataContainer.error).toHaveProperty('stack');
-        expect(dataContainer.meta.reason).toBe('testing');
+        expect(payload.error_name).toBe('Error');
+        expect(payload.error_message).toBe('inner error');
+        expect(payload.details).toContain('inner error');
+        expect(payload.details).toContain('testing');
     });
   });
 

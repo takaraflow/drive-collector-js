@@ -318,15 +318,14 @@ const log = async (instanceId, level, message, data = {}) => {
   }
 
   // 序列化数据并进行深度剪裁，防止字段爆炸
-  // 使用 pruneData 替代简单的 limitFields，可以处理嵌套对象
   const prunedData = pruneData(finalData, 3, 20);
   
+  // 构建基础 Payload，严格控制顶层字段
   const payload = {
     version,
     instanceId,
     level,
     message: displayMessage,
-    ...prunedData,
     timestamp: new Date().toISOString(),
     // 在Cloudflare Worker环境下获取一些额外信息
     worker: {
@@ -335,7 +334,34 @@ const log = async (instanceId, level, message, data = {}) => {
     }
   };
 
-  // 最后的安全网：限制顶层字段
+  // 提取常用索引字段 (White-list)，避免污染顶层 Schema
+  const INDEXED_KEYS = ['userId', 'chatId', 'taskId', 'service', 'action', 'source', 'duration'];
+  INDEXED_KEYS.forEach(key => {
+    if (finalData && finalData[key] !== undefined && finalData[key] !== null) {
+      payload[key] = finalData[key];
+    }
+  });
+
+  // 特殊处理 Error 对象，提取关键信息到独立字段
+  const errObj = finalData instanceof Error ? finalData : (finalData.error instanceof Error ? finalData.error : null);
+  if (errObj) {
+      payload.error_name = errObj.name;
+      payload.error_message = errObj.message;
+      // stack 放入 details
+  } else if (finalData.error) {
+      // 处理非 Error 实例的 error 字段
+      payload.error_summary = String(finalData.error).substring(0, 200);
+  }
+
+  // 将所有数据（包括被提取的字段）序列化存入 details 字段
+  // 这样做彻底解决了字段爆炸问题，因为 Axiom 不会解析字符串内部的结构作为列
+  try {
+      payload.details = JSON.stringify(prunedData);
+  } catch (e) {
+      payload.details = '[JSON Stringify Error]';
+  }
+
+  // 最后的安全网：限制顶层字段 (虽然现在不太可能超限了)
   const finalPayload = limitFields(payload, 50);
 
   try {
