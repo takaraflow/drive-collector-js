@@ -39,6 +39,12 @@ jobs:
           else
             # 显示前 15 位，确认是否以 -----BEGIN 开头
             echo "✅ Secrets.APP_PRIVATE_KEY is set (Length: ${#DEBUG_APP_KEY}). Start with: ${DEBUG_APP_KEY:0:15}***"
+            # 检查是否包含换行符 \n
+            if [[ "$DEBUG_APP_KEY" == *"\n"* ]]; then
+              echo "✅ Private Key contains newlines (good for PEM format)."
+            else
+              echo "::warning::Private Key might be missing newlines. Ensure it is in PEM format with actual newlines."
+            fi
           fi
           
           echo "========================="
