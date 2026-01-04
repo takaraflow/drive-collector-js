@@ -4,7 +4,9 @@ on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'manifest.json'  # 只有当 manifest 文件变动时才上报，节省资源
+      - 'manifest.json'
+      - '.github/workflows/sync-manifest.yml'  # 当工作流文件本身变动时也执行
+  workflow_dispatch:      # 允许手动触发 workflow
 
 jobs:
   update-registry:
