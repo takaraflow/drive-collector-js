@@ -344,7 +344,7 @@
     "webhook": "/"
   },
   "infrastructure": {
-    "CLOUDFLARE_ACCOUNT_ID": {
+    "CF_ACCOUNT_ID": {
       "type": "string",
       "required": true,
       "description": "Cloudflare 账户 ID"
@@ -363,6 +363,31 @@
       "type": "string",
       "required": false,
       "description": "预览环境的 KV 命名空间 ID"
+    },
+    "CF_API_TOKEN": {
+      "type": "string",
+      "required": true,
+      "description": "Cloudflare API 令牌"
+    },
+    "INFISICAL_TOKEN": {
+      "type": "string",
+      "required": true,
+      "description": "Infisical 访问令牌"
+    },
+    "INFISICAL_PROJECT_ID": {
+      "type": "string",
+      "required": true,
+      "description": "Infisical 项目 ID"
+    },
+    "BARK_WEBHOOK_URL": {
+      "type": "string",
+      "required": false,
+      "description": "Bark 通知 Webhook URL"
+    },
+    "BARK_DEVICE_TOKEN": {
+      "type": "string",
+      "required": false,
+      "description": "Bark 设备 Token"
     }
   }
 }

@@ -110,8 +110,9 @@ function extractVariablesFromManifest() {
         .filter(([_, config]) => ['string', 'number', 'boolean'].includes(config.type))
         .map(([key, _]) => key);
     
-    // 手动添加不在 manifest.json config.env 中的关键部署变量
-    const infraVars = ['WORKER_NAME', 'CLOUDFLARE_ACCOUNT_ID', 'CF_KV_NAMESPACE_ID', 'KV_PREVIEW_ID'];
+    // 从 manifest.json infrastructure 动态提取关键部署变量，不再硬编码
+    const infraConfig = manifest.infrastructure || {};
+    const infraVars = Object.keys(infraConfig);
     const allVars = [...vars, ...infraVars];
     
     // 清理可能误传为占位符字符串的变量，并设置默认值
@@ -196,16 +197,19 @@ function generateWranglerToml() {
         process.exit(1);
     }
     
+    const manifestPath = path.join(projectRoot, 'manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    const infraConfig = manifest.infrastructure || {};
+    
     let tomlContent = fs.readFileSync(buildTomlPath, 'utf8');
     
-    // 替换占位符
-    const varsToReplace = ['WORKER_NAME', 'CLOUDFLARE_ACCOUNT_ID', 'CF_KV_NAMESPACE_ID', 'KV_PREVIEW_ID'];
-    
-    for (const varName of varsToReplace) {
+    // 动态发现并替换占位符，不再硬编码字段列表
+    // 逻辑：寻找模板中所有的 ${VAR_NAME}，并尝试从环境中替换
+    const placeholderRegex = /\$\{([^}]+)\}/g;
+    tomlContent = tomlContent.replace(placeholderRegex, (match, varName) => {
         const value = (process.env[varName] || '').trim().replace(/^['"]|['"]$/g, '');
-        const regex = new RegExp(`\\$\\{${varName}\\}`, 'g');
-        tomlContent = tomlContent.replace(regex, value);
-    }
+        return value || match; // 如果没值，保持原样（后续校验会报错）
+    });
     
     // 处理 preview_id
     if (!process.env.KV_PREVIEW_ID) {
@@ -339,14 +343,13 @@ if (process.argv[1] === __filename) {
 function generateToml(env, manifest, tomlTemplate, packageJson) {
     let content = tomlTemplate;
     
-    // 替换占位符
-    const varsToReplace = ['WORKER_NAME', 'CLOUDFLARE_ACCOUNT_ID', 'CF_KV_NAMESPACE_ID', 'KV_PREVIEW_ID'];
-    
-    for (const varName of varsToReplace) {
-        const value = env[varName] || '';
-        const regex = new RegExp(`\\$\\{${varName}\\}`, 'g');
-        content = content.replace(regex, value);
-    }
+    // 动态发现并替换占位符，不再硬编码字段列表
+    // 逻辑：寻找模板中所有的 ${VAR_NAME}，并尝试从环境中替换
+    const placeholderRegex = /\$\{([^}]+)\}/g;
+    content = content.replace(placeholderRegex, (match, varName) => {
+        const value = (env[varName] || '').trim().replace(/^['"]|['"]$/g, '');
+        return value || match; // 如果没值，保持原样（后续校验会报错）
+    });
     
     // 处理 preview_id
     if (!env.KV_PREVIEW_ID) {

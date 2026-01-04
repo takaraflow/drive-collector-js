@@ -98,7 +98,12 @@ export function generateWranglerCommand(env = process.env) {
         // 清理值两侧可能存在的冗余引号（Infisical 导出有时会带引号）
         const cleanValue = String(value).trim().replace(/^['"]|['"]$/g, '');
         const escapedValue = cleanValue.replace(/"/g, '\\"');
-        vars.push(`--var`, `${key}="${escapedValue}"`);
+        
+        // 关键：只将 config.env 中的变量注入为 --var
+        // infrastructure 中的变量 (如 CF_ACCOUNT_ID) 不需要也不应该作为 Worker 的业务变量注入
+        if (envConfig[key]) {
+            vars.push(`--var`, `${key}="${escapedValue}"`);
+        }
       }
     }
 

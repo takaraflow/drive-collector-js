@@ -145,6 +145,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
   test('should throw error if required variable is missing', () => {
     const mockEnv = {
       NODE_ENV: 'test',
+      GITHUB_ACTIONS: 'true', // 强制进入 GHA 模式，触发严格检查
       GHA_SECRETS_JSON: JSON.stringify({ AXIOM_TOKEN: 'test' }),
       GHA_VARS_JSON: JSON.stringify({})
     };
