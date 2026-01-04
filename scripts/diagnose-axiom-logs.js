@@ -11,7 +11,7 @@
  * 
  * 功能:
  *   1. 查询最近 N 小时的日志，过滤 cache fallback 相关信息。
- *   2. 统计 NF 成功率、fallback 次数、平均响应时间、Top 错误码。
+ *   2. 统计 REDIS TLS 成功率、fallback 次数、平均响应时间、Top 错误码。
  *   3. 输出诊断报告。
  */
 
@@ -78,13 +78,13 @@ export async function runDiagnosis(options = {}) {
 
   try {
     // 这里的 APL (Axiom Processing Language) 查询
-    // 过滤条件: 包含 cache, fallback, NF, Redis, KV, quota 等关键字
+    // 过滤条件: 包含 cache, fallback, REDIS TLS, Redis, KV, quota 等关键字
     // 假设日志中有 level, message, duration, status 等字段，以及自定义的 cache_status, fallback_reason 等
     const query = `
       ['${DATASET}']
       | where _time > datetime(${startTime})
       | extend has_cache = case(
-          message contains 'cache' or message contains 'NF' or message contains 'Redis' or message contains 'KV' or message contains 'quota', true,
+          message contains 'cache' or message contains 'REDIS TLS' or message contains 'Redis' or message contains 'KV' or message contains 'quota', true,
           false
         )
       | where has_cache == true
@@ -105,8 +105,8 @@ export async function runDiagnosis(options = {}) {
     const totalLogs = logs.length;
 
     // 统计逻辑
-    let nfSuccess = 0;
-    let nfTotal = 0;
+    let redisSuccess = 0;
+    let redisTotal = 0;
     let fallbackCount = 0;
     let kvQuotaExceeded = 0;
     let totalDuration = 0;
@@ -118,11 +118,11 @@ export async function runDiagnosis(options = {}) {
       const status = match.data.status;
       const duration = match.data.duration;
 
-      // NF 成功率统计 (假设 message 包含 'NF Redis hit' 或类似信息)
-      if (msg.includes('NF')) {
-        nfTotal++;
-        if (msg.includes('hit') || !msg.toLowerCase().includes('fail')) {
-          nfSuccess++;
+      // REDIS TLS 成功率统计 (假设 message 包含 'REDIS TLS' 或 'Redis TLS' 等信息)
+      if (msg.toLowerCase().includes('redis tls')) {
+        redisTotal++;
+        if (msg.toLowerCase().includes('hit') || !msg.toLowerCase().includes('fail')) {
+          redisSuccess++;
         }
       }
 
@@ -152,11 +152,11 @@ export async function runDiagnosis(options = {}) {
     console.log('\n--- 📋 Axiom Diagnosis Report ---');
     console.log(`Total Relevant Logs: ${totalLogs}`);
     
-    if (nfTotal > 0) {
-      const nfHitRate = ((nfSuccess / nfTotal) * 100).toFixed(2);
-      console.log(`NF Success Rate: ${nfHitRate}% (${nfSuccess}/${nfTotal})`);
+    if (redisTotal > 0) {
+      const redisHitRate = ((redisSuccess / redisTotal) * 100).toFixed(2);
+      console.log(`REDIS TLS Success Rate: ${redisHitRate}% (${redisSuccess}/${redisTotal})`);
     } else {
-      console.log('NF Success Rate: N/A (No NF logs found)');
+      console.log('REDIS TLS Success Rate: N/A (No REDIS TLS logs found)');
     }
 
     console.log(`Fallback Occurrences: ${fallbackCount}`);

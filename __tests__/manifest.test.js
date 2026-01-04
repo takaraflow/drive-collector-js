@@ -111,7 +111,7 @@ describe('Manifest Validation Tests', () => {
   });
 
   describe('Required Fields', () => {
-    it('应该包含所有必填字段', () => {
+    it('should_contain_all_required_manifest_fields', () => {
       const requiredFields = ['manifest_version', 'id', 'name', 'version', 'type', 'entrypoint'];
       
       requiredFields.forEach(field => {
@@ -138,7 +138,7 @@ describe('Manifest Validation Tests', () => {
   });
 
   describe('Schema Validation', () => {
-    it('应该通过 schema 验证', () => {
+    it('should_pass_manifest_schema_validation', () => {
       const valid = validate(manifest);
       expect(valid).toBe(true);
       if (!valid) {
@@ -182,7 +182,7 @@ describe('Manifest Validation Tests', () => {
       expect(manifest.description.length).toBeGreaterThan(0);
     });
 
-    it('应该有正确的入口文件路径', () => {
+    it('should_have_correct_entrypoint_file_path', () => {
       // 验证入口文件存在（可选，因为测试环境可能没有构建后的文件）
       expect(manifest.entrypoint).toBe('src/index.js');
     });

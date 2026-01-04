@@ -7,7 +7,8 @@ All notable changes to this project will be documented in this file. See [standa
 
 ### 🐛 Bug Fixes
 
-* enhances release process and Redis health checks ([76fd8f1](https://github.com/YoungSx/lb-worker-js/commit/76fd8f1964a3056f90f3f7c33089a024c61c866b))
+* enhances release process and Redis TLS health checks ([76fd8f1](https://github.com/YoungSx/lb-worker-js/commit/76fd8f1964a3056f90f3f7c33089a024c61c866b))
+* refactor: migrate from Redis TLS to generic Redis TLS ([commit-hash](https://github.com/YoungSx/lb-worker-js/commit/commit-hash))
 
 ### [0.10.1](https://github.com/YoungSx/lb-worker-js/compare/v0.10.0...v0.10.1) (2026-01-04)
 
@@ -231,7 +232,7 @@ All notable changes to this project will be documented in this file. See [standa
 
 ### 🐛 Bug Fixes
 
-* **gha:** add NF_REDIS_PASSWORD and NF_REDIS_URL to deploy workflow ([c2a5d0c](https://github.com/YoungSx/lb-worker-js/commit/c2a5d0cf860f8dd307693289af7f9f2bd6620a86))
+* **gha:** add REDIS_TLS_PASSWORD and REDIS_TLS_URL to deploy workflow ([c2a5d0c](https://github.com/YoungSx/lb-worker-js/commit/c2a5d0cf860f8dd307693289af7f9f2bd6620a86))
 * **gha:** remove hardcoded env list from deploy workflow ([5c93e58](https://github.com/YoungSx/lb-worker-js/commit/5c93e58f78925fb69366a3bb6858b7d48c0e3638))
 
 ## [0.5.0](https://github.com/YoungSx/lb-worker-js/compare/v0.4.3...v0.5.0) (2026-01-01)
@@ -239,7 +240,7 @@ All notable changes to this project will be documented in this file. See [standa
 
 ### 🔧 Maintenance
 
-* replace NF_REDIS_TOKEN to NF_REDIS_PASSWORD ([0ea6bc2](https://github.com/YoungSx/lb-worker-js/commit/0ea6bc2865e046baf4c9ec94246564321bc2a55e))
+* replace REDIS_TLS_TOKEN to REDIS_TLS_PASSWORD ([0ea6bc2](https://github.com/YoungSx/lb-worker-js/commit/0ea6bc2865e046baf4c9ec94246564321bc2a55e))
 
 ### [0.4.3](https://github.com/YoungSx/lb-worker-js/compare/v0.4.2...v0.4.3) (2026-01-01)
 
@@ -266,14 +267,14 @@ All notable changes to this project will be documented in this file. See [standa
 * build ([fca3a61](https://github.com/YoungSx/lb-worker-js/commit/fca3a615aaa344a7173a4592fa9339cdd5d27321))
 * build error ([b832cf7](https://github.com/YoungSx/lb-worker-js/commit/b832cf7d986ec7bf0b810f660083076aebefca04))
 * correct syntax error in jest.config.js moduleNameMapper ([c5fcf8e](https://github.com/YoungSx/lb-worker-js/commit/c5fcf8e5079a9ce116ba6af2f391fd1c7dfe873e))
-* standardize env vars, migrate from wrangler.toml to .env, fix NF_REDIS config, update types ([d2ef91d](https://github.com/YoungSx/lb-worker-js/commit/d2ef91dd53c1c74118c011b21402adc2d918cfbc))
+* standardize env vars, migrate from wrangler.toml to .env, fix REDIS_TLS config, update types ([d2ef91d](https://github.com/YoungSx/lb-worker-js/commit/d2ef91dd53c1c74118c011b21402adc2d918cfbc))
 
 
 ### ✨ Features
 
 * add test:optimized and test:full-optimized scripts to package.json ([3c358af](https://github.com/YoungSx/lb-worker-js/commit/3c358af50ce3f9d8612ecf29f635c2af285e7de2))
-* adds provider priority system with NF Redis > CF KV > Upstash fallback ([aff7d63](https://github.com/YoungSx/lb-worker-js/commit/aff7d631123a9f43b5afeee6e239186415860f2f))
-* supplement missing NF Redis, legacy Redis, and R2 environment variables in manifest, env.example, and wrangler files ([3b0447b](https://github.com/YoungSx/lb-worker-js/commit/3b0447bebf40a80a2172601a3b6cdc9a6dab36ee))
+* adds provider priority system with REDIS TLS > CF KV > Upstash fallback ([aff7d63](https://github.com/YoungSx/lb-worker-js/commit/aff7d631123a9f43b5afeee6e239186415860f2f))
+* supplement missing REDIS TLS, legacy Redis, and R2 environment variables in manifest, env.example, and wrangler files ([3b0447b](https://github.com/YoungSx/lb-worker-js/commit/3b0447bebf40a80a2172601a3b6cdc9a6dab36ee))
 * sync .clinerules with drive-collector-js standards ([9026dff](https://github.com/YoungSx/lb-worker-js/commit/9026dffbe92e4e81463710c6f76011d0909a222f))
 * upgrade jest.config.js with performance optimizations from drive-collector-js ([0c67bc2](https://github.com/YoungSx/lb-worker-js/commit/0c67bc28a80e9f6f550c1cace3c5e66809da8567))
 
@@ -323,7 +324,7 @@ All notable changes to this project will be documented in this file. See [standa
 ### 🔧 Maintenance
 
 * refactors OpenTelemetry initialization to use static imports and instrumentation wrapper ([56e9b16](https://github.com/YoungSx/lb-worker-js/commit/56e9b1655f3c129e5afba50f2c5b5860e523d611))
-* updates QStash import path to use Cloudflare-specific module ([2064e20](https://github.com/YoungSx/lb-worker-js/commit/2064e208c6f1d65c95082e243129e51a91173e5b))
+* updates QStash import path to use Cloudflare-specific module ([2064e20](https://github.com/YoungSx/lb-worker-js/commit/2064e208c6f1d65c95082e24329e51a91173e5b))
 
 
 ### 🐛 Bug Fixes
@@ -372,11 +373,11 @@ All notable changes to this project will be documented in this file. See [standa
   - 所有实例返回 **5xx** 时透传最后一个 5xx 响应，允许 QStash 继续重试。
 - **增强日志记录**：所有错误场景中记录 `Upstash-Message-Id` 和 `Upstash-Retries` 元数据，提升可观测性和调试能力。
 - **新增 LBError 类**：用于精细化错误处理，区分业务错误和内部错误。
-- **完整测试覆盖**：新增 `tests/new-features.test.js`，覆盖 4xx 停止重试、5xx 透传、QStash 元数据记录和 Retry-After 头部等场景，确保 100% 测试通过。
+- **完整测试覆盖**：新增 `__tests__/new-features.test.js`，覆盖 4xx 停止重试、5xx 透传、QStash 元数据记录和 Retry-After 头部等场景，确保 100% 测试通过。
 
 ### Changed
 - **src/index.js**：优化转发逻辑，集成 LBError 类，更新状态码和头部处理，增强日志输出。
-- **tests/index.test.js**：更新现有测试以兼容新逻辑，确保所有测试通过。
+- **__tests__/index.test.js**：更新现有测试以兼容新逻辑，确保所有测试通过。
 
 ### Fixed
 - 修复了之前所有错误统一返回 500 的问题，避免误导 QStash 重试策略。

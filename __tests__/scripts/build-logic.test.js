@@ -39,7 +39,7 @@ describe('build-logic.js - loadEnvFile', () => {
         jest.restoreAllMocks();
     });
 
-    test('Default Behavior: loadEnvFile(mockFs, "dev") loads .env.dev then .env', () => {
+    test('should_load_env_dev_then_env_when_loading_dev_environment', () => {
         // Mock file system
         fs.existsSync.mockImplementation((path) => {
             return path === '/test/project/.env.dev' || path === '/test/project/.env';
@@ -68,7 +68,7 @@ describe('build-logic.js - loadEnvFile', () => {
         expect(process.env.BASE_VAR).toBe('base_value'); // From .env
     });
 
-    test('Priority: Verify variables in .env.prod override .env', () => {
+    test('should_override_base_env_vars_with_prod_env_vars', () => {
         // Mock file system
         fs.existsSync.mockImplementation((path) => {
             return path === '/test/project/.env.prod' || path === '/test/project/.env';
@@ -97,7 +97,7 @@ describe('build-logic.js - loadEnvFile', () => {
         expect(process.env.BASE_VAR).toBe('base_value');
     });
 
-    test('Persistence: Verify existing process.env vars are NOT overwritten unless they are placeholders', () => {
+    test('should_preserve_existing_env_vars_except_placeholders', () => {
         // Mock file system
         fs.existsSync.mockImplementation((path) => {
             return path === '/test/project/.env.dev' || path === '/test/project/.env';
@@ -141,7 +141,7 @@ describe('build-logic.js - loadEnvFile', () => {
         expect(process.env.BASE_VAR).toBe('base_value');
     });
 
-    test('Parsing: Comments (#) are handled correctly', () => {
+    test('should_parse_env_files_with_comments_correctly', () => {
         fs.existsSync.mockImplementation((path) => path === '/test/project/.env.dev');
         fs.readFileSync.mockImplementation(() => 
             'VAR1=value1 # this is a comment\nVAR2=value2#no space comment\n#COMMENTED_VAR=ignored\nVAR3="value with # inside quotes"'
@@ -160,7 +160,7 @@ describe('build-logic.js - loadEnvFile', () => {
         expect(process.env.VAR3).toBe('value with # inside quotes');
     });
 
-    test('Parsing: Quoted values are handled correctly', () => {
+    test('should_parse_env_files_with_quoted_values_correctly', () => {
         fs.existsSync.mockImplementation((path) => path === '/test/project/.env.dev');
         fs.readFileSync.mockImplementation(() => 
             'VAR1="double quoted"\nVAR2=\'single quoted\'\nVAR3="value with spaces"\nVAR4="value with = sign"'

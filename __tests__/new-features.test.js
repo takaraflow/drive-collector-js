@@ -110,8 +110,8 @@ describe('任务调度失败处理优化测试', () => {
     jest.useRealTimers();
   });
 
-  describe('fetchWithRetry - 4xx 停止重试逻辑', () => {
-    it('应该在实例返回400时立即停止重试并透传', async () => {
+  describe('fetchWithRetry - 4xx Stop Retry Logic', () => {
+   it('should_stop_retry_immediately_on_4xx_response_and_forward', async () => {
       const instances = [
         { id: '1', url: 'https://instance1.com' },
         { id: '2', url: 'https://instance2.com' },
@@ -133,7 +133,7 @@ describe('任务调度失败处理优化测试', () => {
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
-    it('应该在实例返回422时立即停止重试并透传', async () => {
+    it('should_stop_retry_on_422_unprocessable_entity', async () => {
       const instances = [
         { id: '1', url: 'https://instance1.com' },
         { id: '2', url: 'https://instance2.com' },
@@ -155,7 +155,7 @@ describe('任务调度失败处理优化测试', () => {
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
-    it('应该在实例返回401时立即停止重试并透传', async () => {
+    it('should_stop_retry_on_401_unauthorized', async () => {
       const instances = [
         { id: '1', url: 'https://instance1.com' },
         { id: '2', url: 'https://instance2.com' },
@@ -177,7 +177,7 @@ describe('任务调度失败处理优化测试', () => {
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
-    it('应该在第一个实例500，第二个实例400时，取消500响应并返回400', async () => {
+    it('should_cancel_500_response_when_4xx_received_from_fallback', async () => {
       const instances = [
         { id: '1', url: 'https://instance1.com' },
         { id: '2', url: 'https://instance2.com' },
@@ -203,12 +203,12 @@ describe('任务调度失败处理优化测试', () => {
     });
   });
 
-  describe('契约路径规范化', () => {
-     it('应该将 /api/tasks/download-tasks 映射到 /api/tasks/download', () => {
+  describe('Contract Path Normalization', () => {
+   it('should_normalize_download_tasks_path_to_download_endpoint', () => {
        expect(normalizePath('/api/tasks/download-tasks')).toBe('/api/tasks/download');
      });
  
-     it('应该将 /api/tasks/upload-tasks 映射到 /api/tasks/upload', () => {
+     it('should_normalize_upload_tasks_path_to_upload_endpoint', () => {
        expect(normalizePath('/api/tasks/upload-tasks')).toBe('/api/tasks/upload');
      });
  
@@ -220,7 +220,7 @@ describe('任务调度失败处理优化测试', () => {
        expect(normalizePath('/api/other/path')).toBe('/api/other/path');
      });
  
-     it('应该在 handleRequest 中记录路径映射', async () => {
+     it('should_log_path_normalization_in_handleRequest', async () => {
        const timestamp = Math.floor(Date.now() / 1000).toString();
        mockVerify.mockResolvedValue('body');
        mockKV.list.mockResolvedValue({ keys: [{ name: 'instance:1' }] });
@@ -265,8 +265,8 @@ describe('任务调度失败处理优化测试', () => {
      });
    });
  
-    describe('多前缀实例扫描', () => {
-     it('应该扫描所有契约键前缀', async () => {
+    describe('Multi-prefix Instance Scanning', () => {
+     it('should_scan_all_contract_key_prefixes', async () => {
        mockKV.list
          .mockResolvedValueOnce({ keys: [{ name: 'instance:1' }] })
          .mockResolvedValueOnce({ keys: [{ name: 'lock:task1' }] })
@@ -288,7 +288,7 @@ describe('任务调度失败处理优化测试', () => {
        expect(mockKV.list).toHaveBeenCalledTimes(7);
      });
  
-     it('应该扫描锁键并返回数量', async () => {
+     it('should_scan_lock_keys_and_return_count', async () => {
        mockKV.list
          .mockResolvedValueOnce({ keys: [{ name: 'lock:1' }, { name: 'lock:2' }] })
          .mockResolvedValueOnce({ keys: [{ name: 'task:1' }] })
@@ -299,7 +299,7 @@ describe('任务调度失败处理优化测试', () => {
        expect(result).toBe(4); // 2 + 1 + 1
      });
  
-     it('应该处理部分前缀扫描失败', async () => {
+     it('should_handle_partial_prefix_scan_failures', async () => {
        mockKV.list
          .mockRejectedValueOnce(new Error('KV error'))
          .mockResolvedValueOnce({ keys: [{ name: 'lock:1' }] })
@@ -319,14 +319,14 @@ describe('任务调度失败处理优化测试', () => {
      });
    });
  
-    describe('缓存提供者检测', () => {
-     it('应该优先使用环境变量', () => {
+    describe('Cache Provider Detection', () => {
+     it('should_prioritize_CACHE_PROVIDER_env_variable', () => {
        const env = { CACHE_PROVIDER: 'redis' };
        expect(detectCacheProvider(env)).toBe('redis');
      });
  
-     it('应该检测 NF Redis (需要 password)', () => {
-       const env = { NF_REDIS_URL: 'https://redis.example.com', NF_REDIS_PASSWORD: 'password' };
+     it('should_detect_redis_tls_with_password', () => {
+       const env = { REDIS_TLS_URL: 'https://redis.example.com', REDIS_TLS_PASSWORD: 'password' };
        expect(detectCacheProvider(env)).toBe('redis');
      });
  
@@ -340,13 +340,13 @@ describe('任务调度失败处理优化测试', () => {
        expect(detectCacheProvider(env)).toBe('upstash');
      });
  
-     it('应该优先 NF Redis > Cloudflare KV > Upstash', () => {
+     it('should_prioritize_redis_tls_over_cloudflare_kv_and_upstash', () => {
        const env = {
          KV_STORAGE: mockKV,
          UPSTASH_REDIS_REST_URL: 'https://redis.example.com',
          UPSTASH_REDIS_REST_TOKEN: 'token',
-         NF_REDIS_URL: 'https://nf.example.com',
-         NF_REDIS_PASSWORD: 'password'
+         REDIS_TLS_URL: 'https://redis-tls.example.com',
+         REDIS_TLS_PASSWORD: 'password'
        };
        expect(detectCacheProvider(env)).toBe('redis');
      });
@@ -369,88 +369,88 @@ describe('任务调度失败处理优化测试', () => {
     describe('Redis 故障转移', () => {
      it('应该执行 Redis GET 操作', async () => {
        const env = {
-         NF_REDIS_URL: 'https://redis.example.com',
-         NF_REDIS_PASSWORD: 'test-password',
+         REDIS_TLS_URL: 'https://redis.example.com',
+         REDIS_TLS_PASSWORD: 'test-password',
        };
- 
+
        __mockSend.mockResolvedValueOnce('test-value');
- 
+
        const result = await executeRedis('_redis_get', env, 'test-key');
        
        expect(result).toBe('test-value');
        expect(__mockSend).toHaveBeenCalledWith('GET', 'test-key');
      });
- 
+
      it('应该执行 Redis PUT 操作', async () => {
        const env = {
-         NF_REDIS_URL: 'https://redis.example.com',
-         NF_REDIS_PASSWORD: 'test-password',
+         REDIS_TLS_URL: 'https://redis.example.com',
+         REDIS_TLS_PASSWORD: 'test-password',
        };
- 
+
        __mockSend.mockResolvedValueOnce('OK');
- 
+
        const result = await executeRedis('_redis_put', env, 'test-key', 'test-value');
        
        expect(result).toBe(true);
        expect(__mockSend).toHaveBeenCalledWith('SET', 'test-key', 'test-value');
      });
- 
+
      it('应该处理 Redis 404 返回 null', async () => {
        const env = {
-         NF_REDIS_URL: 'https://redis.example.com',
-         NF_REDIS_PASSWORD: 'test-password',
+         REDIS_TLS_URL: 'https://redis.example.com',
+         REDIS_TLS_PASSWORD: 'test-password',
        };
- 
+
        __mockSend.mockResolvedValueOnce(null);
- 
+
        const result = await executeRedis('_redis_get', env, 'nonexistent-key');
        
        expect(result).toBe(null);
      });
- 
+
      it('应该在 executeWithFailover 中使用 Redis 作为第一优先级', async () => {
        const env = {
          KV_STORAGE: mockKV,
          UPSTASH_REDIS_REST_URL: 'https://test.upstash.io',
          UPSTASH_REDIS_REST_TOKEN: 'test-password',
-         NF_REDIS_URL: 'https://redis.example.com',
-         NF_REDIS_PASSWORD: 'nf-password',
+         REDIS_TLS_URL: 'https://redis.example.com',
+         REDIS_TLS_PASSWORD: 'redis-password',
        };
- 
-       __mockSend.mockResolvedValueOnce('nf-value');
- 
+
+       __mockSend.mockResolvedValueOnce('redis-value');
+
        const result = await executeWithFailover('_kv_get', env, {}, 'test-key');
        
-       expect(result).toBe('nf-value');
+       expect(result).toBe('redis-value');
      });
- 
+
      it('应该在 Redis 失败时 fallback 到 CF KV', async () => {
        const env = {
          KV_STORAGE: mockKV,
-         NF_REDIS_URL: 'https://redis.example.com',
-         NF_REDIS_PASSWORD: 'nf-password',
+         REDIS_TLS_URL: 'https://redis.example.com',
+         REDIS_TLS_PASSWORD: 'redis-password',
        };
- 
-       __mockSend.mockRejectedValueOnce(new Error('NF error'));
+
+       __mockSend.mockRejectedValueOnce(new Error('Redis error'));
        
        // CF KV 成功
        mockKV.get.mockResolvedValueOnce('cf-value');
- 
+
        const result = await executeWithFailover('_kv_get', env, {}, 'test-key');
        
        expect(result).toBe('cf-value');
      });
- 
-     it('应该在 NF Redis 和 CF KV 都失败时 fallback 到 Upstash', async () => {
+
+     it('应该在 Redis TLS 和 CF KV 都失败时 fallback 到 Upstash', async () => {
        const env = {
          KV_STORAGE: mockKV,
          UPSTASH_REDIS_REST_URL: 'https://test.upstash.io',
          UPSTASH_REDIS_REST_TOKEN: 'test-password',
-         NF_REDIS_URL: 'https://redis.example.com',
-         NF_REDIS_PASSWORD: 'nf-password',
+         REDIS_TLS_URL: 'https://redis.example.com',
+         REDIS_TLS_PASSWORD: 'redis-password',
        };
- 
-       __mockSend.mockRejectedValueOnce(new Error('NF error'));
+
+       __mockSend.mockRejectedValueOnce(new Error('Redis error'));
        
        // CF KV 失败
        mockKV.get.mockRejectedValueOnce(new Error('KV error'));
@@ -460,7 +460,7 @@ describe('任务调度失败处理优化测试', () => {
          ok: true,
          json: async () => ({ result: 'upstash-value' }),
        });
- 
+
        const result = await executeWithFailover('_kv_get', env, {}, 'test-key');
        
        expect(result).toBe('upstash-value');
@@ -539,15 +539,15 @@ describe('任务调度失败处理优化测试', () => {
      });
    });
  
-    describe('getActiveInstances - 无活跃实例处理', () => {
-     it('应该在无活跃实例时返回空数组', async () => {
+    describe('getActiveInstances - No Active Instances Handling', () => {
+     it('should_return_empty_array_when_no_active_instances', async () => {
        mockKV.list.mockResolvedValue({ keys: [] });
  
        const result = await getActiveInstances(mockEnv, {});
        expect(result).toEqual([]);
      });
  
-     it('应该在所有实例都过期时返回空数组', async () => {
+     it('should_return_empty_array_when_all_instances_expired', async () => {
        const now = Date.now();
        mockKV.list.mockResolvedValue({
          keys: [{ name: 'instance:1' }, { name: 'instance:2' }]

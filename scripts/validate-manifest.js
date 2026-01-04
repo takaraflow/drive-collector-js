@@ -37,7 +37,7 @@ async function validateManifest() {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
 
     // 读取 schema
-    const schemaPath = join(projectRoot, 'tests', 'manifest.schema.json');
+    const schemaPath = join(projectRoot, '__tests__', 'manifest.schema.json');
     const schema = JSON.parse(readFileSync(schemaPath, 'utf-8'));
 
     // 初始化 Ajv

@@ -24,7 +24,7 @@ describe('Logger Safeguard - sanitizeLogData', () => {
   });
 
   describe('字符串长度限制', () => {
-    test('应截断超过 10,000 字符的字符串', () => {
+    test('should_truncate_strings_exceeding_10000_characters', () => {
       const longString = 'a'.repeat(15000);
       const data = { message: longString, level: 'info' };
       const result = sanitizeLogData(data);
@@ -33,7 +33,7 @@ describe('Logger Safeguard - sanitizeLogData', () => {
       expect(result.message).toContain('[TRUNCATED]');
     });
 
-    test('应保留不超过 10,000 字符的字符串', () => {
+    test('should_preserve_strings_under_10000_characters', () => {
       const shortString = 'a'.repeat(5000);
       const data = { message: shortString };
       const result = sanitizeLogData(data);

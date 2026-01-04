@@ -274,68 +274,35 @@
         "priority": "highest",
         "description": "Northflank Redis Password（优先级最高，与 URL 配合使用）"
       },
-      "REDIS_TLS_ENABLED": {
-        "type": "boolean",
-        "required": false,
-        "description": "启用 Redis TLS 连接"
-      },
       "REDIS_TLS_REJECT_UNAUTHORIZED": {
         "type": "boolean",
         "required": false,
-        "description": "是否拒绝未授权的 TLS 证书"
+        "description": "是否拒绝未授权的 TLS 证书（通用 TLS 配置）"
       },
       "REDIS_TLS_CA": {
         "type": "string",
         "required": false,
-        "description": "自定义 Redis TLS CA 证书"
+        "description": "自定义 Redis TLS CA 证书（通用 TLS 配置）"
       },
-      "REDIS_TLS": {
+      "REDIS_TLS_CA_CERT": {
         "type": "string",
         "required": false,
-        "description": "Redis TLS 配置（向后兼容）"
+        "description": "自定义 Redis TLS CA 证书（通用 TLS 配置，别名）"
       },
-      "NF_REDIS_HOST": {
+      "REDIS_TLS_CLIENT_CERT": {
         "type": "string",
         "required": false,
-        "description": "Northflank Redis host"
+        "description": "Redis TLS 客户端证书（通用 TLS 配置）"
       },
-      "NF_REDIS_PORT": {
-        "type": "number",
-        "required": false,
-        "default": 6379,
-        "description": "Northflank Redis port"
-      },
-      "NF_REDIS_TLS_ENABLED": {
-        "type": "boolean",
-        "required": false,
-        "default": false,
-        "description": "Enable TLS for Northflank Redis"
-      },
-      "NF_REDIS_TLS_REJECT_UNAUTHORIZED": {
-        "type": "boolean",
-        "required": false,
-        "default": true,
-        "description": "Reject unauthorized TLS certificates for Northflank Redis"
-      },
-      "NF_REDIS_TLS_CA": {
+      "REDIS_TLS_CLIENT_KEY": {
         "type": "string",
         "required": false,
-        "description": "Northflank Redis TLS CA certificate"
+        "description": "Redis TLS 客户端密钥（通用 TLS 配置）"
       },
-      "NF_REDIS_TLS_CLIENT_CERT": {
+      "REDIS_TLS_SNI_SERVERNAME": {
         "type": "string",
         "required": false,
-        "description": "Northflank Redis TLS client certificate"
-      },
-      "NF_REDIS_TLS_CLIENT_KEY": {
-        "type": "string",
-        "required": false,
-        "description": "Northflank Redis TLS client key"
-      },
-      "NF_REDIS_SNI_SERVERNAME": {
-        "type": "string",
-        "required": false,
-        "description": "Northflank Redis TLS SNI servername"
+        "description": "Redis TLS SNI 服务器名称（通用 TLS 配置）"
       }
     }
   },

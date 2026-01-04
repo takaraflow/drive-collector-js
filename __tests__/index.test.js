@@ -152,8 +152,8 @@ describe('Worker Tests', () => {
       QSTASH_URL: 'https://qstash.url',
       UPSTASH_REDIS_REST_URL: 'https://redis.url',
       UPSTASH_REDIS_REST_TOKEN: 'redis-token',
-      NF_REDIS_URL: 'https://nf-redis.url',
-      NF_REDIS_PASSWORD: 'nf-password',
+      REDIS_TLS_URL: 'https://redis-tls.url',
+      REDIS_TLS_PASSWORD: 'redis-tls-password',
       SKIP_SIGNATURE_VERIFY: 'true',
     };
 
@@ -182,7 +182,7 @@ describe('Worker Tests', () => {
   });
 
   describe('Basic Functionality', () => {
-    test('should return 200 for unknown routes (forwarded)', async () => {
+    test('should_forward_unknown_routes_with_200_status', async () => {
       // Use CF KV only for this basic test
       const basicEnv = {
         KV_STORAGE: mockKV,
@@ -197,7 +197,7 @@ describe('Worker Tests', () => {
       expect(result.status).toBe(200);
     });
 
-    test('should handle health check', async () => {
+    test('should_return_health_status_with_active_instances', async () => {
       const request = new Request('https://test.url/health');
       const ctx = { waitUntil: jest.fn() };
       const result = await handleRequest(request, env, ctx);
@@ -209,7 +209,7 @@ describe('Worker Tests', () => {
       expect(json.timestamp).toBeDefined();
     });
 
-    test('should handle root path (forwarded)', async () => {
+    test('should_forward_root_path_request', async () => {
       // Use CF KV only for this basic test
       const basicEnv = {
         KV_STORAGE: mockKV,
@@ -226,7 +226,7 @@ describe('Worker Tests', () => {
   });
 
   describe('QStash Webhook Verification', () => {
-    test('should reject invalid QStash signature', async () => {
+    test('should_reject_requests_with_invalid_qstash_signature', async () => {
       delete env.SKIP_SIGNATURE_VERIFY;
       mockVerify.mockResolvedValue(false);
 
@@ -243,7 +243,7 @@ describe('Worker Tests', () => {
       expect(result.status).toBe(401);
     });
 
-    test('should accept valid QStash signature', async () => {
+    test('should_accept_requests_with_valid_qstash_signature', async () => {
       // Use CF KV only for this test
       const basicEnv = {
         KV_STORAGE: mockKV,
@@ -268,7 +268,7 @@ describe('Worker Tests', () => {
   });
 
   describe('Task Operations', () => {
-    test('should download tasks', async () => {
+    test('should_download_tasks_from_backend_via_forwarding', async () => {
       // Use CF KV only for this test
       const basicEnv = {
         KV_STORAGE: mockKV,
@@ -285,7 +285,7 @@ describe('Worker Tests', () => {
       expect(data.tasks).toBeDefined(); // Assumes default mock fetch returns { tasks: [] }
     });
 
-    test('should handle task upload', async () => {
+    test('should_upload_tasks_to_backend_via_forwarding', async () => {
       // Use CF KV only for this test
       const basicEnv = {
         KV_STORAGE: mockKV,
@@ -308,7 +308,7 @@ describe('Worker Tests', () => {
   });
 
   describe('Error Handling', () => {
-    test('should handle missing environment variables', async () => {
+    test('should_return_401_when_qstash_key_missing', async () => {
       delete env.QSTASH_CURRENT_SIGNING_KEY;
       delete env.SKIP_SIGNATURE_VERIFY;
 
@@ -324,7 +324,7 @@ describe('Worker Tests', () => {
       expect(result.status).toBe(401);
     });
 
-    test('should return 503 and flush logs when no active instances', async () => {
+    test('should_return_503_and_flush_logs_when_no_active_instances_available', async () => {
       // Mock KV to return no instances
       mockKV.list.mockImplementation(async (options) => {
         if (options && options.prefix) {
@@ -362,7 +362,7 @@ describe('Worker Tests', () => {
   });
 
   describe('Logger Version and Level', () => {
-    test('logger.info should include version and level in pending logs', async () => {
+    test('should_include_version_and_level_in_logger_info_pending_logs', async () => {
       // Test that pending logs include version and level
       await logger.info('test message', { custom: 'data' });
       
@@ -373,12 +373,12 @@ describe('Worker Tests', () => {
       expect(logger.env).toBeDefined();
     });
 
-    test('logger.warn should include version and level in pending logs', async () => {
+    test('should_include_version_and_level_in_logger_warn_pending_logs', async () => {
       await logger.warn('warning message', { custom: 'data' });
       expect(logger.version).toBe('dev');
     });
 
-    test('logger.error should include version and level in pending logs', async () => {
+    test('should_include_version_and_level_in_logger_error_pending_logs', async () => {
       await logger.error('error message', { custom: 'data' });
       expect(logger.version).toBe('dev');
     });
@@ -430,17 +430,17 @@ describe('Worker Tests', () => {
     });
 
     test('executeWithPriorityFallback should log fallback with duration and error info', async () => {
-      const envWithNF = {
-        NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_PASSWORD: 'nf-password',
+      const envWithRedis = {
+        REDIS_TLS_URL: 'https://redis.url',
+        REDIS_TLS_PASSWORD: 'redis-password',
         KV_STORAGE: mockKV
       };
 
-      __mockSend.mockRejectedValueOnce(new Error('NF error'));
+      __mockSend.mockRejectedValueOnce(new Error('Redis error'));
 
       mockKV.get.mockResolvedValue('cf-value');
 
-      await executeWithFailover('_kv_get', envWithNF, null, 'test-key');
+      await executeWithFailover('_kv_get', envWithRedis, null, 'test-key');
 
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         expect.stringContaining('尝试 redis → 失败'),
@@ -482,9 +482,9 @@ describe('Worker Tests', () => {
     });
 
     test('executeRedis operations should log timing info', async () => {
-      const envWithNF = {
-        NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_PASSWORD: 'nf-password',
+      const envWithRedis = {
+        REDIS_TLS_URL: 'https://redis.url',
+        REDIS_TLS_PASSWORD: 'redis-password',
         NODE_ENV: 'development'
       };
 
@@ -503,10 +503,10 @@ describe('Worker Tests', () => {
 
       try {
         // Test GET log
-        await executeWithFailover('_kv_get', envWithNF, null, 'test-key');
+        await executeWithFailover('_kv_get', envWithRedis, null, 'test-key');
         
         // Test PUT log
-        await executeWithFailover('_kv_put', envWithNF, null, 'test-key', 'val');
+        await executeWithFailover('_kv_put', envWithRedis, null, 'test-key', 'val');
         
         expect(__mockSend).toHaveBeenCalledWith('GET', 'test-key');
         expect(__mockSend).toHaveBeenCalledWith('SET', 'test-key', 'val');
@@ -594,17 +594,17 @@ describe('Worker Tests', () => {
   describe('Provider Priority and Fallback', () => {
     test('getProviderPriority should return correct priority order', () => {
       // Redis only
-      const env1 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_PASSWORD: 'token' };
+      const env1 = { REDIS_TLS_URL: 'https://redis.url', REDIS_TLS_PASSWORD: 'token' };
       expect(getProviderPriority(env1)).toEqual(['redis']);
 
       // Redis + CF KV
-      const env2 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_PASSWORD: 'token', KV_STORAGE: mockKV };
+      const env2 = { REDIS_TLS_URL: 'https://redis.url', REDIS_TLS_PASSWORD: 'token', KV_STORAGE: mockKV };
       expect(getProviderPriority(env2)).toEqual(['redis', 'cloudflare']);
 
       // All three
       const env3 = {
-        NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_PASSWORD: 'token',
+        REDIS_TLS_URL: 'https://redis.url',
+        REDIS_TLS_PASSWORD: 'token',
         KV_STORAGE: mockKV,
         UPSTASH_REDIS_REST_URL: 'https://redis.url',
         UPSTASH_REDIS_REST_TOKEN: 'token'
@@ -629,7 +629,7 @@ describe('Worker Tests', () => {
 
     test('detectCacheProvider should return first available provider', () => {
       // Redis first
-      const env1 = { NF_REDIS_URL: 'https://nf.url', NF_REDIS_PASSWORD: 'token', KV_STORAGE: mockKV };
+      const env1 = { REDIS_TLS_URL: 'https://redis.url', REDIS_TLS_PASSWORD: 'token', KV_STORAGE: mockKV };
       expect(detectCacheProvider(env1)).toBe('redis');
 
       // CF KV first
@@ -647,25 +647,25 @@ describe('Worker Tests', () => {
 
     test('Redis primary: should use Redis when configured', async () => {
       const env = {
-        NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_PASSWORD: 'nf-password',
+        REDIS_TLS_URL: 'https://redis.url',
+        REDIS_TLS_PASSWORD: 'redis-password',
         KV_STORAGE: mockKV
       };
 
       // Mock Redis success
       const mockClient = createRedis({ url: '...' });
       __test_setRedisClient(mockClient);
-      __mockSend.mockResolvedValueOnce('nf-value');
+      __mockSend.mockResolvedValueOnce('redis-value');
 
       const result = await executeWithFailover('_kv_get', env, null, 'test-key');
-      expect(result).toBe('nf-value');
+      expect(result).toBe('redis-value');
       expect(__mockSend).toHaveBeenCalledWith('GET', 'test-key');
     });
 
-    test('Redis fallback: should fallback to CF KV when NF fails', async () => {
+    test('Redis fallback: should fallback to CF KV when Redis fails', async () => {
       const env = {
-        NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_PASSWORD: 'nf-password',
+        REDIS_TLS_URL: 'https://redis.url',
+        REDIS_TLS_PASSWORD: 'redis-password',
         KV_STORAGE: mockKV
       };
 
@@ -681,10 +681,10 @@ describe('Worker Tests', () => {
       expect(mockKV.get).toHaveBeenCalledWith('test-key');
     });
 
-    test('Redis fallback: should fallback to Upstash when NF fails and CF not available', async () => {
+    test('Redis fallback: should fallback to Upstash when Redis fails and CF not available', async () => {
       const env = {
-        NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_PASSWORD: 'nf-password',
+        REDIS_TLS_URL: 'https://redis.url',
+        REDIS_TLS_PASSWORD: 'redis-password',
         UPSTASH_REDIS_REST_URL: 'https://redis.url',
         UPSTASH_REDIS_REST_TOKEN: 'upstash-token'
       };
@@ -712,10 +712,10 @@ describe('Worker Tests', () => {
       );
     });
 
-    test('Config incomplete: should skip NF when token missing', async () => {
+    test('Config incomplete: should skip Redis when password missing', async () => {
       const env = {
-        NF_REDIS_URL: 'https://nf.url',
-        // NF_REDIS_PASSWORD missing
+        REDIS_TLS_URL: 'https://redis.url',
+        // REDIS_TLS_PASSWORD missing
         KV_STORAGE: mockKV
       };
       
@@ -727,14 +727,14 @@ describe('Worker Tests', () => {
       const result = await executeWithFailover('_kv_get', env, null, 'test-key');
       expect(result).toBe('cf-value');
       expect(mockKV.get).toHaveBeenCalledWith('test-key');
-      // Should not call NF
+      // Should not call Redis
       expect(__mockSend).not.toHaveBeenCalled();
     });
 
-    test('List scan: should use NF scan when primary', async () => {
+    test('List scan: should use Redis scan when primary', async () => {
       const env = {
-        NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_PASSWORD: 'nf-password',
+        REDIS_TLS_URL: 'https://redis.url',
+        REDIS_TLS_PASSWORD: 'redis-password',
         KV_STORAGE: mockKV
       };
 
@@ -761,12 +761,12 @@ describe('Worker Tests', () => {
 
     test('Redis scan error: should fallback to CF list', async () => {
       const env = {
-        NF_REDIS_URL: 'https://nf.url',
-        NF_REDIS_PASSWORD: 'nf-password',
+        REDIS_TLS_URL: 'https://redis.url',
+        REDIS_TLS_PASSWORD: 'redis-password',
         KV_STORAGE: mockKV
       };
 
-      // Mock NF scan failure
+      // Mock Redis scan failure
       const mockClient = createRedis({ url: '...' });
       __test_setRedisClient(mockClient);
       __mockSend.mockRejectedValueOnce(new Error('Connection failed'));

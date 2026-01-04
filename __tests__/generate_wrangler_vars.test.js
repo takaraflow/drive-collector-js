@@ -96,7 +96,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
         process.cwd = originalCwd;
     });
 
-    test('should parse --env=staging argument and load .env.staging', () => {
+    test('should_parse_env_argument_and_load_corresponding_env_file', () => {
         // Mock process.argv
         const mockArgv = ['node', 'script', '--env=staging'];
         
@@ -131,7 +131,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
         expect(secondCallPath).toContain('.env.staging');
     });
 
-    test('should default to "dev" when no --env argument is provided', () => {
+    test('should_default_to_dev_when_no_env_argument_provided', () => {
         const mockArgv = ['node', 'script'];
         
         // Save original cwd
@@ -155,7 +155,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
         expect(configMock).toHaveBeenCalledWith();
     });
 
-    test('should not call dotenv.config second time if .env.staging does not exist', () => {
+    test('should_skip_second_dotenv_call_when_env_file_missing', () => {
         const mockArgv = ['node', 'script', '--env=staging'];
         
         process.cwd = () => '/test/project';
@@ -171,7 +171,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
         expect(configMock).toHaveBeenCalledWith();
     });
 
-    test('should handle --env=prod argument correctly', () => {
+    test('should_handle_prod_env_argument_correctly', () => {
         const mockArgv = ['node', 'script', '--env=prod'];
         
         process.cwd = () => '/test/project';
@@ -193,7 +193,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
         expect(secondCallPath).toContain('.env.prod');
     });
 
-    test('should handle complex --env argument with equals signs', () => {
+    test('should_handle_complex_env_argument_with_equals_signs', () => {
         const mockArgv = ['node', 'script', '--env=test-env', 'other=arg'];
         
         process.cwd = () => '/test/project';
@@ -206,7 +206,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
   });
 
   describe('generateWranglerCommand', () => {
-    test('should generate --var from GHA JSON contexts and manifest', () => {
+    test('should_generate_wrangler_vars_from_gha_json_contexts', () => {
         const mockEnv = {
           GHA_SECRETS_JSON: JSON.stringify({
             NF_REDIS_PASSWORD: 'secret-password',
@@ -232,7 +232,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
         expect(output).toContain('--var NODE_ENV="production"');
     });
 
-    test('should prioritize secrets over vars', () => {
+    test('should_prioritize_secrets_over_vars_in_wrangler_command', () => {
         const mockEnv = {
           GHA_SECRETS_JSON: JSON.stringify({
             AXIOM_TOKEN: 'secret-value',
@@ -245,7 +245,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
         expect(output).toContain('--var AXIOM_TOKEN="secret-value"');
     });
 
-    test('should handle special characters in values', () => {
+    test('should_handle_special_characters_in_variable_values', () => {
         const mockEnv = {
           GHA_SECRETS_JSON: JSON.stringify({
             AXIOM_TOKEN: 'token"with"quotes',

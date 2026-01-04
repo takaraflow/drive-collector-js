@@ -58,7 +58,7 @@ describe('diagnose-axiom-logs.js', () => {
     jest.useRealTimers();
   });
 
-  test('parseArgs should handle default values', () => {
+  test('should_parse_args_with_default_values', () => {
     // Note: yargs might behave differently with hideBin in tests if process.argv is not what it expects
     // We pass an empty array but yargs(hideBin([])) results in something that might be weird.
     // Better to pass a dummy command line
@@ -67,7 +67,7 @@ describe('diagnose-axiom-logs.js', () => {
     expect(argv['env-file']).toBe('.env');
   });
 
-  test('parseArgs should handle custom values', () => {
+  test('should_parse_args_with_custom_values', () => {
     const argv = parseArgs(['node', 'script.js', '--hours', '5', '--dataset', 'my-dataset', '--env-file', '.env.prod']);
     expect(argv.hours).toBe(5);
     expect(argv.dataset).toBe('my-dataset');
@@ -102,10 +102,10 @@ describe('diagnose-axiom-logs.js', () => {
     expect(dotenv.config).toHaveBeenCalledWith({ path: '.env.test' });
   });
 
-  test('runDiagnosis should process logs and generate report correctly', async () => {
+  test('should_process_logs_and_generate_diagnosis_report', async () => {
     const mockMatches = [
-      { data: { message: 'NF Redis hit', status: 200, duration: 10 } },
-      { data: { message: 'NF fail', status: 500, duration: 20 } },
+      { data: { message: 'Redis TLS hit', status: 200, duration: 10 } },
+      { data: { message: 'Redis TLS fail', status: 500, duration: 20 } },
       { data: { message: 'fallback to KV', status: 200, duration: 15 } },
       { data: { message: 'KV quota exceeded', status: 429, duration: 5 } },
       { data: { message: 'some other log', status: 200, duration: 12 } }
@@ -124,15 +124,18 @@ describe('diagnose-axiom-logs.js', () => {
     expect(mockAxiomClient.query).toHaveBeenCalledWith(expect.stringContaining("['test-ds']"));
     expect(mockAxiomClient.query).toHaveBeenCalledWith(expect.stringContaining("where _time > datetime(2026-01-01T10:00:00.000Z)"));
 
-    // Verify report output
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Total Relevant Logs: 5'));
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('NF Success Rate: 50.00% (1/2)'));
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Fallback Occurrences: 1'));
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('CF KV Quota Exceeded: 1'));
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Average Duration: 12.40ms'));
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Top Error Codes:'));
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('- 500: 1x'));
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('- 429: 1x'));
+    // Verify report output - check all console.log calls
+    const calls = consoleLogSpy.mock.calls.flat();
+    const output = calls.join('\n');
+    
+    expect(output).toContain('Total Relevant Logs: 5');
+    expect(output).toContain('REDIS TLS Success Rate: 50.00% (1/2)');
+    expect(output).toContain('Fallback Occurrences: 1');
+    expect(output).toContain('CF KV Quota Exceeded: 1');
+    expect(output).toContain('Average Duration: 12.40ms');
+    expect(output).toContain('Top Error Codes:');
+    expect(output).toContain('- 500: 1x');
+    expect(output).toContain('- 429: 1x');
   });
 
   test('runDiagnosis should handle empty results', async () => {
@@ -177,6 +180,6 @@ describe('diagnose-axiom-logs.js', () => {
     });
 
     expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Total Relevant Logs: 1'));
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('NF Success Rate: N/A'));
+    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('REDIS TLS Success Rate: N/A'));
   });
 });
