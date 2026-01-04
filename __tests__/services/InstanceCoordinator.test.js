@@ -22,6 +22,8 @@ jest.unstable_mockModule("../../src/repositories/InstanceRepository.js", () => (
   },
 }));
 
+
+
 // Mock logger
 const mockLogger = {
   info: jest.fn(),
@@ -67,6 +69,9 @@ describe("InstanceCoordinator", () => {
     // Also import cache for mocking
     const { cache: importedCache } = await import("../../src/services/CacheService.js");
     cache = importedCache;
+
+    // Prevent CacheService heartbeat timer from starting
+    cache._startHeartbeat = jest.fn();
   });
 
   afterAll(() => {
