@@ -2,8 +2,18 @@ import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 
-// 加载 .env 文件 (如果存在)
+// 解析 --env 参数
+const envArg = process.argv.find(arg => arg.startsWith('--env='));
+const targetEnv = envArg ? envArg.split('=')[1] : 'dev';
+
+// 1. 优先加载 .env (作为本地覆盖)
 dotenv.config();
+
+// 2. 如果存在特定环境的 .env 文件，也加载它 (作为额外覆盖)
+const specificEnvPath = path.resolve(process.cwd(), `.env.${targetEnv}`);
+if (fs.existsSync(specificEnvPath)) {
+    dotenv.config({ path: specificEnvPath, override: true });
+}
 
 /**
  * 脱敏敏感信息

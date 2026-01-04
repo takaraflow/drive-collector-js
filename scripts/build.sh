@@ -20,7 +20,8 @@ fi
 
 # 3. 使用 Node.js 脚本处理所有构建逻辑 (环境变量注入、toml 生成)
 # 这是最核心的一步，它会读取 GHA_SECRETS_JSON 并替换 wrangler.toml 中的占位符
-$NODE_CMD scripts/build-logic.js
+# 将所有从 npm script 传来的参数 ($@) 转发给 build-logic.js
+$NODE_CMD scripts/build-logic.js "$@"
 
 if [ $? -ne 0 ]; then
     echo "错误: build-logic.js 执行失败"

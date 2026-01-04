@@ -14,7 +14,64 @@ const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 
 // 从 .env 文件加载环境变量
-function loadEnvFile(fileSystem = fs) {
+function loadEnvFile(fileSystem = fs, targetEnv = 'dev') {
+    // 1. 优先加载 .env.${targetEnv}
+    const specificEnvPath = path.join(projectRoot, `.env.${targetEnv}`);
+    if (fileSystem.existsSync(specificEnvPath)) {
+        const envContent = fileSystem.readFileSync(specificEnvPath, 'utf8');
+        const lines = envContent.split('\n');
+        
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+                const [key, ...valueParts] = trimmed.split('=');
+                let value = valueParts.join('=');
+                
+                // 处理行尾注释：需要考虑引号内的 # 不被当作注释开始
+                let inQuotes = false;
+                let quoteChar = null;
+                let commentStart = -1;
+                
+                for (let charIndex = 0; charIndex < value.length; charIndex++) {
+                    const char = value[charIndex];
+
+                    if ((char === '"' || char === "'") && (charIndex === 0 || value[charIndex-1] !== '\\')) {
+                        if (!inQuotes) {
+                            inQuotes = true;
+                            quoteChar = char;
+                        } else if (char === quoteChar) {
+                            inQuotes = false;
+                            quoteChar = null;
+                        }
+                    } else if (char === '#' && !inQuotes) {
+                        commentStart = charIndex;
+                        break;
+                    }
+                }
+                
+                // 移除注释部分
+                if (commentStart !== -1) {
+                    value = value.substring(0, commentStart).trim();
+                } else {
+                    value = value.trim();
+                }
+                
+                // 循环去除所有包围的引号
+                while (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+                    value = value.substring(1, value.length - 1);
+                }
+                
+                const keyTrim = key.trim();
+                const currentVal = process.env[keyTrim];
+                // 只有当环境变量不存在，或者是 ${VAR} 这种占位符时，才从 .env 加载
+                if (!currentVal || currentVal === `\${${keyTrim}}`) {
+                    process.env[keyTrim] = value;
+                }
+            }
+        }
+    }
+
+    // 2. 然后加载 .env (作为 fallback，不会覆盖已存在的值)
     const envPath = path.join(projectRoot, '.env');
     if (fileSystem.existsSync(envPath)) {
         const envContent = fileSystem.readFileSync(envPath, 'utf8');
@@ -325,7 +382,12 @@ function generateWranglerToml() {
 // 主函数
 function main() {
     try {
-        loadEnvFile();
+        // 1. 解析 --env 参数
+        const envArg = process.argv.find(arg => arg.startsWith('--env='));
+        const targetEnv = envArg ? envArg.split('=')[1] : 'dev'; // 默认为 dev
+
+        // 2. 加载环境文件
+        loadEnvFile(fs, targetEnv);
 
         ['GHA_SECRETS_JSON', 'GHA_VARS_JSON'].forEach(key => {
             if (process.env[key]) {
@@ -340,9 +402,9 @@ function main() {
                                 value = value.substring(1, value.length - 1);
                             }
                              // 仅当环境变量尚未被外部（如 Infisical）设置时，才从 GHA JSON 中加载
-                    if (!process.env[k]) {
-                        process.env[k] = value;
-                    }
+                     if (!process.env[k]) {
+                         process.env[k] = value;
+                     }
                         }
                     });
                 } catch (e) { console.warn(`解析 ${key} 失败:`, e.message); }
