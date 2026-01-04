@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.9.3](https://github.com/YoungSx/lb-worker-js/compare/v0.9.2...v0.9.3) (2026-01-04)
+
+
+### ✨ Features
+
+* add local GHA simulation support and update dependencies ([a80dec0](https://github.com/YoungSx/lb-worker-js/commit/a80dec0bca1d085a8ae9c09e9c4488ddfc6f5116))
+
+
+### 🔧 Maintenance
+
+* build logic ([973703c](https://github.com/YoungSx/lb-worker-js/commit/973703cebece36ddfd8cf2fd29a7e0535359a152))
+
+
+### 🐛 Bug Fixes
+
+* enhances test assertions with proper value quoting ([88dabce](https://github.com/YoungSx/lb-worker-js/commit/88dabce0b4e34e5ef384226cbb93e2917e394b5f))
+* improves deployment security and reliability ([23eb584](https://github.com/YoungSx/lb-worker-js/commit/23eb584e073422f0819748e00cae1f86a463a6a1))
+* improves sensitive data handling in deployment scripts ([c34c3fd](https://github.com/YoungSx/lb-worker-js/commit/c34c3fddff03274c126f2fe0697a6ac58cce1423))
+* updates environment variable naming to use CF_ prefix ([f16ec29](https://github.com/YoungSx/lb-worker-js/commit/f16ec2949b5fb946ca11e37fcb446562bd1c4395))
+* updates sensitive data redaction patterns ([26a1c40](https://github.com/YoungSx/lb-worker-js/commit/26a1c404442fdfce12706cbaffd8acfe9c0ec699))
+
 ### [0.9.2](https://github.com/YoungSx/lb-worker-js/compare/v0.9.1...v0.9.2) (2026-01-03)
 
 
