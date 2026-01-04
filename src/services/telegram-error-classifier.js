@@ -12,6 +12,7 @@ export class TelegramErrorClassifier {
         BINARY_READER: 'BINARY_READER',        // 二进制解析错误
         NETWORK: 'NETWORK',                    // 网络层错误
         RPC_ERROR: 'RPC_ERROR',                // Telegram RPC 错误
+        FLOOD: 'FLOOD',                        // Flood 限制错误
         UNKNOWN: 'UNKNOWN'                     // 未知错误
     };
 
@@ -21,8 +22,14 @@ export class TelegramErrorClassifier {
         const msg = error.message || '';
         const msgLower = msg.toLowerCase();
         const code = error.code;
+        const seconds = error.seconds;
 
-        // 1. 认证和会话冲突 (最高优先级)
+        // 0. Flood 限制 (最高优先级)
+        if (code === 420 || msg.includes('FLOOD') || seconds > 0) {
+            return this.ERROR_TYPES.FLOOD;
+        }
+
+        // 1. 认证和会话冲突 (高优先级)
         if (code === 406 || msg.includes('AUTH_KEY_DUPLICATED')) {
             return this.ERROR_TYPES.AUTH_KEY_DUPLICATED;
         }
@@ -94,7 +101,16 @@ export class TelegramErrorClassifier {
     /**
      * 获取推荐的重连策略
      */
-    static getReconnectStrategy(errorType, failureCount) {
+    static getReconnectStrategy(errorType, failureCount, error = null) {
+        // 特殊处理 Flood Wait
+        if (errorType === this.ERROR_TYPES.FLOOD && error?.seconds) {
+            return {
+                type: 'wait',
+                delay: (error.seconds + 5) * 1000, // 多等5秒缓冲
+                shouldRetry: true
+            };
+        }
+
         const strategies = {
             [this.ERROR_TYPES.TIMEOUT]: {
                 type: 'lightweight',
@@ -138,6 +154,13 @@ export class TelegramErrorClassifier {
                 maxRetries: 4,
                 backoffMultiplier: 1.5
             },
+            [this.ERROR_TYPES.FLOOD]: {
+                type: 'wait',
+                baseDelay: 60000,
+                maxDelay: 86400000, // 1天
+                maxRetries: 3,
+                backoffMultiplier: 1.0 // 由 error.seconds 决定，这里仅作默认值
+            },
             [this.ERROR_TYPES.UNKNOWN]: {
                 type: 'full',
                 baseDelay: 10000,
@@ -168,6 +191,11 @@ export class TelegramErrorClassifier {
     static shouldTripCircuitBreaker(errorType, failureCount) {
         // 认证错误立即触发
         if (errorType === this.ERROR_TYPES.AUTH_KEY_DUPLICATED) {
+            return true;
+        }
+
+        // Flood 错误：1次即触发，避免继续请求
+        if (errorType === this.ERROR_TYPES.FLOOD) {
             return true;
         }
 

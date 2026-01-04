@@ -37,7 +37,7 @@ class EnhancedTelegramCircuitBreaker {
             this.onSuccess();
             return result;
         } catch (error) {
-            this.onFailure(errorType);
+            this.onFailure(errorType, error);
             throw error;
         }
     }
@@ -55,7 +55,7 @@ class EnhancedTelegramCircuitBreaker {
         }
     }
 
-    onFailure(errorType) {
+    onFailure(errorType, error = null) {
         this.failures++;
         this.lastFailure = Date.now();
 
@@ -69,10 +69,16 @@ class EnhancedTelegramCircuitBreaker {
         
         if (this.failures >= effectiveThreshold) {
             this.state = 'OPEN';
-            logger.error(`🚨 Circuit breaker OPENED after ${this.failures} failures (threshold: ${effectiveThreshold}, type: ${errorType})`);
             
-            // 根据错误类型调整超时时间
-            const effectiveTimeout = this.getEffectiveTimeout(errorType);
+             // 根据错误类型调整超时时间
+             const effectiveTimeout = this.getEffectiveTimeout(errorType, error);
+
+            // 如果是 Flood 错误，打印特殊日志
+            if (errorType === TelegramErrorClassifier.ERROR_TYPES.FLOOD) {
+                 logger.error(`🚨 Circuit breaker OPENED due to FLOOD limit. Stopping requests for ${Math.ceil(effectiveTimeout / 1000)}s.`);
+            } else {
+                logger.error(`🚨 Circuit breaker OPENED after ${this.failures} failures (threshold: ${effectiveThreshold}, type: ${errorType})`);
+            }
             
             if (this.resetTimer) clearTimeout(this.resetTimer);
             this.resetTimer = setTimeout(() => {
@@ -93,13 +99,19 @@ class EnhancedTelegramCircuitBreaker {
             [TelegramErrorClassifier.ERROR_TYPES.CONNECTION_LOST]: 4,
             [TelegramErrorClassifier.ERROR_TYPES.BINARY_READER]: 3,
             [TelegramErrorClassifier.ERROR_TYPES.AUTH_KEY_DUPLICATED]: 1,
+            [TelegramErrorClassifier.ERROR_TYPES.FLOOD]: 1,
             [TelegramErrorClassifier.ERROR_TYPES.RPC_ERROR]: 6,
             [TelegramErrorClassifier.ERROR_TYPES.UNKNOWN]: 5
         };
         return thresholds[errorType] || 5;
     }
 
-    getEffectiveTimeout(errorType) {
+    getEffectiveTimeout(errorType, error = null) {
+        // Flood 错误特殊处理：使用 error.seconds
+        if (errorType === TelegramErrorClassifier.ERROR_TYPES.FLOOD && error?.seconds) {
+            return (error.seconds + 5) * 1000;
+        }
+
         // 不同错误类型使用不同恢复时间
         const timeouts = {
             [TelegramErrorClassifier.ERROR_TYPES.TIMEOUT]: 90000,      // 90秒
@@ -108,6 +120,7 @@ class EnhancedTelegramCircuitBreaker {
             [TelegramErrorClassifier.ERROR_TYPES.CONNECTION_LOST]: 60000, // 1分钟
             [TelegramErrorClassifier.ERROR_TYPES.BINARY_READER]: 30000, // 30秒
             [TelegramErrorClassifier.ERROR_TYPES.AUTH_KEY_DUPLICATED]: 0, // 立即恢复（但需要特殊处理）
+            [TelegramErrorClassifier.ERROR_TYPES.FLOOD]: 60000, // 默认 1 分钟（如果有具体 seconds 会被上面覆盖）
             [TelegramErrorClassifier.ERROR_TYPES.RPC_ERROR]: 50000,     // 50秒
             [TelegramErrorClassifier.ERROR_TYPES.UNKNOWN]: 60000       // 1分钟
         };
@@ -330,6 +343,8 @@ async function initTelegramClient() {
         enableTelegramConsoleProxy();
         
         // 使用错误类型感知的电路断路器
+        // 注意：TelegramClient 构造函数本身不会抛出 FloodWaitError，
+        // FloodWaitError 通常在 connect() 或 start() 时发生
         telegramClient = await telegramCircuitBreaker.execute(async () => {
             if (!config.apiId || !config.apiHash) {
                 throw new Error("Your API ID or Hash cannot be empty or undefined");
@@ -376,11 +391,17 @@ function setupEventListeners(client) {
         // 记录错误类型统计
         errorTypeFailures[errorType] = (errorTypeFailures[errorType] || 0) + 1;
 
-        logger.error(`⚠️ Telegram error [${errorType}]: ${err.message}`, { service: 'telegram' });
+        // 特殊处理 FLOOD
+        if (errorType === TelegramErrorClassifier.ERROR_TYPES.FLOOD) {
+             const waitSeconds = err.seconds || 60;
+             logger.error(`🚨 Telegram Flood Wait Detected: A wait of ${waitSeconds} seconds is required.`, { service: 'telegram', waitSeconds });
+        } else {
+             logger.error(`⚠️ Telegram error [${errorType}]: ${err.message}`, { service: 'telegram' });
+        }
 
         // 检查是否需要触发电路断路器
         if (TelegramErrorClassifier.shouldTripCircuitBreaker(errorType, errorTypeFailures[errorType])) {
-            telegramCircuitBreaker.onFailure(errorType);
+            telegramCircuitBreaker.onFailure(errorType, err);
         }
 
         // 检查是否需要跳过重连
@@ -390,7 +411,7 @@ function setupEventListeners(client) {
         }
 
         // 获取推荐的重连策略
-        const strategy = TelegramErrorClassifier.getReconnectStrategy(errorType, errorTypeFailures[errorType]);
+        const strategy = TelegramErrorClassifier.getReconnectStrategy(errorType, errorTypeFailures[errorType], err);
         
         if (!strategy.shouldRetry) {
             logger.warn(`⚠️ Max retries exceeded for error type ${errorType}, stopping reconnection attempts`);
@@ -787,10 +808,18 @@ export const connectAndStart = async () => {
         if (!client.connected) {
             const config = getConfig();
             logger.info("🔌 正在连接 Telegram 客户端...");
-            await client.connect();
+            
+            // 使用电路断路器保护连接过程，捕获 FloodWaitError
+            await telegramCircuitBreaker.execute(async () => {
+                await client.connect();
+            }, TelegramErrorClassifier.ERROR_TYPES.UNKNOWN);
             
             logger.info("🤖 正在启动 Telegram Bot...");
-            await client.start({ botAuthToken: config.botToken });
+            
+            // 使用电路断路器保护启动过程，捕获 FloodWaitError
+            await telegramCircuitBreaker.execute(async () => {
+                await client.start({ botAuthToken: config.botToken });
+            }, TelegramErrorClassifier.ERROR_TYPES.UNKNOWN);
             
             await saveSession();
             
@@ -800,8 +829,22 @@ export const connectAndStart = async () => {
         
         return client;
     } catch (error) {
-        logger.error("❌ Telegram 客户端连接启动失败:", error);
-        throw error;
+        // 重新分类错误以进行适当处理
+        const errorType = TelegramErrorClassifier.classify(error);
+        
+        if (errorType === TelegramErrorClassifier.ERROR_TYPES.FLOOD) {
+            const waitSeconds = error.seconds || 60;
+            logger.error(`🚨 Telegram Flood Wait Detected during connect/start: A wait of ${waitSeconds} seconds is required.`, { service: 'telegram', waitSeconds });
+            
+            // 触发电路断路器
+            telegramCircuitBreaker.onFailure(errorType, error);
+            
+            // 抛出错误以便上层处理
+            throw error;
+        } else {
+            logger.error("❌ Telegram 客户端连接启动失败:", error);
+            throw error;
+        }
     }
 };
 
