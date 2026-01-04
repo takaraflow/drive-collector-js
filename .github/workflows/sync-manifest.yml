@@ -15,7 +15,33 @@ jobs:
       REPO_DIR: "contract-repo"
       REGISTRY_PATH: "registry"
     steps:
-      # 1. 获取临时访问令牌 (使用之前创建的 GitHub App)
+      # 1. 检查 Secrets (Debug 模式)
+      - name: Check Secrets Presence
+        env:
+          # 显式映射 secret 到环境变量，以便在脚本中检查
+          # 注意：为了安全，不要直接打印 secret 的值！
+          DEBUG_APP_ID: ${{ secrets.APP_ID }}
+          DEBUG_APP_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        run: |
+          echo "=== Debugging Secrets ==="
+          
+          if [ -z "$DEBUG_APP_ID" ]; then
+            echo "::error::Secrets.APP_ID is EMPTY or NOT FOUND."
+          else
+            # 显示前 4 位，方便排查是否配置正确
+            echo "✅ Secrets.APP_ID is set (Length: ${#DEBUG_APP_ID}). Start with: ${DEBUG_APP_ID:0:4}***"
+          fi
+          
+          if [ -z "$DEBUG_APP_KEY" ]; then
+            echo "::error::Secrets.APP_PRIVATE_KEY is EMPTY or NOT FOUND."
+          else
+            # 显示前 15 位，确认是否以 -----BEGIN 开头
+            echo "✅ Secrets.APP_PRIVATE_KEY is set (Length: ${#DEBUG_APP_KEY}). Start with: ${DEBUG_APP_KEY:0:15}***"
+          fi
+          
+          echo "========================="
+
+      # 2. 获取临时访问令牌 (使用之前创建的 GitHub App)
       - name: Generate Token
         id: generate_token
         uses: tibdex/github-app-token@v2
