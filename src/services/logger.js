@@ -252,7 +252,7 @@ const serializeData = (data) => {
  * @param {number} currentDepth - 当前深度
  * @returns {any} - 裁剪后的对象
  */
-const pruneData = (obj, maxDepth = 3, maxKeys = 20, currentDepth = 0) => {
+const pruneData = (obj, maxDepth = 2, maxKeys = 5, currentDepth = 0) => {
   if (currentDepth >= maxDepth) {
       if (typeof obj === 'object' && obj !== null) {
           return '[Truncated: Max Depth]';
@@ -263,9 +263,10 @@ const pruneData = (obj, maxDepth = 3, maxKeys = 20, currentDepth = 0) => {
   if (obj === null || typeof obj !== 'object') return obj;
   
   if (Array.isArray(obj)) {
+      // 更严格的数组处理：最多保留 5 项，每项深度递减
       const prunedArray = obj.slice(0, maxKeys).map(item => pruneData(item, maxDepth, maxKeys, currentDepth + 1));
       if (obj.length > maxKeys) {
-          prunedArray.push('[Truncated: Max Array Length]');
+          prunedArray.push(`[Truncated: ${obj.length - maxKeys} items]`);
       }
       return prunedArray;
   }
@@ -282,7 +283,7 @@ const pruneData = (obj, maxDepth = 3, maxKeys = 20, currentDepth = 0) => {
   for (const key in obj) {
       if (Object.prototype.hasOwnProperty.call(obj, key)) {
           if (keyCount >= maxKeys) {
-              newObj['_truncated_keys'] = `... ${Object.keys(obj).length - maxKeys} more keys`;
+              newObj['_truncated'] = `... ${Object.keys(obj).length - maxKeys} more keys`;
               break;
           }
           newObj[key] = pruneData(obj[key], maxDepth, maxKeys, currentDepth + 1);
@@ -336,18 +337,17 @@ const log = async (instanceId, level, message, data = {}) => {
       payload.error_summary = String(finalData.error).substring(0, 200);
   }
 
-  // 方案1: 对于非 Error 数据，使用更严格的裁剪 + 字符串化
-  // 采用更保守的参数：深度2，每层最多10个键
-  const prunedData = pruneData(finalData, 2, 10);
+  // 采用更保守的参数：深度2，每层最多5个键
+  const prunedData = pruneData(finalData, 2, 5);
   
   // 将所有数据序列化存入 details 字段
   // 关键：Axiom 不会解析字符串内部的 JSON，所以不会产生额外列
+  // details 字段本身只占 1 列，无论内部多复杂
   try {
       const detailsStr = JSON.stringify(prunedData);
       
-      // 方案2: 如果序列化后的字符串仍然过长（可能导致列数过多），使用摘要模式
-      // Axiom 的列限制是 257，我们保守地假设 details 字段可能占用 250 列
-      // 所以如果数据结构过于复杂，直接使用摘要模式
+      // 如果序列化后的字符串仍然过长，使用摘要模式
+      // 保守限制：5000 字符，防止 Axiom 内部处理问题
       if (detailsStr.length > 5000) {
           // 数据过于复杂，使用摘要模式
           payload.details = JSON.stringify({
@@ -364,8 +364,18 @@ const log = async (instanceId, level, message, data = {}) => {
       payload.details = '[JSON Stringify Error]';
   }
 
-  // 最后的安全网：限制顶层字段
+  // 最后的安全网：限制顶层字段，使用更保守的值
+  // 理论上 payload 只有 5-6 个顶层字段，但为了安全使用 50
   const finalPayload = limitFields(payload, 50);
+  
+  // 额外验证：确保 details 是字符串且不会导致列数超标
+  if (finalPayload.details && typeof finalPayload.details !== 'string') {
+      try {
+          finalPayload.details = JSON.stringify(finalPayload.details);
+      } catch (e) {
+          finalPayload.details = '[Unable to stringify]';
+      }
+  }
 
   try {
     const dataset = getSafeDatasetName();
