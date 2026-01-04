@@ -1,18 +1,28 @@
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
 
-// 解析 --env 参数
-const envArg = process.argv.find(arg => arg.startsWith('--env='));
-const targetEnv = envArg ? envArg.split('=')[1] : 'dev';
+/**
+ * 设置环境变量 - 解析 --env 参数并加载对应的 .env 文件
+ * @param {string[]} argv - process.argv 数组，默认为 process.argv
+ * @returns {string} - 解析出的 targetEnv
+ */
+export function setupEnvironment(argv = process.argv) {
+    // 解析 --env 参数
+    const envArg = argv.find(arg => arg.startsWith('--env='));
+    const targetEnv = envArg ? envArg.split('=')[1] : 'dev';
 
-// 1. 优先加载 .env (作为本地覆盖)
-dotenv.config();
+    // 1. 优先加载 .env (作为本地覆盖)
+    dotenv.config();
 
-// 2. 如果存在特定环境的 .env 文件，也加载它 (作为额外覆盖)
-const specificEnvPath = path.resolve(process.cwd(), `.env.${targetEnv}`);
-if (fs.existsSync(specificEnvPath)) {
-    dotenv.config({ path: specificEnvPath, override: true });
+    // 2. 如果存在特定环境的 .env 文件，也加载它 (作为额外覆盖)
+    const specificEnvPath = path.resolve(process.cwd(), `.env.${targetEnv}`);
+    if (fs.existsSync(specificEnvPath)) {
+        dotenv.config({ path: specificEnvPath, override: true });
+    }
+
+    return targetEnv;
 }
 
 /**
@@ -203,7 +213,6 @@ export function generateWranglerCommand(env = process.env) {
 }
 
 // Only execute if running directly
-import { fileURLToPath } from 'url';
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // 脱敏后输出命令
   console.log(redactSensitiveInfo(generateWranglerCommand()));
