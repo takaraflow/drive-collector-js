@@ -317,9 +317,6 @@ const log = async (instanceId, level, message, data = {}) => {
     return;
   }
 
-  // 序列化数据并进行深度剪裁，防止字段爆炸
-  const prunedData = pruneData(finalData, 3, 20);
-  
   // 构建基础 Payload，严格控制顶层字段 - ONLY the absolute minimum
   const payload = {
     version,
@@ -339,15 +336,35 @@ const log = async (instanceId, level, message, data = {}) => {
       payload.error_summary = String(finalData.error).substring(0, 200);
   }
 
-  // 将所有数据（包括被提取的字段）序列化存入 details 字段
-  // 这样做彻底解决了字段爆炸问题，因为 Axiom 不会解析字符串内部的结构作为列
+  // 方案1: 对于非 Error 数据，使用更严格的裁剪 + 字符串化
+  // 采用更保守的参数：深度2，每层最多10个键
+  const prunedData = pruneData(finalData, 2, 10);
+  
+  // 将所有数据序列化存入 details 字段
+  // 关键：Axiom 不会解析字符串内部的 JSON，所以不会产生额外列
   try {
-      payload.details = JSON.stringify(prunedData);
+      const detailsStr = JSON.stringify(prunedData);
+      
+      // 方案2: 如果序列化后的字符串仍然过长（可能导致列数过多），使用摘要模式
+      // Axiom 的列限制是 257，我们保守地假设 details 字段可能占用 250 列
+      // 所以如果数据结构过于复杂，直接使用摘要模式
+      if (detailsStr.length > 5000) {
+          // 数据过于复杂，使用摘要模式
+          payload.details = JSON.stringify({
+              service: finalData.service || 'unknown',
+              type: finalData.type || 'unknown',
+              summary: 'Data truncated due to complexity',
+              original_size: detailsStr.length,
+              error: finalData.error ? String(finalData.error).substring(0, 200) : undefined
+          });
+      } else {
+          payload.details = detailsStr;
+      }
   } catch (e) {
       payload.details = '[JSON Stringify Error]';
   }
 
-  // 最后的安全网：限制顶层字段 (虽然现在不太可能超限了)
+  // 最后的安全网：限制顶层字段
   const finalPayload = limitFields(payload, 50);
 
   try {
