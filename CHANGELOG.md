@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.10.0](https://github.com/YoungSx/lb-worker-js/compare/v0.9.3...v0.10.0) (2026-01-04)
+
+
+### 🐛 Bug Fixes
+
+* adds fallback for CLOUDFLARE_ACCOUNT_ID from .act.secrets in local dev ([e722833](https://github.com/YoungSx/lb-worker-js/commit/e722833bd0ebe5d3c03c33a181c6e81fe20526c2))
+* adds newline check for private key validation ([e88a64b](https://github.com/YoungSx/lb-worker-js/commit/e88a64b2e3c3af4ef7eb5934d083883ec80fc3da))
+* enables explicit Cloudflare API token and account ID propagation ([56ecc0a](https://github.com/YoungSx/lb-worker-js/commit/56ecc0a9a00329baf9f6e3504f2d1294675f3408))
+* enhance log redaction to prevent sensitive info leakage ([6d804c0](https://github.com/YoungSx/lb-worker-js/commit/6d804c019acaad727d13ee8da70e287c74c9eca5))
+* improves Infisical integration and error handling in deployment workflow ([1af4556](https://github.com/YoungSx/lb-worker-js/commit/1af4556af4202babdff232f2c71532404f13b996))
+* improves secret management and fallback handling in deployment workflow ([aa90c8c](https://github.com/YoungSx/lb-worker-js/commit/aa90c8c15d5e63db57cfc248f9ad3baa7bba0561))
+* removes redundant environment variable handling in wrangler command generation ([deb3c3f](https://github.com/YoungSx/lb-worker-js/commit/deb3c3fdf3b2c4187a37f93bf0b8a2555256c5f4))
+* updates Cloudflare-related environment variables for consistency ([913d9ff](https://github.com/YoungSx/lb-worker-js/commit/913d9ff4b237acf83b1e1f7969ab2e1ec62d2e2d))
+
+
+### 🔧 Maintenance
+
+* make secret masking dynamic based on manifest.json ([271d571](https://github.com/YoungSx/lb-worker-js/commit/271d571bd108cca5b67aa07860f8d471367a91aa))
+
+
+### ✨ Features
+
+* adds robust log sanitization and size management for Axiom integration ([c7aafdc](https://github.com/YoungSx/lb-worker-js/commit/c7aafdce1d1ec37c5d3f68442345f0a16afe894a))
+
 ### [0.9.3](https://github.com/YoungSx/lb-worker-js/compare/v0.9.2...v0.9.3) (2026-01-04)
 
 
