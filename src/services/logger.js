@@ -350,6 +350,16 @@ const log = async (instanceId, level, message, data = {}) => {
   // 最后的安全网：限制顶层字段 (虽然现在不太可能超限了)
   const finalPayload = limitFields(payload, 50);
 
+  // 如果 payload 仍然会导致列数超限（例如 details 字符串过长），则直接降级到 console
+  // 检查字段数量
+  const fieldCount = Object.keys(finalPayload).length;
+  if (fieldCount > 250) {
+    // 直接降级到 console，避免 Axiom 报错
+    const fallback = { error: originalConsoleError, warn: originalConsoleWarn, log: originalConsoleLog }[level] || originalConsoleLog;
+    fallback.call(console, displayMessage, finalData);
+    return;
+  }
+
   try {
     const dataset = getSafeDatasetName();
     await safeAxiomIngest(dataset, [finalPayload]);
