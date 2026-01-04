@@ -13,15 +13,34 @@ dotenv.config();
 function redactSensitiveInfo(str) {
     if (!str) return str;
     
-    // 脱敏敏感信息模式：动态识别包含 TOKEN, KEY, SECRET, PASSWORD, PWD 的变量
+    // 增强的脱敏模式：覆盖更多敏感关键词和场景
     const patterns = [
+        // 1. 匹配 --var 或 export 后的敏感变量名（包含 TOKEN, KEY, SECRET, PASSWORD, PWD, URL, ID 等）
         {
-            regex: /(--var\s+)([^=]*(?:TOKEN|KEY|SECRET|PASSWORD|PWD)[^=]*)(="?)([^" ]+)("?)/gi,
-            replacement: (match, p1, p2, p3, p4, p5) => `${p1}${p2}${p3}***REDACTED***${p5}`
+            regex: /(--var\s+|export\s+)([^=]*(?:TOKEN|KEY|SECRET|PASSWORD|PWD|URL|ID|AUTH|TOKEN_|KEY_|SECRET_|PASSWORD_|PWD_|URL_|ID_|AUTH_)[^=]*)(=)([^;\s]+)/gi,
+            replacement: (match, p1, p2, p3, p4) => {
+                // 如果是 URL，尝试保留协议头但隐藏敏感部分
+                if (p4.includes('://') && p4.length > 10) {
+                    return `${p1}${p2}${p3}"***REDACTED***"`;
+                }
+                return `${p1}${p2}${p3}***REDACTED***`;
+            }
         },
+        // 2. 匹配 URL 中的密码部分 (redis://:password@host)
         {
-            regex: /(export\s+)([^=]*(?:TOKEN|KEY|SECRET|PASSWORD|PWD)[^=]*)(="?)([^" ]+)("?)/gi,
-            replacement: (match, p1, p2, p3, p4, p5) => `${p1}${p2}${p3}***REDACTED***${p5}`
+            regex: /(redis|rediss|postgres|mysql|mongodb):\/\/([^@]+@)?([^@]+)(:\d+)?/gi,
+            replacement: (match, protocol, userPass, host, port) => {
+                // 如果包含密码 (:password@)
+                if (userPass && userPass.includes(':')) {
+                    return `${protocol}://***REDACTED***@${host}${port || ''}`;
+                }
+                return match;
+            }
+        },
+        // 3. 匹配 JSON 格式中的敏感字段
+        {
+            regex: /("([^"]*(?:TOKEN|KEY|SECRET|PASSWORD|PWD|URL|ID|AUTH)[^"]*)"\s*:\s*)("([^"]*)"|'([^']*)')/gi,
+            replacement: (match, p1, p2, p3, p4) => `${p1}"***REDACTED***"`
         }
     ];
     
