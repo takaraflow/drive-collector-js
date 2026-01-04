@@ -77,12 +77,6 @@ function main() {
         // 执行 wrangler 命令（脱敏后输出）
         console.log('Executing wrangler command...');
         
-        // 显式传递 env，确保 .env 加载的变量能传给 wrangler
-        execSync(wranglerCmd, {
-            stdio: 'inherit',
-            env: { ...process.env }
-        });
-        // 显式传递 env，确保 .env 加载的变量能传给 wrangler
         execSync(wranglerCmd, {
             stdio: 'inherit',
             env: { ...process.env }

@@ -95,8 +95,15 @@ export function generateWranglerCommand(env = process.env) {
       ...localOverrides // 本地覆盖，优先级最高
     };
 
-    // 移除所有 CF_API_TOKEN 和 CLOUDFLARE_ACCOUNT_ID 的旧版判断逻辑
-    // 直接使用 allAvailableVars 中的值，不做额外处理
+    // 2026-01-04: 如果环境变量中存在 CLOUDFLARE_API_TOKEN 或 CLOUDFLARE_ACCOUNT_ID，将其导出
+    // 这对于从 .act.secrets 或 Infisical 获取的变量至关重要，因为它们需要传递给 wrangler 进程
+    const extraExports = [];
+    if (allAvailableVars.CLOUDFLARE_API_TOKEN) {
+        extraExports.push(`export CLOUDFLARE_API_TOKEN="${allAvailableVars.CLOUDFLARE_API_TOKEN}"`);
+    }
+    if (allAvailableVars.CLOUDFLARE_ACCOUNT_ID) {
+        extraExports.push(`export CLOUDFLARE_ACCOUNT_ID="${allAvailableVars.CLOUDFLARE_ACCOUNT_ID}"`);
+    }
     
     const args = [];
     const vars = [];
@@ -154,11 +161,9 @@ export function generateWranglerCommand(env = process.env) {
     // 如果有额外的 exports，将它们前置到命令中
     // 注意：eval 会执行整个字符串。
     // 格式：export A="b"; export C="d"; npx wrangler ...
-    // 2026-01-04: 移除 extraExports 逻辑，因为 CLOUDFLARE_API_TOKEN 和 CLOUDFLARE_ACCOUNT_ID
-    // 应该直接通过 process.env 传递，而不是通过 export 语句
-    // if (extraExports.length > 0) {
-    //     command = extraExports.join('; ') + '; ' + command;
-    // }
+    if (extraExports.length > 0) {
+        command = extraExports.join('; ') + '; ' + command;
+    }
 
     return command;
   } catch (error) {
