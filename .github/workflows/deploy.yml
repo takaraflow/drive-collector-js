@@ -49,8 +49,6 @@ jobs:
           fi
           
           echo "Fetching secrets for environment: $NODE_ENV"
-          echo "INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID}"
-          echo "INFISICAL_TOKEN: ${INFISICAL_TOKEN:0:10}..."  # 只显示前10个字符用于调试
           
           # 2026-01-04: 修复 GHA 环境下 ${{ vars.INFISICAL_PROJECT_ID }} 可能为空的问题
           # 如果 vars.INFISICAL_PROJECT_ID 为空，明确失败而不是硬编码
@@ -66,9 +64,6 @@ jobs:
             echo "请检查 GitHub Secrets 中是否配置了 INFISICAL_TOKEN"
             exit 1
           fi
-          
-          # 立即遮蔽敏感信息，防止后续步骤意外泄露
-          echo "正在遮蔽敏感环境变量..."
           
           # 检查 manifest.json 是否存在
           if [ ! -f "manifest.json" ]; then
@@ -96,6 +91,9 @@ jobs:
           # 额外添加需要遮蔽但不在 manifest 中的变量
           EXTRA_KEYS="INFISICAL_PROJECT_ID"
           
+          # 立即遮蔽敏感信息，防止后续步骤意外泄露
+          echo "正在遮蔽敏感环境变量并输出长度..."
+          
           for KEY in $ALL_KEYS $EXTRA_KEYS; do
             # 跳过 NODE_ENV，它不是敏感信息
             if [[ "$KEY" == "NODE_ENV" ]]; then
@@ -104,6 +102,8 @@ jobs:
             VALUE="${!KEY}" # 间接引用获取变量的值
             if [ -n "$VALUE" ]; then
               echo "::add-mask::$VALUE"
+              LENGTH=${#VALUE}
+              echo "  遮蔽: $KEY (长度: ${LENGTH} 字符)"
             fi
           done
           
