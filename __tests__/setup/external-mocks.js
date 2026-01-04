@@ -101,6 +101,7 @@ globalMocks.redisClient = {
   removeListener: jest.fn().mockReturnThis(),
   removeAllListeners: jest.fn().mockReturnThis(),
   quit: jest.fn().mockResolvedValue('OK'),
+  disconnect: jest.fn().mockResolvedValue('OK'), // 添加 disconnect 方法
   ping: jest.fn().mockResolvedValue('PONG'),
   get: jest.fn(),
   set: jest.fn(),

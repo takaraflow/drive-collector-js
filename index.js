@@ -2,7 +2,7 @@ process.on('uncaughtException', (err) => { console.error('FATAL: Uncaught Except
 process.on('unhandledRejection', (reason, promise) => { console.error('FATAL: Unhandled Rejection:', reason); process.exit(1); })
 
 import http from "http";
-import { config } from "./src/config/index.js";
+import { initConfig, config } from "./src/config/index.js";
 import { SettingsRepository } from "./src/repositories/SettingsRepository.js";
 import { instanceCoordinator } from "./src/services/InstanceCoordinator.js";
 import { qstashService } from "./src/services/QStashService.js";
@@ -146,6 +146,15 @@ export { handleQStashWebhook };
 (async () => {
     try {
         logger.info("🔄 正在启动应用...");
+
+        // --- 🔐 初始化配置 (Infisical) ---
+        try {
+            await initConfig();
+            logger.info("✅ 配置初始化完成");
+        } catch (configError) {
+            logger.error("❌ 配置初始化失败:", configError);
+            process.exit(1);
+        }
 
         // 检查 NODE_MODE 环境变量（支持向后兼容旧名称）
         const modeMapping = { bot: 'dispatcher', worker: 'processor' };

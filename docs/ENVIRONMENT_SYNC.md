@@ -1,56 +1,94 @@
 # 环境变量同步指南
 
+## ⚠️ 安全警告：生产环境必须使用运行时同步
+
+**重要变更**：从安全增强版本开始，生产环境不再推荐使用 `scripts/sync-env.js` 将密钥写入 `.env` 文件。改为在应用启动时直接从 Infisical 获取配置并注入内存，避免密钥持久化到磁盘。
+
 ## 统一原则
 
 **无论在哪里构建（GHA、云服务商、本地、Docker），只要设置好 `INFISICAL_TOKEN` 等变量，都能自动从 Infisical 获取所有环境变量。**
 
 ## 核心机制
 
-### 1. 统一入口：`sync:env`
+### 1. 运行时安全同步（推荐生产环境）
 
-所有启动脚本都通过 `npm run sync:env` 从 Infisical 拉取环境变量：
+应用启动时，通过 `src/services/InfisicalClient.js` 直接从 Infisical API 获取密钥，并注入到 `config` 对象中，**不写入磁盘**。
 
+**启动流程**：
+```javascript
+// index.js
+await initConfig(); // 从 Infisical 获取配置
+// config 对象已包含所有密钥，可安全使用
+```
+
+**优势**：
+- ✅ 密钥不落地，避免磁盘泄露风险
+- ✅ 实时获取最新配置
+- ✅ 支持 4 级降级（Infisical API → 本地缓存 → 云服务商配置 → 失败退出）
+
+### 2. 传统同步模式（仅限开发/调试）
+
+`scripts/sync-env.js` 仍保留用于开发环境，但**不建议在生产环境使用**。
+
+**使用场景**：
+- 本地开发调试
+- 离线环境测试
+- 需要生成 `.env` 备份
+
+**执行命令**：
+```bash
+# 生成 .env 文件（仅开发）
+npm run sync:env
+```
+
+### 3. 启动脚本调整
+
+**生产环境（推荐）**：
 ```json
 {
   "scripts": {
-    "sync:env": "node scripts/sync-env.js",
-    "start": "npm run sync:env && cross-env NODE_MODE=all node index.js",
-    "start:dispatcher": "npm run sync:env && cross-env NODE_MODE=dispatcher node index.js",
-    "start:processor": "npm run sync:env && cross-env NODE_MODE=processor node index.js",
+    "start": "cross-env NODE_MODE=all node index.js",
+    "start:dispatcher": "cross-env NODE_MODE=dispatcher node index.js",
+    "start:processor": "cross-env NODE_MODE=processor node index.js",
     "dev": "npm run sync:env && cross-env NODE_MODE=dev node --watch index.js"
   }
 }
 ```
 
-### 2. 支持两种模式
+**说明**：
+- `start` 命令不再执行 `sync:env`，而是依赖运行时 `initConfig()`
+- `dev` 命令保留 `sync:env` 以兼容本地开发习惯
 
-`scripts/sync-env.js` 支持两种从 Infisical 获取数据的方式：
+### 4. Docker 集成
 
-#### CLI 模式（推荐）
-```bash
-# 需要安装 Infisical CLI
-infisical export --env=prod --projectId=xxx --format=dotenv
-```
-
-#### API 模式（备用）
-```bash
-# 使用 REST API，无需安装 CLI
-# 需要 INFISICAL_TOKEN 和 INFISICAL_PROJECT_ID
-```
-
-### 3. Docker 集成
-
-#### 运行时同步（推荐）
+#### 运行时同步（推荐生产）
 ```bash
 docker run -d \
   -e INFISICAL_TOKEN="your-token" \
   -e INFISICAL_PROJECT_ID="your-project-id" \
+  -e STRICT_SYNC=1 \
   -p 7860:7860 \
   my-app
 ```
 
-容器启动时会自动运行：
+容器启动时：
+1. `initConfig()` 被调用
+2. 从 Infisical API 获取密钥
+3. 注入到内存配置对象
+4. 应用启动，**不生成 `.env` 文件**
+
+#### 开发环境（可选）
 ```bash
+# 如果需要 .env 文件用于调试
+docker run -d \
+  -e INFISICAL_TOKEN="your-token" \
+  -e INFISICAL_PROJECT_ID="your-project-id" \
+  -e STRICT_SYNC=0 \
+  -v $(pwd)/.env:/app/.env \
+  -p 7860:7860 \
+  my-app
+```
+
 if [ -n "$INFISICAL_TOKEN" ]; then
   node scripts/sync-env.js
 fi
@@ -1177,10 +1215,12 @@ Infisical 返回的环境变量值可能包含额外的引号：
 - `KEY="it's a test"` - 值内部包含引号
 
 ### 解决方案
-在 CI/CD 流程中，`sync:env` 之后会自动执行引号清理：
+**运行时模式**：`InfisicalClient` 已内置引号去除逻辑，无需额外处理。
+
+**传统模式**（仅开发）：`sync:env` 脚本会自动清理引号。
 
 ```yaml
-# .github/workflows/ci.yml
+# .github/workflows/ci.yml (仅开发环境需要)
 - name: Sync environment variables from Infisical
   run: npm run sync:env
 

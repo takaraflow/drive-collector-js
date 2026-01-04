@@ -100,6 +100,7 @@ describe('CacheService Provider Priority', () => {
             UPSTASH_REDIS_REST_URL: 'https://upstash.io',
             UPSTASH_REDIS_REST_TOKEN: 'up-token'
         });
+        // Check properties
         expect(cacheInstance.hasRedis).toBe(true);
         expect(cacheInstance.currentProvider).toBe('redis');
     });

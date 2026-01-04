@@ -57,6 +57,7 @@ describe("Config Module", () => {
 
   test("should have the CACHE_TTL constant", async () => {
     const { CACHE_TTL } = await import("../../src/config/index.js");
+    // CACHE_TTL is exported as a named export
     expect(CACHE_TTL).toBeDefined();
     expect(typeof CACHE_TTL).toBe("number");
     expect(CACHE_TTL).toBe(10 * 60 * 1000);

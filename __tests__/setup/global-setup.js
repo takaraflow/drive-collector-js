@@ -1,7 +1,24 @@
+// Mock ioredis with disconnect method
+import { globalMocks } from './external-mocks.js';
 import { afterEach, afterAll, jest, beforeEach } from '@jest/globals';
 import { cleanupSingletonTimers, quickMockCleanup } from './test-helpers.js';
 import { cleanupDatabaseState, closeSharedDatabase, resetDbTracking } from './test-db.js';
 import { disableTelegramConsoleProxy, resetLogger } from '../../src/services/logger.js';
+import { cache } from '../../src/services/CacheService.js';
+import infisicalClient from '../../src/services/InfisicalClient.js';
+import { initConfig } from '../../src/config/index.js';
+
+// 初始化配置
+beforeAll(async () => {
+    // 设置测试环境的 process.env
+    process.env.API_ID = '123456';
+    process.env.API_HASH = 'test_hash';
+    process.env.BOT_TOKEN = 'test_token';
+    process.env.NODE_ENV = 'test';
+    
+    // 初始化配置
+    await initConfig();
+});
 
 /**
  * 每个测试开始前重置数据库跟踪
@@ -16,6 +33,16 @@ beforeEach(() => {
  * 在每个测试用例结束后清理单例服务定时器和 mock 状态
  */
 afterEach(async () => {
+  // 清理 CacheService 单例
+  if (cache) {
+      await cache.destroy();
+  }
+  
+  // 清理 InfisicalClient 缓存
+  if (infisicalClient && typeof infisicalClient.clearCache === 'function') {
+      infisicalClient.clearCache();
+  }
+
   // 快速清理 mock 状态 - 仅清理调用历史，保留实现
   quickMockCleanup();
   

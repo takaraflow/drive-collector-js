@@ -49,6 +49,25 @@ jest.unstable_mockModule('../../src/services/logger.js', () => ({
    logger: mockLogger
 }));
 
+// Mock config/index.js explicitly
+jest.unstable_mockModule('../../src/config/index.js', () => ({
+  config: {
+    botToken: 'mock_token',
+    ownerId: 'owner_id',
+    redis: {
+      url: 'redis://localhost:6379'
+    }
+  },
+  getConfig: jest.fn().mockReturnValue({
+    botToken: 'mock_token',
+    ownerId: 'owner_id',
+    redis: {
+      url: 'redis://localhost:6379'
+    }
+  }),
+  initConfig: jest.fn().mockResolvedValue({})
+}));
+
 const { startDispatcher } = await import('../../src/dispatcher/bootstrap.js');
 
 describe('Dispatcher Bootstrap', () => {
@@ -72,7 +91,7 @@ describe('Dispatcher Bootstrap', () => {
     await startDispatcher();
 
     expect(mockInstanceCoordinator.acquireLock).toHaveBeenCalledWith('telegram_client', 90, expect.objectContaining({ maxAttempts: 5 }));
-    expect(mockTelegram.client.start).toHaveBeenCalledWith({ botAuthToken: 'test-bot-token' });
+    expect(mockTelegram.client.start).toHaveBeenCalledWith({ botAuthToken: 'mock_token' });
     expect(mockTelegram.saveSession).toHaveBeenCalled();
     expect(mockTelegram.client.addEventHandler).toHaveBeenCalled();
     expect(mockMessageHandler.MessageHandler.init).toHaveBeenCalled();

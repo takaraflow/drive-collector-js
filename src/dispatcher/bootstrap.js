@@ -1,7 +1,7 @@
 import { getClient, saveSession, clearSession, resetClientSession, setConnectionStatusCallback } from "../services/telegram.js";
 import { MessageHandler } from "./MessageHandler.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
-import { config } from "../config/index.js";
+import { getConfig } from "../config/index.js";
 import { logger } from "../services/logger.js";
 
 /**
@@ -87,6 +87,7 @@ export async function startDispatcher() {
         try {
             while (!isClientActive && retryCount < maxRetries) {
                 try {
+                    const config = getConfig();
                     const client = await getClient();
                     await client.start({ botAuthToken: config.botToken });
                     await saveSession();

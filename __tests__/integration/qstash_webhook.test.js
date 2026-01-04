@@ -129,6 +129,31 @@ describe("QStash Webhook Integration", () => {
             }
         }));
 
+        // Mock initConfig before importing index.js
+        jest.unstable_mockModule("../../src/config/index.js", () => ({
+            config: {
+                qstash: {
+                    token: "mock-token",
+                    url: "https://qstash.upstash.io",
+                    webhookUrl: "https://example.com/webhook"
+                },
+                telegram: {
+                    proxy: {}
+                }
+            },
+            initConfig: jest.fn().mockResolvedValue({}),
+            getConfig: jest.fn().mockReturnValue({
+                qstash: {
+                    token: "mock-token",
+                    url: "https://qstash.upstash.io",
+                    webhookUrl: "https://example.com/webhook"
+                },
+                telegram: {
+                    proxy: {}
+                }
+            })
+        }));
+
         // Now import index.js
         const { handleQStashWebhook: webhookHandler } = await import("../../index.js");
         handleQStashWebhook = webhookHandler;

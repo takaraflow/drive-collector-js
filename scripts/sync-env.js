@@ -1,21 +1,29 @@
 #!/usr/bin/env node
 
 /**
- * Infisical Environment Variable Sync Script
- * 
+ * Infisical 环境变量同步脚本 - 开发/调试专用
+ *
+ * ⚠️ 安全警告：此脚本会将密钥写入磁盘 (.env 文件)，仅用于开发环境。
+ *     生产环境请使用运行时同步（src/services/InfisicalClient.js）。
+ *
  * 统一从 Infisical 拉取环境变量，支持多种降级方案：
  * 1. CLI 模式：使用 `infisical export` (推荐，性能更好)
  * 2. API 模式：通过 REST API 获取密钥 (备用方案)
  * 3. 本地 .env 文件：作为降级缓存
  * 4. 云服务商 Dashboard：手动配置的环境变量 (当前系统自带)
- * 
+ *
  * 使用方法：
  * 1. 设置环境变量：INFISICAL_TOKEN, INFISICAL_PROJECT_ID, INFISICAL_ENV
  * 2. 可选：INFISICAL_SECRET_PATH (默认为 "/")
  * 3. 运行：node scripts/sync-env.js
- * 
+ *
  * 输出：将密钥同步到 .env 文件
- * 
+ *
+ * 安全提示：
+ *   - 此脚本仅用于开发环境
+ *   - 生产环境使用运行时同步（src/services/InfisicalClient.js）
+ *   - 永远不要提交 .env 文件到 Git
+ *
  * 统一原则：无论在哪里构建，只要设置好 INFISICAL_TOKEN 等变量，
  * 都能自动从 Infisical 获取所有环境变量。
  */
