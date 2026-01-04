@@ -344,7 +344,7 @@
     "webhook": "/"
   },
   "infrastructure": {
-    "CF_ACCOUNT_ID": {
+    "CLOUDFLARE_ACCOUNT_ID": {
       "type": "string",
       "required": true,
       "description": "Cloudflare 账户 ID"
@@ -364,7 +364,7 @@
       "required": false,
       "description": "预览环境的 KV 命名空间 ID"
     },
-    "CF_API_TOKEN": {
+    "CLOUDFLARE_API_TOKEN": {
       "type": "string",
       "required": true,
       "description": "Cloudflare API 令牌"

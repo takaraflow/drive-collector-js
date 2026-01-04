@@ -155,12 +155,12 @@ function extractVariablesFromManifest() {
         process.env.SIGNATURE_EXPIRATION_WINDOW = '900';
     }
     
-    // 根据 WRANGLER_MODE 设置 CF_ACCOUNT_ID
+    // 根据 WRANGLER_MODE 设置 CLOUDFLARE_ACCOUNT_ID
     if (process.env.WRANGLER_MODE === 'local') {
-        process.env.CF_ACCOUNT_ID = 'unused-in-local-dev';
+        process.env.CLOUDFLARE_ACCOUNT_ID = 'unused-in-local-dev';
     } else if (process.env.WRANGLER_MODE === 'remote') {
-        if (!process.env.CF_ACCOUNT_ID) {
-            console.error('错误: 远程开发模式需要 CF_ACCOUNT_ID');
+        if (!process.env.CLOUDFLARE_ACCOUNT_ID) {
+            console.error('错误: 远程开发模式需要 CLOUDFLARE_ACCOUNT_ID');
             console.error('请在 .env 文件中设置此变量');
             process.exit(1);
         }
@@ -170,8 +170,8 @@ function extractVariablesFromManifest() {
     if (process.env.GITHUB_ACTIONS === 'true') {
         console.log('检测到 GitHub Actions 环境...');
         
-        if (!process.env.CF_ACCOUNT_ID) {
-            console.error('错误: GHA 环境下需要 CF_ACCOUNT_ID');
+        if (!process.env.CLOUDFLARE_ACCOUNT_ID) {
+            console.error('错误: GHA 环境下需要 CLOUDFLARE_ACCOUNT_ID');
             process.exit(1);
         }
         

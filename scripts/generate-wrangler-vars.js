@@ -100,7 +100,7 @@ export function generateWranglerCommand(env = process.env) {
         const escapedValue = cleanValue.replace(/"/g, '\\"');
         
         // 关键：只将 config.env 中的变量注入为 --var
-        // infrastructure 中的变量 (如 CF_ACCOUNT_ID) 不需要也不应该作为 Worker 的业务变量注入
+        // infrastructure 中的变量 (如 CLOUDFLARE_ACCOUNT_ID) 不需要也不应该作为 Worker 的业务变量注入
         if (envConfig[key]) {
             vars.push(`--var`, `${key}="${escapedValue}"`);
         }
