@@ -60,12 +60,8 @@ export function generateWranglerCommand(env = process.env) {
       ...secretsJson
     };
 
-    const extraExports = [];
-    for (const key of Object.keys(infraConfig)) {
-        if (allAvailableVars[key] !== undefined && env[key] === undefined) {
-             extraExports.push(`export ${key}="${allAvailableVars[key]}"`);
-        }
-    }
+    // 移除所有 CF_API_TOKEN 和 CLOUDFLARE_ACCOUNT_ID 的旧版判断逻辑
+    // 直接使用 allAvailableVars 中的值，不做额外处理
     
     const args = [];
     const vars = [];
@@ -123,9 +119,11 @@ export function generateWranglerCommand(env = process.env) {
     // 如果有额外的 exports，将它们前置到命令中
     // 注意：eval 会执行整个字符串。
     // 格式：export A="b"; export C="d"; npx wrangler ...
-    if (extraExports.length > 0) {
-        command = extraExports.join('; ') + '; ' + command;
-    }
+    // 2026-01-04: 移除 extraExports 逻辑，因为 CLOUDFLARE_API_TOKEN 和 CLOUDFLARE_ACCOUNT_ID
+    // 应该直接通过 process.env 传递，而不是通过 export 语句
+    // if (extraExports.length > 0) {
+    //     command = extraExports.join('; ') + '; ' + command;
+    // }
 
     return command;
   } catch (error) {
