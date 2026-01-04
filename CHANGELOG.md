@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.11.0](https://github.com/YoungSx/lb-worker-js/compare/v0.10.2...v0.11.0) (2026-01-04)
+
+
+### 🔧 Maintenance
+
+* improve Redis TLS configuration and health checks ([0541f63](https://github.com/YoungSx/lb-worker-js/commit/0541f632c80a868a130e972c08e91a03cb150fa5))
+
 ### [0.10.2](https://github.com/YoungSx/lb-worker-js/compare/v0.10.1...v0.10.2) (2026-01-04)
 
 
