@@ -36,13 +36,19 @@ export async function fetchInfisicalSecrets({ clientId, clientSecret, projectId,
         url.searchParams.append('environment', envName);
         url.searchParams.append('secretPath', '/');
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+
         const response = await fetch(url.toString(), {
             method: 'GET',
             headers: {
                 'Authorization': authHeader,
                 'Content-Type': 'application/json'
-            }
+            },
+            signal: controller.signal
         });
+
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
             console.warn(`[Infisical] Fetch secrets skipped/failed: ${response.status}`);

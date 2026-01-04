@@ -97,6 +97,10 @@ const initAxiom = async () => {
       return;
     }
 
+    // 如果没有环境变量，跳过初始化，直接使用console
+    axiomInitialized = true;
+    return;
+
     // 回退到 config 模块
     if (!config) {
       try {

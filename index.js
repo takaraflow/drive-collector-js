@@ -64,7 +64,27 @@ export async function handleQStashWebhook(req, res) {
 async function main() {
     // 1. 初始化并加载配置 (从 Infisical 获取)
     await initConfig();
-    
+
+    // 检查是否需要显示配置
+    if (process.argv.includes('--show-config')) {
+        // 延迟执行，确保没有异步操作干扰
+        setImmediate(async () => {
+            try {
+                console.log('🔍 最终配置信息:');
+                const config = getConfig();
+
+                // 输出完整配置
+                console.log(JSON.stringify(config, null, 2));
+            } catch (error) {
+                console.error('❌ 显示配置时出错:', error);
+            } finally {
+                // 总是退出，避免 Windows assertion 错误
+                process.exit(0);
+            }
+        });
+        return; // 退出 main()，等待 setImmediate 执行
+    }
+
     // 2. 验证配置完整性
     if (!validateConfig()) {
         console.error("🚨 核心配置缺失，程序停止启动。");
@@ -129,9 +149,11 @@ async function main() {
 
 // Only run main() when this file is executed directly (not when imported as a module)
 // Check if we're in test environment or if this is the main entry point
-if (process.env.NODE_ENV !== 'test' && process.argv[1]?.endsWith('index.js')) {
+if (process.env.NODE_ENV !== 'test' && (process.argv[1]?.endsWith('index.js') || process.argv[1]?.endsWith('index'))) {
     main().catch(error => {
         console.error("❌ 引导程序失败:", error);
         process.exit(1);
     });
 }
+
+
