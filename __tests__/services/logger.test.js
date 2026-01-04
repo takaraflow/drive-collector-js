@@ -166,13 +166,15 @@ describe('Logger Service', () => {
         version: expect.any(String),
         instanceId: expect.any(String),
         level: 'info',
-        message: expect.stringContaining('[v'),
-        userId: 123,
-        action: 'login'
+        message: expect.stringContaining('[v')
       });
       expect(payload).toHaveProperty('timestamp');
-      expect(payload).toHaveProperty('worker');
+      // 'worker' field is not part of the strict schema, removed from test
       expect(payload).toHaveProperty('details'); // Ensure details field exists
+      // Check that data is in details string
+      expect(payload.details).toContain('userId');
+      expect(payload.details).toContain('123');
+      expect(payload.details).toContain('login');
 
       // Ensure console was not called
       expect(consoleInfoSpy).not.toHaveBeenCalled();
@@ -383,15 +385,14 @@ describe('Logger Service', () => {
       // Filter relevant calls to ignore extraneous ingest calls
       const relevantCalls = mockIngest.mock.calls.filter(call => {
         const payload = call[1][0];
-        return payload.service === 'telegram' && payload.source === 'console_proxy';
+        // Check details string for service and source
+        return payload.details && payload.details.includes('telegram') && payload.details.includes('console_proxy');
       });
 
       expect(relevantCalls.length).toBe(1);
 
       const payload = relevantCalls[0][1][0];
       expect(payload.level).toBe('error');
-      expect(payload.service).toBe('telegram');
-      expect(payload.source).toBe('console_proxy');
       expect(payload.message).toContain('Telegram library TIMEOUT captured');
       expect(payload.message).toContain('TIMEOUT in updates.js');
     });
@@ -413,7 +414,7 @@ describe('Logger Service', () => {
       // Filter relevant calls instead of checking exact count
       const relevantCalls = mockIngest.mock.calls.filter(call => {
          const payload = call[1][0];
-         return payload.service === 'telegram' && payload.source === 'console_proxy';
+         return payload.level === 'error' && payload.details && payload.details.includes('telegram');
       });
 
       expect(relevantCalls.length).toBe(3);
@@ -421,8 +422,7 @@ describe('Logger Service', () => {
       relevantCalls.forEach(call => {
         const payload = call[1][0];
         expect(payload.level).toBe('error');
-        expect(payload.service).toBe('telegram');
-        expect(payload.source).toBe('console_proxy');
+        expect(payload.details).toContain('telegram');
       });
     });
 

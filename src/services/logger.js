@@ -320,34 +320,20 @@ const log = async (instanceId, level, message, data = {}) => {
   // 序列化数据并进行深度剪裁，防止字段爆炸
   const prunedData = pruneData(finalData, 3, 20);
   
-  // 构建基础 Payload，严格控制顶层字段
+  // 构建基础 Payload，严格控制顶层字段 - ONLY the absolute minimum
   const payload = {
     version,
     instanceId,
     level,
     message: displayMessage,
-    timestamp: new Date().toISOString(),
-    // 在Cloudflare Worker环境下获取一些额外信息
-    worker: {
-      id: global.WORKER_ID, // 假设全局有WORKER_ID
-      env: config ? config.env : undefined,
-    }
+    timestamp: new Date().toISOString()
   };
-
-  // 提取常用索引字段 (White-list)，避免污染顶层 Schema
-  const INDEXED_KEYS = ['userId', 'chatId', 'taskId', 'service', 'action', 'source', 'duration'];
-  INDEXED_KEYS.forEach(key => {
-    if (finalData && finalData[key] !== undefined && finalData[key] !== null) {
-      payload[key] = finalData[key];
-    }
-  });
 
   // 特殊处理 Error 对象，提取关键信息到独立字段
   const errObj = finalData instanceof Error ? finalData : (finalData.error instanceof Error ? finalData.error : null);
   if (errObj) {
       payload.error_name = errObj.name;
       payload.error_message = errObj.message;
-      // stack 放入 details
   } else if (finalData.error) {
       // 处理非 Error 实例的 error 字段
       payload.error_summary = String(finalData.error).substring(0, 200);
