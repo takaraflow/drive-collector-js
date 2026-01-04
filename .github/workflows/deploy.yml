@@ -39,10 +39,10 @@ jobs:
           INFISICAL_PROJECT_ID: ${{ vars.INFISICAL_PROJECT_ID }}
         run: |
           # Determine environment based on branch
-          # main -> prod, develop -> dev, others -> staging
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          BRANCH="${{ github.ref_name }}"
+          if [[ "$BRANCH" == "main" ]]; then
             INFISICAL_ENV="prod"
-          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+          elif [[ "$BRANCH" == "develop" ]]; then
             INFISICAL_ENV="dev"
           else
             INFISICAL_ENV="staging"
@@ -64,31 +64,6 @@ jobs:
           if [ -z "${INFISICAL_TOKEN}" ]; then
             echo "错误: INFISICAL_TOKEN 未设置"
             echo "请检查 GitHub Secrets 中是否配置了 INFISICAL_TOKEN"
-            exit 1
-          fi
-          
-          # 尝试使用 Infisical CLI 拉取密钥
-          echo "正在使用 Infisical CLI 拉取密钥..."
-          
-          # 使用 jq 转换为 GitHub Actions 环境变量格式
-          echo "正在转换为 GitHub Actions 环境变量格式..."
-          if infisical export \
-            --env="$INFISICAL_ENV" \
-            --projectId="$INFISICAL_PROJECT_ID" \
-            --format=json \
-          | jq -r '
-            to_entries[] |
-            (.key + "<<__INFISICAL_EOF__\n" + .value + "\n__INFISICAL_EOF__")
-          ' >> "$GITHUB_ENV"; then
-            echo "成功从 Infisical 拉取密钥"
-            echo "已写入的环境变量名："
-            cut -d'<' -f1 "$GITHUB_ENV" | sort -u
-          else
-            echo "错误: 从 Infisical 拉取密钥失败"
-            echo "请检查:"
-            echo "  1. INFISICAL_TOKEN 是否有效"
-            echo "  2. INFISICAL_PROJECT_ID 是否正确"
-            echo "  3. Infisical 项目中是否配置了对应环境的密钥"
             exit 1
           fi
           
@@ -134,6 +109,32 @@ jobs:
                 echo "::add-mask::$VALUE"
               fi
             done
+          fi
+          
+          # 尝试使用 Infisical CLI 拉取密钥
+          echo "正在使用 Infisical CLI 拉取密钥..."
+          
+          # 生成动态分隔符，避免与 secret 值冲突
+          DELIM="__INFISICAL_$(uuidgen | tr -d '-')__"
+          
+          # 使用 jq 转换为 GitHub Actions 环境变量格式
+          echo "正在转换为 GitHub Actions 环境变量格式..."
+          if infisical export \
+            --env="$INFISICAL_ENV" \
+            --projectId="$INFISICAL_PROJECT_ID" \
+            --format=json \
+          | jq -r --arg d "$DELIM" '
+            to_entries[] |
+            (.key + "<<" + $d + "\n" + (.value // "" | tostring) + "\n" + $d)
+          ' >> "$GITHUB_ENV"; then
+            echo "成功从 Infisical 拉取密钥"
+          else
+            echo "错误: 从 Infisical 拉取密钥失败"
+            echo "请检查:"
+            echo "  1. INFISICAL_TOKEN 是否有效"
+            echo "  2. INFISICAL_PROJECT_ID 是否正确"
+            echo "  3. Infisical 项目中是否配置了对应环境的密钥"
+            exit 1
           fi
 
       - name: Validate Manifest
