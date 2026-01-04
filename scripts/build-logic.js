@@ -182,6 +182,31 @@ function extractVariablesFromManifest() {
                 process.exit(1);
             }
         }
+    } else {
+        // 本地开发环境：如果缺少 CLOUDFLARE_ACCOUNT_ID，尝试从 .act.secrets 读取
+        if (!process.env.CLOUDFLARE_ACCOUNT_ID) {
+            console.log('警告: 本地环境下 CLOUDFLARE_ACCOUNT_ID 为空，尝试从 .act.secrets 读取...');
+            
+            try {
+                const secretsPath = path.resolve(projectRoot, '.act.secrets');
+                if (fs.existsSync(secretsPath)) {
+                    const content = fs.readFileSync(secretsPath, 'utf8');
+                    const lines = content.split('\n').filter(l => l && !l.startsWith('#'));
+                    
+                    lines.forEach(line => {
+                        const [key, ...rest] = line.split('=');
+                        const value = rest.join('=');
+                        if (key === 'CLOUDFLARE_ACCOUNT_ID' && value) {
+                            const cleanValue = value.replace(/^\"|\"$/g, '');
+                            process.env.CLOUDFLARE_ACCOUNT_ID = cleanValue;
+                            console.log('已从 .act.secrets 读取 CLOUDFLARE_ACCOUNT_ID');
+                        }
+                    });
+                }
+            } catch (error) {
+                console.warn('无法从 .act.secrets 读取:', error.message);
+            }
+        }
     }
     
     return allVars;
