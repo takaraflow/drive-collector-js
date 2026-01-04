@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.8.0](https://github.com/YoungSx/drive-collector-js/compare/v4.7.1...v4.8.0) (2026-01-04)
+
+
+### ♻️ 代码重构
+
+* implement secure runtime configuration with Infisical integration ([b42a386](https://github.com/YoungSx/drive-collector-js/commit/b42a386503910e4f83a8f2abcd3e6ecf11c28334))
+* upgrade QStashService to support explicit initialization and improved error handling ([f0481f2](https://github.com/YoungSx/drive-collector-js/commit/f0481f2024698159521fda76cf21d5d655aaad5b))
+
+
+### 🐛 问题修复
+
+* adds config display and improves Infisical client timeout handling ([d2a7255](https://github.com/YoungSx/drive-collector-js/commit/d2a725536178ddfb900b7b5701483aab9ba72426))
+* prevent CacheService heartbeat timer in tests to eliminate open handles ([1040ac8](https://github.com/YoungSx/drive-collector-js/commit/1040ac8cb12d39624a669a60fc243f1af8efe3a8))
+* resolve InstanceCoordinator test timeouts by intercepting setInterval ([6b62c21](https://github.com/YoungSx/drive-collector-js/commit/6b62c2110d79acdf21fc8e06a3bc5d50d97d251f))
+
+
+### 🔧 其他任务
+
+* improves Telegram error handling by adding FloodWaitError support ([5eccc14](https://github.com/YoungSx/drive-collector-js/commit/5eccc145262b618621db1a095dafe71d55d6ca8f))
+
 ### [4.7.1](https://github.com/YoungSx/drive-collector-js/compare/v4.7.0...v4.7.1) (2026-01-03)
 
 
