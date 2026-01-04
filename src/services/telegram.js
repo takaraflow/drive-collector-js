@@ -1,6 +1,6 @@
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
-import { config } from "../config/index.js";
+import { getConfig } from "../config/index.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
 import logger, { enableTelegramConsoleProxy } from "./logger.js";
@@ -247,13 +247,14 @@ async function initTelegramClient() {
     isClientInitializing = true;
     
     try {
+        const config = getConfig();
         const proxyOptions = config.telegram?.proxy?.host ? {
             proxy: {
                 ip: config.telegram.proxy.host,
                 port: parseInt(config.telegram.proxy.port),
-                socksType: config.telegram.proxy.type === 'socks5' ? 5 : 4,
-                username: config.telegram.proxy.username,
-                password: config.telegram.proxy.password,
+                socksType: config.telegram.proxy.type === 'socks5' ? 5 : (config.telegram.proxy.type === 'socks4' ? 4 : 5),
+                username: config.telegram.proxy.username || undefined,
+                password: config.telegram.proxy.password || undefined,
             }
         } : {};
         
@@ -263,7 +264,7 @@ async function initTelegramClient() {
         const clientConfig = {
             connectionRetries: 3,
             requestRetries: 3,
-            retryDelay: { 
+            retryDelay: {
                 min: 5000,
                 max: 15000
             },
@@ -275,10 +276,11 @@ async function initTelegramClient() {
             updateGetIntervalMs: 15000,
             pingIntervalMs: 45000,
             keepAliveTimeout: 45000,
-            floodSleepThreshold: 60,
-            deviceModel: "DriveCollector-Server",
-            systemVersion: "Linux",
-            appVersion: "2.3.3",
+            floodSleepThreshold: 300, // 增大 Flood 睡眠阈值，支持长时间等待
+            testMode: config.telegram?.testMode || false,
+            deviceModel: config.telegram?.deviceModel || "DriveCollector-Server",
+            systemVersion: config.telegram?.systemVersion || "Linux",
+            appVersion: config.telegram?.appVersion || "2.3.3",
             useWSS: false,
             autoReconnect: true,
             dcId: undefined,
@@ -322,10 +324,16 @@ async function initTelegramClient() {
             ...proxyOptions
         };
 
+        // Log test mode configuration
+        logger.info(`[Telegram Init] testMode: ${config.telegram?.testMode}, connection: default (obfuscated)`);
+
         enableTelegramConsoleProxy();
         
         // 使用错误类型感知的电路断路器
         telegramClient = await telegramCircuitBreaker.execute(async () => {
+            if (!config.apiId || !config.apiHash) {
+                throw new Error("Your API ID or Hash cannot be empty or undefined");
+            }
             return new TelegramClient(
                 new StringSession(sessionString),
                 config.apiId,
@@ -777,6 +785,7 @@ export const connectAndStart = async () => {
         const client = await getClient();
         
         if (!client.connected) {
+            const config = getConfig();
             logger.info("🔌 正在连接 Telegram 客户端...");
             await client.connect();
             

@@ -18,6 +18,9 @@ const mockCache = {
 
 describe("InstanceCoordinator Heartbeat (KV Only)", () => {
     beforeAll(async () => {
+        // 强制使用真实定时器，防止 setTimeout 挂起
+        jest.useRealTimers();
+
         process.env = {
             ...originalEnv,
             CF_ACCOUNT_ID: "mock_account_id",
@@ -98,6 +101,9 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
     });
 
     test("should send heartbeat to KV", async () => {
+        // 使用 Jest Fake Timers
+        jest.useFakeTimers();
+
         const instanceData = {
             id: "test_instance_heartbeat",
             status: "active",
@@ -106,16 +112,13 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         mockCache.get.mockResolvedValue(instanceData);
         mockCache.set.mockResolvedValue(true);
 
-        // Mock setInterval to call immediately
-        const originalSetInterval = global.setInterval;
-        global.setInterval = jest.fn((fn, delay) => {
-            fn();
-            return 123;
-        });
-
         instanceCoordinator.startHeartbeat();
 
-        await new Promise(resolve => setTimeout(resolve, 0));
+        // 快进时间以触发心跳
+        jest.advanceTimersByTime(5 * 60 * 1000); // 5分钟心跳间隔
+
+        // 等待异步操作完成
+        await Promise.resolve();
 
         expect(mockCache.get).toHaveBeenCalledWith("instance:test_instance_heartbeat");
         expect(mockCache.set).toHaveBeenCalledWith(
@@ -126,23 +129,28 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
             }),
             900 // 15分钟(900秒) TTL
         );
-        
-        global.setInterval = originalSetInterval;
+
+        // 清理定时器
+        if (instanceCoordinator.heartbeatTimer) {
+            clearInterval(instanceCoordinator.heartbeatTimer);
+        }
+        jest.useRealTimers();
     });
 
     test("should re-register if instance data missing in KV", async () => {
+        // 使用 Jest Fake Timers
+        jest.useFakeTimers();
+
         mockCache.get.mockResolvedValue(null);
         mockCache.set.mockResolvedValue(true);
 
-        const originalSetInterval = global.setInterval;
-        global.setInterval = jest.fn((fn, delay) => {
-            fn();
-            return 123;
-        });
-
         instanceCoordinator.startHeartbeat();
 
-        await new Promise(resolve => setTimeout(resolve, 0));
+        // 快进时间以触发心跳
+        jest.advanceTimersByTime(5 * 60 * 1000); // 5分钟心跳间隔
+
+        // 等待异步操作完成
+        await Promise.resolve();
 
         expect(mockCache.get).toHaveBeenCalledWith("instance:test_instance_heartbeat");
         // 根据源码，重新注册会写入 hostname, startedAt 等信息
@@ -156,29 +164,38 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
             900
         );
         
-        global.setInterval = originalSetInterval;
+        // 清理定时器
+        if (instanceCoordinator.heartbeatTimer) {
+            clearInterval(instanceCoordinator.heartbeatTimer);
+        }
+        jest.useRealTimers();
     });
 
     test("should handle KV errors gracefully", async () => {
+        // 使用 Jest Fake Timers
+        jest.useFakeTimers();
+
         // 根据 InstanceCoordinator.js 第 126 行：logger.error(`[${cache.getCurrentProvider()}] Cache心跳更新失败...`)
         const loggerSpy = jest.spyOn(mockLogger, "error").mockImplementation(() => {});
 
         mockCache.get.mockRejectedValue(new Error("KV Network Error"));
 
-        const originalSetInterval = global.setInterval;
-        global.setInterval = jest.fn((fn, delay) => {
-            fn();
-            return 123;
-        });
-
         instanceCoordinator.startHeartbeat();
 
-        await new Promise(resolve => setTimeout(resolve, 0));
+        // 快进时间以触发心跳
+        jest.advanceTimersByTime(5 * 60 * 1000); // 5分钟心跳间隔
+
+        // 等待异步操作完成
+        await Promise.resolve();
 
         // 验证是否记录了错误日志
         expect(loggerSpy).toHaveBeenCalledWith(expect.stringContaining("心跳更新失败"));
         
+        // Clean up
         loggerSpy.mockRestore();
-        global.setInterval = originalSetInterval;
+        if (instanceCoordinator.heartbeatTimer) {
+            clearInterval(instanceCoordinator.heartbeatTimer);
+        }
+        jest.useRealTimers();
     });
 });

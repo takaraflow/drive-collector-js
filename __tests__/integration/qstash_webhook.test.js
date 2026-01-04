@@ -123,12 +123,6 @@ describe("QStash Webhook Integration", () => {
             }
         }));
 
-        jest.unstable_mockModule("../../src/config/index.js", () => ({
-            config: {
-                port: 3000
-            }
-        }));
-
         // Mock initConfig before importing index.js
         jest.unstable_mockModule("../../src/config/index.js", () => ({
             config: {
@@ -142,6 +136,7 @@ describe("QStash Webhook Integration", () => {
                 }
             },
             initConfig: jest.fn().mockResolvedValue({}),
+            validateConfig: jest.fn().mockReturnValue(true),
             getConfig: jest.fn().mockReturnValue({
                 qstash: {
                     token: "mock-token",

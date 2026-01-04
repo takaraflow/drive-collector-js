@@ -212,6 +212,11 @@ describe("Dispatcher", () => {
     Dispatcher.lastRefreshTime = 0;
   });
 
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.clearAllTimers();
+  });
+
   describe("_extractContext", () => {
     test("should extract context from UpdateBotCallbackQuery", () => {
       const event = new Api.UpdateBotCallbackQuery({
@@ -426,7 +431,7 @@ describe("Dispatcher", () => {
       expect(Dispatcher.groupBuffers.has("999")).toBe(true);
       expect(Dispatcher.groupBuffers.get("999").messages).toHaveLength(2);
 
-      jest.runAllTimers();
+      jest.advanceTimersByTime(800);
       await Promise.resolve();
 
       expect(mockTaskManager.addBatchTasks).toHaveBeenCalledWith(target, [event1.message, event2.message], "123");

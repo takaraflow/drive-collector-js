@@ -65,8 +65,12 @@ describe('Logger Service', () => {
   describe('When Axiom is not configured', () => {
     beforeEach(async () => {
       // Ensure axiom config is not present
-      const configModule = await import('../../src/config/index.js');
-      configModule.config.axiom = undefined;
+      // Mock the config module to return undefined axiom
+      jest.unstable_mockModule('../../src/config/index.js', () => ({
+        config: { axiom: undefined },
+        getConfig: () => ({ axiom: undefined }),
+        default: { config: { axiom: undefined }, getConfig: () => ({ axiom: undefined }) }
+      }));
 
       // Reset logger module to pick up config changes
       jest.resetModules();
@@ -287,11 +291,15 @@ describe('Logger Service', () => {
     });
 
     test('Axiom is not initialized when config is missing', async () => {
-      // Ensure axiom config is not present
-      const configModule = await import('../../src/config/index.js');
-      configModule.config.axiom = undefined;
+      // Mock the config module to return undefined axiom
+      jest.unstable_mockModule('../../src/config/index.js', () => ({
+        config: { axiom: undefined },
+        getConfig: () => ({ axiom: undefined }),
+        default: { config: { axiom: undefined }, getConfig: () => ({ axiom: undefined }) }
+      }));
 
       // Reset logger
+      jest.resetModules();
       const loggerModule = await import('../../src/services/logger.js');
       loggerModule.resetLogger();
 

@@ -23,6 +23,22 @@ describe("Multi-Instance Integration", () => {
     };
     jest.resetModules();
 
+    // Mock CacheService to avoid actual Cloudflare API calls
+    jest.unstable_mockModule("../../src/services/CacheService.js", () => {
+      const mockCache = {
+        set: jest.fn().mockResolvedValue(true),
+        get: jest.fn().mockResolvedValue(null),
+        delete: jest.fn().mockResolvedValue(true),
+        listKeys: jest.fn().mockResolvedValue([]),
+        getCurrentProvider: jest.fn().mockReturnValue('mock'),
+        initialize: jest.fn().mockResolvedValue(undefined)
+      };
+      return {
+        cache: mockCache,
+        default: mockCache
+      };
+    });
+
     // Dynamically import after setting up mocks - only InstanceCoordinator
     const { instanceCoordinator: importedIC } = await import("../../src/services/InstanceCoordinator.js");
     instanceCoordinator = importedIC;

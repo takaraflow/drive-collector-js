@@ -74,6 +74,6 @@ ENV INFISICAL_SECRET_PATH="/"
 
 # 5. 在容器启动时自动同步环境变量
 # 如果设置了 INFISICAL_TOKEN，则同步；否则跳过
-CMD sh -c 'if [ -n "$INFISICAL_TOKEN" ]; then echo "🔄 同步环境变量..."; node scripts/sync-env.js; else echo "⚠️ 跳过环境变量同步 (未设置 INFISICAL_TOKEN)"; fi && node index.js'
+CMD sh -c 'if [ -n "$INFISICAL_TOKEN" ]; then echo "🔄 同步环境变量..."; node scripts/sync-env.js; else echo "⚠️ 跳过环境变量同步 (未设置 INFISISCAL_TOKEN)"; fi && node index.js'
 
 EXPOSE 7860

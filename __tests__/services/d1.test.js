@@ -30,7 +30,7 @@ describe("D1 Service", () => {
     process.env = originalEnv;
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.useFakeTimers();
     jest.clearAllMocks();
     // Mock setTimeout to execute immediately to eliminate real delays
@@ -38,6 +38,11 @@ describe("D1 Service", () => {
       cb();
       return 1;
     });
+
+    if (d1Instance) {
+      d1Instance._reset();
+      await d1Instance.initialize();
+    }
   });
 
   afterEach(() => {
@@ -69,47 +74,30 @@ describe("D1 Service", () => {
   describe("Token initialization", () => {
     test("should use CF_D1_TOKEN when CF_D1_TOKEN is set and CF_KV_TOKEN is also set", async () => {
       // Set up environment with both tokens
-      const testEnv = {
-        ...originalEnv,
-        CF_D1_ACCOUNT_ID: "test_account",
-        CF_D1_DATABASE_ID: "test_db",
-        CF_D1_TOKEN: "valid_d1_token",
-        CF_KV_TOKEN: "invalid_kv_token",
-      };
+      process.env.CF_D1_ACCOUNT_ID = "test_account";
+      process.env.CF_D1_DATABASE_ID = "test_db";
+      process.env.CF_D1_TOKEN = "valid_d1_token";
+      process.env.CF_KV_TOKEN = "invalid_kv_token";
       
-      process.env = testEnv;
-      jest.resetModules();
-      
-      const { d1: testD1 } = await import("../../src/services/d1.js");
+      d1Instance._reset();
+      await d1Instance.initialize();
       
       // Should use CF_D1_TOKEN, not CF_KV_TOKEN
-      expect(testD1.token).toBe("valid_d1_token");
-      expect(testD1.token).not.toBe("invalid_kv_token");
-      
-      // Restore original env
-      process.env = originalEnv;
+      expect(d1Instance.token).toBe("valid_d1_token");
+      expect(d1Instance.token).not.toBe("invalid_kv_token");
     });
 
     test("should throw error when CF_D1_TOKEN is missing", async () => {
       // Set up environment without CF_D1_TOKEN
-      const testEnv = {
-        ...originalEnv,
-        CF_D1_ACCOUNT_ID: "test_account",
-        CF_D1_DATABASE_ID: "test_db",
-        // CF_D1_TOKEN is missing
-        CF_KV_TOKEN: "some_kv_token", // This should NOT be used as fallback
-      };
+      delete process.env.CF_D1_TOKEN;
+      process.env.CF_KV_TOKEN = "some_kv_token"; // This should NOT be used as fallback
       
-      process.env = testEnv;
-      jest.resetModules();
+      d1Instance._reset();
+      await d1Instance.initialize();
       
-      const { d1: testD1 } = await import("../../src/services/d1.js");
-      
-      // Should have undefined token (no fallback)
-      expect(testD1.token).toBeUndefined();
-      
-      // Restore original env
-      process.env = originalEnv;
+      // Should have undefined token (no fallback) and not be initialized
+      expect(d1Instance.token).toBeUndefined();
+      expect(d1Instance.isInitialized).toBe(false);
     });
   });
 
@@ -135,7 +123,7 @@ describe("D1 Service", () => {
           body: JSON.stringify({ sql, params }),
         })
       );
-      expect(result).toEqual(mockResponse.result[0]);
+      expect(result).toEqual(mockResponse);
     });
 
     test("should throw an error if execution fails", async () => {
@@ -143,7 +131,7 @@ describe("D1 Service", () => {
         success: false,
         errors: [{ message: "D1 specific error" }],
       };
-      mockFetch.mockResolvedValueOnce({
+      mockFetch.mockResolvedValue({
         ok: true,
         json: () => Promise.resolve(mockErrorResponse),
       });
@@ -166,12 +154,14 @@ describe("D1 Service", () => {
     });
 
     test("should throw HTTP error for non-200 responses", async () => {
-      // Mock fetch to return 500 error on all attempts
+      // Mock fetch to return 500 error
+      const errorBody = JSON.stringify({ success: false, errors: [{ message: "Internal Server Error" }] });
       mockFetch.mockResolvedValue({
         ok: false,
         status: 500,
         statusText: "Internal Server Error",
-        text: () => Promise.resolve("{}"),
+        text: () => Promise.resolve(errorBody),
+        json: () => Promise.resolve({ success: false, errors: [{ message: "Internal Server Error" }] })
       });
 
       const sql = "SELECT * FROM users";
@@ -181,14 +171,16 @@ describe("D1 Service", () => {
     });
 
     test("should parse and throw detailed 400 error", async () => {
-      mockFetch.mockResolvedValueOnce({
+      const errorBody = {
+        success: false,
+        errors: [{code: 10000, message: "Invalid token"}]
+      };
+      mockFetch.mockResolvedValue({
         ok: false,
         status: 400,
         statusText: "Bad Request",
-        text: () => Promise.resolve(JSON.stringify({
-          success: false,
-          errors: [{code: 10000, message: "Invalid token"}]
-        }))
+        text: () => Promise.resolve(JSON.stringify(errorBody)),
+        json: () => Promise.resolve(errorBody)
       });
       await expect(d1Instance._execute("SELECT 1")).rejects.toThrow("D1 HTTP 400 [10000]: Invalid token");
     });
@@ -203,11 +195,13 @@ describe("D1 Service", () => {
         // Let's actually check if it throws correctly, logging verification is harder without mocking the logger module specifically.
         // But we can verify it doesn't crash on object params.
         
-        mockFetch.mockResolvedValueOnce({
+        const errorBody = { success: false, errors: [{code: 7000, message: "Type error"}] };
+        mockFetch.mockResolvedValue({
             ok: false,
             status: 400,
             statusText: "Bad Request",
-            text: () => Promise.resolve(JSON.stringify({ success: false, errors: [{code: 7000, message: "Type error"}] }))
+            text: () => Promise.resolve(JSON.stringify(errorBody)),
+            json: () => Promise.resolve(errorBody)
         });
 
         const params = [1, "test", { a: 1 }, null, undefined];
@@ -220,7 +214,8 @@ describe("D1 Service", () => {
   describe("fetchAll", () => {
     test("should fetch all results", async () => {
       const mockResults = [{ id: 1 }, { id: 2 }];
-      jest.spyOn(d1Instance, "_execute").mockResolvedValueOnce({ results: mockResults });
+      const mockExecuteResponse = { result: [{ results: mockResults }] };
+      jest.spyOn(d1Instance, "_execute").mockResolvedValueOnce(mockExecuteResponse);
 
       const sql = "SELECT * FROM items";
       const results = await d1Instance.fetchAll(sql);
@@ -230,7 +225,8 @@ describe("D1 Service", () => {
     });
 
     test("should return empty array if no results", async () => {
-      jest.spyOn(d1Instance, "_execute").mockResolvedValueOnce({ results: [] });
+      const mockExecuteResponse = { result: [{ results: [] }] };
+      jest.spyOn(d1Instance, "_execute").mockResolvedValueOnce(mockExecuteResponse);
 
       const sql = "SELECT * FROM items WHERE false";
       const results = await d1Instance.fetchAll(sql);
@@ -263,24 +259,28 @@ describe("D1 Service", () => {
 
   describe("run", () => {
     test("should execute a run operation", async () => {
-      const mockExecuteResult = { success: true };
-      jest.spyOn(d1Instance, "_execute").mockResolvedValueOnce(mockExecuteResult);
+      const mockRunResult = { id: 1, status: "ok" };
+      const mockExecuteResponse = { result: [{ results: [mockRunResult] }] };
+      jest.spyOn(d1Instance, "_execute").mockResolvedValueOnce(mockExecuteResponse);
 
       const sql = "INSERT INTO logs (message) VALUES (?)";
       const result = await d1Instance.run(sql, ["log message"]);
 
       expect(d1Instance._execute).toHaveBeenCalledWith(sql, ["log message"]);
-      expect(result).toEqual(mockExecuteResult);
+      expect(result).toEqual(mockRunResult);
     });
   });
 
   describe("batch", () => {
     test("should execute a batch of statements concurrently and return settled results", async () => {
-      const mockResult1 = { id: 1 };
+      const mockResult1 = { result: [{ results: [{ id: 1 }] }] };
+      const mockError = new Error("Some error");
       
-      jest.spyOn(d1Instance, "_execute")
+      // Spy on the prototype to intercept all calls
+      const D1Service = d1Instance.constructor;
+      jest.spyOn(D1Service.prototype, "_execute")
           .mockResolvedValueOnce(mockResult1)
-          .mockRejectedValueOnce(new Error("Some error"));
+          .mockRejectedValueOnce(mockError);
 
       const statements = [
         { sql: "UPDATE users SET status = ?", params: ["active"] },
@@ -289,10 +289,10 @@ describe("D1 Service", () => {
       
       const results = await d1Instance.batch(statements);
 
-      expect(d1Instance._execute).toHaveBeenCalledTimes(2);
+      expect(D1Service.prototype._execute).toHaveBeenCalledTimes(2);
       expect(results).toHaveLength(2);
       expect(results[0]).toEqual({ success: true, result: mockResult1 });
-      expect(results[1]).toEqual({ success: false, error: expect.any(Error) });
+      expect(results[1]).toEqual({ success: false, error: mockError });
       expect(results[1].error.message).toBe("Some error");
     });
   });

@@ -28,6 +28,47 @@ jest.unstable_mockModule('../../src/config/index.js', () => ({
         publicUrl: 'https://test.public'
       }
     }
+  },
+  getConfig: () => ({
+    oss: {
+      workerUrl: 'http://test.worker',
+      workerSecret: 'test-secret',
+      r2: {
+        endpoint: 'https://test.r2',
+        accessKeyId: 'test-key',
+        secretAccessKey: 'test-secret',
+        bucket: 'test-bucket',
+        publicUrl: 'https://test.public'
+      }
+    }
+  }),
+  default: {
+    config: {
+      oss: {
+        workerUrl: 'http://test.worker',
+        workerSecret: 'test-secret',
+        r2: {
+          endpoint: 'https://test.r2',
+          accessKeyId: 'test-key',
+          secretAccessKey: 'test-secret',
+          bucket: 'test-bucket',
+          publicUrl: 'https://test.public'
+        }
+      }
+    },
+    getConfig: () => ({
+      oss: {
+        workerUrl: 'http://test.worker',
+        workerSecret: 'test-secret',
+        r2: {
+          endpoint: 'https://test.r2',
+          accessKeyId: 'test-key',
+          secretAccessKey: 'test-secret',
+          bucket: 'test-bucket',
+          publicUrl: 'https://test.public'
+        }
+      }
+    })
   }
 }));
 

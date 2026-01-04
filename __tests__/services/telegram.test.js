@@ -13,7 +13,8 @@ const mockConfig = {
 // 使用 unstable_mockModule 拦截内部 ESM 模块
 jest.unstable_mockModule("../../src/config/index.js", () => ({
     config: mockConfig,
-    default: { config: mockConfig }
+    getConfig: jest.fn(() => mockConfig),
+    default: { config: mockConfig, getConfig: jest.fn(() => mockConfig) }
 }));
 
 // ================== Mock 2: Logger (Internal) ==================

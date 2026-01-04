@@ -29,20 +29,28 @@ const { CloudTool } = await import('../../src/services/rclone.js');
 
 const waitFor = async (callback, timeout = 200, interval = 10) => {
     const startTime = Date.now();
-    while (Date.now() - startTime < timeout) {
+    while (true) {
         try {
             const result = callback();
             if (result !== false) return;
         } catch (e) {
             // ignore
         }
-        await new Promise(r => setTimeout(r, interval));
+        if (Date.now() - startTime > timeout) break;
+        
+        // 如果是 Fake Timers 环境，必须推进时间，否则会死锁
+        if (jest.isMockFunction(setTimeout)) {
+            await jest.advanceTimersByTimeAsync(interval);
+        } else {
+            await new Promise(r => setTimeout(r, interval));
+        }
     }
     callback(); // run one last time to throw if still failing
 };
 
 describe('CloudTool Batch Upload', () => {
     beforeEach(() => {
+        jest.useRealTimers();
         jest.clearAllMocks();
     });
 

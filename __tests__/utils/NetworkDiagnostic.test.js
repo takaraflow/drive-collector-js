@@ -37,10 +37,13 @@ jest.unstable_mockModule("../../src/repositories/DriveRepository.js", () => ({
     },
 }));
 
+const mockConfig = {
+    botToken: "mock_token",
+};
 jest.unstable_mockModule("../../src/config/index.js", () => ({
-    config: {
-        botToken: "mock_token",
-    },
+    config: mockConfig,
+    getConfig: () => mockConfig,
+    validateConfig: () => true
 }));
 
 jest.unstable_mockModule("child_process", () => ({

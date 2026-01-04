@@ -70,6 +70,9 @@ describe("InstanceCoordinator", () => {
     const { cache: importedCache } = await import("../../src/services/CacheService.js");
     cache = importedCache;
 
+    // Pre-initialize cache to avoid repeated async initialization overhead
+    await cache.initialize();
+
     // Prevent CacheService heartbeat timer from starting
     cache._startHeartbeat = jest.fn();
   });

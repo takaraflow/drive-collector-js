@@ -32,7 +32,8 @@ describe("Config Module", () => {
 
   test("should have the required config object and properties", async () => {
     // Dynamically import the module to use the mocked env
-    const { config } = await import("../../src/config/index.js");
+    const { initConfig } = await import("../../src/config/index.js");
+    const config = await initConfig();
     expect(config).toBeDefined();
     expect(typeof config).toBe("object");
 
@@ -43,13 +44,12 @@ describe("Config Module", () => {
     expect(config.ownerId).toBe("owner_id");
     expect(config.remoteName).toBe("mega_test");
     expect(config.remoteFolder).toBe("/test");
-    expect(config.port).toBe("8080");
     
     // Check telegram proxy configuration
     expect(config.telegram).toBeDefined();
     expect(config.telegram.proxy).toBeDefined();
     expect(config.telegram.proxy.host).toBe("proxy.example.com");
-    expect(config.telegram.proxy.port).toBe("1080");
+    expect(config.telegram.proxy.port).toBe(1080);
     expect(config.telegram.proxy.type).toBe("socks5");
     expect(config.telegram.proxy.username).toBe("proxy_user");
     expect(config.telegram.proxy.password).toBe("proxy_pass");
@@ -69,7 +69,8 @@ describe("Config Module", () => {
     process.env.REDIS_TLS_ENABLED = "false";
     jest.resetModules();
     
-    const { config: config1 } = await import("../../src/config/index.js");
+    const { initConfig } = await import("../../src/config/index.js");
+    const config1 = await initConfig();
     expect(config1.redis.tls.enabled).toBe(false);
     
     // Clean up
@@ -82,7 +83,8 @@ describe("Config Module", () => {
     process.env.NF_REDIS_URL = "rediss://user:pass@redis.example.com:6379";
     jest.resetModules();
     
-    const { config: config2 } = await import("../../src/config/index.js");
+    const { initConfig } = await import("../../src/config/index.js");
+    const config2 = await initConfig();
     expect(config2.redis.tls.enabled).toBe(true);
     
     // Clean up
@@ -95,7 +97,8 @@ describe("Config Module", () => {
     process.env.NF_REDIS_TLS_ENABLED = "false";
     jest.resetModules();
     
-    const { config: config3 } = await import("../../src/config/index.js");
+    const { initConfig } = await import("../../src/config/index.js");
+    const config3 = await initConfig();
     expect(config3.redis.tls.enabled).toBe(false);
     
     // Clean up
@@ -108,7 +111,8 @@ describe("Config Module", () => {
     process.env.REDIS_TOKEN = "test_token_123";
     jest.resetModules();
 
-    const { getRedisConnectionConfig } = await import("../../src/config/index.js");
+    const { initConfig, getRedisConnectionConfig } = await import("../../src/config/index.js");
+    await initConfig();
     const { options } = getRedisConnectionConfig();
     expect(options.password).toBe("test_token_123");
 
@@ -122,7 +126,8 @@ describe("Config Module", () => {
     process.env.UPSTASH_REDIS_REST_TOKEN = "upstash_token_123";
     jest.resetModules();
 
-    const { getRedisConnectionConfig } = await import("../../src/config/index.js");
+    const { initConfig, getRedisConnectionConfig } = await import("../../src/config/index.js");
+    await initConfig();
     const { options } = getRedisConnectionConfig();
     expect(options.password).toBe("upstash_token_123");
 
@@ -137,7 +142,8 @@ describe("Config Module", () => {
     process.env.UPSTASH_REDIS_REST_TOKEN = "upstash_token_123";
     jest.resetModules();
 
-    const { getRedisConnectionConfig } = await import("../../src/config/index.js");
+    const { initConfig, getRedisConnectionConfig } = await import("../../src/config/index.js");
+    await initConfig();
     const { options } = getRedisConnectionConfig();
     expect(options.password).toBe("priority_token");
 

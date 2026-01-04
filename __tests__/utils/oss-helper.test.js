@@ -6,15 +6,22 @@ import { Readable } from 'stream';
 jest.unstable_mockModule('../../src/config/index.js', () => ({
   config: {
     oss: {
-      r2: {
-        endpoint: 'https://test.r2',
-        accessKeyId: 'test-key',
-        secretAccessKey: 'test-secret',
-        bucket: 'test-bucket',
-        publicUrl: 'https://test.public'
-      }
+      endpoint: 'https://test.r2',
+      accessKeyId: 'test-key',
+      secretAccessKey: 'test-secret',
+      bucket: 'test-bucket',
+      publicUrl: 'https://test.public'
     }
-  }
+  },
+  getConfig: jest.fn().mockReturnValue({
+    oss: {
+      endpoint: 'https://test.r2',
+      accessKeyId: 'test-key',
+      secretAccessKey: 'test-secret',
+      bucket: 'test-bucket',
+      publicUrl: 'https://test.public'
+    }
+  })
 }));
 
 const mockLogger = {

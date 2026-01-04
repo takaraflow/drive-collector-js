@@ -6,6 +6,20 @@ jest.unstable_mockModule("../../src/config/index.js", () => ({
         downloadDir: "/tmp/downloads",
         remoteFolder: "remote_folder",
     },
+    getConfig: () => ({
+        downloadDir: "/tmp/downloads",
+        remoteFolder: "remote_folder",
+    }),
+    default: {
+        config: {
+            downloadDir: "/tmp/downloads",
+            remoteFolder: "remote_folder",
+        },
+        getConfig: () => ({
+            downloadDir: "/tmp/downloads",
+            remoteFolder: "remote_folder",
+        })
+    }
 }));
 
 const mockClient = {

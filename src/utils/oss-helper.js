@@ -1,6 +1,6 @@
 import { S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
-import { config } from '../config/index.js';
+import { getConfig } from '../config/index.js';
 import { logger } from '../services/logger.js';
 import fs from 'fs';
 
@@ -11,44 +11,51 @@ import fs from 'fs';
 class OSSHelper {
     constructor() {
         this.s3Client = null;
-        this._initS3Client();
+        this._initialized = false;
     }
 
     /**
-     * 初始化 S3 客户端
+     * 延迟初始化 S3 客户端
      */
-    _initS3Client() {
-        logger.debug('OSS R2 Config:', { config: config.oss?.r2 });
-        if (!config.oss?.r2?.endpoint || !config.oss?.r2?.accessKeyId || !config.oss?.r2?.secretAccessKey) {
+    _init() {
+        if (this._initialized) return;
+
+        const config = getConfig();
+        const ossConfig = config.oss;
+
+        logger.debug('OSS R2 Config:', { config: ossConfig });
+
+        if (!ossConfig?.endpoint || !ossConfig?.accessKeyId || !ossConfig?.secretAccessKey) {
             logger.warn('⚠️ OSS Helper: R2 config incomplete, S3 client initialization skipped');
+            this._initialized = true;
             return;
         }
 
         this.s3Client = new S3Client({
-            endpoint: config.oss.r2.endpoint,
+            endpoint: ossConfig.endpoint,
             region: 'auto', // R2 使用 auto region
             credentials: {
-                accessKeyId: config.oss.r2.accessKeyId,
-                secretAccessKey: config.oss.r2.secretAccessKey,
+                accessKeyId: ossConfig.accessKeyId,
+                secretAccessKey: ossConfig.secretAccessKey,
             },
         });
 
         logger.info('✅ OSS Helper: S3 client initialized successfully');
+        this._initialized = true;
     }
 
     /**
      * 执行 S3 分片上传
-     * @param {string} localPath - 本地文件路径
-     * @param {string} remoteName - 远程文件名
-     * @param {Function} onProgress - 进度回调函数 (progress) => {}
-     * @returns {Promise<Object>} 上传结果
      */
     async uploadToS3(localPath, remoteName, onProgress = null) {
+        this._init();
+        
         if (!this.s3Client) {
             throw new Error('S3 客户端未初始化，请检查 R2 配置');
         }
 
-        if (!config.oss?.r2?.bucket) {
+        const config = getConfig();
+        if (!config.oss?.bucket) {
             throw new Error('R2 bucket 未配置');
         }
 
@@ -56,13 +63,12 @@ class OSSHelper {
         const upload = new Upload({
             client: this.s3Client,
             params: {
-                Bucket: config.oss.r2.bucket,
+                Bucket: config.oss.bucket,
                 Key: remoteName,
                 Body: fileStream,
             },
         });
 
-        // 绑定进度事件
         if (onProgress) {
             upload.on('httpUploadProgress', (progress) => {
                 onProgress(progress);
@@ -81,15 +87,33 @@ class OSSHelper {
 
     /**
      * 获取公共 URL
-     * @param {string} remoteName - 远程文件名
-     * @returns {string} 公共访问 URL
      */
     getPublicUrl(remoteName) {
-        if (!config.oss?.r2?.publicUrl) {
+        this._init();
+        const config = getConfig();
+        if (!config.oss?.publicUrl) {
             return null;
         }
-        return `${config.oss.r2.publicUrl}/${remoteName}`;
+        return `${config.oss.publicUrl}/${remoteName}`;
     }
 }
 
-export const ossHelper = new OSSHelper();
+// 延迟加载单例模式
+let _instance = null;
+export const getOSSHelper = () => {
+    if (!_instance) _instance = new OSSHelper();
+    return _instance;
+};
+
+export const ossHelper = new Proxy({}, {
+    get: (target, prop) => {
+        const instance = getOSSHelper();
+        const value = instance[prop];
+        return typeof value === 'function' ? value.bind(instance) : value;
+    },
+    set: (target, prop, value) => {
+        const instance = getOSSHelper();
+        instance[prop] = value;
+        return true;
+    }
+});
