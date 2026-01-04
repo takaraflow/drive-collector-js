@@ -124,7 +124,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
   });
 
 
-  test('should prepend exports for infrastructure vars found in GHA JSON contexts', () => {
+  test('should handle infrastructure vars found in GHA JSON contexts', () => {
     const mockEnv = {
       GHA_VARS_JSON: JSON.stringify({
         CLOUDFLARE_ACCOUNT_ID: 'test-account-id',
@@ -136,9 +136,13 @@ describe('generate-wrangler-vars.js (Unit)', () => {
 
     const output = generateWranglerCommand(mockEnv);
     
-    expect(output).toContain('export CLOUDFLARE_ACCOUNT_ID="test-account-id"');
-    expect(output).toContain('export WORKER_NAME="test-worker"');
+    // 2026-01-04: 修复测试适配最新业务代码
+    // 最新代码不再使用 export 语句，而是直接通过 process.env 传递变量
+    // CLOUDFLARE_ACCOUNT_ID 和 WORKER_NAME 不需要注入到 wrangler 命令中
     expect(output).toContain('npx wrangler deploy');
+    expect(output).toContain('--var QSTASH_CURRENT_SIGNING_KEY="test-key"');
+    expect(output).not.toContain('export CLOUDFLARE_ACCOUNT_ID');
+    expect(output).not.toContain('export WORKER_NAME');
   });
 
 

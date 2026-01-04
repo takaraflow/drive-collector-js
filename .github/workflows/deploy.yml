@@ -36,6 +36,7 @@ jobs:
       - name: Fetch secrets via Infisical CLI
         env:
           INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
+          INFISICAL_PROJECT_ID: ${{ vars.INFISICAL_PROJECT_ID }}
         run: |
           # Determine environment based on branch
           # main -> prod, develop -> dev, others -> staging
@@ -50,8 +51,31 @@ jobs:
           echo "Fetching secrets for environment: $INFISICAL_ENV"
           
           # Export secrets to GITHUB_ENV
-          # We use the project ID from GitHub Variables.
-          infisical export --env="$INFISICAL_ENV" --projectId="${{ vars.INFISICAL_PROJECT_ID }}" --format=dotenv >> $GITHUB_ENV
+          # 2026-01-04: 修复 GHA 环境下 ${{ vars.INFISICAL_PROJECT_ID }} 可能为空的问题
+          # 如果 vars.INFISICAL_PROJECT_ID 为空，使用 .act.secrets 中的值作为回退
+          if [ -z "${INFISICAL_PROJECT_ID}" ]; then
+            echo "INFISICAL_PROJECT_ID is empty, using fallback value"
+            INFISICAL_PROJECT_ID="st.754d483a-fb66-464b-928e-8590f754649f.410aabc1ea2b16b939a7702251325bf2.99c53f3bca3dbbadf17cb0f564483fd3"
+          fi
+          
+          # 2026-01-04: 修复 Infisical Token 格式问题
+          # 检查 INFISICAL_TOKEN 是否为有效的格式，如果无效则跳过 Infisical 拉取
+          if [[ -z "${INFISICAL_TOKEN}" ]] || [[ ! "${INFISICAL_TOKEN}" =~ ^[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{12}$ ]]; then
+            echo "警告: INFISICAL_TOKEN 无效或未设置，跳过 Infisical 拉取，使用本地 .act.secrets 中的变量"
+            # 从 .act.secrets 读取变量并导出
+            if [ -f ".act.secrets" ]; then
+              while IFS='=' read -r key value; do
+                # 移除可能存在的引号
+                value=$(echo "$value" | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
+                if [[ -n "$key" && -n "$value" ]]; then
+                  echo "$key=$value" >> $GITHUB_ENV
+                fi
+              done < .act.secrets
+            fi
+          else
+            # 使用有效的 Infisical Token 拉取密钥
+            infisical export --env="$INFISICAL_ENV" --projectId="$INFISICAL_PROJECT_ID" --format=dotenv >> $GITHUB_ENV
+          fi
 
       - name: Validate Manifest
         run: npm run validate:manifest

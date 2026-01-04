@@ -54,10 +54,45 @@ export function generateWranglerCommand(env = process.env) {
     const secretsJson = env.GHA_SECRETS_JSON ? JSON.parse(env.GHA_SECRETS_JSON) : {};
     const varsJson = env.GHA_VARS_JSON ? JSON.parse(env.GHA_VARS_JSON) : {};
 
+    // 2026-01-04: 修复本地环境从 Infisical 获取密钥的问题
+    // 在本地调试或 act 环境下，如果 process.env 中没有 CLOUDFLARE_API_TOKEN 或 CLOUDFLARE_ACCOUNT_ID
+    // 则尝试从 .act.secrets 文件中读取，而不是依赖 Infisical 拉取
+    const localOverrides = {};
+    if (env.ACT || !env.GITHUB_ACTIONS) {
+        // 检查是否缺少关键密钥
+        const needsCloudflareTokens = !env.CLOUDFLARE_API_TOKEN || !env.CLOUDFLARE_ACCOUNT_ID;
+        
+        if (needsCloudflareTokens) {
+            // 尝试从 .act.secrets 读取
+            try {
+                const secretsPath = path.resolve(process.cwd(), '.act.secrets');
+                
+                if (fs.existsSync(secretsPath)) {
+                    const content = fs.readFileSync(secretsPath, 'utf8');
+                    const lines = content.split('\n').filter(l => l && !l.startsWith('#'));
+                    
+                    lines.forEach(line => {
+                        const [key, ...rest] = line.split('=');
+                        const value = rest.join('=');
+                        if (key && value) {
+                            const cleanValue = value.replace(/^\"|\"$/g, '');
+                            if (!env[key]) {
+                                localOverrides[key] = cleanValue;
+                            }
+                        }
+                    });
+                }
+            } catch (error) {
+                console.warn('无法从 .act.secrets 读取:', error.message);
+            }
+        }
+    }
+
     const allAvailableVars = {
       ...env,
       ...varsJson,
-      ...secretsJson
+      ...secretsJson,
+      ...localOverrides // 本地覆盖，优先级最高
     };
 
     // 移除所有 CF_API_TOKEN 和 CLOUDFLARE_ACCOUNT_ID 的旧版判断逻辑
