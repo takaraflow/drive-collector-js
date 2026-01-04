@@ -43,7 +43,7 @@ jobs:
           if [[ "$BRANCH" == "main" ]]; then
             NODE_ENV="production"
           elif [[ "$BRANCH" == "develop" ]]; then
-            NODE_ENV="develop"
+            NODE_ENV="development"
           else
             NODE_ENV="staging"
           fi
@@ -89,6 +89,10 @@ jobs:
             ALL_KEYS="$CONFIG_ENV_KEYS $INFRA_KEYS"
             
             for KEY in $ALL_KEYS; do
+              # 跳过 NODE_ENV，它不是敏感信息
+              if [[ "$KEY" == "NODE_ENV" ]]; then
+                continue
+              fi
               VALUE="${!KEY}" # 间接引用获取变量的值
               if [ -n "$VALUE" ]; then
                 echo "::add-mask::$VALUE"
