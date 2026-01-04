@@ -8,7 +8,6 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -143,9 +142,7 @@ function extractVariablesFromManifest() {
         process.env.WORKER_NAME = pkg.name;
     }
     
-    if (!process.env.AXIOM_DATASET) {
-        process.env.AXIOM_DATASET = 'drive-collector';
-    }
+    // AXIOM_DATASET should be provided via environment or manifest default, not hardcoded
     
     if (!process.env.NODE_ENV) {
         process.env.NODE_ENV = 'production';
@@ -166,12 +163,39 @@ function extractVariablesFromManifest() {
         }
     }
     
+    if (!process.env.GITHUB_ACTIONS && !process.env.CLOUDFLARE_ACCOUNT_ID) {
+        const secretsPath = path.join(projectRoot, '.act.secrets');
+        if (fs.existsSync(secretsPath)) {
+            const content = fs.readFileSync(secretsPath, 'utf8');
+            const lines = content.split('\n').filter(l => l && !l.startsWith('#'));
+            
+            for (const line of lines) {
+                const [key, ...rest] = line.split('=');
+                if (key === 'CLOUDFLARE_ACCOUNT_ID') {
+                    const value = rest.join('=').replace(/^"|"$/g, '');
+                    process.env.CLOUDFLARE_ACCOUNT_ID = value;
+                    console.log('从 .act.secrets 读取 CLOUDFLARE_ACCOUNT_ID');
+                    break;
+                }
+            }
+        }
+    }
+    
     // 检查是否在 GitHub Actions 环境中
     if (process.env.GITHUB_ACTIONS === 'true') {
         console.log('检测到 GitHub Actions 环境...');
         
+        // 2026-01-04: 增加调试信息（在 Infisical 拉取之后）
+        console.log('DEBUG: GHA 环境变量检查 (Infisical 拉取后):');
+        console.log('  - GITHUB_ACTIONS:', process.env.GITHUB_ACTIONS);
+        console.log('  - CLOUDFLARE_ACCOUNT_ID:', process.env.CLOUDFLARE_ACCOUNT_ID ? '已设置' : '未设置');
+        console.log('  - INFISICAL_TOKEN:', process.env.INFISICAL_TOKEN ? '已设置' : '未设置');
+        console.log('  - INFISICAL_PROJECT_ID:', process.env.INFISICAL_PROJECT_ID ? '已设置' : '未设置');
+        
         if (!process.env.CLOUDFLARE_ACCOUNT_ID) {
             console.error('错误: GHA 环境下需要 CLOUDFLARE_ACCOUNT_ID');
+            console.error('CLOUDFLARE_ACCOUNT_ID 应该通过 Infisical 从 GHA secrets 中获取');
+            console.error('请检查 GitHub Actions 的 INFISICAL_TOKEN 和 INFISICAL_PROJECT_ID 配置');
             process.exit(1);
         }
         
@@ -183,30 +207,9 @@ function extractVariablesFromManifest() {
             }
         }
     } else {
-        // 本地开发环境：如果缺少 CLOUDFLARE_ACCOUNT_ID，尝试从 .act.secrets 读取
-        if (!process.env.CLOUDFLARE_ACCOUNT_ID) {
-            console.log('警告: 本地环境下 CLOUDFLARE_ACCOUNT_ID 为空，尝试从 .act.secrets 读取...');
-            
-            try {
-                const secretsPath = path.resolve(projectRoot, '.act.secrets');
-                if (fs.existsSync(secretsPath)) {
-                    const content = fs.readFileSync(secretsPath, 'utf8');
-                    const lines = content.split('\n').filter(l => l && !l.startsWith('#'));
-                    
-                    lines.forEach(line => {
-                        const [key, ...rest] = line.split('=');
-                        const value = rest.join('=');
-                        if (key === 'CLOUDFLARE_ACCOUNT_ID' && value) {
-                            const cleanValue = value.replace(/^\"|\"$/g, '');
-                            process.env.CLOUDFLARE_ACCOUNT_ID = cleanValue;
-                            console.log('已从 .act.secrets 读取 CLOUDFLARE_ACCOUNT_ID');
-                        }
-                    });
-                }
-            } catch (error) {
-                console.warn('无法从 .act.secrets 读取:', error.message);
-            }
-        }
+        console.log('检测到本地开发环境...');
+        // 本地开发环境：CLOUDFLARE_ACCOUNT_ID 应该从 .act.secrets 获取
+        // 这里不做额外处理，因为 generate-wrangler-vars.js 已经处理了
     }
     
     return allVars;
