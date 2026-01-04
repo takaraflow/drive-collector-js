@@ -173,7 +173,10 @@ export function generateWranglerCommand(env = process.env) {
       // 只有当值存在且不为空时才添加
       if (value !== undefined && value !== '') {
         // 清理值两侧可能存在的冗余引号（Infisical 导出有时会带引号）
-        const cleanValue = String(value).trim().replace(/^['"]|['"]$/g, '');
+        let cleanValue = String(value).trim();
+        while (cleanValue.length > 1 && ((cleanValue.startsWith('"') && cleanValue.endsWith('"')) || (cleanValue.startsWith("'") && cleanValue.endsWith("'")))) {
+            cleanValue = cleanValue.substring(1, cleanValue.length - 1);
+        }
         const escapedValue = cleanValue.replace(/"/g, '\\"');
         
         // 关键：只将 config.env 中的变量注入为 --var

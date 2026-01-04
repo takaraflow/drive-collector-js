@@ -292,7 +292,11 @@ function generateWranglerToml() {
     // 逻辑：寻找模板中所有的 ${VAR_NAME}，并尝试从环境中替换
     const placeholderRegex = /\$\{([^}]+)\}/g;
     tomlContent = tomlContent.replace(placeholderRegex, (match, varName) => {
-        const value = (process.env[varName] || '').trim().replace(/^['"]|['"]$/g, '');
+        let value = (process.env[varName] || '').trim();
+        // 循环去除所有包围的引号，修复协议头被错误去除的问题
+        while (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+            value = value.substring(1, value.length - 1);
+        }
         return value || match; // 如果没值，保持原样（后续校验会报错）
     });
     
@@ -437,7 +441,11 @@ function generateToml(env, manifest, tomlTemplate, packageJson) {
     // 逻辑：寻找模板中所有的 ${VAR_NAME}，并尝试从环境中替换
     const placeholderRegex = /\$\{([^}]+)\}/g;
     content = content.replace(placeholderRegex, (match, varName) => {
-        const value = (env[varName] || '').trim().replace(/^['"]|['"]$/g, '');
+        let value = (env[varName] || '').trim();
+        // 循环去除所有包围的引号，修复协议头被错误去除的问题
+        while (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+            value = value.substring(1, value.length - 1);
+        }
         return value || match; // 如果没值，保持原样（后续校验会报错）
     });
     
