@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.8.1](https://github.com/YoungSx/drive-collector-js/compare/v4.8.0...v4.8.1) (2026-01-04)
+
+
+### 🐛 问题修复
+
+* adds debug logging for Axiom column limit errors ([2cf3884](https://github.com/YoungSx/drive-collector-js/commit/2cf38848cda28cb8763f6d56757e93f5420de4b0))
+* improves data pruning for Axiom payloads ([679f0fd](https://github.com/YoungSx/drive-collector-js/commit/679f0fdda25194080d8186d561c67a7feaa25bfc))
+
 ## [4.8.0](https://github.com/YoungSx/drive-collector-js/compare/v4.7.1...v4.8.0) (2026-01-04)
 
 
