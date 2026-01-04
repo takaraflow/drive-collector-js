@@ -41,9 +41,9 @@ jobs:
           # 使用 NODE_ENV 作为环境变量名
           BRANCH="${{ github.ref_name }}"
           if [[ "$BRANCH" == "main" ]]; then
-            NODE_ENV="production"
+            NODE_ENV="prod"
           elif [[ "$BRANCH" == "develop" ]]; then
-            NODE_ENV="development"
+            NODE_ENV="dev"
           else
             NODE_ENV="staging"
           fi
