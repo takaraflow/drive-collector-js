@@ -22,8 +22,8 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install production dependencies
-        run: npm ci --production
+      - name: Install dependencies
+        run: npm ci
 
       - name: Install build tools
         run: npm install --no-save esbuild wrangler
@@ -79,8 +79,7 @@ jobs:
           fi
           
           # Ensure BARK_WEBHOOK_URL ends with / if it's just the domain
-          BASE_URL="$BARK_WEBHOOK_URL"
-          BASE_URL="${BASE_URL%/}"
+          BASE_URL="${BARK_WEBHOOK_URL%/}"
           
           # Construct JSON body for Bark POST API
           curl -L -X POST "$BASE_URL/push" \

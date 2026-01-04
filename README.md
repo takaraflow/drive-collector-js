@@ -1,90 +1,101 @@
-# lb-worker-js
+# LB Worker JS
 
-Cloudflare Worker 负载均衡器，用于多实例请求转发，支持故障转移到 Upstash Redis。
+Load Balancer Worker for drive-collector.
 
-## 快速开始
+## 本地开发与测试
 
-### 本地开发
-1. 复制 [.env.example](.env.example) 到 `.env`（`.env` 已加入 [.gitignore](.gitignore)，不会上传隐私信息）。
-2. 编辑 `.env`，填写实际值（如 KV ID、Axiom Token 等）。
-3. `source .env && npm run dev`
+### 环境要求
+- Node.js ^20.0.0
+- Docker Desktop (用于本地模拟 GHA)
+- act (用于本地运行 GitHub Actions)
 
-### 生产部署（Cloudflare Workers）
-1. **配置 KV Namespace**：
-   1. **创建 KV Namespace**（如果没有）：[Workers & Pages > KV](https://dash.cloudflare.com/?to=/:account/workers-and-pages/kv) > Create namespace，记下 Namespace ID，填入 [`wrangler.build.toml`](wrangler.build.toml) 的 `[[kv_namespaces]]`：
-      ```
-      [[kv_namespaces]]
-      binding = "KV_STORAGE"
-      id = "your-namespace-id"
-      preview_id = "your-preview-id"
-      ```
-   2. **绑定到 Worker**：Workers > [你的 Worker] > Settings > Variables > KV Namespace Bindings > Add binding：
-      - Variable name: `KV_STORAGE`
-      - KV namespace: 选择你的 namespace
-2. **敏感环境变量使用 Secrets（推荐，避免硬编码泄露）：**
-   ```
-   wrangler secret put AXIOM_TOKEN
-   wrangler secret put AXIOM_ORG_ID
-   wrangler secret put AXIOM_DATASET
-   wrangler secret put QSTASH_CURRENT_SIGNING_KEY  # 如需
-   wrangler secret put UPSTASH_REDIS_REST_URL  # 如需
-   wrangler secret put UPSTASH_REDIS_REST_TOKEN  # 如需
-   ```
-   或通过 [Cloudflare Dashboard](https://dash.cloudflare.com/) 设置。
-3. **🚀 GitHub Actions CI/CD**（推荐）：
+### 快速开始
 
-   ### 创建 CLOUDFLARE_API_TOKEN
-   1. [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens) > Create Token > Custom token
-   2. **Permissions**（至少）：
-      | Resource | Permission |
-      |----------|------------|
-      | Account · Cloudflare Workers | Edit |
-   3. Continue to summary > Create Token，复制 value。
-
-   ### 配置 Secrets & Variables
-   Repo Settings > Secrets and variables > Actions（默认分组，非 Environment-specific）：
-
-   **Secrets**：
-   | Name | 描述 |
-   |------|------|
-   | `CLOUDFLARE_API_TOKEN` | 上步 API Token |
-   | `AXIOM_TOKEN` | Axiom ingestion token |
-   | `AXIOM_ORG_ID` | Axiom organization ID |
-   | `QSTASH_CURRENT_SIGNING_KEY` | QStash 当前 signing key (可选) |
-   | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis token (可选) |
-
-   **Variables**：
-   | Name | 描述 |
-   |------|------|
-   | `WORKER_NAME` | Worker 名称 (e.g. `lb-worker-js`) |
-   | `AXIOM_DATASET` | Axiom dataset |
-   | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL (可选) |
-
-   **注意：** 以上 Secrets 和 Variables 位于 Actions 默认分组（main branch），非 Environment-specific。
-
-   如果使用 Environment "production"，需在 workflow 的 jobs 中设置 `environment: production`，并进行 manual approval。
-
-   4. Push 到 `main`，触发 [deploy.yml](.github/workflows/deploy.yml) 自动部署。
-
-   ### 本地 Deploy
-   ```
-   export WORKER_NAME=your-worker-name
-   # 本地部署需设置 CLOUDFLARE_API_TOKEN 环境变量 或运行 `npx wrangler login`
-   # 其他 env vars from .env
-   npm run deploy
+1. **安装依赖**
+   ```bash
+   npm install
    ```
 
-   ### Troubleshooting
-   - **Token error**：确认 API Token 有 "Cloudflare Workers: Edit" 权限，重试。
-   - **Wrangler version warning**：运行 `npm i wrangler@latest -g` 更新。
-   - **Deploy 失败**：检查 Actions logs，确认 secrets/vars 已设。
+2. **本地开发**
+   ```bash
+   npm run dev
+   ```
 
-**注意：** `wrangler.toml` 和 `build.sh` 使用占位符 `${VAR}` 机制，确保无隐私硬编码。Secrets 优先于 env vars 中的 vars。
+3. **运行测试**
+   ```bash
+   npm test
+   ```
 
-## 测试
-`npm test`
+## 本地模拟 GitHub Actions
 
-## 架构
-- KV 存储活跃实例列表。
-- 支持 QStash 签名验证。
-- 故障转移：KV 失败时切换 Upstash Redis。
+本项目支持在本地使用 `act` 工具模拟 GitHub Actions 的执行流程，这对于调试 CI/CD 流程非常有用。
+
+### 前置准备
+
+1. **安装 Docker** (Windows/Mac 请安装 Docker Desktop)
+2. **安装 act**:
+   - Windows (Winget): `winget install nektos.act`
+   - Windows (Scoop): `scoop install act`
+   - macOS: `brew install act`
+
+### 配置本地 Secrets
+
+GitHub Actions 依赖的敏感信息需要在本地创建一个文件来模拟。
+
+1. 复制模板文件：
+   ```bash
+   cp .act.secrets.example .act.secrets
+   ```
+
+2. 编辑 `.act.secrets` 并填入真实的值：
+   ```ini
+   INFISICAL_TOKEN=你的_Infisical_Token
+   BARK_WEBHOOK_URL=你的_Bark_Webhook_URL
+   BARK_DEVICE_TOKEN=你的_Bark_设备密钥
+   INFISICAL_PROJECT_ID=你的_Infisical_项目ID
+   ```
+
+### 运行模拟
+
+#### 1. 查看可用的工作流
+```bash
+act --list
+```
+
+#### 2. 运行部署工作流 (Deploy)
+这将模拟 `push` 事件并执行 `deploy` 作业：
+```bash
+act push -j deploy --secret-file .act.secrets --eventpath event.json
+```
+
+#### 3. 运行同步清单工作流 (Sync Manifest)
+```bash
+act push -j update-registry --secret-file .act.secrets
+```
+
+#### 4. 使用完整镜像 (推荐)
+如果你遇到环境缺失问题（如缺少 Node.js 或 apt-get），可以指定使用功能完整的镜像：
+```bash
+act push -j deploy --secret-file .act.secrets --eventpath event.json -P ubuntu-latest=catthehacker/ubuntu:act-latest
+```
+
+### 常见问题
+
+**Q: 提示 "permission denied" 或找不到文件？**
+A: 在 Windows 上，尝试以管理员身份运行终端。
+
+**Q: 为什么需要 `.act.secrets` 文件？**
+A: 因为 `deploy.yml` 工作流需要 `INFISICAL_TOKEN` 来获取生产环境的密钥。本地模拟时无法访问 GitHub Secrets，所以需要手动提供。
+
+**Q: 如何清理 act 产生的容器？**
+A: `docker system prune`
+
+## 脚本说明
+
+- `npm run deploy`: 构建并部署到 Cloudflare Workers
+- `npm run validate:manifest`: 验证 manifest.json 格式
+- `npm run diagnose:axiom`: 诊断 Axiom 日志
+
+## License
+
+ISC
