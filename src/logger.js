@@ -30,14 +30,114 @@ let baseLoggerConfig = {
  * @param {Object} env - 环境变量
  */
 export function configureBaseLoggerTransport(env) {
-  if (isTestEnvironment) return;
-
+  // 在测试环境中也允许配置，用于测试
   if (env.AXIOM_TOKEN && env.AXIOM_DATASET) {
     baseLoggerConfig.dataset = env.AXIOM_DATASET;
     baseLoggerConfig.token = env.AXIOM_TOKEN;
     baseLoggerConfig.orgId = env.AXIOM_ORG_ID || null;
     baseLoggerConfig.env = env.NODE_ENV || 'production';
   }
+}
+
+/**
+ * 数据清洗函数 - Axiom 日志保底逻辑
+ * 限制单条日志的字段数量、字符串长度和对象深度
+ * @param {any} val - 要清洗的值
+ * @param {number} depth - 当前深度
+ * @param {Object} context - 上下文（用于跟踪字段计数）
+ * @returns {any} - 清洗后的值
+ */
+function sanitizeLogData(val, depth = 0, context = { fieldCount: 0 }) {
+  try {
+    // 限制最大深度为 3 层
+    if (depth > 3) {
+      return "[DEPTH_EXCEEDED]";
+    }
+
+    // 处理 null 和 undefined
+    if (val === null || val === undefined) {
+      return val;
+    }
+
+    // 处理字符串 - 限制长度为 10,000 字符
+    if (typeof val === 'string') {
+      if (val.length > 10000) {
+        return val.substring(0, 10000) + "...[TRUNCATED]";
+      }
+      return val;
+    }
+
+    // 处理数字、布尔值等基本类型
+    if (typeof val !== 'object') {
+      return val;
+    }
+
+    // 处理数组
+    if (Array.isArray(val)) {
+      return val.map(item => sanitizeLogData(item, depth + 1, context));
+    }
+
+    // 处理对象 - 限制字段数量为 50 个
+    if (typeof val === 'object') {
+      // 处理 Date 对象
+      if (val instanceof Date) {
+        return val.toISOString();
+      }
+      
+      // 处理数组
+      if (Array.isArray(val)) {
+        return val.map(item => sanitizeLogData(item, depth + 1, context));
+      }
+      
+      const cleaned = {};
+      
+      // 优先保留关键字段（不计入 50 个限制）
+      const priorityKeys = ['timestamp', 'level', 'message', 'requestId'];
+      const priorityData = {};
+      const otherData = {};
+
+      for (const key in val) {
+        if (priorityKeys.includes(key)) {
+          priorityData[key] = val[key];
+        } else {
+          otherData[key] = val[key];
+        }
+      }
+
+      // 先添加优先字段
+      for (const key in priorityData) {
+        cleaned[key] = sanitizeLogData(priorityData[key], depth + 1, context);
+      }
+
+      // 再添加其他字段，但不超过 50 个总数
+      let fieldCount = 0;
+      for (const key in otherData) {
+        if (fieldCount >= 50) {
+          cleaned['_truncated_fields'] = true;
+          break;
+        }
+        cleaned[key] = sanitizeLogData(otherData[key], depth + 1, context);
+        fieldCount++;
+      }
+
+      return cleaned;
+    }
+
+    // 处理其他类型（如 Function 等）
+    return String(val);
+  } catch (error) {
+    // 如果清洗过程出错，返回一个简化的错误信息
+    return "[SANITATION_ERROR]";
+  }
+}
+
+/**
+ * 计算字符串的字节大小
+ * @param {string} str - 字符串
+ * @returns {number} - 字节大小
+ */
+function getByteSize(str) {
+  return new Blob([str]).size;
 }
 
 /**
@@ -49,11 +149,26 @@ export function configureBaseLoggerTransport(env) {
 async function sendToAxiom(logData, logBuffer, ctx = null) {
   const requestId = ctx?._axiomDebugRequestId || 'unknown';
 
+  // 应用清洗逻辑 - 在所有环境中都执行，确保数据安全
+  let sanitizedData;
+  try {
+    sanitizedData = sanitizeLogData(logData);
+  } catch (error) {
+    // 如果清洗失败，记录错误并使用原始数据（保底策略）
+    console.error(`[Axiom] Sanitization failed: ${error.message}`);
+    sanitizedData = {
+      level: logData.level || 'error',
+      message: '[SANITATION_ERROR]',
+      timestamp: new Date().toISOString(),
+      version: VERSION
+    };
+  }
+
   if (isTestEnvironment) {
     // 测试环境：输出到控制台供测试用例捕获
-    const level = logData.level || 'info';
-    const message = logData.message;
-    const data = { ...logData };
+    const level = sanitizedData.level || 'info';
+    const message = sanitizedData.message;
+    const data = { ...sanitizedData };
     delete data.level;
     delete data.message;
     delete data.timestamp;
@@ -71,9 +186,9 @@ async function sendToAxiom(logData, logBuffer, ctx = null) {
     return;
   }
 
-  // 将日志添加到缓冲
-  console.log(`[AXIOM_DEBUG] ${requestId}: sendToAxiom - adding ${logData.level} log to buffer, current size=${logBuffer.length}`);
-  logBuffer.push(logData);
+  // 将清洗后的日志添加到缓冲
+  console.log(`[AXIOM_DEBUG] ${requestId}: sendToAxiom - adding ${sanitizedData.level} log to buffer, current size=${logBuffer.length}`);
+  logBuffer.push(sanitizedData);
 }
 
 /**
@@ -83,9 +198,16 @@ async function sendToAxiom(logData, logBuffer, ctx = null) {
  */
 export async function flushLogs(logBuffer, ctx = null) {
   // 1. 基础防御检查
-  // baseLoggerConfig 需要你在 logger.js 顶部定义好(包含 token, dataset 等)
   if (!baseLoggerConfig.token || !baseLoggerConfig.dataset) {
-    console.warn('[Axiom] Config missing, skipping flush');
+    // 在测试环境中，如果没有配置，仍然处理缓冲区但不发送
+    if (!isTestEnvironment) {
+      console.warn('[Axiom] Config missing, skipping flush');
+    }
+    
+    // 即使没有配置，也要清空缓冲区防止内存泄漏
+    if (logBuffer && logBuffer.length > 0) {
+      logBuffer.length = 0;
+    }
     return;
   }
 
@@ -94,13 +216,81 @@ export async function flushLogs(logBuffer, ctx = null) {
   }
 
   // 2. 关键步骤：冻结并清空缓冲区 (防止引用问题)
-  // 必须使用副本发送，因为异步过程中原数组可能会变
   const logsToSend = [...logBuffer];
   logBuffer.length = 0; // 立即清空原数组
 
   console.log(`[Axiom] Preparing to send ${logsToSend.length} events...`);
 
-  // 3. 构造请求参数
+  // 3. 应用清洗逻辑（双重保险，确保缓冲区中的数据也是清洗过的）
+  const sanitizedLogs = logsToSend.map(log => {
+    try {
+      return sanitizeLogData(log);
+    } catch (error) {
+      // 如果单条日志清洗失败，返回一个简化的错误日志
+      return {
+        level: 'error',
+        message: '[LOG_SANITIZE_FAILED]',
+        timestamp: new Date().toISOString(),
+        version: VERSION
+      };
+    }
+  });
+
+  // 4. 序列化并检查总体积
+  let batchBody;
+  try {
+    batchBody = JSON.stringify(sanitizedLogs);
+  } catch (error) {
+    // 如果序列化失败（如循环引用），记录错误并停止
+    console.error(`[Axiom] Batch serialization failed: ${error.message}`);
+    return;
+  }
+
+  const batchSize = getByteSize(batchBody);
+  const maxBatchSize = 2 * 1024 * 1024; // 2MB
+
+  console.log(`[Axiom] Batch size: ${(batchSize / 1024 / 1024).toFixed(2)}MB`);
+
+  // 5. 体积超限处理
+  if (batchSize > maxBatchSize) {
+    console.warn(`[Axiom] Batch size ${batchSize} exceeds limit ${maxBatchSize}. Applying truncation...`);
+
+    // 策略：按顺序截断，直到体积符合要求
+    let truncatedLogs = [];
+    let currentSize = 0;
+    
+    for (const log of sanitizedLogs) {
+      const logStr = JSON.stringify(log);
+      const logSize = getByteSize(logStr);
+      
+      // 如果加上当前日志会超限，且已经有日志了，则停止添加
+      if (currentSize + logSize > maxBatchSize && truncatedLogs.length > 0) {
+        // 添加一条截断警告日志
+        truncatedLogs.push({
+          level: 'warn',
+          message: '[BATCH_TRUNCATED]',
+          details: `Original count: ${sanitizedLogs.length}, sent: ${truncatedLogs.length}`,
+          timestamp: new Date().toISOString(),
+          version: VERSION
+        });
+        break;
+      }
+      
+      truncatedLogs.push(log);
+      currentSize += logSize;
+    }
+
+    // 如果截断后还是太大，只保留第一条并添加警告
+    if (truncatedLogs.length === 0 || getByteSize(JSON.stringify(truncatedLogs)) > maxBatchSize) {
+      console.error(`[Axiom] Batch still too large after truncation. Dropping all logs.`);
+      return;
+    }
+
+    batchBody = JSON.stringify(truncatedLogs);
+    console.log(`[Axiom] Truncated to ${truncatedLogs.length} logs, new size: ${(getByteSize(batchBody) / 1024 / 1024).toFixed(2)}MB`);
+  }
+
+  // 6. 构造请求参数
   const url = `https://api.axiom.co/v1/datasets/${baseLoggerConfig.dataset}/ingest`;
 
   const headers = {
@@ -114,17 +304,16 @@ export async function flushLogs(logBuffer, ctx = null) {
     headers['X-Axiom-Org-Id'] = baseLoggerConfig.orgId;
   }
 
-  // 4. 执行原生 Fetch (这是解决报错的核心)
-  // 注意：这里绝对不要传 'cache' 参数
+  // 7. 执行原生 Fetch
   const uploadTask = fetch(url, {
     method: 'POST',
     headers: headers,
-    body: JSON.stringify(logsToSend)
+    body: batchBody
   })
   .then(async (res) => {
-    // 5. 调试回显 (查看 CF 实时日志)
+    // 8. 调试回显 (查看 CF 实时日志)
     if (res.ok) {
-      console.log(`[Axiom] Success: ${res.status} OK. Ingested ${logsToSend.length} logs.`);
+      console.log(`[Axiom] Success: ${res.status} OK. Ingested batch.`);
     } else {
       // 只有报错时才读取 text，节省资源
       const errText = await res.text();
@@ -136,12 +325,17 @@ export async function flushLogs(logBuffer, ctx = null) {
     console.error(`[Axiom] Network Error: ${error.message}`);
   });
 
-  // 6. 生命周期管理 (防止 Worker 提前结束)
+  // 9. 生命周期管理 (防止 Worker 提前结束)
   if (ctx && ctx.waitUntil) {
     ctx.waitUntil(uploadTask);
   } else {
     // 本地测试环境可能没有 waitUntil，使用 await
-    await uploadTask;
+    // 在测试环境中，我们需要确保 fetch 被调用
+    if (isTestEnvironment) {
+      await uploadTask;
+    } else {
+      await uploadTask;
+    }
   }
 }
 
@@ -298,6 +492,9 @@ function createLoggerFactory(context, bindings = {}) {
 
 // 基础 logger 实例
 export const logger = createLoggerFactory({ env: baseLoggerConfig.env, logBuffer: [] }); // 初始 logger 实例带有自己的缓冲
+
+// 导出清洗函数供测试使用
+export { sanitizeLogData };
 
 // 导出配置函数供外部使用
 export default logger;
