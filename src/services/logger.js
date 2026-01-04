@@ -205,6 +205,20 @@ const safeAxiomIngest = async (dataset, payload) => {
     
     // 检查是否是字段超限错误
     if (error.message && error.message.includes('column limit')) {
+      try {
+        const item = payload[0];
+        console.error('[Axiom Debug] Column limit exceeded. Inspecting payload structure:');
+        console.error('[Axiom Debug] Top-level keys:', Object.keys(item));
+        
+        // Inspect nested objects which might be flattened
+        for (const [key, value] of Object.entries(item)) {
+            if (value && typeof value === 'object') {
+                console.error(`[Axiom Debug] Keys in '${key}':`, Object.keys(value));
+            }
+        }
+      } catch (e) {
+        console.error('[Axiom Debug] Failed to inspect payload', e);
+      }
       throw new Error(`Axiom column limit exceeded: ${error.message}`);
     }
     
