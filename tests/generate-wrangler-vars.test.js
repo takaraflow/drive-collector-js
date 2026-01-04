@@ -44,7 +44,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
       }
     },
     infrastructure: {
-      CLOUDFLARE_ACCOUNT_ID: { type: "string", required: true },
+      CF_ACCOUNT_ID: { type: "string", required: true },
       WORKER_NAME: { type: "string", required: true },
       CF_KV_NAMESPACE_ID: { type: "string", required: true },
       KV_PREVIEW_ID: { type: "string", required: false }
@@ -127,7 +127,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
   test('should prepend exports for infrastructure vars found in GHA JSON contexts', () => {
     const mockEnv = {
       GHA_VARS_JSON: JSON.stringify({
-        CLOUDFLARE_ACCOUNT_ID: 'test-account-id',
+        CF_ACCOUNT_ID: 'test-account-id',
         WORKER_NAME: 'test-worker',
         QSTASH_CURRENT_SIGNING_KEY: 'test-key' // Added required var
       }),
@@ -136,7 +136,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
 
     const output = generateWranglerCommand(mockEnv);
     
-    expect(output).toContain('export CLOUDFLARE_ACCOUNT_ID="test-account-id"');
+    expect(output).toContain('export CF_ACCOUNT_ID="test-account-id"');
     expect(output).toContain('export WORKER_NAME="test-worker"');
     expect(output).toContain('npx wrangler deploy');
   });
@@ -173,7 +173,7 @@ describe('build.sh Logic (Unit)', () => {
   const mockPackageJson = { name: 'pkg-worker-name' };
   const mockTomlTemplate = `
 name = "\${WORKER_NAME}"
-account_id = "\${CLOUDFLARE_ACCOUNT_ID}"
+account_id = "\${CF_ACCOUNT_ID}"
 kv_namespaces = [
   { binding = "KV", id = "\${CF_KV_NAMESPACE_ID}", preview_id = "\${KV_PREVIEW_ID}" }
 ]
@@ -185,7 +185,7 @@ kv_namespaces = [
       NODE_ENV: 'development',
       WORKER_NAME: 'test-local-worker',
       QSTASH_CURRENT_SIGNING_KEY: 'local-key',
-      CLOUDFLARE_ACCOUNT_ID: 'test-id',
+      CF_ACCOUNT_ID: 'test-id',
       CF_KV_NAMESPACE_ID: 'test-kv'
     };
 
@@ -201,7 +201,7 @@ kv_namespaces = [
       GITHUB_ACTIONS: 'true',
       NODE_ENV: 'production',
       WORKER_NAME: 'gha-worker',
-      CLOUDFLARE_ACCOUNT_ID: 'test-id',
+      CF_ACCOUNT_ID: 'test-id',
       CF_KV_NAMESPACE_ID: 'test-kv'
     };
 
@@ -214,7 +214,7 @@ kv_namespaces = [
   test('should replace placeholders correctly', () => {
       const mockEnv = {
           WORKER_NAME: 'final-name',
-          CLOUDFLARE_ACCOUNT_ID: 'acc-123',
+          CF_ACCOUNT_ID: 'acc-123',
           CF_KV_NAMESPACE_ID: 'kv-123',
           KV_PREVIEW_ID: 'prev-123'
       };

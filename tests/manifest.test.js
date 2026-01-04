@@ -49,7 +49,7 @@ describe('Manifest Validation Tests', () => {
         }
       },
       infrastructure: {
-        CLOUDFLARE_ACCOUNT_ID: { type: "string", required: true },
+        CF_ACCOUNT_ID: { type: "string", required: true },
         WORKER_NAME: { type: "string", required: true },
         CF_KV_NAMESPACE_ID: { type: "string", required: true }
       }
