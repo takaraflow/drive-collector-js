@@ -24,6 +24,7 @@
     "gha:local:sync": "act push -j update-registry --secret-file .act.secrets --platform ubuntu-latest=catthehacker/ubuntu:act-latest --rm",
     "gha:list": "act --list",
     "gha:clean": "docker container prune -f --filter label=type=act",
+    "gha:debug": "node scripts/deploy-wrapper.js",
     "release": "npm test && standard-version",
     "release:patch": "npm test && standard-version --release-as patch",
     "release:minor": "npm test && standard-version --release-as minor",

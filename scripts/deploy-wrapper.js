@@ -16,14 +16,16 @@ import { execSync } from 'child_process';
 function redactSensitiveInfo(str) {
     if (!str) return str;
     
-    // 脱敏常见的敏感信息模式
+    // 脱敏敏感信息模式：动态识别包含 TOKEN, KEY, SECRET, PASSWORD, PWD 的变量
     const patterns = [
-        // API Keys/Vars (处理 --var key="value" 或 --var key=value 格式)
-        { regex: /(--var\s+[^=]+=)([^ ]+)/g, replacement: (match, prefix, value) => `${prefix}***REDACTED***` },
-        // 环境变量值 (引号内的内容)
-        { regex: /(export\s+\w+=)"([^"]{10,})"/g, replacement: (match, prefix, value) => `${prefix}"***REDACTED***"` },
-        // Tokens (引号内且较长的内容)
-        { regex: /"[a-zA-Z0-9_\-\.]{40,}"/g, replacement: '"***REDACTED***"' },
+        {
+            regex: /(--var\s+)([^=]*(?:TOKEN|KEY|SECRET|PASSWORD|PWD)[^=]*)(="?)([^" ]+)("?)/gi,
+            replacement: (match, p1, p2, p3, p4, p5) => `${p1}${p2}${p3}***REDACTED***${p5}`
+        },
+        {
+            regex: /(export\s+)([^=]*(?:TOKEN|KEY|SECRET|PASSWORD|PWD)[^=]*)(="?)([^" ]+)("?)/gi,
+            replacement: (match, p1, p2, p3, p4, p5) => `${p1}${p2}${p3}***REDACTED***${p5}`
+        }
     ];
     
     let result = str;
@@ -74,7 +76,11 @@ function main() {
         
         // 执行 wrangler 命令（脱敏后输出）
         console.log('Executing wrangler command...');
-        execSync(wranglerCmd, { stdio: 'inherit' });
+        // 显式传递 env，确保 .env 加载的变量能传给 wrangler
+        execSync(wranglerCmd, {
+            stdio: 'inherit',
+            env: { ...process.env }
+        });
         
     } catch (error) {
         console.error('Deploy failed:', error.message);
@@ -82,6 +88,5 @@ function main() {
     }
 }
 
-if (import.meta.url === new URL(process.argv[1], 'file:').href) {
-    main();
-}
+// 直接运行，不进行复杂的 ESM 路径匹配判断，确保在 Windows 上能工作
+main();

@@ -1,5 +1,9 @@
 import fs from 'fs';
 import path from 'path';
+import dotenv from 'dotenv';
+
+// 加载 .env 文件 (如果存在)
+dotenv.config();
 
 /**
  * 脱敏敏感信息
@@ -9,14 +13,16 @@ import path from 'path';
 function redactSensitiveInfo(str) {
     if (!str) return str;
     
-    // 脱敏常见的敏感信息模式
+    // 脱敏敏感信息模式：动态识别包含 TOKEN, KEY, SECRET, PASSWORD, PWD 的变量
     const patterns = [
-        // API Keys/Vars (处理 --var key="value" 或 --var key=value 格式)
-        { regex: /(--var\s+[^=]+=)([^ ]+)/g, replacement: (match, prefix, value) => `${prefix}***REDACTED***` },
-        // 环境变量值 (引号内的内容)
-        { regex: /(export\s+\w+=)"([^"]{10,})"/g, replacement: (match, prefix, value) => `${prefix}"***REDACTED***"` },
-        // Tokens (引号内且较长的内容)
-        { regex: /"[a-zA-Z0-9_\-\.]{40,}"/g, replacement: '"***REDACTED***"' },
+        {
+            regex: /(--var\s+)([^=]*(?:TOKEN|KEY|SECRET|PASSWORD|PWD)[^=]*)(="?)([^" ]+)("?)/gi,
+            replacement: (match, p1, p2, p3, p4, p5) => `${p1}${p2}${p3}***REDACTED***${p5}`
+        },
+        {
+            regex: /(export\s+)([^=]*(?:TOKEN|KEY|SECRET|PASSWORD|PWD)[^=]*)(="?)([^" ]+)("?)/gi,
+            replacement: (match, p1, p2, p3, p4, p5) => `${p1}${p2}${p3}***REDACTED***${p5}`
+        }
     ];
     
     let result = str;
@@ -73,7 +79,13 @@ export function generateWranglerCommand(env = process.env) {
       
       // 检查是否为必需变量
       if (config.required && (value === undefined || value === '')) {
-        console.error(`错误: 缺少必需的环境变量 ${key}`);
+        // 在本地调试模式下 (非 GHA 环境)，只打印警告而不退出
+        if (!env.GITHUB_ACTIONS && !env.ACT) {
+            console.warn(`⚠️ 警告: 缺少必需的环境变量 [${key}]，已跳过`);
+            continue;
+        }
+        
+        console.error(`❌ 错误: 缺少必需的环境变量 [${key}]`);
         // In test mode, we might want to throw instead of exit
         if (env.NODE_ENV === 'test') {
           throw new Error(`缺少必需的环境变量 ${key}`);
@@ -83,7 +95,9 @@ export function generateWranglerCommand(env = process.env) {
 
       // 只有当值存在且不为空时才添加
       if (value !== undefined && value !== '') {
-        const escapedValue = String(value).replace(/"/g, '\\"');
+        // 清理值两侧可能存在的冗余引号（Infisical 导出有时会带引号）
+        const cleanValue = String(value).trim().replace(/^['"]|['"]$/g, '');
+        const escapedValue = cleanValue.replace(/"/g, '\\"');
         vars.push(`--var`, `${key}="${escapedValue}"`);
       }
     }
