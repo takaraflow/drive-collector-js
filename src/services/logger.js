@@ -205,20 +205,6 @@ const safeAxiomIngest = async (dataset, payload) => {
     
     // 检查是否是字段超限错误
     if (error.message && error.message.includes('column limit')) {
-      try {
-        const item = payload[0];
-        console.error('[Axiom Debug] Column limit exceeded. Inspecting payload structure:');
-        console.error('[Axiom Debug] Top-level keys:', Object.keys(item));
-        
-        // Inspect nested objects which might be flattened
-        for (const [key, value] of Object.entries(item)) {
-            if (value && typeof value === 'object') {
-                console.error(`[Axiom Debug] Keys in '${key}':`, Object.keys(value));
-            }
-        }
-      } catch (e) {
-        console.error('[Axiom Debug] Failed to inspect payload', e);
-      }
       throw new Error(`Axiom column limit exceeded: ${error.message}`);
     }
     
@@ -258,6 +244,54 @@ const serializeData = (data) => {
   return data;
 };
 
+/**
+ * 递归裁剪对象，限制深度和字段数量
+ * @param {any} obj - 要裁剪的对象
+ * @param {number} maxDepth - 最大深度
+ * @param {number} maxKeys - 每个对象的最大键数
+ * @param {number} currentDepth - 当前深度
+ * @returns {any} - 裁剪后的对象
+ */
+const pruneData = (obj, maxDepth = 3, maxKeys = 20, currentDepth = 0) => {
+  if (currentDepth >= maxDepth) {
+      if (typeof obj === 'object' && obj !== null) {
+          return '[Truncated: Max Depth]';
+      }
+      return obj;
+  }
+  
+  if (obj === null || typeof obj !== 'object') return obj;
+  
+  if (Array.isArray(obj)) {
+      const prunedArray = obj.slice(0, maxKeys).map(item => pruneData(item, maxDepth, maxKeys, currentDepth + 1));
+      if (obj.length > maxKeys) {
+          prunedArray.push('[Truncated: Max Array Length]');
+      }
+      return prunedArray;
+  }
+
+  // Error 对象特殊处理
+  if (obj instanceof Error) {
+      const serialized = serializeError(obj);
+      return pruneData(serialized, maxDepth, maxKeys, currentDepth);
+  }
+
+  const newObj = {};
+  let keyCount = 0;
+  
+  for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          if (keyCount >= maxKeys) {
+              newObj['_truncated_keys'] = `... ${Object.keys(obj).length - maxKeys} more keys`;
+              break;
+          }
+          newObj[key] = pruneData(obj[key], maxDepth, maxKeys, currentDepth + 1);
+          keyCount++;
+      }
+  }
+  return newObj;
+};
+
 const log = async (instanceId, level, message, data = {}) => {
   // 确保 data 是一个对象且不是 Error 实例
   let finalData = data;
@@ -283,16 +317,16 @@ const log = async (instanceId, level, message, data = {}) => {
     return;
   }
 
-  // 序列化数据并限制字段数量
-  const serializedData = serializeData(finalData);
-  const limitedData = limitFields(serializedData);
+  // 序列化数据并进行深度剪裁，防止字段爆炸
+  // 使用 pruneData 替代简单的 limitFields，可以处理嵌套对象
+  const prunedData = pruneData(finalData, 3, 20);
   
   const payload = {
     version,
     instanceId,
     level,
     message: displayMessage,
-    ...limitedData,
+    ...prunedData,
     timestamp: new Date().toISOString(),
     // 在Cloudflare Worker环境下获取一些额外信息
     worker: {
@@ -301,8 +335,8 @@ const log = async (instanceId, level, message, data = {}) => {
     }
   };
 
-  // 再次限制总字段数，确保不超过限制
-  const finalPayload = limitFields(payload, 200);
+  // 最后的安全网：限制顶层字段
+  const finalPayload = limitFields(payload, 50);
 
   try {
     const dataset = getSafeDatasetName();
@@ -320,10 +354,11 @@ const log = async (instanceId, level, message, data = {}) => {
       // Fallback: log to console only (avoid recursive calls)
       // Use original console.error to avoid proxy recursion
       originalConsoleError.call(console, 'Axiom ingest failed after retries:', lastError.message);
+      // 为了避免控制台也被撑爆，对 fallback 的 payload 也做一下 prune
       originalConsoleError.call(console, 'Failed payload:', {
         service: data.service || 'unknown',
         error: serializeError(lastError),
-        payload: finalPayload
+        payload: pruneData(finalPayload, 2, 10)
       });
     });
   }

@@ -654,16 +654,13 @@ describe('Logger Service', () => {
         const call = mockIngest.mock.calls[0];
         const payload = call[1][0];
         
-        // 根据你采用的方案（是否封装在 fields 字段中）进行断言
-        // 如果你采用了 fields: limitedData 封装：
-        if (payload.fields) {
-            const fieldsCount = Object.keys(payload.fields).length;
-            expect(fieldsCount).toBeLessThanOrEqual(201); // 200个字段 + 1个 _truncated
-            expect(payload.fields._truncated).toBe(true);
+        // 我们使用了 pruneData，它会将超过 maxKeys 的部分放入 _truncated_keys 中
+        // 并且最终 payload 也会被 limitFields 限制
+        if (payload._truncated_keys) {
+             expect(Object.keys(payload).length).toBeLessThanOrEqual(51); // 50 (limitFields) + safe margin
         } else {
-            // 如果你仍然使用展开运算符 ...limitedData
-            const rootKeysCount = Object.keys(payload).length;
-            expect(rootKeysCount).toBeLessThanOrEqual(210); // 基础字段 + 200限制
+             // 如果没触发 _truncated_keys，说明被 limitFields 截断了
+             expect(Object.keys(payload).length).toBeLessThanOrEqual(51);
         }
     });
 
