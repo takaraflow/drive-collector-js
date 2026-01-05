@@ -1,4 +1,11 @@
 import { Axiom } from '@axiomhq/js';
+import { 
+  limitFields, 
+  serializeError, 
+  pruneData, 
+  serializeToString 
+} from '../utils/serializer.js';
+
 // Removed InstanceCoordinator dependency to avoid circular import
 let getInstanceIdFunc = () => 'unknown';
 
@@ -126,34 +133,6 @@ const initAxiom = async () => {
 };
 
 /**
- * 限制对象字段数量，防止超过 Axiom 的列数限制
- * @param {Object} obj - 要限制的对象
- * @param {number} maxFields - 最大字段数，默认 200（留出安全余量）
- * @returns {Object} - 限制后的对象
- */
-const limitFields = (obj, maxFields = 200) => {
-  if (!obj || typeof obj !== 'object') return obj;
-  
-  const result = {};
-  let count = 0;
-  
-  for (const key in obj) {
-    if (count >= maxFields) {
-      // 添加一个标记表示字段被截断
-      result._truncated = true;
-      break;
-    }
-    
-    if (obj.hasOwnProperty(key)) {
-      result[key] = obj[key];
-      count++;
-    }
-  }
-  
-  return result;
-};
-
-/**
  * 安全地检查和获取数据集名称
  * @returns {string} - 数据集名称
  */
@@ -213,86 +192,6 @@ const safeAxiomIngest = async (dataset, payload) => {
   }
 };
 
-const serializeError = (err) => {
-  if (!(err instanceof Error)) return err;
-  const serialized = {
-    name: err.name,
-    message: err.message,
-    stack: err.stack,
-  };
-  // Add any additional enumerable properties
-  for (const key in err) {
-    if (err.hasOwnProperty(key) && !(key in serialized)) {
-      serialized[key] = err[key];
-    }
-  }
-  return serialized;
-};
-
-const serializeData = (data) => {
-  if (!data) return {};
-  if (data instanceof Error) return serializeError(data);
-  if (typeof data === 'object') {
-    const serialized = {};
-    for (const key in data) {
-      if (data.hasOwnProperty(key)) {
-        serialized[key] = data[key] instanceof Error ? serializeError(data[key]) : data[key];
-      }
-    }
-    return serialized;
-  }
-  return data;
-};
-
-/**
- * 递归裁剪对象，限制深度和字段数量
- * @param {any} obj - 要裁剪的对象
- * @param {number} maxDepth - 最大深度
- * @param {number} maxKeys - 每个对象的最大键数
- * @param {number} currentDepth - 当前深度
- * @returns {any} - 裁剪后的对象
- */
-const pruneData = (obj, maxDepth = 2, maxKeys = 5, currentDepth = 0) => {
-  if (currentDepth >= maxDepth) {
-      if (typeof obj === 'object' && obj !== null) {
-          return '[Truncated: Max Depth]';
-      }
-      return obj;
-  }
-  
-  if (obj === null || typeof obj !== 'object') return obj;
-  
-  if (Array.isArray(obj)) {
-      // 更严格的数组处理：最多保留 5 项，每项深度递减
-      const prunedArray = obj.slice(0, maxKeys).map(item => pruneData(item, maxDepth, maxKeys, currentDepth + 1));
-      if (obj.length > maxKeys) {
-          prunedArray.push(`[Truncated: ${obj.length - maxKeys} items]`);
-      }
-      return prunedArray;
-  }
-
-  // Error 对象特殊处理
-  if (obj instanceof Error) {
-      const serialized = serializeError(obj);
-      return pruneData(serialized, maxDepth, maxKeys, currentDepth);
-  }
-
-  const newObj = {};
-  let keyCount = 0;
-  
-  for (const key in obj) {
-      if (Object.prototype.hasOwnProperty.call(obj, key)) {
-          if (keyCount >= maxKeys) {
-              newObj['_truncated'] = `... ${Object.keys(obj).length - maxKeys} more keys`;
-              break;
-          }
-          newObj[key] = pruneData(obj[key], maxDepth, maxKeys, currentDepth + 1);
-          keyCount++;
-      }
-  }
-  return newObj;
-};
-
 const log = async (instanceId, level, message, data = {}) => {
   // 确保 data 是一个对象且不是 Error 实例
   let finalData = data;
@@ -318,64 +217,28 @@ const log = async (instanceId, level, message, data = {}) => {
     return;
   }
 
-  // 构建基础 Payload，严格控制顶层字段 - ONLY the absolute minimum
+  // 构建 payload，details 永远是字符串
   const payload = {
     version,
     instanceId,
     level,
     message: displayMessage,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    details: serializeToString(finalData) // ✅ 永远字符串，已处理循环引用和特殊值
   };
 
-  // 特殊处理 Error 对象，提取关键信息到独立字段
+  // 特殊处理 Error 对象，提取关键信息到独立字段（但要确保是字符串）
   const errObj = finalData instanceof Error ? finalData : (finalData.error instanceof Error ? finalData.error : null);
   if (errObj) {
-      payload.error_name = errObj.name;
-      payload.error_message = errObj.message;
+    payload.error_name = String(errObj.name).substring(0, 100);
+    payload.error_message = String(errObj.message).substring(0, 200);
   } else if (finalData.error) {
-      // 处理非 Error 实例的 error 字段
-      payload.error_summary = String(finalData.error).substring(0, 200);
+    // 处理非 Error 实例的 error 字段
+    payload.error_summary = String(finalData.error).substring(0, 200);
   }
 
-  // 采用更保守的参数：深度2，每层最多5个键
-  const prunedData = pruneData(finalData, 2, 5);
-  
-  // 将所有数据序列化存入 details 字段
-  // 关键：Axiom 不会解析字符串内部的 JSON，所以不会产生额外列
-  // details 字段本身只占 1 列，无论内部多复杂
-  try {
-      const detailsStr = JSON.stringify(prunedData);
-      
-      // 如果序列化后的字符串仍然过长，使用摘要模式
-      // 保守限制：5000 字符，防止 Axiom 内部处理问题
-      if (detailsStr.length > 5000) {
-          // 数据过于复杂，使用摘要模式
-          payload.details = JSON.stringify({
-              service: finalData.service || 'unknown',
-              type: finalData.type || 'unknown',
-              summary: 'Data truncated due to complexity',
-              original_size: detailsStr.length,
-              error: finalData.error ? String(finalData.error).substring(0, 200) : undefined
-          });
-      } else {
-          payload.details = detailsStr;
-      }
-  } catch (e) {
-      payload.details = '[JSON Stringify Error]';
-  }
-
-  // 最后的安全网：限制顶层字段，使用更保守的值
-  // 理论上 payload 只有 5-6 个顶层字段，但为了安全使用 50
+  // 额外安全：限制顶层字段，使用更保守的值（50 远低于 257）
   const finalPayload = limitFields(payload, 50);
-  
-  // 额外验证：确保 details 是字符串且不会导致列数超标
-  if (finalPayload.details && typeof finalPayload.details !== 'string') {
-      try {
-          finalPayload.details = JSON.stringify(finalPayload.details);
-      } catch (e) {
-          finalPayload.details = '[Unable to stringify]';
-      }
-  }
 
   try {
     const dataset = getSafeDatasetName();
