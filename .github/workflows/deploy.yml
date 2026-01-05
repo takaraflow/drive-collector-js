@@ -30,7 +30,7 @@ jobs:
         run: npm ci
 
       - name: Install build tools
-        run: npm install --no-save esbuild wrangler
+        run: npm install --save-dev esbuild wrangler
 
       - name: Install Infisical CLI and jq
         run: |
