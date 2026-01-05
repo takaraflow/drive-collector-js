@@ -89,11 +89,6 @@ jobs:
             exit 1
           fi
           
-          # 输出原始数据用于调试
-          echo "=== Infisical 原始数据 (调试用) ==="
-          echo "$INFISICAL_OUTPUT" | jq .
-          echo "==================================="
-          
           # 验证 JSON 有效性 (Infisical 返回的是数组格式)
           if ! echo "$INFISICAL_OUTPUT" | jq -e 'type == "array" and length > 0' > /dev/null 2>&1; then
             echo "❌ Infisical 返回空配置或无效数据"
