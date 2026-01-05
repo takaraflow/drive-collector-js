@@ -64,7 +64,10 @@ async function syncEnv() {
     // 尝试从 Infisical 拉取
     if (token && projectId) {
         try {
+            console.log('🔄 初始化 Infisical SDK...');
             const sdk = new InfisicalSDK({ siteUrl: 'https://app.infisical.com' });
+            
+            console.log('🔑 进行认证...');
             sdk.auth().accessToken(token);
 
             console.log('📡 正在从 Infisical 拉取配置 (SDK v4)...');
