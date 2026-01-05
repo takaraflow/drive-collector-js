@@ -35,14 +35,18 @@ export class CacheService {
                 this._startHeartbeat();
             } else {
                 // Fallback to config if env doesn't have it
-                const config = getConfig();
-                const ckv = config.kv;
-                if (ckv?.accountId && ckv?.namespaceId && ckv?.token) {
-                    this.cfAccountId = ckv.accountId;
-                    this.apiUrl = `https://api.cloudflare.com/client/v4/accounts/${ckv.accountId}/storage/kv/namespaces/${ckv.namespaceId}`;
-                    this.cfCachetoken = ckv.token;
-                    this.currentProvider = 'cloudflare';
-                    this._startHeartbeat();
+                try {
+                    const config = getConfig();
+                    const ckv = config.kv;
+                    if (ckv?.accountId && ckv?.namespaceId && ckv?.token) {
+                        this.cfAccountId = ckv.accountId;
+                        this.apiUrl = `https://api.cloudflare.com/client/v4/accounts/${ckv.accountId}/storage/kv/namespaces/${ckv.namespaceId}`;
+                        this.cfCachetoken = ckv.token;
+                        this.currentProvider = 'cloudflare';
+                        this._startHeartbeat();
+                    }
+                } catch (configError) {
+                    // Config not available, stay in memory mode
                 }
             }
         } catch (e) {

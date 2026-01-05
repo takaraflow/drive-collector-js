@@ -1,13 +1,25 @@
 import { jest, describe, test, expect, beforeAll, afterAll, afterEach, beforeEach } from "@jest/globals";
 
+// Use unstable_mockModule for ESM mocking
 // Mock LocalCache to disable L1 optimization
-jest.mock("../../src/utils/LocalCache.js", () => ({
+await jest.unstable_mockModule("../../src/utils/LocalCache.js", () => ({
     localCache: {
         isUnchanged: jest.fn(() => false), // Always return false to force physical writes
         set: jest.fn(),
-        get: jest.fn(() => undefined), // Always miss to force physical reads (use undefined instead of null)
-        del: jest.fn()
+        get: jest.fn(() => undefined), // Always miss to force physical reads
+        del: jest.fn(),
+        delete: jest.fn() // Add alias for compatibility
     }
+}));
+
+// Mock config to prevent fallback to system environment variables
+await jest.unstable_mockModule("../../src/config/index.js", () => ({
+    getConfig: jest.fn(() => ({
+        kv: {}
+    })),
+    // We also mock initConfig to be safe, though getConfig is the main one used
+    initConfig: jest.fn(async () => ({ kv: {} })),
+    config: { kv: {} }
 }));
 
 // Mock global fetch
@@ -35,6 +47,7 @@ describe("Cache Service Cloudflare KV Tests", () => {
         mockFetch.mockClear();
         
         // Import the class directly - each test gets fresh module
+        // Note: With unstable_mockModule, the module is mocked globally for the test file
         const { CacheService } = await import("../../src/services/CacheService.js");
         
         // Create instance with dependency injection
