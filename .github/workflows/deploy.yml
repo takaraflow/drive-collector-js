@@ -99,15 +99,7 @@ jobs:
           echo "正在转换为 GitHub Actions 环境变量格式..."
           echo "$INFISICAL_OUTPUT" | jq -r '.[] | "\(.key)<<EOF\n\(.value // "")\nEOF"' >> $GITHUB_ENV
           
-          # 立即遮蔽所有拉取的密钥，防止当前步骤后续日志泄露
-          echo "立即遮蔽所有拉取的密钥..."
-          echo "$INFISICAL_OUTPUT" | jq -r '.[] | "\(.value // "")"' | while read -r value; do
-            if [ -n "$value" ]; then
-              echo "::add-mask::$value"
-            fi
-          done
-          
-          echo "✅ 成功从 Infisical 拉取并遮蔽密钥"
+          echo "✅ 成功从 Infisical 拉取密钥 (GHA 会自动脱敏)"
 
       - name: Mask Infisical Secrets
         shell: bash
