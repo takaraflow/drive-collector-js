@@ -118,6 +118,7 @@ jobs:
           INFISICAL_OUTPUT=$(infisical export \
             --env="$NODE_ENV" \
             --projectId="$INFISICAL_PROJECT_ID" \
+            --path="/" \
             --format=json)
           
           # 检查是否为空或无效 JSON
