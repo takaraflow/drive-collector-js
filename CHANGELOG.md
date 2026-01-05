@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.12.0](https://github.com/YoungSx/lb-worker-js/compare/v0.11.0...v0.12.0) (2026-01-05)
+
+
+### 🐛 Bug Fixes
+
+* adds path parameter to Infisical export command ([9a2f0c0](https://github.com/YoungSx/lb-worker-js/commit/9a2f0c0d833cf1a38ad2662e1cd5edf754c75c66))
+* changes environment variable validation to be informational only ([83d55e4](https://github.com/YoungSx/lb-worker-js/commit/83d55e4c52931e47d9bc978fe23d015dccc91ce8))
+* enhances environment variable validation and masking ([4bc99a9](https://github.com/YoungSx/lb-worker-js/commit/4bc99a987e2cdabc478d8cf5272db665108de2b1))
+* enhances Infisical integration and improves secret management ([3b4298f](https://github.com/YoungSx/lb-worker-js/commit/3b4298f29c1056f3227012d9d4b0c03c6e0daf61))
+* improves Infisical secret fetching with dynamic delimiter ([68caf0e](https://github.com/YoungSx/lb-worker-js/commit/68caf0e8695c7811ec4325ff686ee033290017dd))
+* improves Infisical secret management and validation ([c44ab7c](https://github.com/YoungSx/lb-worker-js/commit/c44ab7ce7f74fc1ab5b7a2b04c8546ef68762406))
+* improves Infisical secret retrieval with validation ([2bff99f](https://github.com/YoungSx/lb-worker-js/commit/2bff99f5363b491e28899acb59984704dcd6cfe3))
+* improves Infisical secrets handling with filtering and masking ([8982196](https://github.com/YoungSx/lb-worker-js/commit/898219655cd3285b7f72cca281c64caddb3826cd))
+* improves manifest.json validation and error handling ([785bdd8](https://github.com/YoungSx/lb-worker-js/commit/785bdd86373d38e8dce0efe4fc1282f9d84bb10b))
+* improves quote stripping logic for environment variables ([868cb93](https://github.com/YoungSx/lb-worker-js/commit/868cb93d8143469d4008420c426a2871e3776484))
+* improves sensitive data handling in deployment workflow ([4f19f7f](https://github.com/YoungSx/lb-worker-js/commit/4f19f7f0df8f3c32a26fbfb8226f75b36c1ca0f5))
+* moves ajv to production dependencies ([e095448](https://github.com/YoungSx/lb-worker-js/commit/e0954481040de37eb4c7be945cc0bb67a0ac9736))
+* remove debug message ([82f35ac](https://github.com/YoungSx/lb-worker-js/commit/82f35acbde8113986c3d34b82773575bbdc387ad))
+* removes redundant secret masking step ([759891a](https://github.com/YoungSx/lb-worker-js/commit/759891a26ace93ebc17bac0b5da968769909c679))
+* restricts secret validation to required environment variables only ([8528cc7](https://github.com/YoungSx/lb-worker-js/commit/8528cc74a2097c2ae12fef4d0f5606d6ef7dcb6b))
+* simplifies secret injection workflow ([150391f](https://github.com/YoungSx/lb-worker-js/commit/150391ff662722969a40e170f1c6880a95f12aae))
+* test CI ([9714f8d](https://github.com/YoungSx/lb-worker-js/commit/9714f8d0dd37e05ab5a802c0f1b009b9e9ae0e88))
+* updates dependencies and removes redundant build tool installation ([0ab6437](https://github.com/YoungSx/lb-worker-js/commit/0ab643700c3b2b17fe8253a69e66ce239b48fa94))
+* updates environment handling for Infisical integration ([13ac759](https://github.com/YoungSx/lb-worker-js/commit/13ac759317cea208118c065db2a6f23c19a2965f))
+* updates environment variable names to be more concise ([0855613](https://github.com/YoungSx/lb-worker-js/commit/08556139683af0bc50bc5f324d827fa5e82ba9fa))
+* updates environment variable naming to use NODE_ENV ([f7116b0](https://github.com/YoungSx/lb-worker-js/commit/f7116b0c8cb9cedcb1bb3703a7f4a13bbd343bdd))
+* updates esbuild setup for better reliability ([a736829](https://github.com/YoungSx/lb-worker-js/commit/a73682982eddb159361fc26c135ac4707740b11d))
+* updates Infisical configuration parsing to handle array response ([c599316](https://github.com/YoungSx/lb-worker-js/commit/c599316f5c1ba2c9bc7acb66860bfd66519c55a1))
+* updates NODE_ENV value and skips masking for sensitive keys ([786c3c5](https://github.com/YoungSx/lb-worker-js/commit/786c3c5ec74f7d03f2e4f4b5ad5470c391ab2c79))
+
+
+### 🔧 Maintenance
+
+* improves deployment workflow with secret management ([ff66d21](https://github.com/YoungSx/lb-worker-js/commit/ff66d2174c6364ea4960387169d860da301e6845))
+
 ## [0.11.0](https://github.com/YoungSx/lb-worker-js/compare/v0.10.2...v0.11.0) (2026-01-04)
 
 
