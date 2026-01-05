@@ -31,7 +31,9 @@ export async function initConfig() {
 
     // 只有当 Infisical 配置存在时才尝试动态拉取
     if (((clientId && clientSecret) || process.env.INFISICAL_TOKEN) && projectId) {
-        if (process.env.NODE_ENV === 'test') {
+        if (process.env.SKIP_INFISICAL_RUNTIME === 'true') {
+            console.log(`ℹ️ Skipping Infisical runtime fetch (SKIP_INFISICAL_RUNTIME=true)`);
+        } else if (process.env.NODE_ENV === 'test') {
             console.log(`ℹ️ Skipping Infisical fetch in test environment`);
         } else {
             try {

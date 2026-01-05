@@ -98,14 +98,17 @@ async function syncEnv() {
                 if (validateVariables(secretsMap, 'Infisical')) {
                     fs.writeFileSync(envPath, envContent);
                     console.log(`✅ 已更新 .env 文件`);
-                    process.exit(0);
                 } else {
                     if (STRICT_SYNC) process.exit(1);
                 }
             }
         } catch (error) {
             console.error(`❌ Infisical 同步失败: ${error.message}`);
-            if (STRICT_SYNC) process.exit(1);
+            // 如果是非严格模式，允许失败继续（进入降级逻辑）
+            if (STRICT_SYNC) {
+                console.error('❌ 严格模式下 Infisical 同步失败是致命错误');
+                process.exit(1);
+            }
         }
     } else {
         console.warn('⚠️  未设置 INFISICAL_TOKEN 或 INFISICAL_PROJECT_ID，跳过远程同步');
@@ -124,7 +127,7 @@ async function syncEnv() {
         const currentEnv = dotenv.parse(fs.readFileSync(envPath));
         if (validateVariables(currentEnv, '本地 .env')) {
             console.log('✅ 使用本地 .env 缓存继续');
-            process.exit(0);
+            return; // 成功，正常返回，让 node 进程自然退出
         }
     }
 
@@ -132,11 +135,14 @@ async function syncEnv() {
     console.log('🔍 检查系统环境变量...');
     if (validateVariables(process.env, '系统环境变量')) {
         console.log('✅ 系统环境变量满足要求');
-        process.exit(0);
+        return; // 成功，正常返回
     }
 
     console.error('❌ 无法满足最小配置要求');
     process.exit(1);
 }
 
-syncEnv();
+syncEnv().catch(err => {
+    console.error('❌ 脚本执行异常:', err);
+    process.exit(1);
+});
