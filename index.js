@@ -22,7 +22,14 @@ export async function handleQStashWebhook(req, res) {
         const signature = req.headers['upstash-signature'];
         const isValid = await qstashService.verifyWebhookSignature(signature, body);
         if (!isValid) {
-            logger.warn("🚨 QStash 签名验证失败");
+            // 记录签名和部分 body 信息以便调试
+            const bodyPreview = body ? body.substring(0, 200) : 'empty';
+            logger.warn("🚨 QStash 签名验证失败", {
+                signature: signature || 'missing',
+                bodyPreview: bodyPreview,
+                url: req.url,
+                method: req.method
+            });
             res.writeHead(401);
             res.end('Unauthorized');
             return;
