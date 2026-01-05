@@ -33,11 +33,13 @@ export async function initConfig() {
             console.log('[v4.7.1] ℹ️ Skipping Infisical fetch in test environment');
         } else {
             try {
+                const envName = process.env.NODE_ENV || 'dev';
+                console.log(`[v4.7.1] ℹ️ Fetching Infisical secrets for environment: ${envName}`);
                 const secrets = await fetchInfisicalSecrets({
                     clientId,
                     clientSecret,
                     projectId,
-                    envName: process.env.NODE_ENV || 'dev'
+                    envName
                 });
                 
                 if (secrets) {

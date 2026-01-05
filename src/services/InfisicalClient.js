@@ -52,6 +52,7 @@ export async function fetchInfisicalSecrets({ clientId, clientSecret, projectId,
 
         if (!response.ok) {
             console.warn(`[Infisical] Fetch secrets skipped/failed: ${response.status}`);
+            console.warn(`[Infisical] Debug Info: URL=${url.toString()}, ProjectId=${projectId}, Env=${envName}`);
             return {};
         }
 
