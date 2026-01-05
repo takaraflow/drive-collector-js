@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.9.1](https://github.com/YoungSx/drive-collector-js/compare/v4.9.0...v4.9.1) (2026-01-05)
+
+
+### ♻️ 代码重构
+
+* Enhances Infisical environment sync with validation and fallback logic ([2e0b57c](https://github.com/YoungSx/drive-collector-js/commit/2e0b57cb3c389a94f553f8589860c3f97b133c67))
+
+
+### 🔧 其他任务
+
+* add some log to sync-env ([4dc4f4a](https://github.com/YoungSx/drive-collector-js/commit/4dc4f4a2606b9126181d468980e63703ac1c0c81))
+* improves QStash webhook verification debugging ([363cd96](https://github.com/YoungSx/drive-collector-js/commit/363cd9616ec69c8134a1d28d8270e0ef25d61a6e))
+
+
+### 🐛 问题修复
+
+* CacheService.test.js ([f713059](https://github.com/YoungSx/drive-collector-js/commit/f71305948ccf14750029d8172c61408452285683))
+* improves error handling and script robustness ([f94d068](https://github.com/YoungSx/drive-collector-js/commit/f94d0685086b0028e6a1cb8edc8ba9fd61ce5cdd))
+* update CF Cache required to false in manifest ([1deb891](https://github.com/YoungSx/drive-collector-js/commit/1deb8918f76d223b618a95803899f7998d2ccf8e))
+
 ## [4.9.0](https://github.com/YoungSx/drive-collector-js/compare/v4.8.1...v4.9.0) (2026-01-05)
 
 
