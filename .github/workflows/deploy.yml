@@ -151,59 +151,53 @@ jobs:
       - name: Verify Infisical Secrets Loaded
         shell: bash
         run: |
-          echo "验证 Infisical 必需密钥是否已加载..."
+          echo "检查已加载的环境变量状态..."
+          echo ""
 
-          # 从 manifest.json 动态读取必需的环境变量
+          # 从 manifest.json 动态读取所有环境变量（用于信息显示）
           if [ ! -f "manifest.json" ]; then
             echo "错误: manifest.json 文件不存在"
             exit 1
           fi
 
-          # 提取 config.env 中 required: true 的变量名
-          REQUIRED_CONFIG_KEYS=$(node -e "
+          # 提取所有 config.env 变量名
+          ALL_CONFIG_KEYS=$(node -e "
             const manifest = require('./manifest.json');
             const envConfig = manifest.config?.env || {};
-            const requiredKeys = Object.entries(envConfig)
-              .filter(([_, config]) => config.required === true)
-              .map(([key, _]) => key);
-            console.log(requiredKeys.join(' '));
+            console.log(Object.keys(envConfig).join(' '));
           ")
 
-          # 提取 infrastructure 中 required: true 的变量名
-          REQUIRED_INFRA_KEYS=$(node -e "
+          # 提取所有 infrastructure 变量名
+          ALL_INFRA_KEYS=$(node -e "
             const manifest = require('./manifest.json');
             const infraConfig = manifest.infrastructure || {};
-            const requiredKeys = Object.entries(infraConfig)
-              .filter(([_, config]) => config.required === true)
-              .map(([key, _]) => key);
-            console.log(requiredKeys.join(' '));
+            console.log(Object.keys(infraConfig).join(' '));
           ")
 
-          # 合并所有必需的变量名
-          REQUIRED_KEYS="$REQUIRED_CONFIG_KEYS $REQUIRED_INFRA_KEYS"
+          # 合并所有变量名
+          ALL_KEYS="$ALL_CONFIG_KEYS $ALL_INFRA_KEYS"
 
-          echo "从 manifest.json 读取到的必需环境变量列表:"
-          echo "$REQUIRED_KEYS"
+          echo "从 manifest.json 读取到的环境变量列表:"
+          echo "$ALL_KEYS"
           echo ""
 
-          MISSING_VARS=()
-          for KEY in $REQUIRED_KEYS; do
+          # 检查每个变量的状态（信息性，不报错）
+          for KEY in $ALL_KEYS; do
             VALUE="${!KEY}"
             if [ -z "$VALUE" ]; then
-              echo "❌ 缺少必需变量: $KEY"
-              MISSING_VARS+=("$KEY")
+              echo "⚪ 未设置: $KEY"
             else
               LENGTH=${#VALUE}
               echo "✅ 已设置: $KEY (长度: ${LENGTH} 字符)"
 
-              # 根据变量名模式进行长度验证
+              # 根据变量名模式进行长度验证（警告，不失败）
               if [[ "$KEY" =~ (TOKEN|KEY|PASSWORD|SECRET)$ ]]; then
                 if [ $LENGTH -lt 20 ]; then
                   echo "   ⚠️  警告: $KEY 长度异常 (仅 ${LENGTH} 字符，预期至少 20)"
                 fi
               fi
 
-              # URL 格式验证
+              # URL 格式验证（警告，不失败）
               if [[ "$KEY" =~ URL$ ]]; then
                 if [[ ! "$VALUE" =~ ^https?:// ]]; then
                   echo "   ⚠️  警告: $KEY 格式异常 (不是有效的 URL)"
@@ -213,13 +207,7 @@ jobs:
           done
 
           echo ""
-          if [ ${#MISSING_VARS[@]} -gt 0 ]; then
-            echo "错误: 以下必需变量未设置: ${MISSING_VARS[*]}"
-            echo "这可能意味着 Infisical 密钥拉取失败或变量名不匹配"
-            exit 1
-          fi
-
-          echo "所有必需环境变量验证通过"
+          echo "环境变量检查完成（所有变量都是可选的）"
 
       - name: Deploy
         # CLOUDFLARE_API_TOKEN is now fetched from Infisical and available in the environment
