@@ -12,6 +12,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: Actions
+    env:
+      INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
+      INFISICAL_PROJECT_ID: ${{ vars.INFISICAL_PROJECT_ID }}
+      NODE_ENV: ${{ vars.NODE_ENV }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,87 +37,17 @@ jobs:
           curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | sudo -E bash
           sudo apt-get update && sudo apt-get install -y infisical jq
 
-      - name: Fetch, Filter & Inject Secrets
-        env:
-          INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
-          INFISICAL_PROJECT_ID: ${{ vars.INFISICAL_PROJECT_ID }}
-          NODE_ENV: ${{ vars.NODE_ENV }}
-        run: |
-          # 1. 环境判断和转换
-          if [ -z "$NODE_ENV" ]; then
-            echo "错误: NODE_ENV 未在 GitHub Variables 中设置"
-            echo "请在 GitHub Variables 中设置 NODE_ENV (例如: development, production)"
-            exit 1
-          fi
-          case "$NODE_ENV" in "production") E="prod" ;; "development") E="dev" ;; *) E="staging" ;; esac
 
-          # 验证必要参数是否已传递给此步骤
-          if [ -z "${INFISICAL_PROJECT_ID}" ]; then
-            echo "错误: INFISICAL_PROJECT_ID 未设置，请检查 GitHub Vars"
-            exit 1
-          fi
-          if [ -z "${INFISICAL_TOKEN}" ]; then
-            echo "错误: INFISICAL_TOKEN 未设置，请检查 GitHub Secrets"
-            exit 1
-          fi
-
-          echo "GHA NODE_ENV: $NODE_ENV"
-          echo "Infisical 环境: $E"
-          echo "Debug: INFISICAL_PROJECT_ID 长度: ${#INFISICAL_PROJECT_ID}"
-          echo "::add-mask::${INFISICAL_TOKEN}" # 遮蔽令牌，仅显示是否设置
-          echo "Debug: INFISICAL_TOKEN 已设置" # 辅助信息
-
-          # 2. 拉取所有数据到内存 (不直接写入 ENV，防止污染)
-          echo "Fetching from Infisical ($E)..."
-          export RAW_DATA=$(infisical export --env="$E" --projectId="$INFISICAL_PROJECT_ID" --path="/" --format=json)
-
-          if [ $? -ne 0 ]; then
-            echo "❌ Infisical export 命令执行失败，请检查 Infisical CLI 配置、Token 或 Project ID"
-            exit 1
-          fi
-
-          if [ -z "$RAW_DATA" ]; then
-            echo "❌ Infisical export 返回空数据，请检查 Infisical 环境 ($E) 或 Project ID ($INFISICAL_PROJECT_ID) 是否有配置密钥"
-            exit 1
-          fi
-          echo "Debug: RAW_DATA (部分内容已遮蔽):"
-          echo "::add-mask::${RAW_DATA}"
-
-          # 3. 使用 Node.js 进行"按需筛选" + "立即遮蔽" + "多行注入"
-          # 这样可以完美解决 rediss:// 截断问题，且只注入 manifest 中存在的变量
-          node <<EOF
-          const fs = require('fs');
-          // 读取 manifest
-          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
-          const allowedKeys = new Set([
-            ...Object.keys(manifest.config?.env || {}),
-            ...Object.keys(manifest.infrastructure || {})
-          ]);
-
-          // 读取 Infisical 数据
-          const secrets = JSON.parse(process.env.RAW_DATA || '[]');
-          const ghEnv = fs.createWriteStream(process.env.GITHUB_ENV, { flags: 'a' });
-
-          secrets.forEach(s => {
-            // 核心逻辑：只注入 manifest 里有的
-            if (allowedKeys.has(s.key)) {
-              // A. 先遮蔽 (防止日志截断的关键)
-              console.log('::add-mask::' + s.value);
-              
-              // B. 再注入 (使用 EOF 处理特殊字符)
-              ghEnv.write(s.key + '<<INFISICAL_EOF\n' + s.value + '\nINFISICAL_EOF\n');
-              
-              console.log('✅ Loaded: ' + s.key);
-            }
-          });
-          ghEnv.end();
-          EOF
-          echo "✅ Infisical secrets 已过滤、遮蔽并注入到 GitHub Actions 环境"
       - name: Validate Manifest
         run: npm run validate:manifest
       - name: Deploy
-        # CLOUDFLARE_API_TOKEN is now fetched from Infisical and available in the environment
-        run: npm run deploy
+        run: |
+          case "$NODE_ENV" in
+            "production") INFISICAL_ENV="prod" ;;
+            "development") INFISICAL_ENV="dev" ;;
+            *) INFISICAL_ENV="staging" ;;
+          esac
+          infisical run --env="$INFISICAL_ENV" --projectId="$INFISICAL_PROJECT_ID" -- npm run deploy:${INFISICAL_ENV}
 
       - name: Notify Bark result
         if: always()
