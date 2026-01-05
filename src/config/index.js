@@ -23,7 +23,7 @@ export const CACHE_TTL = 10 * 60 * 1000;
 export async function initConfig() {
     if (isInitialized) return config;
 
-    console.log('[v4.7.1] 🚀 Initializing configuration...');
+    console.log(`🚀 Initializing configuration...`);
 
     const clientId = process.env.INFISICAL_CLIENT_ID;
     const clientSecret = process.env.INFISICAL_CLIENT_SECRET;
@@ -32,11 +32,11 @@ export async function initConfig() {
     // 只有当 Infisical 配置存在时才尝试动态拉取
     if (((clientId && clientSecret) || process.env.INFISICAL_TOKEN) && projectId) {
         if (process.env.NODE_ENV === 'test') {
-            console.log('[v4.7.1] ℹ️ Skipping Infisical fetch in test environment');
+            console.log(`ℹ️ Skipping Infisical fetch in test environment`);
         } else {
             try {
                 const infisicalEnvName = mapNodeEnvToInfisicalEnv(process.env.NODE_ENV || 'development');
-                console.log(`[v4.7.1] ℹ️ Attempting to fetch Infisical secrets for environment: ${infisicalEnvName} (mapped from NODE_ENV: ${process.env.NODE_ENV || 'development'})`);
+                console.log(`ℹ️ Attempting to fetch Infisical secrets for environment: ${infisicalEnvName} (mapped from NODE_ENV: ${process.env.NODE_ENV || 'development'})`);
                 const secrets = await fetchInfisicalSecrets({
                     clientId,
                     clientSecret,
@@ -50,9 +50,9 @@ export async function initConfig() {
                         process.env[key] = cleanValue;
                     }
                 }
-                console.log('[v4.7.1] ✅ Successfully fetched Infisical secrets.');
+                console.log(`✅ Successfully fetched Infisical secrets.`);
             } catch (error) {
-                console.warn(`[v4.7.1] ⚠️ Infisical fetch failed, falling back to .env or system envs: ${error.message}`);
+                console.warn(`⚠️ Infisical fetch failed, falling back to .env or system envs: ${error.message}`);
             }
         }
     }
@@ -71,8 +71,8 @@ export async function initConfig() {
             url: env.NF_REDIS_URL || env.REDIS_URL || null,
             token: env.REDIS_TOKEN || env.UPSTASH_REDIS_REST_TOKEN || null,
             tls: {
-                enabled: (env.REDIS_TLS_ENABLED || env.NF_REDIS_TLS_ENABLED) !== 'false' && 
-                        ((env.NF_REDIS_URL || env.REDIS_URL || '').startsWith('rediss://') || 
+                enabled: (env.REDIS_TLS_ENABLED || env.NF_REDIS_TLS_ENABLED) !== 'false' &&
+                        ((env.NF_REDIS_URL || env.REDIS_URL || '').startsWith('rediss://') ||
                          (env.REDIS_TLS_ENABLED || env.NF_REDIS_TLS_ENABLED) === 'true')
             }
         },

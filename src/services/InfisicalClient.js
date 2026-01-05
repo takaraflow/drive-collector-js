@@ -1,66 +1,27 @@
 
-const INFISICAL_API_BASE = 'https://app.infisical.com/api/v3';
+import { InfisicalSDK } from '@infisical/sdk';
 
 /**
  * 从 Infisical 动态拉取秘密 (不落盘)
  */
 export async function fetchInfisicalSecrets({ clientId, clientSecret, projectId, envName = 'dev' }) {
     try {
-        let authHeader = '';
-
-        // 1. 优先检查环境变量中的 INFISICAL_TOKEN (Service Token)
-        if (process.env.INFISICAL_TOKEN) {
-            authHeader = `Bearer ${process.env.INFISICAL_TOKEN}`;
-        } 
-        // 2. 其次尝试使用 Machine Identity (ClientId/Secret)
-        else if (clientId && clientSecret) {
-            const loginResponse = await fetch(`${INFISICAL_API_BASE}/auth/universal-auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ clientId, clientSecret })
-            });
-
-            if (!loginResponse.ok) {
-                throw new Error(`Auth failed: ${loginResponse.status}`);
-            }
-
-            const { accessToken } = await loginResponse.json();
-            authHeader = `Bearer ${accessToken}`;
-        } else {
-            throw new Error('No authentication method provided (Token or ClientId/Secret)');
-        }
-
-        // 3. 获取秘密
-        const url = new URL(`${INFISICAL_API_BASE}/secrets/raw`);
-        url.searchParams.append('workspaceId', projectId);
-        url.searchParams.append('environment', envName);
-        url.searchParams.append('secretPath', '/');
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
-
-        const response = await fetch(url.toString(), {
-            method: 'GET',
-            headers: {
-                'Authorization': authHeader,
-                'Content-Type': 'application/json'
-            },
-            signal: controller.signal
+        const client = new InfisicalSDK({
+            token: process.env.INFISICAL_TOKEN, // 优先使用 Service Token
+            clientId: clientId, // 其次使用 Machine Identity
+            clientSecret: clientSecret,
+            siteURL: 'https://app.infisical.com' // 如果你的 Infisical 实例是自托管的，请修改此项
         });
 
-        clearTimeout(timeoutId);
+        const secrets = await client.getAllSecrets({
+            environment: envName,
+            projectSlug: projectId, // Infisical SDK使用projectSlug，而不是workspaceId
+            path: '/'
+        });
 
-        if (!response.ok) {
-            console.warn(`[Infisical] Fetch secrets skipped/failed: ${response.status}`);
-            console.warn(`[Infisical] Debug Info: URL=${url.toString()}, ProjectId=${projectId}, Env=${envName}`);
-            return {};
-        }
-
-        const data = await response.json();
-        
-        if (data && data.secrets) {
+        if (secrets && secrets.length > 0) {
             const secretsMap = {};
-            data.secrets.forEach(s => {
+            secrets.forEach(s => {
                 secretsMap[s.secretKey] = s.secretValue;
             });
             console.info(`✅ InfisicalClient: Successfully fetched ${Object.keys(secretsMap).length} secrets from environment: ${envName}`);
@@ -70,6 +31,8 @@ export async function fetchInfisicalSecrets({ clientId, clientSecret, projectId,
         return {};
     } catch (error) {
         console.error('❌ InfisicalClient Error:', error.message);
+        // 在此处添加更详细的错误日志以帮助调试
+        console.error(`[InfisicalClient Debug] ClientId: ${clientId}, ProjectId: ${projectId}, Env: ${envName}, Token Exists: ${!!process.env.INFISICAL_TOKEN}`);
         throw error;
     }
 }
