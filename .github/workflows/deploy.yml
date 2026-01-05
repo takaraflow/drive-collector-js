@@ -29,9 +29,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install build tools
-        run: npm install --save-dev esbuild wrangler
-
       - name: Install Infisical CLI and jq
         run: |
           curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | sudo -E bash
