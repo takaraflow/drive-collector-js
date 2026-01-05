@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { fetchInfisicalSecrets } from '../services/InfisicalClient.js';
+import { mapNodeEnvToInfisicalEnv } from '../utils/envMapper.js';
 
 let config = null;
 let isInitialized = false;
@@ -28,18 +29,19 @@ export async function initConfig() {
     const clientSecret = process.env.INFISICAL_CLIENT_SECRET;
     const projectId = process.env.INFISICAL_PROJECT_ID;
 
+    // 只有当 Infisical 配置存在时才尝试动态拉取
     if (((clientId && clientSecret) || process.env.INFISICAL_TOKEN) && projectId) {
         if (process.env.NODE_ENV === 'test') {
             console.log('[v4.7.1] ℹ️ Skipping Infisical fetch in test environment');
         } else {
             try {
-                const envName = process.env.NODE_ENV || 'dev';
-                console.log(`[v4.7.1] ℹ️ Fetching Infisical secrets for environment: ${envName}`);
+                const infisicalEnvName = mapNodeEnvToInfisicalEnv(process.env.NODE_ENV || 'development');
+                console.log(`[v4.7.1] ℹ️ Attempting to fetch Infisical secrets for environment: ${infisicalEnvName} (mapped from NODE_ENV: ${process.env.NODE_ENV || 'development'})`);
                 const secrets = await fetchInfisicalSecrets({
                     clientId,
                     clientSecret,
                     projectId,
-                    envName
+                    envName: infisicalEnvName
                 });
                 
                 if (secrets) {
@@ -48,8 +50,9 @@ export async function initConfig() {
                         process.env[key] = cleanValue;
                     }
                 }
+                console.log('[v4.7.1] ✅ Successfully fetched Infisical secrets.');
             } catch (error) {
-                console.warn(`[v4.7.1] ⚠️ Infisical fetch skipped/failed, using existing env: ${error.message}`);
+                console.warn(`[v4.7.1] ⚠️ Infisical fetch failed, falling back to .env or system envs: ${error.message}`);
             }
         }
     }
