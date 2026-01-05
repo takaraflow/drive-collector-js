@@ -33,7 +33,7 @@ jobs:
           curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | sudo -E bash
           sudo apt-get update && sudo apt-get install -y infisical jq
 
-      - name: Fetch secrets via Infisical CLI
+      - name: Fetch, Filter & Inject Secrets
         env:
           INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
           INFISICAL_PROJECT_ID: ${{ vars.INFISICAL_PROJECT_ID }}
@@ -45,170 +45,72 @@ jobs:
             echo "请在 GitHub Variables 中设置 NODE_ENV (例如: development, production)"
             exit 1
           fi
-          
-          # 转换 NODE_ENV 为 Infisical 环境名
-          case "$NODE_ENV" in
-            "development")
-              INFISICAL_ENV="dev"
-              ;;
-            "production")
-              INFISICAL_ENV="prod"
-              ;;
-            *)
-              INFISICAL_ENV="staging"
-              ;;
-          esac
-          
-          echo "GHA NODE_ENV: $NODE_ENV"
-          echo "Infisical 环境: $INFISICAL_ENV"
-          
-          # 2. 验证必要参数
+          case "$NODE_ENV" in "production") E="prod" ;; "development") E="dev" ;; *) E="staging" ;; esac
+
+          # 验证必要参数是否已传递给此步骤
           if [ -z "${INFISICAL_PROJECT_ID}" ]; then
-            echo "错误: INFISICAL_PROJECT_ID 未设置"
+            echo "错误: INFISICAL_PROJECT_ID 未设置，请检查 GitHub Vars"
             exit 1
           fi
-          
           if [ -z "${INFISICAL_TOKEN}" ]; then
-            echo "错误: INFISICAL_TOKEN 未设置"
+            echo "错误: INFISICAL_TOKEN 未设置，请检查 GitHub Secrets"
             exit 1
           fi
-          
-          # 3. 核心拉取动作 - 使用 JSON 格式并转换
-          echo "正在从 Infisical ($INFISICAL_ENV) 拉取密钥..."
-          
-          # 先拉取 JSON 数据
-          INFISICAL_OUTPUT=$(infisical export \
-            --env="$INFISICAL_ENV" \
-            --projectId="$INFISICAL_PROJECT_ID" \
-            --path="/" \
-            --format=json)
-          
-          # 检查是否成功
+
+          echo "GHA NODE_ENV: $NODE_ENV"
+          echo "Infisical 环境: $E"
+          echo "Debug: INFISICAL_PROJECT_ID 长度: ${#INFISICAL_PROJECT_ID}"
+          echo "::add-mask::${INFISICAL_TOKEN}" # 遮蔽令牌，仅显示是否设置
+          echo "Debug: INFISICAL_TOKEN 已设置" # 辅助信息
+
+          # 2. 拉取所有数据到内存 (不直接写入 ENV，防止污染)
+          echo "Fetching from Infisical ($E)..."
+          export RAW_DATA=$(infisical export --env="$E" --projectId="$INFISICAL_PROJECT_ID" --path="/" --format=json)
+
           if [ $? -ne 0 ]; then
-            echo "❌ 拉取失败，请检查 Token 权限和环境配置"
+            echo "❌ Infisical export 命令执行失败，请检查 Infisical CLI 配置、Token 或 Project ID"
             exit 1
           fi
-          
-          # 验证 JSON 有效性 (Infisical 返回的是数组格式)
-          if ! echo "$INFISICAL_OUTPUT" | jq -e 'type == "array" and length > 0' > /dev/null 2>&1; then
-            echo "❌ Infisical 返回空配置或无效数据"
-            exit 1
-          fi
-          
-          # 转换为 GITHUB_ENV 格式 (使用 Multiline 语法处理特殊字符)
-          echo "正在转换为 GitHub Actions 环境变量格式..."
-          echo "$INFISICAL_OUTPUT" | jq -r '.[] | "\(.key)<<EOF\n\(.value // "")\nEOF"' >> $GITHUB_ENV
-          
-          echo "✅ 成功从 Infisical 拉取密钥 (GHA 会自动脱敏)"
 
-      - name: Mask Infisical Secrets
-        shell: bash
-        run: |
-          echo "正在遮蔽敏感环境变量..."
-          
-          # 检查 manifest.json 是否存在
-          if [ ! -f "manifest.json" ]; then
-            echo "错误: manifest.json 文件不存在"
+          if [ -z "$RAW_DATA" ]; then
+            echo "❌ Infisical export 返回空数据，请检查 Infisical 环境 ($E) 或 Project ID ($INFISICAL_PROJECT_ID) 是否有配置密钥"
             exit 1
           fi
-          
-          # 提取 config.env 中的变量名
-          CONFIG_ENV_KEYS=$(node -e "
-            const manifest = require('./manifest.json');
-            const envConfig = manifest.config?.env || {};
-            console.log(Object.keys(envConfig).join(' '));
-          ")
-          
-          # 提取 infrastructure 中的变量名
-          INFRA_KEYS=$(node -e "
-            const manifest = require('./manifest.json');
-            const infraConfig = manifest.infrastructure || {};
-            console.log(Object.keys(infraConfig).join(' '));
-          ")
-          
-          # 合并所有需要遮蔽的变量名
-          ALL_KEYS="$CONFIG_ENV_KEYS $INFRA_KEYS"
-          
-          for KEY in $ALL_KEYS; do
-            # 跳过非敏感变量
-            if [[ "$KEY" == "NODE_ENV" ]] || [[ "$KEY" == "INFISICAL_ENV" ]]; then
-              continue
-            fi
-            
-            VALUE="${!KEY}"
-            if [ -n "$VALUE" ]; then
-              echo "::add-mask::$VALUE"
-              LENGTH=${#VALUE}
-              echo "  遮蔽: $KEY (长度: ${LENGTH} 字符)"
-            fi
-          done
-          
-          echo "✅ 敏感信息遮蔽完成"
+          echo "Debug: RAW_DATA (部分内容已遮蔽):"
+          echo "::add-mask::${RAW_DATA}"
 
+          # 3. 使用 Node.js 进行"按需筛选" + "立即遮蔽" + "多行注入"
+          # 这样可以完美解决 rediss:// 截断问题，且只注入 manifest 中存在的变量
+          node <<EOF
+          const fs = require('fs');
+          // 读取 manifest
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          const allowedKeys = new Set([
+            ...Object.keys(manifest.config?.env || {}),
+            ...Object.keys(manifest.infrastructure || {})
+          ]);
+
+          // 读取 Infisical 数据
+          const secrets = JSON.parse(process.env.RAW_DATA || '[]');
+          const ghEnv = fs.createWriteStream(process.env.GITHUB_ENV, { flags: 'a' });
+
+          secrets.forEach(s => {
+            // 核心逻辑：只注入 manifest 里有的
+            if (allowedKeys.has(s.key)) {
+              // A. 先遮蔽 (防止日志截断的关键)
+              console.log('::add-mask::' + s.value);
+              
+              // B. 再注入 (使用 EOF 处理特殊字符)
+              ghEnv.write(s.key + '<<INFISICAL_EOF\n' + s.value + '\nINFISICAL_EOF\n');
+              
+              console.log('✅ Loaded: ' + s.key);
+            }
+          });
+          ghEnv.end();
+          EOF
+          echo "✅ Infisical secrets 已过滤、遮蔽并注入到 GitHub Actions 环境"
       - name: Validate Manifest
         run: npm run validate:manifest
-
-      - name: Verify Infisical Secrets Loaded
-        shell: bash
-        run: |
-          echo "检查已加载的环境变量状态..."
-          echo ""
-
-          # 从 manifest.json 动态读取所有环境变量（用于信息显示）
-          if [ ! -f "manifest.json" ]; then
-            echo "错误: manifest.json 文件不存在"
-            exit 1
-          fi
-
-          # 提取所有 config.env 变量名
-          ALL_CONFIG_KEYS=$(node -e "
-            const manifest = require('./manifest.json');
-            const envConfig = manifest.config?.env || {};
-            console.log(Object.keys(envConfig).join(' '));
-          ")
-
-          # 提取所有 infrastructure 变量名
-          ALL_INFRA_KEYS=$(node -e "
-            const manifest = require('./manifest.json');
-            const infraConfig = manifest.infrastructure || {};
-            console.log(Object.keys(infraConfig).join(' '));
-          ")
-
-          # 合并所有变量名
-          ALL_KEYS="$ALL_CONFIG_KEYS $ALL_INFRA_KEYS"
-
-          echo "从 manifest.json 读取到的环境变量列表:"
-          echo "$ALL_KEYS"
-          echo ""
-
-          # 检查每个变量的状态（信息性，不报错）
-          for KEY in $ALL_KEYS; do
-            VALUE="${!KEY}"
-            if [ -z "$VALUE" ]; then
-              echo "⚪ 未设置: $KEY"
-            else
-              LENGTH=${#VALUE}
-              echo "✅ 已设置: $KEY (长度: ${LENGTH} 字符)"
-
-              # 根据变量名模式进行长度验证（警告，不失败）
-              if [[ "$KEY" =~ (TOKEN|KEY|PASSWORD|SECRET)$ ]]; then
-                if [ $LENGTH -lt 20 ]; then
-                  echo "   ⚠️  警告: $KEY 长度异常 (仅 ${LENGTH} 字符，预期至少 20)"
-                fi
-              fi
-
-              # URL 格式验证（警告，不失败）
-              if [[ "$KEY" =~ URL$ ]]; then
-                if [[ ! "$VALUE" =~ ^https?:// ]]; then
-                  echo "   ⚠️  警告: $KEY 格式异常 (不是有效的 URL)"
-                fi
-              fi
-            fi
-          done
-
-          echo ""
-          echo "环境变量检查完成（所有变量都是可选的）"
-
       - name: Deploy
         # CLOUDFLARE_API_TOKEN is now fetched from Infisical and available in the environment
         run: npm run deploy
