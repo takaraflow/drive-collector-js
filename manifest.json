@@ -576,17 +576,17 @@
       },
       "CF_CACHE_ACCOUNT_ID": {
         "type": "string",
-        "required": true,
+        "required": false,
         "description": "Cloudflare Cache account ID (also supports CF_KV_ACCOUNT_ID for backward compatibility)"
       },
       "CF_CACHE_NAMESPACE_ID": {
         "type": "string",
-        "required": true,
+        "required": false,
         "description": "Cloudflare Cache namespace ID (also supports CF_KV_NAMESPACE_ID for backward compatibility)"
       },
       "CF_CACHE_TOKEN": {
         "type": "string",
-        "required": true,
+        "required": false,
         "description": "Cloudflare Cache API token (also supports CF_KV_TOKEN for backward compatibility)"
       },
       "CF_KV_ACCOUNT_ID": {
@@ -606,12 +606,12 @@
       },
       "UPSTASH_REDIS_REST_URL": {
         "type": "string",
-        "required": true,
+        "required": false,
         "description": "Upstash Redis REST API URL"
       },
       "UPSTASH_REDIS_REST_TOKEN": {
         "type": "string",
-        "required": true,
+        "required": false,
         "description": "Upstash Redis REST API token"
       },
       "PORT": {
