@@ -9,13 +9,14 @@ permissions:
   pull-requests: write
 
 jobs:
-  deploy:
+  deploy-with-secrets:
     runs-on: ubuntu-latest
     environment: Actions
     env:
       INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
-      INFISICAL_PROJECT_ID: ${{ vars.INFISICAL_PROJECT_ID }}
-      NODE_ENV: ${{ vars.NODE_ENV }}
+      # Use secret for project ID to support both GHA vars and local 'act' secrets
+      INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID || vars.INFISICAL_PROJECT_ID }}
+      NODE_ENV: ${{ vars.NODE_ENV || 'development' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,14 +38,23 @@ jobs:
 
       - name: Validate Manifest
         run: npm run validate:manifest
-      - name: Deploy
+      - name: Build
         run: |
           case "$NODE_ENV" in
             "production") INFISICAL_ENV="prod" ;;
             "development") INFISICAL_ENV="dev" ;;
             *) INFISICAL_ENV="staging" ;;
           esac
-          infisical run --env="$INFISICAL_ENV" --projectId="$INFISICAL_PROJECT_ID" -- npm run deploy:${INFISICAL_ENV}
+          infisical run --env="$INFISICAL_ENV" --projectId="$INFISICAL_PROJECT_ID" -- npm run build -- --env=${INFISICAL_ENV}
+
+      - name: Deploy with Secrets
+        run: |
+          case "$NODE_ENV" in
+            "production") INFISICAL_ENV="prod" ;;
+            "development") INFISICAL_ENV="dev" ;;
+            *) INFISICAL_ENV="staging" ;;
+          esac
+          infisical run --env="$INFISICAL_ENV" --projectId="$INFISICAL_PROJECT_ID" -- node scripts/deploy-with-secrets.js
 
       - name: Notify Bark result
         if: always()
