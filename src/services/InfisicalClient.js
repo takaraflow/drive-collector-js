@@ -1,4 +1,3 @@
-
 import { InfisicalSDK } from '@infisical/sdk';
 
 /**
@@ -6,33 +5,44 @@ import { InfisicalSDK } from '@infisical/sdk';
  */
 export async function fetchInfisicalSecrets({ clientId, clientSecret, projectId, envName = 'dev' }) {
     try {
-        const client = new InfisicalSDK({
-            token: process.env.INFISICAL_TOKEN, // 优先使用 Service Token
-            clientId: clientId, // 其次使用 Machine Identity
-            clientSecret: clientSecret,
-            siteURL: 'https://app.infisical.com' // 如果你的 Infisical 实例是自托管的，请修改此项
+        const infisicalSdk = new InfisicalSDK({
+            siteUrl: 'https://app.infisical.com'
         });
 
-        const secrets = await client.getAllSecrets({
+        // 身份验证
+        if (process.env.INFISICAL_TOKEN) {
+            // Service Token 认证
+            infisicalSdk.auth().accessToken(process.env.INFISICAL_TOKEN);
+            console.info('ℹ️ InfisicalClient: Using Service Token');
+        } else if (clientId && clientSecret) {
+            // Machine Identity 认证
+            await infisicalSdk.auth().universalAuth.login({
+                clientId,
+                clientSecret
+            });
+            console.info('ℹ️ InfisicalClient: Using Machine Identity');
+        }
+
+        // 获取秘密
+        const response = await infisicalSdk.secrets().listSecrets({
             environment: envName,
-            projectSlug: projectId, // Infisical SDK使用projectSlug，而不是workspaceId
-            path: '/'
+            projectId: projectId,
+            secretPath: '/',
+            includeImports: true
         });
 
-        if (secrets && secrets.length > 0) {
+        if (response && response.secrets) {
             const secretsMap = {};
-            secrets.forEach(s => {
+            response.secrets.forEach(s => {
                 secretsMap[s.secretKey] = s.secretValue;
             });
-            console.info(`✅ InfisicalClient: Successfully fetched ${Object.keys(secretsMap).length} secrets from environment: ${envName}`);
+            console.info(`✅ InfisicalClient: Successfully fetched ${Object.keys(secretsMap).length} secrets`);
             return secretsMap;
         }
 
         return {};
     } catch (error) {
         console.error('❌ InfisicalClient Error:', error.message);
-        // 在此处添加更详细的错误日志以帮助调试
-        console.error(`[InfisicalClient Debug] ClientId: ${clientId}, ProjectId: ${projectId}, Env: ${envName}, Token Exists: ${!!process.env.INFISICAL_TOKEN}`);
         throw error;
     }
 }
