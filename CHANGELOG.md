@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.9.0](https://github.com/YoungSx/drive-collector-js/compare/v4.8.1...v4.9.0) (2026-01-05)
+
+
+### 🐛 问题修复
+
+* adds environment mapping utility for Infisical integration ([8d519a7](https://github.com/YoungSx/drive-collector-js/commit/8d519a7066708f498aaf2cb3cbfb8d267cb0d188))
+* adds fallback logging for payloads exceeding field limits ([2eb0cbb](https://github.com/YoungSx/drive-collector-js/commit/2eb0cbba78a5cd4967ac185f70f3888a4e7f36da))
+* adjusts data pruning parameters for stricter logging ([71057e8](https://github.com/YoungSx/drive-collector-js/commit/71057e88c3aae501fe81b9adcaf73eda48ca069a))
+* improves data handling for logging to prevent field explosion ([c4b2886](https://github.com/YoungSx/drive-collector-js/commit/c4b2886a0a805e0166aade2364fa1c0313090893))
+* improves Infisical secrets logging for better debugging ([07f0e92](https://github.com/YoungSx/drive-collector-js/commit/07f0e92b42cccff14660b7e650eed71f0768ab84))
+* refactors logger payload structure to simplify schema ([0f67717](https://github.com/YoungSx/drive-collector-js/commit/0f67717c9251e853e343a5081642e48f0daee0c0))
+* removes redundant payload size validation ([3308038](https://github.com/YoungSx/drive-collector-js/commit/3308038ca3a16e8d4106da017f2fe4c7864fc486))
+
+
+### ♻️ 代码重构
+
+* infisical ([290dc90](https://github.com/YoungSx/drive-collector-js/commit/290dc9028b4bf8ef6ba4f64b34ae8ad1f77b51c7))
+* refactors serialization logic into shared utilities ([4b0c7ee](https://github.com/YoungSx/drive-collector-js/commit/4b0c7eecc20e0fec3491ee607d7b1dd1174cd234))
+
 ### [4.8.1](https://github.com/YoungSx/drive-collector-js/compare/v4.8.0...v4.8.1) (2026-01-04)
 
 
