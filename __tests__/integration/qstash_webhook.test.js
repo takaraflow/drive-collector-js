@@ -255,6 +255,21 @@ describe("QStash Webhook Integration", () => {
         expect(res.end).toHaveBeenCalledWith('OK');
     });
 
+    test("应当返回健康检查响应", async () => {
+        const req = {
+            url: '/health',
+            method: 'GET',
+            headers: {}
+        };
+        const res = createMockResponse();
+
+        await handleQStashWebhook(req, res);
+
+        expect(mockVerifySignature).not.toHaveBeenCalled();
+        expect(res.writeHead).toHaveBeenCalledWith(200);
+        expect(res.end).toHaveBeenCalledWith('OK');
+    });
+
     test("应当拒绝非法签名", async () => {
         mockVerifySignature.mockResolvedValue(false);
 

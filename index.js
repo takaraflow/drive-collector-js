@@ -12,6 +12,21 @@ export async function handleQStashWebhook(req, res) {
     const { logger } = await import("./src/services/logger.js");
 
     try {
+        const healthPath = '/health';
+        if ((req.method === 'GET' || req.method === 'HEAD') && req.url) {
+            const host = req.headers?.host || 'localhost';
+            const url = new URL(req.url, `http://${host}`);
+            if (url.pathname === healthPath) {
+                res.writeHead(200);
+                if (req.method === 'HEAD') {
+                    res.end();
+                } else {
+                    res.end('OK');
+                }
+                return;
+            }
+        }
+
         // 1. 获取 Body
         let body = '';
         for await (const chunk of req) {
@@ -194,4 +209,3 @@ if (process.env.NODE_ENV !== 'test' && (process.argv[1]?.endsWith('index.js') ||
         process.exit(1);
     });
 }
-

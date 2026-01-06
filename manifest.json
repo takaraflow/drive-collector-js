@@ -692,6 +692,7 @@
     }
   },
   "endpoints": {
+    "health": "/health",
     "webhook": "/api/tasks"
   }
 }
