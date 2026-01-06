@@ -280,12 +280,13 @@ export class InstanceCoordinator {
             // 如果不是最后一次尝试，等待退避延迟
             if (attempt < maxAttempts) {
                 const delay = backoffDelays[Math.min(attempt - 1, backoffDelays.length - 1)];
-                log.warn(`[${cache.getCurrentProvider()}] 🔒 锁获取失败，尝试 ${attempt}/${maxAttempts}，等待 ${delay}ms 后重试...`);
+                // Reduce noise: keep retry attempts at debug level
+                log.debug(`[${cache.getCurrentProvider()}] 🔒 锁获取失败，尝试 ${attempt}/${maxAttempts}，等待 ${delay}ms 后重试...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
         }
 
-        log.error(`[${cache.getCurrentProvider()}] 🔒 锁获取失败，已达到最大重试次数: ${lockKey}`);
+        log.warn(`[${cache.getCurrentProvider()}] 🔒 锁获取失败，已达到最大重试次数: ${lockKey}`);
         return false;
     }
 
