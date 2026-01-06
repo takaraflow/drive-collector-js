@@ -3,7 +3,23 @@ import { trace, context } from '@opentelemetry/api';
 // 全局类型定义（解决 TypeScript 警告）
 /** @type {string} */
 // 避免 esbuild 替换导致的 variable shadowing 问题
-const __VERSION__ = (typeof globalThis !== 'undefined' && globalThis.__VERSION__) || 'dev';
+// 如果 globalThis.__VERSION__ 未定义，则尝试从全局作用域的 __VERSION__ 获取（由 esbuild 定义）
+// 否则回退到 'dev'
+let __VERSION__ = 'dev';
+if (typeof globalThis.__VERSION__ !== 'undefined') {
+  __VERSION__ = globalThis.__VERSION__;
+} else {
+  try {
+    // 尝试访问 esbuild 注入的全局变量，如果未定义会抛出 ReferenceError
+    // @ts-ignore
+    if (typeof __VERSION__ !== 'undefined') {
+      // @ts-ignore
+      __VERSION__ = __VERSION__;
+    }
+  } catch (e) {
+    // 忽略 ReferenceError
+  }
+}
 
 /** @type {any} */
 const jest = typeof globalThis.jest !== 'undefined' ? globalThis.jest : undefined;

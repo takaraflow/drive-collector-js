@@ -147,10 +147,28 @@ describe('Redis TCP Adaptation', () => {
       
       expect(result.keys).toEqual([{ name: 'key1' }, { name: 'key2' }]);
       // 验证 send 是否被正确调用，带有 MATCH 和 COUNT 关键字
-      expect(currentTestMockClient.send).toHaveBeenCalledWith('SCAN', '0', 'MATCH', 'prefix*', 'COUNT', 100);
-      expect(currentTestMockClient.send).toHaveBeenCalledWith('SCAN', '10', 'MATCH', 'prefix*', 'COUNT', 100);
+      // 注意：代码中的智能匹配逻辑会在 prefix 没有冒号时自动添加 ':*'
+      expect(currentTestMockClient.send).toHaveBeenCalledWith('SCAN', '0', 'MATCH', 'prefix:*', 'COUNT', 100);
+      expect(currentTestMockClient.send).toHaveBeenCalledWith('SCAN', '10', 'MATCH', 'prefix:*', 'COUNT', 100);
       
       // 清理 send 方法以免影响其他测试
+      delete currentTestMockClient.send;
+    });
+
+    test('should_construct_correct_match_pattern_for_scan', async () => {
+      const env = { NF_REDIS_URL: 'rediss://example.com:6380', NF_REDIS_PASSWORD: 'pass' };
+      // 模拟 client.send
+      currentTestMockClient.send = jest.fn().mockResolvedValue(['0', []]);
+      currentTestMockClient.scan.mockClear();
+
+      // Case 1: Prefix with colon 'instance:' -> MATCH 'instance:*'
+      await executeRedisScan(env, 'instance:');
+      expect(currentTestMockClient.send).toHaveBeenLastCalledWith('SCAN', '0', 'MATCH', 'instance:*', 'COUNT', 100);
+
+      // Case 2: Prefix without colon 'instance' -> MATCH 'instance:*'
+      await executeRedisScan(env, 'instance');
+      expect(currentTestMockClient.send).toHaveBeenLastCalledWith('SCAN', '0', 'MATCH', 'instance:*', 'COUNT', 100);
+
       delete currentTestMockClient.send;
     });
 
@@ -161,11 +179,8 @@ describe('Redis TCP Adaptation', () => {
       const result = await executeRedisScan(env, 'prefix');
       expect(result.keys).toEqual([{ name: 'key1' }, { name: 'key2' }]);
       // 验证调用参数是否包含 MATCH 和 COUNT
-      // 注意：mock 的调用参数取决于 src/index.js 中实际调用的 scan 还是 send
-      // 由于我们 mock 的是 scan 方法，且 src/index.js 中优先使用 send，
-      // 但如果 mock client 没有 send 方法（这里只有 scan），就会走到 scan 分支。
-      // 在这个测试 setup 中，currentTestMockClient 没有 send 方法。
-      expect(currentTestMockClient.scan).toHaveBeenCalledWith('0', 'prefix*', 100);
+      // 注意：代码中的智能匹配逻辑会在 prefix 没有冒号时自动添加 ':*'
+      expect(currentTestMockClient.scan).toHaveBeenCalledWith('0', 'prefix:*', 100);
     });
 
     test('should_handle_empty_redis_scan_results', async () => {
