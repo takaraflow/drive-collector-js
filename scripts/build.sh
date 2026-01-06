@@ -31,8 +31,8 @@ fi
 # 4. 执行 esbuild 构建
 echo "执行 esbuild 构建并注入版本号..."
 
-# 获取版本号
-VERSION=$(node -p "require('./package.json').version")
+# 获取版本号（优先 manifest.json，回退 package.json）
+VERSION=$(node -e "const fs=require('fs');let v=require('./package.json').version; if (fs.existsSync('manifest.json')) { const m=require('./manifest.json'); if (m && m.version) v=m.version; } console.log(v);")
 
 # 尝试不同的 esbuild 执行方式
 # 方式1: 使用 node_modules 中的 esbuild

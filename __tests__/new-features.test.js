@@ -615,6 +615,31 @@ describe('任务调度失败处理优化测试', () => {
      expect(result.length).toBe(1);
      expect(result[0].id).toBe('1');
    });
+
+   it('should_accept_uint8array_payload', async () => {
+     mockKV.list.mockImplementation(async (options) => {
+       if (options && options.prefix) {
+         if (options.prefix.startsWith('instance:')) {
+           return { keys: [{ name: 'instance:1' }] };
+         }
+         return { keys: [] };
+       }
+       return { keys: [] };
+     });
+
+     const payload = JSON.stringify({
+       id: '1',
+       url: 'https://instance1.com',
+       status: 'active',
+       lastHeartbeat: Date.now(),
+     });
+
+     mockKV.get.mockResolvedValue(new TextEncoder().encode(payload));
+
+     const result = await getActiveInstances(mockEnv, {});
+     expect(result.length).toBe(1);
+     expect(result[0].id).toBe('1');
+   });
   });
  
     describe('QStash 元数据记录', () => {

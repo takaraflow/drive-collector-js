@@ -97,7 +97,17 @@ export class CacheTLSClient extends ICacheClient {
    */
   async get(key) {
     const result = await this.sendCommand('GET', [key]);
-    return result === null ? null : String(result);
+    if (result === null) return null;
+    if (result instanceof Uint8Array) {
+      return new TextDecoder().decode(result);
+    }
+    if (ArrayBuffer.isView(result)) {
+      return new TextDecoder().decode(result.buffer);
+    }
+    if (result instanceof ArrayBuffer) {
+      return new TextDecoder().decode(new Uint8Array(result));
+    }
+    return String(result);
   }
 
   /**

@@ -712,7 +712,7 @@ describe('Worker Tests', () => {
       );
     });
 
-    test('Config incomplete: should skip Redis when password missing', async () => {
+    test('Config incomplete: should still try Redis when password missing', async () => {
       const env = {
         REDIS_TLS_URL: 'https://redis.url',
         // REDIS_TLS_PASSWORD missing
@@ -722,13 +722,11 @@ describe('Worker Tests', () => {
       const mockClient = createRedis({ url: '...' });
       __test_setRedisClient(mockClient);
 
-      mockKV.get.mockResolvedValue('cf-value');
+      __mockSend.mockResolvedValueOnce('redis-value');
 
       const result = await executeWithFailover('_kv_get', env, null, 'test-key');
-      expect(result).toBe('cf-value');
-      expect(mockKV.get).toHaveBeenCalledWith('test-key');
-      // Should not call Redis
-      expect(__mockSend).not.toHaveBeenCalled();
+      expect(result).toBe('redis-value');
+      expect(__mockSend).toHaveBeenCalledWith('GET', 'test-key');
     });
 
     test('List scan: should use Redis scan when primary', async () => {
