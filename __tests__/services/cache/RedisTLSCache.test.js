@@ -76,6 +76,7 @@ describe("RedisTLSCache", () => {
       rejectUnauthorized: true
     });
 
+    globalMocks.redisClient.status = "end";
     await cache.connect();
 
     expect(globalMocks.redisClient.connect).toHaveBeenCalledTimes(1);
@@ -99,6 +100,7 @@ describe("RedisTLSCache", () => {
       name: "secure-redis"
     });
 
+    globalMocks.redisClient.status = "end";
     await cache.connect();
 
     const info = cache.getConnectionInfo();
@@ -120,6 +122,7 @@ describe("RedisTLSCache", () => {
       rejectUnauthorized: true
     });
 
+    globalMocks.redisClient.status = "end";
     await cache.connect();
 
     const setResult = await cache.set("secure-key", { secure: "data" }, 3600);
@@ -141,6 +144,7 @@ describe("RedisTLSCache", () => {
       rejectUnauthorized: true
     });
 
+    globalMocks.redisClient.status = "end";
     await cache.connect();
     await cache.disconnect();
 

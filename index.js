@@ -144,10 +144,26 @@ async function main() {
         
         // 依次启动业务模块
         await instanceCoordinator.start();
-        await connectAndStart();
+        const allowTelegramFailure =
+            process.env.ALLOW_TELEGRAM_STARTUP_FAILURE === 'true' ||
+            process.env.NODE_MODE === 'dev' ||
+            process.env.NODE_ENV === 'development';
+        let telegramConnected = false;
+        try {
+            await connectAndStart();
+            telegramConnected = true;
+        } catch (error) {
+            console.error("🚨 Telegram 启动失败:", error?.message || error);
+            logger.error("🚨 Telegram 客户端连接启动失败:", error);
+            if (!allowTelegramFailure) {
+                throw error;
+            }
+        }
         await startDispatcher();
         await startProcessor();
-        startWatchdog();
+        if (telegramConnected) {
+            startWatchdog();
+        }
 
         // 6. 启动 Webhook HTTP Server
         const http = await import("http");
@@ -178,5 +194,4 @@ if (process.env.NODE_ENV !== 'test' && (process.argv[1]?.endsWith('index.js') ||
         process.exit(1);
     });
 }
-
 

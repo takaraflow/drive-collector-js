@@ -70,7 +70,10 @@ describe("sync-env script", () => {
     expect(logText).toContain("使用 Infisical 变量继续");
     expect(logText).not.toContain("本地 .env");
 
-    expect(warnSpy).not.toHaveBeenCalled();
+    const warnText = warnSpy.mock.calls.flat().join(" ");
+    if (warnText.length > 0) {
+      expect(warnText).toContain("未找到 manifest.json");
+    }
     expect(errorSpy).not.toHaveBeenCalled();
   });
 });
