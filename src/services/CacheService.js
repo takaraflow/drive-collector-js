@@ -274,7 +274,7 @@ class CacheService {
         // Skip L1 if explicitly requested or if we are in a critical failover state (optional logic)
         if (!options.skipL1) {
             const l1Value = localCache.get(key);
-            if (l1Value !== undefined) {
+            if (l1Value !== null && l1Value !== undefined) {
                 // Refresh L1 TTL if needed (LocalCache handles this via set, but here we just return)
                 return l1Value;
             }
@@ -323,6 +323,12 @@ class CacheService {
         // 2. Update L2 (Provider)
         if (!this.primaryProvider && this.currentProviderName === 'MemoryCache') {
             return true; // Memory only
+        }
+
+        // If in failover mode, don't attempt L2 writes (degrade to L1 only)
+        if (this.isFailoverMode) {
+            logger.warn('[CacheService] In failover mode, skipping L2 write');
+            return true; // L1 write succeeded
         }
 
         try {
@@ -405,7 +411,7 @@ class CacheService {
      * Periodically attempts to reconnect to the primary provider.
      */
     _startRecoveryCheck() {
-        if (this.recoveryTimer || process.env.NODE_ENV === 'test') return;
+        if (this.recoveryTimer) return;
 
         this.recoveryTimer = setInterval(async () => {
             if (!this.isFailoverMode) return;

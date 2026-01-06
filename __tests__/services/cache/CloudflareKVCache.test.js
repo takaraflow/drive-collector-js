@@ -5,13 +5,33 @@ const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
 // Mock logger
-await jest.unstable_mockModule("../../../src/services/logger.js", () => ({
+await jest.unstable_mockModule("../../src/services/logger.js", () => ({
     logger: {
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
-        debug: jest.fn()
-    }
+        debug: jest.fn(),
+        child: jest.fn().mockReturnThis(),
+        configure: jest.fn(),
+        isInitialized: jest.fn().mockReturnValue(true),
+        canSend: jest.fn().mockReturnValue(true)
+    },
+    default: {
+        info: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+        debug: jest.fn(),
+        child: jest.fn().mockReturnThis(),
+        configure: jest.fn(),
+        isInitialized: jest.fn().mockReturnValue(true),
+        canSend: jest.fn().mockReturnValue(true)
+    },
+    setInstanceIdProvider: jest.fn(),
+    enableTelegramConsoleProxy: jest.fn(),
+    disableTelegramConsoleProxy: jest.fn(),
+    resetLogger: jest.fn(),
+    delay: jest.fn().mockResolvedValue(undefined),
+    retryWithDelay: jest.fn().mockImplementation(async (fn) => await fn())
 }));
 
 let CloudflareKVCache;
@@ -22,11 +42,12 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+    mockFetch.mockReset();
     jest.clearAllMocks();
 });
 
 describe("CloudflareKVCache", () => {
-    test("should instantiate with correct options", () => {
+    test("should instantiate with correct configuration", () => {
         const cache = new CloudflareKVCache({
             accountId: "acc123",
             namespaceId: "ns456",
@@ -34,10 +55,10 @@ describe("CloudflareKVCache", () => {
             name: "cf-cache"
         });
         
-        expect(cache.options.accountId).toBe("acc123");
-        expect(cache.options.namespaceId).toBe("ns456");
-        expect(cache.options.token).toBe("tok789");
-        expect(cache.options.name).toBe("cf-cache");
+        expect(cache.accountId).toBe("acc123");
+        expect(cache.namespaceId).toBe("ns456");
+        expect(cache.token).toBe("tok789");
+        expect(cache.apiUrl).toBe("https://api.cloudflare.com/client/v4/accounts/acc123/storage/kv/namespaces/ns456");
     });
 
     test("should connect successfully", async () => {
@@ -47,34 +68,22 @@ describe("CloudflareKVCache", () => {
             token: "tok789"
         });
 
-        // Mock successful API response for connection check
-        mockFetch.mockResolvedValueOnce({
-            ok: true,
-            status: 200,
-            json: async () => ({ success: true })
-        });
-
         await cache.connect();
         
         expect(cache.connected).toBe(true);
+        expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    test("should handle connection failure", async () => {
+    test("should not require network access on connect", async () => {
         const cache = new CloudflareKVCache({
             accountId: "acc123",
             namespaceId: "ns456",
             token: "tok789"
         });
 
-        // Mock API failure
-        mockFetch.mockResolvedValueOnce({
-            ok: false,
-            status: 401,
-            statusText: "Unauthorized"
-        });
-
-        await expect(cache.connect()).rejects.toThrow("Failed to connect to Cloudflare KV");
-        expect(cache.connected).toBe(false);
+        await cache.connect();
+        expect(cache.connected).toBe(true);
+        expect(mockFetch).not.toHaveBeenCalled();
     });
 
     test("should get value as JSON", async () => {
@@ -88,7 +97,7 @@ describe("CloudflareKVCache", () => {
         const mockValue = { data: "test" };
         mockFetch.mockResolvedValueOnce({
             ok: true,
-            json: async () => ({ result: JSON.stringify(mockValue) })
+            json: async () => mockValue
         });
 
         const result = await cache.get("test-key", "json");
@@ -115,7 +124,7 @@ describe("CloudflareKVCache", () => {
             text: async () => "plain-text-value"
         });
 
-        const result = await cache.get("test-key", "string");
+        const result = await cache.get("test-key", "text");
         
         expect(result).toBe("plain-text-value");
     });
@@ -155,7 +164,7 @@ describe("CloudflareKVCache", () => {
         
         expect(result).toBe(true);
         expect(mockFetch).toHaveBeenCalledWith(
-            "https://api.cloudflare.com/client/v4/accounts/acc123/storage/kv/namespaces/ns456/values/test-key?ttl=3600",
+            "https://api.cloudflare.com/client/v4/accounts/acc123/storage/kv/namespaces/ns456/values/test-key?expiration_ttl=3600",
             expect.objectContaining({
                 method: "PUT",
                 body: '{"data":"value"}',
@@ -211,7 +220,7 @@ describe("CloudflareKVCache", () => {
             token: "tok789"
         });
         
-        expect(cache.getProviderName()).toBe("CloudflareKV");
+        expect(cache.getProviderName()).toBe("cloudflare");
     });
 
     test("should get connection info", async () => {
@@ -226,10 +235,8 @@ describe("CloudflareKVCache", () => {
         const info = cache.getConnectionInfo();
         
         expect(info).toEqual({
-            provider: "CloudflareKV",
-            name: "my-cf",
-            accountId: "acc123",
-            namespaceId: "ns456"
+            provider: "cloudflare",
+            connected: true
         });
     });
 

@@ -138,11 +138,13 @@ describe("CacheService Integration Tests", () => {
         });
 
         test("should get JSON value successfully", async () => {
-            // The provider's get method is already mocked to return undefined
-            // Since we're using skipCache, it will call the provider
-            // But the mock returns undefined by default, which becomes null in the service
+            // Core logic in CloudflareKVCache: type === "json" ? await res.json() : ...
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => null
+            });
             const result = await service.get("key", "json", { skipCache: true });
-            // The mock returns undefined, which becomes null
             expect(result).toBeNull();
         });
 
@@ -186,9 +188,16 @@ describe("CacheService Integration Tests", () => {
         });
 
         test("should return null for get in memory mode", async () => {
+            mockFetch.mockResolvedValue({
+                ok: true,
+                status: 200,
+                json: async () => null
+            });
             service = new CacheService({ env: {} });
             await service.initialize();
-            const result = await service.get("test-key");
+            // Since it's memory mode, primaryProvider is null
+            // For a fresh CacheService in Memory mode, any get should be null
+            const result = await service.get("test-key", "json", { skipL1: true });
             expect(result).toBeNull();
         });
 
@@ -269,11 +278,9 @@ describe("CacheService Integration Tests", () => {
         test("should handle fetch timeout gracefully", async () => {
             mockFetch.mockImplementation(() => {
                 return new Promise((_, reject) => {
-                    setTimeout(() => {
-                        const abortError = new Error("The operation was aborted");
-                        abortError.name = "AbortError";
-                        reject(abortError);
-                    }, 100);
+                    const abortError = new Error("The operation was aborted");
+                    abortError.name = "AbortError";
+                    reject(abortError);
                 });
             });
 

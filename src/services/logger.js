@@ -27,12 +27,6 @@ let version = 'unknown';
 const initVersion = async () => {
     if (version !== 'unknown') return;
 
-    // 在测试环境中立即设置版本，避免异步操作
-    if (process.env.NODE_ENV === 'test') {
-        version = 'test';
-        return;
-    }
-
     try {
         // 方案 A: 尝试通过环境变量读取（CI/CD 注入）
         if (process.env.APP_VERSION) {
@@ -203,7 +197,6 @@ const log = async (instanceId, level, message, data = {}) => {
 
   // 确保版本已初始化
   await initVersion();
-
   if (!axiom) {
     await initAxiom();
   }
@@ -216,7 +209,7 @@ const log = async (instanceId, level, message, data = {}) => {
     fallback.call(console, displayMessage, finalData);
     return;
   }
-
+  
   // 构建 payload，details 永远是字符串
   const payload = {
     version,
@@ -272,16 +265,8 @@ const getSafeInstanceId = () => {
         if (id && typeof id === 'string' && id.trim() !== '' && id !== 'unknown') {
             return id;
         }
-        // 如果返回了 'unknown' 或无效值，使用本地 fallback
-        // 在测试环境下减少此类日志输出，除非显式开启 DEBUG
-        if (process.env.NODE_ENV !== 'test' || process.env.DEBUG === 'true') {
-            // 移除 console.debug
-        }
         return localFallbackId;
     } catch (e) {
-        if (process.env.NODE_ENV !== 'test' || process.env.DEBUG === 'true') {
-            // 移除 console.debug
-        }
         return localFallbackId;
     }
 };

@@ -61,9 +61,12 @@ globalMocks.localCache = {
     isUnchanged: jest.fn().mockReturnValue(false)
 };
 
+// Mock logger - REMOVED to allow tests to import the real logger module
+// Tests that need to mock logger should do so explicitly in their own test files
+
 // Mock Axiom (logger.js) - 使用全局 mock
 jest.unstable_mockModule('@axiomhq/js', () => ({
-  Axiom: globalMocks.axiomConstructor
+    Axiom: globalMocks.axiomConstructor
 }));
 
 // Mock QStash - 使用全局 mock
@@ -94,23 +97,28 @@ export {
   globalMocks
 };
 
+const createRedisPipeline = () => ({
+  set: jest.fn().mockReturnThis(),
+  del: jest.fn().mockReturnThis(),
+  exec: jest.fn().mockResolvedValue([])
+});
+
 // Mock ioredis
 globalMocks.redisClient = {
   on: jest.fn().mockReturnThis(),
   once: jest.fn().mockReturnThis(),
   removeListener: jest.fn().mockReturnThis(),
   removeAllListeners: jest.fn().mockReturnThis(),
+  connect: jest.fn().mockResolvedValue(undefined),
   quit: jest.fn().mockResolvedValue('OK'),
-  disconnect: jest.fn().mockResolvedValue('OK'), // 添加 disconnect 方法
+  disconnect: jest.fn().mockResolvedValue('OK'),
   ping: jest.fn().mockResolvedValue('PONG'),
-  get: jest.fn(),
-  set: jest.fn(),
-  del: jest.fn(),
-  keys: jest.fn(),
-  pipeline: jest.fn(() => ({
-    set: jest.fn().mockReturnThis(),
-    exec: jest.fn().mockResolvedValue([])
-  })),
+  get: jest.fn().mockResolvedValue(null),
+  set: jest.fn().mockResolvedValue('OK'),
+  del: jest.fn().mockResolvedValue(1),
+  keys: jest.fn().mockResolvedValue([]),
+  pipeline: jest.fn(createRedisPipeline),
+  multi: jest.fn(createRedisPipeline),
   status: 'ready',
   options: {
     maxRetriesPerRequest: 5,

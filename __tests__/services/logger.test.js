@@ -1,8 +1,9 @@
 import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-import { mockAxiomIngest, mockAxiomConstructor } from '../setup/external-mocks.js';
+import { mockAxiomIngest, mockAxiomConstructor as mockAxiomConstructorImport } from '../setup/external-mocks.js';
 
-// Use the global mock
+// Use the global mock - use let so we can reassign them in beforeEach
 let mockIngest = mockAxiomIngest;
+let mockAxiomConstructor = mockAxiomConstructorImport;
 
 // Mock InstanceCoordinator
 jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () => ({
@@ -14,10 +15,19 @@ describe('Logger Service', () => {
   let consoleInfoSpy;
   let consoleWarnSpy;
   let consoleErrorSpy;
+  let enableTelegramConsoleProxy;
+  let disableTelegramConsoleProxy;
 
+  // Top-level setup for all tests in this describe block
   beforeEach(async () => {
+    // Set environment for tests
     process.env.DEBUG = 'true';
     jest.useFakeTimers('modern');
+
+    // Spy on console methods BEFORE resetting modules, so logger.js captures the spied versions
+    consoleInfoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+    consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
     // Mock Math.random to return a fixed value for deterministic tests
     const mockMath = Object.create(global.Math);
@@ -30,26 +40,23 @@ describe('Logger Service', () => {
     jest.resetModules();
 
     // Re-import mocks after resetModules to ensure they're fresh
-    const { mockAxiomIngest: freshMockIngest } = await import('../setup/external-mocks.js');
+    const { mockAxiomIngest: freshMockIngest, mockAxiomConstructor: freshMockConstructor } = await import('../setup/external-mocks.js');
     mockIngest = freshMockIngest;
+    mockAxiomConstructor = freshMockConstructor;
     
     // Reset Axiom mock implementation to default successful state
     mockIngest.mockResolvedValue(undefined);
 
-    // Spy on console methods
-    consoleInfoSpy = jest.spyOn(console, 'info').mockImplementation();
-    consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
-    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
-
-    // Mock setTimeout to immediate execution for faster tests
-    jest.spyOn(global, 'setTimeout').mockImplementation((fn) => { fn(); return 1; });
-
     // Import logger after mocks are set up
     const loggerModule = await import('../../src/services/logger.js');
     logger = loggerModule.logger;
+    enableTelegramConsoleProxy = loggerModule.enableTelegramConsoleProxy;
+    disableTelegramConsoleProxy = loggerModule.disableTelegramConsoleProxy;
   });
 
+  // Top-level teardown for all tests in this describe block
   afterEach(() => {
+    // Clean up environment variables
     delete process.env.DEBUG;
     delete process.env.AXIOM_TOKEN;
     delete process.env.AXIOM_ORG_ID;
@@ -98,15 +105,9 @@ describe('Logger Service', () => {
       await logger.warn(message, data);
       await jest.runAllTimersAsync();
 
-      // Adjusted to match actual behavior (should be 3 calls: 1 from logger + 2 from other warnings)
-      // The extra warnings are likely:
-      // 1. "⚠️ InfisicalClient: Missing INFISICAL_TOKEN..."
-      // 2. "⚠️ InfisicalClient: Falling back to process.env"
-      // 3. "⚠️ No complete cache configuration found..."
-      // But we only care about the one containing our message
-      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('[v'), data);
-      expect(consoleWarnSpy.mock.calls.some(call => call[0].includes(message))).toBe(true);
-      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('[v'), data);
+      // We only care about the one containing our message. The `data` should be matched using `expect.objectContaining`.
+      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('[v'), expect.objectContaining(data));
+      // Check that at least one call contains the message
       expect(consoleWarnSpy.mock.calls.some(call => call[0].includes(message))).toBe(true);
     });
 
@@ -118,7 +119,7 @@ describe('Logger Service', () => {
       await jest.runAllTimersAsync();
 
       expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
-      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('[v'), data);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('[v'), expect.objectContaining(data));
     });
 
     test('logger.debug falls back to no-op when Axiom is not configured', async () => {
@@ -126,9 +127,6 @@ describe('Logger Service', () => {
       const data = { debug: true };
 
       // Debug logs should not be sent to console when Axiom is not configured
-      // The logger.js file itself has removed console.debug calls in this scenario.
-      // We'll rely on absence of console.debug calls being the correct behavior.
-      // If this test fails, it means logger.js is still unexpectedly calling console.debug
       const consoleDebugSpy = jest.spyOn(console, 'debug').mockImplementation();
       await logger.debug(message, data);
       await jest.runAllTimersAsync();
@@ -143,6 +141,18 @@ describe('Logger Service', () => {
       process.env.AXIOM_TOKEN = 'test-token';
       process.env.AXIOM_ORG_ID = 'test-org';
       process.env.AXIOM_DATASET = 'test-dataset';
+
+      // Clear any pending timers to ensure clean state
+      jest.clearAllTimers();
+
+      // Re-import mocks to ensure we have fresh references
+      const { mockAxiomIngest: freshMockIngest, mockAxiomConstructor: freshMockConstructor } = await import('../setup/external-mocks.js');
+      mockIngest = freshMockIngest;
+      mockAxiomConstructor = freshMockConstructor;
+
+      // Clear any potential previous Axiom mock calls
+      mockIngest.mockClear();
+      mockAxiomConstructor.mockClear();
 
       // Reset logger internal state
       const loggerModule = await import('../../src/services/logger.js');
@@ -245,8 +255,16 @@ describe('Logger Service', () => {
       const message = 'test message';
       const data = { test: true };
 
-      await logger.error(message, data);
-      await jest.runAllTimersAsync();
+      // Start the logger call (it will wait at the first delay)
+      const loggerPromise = logger.error(message, data);
+      
+      // Advance timers for each retry delay: 1000ms, 2000ms, 4000ms
+      await jest.advanceTimersByTimeAsync(1000);
+      await jest.advanceTimersByTimeAsync(2000);
+      await jest.advanceTimersByTimeAsync(4000);
+      
+      // Wait for the logger call to complete
+      await loggerPromise;
 
       // Should retry 3 times (initial + 3 retries = 4 calls)
       expect(mockIngest).toHaveBeenCalledTimes(4);
@@ -267,11 +285,11 @@ describe('Logger Service', () => {
       // Reset logger internal state
       const loggerModule = await import('../../src/services/logger.js');
       loggerModule.resetLogger();
-
       logger = loggerModule.logger;
 
-      // Track mockAxiomConstructor calls
-      const callCountBefore = mockAxiomConstructor.mock.calls.length;
+      // Clear any potential previous Axiom mock calls
+      mockIngest.mockClear();
+      mockAxiomConstructor.mockClear();
 
       // First call - this should trigger initAxiom which creates new Axiom()
       await logger.info('first call');
@@ -285,15 +303,14 @@ describe('Logger Service', () => {
       await logger.warn('third call');
       await jest.runAllTimersAsync();
 
-      const callCountAfter = mockAxiomConstructor.mock.calls.length;
-      
-      // With env-based init, Axiom constructor may not be called directly
-      // Instead, verify that ingest was called 3 times (once per log call)
+      // Verify that ingest was called 3 times (once per log call)
       expect(mockIngest).toHaveBeenCalledTimes(3);
+      // Axiom constructor should be called only once
+      expect(mockAxiomConstructor).toHaveBeenCalledTimes(1);
     });
 
     test('Axiom is not initialized when config is missing', async () => {
-      // Mock the config module to return undefined axiom
+      // Mock config module to return undefined axiom
       jest.unstable_mockModule('../../src/config/index.js', () => ({
         config: { axiom: undefined },
         getConfig: () => ({ axiom: undefined }),
@@ -307,15 +324,17 @@ describe('Logger Service', () => {
 
       logger = loggerModule.logger;
 
-      const callCountBefore = mockAxiomConstructor.mock.calls.length;
+      // Clear any potential previous Axiom mock calls
+      mockIngest.mockClear();
+      mockAxiomConstructor.mockClear();
 
       // Call logger
       await logger.info('test call');
       await jest.runAllTimersAsync();
 
       // Axiom should not be initialized
-      const callCountAfter = mockAxiomConstructor.mock.calls.length;
-      expect(callCountAfter - callCountBefore).toBe(0);
+      expect(mockAxiomConstructor).not.toHaveBeenCalled();
+      expect(mockIngest).not.toHaveBeenCalled(); // Ensure ingest is also not called
     });
   });
 
@@ -330,8 +349,6 @@ describe('Logger Service', () => {
   });
 
   describe('Telegram Console Proxy', () => {
-    let enableTelegramConsoleProxy;
-    let disableTelegramConsoleProxy;
     let originalConsoleError;
     let originalConsoleWarn;
     let originalConsoleLog;
@@ -342,11 +359,11 @@ describe('Logger Service', () => {
       process.env.AXIOM_ORG_ID = 'test-org';
       process.env.AXIOM_DATASET = 'test-dataset';
 
-      // Import the proxy functions
-      const loggerModule = await import('../../src/services/logger.js');
-      enableTelegramConsoleProxy = loggerModule.enableTelegramConsoleProxy;
-      disableTelegramConsoleProxy = loggerModule.disableTelegramConsoleProxy;
-      
+      // Re-import mocks to ensure we have fresh references
+      const { mockAxiomIngest: freshMockIngest, mockAxiomConstructor: freshMockConstructor } = await import('../setup/external-mocks.js');
+      mockIngest = freshMockIngest;
+      mockAxiomConstructor = freshMockConstructor;
+
       // Save original console methods
       originalConsoleError = console.error;
       originalConsoleWarn = console.warn;
@@ -359,7 +376,9 @@ describe('Logger Service', () => {
       console.warn = originalConsoleWarn;
       console.log = originalConsoleLog;
       // Disable proxy if enabled
-      disableTelegramConsoleProxy();
+      if (disableTelegramConsoleProxy) {
+        disableTelegramConsoleProxy();
+      }
     });
 
     test('proxy captures TIMEOUT in updates.js and calls logger.error with service: telegram', async () => {
@@ -382,26 +401,25 @@ describe('Logger Service', () => {
       // Advance timers for async logger call
       await jest.runAllTimersAsync();
 
-      // Filter relevant calls to ignore extraneous ingest calls
-      const relevantCalls = mockIngest.mock.calls.filter(call => {
-        const payload = call[1][0];
-        // Check details string for service and source
-        return payload.details && payload.details.includes('telegram') && payload.details.includes('console_proxy');
-      });
+      // We expect one call to mockIngest from the proxy
+      expect(mockIngest).toHaveBeenCalledTimes(1);
 
-      expect(relevantCalls.length).toBe(1);
-
-      const payload = relevantCalls[0][1][0];
+      const payload = mockIngest.mock.calls[0][1][0];
       expect(payload.level).toBe('error');
       expect(payload.message).toContain('Telegram library TIMEOUT captured');
       expect(payload.message).toContain('TIMEOUT in updates.js');
+      expect(payload.details).toContain('service');
+      expect(payload.details).toContain('telegram');
+      expect(payload.details).toContain('console_proxy');
     });
 
     test('proxy captures timeout patterns and calls logger.error', async () => {
+      // Setup Axiom config
       const loggerModule = await import('../../src/services/logger.js');
       loggerModule.resetLogger();
       logger = loggerModule.logger;
 
+      // Enable proxy
       enableTelegramConsoleProxy();
 
       // Various timeout patterns
@@ -411,15 +429,10 @@ describe('Logger Service', () => {
 
       await jest.runAllTimersAsync();
 
-      // Filter relevant calls instead of checking exact count
-      const relevantCalls = mockIngest.mock.calls.filter(call => {
-         const payload = call[1][0];
-         return payload.level === 'error' && payload.details && payload.details.includes('telegram');
-      });
-
-      expect(relevantCalls.length).toBe(3);
+      // We expect 3 calls to mockIngest from the proxy
+      expect(mockIngest).toHaveBeenCalledTimes(3);
       
-      relevantCalls.forEach(call => {
+      mockIngest.mock.calls.forEach(call => {
         const payload = call[1][0];
         expect(payload.level).toBe('error');
         expect(payload.details).toContain('telegram');
@@ -427,14 +440,12 @@ describe('Logger Service', () => {
     });
 
     test('proxy does not capture non-timeout errors', async () => {
+      // Setup Axiom config
       const loggerModule = await import('../../src/services/logger.js');
       loggerModule.resetLogger();
       logger = loggerModule.logger;
 
-      // Clear any potential initialization logs
-      await jest.runAllTimersAsync();
-      mockIngest.mockClear();
-
+      // Enable proxy
       enableTelegramConsoleProxy();
 
       // Non-timeout error
@@ -444,10 +455,19 @@ describe('Logger Service', () => {
 
       // Should not call logger.error (no ingest)
       expect(mockIngest).not.toHaveBeenCalled();
+      // Ensure console.error was still called for the original message
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Some other error');
     });
   });
 
   describe('Instance ID Fallback', () => {
+    beforeEach(async () => {
+      // Re-import mocks to ensure we have fresh references
+      const { mockAxiomIngest: freshMockIngest, mockAxiomConstructor: freshMockConstructor } = await import('../setup/external-mocks.js');
+      mockIngest = freshMockIngest;
+      mockAxiomConstructor = freshMockConstructor;
+    });
+
     test('should use fallback ID when provider returns null', async () => {
       // Set env variables
       process.env.AXIOM_TOKEN = 'test-token';
@@ -596,8 +616,6 @@ describe('Logger Service', () => {
       expect(payload.instanceId).not.toBe('unknown');
     });
 
-    // Removed tests for console.debug calls as they are no longer expected to be made in logger.js
-
     test('should use fallback ID when provider is not registered (before setInstanceIdProvider)', async () => {
       // Set env variables
       process.env.AXIOM_TOKEN = 'test-token';
@@ -628,6 +646,11 @@ describe('Logger Service', () => {
         process.env.AXIOM_TOKEN = 'test-token';
         process.env.AXIOM_ORG_ID = 'test-org';
         process.env.AXIOM_DATASET = 'test-dataset';
+        
+        // Re-import mocks to ensure we have fresh references
+        const { mockAxiomIngest: freshMockIngest, mockAxiomConstructor: freshMockConstructor } = await import('../setup/external-mocks.js');
+        mockIngest = freshMockIngest;
+        mockAxiomConstructor = freshMockConstructor;
         
         // 显式重置并重新初始化，确保测试环境干净
         const loggerModule = await import('../../src/services/logger.js');
@@ -682,5 +705,4 @@ describe('Logger Service', () => {
         expect(payload.details).toContain('testing');
     });
   });
-
 });

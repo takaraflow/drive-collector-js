@@ -53,6 +53,19 @@ class AivenVTCache extends ValkeyTLSCache {
 
         super(finalOptions);
     }
+
+    // Override to return correct provider name
+    getProviderName() {
+        return 'AivenValkey';
+    }
+
+    // Override to include TLS info
+    getConnectionInfo() {
+        const info = super.getConnectionInfo();
+        // Ensure TLS info is included
+        info.tls = true;
+        return info;
+    }
 }
 
 export { AivenVTCache };

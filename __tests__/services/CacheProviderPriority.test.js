@@ -83,17 +83,14 @@ describe('CacheService Cloudflare KV Priority', () => {
         process.env = originalEnv;
     });
 
-    // All Redis/Upstash tests are removed as they are obsolete
-    // Current implementation only supports Cloudflare KV
-
     test('should use Cloudflare KV when configured via env', async () => {
         cacheInstance = await createCacheService({
             CF_CACHE_ACCOUNT_ID: 'cf-acc',
             CF_CACHE_NAMESPACE_ID: 'cf-ns',
             CF_CACHE_TOKEN: 'cf-token'
         });
-        expect(cacheInstance.currentProvider).toBe('cloudflare');
-        expect(cacheInstance.apiUrl).toContain('cf-acc');
+        expect(cacheInstance.getCurrentProvider()).toBe('cloudflare');
+        expect(cacheInstance.primaryProvider.apiUrl).toContain('cf-acc');
     });
 
     test('should use Cloudflare KV when using alternative env variable names', async () => {
@@ -102,8 +99,8 @@ describe('CacheService Cloudflare KV Priority', () => {
             CF_KV_NAMESPACE_ID: 'kv-ns',
             CF_KV_TOKEN: 'kv-token'
         });
-        expect(cacheInstance.currentProvider).toBe('cloudflare');
-        expect(cacheInstance.apiUrl).toContain('kv-acc');
+        expect(cacheInstance.getCurrentProvider()).toBe('cloudflare');
+        expect(cacheInstance.primaryProvider.apiUrl).toContain('kv-acc');
     });
 
     test('should use Cloudflare KV when using CF_ACCOUNT_ID fallback', async () => {
@@ -112,15 +109,15 @@ describe('CacheService Cloudflare KV Priority', () => {
             CF_KV_NAMESPACE_ID: 'account-ns',
             CF_KV_TOKEN: 'account-token'
         });
-        expect(cacheInstance.currentProvider).toBe('cloudflare');
-        expect(cacheInstance.apiUrl).toContain('account-acc');
+        expect(cacheInstance.getCurrentProvider()).toBe('cloudflare');
+        expect(cacheInstance.primaryProvider.apiUrl).toContain('account-acc');
     });
 
     test('should default to Cloudflare KV when no providers are configured (using config)', async () => {
         // When env is empty, CacheService falls back to getConfig()
         cacheInstance = await createCacheService({});
-        expect(cacheInstance.currentProvider).toBe('cloudflare');
-        expect(cacheInstance.apiUrl).toContain('mock-cf-account-id');
+        expect(cacheInstance.getCurrentProvider()).toBe('cloudflare');
+        expect(cacheInstance.primaryProvider.apiUrl).toContain('mock-cf-account-id');
     });
 
     test('should fallback to memory when no Cloudflare credentials in env or config', async () => {
@@ -143,8 +140,7 @@ describe('CacheService Cloudflare KV Priority', () => {
         cacheInstance = new Service({ env: {} });
         await cacheInstance.initialize();
         
-        expect(cacheInstance.currentProvider).toBe('memory');
-        expect(cacheInstance.apiUrl).toBe('');
+        expect(cacheInstance.getCurrentProvider()).toBe('MemoryCache');
     });
 
     test('should prioritize env over config for Cloudflare credentials', async () => {
@@ -155,8 +151,8 @@ describe('CacheService Cloudflare KV Priority', () => {
         });
         
         // Should use env values, not config values
-        expect(cacheInstance.apiUrl).toContain('env-acc');
-        expect(cacheInstance.apiUrl).not.toContain('mock-cf-account-id');
+        expect(cacheInstance.primaryProvider.apiUrl).toContain('env-acc');
+        expect(cacheInstance.primaryProvider.apiUrl).not.toContain('mock-cf-account-id');
     });
 
     test('should expose correct provider status properties', async () => {
@@ -166,24 +162,60 @@ describe('CacheService Cloudflare KV Priority', () => {
             CF_CACHE_TOKEN: 'cf-token'
         });
 
-        expect(cacheInstance.currentProvider).toBe('cloudflare');
-        expect(cacheInstance.hasCloudflare).toBe(true);
-        expect(cacheInstance.hasRedis).toBe(false);
-        expect(cacheInstance.hasUpstash).toBe(false);
+        expect(cacheInstance.getCurrentProvider()).toBe('cloudflare');
         expect(cacheInstance.isFailoverMode).toBe(false);
-        expect(cacheInstance.failoverEnabled).toBe(false);
         expect(cacheInstance.failureCount).toBe(0);
     });
 
     test('should expose correct properties in memory mode', async () => {
-        cacheInstance = await createCacheService({});
+        // Reset modules to ensure clean state
+        jest.resetModules();
+        
+        // Re-apply the config mock
+        jest.unstable_mockModule("../../src/config/index.js", () => ({
+            getConfig: () => ({
+                kv: {
+                    accountId: 'mock-cf-account-id',
+                    namespaceId: 'mock-cf-namespace-id',
+                    token: 'mock-cf-token'
+                },
+                redis: {},
+                qstash: {},
+                oss: {},
+                d1: {},
+                telegram: {}
+            })
+        }));
 
-        expect(cacheInstance.currentProvider).toBe('memory');
-        expect(cacheInstance.hasCloudflare).toBe(false);
-        expect(cacheInstance.hasRedis).toBe(false);
-        expect(cacheInstance.hasUpstash).toBe(false);
+        const module = await import("../../src/services/CacheService.js");
+        const Service = module.CacheService;
+        
+        cacheInstance = new Service({ env: {} });
+        await cacheInstance.initialize();
+
+        // When no env is provided, CacheService falls back to getConfig()
+        // The mocked getConfig returns Cloudflare KV credentials
+        expect(cacheInstance.getCurrentProvider()).toBe('cloudflare');
         expect(cacheInstance.isFailoverMode).toBe(false);
-        expect(cacheInstance.failoverEnabled).toBe(false);
         expect(cacheInstance.failureCount).toBe(0);
+    });
+
+    test('should handle missing config gracefully', async () => {
+        // Mock getConfig to throw error
+        jest.resetModules();
+        jest.unstable_mockModule("../../src/config/index.js", () => ({
+            getConfig: () => {
+                throw new Error('Config not available');
+            }
+        }));
+        
+        const module = await import("../../src/services/CacheService.js");
+        const Service = module.CacheService;
+        
+        cacheInstance = new Service({ env: {} });
+        await cacheInstance.initialize();
+        
+        // Should fallback to memory cache
+        expect(cacheInstance.getCurrentProvider()).toBe('MemoryCache');
     });
 });

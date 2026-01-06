@@ -8,32 +8,38 @@ import { RedisCache } from './RedisCache.js';
 class RedisTLSCache extends RedisCache {
     /**
      * @param {Object} config - Redis configuration with TLS
+     * @param {string} config.url - Redis connection URL
      * @param {string} config.host - Redis host
      * @param {number} config.port - Redis port
      * @param {string} config.password - Redis password
      * @param {number} config.db - Redis database (optional, default 0)
-     * @param {Object} config.tls - TLS configuration (optional, will be forced)
+     * @param {boolean} config.rejectUnauthorized - Whether to reject unauthorized certificates
+     * @param {string} config.servername - Server name for SNI
      */
     constructor(config) {
-        // Force TLS configuration
-        const tlsConfig = {
-            ...config,
-            tls: config.tls || {
-                // Default TLS settings for Redis
-                rejectUnauthorized: false,
-                // These can be overridden by passing explicit tls config
-            }
-        };
-
-        // Ensure maxRetriesPerRequest is set for quick failover
-        if (!tlsConfig.maxRetriesPerRequest) {
-            tlsConfig.maxRetriesPerRequest = 1;
+        // Extract TLS-related options
+        const { rejectUnauthorized, servername, ...redisOptions } = config;
+        
+        // Build TLS configuration
+        const tlsConfig = {};
+        
+        // Handle rejectUnauthorized (default to true if not specified)
+        if (rejectUnauthorized !== undefined) {
+            tlsConfig.rejectUnauthorized = rejectUnauthorized;
+        } else {
+            tlsConfig.rejectUnauthorized = true;
+        }
+        
+        // Add servername if provided
+        if (servername) {
+            tlsConfig.servername = servername;
         }
 
-        super(tlsConfig);
-        
-        this.tlsConfig = tlsConfig.tls;
-        console.log('[RedisTLSCache] Initialized with TLS configuration');
+        // Pass modified options to parent with TLS config
+        super({
+            ...redisOptions,
+            tls: Object.keys(tlsConfig).length > 0 ? tlsConfig : undefined
+        });
     }
 
     /**
@@ -41,7 +47,20 @@ class RedisTLSCache extends RedisCache {
      * @returns {string} - Provider name
      */
     getProviderName() {
-        return 'RedisTLSCache';
+        return 'RedisTLS';
+    }
+
+    /**
+     * Get connection information
+     * @returns {Object} - Connection info
+     */
+    getConnectionInfo() {
+        const info = super.getConnectionInfo();
+        // Include TLS info
+        if (this.options.tls) {
+            info.tls = true;
+        }
+        return info;
     }
 
     /**
@@ -49,13 +68,13 @@ class RedisTLSCache extends RedisCache {
      * @returns {boolean} - True if TLS is properly configured
      */
     validateTLS() {
-        if (!this.tlsConfig) {
+        if (!this.options.tls) {
             console.warn('[RedisTLSCache] No TLS configuration found');
             return false;
         }
         
         // Check for common TLS misconfigurations
-        if (this.tlsConfig.rejectUnauthorized === false) {
+        if (this.options.tls.rejectUnauthorized === false) {
             console.warn('[RedisTLSCache] TLS verification is disabled (rejectUnauthorized: false)');
         }
         

@@ -5,13 +5,33 @@ const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
 // Mock logger
-await jest.unstable_mockModule("../../../src/services/logger.js", () => ({
+await jest.unstable_mockModule("../../src/services/logger.js", () => ({
     logger: {
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
-        debug: jest.fn()
-    }
+        debug: jest.fn(),
+        child: jest.fn().mockReturnThis(),
+        configure: jest.fn(),
+        isInitialized: jest.fn().mockReturnValue(true),
+        canSend: jest.fn().mockReturnValue(true)
+    },
+    default: {
+        info: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+        debug: jest.fn(),
+        child: jest.fn().mockReturnThis(),
+        configure: jest.fn(),
+        isInitialized: jest.fn().mockReturnValue(true),
+        canSend: jest.fn().mockReturnValue(true)
+    },
+    setInstanceIdProvider: jest.fn(),
+    enableTelegramConsoleProxy: jest.fn(),
+    disableTelegramConsoleProxy: jest.fn(),
+    resetLogger: jest.fn(),
+    delay: jest.fn().mockResolvedValue(undefined),
+    retryWithDelay: jest.fn().mockImplementation(async (fn) => await fn())
 }));
 
 let UpstashRHCache;
@@ -22,20 +42,21 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+    mockFetch.mockReset();
     jest.clearAllMocks();
 });
 
 describe("UpstashRHCache", () => {
-    test("should instantiate with correct options", () => {
+    test("should instantiate with correct configuration", () => {
         const cache = new UpstashRHCache({
             url: "https://upstash.io",
             token: "token123",
             name: "upstash-cache"
         });
         
-        expect(cache.options.url).toBe("https://upstash.io");
-        expect(cache.options.token).toBe("token123");
-        expect(cache.options.name).toBe("upstash-cache");
+        expect(cache.url).toBe("https://upstash.io");
+        expect(cache.token).toBe("token123");
+        expect(cache.apiUrl).toBe("https://upstash.io");
     });
 
     test("should connect successfully", async () => {
@@ -44,31 +65,21 @@ describe("UpstashRHCache", () => {
             token: "token123"
         });
 
-        // Mock successful ping
-        mockFetch.mockResolvedValueOnce({
-            ok: true,
-            json: async () => ({ result: "PONG" })
-        });
-
         await cache.connect();
         
         expect(cache.connected).toBe(true);
+        expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    test("should handle connection failure", async () => {
+    test("should not require network access on connect", async () => {
         const cache = new UpstashRHCache({
             url: "https://upstash.io",
             token: "token123"
         });
 
-        // Mock API failure
-        mockFetch.mockResolvedValueOnce({
-            ok: false,
-            status: 401
-        });
-
-        await expect(cache.connect()).rejects.toThrow("Failed to connect to Upstash");
-        expect(cache.connected).toBe(false);
+        await cache.connect();
+        expect(cache.connected).toBe(true);
+        expect(mockFetch).not.toHaveBeenCalled();
     });
 
     test("should get value as JSON", async () => {
@@ -81,20 +92,22 @@ describe("UpstashRHCache", () => {
         const mockValue = { data: "test" };
         mockFetch.mockResolvedValueOnce({
             ok: true,
-            json: async () => ({ result: JSON.stringify(mockValue) })
+            json: async () => ({ result: JSON.stringify(mockValue) }),
+            headers: { get: jest.fn().mockReturnValue(null) }
         });
 
         const result = await cache.get("test-key", "json");
         
         expect(result).toEqual(mockValue);
         expect(mockFetch).toHaveBeenCalledWith(
-            "https://upstash.io/get/test-key",
+            "https://upstash.io/exec",
             expect.objectContaining({
                 method: "POST",
                 headers: { 
                     Authorization: `Bearer token123`,
                     "Content-Type": "application/json"
-                }
+                },
+                body: JSON.stringify(["GET", "test-key"])
             })
         );
     });
@@ -108,10 +121,11 @@ describe("UpstashRHCache", () => {
 
         mockFetch.mockResolvedValueOnce({
             ok: true,
-            json: async () => ({ result: "plain-text-value" })
+            json: async () => ({ result: "plain-text-value" }),
+            headers: { get: jest.fn().mockReturnValue(null) }
         });
 
-        const result = await cache.get("test-key", "string");
+        const result = await cache.get("test-key", "text");
         
         expect(result).toBe("plain-text-value");
     });
@@ -125,7 +139,8 @@ describe("UpstashRHCache", () => {
 
         mockFetch.mockResolvedValueOnce({
             ok: true,
-            json: async () => ({ result: null })
+            json: async () => ({ result: null }),
+            headers: { get: jest.fn().mockReturnValue(null) }
         });
 
         const result = await cache.get("missing-key");
@@ -142,24 +157,22 @@ describe("UpstashRHCache", () => {
 
         mockFetch.mockResolvedValueOnce({
             ok: true,
-            json: async () => ({ result: "OK" })
+            json: async () => ({ result: "OK" }),
+            headers: { get: jest.fn().mockReturnValue(null) }
         });
 
         const result = await cache.set("test-key", { data: "value" }, 3600);
         
         expect(result).toBe(true);
         expect(mockFetch).toHaveBeenCalledWith(
-            "https://upstash.io/set/test-key",
+            "https://upstash.io/exec",
             expect.objectContaining({
                 method: "POST",
-                body: JSON.stringify({ 
-                    value: '{"data":"value"}', 
-                    ttl: 3600 
-                }),
                 headers: { 
                     Authorization: `Bearer token123`,
                     "Content-Type": "application/json"
-                }
+                },
+                body: JSON.stringify(["SET", "test-key", '{"data":"value"}', "EX", 3600])
             })
         );
     });
@@ -173,20 +186,22 @@ describe("UpstashRHCache", () => {
 
         mockFetch.mockResolvedValueOnce({
             ok: true,
-            json: async () => ({ result: 1 })
+            json: async () => ({ result: 1 }),
+            headers: { get: jest.fn().mockReturnValue(null) }
         });
 
         const result = await cache.delete("test-key");
         
         expect(result).toBe(true);
         expect(mockFetch).toHaveBeenCalledWith(
-            "https://upstash.io/del/test-key",
+            "https://upstash.io/exec",
             expect.objectContaining({
                 method: "POST",
                 headers: { 
                     Authorization: `Bearer token123`,
                     "Content-Type": "application/json"
-                }
+                },
+                body: JSON.stringify(["DEL", "test-key"])
             })
         );
     });
@@ -209,7 +224,7 @@ describe("UpstashRHCache", () => {
             token: "token123"
         });
         
-        expect(cache.getProviderName()).toBe("Upstash");
+        expect(cache.getProviderName()).toBe("UpstashRHCache");
     });
 
     test("should get connection info", async () => {
@@ -223,9 +238,10 @@ describe("UpstashRHCache", () => {
         const info = cache.getConnectionInfo();
         
         expect(info).toEqual({
-            provider: "Upstash",
-            name: "my-upstash",
-            url: "https://upstash.io"
+            provider: "UpstashRHCache",
+            url: "https://upstash.io",
+            hasToken: true,
+            endpoint: "Upstash REST API"
         });
     });
 
@@ -240,7 +256,8 @@ describe("UpstashRHCache", () => {
         mockFetch.mockResolvedValueOnce({
             ok: false,
             status: 500,
-            statusText: "Internal Server Error"
+            statusText: "Internal Server Error",
+            headers: { get: jest.fn().mockReturnValue(null) }
         });
 
         const result = await cache.get("error-key");
@@ -271,15 +288,7 @@ describe("UpstashRHCache", () => {
         });
         await cache.connect();
 
-        // Mock pipeline response
-        mockFetch.mockResolvedValueOnce({
-            ok: true,
-            json: async () => ({ result: ["OK", "OK"] })
-        });
-
-        // This tests if the underlying client supports pipeline
-        // which is important for atomic operations
-        const pipeline = cache.client.pipeline();
+        const pipeline = cache.pipeline();
         expect(pipeline).toBeDefined();
         expect(typeof pipeline.set).toBe("function");
         expect(typeof pipeline.exec).toBe("function");

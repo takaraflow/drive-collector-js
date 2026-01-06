@@ -121,9 +121,13 @@ const mockLogger = {
     error: jest.fn(),
     debug: jest.fn(),
 };
+
+// 设置全局 mock logger 供 logger.js 使用 - 必须在导入 Dispatcher 之前
+global.mockLogger = mockLogger;
+
 jest.unstable_mockModule("../../src/services/logger.js", () => ({
-    default: mockLogger,
-    logger: mockLogger
+    logger: mockLogger,
+    default: mockLogger
 }));
 
 const mockDriveRepository = {
@@ -210,6 +214,8 @@ describe("Dispatcher", () => {
     jest.clearAllMocks();
     Dispatcher.groupBuffers.clear();
     Dispatcher.lastRefreshTime = 0;
+    // 重新设置全局 mock logger
+    global.mockLogger = mockLogger;
   });
 
   afterEach(() => {
@@ -757,6 +763,10 @@ describe("Dispatcher", () => {
       mockAuthGuard.can.mockResolvedValue(false);
       mockSettingsRepository.get.mockResolvedValue("private");
 
+      // 验证 mock 是否正确设置
+      console.log('Mock logger info calls before:', mockLogger.info.mock.calls.length);
+      console.log('Global mock logger exists:', !!global.mockLogger);
+
       const event = {
         userId: BigInt(789),
         peer: { className: "PeerUser", userId: BigInt(789) },
@@ -764,6 +774,10 @@ describe("Dispatcher", () => {
       };
 
       await Dispatcher.handle(event);
+      
+      console.log('Mock logger info calls after:', mockLogger.info.mock.calls.length);
+      console.log('Mock logger calls:', mockLogger.info.mock.calls);
+      
       // Updated to match new log format with [PERF] tag
       expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining("[Dispatcher][PERF] 消息被全局守卫拦截"));
     });
