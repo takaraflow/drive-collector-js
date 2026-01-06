@@ -344,7 +344,9 @@ describe("UIHelper", () => {
                     isLeader: true,
                     tgActive: true,
                     isTgLeader: true,
-                    instanceCount: 2
+                    instanceCount: 2,
+                    cacheProvider: 'RedisTLS',
+                    cacheFailover: true
                 },
                 systemResources: {
                     memoryMB: '120MB (100MB/200MB)',
@@ -361,6 +363,7 @@ describe("UIHelper", () => {
             expect(result).toContain("ID:   instance-123 (👑)");
             expect(result).toContain("TG:   ✅ 已连接 | 🔒 是");
             expect(result).toContain("活跃: 2 个实例");
+            expect(result).toContain("Cache: RedisTLS | Failover: 是");
             expect(result).toContain("🌐 <b>网络诊断</b>");
             expect(result).toContain("TG-MT  : ✅ Telegram MTProto API 连接正常 (45ms)");
             expect(result).toContain("DB-D1  : ❌ Cloudflare D1 连接失败: Timeout (5000ms)");

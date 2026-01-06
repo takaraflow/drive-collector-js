@@ -33,6 +33,14 @@ export class InstanceCoordinator {
         // 注册实例
         await this.registerInstance();
 
+        // 自检：枚举实例键，确认外部缓存可用
+        try {
+            const keys = await cache.listKeys('instance:');
+            log.info(`[${cache.getCurrentProvider()}] 实例键自检: ${keys.length} 个`);
+        } catch (error) {
+            log.warn(`[${cache.getCurrentProvider()}] 实例键自检失败: ${error.message}`);
+        }
+
         // 启动心跳
         this.startHeartbeat();
 

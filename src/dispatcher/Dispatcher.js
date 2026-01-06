@@ -16,6 +16,7 @@ import { runBotTask, runBotTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 import { NetworkDiagnostic } from "../utils/NetworkDiagnostic.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
+import { cache } from "../services/CacheService.js";
 import { qstashService } from "../services/QStashService.js";
 import { logger } from "../services/logger.js";
 import fs from "fs";
@@ -589,6 +590,8 @@ export class Dispatcher {
             // 当前实例信息
             instanceInfo.currentInstanceId = instanceCoordinator.getInstanceId();
             instanceInfo.isLeader = instanceCoordinator.isLeader;
+            instanceInfo.cacheProvider = cache.getCurrentProvider?.() || cache.getProviderName?.() || "unknown";
+            instanceInfo.cacheFailover = !!cache.isFailoverMode;
 
             // Telegram 状态
             instanceInfo.tgActive = isClientActive();

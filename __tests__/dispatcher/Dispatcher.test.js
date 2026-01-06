@@ -66,6 +66,14 @@ jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
   qstashService: mockQstashService,
 }));
 
+const mockCacheService = {
+  getCurrentProvider: jest.fn(() => "RedisTLS"),
+  isFailoverMode: false
+};
+jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+  cache: mockCacheService
+}));
+
 const mockLinkParser = {
   parse: jest.fn(),
 };
@@ -75,6 +83,7 @@ jest.unstable_mockModule("../../src/processor/LinkParser.js", () => ({
 
 const mockUIHelper = {
   renderFilesPage: jest.fn(() => ({ text: "mock_text", buttons: [] })),
+  renderDiagnosisReport: jest.fn(() => "mock_diagnosis_report")
 };
 jest.unstable_mockModule("../../src/ui/templates.js", () => ({
   UIHelper: mockUIHelper,

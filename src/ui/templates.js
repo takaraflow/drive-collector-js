@@ -216,6 +216,11 @@ export class UIHelper {
              html += `<code>ID:   ${instanceId}${leaderBadge}</code>\n`;
              html += `<code>TG:   ${instance.tgActive ? '✅ ' + STRINGS.diagnosis.connected : '❌ ' + STRINGS.diagnosis.disconnected} | 🔒 ${instance.isTgLeader ? STRINGS.diagnosis.yes : STRINGS.diagnosis.no}</code>\n`;
              html += `<code>活跃: ${instance.instanceCount || 0} 个实例</code>\n`;
+             if (instance.cacheProvider) {
+                 const provider = escapeHTML(instance.cacheProvider);
+                 const failover = instance.cacheFailover ? STRINGS.diagnosis.yes : STRINGS.diagnosis.no;
+                 html += `<code>Cache: ${provider} | Failover: ${failover}</code>\n`;
+             }
          } else {
              html += `<code>数据获取失败</code>\n`;
          }
