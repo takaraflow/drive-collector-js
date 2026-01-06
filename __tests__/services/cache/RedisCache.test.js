@@ -27,6 +27,7 @@ const resetRedisClientMocks = () => {
   globalMocks.redisClient.removeAllListeners.mockReset().mockReturnThis();
   globalMocks.redisClient.pipeline.mockReset().mockImplementation(createPipeline);
   globalMocks.redisClient.multi.mockReset().mockImplementation(createPipeline);
+  globalMocks.redisClient.status = "ready";
 };
 
 const buildCache = async (config = defaultConfig) => {
@@ -50,6 +51,7 @@ describe("RedisCache", () => {
     expect(cache.client).toBeDefined();
     expect(typeof cache.client.connect).toBe("function");
 
+    globalMocks.redisClient.status = "end";
     await cache.connect();
 
     expect(globalMocks.redisClient.connect).toHaveBeenCalledTimes(1);

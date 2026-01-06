@@ -62,9 +62,26 @@ class RedisCache extends BaseCache {
         if (this.connected) return;
         
         try {
+            const status = this.client?.status;
+            if (status === 'ready') {
+                this.connected = true;
+                console.log('[RedisCache] Connection successful');
+                return;
+            }
+
             // For testing with mocks, check if client has connect method
             if (this.client.connect && typeof this.client.connect === 'function') {
-                await this.client.connect();
+                if (status === 'connecting' || status === 'connect') {
+                    // Avoid double-connect; wait for ready instead
+                    await new Promise((resolve, reject) => {
+                        this.client.once('ready', resolve);
+                        this.client.once('error', reject);
+                        // Timeout connection attempt
+                        setTimeout(() => reject(new Error('Redis connection timeout')), 5000);
+                    });
+                } else {
+                    await this.client.connect();
+                }
             } else {
                 // For real connections, wait for ready event
                 await new Promise((resolve, reject) => {
