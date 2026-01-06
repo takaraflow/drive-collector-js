@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.12.4](https://github.com/YoungSx/lb-worker-js/compare/v0.12.3...v0.12.4) (2026-01-06)
+
+
+### 🐛 Bug Fixes
+
+* improves Redis fallback behavior and adds Uint8Array support ([a6f19bb](https://github.com/YoungSx/lb-worker-js/commit/a6f19bb3b06fe651bcb6f66f2a4811df8c0fed9a))
+
 ### [0.12.3](https://github.com/YoungSx/lb-worker-js/compare/v0.12.2...v0.12.3) (2026-01-06)
 
 
