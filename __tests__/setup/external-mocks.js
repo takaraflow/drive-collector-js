@@ -126,8 +126,10 @@ globalMocks.redisClient = {
   }
 };
 
-const RedisMock = jest.fn().mockImplementation((config) => {
-  RedisMock.mock.calls.push([config]);
+const RedisMock = jest.fn().mockImplementation((...args) => {
+  if (RedisMock.mock && Array.isArray(RedisMock.mock.calls)) {
+    RedisMock.mock.calls.push(args);
+  }
   return globalMocks.redisClient;
 });
 RedisMock.mock = { calls: [] };

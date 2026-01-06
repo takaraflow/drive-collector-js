@@ -19,6 +19,7 @@ jest.mock("../../src/config/index.js", () => ({
 
 // Import CacheService after mocks
 import { CacheService } from "../../src/services/CacheService.js";
+import { mockRedisConstructor } from "../setup/external-mocks.js";
 
 describe("CacheProviderFactory Tests", () => {
     let service;
@@ -27,6 +28,7 @@ describe("CacheProviderFactory Tests", () => {
     beforeEach(() => {
         process.env = { ...originalEnv };
         jest.clearAllMocks();
+        mockRedisConstructor.mock.calls = [];
     });
 
     afterEach(async () => {
@@ -233,6 +235,21 @@ describe("CacheProviderFactory Tests", () => {
             await service.initialize();
 
             expect(service.currentProviderName).toBe('cloudflare');
+        }, 50);
+
+        test("should format redis url with password-only auth", async () => {
+            const env = {
+                CACHE_PROVIDERS: JSON.stringify([
+                    { name: "test-redis-auth", type: "redis", priority: 1, host: "localhost", port: 6379, password: "secret" }
+                ])
+            };
+
+            service = new CacheService({ env });
+            await service.initialize();
+
+            const calls = mockRedisConstructor.mock.calls;
+            expect(calls.length).toBeGreaterThan(0);
+            expect(calls[0][0]).toContain("redis://:secret@localhost:6379/0");
         }, 50);
     });
 

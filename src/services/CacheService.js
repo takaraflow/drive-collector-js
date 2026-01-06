@@ -146,7 +146,7 @@ class CacheService {
      * Supports 'name' field for identification and 'replicas' for future expansion.
      */
     _instantiateProvider(config) {
-        const { type, host, port, password, db, tls, restUrl, restToken, replicas, name } = config;
+        const { type, host, port, username, password, db, tls, restUrl, restToken, replicas, name } = config;
 
         // 1. Upstash / Redis HTTP
         if (type === 'upstash-rest' || (restUrl && restToken)) {
@@ -167,7 +167,15 @@ class CacheService {
 
         // 3. Redis / Valkey TCP/TLS
         if (host && port) {
-            const url = `redis://${password ? `${password}@` : ''}${host}:${port}/${db || 0}`;
+            let authPart = '';
+            if (username) {
+                const safeUser = encodeURIComponent(username);
+                const safePass = password ? encodeURIComponent(password) : '';
+                authPart = `${safeUser}:${safePass}@`;
+            } else if (password) {
+                authPart = `:${encodeURIComponent(password)}@`;
+            }
+            const url = `redis://${authPart}${host}:${port}/${db || 0}`;
             
             // Determine if TLS is needed
             const isTls = tls?.enabled || (tls && tls.rejectUnauthorized !== undefined);

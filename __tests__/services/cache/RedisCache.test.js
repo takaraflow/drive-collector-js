@@ -1,5 +1,5 @@
 import { jest, describe, test, expect, beforeEach } from "@jest/globals";
-import { globalMocks } from "../../setup/external-mocks.js";
+import { globalMocks, mockRedisConstructor } from "../../setup/external-mocks.js";
 
 const defaultConfig = { url: "redis://localhost:6379" };
 
@@ -28,6 +28,7 @@ const resetRedisClientMocks = () => {
   globalMocks.redisClient.pipeline.mockReset().mockImplementation(createPipeline);
   globalMocks.redisClient.multi.mockReset().mockImplementation(createPipeline);
   globalMocks.redisClient.status = "ready";
+  mockRedisConstructor.mock.calls = [];
 };
 
 const buildCache = async (config = defaultConfig) => {
@@ -43,6 +44,13 @@ describe("RedisCache", () => {
   test("should instantiate with provided url", async () => {
     const cache = await buildCache();
     expect(cache.options.url).toBe(defaultConfig.url);
+  });
+
+  test("should pass url as first argument to ioredis constructor", async () => {
+    await buildCache();
+    const constructorCalls = mockRedisConstructor.mock.calls;
+    expect(constructorCalls.length).toBeGreaterThan(0);
+    expect(constructorCalls[0][0]).toBe(defaultConfig.url);
   });
 
   test("should connect successfully", async () => {

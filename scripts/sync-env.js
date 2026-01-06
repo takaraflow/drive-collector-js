@@ -7,7 +7,7 @@ import { InfisicalSDK } from '@infisical/sdk';
 import dotenv from 'dotenv';
 
 // 加载现有 .env (如果存在) 用于降级检查
-dotenv.config();
+dotenv.config({ override: true });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -60,6 +60,7 @@ async function syncEnv() {
 
     const token = process.env.INFISICAL_TOKEN;
     const projectId = process.env.INFISICAL_PROJECT_ID;
+    let infisicalSynced = false;
 
     // 尝试从 Infisical 拉取
     if (token && projectId) {
@@ -97,6 +98,7 @@ async function syncEnv() {
                 // 验证
                 if (validateVariables(secretsMap, 'Infisical')) {
                     fs.writeFileSync(envPath, envContent);
+                    infisicalSynced = true;
                     console.log(`✅ 已更新 .env 文件`);
                 } else {
                     if (STRICT_SYNC) process.exit(1);
@@ -116,6 +118,11 @@ async function syncEnv() {
             console.error('❌ 严格模式下必须提供 Infisical 凭证');
             process.exit(1);
         }
+    }
+
+    if (infisicalSynced) {
+        console.log('? 使用 Infisical 变量继续');
+        return;
     }
 
     // 降级逻辑: 检查本地缓存或系统变量

@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 // 立即执行 dotenv 确保凭证可用
-dotenv.config();
+const shouldOverrideEnv = process.env.NODE_ENV !== 'test';
+dotenv.config({ override: shouldOverrideEnv });
 
 import { fetchInfisicalSecrets } from '../services/InfisicalClient.js';
 import { mapNodeEnvToInfisicalEnv } from '../utils/envMapper.js';

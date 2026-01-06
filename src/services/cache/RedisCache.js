@@ -22,9 +22,13 @@ class RedisCache extends BaseCache {
         
         console.log('[RedisCache] Constructor called with:', config);
         
-        // Initialize ioredis instance with the config directly
-        // This ensures the mock receives the exact same config object
-        this.client = new Redis(config);
+        // Initialize ioredis instance with URL parsing support
+        if (config?.url) {
+            const { url, ...redisOptions } = config;
+            this.client = new Redis(url, redisOptions);
+        } else {
+            this.client = new Redis(config);
+        }
         
         console.log('[RedisCache] Client created:', typeof this.client, this.client);
         
