@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.10.0](https://github.com/YoungSx/drive-collector-js/compare/v4.9.1...v4.10.0) (2026-01-06)
+
+
+### ♻️ 代码重构
+
+*  CacheService test mocks and improve test coverage ([c71968a](https://github.com/YoungSx/drive-collector-js/commit/c71968ac05b8aec551a038e5fb3664930f2cbdf4))
+* cache provider implementations to improve testability and reliability ([e009f2f](https://github.com/YoungSx/drive-collector-js/commit/e009f2fb136c727eb9b87b186c0131e17eb66980))
+* refactor Cache and implement multi-provider cache system with L1/L2 architecture ([79566f2](https://github.com/YoungSx/drive-collector-js/commit/79566f2d2ab4490a275f40891c60be6fb223b132))
+
+
+### ✅ 测试相关
+
+* Iimproves test reliability and maintainability ([7050d74](https://github.com/YoungSx/drive-collector-js/commit/7050d741298b821fc8e15a6a3da354b5074edf1c))
+
+
+### 🐛 问题修复
+
+* enhances configuration logging with cache provider details ([f89b4e6](https://github.com/YoungSx/drive-collector-js/commit/f89b4e6a0d29599f125998f21f065c7d9a0ff574))
+* improves error handling for Telegram startup failures ([ef775bc](https://github.com/YoungSx/drive-collector-js/commit/ef775bcc5b8148fd27a1b0ca509f82112ce1721a))
+* improves Redis connection handling and status checks ([55fb6e2](https://github.com/YoungSx/drive-collector-js/commit/55fb6e236e51aba4775240ea4d41ca404492ea47))
+* improves Redis URL construction with username/password support ([eb6b925](https://github.com/YoungSx/drive-collector-js/commit/eb6b9258d0e606d2d36bf23fde02578f0b61dca3))
+
+
+### ✨ 新特性
+
+* adds health check endpoint ([d9ad6e5](https://github.com/YoungSx/drive-collector-js/commit/d9ad6e5f8b24ac227a62b4d700dd97022cb81239))
+
 ### [4.9.1](https://github.com/YoungSx/drive-collector-js/compare/v4.9.0...v4.9.1) (2026-01-05)
 
 
