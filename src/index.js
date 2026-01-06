@@ -184,6 +184,29 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
   }
 }
 
+function normalizeEpochMillis(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return null;
+  if (value < 1e12) {
+    return value * 1000;
+  }
+  return value;
+}
+
+function normalizeHeartbeat(rawValue) {
+  if (rawValue === null || rawValue === undefined) return null;
+  if (rawValue instanceof Date) return rawValue.getTime();
+  if (typeof rawValue === 'number') return normalizeEpochMillis(rawValue);
+  if (typeof rawValue === 'string') {
+    const trimmed = rawValue.trim();
+    if (!trimmed) return null;
+    const numeric = Number(trimmed);
+    if (!Number.isNaN(numeric)) return normalizeEpochMillis(numeric);
+    const parsed = Date.parse(trimmed);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return null;
+}
+
 /**
  * 解析实例数据
  */
@@ -191,16 +214,26 @@ function parseInstanceData(data) {
   if (!data) return null;
   
   try {
-    if (typeof data === 'string') {
-      data = JSON.parse(data);
+    let parsed = safeJsonParse(data, 'instance');
+    if (!parsed) return null;
+    if (parsed && typeof parsed === 'object' && parsed.value !== undefined) {
+      const inner = safeJsonParse(parsed.value, 'instance.value');
+      if (inner) {
+        parsed = inner;
+      }
     }
+
+    const lastHeartbeat = normalizeHeartbeat(parsed.lastHeartbeat ?? parsed.startedAt);
+    const startedAt = normalizeHeartbeat(parsed.startedAt);
     
     return {
-      id: data.id,
-      url: data.url,
-      status: data.status || 'active',
-      lastHeartbeat: data.lastHeartbeat || Date.now(),
-      region: data.region || 'unknown'
+      id: parsed.id,
+      url: parsed.url,
+      hostname: parsed.hostname,
+      status: parsed.status || 'active',
+      lastHeartbeat: lastHeartbeat ?? Date.now(),
+      startedAt,
+      region: parsed.region || 'unknown'
     };
   } catch (e) {
     return null;

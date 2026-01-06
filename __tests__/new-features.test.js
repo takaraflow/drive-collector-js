@@ -539,7 +539,7 @@ describe('任务调度失败处理优化测试', () => {
      });
    });
  
-    describe('getActiveInstances - No Active Instances Handling', () => {
+  describe('getActiveInstances - No Active Instances Handling', () => {
      it('should_return_empty_array_when_no_active_instances', async () => {
        mockKV.list.mockResolvedValue({ keys: [] });
  
@@ -547,11 +547,11 @@ describe('任务调度失败处理优化测试', () => {
        expect(result).toEqual([]);
      });
  
-     it('should_return_empty_array_when_all_instances_expired', async () => {
-       const now = Date.now();
-       mockKV.list.mockResolvedValue({
-         keys: [{ name: 'instance:1' }, { name: 'instance:2' }]
-       });
+    it('should_return_empty_array_when_all_instances_expired', async () => {
+      const now = Date.now();
+      mockKV.list.mockResolvedValue({
+        keys: [{ name: 'instance:1' }, { name: 'instance:2' }]
+      });
  
        mockKV.get.mockImplementation((key) => {
          return Promise.resolve({
@@ -562,10 +562,60 @@ describe('任务调度失败处理优化测试', () => {
          });
        });
  
-       const result = await getActiveInstances(mockEnv, {});
-       expect(result).toEqual([]);
+      const result = await getActiveInstances(mockEnv, {});
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('getActiveInstances - Heartbeat Parsing', () => {
+   it('should_accept_iso_lastHeartbeat_string', async () => {
+     const now = new Date();
+     mockKV.list.mockImplementation(async (options) => {
+       if (options && options.prefix) {
+         if (options.prefix.startsWith('instance:')) {
+           return { keys: [{ name: 'instance:1' }] };
+         }
+         return { keys: [] };
+       }
+       return { keys: [] };
      });
+
+     mockKV.get.mockResolvedValue(JSON.stringify({
+       id: '1',
+       url: 'https://instance1.com',
+       status: 'active',
+       lastHeartbeat: now.toISOString(),
+     }));
+
+     const result = await getActiveInstances(mockEnv, {});
+     expect(result.length).toBe(1);
+     expect(result[0].id).toBe('1');
    });
+
+   it('should_accept_epoch_seconds_lastHeartbeat', async () => {
+     const nowSeconds = Math.floor(Date.now() / 1000);
+     mockKV.list.mockImplementation(async (options) => {
+       if (options && options.prefix) {
+         if (options.prefix.startsWith('instance:')) {
+           return { keys: [{ name: 'instance:1' }] };
+         }
+         return { keys: [] };
+       }
+       return { keys: [] };
+     });
+
+     mockKV.get.mockResolvedValue(JSON.stringify({
+       id: '1',
+       url: 'https://instance1.com',
+       status: 'active',
+       lastHeartbeat: nowSeconds,
+     }));
+
+     const result = await getActiveInstances(mockEnv, {});
+     expect(result.length).toBe(1);
+     expect(result[0].id).toBe('1');
+   });
+  });
  
     describe('QStash 元数据记录', () => {
      it('应该在无活跃实例时记录 QStash 元数据到日志', async () => {
