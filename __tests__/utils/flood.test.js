@@ -31,11 +31,13 @@ describe('Limiter 429 & FloodWait Handling', () => {
 
     it('should handle 429 errors with retry', async () => {
         let callCount = 0;
+        const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
         const mockTask = jest.fn().mockImplementation(() => {
             callCount++;
             if (callCount === 1) {
                 const err = new Error('FloodWait');
                 err.code = 429;
+                err.retryAfter = 1;
                 throw err;
             }
             return 'success';
@@ -47,12 +49,13 @@ describe('Limiter 429 & FloodWait Handling', () => {
         const promise = handle429Error(mockTask, 10);
         
         // Advance time for retry
-        await jest.advanceTimersByTimeAsync(5000);
+        await jest.advanceTimersByTimeAsync(1000);
         
         const result = await promise;
         expect(result).toBe('success');
         expect(callCount).toBe(2);
         
         jest.useRealTimers();
+        randomSpy.mockRestore();
     });
 });

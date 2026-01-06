@@ -172,4 +172,12 @@ export function getConfig() {
     return config;
 }
 
+export function __resetConfigForTests() {
+    if (process.env.NODE_ENV !== 'test') {
+        return;
+    }
+    config = null;
+    isInitialized = false;
+}
+
 export { config };

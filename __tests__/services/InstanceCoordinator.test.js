@@ -214,18 +214,21 @@ describe("InstanceCoordinator", () => {
     });
 
     test("should fail to acquire lock when already held by another instance", async () => {
+      const expectedTime = 1234567890;
+      const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
       const existingLock = {
         instanceId: "other_instance",
-        acquiredAt: Date.now(),
+        acquiredAt: expectedTime,
         ttl: 300,
       };
 
       const originalGet = cache.get;
       cache.get = jest.fn().mockResolvedValue(existingLock);
 
-      const result = await instanceCoordinator.acquireLock("test_lock");
+      const result = await instanceCoordinator.acquireLock("test_lock", 300, { maxAttempts: 1 });
       expect(result).toBe(false);
 
+      dateSpy.mockRestore();
       cache.get = originalGet;
     });
 
@@ -311,6 +314,8 @@ describe("InstanceCoordinator", () => {
     });
 
     test("should fail when double-check verification fails (race condition)", async () => {
+      const expectedTime = 1234567890;
+      const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
       const originalGet = cache.get;
       const originalSet = cache.set;
       
@@ -322,16 +327,17 @@ describe("InstanceCoordinator", () => {
         } else {
           return Promise.resolve({    // Second call - verification shows race condition
             instanceId: "other_instance", // Different instance!
-            acquiredAt: Date.now(),
+            acquiredAt: expectedTime,
             ttl: 300
           });
         }
       });
       cache.set = jest.fn().mockResolvedValue(true);
 
-      const result = await instanceCoordinator.acquireLock("test_lock");
+      const result = await instanceCoordinator.acquireLock("test_lock", 300, { maxAttempts: 1 });
       expect(result).toBe(false); // Should fail due to race condition
 
+      dateSpy.mockRestore();
       cache.get = originalGet;
       cache.set = originalSet;
     });
@@ -478,49 +484,38 @@ describe("InstanceCoordinator", () => {
 
   describe("broadcast", () => {
     test("should broadcast system event with sourceInstance and timestamp", async () => {
-      // Mock qstashService.broadcastSystemEvent
-      const mockBroadcastSystemEvent = jest.fn().mockImplementation(() => Promise.resolve());
-      jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
-        qstashService: {
-          broadcastSystemEvent: mockBroadcastSystemEvent
-        }
-      }));
+      const expectedTime = 1234567890;
+      const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
+      const { qstashService } = await import("../../src/services/QStashService.js");
+      const broadcastSpy = jest.spyOn(qstashService, "broadcastSystemEvent").mockResolvedValue(undefined);
 
-      // Re-import to get updated mock
-      jest.resetModules();
-      const { instanceCoordinator: newIC } = await import("../../src/services/InstanceCoordinator.js");
+      await instanceCoordinator.broadcast("instance_started", { nodeType: "dispatcher" });
 
-      await newIC.broadcast("instance_started", { nodeType: "dispatcher" });
-
-      expect(mockBroadcastSystemEvent).toHaveBeenCalledWith("instance_started", {
+      expect(broadcastSpy).toHaveBeenCalledWith("instance_started", {
         nodeType: "dispatcher",
-        sourceInstance: newIC.instanceId,
-        timestamp: expect.any(Number)
+        sourceInstance: instanceCoordinator.instanceId,
+        timestamp: expectedTime
       });
+      broadcastSpy.mockRestore();
+      dateSpy.mockRestore();
     });
 
     test("should handle broadcast failure gracefully", async () => {
-        // Mock qstashService.broadcastSystemEvent to throw
-        const mockBroadcastSystemEvent = jest.fn().mockImplementation(() => Promise.reject(new Error("QStash error")));
-        jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
-            qstashService: {
-                broadcastSystemEvent: mockBroadcastSystemEvent
-            }
-        }));
+        const expectedTime = 1234567890;
+        const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
+        const { qstashService } = await import("../../src/services/QStashService.js");
+        const broadcastSpy = jest.spyOn(qstashService, "broadcastSystemEvent").mockRejectedValue(new Error("QStash error"));
 
-        // Re-import to get updated mock
-        jest.resetModules();
-        const { instanceCoordinator: newIC } = await import("../../src/services/InstanceCoordinator.js");
-        const { default: logger } = await import("../../src/services/logger.js");
+        await instanceCoordinator.broadcast("instance_failed", { error: "test" });
 
-        await newIC.broadcast("instance_failed", { error: "test" });
-
-        expect(mockBroadcastSystemEvent).toHaveBeenCalled();
+        expect(broadcastSpy).toHaveBeenCalled();
         // Check for either [memory] or [MemoryCache] format
-        expect(logger.error).toHaveBeenCalledWith(
-          expect.stringContaining("❌ 广播事件失败 instance_failed:"),
+        expect(mockLogger.error).toHaveBeenCalledWith(
+          expect.stringContaining("广播事件失败 instance_failed:"),
           expect.anything()
         );
+        broadcastSpy.mockRestore();
+        dateSpy.mockRestore();
     });
   });
 
@@ -647,3 +642,4 @@ describe("InstanceCoordinator", () => {
       });
   });
 });
+

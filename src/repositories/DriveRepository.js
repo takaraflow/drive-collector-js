@@ -264,6 +264,9 @@ export class DriveRepository {
             const activeIds = [];
 
             for (const key of keys) {
+                if (key.startsWith('drive_id:')) {
+                    continue;
+                }
                 const drive = await cache.get(key, "json");
                 if (drive && drive.id) {
                     activeIds.push(drive.id);

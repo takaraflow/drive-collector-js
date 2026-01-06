@@ -315,6 +315,7 @@ describe("Dispatcher", () => {
     });
 
     test("should handle files callbacks", async () => {
+      jest.useFakeTimers();
       const event = new Api.UpdateBotCallbackQuery({
         data: Buffer.from("files_page_0"),
         userId: BigInt(123),
@@ -323,9 +324,12 @@ describe("Dispatcher", () => {
         msgId: 456,
       });
 
-      await Dispatcher._handleCallback(event, { userId: "123" });
+      const callbackPromise = Dispatcher._handleCallback(event, { userId: "123" });
+      await jest.advanceTimersByTimeAsync(50);
+      await callbackPromise;
       expect(mockCloudTool.listRemoteFiles).toHaveBeenCalledWith("123", false);
       expect(mockUIHelper.renderFilesPage).toHaveBeenCalled();
+      jest.useRealTimers();
     });
 
     test("should handle diagnosis_run callback", async () => {

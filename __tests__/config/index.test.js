@@ -1,12 +1,10 @@
-import { jest, describe, test, expect, beforeAll, afterAll } from "@jest/globals";
+import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 
 // Store original process.env
 const originalEnv = process.env;
 
 describe("Config Module", () => {
   beforeAll(() => {
-    // Reset modules to ensure config is reloaded
-    jest.resetModules();
     // Set up mock environment variables
     process.env = {
       ...originalEnv,
@@ -32,7 +30,8 @@ describe("Config Module", () => {
 
   test("should have the required config object and properties", async () => {
     // Dynamically import the module to use the mocked env
-    const { initConfig } = await import("../../src/config/index.js");
+    const { initConfig, __resetConfigForTests } = await import("../../src/config/index.js");
+    __resetConfigForTests();
     const config = await initConfig();
     expect(config).toBeDefined();
     expect(typeof config).toBe("object");
@@ -67,9 +66,9 @@ describe("Config Module", () => {
     // Test case 1: rediss:// URL with TLS disabled
     process.env.NF_REDIS_URL = "rediss://user:pass@redis.example.com:6379";
     process.env.REDIS_TLS_ENABLED = "false";
-    jest.resetModules();
     
-    const { initConfig } = await import("../../src/config/index.js");
+    const { initConfig, __resetConfigForTests } = await import("../../src/config/index.js");
+    __resetConfigForTests();
     const config1 = await initConfig();
     expect(config1.redis.tls.enabled).toBe(false);
     
@@ -81,9 +80,9 @@ describe("Config Module", () => {
   test("should enable TLS for rediss:// URL when not explicitly disabled", async () => {
     // Test case 2: rediss:// URL without TLS disabled
     process.env.NF_REDIS_URL = "rediss://user:pass@redis.example.com:6379";
-    jest.resetModules();
     
-    const { initConfig } = await import("../../src/config/index.js");
+    const { initConfig, __resetConfigForTests } = await import("../../src/config/index.js");
+    __resetConfigForTests();
     const config2 = await initConfig();
     expect(config2.redis.tls.enabled).toBe(true);
     
@@ -95,9 +94,9 @@ describe("Config Module", () => {
     // Test case 3: NF_REDIS_TLS_ENABLED=false
     process.env.NF_REDIS_URL = "rediss://user:pass@redis.example.com:6379";
     process.env.NF_REDIS_TLS_ENABLED = "false";
-    jest.resetModules();
     
-    const { initConfig } = await import("../../src/config/index.js");
+    const { initConfig, __resetConfigForTests } = await import("../../src/config/index.js");
+    __resetConfigForTests();
     const config3 = await initConfig();
     expect(config3.redis.tls.enabled).toBe(false);
     
@@ -109,9 +108,9 @@ describe("Config Module", () => {
   test("should use REDIS_TOKEN when password is not provided in URL", async () => {
     process.env.REDIS_URL = "redis://redis.example.com:6379";
     process.env.REDIS_TOKEN = "test_token_123";
-    jest.resetModules();
 
-    const { initConfig, getRedisConnectionConfig } = await import("../../src/config/index.js");
+    const { initConfig, getRedisConnectionConfig, __resetConfigForTests } = await import("../../src/config/index.js");
+    __resetConfigForTests();
     await initConfig();
     const { options } = getRedisConnectionConfig();
     expect(options.password).toBe("test_token_123");
@@ -124,9 +123,9 @@ describe("Config Module", () => {
   test("should use UPSTASH_REDIS_REST_TOKEN as fallback for Redis password", async () => {
     process.env.REDIS_URL = "redis://redis.example.com:6379";
     process.env.UPSTASH_REDIS_REST_TOKEN = "upstash_token_123";
-    jest.resetModules();
 
-    const { initConfig, getRedisConnectionConfig } = await import("../../src/config/index.js");
+    const { initConfig, getRedisConnectionConfig, __resetConfigForTests } = await import("../../src/config/index.js");
+    __resetConfigForTests();
     await initConfig();
     const { options } = getRedisConnectionConfig();
     expect(options.password).toBe("upstash_token_123");
@@ -140,9 +139,9 @@ describe("Config Module", () => {
     process.env.REDIS_URL = "redis://redis.example.com:6379";
     process.env.REDIS_TOKEN = "priority_token";
     process.env.UPSTASH_REDIS_REST_TOKEN = "upstash_token_123";
-    jest.resetModules();
 
-    const { initConfig, getRedisConnectionConfig } = await import("../../src/config/index.js");
+    const { initConfig, getRedisConnectionConfig, __resetConfigForTests } = await import("../../src/config/index.js");
+    __resetConfigForTests();
     await initConfig();
     const { options } = getRedisConnectionConfig();
     expect(options.password).toBe("priority_token");

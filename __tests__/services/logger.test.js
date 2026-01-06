@@ -22,6 +22,7 @@ describe('Logger Service', () => {
   beforeEach(async () => {
     // Set environment for tests
     process.env.DEBUG = 'true';
+    process.env.APP_VERSION = 'test-version';
     jest.useFakeTimers('modern');
 
     // Spy on console methods BEFORE resetting modules, so logger.js captures the spied versions
@@ -61,6 +62,7 @@ describe('Logger Service', () => {
     delete process.env.AXIOM_TOKEN;
     delete process.env.AXIOM_ORG_ID;
     delete process.env.AXIOM_DATASET;
+    delete process.env.APP_VERSION;
     jest.runAllTimers();
     jest.useRealTimers();
     jest.restoreAllMocks();
