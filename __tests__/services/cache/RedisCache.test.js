@@ -21,6 +21,10 @@ const resetRedisClientMocks = () => {
   globalMocks.redisClient.get.mockReset().mockResolvedValue(null);
   globalMocks.redisClient.set.mockReset().mockResolvedValue("OK");
   globalMocks.redisClient.del.mockReset().mockResolvedValue(1);
+  globalMocks.redisClient.exists.mockReset().mockResolvedValue(0);
+  globalMocks.redisClient.incr.mockReset().mockResolvedValue(1);
+  globalMocks.redisClient.eval.mockReset().mockResolvedValue(1);
+  globalMocks.redisClient.scan.mockReset().mockResolvedValue(['0', []]);
   globalMocks.redisClient.on.mockReset().mockReturnThis();
   globalMocks.redisClient.once.mockReset().mockReturnThis();
   globalMocks.redisClient.removeListener.mockReset().mockReturnThis();
@@ -129,6 +133,81 @@ describe("RedisCache", () => {
 
     expect(globalMocks.redisClient.del).toHaveBeenCalledWith("key");
     expect(result).toBe(true);
+  });
+
+  test("should check existence", async () => {
+    globalMocks.redisClient.exists.mockResolvedValueOnce(1);
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    const result = await cache.exists("key");
+
+    expect(globalMocks.redisClient.exists).toHaveBeenCalledWith("key");
+    expect(result).toBe(true);
+  });
+
+  test("should increment value", async () => {
+    globalMocks.redisClient.incr.mockResolvedValueOnce(5);
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    const result = await cache.incr("counter");
+
+    expect(globalMocks.redisClient.incr).toHaveBeenCalledWith("counter");
+    expect(result).toBe(5);
+  });
+
+  test("should acquire lock", async () => {
+    globalMocks.redisClient.set.mockResolvedValueOnce("OK");
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    const result = await cache.lock("lock:key", 30);
+
+    expect(globalMocks.redisClient.set).toHaveBeenCalledWith("lock:key", 1, "NX", "PX", 30000);
+    expect(result).toBe(true);
+  });
+
+  test("should release lock", async () => {
+    globalMocks.redisClient.eval.mockResolvedValueOnce(1);
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    const result = await cache.unlock("lock:key");
+
+    expect(globalMocks.redisClient.eval).toHaveBeenCalled();
+    expect(result).toBe(true);
+  });
+
+  test("should list keys by prefix using scan", async () => {
+    globalMocks.redisClient.scan
+      .mockResolvedValueOnce(["1", ["instance:one"]])
+      .mockResolvedValueOnce(["0", ["instance:two"]]);
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    const result = await cache.listKeys("instance:");
+
+    expect(globalMocks.redisClient.scan).toHaveBeenCalledWith("0", "MATCH", "instance:*", "COUNT", 200);
+    expect(result).toEqual(["instance:one", "instance:two"]);
+  });
+
+  test("should respect listKeys limit", async () => {
+    globalMocks.redisClient.scan
+      .mockResolvedValueOnce(["1", ["instance:one", "instance:two"]])
+      .mockResolvedValueOnce(["0", ["instance:three"]]);
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    const result = await cache.listKeys("instance:", 2);
+
+    expect(result).toEqual(["instance:one", "instance:two"]);
   });
 
   test("should disconnect and flip connection flag", async () => {

@@ -167,6 +167,23 @@ class BaseCache {
     }
 
     /**
+     * List keys with optional prefix filter
+     * @param {string} prefix - Key prefix filter
+     * @param {number} limit - Max keys to return
+     * @returns {Promise<string[]>} - Array of keys
+     * @throws {Error} - If not connected or not implemented
+     */
+    async listKeys(prefix = '', limit = 1000) {
+        if (!this.connected) {
+            throw new Error('Not connected');
+        }
+        if (this._listKeys) {
+            return await this._listKeys(prefix, limit);
+        }
+        throw new Error('Not implemented');
+    }
+
+    /**
      * Get current provider name
      * @returns {string} - Provider name
      */

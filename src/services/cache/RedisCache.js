@@ -271,6 +271,39 @@ class RedisCache extends BaseCache {
     }
 
     /**
+     * List keys with optional prefix filter
+     * Uses SCAN to avoid blocking Redis with KEYS
+     * @param {string} prefix - Key prefix filter
+     * @param {number} limit - Max keys to return
+     * @returns {Promise<string[]>} - Array of keys
+     */
+    async listKeys(prefix = '', limit = 1000) {
+        try {
+            const pattern = prefix ? `${prefix}*` : '*';
+            const keys = [];
+            let cursor = '0';
+            const count = 200;
+
+            do {
+                const result = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', count);
+                cursor = result[0];
+                const batch = result[1] || [];
+                if (batch.length > 0) {
+                    keys.push(...batch);
+                    if (limit && keys.length >= limit) {
+                        return keys.slice(0, limit);
+                    }
+                }
+            } while (cursor !== '0');
+
+            return keys;
+        } catch (error) {
+            console.error('[RedisCache] ListKeys error:', error.message);
+            throw error;
+        }
+    }
+
+    /**
      * Get current provider name
      * @returns {string} - Provider name
      */

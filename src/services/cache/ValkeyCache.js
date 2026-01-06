@@ -129,6 +129,80 @@ class ValkeyCache extends BaseCache {
         }
     }
 
+    async exists(key) {
+        this._checkReady();
+        try {
+            const result = await this.client.exists(key);
+            return result === 1;
+        } catch (error) {
+            throw new Error(`Valkey exists error: ${error.message}`);
+        }
+    }
+
+    async incr(key) {
+        this._checkReady();
+        try {
+            const result = await this.client.incr(key);
+            return result;
+        } catch (error) {
+            throw new Error(`Valkey incr error: ${error.message}`);
+        }
+    }
+
+    async lock(key, ttl = 60) {
+        this._checkReady();
+        try {
+            const ttlMs = ttl * 1000;
+            const result = await this.client.set(key, 1, 'NX', 'PX', ttlMs);
+            return result === 'OK';
+        } catch (error) {
+            throw new Error(`Valkey lock error: ${error.message}`);
+        }
+    }
+
+    async unlock(key) {
+        this._checkReady();
+        try {
+            const luaScript = `
+                if redis.call("get", KEYS[1]) == "1" then
+                    return redis.call("del", KEYS[1])
+                else
+                    return 0
+                end
+            `;
+            const result = await this.client.eval(luaScript, 1, key);
+            return result === 1;
+        } catch (error) {
+            throw new Error(`Valkey unlock error: ${error.message}`);
+        }
+    }
+
+    async listKeys(prefix = '', limit = 1000) {
+        this._checkReady();
+        try {
+            const pattern = prefix ? `${prefix}*` : '*';
+            const keys = [];
+            let cursor = '0';
+            const count = 200;
+
+            do {
+                const result = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', count);
+                cursor = result[0];
+                const batch = result[1] || [];
+                if (batch.length > 0) {
+                    keys.push(...batch);
+                    if (limit && keys.length >= limit) {
+                        return keys.slice(0, limit);
+                    }
+                }
+            } while (cursor !== '0');
+
+            return keys;
+        } catch (error) {
+            throw new Error(`Valkey listKeys error: ${error.message}`);
+        }
+    }
+
     async clear() {
         this._checkReady();
         try {
