@@ -2,7 +2,9 @@ import { trace, context } from '@opentelemetry/api';
 
 // 全局类型定义（解决 TypeScript 警告）
 /** @type {string} */
-const __VERSION__ = typeof globalThis.__VERSION__ !== 'undefined' ? globalThis.__VERSION__ : 'dev';
+// 避免 esbuild 替换导致的 variable shadowing 问题
+const __VERSION__ = (typeof globalThis !== 'undefined' && globalThis.__VERSION__) || 'dev';
+
 /** @type {any} */
 const jest = typeof globalThis.jest !== 'undefined' ? globalThis.jest : undefined;
 
