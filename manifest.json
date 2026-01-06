@@ -6,11 +6,17 @@
   "description": "基于 JSON Schema 契约中心的分布式转存项目，支持 Telegram 媒体转存至 Rclone/S3。",
   "type": "worker",
   "capabilities": [
+    "telegram-bot",
     "distributed-task-scheduling",
     "multi-instance-locking",
     "instance-registration",
+    "qstash-webhook",
+    "d1-storage",
+    "cache-failover",
     "rclone-integration",
-    "s3-transfer"
+    "s3-transfer",
+    "sec-transfer",
+    "diagnosis-reporting"
   ],
   "behaviors": {
     "telegramHandler": {
@@ -65,13 +71,26 @@
           "taskId": {
             "type": "string"
           },
+          "groupId": {
+            "type": "string"
+          },
+          "taskIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "type": {
             "type": "string",
             "enum": [
               "download",
               "upload",
-              "batch"
+              "batch",
+              "system-event"
             ]
+          },
+          "event": {
+            "type": "string"
           },
           "payload": {
             "type": "object"
@@ -81,15 +100,14 @@
           }
         },
         "required": [
-          "taskId",
-          "type",
-          "payload"
+          "type"
         ]
       },
       "endpoints": {
-        "download": "/api/tasks/download",
-        "upload": "/api/tasks/upload",
-        "batch": "/api/tasks/media-batch"
+        "download": "/api/tasks/download-tasks",
+        "upload": "/api/tasks/upload-tasks",
+        "batch": "/api/tasks/media-batch",
+        "systemEvents": "/api/tasks/system-events"
       },
       "locking": {
         "mechanism": "cache",
@@ -101,7 +119,8 @@
         "TaskManager",
         "QStashService",
         "D1",
-        "Cache"
+        "Cache",
+        "InstanceCoordinator"
       ],
       "reliability": {
         "retry": "qstash-default",
@@ -250,8 +269,8 @@
         "release": "delete",
         "renew": "update-ttl"
       },
-      "conflictResolution": "last-write-wins-with-version-check",
-      "description": "基于 Cache 的原子操作实现分布式锁，支持锁续约、自动过期与版本冲突检测"
+      "conflictResolution": "last-write-wins-with-verify-read",
+      "description": "基于 Cache 的原子操作实现分布式锁，支持锁续约、自动过期与写后校验"
     },
     "valueSchema": {
       "instance": {
@@ -285,7 +304,6 @@
         },
         "required": [
           "id",
-          "url",
           "hostname",
           "startedAt",
           "lastHeartbeat",
@@ -303,16 +321,12 @@
           },
           "ttl": {
             "type": "number"
-          },
-          "version": {
-            "type": "number"
           }
         },
         "required": [
           "instanceId",
           "acquiredAt",
-          "ttl",
-          "version"
+          "ttl"
         ]
       }
     },
@@ -359,15 +373,65 @@
         "required": true,
         "description": "Admin User ID"
       },
+      "NODE_ENV": {
+        "type": "string",
+        "required": false,
+        "description": "Node.js runtime environment (development/production/test)"
+      },
+      "NODE_MODE": {
+        "type": "string",
+        "required": false,
+        "description": "Application mode (bot/dev/etc.)"
+      },
+      "APP_VERSION": {
+        "type": "string",
+        "required": false,
+        "description": "Application version override for logging"
+      },
+      "INSTANCE_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Instance ID override for multi-instance coordination"
+      },
+      "APP_EXTERNAL_URL": {
+        "type": "string",
+        "required": false,
+        "description": "External URL for load balancer routing"
+      },
+      "HOSTNAME": {
+        "type": "string",
+        "required": false,
+        "description": "Hostname identifier for instance metadata"
+      },
+      "CF_REGION": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare region identifier for instance metadata"
+      },
       "QSTASH_TOKEN": {
         "type": "string",
         "required": true,
         "description": "Upstash QStash Token"
       },
+      "QSTASH_AUTH_TOKEN": {
+        "type": "string",
+        "required": false,
+        "description": "Upstash QStash auth token (legacy publishing token)"
+      },
       "QSTASH_URL": {
         "type": "string",
         "required": true,
         "description": "QStash API 地址"
+      },
+      "QSTASH_CURRENT_SIGNING_KEY": {
+        "type": "string",
+        "required": false,
+        "description": "QStash Webhook current signing key"
+      },
+      "QSTASH_NEXT_SIGNING_KEY": {
+        "type": "string",
+        "required": false,
+        "description": "QStash Webhook next signing key"
       },
       "LB_WEBHOOK_URL": {
         "type": "string",
@@ -438,6 +502,26 @@
         "type": "string",
         "required": false,
         "description": "Axiom dataset name"
+      },
+      "CF_D1_ACCOUNT_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare D1 account ID"
+      },
+      "CF_D1_DATABASE_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare D1 database ID"
+      },
+      "CF_D1_TOKEN": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare D1 API token"
+      },
+      "CF_ACCOUNT_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare account ID (fallback for KV/D1)"
       },
       "NF_REDIS_URL": {
         "type": "string",
@@ -649,6 +733,55 @@
         "required": false,
         "description": "Telegram 代理服务器密码"
       },
+      "TG_DEVICE_MODEL": {
+        "type": "string",
+        "required": false,
+        "description": "Telegram client device model"
+      },
+      "TG_SYSTEM_VERSION": {
+        "type": "string",
+        "required": false,
+        "description": "Telegram client system version"
+      },
+      "TG_APP_VERSION": {
+        "type": "string",
+        "required": false,
+        "description": "Telegram client app version"
+      },
+      "TG_TEST_MODE": {
+        "type": "boolean",
+        "required": false,
+        "description": "Enable Telegram test mode"
+      },
+      "TG_PROXY_HOST": {
+        "type": "string",
+        "required": false,
+        "description": "Telegram proxy host (TG_* alias)"
+      },
+      "TG_PROXY_PORT": {
+        "type": "number",
+        "required": false,
+        "description": "Telegram proxy port (TG_* alias)"
+      },
+      "TG_PROXY_TYPE": {
+        "type": "string",
+        "required": false,
+        "enum": [
+          "socks4",
+          "socks5"
+        ],
+        "description": "Telegram proxy type (TG_* alias)"
+      },
+      "TG_PROXY_USERNAME": {
+        "type": "string",
+        "required": false,
+        "description": "Telegram proxy username (TG_* alias)"
+      },
+      "TG_PROXY_PASSWORD": {
+        "type": "string",
+        "required": false,
+        "description": "Telegram proxy password (TG_* alias)"
+      },
       "CACHE_PROVIDERS": {
         "type": "string",
         "required": false,
@@ -679,6 +812,16 @@
         "required": false,
         "description": "Valkey 数据库密码"
       },
+      "VALKEY_USER": {
+        "type": "string",
+        "required": false,
+        "description": "Valkey 数据库用户名 (Aiven)"
+      },
+      "VALKEY_CA_CERT": {
+        "type": "string",
+        "required": false,
+        "description": "Valkey CA 证书 (Aiven)"
+      },
       "VALKEY_TLS": {
         "type": "boolean",
         "default": false,
@@ -688,11 +831,55 @@
         "type": "number",
         "default": 0,
         "description": "Valkey 数据库索引"
+      },
+      "INFISICAL_CLIENT_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Infisical client ID"
+      },
+      "INFISICAL_CLIENT_SECRET": {
+        "type": "string",
+        "required": false,
+        "description": "Infisical client secret"
+      },
+      "INFISICAL_TOKEN": {
+        "type": "string",
+        "required": false,
+        "description": "Infisical access token"
+      },
+      "INFISICAL_PROJECT_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Infisical project ID"
+      },
+      "INFISICAL_ENV": {
+        "type": "string",
+        "required": false,
+        "description": "Infisical environment name"
+      },
+      "INFISICAL_SECRET_PATH": {
+        "type": "string",
+        "required": false,
+        "description": "Infisical secret path"
+      },
+      "STRICT_SYNC": {
+        "type": "boolean",
+        "required": false,
+        "description": "Infisical sync strict mode"
+      },
+      "SKIP_INFISICAL_RUNTIME": {
+        "type": "boolean",
+        "required": false,
+        "description": "Skip Infisical runtime fetch"
       }
     }
   },
   "endpoints": {
     "health": "/health",
-    "webhook": "/api/tasks"
+    "webhookBase": "/api/tasks",
+    "downloadTasks": "/api/tasks/download-tasks",
+    "uploadTasks": "/api/tasks/upload-tasks",
+    "mediaBatch": "/api/tasks/media-batch",
+    "systemEvents": "/api/tasks/system-events"
   }
 }
