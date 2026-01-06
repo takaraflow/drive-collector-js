@@ -75,7 +75,12 @@ class CacheService {
             // 3. Connect to the first available provider
             for (const providerEntry of this.providerList) {
                 try {
-                    await providerEntry.instance.connect();
+                    // Try connect() first, then initialize() as fallback
+                    if (typeof providerEntry.instance.connect === 'function') {
+                        await providerEntry.instance.connect();
+                    } else if (typeof providerEntry.instance.initialize === 'function') {
+                        await providerEntry.instance.initialize();
+                    }
                     this.primaryProvider = providerEntry.instance;
                     this.currentProviderName = providerEntry.instance.getProviderName();
                     this.isFailoverMode = false;
@@ -350,7 +355,7 @@ class CacheService {
         await this._ensureInitialized();
 
         // 1. Delete from L1
-        localCache.delete(key);
+        localCache.del(key);
 
         // 2. Delete from L2
         if (!this.primaryProvider) return true;
@@ -476,6 +481,29 @@ class CacheService {
             return this.primaryProvider.getConnectionInfo();
         }
         return { provider: this.currentProviderName };
+    }
+
+    /**
+     * List keys from the primary provider
+     * @param {string} prefix - Optional prefix filter
+     * @returns {Promise<string[]>} - Array of keys
+     */
+    async listKeys(prefix = '') {
+        await this._ensureInitialized();
+        
+        if (!this.primaryProvider) {
+            return [];
+        }
+
+        try {
+            if (typeof this.primaryProvider.listKeys === 'function') {
+                return await this.primaryProvider.listKeys(prefix);
+            }
+            return [];
+        } catch (error) {
+            logger.error(`[CacheService] ListKeys error: ${error.message}`);
+            return [];
+        }
     }
 
     /**
