@@ -54,6 +54,7 @@ class CacheService {
      */
     async initialize() {
         if (this.isInitialized) return;
+        this.isInitialized = true; // Set early to prevent re-entry
 
         try {
             // 1. Load and parse providers from environment

@@ -79,9 +79,25 @@ async function main() {
             try {
                 console.log('🔍 最终配置信息:');
                 const config = getConfig();
+                
+                // 附加 CacheProvider 信息
+                const { cache } = await import("./src/services/CacheService.js");
+                await cache.initialize();
+                
+                const finalConfig = {
+                    ...config,
+                    cache: {
+                        currentProvider: cache.getCurrentProvider(),
+                        allProviders: cache.providerList.map(p => ({
+                            name: p.config.name,
+                            type: p.config.type,
+                            priority: p.config.priority
+                        }))
+                    }
+                };
 
                 // 输出完整配置
-                console.log(JSON.stringify(config, null, 2));
+                console.log(JSON.stringify(finalConfig, null, 2));
             } catch (error) {
                 console.error('❌ 显示配置时出错:', error);
             } finally {
