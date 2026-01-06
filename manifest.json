@@ -648,6 +648,46 @@
         "type": "string",
         "required": false,
         "description": "Telegram 代理服务器密码"
+      },
+      "CACHE_PROVIDERS": {
+        "type": "string",
+        "required": false,
+        "description": "JSON 格式的缓存提供者配置数组，支持优先级和多实例配置。例如: [{\"type\":\"valkey\",\"priority\":1,\"host\":\"...\",\"port\":6379,\"name\":\"primary\"}]"
+      },
+      "PRIMARY_CACHE_PROVIDER": {
+        "type": "string",
+        "required": false,
+        "description": "强制指定某个配置的 name 作为主缓存提供者，用于覆盖优先级或故障转移后的选择"
+      },
+      "VALKEY_HOST": {
+        "type": "string",
+        "required": false,
+        "description": "Valkey 数据库主机地址 (自动检测为 Valkey 提供者)"
+      },
+      "VALKEY_PORT": {
+        "type": "number",
+        "default": 6379,
+        "description": "Valkey 数据库端口"
+      },
+      "VALKEY_URL": {
+        "type": "string",
+        "required": false,
+        "description": "Valkey 完整连接 URL (支持 redis:// 或 valkeys://)"
+      },
+      "VALKEY_PASSWORD": {
+        "type": "string",
+        "required": false,
+        "description": "Valkey 数据库密码"
+      },
+      "VALKEY_TLS": {
+        "type": "boolean",
+        "default": false,
+        "description": "启用 Valkey TLS 连接"
+      },
+      "VALKEY_DB": {
+        "type": "number",
+        "default": 0,
+        "description": "Valkey 数据库索引"
       }
     }
   },
