@@ -4,6 +4,8 @@ import { getConfig } from '../config/index.js';
 import { logger } from '../services/logger.js';
 import fs from 'fs';
 
+const log = logger.withModule ? logger.withModule('OSSHelper') : logger;
+
 /**
  * --- OSS 辅助工具 ---
  * 提供 S3 客户端初始化和分片上传功能
@@ -23,10 +25,10 @@ class OSSHelper {
         const config = getConfig();
         const ossConfig = config.oss;
 
-        logger.debug('OSS R2 Config:', { config: ossConfig });
+        log.debug('OSS R2 Config:', { config: ossConfig });
 
         if (!ossConfig?.endpoint || !ossConfig?.accessKeyId || !ossConfig?.secretAccessKey) {
-            logger.warn('⚠️ OSS Helper: R2 config incomplete, S3 client initialization skipped');
+            log.warn('⚠️ OSS Helper: R2 config incomplete, S3 client initialization skipped');
             this._initialized = true;
             return;
         }
@@ -40,7 +42,7 @@ class OSSHelper {
             },
         });
 
-        logger.info('✅ OSS Helper: S3 client initialized successfully');
+        log.info('✅ OSS Helper: S3 client initialized successfully');
         this._initialized = true;
     }
 
@@ -77,10 +79,10 @@ class OSSHelper {
 
         try {
             const result = await upload.done();
-            logger.info(`✅ S3 upload successful: ${remoteName}`);
+            log.info(`✅ S3 upload successful: ${remoteName}`);
             return result;
         } catch (error) {
-            logger.error(`🚨 S3 upload failed: ${remoteName}`, error);
+            log.error(`🚨 S3 upload failed: ${remoteName}`, error);
             throw error;
         }
     }

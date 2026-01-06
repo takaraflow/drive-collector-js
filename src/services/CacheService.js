@@ -27,6 +27,8 @@ import { ValkeyCache } from './cache/ValkeyCache.js';
 import { ValkeyTLSCache } from './cache/ValkeyTLSCache.js';
 import { AivenVTCache } from './cache/AivenVTCache.js';
 
+const log = logger.withModule ? logger.withModule('CacheService') : logger;
+
 class CacheService {
     constructor(options = {}) {
         this.env = options.env || process.env;
@@ -62,7 +64,7 @@ class CacheService {
             
             if (this.providerList.length === 0) {
                 // Fallback to legacy detection if JSON config is missing
-                logger.warn('[CacheService] No CACHE_PROVIDERS found. Falling back to legacy detection.');
+                log.warn('No CACHE_PROVIDERS found. Falling back to legacy detection.');
                 const legacyProvider = this._createProviderFromLegacyEnv();
                 if (legacyProvider) {
                     this.providerList.push({ instance: legacyProvider, config: { name: 'legacy' } });
@@ -85,22 +87,22 @@ class CacheService {
                     this.currentProviderName = providerEntry.instance.getProviderName();
                     this.isFailoverMode = false;
                     
-                    logger.info(`[CacheService] Connected to primary provider: ${this.currentProviderName} (${providerEntry.config.name})`);
+                    log.info(`Connected to primary provider: ${this.currentProviderName} (${providerEntry.config.name})`);
                     break; // Stop on first successful connection
                 } catch (error) {
-                    logger.error(`[CacheService] Failed to connect to ${providerEntry.config.name}: ${error.message}`);
+                    log.error(`Failed to connect to ${providerEntry.config.name}: ${error.message}`);
                     // Continue to next provider
                 }
             }
 
             if (!this.primaryProvider) {
                 this.currentProviderName = 'MemoryCache';
-                logger.warn('[CacheService] No external cache provider connected. Using MemoryCache (L1 only).');
+                log.warn('No external cache provider connected. Using MemoryCache (L1 only).');
             }
 
             this.isInitialized = true;
         } catch (error) {
-            logger.error(`[CacheService] Initialization failed: ${error.message}`);
+            log.error(`Initialization failed: ${error.message}`);
             this.isInitialized = true;
         }
     }
@@ -115,7 +117,7 @@ class CacheService {
 
         const configs = parseCacheConfig(providersJson);
         if (!Array.isArray(configs)) {
-            logger.error('[CacheService] CACHE_PROVIDERS must be a JSON array');
+            log.error('CACHE_PROVIDERS must be a JSON array');
             return [];
         }
 
@@ -124,7 +126,7 @@ class CacheService {
         for (const config of configs) {
             // Check for PRIMARY_CACHE_PROVIDER override
             if (this.env.PRIMARY_CACHE_PROVIDER && config.name !== this.env.PRIMARY_CACHE_PROVIDER) {
-                logger.info(`[CacheService] Skipping ${config.name} due to PRIMARY_CACHE_PROVIDER override`);
+                log.info(`Skipping ${config.name} due to PRIMARY_CACHE_PROVIDER override`);
                 continue;
             }
 
@@ -134,7 +136,7 @@ class CacheService {
                     instances.push({ instance, config });
                 }
             } catch (error) {
-                logger.error(`[CacheService] Failed to instantiate provider ${config.name}: ${error.message}`);
+                log.error(`Failed to instantiate provider ${config.name}: ${error.message}`);
             }
         }
 
@@ -150,13 +152,13 @@ class CacheService {
 
         // 1. Upstash / Redis HTTP
         if (type === 'upstash-rest' || (restUrl && restToken)) {
-            logger.info(`[CacheService] Instantiating UpstashRHCache for '${name}'`);
+            log.info(`Instantiating UpstashRHCache for '${name}'`);
             return new UpstashRHCache({ url: restUrl, token: restToken, name });
         }
 
         // 2. Cloudflare KV
         if (type === 'cloudflare-kv' || (config.accountId && config.namespaceId)) {
-            logger.info(`[CacheService] Instantiating CloudflareKVCache for '${name}'`);
+            log.info(`Instantiating CloudflareKVCache for '${name}'`);
             return new CloudflareKVCache({
                 accountId: config.accountId,
                 namespaceId: config.namespaceId,
@@ -186,7 +188,7 @@ class CacheService {
             // Log instantiation with name
             const providerName = isValkey ? 'Valkey' : 'Redis';
             const mode = isTls ? 'TLS' : 'TCP';
-            logger.info(`[CacheService] Instantiating ${providerName}${mode}Cache for '${name}'`);
+            log.info(`Instantiating ${providerName}${mode}Cache for '${name}'`);
 
             if (isTls) {
                 const tlsOptions = {
@@ -208,17 +210,17 @@ class CacheService {
 
         // 4. Northflank (Specialized Redis)
         if (type === 'northflank' || config.nfRedisUrl) {
-            logger.info(`[CacheService] Instantiating NorthFlankRTCache for '${name}'`);
+            log.info(`Instantiating NorthFlankRTCache for '${name}'`);
             return new NorthFlankRTCache({ url: config.nfRedisUrl, name });
         }
 
         // 5. Aiven Valkey (Auto-detect)
         if (type === 'aiven-valkey' || (host && port && name && name.toLowerCase().includes('aiven'))) {
-            logger.info(`[CacheService] Instantiating AivenVTCache for '${name}'`);
+            log.info(`Instantiating AivenVTCache for '${name}'`);
             return new AivenVTCache({ url: `redis://${host}:${port}`, name });
         }
 
-        logger.warn(`[CacheService] Unknown provider config: ${JSON.stringify(config)}`);
+        log.warn(`Unknown provider config: ${JSON.stringify(config)}`);
         return null;
     }
 
@@ -304,7 +306,7 @@ class CacheService {
             
             return value;
         } catch (error) {
-            logger.error(`[CacheService] Get error on ${this.currentProviderName}: ${error.message}`);
+            log.error(`Get error on ${this.currentProviderName}: ${error.message}`);
             await this._handleProviderFailure(error);
             
             // Retry with failover if available
@@ -335,7 +337,7 @@ class CacheService {
 
         // If in failover mode, don't attempt L2 writes (degrade to L1 only)
         if (this.isFailoverMode) {
-            logger.warn('[CacheService] In failover mode, skipping L2 write');
+            log.warn('In failover mode, skipping L2 write');
             return true; // L1 write succeeded
         }
 
@@ -345,7 +347,7 @@ class CacheService {
             if (!result) throw new Error('Provider returned false');
             return true;
         } catch (error) {
-            logger.error(`[CacheService] Set error on ${this.currentProviderName}: ${error.message}`);
+            log.error(`Set error on ${this.currentProviderName}: ${error.message}`);
             await this._handleProviderFailure(error);
             
             // Failover write?
@@ -378,7 +380,7 @@ class CacheService {
             await this.primaryProvider.delete(key);
             return true;
         } catch (error) {
-            logger.error(`[CacheService] Delete error: ${error.message}`);
+            log.error(`Delete error: ${error.message}`);
             await this._handleProviderFailure(error);
             return false;
         }
@@ -392,7 +394,7 @@ class CacheService {
         this.failureCount++;
 
         if (this.failureCount >= this.maxFailuresBeforeFailover && !this.isFailoverMode) {
-            logger.warn(`[CacheService] Max failures (${this.maxFailuresBeforeFailover}) reached. Triggering failover.`);
+            log.warn(`Max failures (${this.maxFailuresBeforeFailover}) reached. Triggering failover.`);
             await this._failover();
         }
     }
@@ -408,7 +410,7 @@ class CacheService {
         // In a complex system, we might scan for a secondary Redis URL (e.g., REDIS_URL_BACKUP)
         // For now, we degrade gracefully to Memory-only mode (L1).
         
-        logger.warn('[CacheService] Failover active. Degrading to Memory (L1) mode. External writes disabled.');
+        log.warn('Failover active. Degrading to Memory (L1) mode. External writes disabled.');
         
         // Start recovery check
         this._startRecoveryCheck();
@@ -424,7 +426,7 @@ class CacheService {
         this.recoveryTimer = setInterval(async () => {
             if (!this.isFailoverMode) return;
             
-            logger.info('[CacheService] Attempting recovery of primary provider...');
+            log.info('Attempting recovery of primary provider...');
             
             try {
                 // Attempt a simple ping or get
@@ -439,13 +441,13 @@ class CacheService {
                 }
 
                 // If we get here, it's alive
-                logger.info('[CacheService] Primary provider recovered!');
+                log.info('Primary provider recovered!');
                 this.isFailoverMode = false;
                 this.failureCount = 0;
                 clearInterval(this.recoveryTimer);
                 this.recoveryTimer = null;
             } catch (e) {
-                logger.debug('[CacheService] Recovery attempt failed.');
+                log.debug('Recovery attempt failed.');
             }
         }, 30000); // Check every 30 seconds
     }
@@ -515,7 +517,7 @@ class CacheService {
             }
             return [];
         } catch (error) {
-            logger.error(`[CacheService] ListKeys error: ${error.message}`);
+            log.error(`ListKeys error: ${error.message}`);
             return [];
         }
     }

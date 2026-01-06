@@ -4,6 +4,8 @@ import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { logger } from "../services/logger.js";
 import { config } from "../config/index.js";
 
+const log = logger.withModule ? logger.withModule('MessageHandler') : logger;
+
 // 全局消息去重缓存 (防止多实例重复处理)
 const processedMessages = new Map();
 
@@ -21,7 +23,7 @@ export class MessageHandler {
         if (!this.botId && client.session?.save()) {
             // 确保客户端已连接
             if (!client.connected) {
-                logger.warn("⚠️ Telegram 客户端未连接，跳过初始化");
+                log.warn("⚠️ Telegram 客户端未连接，跳过初始化");
                 return;
             }
             try {
@@ -88,7 +90,7 @@ export class MessageHandler {
         if (!this.botId && client && client.session?.save()) {
             // 确保客户端已连接
             if (!client.connected) {
-                logger.warn("⚠️ Telegram 客户端未连接，跳过 Bot ID 检查");
+                log.warn("⚠️ Telegram 客户端未连接，跳过 Bot ID 检查");
                 return;
             }
             try {
@@ -110,7 +112,7 @@ export class MessageHandler {
 
             // 1.1 内存快速过滤
             if (processedMessages.has(msgId)) {
-                logger.debug("跳过重复消息", { msgId, filter: 'memory' });
+                log.debug("跳过重复消息", { msgId, filter: 'memory' });
                 return;
             }
             
@@ -124,14 +126,14 @@ export class MessageHandler {
                 const lockTime = Date.now() - lockStart;
                 
                 if (!hasLock) {
-                    logger.info(`[MessageHandler][PERF] 消息 ${msgId} 锁竞争失败 (lock: ${lockTime}ms)`);
+                    log.info(`[PERF] 消息 ${msgId} 锁竞争失败 (lock: ${lockTime}ms)`);
                     // 标记为本地已处理，避免后续重复请求 KV
                     processedMessages.set(msgId, now);
                     return;
                 }
-                logger.info(`[MessageHandler][PERF] 消息 ${msgId} 获取锁耗时 ${lockTime}ms`);
+                log.info(`[PERF] 消息 ${msgId} 获取锁耗时 ${lockTime}ms`);
             } catch (lockError) {
-                logger.error(`⚠️ 获取消息锁时发生异常, 降级处理继续执行`, lockError);
+                log.error(`⚠️ 获取消息锁时发生异常, 降级处理继续执行`, lockError);
                 // 如果锁服务完全挂了，为了不丢消息，我们可以选择继续处理（但这可能导致重复回复）
                 // 这里选择继续执行，毕竟可用性优先
             }
@@ -174,24 +176,24 @@ export class MessageHandler {
                     }
                 };
 
-                logger.debug("[MessageHandler] 收到未知类型事件，详细内容:", {
+                log.debug("收到未知类型事件，详细内容:", {
                     className: event.className,
                     constructorName: event.constructor?.name,
                     keys: Object.keys(event),
                     event: safeSerializeEvent(event)
                 });
                 // 未知类型事件降级为 debug 日志，减少噪音
-                logger.debug(`[MessageHandler][PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+                log.debug(`[PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
             } else {
                 // 已知类型事件保留 info 日志
-                logger.info(`[MessageHandler][PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+                log.info(`[PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
             }
             // 性能监控：如果总耗时超过 500ms，记录警告
             if (totalTime > 500) {
-                logger.warn(`[MessageHandler][PERF] 慢响应警告: 消息处理耗时 ${totalTime}ms，超过阈值 500ms`);
+                log.warn(`[PERF] 慢响应警告: 消息处理耗时 ${totalTime}ms，超过阈值 500ms`);
             }
         } catch (e) {
-            logger.error("Critical: Unhandled Dispatcher Error", e);
+            log.error("Critical: Unhandled Dispatcher Error", e);
         }
     }
 }

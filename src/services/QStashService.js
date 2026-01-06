@@ -2,6 +2,8 @@ import { Client, Receiver } from "@upstash/qstash";
 import { getConfig } from "../config/index.js";
 import { logger } from "./logger.js";
 
+const log = logger.withModule ? logger.withModule('QStashService') : logger;
+
 /**
  * QStash 服务层
  */
@@ -26,7 +28,7 @@ export class QStashService {
 
         const config = getConfig();
         if (!config.qstash?.token) {
-            logger.warn('⚠️ QStash Token 未找到，使用模拟模式。');
+            log.warn('⚠️ QStash Token 未找到，使用模拟模式。');
             this.isMockMode = true;
         } else {
             this.client = new Client({ token: config.qstash.token });
@@ -39,13 +41,13 @@ export class QStashService {
         });
 
         this.isInitialized = true;
-        logger.info(`[QStash] Service initialized (Mode: ${this.isMockMode ? 'Mock' : 'Real'})`);
+        log.info(`QStash Service initialized (Mode: ${this.isMockMode ? 'Mock' : 'Real'})`);
     }
 
     _checkMockMode() {
         if (!this.isInitialized) throw new Error("QStashService not initialized");
         if (this.isMockMode) {
-            logger.info('📤 [模拟模式] QStash 未配置，跳过操作');
+            log.info('📤 [模拟模式] QStash 未配置，跳过操作');
             return true;
         }
         return false;
@@ -63,7 +65,7 @@ export class QStashService {
                 body: message,
                 ...options
             });
-            logger.info(`[QStash] Published to ${topic}, MsgID: ${result.messageId}`);
+            log.info(`QStash Published to ${topic}, MsgID: ${result.messageId}`);
             return result;
         }, "publish");
     }
@@ -99,13 +101,13 @@ export class QStashService {
                 
                 // 4xx errors should not be retried
                 if (errorCode && errorCode >= 400 && errorCode < 500) {
-                    logger.error(`[QStash] ${operationName} failed with ${errorCode}, not retrying`);
+                    log.error(`QStash ${operationName} failed with ${errorCode}, not retrying`);
                     throw error;
                 }
 
                 // If it's the last attempt, throw the error
                 if (attempt === maxRetries) {
-                    logger.error(`[QStash] ${operationName} failed after ${maxRetries} attempts`);
+                    log.error(`QStash ${operationName} failed after ${maxRetries} attempts`);
                     throw error;
                 }
 
@@ -114,7 +116,7 @@ export class QStashService {
                 // In production: random jitter (Math.random() * 50)
                 const jitter = process.env.NODE_ENV === 'test' ? 25 : Math.random() * 50;
                 const delay = baseDelay * Math.pow(2, attempt - 1) + jitter;
-                logger.warn(`[QStash] ${operationName} attempt ${attempt} failed, retrying in ${delay.toFixed(0)}ms`);
+                log.warn(`QStash ${operationName} attempt ${attempt} failed, retrying in ${delay.toFixed(0)}ms`);
 
                 // In test environment, use jest-compatible delay
                 if (process.env.NODE_ENV === 'test' && typeof jest !== 'undefined') {
@@ -137,14 +139,14 @@ export class QStashService {
         if (this.isMockMode) return true;
         // Defensive check: if signature is missing, return false immediately
         if (!signature) {
-            logger.warn('[QStash] Signature verification failed: missing signature');
+            log.warn('QStash Signature verification failed: missing signature');
             return false;
         }
         try {
             await this.receiver.verify({ signature, body });
             return true;
         } catch (error) {
-            logger.error('[QStash] Signature verification failed', error);
+            log.error('QStash Signature verification failed', error);
             return false;
         }
     }

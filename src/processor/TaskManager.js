@@ -19,6 +19,8 @@ import { qstashService } from "../services/QStashService.js";
 import { logger } from "../services/logger.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 
+const log = logger.withModule ? logger.withModule('TaskManager') : logger;
+
 // QStash 延迟队列替代了 UploadBatcher
 
 /**
@@ -41,13 +43,13 @@ export class TaskManager {
         try {
             await d1.batch(statements);
         } catch (e) {
-            logger.error("batchUpdateStatus failed", e);
+            log.error("batchUpdateStatus failed", e);
             // 降级到单个更新
             for (const update of updates) {
                 try {
                     await TaskRepository.updateStatus(update.id, update.status, update.error);
                 } catch (err) {
-                    logger.error("Failed to update task", { taskId: update.id, error: err });
+                    log.error("Failed to update task", { taskId: update.id, error: err });
                 }
             }
         }
@@ -112,18 +114,18 @@ export class TaskManager {
      * 初始化：恢复因重启中断的僵尸任务
      */
     static async init() {
-        logger.info("正在检查数据库中异常中断的任务");
+        log.info("正在检查数据库中异常中断的任务");
 
         // 安全检查：如果处于 Cache 故障转移模式，延迟任务恢复以优先让主集群处理
         if (cache.isFailoverMode) {
-            logger.warn("系统处于 Cache 故障转移模式", { provider: 'upstash', delay: 30000 });
+            log.warn("系统处于 Cache 故障转移模式", { provider: 'upstash', delay: 30000 });
 
             // 先预加载常用数据
             await this._preloadCommonData();
 
             // 延迟 30 秒
             await new Promise(resolve => setTimeout(resolve, 30000));
-            logger.info("故障转移实例开始执行延迟恢复检查");
+            log.info("故障转移实例开始执行延迟恢复检查");
         }
 
         try {
@@ -138,16 +140,16 @@ export class TaskManager {
             // 预加载失败不会影响主流程，只记录日志
 
             if (!tasks || tasks.length === 0) {
-                logger.info("没有发现僵尸任务");
+                log.info("没有发现僵尸任务");
                 return;
             }
 
-            logger.info("发现僵尸任务", { count: tasks.length, action: 'batch_restore' });
+            log.info("发现僵尸任务", { count: tasks.length, action: 'batch_restore' });
 
             const chatGroups = new Map();
             for (const row of tasks) {
                 if (!row.chat_id || row.chat_id.includes("Object")) {
-                    logger.warn("跳过无效 chat_id 的任务", { taskId: row.id, chatId: row.chat_id });
+                    log.warn("跳过无效 chat_id 的任务", { taskId: row.id, chatId: row.chat_id });
                     continue;
                 }
                 if (!chatGroups.has(row.chat_id)) {
@@ -165,7 +167,7 @@ export class TaskManager {
 
             this.updateQueueUI();
         } catch (e) {
-            logger.error("TaskManager.init critical error", e);
+            log.error("TaskManager.init critical error", e);
         }
     }
 
@@ -221,15 +223,15 @@ export class TaskManager {
             const successCount = results.filter(r => r.status === 'fulfilled').length;
             const totalCount = results.length;
 
-            logger.info("预加载常用数据完成", { successCount, totalCount });
+            log.info("预加载常用数据完成", { successCount, totalCount });
 
             // 如果大部分预加载失败，记录警告
             if (successCount < totalCount * 0.7) {
-                logger.warn("预加载成功率较低", { successCount, totalCount });
+                log.warn("预加载成功率较低", { successCount, totalCount });
             }
 
         } catch (e) {
-            logger.warn("预加载数据失败", e);
+            log.warn("预加载数据失败", e);
         }
     }
 
@@ -258,7 +260,7 @@ export class TaskManager {
             for (const row of rows) {
                 const message = messageMap.get(row.source_msg_id);
                 if (!message || !message.media) {
-                    logger.warn(`⚠️ 无法找到原始消息 (ID: ${row.source_msg_id})`);
+                    log.warn(`⚠️ 无法找到原始消息 (ID: ${row.source_msg_id})`);
                     failedUpdates.push({ id: row.id, status: 'failed', error: 'Source msg missing' });
                     continue;
                 }
@@ -276,10 +278,10 @@ export class TaskManager {
                     if (fs.existsSync(localPath)) {
                         task.localPath = localPath;
                         tasksToUpload.push(task);
-                        logger.info(`📤 恢复下载完成的任务 ${row.id} 到上传队列`);
+                        log.info(`📤 恢复下载完成的任务 ${row.id} 到上传队列`);
                     } else {
                         // 本地文件不存在，重新下载
-                        logger.warn(`⚠️ 本地文件不存在，重新下载任务 ${row.id}`);
+                        log.warn(`⚠️ 本地文件不存在，重新下载任务 ${row.id}`);
                         tasksToEnqueue.push(task);
                     }
                 } else {
@@ -316,7 +318,7 @@ export class TaskManager {
             tasksToUpload.forEach(task => this._enqueueUploadTask(task));
 
         } catch (e) {
-            logger.error(`批量恢复会话 ${chatId} 的任务失败:`, e);
+            log.error(`批量恢复会话 ${chatId} 的任务失败:`, e);
         }
     }
 
@@ -355,10 +357,10 @@ export class TaskManager {
             // 立即推送到 QStash 队列
             const task = this._createTaskObject(taskId, userId, chatIdStr, statusMsg.id, mediaMessage);
             await this._enqueueTask(task);
-            logger.info("Task created and enqueued", { taskId, status: 'enqueued' });
+            log.info("Task created and enqueued", { taskId, status: 'enqueued' });
 
         } catch (e) {
-            logger.error("Task creation failed", e);
+            log.error("Task creation failed", e);
             // 尝试更新状态消息，如果失败则记录但不抛出异常
             try {
                 await client.editMessage(target, {
@@ -366,7 +368,7 @@ export class TaskManager {
                     text: STRINGS.task.create_failed
                 });
             } catch (editError) {
-                logger.warn("Failed to update error message", { error: editError.message });
+                log.warn("Failed to update error message", { error: editError.message });
             }
         }
     }
@@ -416,7 +418,7 @@ export class TaskManager {
                 await this._enqueueTask(task);
             }
         }
-        logger.info("Batch tasks created and enqueued", { count: messages.length, status: 'enqueued' });
+        log.info("Batch tasks created and enqueued", { count: messages.length, status: 'enqueued' });
     }
 
     /**
@@ -446,9 +448,9 @@ export class TaskManager {
                 chatId: task.chatId,
                 msgId: task.msgId
             });
-            logger.info("Task enqueued for download", { taskId: task.id, service: 'qstash' });
+            log.info("Task enqueued for download", { taskId: task.id, service: 'qstash' });
         } catch (error) {
-            logger.error("Failed to enqueue download task", { taskId: task.id, error });
+            log.error("Failed to enqueue download task", { taskId: task.id, error });
         }
     }
 
@@ -463,9 +465,9 @@ export class TaskManager {
                 msgId: task.msgId,
                 localPath: task.localPath
             });
-            logger.info("Task enqueued for upload", { taskId: task.id, service: 'qstash' });
+            log.info("Task enqueued for upload", { taskId: task.id, service: 'qstash' });
         } catch (error) {
-            logger.error("Failed to enqueue upload task", { taskId: task.id, error });
+            log.error("Failed to enqueue upload task", { taskId: task.id, error });
         }
     }
 
@@ -572,12 +574,12 @@ export class TaskManager {
         }
 
         try {
-            logger.info(`[QStash] Received download webhook for Task: ${taskId}`);
+            log.info(`QStash Received download webhook for Task: ${taskId}`);
 
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
             if (!dbTask) {
-                logger.error(`❌ Task ${taskId} not found in database`);
+                log.error(`❌ Task ${taskId} not found in database`);
                 return { success: false, statusCode: 404, message: "Task not found" };
             }
 
@@ -601,7 +603,7 @@ export class TaskManager {
             return { success: true, statusCode: 200 };
 
         } catch (error) {
-            logger.error("Download webhook failed", { taskId, error });
+            log.error("Download webhook failed", { taskId, error });
             const code = this._classifyError(error);
             await TaskRepository.updateStatus(taskId, 'failed', error.message);
             return { success: false, statusCode: code, message: error.message };
@@ -619,12 +621,12 @@ export class TaskManager {
         }
 
         try {
-            logger.info(`[QStash] Received upload webhook for Task: ${taskId}`);
+            log.info(`QStash Received upload webhook for Task: ${taskId}`);
 
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
             if (!dbTask) {
-                logger.error(`❌ Task ${taskId} not found in database`);
+                log.error(`❌ Task ${taskId} not found in database`);
                 return { success: false, statusCode: 404, message: "Task not found" };
             }
 
@@ -656,7 +658,7 @@ export class TaskManager {
             return { success: true, statusCode: 200 };
 
         } catch (error) {
-            logger.error("Upload webhook failed", { taskId, error });
+            log.error("Upload webhook failed", { taskId, error });
             const code = this._classifyError(error);
             await TaskRepository.updateStatus(taskId, 'failed', error.message);
             return { success: false, statusCode: code, message: error.message };
@@ -669,7 +671,7 @@ export class TaskManager {
      */
     static async handleMediaBatchWebhook(groupId, taskIds) {
         try {
-            logger.info(`[QStash] Received media-batch webhook for Group: ${groupId}, TaskCount: ${taskIds.length}`);
+            log.info(`QStash Received media-batch webhook for Group: ${groupId}, TaskCount: ${taskIds.length}`);
 
             // 这里可以实现批处理逻辑，目前先逐个处理
             for (const taskId of taskIds) {
@@ -682,7 +684,7 @@ export class TaskManager {
             return { success: true, statusCode: 200 };
 
         } catch (error) {
-            logger.error("Media batch webhook failed", { groupId, error });
+            log.error("Media batch webhook failed", { groupId, error });
             const code = this._classifyError(error);
             return { success: false, statusCode: code, message: error.message };
         }
@@ -698,7 +700,7 @@ export class TaskManager {
         // 分布式锁：尝试获取任务锁，确保多实例下同一任务不会被重复处理
         const lockAcquired = await instanceCoordinator.acquireTaskLock(id);
         if (!lockAcquired) {
-            logger.info("Task lock exists, skipping download", { taskId: id, instance: 'current' });
+            log.info("Task lock exists, skipping download", { taskId: id, instance: 'current' });
             return;
         }
 
@@ -707,7 +709,7 @@ export class TaskManager {
         try {
             // 防重入：检查任务是否已经在处理中
             if (this.activeProcessors.has(id)) {
-                logger.warn("Task already processing, skipping download", { taskId: id });
+                log.warn("Task already processing, skipping download", { taskId: id });
                 return;
             }
             this.activeProcessors.add(id);
@@ -785,7 +787,7 @@ export class TaskManager {
                         msgId: task.msgId,
                         localPath: task.localPath
                     });
-                    logger.info("Local file exists, triggered upload webhook", { taskId: task.id });
+                    log.info("Local file exists, triggered upload webhook", { taskId: task.id });
                     return;
                 }
 
@@ -820,14 +822,14 @@ export class TaskManager {
                     msgId: task.msgId,
                     localPath: task.localPath
                 });
-                logger.info("Download complete, triggered upload webhook", { taskId: task.id });
+                log.info("Download complete, triggered upload webhook", { taskId: task.id });
 
             } catch (e) {
                 const isCancel = e.message === "CANCELLED";
                 try {
                     await TaskRepository.updateStatus(task.id, isCancel ? 'cancelled' : 'failed', e.message);
                 } catch (updateError) {
-                    logger.error(`Failed to update task status for ${task.id}:`, updateError);
+                    log.error(`Failed to update task status for ${task.id}:`, updateError);
                 }
 
                 if (task.isGroup) {
@@ -853,14 +855,14 @@ export class TaskManager {
         // 分布式锁：尝试获取任务锁，确保多实例下同一任务不会被重复处理
         const lockAcquired = await instanceCoordinator.acquireTaskLock(id);
         if (!lockAcquired) {
-            logger.info("Task lock exists, skipping upload", { taskId: id, instance: 'current' });
+            log.info("Task lock exists, skipping upload", { taskId: id, instance: 'current' });
             return;
         }
 
         try {
             // 防重入：上传 Task 也增加检查
             if (this.activeProcessors.has(id)) {
-                logger.warn("Task already processing, skipping upload", { taskId: id });
+                log.warn("Task already processing, skipping upload", { taskId: id });
                 return;
             }
             this.activeProcessors.add(id);
@@ -923,7 +925,7 @@ export class TaskManager {
 
             if (isR2Drive) {
                 // 使用 OSS 服务进行双轨制上传
-                logger.info(`📤 使用 OSS 服务上传到 R2: ${fileName}`);
+                log.info(`📤 使用 OSS 服务上传到 R2: ${fileName}`);
                 uploadResult = await ossService.upload(localPath, fileName, (progress) => {
                     const now = Date.now();
                     if (now - lastUpdate > 3000) {
@@ -935,7 +937,7 @@ export class TaskManager {
                 uploadResult = uploadResult.success ? { success: true } : { success: false, error: uploadResult.error };
             } else {
                 // 使用 rclone 直接上传单个文件
-                logger.info(`📤 使用 rclone 直接上传: ${fileName}`);
+                log.info(`📤 使用 rclone 直接上传: ${fileName}`);
                 uploadResult = await CloudTool.uploadFile(localPath, task, (progress) => {
                     const now = Date.now();
                     if (now - lastUpdate > 3000) {
@@ -968,18 +970,18 @@ export class TaskManager {
                     if (validationAttempts < maxValidationAttempts) {
                         // 如果是最后一次尝试，强制刷新文件列表缓存
                         if (validationAttempts === maxValidationAttempts - 1) {
-                            logger.info(`[Validation] Final attempt for ${actualFileName}, forcing cache refresh...`);
+                            log.info(`[Validation] Final attempt for ${actualFileName}, forcing cache refresh...`);
                             try {
                                 await CloudTool.listRemoteFiles(task.userId, true); // 强制刷新缓存
                                 // 再试一次
                                 finalRemote = await CloudTool.getRemoteFileInfo(actualFileName, task.userId, 1);
                                 if (finalRemote) break;
                             } catch (e) {
-                                logger.warn(`[Validation] Cache refresh failed:`, e);
+                                log.warn(`[Validation] Cache refresh failed:`, e);
                             }
                         }
 
-                        logger.info(`[Validation] Attempt ${validationAttempts} failed for ${actualFileName}, retrying in ${validationAttempts * 5}s...`);
+                        log.info(`[Validation] Attempt ${validationAttempts} failed for ${actualFileName}, retrying in ${validationAttempts * 5}s...`);
                         await new Promise(resolve => setTimeout(resolve, validationAttempts * 5000)); // 递增延迟: 5s, 10s, 15s, 20s
                     }
                 }
@@ -988,11 +990,11 @@ export class TaskManager {
                 const isOk = finalRemote && this._isSizeMatch(finalRemote.Size, localSize);
 
                 if (!isOk) {
-                    logger.error(`[Validation Failed] Task: ${task.id}, File: ${actualFileName}`);
-                    logger.error(`- Local Size: ${localSize}`);
-                    logger.error(`- Remote Size: ${finalRemote ? finalRemote.Size : 'N/A'}`);
-                    logger.error(`- Remote Info: ${JSON.stringify(finalRemote)}`);
-                    logger.error(`- Validation attempts: ${validationAttempts}`);
+                    log.error(`[Validation Failed] Task: ${task.id}, File: ${actualFileName}`);
+                    log.error(`- Local Size: ${localSize}`);
+                    log.error(`- Remote Size: ${finalRemote ? finalRemote.Size : 'N/A'}`);
+                    log.error(`- Remote Info: ${JSON.stringify(finalRemote)}`);
+                    log.error(`- Validation attempts: ${validationAttempts}`);
                 }
 
                 const finalStatus = isOk ? 'completed' : 'failed';
@@ -1040,7 +1042,7 @@ export class TaskManager {
                     fs.unlinkSync(localPath);
                 }
             } catch (e) {
-                logger.warn(`Failed to cleanup local file ${localPath}:`, e);
+                log.warn(`Failed to cleanup local file ${localPath}:`, e);
             }
             this.activeProcessors.delete(id);
         }
@@ -1100,7 +1102,7 @@ export class TaskManager {
                     if (mtprotoLimiter?.adjustConcurrency) mtprotoLimiter.adjustConcurrency();
                     if (mtprotoFileLimiter?.adjustConcurrency) mtprotoFileLimiter.adjustConcurrency();
                 } catch (error) {
-                    logger.error('Auto-scaling adjustment error:', error);
+                    log.error('Auto-scaling adjustment error:', error);
                 }
             }, 30000);
         });

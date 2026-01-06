@@ -783,7 +783,7 @@ describe("Dispatcher", () => {
       console.log('Mock logger calls:', mockLogger.info.mock.calls);
       
       // Updated to match new log format with [PERF] tag
-      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining("[Dispatcher][PERF] 消息被全局守卫拦截"));
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining("[PERF] 消息被全局守卫拦截"));
     });
 
     test("should route to callback handler", async () => {

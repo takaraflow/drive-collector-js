@@ -1,6 +1,8 @@
 import { d1 } from "../services/d1.js";
 import { logger } from "../services/logger.js";
 
+const log = logger.withModule ? logger.withModule('InstanceRepository') : logger;
+
 /**
  * 实例数据仓储层
  * 负责管理多实例相关的数据持久化
@@ -25,7 +27,7 @@ export class InstanceRepository {
                 )
             `);
         } catch (e) {
-            logger.error("InstanceRepository.createTableIfNotExists failed:", e);
+            log.error("InstanceRepository.createTableIfNotExists failed:", e);
         }
     }
 
@@ -56,7 +58,7 @@ export class InstanceRepository {
             ]);
             return true;
         } catch (e) {
-            logger.error(`InstanceRepository.upsert failed for ${instanceData.id}:`, e);
+            log.error(`InstanceRepository.upsert failed for ${instanceData.id}:`, e);
             return false;
         }
     }
@@ -76,7 +78,7 @@ export class InstanceRepository {
                 ORDER BY id ASC
             `, [deadline]);
         } catch (e) {
-            logger.error("InstanceRepository.findAllActive failed:", e);
+            log.error("InstanceRepository.findAllActive failed:", e);
             return [];
         }
     }
@@ -91,7 +93,7 @@ export class InstanceRepository {
                 ORDER BY id ASC
             `);
         } catch (e) {
-            logger.error("InstanceRepository.findAll failed:", e);
+            log.error("InstanceRepository.findAll failed:", e);
             return [];
         }
     }
@@ -105,7 +107,7 @@ export class InstanceRepository {
                 SELECT * FROM instances WHERE id = ?
             `, [instanceId]);
         } catch (e) {
-            logger.error(`InstanceRepository.findById failed for ${instanceId}:`, e);
+            log.error(`InstanceRepository.findById failed for ${instanceId}:`, e);
             return null;
         }
     }
@@ -122,7 +124,7 @@ export class InstanceRepository {
             `, [heartbeatTime, Date.now(), instanceId]);
             return true;
         } catch (e) {
-            logger.error(`InstanceRepository.updateHeartbeat failed for ${instanceId}:`, e);
+            log.error(`InstanceRepository.updateHeartbeat failed for ${instanceId}:`, e);
             return false;
         }
     }
@@ -139,7 +141,7 @@ export class InstanceRepository {
             `, [Date.now(), instanceId]);
             return true;
         } catch (e) {
-            logger.error(`InstanceRepository.markOffline failed for ${instanceId}:`, e);
+            log.error(`InstanceRepository.markOffline failed for ${instanceId}:`, e);
             return false;
         }
     }
@@ -160,7 +162,7 @@ export class InstanceRepository {
 
             return result.changes || 0;
         } catch (e) {
-            logger.error("InstanceRepository.deleteExpired failed:", e);
+            log.error("InstanceRepository.deleteExpired failed:", e);
             return 0;
         }
     }
@@ -191,7 +193,7 @@ export class InstanceRepository {
                 newestHeartbeat: stats.newest_heartbeat
             };
         } catch (e) {
-            logger.error("InstanceRepository.getStats failed:", e);
+            log.error("InstanceRepository.getStats failed:", e);
             return {
                 activeCount: 0,
                 offlineCount: 0,

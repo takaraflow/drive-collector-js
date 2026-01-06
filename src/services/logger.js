@@ -186,7 +186,26 @@ const safeAxiomIngest = async (dataset, payload) => {
   }
 };
 
-const log = async (instanceId, level, message, data = {}) => {
+const normalizeContext = (context) => {
+    if (!context) return {};
+    if (typeof context === 'string') {
+        return { module: context };
+    }
+    if (typeof context !== 'object') return {};
+
+    const normalized = {};
+    for (const [key, value] of Object.entries(context)) {
+        if (value === undefined || value === null) continue;
+        normalized[key] = value;
+    }
+    return normalized;
+};
+
+const mergeContext = (baseContext, extraContext) => {
+    return { ...baseContext, ...normalizeContext(extraContext) };
+};
+
+const log = async (instanceId, level, message, data = {}, context = {}) => {
   // 确保 data 是一个对象且不是 Error 实例
   let finalData = data;
   if (data && typeof data !== 'object') {
@@ -201,7 +220,13 @@ const log = async (instanceId, level, message, data = {}) => {
     await initAxiom();
   }
 
-  const displayMessage = `[v${version}] ${message}`;
+  const contextFields = normalizeContext(context);
+  if (contextFields.module != null) {
+    contextFields.module = String(contextFields.module);
+  }
+
+  const modulePrefix = contextFields.module ? `[${contextFields.module}] ` : '';
+  const displayMessage = `[v${version}] ${modulePrefix}${message}`;
 
   if (!axiom) {
     // Axiom 未初始化时，降级到原生 console，防止触发 Proxy 递归
@@ -212,6 +237,7 @@ const log = async (instanceId, level, message, data = {}) => {
   
   // 构建 payload，details 永远是字符串
   const payload = {
+    ...contextFields,
     version,
     instanceId,
     level,
@@ -272,26 +298,39 @@ const getSafeInstanceId = () => {
 };
 
 // Use a simple object with methods for the logger to avoid Proxy issues in tests/production
-export const logger = {
-    info: (message, data) => log(getSafeInstanceId(), 'info', message, data),
-    warn: (message, data) => log(getSafeInstanceId(), 'warn', message, data),
-    error: (message, data) => log(getSafeInstanceId(), 'error', message, data),
-    debug: (message, data) => {
-        // Debug logs should not be output to console when Axiom is not configured
-        if (!process.env.AXIOM_TOKEN && (!config || !config.axiom)) return;
-        return log(getSafeInstanceId(), 'debug', message, data);
-    },
-    configure: (customConfig) => {
-        config = { ...config, ...customConfig };
-        // 如果提供了 axiom 配置，重置初始化状态以便重新初始化
-        if (customConfig.axiom) {
-            axiom = null;
-            axiomInitialized = false;
-        }
-    },
-    isInitialized: () => axiomInitialized,
-    canSend: (level) => true
+const configureLogger = (customConfig) => {
+    config = { ...config, ...customConfig };
+    // 如果提供了 axiom 配置，重置初始化状态以便重新初始化
+    if (customConfig.axiom) {
+        axiom = null;
+        axiomInitialized = false;
+    }
 };
+
+const isInitialized = () => axiomInitialized;
+
+const canSend = (level) => true;
+
+export const createLogger = (context = {}) => {
+    const baseContext = normalizeContext(context);
+    return {
+        info: (message, data) => log(getSafeInstanceId(), 'info', message, data, baseContext),
+        warn: (message, data) => log(getSafeInstanceId(), 'warn', message, data, baseContext),
+        error: (message, data) => log(getSafeInstanceId(), 'error', message, data, baseContext),
+        debug: (message, data) => {
+            // Debug logs should not be output to console when Axiom is not configured
+            if (!process.env.AXIOM_TOKEN && (!config || !config.axiom)) return;
+            return log(getSafeInstanceId(), 'debug', message, data, baseContext);
+        },
+        withContext: (extraContext) => createLogger(mergeContext(baseContext, extraContext)),
+        withModule: (moduleName) => createLogger(mergeContext(baseContext, { module: moduleName })),
+        configure: configureLogger,
+        isInitialized,
+        canSend
+    };
+};
+
+export const logger = createLogger();
 
 /**
  * Enable console proxy for Telegram library errors

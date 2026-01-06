@@ -1,5 +1,7 @@
 import { logger } from "./logger.js";
 
+const log = logger.withModule ? logger.withModule('D1') : logger;
+
 /**
  * --- D1 数据库服务层 ---
  */
@@ -20,11 +22,11 @@ class D1Service {
         this.token = process.env.CF_D1_TOKEN;
 
         if (!this.accountId || !this.databaseId || !this.token) {
-            logger.warn("⚠️ D1配置不完整: 请检查 CF_D1_ACCOUNT_ID, CF_D1_DATABASE_ID, CF_D1_TOKEN");
+            log.warn("⚠️ D1配置不完整: 请检查 CF_D1_ACCOUNT_ID, CF_D1_DATABASE_ID, CF_D1_TOKEN");
         } else {
             this.apiUrl = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/d1/database/${this.databaseId}/query`;
             this.isInitialized = true;
-            logger.info(`[D1] Service initialized: ${this.databaseId}`);
+            log.info(`Service initialized: ${this.databaseId}`);
         }
     }
 
@@ -78,7 +80,7 @@ class D1Service {
                     const isD1NetworkError = response.status === 400 && errorCode === 7500;
                     
                     // Log detailed error info
-                    logger.error(`🚨 D1 HTTP ${response.status} - ${response.statusText}${errorDetails}`);
+                    log.error(`🚨 D1 HTTP ${response.status} - ${response.statusText}${errorDetails}`);
 
                     // Client errors (4xx) should not retry, except 400 with 7500
                     if (response.status >= 400 && response.status < 500 && !isD1NetworkError) {
@@ -106,14 +108,14 @@ class D1Service {
                     const errorCode = error?.code || 'N/A';
                     const errorMessage = error?.message || '';
                     
-                    logger.error(`🚨 D1 SQL Error [${errorCode}]: ${errorMessage}`);
+                    log.error(`🚨 D1 SQL Error [${errorCode}]: ${errorMessage}`);
                     throw new Error(`D1 SQL Error [${errorCode}]: ${errorMessage}`);
                 }
                 return result;
             } catch (error) {
                 // Network errors (TypeError: Failed to fetch)
                 if (error instanceof TypeError) {
-                    logger.error(`🚨 D1 Network Error: ${error.message}`);
+                    log.error(`🚨 D1 Network Error: ${error.message}`);
                     
                     if (attempts < maxAttempts - 1) {
                         attempts++;

@@ -70,7 +70,7 @@ describe('Reproduce Unknown Event Logging', () => {
         expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('消息 unknown 分发完成'));
 
         // Verify debug log contains details
-        expect(logger.debug).toHaveBeenCalledWith("[MessageHandler] 收到未知类型事件，详细内容:", expect.objectContaining({
+        expect(logger.debug).toHaveBeenCalledWith("收到未知类型事件，详细内容:", expect.objectContaining({
             keys: expect.arrayContaining(['someRandomField'])
         }));
     });
@@ -88,7 +88,7 @@ describe('Reproduce Unknown Event Logging', () => {
         expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('消息 [UpdateUserStatus] 分发完成'));
         
         // Should NOT trigger unknown debug log
-        const debugCalls = logger.debug.mock.calls.filter(call => call[0] === "[MessageHandler] 收到未知类型事件，详细内容:");
+        const debugCalls = logger.debug.mock.calls.filter(call => call[0] === "收到未知类型事件，详细内容:");
         expect(debugCalls.length).toBe(0);
     });
 });

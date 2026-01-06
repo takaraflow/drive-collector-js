@@ -3,6 +3,8 @@ import { runBotTask, runBotTaskWithRetry } from "./limiter.js";
 import { STRINGS } from "../locales/zh-CN.js";
 import { logger } from "../services/logger.js";
 
+const log = logger.withModule ? logger.withModule('CommonUtils') : logger;
+
 /**
  * --- 辅助工具函数 (Internal Helpers) ---
  */
@@ -38,7 +40,7 @@ export const safeEdit = async (chatId, msgId, text, buttons = null, userId = nul
                     if (e.code === 406 && (e.errorMessage?.includes('AUTH_KEY_DUPLICATED') || e.message?.includes('AUTH_KEY_DUPLICATED'))) {
                         const { clearSession } = await import("../services/telegram.js");
                         await clearSession();
-                        logger.error(`🚨 关键错误: AUTH_KEY_DUPLICATED 检测到，已清除 Session。建议重启服务。`);
+                        log.error(`🚨 关键错误: AUTH_KEY_DUPLICATED 检测到，已清除 Session。建议重启服务。`);
                         // 不再重试，因为 Session 已失效
                         return;
                     }
@@ -55,7 +57,7 @@ export const safeEdit = async (chatId, msgId, text, buttons = null, userId = nul
         if (e.code === 406 && (e.errorMessage?.includes('AUTH_KEY_DUPLICATED') || e.message?.includes('AUTH_KEY_DUPLICATED'))) {
             return; // 已经在内部处理过了
         }
-        logger.warn(`[safeEdit Failed] msgId ${msgId}:`, e.message);
+        log.warn(`[safeEdit Failed] msgId ${msgId}:`, e.message);
     }
 };
 

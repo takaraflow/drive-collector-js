@@ -17,6 +17,7 @@ describe('Logger Service', () => {
   let consoleErrorSpy;
   let enableTelegramConsoleProxy;
   let disableTelegramConsoleProxy;
+  let createLogger;
 
   // Top-level setup for all tests in this describe block
   beforeEach(async () => {
@@ -53,6 +54,7 @@ describe('Logger Service', () => {
     logger = loggerModule.logger;
     enableTelegramConsoleProxy = loggerModule.enableTelegramConsoleProxy;
     disableTelegramConsoleProxy = loggerModule.disableTelegramConsoleProxy;
+    createLogger = loggerModule.createLogger;
   });
 
   // Top-level teardown for all tests in this describe block
@@ -248,6 +250,36 @@ describe('Logger Service', () => {
         message: expect.stringContaining('[v')
       });
       expect(payload.details).toContain('verbose');
+    });
+
+    test('withModule adds module prefix and payload field', async () => {
+      const moduleLogger = createLogger({ module: 'TestModule', component: 'Unit' });
+
+      await moduleLogger.info('hello', { ok: true });
+      await jest.runAllTimersAsync();
+
+      expect(mockIngest).toHaveBeenCalledTimes(1);
+      const payload = mockIngest.mock.calls[0][1][0];
+
+      expect(payload.module).toBe('TestModule');
+      expect(payload.component).toBe('Unit');
+      expect(payload.message).toContain('[TestModule]');
+    });
+
+    test('withContext merges and overrides module fields', async () => {
+      const baseLogger = createLogger({ module: 'BaseModule', region: 'us-east' });
+      const childLogger = baseLogger.withContext({ module: 'ChildModule', requestId: 'req-1' });
+
+      await childLogger.info('child log');
+      await jest.runAllTimersAsync();
+
+      expect(mockIngest).toHaveBeenCalledTimes(1);
+      const payload = mockIngest.mock.calls[0][1][0];
+
+      expect(payload.module).toBe('ChildModule');
+      expect(payload.region).toBe('us-east');
+      expect(payload.requestId).toBe('req-1');
+      expect(payload.message).toContain('[ChildModule]');
     });
 
     test('when axiom.ingest fails, retry and fallback to console + structured error', async () => {

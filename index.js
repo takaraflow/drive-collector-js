@@ -10,6 +10,7 @@ export async function handleQStashWebhook(req, res) {
     const { qstashService } = await import("./src/services/QStashService.js");
     const { TaskManager } = await import("./src/processor/TaskManager.js");
     const { logger } = await import("./src/services/logger.js");
+    const log = logger.withModule ? logger.withModule('App') : logger;
 
     try {
         const healthPath = '/health';
@@ -39,7 +40,7 @@ export async function handleQStashWebhook(req, res) {
         if (!isValid) {
             // 记录签名和部分 body 信息以便调试
             const bodyPreview = body ? body.substring(0, 200) : 'empty';
-            logger.warn("🚨 QStash 签名验证失败", {
+            log.warn("🚨 QStash 签名验证失败", {
                 signature: signature || 'missing',
                 bodyPreview: bodyPreview,
                 url: req.url,
@@ -55,7 +56,7 @@ export async function handleQStashWebhook(req, res) {
         const data = JSON.parse(body);
         const path = url.pathname;
 
-        logger.info(`📥 收到 QStash Webhook: ${path}`, { taskId: data.taskId, groupId: data.groupId });
+        log.info(`📥 收到 QStash Webhook: ${path}`, { taskId: data.taskId, groupId: data.groupId });
 
         let result = { success: true, statusCode: 200 };
 
@@ -69,7 +70,7 @@ export async function handleQStashWebhook(req, res) {
             // 系统事件暂只记录不处理
             result = { success: true, statusCode: 200 };
         } else {
-            logger.warn(`❓ 未知的 Webhook 路径: ${path}`);
+            log.warn(`❓ 未知的 Webhook 路径: ${path}`);
         }
 
         res.writeHead(result.statusCode || 200);
@@ -77,7 +78,8 @@ export async function handleQStashWebhook(req, res) {
 
     } catch (error) {
         const { logger } = await import("./src/services/logger.js");
-        logger.error("🚨 Webhook 处理发生异常:", error);
+    const log = logger.withModule ? logger.withModule('App') : logger;
+        log.error("🚨 Webhook 处理发生异常:", error);
         res.writeHead(500);
         res.end('Internal Server Error');
     }
@@ -134,6 +136,7 @@ async function main() {
     const { cache } = await import("./src/services/CacheService.js");
     const { d1 } = await import("./src/services/d1.js");
     const { logger } = await import("./src/services/logger.js");
+    const log = logger.withModule ? logger.withModule('App') : logger;
 
     // 4. 显式初始化各个服务
     console.log("🔄 正在初始化核心服务...");
@@ -155,7 +158,7 @@ async function main() {
         const { startProcessor } = await import("./src/processor/bootstrap.js");
         const { connectAndStart, startWatchdog } = await import("./src/services/telegram.js");
 
-        logger.info("🚀 启动业务模块: InstanceCoordinator, Telegram, Dispatcher, Processor");
+        log.info("🚀 启动业务模块: InstanceCoordinator, Telegram, Dispatcher, Processor");
         
         // 依次启动业务模块
         await instanceCoordinator.start();
@@ -169,7 +172,7 @@ async function main() {
             telegramConnected = true;
         } catch (error) {
             console.error("🚨 Telegram 启动失败:", error?.message || error);
-            logger.error("🚨 Telegram 客户端连接启动失败:", error);
+            log.error("🚨 Telegram 客户端连接启动失败:", error);
             if (!allowTelegramFailure) {
                 throw error;
             }
@@ -185,10 +188,10 @@ async function main() {
         const config = getConfig();
         const server = http.createServer(handleQStashWebhook);
         server.listen(config.port, () => {
-            logger.info(`🌐 Webhook Server 运行在端口: ${config.port}`);
+            log.info(`🌐 Webhook Server 运行在端口: ${config.port}`);
         });
         
-        logger.info("🎉 应用启动成功，正在运行中");
+        log.info("🎉 应用启动成功，正在运行中");
         
         // 保持活跃
         if (process.env.NODE_ENV !== 'test') {

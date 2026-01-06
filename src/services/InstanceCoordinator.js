@@ -3,6 +3,8 @@ import { qstashService } from "./QStashService.js";
 import { InstanceRepository } from "../repositories/InstanceRepository.js";
 import logger, { setInstanceIdProvider } from "./logger.js";
 
+const log = logger.withModule ? logger.withModule('InstanceCoordinator') : logger;
+
 /**
  * --- 多实例协调服务 ---
  * 基于 Cloudflare Cache 实现异地多实例支持
@@ -26,7 +28,7 @@ export class InstanceCoordinator {
      * 启动实例协调器
      */
     async start() {
-        logger.info(`🚀 启动实例协调器: ${this.instanceId}`);
+        log.info(`🚀 启动实例协调器: ${this.instanceId}`);
 
         // 注册实例
         await this.registerInstance();
@@ -37,14 +39,14 @@ export class InstanceCoordinator {
         // 监听其他实例变化
         this.watchInstances();
 
-        logger.info(`✅ 实例协调器启动完成`);
+        log.info(`✅ 实例协调器启动完成`);
     }
 
     /**
      * 停止实例协调器
      */
     async stop() {
-        logger.info(`🛑 停止实例协调器: ${this.instanceId}`);
+        log.info(`🛑 停止实例协调器: ${this.instanceId}`);
 
         if (this.heartbeatTimer) {
             clearInterval(this.heartbeatTimer);
@@ -71,9 +73,9 @@ export class InstanceCoordinator {
         // 写入 Cache (核心 Cache 模块，用于关键数据存储)
         try {
             await cache.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
-            logger.info(`[${cache.getCurrentProvider()}] 📝 实例已注册到 Cache: ${this.instanceId}`);
+            log.info(`[${cache.getCurrentProvider()}] 📝 实例已注册到 Cache: ${this.instanceId}`);
         } catch (cacheError) {
-            logger.error(`[${cache.getCurrentProvider()}] ❌ Cache注册失败: ${cacheError.message}`);
+            log.error(`[${cache.getCurrentProvider()}] ❌ Cache注册失败: ${cacheError.message}`);
             throw cacheError; // Cache 是主存储，失败时抛出异常
         }
     }
@@ -84,9 +86,9 @@ export class InstanceCoordinator {
     async unregisterInstance() {
         try {
             await cache.delete(`instance:${this.instanceId}`);
-            logger.info(`[${cache.getCurrentProvider()}] 📝 实例已注销: ${this.instanceId}`);
+            log.info(`[${cache.getCurrentProvider()}] 📝 实例已注销: ${this.instanceId}`);
         } catch (error) {
-            logger.error(`[${cache.getCurrentProvider()}] ❌ 实例注销失败: ${error.message}`);
+            log.error(`[${cache.getCurrentProvider()}] ❌ 实例注销失败: ${error.message}`);
         }
     }
 
@@ -113,7 +115,7 @@ export class InstanceCoordinator {
                     await cache.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
                 }
             } catch (cacheError) {
-                logger.error(`[${cache.getCurrentProvider()}] Cache心跳更新失败: ${cacheError.message}`);
+                log.error(`[${cache.getCurrentProvider()}] Cache心跳更新失败: ${cacheError.message}`);
             }
         }, this.heartbeatInterval);
     }
@@ -137,7 +139,7 @@ export class InstanceCoordinator {
             this.activeInstances = new Set(activeInstances.map(inst => inst.id));
             return activeInstances;
         } catch (e) {
-            logger.error(`[${cache.getCurrentProvider()}] 获取活跃实例失败:`, e.message);
+            log.error(`[${cache.getCurrentProvider()}] 获取活跃实例失败:`, e.message);
             return [];
         }
     }
@@ -153,12 +155,12 @@ export class InstanceCoordinator {
             const isOwner = existing && existing.instanceId === this.instanceId;
             if (existing && !isOwner) {
                 // 明确被其他实例持有
-                // logger.debug(`[Lock] ${lockKey} is held by ${existing.instanceId}`);
+                // log.debug(`[Lock] ${lockKey} is held by ${existing.instanceId}`);
             }
             return isOwner;
         } catch (e) {
             // 关键：识别 KV 错误，不要在 429 或网络错误时立即断定失去锁
-            logger.warn(`[${cache.getCurrentProvider()}] ⚠️ 检查锁失败 ${lockKey}, 可能是 KV 限流或网络问题: ${e.message}`);
+            log.warn(`[${cache.getCurrentProvider()}] ⚠️ 检查锁失败 ${lockKey}, 可能是 KV 限流或网络问题: ${e.message}`);
             
             // 如果是 429 或超时，保守起见我们假设仍然持有（只要上一次成功持有）
             // 或者抛出错误让调用者决定，而不是返回错误的 false
@@ -193,7 +195,7 @@ export class InstanceCoordinator {
                         });
                     }
                 } catch (e) {
-                    logger.warn(`[${cache.getCurrentProvider()}] 获取实例 ${key} 失败，跳过:`, e?.message || String(e));
+                    log.warn(`[${cache.getCurrentProvider()}] 获取实例 ${key} 失败，跳过:`, e?.message || String(e));
                     // 忽略单个实例获取失败，继续处理其他实例
                 }
             }
@@ -202,7 +204,7 @@ export class InstanceCoordinator {
             this.activeInstances = new Set(instances.map(inst => inst.id));
             return instances;
         } catch (e) {
-            logger.error(`[${cache.getCurrentProvider()}] 获取所有实例失败:`, e?.message || String(e));
+            log.error(`[${cache.getCurrentProvider()}] 获取所有实例失败:`, e?.message || String(e));
             return [];
         }
     }
@@ -223,7 +225,7 @@ export class InstanceCoordinator {
             this.isLeader = leader && leader.id === this.instanceId;
 
             if (this.isLeader) {
-                logger.info(`👑 本实例成为领导者 (${instanceCount} 个活跃实例)`);
+                log.info(`👑 本实例成为领导者 (${instanceCount} 个活跃实例)`);
             }
 
             // 清理过期的实例数据
@@ -250,10 +252,10 @@ export class InstanceCoordinator {
             }
 
             if (cleanedCount > 0) {
-                logger.info(`[${cache.getCurrentProvider()}] 🧹 清理了 ${cleanedCount} 个过期实例`);
+                log.info(`[${cache.getCurrentProvider()}] 🧹 清理了 ${cleanedCount} 个过期实例`);
             }
         } catch (e) {
-            logger.error(`[${cache.getCurrentProvider()}] 清理过期实例失败:`, e.message);
+            log.error(`[${cache.getCurrentProvider()}] 清理过期实例失败:`, e.message);
         }
     }
 
@@ -278,12 +280,12 @@ export class InstanceCoordinator {
             // 如果不是最后一次尝试，等待退避延迟
             if (attempt < maxAttempts) {
                 const delay = backoffDelays[Math.min(attempt - 1, backoffDelays.length - 1)];
-                logger.warn(`[${cache.getCurrentProvider()}] 🔒 锁获取失败，尝试 ${attempt}/${maxAttempts}，等待 ${delay}ms 后重试...`);
+                log.warn(`[${cache.getCurrentProvider()}] 🔒 锁获取失败，尝试 ${attempt}/${maxAttempts}，等待 ${delay}ms 后重试...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
         }
 
-        logger.error(`[${cache.getCurrentProvider()}] 🔒 锁获取失败，已达到最大重试次数: ${lockKey}`);
+        log.error(`[${cache.getCurrentProvider()}] 🔒 锁获取失败，已达到最大重试次数: ${lockKey}`);
         return false;
     }
 
@@ -317,12 +319,12 @@ export class InstanceCoordinator {
                     
                     if (ownerData) {
                         // 锁被其他活跃实例持有且未过期
-                        // logger.debug(`[Lock] ${lockKey} is held by active instance ${existing.instanceId}`);
+                        // log.debug(`[Lock] ${lockKey} is held by active instance ${existing.instanceId}`);
                         return false;
                     }
                     
                     // 锁持有者已下线，允许抢占
-                    logger.info(`[${cache.getCurrentProvider()}] 🔒 发现残留锁 ${lockKey} (持有者 ${existing.instanceId} 已下线)，允许抢占`);
+                    log.info(`[${cache.getCurrentProvider()}] 🔒 发现残留锁 ${lockKey} (持有者 ${existing.instanceId} 已下线)，允许抢占`);
                 }
                 // 如果锁过期、被当前实例持有、或持有者已下线，允许重新获取
             }
@@ -336,7 +338,7 @@ export class InstanceCoordinator {
             const verified = await cache.get(`lock:${lockKey}`, "json", { skipCache: true });
             
             // 记录详细日志便于排查 KV 延迟问题
-            logger.debug(`[${cache.getCurrentProvider()}] [Lock verify] key=${lockKey}, existing=${existing?.instanceId}, verified=${verified?.instanceId}, self=${this.instanceId}`);
+            log.debug(`[${cache.getCurrentProvider()}] [Lock verify] key=${lockKey}, existing=${existing?.instanceId}, verified=${verified?.instanceId}, self=${this.instanceId}`);
 
             if (verified && verified.instanceId === this.instanceId) {
                 return true;
@@ -345,7 +347,7 @@ export class InstanceCoordinator {
             // 被其他实例抢先覆盖了
             return false;
         } catch (e) {
-            logger.error(`[${cache.getCurrentProvider()}] 获取锁失败 ${lockKey}:`, e?.message || String(e));
+            log.error(`[${cache.getCurrentProvider()}] 获取锁失败 ${lockKey}:`, e?.message || String(e));
             return false;
         }
     }
@@ -361,7 +363,7 @@ export class InstanceCoordinator {
                 await cache.delete(`lock:${lockKey}`);
             }
         } catch (e) {
-            logger.error(`[${cache.getCurrentProvider()}] 释放锁失败 ${lockKey}:`, e?.message || String(e));
+            log.error(`[${cache.getCurrentProvider()}] 释放锁失败 ${lockKey}:`, e?.message || String(e));
         }
     }
 
@@ -416,9 +418,9 @@ export class InstanceCoordinator {
                 sourceInstance: this.instanceId,
                 timestamp: Date.now()
             });
-            logger.info(`[${cache.getCurrentProvider()}] 📢 广播系统事件: ${event}`);
+            log.info(`[${cache.getCurrentProvider()}] 📢 广播系统事件: ${event}`);
         } catch (error) {
-            logger.error(`[${cache.getCurrentProvider()}] ❌ 广播事件失败 ${event}:`, error);
+            log.error(`[${cache.getCurrentProvider()}] ❌ 广播事件失败 ${event}:`, error);
         }
     }
 }

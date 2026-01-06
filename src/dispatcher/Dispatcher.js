@@ -21,6 +21,8 @@ import { logger } from "../services/logger.js";
 import fs from "fs";
 import path from "path";
 
+const log = logger.withModule ? logger.withModule('Dispatcher') : logger;
+
 /**
  * 消息分发器 (Dispatcher)
  * 职责：
@@ -55,21 +57,21 @@ export class Dispatcher {
         const passed = await this._globalGuard(event, ctx);
         const guardTime = Date.now() - guardStart;
         if (!passed) {
-            logger.info(`[Dispatcher][PERF] 消息被全局守卫拦截 (User: ${ctx.userId}, guard: ${guardTime}ms, total: ${Date.now() - start}ms)`);
+            log.info(`[PERF] 消息被全局守卫拦截 (User: ${ctx.userId}, guard: ${guardTime}ms, total: ${Date.now() - start}ms)`);
             return;
         }
 
         // 3. 路由分发
         // 使用 className 检查替代 instanceof，提高鲁棒性并方便测试
         if (event.className === 'UpdateBotCallbackQuery') {
-            logger.info(`[Dispatcher][PERF] 回调处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
+            log.info(`[PERF] 回调处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
             await this._handleCallback(event, ctx);
         } else if (event.className === 'UpdateNewMessage' && event.message) {
-            logger.info(`[Dispatcher][PERF] 消息处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
+            log.info(`[PERF] 消息处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
             await this._handleMessage(event, ctx);
         }
         
-        logger.info(`[Dispatcher][PERF] 总耗时 ${Date.now() - start}ms`);
+        log.info(`[PERF] 总耗时 ${Date.now() - start}ms`);
     }
 
     /**
@@ -101,7 +103,7 @@ export class Dispatcher {
                 target = m.peerId;
             }
         } catch (e) {
-            logger.error(`[Dispatcher] Context extraction error:`, e);
+            log.error(`Context extraction error:`, e);
         }
         
         return { userId, target, isCallback };
@@ -357,7 +359,7 @@ export class Dispatcher {
 
                 // 如果发现数据是加载中的（例如缓存过期正在后台刷新），可以考虑在这里逻辑
             } catch (e) {
-                logger.error("Files command async error:", e);
+                log.error("Files command async error:", e);
                 await safeEdit(target, placeholder.id, "❌ 无法获取文件列表，请稍后重试。", null, userId);
             }
         })();
@@ -571,7 +573,7 @@ export class Dispatcher {
 
                 await safeEdit(target, placeholder.id, message, null, userId);
             } catch (error) {
-                logger.error("Diagnosis error:", error);
+                log.error("Diagnosis error:", error);
                 await safeEdit(target, placeholder.id, `❌ 诊断过程中发生错误: ${escapeHTML(error.message)}`, null, userId);
             }
         })();
@@ -597,7 +599,7 @@ export class Dispatcher {
             instanceInfo.instanceCount = await instanceCoordinator.getInstanceCount();
 
         } catch (error) {
-            logger.error("获取实例信息失败:", error);
+            log.error("获取实例信息失败:", error);
             instanceInfo.error = error.message;
         }
 

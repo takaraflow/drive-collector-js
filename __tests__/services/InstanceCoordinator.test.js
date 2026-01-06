@@ -38,6 +38,21 @@ jest.unstable_mockModule("../../src/services/logger.js", () => ({
    setInstanceIdProvider: jest.fn(),
 }));
 
+// Mock CacheService to avoid real provider initialization
+const mockCache = {
+  initialize: jest.fn().mockResolvedValue(undefined),
+  get: jest.fn(),
+  set: jest.fn(),
+  delete: jest.fn(),
+  listKeys: jest.fn(),
+  getCurrentProvider: jest.fn().mockReturnValue("cloudflare"),
+  _startHeartbeat: jest.fn(),
+};
+
+jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+  cache: mockCache,
+}));
+
 describe("InstanceCoordinator", () => {
   beforeAll(async () => {
     // 【关键修复 1】强制使用真实定时器，防止 async/await 逻辑因为 FakeTimers 导致死锁
@@ -72,9 +87,6 @@ describe("InstanceCoordinator", () => {
 
     // Pre-initialize cache to avoid repeated async initialization overhead
     await cache.initialize();
-
-    // Prevent CacheService heartbeat timer from starting
-    cache._startHeartbeat = jest.fn();
   });
 
   afterAll(() => {
@@ -95,9 +107,11 @@ describe("InstanceCoordinator", () => {
         instanceCoordinator.activeInstances = new Set();
     }
 
-    // Ensure Cache is in normal mode for tests
+    // Ensure Cache provider name is stable for tests
     const { cache } = await import("../../src/services/CacheService.js");
-    if (cache) cache.currentProvider = 'cloudflare';
+    if (cache?.getCurrentProvider?.mockReturnValue) {
+        cache.getCurrentProvider.mockReturnValue("cloudflare");
+    }
   });
 
   afterEach(() => {
@@ -113,31 +127,25 @@ describe("InstanceCoordinator", () => {
 
   describe("registerInstance", () => {
       test("should register instance successfully (Cache only)", async () => {
-          // Mock the fetch response to be ok: true
-          mockFetch.mockResolvedValueOnce({
-            ok: true,
-            json: () => Promise.resolve({ success: true }),
-          });
+          const setSpy = jest.fn().mockResolvedValue(true);
+          cache.set = setSpy;
   
           await instanceCoordinator.registerInstance();
   
-          // Verify Cache write only - check that it contains the key pattern
-          expect(mockFetch).toHaveBeenCalledWith(
-            expect.stringContaining("/storage/kv/namespaces/"),
+          // Verify cache write with instance payload
+          expect(setSpy).toHaveBeenCalledWith(
+            "instance:test_instance_123",
             expect.objectContaining({
-              method: "PUT",
-              body: expect.stringContaining('"id":"test_instance_123"'),
-            })
+              id: "test_instance_123",
+              status: "active"
+            }),
+            expect.any(Number)
           );
       });
 
       test("should throw error when Cache registration fails", async () => {
-          // Mock Cache failure - response not ok
-          mockFetch.mockResolvedValueOnce({
-              ok: false,
-              status: 400,
-              json: () => Promise.resolve({ success: false, errors: [{ message: "Registration failed" }] }),
-          });
+          const setSpy = jest.fn().mockRejectedValue(new Error("Cache registration failed"));
+          cache.set = setSpy;
   
           // Should throw since Cache is the primary storage
           try {

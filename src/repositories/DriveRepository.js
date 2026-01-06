@@ -3,6 +3,8 @@ import { localCache } from "../utils/LocalCache.js";
 import { d1 } from "../services/d1.js";
 import { logger } from "../services/logger.js";
 
+const log = logger.withModule ? logger.withModule('DriveRepository') : logger;
+
 /**
  * 网盘配置仓储层
  * 使用 Cache 存储作为主存储，符合低频关键数据规则
@@ -47,7 +49,7 @@ export class DriveRepository {
                 return drive;
             }
         } catch (cacheError) {
-            logger.warn(`Cache unavailable for ${userId}, falling back to D1:`, cacheError);
+            log.warn(`Cache unavailable for ${userId}, falling back to D1:`, cacheError);
         }
 
         // Cache miss 或失败，从 D1 回源
@@ -56,7 +58,7 @@ export class DriveRepository {
             try {
                 await cache.set(this.getDriveKey(userId), drive);
             } catch (cacheError) {
-                logger.warn(`Failed to update cache for ${userId}:`, cacheError);
+                log.warn(`Failed to update cache for ${userId}:`, cacheError);
             }
             localCache.set(cacheKey, drive, 60 * 1000);
         }
@@ -107,7 +109,7 @@ export class DriveRepository {
             localCache.del(this.getAllDrivesKey());
             return true;
         } catch (e) {
-            logger.error(`DriveRepository.create failed for ${userId}:`, e);
+            log.error(`DriveRepository.create failed for ${userId}:`, e);
             throw e;
         }
     }
@@ -133,7 +135,7 @@ export class DriveRepository {
             localCache.del(`drive_${userId}`);
             localCache.del(this.getAllDrivesKey());
         } catch (e) {
-            logger.error(`DriveRepository.deleteByUserId failed for ${userId}:`, e);
+            log.error(`DriveRepository.deleteByUserId failed for ${userId}:`, e);
             throw e;
         }
     }
@@ -158,7 +160,7 @@ export class DriveRepository {
             }
             localCache.del(this.getAllDrivesKey());
         } catch (e) {
-            logger.error(`DriveRepository.delete failed for ${driveId}:`, e);
+            log.error(`DriveRepository.delete failed for ${driveId}:`, e);
             throw e;
         }
     }
@@ -188,7 +190,7 @@ export class DriveRepository {
 
             return drive;
         } catch (e) {
-            logger.error(`DriveRepository.findById error for ${driveId}:`, e);
+            log.error(`DriveRepository.findById error for ${driveId}:`, e);
             return null;
         }
     }
@@ -221,7 +223,7 @@ export class DriveRepository {
             }
             return drives;
         } catch (e) {
-            logger.error("DriveRepository.findAll error:", e);
+            log.error("DriveRepository.findAll error:", e);
             return [];
         }
     }
@@ -248,7 +250,7 @@ export class DriveRepository {
             );
             return result;
         } catch (e) {
-            logger.error(`DriveRepository._findDriveInD1 error for ${safeUserId}:`, e);
+            log.error(`DriveRepository._findDriveInD1 error for ${safeUserId}:`, e);
             return null;
         }
     }
@@ -274,9 +276,9 @@ export class DriveRepository {
             }
 
             await cache.set(this.getAllDrivesKey(), activeIds);
-            logger.info(`📝 已更新活跃网盘列表，共 ${activeIds.length} 个`);
+            log.info(`📝 已更新活跃网盘列表，共 ${activeIds.length} 个`);
         } catch (e) {
-            logger.error("Failed to update active drives list:", e);
+            log.error("Failed to update active drives list:", e);
         }
     }
 }

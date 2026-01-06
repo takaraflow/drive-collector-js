@@ -2,6 +2,8 @@ import { cache } from "../services/CacheService.js";
 import { localCache } from "../utils/LocalCache.js";
 import { logger } from "../services/logger.js";
 
+const log = logger.withModule ? logger.withModule('SettingsRepository') : logger;
+
 /**
  * 系统设置仓储层
  * 使用 Cache 存储作为主存储，符合低频关键数据规则
@@ -33,7 +35,7 @@ export class SettingsRepository {
 
             return defaultValue;
         } catch (e) {
-            logger.error(`[${cache.getCurrentProvider()}] SettingsRepository.get failed for ${key}:`, e);
+            log.error(`[${cache.getCurrentProvider()}] SettingsRepository.get failed for ${key}:`, e);
             return defaultValue;
         }
     }
@@ -47,7 +49,7 @@ export class SettingsRepository {
     static async set(key, value) {
         // 处理null key的情况
         if (key == null) {
-            logger.warn('SettingsRepository.set called with null/undefined key, ignoring');
+            log.warn('SettingsRepository.set called with null/undefined key, ignoring');
             return;
         }
 
@@ -56,7 +58,7 @@ export class SettingsRepository {
             // 1. 更新 Cache（主存储）
             await cache.set(cacheKey, value);
         } catch (cacheError) {
-            logger.error(`[${cache.getCurrentProvider()}] SettingsRepository.set failed for ${key} (Cache):`, cacheError);
+            log.error(`[${cache.getCurrentProvider()}] SettingsRepository.set failed for ${key} (Cache):`, cacheError);
             throw cacheError; // Cache是主存储，失败时抛出异常
         }
 

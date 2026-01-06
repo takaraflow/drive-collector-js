@@ -2,6 +2,8 @@ import PQueue from "p-queue";
 import { cache } from "../services/CacheService.js";
 import { logger } from "../services/logger.js";
 
+const log = logger.withModule ? logger.withModule('Limiter') : logger;
+
 const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const createLimiter = (options) => {
@@ -63,7 +65,7 @@ const createAutoScalingLimiter = (options, autoScaling = {}) => {
 
         if (newConcurrency !== queue.concurrency) {
             queue.concurrency = newConcurrency;
-            logger.info(`📊 Auto-scaling: Adjusted concurrency from ${queue.concurrency} to ${newConcurrency}`);
+            log.info(`📊 Auto-scaling: Adjusted concurrency from ${queue.concurrency} to ${newConcurrency}`);
         }
 
         this.successCount = 0;
@@ -233,7 +235,7 @@ const checkCooling = async () => {
     // 1. 如果本地已经处于冷静期，直接等待，不需要同步 KV
     if (now < globalCoolingUntil) {
         const waitTime = globalCoolingUntil - now;
-        logger.warn(`❄️ System is in LOCAL cooling period, waiting ${waitTime}ms...`);
+        log.warn(`❄️ System is in LOCAL cooling period, waiting ${waitTime}ms...`);
         await sleep(waitTime);
         return;
     }
@@ -252,7 +254,7 @@ const checkCooling = async () => {
 
     if (now < globalCoolingUntil) {
         const waitTime = globalCoolingUntil - now;
-        logger.warn(`❄️ System is in global cooling period, waiting ${waitTime}ms...`);
+        log.warn(`❄️ System is in global cooling period, waiting ${waitTime}ms...`);
         await sleep(waitTime);
     }
 };
@@ -283,7 +285,7 @@ const handle429Error = async (fn, maxRetries = 10) => {
             );
 
             if (isDisconnected) {
-                logger.warn(`🔌 Disconnected error detected, waiting 3 seconds for reconnection (attempt ${retryCount + 1}/${maxRetries})`);
+                log.warn(`🔌 Disconnected error detected, waiting 3 seconds for reconnection (attempt ${retryCount + 1}/${maxRetries})`);
                 lastRetryAfter = 3000; // 记录断开连接的等待时间
                 await sleep(3000);
                 retryCount++;
@@ -292,7 +294,7 @@ const handle429Error = async (fn, maxRetries = 10) => {
                 let retryAfter = error.retryAfter || error.seconds || 0;
                 
                 // 记录原始错误信息以便调试 (logger 可能没有 debug 方法，使用 info)
-                logger.info(`[Limiter] 429 Error Details: code=${error.code}, name=${error.name}, msg=${error.message}, rawRetryAfter=${retryAfter}`);
+                log.info(`429 Error Details: code=${error.code}, name=${error.name}, msg=${error.message}, rawRetryAfter=${retryAfter}`);
 
                 if (!retryAfter) {
                     const match = error.message.match(/wait (\d+) seconds?/i);
@@ -313,13 +315,13 @@ const handle429Error = async (fn, maxRetries = 10) => {
                 lastRetryAfter = waitMs; // 确保在 sleep 之前赋值，防止在 sleep 期间出错导致丢失
 
                 if (retryAfter > 60) {
-                    logger.error(`🚨 Large FloodWait detected (${retryAfter}s). Triggering GLOBAL cooling.`);
+                    log.error(`🚨 Large FloodWait detected (${retryAfter}s). Triggering GLOBAL cooling.`);
                     globalCoolingUntil = Date.now() + waitMs;
                     // 同步到 Cache
                     await cache.set("system:cooling_until", globalCoolingUntil.toString(), Math.ceil(waitMs / 1000) + 60).catch(() => {});
                 }
 
-                logger.warn(`⚠️ 429/FloodWait encountered, retrying after ${Math.round(waitMs)}ms (attempt ${retryCount + 1}/${maxRetries})`);
+                log.warn(`⚠️ 429/FloodWait encountered, retrying after ${Math.round(waitMs)}ms (attempt ${retryCount + 1}/${maxRetries})`);
                 await sleep(waitMs);
                 retryCount++;
             } else {
