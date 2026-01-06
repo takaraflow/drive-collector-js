@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.12.0](https://github.com/YoungSx/drive-collector-js/compare/v4.11.0...v4.12.0) (2026-01-06)
+
+
+### 🔧 其他任务
+
+* expands system capabilities and configuration options ([06addaf](https://github.com/YoungSx/drive-collector-js/commit/06addaf4040edb42bdf4cd5026e0f587970b8cd4))
+* reduces lock acquisition retry log noise ([f8e3d18](https://github.com/YoungSx/drive-collector-js/commit/f8e3d18e84398dc892c56a089dad7a3a36100784))
+
+
+### ✨ 新特性
+
+* add cache provider and failover status to instance diagnostics ([18fbeb4](https://github.com/YoungSx/drive-collector-js/commit/18fbeb4d0f881b1680349619fc0fc0f5d332f83e))
+
 ## [4.11.0](https://github.com/YoungSx/drive-collector-js/compare/v4.10.0...v4.11.0) (2026-01-06)
 
 
