@@ -11,18 +11,36 @@
 
 # 自动化测试编写规则
 
-1. 单元测试中严禁任何真实 IO（DB / HTTP / FS / Redis / Queue）
-2. 禁止在 test / beforeAll / beforeEach 中启动 server 或监听端口
-3. 禁止使用真实时间（Date.now / setTimeout / setInterval），必须 mock 或 useFakeTimers
-4. 单个 test 用例执行时间不得超过 30ms
-5. 单个 test 文件执行时间不得超过 300ms
-6. 禁止在 beforeAll 中做全局初始化，必须使用最小化 per-test 构造
-7. 每个 test 必须 100% 可并行运行，不得依赖共享状态
-8. 测试中禁止使用随机数，必须 mock Math.random
-9. 所有 Promise 必须被 await，禁止 fire-and-forget
-10. 禁止 async test 中使用 done 回调
-11. 测试中不得读取真实 process.env，必须显式注入
-12. 禁止 snapshot 用于业务逻辑断言（仅限 UI / 结构性输出）
-13. 禁止 console.log，调试信息必须通过断言体现
-14. 所有 mock 必须在 test 内显式声明，禁止隐式自动 mock
-15. 测试结束后必须无 open handles（timer / socket / file）
+## 1. Execution Constraints (执行约束 - 确保确定性)
+
+- **IO Isolation:** 单元测试严禁任何真实 IO（DB, HTTP, FS, Redis, Queue）。所有外部依赖必须 Mock。
+- **No Networking:** 禁止在测试生命周期（test/before/after）中启动 Server 或监听真实物理端口。
+- **Time Control:** 禁止使用真实系统时间（`Date.now`, `setTimeout`）。必须使用时钟模拟器（如 `useFakeTimers`）。
+- **Performance Budget:** * 单个 Test Case 执行时间 $\le 30\text{ms}$。
+  - 单个 Test File 执行时间 $\le 300\text{ms}$。
+- **No Side Effects:** * 禁止读取真实 `process.env`，必须通过依赖注入或显式 Mock。
+  - 禁止 `console.log`，调试信息应体现为失败断言。
+  - 测试结束后必须零残留（无 Open Handles, Timers, Sockets）。
+- **Determinism:** 禁止使用随机数。必须 Mock `Math.random` 或指定随机种子。
+
+## 2. Implementation Patterns (实现模式 - 确保稳定性)
+
+- **Parallel Readiness:** 每个用例必须 100% 可并行化。严禁依赖共享的全局状态。
+- **Minimal Setup:** 禁止在 `beforeAll` 做全局初始化。优先使用 `per-test` 的局部构造，确保环境干净。
+- **Async Handling:** * 所有 Promise 必须被 `await`，严禁 Fire-and-forget。
+  - 禁止在异步测试中使用 `done()` 回调，统一使用 `async/await`。
+- **Explicit Mocking:** 所有 Mock 必须在 Test 内部或紧邻的 Scope 显式声明。禁止使用全局隐式 Auto-mock。
+- **Explicit Waits:** 严禁 `sleep(ms)`。必须使用“显式等待”机制（如 `waitUntil(condition)`），以适应波动的执行环境。
+- **Data Strategy:** * **独立构造：** 禁止调用生产环境的 Utility 类构造测试数据，防止“BUG 传递”。
+  - **即用即毁：** 使用 Ephemeral Data（如随机 UUID），测试结束立即清理。
+
+## 3. Design Philosophy (设计哲学 - 确保质量)
+
+- **Verification of State (State over Process):** * **验证结果而非过程：** 聚焦于输入 $A$ 产生输出 $B$ 或状态 $C$。
+  - **禁止验证内部细节：** 不要断言私有方法调用、循环次数或具体数据结构（如 `ArrayList` vs `LinkedList`）。
+- **Anti-Fragility (防碎性):** * **硬编码预期值：** 断言的预期结果应是硬编码的常量。禁止通过调用生产逻辑来计算预期值（避免 `assert result == production_calc(input)`）。
+  - **三层架构：** 遵循 `DSL层 (Business Context) -> 逻辑抽象层 (Action/Tasks) -> 驱动层 (Protocol/Driver)`。
+- **Assertion Intent:** 使用语义化断言（如 `assertThat(user).isActive()`）而非原始逻辑比较（如 `assert user.status == 1`）。
+- **Snapshot Policy:** Snapshot 仅限用于 UI 结构或大段不可变输出验证，严禁用于验证核心业务逻辑。
+
+**严格执行上述规则。确保正确性并达成性能指标，优先于精简表达。**
