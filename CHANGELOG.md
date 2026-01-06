@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.12.3](https://github.com/YoungSx/lb-worker-js/compare/v0.12.2...v0.12.3) (2026-01-06)
+
+
+### 🐛 Bug Fixes
+
+* improves instance heartbeat parsing and validation ([79d1a94](https://github.com/YoungSx/lb-worker-js/commit/79d1a9462a3523884f614a6d0c55ce283d80dde5))
+
 ### [0.12.2](https://github.com/YoungSx/lb-worker-js/compare/v0.12.1...v0.12.2) (2026-01-06)
 
 
