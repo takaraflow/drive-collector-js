@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.11.0](https://github.com/YoungSx/drive-collector-js/compare/v4.10.0...v4.11.0) (2026-01-06)
+
+
+### ♻️ 代码重构
+
+* improve logger module with context support and module-specific logging ([724f97d](https://github.com/YoungSx/drive-collector-js/commit/724f97d2af263fd5531a200ecf0d3e7d58ec9734))
+
+
+### 🐛 问题修复
+
+* resolve the error regarding Telegram lock during scrolling publishing ([2989c1d](https://github.com/YoungSx/drive-collector-js/commit/2989c1d05def2aa2f7219cf1ca7ec33e5736b91f))
+
+
+### ✨ 新特性
+
+* adds Redis/Valkey cache operations and key listing functionality ([f9d7997](https://github.com/YoungSx/drive-collector-js/commit/f9d799793802637466872275bbacce0a2f57693b))
+
 ## [4.10.0](https://github.com/YoungSx/drive-collector-js/compare/v4.9.1...v4.10.0) (2026-01-06)
 
 
