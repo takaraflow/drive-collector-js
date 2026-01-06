@@ -134,12 +134,38 @@ describe('Redis TCP Adaptation', () => {
     });
   });
 
+    test('should_use_send_command_with_match_count_when_available', async () => {
+      const env = { NF_REDIS_URL: 'rediss://example.com:6380', NF_REDIS_PASSWORD: 'pass' };
+      // 为此测试添加 send 方法
+      currentTestMockClient.send = jest.fn()
+        .mockResolvedValueOnce(['10', ['key1']])
+        .mockResolvedValueOnce(['0', ['key2']]);
+      // scan 方法应该不被调用
+      currentTestMockClient.scan.mockClear();
+
+      const result = await executeRedisScan(env, 'prefix');
+      
+      expect(result.keys).toEqual([{ name: 'key1' }, { name: 'key2' }]);
+      // 验证 send 是否被正确调用，带有 MATCH 和 COUNT 关键字
+      expect(currentTestMockClient.send).toHaveBeenCalledWith('SCAN', '0', 'MATCH', 'prefix*', 'COUNT', 100);
+      expect(currentTestMockClient.send).toHaveBeenCalledWith('SCAN', '10', 'MATCH', 'prefix*', 'COUNT', 100);
+      
+      // 清理 send 方法以免影响其他测试
+      delete currentTestMockClient.send;
+    });
+
   describe('executeRedisScan', () => {
     test('should_scan_redis_keys_with_prefix_correctly', async () => {
       const env = { NF_REDIS_URL: 'rediss://example.com:6380', NF_REDIS_PASSWORD: 'pass' };
       currentTestMockClient.scan.mockResolvedValueOnce(['10', ['key1']]).mockResolvedValueOnce(['0', ['key2']]);
       const result = await executeRedisScan(env, 'prefix');
       expect(result.keys).toEqual([{ name: 'key1' }, { name: 'key2' }]);
+      // 验证调用参数是否包含 MATCH 和 COUNT
+      // 注意：mock 的调用参数取决于 src/index.js 中实际调用的 scan 还是 send
+      // 由于我们 mock 的是 scan 方法，且 src/index.js 中优先使用 send，
+      // 但如果 mock client 没有 send 方法（这里只有 scan），就会走到 scan 分支。
+      // 在这个测试 setup 中，currentTestMockClient 没有 send 方法。
+      expect(currentTestMockClient.scan).toHaveBeenCalledWith('0', 'prefix*', 100);
     });
 
     test('should_handle_empty_redis_scan_results', async () => {

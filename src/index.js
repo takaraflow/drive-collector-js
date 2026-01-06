@@ -743,9 +743,19 @@ async function executeRedisScan(env, prefix, ctx = null) {
   do {
     // 支持 mock client 的 send 方法和真实 client 的 scan 方法
     let res;
+    // 添加日志，记录使用的 client 类型和 scan 参数
+    const isNFCacheClient = !!client.scan && !client.send;
+    const clientType = isNFCacheClient ? 'NFCacheClient' : (client.send ? 'RedisClient' : 'Unknown');
+    // await logger.debug(`Executing Redis SCAN`, { clientType, prefix, cursor }, ctx);
+
     if (client.send) {
-      res = await client.send('SCAN', cursor, `${prefix}*`, 100);
+      // 原生 redis-on-workers 或类似 client，直接发送命令
+      // 必须显式包含 MATCH 和 COUNT 关键字
+      res = await client.send('SCAN', cursor, 'MATCH', `${prefix}*`, 'COUNT', 100);
     } else if (client.scan) {
+      // NFCacheClient 或兼容接口
+      // 假设 scan 方法签名是 (cursor, matchPattern, count)
+      // 这里的 matchPattern 应该是完整的 pattern (如 "instance:*")
       res = await client.scan(cursor, `${prefix}*`, 100);
     } else {
       throw new Error('Client does not support scan or send method');
