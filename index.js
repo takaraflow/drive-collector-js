@@ -156,32 +156,14 @@ async function main() {
         const { instanceCoordinator } = await import("./src/services/InstanceCoordinator.js");
         const { startDispatcher } = await import("./src/dispatcher/bootstrap.js");
         const { startProcessor } = await import("./src/processor/bootstrap.js");
-        const { connectAndStart, startWatchdog } = await import("./src/services/telegram.js");
+        await import("./src/services/telegram.js");
 
         log.info("🚀 启动业务模块: InstanceCoordinator, Telegram, Dispatcher, Processor");
         
         // 依次启动业务模块
         await instanceCoordinator.start();
-        const allowTelegramFailure =
-            process.env.ALLOW_TELEGRAM_STARTUP_FAILURE === 'true' ||
-            process.env.NODE_MODE === 'dev' ||
-            process.env.NODE_ENV === 'development';
-        let telegramConnected = false;
-        try {
-            await connectAndStart();
-            telegramConnected = true;
-        } catch (error) {
-            console.error("🚨 Telegram 启动失败:", error?.message || error);
-            log.error("🚨 Telegram 客户端连接启动失败:", error);
-            if (!allowTelegramFailure) {
-                throw error;
-            }
-        }
         await startDispatcher();
         await startProcessor();
-        if (telegramConnected) {
-            startWatchdog();
-        }
 
         // 6. 启动 Webhook HTTP Server
         const http = await import("http");
