@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.13.1](https://github.com/YoungSx/drive-collector-js/compare/v4.13.0...v4.13.1) (2026-01-07)
+
+
+### ✅ 测试相关
+
+* adds comprehensive 502 error diagnostic guide ([c68655d](https://github.com/YoungSx/drive-collector-js/commit/c68655d0278a35c3043e65df38fba156abf13ecf))
+
+
+### 🐛 问题修复
+
+* adds error handling for Axiom client initialization ([8554e73](https://github.com/YoungSx/drive-collector-js/commit/8554e7312fa42d4a21f1c58af664e7f9fdc1e831))
+
 ## [4.13.0](https://github.com/YoungSx/drive-collector-js/compare/v4.12.0...v4.13.0) (2026-01-07)
 
 
