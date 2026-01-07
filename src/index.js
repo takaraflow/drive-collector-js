@@ -256,8 +256,8 @@ function parseInstanceData(data) {
 /**
  * 扫描锁键（用于 leader election 提示）
  */
-async function scanLockKeys(env, ctx = null) {
-  const scanLockKeysLogger = logger.child({ module: 'scanLockKeys' });
+async function scanLockKeys(env, ctx = null, parentLogger = logger) {
+  const scanLockKeysLogger = parentLogger.child({ module: 'scanLockKeys' });
   try {
     const lockPrefixes = ['lock:', 'task:', 'msg_lock:'];
     let lockCount = 0;
@@ -287,8 +287,8 @@ async function scanLockKeys(env, ctx = null) {
 /**
  * 获取活跃实例
  */
-async function getActiveInstances(env, ctx = null) {
-  const getActiveInstancesLogger = logger.child({ module: 'getActiveInstances' });
+async function getActiveInstances(env, ctx = null, parentLogger = logger) {
+  const getActiveInstancesLogger = parentLogger.child({ module: 'getActiveInstances' });
   try {
     // 扫描所有契约键前缀
     const prefixes = ['instance:', 'lock:', 'task:', 'msg_lock:'];
@@ -367,7 +367,7 @@ async function getActiveInstances(env, ctx = null) {
 
     // 为了兼容测试：测试期望 scanLockKeys 被调用，从而触发额外的 KV.list
     if (isTestEnvironment) {
-      await scanLockKeys(env, ctx);
+      await scanLockKeys(env, ctx, parentLogger);
     }
 
     await getActiveInstancesLogger.debug('获取活跃实例', { count: instances.length, totalKeys: allKeys.length }, ctx);
@@ -381,8 +381,8 @@ async function getActiveInstances(env, ctx = null) {
 /**
  * 选择目标实例 (轮询)
  */
-async function selectTargetInstance(instances, env, ctx) {
-  const selectTargetInstanceLogger = logger.child({ module: 'selectTargetInstance' });
+async function selectTargetInstance(instances, env, ctx, parentLogger = logger) {
+  const selectTargetInstanceLogger = parentLogger.child({ module: 'selectTargetInstance' });
   if (instances.length === 0) {
     return null;
   }
@@ -410,8 +410,8 @@ async function selectTargetInstance(instances, env, ctx) {
 /**
  * 转发请求到目标实例
  */
-async function forwardToInstance(instance, normalizedUrl, request, originalBody, ctx = null) {
-  const forwardToInstanceLogger = logger.child({ module: 'forwardToInstance' });
+async function forwardToInstance(instance, normalizedUrl, request, originalBody, ctx = null, parentLogger = logger) {
+  const forwardToInstanceLogger = parentLogger.child({ module: 'forwardToInstance' });
   const url = new URL(normalizedUrl.href);
   url.host = new URL(instance.url).host;
   url.protocol = new URL(instance.url).protocol;
@@ -454,14 +454,14 @@ async function forwardToInstance(instance, normalizedUrl, request, originalBody,
 /**
  * 带重试的转发逻辑
  */
-async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx) {
-  const fetchWithRetryLogger = logger.child({ module: 'fetchWithRetry' });
+async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx, parentLogger = logger) {
+  const fetchWithRetryLogger = parentLogger.child({ module: 'fetchWithRetry' });
   let lastError;
   let last5xxResponse = null;
 
   for (const instance of instances) {
     try {
-      const response = await forwardToInstance(instance, normalizedUrl, request, body, ctx);
+      const response = await forwardToInstance(instance, normalizedUrl, request, body, ctx, parentLogger);
       
       // 4xx 错误：直接透传，不再重试其他实例
       if (response.status >= 400 && response.status < 500) {
@@ -1326,10 +1326,10 @@ async function handleRequest(request, env, ctx) {
   // 健康检查 - 增加日志采样过滤
   if ((request.method === 'GET' || request.method === 'HEAD') && normalizedUrl.pathname === '/health') {
     try {
-      const activeInstances = await getActiveInstances(env, ctx);
+      const activeInstances = await getActiveInstances(env, ctx, requestLogger);
       const activeCount = activeInstances.length;
       const provider = getCurrentProvider();
-      const lockCount = await scanLockKeys(env, ctx);
+      const lockCount = await scanLockKeys(env, ctx, requestLogger);
       
       // 健康检查日志采样：仅在非生产环境或特定条件下记录详细信息
       if (env.NODE_ENV !== 'production' || activeCount === 0 || lockCount > 0) {
@@ -1404,7 +1404,7 @@ async function handleRequest(request, env, ctx) {
   try {
     console.log(`[AXIOM_DEBUG] ${requestId}: Before getActiveInstances, buffer size=${requestLogBuffer.length}`);
     // 获取活跃实例
-    const activeInstances = await getActiveInstances(env, ctx);
+    const activeInstances = await getActiveInstances(env, ctx, requestLogger);
     console.log(`[AXIOM_DEBUG] ${requestId}: After getActiveInstances, found ${activeInstances.length} instances, buffer size=${requestLogBuffer.length}`);
     await requestLogger.debug('getActiveInstances complete', { count: activeInstances.length, module: 'instanceSelector' });
     await requestLogger.info('活跃实例查询完成', { count: activeInstances.length });
@@ -1438,13 +1438,13 @@ async function handleRequest(request, env, ctx) {
       await requestLogger.warn('返回 503 响应：无活跃实例可用', { qstashMsgId, retryCount, path: normalizedUrl.pathname, status: 503 });
     } else {
       // 选择目标实例
-      const targetInstance = await selectTargetInstance(activeInstances, env, ctx);
+      const targetInstance = await selectTargetInstance(activeInstances, env, ctx, requestLogger);
       await requestLogger.debug('targetInstance selected', { id: targetInstance?.id || 'NONE', module: 'instanceSelector' });
       if (!targetInstance) {
         result = new Response('No target instance selected', { status: 503 });
       } else {
         // 转发请求
-        const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], normalizedUrl, request, env, body, ctx);
+        const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], normalizedUrl, request, env, body, ctx, requestLogger);
 
         await requestLogger.debug('负载均衡请求完成', { status: response.status });
 
