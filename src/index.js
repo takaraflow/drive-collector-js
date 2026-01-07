@@ -343,6 +343,28 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     // 新增日志：记录获取到的原始实例数据
     await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Fetch Phase: Raw instance data results', { rawData: instanceDataResults }, ctx);
 
+    // 新增：输出所有扫描到的键及其值，便于线上调试
+    const instanceDataByKey = new Map();
+    instanceKeys.forEach((keyName, idx) => {
+      instanceDataByKey.set(keyName, instanceDataResults[idx]);
+    });
+
+    const keyValueDump = [];
+    for (const key of allKeys) {
+      const keyName = key.name;
+      if (instanceDataByKey.has(keyName)) {
+        keyValueDump.push({ key: keyName, value: instanceDataByKey.get(keyName) });
+        continue;
+      }
+      try {
+        const value = await executeWithFailover('_kv_get', env, ctx, keyName);
+        keyValueDump.push({ key: keyName, value });
+      } catch (e) {
+        keyValueDump.push({ key: keyName, error: e.message });
+      }
+    }
+    await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Full KV dump for scanned keys', { entries: keyValueDump }, ctx);
+
     for (const data of instanceDataResults) {
       const instance = parseInstanceData(data);
       await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Fetch Phase: Parsed instance data', { instanceId: instance?.id, parsedInstance: instance }, ctx);
