@@ -363,7 +363,28 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
         keyValueDump.push({ key: keyName, error: e.message });
       }
     }
-    await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Full KV dump for scanned keys', { entries: keyValueDump }, ctx);
+    // 将键值对分片输出，避免单条日志过大（Axiom 2MB 限制）
+    const MAX_VALUE_PREVIEW_LENGTH = 2000;
+    const formattedEntries = keyValueDump.map(({ key, value, error }) => {
+      if (error) return { key, error };
+      try {
+        const raw = typeof value === 'string' ? value : JSON.stringify(value);
+        const preview = raw.length > MAX_VALUE_PREVIEW_LENGTH
+          ? `${raw.slice(0, MAX_VALUE_PREVIEW_LENGTH)}...[TRUNCATED]`
+          : raw;
+        return { key, preview, type: typeof value };
+      } catch (e) {
+        return { key, error: `format_error:${e.message}` };
+      }
+    });
+
+    const chunkSize = 20;
+    const totalChunks = Math.max(1, Math.ceil(formattedEntries.length / chunkSize));
+    for (let i = 0; i < formattedEntries.length; i += chunkSize) {
+      const chunkIndex = Math.floor(i / chunkSize) + 1;
+      const chunk = formattedEntries.slice(i, i + chunkSize);
+      await getActiveInstancesLogger.info(`[DEBUG] getActiveInstances Full KV chunk ${chunkIndex}/${totalChunks}`, { entries: chunk }, ctx);
+    }
 
     for (const data of instanceDataResults) {
       const instance = parseInstanceData(data);
