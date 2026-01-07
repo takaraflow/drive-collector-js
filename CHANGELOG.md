@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.12.7](https://github.com/YoungSx/lb-worker-js/compare/v0.12.6...v0.12.7) (2026-01-07)
+
+
+### 🐛 Bug Fixes
+
+* adds comprehensive KV dump logging for debugging ([5670fec](https://github.com/YoungSx/lb-worker-js/commit/5670fecdd091e6d4f0675f2d7c41d8b163172e51))
+
 ### [0.12.6](https://github.com/YoungSx/lb-worker-js/compare/v0.12.5...v0.12.6) (2026-01-07)
 
 
