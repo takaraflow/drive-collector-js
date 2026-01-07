@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.12.6](https://github.com/YoungSx/lb-worker-js/compare/v0.12.5...v0.12.6) (2026-01-07)
+
+
+### 🐛 Bug Fixes
+
+* improves logger hierarchy by adding parent logger parameter ([6929c22](https://github.com/YoungSx/lb-worker-js/commit/6929c220da1fe0651db052494d7f2ab55da97666))
+
 ### [0.12.5](https://github.com/YoungSx/lb-worker-js/compare/v0.12.4...v0.12.5) (2026-01-07)
 
 ### [0.12.4](https://github.com/YoungSx/lb-worker-js/compare/v0.12.3...v0.12.4) (2026-01-06)
