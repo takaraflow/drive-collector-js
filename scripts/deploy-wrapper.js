@@ -94,7 +94,7 @@ function main() {
         }
         
         // 执行 wrangler 命令（脱敏后输出）
-        console.log('Executing wrangler command...');
+        console.log('🚀 正在执行 Wrangler 命令 (Executing wrangler command)...');
         
         execSync(wranglerCmd, {
             stdio: 'inherit',
@@ -102,7 +102,7 @@ function main() {
         });
         
     } catch (error) {
-        console.error('Deploy failed:', error.message);
+        console.error('❌ 部署失败 (Deploy failed):', error.message);
         process.exit(1);
     }
 }

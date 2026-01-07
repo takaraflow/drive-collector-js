@@ -58,11 +58,11 @@ export class CacheTLSClient extends ICacheClient {
         const client = createRedis(redisOptions);
         await client.send('PING');
         this.client = client;
-        logger.info('Cache TLS Client 初始化成功', { host: this.tlsOptions.servername || new URL(this.url).hostname });
+        logger.info('✅ Cache TLS 客户端初始化成功 (Cache TLS Client initialized)', { host: this.tlsOptions.servername || new URL(this.url).hostname });
       } catch (e) {
         this.client = null;
         this.connectPromise = null;
-        logger.error('Cache TLS Client 初始化失败', { error: e.message, url: this.url });
+        logger.error('❌ Cache TLS 客户端初始化失败 (Cache TLS Client initialization failed)', { error: e.message, url: this.url });
         throw e;
       }
     })();

@@ -122,10 +122,10 @@ export async function getRedisClient(env, ctx) {
   
   try {
     redisClient = createRedis(redisOptions);
-    await logger.info('Redis Client 初始化成功', { url: urlStr.replace(/:[^:@]*@/, ':***@') });
+    await logger.info('✅ Redis 客户端初始化成功 (Redis Client initialized)', { url: urlStr.replace(/:[^:@]*@/, ':***@') });
     return redisClient;
   } catch (e) {
-    await logger.error('Redis Client 初始化失败', { error: e.message });
+    await logger.error('❌ Redis 客户端初始化失败 (Redis Client initialization failed)', { error: e.message });
     throw e;
   }
 }

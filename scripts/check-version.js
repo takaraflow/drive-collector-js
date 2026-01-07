@@ -12,12 +12,12 @@ if (fs.existsSync('manifest.json')) {
     console.log('manifest.json version:', manifest.version);
     
     if (manifest.version === packageJson.version) {
-        console.log('✅ manifest.json version matches');
+        console.log('✅ manifest.json 版本匹配 (manifest.json version matches)');
     } else {
-        console.error('❌ manifest.json version mismatch!');
+        console.error('❌ manifest.json 版本不匹配 (manifest.json version mismatch!)');
     }
 } else {
-    console.warn('⚠️ manifest.json not found');
+    console.warn('⚠️ 未找到 manifest.json (manifest.json not found)');
 }
 
 // 3. 读取 package-lock.json
@@ -26,10 +26,10 @@ if (fs.existsSync('package-lock.json')) {
     console.log('package-lock.json version:', packageLock.version);
     
     if (packageLock.version === packageJson.version) {
-        console.log('✅ package-lock.json version matches');
+        console.log('✅ package-lock.json 版本匹配 (package-lock.json version matches)');
     } else {
-        console.error('❌ package-lock.json version mismatch!');
+        console.error('❌ package-lock.json 版本不匹配 (package-lock.json version mismatch!)');
     }
 } else {
-    console.warn('⚠️ package-lock.json not found');
+    console.warn('⚠️ 未找到 package-lock.json (package-lock.json not found)');
 }

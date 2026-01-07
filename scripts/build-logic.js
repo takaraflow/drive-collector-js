@@ -160,7 +160,7 @@ function loadEnvFile(fileSystem = fs, targetEnv = 'dev') {
 
 // 检查必需的敏感变量
 function checkRequiredVariables() {
-    console.log('检查环境变量配置...');
+    console.log('🔎 检查环境变量配置 (Checking environment variables)...');
     
     const checks = [
         { name: 'AXIOM_TOKEN', warning: 'AXIOM_TOKEN 未设置，请确保在生产环境中配置此变量' },

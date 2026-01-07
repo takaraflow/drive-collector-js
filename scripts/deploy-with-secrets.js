@@ -104,7 +104,7 @@ function redactSensitiveInfo(str) {
  * 执行 wrangler secret bulk 命令
  */
 function uploadSecrets(secretsJsonPath) {
-    console.log('🚀 Uploading secrets to Cloudflare Workers...');
+    console.log('🚀 正在上传 Secrets 到 Cloudflare (Uploading secrets)...');
     
     try {
         const command = `npx wrangler secret bulk ${secretsJsonPath}`;
@@ -115,7 +115,7 @@ function uploadSecrets(secretsJsonPath) {
             env: { ...process.env }
         });
         
-        console.log('✅ Secrets uploaded successfully');
+        console.log('✅ Secrets 上传成功 (Secrets uploaded successfully)');
         return true;
     } catch (error) {
         console.error('❌ Failed to upload secrets:', error.message);

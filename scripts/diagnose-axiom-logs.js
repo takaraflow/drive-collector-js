@@ -74,7 +74,7 @@ export async function runDiagnosis(options = {}) {
   const hours = argv.hours;
   const startTime = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
   
-  console.log(`🔍 Querying logs from ${startTime} (last ${hours}h) in dataset "${DATASET}"...`);
+  console.log(`🔎 正在查询数据集 "${DATASET}" 中自 ${startTime} (最近 ${hours} 小时) 的日志...`);
 
   try {
     // 这里的 APL (Axiom Processing Language) 查询

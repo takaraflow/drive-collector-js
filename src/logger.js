@@ -240,7 +240,7 @@ export async function flushLogs(logBuffer, ctx = null) {
   if (!baseLoggerConfig.token || !baseLoggerConfig.dataset) {
     // 在测试环境中，如果没有配置，仍然处理缓冲区但不发送
     if (!isTestEnvironment) {
-      console.warn('[Axiom] Config missing, skipping flush');
+      console.warn('⚠️ [Axiom] 配置缺失，跳过刷新 (Config missing, skipping flush)');
     }
     
     // 即使没有配置，也要清空缓冲区防止内存泄漏
@@ -258,7 +258,7 @@ export async function flushLogs(logBuffer, ctx = null) {
   const logsToSend = [...logBuffer];
   logBuffer.length = 0; // 立即清空原数组
 
-  console.log(`[Axiom] Preparing to send ${logsToSend.length} events...`);
+  console.log(`📤 [Axiom] 准备发送事件 (Preparing to send events)...`);
 
   // 3. 应用清洗逻辑（双重保险，确保缓冲区中的数据也是清洗过的）
   const sanitizedLogs = logsToSend.map(log => {

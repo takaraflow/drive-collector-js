@@ -18,7 +18,6 @@ import { instrument } from '@microlabs/otel-cf-workers';
 import { Receiver } from '@upstash/qstash';
 
 // 静态导入 Redis client
-import { createRedis } from 'redis-on-workers';
 // 导入新的缓存客户端抽象
 import { getNFCacheClient } from './cache/client-factory.js';
 
@@ -106,7 +105,7 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
   const verifyQStashSignatureLogger = logger.child({ module: 'QStashSignature' });
   // 跳过签名验证
   if (env.SKIP_SIGNATURE_VERIFY === 'true') {
-    await verifyQStashSignatureLogger.debug('跳过签名验证', {}, ctx);
+    await verifyQStashSignatureLogger.debug('⏭️ 跳过签名验证 (Skipping signature verification)', {}, ctx);
     if (isGetRequest) {
       return null;
     }
@@ -173,7 +172,7 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
       // 返回 Uint8Array 以匹配测试期望
       return bodyData;
     } catch (e) {
-      await verifyQStashSignatureLogger.error('QStash mock 验证失败', { error: e.message }, ctx);
+      await verifyQStashSignatureLogger.error('❌ QStash mock 验证失败 (QStash mock verification failed)', { error: e.message }, ctx);
       throw e;
     }
   }
@@ -205,7 +204,7 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
       throw e;
     }
     // 其他错误（如密钥无效、格式错误等）
-    await verifyQStashSignatureLogger.error('QStash 验证失败', { error: e.message }, ctx);
+    await verifyQStashSignatureLogger.error('❌ QStash 验证失败 (QStash verification failed)', { error: e.message }, ctx);
     throw new Error(`Signature verification failed: ${e.message}`);
   }
 }
@@ -303,7 +302,7 @@ async function scanLockKeys(env, ctx = null, parentLogger = logger) {
 async function getActiveInstances(env, ctx = null, parentLogger = logger) {
   const getActiveInstancesLogger = parentLogger.child({ module: 'getActiveInstances' });
   const redisEndpointSummary = describeRedisEndpoint(env);
-  await getActiveInstancesLogger.debug('Redis endpoint summary for active-instance scan', { endpoint: redisEndpointSummary }, ctx);
+  await getActiveInstancesLogger.debug('📊 Redis 终端摘要 (Redis endpoint summary)', { endpoint: redisEndpointSummary }, ctx);
   try {
     // 扫描所有契约键前缀
     const prefixes = ['instance:', 'lock:', 'task:', 'msg_lock:'];
@@ -325,17 +324,17 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     }
 
     // 新增日志：记录扫描到的所有原始键
-    await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: All raw keys scanned', { keys: allKeys.map(k => k.name) }, ctx);
+    await getActiveInstancesLogger.debug('🔎 扫描到所有原始键 (All raw keys scanned)', { keys: allKeys.map(k => k.name) }, ctx);
 
     if (allKeys.length === 0) {
-      await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: No keys found, attempting fallback full scan', {}, ctx);
+      await getActiveInstancesLogger.debug('⚠️ 未找到键，尝试回退全量扫描 (No keys found, attempting fallback full scan)', {}, ctx);
       try {
         const fallbackResult = await executeWithFailover('_kv_list', env, ctx, '');
         const fallbackKeys = fallbackResult?.keys || [];
         await getActiveInstancesLogger.debug('getActiveInstances Fallback Scan: Raw keys', { keys: fallbackKeys.map(k => k.name), count: fallbackKeys.length }, ctx);
         allKeys = fallbackKeys;
       } catch (e) {
-        await getActiveInstancesLogger.error('getActiveInstances Fallback Scan failed', { error: e.message }, ctx);
+        await getActiveInstancesLogger.error('❌ 回退扫描失败 (Fallback scan failed)', { error: e.message }, ctx);
       }
 
       if (allKeys.length === 0) {
@@ -440,7 +439,7 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
       await scanLockKeys(env, ctx, parentLogger);
     }
 
-    await getActiveInstancesLogger.debug('获取活跃实例', { count: instances.length, totalKeys: allKeys.length }, ctx);
+    await getActiveInstancesLogger.debug('👥 获取活跃实例完成 (Active instances fetched)', { count: instances.length, totalKeys: allKeys.length }, ctx);
     return instances;
   } catch (error) {
     await getActiveInstancesLogger.error('获取活跃实例失败', { error: error.message }, ctx);
@@ -636,11 +635,11 @@ function failover(env) {
   // 优先级：Upstash > NF Redis
   if (hasUpstash) {
     currentProvider = 'upstash';
-    failoverLogger.info('故障转移到 Upstash Redis', { reason: failoverReason });
+    failoverLogger.info('🔄 故障转移到 Upstash Redis (Failover to Upstash Redis)', { reason: failoverReason });
     return true;
   } else if (hasNFRedis) {
     currentProvider = 'redis';
-    failoverLogger.info('故障转移到 NF Redis', { reason: failoverReason });
+    failoverLogger.info('🔄 故障转移到 NF Redis (Failover to NF Redis)', { reason: failoverReason });
     return true;
   }
   

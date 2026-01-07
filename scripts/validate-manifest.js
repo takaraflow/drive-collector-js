@@ -19,13 +19,13 @@ async function checkVersionSync() {
     const manifestJson = JSON.parse(readFileSync(manifestJsonPath, 'utf-8'));
 
     if (packageJson.version !== manifestJson.version) {
-      console.error(`❌ Version mismatch between package.json (${packageJson.version}) and manifest.json (${manifestJson.version}).`);
+      console.error(`❌ package.json (${packageJson.version}) 与 manifest.json (${manifestJson.version}) 版本不匹配 (Version mismatch).`);
       process.exit(1);
     } else {
-      console.log(`✅ Version check passed: package.json and manifest.json are in sync (v${packageJson.version}).`);
+      console.log(`✅ 版本检查通过: package.json 与 manifest.json 已同步 (v${packageJson.version}) (Version check passed).`);
     }
   } catch (error) {
-    console.error(`❌ Failed to check version sync: ${error.message}`);
+    console.error(`❌ 检查版本同步失败 (Failed to check version sync): ${error.message}`);
     process.exit(1);
   }
 }
@@ -50,7 +50,7 @@ async function validateManifest() {
     const valid = validate(manifest);
 
     if (!valid) {
-      console.error('❌ Manifest validation failed:');
+      console.error('❌ Manifest 验证失败 (Manifest validation failed):');
       validate.errors.forEach(err => {
         console.error(`- ${err.instancePath || 'root'} ${err.message}`);
         if (err.params) {
@@ -60,9 +60,9 @@ async function validateManifest() {
       process.exit(1);
     }
 
-    console.log('✅ Manifest validation passed');
+    console.log('✅ Manifest 验证通过 (Manifest validation passed)');
   } catch (error) {
-    console.error('❌ Error during manifest validation:', error.message);
+    console.error('❌ Manifest 验证过程中出错 (Error during manifest validation):', error.message);
     process.exit(1);
   }
 }

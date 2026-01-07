@@ -209,7 +209,7 @@ export function generateWranglerCommand(env = process.env) {
 
     return command;
   } catch (error) {
-    console.error('Error generating wrangler command:', error.message);
+    console.error('❌ 生成 Wrangler 命令失败 (Error generating wrangler command):', error.message);
     if (env.NODE_ENV === 'test') throw error;
     return 'npx wrangler deploy';
   }
