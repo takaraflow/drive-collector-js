@@ -53,9 +53,15 @@ function extractSecretsFromEnv(env = process.env) {
     
     // 定义不需要作为 secret 上传的变量黑名单
     const blacklist = ['NODE_ENV', 'SIGNATURE_EXPIRATION_WINDOW'];
+    // 避免与已存在的纯文本 Vars 绑定冲突（Cloudflare 不允许同名 secret + var）
+    const conflictSkipList = new Set(['AXIOM_DATASET', 'AXIOM_ORG_ID']);
     
     for (const key of secretKeys) {
         if (blacklist.includes(key)) continue;
+        if (conflictSkipList.has(key)) {
+            console.warn(`Skipping secret ${key} to avoid binding conflict; expected to be provided as plain var in Cloudflare.`);
+            continue;
+        }
         
         const value = env[key];
         if (value !== undefined && value !== '') {
