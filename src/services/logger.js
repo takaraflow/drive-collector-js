@@ -6,6 +6,10 @@ import {
   serializeToString 
 } from '../utils/serializer.js';
 
+const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
+const originalConsoleLog = console.log;
+
 // Removed InstanceCoordinator dependency to avoid circular import
 let getInstanceIdFunc = () => 'unknown';
 
@@ -74,6 +78,20 @@ export const retryWithDelay = async (fn, maxRetries = 3, delayFn = (attempt) => 
   throw lastError;
 };
 
+const handleAxiomError = (error) => {
+  if (!error) return;
+  const message = String(error.message || '');
+  const isJsonParseError =
+    error instanceof SyntaxError &&
+    message.includes('Unexpected end of JSON input');
+
+  if (isJsonParseError) {
+    return;
+  }
+
+  originalConsoleError.call(console, 'Axiom ingest error:', message);
+};
+
 const initAxiom = async () => {
   if (axiomInitialized) return;
 
@@ -87,6 +105,7 @@ const initAxiom = async () => {
       axiom = new Axiom({
         token: envToken,
         orgId: envOrgId,
+        onError: handleAxiomError
       });
       config = config || {};
       config.axiom = {
@@ -117,6 +136,7 @@ const initAxiom = async () => {
       axiom = new Axiom({
         token: config.axiom.token,
         orgId: config.axiom.orgId,
+        onError: handleAxiomError
       });
     }
   } catch (error) {
@@ -337,9 +357,6 @@ export const logger = createLogger();
  * Captures console.error calls from GramJS and routes them to structured logging
  */
 let consoleProxyEnabled = false;
-const originalConsoleError = console.error;
-const originalConsoleWarn = console.warn;
-const originalConsoleLog = console.log;
 
 export const enableTelegramConsoleProxy = () => {
   if (consoleProxyEnabled) return;
