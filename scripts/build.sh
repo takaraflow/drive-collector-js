@@ -29,39 +29,32 @@ if [ $? -ne 0 ]; then
 fi
 
 # 4. 执行 esbuild 构建
-echo "执行 esbuild 构建并注入版本号..."
-
-# 获取版本号（优先 manifest.json，回退 package.json）
-VERSION=$(node -e "const fs=require('fs');let v=require('./package.json').version; if (fs.existsSync('manifest.json')) { const m=require('./manifest.json'); if (m && m.version) v=m.version; } console.log(v);")
+echo "执行 esbuild 构建（版本通过 Wrangler 变量注入）..."
 
 # 尝试不同的 esbuild 执行方式
 # 方式1: 使用 node_modules 中的 esbuild
 if [ -f "node_modules/.bin/esbuild" ]; then
     echo "使用 node_modules 中的 esbuild..."
-    node_modules/.bin/esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:* --define:__VERSION__=\"$VERSION\"
+    node_modules/.bin/esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:*
 # 方式2: 使用 npx
 elif command -v npx >/dev/null 2>&1; then
     echo "使用 npx 运行 esbuild..."
-    npx esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:* --define:__VERSION__=\"$VERSION\"
+    npx esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:*
 # 方式3: 使用全局安装的 esbuild
 elif command -v esbuild >/dev/null 2>&1; then
     echo "使用全局 esbuild..."
-    esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:* --define:__VERSION__=\"$VERSION\"
+    esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:*
 # 方式4: 回退到内联 Node.js 方式
 else
     echo "使用内联 Node.js 方式运行 esbuild..."
     $NODE_CMD --input-type=module -e "
 import { build } from 'esbuild';
-import { readFileSync } from 'fs';
-const pkgStr = readFileSync('./package.json', 'utf8');
-const pkg = JSON.parse(pkgStr);
 await build({
     entryPoints: ['src/index.js'],
     bundle: true,
     format: 'esm',
     outdir: 'dist',
-    external: ['node:*'],
-    define: { __VERSION__: JSON.stringify(pkg.version) }
+    external: ['node:*']
 });
 "
 fi

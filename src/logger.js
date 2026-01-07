@@ -1,18 +1,52 @@
 import { trace, context } from '@opentelemetry/api';
 
+function resolveBuildVersion() {
+  if (typeof globalThis !== 'undefined') {
+    if (globalThis.VERSION !== undefined && globalThis.VERSION !== null && globalThis.VERSION !== '') {
+      return String(globalThis.VERSION);
+    }
+    if (globalThis.__VERSION__ !== undefined && globalThis.__VERSION__ !== null && globalThis.__VERSION__ !== '') {
+      return String(globalThis.__VERSION__);
+    }
+  }
+
+  if (typeof process !== 'undefined' && process.env) {
+    const envVersion = process.env.VERSION;
+    if (envVersion) {
+      return String(envVersion);
+    }
+  }
+
+  return 'dev';
+}
+
 // 全局类型定义（解决 TypeScript 警告）
 /** @type {string} */
-const BUILD_VERSION = (typeof __VERSION__ !== 'undefined')
-  ? __VERSION__
-  : (typeof globalThis !== 'undefined' && typeof globalThis.__VERSION__ !== 'undefined')
-    ? globalThis.__VERSION__
-    : 'dev';
+let BUILD_VERSION = resolveBuildVersion();
 
 /** @type {any} */
 const jest = typeof globalThis.jest !== 'undefined' ? globalThis.jest : undefined;
 
 // 版本信息
-export const VERSION = BUILD_VERSION;
+export let VERSION = BUILD_VERSION;
+
+function syncGlobalVersion() {
+  if (typeof globalThis !== 'undefined') {
+    globalThis.VERSION = VERSION;
+  }
+}
+
+export function updateVersionFromEnv(envVersion) {
+  if (!envVersion) return;
+  const normalized = String(envVersion).trim();
+  if (!normalized) return;
+  if (normalized === BUILD_VERSION) return;
+  BUILD_VERSION = normalized;
+  VERSION = BUILD_VERSION;
+  syncGlobalVersion();
+}
+
+syncGlobalVersion();
 export const isTestEnvironment = process.env.NODE_ENV === 'test' || typeof jest !== 'undefined';
 
 // 定义 LoggerContext 类型

@@ -1,4 +1,4 @@
-import { logger, configureBaseLoggerTransport, isTestEnvironment, VERSION, flushLogs } from './logger.js';
+import { logger, configureBaseLoggerTransport, isTestEnvironment, VERSION, flushLogs, updateVersionFromEnv } from './logger.js';
 
 // 全局状态
 let currentProvider = 'cloudflare';
@@ -1263,6 +1263,8 @@ export default {
 
     // 1. 创建安全环境，防止 OTel 扫描 undefined 变量时崩溃
     const safeEnv = createSafeEnv(env);
+
+    updateVersionFromEnv(safeEnv.VERSION);
 
     // 2. 配置基础 Logger 的 transport
     configureBaseLoggerTransport(safeEnv);

@@ -13,6 +13,36 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 
+function determineVersion(root) {
+    const manifestPath = path.join(root, 'manifest.json');
+    let version = '';
+
+    if (fs.existsSync(manifestPath)) {
+        try {
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            if (manifest && typeof manifest.version === 'string') {
+                version = manifest.version.trim();
+            }
+        } catch (error) {
+            console.warn('解析 manifest.json 版本号失败:', error.message);
+        }
+    }
+
+    if (!version) {
+        const pkgPath = path.join(root, 'package.json');
+        if (fs.existsSync(pkgPath)) {
+            try {
+                const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+                version = (pkg.version || '').trim();
+            } catch (error) {
+                console.warn('解析 package.json 版本号失败:', error.message);
+            }
+        }
+    }
+
+    return version || 'dev';
+}
+
 // 从 .env 文件加载环境变量
 function loadEnvFile(fileSystem = fs, targetEnv = 'dev') {
     // 1. 优先加载 .env.${targetEnv}
@@ -276,34 +306,29 @@ function extractVariablesFromManifest() {
 function generateWranglerToml() {
     const buildTomlPath = path.join(projectRoot, 'wrangler.build.toml');
     const tomlPath = path.join(projectRoot, 'wrangler.toml');
-    
+
     if (!fs.existsSync(buildTomlPath)) {
         console.error('错误: 未找到 wrangler.build.toml');
         process.exit(1);
     }
-    
+
     const manifestPath = path.join(projectRoot, 'manifest.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    const infraConfig = manifest.infrastructure || {};
-    
+    const envConfig = manifest.config?.env || {};
+
     let tomlContent = fs.readFileSync(buildTomlPath, 'utf8');
-    
-    // 动态发现并替换占位符，不再硬编码字段列表
-    // 逻辑：寻找模板中所有的 ${VAR_NAME}，并尝试从环境中替换
+
     const placeholderRegex = /\$\{([^}]+)\}/g;
     tomlContent = tomlContent.replace(placeholderRegex, (match, varName) => {
         let value = (process.env[varName] || '').trim();
-        // 循环去除所有包围的引号，修复协议头被错误去除的问题
         while (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
             value = value.substring(1, value.length - 1);
         }
-        return value || match; // 如果没值，保持原样（后续校验会报错）
+        return value || match;
     });
-    
-    // 处理 preview_id
+
     if (!process.env.KV_PREVIEW_ID) {
         if (process.env.NODE_ENV !== 'production' && process.env.CF_KV_NAMESPACE_ID) {
-            // 本地开发模式且设置了生产 ID：提供占位符以绕过 Wrangler 的强制校验
             let dummyId = '00000000000000000000000000000000';
             if (dummyId === process.env.CF_KV_NAMESPACE_ID) {
                 dummyId = 'ffffffffffffffffffffffffffffffff';
@@ -311,17 +336,15 @@ function generateWranglerToml() {
             tomlContent = tomlContent.replace(/preview_id = .*/, `preview_id = "${dummyId}"`);
             console.log('本地开发模式：已设置占位符 preview_id 以绕过 Wrangler 验证。');
         } else {
-            // 生产环境或完全没有 KV 配置：移除 preview_id 行
             tomlContent = tomlContent.replace(/preview_id = .*/g, '');
             console.log('已从 wrangler.toml 中移除 preview_id。');
-            
+
             if (!process.env.CF_KV_NAMESPACE_ID) {
-                // 如果两者都为空，移除整个 kv_namespaces 绑定
                 tomlContent = tomlContent.replace(/\[\[kv_namespaces\]\][\s\S]*?(?=\[|$)/g, '');
             }
         }
     }
-    
+
     if (process.env.WRANGLER_MODE === 'local') {
         console.log('本地开发模式：移除 KV ID 以强制使用本地模拟');
         tomlContent = tomlContent.replace(/^id = .*/gm, '');
@@ -334,53 +357,58 @@ function generateWranglerToml() {
             process.exit(1);
         }
     }
-    
-    // 校验构建结果：检查是否还有未替换的占位符
+
     if (/\$\{[^}]+\}/.test(tomlContent)) {
         console.error('错误: wrangler.toml 中仍存在未替换的占位符变量');
         const matches = tomlContent.match(/\$\{[^}]+\}/g);
-        // 脱敏：只输出变量名，不输出完整内容
         const varNames = matches ? matches.map(m => m.replace(/^\$\{|\}$/g, '')) : [];
         console.error('未替换的变量:', varNames.join(', '));
         process.exit(1);
     }
-    
+
+    const varsResult = buildVarsSection(envConfig);
+    tomlContent = `${tomlContent.trimEnd()}\n\n${varsResult.section}\n`;
     fs.writeFileSync(tomlPath, tomlContent);
-    
-    // 如果是非 GHA 环境（本地），追加 [vars] 块到 wrangler.toml
-    if (process.env.GITHUB_ACTIONS !== 'true') {
-        const manifestPath = path.join(projectRoot, 'manifest.json');
-        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-        const envConfig = manifest.config?.env || {};
-        
-        // 提取类型为 string, number, boolean 的配置项
-        const entries = Object.entries(envConfig)
-            .filter(([_, config]) => ['string', 'number', 'boolean'].includes(config.type));
-        
-        if (entries.length > 0) {
-            tomlContent += '\n[vars]\n';
-            
-            for (const [key, config] of entries) {
-                const val = process.env[key];
-                const finalVal = val || config.default || '';
-                
-                if (finalVal !== '') {
-                    if (config.type === 'string') {
-                        const escapedVal = finalVal.replace(/"/g, '\\"');
-                        tomlContent += `${key} = "${escapedVal}"\n`;
-                    } else {
-                        tomlContent += `${key} = ${finalVal}\n`;
-                    }
-                }
-            }
-            
-            fs.writeFileSync(tomlPath, tomlContent);
-        }
-        
+
+    if (varsResult.manifestCount > 0) {
         console.log('正在本地环境中向 wrangler.toml 追加业务变量...');
     }
-    
-    console.log('wrangler.toml updated successfully. VERSION will be injected dynamically via esbuild --define during build.');
+
+    console.log('wrangler.toml updated successfully. VERSION is provided via Wrangler vars.');
+}
+
+function escapeTomlString(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function buildVarsSection(envConfig = {}, envSource = process.env) {
+    const versionValue = (envSource.VERSION || 'dev').trim() || 'dev';
+    const lines = ['[vars]', `VERSION = "${escapeTomlString(versionValue)}"`];
+    let manifestCount = 0;
+
+    if (envSource.GITHUB_ACTIONS !== 'true') {
+        const entries = Object.entries(envConfig)
+            .filter(([_, config]) => ['string', 'number', 'boolean'].includes(config.type));
+
+        for (const [key, config] of entries) {
+            const val = envSource[key];
+            const finalVal = val || config.default || '';
+
+            if (finalVal === '') continue;
+
+            manifestCount++;
+            if (config.type === 'string') {
+                lines.push(`${key} = "${escapeTomlString(finalVal)}"`);
+            } else {
+                lines.push(`${key} = ${finalVal}`);
+            }
+        }
+    }
+
+    return {
+        section: lines.join('\n'),
+        manifestCount
+    };
 }
 
 // 主函数
@@ -406,14 +434,19 @@ function main() {
                                 value = value.substring(1, value.length - 1);
                             }
                              // 仅当环境变量尚未被外部（如 Infisical）设置时，才从 GHA JSON 中加载
-                     if (!process.env[k]) {
-                         process.env[k] = value;
-                     }
+                             if (!process.env[k]) {
+                                 process.env[k] = value;
+                             }
                         }
                     });
                 } catch (e) { console.warn(`解析 ${key} 失败:`, e.message); }
             }
         });
+
+        const resolvedVersion = determineVersion(projectRoot);
+        if (!process.env.VERSION || process.env.VERSION === `\${VERSION}`) {
+            process.env.VERSION = resolvedVersion;
+        }
 
         checkRequiredVariables();
 
@@ -469,31 +502,9 @@ function generateToml(env, manifest, tomlTemplate, packageJson) {
         }
     }
     
-    // 如果是非 GHA 环境（本地），追加 [vars] 块
-    if (env.GITHUB_ACTIONS !== 'true') {
-        const envConfig = manifest.config?.env || {};
-        const entries = Object.entries(envConfig)
-            .filter(([_, config]) => ['string', 'number', 'boolean'].includes(config.type));
-        
-        if (entries.length > 0) {
-            content += '\n[vars]\n';
-            
-            for (const [key, config] of entries) {
-                const val = env[key];
-                const finalVal = val || config.default || '';
-                
-                if (finalVal !== '') {
-                    if (config.type === 'string') {
-                        const escapedVal = finalVal.replace(/"/g, '\\"');
-                        content += `${key} = "${escapedVal}"\n`;
-                    } else {
-                        content += `${key} = ${finalVal}\n`;
-                    }
-                }
-            }
-        }
-    }
-    
+    const envConfig = manifest.config?.env || {};
+    const varsResult = buildVarsSection(envConfig, env);
+    content = `${content.trimEnd()}\n\n${varsResult.section}\n`;
     return content;
 }
 

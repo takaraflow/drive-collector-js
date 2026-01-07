@@ -341,8 +341,9 @@ kv_namespaces = [
 
       const content = generateToml(mockEnv, mockManifest, mockTomlTemplate, mockPackageJson);
       
-      expect(content).not.toContain('[vars]');
+      expect(content).toContain('[vars]');
       expect(content).toContain('name = "gha-worker"');
+      expect(content).toContain('VERSION = "dev"');
     });
 
     test('should replace placeholders correctly', () => {
@@ -353,9 +354,9 @@ kv_namespaces = [
             KV_PREVIEW_ID: 'prev-123'
         };
         
-        const content = generateToml(mockEnv, mockManifest, mockTomlTemplate, mockPackageJson);
-        
-        expect(content).toContain('name = "final-name"');
+      const content = generateToml(mockEnv, mockManifest, mockTomlTemplate, mockPackageJson);
+      
+      expect(content).toContain('name = "final-name"');
         expect(content).toContain('account_id = "acc-123"');
         expect(content).toContain('id = "kv-123"');
         expect(content).toContain('preview_id = "prev-123"');
