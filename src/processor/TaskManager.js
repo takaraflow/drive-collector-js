@@ -443,12 +443,25 @@ export class TaskManager {
      */
     static async _enqueueTask(task) {
         try {
-            await qstashService.enqueueDownloadTask(task.id, {
+            // 添加触发源信息
+            const taskPayload = {
                 userId: task.userId,
                 chatId: task.chatId,
-                msgId: task.msgId
+                msgId: task.msgId,
+                _meta: {
+                    triggerSource: 'direct-qstash', // 标识是直接通过 QStash 发送
+                    instanceId: process.env.INSTANCE_ID || 'unknown',
+                    timestamp: Date.now(),
+                    source: 'TaskManager._enqueueTask'
+                }
+            };
+
+            await qstashService.enqueueDownloadTask(task.id, taskPayload);
+            log.info("Task enqueued for download", { 
+                taskId: task.id, 
+                service: 'qstash',
+                triggerSource: 'direct-qstash'
             });
-            log.info("Task enqueued for download", { taskId: task.id, service: 'qstash' });
         } catch (error) {
             log.error("Failed to enqueue download task", { taskId: task.id, error });
         }
@@ -574,10 +587,16 @@ export class TaskManager {
         }
 
         try {
-            log.info(`QStash Received download webhook for Task: ${taskId}`);
-
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
+            const triggerSource = dbTask?.source_data?._meta?.triggerSource || 'unknown';
+            const instanceId = dbTask?.source_data?._meta?.instanceId || 'unknown';
+            
+            log.info(`QStash Received download webhook for Task: ${taskId}`, {
+                triggerSource, // 'direct-qstash' 或 'unknown'
+                instanceId,
+                isFromQStash: triggerSource === 'direct-qstash'
+            });
             if (!dbTask) {
                 log.error(`❌ Task ${taskId} not found in database`);
                 return { success: false, statusCode: 404, message: "Task not found" };
@@ -614,17 +633,24 @@ export class TaskManager {
      * 处理上传 Webhook - QStash 事件驱动
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
-    static async handleUploadWebhook(taskId) {
+     static async handleUploadWebhook(taskId) {
         // Leader 状态校验：只有持有 telegram_client 锁的实例才能处理任务
         if (!(await instanceCoordinator.hasLock("telegram_client"))) {
             return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
         }
 
         try {
-            log.info(`QStash Received upload webhook for Task: ${taskId}`);
-
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
+            const triggerSource = dbTask?.source_data?._meta?.triggerSource || 'unknown';
+            const instanceId = dbTask?.source_data?._meta?.instanceId || 'unknown';
+            
+            log.info(`QStash Received upload webhook for Task: ${taskId}`, {
+                triggerSource, // 'direct-qstash' 或 'unknown'
+                instanceId,
+                isFromQStash: triggerSource === 'direct-qstash'
+            });
+            
             if (!dbTask) {
                 log.error(`❌ Task ${taskId} not found in database`);
                 return { success: false, statusCode: 404, message: "Task not found" };

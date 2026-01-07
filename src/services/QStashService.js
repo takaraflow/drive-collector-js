@@ -59,13 +59,24 @@ export class QStashService {
         const config = getConfig();
         const url = `${config.qstash.webhookUrl}/api/tasks/${topic}`;
 
+        // 添加触发来源信息
+        const enhancedMessage = {
+            ...message,
+            _meta: {
+                triggerSource: 'direct-qstash', // 标识是直接通过 QStash 发布
+                instanceId: process.env.INSTANCE_ID || 'unknown',
+                timestamp: Date.now(),
+                caller: new Error().stack.split('\n')[2]?.trim() || 'unknown'
+            }
+        };
+
         return this._executeWithRetry(async () => {
             const result = await this.client.publishJSON({
                 url,
-                body: message,
+                body: enhancedMessage,
                 ...options
             });
-            log.info(`QStash Published to ${topic}, MsgID: ${result.messageId}`);
+            log.info(`QStash Published to ${topic}, MsgID: ${result.messageId}, Source: direct-qstash`);
             return result;
         }, "publish");
     }

@@ -56,7 +56,17 @@ export async function handleQStashWebhook(req, res) {
         const data = JSON.parse(body);
         const path = url.pathname;
 
-        log.info(`📥 收到 QStash Webhook: ${path}`, { taskId: data.taskId, groupId: data.groupId });
+        // 检查触发来源
+        const triggerSource = data._meta?.triggerSource || 'unknown';
+        const instanceId = data._meta?.instanceId || 'unknown';
+        
+        log.info(`📥 收到 Webhook: ${path}`, { 
+            taskId: data.taskId, 
+            groupId: data.groupId,
+            triggerSource, // 'direct-qstash' 或 'unknown'
+            instanceId,
+            isFromQStash: triggerSource === 'direct-qstash'
+        });
 
         let result = { success: true, statusCode: 200 };
 
