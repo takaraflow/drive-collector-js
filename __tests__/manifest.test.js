@@ -40,7 +40,11 @@ describe('Manifest Validation Tests', () => {
       capabilities: ["kv", "fetch"],
       endpoints: {
         health: "/health",
-        webhook: "/api/qstash/webhook"
+        webhookBase: "/api/tasks",
+        downloadTasks: "/api/tasks/download-tasks",
+        uploadTasks: "/api/tasks/upload-tasks",
+        mediaBatch: "/api/tasks/media-batch",
+        systemEvents: "/api/tasks/system-events"
       },
       config: {
         env: {
@@ -72,7 +76,11 @@ describe('Manifest Validation Tests', () => {
           type: "object",
           properties: {
             health: { type: "string", pattern: "^/" },
-            webhook: { type: "string", pattern: "^/" }
+            webhookBase: { type: "string", pattern: "^/" },
+            downloadTasks: { type: "string", pattern: "^/" },
+            uploadTasks: { type: "string", pattern: "^/" },
+            mediaBatch: { type: "string", pattern: "^/" },
+            systemEvents: { type: "string", pattern: "^/" }
           }
         },
         config: {
@@ -146,12 +154,20 @@ describe('Manifest Validation Tests', () => {
       }
     });
 
-    it('应该包含 endpoints 对象且有 health 和 webhook', () => {
+    it('应该包含 endpoints 对象且有新的任务相关接口', () => {
       expect(manifest.endpoints).toBeDefined();
       expect(manifest.endpoints.health).toBeDefined();
-      expect(manifest.endpoints.webhook).toBeDefined();
+      expect(manifest.endpoints.webhookBase).toBeDefined();
+      expect(manifest.endpoints.downloadTasks).toBeDefined();
+      expect(manifest.endpoints.uploadTasks).toBeDefined();
+      expect(manifest.endpoints.mediaBatch).toBeDefined();
+      expect(manifest.endpoints.systemEvents).toBeDefined();
       expect(manifest.endpoints.health).toMatch(/^\/.*/);
-      expect(manifest.endpoints.webhook).toMatch(/^\/.*/);
+      expect(manifest.endpoints.webhookBase).toMatch(/^\/.*/);
+      expect(manifest.endpoints.downloadTasks).toMatch(/^\/.*/);
+      expect(manifest.endpoints.uploadTasks).toMatch(/^\/.*/);
+      expect(manifest.endpoints.mediaBatch).toMatch(/^\/.*/);
+      expect(manifest.endpoints.systemEvents).toMatch(/^\/.*/);
     });
 
     it('应该包含 config.env 对象', () => {

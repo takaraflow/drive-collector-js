@@ -308,7 +308,11 @@
   },
   "endpoints": {
     "health": "/health",
-    "webhook": "/"
+    "webhookBase": "/api/tasks",
+    "downloadTasks": "/api/tasks/download-tasks",
+    "uploadTasks": "/api/tasks/upload-tasks",
+    "mediaBatch": "/api/tasks/media-batch",
+    "systemEvents": "/api/tasks/system-events"
   },
   "infrastructure": {
     "CLOUDFLARE_ACCOUNT_ID": {

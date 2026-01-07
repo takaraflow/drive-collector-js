@@ -204,66 +204,70 @@ describe('任务调度失败处理优化测试', () => {
   });
 
   describe('Contract Path Normalization', () => {
-   it('should_normalize_download_tasks_path_to_download_endpoint', () => {
-       expect(normalizePath('/api/tasks/download-tasks')).toBe('/api/tasks/download');
-     });
- 
-     it('should_normalize_upload_tasks_path_to_upload_endpoint', () => {
-       expect(normalizePath('/api/tasks/upload-tasks')).toBe('/api/tasks/upload');
-     });
- 
-     it('应该将 /api/tasks/media-batch 保持不变', () => {
-       expect(normalizePath('/api/tasks/media-batch')).toBe('/api/tasks/media-batch');
-     });
- 
-     it('应该将未知路径保持不变', () => {
-       expect(normalizePath('/api/other/path')).toBe('/api/other/path');
-     });
- 
-     it('should_log_path_normalization_in_handleRequest', async () => {
-       const timestamp = Math.floor(Date.now() / 1000).toString();
-       mockVerify.mockResolvedValue('body');
-       mockKV.list.mockResolvedValue({ keys: [{ name: 'instance:1' }] });
-       mockKV.get.mockResolvedValue({
-         id: '1',
-         url: 'https://instance1.com',
-         status: 'active',
-         lastHeartbeat: Date.now(),
-       });
- 
-       global.fetch.mockResolvedValueOnce(createMockResponse(200, {
-         text: () => Promise.resolve('OK'),
-         headers: new Map([['Content-Type', 'text/plain']])
-       }));
- 
-       const request = {
-         url: 'https://lb.example.com/api/tasks/download-tasks',
-         method: 'POST',
-         headers: new Map([
-           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-           ['Upstash-Timestamp', timestamp],
-         ]),
-         text: jest.fn().mockResolvedValue('body'),
-         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
-       };
- 
-       consoleLogSpy.mockClear();
-       
-       const lb = await import('../src/index.js');
-       await lb.default.fetch(request, mockEnv, {});
- 
-       // 验证路径映射被记录
-       const logCalls = consoleLogSpy.mock.calls;
-       const hasMappingLog = logCalls.some(call => {
-         const message = call[0];
-         const meta = call[1];
-         return message.includes('路径规范化') &&
-                meta.original === '/api/tasks/download-tasks' &&
-                meta.normalized === '/api/tasks/download';
-       });
-       expect(hasMappingLog).toBe(true);
-     });
-   });
+    it('should_normalize_legacy_download_path_to_new_endpoint', () => {
+      expect(normalizePath('/api/tasks/download')).toBe('/api/tasks/download-tasks');
+    });
+
+    it('should_normalize_legacy_upload_path_to_new_endpoint', () => {
+      expect(normalizePath('/api/tasks/upload')).toBe('/api/tasks/upload-tasks');
+    });
+
+    it('should_keep_new_download_tasks_path_unchanged', () => {
+      expect(normalizePath('/api/tasks/download-tasks')).toBe('/api/tasks/download-tasks');
+    });
+
+    it('应该将 /api/tasks/media-batch 保持不变', () => {
+      expect(normalizePath('/api/tasks/media-batch')).toBe('/api/tasks/media-batch');
+    });
+
+    it('应该将未知路径保持不变', () => {
+      expect(normalizePath('/api/other/path')).toBe('/api/other/path');
+    });
+
+    it('should_log_path_normalization_in_handleRequest', async () => {
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      mockVerify.mockResolvedValue('body');
+      mockKV.list.mockResolvedValue({ keys: [{ name: 'instance:1' }] });
+      mockKV.get.mockResolvedValue({
+        id: '1',
+        url: 'https://instance1.com',
+        status: 'active',
+        lastHeartbeat: Date.now(),
+      });
+
+      global.fetch.mockResolvedValueOnce(createMockResponse(200, {
+        text: () => Promise.resolve('OK'),
+        headers: new Map([['Content-Type', 'text/plain']])
+      }));
+
+      const request = {
+        url: 'https://lb.example.com/api/tasks/upload',
+        method: 'POST',
+        headers: new Map([
+          ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
+          ['Upstash-Timestamp', timestamp],
+        ]),
+        text: jest.fn().mockResolvedValue('body'),
+        arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
+      };
+
+      consoleLogSpy.mockClear();
+      
+      const lb = await import('../src/index.js');
+      await lb.default.fetch(request, mockEnv, {});
+
+      // 验证路径映射被记录
+      const logCalls = consoleLogSpy.mock.calls;
+      const hasMappingLog = logCalls.some(call => {
+        const message = call[0];
+        const meta = call[1];
+        return message.includes('路径规范化') &&
+               meta.original === '/api/tasks/upload' &&
+               meta.normalized === '/api/tasks/upload-tasks';
+      });
+      expect(hasMappingLog).toBe(true);
+    });
+  });
  
     describe('Multi-prefix Instance Scanning', () => {
      it('should_scan_all_contract_key_prefixes', async () => {
@@ -485,13 +489,13 @@ describe('任务调度失败处理优化测试', () => {
          headers: new Map([['Content-Type', 'text/plain']])
        }));
  
-       const request = {
-         url: 'https://lb.example.com/api/tasks/download-tasks',
-         method: 'POST',
-         headers: new Map([
-           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-           ['Upstash-Timestamp', timestamp],
-         ]),
+      const request = {
+        url: 'https://lb.example.com/api/tasks/download',
+        method: 'POST',
+        headers: new Map([
+          ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
+          ['Upstash-Timestamp', timestamp],
+        ]),
          text: jest.fn().mockResolvedValue('body'),
          arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
        };
@@ -503,16 +507,16 @@ describe('任务调度失败处理优化测试', () => {
  
        // 验证路径映射被记录
        const logCalls = consoleLogSpy.mock.calls;
-       const hasMappingLog = logCalls.some(call => {
-         const message = call[0];
-         const meta = call[1];
-         return message.includes('路径规范化') &&
-                meta.original === '/api/tasks/download-tasks' &&
-                meta.normalized === '/api/tasks/download';
-       });
-       expect(hasMappingLog).toBe(true);
-     });
-   });
+      const hasMappingLog = logCalls.some(call => {
+        const message = call[0];
+        const meta = call[1];
+        return message.includes('路径规范化') &&
+               meta.original === '/api/tasks/download' &&
+               meta.normalized === '/api/tasks/download-tasks';
+      });
+      expect(hasMappingLog).toBe(true);
+    });
+  });
  
     describe('fetchWithRetry - 5xx 透传逻辑', () => {
      it('应该在所有实例都返回5xx时返回最后一个5xx响应', async () => {

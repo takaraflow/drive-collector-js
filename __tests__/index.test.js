@@ -294,7 +294,7 @@ describe('Worker Tests', () => {
         QSTASH_URL: 'https://qstash.url',
         SKIP_SIGNATURE_VERIFY: 'true',
       };
-      const request = new Request('https://test.url/api/tasks/upload', {
+      const request = new Request('https://test.url/api/tasks/upload-tasks', {
         method: 'POST',
         body: JSON.stringify({ tasks: [{ id: 'task1' }] }),
       });

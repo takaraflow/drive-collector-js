@@ -87,13 +87,36 @@
     },
     "endpoints": {
       "type": "object",
-      "required": ["health", "webhook"],
+      "required": [
+        "health",
+        "webhookBase",
+        "downloadTasks",
+        "uploadTasks",
+        "mediaBatch",
+        "systemEvents"
+      ],
       "properties": {
         "health": {
           "type": "string",
           "pattern": "^/"
         },
-        "webhook": {
+        "webhookBase": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "downloadTasks": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "uploadTasks": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "mediaBatch": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "systemEvents": {
           "type": "string",
           "pattern": "^/"
         }
