@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.13.0](https://github.com/YoungSx/drive-collector-js/compare/v4.12.0...v4.13.0) (2026-01-07)
+
+
+### ✨ 新特性
+
+* add debug and monitoring tools for file processing issues ([b4ee4b2](https://github.com/YoungSx/drive-collector-js/commit/b4ee4b250561e9aa879c5df037f33058714f562d))
+* implement graceful shutdown system with error recovery ([2257b03](https://github.com/YoungSx/drive-collector-js/commit/2257b034ca7d0a3cd0cc68507ca6a691139d6ee7))
+
 ## [4.12.0](https://github.com/YoungSx/drive-collector-js/compare/v4.11.0...v4.12.0) (2026-01-06)
 
 
