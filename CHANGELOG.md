@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.13.3](https://github.com/YoungSx/lb-worker-js/compare/v0.13.2...v0.13.3) (2026-01-07)
+
+
+### 🐛 Bug Fixes
+
+* import redis ([d6195d6](https://github.com/YoungSx/lb-worker-js/commit/d6195d6737d96a622b18a643c5a6064c41f0d33f))
+
 ### [0.13.2](https://github.com/YoungSx/lb-worker-js/compare/v0.13.1...v0.13.2) (2026-01-07)
 
 
