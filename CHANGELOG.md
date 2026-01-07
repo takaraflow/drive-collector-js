@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.14.0](https://github.com/YoungSx/lb-worker-js/compare/v0.13.3...v0.14.0) (2026-01-07)
+
+
+### 🔧 Maintenance
+
+* standardizes environment naming conventions across the project ([4dfe7c8](https://github.com/YoungSx/lb-worker-js/commit/4dfe7c8091fb49b9647590f96d8ee387c440ac41))
+
 ### [0.13.3](https://github.com/YoungSx/lb-worker-js/compare/v0.13.2...v0.13.3) (2026-01-07)
 
 
