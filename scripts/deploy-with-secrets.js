@@ -53,8 +53,9 @@ function extractSecretsFromEnv(env = process.env) {
     
     // 定义不需要作为 secret 上传的变量黑名单
     const blacklist = ['NODE_ENV', 'SIGNATURE_EXPIRATION_WINDOW'];
-    // 避免与已存在的纯文本 Vars 绑定冲突（Cloudflare 不允许同名 secret + var）
-    const conflictSkipList = new Set(['AXIOM_DATASET', 'AXIOM_ORG_ID']);
+    // 避免与已存在的纯文本 Vars 绑定冲突（Cloudflare 不允许同名 secret + var），支持通过环境变量配置
+    const skipKeysRaw = env.SECRET_SKIP_KEYS || env.SECRET_CONFLICT_KEYS || '';
+    const conflictSkipList = new Set(skipKeysRaw.split(',').map(k => k.trim()).filter(Boolean));
     
     for (const key of secretKeys) {
         if (blacklist.includes(key)) continue;
@@ -122,11 +123,55 @@ function uploadSecrets(secretsJsonPath) {
         });
         
         console.log('✅ Secrets 上传成功 (Secrets uploaded successfully)');
-        return true;
+        return { ok: true };
     } catch (error) {
         console.error('❌ Failed to upload secrets:', error.message);
+        return { ok: false, error };
+    }
+}
+
+function handleSecretsUpload(initialSecrets) {
+    let secrets = { ...initialSecrets };
+    let attempt = 0;
+    const maxAttempts = 5;
+
+    while (attempt < maxAttempts) {
+        if (Object.keys(secrets).length === 0) {
+            console.warn('No secrets left to upload after resolving conflicts.');
+            return true; // nothing to upload, but not a hard failure
+        }
+
+        console.log('\n2. Generating secrets.json...');
+        const secretsJsonPath = generateSecretsJson(secrets);
+
+        console.log('\n3. Uploading secrets to Cloudflare...');
+        const result = uploadSecrets(secretsJsonPath);
+
+        if (fs.existsSync(secretsJsonPath)) {
+            fs.unlinkSync(secretsJsonPath);
+            console.log('   Cleaned up temporary secrets.json');
+        }
+
+        if (result.ok) {
+            return true;
+        }
+
+        const conflictMatch = /Binding name '([^']+)' already in use/i.exec(result.error?.message || '');
+        if (conflictMatch) {
+            const conflictedKey = conflictMatch[1];
+            if (secrets[conflictedKey] !== undefined) {
+                console.warn(`Detected binding conflict for ${conflictedKey}; removing from secrets and retrying...`);
+                delete secrets[conflictedKey];
+                attempt += 1;
+                continue;
+            }
+        }
+
         return false;
     }
+
+    console.error('Reached maximum retry attempts for secrets upload.');
+    return false;
 }
 
 /**
@@ -230,23 +275,10 @@ function main() {
                 Object.keys(secrets).join(', '));
         }
         
-        let secretsJsonPath = null;
-        if (Object.keys(secrets).length > 0) {
-            console.log('\n2. Generating secrets.json...');
-            secretsJsonPath = generateSecretsJson(secrets);
-        }
-        
-        if (secretsJsonPath) {
-            console.log('\n3. Uploading secrets to Cloudflare...');
-            const success = uploadSecrets(secretsJsonPath);
-            if (!success) {
-                console.error('Secret upload failed, aborting deployment');
-                if (fs.existsSync(secretsJsonPath)) fs.unlinkSync(secretsJsonPath);
-                process.exit(1);
-            }
-            
-            fs.unlinkSync(secretsJsonPath);
-            console.log('   Cleaned up temporary secrets.json');
+        const uploadSuccess = handleSecretsUpload(secrets);
+        if (!uploadSuccess) {
+            console.error('Secret upload failed, aborting deployment');
+            process.exit(1);
         }
         
         console.log('\n4. Deploying worker...');
