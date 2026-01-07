@@ -313,8 +313,20 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Scan Phase: All raw keys scanned', { keys: allKeys.map(k => k.name) }, ctx);
 
     if (allKeys.length === 0) {
-      await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Scan Phase: No keys found, returning empty array.', {}, ctx);
-      return [];
+      await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Scan Phase: No keys found, attempting fallback full scan', {}, ctx);
+      try {
+        const fallbackResult = await executeWithFailover('_kv_list', env, ctx, '');
+        const fallbackKeys = fallbackResult?.keys || [];
+        await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Fallback Scan: Raw keys', { keys: fallbackKeys.map(k => k.name), count: fallbackKeys.length }, ctx);
+        allKeys = fallbackKeys;
+      } catch (e) {
+        await getActiveInstancesLogger.error('[DEBUG] getActiveInstances Fallback Scan failed', { error: e.message }, ctx);
+      }
+
+      if (allKeys.length === 0) {
+        await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Scan Phase: No keys found after fallback, returning empty array.', {}, ctx);
+        return [];
+      }
     }
 
     const instances = [];
