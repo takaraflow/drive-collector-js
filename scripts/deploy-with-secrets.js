@@ -125,8 +125,13 @@ function uploadSecrets(secretsJsonPath) {
         console.log('✅ Secrets 上传成功 (Secrets uploaded successfully)');
         return { ok: true };
     } catch (error) {
-        console.error('❌ Failed to upload secrets:', error.message);
-        return { ok: false, error };
+        const combined = [
+            error?.stdout?.toString?.() || '',
+            error?.stderr?.toString?.() || '',
+            error?.message || ''
+        ].join('\n');
+        console.error('❌ Failed to upload secrets:', combined || error.message);
+        return { ok: false, errorText: combined || error.message };
     }
 }
 
@@ -156,7 +161,7 @@ function handleSecretsUpload(initialSecrets) {
             return true;
         }
 
-        const conflictMatch = /Binding name '([^']+)' already in use/i.exec(result.error?.message || '');
+        const conflictMatch = /Binding name ['"]?([A-Z0-9_]+)['"]? already in use/i.exec(result.errorText || '');
         if (conflictMatch) {
             const conflictedKey = conflictMatch[1];
             if (secrets[conflictedKey] !== undefined) {
