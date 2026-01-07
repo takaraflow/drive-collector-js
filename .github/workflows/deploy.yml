@@ -16,7 +16,7 @@ jobs:
       INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
       # Use secret for project ID to support both GHA vars and local 'act' secrets
       INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID || vars.INFISICAL_PROJECT_ID }}
-      NODE_ENV: ${{ vars.NODE_ENV || 'development' }}
+      NODE_ENV: ${{ env.NODE_ENV || vars.NODE_ENV || 'dev' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,18 +41,20 @@ jobs:
       - name: Build
         run: |
           case "$NODE_ENV" in
-            "production") INFISICAL_ENV="prod" ;;
-            "development") INFISICAL_ENV="dev" ;;
-            *) INFISICAL_ENV="staging" ;;
+            "prod") INFISICAL_ENV="prod" ;;
+            "dev") INFISICAL_ENV="dev" ;;
+            "pre") INFISICAL_ENV="pre" ;;
+            *) INFISICAL_ENV="dev" ;;
           esac
           infisical run --env="$INFISICAL_ENV" --projectId="$INFISICAL_PROJECT_ID" -- npm run build -- --env=${INFISICAL_ENV}
 
       - name: Deploy with Secrets
         run: |
           case "$NODE_ENV" in
-            "production") INFISICAL_ENV="prod" ;;
-            "development") INFISICAL_ENV="dev" ;;
-            *) INFISICAL_ENV="staging" ;;
+            "prod") INFISICAL_ENV="prod" ;;
+            "dev") INFISICAL_ENV="dev" ;;
+            "pre") INFISICAL_ENV="pre" ;;
+            *) INFISICAL_ENV="dev" ;;
           esac
           infisical run --env="$INFISICAL_ENV" --projectId="$INFISICAL_PROJECT_ID" -- node scripts/deploy-with-secrets.js
 

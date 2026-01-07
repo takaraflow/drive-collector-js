@@ -3,15 +3,30 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 
+const ENV_ALIASES = {
+    development: 'dev',
+    dev: 'dev',
+    production: 'prod',
+    prod: 'prod',
+    staging: 'pre',
+    pre: 'pre'
+};
+
+function normalizeEnvName(value = 'dev') {
+    const key = String(value || '').toLowerCase();
+    return ENV_ALIASES[key] || key || 'dev';
+}
+
 /**
  * 设置环境变量 - 解析 --env 参数并加载对应的 .env 文件
  * @param {string[]} argv - process.argv 数组，默认为 process.argv
- * @returns {string} - 解析出的 targetEnv
+ * @returns {string} - 解析出的 canonical env（dev/pre/prod）
  */
 export function setupEnvironment(argv = process.argv) {
-    // 解析 --env 参数
+    // 解析 --env 参数并标准化为缩写
     const envArg = argv.find(arg => arg.startsWith('--env='));
-    const targetEnv = envArg ? envArg.split('=')[1] : 'dev';
+    const rawEnv = envArg ? envArg.split('=')[1] : 'dev';
+    const targetEnv = normalizeEnvName(rawEnv);
 
     // 1. 优先加载 .env (作为本地覆盖)
     dotenv.config();
@@ -133,6 +148,11 @@ export function generateWranglerCommand(env = process.env) {
       ...secretsJson,
       ...localOverrides // 本地覆盖，优先级最高
     };
+
+    // 统一环境标识为缩写（dev/pre/prod）
+    if (allAvailableVars.NODE_ENV) {
+        allAvailableVars.NODE_ENV = normalizeEnvName(allAvailableVars.NODE_ENV);
+    }
 
     // 2026-01-04: 如果环境变量中存在 CLOUDFLARE_API_TOKEN 或 CLOUDFLARE_ACCOUNT_ID，将其导出
     // 这对于从 .act.secrets 或 Infisical 获取的变量至关重要，因为它们需要传递给 wrangler 进程

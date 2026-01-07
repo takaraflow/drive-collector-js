@@ -63,7 +63,7 @@ export const logger = {
   },
 
   async debug(message, meta = {}, ctx = null) {
-    if (this.env === 'development' || this.env === 'test') {
+    if (this.env === 'dev' || this.env === 'test') {
       if (console && console.debug) {
         console.debug(`[DEBUG] ${message}`, meta);
       }

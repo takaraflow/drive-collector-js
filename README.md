@@ -26,6 +26,11 @@ Load Balancer Worker for drive-collector.
    npm test
    ```
 
+## 环境约定
+- 环境缩写：`dev`（开发）、`pre`（预发布）、`prod`（线上）
+- 非线上环境 Worker 命名：`{env}-lb-worker-js`（例如 `dev-lb-worker-js`、`pre-lb-worker-js`），线上保持 `lb-worker-js`
+- `.env` 读取优先级：`.env.<env>` > `.env`
+
 ## 本地模拟 GitHub Actions
 
 本项目支持在本地使用 `act` 工具模拟 GitHub Actions 的执行流程，这对于调试 CI/CD 流程非常有用。
@@ -63,9 +68,11 @@ act --list
 ```
 
 #### 2. 运行部署工作流 (Deploy)
-这将模拟 `push` 事件并执行 `deploy` 作业：
+使用 npm 脚本快速切换环境：
 ```bash
-act push -j deploy --secret-file .act.secrets --eventpath event.json
+npm run gha:dev   # 开发环境模拟
+npm run gha:pre   # 预发环境模拟
+npm run gha:prod  # 生产环境模拟
 ```
 
 #### 3. 运行同步清单工作流 (Sync Manifest)
@@ -74,7 +81,7 @@ act push -j update-registry --secret-file .act.secrets
 ```
 
 #### 4. 使用完整镜像 (推荐)
-如果你遇到环境缺失问题（如缺少 Node.js 或 apt-get），可以指定使用功能完整的镜像：
+如果你遇到环境缺失问题（如缺少 Node.js 或 apt-get），可以指定使用功能完整的镜像（可与上面的 npm 脚本组合使用）：
 ```bash
 act push -j deploy --secret-file .act.secrets --eventpath event.json -P ubuntu-latest=catthehacker/ubuntu:act-latest
 ```
@@ -92,7 +99,8 @@ A: `docker system prune`
 
 ## 脚本说明
 
-- `npm run deploy`: 构建并部署到 Cloudflare Workers
+- `npm run deploy:dev|pre|prod`: 构建并部署到对应环境的 Cloudflare Workers
+- `npm run gha:dev|pre|prod`: 使用 act 本地模拟 GitHub Actions 部署对应环境
 - `npm run validate:manifest`: 验证 manifest.json 格式
 - `npm run diagnose:axiom`: 诊断 Axiom 日志
 

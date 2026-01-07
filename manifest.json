@@ -240,7 +240,7 @@
       "NODE_ENV": {
         "type": "string",
         "required": false,
-        "description": "运行环境（production/development）"
+        "description": "运行环境（prod/dev/pre）"
       },
       "CACHE_PROVIDER": {
         "type": "string",

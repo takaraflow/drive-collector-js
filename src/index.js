@@ -6,7 +6,6 @@ let failureCount = 0;
 let lastFailureTime = 0;
 let failoverReason = '';
 
-
 // 常量
 const ROUND_ROBIN_KEY = 'lb:round_robin_index';
 const HEARTBEAT_TIMEOUT = 15 * 60 * 1000; // 15分钟
@@ -21,6 +20,20 @@ import { Receiver } from '@upstash/qstash';
 import { createRedis } from 'redis-on-workers';
 // 导入新的缓存客户端抽象
 import { getNFCacheClient } from './cache/client-factory.js';
+
+const ENV_ALIASES = {
+  development: 'dev',
+  dev: 'dev',
+  production: 'prod',
+  prod: 'prod',
+  staging: 'pre',
+  pre: 'pre'
+};
+
+const normalizeEnvName = (value = 'prod') => {
+  const key = String(value || '').toLowerCase();
+  return ENV_ALIASES[key] || key || 'prod';
+};
 
 
 /**
@@ -110,8 +123,17 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
     if (isGetRequest) {
       return null;
     }
-    const text = await request.text();
-    return new TextEncoder().encode(text);
+    
+    // 统一读取 body 逻辑，支持 text() 和 arrayBuffer()
+    if (request.text) {
+      const text = await request.text();
+      return new TextEncoder().encode(text);
+    } else if (request.arrayBuffer) {
+      const buffer = await request.arrayBuffer();
+      return new Uint8Array(buffer);
+    } else {
+      throw new Error('Request object must have text() or arrayBuffer() method');
+    }
   }
 
   // 检查密钥配置
@@ -1364,7 +1386,8 @@ async function handleRequest(request, env, ctx) {
   }
 
   // 1. 初始化基础状态
-  logger.configure({ env: env.NODE_ENV || 'production' });
+  const runtimeEnv = normalizeEnvName(env.NODE_ENV || 'prod');
+  logger.configure({ env: runtimeEnv });
 
   await requestLogger.debug('Axiom 配置检查', {
     axiomEnabled,
@@ -1404,7 +1427,7 @@ async function handleRequest(request, env, ctx) {
       const lockCount = await scanLockKeys(env, ctx, requestLogger);
       
       // 健康检查日志采样：仅在非生产环境或特定条件下记录详细信息
-      if (env.NODE_ENV !== 'production' || activeCount === 0 || lockCount > 0) {
+      if (runtimeEnv !== 'prod' || activeCount === 0 || lockCount > 0) {
         await requestLogger.info('Health check passed', {
           activeInstances: activeCount,
           provider,

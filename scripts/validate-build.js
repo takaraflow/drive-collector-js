@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename);
 console.log('Running build validation...');
 
 // 1. 设置测试环境变量
-process.env.NODE_ENV = 'production';
+process.env.NODE_ENV = 'prod';
 process.env.WORKER_NAME = 'test-worker';
 process.env.CF_KV_NAMESPACE_ID = 'test-kv-id';
 process.env.AXIOM_TOKEN = 'test-axiom-token';
@@ -20,7 +20,7 @@ process.env.AXIOM_ORG_ID = 'test-org-id';
 // 2. 模拟构建命令 (仅执行 build-logic 部分)
 try {
     console.log('🚀 正在执行构建逻辑 (Executing build logic)...');
-    execSync('node scripts/build-logic.js', { stdio: 'inherit' });
+    execSync('node scripts/build-logic.js --env=prod', { stdio: 'inherit' });
     
     // 3. 验证 wrangler.toml 是否生成
     if (fs.existsSync('wrangler.toml')) {

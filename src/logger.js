@@ -1,5 +1,21 @@
 import { trace, context } from '@opentelemetry/api';
 
+const ENV_ALIASES = {
+  development: 'dev',
+  dev: 'dev',
+  production: 'prod',
+  prod: 'prod',
+  staging: 'pre',
+  pre: 'pre'
+};
+
+const normalizeEnvName = (value = 'prod') => {
+  const key = String(value || '').toLowerCase();
+  return ENV_ALIASES[key] || key || 'prod';
+};
+
+const isDevEnv = (value) => normalizeEnvName(value) === 'dev';
+
 function resolveBuildVersion() {
   if (typeof globalThis !== 'undefined') {
     if (globalThis.VERSION !== undefined && globalThis.VERSION !== null && globalThis.VERSION !== '') {
@@ -52,7 +68,7 @@ export const isTestEnvironment = process.env.NODE_ENV === 'test' || typeof jest 
 // 定义 LoggerContext 类型
 /**
  * @typedef {Object} LoggerContext
- * @property {string} env - 环境 (production, development, test)
+ * @property {string} env - 环境 (prod, dev, pre, test)
  * @property {Array<Object>} [logBuffer] - 当前请求的日志缓冲
  */
 
@@ -61,7 +77,7 @@ let baseLoggerConfig = {
   dataset: null,
   token: null,
   orgId: null,
-  env: 'production'
+  env: 'prod'
 };
 
 /**
@@ -74,7 +90,7 @@ export function configureBaseLoggerTransport(env) {
     baseLoggerConfig.dataset = env.AXIOM_DATASET;
     baseLoggerConfig.token = env.AXIOM_TOKEN;
     baseLoggerConfig.orgId = env.AXIOM_ORG_ID || null;
-    baseLoggerConfig.env = env.NODE_ENV || 'production';
+    baseLoggerConfig.env = normalizeEnvName(env.NODE_ENV || 'prod');
   }
 }
 
@@ -411,7 +427,7 @@ function createLoggerFactory(context, bindings = {}) {
   const logger = {
     // 基础属性
     version: VERSION,
-    env: context.env || 'production',
+    env: normalizeEnvName(context.env || 'prod'),
     bindings: bindings,
 
     /**
@@ -431,7 +447,7 @@ function createLoggerFactory(context, bindings = {}) {
       await sendToAxiom(logData, context.logBuffer, ctx);
 
       // 开发环境同时输出到控制台
-      if (context.env === 'development' && !isTestEnvironment) {
+      if (isDevEnv(context.env) && !isTestEnvironment) {
         console.log(`[INFO] ${message}`, { ...bindings, ...data, version: VERSION });
       }
     },
@@ -452,7 +468,7 @@ function createLoggerFactory(context, bindings = {}) {
       addOtelEvent('warn', message, logData, span);
       await sendToAxiom(logData, context.logBuffer, ctx);
 
-      if (context.env === 'development' && !isTestEnvironment) {
+      if (isDevEnv(context.env) && !isTestEnvironment) {
         console.warn(`[WARN] ${message}`, { ...bindings, ...data, version: VERSION });
       }
     },
@@ -473,7 +489,7 @@ function createLoggerFactory(context, bindings = {}) {
       addOtelEvent('error', message, logData, span);
       await sendToAxiom(logData, context.logBuffer, ctx);
 
-      if (context.env === 'development' && !isTestEnvironment) {
+      if (isDevEnv(context.env) && !isTestEnvironment) {
         console.error(`[ERROR] ${message}`, { ...bindings, ...data, version: VERSION });
       }
     },
@@ -494,7 +510,7 @@ function createLoggerFactory(context, bindings = {}) {
       addOtelEvent('debug', message, logData, span);
 
       // Debug 日志只在开发环境或测试环境添加到缓冲
-      if (context.env === 'development' || isTestEnvironment) {
+      if (isDevEnv(context.env) || isTestEnvironment) {
         await sendToAxiom(logData, context.logBuffer, ctx);
 
         if (!isTestEnvironment) {
@@ -520,8 +536,9 @@ function createLoggerFactory(context, bindings = {}) {
      */
     configure: function(config) {
       if (config.env) {
-        context.env = config.env;
-        logger.env = config.env;
+        const normalized = normalizeEnvName(config.env);
+        context.env = normalized;
+        logger.env = normalized;
       }
     }
   };

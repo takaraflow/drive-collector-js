@@ -13,6 +13,24 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 
+const ENV_ALIASES = {
+    development: 'dev',
+    dev: 'dev',
+    production: 'prod',
+    prod: 'prod',
+    staging: 'pre',
+    pre: 'pre'
+};
+
+function normalizeEnvName(value = 'dev') {
+    const key = String(value || '').toLowerCase();
+    return ENV_ALIASES[key] || key || 'dev';
+}
+
+function isProdEnv(value) {
+    return normalizeEnvName(value) === 'prod';
+}
+
 function determineVersion(root) {
     const manifestPath = path.join(root, 'manifest.json');
     let version = '';
@@ -45,59 +63,70 @@ function determineVersion(root) {
 
 // 从 .env 文件加载环境变量
 function loadEnvFile(fileSystem = fs, targetEnv = 'dev') {
-    // 1. 优先加载 .env.${targetEnv}
-    const specificEnvPath = path.join(projectRoot, `.env.${targetEnv}`);
-    if (fileSystem.existsSync(specificEnvPath)) {
-        const envContent = fileSystem.readFileSync(specificEnvPath, 'utf8');
-        const lines = envContent.split('\n');
-        
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-                const [key, ...valueParts] = trimmed.split('=');
-                let value = valueParts.join('=');
-                
-                // 处理行尾注释：需要考虑引号内的 # 不被当作注释开始
-                let inQuotes = false;
-                let quoteChar = null;
-                let commentStart = -1;
-                
-                for (let charIndex = 0; charIndex < value.length; charIndex++) {
-                    const char = value[charIndex];
+    const normalizedEnv = normalizeEnvName(targetEnv);
+    const envCandidates = [normalizedEnv];
+    if (normalizedEnv !== targetEnv) {
+        envCandidates.push(targetEnv);
+    }
 
-                    if ((char === '"' || char === "'") && (charIndex === 0 || value[charIndex-1] !== '\\')) {
-                        if (!inQuotes) {
-                            inQuotes = true;
-                            quoteChar = char;
-                        } else if (char === quoteChar) {
-                            inQuotes = false;
-                            quoteChar = null;
+    // 1. 优先加载 .env.${targetEnv}（支持别名）
+    for (const candidate of envCandidates) {
+        const specificEnvPath = path.join(projectRoot, `.env.${candidate}`);
+        if (fileSystem.existsSync(specificEnvPath)) {
+            const envContent = fileSystem.readFileSync(specificEnvPath, 'utf8');
+            const lines = envContent.split('\n');
+            
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+                    const [key, ...valueParts] = trimmed.split('=');
+                    let value = valueParts.join('=');
+                    
+                    // 处理行尾注释：需要考虑引号内的 # 不被当作注释开始
+                    let inQuotes = false;
+                    let quoteChar = null;
+                    let commentStart = -1;
+                    
+                    for (let charIndex = 0; charIndex < value.length; charIndex++) {
+                        const char = value[charIndex];
+
+                        if ((char === '"' || char === "'") && (charIndex === 0 || value[charIndex-1] !== '\\')) {
+                            if (!inQuotes) {
+                                inQuotes = true;
+                                quoteChar = char;
+                            } else if (char === quoteChar) {
+                                inQuotes = false;
+                                quoteChar = null;
+                            }
+                        } else if (char === '#' && !inQuotes) {
+                            commentStart = charIndex;
+                            break;
                         }
-                    } else if (char === '#' && !inQuotes) {
-                        commentStart = charIndex;
-                        break;
+                    }
+                    
+                    // 移除注释部分
+                    if (commentStart !== -1) {
+                        value = value.substring(0, commentStart).trim();
+                    } else {
+                        value = value.trim();
+                    }
+                    
+                    // 循环去除所有包围的引号
+                    while (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+                        value = value.substring(1, value.length - 1);
+                    }
+                    
+                    const keyTrim = key.trim();
+                    const currentVal = process.env[keyTrim];
+                    // 只有当环境变量不存在，或者是 ${VAR} 这种占位符时，才从 .env 加载
+                    if (!currentVal || currentVal === `\${${keyTrim}}`) {
+                        process.env[keyTrim] = value;
                     }
                 }
-                
-                // 移除注释部分
-                if (commentStart !== -1) {
-                    value = value.substring(0, commentStart).trim();
-                } else {
-                    value = value.trim();
-                }
-                
-                // 循环去除所有包围的引号
-                while (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
-                    value = value.substring(1, value.length - 1);
-                }
-                
-                const keyTrim = key.trim();
-                const currentVal = process.env[keyTrim];
-                // 只有当环境变量不存在，或者是 ${VAR} 这种占位符时，才从 .env 加载
-                if (!currentVal || currentVal === `\${${keyTrim}}`) {
-                    process.env[keyTrim] = value;
-                }
             }
+
+            // 找到第一个存在的文件后即退出
+            break;
         }
     }
 
@@ -225,14 +254,20 @@ function extractVariablesFromManifest() {
     const pkgPath = path.join(projectRoot, 'package.json');
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
     
+    const runtimeEnv = process.env.RUNTIME_ENV || normalizeEnvName(process.env.NODE_ENV || 'dev');
+    const baseWorkerName = pkg.name;
+    const resolvedWorkerName = runtimeEnv === 'prod' ? baseWorkerName : `${runtimeEnv}-${baseWorkerName}`;
+
     if (!process.env.WORKER_NAME) {
-        process.env.WORKER_NAME = pkg.name;
+        process.env.WORKER_NAME = resolvedWorkerName;
+    } else if (runtimeEnv !== 'prod' && !process.env.WORKER_NAME.startsWith(`${runtimeEnv}-`)) {
+        process.env.WORKER_NAME = `${runtimeEnv}-${process.env.WORKER_NAME}`;
     }
-    
+
     // AXIOM_DATASET should be provided via environment or manifest default, not hardcoded
-    
+
     if (!process.env.NODE_ENV) {
-        process.env.NODE_ENV = 'production';
+        process.env.NODE_ENV = runtimeEnv;
     }
     
     if (!process.env.SIGNATURE_EXPIRATION_WINDOW) {
@@ -288,7 +323,7 @@ function extractVariablesFromManifest() {
         
         if (!process.env.CF_KV_NAMESPACE_ID) {
             console.log('警告: GHA 环境下 CF_KV_NAMESPACE_ID 为空，KV 绑定可能失效');
-            if (process.env.NODE_ENV === 'production') {
+            if (isProdEnv(process.env.NODE_ENV)) {
                 console.error('错误: 生产部署需要 CF_KV_NAMESPACE_ID');
                 process.exit(1);
             }
@@ -328,7 +363,7 @@ function generateWranglerToml() {
     });
 
     if (!process.env.KV_PREVIEW_ID) {
-        if (process.env.NODE_ENV !== 'production' && process.env.CF_KV_NAMESPACE_ID) {
+        if (!isProdEnv(process.env.NODE_ENV) && process.env.CF_KV_NAMESPACE_ID) {
             let dummyId = '00000000000000000000000000000000';
             if (dummyId === process.env.CF_KV_NAMESPACE_ID) {
                 dummyId = 'ffffffffffffffffffffffffffffffff';
@@ -417,9 +452,14 @@ function main() {
         // 1. 解析 --env 参数
         const envArg = process.argv.find(arg => arg.startsWith('--env='));
         const targetEnv = envArg ? envArg.split('=')[1] : 'dev'; // 默认为 dev
+        const normalizedEnv = normalizeEnvName(targetEnv);
+
+        // 1.1 标准化环境写回，方便后续步骤使用
+        process.env.RUNTIME_ENV = normalizedEnv;
+        process.env.NODE_ENV = normalizeEnvName(process.env.NODE_ENV || normalizedEnv);
 
         // 2. 加载环境文件
-        loadEnvFile(fs, targetEnv);
+        loadEnvFile(fs, normalizedEnv);
 
         ['GHA_SECRETS_JSON', 'GHA_VARS_JSON'].forEach(key => {
             if (process.env[key]) {
@@ -484,7 +524,8 @@ function generateToml(env, manifest, tomlTemplate, packageJson) {
     
     // 处理 preview_id
     if (!env.KV_PREVIEW_ID) {
-        if (env.NODE_ENV !== 'production' && env.CF_KV_NAMESPACE_ID) {
+        const normalizedNodeEnv = normalizeEnvName(env.NODE_ENV || 'dev');
+        if (normalizedNodeEnv !== 'prod' && env.CF_KV_NAMESPACE_ID) {
             // 本地开发模式且设置了生产 ID：提供占位符以绕过 Wrangler 的强制校验
             let dummyId = '00000000000000000000000000000000';
             if (dummyId === env.CF_KV_NAMESPACE_ID) {

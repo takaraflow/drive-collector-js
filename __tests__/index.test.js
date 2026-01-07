@@ -485,7 +485,7 @@ describe('Worker Tests', () => {
       const envWithRedis = {
         REDIS_TLS_URL: 'https://redis.url',
         REDIS_TLS_PASSWORD: 'redis-password',
-        NODE_ENV: 'development'
+        NODE_ENV: 'dev'
       };
 
       const mockClient = createRedis({ url: '...' });
@@ -499,7 +499,7 @@ describe('Worker Tests', () => {
 
       // Override environment detection for logger inside the test
       const originalEnv = logger.env;
-      logger.configure({ env: 'development' });
+      logger.configure({ env: 'dev' });
 
       try {
         // Test GET log
@@ -520,7 +520,7 @@ describe('Worker Tests', () => {
       const envWithUpstash = {
         UPSTASH_REDIS_REST_URL: 'https://upstash.url',
         UPSTASH_REDIS_REST_TOKEN: 'token',
-        NODE_ENV: 'development'
+        NODE_ENV: 'dev'
       };
 
       global.fetch = jest.fn().mockResolvedValue({
@@ -531,7 +531,7 @@ describe('Worker Tests', () => {
 
       // Override environment detection for logger inside the test
       const originalEnv = logger.env;
-      logger.configure({ env: 'development' });
+      logger.configure({ env: 'dev' });
 
       try {
         await executeUpstashScan(envWithUpstash, 'prefix');

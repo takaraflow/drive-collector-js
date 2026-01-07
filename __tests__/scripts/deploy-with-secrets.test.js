@@ -59,7 +59,7 @@ describe('deploy-with-secrets.js (Unit)', () => {
             const mockEnv = {
                 SECRET_A: 'value-a',
                 CONFIG_B: '123',
-                NODE_ENV: 'production',
+                NODE_ENV: 'prod',
                 SIGNATURE_EXPIRATION_WINDOW: '900',
                 OTHER: 'ignored'
             };

@@ -98,21 +98,21 @@ describe('generate-wrangler-vars.js (Unit)', () => {
 
     test('should_parse_env_argument_and_load_corresponding_env_file', () => {
         // Mock process.argv
-        const mockArgv = ['node', 'script', '--env=staging'];
+        const mockArgv = ['node', 'script', '--env=pre'];
         
         // Mock process.cwd
         process.cwd = () => '/test/project';
         
-        // Mock fs.existsSync to simulate .env.staging exists
+        // Mock fs.existsSync to simulate .env.pre exists (staging alias)
         existsSyncMock.mockImplementation((path) => {
-            return path.includes('.env.staging');
+            return path.includes('.env.pre');
         });
 
         // Call setupEnvironment with mock argv
         const result = setupEnvironment(mockArgv);
 
         // Verify result
-        expect(result).toBe('staging');
+        expect(result).toBe('pre');
 
         // Verify dotenv.config was called twice
         expect(configMock).toHaveBeenCalledTimes(2);
@@ -120,7 +120,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
         // First call: default .env
         expect(configMock).toHaveBeenNthCalledWith(1);
         
-        // Second call: .env.staging with override
+        // Second call: .env.pre with override
         expect(configMock).toHaveBeenNthCalledWith(2, {
             path: expect.any(String),
             override: true
@@ -128,7 +128,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
         
         // Verify the path contains the expected filename
         const secondCallPath = configMock.mock.calls[1][0].path;
-        expect(secondCallPath).toContain('.env.staging');
+        expect(secondCallPath).toContain('.env.pre');
     });
 
     test('should_default_to_dev_when_no_env_argument_provided', () => {
@@ -164,7 +164,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
 
         const result = setupEnvironment(mockArgv);
 
-        expect(result).toBe('staging');
+        expect(result).toBe('pre');
         
         // Should only be called once for default .env
         expect(configMock).toHaveBeenCalledTimes(1);
@@ -215,7 +215,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
           }),
           GHA_VARS_JSON: JSON.stringify({
             NF_REDIS_URL: 'https://vars.url',
-            NODE_ENV: 'production'
+            NODE_ENV: 'prod'
           })
         };
 
@@ -229,7 +229,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
         expect(output).toContain('--var AXIOM_TOKEN="axiom-secret"');
         expect(output).toContain('--var QSTASH_CURRENT_SIGNING_KEY="qstash-key"');
         expect(output).toContain('--var NF_REDIS_URL="https://vars.url"');
-        expect(output).toContain('--var NODE_ENV="production"');
+        expect(output).toContain('--var NODE_ENV="prod"');
     });
 
     test('should_prioritize_secrets_over_vars_in_wrangler_command', () => {
@@ -316,7 +316,7 @@ kv_namespaces = [
     test('should append [vars] in local environment', () => {
       const mockEnv = {
         GITHUB_ACTIONS: 'false',
-        NODE_ENV: 'development',
+        NODE_ENV: 'dev',
         WORKER_NAME: 'test-local-worker',
         QSTASH_CURRENT_SIGNING_KEY: 'local-key',
         CLOUDFLARE_ACCOUNT_ID: 'test-id',
@@ -333,7 +333,7 @@ kv_namespaces = [
     test('should NOT append [vars] in GHA environment', () => {
       const mockEnv = {
         GITHUB_ACTIONS: 'true',
-        NODE_ENV: 'production',
+        NODE_ENV: 'prod',
         WORKER_NAME: 'gha-worker',
         CLOUDFLARE_ACCOUNT_ID: 'test-id',
         CF_KV_NAMESPACE_ID: 'test-kv'
@@ -364,7 +364,7 @@ kv_namespaces = [
 
     test('should use dummy preview_id in local dev with prod KV ID', () => {
         const mockEnv = {
-            NODE_ENV: 'development',
+            NODE_ENV: 'dev',
             CF_KV_NAMESPACE_ID: 'prod-kv-id',
             KV_PREVIEW_ID: ''
         };
