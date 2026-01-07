@@ -14,9 +14,9 @@ export async function handleQStashWebhook(req, res) {
 
     try {
         const healthPath = '/health';
+        const hostHeader = req.headers?.host || req.headers?.[':authority'] || 'localhost';
         if ((req.method === 'GET' || req.method === 'HEAD') && req.url) {
-            const host = req.headers?.host || 'localhost';
-            const url = new URL(req.url, `http://${host}`);
+            const url = new URL(req.url, `http://${hostHeader}`);
             if (url.pathname === healthPath) {
                 res.writeHead(200);
                 if (req.method === 'HEAD') {
@@ -52,7 +52,7 @@ export async function handleQStashWebhook(req, res) {
         }
 
         // 3. 解析路由和数据
-        const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        const url = new URL(req.url, `http://${hostHeader}`);
         const data = JSON.parse(body);
         const path = url.pathname;
 
@@ -232,9 +232,30 @@ async function main() {
         await startProcessor();
 
         // 7. 启动 Webhook HTTP Server
-        const http = await import("http");
         const config = getConfig();
-        httpServer = http.createServer(handleQStashWebhook);
+        const http2Config = config.http2 || {};
+        if (http2Config.enabled) {
+            const http2 = await import("http2");
+            if (http2Config.plain) {
+                httpServer = http2.createServer({}, handleQStashWebhook);
+            } else {
+                if (!http2Config.keyPath || !http2Config.certPath) {
+                    log.error("?? HTTP/2 已启用，但未配置 TLS 证书路径 (HTTP2_TLS_KEY_PATH/HTTP2_TLS_CERT_PATH)");
+                    gracefulShutdown.exitCode = 1;
+                    gracefulShutdown.shutdown('http2-tls-missing');
+                    return;
+                }
+                const { readFileSync } = await import("fs");
+                httpServer = http2.createSecureServer({
+                    key: readFileSync(http2Config.keyPath),
+                    cert: readFileSync(http2Config.certPath),
+                    allowHTTP1: http2Config.allowHttp1 !== false
+                }, handleQStashWebhook);
+            }
+        } else {
+            const http = await import("http");
+            httpServer = http.createServer(handleQStashWebhook);
+        }
         httpServer.listen(config.port, () => {
             log.info(`🌐 Webhook Server 运行在端口: ${config.port}`);
         });

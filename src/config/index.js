@@ -70,6 +70,13 @@ export async function initConfig() {
         remoteName: env.RCLONE_REMOTE || null,
         remoteFolder: env.REMOTE_FOLDER || null,
         port: env.PORT || "3000",
+        http2: {
+            enabled: env.HTTP2_ENABLED === 'true',
+            plain: env.HTTP2_PLAIN === 'true',
+            allowHttp1: env.HTTP2_ALLOW_HTTP1 !== 'false',
+            keyPath: env.HTTP2_TLS_KEY_PATH || env.TLS_KEY_PATH || null,
+            certPath: env.HTTP2_TLS_CERT_PATH || env.TLS_CERT_PATH || null
+        },
         redis: {
             url: env.NF_REDIS_URL || env.REDIS_URL || null,
             token: env.REDIS_TOKEN || env.UPSTASH_REDIS_REST_TOKEN || null,

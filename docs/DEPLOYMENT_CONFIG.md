@@ -216,6 +216,11 @@ railway run npm run sync:env
 - `RCLONE_REMOTE`: Rclone 远程名称（默认: mega）
 - `REMOTE_FOLDER`: 远程文件夹路径（默认: /DriveCollectorBot）
 - `PORT`: HTTP 服务器端口（默认: 7860）
+- `HTTP2_ENABLED`: 是否启用 HTTP/2（默认: false）
+- `HTTP2_PLAIN`: 是否使用明文 h2c（默认: false）
+- `HTTP2_ALLOW_HTTP1`: 是否允许 HTTP/1.1 回退（默认: true）
+- `HTTP2_TLS_KEY_PATH`: HTTP/2 TLS 私钥路径（启用 TLS 时必填）
+- `HTTP2_TLS_CERT_PATH`: HTTP/2 TLS 证书路径（启用 TLS 时必填）
 
 #### QStash（任务队列）
 - `QSTASH_AUTH_TOKEN`: QStash 认证令牌
@@ -348,6 +353,11 @@ REMOTE_FOLDER=/DriveCollectorBot
 
 # HTTP 服务器
 PORT=7860
+HTTP2_ENABLED=false
+HTTP2_PLAIN=false
+HTTP2_ALLOW_HTTP1=true
+HTTP2_TLS_KEY_PATH=
+HTTP2_TLS_CERT_PATH=
 
 # QStash (可选)
 QSTASH_AUTH_TOKEN=
