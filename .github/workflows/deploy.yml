@@ -16,7 +16,7 @@ jobs:
       INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
       # Use secret for project ID to support both GHA vars and local 'act' secrets
       INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID || vars.INFISICAL_PROJECT_ID }}
-      NODE_ENV: ${{ env.NODE_ENV || vars.NODE_ENV || 'dev' }}
+      NODE_ENV: ${{ vars.NODE_ENV || 'dev' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
