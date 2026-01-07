@@ -1,7 +1,7 @@
-process.on('uncaughtException', (err) => { console.error('FATAL: Uncaught Exception:', err); process.exit(1); })
-process.on('unhandledRejection', (reason, promise) => { console.error('FATAL: Unhandled Rejection:', reason); process.exit(1); })
-
+import { gracefulShutdown } from "./src/services/GracefulShutdown.js";
 import { initConfig, validateConfig, getConfig } from "./src/config/index.js";
+
+let httpServer = null;
 
 /**
  * QStash Webhook 处理程序 (供外部 HTTP Server 或测试使用)
@@ -78,11 +78,60 @@ export async function handleQStashWebhook(req, res) {
 
     } catch (error) {
         const { logger } = await import("./src/services/logger.js");
-    const log = logger.withModule ? logger.withModule('App') : logger;
+        const log = logger.withModule ? logger.withModule('App') : logger;
         log.error("🚨 Webhook 处理发生异常:", error);
         res.writeHead(500);
         res.end('Internal Server Error');
     }
+}
+
+/**
+ * 注册关闭钩子
+ */
+async function registerShutdownHooks() {
+    const { instanceCoordinator } = await import("./src/services/InstanceCoordinator.js");
+    const { cache } = await import("./src/services/CacheService.js");
+    const { stopWatchdog, client } = await import("./src/services/telegram.js");
+    const { TaskRepository } = await import("./src/repositories/TaskRepository.js");
+
+    // 1. 停止接受新请求 (priority: 10)
+    gracefulShutdown.register(async () => {
+        if (httpServer) {
+            return new Promise((resolve) => {
+                httpServer.close(() => {
+                    console.log('✅ HTTP Server 已关闭');
+                    resolve();
+                });
+            });
+        }
+    }, 10, 'http-server');
+
+    // 2. 停止实例协调器 (priority: 20)
+    gracefulShutdown.register(async () => {
+        await instanceCoordinator.stop();
+        console.log('✅ InstanceCoordinator 已停止');
+    }, 20, 'instance-coordinator');
+
+    // 3. 停止 Telegram 看门狗和客户端 (priority: 30)
+    gracefulShutdown.register(async () => {
+        stopWatchdog();
+        if (client && client.connected) {
+            await client.disconnect();
+            console.log('✅ Telegram 客户端已断开');
+        }
+    }, 30, 'telegram-client');
+
+    // 4. 刷新待处理的任务更新 (priority: 40)
+    gracefulShutdown.register(async () => {
+        await TaskRepository.flushUpdates();
+        console.log('✅ TaskRepository 待更新任务已刷新');
+    }, 40, 'task-repository');
+
+    // 5. 断开 Cache 连接 (priority: 50)
+    gracefulShutdown.register(async () => {
+        await cache.destroy();
+        console.log('✅ Cache 服务已断开');
+    }, 50, 'cache-service');
 }
 
 async function main() {
@@ -97,7 +146,7 @@ async function main() {
                 console.log('🔍 最终配置信息:');
                 const config = getConfig();
                 
-                // 附加 CacheProvider 信息
+                //附加 CacheProvider 信息
                 const { cache } = await import("./src/services/CacheService.js");
                 await cache.initialize();
                 
@@ -119,7 +168,7 @@ async function main() {
                 console.error('❌ 显示配置时出错:', error);
             } finally {
                 // 总是退出，避免 Windows assertion 错误
-                process.exit(0);
+                gracefulShutdown.shutdown('show-config');
             }
         });
         return; // 退出 main()，等待 setImmediate 执行
@@ -128,7 +177,9 @@ async function main() {
     // 2. 验证配置完整性
     if (!validateConfig()) {
         console.error("🚨 核心配置缺失，程序停止启动。");
-        process.exit(1);
+        gracefulShutdown.exitCode = 1;
+        gracefulShutdown.shutdown('config-validation-failed');
+        return;
     }
 
     // 3. 动态加载核心服务
@@ -148,10 +199,15 @@ async function main() {
         ]);
     } catch (err) {
         console.error("❌ 服务初始化失败:", err.message);
-        process.exit(1);
+        gracefulShutdown.exitCode = 1;
+        gracefulShutdown.shutdown('service-initialization-failed', err);
+        return;
     }
 
-    // 5. 启动业务逻辑
+    // 5. 注册关闭钩子（在启动业务逻辑之前）
+    await registerShutdownHooks();
+
+    // 6. 启动业务逻辑
     try {
         const { instanceCoordinator } = await import("./src/services/InstanceCoordinator.js");
         const { startDispatcher } = await import("./src/dispatcher/bootstrap.js");
@@ -165,11 +221,11 @@ async function main() {
         await startDispatcher();
         await startProcessor();
 
-        // 6. 启动 Webhook HTTP Server
+        // 7. 启动 Webhook HTTP Server
         const http = await import("http");
         const config = getConfig();
-        const server = http.createServer(handleQStashWebhook);
-        server.listen(config.port, () => {
+        httpServer = http.createServer(handleQStashWebhook);
+        httpServer.listen(config.port, () => {
             log.info(`🌐 Webhook Server 运行在端口: ${config.port}`);
         });
         
@@ -182,7 +238,8 @@ async function main() {
 
     } catch (error) {
         console.error("🚨 应用启动过程中发生致命错误:", error);
-        process.exit(1);
+        gracefulShutdown.exitCode = 1;
+        gracefulShutdown.shutdown('startup-failed', error);
     }
 }
 
@@ -191,6 +248,7 @@ async function main() {
 if (process.env.NODE_ENV !== 'test' && (process.argv[1]?.endsWith('index.js') || process.argv[1]?.endsWith('index'))) {
     main().catch(error => {
         console.error("❌ 引导程序失败:", error);
-        process.exit(1);
+        gracefulShutdown.exitCode = 1;
+        gracefulShutdown.shutdown('main-failed', error);
     });
 }
