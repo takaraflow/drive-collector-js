@@ -18,6 +18,7 @@ import { instrument } from '@microlabs/otel-cf-workers';
 import { Receiver } from '@upstash/qstash';
 
 // 静态导入 Redis client
+import { createRedis } from 'redis-on-workers';
 // 导入新的缓存客户端抽象
 import { getNFCacheClient } from './cache/client-factory.js';
 
