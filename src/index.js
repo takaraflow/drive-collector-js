@@ -310,10 +310,10 @@ async function getActiveInstances(env, ctx = null) {
     }
 
     // 新增日志：记录扫描到的所有原始键
-    await getActiveInstancesLogger.debug('[DEBUG] getActiveInstances Scan Phase: All raw keys scanned', { keys: allKeys.map(k => k.name) }, ctx);
+    await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Scan Phase: All raw keys scanned', { keys: allKeys.map(k => k.name) }, ctx);
 
     if (allKeys.length === 0) {
-      await getActiveInstancesLogger.debug('[DEBUG] getActiveInstances Scan Phase: No keys found, returning empty array.', {}, ctx);
+      await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Scan Phase: No keys found, returning empty array.', {}, ctx);
       return [];
     }
 
@@ -329,7 +329,7 @@ async function getActiveInstances(env, ctx = null) {
         instanceKeys.push(key.name);
       }
     }
-    await getActiveInstancesLogger.debug('[DEBUG] getActiveInstances Scan Phase: Filtered instance keys', { instanceKeys, count: instanceKeys.length }, ctx);
+    await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Scan Phase: Filtered instance keys', { instanceKeys, count: instanceKeys.length }, ctx);
 
     // 并发读取实例数据
     const instanceDataResults = await Promise.all(instanceKeys.map(keyName =>
@@ -341,18 +341,18 @@ async function getActiveInstances(env, ctx = null) {
     ));
 
     // 新增日志：记录获取到的原始实例数据
-    await getActiveInstancesLogger.debug('[DEBUG] getActiveInstances Fetch Phase: Raw instance data results', { rawData: instanceDataResults }, ctx);
+    await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Fetch Phase: Raw instance data results', { rawData: instanceDataResults }, ctx);
 
     for (const data of instanceDataResults) {
       const instance = parseInstanceData(data);
-      await getActiveInstancesLogger.debug('[DEBUG] getActiveInstances Fetch Phase: Parsed instance data', { instanceId: instance?.id, parsedInstance: instance }, ctx);
+      await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Fetch Phase: Parsed instance data', { instanceId: instance?.id, parsedInstance: instance }, ctx);
       if (instance && instance.status === 'active') {
         // 检查心跳是否过期
         if (now - instance.lastHeartbeat <= HEARTBEAT_TIMEOUT) {
           instances.push(instance);
         } else {
           const ageSeconds = Math.floor((now - instance.lastHeartbeat) / 1000);
-          await getActiveInstancesLogger.debug('[DEBUG] getActiveInstances Fetch Phase: Instance expired', { instanceId: instance.id, lastHeartbeat: instance.lastHeartbeat, heartbeatTimeoutSeconds: HEARTBEAT_TIMEOUT / 1000, ageSeconds }, ctx);
+          await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Fetch Phase: Instance expired', { instanceId: instance.id, lastHeartbeat: instance.lastHeartbeat, heartbeatTimeoutSeconds: HEARTBEAT_TIMEOUT / 1000, ageSeconds }, ctx);
         }
       }
     }
@@ -735,7 +735,7 @@ async function executeRedis(operation, env, key, value = null, ctx = null) {
       case '_kv_get': {
         // 支持 mock client 的 send 方法和真实 client 的 get 方法
         let result;
-        await logger.debug(`[DEBUG] executeRedis GET: key=${key}`, {}, ctx);
+        await logger.info(`[DEBUG] executeRedis GET: key=${key}`, {}, ctx);
         if (client.send) {
           result = await client.send('GET', key);
         } else if (client.get) {
@@ -744,7 +744,7 @@ async function executeRedis(operation, env, key, value = null, ctx = null) {
           throw new Error('Client does not support get or send method');
         }
         const duration = Date.now() - start;
-        await logger.debug(`[DEBUG] executeRedis GET result: key=${key}, result=${result}, duration=${duration}ms`, {}, ctx);
+        await logger.info(`[DEBUG] executeRedis GET result: key=${key}, result=${result}, duration=${duration}ms`, {}, ctx);
         return result;
       }
       case '_redis_put':
@@ -796,7 +796,7 @@ async function executeRedisScan(env, prefix, ctx = null) {
     // 添加日志，记录使用的 client 类型和 scan 参数
     const isNFCacheClient = !!client.scan && !client.send;
     const clientType = isNFCacheClient ? 'NFCacheClient' : (client.send ? 'RedisClient' : 'Unknown');
-    await logger.debug(`[DEBUG] executeRedisScan: clientType=${clientType}, prefix=${prefix}, cursor=${cursor}`, {}, ctx);
+    await logger.info(`[DEBUG] executeRedisScan: clientType=${clientType}, prefix=${prefix}, cursor=${cursor}`, {}, ctx);
 
     if (client.send) {
       // 原生 redis-on-workers 或类似 client，直接发送命令
@@ -827,7 +827,7 @@ async function executeRedisScan(env, prefix, ctx = null) {
     }
   } while (cursor !== '0');
   
-  await logger.debug(`[DEBUG] executeRedisScan: finished scanning, found ${keys.length} keys`, {}, ctx);
+  await logger.info(`[DEBUG] executeRedisScan: finished scanning, found ${keys.length} keys`, {}, ctx);
   return { keys };
 }
 
