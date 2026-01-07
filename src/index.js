@@ -84,6 +84,19 @@ function detectCacheProvider(env) {
   return prios[0] || 'none';
 }
 
+function describeRedisEndpoint(env) {
+  const redisUrl = env.NF_REDIS_URL || env.REDIS_TLS_URL;
+  if (!redisUrl) return 'not configured';
+  try {
+    const parsed = new URL(redisUrl);
+    const portSegment = parsed.port ? `:${parsed.port}` : '';
+    const pathSegment = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname : '';
+    return `${parsed.protocol}//${parsed.hostname}${portSegment}${pathSegment}`;
+  } catch (error) {
+    return redisUrl;
+  }
+}
+
 
 
 /**
@@ -289,6 +302,8 @@ async function scanLockKeys(env, ctx = null, parentLogger = logger) {
  */
 async function getActiveInstances(env, ctx = null, parentLogger = logger) {
   const getActiveInstancesLogger = parentLogger.child({ module: 'getActiveInstances' });
+  const redisEndpointSummary = describeRedisEndpoint(env);
+  await getActiveInstancesLogger.info('Redis endpoint summary for active-instance scan', { endpoint: redisEndpointSummary }, ctx);
   try {
     // 扫描所有契约键前缀
     const prefixes = ['instance:', 'lock:', 'task:', 'msg_lock:'];
