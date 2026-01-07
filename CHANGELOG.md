@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.12.8](https://github.com/YoungSx/lb-worker-js/compare/v0.12.7...v0.12.8) (2026-01-07)
+
+
+### 🐛 Bug Fixes
+
+* adds fallback mechanism for key scanning when primary method fails ([74d6edd](https://github.com/YoungSx/lb-worker-js/commit/74d6edd72adfdd20246400fbb6efc590d601c887))
+* improves debug logging by chunking large KV data ([4ea69c6](https://github.com/YoungSx/lb-worker-js/commit/4ea69c6ab87aeb1b8efad99348860a29324901b2))
+
 ### [0.12.7](https://github.com/YoungSx/lb-worker-js/compare/v0.12.6...v0.12.7) (2026-01-07)
 
 
