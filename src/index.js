@@ -303,7 +303,7 @@ async function scanLockKeys(env, ctx = null, parentLogger = logger) {
 async function getActiveInstances(env, ctx = null, parentLogger = logger) {
   const getActiveInstancesLogger = parentLogger.child({ module: 'getActiveInstances' });
   const redisEndpointSummary = describeRedisEndpoint(env);
-  await getActiveInstancesLogger.info('Redis endpoint summary for active-instance scan', { endpoint: redisEndpointSummary }, ctx);
+  await getActiveInstancesLogger.debug('Redis endpoint summary for active-instance scan', { endpoint: redisEndpointSummary }, ctx);
   try {
     // 扫描所有契约键前缀
     const prefixes = ['instance:', 'lock:', 'task:', 'msg_lock:'];
@@ -325,21 +325,21 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     }
 
     // 新增日志：记录扫描到的所有原始键
-    await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Scan Phase: All raw keys scanned', { keys: allKeys.map(k => k.name) }, ctx);
+    await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: All raw keys scanned', { keys: allKeys.map(k => k.name) }, ctx);
 
     if (allKeys.length === 0) {
-      await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Scan Phase: No keys found, attempting fallback full scan', {}, ctx);
+      await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: No keys found, attempting fallback full scan', {}, ctx);
       try {
         const fallbackResult = await executeWithFailover('_kv_list', env, ctx, '');
         const fallbackKeys = fallbackResult?.keys || [];
-        await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Fallback Scan: Raw keys', { keys: fallbackKeys.map(k => k.name), count: fallbackKeys.length }, ctx);
+        await getActiveInstancesLogger.debug('getActiveInstances Fallback Scan: Raw keys', { keys: fallbackKeys.map(k => k.name), count: fallbackKeys.length }, ctx);
         allKeys = fallbackKeys;
       } catch (e) {
-        await getActiveInstancesLogger.error('[DEBUG] getActiveInstances Fallback Scan failed', { error: e.message }, ctx);
+        await getActiveInstancesLogger.error('getActiveInstances Fallback Scan failed', { error: e.message }, ctx);
       }
 
       if (allKeys.length === 0) {
-        await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Scan Phase: No keys found after fallback, returning empty array.', {}, ctx);
+        await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: No keys found after fallback, returning empty array.', {}, ctx);
         return [];
       }
     }
@@ -356,7 +356,7 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
         instanceKeys.push(key.name);
       }
     }
-    await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Scan Phase: Filtered instance keys', { instanceKeys, count: instanceKeys.length }, ctx);
+    await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: Filtered instance keys', { instanceKeys, count: instanceKeys.length }, ctx);
 
     // 并发读取实例数据
     const instanceDataResults = await Promise.all(instanceKeys.map(keyName =>
@@ -368,7 +368,7 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     ));
 
     // 新增日志：记录获取到的原始实例数据
-    await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Fetch Phase: Raw instance data results', { rawData: instanceDataResults }, ctx);
+    await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Raw instance data results', { rawData: instanceDataResults }, ctx);
 
     // 新增：输出所有扫描到的键及其值，便于线上调试
     const instanceDataByKey = new Map();
@@ -410,19 +410,19 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     for (let i = 0; i < formattedEntries.length; i += chunkSize) {
       const chunkIndex = Math.floor(i / chunkSize) + 1;
       const chunk = formattedEntries.slice(i, i + chunkSize);
-      await getActiveInstancesLogger.info(`[DEBUG] getActiveInstances Full KV chunk ${chunkIndex}/${totalChunks}`, { entries: chunk }, ctx);
+      await getActiveInstancesLogger.debug(`getActiveInstances Full KV chunk ${chunkIndex}/${totalChunks}`, { entries: chunk }, ctx);
     }
 
     for (const data of instanceDataResults) {
       const instance = parseInstanceData(data);
-      await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Fetch Phase: Parsed instance data', { instanceId: instance?.id, parsedInstance: instance }, ctx);
+      await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Parsed instance data', { instanceId: instance?.id, parsedInstance: instance }, ctx);
       if (instance && instance.status === 'active') {
         // 检查心跳是否过期
         if (now - instance.lastHeartbeat <= HEARTBEAT_TIMEOUT) {
           instances.push(instance);
         } else {
           const ageSeconds = Math.floor((now - instance.lastHeartbeat) / 1000);
-          await getActiveInstancesLogger.info('[DEBUG] getActiveInstances Fetch Phase: Instance expired', { instanceId: instance.id, lastHeartbeat: instance.lastHeartbeat, heartbeatTimeoutSeconds: HEARTBEAT_TIMEOUT / 1000, ageSeconds }, ctx);
+          await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Instance expired', { instanceId: instance.id, lastHeartbeat: instance.lastHeartbeat, heartbeatTimeoutSeconds: HEARTBEAT_TIMEOUT / 1000, ageSeconds }, ctx);
         }
       }
     }
@@ -805,7 +805,7 @@ async function executeRedis(operation, env, key, value = null, ctx = null) {
       case '_kv_get': {
         // 支持 mock client 的 send 方法和真实 client 的 get 方法
         let result;
-        await logger.info(`[DEBUG] executeRedis GET: key=${key}`, {}, ctx);
+        await logger.debug(`executeRedis GET: key=${key}`, {}, ctx);
         if (client.send) {
           result = await client.send('GET', key);
         } else if (client.get) {
@@ -814,7 +814,7 @@ async function executeRedis(operation, env, key, value = null, ctx = null) {
           throw new Error('Client does not support get or send method');
         }
         const duration = Date.now() - start;
-        await logger.info(`[DEBUG] executeRedis GET result: key=${key}, result=${result}, duration=${duration}ms`, {}, ctx);
+        await logger.debug(`executeRedis GET result: key=${key}, result=${result}, duration=${duration}ms`, {}, ctx);
         return result;
       }
       case '_redis_put':
@@ -866,7 +866,7 @@ async function executeRedisScan(env, prefix, ctx = null) {
     // 添加日志，记录使用的 client 类型和 scan 参数
     const isNFCacheClient = !!client.scan && !client.send;
     const clientType = isNFCacheClient ? 'NFCacheClient' : (client.send ? 'RedisClient' : 'Unknown');
-    await logger.info(`[DEBUG] executeRedisScan: clientType=${clientType}, prefix=${prefix}, cursor=${cursor}`, {}, ctx);
+    await logger.debug(`executeRedisScan: clientType=${clientType}, prefix=${prefix}, cursor=${cursor}`, {}, ctx);
 
     if (client.send) {
       // 原生 redis-on-workers 或类似 client，直接发送命令
@@ -897,7 +897,7 @@ async function executeRedisScan(env, prefix, ctx = null) {
     }
   } while (cursor !== '0');
   
-  await logger.info(`[DEBUG] executeRedisScan: finished scanning, found ${keys.length} keys`, {}, ctx);
+  await logger.debug(`executeRedisScan: finished scanning, found ${keys.length} keys`, {}, ctx);
   return { keys };
 }
 
