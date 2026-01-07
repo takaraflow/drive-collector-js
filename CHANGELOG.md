@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.13.1](https://github.com/YoungSx/lb-worker-js/compare/v0.13.0...v0.13.1) (2026-01-07)
+
 ## [0.13.0](https://github.com/YoungSx/lb-worker-js/compare/v0.12.9...v0.13.0) (2026-01-07)
 
 ### [0.12.9](https://github.com/YoungSx/lb-worker-js/compare/v0.12.8...v0.12.9) (2026-01-07)
