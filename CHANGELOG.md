@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.15.0](https://github.com/YoungSx/lb-worker-js/compare/v0.14.0...v0.15.0) (2026-01-07)
+
+
+### 🔧 Maintenance
+
+* updates task endpoint paths and schema validation ([7b506bd](https://github.com/YoungSx/lb-worker-js/commit/7b506bd676ff4cc0f4fae09ed06feaa1ddae079a))
+
 ## [0.14.0](https://github.com/YoungSx/lb-worker-js/compare/v0.13.3...v0.14.0) (2026-01-07)
 
 
