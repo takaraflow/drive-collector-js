@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.14.0](https://github.com/YoungSx/drive-collector-js/compare/v4.13.1...v4.14.0) (2026-01-07)
+
+
+### ✅ 测试相关
+
+* adds comprehensive upstream error diagnosis guides and monitoring scripts ([a9529fa](https://github.com/YoungSx/drive-collector-js/commit/a9529fa7587afa36b12f005982215292823e4803))
+
+
+### ✨ 新特性
+
+* add HTTP/2 support to webhook server ([3f3b326](https://github.com/YoungSx/drive-collector-js/commit/3f3b3266e5170fefa14aaac279f9a2f05007981d))
+
 ### [4.13.1](https://github.com/YoungSx/drive-collector-js/compare/v4.13.0...v4.13.1) (2026-01-07)
 
 
