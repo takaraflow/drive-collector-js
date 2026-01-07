@@ -858,14 +858,14 @@ async function executeRedisScan(env, prefix, ctx = null) {
       // 必须显式包含 MATCH 和 COUNT 关键字
       // 修复：MATCH pattern 应该是 'instance:*' 而不是 'instance:instance:*'
       // 传入的 prefix 是 'instance:'
-      const matchPattern = prefix.endsWith(':') ? `${prefix}*` : `${prefix}:*`;
+      const matchPattern = prefix === '' ? '*' : (prefix.endsWith(':') ? `${prefix}*` : `${prefix}:*`);
       await logger.debug(`Executing Redis SCAN (send)`, { clientType, prefix, matchPattern, cursor }, ctx);
       res = await client.send('SCAN', cursor, 'MATCH', matchPattern, 'COUNT', 100);
     } else if (client.scan) {
       // NFCacheClient 或兼容接口
       // 假设 scan 方法签名是 (cursor, matchPattern, count)
       // 这里的 matchPattern 应该是完整的 pattern (如 "instance:*")
-      const matchPattern = prefix.endsWith(':') ? `${prefix}*` : `${prefix}:*`;
+      const matchPattern = prefix === '' ? '*' : (prefix.endsWith(':') ? `${prefix}*` : `${prefix}:*`);
       await logger.debug(`Executing Redis SCAN (scan)`, { clientType, prefix, matchPattern, cursor }, ctx);
       res = await client.scan(cursor, matchPattern, 100);
     } else {
