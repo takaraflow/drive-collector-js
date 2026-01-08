@@ -40,20 +40,22 @@ jobs:
         run: npm run validate:manifest
       - name: Build
         run: |
-          case "$NODE_ENV" in
-            "prod") INFISICAL_ENV="prod" ;;
-            "dev") INFISICAL_ENV="dev" ;;
-            "pre") INFISICAL_ENV="pre" ;;
+          ENV_ALIAS=$(echo "${NODE_ENV:-dev}" | tr '[:upper:]' '[:lower:]')
+          case "$ENV_ALIAS" in
+            prod|production) INFISICAL_ENV="prod" ;;
+            dev|development) INFISICAL_ENV="dev" ;;
+            pre|staging) INFISICAL_ENV="pre" ;;
             *) INFISICAL_ENV="dev" ;;
           esac
           infisical run --env="$INFISICAL_ENV" --projectId="$INFISICAL_PROJECT_ID" -- npm run build -- --env=${INFISICAL_ENV}
 
       - name: Deploy with Secrets
         run: |
-          case "$NODE_ENV" in
-            "prod") INFISICAL_ENV="prod" ;;
-            "dev") INFISICAL_ENV="dev" ;;
-            "pre") INFISICAL_ENV="pre" ;;
+          ENV_ALIAS=$(echo "${NODE_ENV:-dev}" | tr '[:upper:]' '[:lower:]')
+          case "$ENV_ALIAS" in
+            prod|production) INFISICAL_ENV="prod" ;;
+            dev|development) INFISICAL_ENV="dev" ;;
+            pre|staging) INFISICAL_ENV="pre" ;;
             *) INFISICAL_ENV="dev" ;;
           esac
           infisical run --env="$INFISICAL_ENV" --projectId="$INFISICAL_PROJECT_ID" -- node scripts/deploy-with-secrets.js
