@@ -36,10 +36,21 @@ await jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () =
     }
 }));
 
+// Mock logger
+await jest.unstable_mockModule('../../src/services/logger.js', () => ({
+    logger: {
+        info: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+        debug: jest.fn()
+    }
+}));
+
 // 动态导入被测试模块
 const { MessageHandler } = await import('../../src/dispatcher/MessageHandler.js');
 const { Dispatcher } = await import('../../src/dispatcher/Dispatcher.js');
 const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+const { logger } = await import('../../src/services/logger.js');
 
 describe('MessageHandler Integration Tests', () => {
     let mockClient;
@@ -206,7 +217,7 @@ describe('MessageHandler Integration Tests', () => {
     });
 
     describe('UpdateConnectionState Handling', () => {
-        it('should handle connected state (state=1)', async () => {
+        it('should handle connected state (state=1) with debug log', async () => {
             instanceCoordinator.acquireLock.mockResolvedValue(true);
 
             const event = {
@@ -218,9 +229,15 @@ describe('MessageHandler Integration Tests', () => {
             await MessageHandler.handleEvent(event, mockClient);
 
             expect(Dispatcher.handle).toHaveBeenCalledWith(event);
+            expect(logger.debug).toHaveBeenCalledWith(
+                expect.stringContaining('[UpdateConnectionState:connected]')
+            );
+            expect(logger.info).not.toHaveBeenCalledWith(
+                expect.stringContaining('[UpdateConnectionState')
+            );
         });
 
-        it('should handle broken state (state=0)', async () => {
+        it('should handle broken state (state=0) with debug log', async () => {
             instanceCoordinator.acquireLock.mockResolvedValue(true);
 
             const event = {
@@ -232,9 +249,12 @@ describe('MessageHandler Integration Tests', () => {
             await MessageHandler.handleEvent(event, mockClient);
 
             expect(Dispatcher.handle).toHaveBeenCalledWith(event);
+            expect(logger.debug).toHaveBeenCalledWith(
+                expect.stringContaining('[UpdateConnectionState:broken]')
+            );
         });
 
-        it('should handle disconnected state (state=-1)', async () => {
+        it('should handle disconnected state (state=-1) with debug log', async () => {
             instanceCoordinator.acquireLock.mockResolvedValue(true);
 
             const event = {
@@ -246,9 +266,12 @@ describe('MessageHandler Integration Tests', () => {
             await MessageHandler.handleEvent(event, mockClient);
 
             expect(Dispatcher.handle).toHaveBeenCalledWith(event);
+            expect(logger.debug).toHaveBeenCalledWith(
+                expect.stringContaining('[UpdateConnectionState:disconnected]')
+            );
         });
 
-        it('should handle unknown state number gracefully', async () => {
+        it('should handle unknown state number with debug log', async () => {
             instanceCoordinator.acquireLock.mockResolvedValue(true);
 
             const event = {
@@ -260,6 +283,9 @@ describe('MessageHandler Integration Tests', () => {
             await MessageHandler.handleEvent(event, mockClient);
 
             expect(Dispatcher.handle).toHaveBeenCalledWith(event);
+            expect(logger.debug).toHaveBeenCalledWith(
+                expect.stringContaining('[UpdateConnectionState:stateNum_999]')
+            );
         });
     });
 });

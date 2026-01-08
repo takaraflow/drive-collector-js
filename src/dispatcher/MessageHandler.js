@@ -216,6 +216,9 @@ export class MessageHandler {
                 });
                 // 未知类型事件降级为 debug 日志，减少噪音
                 log.debug(`[PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+            } else if (isUpdateConnectionState) {
+                // UpdateConnectionState 是常规心跳，改为 debug 级别
+                log.debug(`[PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
             } else {
                 // 已知类型事件保留 info 日志
                 log.info(`[PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
