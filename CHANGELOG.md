@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.15.4](https://github.com/YoungSx/lb-worker-js/compare/v0.15.3...v0.15.4) (2026-01-08)
+
+
+### 🐛 Bug Fixes
+
+* add Infisical credential detection and .env fallback logic ([ac11806](https://github.com/YoungSx/lb-worker-js/commit/ac11806f94faabb9986904478f5e0dc4b2be169a))
+* aligns NODE_ENV with DEPLOY_ENV in GitHub Actions ([d87970c](https://github.com/YoungSx/lb-worker-js/commit/d87970c39de514da0dc22f122b109765e7777678))
+* improves Redis scan operation with dedicated logger ([e86f078](https://github.com/YoungSx/lb-worker-js/commit/e86f078319bdaedf45cc92e122705073bfe8177a))
+
 ### [0.15.3](https://github.com/YoungSx/lb-worker-js/compare/v0.15.2...v0.15.3) (2026-01-08)
 
 
