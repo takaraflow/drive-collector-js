@@ -15,8 +15,7 @@ jobs:
     env:
       INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
       # Use secret for project ID to support both GHA vars and local 'act' secrets
-      INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID || vars.INFISICAL_PROJECT_ID }}
-      NODE_ENV: ${{ vars.NODE_ENV || 'dev' }}
+      INFISICAL_PROJECT_ID: ${{ vars.INFISICAL_PROJECT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,6 +28,16 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Align NODE_ENV with DEPLOY_ENV
+        shell: bash
+        run: |
+          DEFAULT_NODE_ENV="${{ vars.NODE_ENV || 'dev' }}"
+          if [ -n "$DEPLOY_ENV" ]; then
+            echo "NODE_ENV=$DEPLOY_ENV" >> "$GITHUB_ENV"
+          else
+            echo "NODE_ENV=$DEFAULT_NODE_ENV" >> "$GITHUB_ENV"
+          fi
 
       - name: Install Infisical CLI and jq
         run: |
