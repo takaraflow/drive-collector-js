@@ -159,6 +159,16 @@ export class MessageHandler {
             const msgIdentifier = msgId || (event.className ? `[${event.className}]` : 'unknown');
 
             if (msgIdentifier === 'unknown') {
+                // [DEBUG] 打印原始事件的完整结构，用于排查
+                log.debug("=== 原始事件调试 ===", {
+                    className: event.className,
+                    constructorName: event.constructor?.name,
+                    keys: Object.keys(event).join(','),
+                    stateClassName: event?.state?.className,
+                    stateConstructor: event?.state?.constructor?.name,
+                    stateKeys: event?.state ? Object.keys(event.state).join(',') : null
+                });
+
                 // 安全序列化 Telegram 事件，防止循环引用导致崩溃
                 const safeSerializeEvent = (ev) => {
                     try {
@@ -170,6 +180,14 @@ export class MessageHandler {
                             timestamp: ev?.date,
                             mediaType: ev?.message?.media?.className || 'none'
                         };
+                        // 特别处理 UpdateConnectionState
+                        if (ev?.state) {
+                            safeEvent.state = {
+                                className: ev.state.className,
+                                constructorName: ev.state.constructor?.name,
+                                stateKeys: ev.state ? Object.keys(ev.state).join(',') : 'none'
+                            };
+                        }
                         return JSON.stringify(safeEvent, (k, v) => typeof v === 'bigint' ? v.toString() : v).substring(0, 500);
                     } catch (err) {
                         return '[SERIALIZE_ERROR]';
