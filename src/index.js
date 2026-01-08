@@ -911,15 +911,23 @@ async function executeRedisScan(env, prefix, ctx = null) {
     
     cursor = res[0];
     const batchKeys = res[1];
-    
+
+    // 诊断日志：记录 SCAN 返回的原始数据
+    await logger.debug(`executeRedisScan: SCAN response`, {
+      nextCursor: cursor,
+      batchKeysCount: Array.isArray(batchKeys) ? batchKeys.length : 0,
+      batchKeys: Array.isArray(batchKeys) ? batchKeys.map(k => String(k)) : batchKeys,
+      batchKeysType: Array.isArray(batchKeys) ? 'array' : typeof batchKeys
+    }, ctx);
+
     if (Array.isArray(batchKeys)) {
       for (const k of batchKeys) {
         keys.push({ name: coerceCacheKeyName(k) });
       }
     }
   } while (cursor !== '0');
-  
-  await logger.debug(`executeRedisScan: finished scanning, found ${keys.length} keys`, {}, ctx);
+
+  await logger.debug(`executeRedisScan: finished scanning, found ${keys.length} keys`, { keys: keys.map(k => k.name) }, ctx);
   return { keys };
 }
 
