@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.15.2](https://github.com/YoungSx/drive-collector-js/compare/v4.15.1...v4.15.2) (2026-01-08)
+
+
+### 🐛 问题修复
+
+* **MessageHandler:** add debug logs for unknown UpdateConnectionState events ([8a36568](https://github.com/YoungSx/drive-collector-js/commit/8a365683b2533f25ab7260de3827c182d28832ae))
+* **MessageHandler:** correctly parse UpdateConnectionState events ([9e9fb52](https://github.com/YoungSx/drive-collector-js/commit/9e9fb52b015aae1cfdfc585c8c8b9d989dcfb510))
+
 ### [4.15.1](https://github.com/YoungSx/drive-collector-js/compare/v4.15.0...v4.15.1) (2026-01-08)
 
 
