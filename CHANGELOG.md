@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.15.3](https://github.com/YoungSx/drive-collector-js/compare/v4.15.2...v4.15.3) (2026-01-08)
+
+
+### 🐛 问题修复
+
+* **MessageHandler:** use debug level for UpdateConnectionState heartbeat events ([d5e8e1c](https://github.com/YoungSx/drive-collector-js/commit/d5e8e1c729fbb7ba50f7b70ecef7cd12ad98704f))
+
 ### [4.15.2](https://github.com/YoungSx/drive-collector-js/compare/v4.15.1...v4.15.2) (2026-01-08)
 
 
