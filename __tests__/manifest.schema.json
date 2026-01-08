@@ -90,9 +90,9 @@
       "required": [
         "health",
         "webhookBase",
-        "downloadTasks",
-        "uploadTasks",
-        "mediaBatch",
+        "download",
+        "upload",
+        "batch",
         "systemEvents"
       ],
       "properties": {
@@ -104,15 +104,15 @@
           "type": "string",
           "pattern": "^/"
         },
-        "downloadTasks": {
+        "download": {
           "type": "string",
           "pattern": "^/"
         },
-        "uploadTasks": {
+        "upload": {
           "type": "string",
           "pattern": "^/"
         },
-        "mediaBatch": {
+        "batch": {
           "type": "string",
           "pattern": "^/"
         },
