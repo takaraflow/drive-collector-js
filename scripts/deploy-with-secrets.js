@@ -11,6 +11,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync, spawn, spawnSync } from 'child_process';
 import dotenv from 'dotenv';
+import { loadEnvFile, normalizeEnvName, hasInfisicalCredentials } from './build-logic.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -262,6 +263,18 @@ function ensureInfisicalInjection() {
     return true; // 表示已经启动了子进程
 }
 
+function applyDotenvFallback() {
+    const runtimeEnv = process.env.RUNTIME_ENV || process.env.DEPLOY_ENV || process.env.NODE_ENV || 'dev';
+    const normalizedEnv = normalizeEnvName(runtimeEnv);
+    const shouldOverride = !hasInfisicalCredentials();
+
+    if (shouldOverride) {
+        console.log('?? 未检测到 Infisical 信息，使用 .env 文件作为部署阶段的降级配置');
+    }
+
+    loadEnvFile(fs, normalizedEnv, { overrideExisting: shouldOverride });
+}
+
 /**
  * 主函数
  */
@@ -270,6 +283,7 @@ function main() {
     if (ensureInfisicalInjection()) {
         return;
     }
+    applyDotenvFallback();
 
     try {
         console.log('=== Cloudflare Worker Deployment with Secrets ===\n');

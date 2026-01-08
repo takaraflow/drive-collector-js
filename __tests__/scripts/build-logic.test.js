@@ -1,6 +1,8 @@
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import path from 'path';
 
+const originalEnv = { ...process.env };
+
 // Mock fs module
 jest.unstable_mockModule('fs', () => ({
     default: {
@@ -13,10 +15,9 @@ jest.unstable_mockModule('fs', () => ({
 
 // Import mocked modules
 const fs = await import('fs');
-const { loadEnvFile } = await import('../../scripts/build-logic.js');
+const { loadEnvFile, hasInfisicalCredentials } = await import('../../scripts/build-logic.js');
 
 describe('build-logic.js - loadEnvFile', () => {
-    const originalEnv = { ...process.env };
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -141,6 +142,19 @@ describe('build-logic.js - loadEnvFile', () => {
         expect(process.env.BASE_VAR).toBe('base_value');
     });
 
+    test('should_override_existing_env_vars_when_override_existing_true', () => {
+        fs.existsSync.mockImplementation((path) => path === '/test/project/.env.dev');
+        fs.readFileSync.mockImplementation(() => 'EXISTING_VAR=override_value\nANOTHER_VAR=dot_env_value');
+
+        process.env.EXISTING_VAR = 'system_value';
+        process.env.ANOTHER_VAR = 'system_value';
+
+        loadEnvFile(fs, 'dev', { overrideExisting: true });
+
+        expect(process.env.EXISTING_VAR).toBe('override_value');
+        expect(process.env.ANOTHER_VAR).toBe('dot_env_value');
+    });
+
     test('should_parse_env_files_with_comments_correctly', () => {
         fs.existsSync.mockImplementation((path) => path === '/test/project/.env.dev');
         fs.readFileSync.mockImplementation(() => 
@@ -226,5 +240,35 @@ describe('build-logic.js - loadEnvFile', () => {
         expect(process.env.VAR2).toBe('value/with/slashes');
         expect(process.env.VAR3).toBe('value-with-dashes');
         expect(process.env.VAR4).toBe('value_with_underscores');
+    });
+});
+
+describe('build-logic.js - hasInfisicalCredentials', () => {
+    afterEach(() => {
+        process.env = { ...originalEnv };
+    });
+
+    test('returns true when Infisical project data exists', () => {
+        process.env.INFISICAL_PROJECT_ID = 'proj-id';
+        process.env.INFISICAL_TOKEN = 'token';
+        expect(hasInfisicalCredentials()).toBe(true);
+    });
+
+    test('returns true when INFISICAL_ENV_INJECTED is set', () => {
+        process.env.INFISICAL_ENV_INJECTED = 'true';
+        expect(hasInfisicalCredentials()).toBe(true);
+    });
+
+    test('returns false when only token exists without project id', () => {
+        delete process.env.INFISICAL_PROJECT_ID;
+        process.env.INFISICAL_TOKEN = 'token';
+        expect(hasInfisicalCredentials()).toBe(false);
+    });
+
+    test('returns false when no Infisical markers are present', () => {
+        delete process.env.INFISICAL_PROJECT_ID;
+        delete process.env.INFISICAL_TOKEN;
+        delete process.env.INFISICAL_ENV_INJECTED;
+        expect(hasInfisicalCredentials()).toBe(false);
     });
 });

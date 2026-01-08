@@ -31,6 +31,21 @@ function isProdEnv(value) {
     return normalizeEnvName(value) === 'prod';
 }
 
+function hasInfisicalCredentials(env = process.env) {
+    const projectId = (env.INFISICAL_PROJECT_ID || '').trim();
+    const token = (env.INFISICAL_TOKEN || '').trim();
+
+    if (projectId && token) {
+        return true;
+    }
+
+    if (env.INFISICAL_ENV_INJECTED === 'true') {
+        return true;
+    }
+
+    return false;
+}
+
 function determineVersion(root) {
     const manifestPath = path.join(root, 'manifest.json');
     let version = '';
@@ -62,128 +77,78 @@ function determineVersion(root) {
 }
 
 // 从 .env 文件加载环境变量
-function loadEnvFile(fileSystem = fs, targetEnv = 'dev') {
+function loadEnvFile(fileSystem = fs, targetEnv = 'dev', { overrideExisting = false } = {}) {
     const normalizedEnv = normalizeEnvName(targetEnv);
     const envCandidates = [normalizedEnv];
     if (normalizedEnv !== targetEnv) {
         envCandidates.push(targetEnv);
     }
 
-    // 1. 优先加载 .env.${targetEnv}（支持别名）
+    const applyEnvFromContent = (envContent) => {
+        const lines = envContent.split('\n');
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) {
+                continue;
+            }
+
+            const [key, ...valueParts] = trimmed.split('=');
+            let value = valueParts.join('=');
+
+            let inQuotes = false;
+            let quoteChar = null;
+            let commentStart = -1;
+
+            for (let charIndex = 0; charIndex < value.length; charIndex++) {
+                const char = value[charIndex];
+
+                if ((char === '"' || char === "'") && (charIndex === 0 || value[charIndex - 1] !== '\\')) {
+                    if (!inQuotes) {
+                        inQuotes = true;
+                        quoteChar = char;
+                    } else if (char === quoteChar) {
+                        inQuotes = false;
+                        quoteChar = null;
+                    }
+                } else if (char === '#' && !inQuotes) {
+                    commentStart = charIndex;
+                    break;
+                }
+            }
+
+            if (commentStart !== -1) {
+                value = value.substring(0, commentStart).trim();
+            } else {
+                value = value.trim();
+            }
+
+            while (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+                value = value.substring(1, value.length - 1);
+            }
+
+            const keyTrim = key.trim();
+            const currentVal = process.env[keyTrim];
+            const placeholder = `\${${keyTrim}}`;
+            if (overrideExisting || !currentVal || currentVal === placeholder) {
+                process.env[keyTrim] = value;
+            }
+        }
+    };
+
     for (const candidate of envCandidates) {
         const specificEnvPath = path.join(projectRoot, `.env.${candidate}`);
         if (fileSystem.existsSync(specificEnvPath)) {
             const envContent = fileSystem.readFileSync(specificEnvPath, 'utf8');
-            const lines = envContent.split('\n');
-            
-            for (const line of lines) {
-                const trimmed = line.trim();
-                if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-                    const [key, ...valueParts] = trimmed.split('=');
-                    let value = valueParts.join('=');
-                    
-                    // 处理行尾注释：需要考虑引号内的 # 不被当作注释开始
-                    let inQuotes = false;
-                    let quoteChar = null;
-                    let commentStart = -1;
-                    
-                    for (let charIndex = 0; charIndex < value.length; charIndex++) {
-                        const char = value[charIndex];
-
-                        if ((char === '"' || char === "'") && (charIndex === 0 || value[charIndex-1] !== '\\')) {
-                            if (!inQuotes) {
-                                inQuotes = true;
-                                quoteChar = char;
-                            } else if (char === quoteChar) {
-                                inQuotes = false;
-                                quoteChar = null;
-                            }
-                        } else if (char === '#' && !inQuotes) {
-                            commentStart = charIndex;
-                            break;
-                        }
-                    }
-                    
-                    // 移除注释部分
-                    if (commentStart !== -1) {
-                        value = value.substring(0, commentStart).trim();
-                    } else {
-                        value = value.trim();
-                    }
-                    
-                    // 循环去除所有包围的引号
-                    while (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
-                        value = value.substring(1, value.length - 1);
-                    }
-                    
-                    const keyTrim = key.trim();
-                    const currentVal = process.env[keyTrim];
-                    // 只有当环境变量不存在，或者是 ${VAR} 这种占位符时，才从 .env 加载
-                    if (!currentVal || currentVal === `\${${keyTrim}}`) {
-                        process.env[keyTrim] = value;
-                    }
-                }
-            }
-
-            // 找到第一个存在的文件后即退出
+            applyEnvFromContent(envContent);
             break;
         }
     }
 
-    // 2. 然后加载 .env (作为 fallback，不会覆盖已存在的值)
     const envPath = path.join(projectRoot, '.env');
     if (fileSystem.existsSync(envPath)) {
         const envContent = fileSystem.readFileSync(envPath, 'utf8');
-        const lines = envContent.split('\n');
-        
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-                const [key, ...valueParts] = trimmed.split('=');
-                let value = valueParts.join('=');
-                
-                // 处理行尾注释：需要考虑引号内的 # 不被当作注释开始
-                let inQuotes = false;
-                let quoteChar = null;
-                let commentStart = -1;
-                
-                for (let charIndex = 0; charIndex < value.length; charIndex++) {
-                    const char = value[charIndex];
-
-                    if ((char === '"' || char === "'") && (charIndex === 0 || value[charIndex-1] !== '\\')) {
-                        if (!inQuotes) {
-                            inQuotes = true;
-                            quoteChar = char;
-                        } else if (char === quoteChar) {
-                            inQuotes = false;
-                            quoteChar = null;
-                        }
-                    } else if (char === '#' && !inQuotes) {
-                        commentStart = charIndex;
-                        break;
-                    }
-                }
-                
-                // 移除注释部分
-                if (commentStart !== -1) {
-                    value = value.substring(0, commentStart).trim();
-                } else {
-                    value = value.trim();
-                }
-                
-                // 循环去除所有包围的引号
-                while (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
-                    value = value.substring(1, value.length - 1);
-                }
-                
-                const keyTrim = key.trim();
-                const currentVal = process.env[keyTrim];
-                // 只有当环境变量不存在，或者是 ${VAR} 这种占位符时，才从 .env 加载
-                if (!currentVal || currentVal === `\${${keyTrim}}`) {
-                    process.env[keyTrim] = value;
-                }
-            }
-        }
+        applyEnvFromContent(envContent);
     }
 }
 
@@ -459,7 +424,11 @@ function main() {
         process.env.NODE_ENV = normalizeEnvName(process.env.NODE_ENV || normalizedEnv);
 
         // 2. 加载环境文件
-        loadEnvFile(fs, normalizedEnv);
+        const overrideEnvFromDots = !hasInfisicalCredentials();
+        if (overrideEnvFromDots) {
+            console.log('?? 未检测到 Infisical 配置，正在将 .env 文件作为降级来源');
+        }
+        loadEnvFile(fs, normalizedEnv, { overrideExisting: overrideEnvFromDots });
 
         ['GHA_SECRETS_JSON', 'GHA_VARS_JSON'].forEach(key => {
             if (process.env[key]) {
@@ -549,4 +518,12 @@ function generateToml(env, manifest, tomlTemplate, packageJson) {
     return content;
 }
 
-export { loadEnvFile, checkRequiredVariables, extractVariablesFromManifest, generateWranglerToml, generateToml };
+export {
+    normalizeEnvName,
+    hasInfisicalCredentials,
+    loadEnvFile,
+    checkRequiredVariables,
+    extractVariablesFromManifest,
+    generateWranglerToml,
+    generateToml
+};
