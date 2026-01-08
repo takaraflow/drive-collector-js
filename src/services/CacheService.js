@@ -231,8 +231,9 @@ class CacheService {
         const env = this.env;
 
         // Aiven
-        if (env.VALKEY_HOST || env.VALKEY_URL) {
-            try { return new AivenVTCache(); } catch (e) {}
+        const aivenConfig = AivenVTCache.detectConfig(env);
+        if (aivenConfig) {
+            try { return new AivenVTCache(aivenConfig); } catch (e) {}
         }
         // Valkey
         if (env.VALKEY_URL) {
@@ -241,12 +242,14 @@ class CacheService {
             return new ValkeyCache({ url: env.VALKEY_URL });
         }
         // Upstash
-        if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
-            return new UpstashRHCache();
+        const upstashConfig = UpstashRHCache.detectConfig(env);
+        if (upstashConfig) {
+            return new UpstashRHCache(upstashConfig);
         }
         // Northflank
-        if (env.NF_REDIS_URL) {
-            return new NorthFlankRTCache();
+        const northflankConfig = NorthFlankRTCache.detectConfig(env, { allowRedisUrl: false });
+        if (northflankConfig) {
+            return new NorthFlankRTCache(northflankConfig);
         }
         // Generic Redis
         if (env.REDIS_URL) {

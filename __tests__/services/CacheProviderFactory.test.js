@@ -131,10 +131,36 @@ describe("CacheProviderFactory Tests", () => {
                 UPSTASH_REDIS_REST_TOKEN: "token123"
             };
 
-            service = new CacheService({ env });
-            await service.initialize();
+            const originalProcessEnv = process.env;
+            process.env = {};
+            try {
+                service = new CacheService({ env });
+                await service.initialize();
+            } finally {
+                process.env = originalProcessEnv;
+            }
 
             expect(service.currentProviderName).toBe('UpstashRHCache');
+        }, 50);
+
+        test("should detect Aiven from VALKEY_* env vars", async () => {
+            const env = {
+                VALKEY_HOST: "aiven-host",
+                VALKEY_PORT: "16379",
+                VALKEY_USER: "aiven-user",
+                VALKEY_PASSWORD: "aiven-pass"
+            };
+
+            const originalProcessEnv = process.env;
+            process.env = {};
+            try {
+                service = new CacheService({ env });
+                await service.initialize();
+            } finally {
+                process.env = originalProcessEnv;
+            }
+
+            expect(service.currentProviderName).toBe('AivenValkey');
         }, 50);
 
         test("should detect Cloudflare from CF_CACHE_* env vars", async () => {

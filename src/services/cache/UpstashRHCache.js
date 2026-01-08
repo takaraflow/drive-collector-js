@@ -6,15 +6,25 @@
 import { RedisHTTPCache } from './RedisHTTPCache.js';
 
 class UpstashRHCache extends RedisHTTPCache {
+    static detectConfig(env = process.env) {
+        const url = env.UPSTASH_REDIS_REST_URL;
+        const token = env.UPSTASH_REDIS_REST_TOKEN;
+        if (url && token) {
+            return { url, token };
+        }
+        return null;
+    }
+
     /**
      * @param {Object} config - Optional config override
      * If not provided, will auto-detect from environment variables
      */
     constructor(config = {}) {
         // Auto-detect from environment if not provided
+        const detectedConfig = UpstashRHCache.detectConfig(config.env || process.env) || {};
         const finalConfig = {
-            url: config.url || process.env.UPSTASH_REDIS_REST_URL,
-            token: config.token || process.env.UPSTASH_REDIS_REST_TOKEN,
+            url: config.url || detectedConfig.url,
+            token: config.token || detectedConfig.token,
             ...config
         };
 

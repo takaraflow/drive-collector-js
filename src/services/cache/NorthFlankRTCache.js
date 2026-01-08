@@ -7,17 +7,46 @@
 import { RedisTLSCache } from './RedisTLSCache.js';
 
 class NorthFlankRTCache extends RedisTLSCache {
+    static detectConfig(env = process.env, options = {}) {
+        const allowRedisUrl = options.allowRedisUrl !== false;
+        const redisUrl = env.NF_REDIS_URL || (allowRedisUrl ? env.REDIS_URL : undefined);
+        if (!redisUrl) {
+            return null;
+        }
+
+        const parsedConfig = NorthFlankRTCache.parseRedisUrlStatic(redisUrl);
+        return { ...parsedConfig, url: redisUrl };
+    }
+
     /**
      * @param {Object} config - Optional config override
      * If not provided, will auto-detect from env.NF_REDIS_URL
      */
     constructor(config = {}) {
+        const { env, url, ...restConfig } = config;
+        let resolvedConfig = { ...restConfig };
+        let resolvedUrl = url;
+
+        if (!resolvedUrl && env) {
+            const detected = NorthFlankRTCache.detectConfig(env);
+            if (detected) {
+                resolvedUrl = detected.url;
+                const { url: _ignored, ...detectedConfig } = detected;
+                resolvedConfig = { ...detectedConfig, ...restConfig };
+            }
+        }
+
+        if (resolvedUrl && (!resolvedConfig.host || !resolvedConfig.port)) {
+            const parsedConfig = NorthFlankRTCache.parseRedisUrlStatic(resolvedUrl);
+            resolvedConfig = { ...parsedConfig, ...restConfig };
+        }
+
         // If config is provided, use it directly
-        if (config.host && config.port) {
+        if (resolvedConfig.host && resolvedConfig.port) {
             // Apply Northflank-specific TLS defaults if not specified
             const hardenedConfig = {
-                ...config,
-                tls: config.tls || {
+                ...resolvedConfig,
+                tls: resolvedConfig.tls || {
                     rejectUnauthorized: false,
                     // Additional TLS options for Northflank compatibility
                     enableOfflineQueue: false,
@@ -39,29 +68,29 @@ class NorthFlankRTCache extends RedisTLSCache {
             
             super(hardenedConfig);
             this.source = 'provided-config';
-            this.redisUrl = `${config.host}:${config.port}`;
+            this.redisUrl = resolvedUrl || `${resolvedConfig.host}:${resolvedConfig.port}`;
             console.log('[NorthFlankRTCache] Using provided configuration with Northflank hardening');
             return;
         }
 
         // Auto-detect from environment
-        const redisUrl = process.env.NF_REDIS_URL || process.env.REDIS_URL;
+        const detected = NorthFlankRTCache.detectConfig(process.env);
         
-        if (!redisUrl) {
+        if (!detected) {
             throw new Error('[NorthFlankRTCache] No Redis URL found in environment (NF_REDIS_URL or REDIS_URL)');
         }
 
         // Parse Redis URL format: redis://user:password@host:port/db
         // Use static method to avoid 'this' before super() issue
-        const parsedConfig = NorthFlankRTCache.parseRedisUrlStatic(redisUrl);
+        const { url: detectedUrl, ...parsedConfig } = detected;
         
         // Merge with any additional config and apply Northflank hardening
         const finalConfig = {
             ...parsedConfig,
-            ...config,
+            ...restConfig,
             // 🔒 FORCE TLS for Northflank (defensive default)
             // Northflank requires TLS for external connections
-            tls: config.tls || parsedConfig.tls || {
+            tls: restConfig.tls || parsedConfig.tls || {
                 rejectUnauthorized: false, // Support self-signed certs
                 // Additional TLS options for Northflank compatibility
                 enableOfflineQueue: false
@@ -81,11 +110,11 @@ class NorthFlankRTCache extends RedisTLSCache {
 
         super(finalConfig);
         this.source = 'env-detection';
-        this.redisUrl = redisUrl;
+        this.redisUrl = detectedUrl;
         this.parsedConfig = parsedConfig;
         
         console.log('[NorthFlankRTCache] ✅ Auto-detected configuration with Northflank hardening');
-        console.log(`[NorthFlankRTCache] 🌐 Connection: ${this._maskUrl(redisUrl)}`);
+        console.log(`[NorthFlankRTCache] 🌐 Connection: ${this._maskUrl(detectedUrl)}`);
         console.log(`[NorthFlankRTCache] 🔒 TLS: ${finalConfig.tls ? 'ENABLED' : 'DISABLED'} (rejectUnauthorized: ${finalConfig.tls?.rejectUnauthorized})`);
     }
 

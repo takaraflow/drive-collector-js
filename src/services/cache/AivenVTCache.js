@@ -19,12 +19,12 @@ class AivenVTCache extends ValkeyTLSCache {
      * Detects Aiven configuration from environment variables.
      * Returns null if Aiven env vars are not present.
      */
-    static detectConfig() {
-        const host = process.env.VALKEY_HOST;
-        const port = process.env.VALKEY_PORT;
-        const user = process.env.VALKEY_USER;
-        const password = process.env.VALKEY_PASSWORD;
-        const caCert = process.env.VALKEY_CA_CERT;
+    static detectConfig(env = process.env) {
+        const host = env.VALKEY_HOST;
+        const port = env.VALKEY_PORT;
+        const user = env.VALKEY_USER;
+        const password = env.VALKEY_PASSWORD;
+        const caCert = env.VALKEY_CA_CERT;
 
         if (host && port && password) {
             // Construct URL: valkey://user:password@host:port
