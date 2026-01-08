@@ -142,7 +142,7 @@ function uploadSecrets(secretsJsonPath) {
 function handleSecretsUpload(initialSecrets) {
     let secrets = { ...initialSecrets };
     let attempt = 0;
-    const maxAttempts = 5;
+    const maxAttempts = Math.max(1, Object.keys(secrets).length + 1);
 
     while (attempt < maxAttempts) {
         if (Object.keys(secrets).length === 0) {
