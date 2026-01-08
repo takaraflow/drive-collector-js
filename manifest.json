@@ -237,6 +237,11 @@
         "required": false,
         "description": "跳过签名验证（仅用于测试环境）"
       },
+      "DEBUG_LOGS": {
+        "type": "string",
+        "required": false,
+        "description": "在生产环境强制开启 debug 日志（设置为 true/1/yes/on 生效）"
+      },
       "NODE_ENV": {
         "type": "string",
         "required": false,
