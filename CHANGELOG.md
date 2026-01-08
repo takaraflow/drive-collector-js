@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.15.3](https://github.com/YoungSx/lb-worker-js/compare/v0.15.2...v0.15.3) (2026-01-08)
+
+
+### 🐛 Bug Fixes
+
+* enhances environment aliasing in deployment workflow ([90c2b9c](https://github.com/YoungSx/lb-worker-js/commit/90c2b9c9c2ba09263b964e481f589ea260342e72))
+
 ### [0.15.2](https://github.com/YoungSx/lb-worker-js/compare/v0.15.1...v0.15.2) (2026-01-08)
 
 
