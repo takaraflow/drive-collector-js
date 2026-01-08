@@ -1,4 +1,6 @@
 import dotenv from 'dotenv';
+import os from 'os';
+import path from 'path';
 // 立即执行 dotenv 确保凭证可用
 const shouldOverrideEnv = process.env.NODE_ENV !== 'test';
 dotenv.config({ override: shouldOverrideEnv });
@@ -63,6 +65,7 @@ export async function initConfig() {
     const env = process.env;
 
     config = {
+        downloadDir: path.resolve(env.DOWNLOAD_DIR || path.join(os.tmpdir(), 'downloads')),
         apiId: parseInt(env.API_ID) || null,
         apiHash: env.API_HASH || null,
         botToken: env.BOT_TOKEN || null,
