@@ -77,7 +77,8 @@ let baseLoggerConfig = {
   dataset: null,
   token: null,
   orgId: null,
-  env: 'prod'
+  env: 'prod',
+  debugEnabled: false
 };
 
 /**
@@ -85,6 +86,9 @@ let baseLoggerConfig = {
  * @param {Object} env - 环境变量
  */
 export function configureBaseLoggerTransport(env) {
+  const debugFlag = String(env.DEBUG_LOGS || '').toLowerCase();
+  baseLoggerConfig.debugEnabled = ['true', '1', 'yes', 'on'].includes(debugFlag);
+
   // 在测试环境中也允许配置，用于测试
   if (env.AXIOM_TOKEN && env.AXIOM_DATASET) {
     baseLoggerConfig.dataset = env.AXIOM_DATASET;
@@ -509,8 +513,8 @@ function createLoggerFactory(context, bindings = {}) {
 
       addOtelEvent('debug', message, logData, span);
 
-      // Debug 日志只在开发环境或测试环境添加到缓冲
-      if (isDevEnv(context.env) || isTestEnvironment) {
+      // Debug 日志：dev/test 环境默认启用，生产可通过 DEBUG_LOGS=true 强制开启
+      if (isDevEnv(context.env) || isTestEnvironment || baseLoggerConfig.debugEnabled) {
         await sendToAxiom(logData, context.logBuffer, ctx);
 
         if (!isTestEnvironment) {
