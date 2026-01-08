@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.15.1](https://github.com/YoungSx/drive-collector-js/compare/v4.15.0...v4.15.1) (2026-01-08)
+
+
+### ♻️ 代码重构
+
+* improves cache provider detection and configuration ([c649135](https://github.com/YoungSx/drive-collector-js/commit/c649135af72af4cd3596f31eb49e0ddc212f36c7))
+
+
+### 🐛 问题修复
+
+* adds configurable download directory with fallback to system temp ([f553ea7](https://github.com/YoungSx/drive-collector-js/commit/f553ea730ffafe1a2782ffd9846b012d0118cfda))
+
 ## [4.15.0](https://github.com/YoungSx/drive-collector-js/compare/v4.14.0...v4.15.0) (2026-01-08)
 
 
