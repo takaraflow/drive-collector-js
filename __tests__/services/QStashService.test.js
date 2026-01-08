@@ -105,7 +105,7 @@ describe("QStashService - Retry Logic", () => {
                 .mockRejectedValueOnce(new Error("Network error"))
                 .mockResolvedValueOnce({ messageId: "msg-123" });
 
-            const promise = qstashService.publish("download-tasks", { taskId: "123" });
+            const promise = qstashService.publish("download", { taskId: "123" });
             
             // Advance timers for retries using Async version
             // Attempt 1 fails immediately, waits 100ms + jitter (fixed 25ms) = 125ms
@@ -123,7 +123,7 @@ describe("QStashService - Retry Logic", () => {
         test("应当在 4xx 错误时不重试", async () => {
             mockPublishJSON.mockRejectedValueOnce(new Error("400 Bad Request"));
 
-            await expect(qstashService.publish("download-tasks", { taskId: "123" }))
+            await expect(qstashService.publish("download", { taskId: "123" }))
                 .rejects.toThrow("400 Bad Request");
 
             expect(mockPublishJSON).toHaveBeenCalledTimes(1);
@@ -135,7 +135,7 @@ describe("QStashService - Retry Logic", () => {
             mockPublishJSON.mockImplementation(() => Promise.reject(persistentError));
 
             // Start the operation and attach catch handler BEFORE advancing timers
-            const promise = qstashService.publish("download-tasks", { taskId: "123" }).catch(e => e);
+            const promise = qstashService.publish("download", { taskId: "123" }).catch(e => e);
             
             // Advance timers for all retries
             await jest.advanceTimersByTimeAsync(125); // Attempt 1
@@ -151,7 +151,7 @@ describe("QStashService - Retry Logic", () => {
         test("应当在第一次尝试成功时不重试", async () => {
             mockPublishJSON.mockResolvedValueOnce({ messageId: "msg-456" });
 
-            const result = await qstashService.publish("download-tasks", { taskId: "123" });
+            const result = await qstashService.publish("download", { taskId: "123" });
 
             expect(mockPublishJSON).toHaveBeenCalledTimes(1);
             expect(result).toEqual({ messageId: "msg-456" });
@@ -160,7 +160,7 @@ describe("QStashService - Retry Logic", () => {
         test("应当正确处理 401 错误（不重试）", async () => {
             mockPublishJSON.mockRejectedValueOnce(new Error("401 Unauthorized"));
 
-            await expect(qstashService.publish("download-tasks", { taskId: "123" }))
+            await expect(qstashService.publish("download", { taskId: "123" }))
                 .rejects.toThrow("401 Unauthorized");
 
             expect(mockPublishJSON).toHaveBeenCalledTimes(1);
@@ -169,7 +169,7 @@ describe("QStashService - Retry Logic", () => {
         test("应当正确处理 403 错误（不重试）", async () => {
             mockPublishJSON.mockRejectedValueOnce(new Error("403 Forbidden"));
 
-            await expect(qstashService.publish("download-tasks", { taskId: "123" }))
+            await expect(qstashService.publish("download", { taskId: "123" }))
                 .rejects.toThrow("403 Forbidden");
 
             expect(mockPublishJSON).toHaveBeenCalledTimes(1);
@@ -178,7 +178,7 @@ describe("QStashService - Retry Logic", () => {
         test("应当正确处理 422 错误（不重试）", async () => {
             mockPublishJSON.mockRejectedValueOnce(new Error("422 Unprocessable Entity"));
 
-            await expect(qstashService.publish("download-tasks", { taskId: "123" }))
+            await expect(qstashService.publish("download", { taskId: "123" }))
                 .rejects.toThrow("422 Unprocessable Entity");
 
             expect(mockPublishJSON).toHaveBeenCalledTimes(1);
@@ -188,7 +188,7 @@ describe("QStashService - Retry Logic", () => {
     describe("batchPublish - Retry Logic", () => {
         test("应当在失败后重试并最终成功", async () => {
             const messages = [
-                { topic: "download-tasks", message: { taskId: "123" } },
+                { topic: "download", message: { taskId: "123" } },
                 { topic: "upload-tasks", message: { taskId: "456" } }
             ];
 
@@ -231,7 +231,7 @@ describe("QStashService - Retry Logic", () => {
 
         test("应当在 4xx 错误时不重试", async () => {
             const messages = [
-                { topic: "download-tasks", message: { taskId: "123" } },
+                { topic: "download", message: { taskId: "123" } },
                 { topic: "upload-tasks", message: { taskId: "456" } }
             ];
 
@@ -255,7 +255,7 @@ describe("QStashService - Retry Logic", () => {
 
         test("应当在部分成功部分失败时返回正确的结果", async () => {
             const messages = [
-                { topic: "download-tasks", message: { taskId: "123" } },
+                { topic: "download", message: { taskId: "123" } },
                 { topic: "upload-tasks", message: { taskId: "456" } }
             ];
 
@@ -290,7 +290,7 @@ describe("QStashService - Retry Logic", () => {
 
         test("应当在所有消息都达到最大重试次数后抛出错误", async () => {
             const messages = [
-                { topic: "download-tasks", message: { taskId: "123" } },
+                { topic: "download", message: { taskId: "123" } },
                 { topic: "upload-tasks", message: { taskId: "456" } }
             ];
 
@@ -338,7 +338,7 @@ describe("QStashService - Retry Logic", () => {
             const service = new QStashService();
             await service.initialize(); 
             // In mock mode, publish returns a mock message ID
-            const result = await service.publish("download-tasks", { taskId: "123" });
+            const result = await service.publish("download", { taskId: "123" });
             expect(result).toEqual({ messageId: "mock-message-id" });
             expect(mockPublishJSON).not.toHaveBeenCalled();
         });

@@ -14,8 +14,8 @@ export class QStashService {
         this.isMockMode = true;
         this.isInitialized = false;
         this.topics = {
-            downloadTasks: "download-tasks",
-            uploadTasks: "upload-tasks",
+            downloadTasks: "download",
+            uploadTasks: "upload",
             systemEvents: "system-events"
         };
     }

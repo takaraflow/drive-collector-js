@@ -70,11 +70,11 @@ export async function handleQStashWebhook(req, res) {
 
         let result = { success: true, statusCode: 200 };
 
-        if (path.endsWith('/download-tasks')) {
+        if (path.endsWith('/download')) {
             result = await TaskManager.handleDownloadWebhook(data.taskId);
-        } else if (path.endsWith('/upload-tasks')) {
+        } else if (path.endsWith('/upload')) {
             result = await TaskManager.handleUploadWebhook(data.taskId);
-        } else if (path.endsWith('/media-batch')) {
+        } else if (path.endsWith('/batch')) {
             result = await TaskManager.handleMediaBatchWebhook(data.groupId, data.taskIds);
         } else if (path.endsWith('/system-events')) {
             // 系统事件暂只记录不处理

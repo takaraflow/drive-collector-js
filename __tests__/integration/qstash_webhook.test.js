@@ -211,8 +211,8 @@ describe("QStash Webhook Integration", () => {
         return res;
     };
 
-    test("应当正确处理 download-tasks Webhook", async () => {
-        const req = createMockRequest('/api/tasks/download-tasks', { taskId: '123' });
+    test("应当正确处理 download Webhook", async () => {
+        const req = createMockRequest('/api/tasks/download', { taskId: '123' });
         const res = createMockResponse();
 
         await handleQStashWebhook(req, res);
@@ -223,8 +223,8 @@ describe("QStash Webhook Integration", () => {
         expect(res.end).toHaveBeenCalledWith('OK');
     });
 
-    test("应当正确处理 upload-tasks Webhook", async () => {
-        const req = createMockRequest('/api/tasks/upload-tasks', { taskId: '456' });
+    test("应当正确处理 upload Webhook", async () => {
+        const req = createMockRequest('/api/tasks/upload', { taskId: '456' });
         const res = createMockResponse();
 
         await handleQStashWebhook(req, res);
@@ -234,8 +234,8 @@ describe("QStash Webhook Integration", () => {
         expect(res.end).toHaveBeenCalledWith('OK');
     });
 
-    test("应当正确处理 media-batch Webhook", async () => {
-        const req = createMockRequest('/api/tasks/media-batch', { groupId: 'group1', taskIds: ['1', '2'] });
+    test("应当正确处理 batch Webhook", async () => {
+        const req = createMockRequest('/api/tasks/batch', { groupId: 'group1', taskIds: ['1', '2'] });
         const res = createMockResponse();
 
         await handleQStashWebhook(req, res);
@@ -273,7 +273,7 @@ describe("QStash Webhook Integration", () => {
     test("应当拒绝非法签名", async () => {
         mockVerifySignature.mockResolvedValue(false);
 
-        const req = createMockRequest('/api/tasks/download-tasks', { taskId: '123' });
+        const req = createMockRequest('/api/tasks/download', { taskId: '123' });
         const res = createMockResponse();
 
         await handleQStashWebhook(req, res);
@@ -286,7 +286,7 @@ describe("QStash Webhook Integration", () => {
 
     test("应当处理无效 JSON", async () => {
         const req = {
-            url: '/api/tasks/download-tasks',
+            url: '/api/tasks/download',
             headers: { 'upstash-signature': 'v1=test' },
             method: 'POST'
         };
@@ -307,7 +307,7 @@ describe("QStash Webhook Integration", () => {
     test("应当处理下游处理异常", async () => {
         mockHandleDownloadWebhook.mockRejectedValue(new Error('Database error'));
 
-        const req = createMockRequest('/api/tasks/download-tasks', { taskId: '123' });
+        const req = createMockRequest('/api/tasks/download', { taskId: '123' });
         const res = createMockResponse();
 
         await handleQStashWebhook(req, res);

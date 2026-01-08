@@ -104,9 +104,11 @@
         ]
       },
       "endpoints": {
-        "download": "/api/tasks/download-tasks",
-        "upload": "/api/tasks/upload-tasks",
-        "batch": "/api/tasks/media-batch",
+        "health": "/health",
+        "webhookBase": "/api/tasks",
+        "download": "/api/tasks/download",
+        "upload": "/api/tasks/upload",
+        "batch": "/api/tasks/batch",
         "systemEvents": "/api/tasks/system-events"
       },
       "locking": {
@@ -877,9 +879,9 @@
   "endpoints": {
     "health": "/health",
     "webhookBase": "/api/tasks",
-    "downloadTasks": "/api/tasks/download-tasks",
-    "uploadTasks": "/api/tasks/upload-tasks",
-    "mediaBatch": "/api/tasks/media-batch",
+    "download": "/api/tasks/download",
+    "upload": "/api/tasks/upload",
+    "batch": "/api/tasks/batch",
     "systemEvents": "/api/tasks/system-events"
   }
 }

@@ -73,7 +73,7 @@ echo 4️⃣ 测试webhook端点...
 echo -------------------
 
 REM 测试下载webhook
-set DOWNLOAD_WEBHOOK=%INSTANCE_URL%/api/tasks/download-tasks
+set DOWNLOAD_WEBHOOK=%INSTANCE_URL%/api/tasks/download
 curl -s -f -X POST "%DOWNLOAD_WEBHOOK%" -H "Content-Type: application/json" -d "{\"taskId\":\"test\"}" --max-time 5 >nul 2>&1
 if %errorlevel% equ 0 (
     echo ✅ 下载webhook可访问
@@ -84,7 +84,7 @@ if %errorlevel% equ 0 (
 )
 
 REM 测试上传webhook
-set UPLOAD_WEBHOOK=%INSTANCE_URL%/api/tasks/upload-tasks
+set UPLOAD_WEBHOOK=%INSTANCE_URL%/api/tasks/upload
 curl -s -f -X POST "%UPLOAD_WEBHOOK%" -H "Content-Type: application/json" -d "{\"taskId\":\"test\"}" --max-time 5 >nul 2>&1
 if %errorlevel% equ 0 (
     echo ✅ 上传webhook可访问

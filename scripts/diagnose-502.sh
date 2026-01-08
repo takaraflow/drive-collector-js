@@ -90,7 +90,7 @@ echo "4️⃣ 测试webhook端点..."
 echo "-------------------"
 
 # 测试下载webhook
-DOWNLOAD_WEBHOOK="$INSTANCE_URL/api/tasks/download-tasks"
+DOWNLOAD_WEBHOOK="$INSTANCE_URL/api/tasks/download"
 if curl -s -f -X POST "$DOWNLOAD_WEBHOOK" \
     -H "Content-Type: application/json" \
     -d '{"taskId":"test"}' \
@@ -104,7 +104,7 @@ else
 fi
 
 # 测试上传webhook
-UPLOAD_WEBHOOK="$INSTANCE_URL/api/tasks/upload-tasks"
+UPLOAD_WEBHOOK="$INSTANCE_URL/api/tasks/upload"
 if curl -s -f -X POST "$UPLOAD_WEBHOOK" \
     -H "Content-Type: application/json" \
     -d '{"taskId":"test"}' \
