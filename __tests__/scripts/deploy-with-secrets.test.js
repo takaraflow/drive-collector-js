@@ -3,6 +3,7 @@ import fs from 'fs';
 
 // Mock modules
 const execSyncMock = jest.fn();
+const spawnSyncMock = jest.fn(() => ({ status: 0, stdout: '', stderr: '' }));
 const spawnMock = jest.fn(() => ({
     on: jest.fn((event, callback) => {
         if (event === 'exit') callback(0);
@@ -11,6 +12,7 @@ const spawnMock = jest.fn(() => ({
 
 jest.unstable_mockModule('child_process', () => ({
     execSync: execSyncMock,
+    spawnSync: spawnSyncMock,
     spawn: spawnMock
 }));
 
@@ -77,10 +79,10 @@ describe('deploy-with-secrets.js (Unit)', () => {
             const jsonPath = 'dummy/secrets.json';
             uploadSecrets(jsonPath);
 
-            expect(execSyncMock).toHaveBeenCalledWith(
-                `npx wrangler secret bulk ${jsonPath}`,
-                expect.any(Object)
-            );
+            const call = spawnSyncMock.mock.calls[0];
+            expect(call[0]).toMatch(/npx(\.cmd)?$/);
+            expect(call[1]).toEqual(['wrangler', 'secret', 'bulk', jsonPath]);
+            expect(call[2]).toEqual(expect.any(Object));
         });
     });
 

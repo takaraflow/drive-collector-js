@@ -9,7 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync, spawn } from 'child_process';
+import { execSync, spawn, spawnSync } from 'child_process';
 import dotenv from 'dotenv';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -113,26 +113,30 @@ function redactSensitiveInfo(str) {
 function uploadSecrets(secretsJsonPath) {
     console.log('🚀 正在上传 Secrets 到 Cloudflare (Uploading secrets)...');
     
-    try {
-        const command = `npx wrangler secret bulk ${secretsJsonPath}`;
-        console.log('Command:', redactSensitiveInfo(command));
-        
-        execSync(command, {
-            stdio: 'inherit',
-            env: { ...process.env }
-        });
-        
+    const args = ['wrangler', 'secret', 'bulk', secretsJsonPath];
+    const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+    const command = `${npxCommand} ${args.map(part => part.includes(' ') ? `"${part}"` : part).join(' ')}`;
+    console.log('Command:', redactSensitiveInfo(command));
+
+    const result = spawnSync(npxCommand, args, {
+        env: { ...process.env },
+        encoding: 'utf8',
+        shell: process.platform === 'win32'
+    });
+
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+
+    if (result.status === 0) {
         console.log('✅ Secrets 上传成功 (Secrets uploaded successfully)');
         return { ok: true };
-    } catch (error) {
-        const combined = [
-            error?.stdout?.toString?.() || '',
-            error?.stderr?.toString?.() || '',
-            error?.message || ''
-        ].join('\n');
-        console.error('❌ Failed to upload secrets:', combined || error.message);
-        return { ok: false, errorText: combined || error.message };
     }
+
+    const combined = [result.stdout || '', result.stderr || '', result.error?.message || '']
+        .join('\n')
+        .trim();
+    console.error('❌ Failed to upload secrets:', combined || 'Unknown error');
+    return { ok: false, errorText: combined || 'Unknown error' };
 }
 
 function handleSecretsUpload(initialSecrets) {
