@@ -866,29 +866,30 @@ async function executeRedis(operation, env, key, value = null, ctx = null) {
  * 执行 Redis TLS Scan 操作 (使用新的缓存客户端抽象)
  */
 async function executeRedisScan(env, prefix, ctx = null) {
+  const scanLogger = logger.child({ module: 'executeRedisScan', logBuffer: ctx?.logBuffer });
   // 同时支持 NF_REDIS_* 和 REDIS_TLS_* 两种环境变量
   const redisUrl = env.NF_REDIS_URL || env.REDIS_TLS_URL;
   const redisPassword = env.NF_REDIS_PASSWORD || env.REDIS_TLS_PASSWORD;
-  
+
   if (!redisUrl) {
     throw new Error('Redis URL not found in environment variables.');
   }
-  
+
   const client = await getRedisClient({
     NF_REDIS_URL: redisUrl,
     NF_REDIS_PASSWORD: redisPassword
   }, ctx);
-  
+
   const keys = [];
   let cursor = '0';
-  
+
   do {
     // 支持 mock client 的 send 方法和真实 client 的 scan 方法
     let res;
     // 添加日志，记录使用的 client 类型和 scan 参数
     const isNFCacheClient = !!client.scan && !client.send;
     const clientType = isNFCacheClient ? 'NFCacheClient' : (client.send ? 'RedisClient' : 'Unknown');
-    await logger.debug(`executeRedisScan: clientType=${clientType}, prefix=${prefix}, cursor=${cursor}`, {}, ctx);
+    await scanLogger.debug(`executeRedisScan: clientType=${clientType}, prefix=${prefix}, cursor=${cursor}`, {}, ctx);
 
     if (client.send) {
       // 原生 redis-on-workers 或类似 client，直接发送命令
@@ -896,24 +897,25 @@ async function executeRedisScan(env, prefix, ctx = null) {
       // 修复：MATCH pattern 应该是 'instance:*' 而不是 'instance:instance:*'
       // 传入的 prefix 是 'instance:'
       const matchPattern = prefix === '' ? '*' : (prefix.endsWith(':') ? `${prefix}*` : `${prefix}:*`);
-      await logger.debug(`Executing Redis SCAN (send)`, { clientType, prefix, matchPattern, cursor }, ctx);
+      await scanLogger.debug(`Executing Redis SCAN (send)`, { clientType, prefix, matchPattern, cursor }, ctx);
       res = await client.send('SCAN', cursor, 'MATCH', matchPattern, 'COUNT', 100);
     } else if (client.scan) {
       // NFCacheClient 或兼容接口
       // 假设 scan 方法签名是 (cursor, matchPattern, count)
       // 这里的 matchPattern 应该是完整的 pattern (如 "instance:*")
       const matchPattern = prefix === '' ? '*' : (prefix.endsWith(':') ? `${prefix}*` : `${prefix}:*`);
-      await logger.debug(`Executing Redis SCAN (scan)`, { clientType, prefix, matchPattern, cursor }, ctx);
+      await scanLogger.debug(`Executing Redis SCAN (scan)`, { clientType, prefix, matchPattern, cursor }, ctx);
       res = await client.scan(cursor, matchPattern, 100);
     } else {
       throw new Error('Client does not support scan or send method');
     }
-    
+
     cursor = res[0];
     const batchKeys = res[1];
 
     // 诊断日志：记录 SCAN 返回的原始数据
-    await logger.debug(`executeRedisScan: SCAN response`, {
+    await scanLogger.debug(`executeRedisScan: SCAN response`, {
+      prefix,
       nextCursor: cursor,
       batchKeysCount: Array.isArray(batchKeys) ? batchKeys.length : 0,
       batchKeys: Array.isArray(batchKeys) ? batchKeys.map(k => String(k)) : batchKeys,
@@ -927,7 +929,7 @@ async function executeRedisScan(env, prefix, ctx = null) {
     }
   } while (cursor !== '0');
 
-  await logger.debug(`executeRedisScan: finished scanning, found ${keys.length} keys`, { keys: keys.map(k => k.name) }, ctx);
+  await scanLogger.debug(`executeRedisScan: finished scanning`, { prefix, keysFound: keys.length, keys: keys.map(k => k.name) }, ctx);
   return { keys };
 }
 
