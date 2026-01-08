@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.15.1](https://github.com/YoungSx/lb-worker-js/compare/v0.15.0...v0.15.1) (2026-01-08)
+
+
+### 🔧 Maintenance
+
+* updates path normalization logic to use shorter endpoint names ([d05ced4](https://github.com/YoungSx/lb-worker-js/commit/d05ced4719f28b19777dc6f3f191253df57157d0))
+
+
+### 🐛 Bug Fixes
+
+* adds conflict avoidance for Cloudflare secret deployment ([af463a5](https://github.com/YoungSx/lb-worker-js/commit/af463a55f4e7f2d97a810c16a85748dad223b1c1))
+* enhances secret upload with conflict resolution and retry logic ([8355281](https://github.com/YoungSx/lb-worker-js/commit/835528108a8614d2dc254ed8fcf1b0852f0bc639))
+* improves error handling in secrets upload ([426a1d2](https://github.com/YoungSx/lb-worker-js/commit/426a1d2b7567c4a8bc3c0b27c6c0bb8e1b61919b))
+* removes redundant NODE_ENV fallback ([0ef278c](https://github.com/YoungSx/lb-worker-js/commit/0ef278cdcc50b9d3551d796ae96a15084598941b))
+* updates schema property names to be more concise ([ec66125](https://github.com/YoungSx/lb-worker-js/commit/ec6612531cd319b147d740baa93b60f4b5e02b5d))
+* updates secret upload retry logic ([7ac928d](https://github.com/YoungSx/lb-worker-js/commit/7ac928db34c2c3392eabe1e2404590b468318fa2))
+* updates secret upload to use spawnSync for better error handling ([e4368ad](https://github.com/YoungSx/lb-worker-js/commit/e4368ad58e97a443ca2465da0ba8e974e3cf5c9a))
+
 ## [0.15.0](https://github.com/YoungSx/lb-worker-js/compare/v0.14.0...v0.15.0) (2026-01-07)
 
 
