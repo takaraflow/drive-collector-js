@@ -204,4 +204,62 @@ describe('MessageHandler Integration Tests', () => {
             expect(Dispatcher.handle).toHaveBeenCalled();
         });
     });
+
+    describe('UpdateConnectionState Handling', () => {
+        it('should handle connected state (state=1)', async () => {
+            instanceCoordinator.acquireLock.mockResolvedValue(true);
+
+            const event = {
+                constructor: { name: 'UpdateConnectionState' },
+                className: 'unknown',
+                state: 1
+            };
+
+            await MessageHandler.handleEvent(event, mockClient);
+
+            expect(Dispatcher.handle).toHaveBeenCalledWith(event);
+        });
+
+        it('should handle broken state (state=0)', async () => {
+            instanceCoordinator.acquireLock.mockResolvedValue(true);
+
+            const event = {
+                constructor: { name: 'UpdateConnectionState' },
+                className: 'unknown',
+                state: 0
+            };
+
+            await MessageHandler.handleEvent(event, mockClient);
+
+            expect(Dispatcher.handle).toHaveBeenCalledWith(event);
+        });
+
+        it('should handle disconnected state (state=-1)', async () => {
+            instanceCoordinator.acquireLock.mockResolvedValue(true);
+
+            const event = {
+                constructor: { name: 'UpdateConnectionState' },
+                className: 'unknown',
+                state: -1
+            };
+
+            await MessageHandler.handleEvent(event, mockClient);
+
+            expect(Dispatcher.handle).toHaveBeenCalledWith(event);
+        });
+
+        it('should handle unknown state number gracefully', async () => {
+            instanceCoordinator.acquireLock.mockResolvedValue(true);
+
+            const event = {
+                constructor: { name: 'UpdateConnectionState' },
+                className: 'unknown',
+                state: 999
+            };
+
+            await MessageHandler.handleEvent(event, mockClient);
+
+            expect(Dispatcher.handle).toHaveBeenCalledWith(event);
+        });
+    });
 });

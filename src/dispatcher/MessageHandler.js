@@ -154,9 +154,31 @@ export class MessageHandler {
             await Dispatcher.handle(event);
             const dispatchTime = Date.now() - dispatchStart;
             const totalTime = Date.now() - start;
-            
+
+            // GramJS UpdateConnectionState 状态常量
+            const CONNECTION_STATE = {
+                0: 'broken',
+                1: 'connected',
+                '-1': 'disconnected'
+            };
+
+            // 检测 UpdateConnectionState 事件（即使 className 为 unknown）
+            const isUpdateConnectionState = event.constructor?.name === 'UpdateConnectionState';
+
             // 增强消息标识：优先使用 msgId，其次尝试从 event 中提取类型
-            const msgIdentifier = msgId || (event.className ? `[${event.className}]` : 'unknown');
+            let msgIdentifier = msgId || (event.className ? `[${event.className}]` : 'unknown');
+
+            // UpdateConnectionState 特殊处理，不走 unknown 分支
+            if (isUpdateConnectionState) {
+                const stateNum = typeof event.state === 'number' ? event.state : -999;
+                const stateName = CONNECTION_STATE[stateNum] || `stateNum_${stateNum}`;
+                msgIdentifier = `[UpdateConnectionState:${stateName}]`;
+
+                log.debug("收到 UpdateConnectionState 事件", {
+                    state: stateNum,
+                    stateName: stateName
+                });
+            }
 
             if (msgIdentifier === 'unknown') {
                 // [DEBUG] 打印原始事件的完整结构，用于排查
@@ -180,14 +202,6 @@ export class MessageHandler {
                             timestamp: ev?.date,
                             mediaType: ev?.message?.media?.className || 'none'
                         };
-                        // 特别处理 UpdateConnectionState
-                        if (ev?.state) {
-                            safeEvent.state = {
-                                className: ev.state.className,
-                                constructorName: ev.state.constructor?.name,
-                                stateKeys: ev.state ? Object.keys(ev.state).join(',') : 'none'
-                            };
-                        }
                         return JSON.stringify(safeEvent, (k, v) => typeof v === 'bigint' ? v.toString() : v).substring(0, 500);
                     } catch (err) {
                         return '[SERIALIZE_ERROR]';
