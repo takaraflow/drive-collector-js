@@ -1323,8 +1323,9 @@ export default {
  * 路径映射 - 将契约路径映射到实际路径
  */
 const PATH_MAP = {
-  '/api/tasks/download': '/api/tasks/download-tasks',
-  '/api/tasks/upload': '/api/tasks/upload-tasks'
+  '/api/tasks/download-tasks': '/api/tasks/download',
+  '/api/tasks/upload-tasks': '/api/tasks/upload',
+  '/api/tasks/media-batch': '/api/tasks/batch'
 };
 
 /**

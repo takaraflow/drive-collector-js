@@ -309,9 +309,9 @@
   "endpoints": {
     "health": "/health",
     "webhookBase": "/api/tasks",
-    "downloadTasks": "/api/tasks/download-tasks",
-    "uploadTasks": "/api/tasks/upload-tasks",
-    "mediaBatch": "/api/tasks/media-batch",
+    "download": "/api/tasks/download",
+    "upload": "/api/tasks/upload",
+    "batch": "/api/tasks/batch",
     "systemEvents": "/api/tasks/system-events"
   },
   "infrastructure": {
@@ -359,6 +359,6 @@
       "type": "string",
       "required": false,
       "description": "Bark 设备 Token"
-    }
+  }
   }
 }

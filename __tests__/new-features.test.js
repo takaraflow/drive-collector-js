@@ -204,20 +204,20 @@ describe('任务调度失败处理优化测试', () => {
   });
 
   describe('Contract Path Normalization', () => {
-    it('should_normalize_legacy_download_path_to_new_endpoint', () => {
-      expect(normalizePath('/api/tasks/download')).toBe('/api/tasks/download-tasks');
+    it('should_normalize_long_download_path_to_short_endpoint', () => {
+      expect(normalizePath('/api/tasks/download-tasks')).toBe('/api/tasks/download');
     });
 
-    it('should_normalize_legacy_upload_path_to_new_endpoint', () => {
-      expect(normalizePath('/api/tasks/upload')).toBe('/api/tasks/upload-tasks');
+    it('should_normalize_long_upload_path_to_short_endpoint', () => {
+      expect(normalizePath('/api/tasks/upload-tasks')).toBe('/api/tasks/upload');
     });
 
-    it('should_keep_new_download_tasks_path_unchanged', () => {
-      expect(normalizePath('/api/tasks/download-tasks')).toBe('/api/tasks/download-tasks');
+    it('should_keep_short_download_path_unchanged', () => {
+      expect(normalizePath('/api/tasks/download')).toBe('/api/tasks/download');
     });
 
-    it('应该将 /api/tasks/media-batch 保持不变', () => {
-      expect(normalizePath('/api/tasks/media-batch')).toBe('/api/tasks/media-batch');
+    it('应该将长路径 /api/tasks/media-batch 规范化为短路径', () => {
+      expect(normalizePath('/api/tasks/media-batch')).toBe('/api/tasks/batch');
     });
 
     it('应该将未知路径保持不变', () => {
@@ -241,7 +241,7 @@ describe('任务调度失败处理优化测试', () => {
       }));
 
       const request = {
-        url: 'https://lb.example.com/api/tasks/upload',
+        url: 'https://lb.example.com/api/tasks/upload-tasks',
         method: 'POST',
         headers: new Map([
           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
@@ -252,7 +252,7 @@ describe('任务调度失败处理优化测试', () => {
       };
 
       consoleLogSpy.mockClear();
-      
+
       const lb = await import('../src/index.js');
       await lb.default.fetch(request, mockEnv, {});
 
@@ -262,8 +262,8 @@ describe('任务调度失败处理优化测试', () => {
         const message = call[0];
         const meta = call[1];
         return message.includes('路径规范化') &&
-               meta.original === '/api/tasks/upload' &&
-               meta.normalized === '/api/tasks/upload-tasks';
+               meta.original === '/api/tasks/upload-tasks' &&
+               meta.normalized === '/api/tasks/upload';
       });
       expect(hasMappingLog).toBe(true);
     });
@@ -488,33 +488,33 @@ describe('任务调度失败处理优化测试', () => {
          text: () => Promise.resolve('OK'),
          headers: new Map([['Content-Type', 'text/plain']])
        }));
- 
-      const request = {
-        url: 'https://lb.example.com/api/tasks/download',
-        method: 'POST',
-        headers: new Map([
-          ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-          ['Upstash-Timestamp', timestamp],
-        ]),
-         text: jest.fn().mockResolvedValue('body'),
-         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
-       };
- 
-       consoleLogSpy.mockClear();
-       
-       const lb = await import('../src/index.js');
-       await lb.default.fetch(request, mockEnv, {});
- 
-       // 验证路径映射被记录
-       const logCalls = consoleLogSpy.mock.calls;
-      const hasMappingLog = logCalls.some(call => {
-        const message = call[0];
-        const meta = call[1];
-        return message.includes('路径规范化') &&
-               meta.original === '/api/tasks/download' &&
-               meta.normalized === '/api/tasks/download-tasks';
-      });
-      expect(hasMappingLog).toBe(true);
+
+       const request = {
+         url: 'https://lb.example.com/api/tasks/download-tasks',
+         method: 'POST',
+         headers: new Map([
+           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
+           ['Upstash-Timestamp', timestamp],
+         ]),
+          text: jest.fn().mockResolvedValue('body'),
+          arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
+        };
+
+        consoleLogSpy.mockClear();
+
+        const lb = await import('../src/index.js');
+        await lb.default.fetch(request, mockEnv, {});
+
+         // 验证路径映射被记录
+         const logCalls = consoleLogSpy.mock.calls;
+        const hasMappingLog = logCalls.some(call => {
+          const message = call[0];
+          const meta = call[1];
+          return message.includes('路径规范化') &&
+                 meta.original === '/api/tasks/download-tasks' &&
+                 meta.normalized === '/api/tasks/download';
+        });
+        expect(hasMappingLog).toBe(true);
     });
   });
  
