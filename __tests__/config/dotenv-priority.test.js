@@ -13,7 +13,7 @@ describe("dotenv priority in config", () => {
   });
 
   test("should override system env with .env in non-test environment", async () => {
-    process.env = { ...originalEnv, NODE_ENV: "development" };
+    process.env = { ...originalEnv, NODE_ENV: "dev" };
     const configSpy = jest.fn();
 
     await jest.unstable_mockModule("dotenv", () => ({

@@ -1,12 +1,15 @@
 import dotenv from 'dotenv';
 import os from 'os';
 import path from 'path';
+import { fetchInfisicalSecrets } from '../services/InfisicalClient.js';
+import { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } from '../utils/envMapper.js';
+
+// 规范化 NODE_ENV（在执行 dotenv 之前）
+process.env.NODE_ENV = normalizeNodeEnv(process.env.NODE_ENV);
+
 // 立即执行 dotenv 确保凭证可用
 const shouldOverrideEnv = process.env.NODE_ENV !== 'test';
 dotenv.config({ override: shouldOverrideEnv });
-
-import { fetchInfisicalSecrets } from '../services/InfisicalClient.js';
-import { mapNodeEnvToInfisicalEnv } from '../utils/envMapper.js';
 
 let config = null;
 let isInitialized = false;
@@ -40,8 +43,8 @@ export async function initConfig() {
             console.log(`ℹ️ Skipping Infisical fetch in test environment`);
         } else {
             try {
-                const infisicalEnvName = mapNodeEnvToInfisicalEnv(process.env.NODE_ENV || 'development');
-                console.log(`ℹ️ Attempting to fetch Infisical secrets for environment: ${infisicalEnvName} (mapped from NODE_ENV: ${process.env.NODE_ENV || 'development'})`);
+                const infisicalEnvName = mapNodeEnvToInfisicalEnv(process.env.NODE_ENV || 'dev');
+                console.log(`ℹ️ Attempting to fetch Infisical secrets for environment: ${infisicalEnvName} (mapped from NODE_ENV: ${process.env.NODE_ENV || 'dev'})`);
                 const secrets = await fetchInfisicalSecrets({
                     clientId,
                     clientSecret,
