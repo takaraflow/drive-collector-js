@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.15.4](https://github.com/YoungSx/drive-collector-js/compare/v4.15.3...v4.15.4) (2026-01-09)
+
+
+### ♻️ 代码重构
+
+* standardizes NODE_ENV values and improves environment mapping ([23a72d1](https://github.com/YoungSx/drive-collector-js/commit/23a72d1f0079bee15f10991503f69f1c979e791f))
+
+
+### ✨ 新特性
+
+* enhances multi-environment support and configuration consistency ([cf8ae2a](https://github.com/YoungSx/drive-collector-js/commit/cf8ae2ab7ae99b810e4431f20624c96d83e93aaa))
+
 ### [4.15.3](https://github.com/YoungSx/drive-collector-js/compare/v4.15.2...v4.15.3) (2026-01-08)
 
 
