@@ -21,7 +21,7 @@ describe("dotenv priority in config", () => {
     }));
 
     await import("../../src/config/index.js");
-    expect(configSpy).toHaveBeenCalledWith({ override: true });
+    expect(configSpy).toHaveBeenCalledWith({ override: true, path: ".env" });
   });
 
   test("should not override system env in test environment", async () => {
@@ -33,6 +33,6 @@ describe("dotenv priority in config", () => {
     }));
 
     await import("../../src/config/index.js");
-    expect(configSpy).toHaveBeenCalledWith({ override: false });
+    expect(configSpy).toHaveBeenCalledWith({ override: false, path: ".env.test" });
   });
 });
