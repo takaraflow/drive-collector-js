@@ -7,13 +7,18 @@ import { InfisicalSDK } from '@infisical/sdk';
 import dotenv from 'dotenv';
 import { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } from '../src/utils/envMapper.js';
 
-// 加载现有 .env (如果存在) 用于降级检查
-dotenv.config({ override: true });
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
+
+// 根据 NODE_ENV 加载对应的 .env 文件
+const nodeEnvForFile = normalizeNodeEnv(process.env.NODE_ENV);
+const envFile = nodeEnvForFile === 'dev' ? '.env' : `.env.${nodeEnvForFile}`;
+const envPath = path.join(rootDir, envFile);
+
+// 加载现有 .env (如果存在) 用于降级检查
+dotenv.config({ path: envPath, override: true });
+
 const manifestPath = path.join(rootDir, 'manifest.json');
-const envPath = path.join(rootDir, '.env');
 
 // 获取配置
 const STRICT_SYNC = process.env.STRICT_SYNC === '1' || process.env.STRICT_SYNC === 'true';
@@ -88,7 +93,7 @@ export async function syncEnv() {
                 secretPath: '/',
                 includeImports: true
             });
-
+ 
             if (response && response.secrets) {
                 const secrets = response.secrets;
                 console.log(`✅ 成功拉取 ${secrets.length} 个变量`);
@@ -130,7 +135,7 @@ export async function syncEnv() {
     }
 
     if (infisicalSynced) {
-        console.log('? 使用 Infisical 变量继续');
+        console.log('✅ 使用 Infisical 变量继续');
         return;
     }
 
@@ -139,7 +144,7 @@ export async function syncEnv() {
     
     // 检查现有 .env
     if (fs.existsSync(envPath)) {
-        console.log('Dg  检查本地 .env 文件...');
+        console.log('📄 检查本地 .env 文件...');
         const currentEnv = dotenv.parse(fs.readFileSync(envPath));
         if (validateVariables(currentEnv, '本地 .env')) {
             console.log('✅ 使用本地 .env 缓存继续');

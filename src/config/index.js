@@ -21,7 +21,10 @@ process.env.NODE_ENV = normalizedNodeEnv;
 
 // 立即执行 dotenv 确保凭证可用
 const shouldOverrideEnv = process.env.NODE_ENV !== 'test';
-dotenv.config({ override: shouldOverrideEnv });
+
+// 根据 NODE_ENV 加载对应的 .env 文件
+const envFile = normalizedNodeEnv === 'dev' ? '.env' : `.env.${normalizedNodeEnv}`;
+dotenv.config({ path: envFile, override: shouldOverrideEnv });
 
 // 恢复被保护的环境变量（无条件恢复，确保优先级）
 Object.entries(protectedEnvValues).forEach(([key, value]) => {
