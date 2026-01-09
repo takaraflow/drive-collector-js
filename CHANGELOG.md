@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.17.0](https://github.com/YoungSx/drive-collector-js/compare/v4.16.0...v4.17.0) (2026-01-09)
+
+
+### 🔧 其他任务
+
+* remove accidentally committed test part files ([d0cb4de](https://github.com/YoungSx/drive-collector-js/commit/d0cb4def16b9e2f21028e9a545fab23dca654ceb))
+
+
+### 📝 文档更新
+
+* adds Telegram webhook setup documentation ([dddbf20](https://github.com/YoungSx/drive-collector-js/commit/dddbf20cd09ff4cb2ae48f3db6831542aa3f26fd))
+
+
+### ✨ 新特性
+
+* adds test mode support for Telegram bot API ([e0915d6](https://github.com/YoungSx/drive-collector-js/commit/e0915d60865b3f867d7cf538dde36a67c2b987df))
+
+
+### ♻️ 代码重构
+
+* improve test infrastructure with deterministic time and environment mocking ([d145680](https://github.com/YoungSx/drive-collector-js/commit/d145680baae4e6a3d8b2b2f1bac8dc785bba7b0e))
+* QStashService to QueueService ([83318a0](https://github.com/YoungSx/drive-collector-js/commit/83318a00443e1915e36eea04dad9d79c2ff2e4ea))
+* rename CF_REGION to INSTANCE_REGION ([759c86c](https://github.com/YoungSx/drive-collector-js/commit/759c86cbd06a7cb11d84fe0f5f4292e6a3a9d2b9))
+
+
+### 🐛 问题修复
+
+* add telegram.testMode to mockConfig in NetworkDiagnostic test ([97f28eb](https://github.com/YoungSx/drive-collector-js/commit/97f28eb86d0bae9d2eff071b0b70d00a6b758c9f))
+* improves environment file loading based on NODE_ENV ([a3dcafd](https://github.com/YoungSx/drive-collector-js/commit/a3dcafde16d5f165021286c4bd68c8d098c807f8))
+* INFISICAL_ENV in Dockerfile ([51f4dd3](https://github.com/YoungSx/drive-collector-js/commit/51f4dd3b67d9e0b848f15ff52b0ae2af63551156))
+* updates dotenv configuration with explicit path specifications ([e7d5da1](https://github.com/YoungSx/drive-collector-js/commit/e7d5da1f8a1159a8efd531439b408cd78393f3fb))
+
 ## [4.16.0](https://github.com/YoungSx/drive-collector-js/compare/v4.15.4...v4.16.0) (2026-01-09)
 
 
