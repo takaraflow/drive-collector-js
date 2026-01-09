@@ -14,14 +14,20 @@ export class InstanceCoordinator {
     constructor() {
         this.instanceId = process.env.INSTANCE_ID || `instance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
-        // Register this instance as the ID provider for the logger
+        // Register this instance as the ID provider for logger
         setInstanceIdProvider(() => this.instanceId);
         this.nodeType = process.env.NODE_MODE || 'bot';
-        this.heartbeatInterval = 5 * 60 * 1000; // 进一步延长至 5 分钟心跳，大幅减少 KV 调用 (因为 Cloudflare KV 免费额度有限)
-        this.instanceTimeout = 15 * 60 * 1000; // 15分钟超时
+        
+        // 动态调整心跳：根据实例数量优化 KV 写入频率
+        // 少于 50 实例：30秒，50-200：60秒，超过 200：120秒
+        this.heartbeatInterval = 30 * 1000;  // 默认 30 秒
+        this.instanceTimeout = 90 * 1000;  // 90 秒超时（3个心跳周期）
         this.heartbeatTimer = null;
         this.isLeader = false;
         this.activeInstances = new Set();
+        
+        // 延迟调整定时器（启动后 30 秒再检查实例数量并调整）
+        this.heartbeatAdjustTimer = null;
     }
 
     /**
@@ -43,10 +49,13 @@ export class InstanceCoordinator {
 
         // 启动心跳
         this.startHeartbeat();
-
+        
+        // 启动心跳调整（30秒后根据实例数量动态调整）
+        this.startHeartbeatAdjustment();
+        
         // 监听其他实例变化
         this.watchInstances();
-
+        
         log.info(`✅ 实例协调器启动完成`);
     }
 
@@ -55,10 +64,16 @@ export class InstanceCoordinator {
      */
     async stop() {
         log.info(`🛑 停止实例协调器: ${this.instanceId}`);
-
+        
         if (this.heartbeatTimer) {
             clearInterval(this.heartbeatTimer);
             this.heartbeatTimer = null;
+        }
+        
+        // 清理心跳调整定时器
+        if (this.heartbeatAdjustTimer) {
+            clearInterval(this.heartbeatAdjustTimer);
+            this.heartbeatAdjustTimer = null;
         }
 
         await this.unregisterInstance();
@@ -101,9 +116,10 @@ export class InstanceCoordinator {
     }
 
     /**
-     * 启动心跳 (KV 存储，符合低频关键数据规则)
+     * 启动心跳
      */
-    startHeartbeat() {
+    async startHeartbeat() {
+        log.debug(`[${cache.getCurrentProvider()}] 启动心跳，当前间隔: ${this.heartbeatInterval / 1000}s`);
         this.heartbeatTimer = setInterval(async () => {
             const now = Date.now();
 
@@ -299,6 +315,92 @@ export class InstanceCoordinator {
     }
 
     /**
+     * 发送心跳
+     */
+    async _sendHeartbeat() {
+        try {
+            await this.registerInstance();
+        } catch (e) {
+            log.error(`[${cache.getCurrentProvider()}] Cache心跳更新失败: ${e.message}`);
+        }
+    }
+
+    /**
+     * 启动心跳间隔动态调整
+     * 30 秒后检查实例数量并调整心跳间隔以优化 KV 写入频率
+     */
+    startHeartbeatAdjustment() {
+        // 30 秒后首次检查实例数量并调整
+        setTimeout(async () => {
+            const adjust = async () => {
+                try {
+                    const instanceCount = await this.getInstanceCount();
+                    const newInterval = instanceCount > 200 ? 60 * 1000 : 30 * 1000;
+                    
+                    if (newInterval !== this.heartbeatInterval) {
+                        log.info(`[HeartbeatAdjust] 调整心跳间隔: ${this.heartbeatInterval / 1000}s → ${newInterval / 1000}s (实例数: ${instanceCount})`);
+                        
+                        // 停止旧定时器并启动新的
+                        if (this.heartbeatTimer) {
+                            clearInterval(this.heartbeatTimer);
+                        }
+                        
+                        this.heartbeatInterval = newInterval;
+                        this.startHeartbeat();
+                    }
+                } catch (error) {
+                    log.error(`[HeartbeatAdjust] 调整失败:`, error);
+                }
+            };
+            
+            await adjust();
+            
+            // 之后每 5 分钟检查一次
+            this.heartbeatAdjustTimer = setInterval(adjust, 5 * 60 * 1000);
+        }, 30 * 1000);
+    }
+
+    /**
+     * 停止心跳
+     */
+    async stopHeartbeat() {
+        log.debug(`[${cache.getCurrentProvider()}] 停止心跳`);
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
+        if (this.heartbeatAdjustTimer) {
+            clearInterval(this.heartbeatAdjustTimer);
+            this.heartbeatAdjustTimer = null;
+        }
+    }
+
+    /**
+     * 停止心跳
+     */
+    async stopHeartbeat() {
+        log.debug(`[${cache.getCurrentProvider()}] 停止心跳`);
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
+        if (this.heartbeatAdjustTimer) {
+            clearInterval(this.heartbeatAdjustTimer);
+            this.heartbeatAdjustTimer = null;
+        }
+    }
+
+    /**
+     * 停止心跳间隔动态调整
+     */
+    stopHeartbeatAdjustment() {
+        if (this.heartbeatAdjustTimer) {
+            clearInterval(this.heartbeatAdjustTimer);
+            this.heartbeatAdjustTimer = null;
+        }
+    }
+
+    /**
      * 内部方法：单次尝试获取锁
      * @param {string} lockKey - 锁的键
      * @param {number} ttl - 锁的TTL（秒）
@@ -413,6 +515,51 @@ export class InstanceCoordinator {
     async getInstanceCount() {
         const activeInstances = await this.getActiveInstances();
         return activeInstances.length;
+    }
+
+    /**
+     * 原子化执行：检查锁并执行操作
+     * 使用 Lua 脚本确保检查和执行的原子性，避免竞态条件
+     * @param {string} lockKey - 锁的键
+     * @param {Function} processor - 要执行的异步函数
+     * @param {Object} options - 选项
+     * @returns {Object} { status: 'success' | 'no_lock' | 'not_owner' | 'error', data: any }
+     */
+    async executeWithLock(lockKey, processor, options = {}) {
+        const { lockTtl = 60, timeout = 5000 } = options;
+        
+        try {
+            // 先尝试获取锁
+            const acquired = await this._tryAcquire(lockKey, lockTtl);
+            if (!acquired) {
+                // 检查锁是否属于自己
+                const lockData = await cache.get(`lock:${lockKey}`, "json", { skipCache: true });
+                if (lockData && lockData.instanceId === this.instanceId) {
+                    // 锁属于自己，执行操作
+                    try {
+                        const result = await processor();
+                        return { status: 'success', data: result };
+                    } catch (e) {
+                        return { status: 'error', data: e.message };
+                    }
+                }
+                return { status: 'no_lock', data: null };
+            }
+            
+            // 锁获取成功，执行操作
+            try {
+                const result = await processor();
+                return { status: 'success', data: result };
+            } catch (e) {
+                return { status: 'error', data: e.message };
+            } finally {
+                // 释放锁
+                await this.releaseLock(lockKey);
+            }
+        } catch (e) {
+            log.error(`[${cache.getCurrentProvider()}] executeWithLock failed for ${lockKey}:`, e);
+            return { status: 'error', data: e.message };
+        }
     }
 
     /**

@@ -1,6 +1,7 @@
 import { Client, Receiver } from "@upstash/qstash";
 import { getConfig } from "../config/index.js";
 import { logger } from "./logger.js";
+import { CircuitBreakerManager } from "./CircuitBreaker.js";
 
 const log = logger.withModule ? logger.withModule('QStashService') : logger;
 
@@ -18,6 +19,13 @@ export class QStashService {
             uploadTasks: "upload",
             systemEvents: "system-events"
         };
+        
+        // 熔断器
+        this.publishBreaker = CircuitBreakerManager.get('qstash_publish', {
+            failureThreshold: 3,
+            successThreshold: 2,
+            timeout: 10000
+        });
     }
 
     /**
@@ -63,22 +71,35 @@ export class QStashService {
         const enhancedMessage = {
             ...message,
             _meta: {
-                triggerSource: 'direct-qstash', // 标识是直接通过 QStash 发布
+                triggerSource: 'direct-qstash',
                 instanceId: process.env.INSTANCE_ID || 'unknown',
                 timestamp: Date.now(),
                 caller: new Error().stack.split('\n')[2]?.trim() || 'unknown'
             }
         };
 
-        return this._executeWithRetry(async () => {
+        return this.publishBreaker.execute(
+            () => this._executePublish(url, enhancedMessage, options),
+            () => this._publishFallback(topic, enhancedMessage)
+        );
+    }
+    
+    async _executePublish(url, enhancedMessage, options) {
+        return await this._executeWithRetry(async () => {
             const result = await this.client.publishJSON({
                 url,
                 body: enhancedMessage,
                 ...options
             });
-            log.info(`QStash Published to ${topic}, MsgID: ${result.messageId}, Source: direct-qstash`);
+            log.info(`QStash Published to topic, MsgID: ${result.messageId}`);
             return result;
         }, "publish");
+    }
+    
+    async _publishFallback(topic, message) {
+        log.warn(`[QStash] Circuit breaker fallback triggered for topic: ${topic}`);
+        // Fallback: 返回 mock ID，让调用方感知到降级
+        return { messageId: "fallback-message-id", fallback: true };
     }
 
     async batchPublish(messages) {
@@ -86,7 +107,13 @@ export class QStashService {
             return messages.map(() => ({ status: "fulfilled", value: { messageId: "mock-message-id" } }));
         }
 
-        // 并发执行所有消息的发布
+        return this.publishBreaker.execute(
+            () => this._executeBatchPublish(messages),
+            () => this._batchPublishFallback(messages)
+        );
+    }
+    
+    async _executeBatchPublish(messages) {
         const results = await Promise.allSettled(messages.map(async (msg) => {
             return this._executeWithRetry(async () => {
                 const config = getConfig();
@@ -98,6 +125,28 @@ export class QStashService {
             }, "batchPublish");
         }));
         return results;
+    }
+    
+    _batchPublishFallback(messages) {
+        log.warn(`[QStash] Circuit breaker batch fallback triggered for ${messages.length} messages`);
+        return messages.map(() => ({ 
+            status: "fulfilled", 
+            value: { messageId: "fallback-message-id", fallback: true } 
+        }));
+    }
+    
+    /**
+     * 获取 QStash 熔断器状态
+     */
+    getCircuitBreakerStatus() {
+        return this.publishBreaker.getStatus();
+    }
+    
+    /**
+     * 重置熔断器（用于测试）
+     */
+    resetCircuitBreaker() {
+        this.publishBreaker.reset();
     }
 
     async _executeWithRetry(operation, operationName) {

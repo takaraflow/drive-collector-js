@@ -56,6 +56,20 @@ jest.unstable_mockModule("../../src/services/logger.js", () => ({
     }
 }));
 
+// Mock CircuitBreaker to disable in tests
+jest.unstable_mockModule("../../src/services/CircuitBreaker.js", () => ({
+    CircuitBreakerManager: {
+        get: jest.fn().mockReturnValue({
+            execute: async (cmd, fallback) => cmd(),  // Pass through without circuit breaker
+            getStatus: () => ({ state: 'CLOSED', failureCount: 0 }),
+            reset: () => {}
+        })
+    },
+    CircuitBreaker: jest.fn().mockImplementation(() => ({
+        execute: async (cmd) => cmd()
+    }))
+}));
+
 describe("QStashService - Retry Logic", () => {
     let QStashService;
     let qstashService;
@@ -96,6 +110,8 @@ describe("QStashService - Retry Logic", () => {
         qstashService = new QStashService();
         // Initialize the service
         await qstashService.initialize();
+        // Reset circuit breaker for clean test state
+        qstashService.resetCircuitBreaker();
     });
 
     describe("publish - Retry Logic", () => {

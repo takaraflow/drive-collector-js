@@ -3,7 +3,6 @@ import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 // Mock services/d1.js
 const mockD1 = {
     run: jest.fn(),
-    // Mock return value must match the new batch implementation (array of result objects)
     batch: jest.fn().mockImplementation(async (statements) => {
         return statements.map(() => ({ success: true, result: {} }));
     })
@@ -12,9 +11,21 @@ jest.unstable_mockModule("../../src/services/d1.js", () => ({
     d1: mockD1
 }));
 
-// Import TaskRepository after mocking
+// Mock services/CacheService.js
+const mockCache = {
+    set: jest.fn().mockResolvedValue(true),
+    get: jest.fn().mockResolvedValue(null),
+    del: jest.fn().mockResolvedValue(true),
+    getKeys: jest.fn().mockResolvedValue([])
+};
+jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+    cache: mockCache
+}));
+
+// Import after mocking
 const { TaskRepository } = await import("../../src/repositories/TaskRepository.js");
 const { d1 } = await import("../../src/services/d1.js");
+const { cache } = await import("../../src/services/CacheService.js");
 
 describe("TaskRepository Cache", () => {
     beforeEach(() => {
@@ -31,21 +42,56 @@ describe("TaskRepository Cache", () => {
         jest.useRealTimers();
     });
 
-    it("should buffer non-critical status updates", async () => {
-        await TaskRepository.updateStatus("task1", "downloading");
+    it("should buffer non-critical status updates (queued)", async () => {
+        await TaskRepository.updateStatus("task1", "queued");
         expect(TaskRepository.pendingUpdates.has("task1")).toBe(true);
+        expect(d1.run).not.toHaveBeenCalled();
+        expect(cache.set).not.toHaveBeenCalled();
+    });
+
+    it("should use Redis for important status updates (downloading)", async () => {
+        await TaskRepository.updateStatus("task1", "downloading");
+        expect(TaskRepository.pendingUpdates.has("task1")).toBe(false);
+        expect(cache.set).toHaveBeenCalledWith(
+            "task_status:task1",
+            expect.objectContaining({ status: "downloading" }),
+            300
+        );
         expect(d1.run).not.toHaveBeenCalled();
     });
 
-    it("should immediately write critical status updates", async () => {
+    it("should use Redis for important status updates (uploading)", async () => {
+        await TaskRepository.updateStatus("task2", "uploading");
+        expect(TaskRepository.pendingUpdates.has("task2")).toBe(false);
+        expect(cache.set).toHaveBeenCalledWith(
+            "task_status:task2",
+            expect.objectContaining({ status: "uploading" }),
+            300
+        );
+    });
+
+    it("should immediately write critical status updates (completed)", async () => {
         await TaskRepository.updateStatus("task1", "completed");
+        expect(TaskRepository.pendingUpdates.has("task1")).toBe(false);
+        expect(d1.run).toHaveBeenCalled();
+        expect(cache.del).toHaveBeenCalledWith("task_status:task1");
+    });
+
+    it("should immediately write critical status updates (failed)", async () => {
+        await TaskRepository.updateStatus("task1", "failed");
         expect(TaskRepository.pendingUpdates.has("task1")).toBe(false);
         expect(d1.run).toHaveBeenCalled();
     });
 
-    it("should flush pending updates periodically", async () => {
-        await TaskRepository.updateStatus("task1", "downloading");
-        await TaskRepository.updateStatus("task2", "uploading");
+    it("should immediately write critical status updates (cancelled)", async () => {
+        await TaskRepository.updateStatus("task1", "cancelled");
+        expect(TaskRepository.pendingUpdates.has("task1")).toBe(false);
+        expect(d1.run).toHaveBeenCalled();
+    });
+
+    it("should flush pending updates for non-important statuses", async () => {
+        await TaskRepository.updateStatus("task1", "queued");
+        await TaskRepository.updateStatus("task2", "queued");
 
         expect(TaskRepository.pendingUpdates.size).toBe(2);
 
@@ -58,8 +104,8 @@ describe("TaskRepository Cache", () => {
 
     it("should cleanup expired pending updates", async () => {
         const now = Date.now();
-        const expiredUpdate = { taskId: "expired", status: "downloading", timestamp: now - 31 * 60 * 1000 }; // 31 minutes ago
-        const validUpdate = { taskId: "valid", status: "downloading", timestamp: now - 10 * 60 * 1000 }; // 10 minutes ago
+        const expiredUpdate = { taskId: "expired", status: "queued", timestamp: now - 31 * 60 * 1000 };
+        const validUpdate = { taskId: "valid", status: "queued", timestamp: now - 10 * 60 * 1000 };
 
         TaskRepository.pendingUpdates.set("expired", expiredUpdate);
         TaskRepository.pendingUpdates.set("valid", validUpdate);
@@ -80,11 +126,20 @@ describe("TaskRepository Cache", () => {
         expect(() => TaskRepository.cleanupExpiredUpdates()).not.toThrow();
     });
 
-    it("should add timestamp to pending updates", async () => {
-        await TaskRepository.updateStatus("task1", "downloading");
+    it("should add timestamp to pending updates for non-important statuses", async () => {
+        await TaskRepository.updateStatus("task1", "queued");
 
         const update = TaskRepository.pendingUpdates.get("task1");
         expect(update).toHaveProperty("timestamp");
         expect(typeof update.timestamp).toBe("number");
+    });
+
+    it("should handle Redis failure gracefully and fallback to memory buffer", async () => {
+        mockCache.set.mockRejectedValueOnce(new Error("Redis connection failed"));
+
+        await TaskRepository.updateStatus("task1", "downloading");
+
+        // Should fallback to memory buffer
+        expect(TaskRepository.pendingUpdates.has("task1")).toBe(true);
     });
 });

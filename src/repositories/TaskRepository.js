@@ -1,4 +1,5 @@
 import { d1 } from "../services/d1.js";
+import { cache } from "../services/CacheService.js";
 import { logger } from "../services/logger.js";
 
 const log = logger.withModule ? logger.withModule('TaskRepository') : logger;
@@ -11,6 +12,9 @@ export class TaskRepository {
     static pendingUpdates = new Map();
     static flushTimer = null;
     static cleanupTimer = null;
+    
+    // 重要的中间状态（需要 Redis 中转，避免实例崩溃时丢失）
+    static IMPORTANT_STATUSES = ['downloading', 'uploading'];
 
     /**
      * 启动定时刷新任务
@@ -135,13 +139,39 @@ export class TaskRepository {
         const deadLine = Date.now() - safeTimeout;
 
         try {
-            return await d1.fetchAll(
+            // 1. 从 D1 获取僵尸任务
+            const d1Tasks = await d1.fetchAll(
                 `SELECT * FROM tasks
                 WHERE status IN ('queued', 'downloading', 'downloaded', 'uploading')
                 AND (updated_at IS NULL OR updated_at < ?)
                 ORDER BY created_at ASC`,
                 [deadLine]
             );
+            
+            // 2. 从 Redis 获取重要的中间状态任务
+            const redisTasks = [];
+            try {
+                const keys = await cache.listKeys('task_status:*');
+                for (const key of keys) {
+                    const data = await cache.get(key, 'json');
+                    if (data && data.updatedAt && data.updatedAt < deadLine) {
+                        redisTasks.push({
+                            id: key.replace('task_status:', ''),
+                            status: data.status,
+                            updated_at: data.updatedAt,
+                            source: 'redis'
+                        });
+                    }
+                }
+            } catch (e) {
+                log.warn('TaskRepository.findStalledTasks Redis check failed:', e.message);
+            }
+            
+            // 合并结果（去重）
+            const d1TaskIds = new Set(d1Tasks.map(t => t.id));
+            const uniqueRedisTasks = redisTasks.filter(t => !d1TaskIds.has(t.id));
+            
+            return [...d1Tasks, ...uniqueRedisTasks];
         } catch (e) {
             log.error("TaskRepository.findStalledTasks error:", e);
             return [];
@@ -206,11 +236,16 @@ export class TaskRepository {
     }
 
     /**
-     * 更新任务状态和心跳 (内存缓冲版)
+     * 更新任务状态（内存缓冲版 + Redis 中转）
+     * Critical: completed/failed/cancelled → 立即写入 D1
+     * Important: downloading/uploading → Redis 中转（实时可见）
+     * Minor: 其他 → 内存缓冲
      */
     static async updateStatus(taskId, status, errorMsg = null) {
         const isCritical = ['completed', 'failed', 'cancelled'].includes(status);
-
+        const isImportant = this.IMPORTANT_STATUSES.includes(status);
+        
+        // Critical: 立即写入 D1，从缓冲和 Redis 中清除
         if (isCritical) {
             this.pendingUpdates.delete(taskId);
             try {
@@ -221,10 +256,49 @@ export class TaskRepository {
             } catch (e) {
                 log.error(`TaskRepository.updateStatus (critical) failed for ${taskId}:`, e);
             }
-        } else {
-            this.pendingUpdates.set(taskId, { taskId, status, errorMsg, timestamp: Date.now() });
-            this.startFlushing();
+            // 也从 Redis 中清除
+            try {
+                await cache.del(`task_status:${taskId}`);
+            } catch (e) {
+                // Ignore Redis errors
+            }
+            return;
         }
+        
+        // Important: 使用 Redis 中转（实时可见 + 持久化）
+        if (isImportant) {
+            try {
+                await cache.set(
+                    `task_status:${taskId}`,
+                    { status, errorMsg, updatedAt: Date.now() },
+                    300  // 5分钟过期
+                );
+            } catch (e) {
+                log.warn(`TaskRepository Redis update failed for ${taskId}:`, e.message);
+                // Fallback to memory buffer
+                this.pendingUpdates.set(taskId, {
+                    taskId,
+                    status,
+                    errorMsg,
+                    timestamp: Date.now(),
+                    updatedAt: Date.now(),
+                    source: 'redis_fallback'
+                });
+                this.startFlushing();
+            }
+            return;
+        }
+        
+        // Minor: 继续缓冲
+        this.pendingUpdates.set(taskId, {
+            taskId,
+            status,
+            errorMsg,
+            timestamp: Date.now(),
+            updatedAt: Date.now(),
+            source: 'memory_buffer'
+        });
+        this.startFlushing();
     }
 
     /**

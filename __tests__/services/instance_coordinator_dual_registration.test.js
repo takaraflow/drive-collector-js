@@ -115,7 +115,7 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         instanceCoordinator.startHeartbeat();
 
         // 快进时间以触发心跳
-        jest.advanceTimersByTime(5 * 60 * 1000); // 5分钟心跳间隔
+        jest.advanceTimersByTime(30 * 1000); // 30秒心跳间隔
 
         // 等待异步操作完成
         await Promise.resolve();
@@ -127,7 +127,7 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
                 id: "test_instance_heartbeat",
                 lastHeartbeat: expect.any(Number)
             }),
-            900 // 15分钟(900秒) TTL
+            90 // 90秒 TTL (instanceTimeout / 1000)
         );
 
         // 清理定时器
@@ -147,7 +147,7 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         instanceCoordinator.startHeartbeat();
 
         // 快进时间以触发心跳
-        jest.advanceTimersByTime(5 * 60 * 1000); // 5分钟心跳间隔
+        jest.advanceTimersByTime(30 * 1000); // 30秒心跳间隔
 
         // 等待异步操作完成
         await Promise.resolve();
@@ -161,7 +161,7 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
                 status: "active",
                 hostname: "unknown"
             }),
-            900
+            90 // 90秒 TTL
         );
         
         // 清理定时器
@@ -183,7 +183,7 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         instanceCoordinator.startHeartbeat();
 
         // 快进时间以触发心跳
-        jest.advanceTimersByTime(5 * 60 * 1000); // 5分钟心跳间隔
+        jest.advanceTimersByTime(30 * 1000); // 30秒心跳间隔
 
         // 等待异步操作完成
         await Promise.resolve();
