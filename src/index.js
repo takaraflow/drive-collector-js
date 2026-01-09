@@ -542,6 +542,16 @@ async function selectInstanceByLock(instances, env, ctx, parentLogger = logger) 
   const acquiredAt = Number(parsed?.acquiredAt || parsed?.acquired_at || 0);
   const ttlSeconds = Number(parsed?.ttl || parsed?.expiresIn || 0);
 
+  const activeIds = instances.map(i => i.id);
+  await lockRoutingLogger.debug('锁路由调试信息', {
+    lockKey: TELEGRAM_LOCK_KEY,
+    rawLock: typeof lockValue === 'string' ? lockValue : parsed,
+    lockOwnerId,
+    acquiredAt,
+    ttlSeconds,
+    activeIds
+  }, ctx);
+
   if (ttlSeconds > 0 && acquiredAt > 0) {
     const expiresAt = acquiredAt + ttlSeconds * 1000;
     if (Date.now() > expiresAt) {
