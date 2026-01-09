@@ -405,10 +405,10 @@
         "required": false,
         "description": "Hostname identifier for instance metadata"
       },
-      "CF_REGION": {
+      "INSTANCE_REGION": {
         "type": "string",
         "required": false,
-        "description": "Cloudflare region identifier for instance metadata"
+        "description": "Instance region identifier for instance metadata"
       },
       "QSTASH_TOKEN": {
         "type": "string",
