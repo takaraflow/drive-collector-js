@@ -476,9 +476,15 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
       await getActiveInstancesLogger.debug(`getActiveInstances Full KV chunk ${chunkIndex}/${totalChunks}`, { entries: chunk }, ctx);
     }
 
-    for (const data of instanceDataResults) {
+    for (let idx = 0; idx < instanceDataResults.length; idx++) {
+      const data = instanceDataResults[idx];
+      const keyName = instanceKeys[idx];
       const instance = parseInstanceData(data);
-      await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Parsed instance data', { instanceId: instance?.id, parsedInstance: instance }, ctx);
+      await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Parsed instance data', {
+        key: keyName,
+        instanceId: instance?.id,
+        parsedInstance: instance
+      }, ctx);
       if (instance && instance.status === 'active') {
         // 检查心跳是否过期
         if (now - instance.lastHeartbeat <= HEARTBEAT_TIMEOUT) {
