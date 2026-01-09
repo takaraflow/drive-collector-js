@@ -17,7 +17,7 @@ import { STRINGS, format } from "../locales/zh-CN.js";
 import { NetworkDiagnostic } from "../utils/NetworkDiagnostic.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { cache } from "../services/CacheService.js";
-import { qstashService } from "../services/QStashService.js";
+import { queueService } from "../services/QueueService.js";
 import { logger } from "../services/logger.js";
 import fs from "fs";
 import path from "path";
@@ -315,7 +315,8 @@ export class Dispatcher {
                             this.groupBuffers.delete(gid);
                             // 创建批量任务并调度 QStash 延迟批处理
                             const taskIds = await TaskManager.addBatchTasks(target, buffer.messages, userId);
-                            qstashService.scheduleMediaGroupBatch(gid, taskIds, 1);
+                            // TODO: scheduleMediaGroupBatch method not implemented in queueService
+                            // qstashService.scheduleMediaGroupBatch(gid, taskIds, 1);
                         }, 800) // 800ms 收集时间
                     });
                 }

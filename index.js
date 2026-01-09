@@ -7,7 +7,7 @@ let httpServer = null;
  * QStash Webhook 处理程序 (供外部 HTTP Server 或测试使用)
  */
 export async function handleQStashWebhook(req, res) {
-    const { qstashService } = await import("./src/services/QStashService.js");
+    const { queueService } = await import("./src/services/QueueService.js");
     const { TaskManager } = await import("./src/processor/TaskManager.js");
     const { logger } = await import("./src/services/logger.js");
     const log = logger.withModule ? logger.withModule('App') : logger;
@@ -36,7 +36,7 @@ export async function handleQStashWebhook(req, res) {
 
         // 2. 验证签名
         const signature = req.headers['upstash-signature'];
-        const isValid = await qstashService.verifyWebhookSignature(signature, body);
+        const isValid = await queueService.verifyWebhookSignature(signature, body);
         if (!isValid) {
             // 记录签名和部分 body 信息以便调试
             const bodyPreview = body ? body.substring(0, 200) : 'empty';
@@ -193,7 +193,7 @@ async function main() {
     }
 
     // 3. 动态加载核心服务
-    const { qstashService } = await import("./src/services/QStashService.js");
+    const { queueService } = await import("./src/services/QueueService.js");
     const { cache } = await import("./src/services/CacheService.js");
     const { d1 } = await import("./src/services/d1.js");
     const { logger } = await import("./src/services/logger.js");
@@ -203,7 +203,7 @@ async function main() {
     console.log("🔄 正在初始化核心服务...");
     try {
         await Promise.all([
-            qstashService.initialize(),
+            queueService.initialize(),
             cache.initialize(),
             d1.initialize()
         ]);

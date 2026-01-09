@@ -24,7 +24,7 @@ const mockInstanceCoordinator = {
 
 const mockEnqueueDownloadTask = jest.fn();
 const mockEnqueueUploadTask = jest.fn();
-const mockQstashService = {
+const mockQueueService = {
     enqueueDownloadTask: mockEnqueueDownloadTask,
     enqueueUploadTask: mockEnqueueUploadTask
 };
@@ -62,8 +62,8 @@ jest.unstable_mockModule("../../src/services/InstanceCoordinator.js", () => ({
     instanceCoordinator: mockInstanceCoordinator
 }));
 
-jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
-    qstashService: mockQstashService
+jest.unstable_mockModule("../../src/services/QueueService.js", () => ({
+    queueService: mockQueueService
 }));
 
 jest.unstable_mockModule("../../src/config/index.js", () => ({

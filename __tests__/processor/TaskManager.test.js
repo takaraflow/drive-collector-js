@@ -53,14 +53,6 @@ jest.unstable_mockModule('../../src/repositories/TaskRepository.js', () => ({
     }
 }));
 
-jest.unstable_mockModule('../../src/services/QStashService.js', () => ({
-    qstashService: {
-        publishTask: jest.fn().mockResolvedValue({ success: true }),
-        cancelTask: jest.fn().mockResolvedValue({ success: true }),
-        publishBatchTasks: jest.fn().mockResolvedValue({ success: true }),
-    }
-}));
-
 jest.unstable_mockModule('../../src/services/oss.js', () => ({
     ossService: {
         upload: jest.fn().mockResolvedValue({ url: 'https://oss.example.com/file.mp4' }),
@@ -114,18 +106,11 @@ jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () => ({
     }
 }));
 
-jest.unstable_mockModule('../../src/services/QStashService.js', () => ({
-    default: {
-        publish: jest.fn().mockResolvedValue({ messageId: 'msg-123' }),
-        subscribe: jest.fn().mockResolvedValue({}),
-        enqueueDownloadTask: jest.fn().mockResolvedValue(true),
-        enqueueUploadTask: jest.fn().mockResolvedValue(true),
-    },
-    qstashService: {
-        publish: jest.fn().mockResolvedValue({ messageId: 'msg-123' }),
-        subscribe: jest.fn().mockResolvedValue({}),
-        enqueueDownloadTask: jest.fn().mockResolvedValue(true),
-        enqueueUploadTask: jest.fn().mockResolvedValue(true),
+jest.unstable_mockModule('../../src/services/QueueService.js', () => ({
+    queueService: {
+        publishTask: jest.fn().mockResolvedValue({ success: true }),
+        cancelTask: jest.fn().mockResolvedValue({ success: true }),
+        publishBatchTasks: jest.fn().mockResolvedValue({ success: true }),
     }
 }));
 
