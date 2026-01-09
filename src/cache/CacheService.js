@@ -11,6 +11,7 @@
 
 import { parseCacheConfig } from '../utils/configParser.js';
 import { CloudflareKVCache } from './CloudflareKVCache.js';
+import { NFCacheClient } from './nf-cache-client.js';
 import { RedisTLSCache } from './RedisTLSCache.js';
 import { logger } from '../logger.js';
 
@@ -22,10 +23,13 @@ class CacheService {
         this.isInitialized = false;
 
         this.primaryProvider = null;
+        this.primaryProviderEntry = null;
         this.fallbackProvider = null;
+        this.fallbackProviderEntry = null;
         this.providerList = [];
 
         this.currentProviderName = 'MemoryCache';
+        this.currentProviderConfigName = 'MemoryCache';
         this.isFailoverMode = false;
         this.recoveryTimer = null;
         this.failureCount = 0;
@@ -49,11 +53,15 @@ class CacheService {
             for (const providerEntry of this.providerList) {
                 try {
                     await providerEntry.instance.connect();
+                    this.primaryProviderEntry = providerEntry;
                     this.primaryProvider = providerEntry.instance;
                     this.currentProviderName = providerEntry.instance.getProviderName();
+                    this.currentProviderConfigName = providerEntry.config.name;
                     this.isFailoverMode = false;
+                    this.fallbackProvider = null;
+                    this.fallbackProviderEntry = null;
 
-                    log.info(`Connected to primary provider: ${this.currentProviderName} (${providerEntry.config.name})`);
+                    log.info('Cache provider connected', this._createProviderLogContext(providerEntry));
                     break;
                 } catch (error) {
                     log.error(`Failed to connect to ${providerEntry.config.name}: ${error.message}`);
@@ -61,7 +69,10 @@ class CacheService {
             }
 
             if (!this.primaryProvider) {
+                this.primaryProviderEntry = null;
                 this.currentProviderName = 'MemoryCache';
+                this.currentProviderConfigName = 'MemoryCache';
+                this.isFailoverMode = false;
                 log.warn('No external cache provider connected. Using MemoryCache (L1 only).');
             }
 
@@ -74,7 +85,14 @@ class CacheService {
 
     _loadProvidersFromConfig() {
         const providersJson = this.env.CACHE_PROVIDERS;
-        if (!providersJson) return [];
+        const hasCacheProviders = typeof providersJson === 'string'
+            ? providersJson.trim().length > 0
+            : !!providersJson;
+
+        if (!hasCacheProviders) {
+            const legacy = this._loadLegacyProvider();
+            return legacy ? [legacy] : [];
+        }
 
         const configs = parseCacheConfig(providersJson, this.env);
         if (!Array.isArray(configs)) {
@@ -107,6 +125,32 @@ class CacheService {
         }
 
         return instances;
+    }
+
+    _loadLegacyProvider() {
+        const env = this.env || {};
+        const redisUrl = env.NF_REDIS_URL || env.REDIS_TLS_URL;
+        if (!redisUrl) return null;
+
+        const legacyEnv = {
+            ...env,
+            NF_REDIS_URL: redisUrl,
+            NF_REDIS_PASSWORD: env.NF_REDIS_PASSWORD || env.REDIS_TLS_PASSWORD
+        };
+
+        try {
+            const instance = new NFCacheClient(legacyEnv);
+            const config = {
+                name: 'LegacyRedis',
+                type: 'redis',
+                priority: 50
+            };
+            log.info('Loaded legacy cache provider', { provider: config.name, url: redisUrl });
+            return { instance, config };
+        } catch (error) {
+            log.error('Failed to instantiate legacy cache provider', { error: error.message });
+            return null;
+        }
     }
 
     _instantiateProvider(config) {
@@ -237,14 +281,17 @@ class CacheService {
 
     async _failover() {
         this.isFailoverMode = true;
-        log.warn('Cache failover active. External writes disabled.');
+        log.warn('Cache failover active. External writes disabled.', this._createProviderLogContext(this.primaryProviderEntry));
 
         for (const entry of this.providerList) {
             if (entry.instance !== this.primaryProvider) {
                 try {
                     await entry.instance.connect();
                     this.fallbackProvider = entry.instance;
-                    log.info(`Failover to backup provider: ${entry.instance.getProviderName()}`);
+                    this.fallbackProviderEntry = entry;
+                    this.currentProviderName = entry.instance.getProviderName();
+                    this.currentProviderConfigName = entry.config.name;
+                    log.info('Switched to fallback cache provider', this._createProviderLogContext(entry));
                     break;
                 } catch (e) {
                     log.error(`Failed to connect to backup provider ${entry.config.name}: ${e.message}`);
@@ -268,10 +315,15 @@ class CacheService {
                     await this.primaryProvider.ping();
                 }
 
-                log.info('Primary cache provider recovered!');
+                if (this.primaryProviderEntry) {
+                    this.currentProviderName = this.primaryProviderEntry.instance.getProviderName();
+                    this.currentProviderConfigName = this.primaryProviderEntry.config.name;
+                }
+                log.info('Primary cache provider recovered', this._createProviderLogContext(this.primaryProviderEntry));
                 this.isFailoverMode = false;
                 this.failureCount = 0;
                 this.fallbackProvider = null;
+                this.fallbackProviderEntry = null;
                 clearInterval(this.recoveryTimer);
                 this.recoveryTimer = null;
             } catch (e) {
@@ -298,10 +350,41 @@ class CacheService {
     }
 
     getConnectionInfo() {
-        if (this.primaryProvider && typeof this.primaryProvider.getConnectionInfo === 'function') {
-            return this.primaryProvider.getConnectionInfo();
+        const activeEntry = this._getActiveProviderEntry();
+        const activeInstance = activeEntry?.instance;
+
+        if (activeInstance && typeof activeInstance.getConnectionInfo === 'function') {
+            const info = activeInstance.getConnectionInfo();
+            return {
+                ...info,
+                provider: info.provider || this.currentProviderName,
+                providerConfig: activeEntry?.config?.name || this.currentProviderConfigName,
+                failover: this.isFailoverMode
+            };
         }
-        return { provider: this.currentProviderName };
+
+        return {
+            provider: this.currentProviderName,
+            providerConfig: this.currentProviderConfigName,
+            failover: this.isFailoverMode
+        };
+    }
+
+    _getActiveProviderEntry() {
+        if (this.isFailoverMode && this.fallbackProviderEntry) {
+            return this.fallbackProviderEntry;
+        }
+        return this.primaryProviderEntry;
+    }
+
+    _createProviderLogContext(entry) {
+        const config = entry?.config || {};
+        return {
+            provider: entry?.instance?.getProviderName?.() || this.currentProviderName,
+            providerConfig: config.name || this.currentProviderConfigName,
+            priority: config.priority ?? 'default',
+            failover: this.isFailoverMode
+        };
     }
 
     async listKeys(prefix = '') {

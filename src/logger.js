@@ -108,7 +108,7 @@ export function configureBaseLoggerTransport(env) {
  */
 function sanitizeLogData(val, depth = 0, context = { fieldCount: 0 }) {
   try {
-    // 限制最大深度为 4 层
+    // 限制最大深度为 5 层（depth 从 0 开始，depth 4 对应第 4 层，深度 5 以上截断）
     if (depth > 4) {
       return "[DEPTH_EXCEEDED]";
     }

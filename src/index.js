@@ -422,13 +422,17 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: Filtered instance keys', { instanceKeys, count: instanceKeys.length }, ctx);
 
     // 并发读取实例数据
-    const instanceDataResults = await Promise.all(instanceKeys.map(keyName =>
-      executeWithFailover('_kv_get', env, ctx, keyName)
-        .catch(e => {
-          getActiveInstancesLogger.error('读取实例数据失败', { key: keyName, error: e.message }, ctx);
-          return null;
-        })
-    ));
+    const instanceDataResults = [];
+    for (const keyName of instanceKeys) {
+      try {
+        // 一个接一个地读，确保 socket 响应不乱序
+        const result = await executeWithFailover('_kv_get', env, ctx, keyName);
+        instanceDataResults.push(result);
+      } catch (e) {
+        getActiveInstancesLogger.error('读取实例数据失败', { key: keyName, error: e.message }, ctx);
+        instanceDataResults.push(null);
+      }
+    }
 
     // 新增日志：记录获取到的原始实例数据
     await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Raw instance data results', { rawData: instanceDataResults }, ctx);

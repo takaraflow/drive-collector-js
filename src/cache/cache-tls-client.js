@@ -13,6 +13,8 @@ export class CacheTLSClient extends ICacheClient {
   password;
   /** @type {Object} */
   tlsOptions;
+  /** @type {string} */
+  providerName = 'CacheTLS';
 
   /**
    * @param {string} url
@@ -32,12 +34,21 @@ export class CacheTLSClient extends ICacheClient {
     this.tlsOptions = {};
 
     if (url.startsWith('rediss://')) {
-      this.tlsOptions.rejectUnauthorized = tlsConfig?.rejectUnauthorized === false ? false : true;
+      this.tlsOptions.rejectUnauthorized = CacheTLSClient._isStrictFalse(tlsConfig?.rejectUnauthorized) ? false : true;
       this.tlsOptions.ca = tlsConfig?.ca || tlsConfig?.caCert;
       this.tlsOptions.cert = tlsConfig?.clientCert;
       this.tlsOptions.key = tlsConfig?.clientKey;
       this.tlsOptions.servername = tlsConfig?.sniServername || new URL(url).hostname;
     }
+  }
+
+  static _isStrictFalse(value) {
+    if (value === false) return true;
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      return normalized === 'false' || normalized === '0' || normalized === 'no';
+    }
+    return false;
   }
 
   async connect() {
@@ -144,5 +155,22 @@ export class CacheTLSClient extends ICacheClient {
    */
   async ping() {
     return await this.sendCommand('PING', []);
+  }
+
+  getProviderName() {
+    return this.providerName;
+  }
+
+  getConnectionInfo() {
+    return {
+      provider: this.providerName,
+      connected: !!this.client,
+      url: this.url,
+      tls: typeof this.url === 'string' && this.url.startsWith('rediss://')
+    };
+  }
+
+  async destroy() {
+    await this.disconnect();
   }
 }

@@ -28,5 +28,6 @@ export class NFCacheClient extends CacheTLSClient {
         sniServername: env.REDIS_TLS_SNI_SERVERNAME,
       }
     );
+    this.providerName = 'LegacyRedis';
   }
 }

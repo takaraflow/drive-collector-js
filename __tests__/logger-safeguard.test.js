@@ -115,7 +115,7 @@ describe('Logger Safeguard - sanitizeLogData', () => {
   });
 
   describe('深度限制', () => {
-    test('应限制嵌套深度为 3 层', () => {
+    test('应限制嵌套深度为 4 层', () => {
       const data = {
         level: 'info',
         message: 'test',
@@ -123,7 +123,9 @@ describe('Logger Safeguard - sanitizeLogData', () => {
           level2: {
             level3: {
               level4: {
-                level5: 'deep value'
+                level5: {
+                  level6: 'too deep'
+                }
               }
             }
           }
@@ -132,25 +134,25 @@ describe('Logger Safeguard - sanitizeLogData', () => {
       
       const result = sanitizeLogData(data);
       
-      // 深度从 0 开始，level1 是第 1 层，level2 是第 2 层，level3 是第 3 层
-      // level4 应该被限制，因为 depth > 3
-      expect(result.level1.level2.level3.level4).toBe('[DEPTH_EXCEEDED]');
+      expect(result.level1.level2.level3.level4.level5).toBe('[DEPTH_EXCEEDED]');
     });
 
-    test('应保留 3 层以内的嵌套', () => {
+    test('应保留 4 层以内的嵌套', () => {
       const data = {
         level: 'info',
         message: 'test',
         level1: {
           level2: {
-            level3: 'valid value'
+            level3: {
+              level4: 'valid value'
+            }
           }
         }
       };
       
       const result = sanitizeLogData(data);
       
-      expect(result.level1.level2.level3).toBe('valid value');
+      expect(result.level1.level2.level3.level4).toBe('valid value');
     });
 
     test('应处理数组中的深度嵌套', () => {
@@ -161,7 +163,9 @@ describe('Logger Safeguard - sanitizeLogData', () => {
           {
             nested: {
               deep: {
-                deeper: 'value'
+                deeper: {
+                  deepest: 'value'
+                }
               }
             }
           }
@@ -170,7 +174,7 @@ describe('Logger Safeguard - sanitizeLogData', () => {
       
       const result = sanitizeLogData(data);
       
-      expect(result.items[0].nested.deep).toBe('[DEPTH_EXCEEDED]');
+      expect(result.items[0].nested.deep.deeper).toBe('[DEPTH_EXCEEDED]');
     });
   });
 
