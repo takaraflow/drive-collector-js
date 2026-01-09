@@ -39,6 +39,9 @@ jest.unstable_mockModule("../../src/repositories/DriveRepository.js", () => ({
 
 const mockConfig = {
     botToken: "mock_token",
+    telegram: {
+        testMode: false
+    }
 };
 jest.unstable_mockModule("../../src/config/index.js", () => ({
     config: mockConfig,
