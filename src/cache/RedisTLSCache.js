@@ -172,7 +172,7 @@ export class RedisTLSCache {
     const keys = [];
     let cursor = '0';
 
-    while (cursor !== '0') {
+    do {
       const args = [cursor];
       if (prefix) {
         args.push('MATCH', prefix + '*');
@@ -193,7 +193,7 @@ export class RedisTLSCache {
       if (keys.length >= limit) {
         break;
       }
-    }
+    } while (cursor !== '0');
 
     return keys.slice(0, limit);
   }
