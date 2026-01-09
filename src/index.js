@@ -9,6 +9,7 @@ let failoverReason = '';
 // 常量
 const ROUND_ROBIN_KEY = 'lb:round_robin_index';
 const HEARTBEAT_TIMEOUT = 15 * 60 * 1000; // 15分钟
+const TELEGRAM_LOCK_KEY = 'lock:telegram_client';
 
 // 静态导入 OpenTelemetry API
 import { trace } from '@opentelemetry/api';
@@ -508,6 +509,49 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     await getActiveInstancesLogger.error('获取活跃实例失败', { error: error.message }, ctx);
     return [];
   }
+}
+
+/**
+ * 根据锁持有者选择实例（用于需要会话锁的下载任务）
+ */
+async function selectInstanceByLock(instances, env, ctx, parentLogger = logger) {
+  const lockRoutingLogger = parentLogger.child({ module: 'lockRouting' });
+  if (!instances || instances.length === 0) return null;
+
+  let lockValue;
+  try {
+    lockValue = await executeWithFailover('_kv_get', env, ctx, TELEGRAM_LOCK_KEY);
+  } catch (error) {
+    await lockRoutingLogger.warn('🔒 读取锁失败，回退轮询', { lockKey: TELEGRAM_LOCK_KEY, error: error.message }, ctx);
+    return null;
+  }
+
+  if (!lockValue) {
+    await lockRoutingLogger.debug('🔍 未找到锁或锁已过期，回退轮询', { lockKey: TELEGRAM_LOCK_KEY }, ctx);
+    return null;
+  }
+
+  let parsed = lockValue;
+  if (typeof lockValue === 'string') {
+    parsed = safeJsonParse(lockValue, 'lockOwner') || { instanceId: lockValue };
+  } else if (lockValue && typeof lockValue === 'object' && lockValue.value !== undefined) {
+    parsed = safeJsonParse(lockValue.value, 'lockOwner.value') || lockValue;
+  }
+
+  const lockOwnerId = parsed?.instanceId || parsed?.ownerId || parsed?.owner || parsed?.id;
+  if (!lockOwnerId) {
+    await lockRoutingLogger.debug('⚠️ 锁值缺少实例信息，回退轮询', { lockKey: TELEGRAM_LOCK_KEY }, ctx);
+    return null;
+  }
+
+  const ownerInstance = instances.find(inst => inst.id === lockOwnerId);
+  if (ownerInstance) {
+    await lockRoutingLogger.info('🎯 使用锁持有者作为目标实例', { lockKey: TELEGRAM_LOCK_KEY, instanceId: lockOwnerId }, ctx);
+    return ownerInstance;
+  }
+
+  await lockRoutingLogger.warn('⚠️ 锁持有者不在活跃实例列表，回退轮询', { lockKey: TELEGRAM_LOCK_KEY, instanceId: lockOwnerId }, ctx);
+  return null;
 }
 
 /**
@@ -1746,8 +1790,15 @@ async function handleRequest(request, env, ctx) {
       });
       await requestLogger.warn('返回 503 响应：无活跃实例可用', { qstashMsgId, retryCount, path: normalizedUrl.pathname, status: 503 });
     } else {
-      // 选择目标实例
-      const targetInstance = await selectTargetInstance(activeInstances, env, ctx, requestLogger);
+      // 选择目标实例：下载任务优先分配给锁持有者
+      let targetInstance = null;
+      if (normalizedUrl.pathname === '/api/tasks/download') {
+        targetInstance = await selectInstanceByLock(activeInstances, env, ctx, requestLogger);
+      }
+
+      if (!targetInstance) {
+        targetInstance = await selectTargetInstance(activeInstances, env, ctx, requestLogger);
+      }
       await requestLogger.debug('targetInstance selected', { id: targetInstance?.id || 'NONE', module: 'instanceSelector' });
       if (!targetInstance) {
         result = new Response('No target instance selected', { status: 503 });

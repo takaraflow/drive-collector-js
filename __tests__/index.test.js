@@ -305,6 +305,71 @@ describe('Worker Tests', () => {
       // It forwards, so mockKV.put is NOT called on the worker (it's called on backend)
       // But verifyQStashSignature is skipped, so it just works.
     });
+
+    test('should_route_download_tasks_to_lock_owner_instance', async () => {
+      // 模拟两个实例，其中实例2持有 telegram_client 锁
+      mockKV.list.mockImplementation(async (options) => {
+        if (options?.prefix === 'instance:') {
+          return { keys: [{ name: 'instance:server1' }, { name: 'instance:server2' }] };
+        }
+        if (options?.prefix?.startsWith('lock:') || options?.prefix?.startsWith('task:') || options?.prefix?.startsWith('msg_lock:')) {
+          return { keys: [] };
+        }
+        return { keys: [{ name: 'instance:server1' }, { name: 'instance:server2' }] };
+      });
+
+      mockKV.get.mockImplementation(async (key) => {
+        if (key === 'lb:round_robin_index') return '0';
+        if (key === 'instance:server1') {
+          return JSON.stringify({
+            id: 'server1',
+            url: 'https://backend-1.example.com',
+            status: 'active',
+            lastHeartbeat: Date.now()
+          });
+        }
+        if (key === 'instance:server2') {
+          return JSON.stringify({
+            id: 'server2',
+            url: 'https://backend-2.example.com',
+            status: 'active',
+            lastHeartbeat: Date.now()
+          });
+        }
+        if (key === 'lock:telegram_client') {
+          return JSON.stringify({ instanceId: 'server2', acquiredAt: Date.now(), ttl: 60 });
+        }
+        return null;
+      });
+
+      global.fetch.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        headers: new Map(),
+        json: async () => ({ status: 'ok' }),
+        text: async () => 'ok',
+        body: { cancel: jest.fn() }
+      });
+
+      const lockRoutingEnv = {
+        KV_STORAGE: mockKV,
+        QSTASH_CURRENT_SIGNING_KEY: 'test-key',
+        QSTASH_NEXT_SIGNING_KEY: 'next-key',
+        SKIP_SIGNATURE_VERIFY: 'true',
+      };
+
+      const request = new Request('https://test.url/api/tasks/download', {
+        method: 'POST',
+        body: JSON.stringify({ taskId: 'task-lock-1' }),
+      });
+      const ctx = { waitUntil: jest.fn() };
+
+      await handleRequest(request, lockRoutingEnv, ctx);
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      const forwardedRequest = global.fetch.mock.calls[0][0];
+      expect(forwardedRequest.url).toContain('backend-2.example.com');
+    });
   });
 
   describe('Error Handling', () => {
