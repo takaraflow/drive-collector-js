@@ -56,8 +56,8 @@ describe("sync-env script", () => {
 
     let importError;
     try {
-      await import("../../scripts/sync-env.js");
-      await new Promise((resolve) => setImmediate(resolve));
+      const { syncEnv } = await import("../../scripts/sync-env.js");
+      await syncEnv();
     } catch (err) {
       importError = err;
     }

@@ -4,12 +4,29 @@ import path from 'path';
 import { fetchInfisicalSecrets } from '../services/InfisicalClient.js';
 import { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } from '../utils/envMapper.js';
 
+// 保护重要环境变量不被 .env 覆盖
+const PROTECTED_ENV_VARS = ['NODE_ENV', 'INFISICAL_ENV', 'INFISICAL_TOKEN', 'INFISICAL_PROJECT_ID'];
+
+// 保存需要保护的环境变量
+const protectedEnvValues = {};
+PROTECTED_ENV_VARS.forEach(key => {
+    if (process.env[key]) {
+        protectedEnvValues[key] = process.env[key];
+    }
+});
+
 // 规范化 NODE_ENV（在执行 dotenv 之前）
-process.env.NODE_ENV = normalizeNodeEnv(process.env.NODE_ENV);
+const normalizedNodeEnv = normalizeNodeEnv(process.env.NODE_ENV);
+process.env.NODE_ENV = normalizedNodeEnv;
 
 // 立即执行 dotenv 确保凭证可用
 const shouldOverrideEnv = process.env.NODE_ENV !== 'test';
 dotenv.config({ override: shouldOverrideEnv });
+
+// 恢复被保护的环境变量（无条件恢复，确保优先级）
+Object.entries(protectedEnvValues).forEach(([key, value]) => {
+    process.env[key] = value;
+});
 
 let config = null;
 let isInitialized = false;
@@ -30,6 +47,49 @@ export async function initConfig() {
     if (isInitialized) return config;
 
     console.log(`🚀 Initializing configuration...`);
+
+    // 环境验证机制
+    function validateEnvironmentConsistency() {
+        const nodeEnv = process.env.NODE_ENV || 'dev';
+        const infisicalEnv = process.env.INFISICAL_ENV;
+        const expectedInfisicalEnv = mapNodeEnvToInfisicalEnv(nodeEnv);
+
+        // 检查INFISICAL_ENV与NODE_ENV是否匹配
+        if (infisicalEnv && infisicalEnv !== expectedInfisicalEnv) {
+            console.warn(`⚠️ 环境不一致警告:`);
+            console.warn(`   NODE_ENV: ${nodeEnv} (期望 Infisical: ${expectedInfisicalEnv})`);
+            console.warn(`   INFISICAL_ENV: ${infisicalEnv}`);
+            console.warn(`   建议统一设置环境变量以避免配置错误`);
+
+            // prod环境严格检查
+            if (nodeEnv === 'prod') {
+                const error = new Error('Environment mismatch in production');
+                error.isProductionMismatch = true; // 标记为生产环境不匹配错误
+                console.error(`❌ 生产环境环境变量不一致，为安全起见停止启动`);
+                console.error(`   请设置 INFISICAL_ENV=prod 或移除 INFISICAL_ENV`);
+                throw error;
+            }
+        }
+
+        // 验证环境变量合法性
+        const validEnvs = ['dev', 'pre', 'prod', 'test'];
+        if (!validEnvs.includes(nodeEnv)) {
+            console.warn(`⚠️ 无效的 NODE_ENV: ${nodeEnv}，将使用默认值 'dev'`);
+            process.env.NODE_ENV = 'dev';
+        }
+    }
+
+    // 执行环境验证
+    try {
+        validateEnvironmentConsistency();
+    } catch (error) {
+        // 检查是否为生产环境不匹配错误（使用错误标记而非字符串比较）
+        if (error.isProductionMismatch || (error.message && error.message.includes('production'))) {
+            console.error(`❌ 严重错误: ${error.message}`);
+            throw error;
+        }
+        console.warn(`⚠️ 环境验证失败: ${error.message}`);
+    }
 
     const clientId = process.env.INFISICAL_CLIENT_ID;
     const clientSecret = process.env.INFISICAL_CLIENT_SECRET;
@@ -142,7 +202,7 @@ export async function initConfig() {
     // Log environment and test mode status
     const envMode = process.env.NODE_MODE || 'unknown';
     const testModeSource = env.TG_TEST_MODE !== undefined ? `TG_TEST_MODE=${env.TG_TEST_MODE}` : `default (NODE_MODE=${envMode})`;
-    console.log(`[Config] Environment: ${envMode}, Telegram Test Mode: ${config.telegram.testMode} (source: ${testModeSource})`);
+    console.log(`[Config] NODE_ENV=${process.env.NODE_ENV}, NODE_MODE=${envMode}, Telegram Test Mode: ${config.telegram.testMode}`);
     
     return config;
 }

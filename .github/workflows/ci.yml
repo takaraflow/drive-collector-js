@@ -111,17 +111,39 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-      
+
+      # 根据分支确定目标环境
+      # main → prod, develop → pre, 其他 → dev
+      - name: Set environment based on branch
+        id: set-env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "infisical_env=prod" >> $GITHUB_OUTPUT
+            echo "🎯 Target: Production Environment"
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            echo "environment=pre" >> $GITHUB_OUTPUT
+            echo "infisical_env=pre" >> $GITHUB_OUTPUT
+            echo "🎯 Target: Pre-production Environment"
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "infisical_env=dev" >> $GITHUB_OUTPUT
+            echo "🎯 Target: Development Environment"
+          fi
+
       # 统一方案：从 Infisical 同步环境变量
       # INFISICAL_TOKEN 使用 secrets (敏感信息)
       # INFISICAL_PROJECT_ID 使用 vars (非敏感配置)
+      # 根据分支自动选择对应的 Infisical 环境
       - name: Sync environment variables from Infisical
         env:
           INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
           INFISICAL_PROJECT_ID: ${{ vars.INFISICAL_PROJECT_ID }}
-          INFISICAL_ENV: prod
+          INFISICAL_ENV: ${{ steps.set-env.outputs.infisical_env }}
           INFISICAL_SECRET_PATH: /
-        run: npm run sync:env
+        run: |
+          echo "🔄 Syncing from Infisical environment: $INFISICAL_ENV"
+          npm run sync:env
         continue-on-error: true  # 允许降级到本地缓存或云配置
       
       # 处理环境变量中的多余引号（Infisical 可能返回带引号的值）
@@ -178,11 +200,13 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # 关键点：将 Infisical 凭据传递给 Docker 构建过程
+          # 关键点：将 Infisical 凭据和环境变量传递给 Docker 构建过程
           # 这样 Dockerfile 内部的 sync-env.js 才能获取变量
           build-args: |
             INFISICAL_TOKEN=${{ secrets.INFISICAL_TOKEN }}
             INFISICAL_PROJECT_ID=${{ vars.INFISICAL_PROJECT_ID }}
+            NODE_ENV=${{ steps.set-env.outputs.environment }}
+            INFISICAL_ENV=${{ steps.set-env.outputs.infisical_env }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -195,23 +219,37 @@ jobs:
       BARK_WEBHOOK_URL: ${{ secrets.BARK_WEBHOOK_URL }}
       BARK_DEVICE_TOKEN: ${{ secrets.BARK_DEVICE_TOKEN }}
     steps:
+      - name: Determine target environment
+        id: set-env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "environment_name=生产环境" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            echo "environment=pre" >> $GITHUB_OUTPUT
+            echo "environment_name=预发布环境" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "environment_name=开发环境" >> $GITHUB_OUTPUT
+          fi
+
       - name: Notify Bark result
         run: |
           if [ "${{ job.status }}" = "success" ]; then
-            TITLE="✅ GHA CI/CD 成功"
+            TITLE="✅ GHA CI/CD 成功 [${{ steps.set-env.outputs.environment_name }}]"
             STATUS="success"
           else
-            TITLE="❌ GHA CI/CD 失败"
+            TITLE="❌ GHA CI/CD 失败 [${{ steps.set-env.outputs.environment_name }}]"
             STATUS="failure"
           fi
-          
+
           # Use printf to handle multiline content safely for JSON
-          CONTENT="Workflow: ${{ github.workflow }}\nStatus: ${{ job.status }}\nCommit: ${{ github.sha }}\nRef: ${{ github.ref }}"
-          
+          CONTENT="环境: ${{ steps.set-env.outputs.environment_name }}\nWorkflow: ${{ github.workflow }}\nStatus: ${{ job.status }}\nCommit: ${{ github.sha }}\nRef: ${{ github.ref }}"
+
           # Ensure BARK_WEBHOOK_URL ends with / if it's just the domain
           BASE_URL="${{ secrets.BARK_WEBHOOK_URL }}"
           BASE_URL="${BASE_URL%/}"
-          
+
           # Only send notification if secrets are configured
           if [ -n "$BASE_URL" ] && [ -n "${{ secrets.BARK_DEVICE_TOKEN }}" ]; then
             curl -L -X POST "$BASE_URL/push" \

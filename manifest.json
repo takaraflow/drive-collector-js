@@ -378,7 +378,7 @@
       "NODE_ENV": {
         "type": "string",
         "required": false,
-        "description": "Node.js runtime environment (development/production/test)"
+        "description": "Node.js runtime environment (dev/pre/prod/test). Supports both full names (development/production/staging) and abbreviations. Defaults to dev."
       },
       "NODE_MODE": {
         "type": "string",

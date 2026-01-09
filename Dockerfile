@@ -3,6 +3,20 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
+# 构建参数：支持多环境构建
+ARG NODE_ENV=production
+ARG INFISICAL_TOKEN
+ARG INFISICAL_PROJECT_ID
+ARG INFISICAL_ENV=prod
+ARG INFISICAL_SECRET_PATH=/
+
+# 环境变量
+ENV NODE_ENV=${NODE_ENV}
+ENV INFISICAL_TOKEN=${INFISICAL_TOKEN}
+ENV INFISICAL_PROJECT_ID=${INFISICAL_PROJECT_ID}
+ENV INFISICAL_ENV=${INFISICAL_ENV}
+ENV INFISICAL_SECRET_PATH=${INFISICAL_SECRET_PATH}
+
 # 复制依赖定义和同步脚本
 COPY package*.json ./
 COPY scripts/sync-env.js ./scripts/
@@ -12,15 +26,6 @@ RUN npm ci && npm cache clean --force
 
 # 2. 如果设置了 INFISICAL_TOKEN，在构建阶段同步环境变量
 # 这样测试就能使用从 Infisical 获取的变量
-ARG INFISICAL_TOKEN
-ARG INFISICAL_PROJECT_ID
-ARG INFISICAL_ENV=prod
-ARG INFISICAL_SECRET_PATH=/
-
-ENV INFISICAL_TOKEN=${INFISICAL_TOKEN}
-ENV INFISICAL_PROJECT_ID=${INFISICAL_PROJECT_ID}
-ENV INFISICAL_ENV=${INFISICAL_ENV}
-ENV INFISICAL_SECRET_PATH=${INFISICAL_SECRET_PATH}
 
 # 复制源代码
 COPY . .
@@ -39,6 +44,14 @@ RUN npm test
 
 # --- 第二阶段：运行环境 ---
 FROM node:20-slim
+
+# 运行时参数：支持多环境部署
+ARG NODE_ENV=production
+ARG INFISICAL_ENV=prod
+
+# 环境变量
+ENV NODE_ENV=${NODE_ENV}
+ENV INFISICAL_ENV=${INFISICAL_ENV}
 
 # 安装 rclone 和基础工具，包括 ping 工具
 # 3. 修改点：安装完 curl/unzip 后立即卸载，只保留运行 rclone 所需的 ca-certificates 和 ping 工具
@@ -67,9 +80,9 @@ COPY . .
 RUN mkdir -p /tmp/downloads && chmod 777 /tmp/downloads
 
 # 4. 设置环境变量同步所需的默认值（可在运行时覆盖）
+# 注意：INFISICAL_ENV已通过ARG在前面设置，这里不需要重复ENV
 ENV INFISICAL_TOKEN=""
 ENV INFISICAL_PROJECT_ID=""
-ENV INFISICAL_ENV="prod"
 ENV INFISICAL_SECRET_PATH="/"
 
 # 5. 在容器启动时自动同步环境变量

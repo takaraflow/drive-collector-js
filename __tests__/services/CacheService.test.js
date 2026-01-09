@@ -175,14 +175,7 @@ describe("CacheService Integration Tests", () => {
 
     describe("Memory Fallback Provider", () => {
         test("should fallback to memory when no credentials provided", async () => {
-            // Clear all mocks and reset the module state
-            jest.clearAllMocks();
-            jest.resetModules();
-            
-            // Re-import to get a fresh CacheService class
-            const { CacheService: FreshCacheService } = await import("../../src/services/CacheService.js");
-            
-            service = new FreshCacheService({ env: {} });
+            service = new CacheService({ env: {} });
             await service.initialize();
             expect(service.currentProviderName).toBe('MemoryCache');
         });

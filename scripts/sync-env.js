@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { InfisicalSDK } from '@infisical/sdk';
 import dotenv from 'dotenv';
+import { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } from '../src/utils/envMapper.js';
 
 // 加载现有 .env (如果存在) 用于降级检查
 dotenv.config({ override: true });
@@ -55,11 +56,19 @@ function validateVariables(variables, sourceName) {
     return true;
 }
 
-async function syncEnv() {
+export async function syncEnv() {
     console.log(`🚀 开始同步 Infisical 环境变量... (模式: ${STRICT_SYNC ? '严格' : '非严格'})`);
 
     const token = process.env.INFISICAL_TOKEN;
     const projectId = process.env.INFISICAL_PROJECT_ID;
+
+    // 支持动态环境：优先使用 INFISICAL_ENV，其次 NODE_ENV，默认 'dev'
+    const nodeEnv = process.env.INFISICAL_ENV || process.env.NODE_ENV || 'dev';
+    const normalizedEnv = normalizeNodeEnv(nodeEnv);
+    const infisicalEnv = mapNodeEnvToInfisicalEnv(normalizedEnv);
+
+    console.log(`[Sync-Env] 检测到环境: ${nodeEnv} -> ${normalizedEnv} -> Infisical环境: ${infisicalEnv}`);
+
     let infisicalSynced = false;
 
     // 尝试从 Infisical 拉取
@@ -72,9 +81,9 @@ async function syncEnv() {
             sdk.auth().accessToken(token);
 
             console.log('📡 正在从 Infisical 拉取配置 (SDK v4)...');
-            
+
             const response = await sdk.secrets().listSecrets({
-                environment: 'prod',
+                environment: infisicalEnv,
                 projectId: projectId,
                 secretPath: '/',
                 includeImports: true
@@ -149,7 +158,12 @@ async function syncEnv() {
     process.exit(1);
 }
 
-syncEnv().catch(err => {
-    console.error('❌ 脚本执行异常:', err);
-    process.exit(1);
-});
+const entryPoint = process.argv[1] ? path.resolve(process.argv[1]) : null;
+const scriptPath = fileURLToPath(import.meta.url);
+
+if (entryPoint === scriptPath) {
+    syncEnv().catch(err => {
+        console.error('❌ 脚本执行异常:', err);
+        process.exit(1);
+    });
+}

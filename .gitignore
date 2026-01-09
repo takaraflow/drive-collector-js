@@ -10,6 +10,10 @@ yarn-error.log*
 .env.development.local
 .env.test.local
 .env.production.local
+.env.dev
+.env.pre
+.env.prod
+.env.debug
 .roomodes
 
 # --- 运行时产生的临时文件 ---
