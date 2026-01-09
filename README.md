@@ -27,6 +27,21 @@ npm install
 
 2.  Edit the `.env` file and fill in your credentials. All required environment variables are listed in this file.
 
+## Telegram Webhook Setup
+
+If you expose your bot via webhook (for example, when `NODE_MODE` or `TG_TEST_MODE` routes traffic through a unique endpoint), register the appropriate Telegram webhook before starting the service:
+
+- **Production** – register with the standard Bot API:
+  ```bash
+  curl "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=https://yourserver.com/webhook"
+  ```
+- **Test mode** – Telegram requires `/test` between the bot token and `setWebhook`, and you can point to a dedicated test path:
+  ```bash
+  curl "https://api.telegram.org/bot${BOT_TOKEN}/test/setWebhook?url=https://yourserver.com/test-webhook"
+  ```
+
+Make sure the URL you supply for testing matches the `TG_TEST_MODE` routing you use on your load balancer or proxy.
+
 ## QStash Integration
 
 QStash is integrated as a message queuing system to enable reliable asynchronous task processing and webhook handling.

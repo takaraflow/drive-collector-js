@@ -25,6 +25,21 @@ npm install
 
 2.  编辑 `.env` 文件并填入您的凭据。所有必需的环境变量都已在此文件中列出。
 
+## Telegram Webhook 配置
+
+当您通过 webhook 暴露 Bot 时（例如 `NODE_MODE` 或 `TG_TEST_MODE` 引导到独立路由），请分别向 Telegram 注册正确的 webhook。
+
+- **正式环境**：使用标准 Bot API 路径，例如：
+  ```bash
+  curl "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=https://yourserver.com/webhook"
+  ```
+- **测试模式**：Telegram 要求在 `bot<TOKEN>` 与 `setWebhook` 之间插入 `/test`，同时可以指向专用的测试地址：
+  ```bash
+  curl "https://api.telegram.org/bot${BOT_TOKEN}/test/setWebhook?url=https://yourserver.com/test-webhook"
+  ```
+
+请确保测试 webhook 所指向的 URL 与 `TG_TEST_MODE` 所配置的路由一致，否则推送不会到达测试实例。
+
 ## QStash 集成
 
 QStash 被集成作为消息队列系统，以实现可靠的异步任务处理和 webhook 处理。
