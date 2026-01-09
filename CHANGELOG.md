@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.16.0](https://github.com/YoungSx/drive-collector-js/compare/v4.15.4...v4.16.0) (2026-01-09)
+
+
+### ✨ 新特性
+
+* enhance task status handling with Redis fallback and circuit breaker ([f50cb73](https://github.com/YoungSx/drive-collector-js/commit/f50cb733148f04840ff692ed7faca87d17b6a693))
+
 ### [4.15.4](https://github.com/YoungSx/drive-collector-js/compare/v4.15.3...v4.15.4) (2026-01-09)
 
 
