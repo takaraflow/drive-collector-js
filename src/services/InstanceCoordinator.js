@@ -1,5 +1,5 @@
 import { cache } from "./CacheService.js";
-import { qstashService } from "./QStashService.js";
+import { queueService } from "./QueueService.js";
 import { InstanceRepository } from "../repositories/InstanceRepository.js";
 import logger, { setInstanceIdProvider } from "./logger.js";
 
@@ -569,7 +569,7 @@ export class InstanceCoordinator {
      */
     async broadcast(event, data = {}) {
         try {
-            await qstashService.broadcastSystemEvent(event, {
+            await queueService.broadcastSystemEvent(event, {
                 ...data,
                 sourceInstance: this.instanceId,
                 timestamp: Date.now()

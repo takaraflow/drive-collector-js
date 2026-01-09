@@ -14,9 +14,9 @@ jest.unstable_mockModule("http", () => ({
     createServer: jest.fn(() => mockServer)
 }));
 
-// Mock QStashService
+// Mock QueueService
 const mockVerifySignature = jest.fn().mockResolvedValue(true);
-const mockQstashService = {
+const mockQueueService = {
     verifyWebhookSignature: mockVerifySignature
 };
 
@@ -38,8 +38,8 @@ jest.mock("../../src/services/telegram.js", () => ({
 }));
 
 // Mock modules
-jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
-    qstashService: mockQstashService
+jest.unstable_mockModule("../../src/services/QueueService.js", () => ({
+    queueService: mockQueueService
 }));
 
 jest.unstable_mockModule("../../src/processor/TaskManager.js", () => ({
@@ -61,8 +61,8 @@ describe("QStash Webhook Integration", () => {
             startWatchdog: jest.fn()
         }));
 
-        jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
-            qstashService: mockQstashService
+        jest.unstable_mockModule("../../src/services/QueueService.js", () => ({
+            queueService: mockQueueService
         }));
 
         jest.unstable_mockModule("../../src/processor/TaskManager.js", () => ({

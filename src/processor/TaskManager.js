@@ -15,7 +15,7 @@ import { TaskRepository } from "../repositories/TaskRepository.js";
 import { d1 } from "../services/d1.js";
 import { cache } from "../services/CacheService.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
-import { qstashService } from "../services/QStashService.js";
+import { queueService } from "../services/QueueService.js";
 import { logger } from "../services/logger.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 
@@ -456,7 +456,7 @@ export class TaskManager {
                 }
             };
 
-            await qstashService.enqueueDownloadTask(task.id, taskPayload);
+            await queueService.enqueueDownloadTask(task.id, taskPayload);
             log.info("Task enqueued for download", { 
                 taskId: task.id, 
                 service: 'qstash',
@@ -472,7 +472,7 @@ export class TaskManager {
      */
     static async _enqueueUploadTask(task) {
         try {
-            await qstashService.enqueueUploadTask(task.id, {
+            await queueService.enqueueUploadTask(task.id, {
                 userId: task.userId,
                 chatId: task.chatId,
                 msgId: task.msgId,
@@ -807,7 +807,7 @@ export class TaskManager {
                         await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
                     }
                     this.activeProcessors.delete(id);
-                    await qstashService.enqueueUploadTask(task.id, {
+                    await queueService.enqueueUploadTask(task.id, {
                         userId: task.userId,
                         chatId: task.chatId,
                         msgId: task.msgId,
@@ -842,7 +842,7 @@ export class TaskManager {
 
                 // 触发上传 Webhook
                 this.activeProcessors.delete(id);
-                await qstashService.enqueueUploadTask(task.id, {
+                await queueService.enqueueUploadTask(task.id, {
                     userId: task.userId,
                     chatId: task.chatId,
                     msgId: task.msgId,

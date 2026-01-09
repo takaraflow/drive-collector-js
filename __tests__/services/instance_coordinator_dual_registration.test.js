@@ -66,9 +66,9 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
             default: { cache: mockCache }
         }));
 
-        // 处理 QStash 依赖，防止 import InstanceCoordinator 时报错
-        jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
-            qstashService: {
+        // 处理 QueueService 依赖，防止 import InstanceCoordinator 时报错
+        jest.unstable_mockModule("../../src/services/QueueService.js", () => ({
+            queueService: {
                 broadcastSystemEvent: jest.fn().mockResolvedValue(undefined)
             }
         }));

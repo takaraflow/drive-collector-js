@@ -101,12 +101,12 @@ jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
     cache: {}
 }));
 
-const mockQstashService = {
+const mockQueueService = {
     enqueueUploadTask: jest.fn(),
     enqueueDownloadTask: jest.fn()
 };
-jest.unstable_mockModule("../../src/services/QStashService.js", () => ({
-    qstashService: mockQstashService
+jest.unstable_mockModule("../../src/services/QueueService.js", () => ({
+    queueService: mockQueueService
 }));
 
 // Mock fs
@@ -156,7 +156,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "completed");
         expect(mockClient.downloadMedia).not.toHaveBeenCalled(); // Skipped download
         // Should NOT enqueue upload task
-        expect(mockQstashService.enqueueUploadTask).not.toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
         expect(TaskManager.activeProcessors.has("task_1")).toBe(false);
     });
 
@@ -176,7 +176,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "downloaded");
 
         // Should enqueue upload task via QStash
-        expect(mockQstashService.enqueueUploadTask).toHaveBeenCalledWith("task_1", expect.objectContaining({
+        expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith("task_1", expect.objectContaining({
             userId: "user_1",
             chatId: "chat_1",
             msgId: 100,
@@ -202,7 +202,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "downloaded");
 
         // Should enqueue upload task via QStash
-        expect(mockQstashService.enqueueUploadTask).toHaveBeenCalledWith("task_1", expect.objectContaining({
+        expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith("task_1", expect.objectContaining({
             userId: "user_1",
             chatId: "chat_1",
             msgId: 100,
@@ -248,7 +248,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         });
 
         // Mock enqueueUploadTask to track when it's called
-        mockQstashService.enqueueUploadTask.mockImplementation(async () => {
+        mockQueueService.enqueueUploadTask.mockImplementation(async () => {
             callOrder.push("enqueueUpload");
         });
 
