@@ -86,7 +86,8 @@ export class NetworkDiagnostic {
             }
 
             // 使用 Bot API 的 getMe 方法验证token
-            const response = await fetch(`https://api.telegram.org/bot${config.botToken}/getMe`, {
+            const botApiPrefix = `https://api.telegram.org/bot${config.botToken}${config.telegram.testMode ? "/test" : ""}`;
+            const response = await fetch(`${botApiPrefix}/getMe`, {
                 method: 'GET',
                 timeout: 10000
             });
