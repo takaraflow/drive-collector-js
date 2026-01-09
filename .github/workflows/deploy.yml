@@ -11,7 +11,7 @@ permissions:
 jobs:
   deploy-with-secrets:
     runs-on: ubuntu-latest
-    environment: Actions
+    environment: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'develop' && 'pre' || 'dev' }}
     env:
       INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
       # Use secret for project ID to support both GHA vars and local 'act' secrets
