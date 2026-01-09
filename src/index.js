@@ -538,7 +538,17 @@ async function selectInstanceByLock(instances, env, ctx, parentLogger = logger) 
     parsed = safeJsonParse(lockValue.value, 'lockOwner.value') || lockValue;
   }
 
-  const lockOwnerId = parsed?.instanceId || parsed?.ownerId || parsed?.owner || parsed?.id;
+  const lockOwnerId = parsed?.instanceId || parsed?.instanced || parsed?.ownerId || parsed?.owner || parsed?.id;
+  const acquiredAt = Number(parsed?.acquiredAt || parsed?.acquired_at || 0);
+  const ttlSeconds = Number(parsed?.ttl || parsed?.expiresIn || 0);
+
+  if (ttlSeconds > 0 && acquiredAt > 0) {
+    const expiresAt = acquiredAt + ttlSeconds * 1000;
+    if (Date.now() > expiresAt) {
+      await lockRoutingLogger.debug('🔍 锁已过期，回退轮询', { lockKey: TELEGRAM_LOCK_KEY, acquiredAt, ttlSeconds }, ctx);
+      return null;
+    }
+  }
   if (!lockOwnerId) {
     await lockRoutingLogger.debug('⚠️ 锁值缺少实例信息，回退轮询', { lockKey: TELEGRAM_LOCK_KEY }, ctx);
     return null;
