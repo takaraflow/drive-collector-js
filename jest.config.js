@@ -18,6 +18,10 @@ export default {
     '^@microlabs/otel-cf-workers$': '<rootDir>/__tests__/mocks/otel-cf-workers.js',
     '^@opentelemetry/api$': '<rootDir>/__tests__/mocks/opentelemetry-api.js',
     '^redis-on-workers$': '<rootDir>/__tests__/mocks/redis-on-workers.js',
+    '^\\./CloudflareKVCache\\.js$': '<rootDir>/__tests__/mocks/cloudflare-kv-cache.js',
+    '^\\./RedisTLSCache\\.js$': '<rootDir>/__tests__/mocks/redis-tls-cache.js',
+    '^../cache/CloudflareKVCache\\.js$': '<rootDir>/__tests__/mocks/cloudflare-kv-cache.js',
+    '^../cache/RedisTLSCache\\.js$': '<rootDir>/__tests__/mocks/redis-tls-cache.js',
   },
   setupFilesAfterEnv: ['<rootDir>/__tests__/jest.setup.js'],
   // 移除 fakeTimers 配置，由 setupFilesAfterEnv 统一管理

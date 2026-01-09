@@ -20,6 +20,8 @@ import { Receiver } from '@upstash/qstash';
 import { createRedis } from 'redis-on-workers';
 // 导入新的缓存客户端抽象
 import { getNFCacheClient } from './cache/client-factory.js';
+// 导入 CacheService（新的统一缓存系统，优先于旧配置）
+import { CacheService, cacheService } from './cache/CacheService.js';
 
 const ENV_ALIASES = {
   development: 'dev',
@@ -807,17 +809,43 @@ async function retryRedisCommand(client, command, args = [], maxRetries = 3, ini
 }
 
 /**
- * 获取 Redis TLS Client (使用新的缓存客户端抽象)
+ * 获取 Redis TLS Client (优先使用 CACHE_PROVIDERS，fallback 到旧配置)
  */
 let redisClient = null;
 let redisInitPromise = null;
+let cacheServiceInstance = null;
 
 async function getRedisClient(env, ctx) {
   const getRedisClientLogger = logger.child({ module: 'getRedisClient' });
+
+  // 测试环境 mock
   if (isTestEnvironment && typeof __test_getRedisClient === 'function') {
     const mockClient = __test_getRedisClient();
     if (mockClient) return mockClient;
   }
+
+  // 优先使用 CACHE_PROVIDERS
+  if (env.CACHE_PROVIDERS) {
+    if (!cacheServiceInstance) {
+      cacheServiceInstance = new CacheService({ env });
+    }
+    await cacheServiceInstance.initialize();
+
+    if (cacheServiceInstance.primaryProvider) {
+      await getRedisClientLogger.info('使用 CACHE_PROVIDERS 缓存系统', {
+        provider: cacheServiceInstance.getCurrentProvider()
+      }, ctx);
+      return {
+        get: (key) => cacheServiceInstance.get(key, 'string'),
+        set: (key, value, ttl) => cacheServiceInstance.set(key, value, ttl),
+        send: undefined, // CacheService 不支持 send
+        connect: () => Promise.resolve(),
+        disconnect: () => cacheServiceInstance.destroy()
+      };
+    }
+  }
+
+  // Fallback: 使用旧的 NFCacheClient
   if (redisClient) return redisClient;
 
   // 如果已经在初始化了，直接返回同一个 Promise
@@ -831,7 +859,7 @@ async function getRedisClient(env, ctx) {
         NF_REDIS_URL: env.NF_REDIS_URL || env.REDIS_TLS_URL,
         NF_REDIS_PASSWORD: env.NF_REDIS_PASSWORD || env.REDIS_TLS_PASSWORD
       };
-      
+
       const client = getNFCacheClient(effectiveEnv);
       await client.connect();
       redisClient = client;
@@ -849,23 +877,55 @@ async function getRedisClient(env, ctx) {
 }
 
 /**
- * 执行 Redis TLS 操作 (使用新的缓存客户端抽象)
+ * 执行 Redis TLS 操作 (优先使用 CACHE_PROVIDERS，fallback 到旧配置)
  */
 async function executeRedis(operation, env, key, value = null, ctx = null) {
-  // 同时支持 NF_REDIS_* 和 REDIS_TLS_* 两种环境变量
+  // 优先使用 CACHE_PROVIDERS
+  if (env.CACHE_PROVIDERS) {
+    if (!cacheServiceInstance) {
+      cacheServiceInstance = new CacheService({ env });
+    }
+    await cacheServiceInstance.initialize();
+
+    const start = Date.now();
+    try {
+      switch (operation) {
+        case '_redis_get':
+        case '_kv_get': {
+          const result = await cacheServiceInstance.get(key, 'string');
+          await logger.debug(`executeRedis GET (CacheService): key=${key}, result=${result}, duration=${Date.now() - start}ms`, {}, ctx);
+          return result;
+        }
+        case '_redis_put':
+        case '_kv_put': {
+          const valStr = typeof value === 'string' ? value : JSON.stringify(value);
+          await cacheServiceInstance.set(key, valStr, 3600);
+          await logger.debug(`executeRedis PUT (CacheService): key=${key}, duration=${Date.now() - start}ms`, {}, ctx);
+          return true;
+        }
+        default:
+          throw new Error(`Unsupported Redis operation: ${operation}`);
+      }
+    } catch (e) {
+      await logger.error(`executeRedis error (CacheService): ${e.message}`, {}, ctx);
+      throw e;
+    }
+  }
+
+  // Fallback: 使用旧的 NFCacheClient
   const redisUrl = env.NF_REDIS_URL || env.REDIS_TLS_URL;
   const redisPassword = env.NF_REDIS_PASSWORD || env.REDIS_TLS_PASSWORD;
-  
+
   if (!redisUrl) {
     throw new Error('Redis URL not found in environment variables.');
   }
-  
+
   const client = await getRedisClient({
     NF_REDIS_URL: redisUrl,
     NF_REDIS_PASSWORD: redisPassword
   }, ctx);
   const start = Date.now();
-  
+
   try {
     switch (operation) {
       case '_redis_get':
@@ -908,11 +968,24 @@ async function executeRedis(operation, env, key, value = null, ctx = null) {
 }
 
 /**
- * 执行 Redis TLS Scan 操作 (使用新的缓存客户端抽象)
+ * 执行 Redis TLS Scan 操作 (优先使用 CACHE_PROVIDERS，fallback 到旧配置)
  */
 async function executeRedisScan(env, prefix, ctx = null) {
   const scanLogger = logger.child({ module: 'executeRedisScan', logBuffer: ctx?.logBuffer });
-  // 同时支持 NF_REDIS_* 和 REDIS_TLS_* 两种环境变量
+
+  // 优先使用 CACHE_PROVIDERS
+  if (env.CACHE_PROVIDERS) {
+    if (!cacheServiceInstance) {
+      cacheServiceInstance = new CacheService({ env });
+    }
+    await cacheServiceInstance.initialize();
+
+    const keys = await cacheServiceInstance.listKeys(prefix);
+    await scanLogger.debug(`executeRedisScan (CacheService): prefix=${prefix}, keysFound=${keys.length}`, {}, ctx);
+    return { keys: keys.map(k => ({ name: k })) };
+  }
+
+  // Fallback: 使用旧的 NFCacheClient
   const redisUrl = env.NF_REDIS_URL || env.REDIS_TLS_URL;
   const redisPassword = env.NF_REDIS_PASSWORD || env.REDIS_TLS_PASSWORD;
 
@@ -979,15 +1052,40 @@ async function executeRedisScan(env, prefix, ctx = null) {
 }
 
 /**
- * 检查 Redis 健康状况 (使用新的缓存客户端抽象)
+ * 检查 Redis 健康状况 (优先使用 CACHE_PROVIDERS，fallback 到旧配置)
  */
 async function checkRedisHealth(env, ctx, executor = executeWithPriorityFallback) {
   const checkRedisHealthLogger = logger.child({ module: 'checkRedisHealth' });
   try {
-    // 同时支持 NF_REDIS_* 和 REDIS_TLS_* 两种环境变量
+    // 优先使用 CACHE_PROVIDERS
+    if (env.CACHE_PROVIDERS) {
+      if (!cacheServiceInstance) {
+        cacheServiceInstance = new CacheService({ env });
+      }
+      await cacheServiceInstance.initialize();
+
+      if (cacheServiceInstance.primaryProvider) {
+        const provider = cacheServiceInstance.getCurrentProvider();
+        const start = Date.now();
+        try {
+          if (cacheServiceInstance.primaryProvider.ping) {
+            await cacheServiceInstance.primaryProvider.ping();
+          } else {
+            await cacheServiceInstance.get('healthcheck_ping');
+          }
+          const duration = Date.now() - start;
+          await checkRedisHealthLogger.info(`Redis 健康检查成功 (CacheService, provider=${provider})`, { duration: `${duration}ms`, provider }, ctx);
+          return true;
+        } catch (pingError) {
+          await checkRedisHealthLogger.warn(`CacheService Redis PING 健康检查失败: ${pingError.message}`, { provider }, ctx);
+        }
+      }
+    }
+
+    // Fallback: 使用旧的 NFCacheClient
     const redisUrl = env.NF_REDIS_URL || env.REDIS_TLS_URL;
     const redisPassword = env.NF_REDIS_PASSWORD || env.REDIS_TLS_PASSWORD;
-    
+
     // 如果配置了 Redis，直接通过 PING 命令检查健康状况
     if (redisUrl) {
       try {
@@ -1284,7 +1382,8 @@ export {
   executeUpstashScan,
   scanLockKeys,
   checkRedisHealth,
-  handleRequest
+  handleRequest,
+  CacheService
 };
 
 // 状态访问器（供测试使用）
