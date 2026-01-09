@@ -503,8 +503,22 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
       await scanLockKeys(env, ctx, parentLogger);
     }
 
-    await getActiveInstancesLogger.debug('👥 获取活跃实例完成 (Active instances fetched)', { count: instances.length, totalKeys: allKeys.length }, ctx);
-    return instances;
+    // 去重：同一个实例 ID 只保留一次（防止脏数据导致重复）
+    const uniqueInstances = [];
+    const seenInstanceIds = new Set();
+    for (const inst of instances) {
+      if (!inst || !inst.id) continue;
+      if (seenInstanceIds.has(inst.id)) continue;
+      seenInstanceIds.add(inst.id);
+      uniqueInstances.push(inst);
+    }
+
+    if (uniqueInstances.length !== instances.length) {
+      await getActiveInstancesLogger.debug('去重后实例列表', { before: instances.map(i => i?.id), after: uniqueInstances.map(i => i.id) }, ctx);
+    }
+
+    await getActiveInstancesLogger.debug('👥 获取活跃实例完成 (Active instances fetched)', { count: uniqueInstances.length, totalKeys: allKeys.length }, ctx);
+    return uniqueInstances;
   } catch (error) {
     await getActiveInstancesLogger.error('获取活跃实例失败', { error: error.message }, ctx);
     return [];
