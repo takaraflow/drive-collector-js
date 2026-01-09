@@ -572,10 +572,17 @@ async function forwardToInstance(instance, normalizedUrl, request, originalBody,
   }
 
   const forwardRequest = new Request(url.toString(), requestOptions);
+  await forwardToInstanceLogger.info('转发请求到实例', { 
+    instanceId: instance.id, 
+    targetUrl: url.toString(),
+    originalPath: normalizedUrl.pathname
+  }, ctx);
   const response = await fetch(forwardRequest);
 
   if (response.status >= 500) {
     await forwardToInstanceLogger.warn('后端返回 5xx 错误', { status: response.status, instanceId: instance.id }, ctx);
+  } else if (response.status >= 400 && response.status < 500) {
+    await forwardToInstanceLogger.warn('后端返回 4xx 错误', { status: response.status, statusText: response.statusText, instanceId: instance.id, targetUrl: url.toString() }, ctx);
   }
 
   return response;
