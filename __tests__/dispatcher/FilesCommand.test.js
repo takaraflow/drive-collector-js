@@ -24,7 +24,7 @@ jest.unstable_mockModule('../../src/services/telegram.js', () => ({
   client: mockClient,
   isClientActive: jest.fn(() => true),
   getUpdateHealth: jest.fn(() => ({
-    lastUpdate: Date.now() - 30000,
+    lastUpdate: 1699970000000,
     timeSince: 30000
   }))
 }));

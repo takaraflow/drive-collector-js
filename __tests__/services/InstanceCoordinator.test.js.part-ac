@@ -1,0 +1,100 @@
+      let getCallCount = 0;
+      cache.get = jest.fn().mockImplementation(() => {
+        getCallCount++;
+        if (getCallCount === 1) {
+          return Promise.resolve(null); // First call - no existing lock
+        } else {
+          return Promise.resolve({    // Second call - verification
+            instanceId: "test_instance_123",
+            acquiredAt: expectedTime,
+            ttl: 300
+          });
+        }
+      });
+      cache.set = jest.fn().mockResolvedValue(true);
+
+      const result = await instanceCoordinator.acquireLock("test_lock");
+      expect(result).toBe(true);
+
+      dateSpy.mockRestore();
+      cache.get = originalGet;
+      cache.set = originalSet;
+    });
+
+    test("should fail to acquire lock when already held by another instance", async () => {
+      const expectedTime = 1234567890;
+      const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
+      const existingLock = {
+        instanceId: "other_instance",
+        acquiredAt: expectedTime,
+        ttl: 300,
+      };
+
+      const originalGet = cache.get;
+      cache.get = jest.fn().mockResolvedValue(existingLock);
+
+      const result = await instanceCoordinator.acquireLock("test_lock", 300, { maxAttempts: 1 });
+      expect(result).toBe(false);
+
+      dateSpy.mockRestore();
+      cache.get = originalGet;
+    });
+
+    test("should acquire lock when existing lock is expired", async () => {
+      const expectedTime = 1234567890;
+      const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
+      
+      const expiredLock = {
+        instanceId: "other_instance",
+        acquiredAt: expectedTime - 400000, // 400 seconds ago (TTL is 300)
+        ttl: 300,
+      };
+
+      const originalGet = cache.get;
+      const originalSet = cache.set;
+      
+      let getCallCount = 0;
+      cache.get = jest.fn().mockImplementation(() => {
+        getCallCount++;
+        if (getCallCount === 1) {
+          return Promise.resolve(expiredLock); // First call - expired lock
+        } else {
+          return Promise.resolve({            // Second call - verification
+            instanceId: "test_instance_123",
+            acquiredAt: expectedTime,
+            ttl: 300
+          });
+        }
+      });
+      cache.set = jest.fn().mockResolvedValue(true);
+
+      const result = await instanceCoordinator.acquireLock("test_lock");
+      expect(result).toBe(true);
+
+      dateSpy.mockRestore();
+      cache.get = originalGet;
+      cache.set = originalSet;
+    });
+
+    test("should acquire lock when existing lock owner is offline (preemption)", async () => {
+        const expectedTime = 1234567890;
+        const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
+        
+        const existingLock = {
+            instanceId: "offline_instance",
+            acquiredAt: expectedTime - 100, // Not expired by TTL
+            ttl: 300,
+        };
+
+        const originalGet = cache.get;
+        const originalSet = cache.set;
+        
+        let getCallCount = 0;
+        const getSpy = jest.fn().mockImplementation((key) => {
+            getCallCount++;
+            if (getCallCount === 1) {
+                return Promise.resolve(existingLock); // First call in _tryAcquire - see existing lock
+            } else if (getCallCount === 2) {
+                return Promise.resolve(null);         // Preemption check - ownerKey is null (offline)
+            } else {
+                return Promise.resolve({             // Verification after set

@@ -1,13 +1,5 @@
 import { jest, describe, test, expect, beforeEach, afterEach, afterAll, beforeAll } from "@jest/globals";
-
-// ================== 核心：截断递归备份 ==================
-const nativeConsole = {
-    error: console.error,
-    warn: console.warn,
-    log: console.log,
-    info: console.info,
-    debug: console.debug
-};
+import { nativeConsole } from "../setup/consoleMock.js";
 
 // ================== 1. Mock Axiom ==================
 jest.unstable_mockModule('@axiomhq/js', () => ({

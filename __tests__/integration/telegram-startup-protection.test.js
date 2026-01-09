@@ -7,8 +7,7 @@ global.fetch = mockFetch;
 
 
 describe("Telegram Startup Protection and Re-entrance Prevention", () => {
-    // Increase timeout for slow async operations
-    jest.setTimeout(60000);
+    // Remove jest.setTimeout - use fake timers instead
     let mockClient;
     let mockCoordinator;
     let mockSettingsRepository;

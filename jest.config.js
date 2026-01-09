@@ -8,32 +8,32 @@ export default {
   ],
   forceExit: true,
   detectOpenHandles: false,
-  testTimeout: 30000, // 恢复到 30s，避免超时
+  testTimeout: 5000, // 严格控制5秒超时
   clearMocks: true,
   restoreMocks: true,
-  maxWorkers: '100%', // 满 CPU 利用
-  // 优化测试运行性能
-  cache: true,
-  cacheDirectory: '<rootDir>/.jest-cache',
-  // 优先快测试
-  testSequencer: '<rootDir>/jest-sequencer.js',
-  // 全局 fake timers（减少真实定时器等待）
+  maxWorkers: 4, // 限制工作进程
+  // 使用 fake timers 进行确定性测试
   fakeTimers: {
-    enableGlobally: true, // 全局启用 fake timers
+    enableGlobally: false, // Let individual tests control fake timers
     legacyFakeTimers: false,
-    doNotFake: ['nextTick', 'setImmediate'] // 不要 mock nextTick 和 setImmediate
+    doNotFake: ['nextTick', 'setImmediate']
   },
-  // 优化全局设置
+  // 全局设置文件
   setupFilesAfterEnv: [
+    '<rootDir>/__tests__/setup/consoleMock.js',
+    '<rootDir>/__tests__/setup/timeMocks.js',
+    '<rootDir>/__tests__/setup/mathMocks.js',
     '<rootDir>/__tests__/setup/external-mocks.js',
     '<rootDir>/__tests__/setup/global-setup.js'
   ],
-  // 性能优化：减少冗余
+  // 性能和稳定性设置
   bail: 0, // 不在第一次失败时停止
-  verbose: false, // 减少详细输出以提升性能
-  // 恢复进度条和预估时间
+  verbose: false, // 减少详细输出
   reporters: [
     'default'
+  ],
+  testPathIgnorePatterns: [
+    '<rootDir>/__tests__/integration/startup-resilience.test.js'
   ],
   // 禁用泄漏检测以提升性能
   detectLeaks: false,

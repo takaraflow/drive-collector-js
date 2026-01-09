@@ -5,7 +5,7 @@ const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
 // Mock logger
-await jest.unstable_mockModule("../../src/services/logger.js", () => ({
+await jest.unstable_mockModule("../../../src/services/logger.js", () => ({
     logger: {
         info: jest.fn(),
         warn: jest.fn(),

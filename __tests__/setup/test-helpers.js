@@ -1,9 +1,7 @@
 import { jest } from '@jest/globals';
 import { Api } from 'telegram';
 import { stopWatchdog as stopTelegramWatchdog } from "../../src/services/telegram.js";
-import { cache as cacheService } from "../../src/services/CacheService.js";
-import { instanceCoordinator } from "../../src/services/InstanceCoordinator.js";
-import { mockRedisClient } from "./external-mocks.js";
+import { mockRedisClient, mockCache } from "./external-mocks.js";
 
 /**
  * 创建模拟的Telegram消息事件
@@ -135,16 +133,16 @@ export async function cleanupSingletonTimers() {
     })()
   );
 
-  // 清理 KV 服务定时器 - 使用静态导入的缓存实例
+  // 清理 KV 服务定时器 - 使用动态导入的缓存实例
   cleanupPromises.push(
     (async () => {
       try {
-        if (cacheService) {
-          if (cacheService.destroy) {
-            await cacheService.destroy();
+        if (mockCache) {
+          if (mockCache.destroy) {
+            await mockCache.destroy();
           }
-          if (cacheService.stopRecoveryCheck) cacheService.stopRecoveryCheck();
-          if (cacheService.stopHeartbeat) cacheService.stopHeartbeat();
+          if (mockCache.stopRecoveryCheck) mockCache.stopRecoveryCheck();
+          if (mockCache.stopHeartbeat) mockCache.stopHeartbeat();
         }
       } catch (error) {
         // console.warn('Failed to cleanup CacheService timers:', error.message);
@@ -152,19 +150,8 @@ export async function cleanupSingletonTimers() {
     })()
   );
 
-  // 清理 InstanceCoordinator 定时器 - 使用静态导入的实例
-  cleanupPromises.push(
-    (async () => {
-      try {
-        if (instanceCoordinator && instanceCoordinator.stopHeartbeat) {
-          instanceCoordinator.stopHeartbeat();
-        }
-      } catch (error) {
-        // console.warn('Failed to cleanup InstanceCoordinator timers:', error.message);
-      }
-    })()
-  );
 
+  // 清理 InstanceCoordinator 定时器 - 使用动态导入的实例
   // 清理 Redis mock listeners - 使用静态导入的 mock
   cleanupPromises.push(
     (async () => {

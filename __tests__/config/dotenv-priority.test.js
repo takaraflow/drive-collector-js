@@ -1,38 +1,69 @@
 import { describe, test, expect, beforeEach, afterEach, jest } from "@jest/globals";
 
-const originalEnv = process.env;
-
 describe("dotenv priority in config", () => {
+  let originalProcessEnv;
+  let mockDotEnvConfig;
+
   beforeEach(() => {
     jest.resetModules();
+    jest.clearAllMocks();
+    
+    // Save original process.env
+    originalProcessEnv = { ...process.env };
+    
+    // Mock dotenv
+    mockDotEnvConfig = jest.fn();
+    
+    // Mock dotenv module before any imports
+    jest.mock('dotenv', () => ({
+      config: mockDotEnvConfig
+    }));
   });
 
   afterEach(() => {
-    process.env = originalEnv;
     jest.restoreAllMocks();
+    // Restore process.env
+    process.env = originalProcessEnv;
   });
 
   test("should override system env with .env in non-test environment", async () => {
-    process.env = { ...originalEnv, NODE_ENV: "dev" };
-    const configSpy = jest.fn();
+    // Mock process.env for non-test environment
+    process.env = {
+      ...originalProcessEnv,
+      NODE_ENV: 'development' // Not 'test'
+    };
 
-    await jest.unstable_mockModule("dotenv", () => ({
-      default: { config: configSpy }
-    }));
+    // Import config module (it will use mocked dotenv)
+    const config = await import('../../src/config/index.js');
 
-    await import("../../src/config/index.js");
-    expect(configSpy).toHaveBeenCalledWith({ override: true, path: ".env" });
+    // Verify dotenv was called with override: true for non-test env
+    expect(mockDotEnvConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        override: true,
+        path: '.env'
+      })
+    );
   });
 
   test("should not override system env in test environment", async () => {
-    process.env = { ...originalEnv, NODE_ENV: "test" };
-    const configSpy = jest.fn();
+    // Mock process.env for test environment
+    process.env = {
+      ...originalProcessEnv,
+      NODE_ENV: 'test'
+    };
 
-    await jest.unstable_mockModule("dotenv", () => ({
-      default: { config: configSpy }
-    }));
+    // Reset mock for clean test
+    mockDotEnvConfig.mockClear();
 
-    await import("../../src/config/index.js");
-    expect(configSpy).toHaveBeenCalledWith({ override: false, path: ".env.test" });
+    // Import config module
+    const config = await import('../../src/config/index.js');
+
+    // Verify dotenv was called with override: false for test env
+    expect(mockDotEnvConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        override: false,
+        path: '.env.test'
+      })
+    );
   });
 });

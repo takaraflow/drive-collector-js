@@ -2,7 +2,7 @@ import { jest, describe, test, expect, beforeEach } from "@jest/globals";
 import { BaseCache } from "../../../src/services/cache/BaseCache.js";
 
 // Mock logger
-await jest.unstable_mockModule("../../src/services/logger.js", () => ({
+await jest.unstable_mockModule("../../../src/services/logger.js", () => ({
     logger: {
         info: jest.fn(),
         warn: jest.fn(),

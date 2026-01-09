@@ -8,10 +8,14 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
         jest.useFakeTimers();
         
         mockClient = {
-            disconnect: jest.fn(() => new Promise(resolve => {
-                // 模拟断开连接需要 2 秒
-                setTimeout(resolve, 2000);
-            })),
+            disconnect: jest.fn(() => {
+                // Use fake timer instead of real setTimeout
+                return new Promise(resolve => {
+                    // This will be resolved by advanceTimersByTimeAsync
+                    const timer = setTimeout(resolve, 2000);
+                    return timer;
+                });
+            }),
             start: jest.fn().mockResolvedValue(undefined),
             connected: true
         };
@@ -46,7 +50,10 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
                     // 核心逻辑：Promise.race 保护
                     await Promise.race([
                         mockClient.disconnect(),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error("Disconnect Timeout")), 5000))
+                        new Promise((_, reject) => {
+                            const timer = setTimeout(() => reject(new Error("Disconnect Timeout")), 5000);
+                            return timer;
+                        })
                     ]);
                 } catch (e) {
                     console.log("⚠️ 断开连接时出错:", e.message);

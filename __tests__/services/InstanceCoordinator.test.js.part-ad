@@ -1,0 +1,100 @@
+                    instanceId: "test_instance_123",
+                    acquiredAt: expectedTime,
+                    ttl: 300
+                });
+            }
+        });
+        const setSpy = jest.fn().mockResolvedValue(true);
+        cache.get = getSpy;
+        cache.set = setSpy;
+
+        const result = await instanceCoordinator.acquireLock("test_lock");
+        expect(result).toBe(true);
+        
+        // Verify set was called
+        expect(setSpy).toHaveBeenCalled();
+        // Verify preemption check was done for the correct instance
+        expect(getSpy).toHaveBeenCalledWith("instance:offline_instance", "json", expect.any(Object));
+
+        dateSpy.mockRestore();
+        cache.get = originalGet;
+        cache.set = originalSet;
+    });
+
+    test("should fail when double-check verification fails (race condition)", async () => {
+      const expectedTime = 1234567890;
+      const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
+      const originalGet = cache.get;
+      const originalSet = cache.set;
+      
+      let getCallCount = 0;
+      cache.get = jest.fn().mockImplementation(() => {
+        getCallCount++;
+        if (getCallCount === 1) {
+          return Promise.resolve(null); // First call - no existing lock
+        } else {
+          return Promise.resolve({    // Second call - verification shows race condition
+            instanceId: "other_instance", // Different instance!
+            acquiredAt: expectedTime,
+            ttl: 300
+          });
+        }
+      });
+      cache.set = jest.fn().mockResolvedValue(true);
+
+      const result = await instanceCoordinator.acquireLock("test_lock", 300, { maxAttempts: 1 });
+      expect(result).toBe(false); // Should fail due to race condition
+
+      dateSpy.mockRestore();
+      cache.get = originalGet;
+      cache.set = originalSet;
+    });
+
+    test("should succeed even if KV returns old self-owned lock (KV eventual consistency)", async () => {
+      const expectedTime = 1234567890;
+      const oldTime = expectedTime - 30000; // 30s ago
+      
+      const originalGet = cache.get;
+      const originalSet = cache.set;
+      
+      cache.get = jest.fn().mockImplementation(() => {
+        return Promise.resolve({          // Both calls return old lock
+          instanceId: "test_instance_123",
+          acquiredAt: oldTime,
+          ttl: 300
+        });
+      });
+      cache.set = jest.fn().mockResolvedValue(true);
+
+      const result = await instanceCoordinator.acquireLock("test_lock");
+      expect(result).toBe(true); // Should succeed because instanceId matches
+
+      cache.get = originalGet;
+      cache.set = originalSet;
+    });
+
+    test("should succeed when double-check verification passes", async () => {
+      const expectedTime = 1234567890;
+      
+      // Mock Date.now to return consistent version
+      const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
+      
+      const originalGet = cache.get;
+      const originalSet = cache.set;
+      
+      let getCallCount = 0;
+      cache.get = jest.fn().mockImplementation(() => {
+        getCallCount++;
+        if (getCallCount === 1) {
+          return Promise.resolve(null); // First call - no existing lock
+        } else {
+          return Promise.resolve({    // Second call - verification passes
+            instanceId: "test_instance_123",
+            acquiredAt: expectedTime,
+            ttl: 300
+          });
+        }
+      });
+      cache.set = jest.fn().mockResolvedValue(true);
+
+      const result = await instanceCoordinator.acquireLock("test_lock");

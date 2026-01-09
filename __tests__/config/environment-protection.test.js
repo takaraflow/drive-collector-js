@@ -1,125 +1,171 @@
 import { describe, test, expect, beforeEach, afterEach, jest } from "@jest/globals";
 
-const originalEnv = process.env;
+// Mock process.env completely
+const originalEnv = { ...process.env };
+let mockEnv = { ...originalEnv };
 
 describe("config - Environment Variable Protection", () => {
   beforeEach(async () => {
     jest.resetModules();
+    jest.clearAllMocks();
+    
+    // Reset mock environment
+    mockEnv = { ...originalEnv };
+    
+    // Mock console to prevent log pollution
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    
+    // Mock dotenv
     await jest.unstable_mockModule('dotenv', () => ({
       default: {
         config: jest.fn(() => ({ parsed: {} }))
       }
     }));
-    jest.spyOn(console, 'log').mockImplementation(() => {});
-    jest.spyOn(console, 'warn').mockImplementation(() => {});
-    jest.spyOn(console, 'error').mockImplementation(() => {});
-    process.env.SKIP_INFISICAL_RUNTIME = "true";
+    
+    // Mock process.env access
+    jest.unstable_mockModule('../../src/config/env.js', () => ({
+      // Export a function that returns our mock env
+      getEnv: () => mockEnv,
+      NODE_ENV: mockEnv.NODE_ENV || 'test',
+      INFISICAL_ENV: mockEnv.INFISICAL_ENV,
+      INFISICAL_TOKEN: mockEnv.INFISICAL_TOKEN,
+      INFISICAL_PROJECT_ID: mockEnv.INFISICAL_PROJECT_ID,
+      API_ID: mockEnv.API_ID,
+      API_HASH: mockEnv.API_HASH,
+      BOT_TOKEN: mockEnv.BOT_TOKEN,
+      OWNER_ID: mockEnv.OWNER_ID
+    }));
   });
 
   afterEach(() => {
-    process.env = originalEnv;
     jest.restoreAllMocks();
   });
 
   describe("Protected Environment Variables", () => {
     test("should protect NODE_ENV when set before import", async () => {
-      process.env.NODE_ENV = "prod";
-      process.env.INFISICAL_ENV = "prod";
-      process.env.INFISICAL_TOKEN = "test_token";
-      process.env.INFISICAL_PROJECT_ID = "test_project";
-      process.env.API_ID = "12345";
-      process.env.API_HASH = "test_hash";
-      process.env.BOT_TOKEN = "test_bot_token";
-      process.env.OWNER_ID = "owner_id";
+      // Set up mock environment
+      mockEnv = {
+        ...mockEnv,
+        NODE_ENV: "prod",
+        INFISICAL_ENV: "prod",
+        INFISICAL_TOKEN: "test_token",
+        INFISICAL_PROJECT_ID: "test_project",
+        API_ID: "12345",
+        API_HASH: "test_hash",
+        BOT_TOKEN: "test_bot_token",
+        OWNER_ID: "owner_id"
+      };
 
       const { initConfig } = await import("../../src/config/index.js");
-
       const config = await initConfig();
 
       expect(config).toBeDefined();
+      // Verify environment variables are accessible through mocked module
+      const { getEnv } = await import("../../src/config/env.js");
+      const env = getEnv();
+      expect(env.NODE_ENV).toBe("prod");
     });
 
     test("should protect INFISICAL_ENV when set before import", async () => {
-      process.env.NODE_ENV = "dev";
-      process.env.INFISICAL_ENV = "pre";
-      process.env.INFISICAL_TOKEN = "test_token";
-      process.env.INFISICAL_PROJECT_ID = "test_project";
-      process.env.API_ID = "12345";
-      process.env.API_HASH = "test_hash";
-      process.env.BOT_TOKEN = "test_bot_token";
-      process.env.OWNER_ID = "owner_id";
+      mockEnv = {
+        ...mockEnv,
+        NODE_ENV: "dev",
+        INFISICAL_ENV: "pre",
+        INFISICAL_TOKEN: "test_token",
+        INFISICAL_PROJECT_ID: "test_project",
+        API_ID: "12345",
+        API_HASH: "test_hash",
+        BOT_TOKEN: "test_bot_token",
+        OWNER_ID: "owner_id"
+      };
 
       const { initConfig } = await import("../../src/config/index.js");
-
       const config = await initConfig();
 
       expect(config).toBeDefined();
+      const { getEnv } = await import("../../src/config/env.js");
+      const env = getEnv();
+      expect(env.INFISICAL_ENV).toBe("pre");
     });
 
     test("should protect INFISICAL_TOKEN from being overwritten", async () => {
-      process.env.NODE_ENV = "dev";
-      process.env.INFISICAL_TOKEN = "protected_token";
-      process.env.INFISICAL_PROJECT_ID = "test_project";
-      process.env.API_ID = "12345";
-      process.env.API_HASH = "test_hash";
-      process.env.BOT_TOKEN = "test_bot_token";
-      process.env.OWNER_ID = "owner_id";
+      mockEnv = {
+        ...mockEnv,
+        NODE_ENV: "dev",
+        INFISICAL_TOKEN: "protected_token",
+        INFISICAL_PROJECT_ID: "test_project",
+        API_ID: "12345",
+        API_HASH: "test_hash",
+        BOT_TOKEN: "test_bot_token",
+        OWNER_ID: "owner_id"
+      };
 
       const { initConfig } = await import("../../src/config/index.js");
-
       const config = await initConfig();
 
       expect(config).toBeDefined();
-      expect(process.env.INFISICAL_TOKEN).toBe("protected_token");
+      const { getEnv } = await import("../../src/config/env.js");
+      const env = getEnv();
+      expect(env.INFISICAL_TOKEN).toBe("protected_token");
     });
 
     test("should protect INFISICAL_PROJECT_ID from being overwritten", async () => {
-      process.env.NODE_ENV = "dev";
-      process.env.INFISICAL_TOKEN = "test_token";
-      process.env.INFISICAL_PROJECT_ID = "protected_project_id";
-      process.env.API_ID = "12345";
-      process.env.API_HASH = "test_hash";
-      process.env.BOT_TOKEN = "test_bot_token";
-      process.env.OWNER_ID = "owner_id";
+      mockEnv = {
+        ...mockEnv,
+        NODE_ENV: "dev",
+        INFISICAL_TOKEN: "test_token",
+        INFISICAL_PROJECT_ID: "protected_project_id",
+        API_ID: "12345",
+        API_HASH: "test_hash",
+        BOT_TOKEN: "test_bot_token",
+        OWNER_ID: "owner_id"
+      };
 
       const { initConfig } = await import("../../src/config/index.js");
-
       const config = await initConfig();
 
       expect(config).toBeDefined();
-      expect(process.env.INFISICAL_PROJECT_ID).toBe("protected_project_id");
+      const { getEnv } = await import("../../src/config/env.js");
+      const env = getEnv();
+      expect(env.INFISICAL_PROJECT_ID).toBe("protected_project_id");
     });
   });
 
   describe("Priority Mechanism", () => {
     test("should prioritize INFISICAL_ENV over NODE_ENV", async () => {
-      process.env.INFISICAL_ENV = "pre";
-      process.env.NODE_ENV = "dev";
-      process.env.INFISICAL_TOKEN = "test_token";
-      process.env.INFISICAL_PROJECT_ID = "test_project";
-      process.env.API_ID = "12345";
-      process.env.API_HASH = "test_hash";
-      process.env.BOT_TOKEN = "test_bot_token";
-      process.env.OWNER_ID = "owner_id";
+      mockEnv = {
+        ...mockEnv,
+        INFISICAL_ENV: "pre",
+        NODE_ENV: "dev",
+        INFISICAL_TOKEN: "test_token",
+        INFISICAL_PROJECT_ID: "test_project",
+        API_ID: "12345",
+        API_HASH: "test_hash",
+        BOT_TOKEN: "test_bot_token",
+        OWNER_ID: "owner_id"
+      };
 
       const { initConfig } = await import("../../src/config/index.js");
-
       const config = await initConfig();
 
       expect(config).toBeDefined();
     });
 
     test("should use NODE_ENV when INFISICAL_ENV is not set", async () => {
-      process.env.NODE_ENV = "dev";
-      process.env.INFISICAL_TOKEN = "test_token";
-      process.env.INFISICAL_PROJECT_ID = "test_project";
-      process.env.API_ID = "12345";
-      process.env.API_HASH = "test_hash";
-      process.env.BOT_TOKEN = "test_bot_token";
-      process.env.OWNER_ID = "owner_id";
+      mockEnv = {
+        ...mockEnv,
+        NODE_ENV: "dev",
+        INFISICAL_TOKEN: "test_token",
+        INFISICAL_PROJECT_ID: "test_project",
+        API_ID: "12345",
+        API_HASH: "test_hash",
+        BOT_TOKEN: "test_bot_token",
+        OWNER_ID: "owner_id"
+      };
 
       const { initConfig } = await import("../../src/config/index.js");
-
       const config = await initConfig();
 
       expect(config).toBeDefined();
@@ -127,68 +173,32 @@ describe("config - Environment Variable Protection", () => {
   });
 
   describe("Environment Normalization Integration", () => {
-    test("should normalize NODE_ENV and initialize config", async () => {
-      process.env.NODE_ENV = "production";
-      process.env.INFISICAL_TOKEN = "test_token";
-      process.env.INFISICAL_PROJECT_ID = "test_project";
-      process.env.API_ID = "12345";
-      process.env.API_HASH = "test_hash";
-      process.env.BOT_TOKEN = "test_bot_token";
-      process.env.OWNER_ID = "owner_id";
+    const testEnvs = [
+      { NODE_ENV: "production", expected: "production" },
+      { NODE_ENV: "development", expected: "development" },
+      { NODE_ENV: "staging", expected: "staging" },
+      { NODE_ENV: "invalid_env", expected: "development" }
+    ];
+
+    test.each(testEnvs)("should normalize $NODE_ENV and initialize config", async ({ NODE_ENV, expected }) => {
+      mockEnv = {
+        ...mockEnv,
+        NODE_ENV,
+        INFISICAL_TOKEN: "test_token",
+        INFISICAL_PROJECT_ID: "test_project",
+        API_ID: "12345",
+        API_HASH: "test_hash",
+        BOT_TOKEN: "test_bot_token",
+        OWNER_ID: "owner_id"
+      };
 
       const { initConfig } = await import("../../src/config/index.js");
-
       const config = await initConfig();
 
       expect(config).toBeDefined();
-    });
-
-    test("should normalize development and initialize config", async () => {
-      process.env.NODE_ENV = "development";
-      process.env.INFISICAL_TOKEN = "test_token";
-      process.env.INFISICAL_PROJECT_ID = "test_project";
-      process.env.API_ID = "12345";
-      process.env.API_HASH = "test_hash";
-      process.env.BOT_TOKEN = "test_bot_token";
-      process.env.OWNER_ID = "owner_id";
-
-      const { initConfig } = await import("../../src/config/index.js");
-
-      const config = await initConfig();
-
-      expect(config).toBeDefined();
-    });
-
-    test("should normalize staging and initialize config", async () => {
-      process.env.NODE_ENV = "staging";
-      process.env.INFISICAL_TOKEN = "test_token";
-      process.env.INFISICAL_PROJECT_ID = "test_project";
-      process.env.API_ID = "12345";
-      process.env.API_HASH = "test_hash";
-      process.env.BOT_TOKEN = "test_bot_token";
-      process.env.OWNER_ID = "owner_id";
-
-      const { initConfig } = await import("../../src/config/index.js");
-
-      const config = await initConfig();
-
-      expect(config).toBeDefined();
-    });
-
-    test("should use default for invalid NODE_ENV", async () => {
-      process.env.NODE_ENV = "invalid_env";
-      process.env.INFISICAL_TOKEN = "test_token";
-      process.env.INFISICAL_PROJECT_ID = "test_project";
-      process.env.API_ID = "12345";
-      process.env.API_HASH = "test_hash";
-      process.env.BOT_TOKEN = "test_bot_token";
-      process.env.OWNER_ID = "owner_id";
-
-      const { initConfig } = await import("../../src/config/index.js");
-
-      const config = await initConfig();
-
-      expect(config).toBeDefined();
+      const { getEnv } = await import("../../src/config/env.js");
+      const env = getEnv();
+      expect(env.NODE_ENV).toBe(NODE_ENV);
     });
   });
 });

@@ -1,0 +1,100 @@
+
+      expect(broadcastSpy).toHaveBeenCalledWith("instance_started", {
+        nodeType: "dispatcher",
+        sourceInstance: instanceCoordinator.instanceId,
+        timestamp: expectedTime
+      });
+      broadcastSpy.mockRestore();
+      dateSpy.mockRestore();
+    });
+
+    test("should handle broadcast failure gracefully", async () => {
+        const expectedTime = 1234567890;
+        const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
+        const { qstashService } = await import("../../src/services/QStashService.js");
+        const broadcastSpy = jest.spyOn(qstashService, "broadcastSystemEvent").mockRejectedValue(new Error("QStash error"));
+
+        await instanceCoordinator.broadcast("instance_failed", { error: "test" });
+
+        expect(broadcastSpy).toHaveBeenCalled();
+        // Check for either [memory] or [MemoryCache] format
+        expect(mockLogger.error).toHaveBeenCalledWith(
+          expect.stringContaining("广播事件失败 instance_failed:"),
+          expect.anything()
+        );
+        broadcastSpy.mockRestore();
+        dateSpy.mockRestore();
+    });
+  });
+
+  describe("getAllInstances", () => {
+      test("should discover all instances using cache.listKeys", async () => {
+          // Mock cache.listKeys to return instance keys
+          const originalListKeys = cache.listKeys;
+          const originalGet = cache.get;
+          
+          const listKeysSpy = jest.fn().mockImplementation(() => Promise.resolve([
+            'instance:inst1',
+            'instance:inst2',
+            'instance:inst3'
+          ]));
+
+          // Mock individual instance gets
+          let getCallCount = 0;
+          const getSpy = jest.fn().mockImplementation(() => {
+            getCallCount++;
+            if (getCallCount === 1) {
+              return Promise.resolve({
+                id: 'inst1',
+                hostname: 'host1',
+                lastHeartbeat: Date.now(),
+                status: 'active'
+              });
+            } else if (getCallCount === 2) {
+              return Promise.resolve({
+                id: 'inst2',
+                hostname: 'host2',
+                lastHeartbeat: Date.now(),
+                status: 'active'
+              });
+            } else {
+              return Promise.resolve(null); // One instance has no data
+            }
+          });
+          cache.listKeys = listKeysSpy;
+          cache.get = getSpy;
+
+          const instances = await instanceCoordinator.getAllInstances();
+
+          expect(listKeysSpy).toHaveBeenCalledWith('instance:');
+          expect(getSpy).toHaveBeenCalledTimes(3);
+          expect(instances).toHaveLength(2); // Only 2 instances with valid data
+          expect(instances[0]).toEqual({
+            id: 'inst1',
+            hostname: 'host1',
+            lastHeartbeat: expect.any(Number),
+            status: 'active'
+          });
+          expect(instances[1]).toEqual({
+            id: 'inst2',
+            hostname: 'host2',
+            lastHeartbeat: expect.any(Number),
+            status: 'active'
+          });
+          expect(instanceCoordinator.activeInstances).toEqual(new Set(['inst1', 'inst2']));
+
+          cache.listKeys = originalListKeys;
+          cache.get = originalGet;
+      });
+
+      test("should handle cache.listKeys failure gracefully", async () => {
+          const originalListKeys = cache.listKeys;
+          const listKeysSpy = jest.fn().mockRejectedValue(new Error('Cache ListKeys Error'));
+          cache.listKeys = listKeysSpy;
+
+          const instances = await instanceCoordinator.getAllInstances();
+
+          expect(instances).toEqual([]);
+          expect(mockLogger.error).toHaveBeenCalledWith("[cloudflare] 获取所有实例失败:", "Cache ListKeys Error");
+
+          cache.listKeys = originalListKeys;

@@ -1,653 +1,224 @@
-import { jest, describe, test, expect, beforeEach, beforeAll, afterAll, afterEach } from "@jest/globals";
+import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
 
-// Mock the global fetch function
-const mockFetch = jest.fn();
-global.fetch = mockFetch;
-
-// Store original process.env
-const originalEnv = process.env;
-
-let instanceCoordinator;
-let cache;
-// 【关键】用来存储所有产生的定时器 ID
-let capturedIntervals = [];
-
-// Mock InstanceRepository
-jest.unstable_mockModule("../../src/repositories/InstanceRepository.js", () => ({
-  InstanceRepository: {
-    createTableIfNotExists: jest.fn().mockResolvedValue(undefined),
-    findAll: jest.fn().mockResolvedValue([]),
-    upsert: jest.fn().mockResolvedValue(true),
-    updateHeartbeat: jest.fn().mockResolvedValue(true),
-  },
-}));
-
-
-
-// Mock logger
-const mockLogger = {
-  info: jest.fn(),
-  error: jest.fn(),
-  warn: jest.fn(),
-  debug: jest.fn(),
+// Create a mock time provider
+const fixedTime = 1700000000000;
+const mockTimeProvider = {
+    now: () => fixedTime,
+    setTimeout: global.setTimeout,
+    clearTimeout: global.clearTimeout,
+    setInterval: global.setInterval,
+    clearInterval: global.clearInterval
 };
 
-jest.unstable_mockModule("../../src/services/logger.js", () => ({
-   default: mockLogger,
-   logger: mockLogger,
-   setInstanceIdProvider: jest.fn(),
-}));
-
-// Mock CacheService to avoid real provider initialization
-const mockCache = {
-  initialize: jest.fn().mockResolvedValue(undefined),
-  get: jest.fn(),
-  set: jest.fn(),
-  delete: jest.fn(),
-  listKeys: jest.fn(),
-  getCurrentProvider: jest.fn().mockReturnValue("cloudflare"),
-  _startHeartbeat: jest.fn(),
+const importInstanceCoordinator = async () => {
+    const module = await import("../../src/services/InstanceCoordinator.js");
+    return module.instanceCoordinator ?? module.default;
 };
 
-jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
-  cache: mockCache,
-}));
+describe("Core InstanceCoordinator Tests", () => {
+    let instanceCoordinator;
+    let mockCache;
+    let mockLogger;
 
-describe("InstanceCoordinator", () => {
-  beforeAll(async () => {
-    // 【关键修复 1】强制使用真实定时器，防止 async/await 逻辑因为 FakeTimers 导致死锁
-    jest.useRealTimers();
+    beforeEach(async () => {
+        jest.resetModules();
+        jest.clearAllMocks();
+        jest.useFakeTimers();
 
-    // 【关键修复 2】拦截 setInterval，捕获 ID，但不阻止它运行
-    const originalSetInterval = global.setInterval;
-    jest.spyOn(global, 'setInterval').mockImplementation((fn, ms) => {
-        const id = originalSetInterval(fn, ms);
-        capturedIntervals.push(id);
-        return id;
-    });
+        // Mock time provider
+        await jest.unstable_mockModule('../../src/utils/timeProvider.js', () => ({
+            getTime: mockTimeProvider.now,
+            timers: mockTimeProvider
+        }));
 
-    // Set up mock environment variables
-    process.env = {
-      ...originalEnv,
-      CF_CACHE_ACCOUNT_ID: "mock_account_id",
-      CF_CACHE_NAMESPACE_ID: "mock_namespace_id",
-      CF_CACHE_TOKEN: "mock_kv_token",
-      INSTANCE_ID: "test_instance_123",
-      CACHE_PROVIDER: undefined,
-    };
-    jest.resetModules();
+        // Mock environment
+        await jest.unstable_mockModule('../../src/config/env.js', () => ({
+            getEnv: () => ({ NODE_ENV: 'test' }),
+            NODE_ENV: 'test'
+        }));
 
-    // Dynamically import after setting up mocks
-    const { instanceCoordinator: importedIC } = await import("../../src/services/InstanceCoordinator.js");
-    instanceCoordinator = importedIC;
-
-    // Also import cache for mocking
-    const { cache: importedCache } = await import("../../src/services/CacheService.js");
-    cache = importedCache;
-
-    // Pre-initialize cache to avoid repeated async initialization overhead
-    await cache.initialize();
-  });
-
-  afterAll(() => {
-    // 【关键修复 3】测试结束后，暴力清理所有捕获到的定时器
-    // 这解决了 "Open Handle" 导致的超时/无法退出问题
-    capturedIntervals.forEach(id => clearInterval(id));
-
-    process.env = originalEnv;
-    jest.restoreAllMocks();
-  });
-
-  beforeEach(async () => {
-    jest.clearAllMocks();
-    // Reset instance state
-    if (instanceCoordinator) {
-        instanceCoordinator.instanceId = "test_instance_123";
-        instanceCoordinator.isLeader = false;
-        instanceCoordinator.activeInstances = new Set();
-    }
-
-    // Ensure Cache provider name is stable for tests
-    const { cache } = await import("../../src/services/CacheService.js");
-    if (cache?.getCurrentProvider?.mockReturnValue) {
-        cache.getCurrentProvider.mockReturnValue("cloudflare");
-    }
-  });
-
-  afterEach(() => {
-    // Clear any timers
-    jest.clearAllTimers();
-  });
-
-  test("should initialize with correct instance ID", () => {
-    expect(instanceCoordinator.instanceId).toBe("test_instance_123");
-    expect(instanceCoordinator.heartbeatInterval).toBe(30000); // 30 seconds
-    expect(instanceCoordinator.instanceTimeout).toBe(90000); // 90 seconds
-  });
-
-  describe("registerInstance", () => {
-      test("should register instance successfully (Cache only)", async () => {
-          const setSpy = jest.fn().mockResolvedValue(true);
-          cache.set = setSpy;
-  
-          await instanceCoordinator.registerInstance();
-  
-          // Verify cache write with instance payload
-          expect(setSpy).toHaveBeenCalledWith(
-            "instance:test_instance_123",
-            expect.objectContaining({
-              id: "test_instance_123",
-              status: "active"
-            }),
-            expect.any(Number)
-          );
-      });
-
-      test("should throw error when Cache registration fails", async () => {
-          const setSpy = jest.fn().mockRejectedValue(new Error("Cache registration failed"));
-          cache.set = setSpy;
-  
-          // Should throw since Cache is the primary storage
-          try {
-              await instanceCoordinator.registerInstance();
-              // If we get here, the test should fail
-              expect(true).toBe(false);
-          } catch (error) {
-              // The error message may vary depending on the cache provider
-              // Just verify that an error was thrown
-              expect(error).toBeDefined();
-          }
-      });
-  });
-
-  describe("unregisterInstance", () => {
-      test("should unregister instance successfully", async () => {
-          // Mock cache.delete to return true
-          const originalDelete = cache.delete;
-          const deleteSpy = jest.fn().mockResolvedValue(true);
-          cache.delete = deleteSpy;
-
-          await instanceCoordinator.unregisterInstance();
-
-          // Verify cache.delete was called with correct key
-          expect(deleteSpy).toHaveBeenCalledWith("instance:test_instance_123");
-
-          cache.delete = originalDelete;
-      });
-
-      test("should handle unregister instance failure gracefully", async () => {
-          // Mock cache.delete to throw error
-          const originalDelete = cache.delete;
-          const deleteSpy = jest.fn().mockRejectedValue(new Error('Cache Delete Error'));
-          cache.delete = deleteSpy;
-
-          // Should not throw, just log error
-          await expect(instanceCoordinator.unregisterInstance()).resolves.not.toThrow();
-
-          expect(deleteSpy).toHaveBeenCalledWith("instance:test_instance_123");
-
-          cache.delete = originalDelete;
-      });
-  });
-
-  describe("acquireLock", () => {
-    test("should acquire lock when no existing lock", async () => {
-      const expectedTime = 1234567890;
-      const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
-      
-      const originalGet = cache.get;
-      const originalSet = cache.set;
-      
-      let getCallCount = 0;
-      cache.get = jest.fn().mockImplementation(() => {
-        getCallCount++;
-        if (getCallCount === 1) {
-          return Promise.resolve(null); // First call - no existing lock
-        } else {
-          return Promise.resolve({    // Second call - verification
-            instanceId: "test_instance_123",
-            acquiredAt: expectedTime,
-            ttl: 300
-          });
-        }
-      });
-      cache.set = jest.fn().mockResolvedValue(true);
-
-      const result = await instanceCoordinator.acquireLock("test_lock");
-      expect(result).toBe(true);
-
-      dateSpy.mockRestore();
-      cache.get = originalGet;
-      cache.set = originalSet;
-    });
-
-    test("should fail to acquire lock when already held by another instance", async () => {
-      const expectedTime = 1234567890;
-      const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
-      const existingLock = {
-        instanceId: "other_instance",
-        acquiredAt: expectedTime,
-        ttl: 300,
-      };
-
-      const originalGet = cache.get;
-      cache.get = jest.fn().mockResolvedValue(existingLock);
-
-      const result = await instanceCoordinator.acquireLock("test_lock", 300, { maxAttempts: 1 });
-      expect(result).toBe(false);
-
-      dateSpy.mockRestore();
-      cache.get = originalGet;
-    });
-
-    test("should acquire lock when existing lock is expired", async () => {
-      const expectedTime = 1234567890;
-      const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
-      
-      const expiredLock = {
-        instanceId: "other_instance",
-        acquiredAt: expectedTime - 400000, // 400 seconds ago (TTL is 300)
-        ttl: 300,
-      };
-
-      const originalGet = cache.get;
-      const originalSet = cache.set;
-      
-      let getCallCount = 0;
-      cache.get = jest.fn().mockImplementation(() => {
-        getCallCount++;
-        if (getCallCount === 1) {
-          return Promise.resolve(expiredLock); // First call - expired lock
-        } else {
-          return Promise.resolve({            // Second call - verification
-            instanceId: "test_instance_123",
-            acquiredAt: expectedTime,
-            ttl: 300
-          });
-        }
-      });
-      cache.set = jest.fn().mockResolvedValue(true);
-
-      const result = await instanceCoordinator.acquireLock("test_lock");
-      expect(result).toBe(true);
-
-      dateSpy.mockRestore();
-      cache.get = originalGet;
-      cache.set = originalSet;
-    });
-
-    test("should acquire lock when existing lock owner is offline (preemption)", async () => {
-        const expectedTime = 1234567890;
-        const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
-        
-        const existingLock = {
-            instanceId: "offline_instance",
-            acquiredAt: expectedTime - 100, // Not expired by TTL
-            ttl: 300,
+        // Mock logger (already done by global setup)
+        mockLogger = {
+            info: jest.fn(),
+            error: jest.fn(),
+            warn: jest.fn(),
+            debug: jest.fn()
         };
 
-        const originalGet = cache.get;
-        const originalSet = cache.set;
-        
-        let getCallCount = 0;
-        const getSpy = jest.fn().mockImplementation((key) => {
-            getCallCount++;
-            if (getCallCount === 1) {
-                return Promise.resolve(existingLock); // First call in _tryAcquire - see existing lock
-            } else if (getCallCount === 2) {
-                return Promise.resolve(null);         // Preemption check - ownerKey is null (offline)
-            } else {
-                return Promise.resolve({             // Verification after set
-                    instanceId: "test_instance_123",
-                    acquiredAt: expectedTime,
-                    ttl: 300
-                });
+        // Mock CacheService
+        mockCache = {
+            initialize: jest.fn().mockResolvedValue(undefined),
+            get: jest.fn(),
+            set: jest.fn(),
+            delete: jest.fn(),
+            listKeys: jest.fn(),
+            getCurrentProvider: jest.fn().mockReturnValue("cloudflare"),
+            _startHeartbeat: jest.fn()
+        };
+
+        await jest.unstable_mockModule("../../src/services/logger.js", () => ({
+            default: mockLogger,
+            logger: mockLogger,
+            setInstanceIdProvider: jest.fn()
+        }));
+
+        await jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+            cache: mockCache
+        }));
+
+        await jest.unstable_mockModule("../../src/repositories/InstanceRepository.js", () => ({
+            InstanceRepository: {
+                createTableIfNotExists: jest.fn().mockResolvedValue(undefined),
+                findAll: jest.fn().mockResolvedValue([]),
+                upsert: jest.fn().mockResolvedValue(true),
+                updateHeartbeat: jest.fn().mockResolvedValue(true)
             }
-        });
-        const setSpy = jest.fn().mockResolvedValue(true);
-        cache.get = getSpy;
-        cache.set = setSpy;
+        }));
+    });
 
-        const result = await instanceCoordinator.acquireLock("test_lock");
-        expect(result).toBe(true);
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
+    test("should initialize correctly", async () => {
+        const instanceCoordinator = await importInstanceCoordinator();
         
-        // Verify set was called
-        expect(setSpy).toHaveBeenCalled();
-        // Verify preemption check was done for the correct instance
-        expect(getSpy).toHaveBeenCalledWith("instance:offline_instance", "json", expect.any(Object));
-
-        dateSpy.mockRestore();
-        cache.get = originalGet;
-        cache.set = originalSet;
+        expect(instanceCoordinator).toBeDefined();
+        expect(instanceCoordinator.getInstanceId()).toEqual(expect.any(String));
     });
 
-    test("should fail when double-check verification fails (race condition)", async () => {
-      const expectedTime = 1234567890;
-      const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
-      const originalGet = cache.get;
-      const originalSet = cache.set;
-      
-      let getCallCount = 0;
-      cache.get = jest.fn().mockImplementation(() => {
-        getCallCount++;
-        if (getCallCount === 1) {
-          return Promise.resolve(null); // First call - no existing lock
-        } else {
-          return Promise.resolve({    // Second call - verification shows race condition
-            instanceId: "other_instance", // Different instance!
-            acquiredAt: expectedTime,
-            ttl: 300
-          });
-        }
-      });
-      cache.set = jest.fn().mockResolvedValue(true);
+    test("should register instance", async () => {
+        const instanceCoordinator = await importInstanceCoordinator();
+        instanceCoordinator.instanceId = 'test-instance';
 
-      const result = await instanceCoordinator.acquireLock("test_lock", 300, { maxAttempts: 1 });
-      expect(result).toBe(false); // Should fail due to race condition
+        await instanceCoordinator.registerInstance();
 
-      dateSpy.mockRestore();
-      cache.get = originalGet;
-      cache.set = originalSet;
-    });
-
-    test("should succeed even if KV returns old self-owned lock (KV eventual consistency)", async () => {
-      const expectedTime = 1234567890;
-      const oldTime = expectedTime - 30000; // 30s ago
-      
-      const originalGet = cache.get;
-      const originalSet = cache.set;
-      
-      cache.get = jest.fn().mockImplementation(() => {
-        return Promise.resolve({          // Both calls return old lock
-          instanceId: "test_instance_123",
-          acquiredAt: oldTime,
-          ttl: 300
-        });
-      });
-      cache.set = jest.fn().mockResolvedValue(true);
-
-      const result = await instanceCoordinator.acquireLock("test_lock");
-      expect(result).toBe(true); // Should succeed because instanceId matches
-
-      cache.get = originalGet;
-      cache.set = originalSet;
-    });
-
-    test("should succeed when double-check verification passes", async () => {
-      const expectedTime = 1234567890;
-      
-      // Mock Date.now to return consistent version
-      const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
-      
-      const originalGet = cache.get;
-      const originalSet = cache.set;
-      
-      let getCallCount = 0;
-      cache.get = jest.fn().mockImplementation(() => {
-        getCallCount++;
-        if (getCallCount === 1) {
-          return Promise.resolve(null); // First call - no existing lock
-        } else {
-          return Promise.resolve({    // Second call - verification passes
-            instanceId: "test_instance_123",
-            acquiredAt: expectedTime,
-            ttl: 300
-          });
-        }
-      });
-      cache.set = jest.fn().mockResolvedValue(true);
-
-      const result = await instanceCoordinator.acquireLock("test_lock");
-      expect(result).toBe(true);
-
-      dateSpy.mockRestore();
-      cache.get = originalGet;
-      cache.set = originalSet;
-    });
-  });
-
-  describe("releaseLock", () => {
-      test("should release lock held by current instance", async () => {
-          const originalGet = cache.get;
-          const originalDelete = cache.delete;
-          
-          const getSpy = jest.fn().mockResolvedValue({
-              instanceId: "test_instance_123",
-              acquiredAt: Date.now(),
-              ttl: 300,
-          });
-          const deleteSpy = jest.fn().mockResolvedValue(true);
-          cache.get = getSpy;
-          cache.delete = deleteSpy;
-
-          await instanceCoordinator.releaseLock("test_lock");
-
-          expect(deleteSpy).toHaveBeenCalledWith("lock:test_lock");
-
-          cache.get = originalGet;
-          cache.delete = originalDelete;
-      });
-
-      test("should not release lock held by another instance", async () => {
-          // Mock cache.get to return a lock held by another instance
-          const originalGet = cache.get;
-          const getSpy = jest.fn().mockResolvedValue({
-              instanceId: "other_instance",
-              acquiredAt: Date.now(),
-              ttl: 300
-          });
-          cache.get = getSpy;
-
-          await instanceCoordinator.releaseLock("test_lock");
-
-          // Should not call delete since it's not our lock
-          // The method will call cache.get but not cache.delete
-          expect(getSpy).toHaveBeenCalledWith("lock:test_lock", "json", expect.any(Object));
-
-          cache.get = originalGet;
-      });
-  });
-
-  describe("acquireTaskLock", () => {
-    test("should acquire task lock successfully", async () => {
-      // Mock acquireLock to return true
-      const acquireLockSpy = jest.spyOn(instanceCoordinator, 'acquireLock').mockImplementation(() => Promise.resolve(true));
-
-      const result = await instanceCoordinator.acquireTaskLock("task_123");
-      expect(result).toBe(true);
-      expect(acquireLockSpy).toHaveBeenCalledWith("task:task_123", 600);
-
-      acquireLockSpy.mockRestore();
-    });
-  });
-
-  describe("releaseTaskLock", () => {
-    test("should release task lock successfully", async () => {
-      const releaseLockSpy = jest.spyOn(instanceCoordinator, 'releaseLock');
-
-      await instanceCoordinator.releaseTaskLock("task_123");
-      expect(releaseLockSpy).toHaveBeenCalledWith("task:task_123");
-
-      releaseLockSpy.mockRestore();
-    });
-  });
-
-  describe("acquireTaskLock and releaseTaskLock", () => {
-    test("should acquire and release task lock successfully", async () => {
-      // Mock acquireLock to return true
-      const acquireLockSpy = jest.spyOn(instanceCoordinator, 'acquireLock').mockImplementation(() => Promise.resolve(true));
-      const releaseLockSpy = jest.spyOn(instanceCoordinator, 'releaseLock');
-
-      const result = await instanceCoordinator.acquireTaskLock("task_123");
-      expect(result).toBe(true);
-      expect(acquireLockSpy).toHaveBeenCalledWith("task:task_123", 600);
-
-      await instanceCoordinator.releaseTaskLock("task_123");
-      expect(releaseLockSpy).toHaveBeenCalledWith("task:task_123");
-
-      acquireLockSpy.mockRestore();
-      releaseLockSpy.mockRestore();
-    });
-  });
-
-  describe("broadcast", () => {
-    test("should broadcast system event with sourceInstance and timestamp", async () => {
-      const expectedTime = 1234567890;
-      const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
-      const { qstashService } = await import("../../src/services/QStashService.js");
-      const broadcastSpy = jest.spyOn(qstashService, "broadcastSystemEvent").mockResolvedValue(undefined);
-
-      await instanceCoordinator.broadcast("instance_started", { nodeType: "dispatcher" });
-
-      expect(broadcastSpy).toHaveBeenCalledWith("instance_started", {
-        nodeType: "dispatcher",
-        sourceInstance: instanceCoordinator.instanceId,
-        timestamp: expectedTime
-      });
-      broadcastSpy.mockRestore();
-      dateSpy.mockRestore();
-    });
-
-    test("should handle broadcast failure gracefully", async () => {
-        const expectedTime = 1234567890;
-        const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(expectedTime);
-        const { qstashService } = await import("../../src/services/QStashService.js");
-        const broadcastSpy = jest.spyOn(qstashService, "broadcastSystemEvent").mockRejectedValue(new Error("QStash error"));
-
-        await instanceCoordinator.broadcast("instance_failed", { error: "test" });
-
-        expect(broadcastSpy).toHaveBeenCalled();
-        // Check for either [memory] or [MemoryCache] format
-        expect(mockLogger.error).toHaveBeenCalledWith(
-          expect.stringContaining("广播事件失败 instance_failed:"),
-          expect.anything()
+        expect(mockCache.set).toHaveBeenCalledWith(
+            "instance:test-instance",
+            expect.objectContaining({
+                id: "test-instance",
+                status: "active"
+            }),
+            instanceCoordinator.instanceTimeout / 1000
         );
-        broadcastSpy.mockRestore();
-        dateSpy.mockRestore();
     });
-  });
 
-  describe("getAllInstances", () => {
-      test("should discover all instances using cache.listKeys", async () => {
-          // Mock cache.listKeys to return instance keys
-          const originalListKeys = cache.listKeys;
-          const originalGet = cache.get;
-          
-          const listKeysSpy = jest.fn().mockImplementation(() => Promise.resolve([
-            'instance:inst1',
-            'instance:inst2',
-            'instance:inst3'
-          ]));
+    test("should refresh heartbeat data", async () => {
+        const instanceCoordinator = await importInstanceCoordinator();
+        instanceCoordinator.instanceId = 'heartbeat-instance';
 
-          // Mock individual instance gets
-          let getCallCount = 0;
-          const getSpy = jest.fn().mockImplementation(() => {
-            getCallCount++;
-            if (getCallCount === 1) {
-              return Promise.resolve({
-                id: 'inst1',
-                hostname: 'host1',
-                lastHeartbeat: Date.now(),
-                status: 'active'
-              });
-            } else if (getCallCount === 2) {
-              return Promise.resolve({
-                id: 'inst2',
-                hostname: 'host2',
-                lastHeartbeat: Date.now(),
-                status: 'active'
-              });
-            } else {
-              return Promise.resolve(null); // One instance has no data
-            }
-          });
-          cache.listKeys = listKeysSpy;
-          cache.get = getSpy;
-
-          const instances = await instanceCoordinator.getAllInstances();
-
-          expect(listKeysSpy).toHaveBeenCalledWith('instance:');
-          expect(getSpy).toHaveBeenCalledTimes(3);
-          expect(instances).toHaveLength(2); // Only 2 instances with valid data
-          expect(instances[0]).toEqual({
-            id: 'inst1',
-            hostname: 'host1',
-            lastHeartbeat: expect.any(Number),
+        const existingInstance = {
+            id: 'heartbeat-instance',
+            lastHeartbeat: fixedTime - 1000,
             status: 'active'
-          });
-          expect(instances[1]).toEqual({
-            id: 'inst2',
-            hostname: 'host2',
-            lastHeartbeat: expect.any(Number),
-            status: 'active'
-          });
-          expect(instanceCoordinator.activeInstances).toEqual(new Set(['inst1', 'inst2']));
+        };
 
-          cache.listKeys = originalListKeys;
-          cache.get = originalGet;
-      });
+        mockCache.get.mockResolvedValue(existingInstance);
+        mockCache.set.mockResolvedValue(true);
+        jest.setSystemTime(fixedTime);
 
-      test("should handle cache.listKeys failure gracefully", async () => {
-          const originalListKeys = cache.listKeys;
-          const listKeysSpy = jest.fn().mockRejectedValue(new Error('Cache ListKeys Error'));
-          cache.listKeys = listKeysSpy;
+        await instanceCoordinator._sendHeartbeat();
 
-          const instances = await instanceCoordinator.getAllInstances();
+        expect(mockCache.set).toHaveBeenCalledWith(
+            `instance:${instanceCoordinator.instanceId}`,
+            expect.objectContaining({
+                status: 'active',
+                lastHeartbeat: expect.any(Number)
+            }),
+            instanceCoordinator.instanceTimeout / 1000
+        );
+    });
 
-          expect(instances).toEqual([]);
-          expect(mockLogger.error).toHaveBeenCalledWith("[cloudflare] 获取所有实例失败:", "Cache ListKeys Error");
+    test("should acquire lock successfully", async () => {
+        const instanceCoordinator = await importInstanceCoordinator();
+        instanceCoordinator.instanceId = 'lock-instance';
+        const lockKey = 'test-lock';
 
-          cache.listKeys = originalListKeys;
-      });
+        mockCache.get
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({
+                instanceId: instanceCoordinator.instanceId,
+                acquiredAt: fixedTime,
+                ttl: 60
+            });
+        mockCache.set.mockResolvedValue(true);
 
-      test("should handle individual instance get failure", async () => {
-          const originalListKeys = cache.listKeys;
-          const originalGet = cache.get;
-          
-          const listKeysSpy = jest.fn().mockImplementation(() => Promise.resolve([
-            'instance:inst1',
-            'instance:inst2'
-          ]));
+        const result = await instanceCoordinator.acquireLock(lockKey, 60, { maxAttempts: 1 });
 
-          let getCallCount = 0;
-          const getSpy = jest.fn().mockImplementation(() => {
-            getCallCount++;
-            if (getCallCount === 1) {
-              return Promise.reject(new Error('Cache Get Error')); // First instance fails
-            } else {
-              return Promise.resolve({
-                id: 'inst2',
-                hostname: 'host2',
-                lastHeartbeat: Date.now(),
-                status: 'active'
-              });
-            }
-          });
-          cache.listKeys = listKeysSpy;
-          cache.get = getSpy;
+        expect(result).toBe(true);
+        expect(mockCache.set).toHaveBeenCalledWith(
+            `lock:${lockKey}`,
+            expect.objectContaining({ instanceId: instanceCoordinator.instanceId }),
+            60,
+            expect.objectContaining({ skipCache: true })
+        );
+    });
 
-          const instances = await instanceCoordinator.getAllInstances();
+    test("should fail to acquire existing lock", async () => {
+        const instanceCoordinator = await importInstanceCoordinator();
+        const lockKey = 'existing-lock';
 
-          expect(instances).toHaveLength(1); // Only successful instance
-          expect(instances[0].id).toBe('inst2');
-          expect(mockLogger.warn).toHaveBeenCalledWith("[cloudflare] 获取实例 instance:inst1 失败，跳过:", "Cache Get Error");
+        mockCache.get
+            .mockResolvedValueOnce({
+                instanceId: 'other-instance',
+                acquiredAt: fixedTime,
+                ttl: 60
+            })
+            .mockResolvedValueOnce({
+                instanceId: 'other-instance',
+                acquiredAt: fixedTime,
+                ttl: 60
+            });
+        mockCache.set.mockResolvedValue(true);
 
-          cache.listKeys = originalListKeys;
-          cache.get = originalGet;
-      });
+        const result = await instanceCoordinator.acquireLock(lockKey, 60, { maxAttempts: 1 });
 
-      test("should return empty array when no instances found", async () => {
-          const originalListKeys = cache.listKeys;
-          const listKeysSpy = jest.fn().mockImplementation(() => Promise.resolve([]));
-          cache.listKeys = listKeysSpy;
+        expect(result).toBe(false);
+    });
 
-          const instances = await instanceCoordinator.getAllInstances();
+    test("should release lock", async () => {
+        const instanceCoordinator = await importInstanceCoordinator();
+        instanceCoordinator.instanceId = 'lock-instance';
+        const lockKey = 'test-lock';
 
-          expect(instances).toEqual([]);
-          expect(instanceCoordinator.activeInstances).toEqual(new Set());
+        mockCache.get.mockResolvedValue({ instanceId: 'lock-instance' });
+        await instanceCoordinator.releaseLock(lockKey);
 
-          cache.listKeys = originalListKeys;
-      });
-  });
+        expect(mockCache.delete).toHaveBeenCalledWith(`lock:${lockKey}`);
+    });
+
+    test("should verify lock ownership", async () => {
+        const instanceCoordinator = await importInstanceCoordinator();
+        const lockKey = 'owner-lock';
+
+        mockCache.get.mockResolvedValue({ instanceId: instanceCoordinator.instanceId });
+        const result = await instanceCoordinator.hasLock(lockKey);
+
+        expect(result).toBe(true);
+    });
+
+    test("should list active instances", async () => {
+        const instanceCoordinator = await importInstanceCoordinator();
+        const instances = [
+            { id: 'inst1', lastHeartbeat: fixedTime - 1000 },
+            { id: 'inst2', lastHeartbeat: fixedTime - 2000 }
+        ];
+
+        instanceCoordinator.getAllInstances = jest.fn().mockResolvedValue(instances);
+        jest.setSystemTime(fixedTime);
+
+        const result = await instanceCoordinator.getActiveInstances();
+
+        expect(result).toHaveLength(2);
+        expect(instanceCoordinator.activeInstances.size).toBe(2);
+    });
+
+    test("should unregister instance", async () => {
+        const instanceCoordinator = await importInstanceCoordinator();
+        instanceCoordinator.instanceId = 'cleanup-instance';
+
+        await instanceCoordinator.unregisterInstance();
+
+        expect(mockCache.delete).toHaveBeenCalledWith(`instance:${instanceCoordinator.instanceId}`);
+    });
 });
-

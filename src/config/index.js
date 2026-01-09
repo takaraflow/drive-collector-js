@@ -1,4 +1,4 @@
-import dotenv from 'dotenv';
+import { loadDotenv } from './dotenv.js';
 import os from 'os';
 import path from 'path';
 import { fetchInfisicalSecrets } from '../services/InfisicalClient.js';
@@ -24,7 +24,7 @@ const shouldOverrideEnv = process.env.NODE_ENV !== 'test';
 
 // 根据 NODE_ENV 加载对应的 .env 文件
 const envFile = normalizedNodeEnv === 'dev' ? '.env' : `.env.${normalizedNodeEnv}`;
-dotenv.config({ path: envFile, override: shouldOverrideEnv });
+loadDotenv({ path: envFile, override: shouldOverrideEnv });
 
 // 恢复被保护的环境变量（无条件恢复，确保优先级）
 Object.entries(protectedEnvValues).forEach(([key, value]) => {

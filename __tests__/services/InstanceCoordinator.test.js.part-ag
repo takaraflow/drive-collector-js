@@ -1,0 +1,53 @@
+      });
+
+      test("should handle individual instance get failure", async () => {
+          const originalListKeys = cache.listKeys;
+          const originalGet = cache.get;
+          
+          const listKeysSpy = jest.fn().mockImplementation(() => Promise.resolve([
+            'instance:inst1',
+            'instance:inst2'
+          ]));
+
+          let getCallCount = 0;
+          const getSpy = jest.fn().mockImplementation(() => {
+            getCallCount++;
+            if (getCallCount === 1) {
+              return Promise.reject(new Error('Cache Get Error')); // First instance fails
+            } else {
+              return Promise.resolve({
+                id: 'inst2',
+                hostname: 'host2',
+                lastHeartbeat: Date.now(),
+                status: 'active'
+              });
+            }
+          });
+          cache.listKeys = listKeysSpy;
+          cache.get = getSpy;
+
+          const instances = await instanceCoordinator.getAllInstances();
+
+          expect(instances).toHaveLength(1); // Only successful instance
+          expect(instances[0].id).toBe('inst2');
+          expect(mockLogger.warn).toHaveBeenCalledWith("[cloudflare] 获取实例 instance:inst1 失败，跳过:", "Cache Get Error");
+
+          cache.listKeys = originalListKeys;
+          cache.get = originalGet;
+      });
+
+      test("should return empty array when no instances found", async () => {
+          const originalListKeys = cache.listKeys;
+          const listKeysSpy = jest.fn().mockImplementation(() => Promise.resolve([]));
+          cache.listKeys = listKeysSpy;
+
+          const instances = await instanceCoordinator.getAllInstances();
+
+          expect(instances).toEqual([]);
+          expect(instanceCoordinator.activeInstances).toEqual(new Set());
+
+          cache.listKeys = originalListKeys;
+      });
+  });
+});
+
