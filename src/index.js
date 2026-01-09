@@ -113,6 +113,44 @@ function describeRedisEndpoint(env) {
 
 
 /**
+ * 验证管理员API Token
+ */
+async function verifyAdminToken(request, env, ctx = null) {
+  const verifyAdminTokenLogger = logger.child({ module: 'AdminToken' });
+  
+  // 跳过验证（开发环境）
+  if (env.SKIP_ADMIN_AUTH === 'true') {
+    await verifyAdminTokenLogger.debug('⏭️ 跳过管理员鉴权 (Skipping admin auth)', {}, ctx);
+    return true;
+  }
+
+  const token = env.ADMIN_API_TOKEN;
+  if (!token) {
+    throw new Error('ADMIN_API_TOKEN 未配置');
+  }
+
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader) {
+    throw new Error('缺少 Authorization 头');
+  }
+
+  // 支持 Bearer token 和直接 token
+  let providedToken;
+  if (authHeader.startsWith('Bearer ')) {
+    providedToken = authHeader.slice(7);
+  } else {
+    providedToken = authHeader;
+  }
+
+  if (providedToken !== token) {
+    throw new Error('无效的 API Token');
+  }
+
+  await verifyAdminTokenLogger.debug('✅ 管理员Token验证成功', {}, ctx);
+  return true;
+}
+
+/**
  * 验证 QStash 签名 - 重构版本
  */
 async function verifyQStashSignature(request, env, isGetRequest = false, ctx = null) {
@@ -1217,6 +1255,7 @@ async function upstash_get(env, key) {
  */
 export {
   verifyQStashSignature,
+  verifyAdminToken,
   parseInstanceData,
   getActiveInstances,
   selectTargetInstance,
@@ -1478,6 +1517,50 @@ async function handleRequest(request, env, ctx) {
         timestamp: new Date().toISOString()
       }), {
         status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  }
+
+  // 实例查询接口 - 返回当前活跃实例信息（需要鉴权）
+  if (request.method === 'GET' && normalizedUrl.pathname === '/api/instances') {
+    try {
+      // 验证管理员Token
+      await verifyAdminToken(request, env, ctx);
+      
+      const activeInstances = await getActiveInstances(env, ctx, requestLogger);
+      const provider = getCurrentProvider();
+      const lockCount = await scanLockKeys(env, ctx, requestLogger);
+      
+      await requestLogger.info('Instance query', {
+        activeInstances: activeInstances.length,
+        provider,
+        totalLocks: lockCount
+      });
+
+      return new Response(JSON.stringify({
+        status: 'ok',
+        data: {
+          instances: activeInstances,
+          summary: {
+            total: activeInstances.length,
+            provider,
+            lockKeys: lockCount,
+            timestamp: new Date().toISOString()
+          }
+        }
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (e) {
+      await requestLogger.error('Instance query failed', { error: e.message });
+      return new Response(JSON.stringify({
+        status: 'error',
+        message: e.message,
+        timestamp: new Date().toISOString()
+      }), {
+        status: e.message.includes('Token') || e.message.includes('Authorization') ? 401 : 500,
         headers: { 'Content-Type': 'application/json' }
       });
     }
