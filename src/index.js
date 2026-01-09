@@ -1368,6 +1368,21 @@ async function handleRequest(request, env, ctx) {
 
   log.debug('Request Received', { method: request.method, url: request.url });
 
+  // 提取请求来源信息（仅 debug 级别，生产环境可通过 DEBUG_LOGS=true 开启）
+  const clientIP = request.headers.get('cf-connecting-ip') || 'unknown';
+  const userAgent = request.headers.get('user-agent') || 'unknown';
+  const referer = request.headers.get('referer') || 'none';
+  const cfRay = request.headers.get('cf-ray') || 'unknown';
+  const country = request.headers.get('cf-ipcountry') || 'unknown';
+
+  log.debug('Request Source Info', {
+    clientIP: clientIP.length > 50 ? clientIP.substring(0, 50) + '...' : clientIP,
+    userAgent: userAgent.length > 200 ? userAgent.substring(0, 200) + '...' : userAgent,
+    referer,
+    cfRay,
+    country
+  });
+
 
 
   // 1. 提前解构环境变量（在任何异步操作前）
