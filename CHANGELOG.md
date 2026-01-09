@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.17.0](https://github.com/YoungSx/lb-worker-js/compare/v0.16.0...v0.17.0) (2026-01-09)
+
+
+### 🐛 Bug Fixes
+
+* adds logging for forwarded requests and error responses ([6d8410c](https://github.com/YoungSx/lb-worker-js/commit/6d8410ca3bae4fa84645bcb7a8bb3630cc81508c))
+
+
+### 🔧 Maintenance
+
+* improves cache system with unified CacheService and provider fallback ([cc4230c](https://github.com/YoungSx/lb-worker-js/commit/cc4230c179c654df9958c19a4f39c4f5af2dd319))
+
+
+### ✨ Features
+
+* updates deployment environment logic ([fa7da6a](https://github.com/YoungSx/lb-worker-js/commit/fa7da6ac0b227df7f2fe39b392ef581fe2c0c801))
+
 ## [0.16.0](https://github.com/YoungSx/lb-worker-js/compare/v0.15.4...v0.16.0) (2026-01-09)
 
 
