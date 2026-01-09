@@ -1,6 +1,6 @@
 {
   "name": "lb-worker-js",
-  "version": "0.15.4",
+  "version": "0.16.0",
   "description": "Load Balancer Worker for drive-collector",
   "main": "src/index.js",
   "type": "module",

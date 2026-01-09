@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.16.0](https://github.com/YoungSx/lb-worker-js/compare/v0.15.4...v0.16.0) (2026-01-09)
+
+
+### ✨ Features
+
+* add admin API and authentication documentation ([a49aaa2](https://github.com/YoungSx/lb-worker-js/commit/a49aaa2e1a4bef1aa122ac907043a1bc9c89334c))
+
 ### [0.15.4](https://github.com/YoungSx/lb-worker-js/compare/v0.15.3...v0.15.4) (2026-01-08)
 
 
