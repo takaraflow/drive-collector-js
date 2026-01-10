@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.20.0](https://github.com/YoungSx/lb-worker-js/compare/v0.19.0...v0.20.0) (2026-01-10)
+
+
+### 🔧 Maintenance
+
+* lifecycle of logs ([fe16e26](https://github.com/YoungSx/lb-worker-js/commit/fe16e262fd6b417cc9a669f2569c2daf12c2cac5))
+
+
+### 🐛 Bug Fixes
+
+* updates cache provider environment variable naming ([483f15b](https://github.com/YoungSx/lb-worker-js/commit/483f15b4937d24f7bd69aa191089aaae45c66f34))
+
 ## [0.19.0](https://github.com/YoungSx/lb-worker-js/compare/v0.18.0...v0.19.0) (2026-01-10)
 
 
