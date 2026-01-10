@@ -480,6 +480,11 @@ async function initTelegramClient() {
                     if (msgStr.includes('TIMEOUT') || msgStr.includes('timeout') || msgStr.includes('ETIMEDOUT')) {
                         log.error(`⚠️ Telegram timeout detected: ${msgStr}`, { service: 'telegram', ...args });
                         telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
+                    } else if (msgStr.includes('Not connected')) {
+                        // 降级 "Not connected" 错误为警告，避免刷屏和误报
+                        log.warn(`⚠️ Telegram connection warning: ${msgStr}`, { service: 'telegram', ...args });
+                        // 触发 NOT_CONNECTED 类型的故障处理，但不视为严重错误
+                        telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.NOT_CONNECTED);
                     } else {
                         log.error(msg, ...args);
                     }
