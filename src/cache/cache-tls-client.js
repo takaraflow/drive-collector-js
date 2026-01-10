@@ -82,7 +82,7 @@ export class CacheTLSClient extends ICacheClient {
 
   async disconnect() {
     if (this.client) {
-      await this.client.quit();
+      await this.client.close();
       this.client = null;
       this.connectPromise = null;
       logger.info('Cache TLS Client 已断开');

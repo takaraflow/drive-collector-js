@@ -342,14 +342,17 @@ async function scanLockKeys(env, ctx = null, parentLogger = logger) {
     const lockPrefixes = ['lock:', 'task:', 'msg_lock:'];
     let lockCount = 0;
 
-    // 并发执行扫描，减少总延迟
-    const results = await Promise.all(lockPrefixes.map(prefix =>
-      executeWithFailover('_kv_list', env, ctx, scanLockKeysLogger, prefix)
-        .catch(e => {
-          scanLockKeysLogger.debug('锁键扫描失败', { prefix, error: e.message });
-          return { keys: [] };
-        })
-    ));
+    // 串行执行扫描，避免 Redis 客户端并发问题
+    const results = [];
+    for (const prefix of lockPrefixes) {
+      try {
+        const result = await executeWithFailover('_kv_list', env, ctx, scanLockKeysLogger, prefix);
+        results.push(result);
+      } catch (e) {
+        scanLockKeysLogger.debug('锁键扫描失败', { prefix, error: e.message });
+        results.push({ keys: [] });
+      }
+    }
 
     for (const result of results) {
       if (result && result.keys) {
@@ -376,14 +379,17 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
     // 扫描所有契约键前缀
     const prefixes = ['instance:', 'lock:', 'task:', 'msg_lock:'];
 
-    // 并发获取所有前缀的键
-    const prefixResults = await Promise.all(prefixes.map(prefix =>
-      executeWithFailover('_kv_list', env, ctx, getActiveInstancesLogger, prefix)
-        .catch(e => {
-          getActiveInstancesLogger.debug('前缀扫描失败', { prefix, error: e.message });
-          return { keys: [] };
-        })
-    ));
+    // 串行获取所有前缀的键（避免 Redis 客户端并发 SCAN 问题）
+    const prefixResults = [];
+    for (const prefix of prefixes) {
+      try {
+        const result = await executeWithFailover('_kv_list', env, ctx, getActiveInstancesLogger, prefix);
+        prefixResults.push(result);
+      } catch (e) {
+        getActiveInstancesLogger.debug('前缀扫描失败', { prefix, error: e.message });
+        prefixResults.push({ keys: [] });
+      }
+    }
 
     let allKeys = [];
     for (const result of prefixResults) {
@@ -1083,7 +1089,7 @@ async function executeRedisScan(env, prefix, ctx = null, requestLogger = null) {
     }
     await cacheServiceInstance.initialize(ctx);
 
-    const keys = await cacheServiceInstance.listKeys(prefix);
+    const keys = await cacheServiceInstance.listKeys(prefix, ctx);
     await scanLogger.debug(`executeRedisScan (CacheService): prefix=${prefix}, keysFound=${keys.length}`, {});
     return { keys: keys.map(k => ({ name: k })) };
   }

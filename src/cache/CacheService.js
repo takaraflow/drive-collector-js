@@ -434,7 +434,7 @@ class CacheService {
 
         try {
             if (typeof this.primaryProvider.listKeys === 'function') {
-                return await this.primaryProvider.listKeys(prefix);
+                return await this.primaryProvider.listKeys(prefix, 1000, ctx);
             }
             return [];
         } catch (error) {
