@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.18.0](https://github.com/YoungSx/drive-collector-js/compare/v4.17.0...v4.18.0) (2026-01-10)
+
+
+### ♻️ 代码重构
+
+* lifecycle management and improves configuration handling ([f5b13eb](https://github.com/YoungSx/drive-collector-js/commit/f5b13eb97eecca5a2dcf37250ae1946f5e660f70))
+
+
+### 🐛 问题修复
+
+* iImproves Redis connection logging with sensitive data masking ([1a3effb](https://github.com/YoungSx/drive-collector-js/commit/1a3effbce1ad3eac3da4ade7635ad2f8b71009bd))
+
+
+### ✨ 新特性
+
+* adds Axiom service suspension on unavailability ([54b6bf6](https://github.com/YoungSx/drive-collector-js/commit/54b6bf6fff8264e71bdad225acb53e27762a9008))
+* adds log batching and flushing functionality ([074c29e](https://github.com/YoungSx/drive-collector-js/commit/074c29e4a614c49ee33d7e38c1f92f65ce251344))
+* adds Telegram DC configuration overrides ([59a20e5](https://github.com/YoungSx/drive-collector-js/commit/59a20e5cf8abc03ce9db6cb870b9e58877ac6597))
+
 ## [4.17.0](https://github.com/YoungSx/drive-collector-js/compare/v4.16.0...v4.17.0) (2026-01-09)
 
 
