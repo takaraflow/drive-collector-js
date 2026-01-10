@@ -313,6 +313,19 @@ export async function flushLogs(logBuffer) {
 
   console.log(`[Axiom] Batch size: ${(batchSize / 1024 / 1024).toFixed(2)}MB`);
 
+  // [DEBUG] Analyze log sizes to find the culprit
+  if (batchSize > maxBatchSize) {
+    const logSizes = sanitizedLogs.map((log, index) => ({
+      index,
+      module: log.module || 'unknown',
+      message: log.message || 'unknown',
+      size: getByteSize(JSON.stringify(log))
+    }));
+    logSizes.sort((a, b) => b.size - a.size);
+    const top5 = logSizes.slice(0, 5);
+    console.warn('[Axiom] Top 5 largest logs:', JSON.stringify(top5, null, 2));
+  }
+
   // 5. 体积超限处理
   if (batchSize > maxBatchSize) {
     console.warn(`[Axiom] Batch size ${batchSize} exceeds limit ${maxBatchSize}. Applying truncation...`);
@@ -533,11 +546,17 @@ function createLoggerFactory(context, bindings = {}) {
      * 创建子日志记录器
      */
     child: function(bindings) {
-      const mergedBindings = { ...logger.bindings, ...bindings };
+      // 关键修复：将 logBuffer 从 bindings 中分离
+      // logBuffer 属于上下文(context)，不应作为日志字段(bindings)被记录，否则会导致日志呈指数级膨胀
+      const { logBuffer, ...incomingBindings } = bindings;
+      
+      const mergedBindings = { ...logger.bindings, ...incomingBindings };
       const newContext = { ...context };
-      if (bindings.logBuffer !== undefined) {
-        newContext.logBuffer = bindings.logBuffer;
+      
+      if (logBuffer !== undefined) {
+        newContext.logBuffer = logBuffer;
       }
+      
       return createLoggerFactory(newContext, mergedBindings);
     },
 
