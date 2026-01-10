@@ -414,10 +414,11 @@ describe('Logger Safeguard - Integration', () => {
       manyFields[`field${i}`] = `value${i}`;
     }
 
-    // 捕获 console 输出以验证清洗效果
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
+    // 创建带logBuffer的logger
+    const testLogBuffer = [];
+    const testLogger = logger.child({ logBuffer: testLogBuffer });
 
-    await logger.info('test message', {
+    await testLogger.info('test message', {
       longField: longString,
       ...manyFields,
       nested: {
@@ -431,11 +432,16 @@ describe('Logger Safeguard - Integration', () => {
       }
     });
 
-    // 验证 console 输出中包含清洗后的数据
-    const callArgs = consoleSpy.mock.calls[0][0];
-    expect(callArgs).toContain('TEST_LOG');
-    
-    consoleSpy.mockRestore();
+    // 验证日志被添加到logBuffer（清洗后）
+    // 注意：不检查console（规则13：禁止console.log）
+    expect(testLogBuffer.length).toBe(1);
+    const logEntry = testLogBuffer[0];
+    expect(logEntry.message).toBe('test message');
+    // 验证长字段被截断（15000字符应该被截断）
+    expect(logEntry.longField.length).toBeLessThan(15000);
+    expect(logEntry.longField).toContain('...[TRUNCATED]');
+    // 验证超出的字段被截断并标记
+    expect(logEntry._truncated_fields).toBe(true);
   });
 
   test('应处理大量日志的批量发送', async () => {

@@ -337,12 +337,12 @@ async function scanLockKeys(env, ctx = null, parentLogger = logger) {
   try {
     const lockPrefixes = ['lock:', 'task:', 'msg_lock:'];
     let lockCount = 0;
-    
+
     // 并发执行扫描，减少总延迟
-    const results = await Promise.all(lockPrefixes.map(prefix => 
-      executeWithFailover('_kv_list', env, ctx, prefix)
+    const results = await Promise.all(lockPrefixes.map(prefix =>
+      executeWithFailover('_kv_list', env, ctx, scanLockKeysLogger, prefix)
         .catch(e => {
-          scanLockKeysLogger.debug('锁键扫描失败', { prefix, error: e.message }, ctx);
+          scanLockKeysLogger.debug('锁键扫描失败', { prefix, error: e.message }, null, ctx);
           return { keys: [] };
         })
     ));
@@ -366,16 +366,16 @@ async function scanLockKeys(env, ctx = null, parentLogger = logger) {
 async function getActiveInstances(env, ctx = null, parentLogger = logger) {
   const getActiveInstancesLogger = parentLogger.child({ module: 'getActiveInstances' });
   const redisEndpointSummary = describeRedisEndpoint(env);
-  await getActiveInstancesLogger.debug('📊 Redis 终端摘要 (Redis endpoint summary)', { endpoint: redisEndpointSummary }, ctx);
+  await getActiveInstancesLogger.debug('📊 Redis 终端摘要 (Redis endpoint summary)', { endpoint: redisEndpointSummary }, null, ctx);
   try {
     // 扫描所有契约键前缀
     const prefixes = ['instance:', 'lock:', 'task:', 'msg_lock:'];
-    
+
     // 并发获取所有前缀的键
     const prefixResults = await Promise.all(prefixes.map(prefix =>
-      executeWithFailover('_kv_list', env, ctx, prefix)
+      executeWithFailover('_kv_list', env, ctx, getActiveInstancesLogger, prefix)
         .catch(e => {
-          getActiveInstancesLogger.debug('前缀扫描失败', { prefix, error: e.message }, ctx);
+          getActiveInstancesLogger.debug('前缀扫描失败', { prefix, error: e.message }, null, ctx);
           return { keys: [] };
         })
     ));
@@ -388,21 +388,21 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     }
 
     // 新增日志：记录扫描到的所有原始键
-    await getActiveInstancesLogger.debug('🔎 扫描到所有原始键 (All raw keys scanned)', { keys: allKeys.map(k => k.name) }, ctx);
+    await getActiveInstancesLogger.debug('🔎 扫描到所有原始键 (All raw keys scanned)', { keys: allKeys.map(k => k.name) }, null, ctx);
 
     if (allKeys.length === 0) {
-      await getActiveInstancesLogger.debug('⚠️ 未找到键，尝试回退全量扫描 (No keys found, attempting fallback full scan)', {}, ctx);
+      await getActiveInstancesLogger.debug('⚠️ 未找到键，尝试回退全量扫描 (No keys found, attempting fallback full scan)', {}, null, ctx);
       try {
-        const fallbackResult = await executeWithFailover('_kv_list', env, ctx, '');
+        const fallbackResult = await executeWithFailover('_kv_list', env, ctx, getActiveInstancesLogger, '');
         const fallbackKeys = fallbackResult?.keys || [];
-        await getActiveInstancesLogger.debug('getActiveInstances Fallback Scan: Raw keys', { keys: fallbackKeys.map(k => k.name), count: fallbackKeys.length }, ctx);
+        await getActiveInstancesLogger.debug('getActiveInstances Fallback Scan: Raw keys', { keys: fallbackKeys.map(k => k.name), count: fallbackKeys.length }, null, ctx);
         allKeys = fallbackKeys;
       } catch (e) {
-        await getActiveInstancesLogger.error('❌ 回退扫描失败 (Fallback scan failed)', { error: e.message }, ctx);
+        await getActiveInstancesLogger.error('❌ 回退扫描失败 (Fallback scan failed)', { error: e.message }, null, ctx);
       }
 
       if (allKeys.length === 0) {
-        await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: No keys found after fallback, returning empty array.', {}, ctx);
+        await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: No keys found after fallback, returning empty array.', {}, null, ctx);
         return [];
       }
     }
@@ -426,16 +426,16 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     for (const keyName of instanceKeys) {
       try {
         // 一个接一个地读，确保 socket 响应不乱序
-        const result = await executeWithFailover('_kv_get', env, ctx, keyName);
+        const result = await executeWithFailover('_kv_get', env, ctx, getActiveInstancesLogger, keyName);
         instanceDataResults.push(result);
       } catch (e) {
-        getActiveInstancesLogger.error('读取实例数据失败', { key: keyName, error: e.message }, ctx);
+        getActiveInstancesLogger.error('读取实例数据失败', { key: keyName, error: e.message }, null, ctx);
         instanceDataResults.push(null);
       }
     }
 
     // 新增日志：记录获取到的原始实例数据
-    await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Raw instance data results', { rawData: instanceDataResults }, ctx);
+    await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Raw instance data results', { rawData: instanceDataResults }, null, ctx);
 
     // 新增：输出所有扫描到的键及其值，便于线上调试
     const instanceDataByKey = new Map();
@@ -451,7 +451,7 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
         continue;
       }
       try {
-        const value = await executeWithFailover('_kv_get', env, ctx, keyName);
+        const value = await executeWithFailover('_kv_get', env, ctx, getActiveInstancesLogger, keyName);
         keyValueDump.push({ key: keyName, value });
       } catch (e) {
         keyValueDump.push({ key: keyName, error: e.message });
@@ -544,14 +544,14 @@ async function selectInstanceByLock(instances, env, ctx, parentLogger = logger) 
 
   let lockValue;
   try {
-    lockValue = await executeWithFailover('_kv_get', env, ctx, TELEGRAM_LOCK_KEY);
+    lockValue = await executeWithFailover('_kv_get', env, ctx, lockRoutingLogger, TELEGRAM_LOCK_KEY);
   } catch (error) {
-    await lockRoutingLogger.warn('🔒 读取锁失败，回退轮询', { lockKey: TELEGRAM_LOCK_KEY, error: error.message }, ctx);
+    await lockRoutingLogger.warn('🔒 读取锁失败，回退轮询', { lockKey: TELEGRAM_LOCK_KEY, error: error.message }, null, ctx);
     return null;
   }
 
   if (!lockValue) {
-    await lockRoutingLogger.debug('🔍 未找到锁或锁已过期，回退轮询', { lockKey: TELEGRAM_LOCK_KEY }, ctx);
+    await lockRoutingLogger.debug('🔍 未找到锁或锁已过期，回退轮询', { lockKey: TELEGRAM_LOCK_KEY }, null, ctx);
     return null;
   }
 
@@ -609,19 +609,19 @@ async function selectTargetInstance(instances, env, ctx, parentLogger = logger) 
 
   let currentIndex = 0;
   try {
-    const stored = await executeWithFailover('_kv_get', env, ctx, ROUND_ROBIN_KEY);
+    const stored = await executeWithFailover('_kv_get', env, ctx, selectTargetInstanceLogger, ROUND_ROBIN_KEY);
     currentIndex = stored ? parseInt(stored) : 0;
   } catch (e) {
-    await selectTargetInstanceLogger.error('轮询索引获取失败', { error: e.message }, ctx);
+    await selectTargetInstanceLogger.error('轮询索引获取失败', { error: e.message }, null, ctx);
   }
 
   const targetIndex = currentIndex % instances.length;
   const targetInstance = instances[targetIndex];
 
   try {
-    await executeWithFailover('_kv_put', env, ctx, ROUND_ROBIN_KEY, (currentIndex + 1).toString());
+    await executeWithFailover('_kv_put', env, ctx, selectTargetInstanceLogger, ROUND_ROBIN_KEY, (currentIndex + 1).toString());
   } catch (e) {
-    await selectTargetInstanceLogger.error('轮询索引更新失败', { error: e.message }, ctx);
+    await selectTargetInstanceLogger.error('轮询索引更新失败', { error: e.message }, null, ctx);
   }
 
   return targetInstance;
@@ -903,8 +903,8 @@ let redisClient = null;
 let redisInitPromise = null;
 let cacheServiceInstance = null;
 
-async function getRedisClient(env, ctx) {
-  const getRedisClientLogger = logger.child({ module: 'getRedisClient' });
+async function getRedisClient(env, ctx, requestLogger) {
+  const getRedisClientLogger = requestLogger || logger.child({ module: 'getRedisClient' });
 
   // 测试环境 mock
   if (isTestEnvironment && typeof __test_getRedisClient === 'function') {
@@ -915,17 +915,19 @@ async function getRedisClient(env, ctx) {
   // 优先使用 CACHE_PROVIDERS
   if (env.CACHE_PROVIDERS) {
     if (!cacheServiceInstance) {
-      cacheServiceInstance = new CacheService({ env });
+      cacheServiceInstance = new CacheService({ env, logger: getRedisClientLogger });
+    } else {
+      cacheServiceInstance.logger = getRedisClientLogger;
     }
-    await cacheServiceInstance.initialize();
+    await cacheServiceInstance.initialize(ctx);
 
     if (cacheServiceInstance.primaryProvider) {
       await getRedisClientLogger.info('使用 CACHE_PROVIDERS 缓存系统', {
         provider: cacheServiceInstance.getCurrentProvider()
-      }, ctx);
+      }, null, ctx);
       return {
-        get: (key) => cacheServiceInstance.get(key, 'string'),
-        set: (key, value, ttl) => cacheServiceInstance.set(key, value, ttl),
+        get: (key) => cacheServiceInstance.get(key, 'string', {}, ctx),
+        set: (key, value, ttl) => cacheServiceInstance.set(key, value, ttl, {}, ctx),
         send: undefined, // CacheService 不支持 send
         connect: () => Promise.resolve(),
         disconnect: () => cacheServiceInstance.destroy()
@@ -967,35 +969,39 @@ async function getRedisClient(env, ctx) {
 /**
  * 执行 Redis TLS 操作 (优先使用 CACHE_PROVIDERS，fallback 到旧配置)
  */
-async function executeRedis(operation, env, key, value = null, ctx = null) {
+async function executeRedis(operation, env, key, value = null, ctx = null, requestLogger = null) {
+  const log = requestLogger || logger.child({ module: 'executeRedis' });
+
   // 优先使用 CACHE_PROVIDERS
   if (env.CACHE_PROVIDERS) {
     if (!cacheServiceInstance) {
-      cacheServiceInstance = new CacheService({ env });
+      cacheServiceInstance = new CacheService({ env, logger: log });
+    } else {
+      cacheServiceInstance.logger = log;
     }
-    await cacheServiceInstance.initialize();
+    await cacheServiceInstance.initialize(ctx);
 
     const start = Date.now();
     try {
       switch (operation) {
         case '_redis_get':
         case '_kv_get': {
-          const result = await cacheServiceInstance.get(key, 'string');
-          await logger.debug(`executeRedis GET (CacheService): key=${key}, result=${result}, duration=${Date.now() - start}ms`, {}, ctx);
+          const result = await cacheServiceInstance.get(key, 'string', {}, ctx);
+          await log.debug(`executeRedis GET (CacheService): key=${key}, result=${result}, duration=${Date.now() - start}ms`, {}, null, ctx);
           return result;
         }
         case '_redis_put':
         case '_kv_put': {
           const valStr = typeof value === 'string' ? value : JSON.stringify(value);
-          await cacheServiceInstance.set(key, valStr, 3600);
-          await logger.debug(`executeRedis PUT (CacheService): key=${key}, duration=${Date.now() - start}ms`, {}, ctx);
+          await cacheServiceInstance.set(key, valStr, 3600, {}, ctx);
+          await log.debug(`executeRedis PUT (CacheService): key=${key}, duration=${Date.now() - start}ms`, {}, null, ctx);
           return true;
         }
         default:
           throw new Error(`Unsupported Redis operation: ${operation}`);
       }
     } catch (e) {
-      await logger.error(`executeRedis error (CacheService): ${e.message}`, {}, ctx);
+      await log.error(`executeRedis error (CacheService): ${e.message}`, {}, null, ctx);
       throw e;
     }
   }
@@ -1011,7 +1017,7 @@ async function executeRedis(operation, env, key, value = null, ctx = null) {
   const client = await getRedisClient({
     NF_REDIS_URL: redisUrl,
     NF_REDIS_PASSWORD: redisPassword
-  }, ctx);
+  }, ctx, log);
   const start = Date.now();
 
   try {
@@ -1020,7 +1026,7 @@ async function executeRedis(operation, env, key, value = null, ctx = null) {
       case '_kv_get': {
         // 支持 mock client 的 send 方法和真实 client 的 get 方法
         let result;
-        await logger.debug(`executeRedis GET: key=${key}`, {}, ctx);
+        await log.debug(`executeRedis GET: key=${key}`, {}, null, ctx);
         if (client.send) {
           result = await client.send('GET', key);
         } else if (client.get) {
@@ -1029,7 +1035,7 @@ async function executeRedis(operation, env, key, value = null, ctx = null) {
           throw new Error('Client does not support get or send method');
         }
         const duration = Date.now() - start;
-        await logger.debug(`executeRedis GET result: key=${key}, result=${result}, duration=${duration}ms`, {}, ctx);
+        await log.debug(`executeRedis GET result: key=${key}, result=${result}, duration=${duration}ms`, {}, null, ctx);
         return result;
       }
       case '_redis_put':
@@ -1058,18 +1064,20 @@ async function executeRedis(operation, env, key, value = null, ctx = null) {
 /**
  * 执行 Redis TLS Scan 操作 (优先使用 CACHE_PROVIDERS，fallback 到旧配置)
  */
-async function executeRedisScan(env, prefix, ctx = null) {
-  const scanLogger = logger.child({ module: 'executeRedisScan', logBuffer: ctx?.logBuffer });
+async function executeRedisScan(env, prefix, ctx = null, requestLogger = null) {
+  const scanLogger = requestLogger || logger.child({ module: 'executeRedisScan', logBuffer: ctx?.logBuffer });
 
   // 优先使用 CACHE_PROVIDERS
   if (env.CACHE_PROVIDERS) {
     if (!cacheServiceInstance) {
-      cacheServiceInstance = new CacheService({ env });
+      cacheServiceInstance = new CacheService({ env, logger: scanLogger });
+    } else {
+      cacheServiceInstance.logger = scanLogger;
     }
-    await cacheServiceInstance.initialize();
+    await cacheServiceInstance.initialize(ctx);
 
-    const keys = await cacheServiceInstance.listKeys(prefix);
-    await scanLogger.debug(`executeRedisScan (CacheService): prefix=${prefix}, keysFound=${keys.length}`, {}, ctx);
+    const keys = await cacheServiceInstance.listKeys(prefix, ctx);
+    await scanLogger.debug(`executeRedisScan (CacheService): prefix=${prefix}, keysFound=${keys.length}`, {}, null, ctx);
     return { keys: keys.map(k => ({ name: k })) };
   }
 
@@ -1255,20 +1263,34 @@ async function executeUpstashScan(env, prefix) {
  * 执行操作并支持优先级故障转移
  */
 async function executeWithPriorityFallback(operation, env, ctx, ...args) {
-  const executeWithPriorityFallbackLogger = logger.child({ module: 'executeWithPriorityFallback' });
+  const lastArg = args[args.length - 1];
+  const requestLogger = (lastArg && typeof lastArg.debug === 'function') ? args.pop() : null;
+  let executeWithPriorityFallbackLogger = requestLogger;
+  if (!executeWithPriorityFallbackLogger) {
+    try {
+      executeWithPriorityFallbackLogger = logger.child({ module: 'executeWithPriorityFallback' });
+    } catch (e) {
+      console.error('Failed to create child logger, using global logger:', e.message);
+      executeWithPriorityFallbackLogger = logger;
+    }
+  }
+  if (typeof executeWithPriorityFallbackLogger.debug !== 'function') {
+    throw new Error(`executeWithPriorityFallbackLogger does not have debug method, type=${typeof executeWithPriorityFallbackLogger}`);
+    executeWithPriorityFallbackLogger = logger;
+  }
   const providers = getProviderPriority(env);
-  await executeWithPriorityFallbackLogger.debug(`执行 ${operation}，优先级: ${JSON.stringify(providers)}`, { args: args.slice(0, 1) }, ctx);
-  
+  await executeWithPriorityFallbackLogger.debug(`执行 ${operation}，优先级: ${JSON.stringify(providers)}`, { args: args.slice(0, 1), providers });
+
   const providerOps = {
     'redis': {
       '_kv_get': async () => {
-        return await executeRedis('_redis_get', env, args[0], null, ctx);
+        return await executeRedis('_redis_get', env, args[0], null, ctx, executeWithPriorityFallbackLogger);
       },
       '_kv_put': async () => {
-        return await executeRedis('_redis_put', env, args[0], args[1], ctx);
+        return await executeRedis('_redis_put', env, args[0], args[1], ctx, executeWithPriorityFallbackLogger);
       },
       '_kv_list': async () => {
-        return await executeRedisScan(env, args[0], ctx);
+        return await executeRedisScan(env, args[0], ctx, executeWithPriorityFallbackLogger);
       }
     },
     'cloudflare': {
@@ -1419,6 +1441,11 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
  * 执行操作并支持故障转移（向后兼容）
  */
 async function executeWithFailover(operation, env, ctx, ...args) {
+  // 检查args的第一个参数是否是logger（旧调用方式：parentLogger在第4位，现在是args[0]）
+  if (args.length > 0 && typeof args[0].debug === 'function') {
+    const parentLogger = args.shift();
+    return await executeWithPriorityFallback(operation, env, ctx, ...args, parentLogger);
+  }
   return await executeWithPriorityFallback(operation, env, ctx, ...args);
 }
 

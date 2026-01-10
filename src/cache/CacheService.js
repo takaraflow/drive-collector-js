@@ -15,12 +15,11 @@ import { NFCacheClient } from './nf-cache-client.js';
 import { RedisTLSCache } from './RedisTLSCache.js';
 import { logger } from '../logger.js';
 
-const log = logger.withModule ? logger.withModule('CacheService') : logger;
-
 class CacheService {
     constructor(options = {}) {
         this.env = options.env || {};
         this.isInitialized = false;
+        this.logger = options.logger;
 
         this.primaryProvider = null;
         this.primaryProviderEntry = null;
@@ -36,15 +35,21 @@ class CacheService {
         this.maxFailuresBeforeFailover = options.maxFailuresBeforeFailover || 3;
     }
 
-    async initialize() {
+    _getLogger() {
+        return this.logger || logger;
+    }
+
+    async initialize(ctx = null) {
         if (this.isInitialized) return;
         this.isInitialized = true;
 
+        const log = this._getLogger();
+
         try {
-            this.providerList = this._loadProvidersFromConfig();
+            this.providerList = this._loadProvidersFromConfig(ctx);
 
             if (this.providerList.length === 0) {
-                log.warn('No CACHE_PROVIDERS found. Using MemoryCache (L1 only).');
+                await log.warn('No CACHE_PROVIDERS found. Using MemoryCache (L1 only).', {}, ctx);
                 return;
             }
 
@@ -61,10 +66,10 @@ class CacheService {
                     this.fallbackProvider = null;
                     this.fallbackProviderEntry = null;
 
-                    log.info('Cache provider connected', this._createProviderLogContext(providerEntry));
+                    await log.info('Cache provider connected', this._createProviderLogContext(providerEntry), null, ctx);
                     break;
                 } catch (error) {
-                    log.error(`Failed to connect to ${providerEntry.config.name}: ${error.message}`);
+                    await log.error(`Failed to connect to ${providerEntry.config.name}: ${error.message}`, {}, null, ctx);
                 }
             }
 
@@ -73,24 +78,25 @@ class CacheService {
                 this.currentProviderName = 'MemoryCache';
                 this.currentProviderConfigName = 'MemoryCache';
                 this.isFailoverMode = false;
-                log.warn('No external cache provider connected. Using MemoryCache (L1 only).');
+                await log.warn('No external cache provider connected. Using MemoryCache (L1 only).', {}, ctx);
             }
 
             this.isInitialized = true;
         } catch (error) {
-            log.error(`CacheService initialization failed: ${error.message}`);
+            await log.error(`CacheService initialization failed: ${error.message}`, {}, null, ctx);
             this.isInitialized = true;
         }
     }
 
-    _loadProvidersFromConfig() {
+    _loadProvidersFromConfig(ctx = null) {
+        const log = this._getLogger();
         const providersJson = this.env.CACHE_PROVIDERS;
         const hasCacheProviders = typeof providersJson === 'string'
             ? providersJson.trim().length > 0
             : !!providersJson;
 
         if (!hasCacheProviders) {
-            const legacy = this._loadLegacyProvider();
+            const legacy = this._loadLegacyProvider(ctx);
             return legacy ? [legacy] : [];
         }
 
@@ -127,7 +133,8 @@ class CacheService {
         return instances;
     }
 
-    _loadLegacyProvider() {
+    _loadLegacyProvider(ctx = null) {
+        const log = this._getLogger();
         const env = this.env || {};
         const redisUrl = env.NF_REDIS_URL || env.REDIS_TLS_URL;
         if (!redisUrl) return null;
@@ -201,8 +208,9 @@ class CacheService {
         return null;
     }
 
-    async get(key, type = 'json', options = {}) {
-        await this._ensureInitialized();
+    async get(key, type = 'json', options = {}, ctx = null) {
+        await this._ensureInitialized(ctx);
+        const log = this._getLogger();
 
         if (!this.primaryProvider) {
             return null;
@@ -212,8 +220,8 @@ class CacheService {
             const value = await this.primaryProvider.get(key, type);
             return value;
         } catch (error) {
-            log.error(`Cache get error on ${this.currentProviderName}: ${error.message}`);
-            await this._handleProviderFailure(error);
+            await log.error(`Cache get error on ${this.currentProviderName}: ${error.message}`, {}, null, ctx);
+            await this._handleProviderFailure(error, ctx);
 
             if (this.isFailoverMode && this.fallbackProvider) {
                 return this._getWithFallback(key, type, options);
@@ -223,15 +231,16 @@ class CacheService {
         }
     }
 
-    async set(key, value, ttl = 3600, options = {}) {
-        await this._ensureInitialized();
+    async set(key, value, ttl = 3600, options = {}, ctx = null) {
+        await this._ensureInitialized(ctx);
+        const log = this._getLogger();
 
         if (!this.primaryProvider) {
             return true;
         }
 
         if (this.isFailoverMode) {
-            log.warn('In failover mode, skipping L2 write');
+            await log.warn('In failover mode, skipping L2 write', {}, null, ctx);
             return true;
         }
 
@@ -239,8 +248,8 @@ class CacheService {
             await this.primaryProvider.set(key, value, ttl);
             return true;
         } catch (error) {
-            log.error(`Cache set error on ${this.currentProviderName}: ${error.message}`);
-            await this._handleProviderFailure(error);
+            await log.error(`Cache set error on ${this.currentProviderName}: ${error.message}`, {}, null, ctx);
+            await this._handleProviderFailure(error, ctx);
 
             if (this.isFailoverMode && this.fallbackProvider) {
                 try {
@@ -255,8 +264,9 @@ class CacheService {
         }
     }
 
-    async delete(key) {
-        await this._ensureInitialized();
+    async delete(key, ctx = null) {
+        await this._ensureInitialized(ctx);
+        const log = this._getLogger();
 
         if (!this.primaryProvider) return true;
 
@@ -264,22 +274,24 @@ class CacheService {
             await this.primaryProvider.delete(key);
             return true;
         } catch (error) {
-            log.error(`Cache delete error: ${error.message}`);
-            await this._handleProviderFailure(error);
+            await log.error(`Cache delete error: ${error.message}`, {}, null, ctx);
+            await this._handleProviderFailure(error, ctx);
             return false;
         }
     }
 
-    async _handleProviderFailure(error) {
+    async _handleProviderFailure(error, ctx = null) {
         this.failureCount++;
+        const log = this._getLogger();
 
         if (this.failureCount >= this.maxFailuresBeforeFailover && !this.isFailoverMode) {
-            log.warn(`Max failures (${this.maxFailuresBeforeFailover}) reached. Triggering failover.`);
-            await this._failover();
+            await log.warn(`Max failures (${this.maxFailuresBeforeFailover}) reached. Triggering failover.`, {}, null, ctx);
+            await this._failover(ctx);
         }
     }
 
-    async _failover() {
+    async _failover(ctx = null) {
+        const log = this._getLogger();
         this.isFailoverMode = true;
         log.warn('Cache failover active. External writes disabled.', this._createProviderLogContext(this.primaryProviderEntry));
 
@@ -303,6 +315,7 @@ class CacheService {
     }
 
     _startRecoveryCheck() {
+        const log = this._getLogger();
         if (this.recoveryTimer) return;
 
         this.recoveryTimer = setInterval(async () => {
@@ -341,8 +354,8 @@ class CacheService {
         }
     }
 
-    async _ensureInitialized() {
-        if (!this.isInitialized) await this.initialize();
+    async _ensureInitialized(ctx = null) {
+        if (!this.isInitialized) await this.initialize(ctx);
     }
 
     getCurrentProvider() {
@@ -387,8 +400,9 @@ class CacheService {
         };
     }
 
-    async listKeys(prefix = '') {
-        await this._ensureInitialized();
+    async listKeys(prefix = '', ctx = null) {
+        await this._ensureInitialized(ctx);
+        const log = this._getLogger();
 
         if (!this.primaryProvider) {
             return [];
@@ -400,7 +414,7 @@ class CacheService {
             }
             return [];
         } catch (error) {
-            log.error(`Cache listKeys error: ${error.message}`);
+            await log.error(`Cache listKeys error: ${error.message}`, {}, null, ctx);
             return [];
         }
     }

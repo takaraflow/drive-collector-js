@@ -21,8 +21,9 @@ jest.useFakeTimers('modern');
 // 全局 mock fetch，避免真实网络 IO
 global.fetch = jest.fn();
 
-// 全局 mock console（可选，根据需求）
+// 全局 mock console，禁止输出到控制台（规则13：禁止console.log）
 jest.spyOn(console, 'log').mockImplementation(() => {});
 jest.spyOn(console, 'warn').mockImplementation(() => {});
 jest.spyOn(console, 'error').mockImplementation(() => {});
 jest.spyOn(console, 'debug').mockImplementation(() => {});
+jest.spyOn(console, 'info').mockImplementation(() => {});

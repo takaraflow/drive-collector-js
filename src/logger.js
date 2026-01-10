@@ -223,30 +223,7 @@ async function sendToAxiom(logData, logBuffer, ctx = null) {
     };
   }
 
-  if (isTestEnvironment) {
-    // 测试环境：输出到控制台供测试用例捕获
-    const level = sanitizedData.level || 'info';
-    const message = sanitizedData.message;
-    const data = { ...sanitizedData };
-    delete data.level;
-    delete data.message;
-    delete data.timestamp;
-    delete data.version;
-
-    if (level === 'info') {
-      console.log(`[AXIOM_DEBUG] ${requestId}: TEST_LOG ${message}`, data);
-    } else if (level === 'warn') {
-      console.warn(`[AXIOM_DEBUG] ${requestId}: TEST_LOG ${message}`, data);
-    } else if (level === 'error') {
-      console.error(`[AXIOM_DEBUG] ${requestId}: TEST_LOG ${message}`, data);
-    } else if (level === 'debug') {
-      console.debug(`[AXIOM_DEBUG] ${requestId}: TEST_LOG ${message}`, data);
-    }
-    return;
-  }
-
   // 将清洗后的日志添加到缓冲
-  console.log(`[AXIOM_DEBUG] ${requestId}: sendToAxiom - adding ${sanitizedData.level} log to buffer, current size=${logBuffer.length}`);
   logBuffer.push(sanitizedData);
 }
 
@@ -258,11 +235,8 @@ async function sendToAxiom(logData, logBuffer, ctx = null) {
 export async function flushLogs(logBuffer, ctx = null) {
   // 1. 基础防御检查
   if (!baseLoggerConfig.token || !baseLoggerConfig.dataset) {
-    // 在测试环境中，如果没有配置，仍然处理缓冲区但不发送
-    if (!isTestEnvironment) {
-      console.warn('⚠️ [Axiom] 配置缺失，跳过刷新 (Config missing, skipping flush)');
-    }
-    
+    console.warn('⚠️ [Axiom] 配置缺失，跳过刷新 (Config missing, skipping flush)');
+
     // 即使没有配置，也要清空缓冲区防止内存泄漏
     if (logBuffer && logBuffer.length > 0) {
       logBuffer.length = 0;
@@ -295,7 +269,7 @@ export async function flushLogs(logBuffer, ctx = null) {
     }
   });
 
-  // 4. 序列化并检查总体积
+   // 4. 序列化并检查总体积
   let batchBody;
   try {
     batchBody = JSON.stringify(sanitizedLogs);
@@ -451,7 +425,7 @@ function createLoggerFactory(context, bindings = {}) {
       await sendToAxiom(logData, context.logBuffer, ctx);
 
       // 开发环境同时输出到控制台
-      if (isDevEnv(context.env) && !isTestEnvironment) {
+      if (isDevEnv(context.env)) {
         console.log(`[INFO] ${message}`, { ...bindings, ...data, version: VERSION });
       }
     },
@@ -472,7 +446,7 @@ function createLoggerFactory(context, bindings = {}) {
       addOtelEvent('warn', message, logData, span);
       await sendToAxiom(logData, context.logBuffer, ctx);
 
-      if (isDevEnv(context.env) && !isTestEnvironment) {
+      if (isDevEnv(context.env)) {
         console.warn(`[WARN] ${message}`, { ...bindings, ...data, version: VERSION });
       }
     },
@@ -493,7 +467,7 @@ function createLoggerFactory(context, bindings = {}) {
       addOtelEvent('error', message, logData, span);
       await sendToAxiom(logData, context.logBuffer, ctx);
 
-      if (isDevEnv(context.env) && !isTestEnvironment) {
+      if (isDevEnv(context.env)) {
         console.error(`[ERROR] ${message}`, { ...bindings, ...data, version: VERSION });
       }
     },
@@ -517,7 +491,7 @@ function createLoggerFactory(context, bindings = {}) {
       if (isDevEnv(context.env) || isTestEnvironment || baseLoggerConfig.debugEnabled) {
         await sendToAxiom(logData, context.logBuffer, ctx);
 
-        if (!isTestEnvironment) {
+        if (isDevEnv(context.env)) {
           console.debug(`[DEBUG] ${message}`, { ...bindings, ...data, version: VERSION });
         }
       }
