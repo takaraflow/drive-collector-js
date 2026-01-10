@@ -133,7 +133,7 @@ class CacheService {
             }
 
             try {
-                const instance = this._instantiateProvider(config);
+                const instance = this._instantiateProvider(ctx, config);
                 if (instance) {
                     instances.push({ instance, config });
                     log.info(`Loaded provider: ${config.name} (${config.type}, priority: ${config.priority || 'default'})`);
@@ -173,7 +173,7 @@ class CacheService {
         }
     }
 
-    _instantiateProvider(config) {
+    _instantiateProvider(ctx = null, config) {
         const log = this._getLoggerWithBuffer(ctx);
         const { type, name, host, port, username, password, db, tls, replicas } = config;
 
