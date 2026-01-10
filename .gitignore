@@ -10,3 +10,4 @@ wrangler.toml
 .jest-cache/
 .act.secrets
 .roo/
+coverage/

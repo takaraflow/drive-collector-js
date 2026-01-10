@@ -193,17 +193,8 @@ describe('Worker Tests', () => {
       };
       const request = new Request('https://test.url/unknown');
       const ctx = { waitUntil: jest.fn() };
-      
-      // Debug: Check what mockKV returns
-      const mockListResult = await mockKV.list({ prefix: 'instance:' });
-      console.log('Mock list result:', mockListResult);
-      const mockGetResult = await mockKV.get('instance:server1');
-      console.log('Mock get result:', mockGetResult);
-      
+
       const result = await handleRequest(request, basicEnv, ctx);
-      console.log('Final result status:', result.status);
-      const resultText = await result.text();
-      console.log('Final result body:', resultText);
       expect(result.status).toBe(200);
     });
 
