@@ -28,6 +28,12 @@ let config = null;
 // Version caching
 let version = 'unknown';
 
+const BATCH_MAX_SIZE = 500;
+const BATCH_FLUSH_INTERVAL_MS = process.env.NODE_ENV === 'test' ? 1000 : 3000;
+let logBuffer = [];
+let batchFlushTimer = null;
+let isBatchFlushing = false;
+
 const AXIOM_UNAVAILABLE_BACKOFF_MS = 3 * 1000; // 3 seconds
 let axiomSuspendedUntil = 0;
 
@@ -63,6 +69,10 @@ const initVersion = async () => {
  * @returns {Promise<void>}
  */
 export const delay = (ms) => {
+  if (process.env.NODE_ENV === 'test' || ms <= 0) {
+    return Promise.resolve();
+  }
+
   return new Promise(resolve => setTimeout(resolve, ms));
 };
 
@@ -227,6 +237,75 @@ const safeAxiomIngest = async (dataset, payload) => {
   }
 };
 
+async function flushLogsBatch() {
+  if (isBatchFlushing || !logBuffer.length) {
+    return;
+  }
+
+  if (batchFlushTimer) {
+    clearTimeout(batchFlushTimer);
+    batchFlushTimer = null;
+  }
+
+  isBatchFlushing = true;
+  const batchToSend = logBuffer;
+  logBuffer = [];
+
+  try {
+    if (!axiom) {
+      await initAxiom();
+    }
+
+    const dataset = getSafeDatasetName();
+    if (!dataset || !axiom) {
+      throw new Error('Axiom not properly configured for batch ingest');
+    }
+
+    await retryWithDelay(async () => {
+      const success = await safeAxiomIngest(dataset, batchToSend);
+      if (!success) {
+        throw new Error('Axiom ingest returned falsy');
+      }
+    }, 3, (attempt) => process.env.NODE_ENV === 'test' ? 0 : Math.pow(2, attempt) * 1000);
+  } catch (error) {
+    originalConsoleError.call(console, 'Axiom batch ingest failed:', error.message);
+    for (const payload of batchToSend) {
+      fallbackToConsole(payload.level || 'log', payload.message, payload);
+    }
+  } finally {
+    isBatchFlushing = false;
+    if (logBuffer.length) {
+      scheduleBatchFlush();
+    }
+  }
+}
+
+const scheduleBatchFlush = () => {
+  if (batchFlushTimer || !logBuffer.length) {
+    return;
+  }
+
+  batchFlushTimer = setTimeout(() => {
+    batchFlushTimer = null;
+    flushLogsBatch();
+  }, BATCH_FLUSH_INTERVAL_MS);
+};
+
+const queuePayloadForBatch = (payload) => {
+  logBuffer.push(payload);
+
+  if (logBuffer.length >= BATCH_MAX_SIZE) {
+    void flushLogsBatch();
+    return;
+  }
+
+  scheduleBatchFlush();
+};
+
+export const flushLogBuffer = async () => {
+  await flushLogsBatch();
+};
+
 const normalizeContext = (context) => {
     if (!context) return {};
     if (typeof context === 'string') {
@@ -308,36 +387,10 @@ const log = async (instanceId, level, message, data = {}, context = {}) => {
 
   // 额外安全：限制顶层字段，使用更保守的值（50 远低于 257）
   const finalPayload = limitFields(payload, 50);
+  finalPayload._time = finalPayload.timestamp;
+  finalPayload.eventId = `${instanceId}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
 
-  try {
-    const dataset = getSafeDatasetName();
-    await safeAxiomIngest(dataset, [finalPayload]);
-  } catch (err) {
-    if (isAxiomSuspended()) {
-      fallbackToConsole(level, displayMessage, finalData);
-      return;
-    }
-
-    // Retry logic with exponential backoff (max 3 attempts)
-    // 使用 retryWithDelay 以便测试中可以 mock
-    await retryWithDelay(async () => {
-      const dataset = getSafeDatasetName(); // 每次重试都重新获取数据集名称
-      if (!dataset || !axiom) {
-        throw new Error('Axiom not properly configured for retry');
-      }
-      await safeAxiomIngest(dataset, [finalPayload]);
-    }, 3, (attempt) => Math.pow(2, attempt) * 1000).catch((lastError) => {
-      // Fallback: log to console only (avoid recursive calls)
-      // Use original console.error to avoid proxy recursion
-      originalConsoleError.call(console, 'Axiom ingest failed after retries:', lastError.message);
-      // 为了避免控制台也被撑爆，对 fallback 的 payload 也做一下 prune
-      originalConsoleError.call(console, 'Failed payload:', {
-        service: data.service || 'unknown',
-        error: serializeError(lastError),
-        payload: pruneData(finalPayload, 2, 10)
-      });
-    });
-  }
+  queuePayloadForBatch(finalPayload);
 };
 
 const getSafeInstanceId = () => {

@@ -27,13 +27,18 @@ describe("Logger Service", () => {
     let enableTelegramConsoleProxy;
     let disableTelegramConsoleProxy;
     let setInstanceIdProvider;
+    let flushLogBuffer;
 
     const getLastAxiomCall = () => {
         const calls = mockAxiomIngest.mock.calls;
         if (!calls.length) {
             throw new Error('Axiom ingest was not invoked');
         }
-        const [dataset, [payload]] = calls[calls.length - 1];
+        const [dataset, payloadArray] = calls[calls.length - 1];
+        if (!Array.isArray(payloadArray) || !payloadArray.length) {
+            throw new Error('Axiom payload was not sent as an array');
+        }
+        const payload = payloadArray[payloadArray.length - 1];
         return { dataset, payload };
     };
 
@@ -91,6 +96,7 @@ describe("Logger Service", () => {
         enableTelegramConsoleProxy = loggerModule.enableTelegramConsoleProxy;
         disableTelegramConsoleProxy = loggerModule.disableTelegramConsoleProxy;
         setInstanceIdProvider = loggerModule.setInstanceIdProvider;
+        flushLogBuffer = loggerModule.flushLogBuffer;
     });
 
     afterEach(() => {
@@ -106,6 +112,7 @@ describe("Logger Service", () => {
         const message = "Test info message";
         
         await logger.withModule(moduleName).info(message);
+        await flushLogBuffer();
         
         const { dataset, payload } = getLastAxiomCall();
         expect(dataset).toBe('test-dataset');
@@ -122,6 +129,7 @@ describe("Logger Service", () => {
         const error = new Error("Test error");
         
         await logger.withModule(moduleName).error(error);
+        await flushLogBuffer();
         
         const { dataset, payload } = getLastAxiomCall();
         expect(dataset).toBe('test-dataset');
@@ -138,6 +146,7 @@ describe("Logger Service", () => {
         const message = "Test warning";
         
         await logger.withModule(moduleName).warn(message);
+        await flushLogBuffer();
         
         const { dataset, payload } = getLastAxiomCall();
         expect(dataset).toBe('test-dataset');
@@ -191,6 +200,7 @@ describe("Logger Service", () => {
         const data = { userId: 123, action: "test" };
         
         await logger.withModule(moduleName).info(message, { data });
+        await flushLogBuffer();
         
         const { dataset, payload } = getLastAxiomCall();
         expect(dataset).toBe('test-dataset');
@@ -202,6 +212,7 @@ describe("Logger Service", () => {
         const longMessage = "x".repeat(10000);
         
         await logger.withModule(moduleName).info(longMessage);
+        await flushLogBuffer();
         
         const { dataset, payload } = getLastAxiomCall();
         expect(dataset).toBe('test-dataset');
@@ -217,6 +228,7 @@ describe("Logger Service", () => {
         const message = "Test with instance";
         
         await logger.withModule(moduleName).info(message);
+        await flushLogBuffer();
         
         const { dataset, payload } = getLastAxiomCall();
         expect(dataset).toBe('test-dataset');
@@ -246,9 +258,9 @@ describe("Logger Service", () => {
         const moduleName = "TestModule";
         const message = "Test error handling";
         
-        const logPromise = logger.withModule(moduleName).info(message);
-        jest.advanceTimersByTime(1000);
-        await logPromise;
+        await logger.withModule(moduleName).info(message);
+        const flushPromise = flushLogBuffer();
+        await flushPromise;
 
         const { dataset } = getLastAxiomCall();
         expect(dataset).toBe('test-dataset');
@@ -258,11 +270,12 @@ describe("Logger Service", () => {
         mockAxiomIngest.mockRejectedValueOnce(new Error("Service unavailable"));
 
         const moduleName = "TestModule";
-        const firstLogPromise = logger.withModule(moduleName).info("first message");
-        jest.advanceTimersByTime(5000);
-        await firstLogPromise;
+        await logger.withModule(moduleName).info("first message");
+        const flushPromise = flushLogBuffer();
+        await flushPromise;
         const callsAfterFirst = mockAxiomIngest.mock.calls.length;
         await logger.withModule(moduleName).info("second message");
+        await flushLogBuffer();
 
         expect(mockAxiomIngest).toHaveBeenCalledTimes(callsAfterFirst);
         expect(
@@ -278,6 +291,7 @@ describe("Logger Service", () => {
         circularData.self = circularData;
         
         await logger.withModule(moduleName).info("Circular test", { data: circularData });
+        await flushLogBuffer();
         
         const { dataset } = getLastAxiomCall();
         expect(dataset).toBe('test-dataset');
@@ -289,6 +303,7 @@ describe("Logger Service", () => {
         jest.setSystemTime(fixedTime);
         
         await logger.withModule(moduleName).info("Date test", { date });
+        await flushLogBuffer();
         
         const { dataset, payload } = getLastAxiomCall();
         expect(dataset).toBe('test-dataset');
