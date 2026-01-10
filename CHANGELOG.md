@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.18.1](https://github.com/YoungSx/drive-collector-js/compare/v4.18.0...v4.18.1) (2026-01-10)
+
+
+### 🐛 问题修复
+
+* **telegram:** correct Telegram test mode DC setting and fix unit test isolation ([ccaa65a](https://github.com/YoungSx/drive-collector-js/commit/ccaa65ac3f3cc5b23d7720f8838b2158efcd1523))
+
 ## [4.18.0](https://github.com/YoungSx/drive-collector-js/compare/v4.17.0...v4.18.0) (2026-01-10)
 
 
