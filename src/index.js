@@ -1,4 +1,4 @@
-import { logger, configureBaseLoggerTransport, isTestEnvironment, VERSION, flushLogs, updateVersionFromEnv } from './logger.js';
+import { logger, configureBaseLoggerTransport, isTestEnvironment, VERSION, flushLogs, updateVersionFromEnv, flushGlobalLoggerBuffer } from './logger.js';
 
 // 全局状态
 let currentProvider = 'cloudflare';
@@ -125,7 +125,7 @@ async function verifyAdminToken(request, env, ctx = null, requestLogger = null) 
   
   // 跳过验证（开发环境）
   if (env.SKIP_ADMIN_AUTH === 'true') {
-    await verifyAdminTokenLogger.debug('⏭️ 跳过管理员鉴权 (Skipping admin auth)', {}, ctx);
+    await verifyAdminTokenLogger.debug('⏭️ 跳过管理员鉴权 (Skipping admin auth)', {});
     return true;
   }
 
@@ -151,7 +151,7 @@ async function verifyAdminToken(request, env, ctx = null, requestLogger = null) 
     throw new Error('无效的 API Token');
   }
 
-  await verifyAdminTokenLogger.debug('✅ 管理员Token验证成功', {}, ctx);
+  await verifyAdminTokenLogger.debug('✅ 管理员Token验证成功', {});
   return true;
 }
 
@@ -164,7 +164,7 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
     (ctx?.logBuffer ? logger.child({ module: 'QStashSignature', logBuffer: ctx.logBuffer }) : logger.child({ module: 'QStashSignature' }));
   // 跳过签名验证
   if (env.SKIP_SIGNATURE_VERIFY === 'true') {
-    await verifyQStashSignatureLogger.debug('⏭️ 跳过签名验证 (Skipping signature verification)', {}, ctx);
+    await verifyQStashSignatureLogger.debug('⏭️ 跳过签名验证 (Skipping signature verification)', {});
     if (isGetRequest) {
       return null;
     }
@@ -240,7 +240,7 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
       // 返回 Uint8Array 以匹配测试期望
       return bodyData;
     } catch (e) {
-      await verifyQStashSignatureLogger.error('❌ QStash mock 验证失败 (QStash mock verification failed)', { error: e.message }, ctx);
+      await verifyQStashSignatureLogger.error('❌ QStash mock 验证失败 (QStash mock verification failed)', { error: e.message });
       throw e;
     }
   }
@@ -272,7 +272,7 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
       throw e;
     }
     // 其他错误（如密钥无效、格式错误等）
-    await verifyQStashSignatureLogger.error('❌ QStash 验证失败 (QStash verification failed)', { error: e.message }, ctx);
+    await verifyQStashSignatureLogger.error('❌ QStash 验证失败 (QStash verification failed)', { error: e.message });
     throw new Error(`Signature verification failed: ${e.message}`);
   }
 }
@@ -346,7 +346,7 @@ async function scanLockKeys(env, ctx = null, parentLogger = logger) {
     const results = await Promise.all(lockPrefixes.map(prefix =>
       executeWithFailover('_kv_list', env, ctx, scanLockKeysLogger, prefix)
         .catch(e => {
-          scanLockKeysLogger.debug('锁键扫描失败', { prefix, error: e.message }, null, ctx);
+          scanLockKeysLogger.debug('锁键扫描失败', { prefix, error: e.message });
           return { keys: [] };
         })
     ));
@@ -359,7 +359,7 @@ async function scanLockKeys(env, ctx = null, parentLogger = logger) {
     
     return lockCount;
   } catch (error) {
-    await scanLockKeysLogger.debug('锁键扫描异常', { error: error.message }, ctx);
+    await scanLockKeysLogger.debug('锁键扫描异常', { error: error.message });
     return 0;
   }
 }
@@ -367,14 +367,11 @@ async function scanLockKeys(env, ctx = null, parentLogger = logger) {
 /**
  * 获取活跃实例
  */
-async function getActiveInstances(env, ctx = null, parentLogger = logger) {
-  // CF Worker 生命周期管理：确保日志能被正确缓冲和发送
-  const getActiveInstancesLogger = parentLogger.child({ 
-    module: 'getActiveInstances',
-    ...(ctx?.logBuffer ? { logBuffer: ctx.logBuffer } : {})
-  });
+async function getActiveInstances(env, ctx = null, requestLogger = null) {
+  // 使用统一的 requestLogger，不再创建新的 logger
+  const getActiveInstancesLogger = requestLogger || logger.child({ module: 'getActiveInstances' });
   const redisEndpointSummary = describeRedisEndpoint(env);
-  await getActiveInstancesLogger.debug('📊 Redis 终端摘要 (Redis endpoint summary)', { endpoint: redisEndpointSummary }, null, ctx);
+  await getActiveInstancesLogger.debug('📊 Redis 终端摘要 (Redis endpoint summary)', { endpoint: redisEndpointSummary });
   try {
     // 扫描所有契约键前缀
     const prefixes = ['instance:', 'lock:', 'task:', 'msg_lock:'];
@@ -383,7 +380,7 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     const prefixResults = await Promise.all(prefixes.map(prefix =>
       executeWithFailover('_kv_list', env, ctx, getActiveInstancesLogger, prefix)
         .catch(e => {
-          getActiveInstancesLogger.debug('前缀扫描失败', { prefix, error: e.message }, null, ctx);
+          getActiveInstancesLogger.debug('前缀扫描失败', { prefix, error: e.message });
           return { keys: [] };
         })
     ));
@@ -396,21 +393,21 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     }
 
     // 新增日志：记录扫描到的所有原始键
-    await getActiveInstancesLogger.debug('🔎 扫描到所有原始键 (All raw keys scanned)', { keys: allKeys.map(k => k.name) }, null, ctx);
+    await getActiveInstancesLogger.debug('🔎 扫描到所有原始键 (All raw keys scanned)', { keys: allKeys.map(k => k.name) });
 
     if (allKeys.length === 0) {
-      await getActiveInstancesLogger.debug('⚠️ 未找到键，尝试回退全量扫描 (No keys found, attempting fallback full scan)', {}, null, ctx);
+      await getActiveInstancesLogger.debug('⚠️ 未找到键，尝试回退全量扫描 (No keys found, attempting fallback full scan)', {});
       try {
         const fallbackResult = await executeWithFailover('_kv_list', env, ctx, getActiveInstancesLogger, '');
         const fallbackKeys = fallbackResult?.keys || [];
-        await getActiveInstancesLogger.debug('getActiveInstances Fallback Scan: Raw keys', { keys: fallbackKeys.map(k => k.name), count: fallbackKeys.length }, null, ctx);
+        await getActiveInstancesLogger.debug('getActiveInstances Fallback Scan: Raw keys', { keys: fallbackKeys.map(k => k.name), count: fallbackKeys.length });
         allKeys = fallbackKeys;
       } catch (e) {
-        await getActiveInstancesLogger.error('❌ 回退扫描失败 (Fallback scan failed)', { error: e.message }, null, ctx);
+        await getActiveInstancesLogger.error('❌ 回退扫描失败 (Fallback scan failed)', { error: e.message });
       }
 
       if (allKeys.length === 0) {
-        await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: No keys found after fallback, returning empty array.', {}, null, ctx);
+        await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: No keys found after fallback, returning empty array.', {});
         return [];
       }
     }
@@ -427,7 +424,7 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
         instanceKeys.push(key.name);
       }
     }
-    await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: Filtered instance keys', { instanceKeys, count: instanceKeys.length }, ctx);
+    await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: Filtered instance keys', { instanceKeys, count: instanceKeys.length });
 
     // 并发读取实例数据
     const instanceDataResults = [];
@@ -437,13 +434,13 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
         const result = await executeWithFailover('_kv_get', env, ctx, getActiveInstancesLogger, keyName);
         instanceDataResults.push(result);
       } catch (e) {
-        getActiveInstancesLogger.error('读取实例数据失败', { key: keyName, error: e.message }, null, ctx);
+        getActiveInstancesLogger.error('读取实例数据失败', { key: keyName, error: e.message });
         instanceDataResults.push(null);
       }
     }
 
     // 新增日志：记录获取到的原始实例数据
-    await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Raw instance data results', { rawData: instanceDataResults }, null, ctx);
+    await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Raw instance data results', { rawData: instanceDataResults });
 
     // 新增：输出所有扫描到的键及其值，便于线上调试
     const instanceDataByKey = new Map();
@@ -485,7 +482,7 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     for (let i = 0; i < formattedEntries.length; i += chunkSize) {
       const chunkIndex = Math.floor(i / chunkSize) + 1;
       const chunk = formattedEntries.slice(i, i + chunkSize);
-      await getActiveInstancesLogger.debug(`getActiveInstances Full KV chunk ${chunkIndex}/${totalChunks}`, { entries: chunk }, ctx);
+      await getActiveInstancesLogger.debug(`getActiveInstances Full KV chunk ${chunkIndex}/${totalChunks}`, { entries: chunk });
     }
 
     for (let idx = 0; idx < instanceDataResults.length; idx++) {
@@ -496,14 +493,14 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
         key: keyName,
         instanceId: instance?.id,
         parsedInstance: instance
-      }, ctx);
+      });
       if (instance && instance.status === 'active') {
         // 检查心跳是否过期
         if (now - instance.lastHeartbeat <= HEARTBEAT_TIMEOUT) {
           instances.push(instance);
         } else {
           const ageSeconds = Math.floor((now - instance.lastHeartbeat) / 1000);
-          await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Instance expired', { instanceId: instance.id, lastHeartbeat: instance.lastHeartbeat, heartbeatTimeoutSeconds: HEARTBEAT_TIMEOUT / 1000, ageSeconds }, ctx);
+          await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Instance expired', { instanceId: instance.id, lastHeartbeat: instance.lastHeartbeat, heartbeatTimeoutSeconds: HEARTBEAT_TIMEOUT / 1000, ageSeconds });
         }
       }
     }
@@ -513,12 +510,12 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     const lockCount = lockKeys.length;
     
     if (lockCount > 0) {
-      await getActiveInstancesLogger.debug('检测到锁键', { lockCount }, ctx);
+      await getActiveInstancesLogger.debug('检测到锁键', { lockCount });
     }
 
     // 为了兼容测试：测试期望 scanLockKeys 被调用，从而触发额外的 KV.list
     if (isTestEnvironment) {
-      await scanLockKeys(env, ctx, parentLogger);
+      await scanLockKeys(env, ctx, getActiveInstancesLogger);
     }
 
     // 去重：同一个实例 ID 只保留一次（防止脏数据导致重复）
@@ -532,13 +529,13 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
     }
 
     if (uniqueInstances.length !== instances.length) {
-      await getActiveInstancesLogger.debug('去重后实例列表', { before: instances.map(i => i?.id), after: uniqueInstances.map(i => i.id) }, ctx);
+      await getActiveInstancesLogger.debug('去重后实例列表', { before: instances.map(i => i?.id), after: uniqueInstances.map(i => i.id) });
     }
 
-    await getActiveInstancesLogger.debug('👥 获取活跃实例完成 (Active instances fetched)', { count: uniqueInstances.length, totalKeys: allKeys.length }, ctx);
+    await getActiveInstancesLogger.debug('👥 获取活跃实例完成 (Active instances fetched)', { count: uniqueInstances.length, totalKeys: allKeys.length });
     return uniqueInstances;
   } catch (error) {
-    await getActiveInstancesLogger.error('获取活跃实例失败', { error: error.message }, ctx);
+    await getActiveInstancesLogger.error('获取活跃实例失败', { error: error.message });
     return [];
   }
 }
@@ -546,23 +543,20 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
 /**
  * 根据锁持有者选择实例（用于需要会话锁的下载任务）
  */
-async function selectInstanceByLock(instances, env, ctx, parentLogger = logger) {
-  const lockRoutingLogger = parentLogger.child({ 
-    module: 'lockRouting',
-    ...(ctx?.logBuffer ? { logBuffer: ctx.logBuffer } : {})
-  });
+async function selectInstanceByLock(instances, env, ctx, requestLogger = null) {
+  const lockRoutingLogger = requestLogger || logger.child({ module: 'lockRouting' });
   if (!instances || instances.length === 0) return null;
 
   let lockValue;
   try {
     lockValue = await executeWithFailover('_kv_get', env, ctx, lockRoutingLogger, TELEGRAM_LOCK_KEY);
   } catch (error) {
-    await lockRoutingLogger.warn('🔒 读取锁失败，回退轮询', { lockKey: TELEGRAM_LOCK_KEY, error: error.message }, null, ctx);
+    await lockRoutingLogger.warn('🔒 读取锁失败，回退轮询', { lockKey: TELEGRAM_LOCK_KEY, error: error.message });
     return null;
   }
 
   if (!lockValue) {
-    await lockRoutingLogger.debug('🔍 未找到锁或锁已过期，回退轮询', { lockKey: TELEGRAM_LOCK_KEY }, null, ctx);
+    await lockRoutingLogger.debug('🔍 未找到锁或锁已过期，回退轮询', { lockKey: TELEGRAM_LOCK_KEY });
     return null;
   }
 
@@ -585,38 +579,35 @@ async function selectInstanceByLock(instances, env, ctx, parentLogger = logger) 
     acquiredAt,
     ttlSeconds,
     activeIds
-  }, ctx);
+  });
 
   if (ttlSeconds > 0 && acquiredAt > 0) {
     const expiresAt = acquiredAt + ttlSeconds * 1000;
     if (Date.now() > expiresAt) {
-      await lockRoutingLogger.debug('🔍 锁已过期，回退轮询', { lockKey: TELEGRAM_LOCK_KEY, acquiredAt, ttlSeconds }, ctx);
+      await lockRoutingLogger.debug('🔍 锁已过期，回退轮询', { lockKey: TELEGRAM_LOCK_KEY, acquiredAt, ttlSeconds });
       return null;
     }
   }
   if (!lockOwnerId) {
-    await lockRoutingLogger.debug('⚠️ 锁值缺少实例信息，回退轮询', { lockKey: TELEGRAM_LOCK_KEY }, ctx);
+    await lockRoutingLogger.debug('⚠️ 锁值缺少实例信息，回退轮询', { lockKey: TELEGRAM_LOCK_KEY });
     return null;
   }
 
   const ownerInstance = instances.find(inst => inst.id === lockOwnerId);
   if (ownerInstance) {
-    await lockRoutingLogger.info('🎯 使用锁持有者作为目标实例', { lockKey: TELEGRAM_LOCK_KEY, instanceId: lockOwnerId }, ctx);
+    await lockRoutingLogger.info('🎯 使用锁持有者作为目标实例', { lockKey: TELEGRAM_LOCK_KEY, instanceId: lockOwnerId });
     return ownerInstance;
   }
 
-  await lockRoutingLogger.warn('⚠️ 锁持有者不在活跃实例列表，回退轮询', { lockKey: TELEGRAM_LOCK_KEY, instanceId: lockOwnerId }, ctx);
+  await lockRoutingLogger.warn('⚠️ 锁持有者不在活跃实例列表，回退轮询', { lockKey: TELEGRAM_LOCK_KEY, instanceId: lockOwnerId });
   return null;
 }
 
 /**
  * 选择目标实例 (轮询)
  */
-async function selectTargetInstance(instances, env, ctx, parentLogger = logger) {
-  const selectTargetInstanceLogger = parentLogger.child({ 
-    module: 'selectTargetInstance',
-    ...(ctx?.logBuffer ? { logBuffer: ctx.logBuffer } : {})
-  });
+async function selectTargetInstance(instances, env, ctx, requestLogger = null) {
+  const selectTargetInstanceLogger = requestLogger || logger.child({ module: 'selectTargetInstance' });
   if (instances.length === 0) {
     return null;
   }
@@ -626,7 +617,7 @@ async function selectTargetInstance(instances, env, ctx, parentLogger = logger) 
     const stored = await executeWithFailover('_kv_get', env, ctx, selectTargetInstanceLogger, ROUND_ROBIN_KEY);
     currentIndex = stored ? parseInt(stored) : 0;
   } catch (e) {
-    await selectTargetInstanceLogger.error('轮询索引获取失败', { error: e.message }, null, ctx);
+    await selectTargetInstanceLogger.error('轮询索引获取失败', { error: e.message });
   }
 
   const targetIndex = currentIndex % instances.length;
@@ -635,7 +626,7 @@ async function selectTargetInstance(instances, env, ctx, parentLogger = logger) 
   try {
     await executeWithFailover('_kv_put', env, ctx, selectTargetInstanceLogger, ROUND_ROBIN_KEY, (currentIndex + 1).toString());
   } catch (e) {
-    await selectTargetInstanceLogger.error('轮询索引更新失败', { error: e.message }, null, ctx);
+    await selectTargetInstanceLogger.error('轮询索引更新失败', { error: e.message });
   }
 
   return targetInstance;
@@ -644,11 +635,8 @@ async function selectTargetInstance(instances, env, ctx, parentLogger = logger) 
 /**
  * 转发请求到目标实例
  */
-async function forwardToInstance(instance, normalizedUrl, request, originalBody, ctx = null, parentLogger = logger) {
-  const forwardToInstanceLogger = parentLogger.child({ 
-    module: 'forwardToInstance',
-    ...(ctx?.logBuffer ? { logBuffer: ctx.logBuffer } : {})
-  });
+async function forwardToInstance(instance, normalizedUrl, request, originalBody, ctx = null, requestLogger = null) {
+  const forwardToInstanceLogger = requestLogger || logger.child({ module: 'forwardToInstance' });
   const url = new URL(normalizedUrl.href);
   url.host = new URL(instance.url).host;
   url.protocol = new URL(instance.url).protocol;
@@ -683,13 +671,13 @@ async function forwardToInstance(instance, normalizedUrl, request, originalBody,
     instanceId: instance.id, 
     targetUrl: url.toString(),
     originalPath: normalizedUrl.pathname
-  }, ctx);
+  });
   const response = await fetch(forwardRequest);
 
   if (response.status >= 500) {
-    await forwardToInstanceLogger.warn('后端返回 5xx 错误', { status: response.status, instanceId: instance.id }, ctx);
+    await forwardToInstanceLogger.warn('后端返回 5xx 错误', { status: response.status, instanceId: instance.id });
   } else if (response.status >= 400 && response.status < 500) {
-    await forwardToInstanceLogger.warn('后端返回 4xx 错误', { status: response.status, statusText: response.statusText, instanceId: instance.id, targetUrl: url.toString() }, ctx);
+    await forwardToInstanceLogger.warn('后端返回 4xx 错误', { status: response.status, statusText: response.statusText, instanceId: instance.id, targetUrl: url.toString() });
   }
 
   return response;
@@ -698,21 +686,18 @@ async function forwardToInstance(instance, normalizedUrl, request, originalBody,
 /**
  * 带重试的转发逻辑
  */
-async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx, parentLogger = logger) {
-  const fetchWithRetryLogger = parentLogger.child({ 
-    module: 'fetchWithRetry',
-    ...(ctx?.logBuffer ? { logBuffer: ctx.logBuffer } : {})
-  });
+async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx, requestLogger = null) {
+  const fetchWithRetryLogger = requestLogger || logger.child({ module: 'fetchWithRetry' });
   let lastError;
   let last5xxResponse = null;
 
   for (const instance of instances) {
     try {
-      const response = await forwardToInstance(instance, normalizedUrl, request, body, ctx, parentLogger);
+      const response = await forwardToInstance(instance, normalizedUrl, request, body, ctx, requestLogger);
       
       // 4xx 错误：直接透传，不再重试其他实例
       if (response.status >= 400 && response.status < 500) {
-        await fetchWithRetryLogger.warn('实例返回 4xx 错误，停止重试', { status: response.status, instanceId: instance.id }, ctx);
+        await fetchWithRetryLogger.warn('实例返回 4xx 错误，停止重试', { status: response.status, instanceId: instance.id });
         if (last5xxResponse && last5xxResponse.body) {
           await last5xxResponse.body.cancel().catch(() => {});
         }
@@ -734,7 +719,7 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx,
       }
       return response;
     } catch (error) {
-      await fetchWithRetryLogger.error('转发请求失败', { instanceId: instance.id, error: error.message }, ctx);
+      await fetchWithRetryLogger.error('转发请求失败', { instanceId: instance.id, error: error.message });
       lastError = error;
       // 新增：在每次请求失败时，也尝试取消之前保存的 5xx 响应体，防止泄漏
       if (last5xxResponse && last5xxResponse.body) {
@@ -745,7 +730,7 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx,
 
   // 如果有 5xx 响应，返回最后一个 5xx 响应（new-features 测试期望）
   if (last5xxResponse) {
-    await fetchWithRetryLogger.warn('所有实例均返回 5xx', { status: last5xxResponse.status }, ctx);
+    await fetchWithRetryLogger.warn('所有实例均返回 5xx', { status: last5xxResponse.status });
     // 注意：这里不取消 last5xxResponse.body，因为需要返回给调用者
     // 调用者负责在使用完响应后调用 cancel()
     return last5xxResponse;
@@ -806,9 +791,8 @@ function shouldFailover(error, env) {
 }
 
 function failover(env, ctx = null, requestLogger = null) {
-  // CF Worker 生命周期管理：确保日志能被正确缓冲和发送
-  const failoverLogger = requestLogger || 
-    (ctx?.logBuffer ? logger.child({ module: 'failover', logBuffer: ctx.logBuffer }) : logger.child({ module: 'failover' }));
+  // 使用统一的 requestLogger
+  const failoverLogger = requestLogger || logger.child({ module: 'failover' });
   const hasUpstash = env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN;
   const hasNFRedis = !!(env.NF_REDIS_URL || env.REDIS_TLS_URL);
   
@@ -850,9 +834,8 @@ function isRetryableError(error) {
  * 带有重试逻辑的 Redis 命令执行器
  */
 async function retryRedisCommand(client, command, args = [], maxRetries = 3, initialDelay = 100, ctx = null, requestLogger = null) {
-  // CF Worker 生命周期管理：确保日志能被正确缓冲和发送
-  const retryRedisCommandLogger = requestLogger || 
-    (ctx?.logBuffer ? logger.child({ module: 'retryRedisCommand', logBuffer: ctx.logBuffer }) : logger.child({ module: 'retryRedisCommand' }));
+  // 使用统一的 requestLogger
+  const retryRedisCommandLogger = requestLogger || logger.child({ module: 'retryRedisCommand' });
   let retries = 0;
   let delay = initialDelay;
   let timerId = null;
@@ -862,7 +845,7 @@ async function retryRedisCommand(client, command, args = [], maxRetries = 3, ini
     while (retries < maxRetries && !isDone) {
       try {
         if (retries > 0) {
-          await retryRedisCommandLogger.warn(`Redis 命令重试: ${command} (尝试 ${retries + 1}/${maxRetries})`, { delay: `${delay}ms` }, ctx);
+          await retryRedisCommandLogger.warn(`Redis 命令重试: ${command} (尝试 ${retries + 1}/${maxRetries})`, { delay: `${delay}ms` });
           let retryTimerId = null;
           try {
             await new Promise((resolve) => {
@@ -948,10 +931,10 @@ async function getRedisClient(env, ctx, requestLogger) {
     if (cacheServiceInstance.primaryProvider) {
       await getRedisClientLogger.info('使用 CACHE_PROVIDERS 缓存系统', {
         provider: cacheServiceInstance.getCurrentProvider()
-      }, null, ctx);
+      });
       return {
-        get: (key) => cacheServiceInstance.get(key, 'string', {}, ctx),
-        set: (key, value, ttl) => cacheServiceInstance.set(key, value, ttl, {}, ctx),
+        get: (key) => cacheServiceInstance.get(key, 'string', {}),
+        set: (key, value, ttl) => cacheServiceInstance.set(key, value, ttl, {}),
         send: undefined, // CacheService 不支持 send
         connect: () => Promise.resolve(),
         disconnect: () => cacheServiceInstance.destroy()
@@ -977,12 +960,12 @@ async function getRedisClient(env, ctx, requestLogger) {
       const client = getNFCacheClient(effectiveEnv);
       await client.connect();
       redisClient = client;
-      await getRedisClientLogger.info('NF Redis Client 初始化成功', { url: effectiveEnv.NF_REDIS_URL }, ctx);
+      await getRedisClientLogger.info('NF Redis Client 初始化成功', { url: effectiveEnv.NF_REDIS_URL });
       return client;
     } catch (e) {
       redisClient = null;
       redisInitPromise = null; // 失败后允许下次重试
-      await getRedisClientLogger.error('NF Redis Client 初始化失败', { error: e.message }, ctx);
+      await getRedisClientLogger.error('NF Redis Client 初始化失败', { error: e.message });
       throw e;
     }
   })();
@@ -1010,22 +993,22 @@ async function executeRedis(operation, env, key, value = null, ctx = null, reque
       switch (operation) {
         case '_redis_get':
         case '_kv_get': {
-          const result = await cacheServiceInstance.get(key, 'string', {}, ctx);
-          await log.debug(`executeRedis GET (CacheService): key=${key}, result=${result}, duration=${Date.now() - start}ms`, {}, null, ctx);
+          const result = await cacheServiceInstance.get(key, 'string', {});
+          await log.debug(`executeRedis GET (CacheService): key=${key}, result=${result}, duration=${Date.now() - start}ms`, {});
           return result;
         }
         case '_redis_put':
         case '_kv_put': {
           const valStr = typeof value === 'string' ? value : JSON.stringify(value);
-          await cacheServiceInstance.set(key, valStr, 3600, {}, ctx);
-          await log.debug(`executeRedis PUT (CacheService): key=${key}, duration=${Date.now() - start}ms`, {}, null, ctx);
+          await cacheServiceInstance.set(key, valStr, 3600, {});
+          await log.debug(`executeRedis PUT (CacheService): key=${key}, duration=${Date.now() - start}ms`, {});
           return true;
         }
         default:
           throw new Error(`Unsupported Redis operation: ${operation}`);
       }
     } catch (e) {
-      await log.error(`executeRedis error (CacheService): ${e.message}`, {}, null, ctx);
+      await log.error(`executeRedis error (CacheService): ${e.message}`, {});
       throw e;
     }
   }
@@ -1050,7 +1033,7 @@ async function executeRedis(operation, env, key, value = null, ctx = null, reque
       case '_kv_get': {
         // 支持 mock client 的 send 方法和真实 client 的 get 方法
         let result;
-        await log.debug(`executeRedis GET: key=${key}`, {}, null, ctx);
+        await log.debug(`executeRedis GET: key=${key}`, {});
         if (client.send) {
           result = await client.send('GET', key);
         } else if (client.get) {
@@ -1059,7 +1042,7 @@ async function executeRedis(operation, env, key, value = null, ctx = null, reque
           throw new Error('Client does not support get or send method');
         }
         const duration = Date.now() - start;
-        await log.debug(`executeRedis GET result: key=${key}, result=${result}, duration=${duration}ms`, {}, null, ctx);
+        await log.debug(`executeRedis GET result: key=${key}, result=${result}, duration=${duration}ms`, {});
         return result;
       }
       case '_redis_put':
@@ -1100,8 +1083,8 @@ async function executeRedisScan(env, prefix, ctx = null, requestLogger = null) {
     }
     await cacheServiceInstance.initialize(ctx);
 
-    const keys = await cacheServiceInstance.listKeys(prefix, ctx);
-    await scanLogger.debug(`executeRedisScan (CacheService): prefix=${prefix}, keysFound=${keys.length}`, {}, null, ctx);
+    const keys = await cacheServiceInstance.listKeys(prefix);
+    await scanLogger.debug(`executeRedisScan (CacheService): prefix=${prefix}, keysFound=${keys.length}`, {});
     return { keys: keys.map(k => ({ name: k })) };
   }
 
@@ -1116,7 +1099,7 @@ async function executeRedisScan(env, prefix, ctx = null, requestLogger = null) {
   const client = await getRedisClient({
     NF_REDIS_URL: redisUrl,
     NF_REDIS_PASSWORD: redisPassword
-  }, ctx);
+  });
 
   const keys = [];
   let cursor = '0';
@@ -1127,7 +1110,7 @@ async function executeRedisScan(env, prefix, ctx = null, requestLogger = null) {
     // 添加日志，记录使用的 client 类型和 scan 参数
     const isNFCacheClient = !!client.scan && !client.send;
     const clientType = isNFCacheClient ? 'NFCacheClient' : (client.send ? 'RedisClient' : 'Unknown');
-    await scanLogger.debug(`executeRedisScan: clientType=${clientType}, prefix=${prefix}, cursor=${cursor}`, {}, ctx);
+    await scanLogger.debug(`executeRedisScan: clientType=${clientType}, prefix=${prefix}, cursor=${cursor}`, {});
 
     if (client.send) {
       // 原生 redis-on-workers 或类似 client，直接发送命令
@@ -1135,14 +1118,14 @@ async function executeRedisScan(env, prefix, ctx = null, requestLogger = null) {
       // 修复：MATCH pattern 应该是 'instance:*' 而不是 'instance:instance:*'
       // 传入的 prefix 是 'instance:'
       const matchPattern = prefix === '' ? '*' : (prefix.endsWith(':') ? `${prefix}*` : `${prefix}:*`);
-      await scanLogger.debug(`Executing Redis SCAN (send)`, { clientType, prefix, matchPattern, cursor }, ctx);
+      await scanLogger.debug(`Executing Redis SCAN (send)`, { clientType, prefix, matchPattern, cursor });
       res = await client.send('SCAN', cursor, 'MATCH', matchPattern, 'COUNT', 100);
     } else if (client.scan) {
       // NFCacheClient 或兼容接口
       // 假设 scan 方法签名是 (cursor, matchPattern, count)
       // 这里的 matchPattern 应该是完整的 pattern (如 "instance:*")
       const matchPattern = prefix === '' ? '*' : (prefix.endsWith(':') ? `${prefix}*` : `${prefix}:*`);
-      await scanLogger.debug(`Executing Redis SCAN (scan)`, { clientType, prefix, matchPattern, cursor }, ctx);
+      await scanLogger.debug(`Executing Redis SCAN (scan)`, { clientType, prefix, matchPattern, cursor });
       res = await client.scan(cursor, matchPattern, 100);
     } else {
       throw new Error('Client does not support scan or send method');
@@ -1158,7 +1141,7 @@ async function executeRedisScan(env, prefix, ctx = null, requestLogger = null) {
       batchKeysCount: Array.isArray(batchKeys) ? batchKeys.length : 0,
       batchKeys: Array.isArray(batchKeys) ? batchKeys.map(k => String(k)) : batchKeys,
       batchKeysType: Array.isArray(batchKeys) ? 'array' : typeof batchKeys
-    }, ctx);
+    });
 
     if (Array.isArray(batchKeys)) {
       for (const k of batchKeys) {
@@ -1167,7 +1150,7 @@ async function executeRedisScan(env, prefix, ctx = null, requestLogger = null) {
     }
   } while (cursor !== '0');
 
-  await scanLogger.debug(`executeRedisScan: finished scanning`, { prefix, keysFound: keys.length, keys: keys.map(k => k.name) }, ctx);
+  await scanLogger.debug(`executeRedisScan: finished scanning`, { prefix, keysFound: keys.length, keys: keys.map(k => k.name) });
   return { keys };
 }
 
@@ -1194,10 +1177,10 @@ async function checkRedisHealth(env, ctx, executor = executeWithPriorityFallback
             await cacheServiceInstance.get('healthcheck_ping');
           }
           const duration = Date.now() - start;
-          await checkRedisHealthLogger.info(`Redis 健康检查成功 (CacheService, provider=${provider})`, { duration: `${duration}ms`, provider }, ctx);
+          await checkRedisHealthLogger.info(`Redis 健康检查成功 (CacheService, provider=${provider})`, { duration: `${duration}ms`, provider });
           return true;
         } catch (pingError) {
-          await checkRedisHealthLogger.warn(`CacheService Redis PING 健康检查失败: ${pingError.message}`, { provider }, ctx);
+          await checkRedisHealthLogger.warn(`CacheService Redis PING 健康检查失败: ${pingError.message}`, { provider });
         }
       }
     }
@@ -1212,19 +1195,19 @@ async function checkRedisHealth(env, ctx, executor = executeWithPriorityFallback
         const client = await getRedisClient({
           NF_REDIS_URL: redisUrl,
           NF_REDIS_PASSWORD: redisPassword
-        }, ctx);
+        });
         const start = Date.now();
         const pong = await client.ping();
         const duration = Date.now() - start;
         if (pong === 'PONG' || pong === 'OK') {
-          await checkRedisHealthLogger.info(`Redis 健康检查成功 (通过 PING)`, { duration: `${duration}ms` }, ctx);
+          await checkRedisHealthLogger.info(`Redis 健康检查成功 (通过 PING)`, { duration: `${duration}ms` });
           return true;
         } else {
-          await checkRedisHealthLogger.warn(`Redis 健康检查失败 (PING 响应: ${pong})`, { duration: `${duration}ms` }, ctx);
+          await checkRedisHealthLogger.warn(`Redis 健康检查失败 (PING 响应: ${pong})`, { duration: `${duration}ms` });
           return false;
         }
       } catch (pingError) {
-        await checkRedisHealthLogger.warn(`Redis PING 健康检查失败: ${pingError.message}`, {}, ctx);
+        await checkRedisHealthLogger.warn(`Redis PING 健康检查失败: ${pingError.message}`, {});
         // 如果直接 PING 失败，不立即返回 false，而是继续尝试通过 _kv_get 进行检查
       }
     }
@@ -1233,10 +1216,10 @@ async function checkRedisHealth(env, ctx, executor = executeWithPriorityFallback
     const start = Date.now();
     await executor('_kv_get', env, ctx, 'healthcheck_ping');
     const duration = Date.now() - start;
-    await checkRedisHealthLogger.info(`备用 provider 健康检查成功 (通过 _kv_get)`, { duration: `${duration}ms` }, ctx);
+    await checkRedisHealthLogger.info(`备用 provider 健康检查成功 (通过 _kv_get)`, { duration: `${duration}ms` });
     return true;
   } catch (e) {
-    await checkRedisHealthLogger.error(`所有 provider 健康检查失败`, { error: e.message }, ctx);
+    await checkRedisHealthLogger.error(`所有 provider 健康检查失败`, { error: e.message });
     return false;
   }
 }
@@ -1299,7 +1282,7 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
     }
   }
   if (typeof executeWithPriorityFallbackLogger.debug !== 'function') {
-    throw new Error(`executeWithPriorityFallbackLogger does not have debug method, type=${typeof executeWithPriorityFallbackLogger}`);
+    console.warn('[executeWithPriorityFallback] Logger 不合法，降级到全局 logger (Logger invalid, fallback to global logger)');
     executeWithPriorityFallbackLogger = logger;
   }
   const providers = getProviderPriority(env);
@@ -1322,7 +1305,7 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         if (env.KV_STORAGE) {
           const start = Date.now();
           const res = await env.KV_STORAGE.get(args[0]);
-          await executeWithPriorityFallbackLogger.debug(`Cloudflare KV GET: key=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' }, ctx);
+          await executeWithPriorityFallbackLogger.debug(`Cloudflare KV GET: key=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' });
           return res;
         }
         throw new Error('KV_STORAGE not available');
@@ -1331,7 +1314,7 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         if (env.KV_STORAGE) {
           const start = Date.now();
           await env.KV_STORAGE.put(args[0], args[1]);
-          await executeWithPriorityFallbackLogger.debug(`Cloudflare KV PUT: key=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' }, ctx);
+          await executeWithPriorityFallbackLogger.debug(`Cloudflare KV PUT: key=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' });
           return true;
         }
         throw new Error('KV_STORAGE not available');
@@ -1340,7 +1323,7 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         if (env.KV_STORAGE) {
           const start = Date.now();
           const res = await env.KV_STORAGE.list({ prefix: args[0] });
-          await executeWithPriorityFallbackLogger.debug(`Cloudflare KV LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' }, ctx);
+          await executeWithPriorityFallbackLogger.debug(`Cloudflare KV LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' });
           return res;
         }
         throw new Error('KV_STORAGE not available');
@@ -1354,22 +1337,22 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         });
         const duration = Date.now() - start;
 
-        await executeWithPriorityFallbackLogger.debug(`Upstash GET ${args[0]}: status ${response.status}, duration=${duration}ms`, { cache: true, provider: 'Upstash' }, ctx);
+        await executeWithPriorityFallbackLogger.debug(`Upstash GET ${args[0]}: status ${response.status}, duration=${duration}ms`, { cache: true, provider: 'Upstash' });
 
         if (response.status === 404) {
-          await executeWithPriorityFallbackLogger.debug(`Upstash GET 404 for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' }, ctx);
+          await executeWithPriorityFallbackLogger.debug(`Upstash GET 404 for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' });
           await response.body.cancel();
           return null;
         }
 
         if (!response.ok) {
-          await executeWithPriorityFallbackLogger.debug(`Upstash GET error ${response.status} for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' }, ctx);
+          await executeWithPriorityFallbackLogger.debug(`Upstash GET error ${response.status} for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' });
           await response.body?.cancel();
           throw new Error(`Upstash Get Error: ${response.status} ${response.statusText}`);
         }
 
         const data = await response.json();
-        await executeWithPriorityFallbackLogger.debug(`Upstash GET ${args[0]} success`, { cache: true, provider: 'Upstash' }, ctx);
+        await executeWithPriorityFallbackLogger.debug(`Upstash GET ${args[0]} success`, { cache: true, provider: 'Upstash' });
         return data.result;
       },
       '_kv_put': async () => {
@@ -1384,21 +1367,21 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         });
         const duration = Date.now() - start;
 
-        await executeWithPriorityFallbackLogger.debug(`Upstash PUT ${args[0]}: status ${response.status}, duration=${duration}ms`, { cache: true, provider: 'Upstash' }, ctx);
+        await executeWithPriorityFallbackLogger.debug(`Upstash PUT ${args[0]}: status ${response.status}, duration=${duration}ms`, { cache: true, provider: 'Upstash' });
 
         if (!response.ok) {
-          await executeWithPriorityFallbackLogger.debug(`Upstash PUT error ${response.status} for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' }, ctx);
+          await executeWithPriorityFallbackLogger.debug(`Upstash PUT error ${response.status} for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' });
           await response.body?.cancel();
           throw new Error(`Upstash Put Error: ${response.status} ${response.statusText}`);
         }
 
-        await executeWithPriorityFallbackLogger.debug(`Upstash PUT ${args[0]} success`, { cache: true, provider: 'Upstash' }, ctx);
+        await executeWithPriorityFallbackLogger.debug(`Upstash PUT ${args[0]} success`, { cache: true, provider: 'Upstash' });
         return true;
       },
       '_kv_list': async () => {
         const start = Date.now();
         const res = await executeUpstashScan(env, args[0]);
-        await executeWithPriorityFallbackLogger.debug(`Upstash LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'Upstash' }, ctx);
+        await executeWithPriorityFallbackLogger.debug(`Upstash LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'Upstash' });
         return res;
       }
     }
@@ -1421,14 +1404,14 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         provider: providerName,
         providerType: p,
         priorityIndex: i
-      }, ctx);
+      });
       const result = await providerOps[p][operation]();
       const duration = Date.now() - start;
       await executeWithPriorityFallbackLogger.info(`使用 ${p} ${operation} 成功, duration=${duration}ms`, {
         cache: true,
         provider: providerName,
         actualProvider: p
-      }, ctx);
+      });
       lastUsedProvider = p;
       return result;
     } catch (e) {
@@ -1446,10 +1429,10 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
       const nextProvider = providers[i + 1];
       const providerName = p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis';
       if (nextProvider) {
-        await executeWithPriorityFallbackLogger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, fallback to ${nextProvider}`, { cache: true, provider: providerName, failedProviders }, ctx);
+        await executeWithPriorityFallbackLogger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, fallback to ${nextProvider}`, { cache: true, provider: providerName, failedProviders });
       } else {
         // 新增：在所有提供者失败时记录更详细的错误日志
-        await executeWithPriorityFallbackLogger.error(`所有提供者失败，操作 ${operation}，所有提供者尝试结果:`, { args: args.slice(0, 1), failedAttempts: failedProviders }, ctx);
+        await executeWithPriorityFallbackLogger.error(`所有提供者失败，操作 ${operation}，所有提供者尝试结果:`, { args: args.slice(0, 1), failedAttempts: failedProviders });
         throw new Error(`All providers failed for ${operation}`);
       }
       // 继续尝试下一个提供者
@@ -1573,9 +1556,8 @@ const createSafeEnv = (env) => {
 export default {
   async fetch(request, env, ctx) {
     // [AXIOM_DEBUG] Request lifecycle tracing
-    // CF Worker 兼容性：使用 crypto.randomUUID() 替代 Math.random() 提供更好的随机性
     const requestId = `req_${Date.now()}_${(typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11))}`;
-    ctx._axiomDebugRequestId = requestId; // Attach to context for tracing
+    if (ctx) ctx._axiomDebugRequestId = requestId; // Attach to context for tracing
     console.log(`[AXIOM_DEBUG] ${requestId}: export.default.fetch entered`);
 
     // 1. 创建安全环境，防止 OTel 扫描 undefined 变量时崩溃
@@ -1587,7 +1569,10 @@ export default {
     configureBaseLoggerTransport(safeEnv);
 
     // 3. 判定是否启用 Axiom 导出器
-    const useAxiom = !isTestEnvironment && safeEnv.AXIOM_TOKEN && safeEnv.AXIOM_DATASET;
+    // 修复：检查实际值而不是空字符串
+    const useAxiom = !isTestEnvironment && 
+                     safeEnv.AXIOM_TOKEN && safeEnv.AXIOM_TOKEN.trim() !== '' &&
+                     safeEnv.AXIOM_DATASET && safeEnv.AXIOM_DATASET.trim() !== '';
     console.log(`[AXIOM_DEBUG] ${requestId}: Axiom decision - useAxiom=${useAxiom}, isTest=${isTestEnvironment}, hasToken=${!!safeEnv.AXIOM_TOKEN}, hasDataset=${!!safeEnv.AXIOM_DATASET}`);
 
     if (useAxiom) {
@@ -1606,7 +1591,7 @@ export default {
       }).fetch(request, safeEnv, ctx);
     }
 
-    // 4. 回退模式：直接运行业务逻辑
+    // 4. 回退模式：直接运行业务逻辑，也要传递 ctx
     console.log(`[AXIOM_DEBUG] ${requestId}: fallback mode - calling handler.fetch directly`);
     return handler.fetch(request, safeEnv, ctx);
   }
@@ -1643,15 +1628,28 @@ async function handleRequest(request, env, ctx) {
   // 1. 在上下文还在时，显式捕获顶级 Span
   const rootSpan = trace.getActiveSpan();
 
-  // 创建封装的 log 助手
+  // 创建封装的 log 助手（包含 child 方法代理，防止调用 .child() 时崩溃）
   const log = {
     info: (message, data = {}) => requestLogger.info(message, data, rootSpan, ctx),
     warn: (message, data = {}) => requestLogger.warn(message, data, rootSpan, ctx),
     error: (message, data = {}) => requestLogger.error(message, data, rootSpan, ctx),
     debug: (message, data = {}) => requestLogger.debug(message, data, rootSpan, ctx),
+    child: (bindings) => requestLogger.child(bindings)
   };
 
-  log.debug('Request Received', { method: request.method, url: request.url });
+log.debug('Request Received', { method: request.method, url: request.url });
+
+  // CORS preflight 优先处理（必须在所有其他逻辑之前，避免触发不必要的签名验证/KV扫描）
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': '*'
+      }
+    });
+  }
 
   // 提取请求来源信息（仅 debug 级别，生产环境可通过 DEBUG_LOGS=true 开启）
   const clientIP = request.headers.get('cf-connecting-ip') || 'unknown';
@@ -1675,8 +1673,11 @@ async function handleRequest(request, env, ctx) {
   const axiomDataset = env.AXIOM_DATASET;
   const axiomOrg = env.AXIOM_ORG_ID;
   
-  // 2. 验证配置
-  const axiomEnabled = !isTestEnvironment && axiomToken && axiomDataset;
+  // 2. 验证配置 - 与入口函数保持一致
+  // 修复：检查实际值而不是空字符串
+  const axiomEnabled = !isTestEnvironment && 
+                      axiomToken && axiomToken.trim() !== '' &&
+                      axiomDataset && axiomDataset.trim() !== '';
 
 
 
@@ -1689,17 +1690,20 @@ async function handleRequest(request, env, ctx) {
 
   // 记录路径映射（如果发生映射）
   if (originalPath !== normalizedUrl.pathname) {
-    await requestLogger.info('路径规范化', {
+    await log.info('路径规范化', {
       original: originalPath,
       normalized: normalizedUrl.pathname
     });
   }
 
-  // 1. 初始化基础状态
+  // 1. 重新配置 Axiom 传输（统一使用 env，此时 env 已经是 safeEnv）
+  configureBaseLoggerTransport(env);
+  
+  // 2. 初始化基础状态
   const runtimeEnv = normalizeEnvName(env.NODE_ENV || 'prod');
   logger.configure({ env: runtimeEnv });
 
-  await requestLogger.debug('Axiom 配置检查', {
+  await log.debug('Axiom 配置检查', {
     axiomEnabled,
     hasToken: !!axiomToken,
     hasDataset: !!axiomDataset,
@@ -1708,7 +1712,7 @@ async function handleRequest(request, env, ctx) {
   });
 
   // 2. 简洁的启动日志（这会被 Axiom 捕获并关联到当前 Trace）
-  await requestLogger.info('LB Request Started', {
+  await log.info('LB Request Started', {
     path: normalizedUrl.pathname,
     method: request.method,
     rayId: request.headers.get('cf-ray'), // 记录 RayID 方便排查
@@ -1719,7 +1723,7 @@ async function handleRequest(request, env, ctx) {
   const primaryProvider = detectCacheProvider(env);
   const priorities = getProviderPriority(env);
   
-  await requestLogger.info('Provider Status', {
+  await log.info('Provider Status', {
     primary: primaryProvider,
     priorities: priorities,
     hasKv: !!env.KV_STORAGE,
@@ -1738,7 +1742,7 @@ async function handleRequest(request, env, ctx) {
       
       // 健康检查日志采样：仅在非生产环境或特定条件下记录详细信息
       if (runtimeEnv !== 'prod' || activeCount === 0 || lockCount > 0) {
-        await requestLogger.info('Health check passed', {
+        await log.info('Health check passed', {
           activeInstances: activeCount,
           provider,
           totalLocks: lockCount
@@ -1756,7 +1760,7 @@ async function handleRequest(request, env, ctx) {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (e) {
-      await requestLogger.error('Health check failed', { error: e.message });
+      await log.error('Health check failed', { error: e.message });
       return new Response(JSON.stringify({
         status: 'error',
         message: e.message,
@@ -1768,22 +1772,16 @@ async function handleRequest(request, env, ctx) {
     }
   }
 
-  // 实例查询接口 - 返回当前活跃实例信息（需要鉴权）
+// 实例查询接口 - 返回当前活跃实例信息（需要鉴权）
   if (request.method === 'GET' && normalizedUrl.pathname === '/api/instances') {
     try {
       // 验证管理员Token
-      await verifyAdminToken(request, env, ctx, requestLogger);
+      await verifyAdminToken(request, env, ctx, log);
       
-      const activeInstances = await getActiveInstances(env, ctx, requestLogger);
+      const activeInstances = await getActiveInstances(env, ctx, log);
       const provider = getCurrentProvider();
-      const lockCount = await scanLockKeys(env, ctx, requestLogger);
+      const lockCount = await scanLockKeys(env, ctx, log);
       
-      await requestLogger.info('Instance query', {
-        activeInstances: activeInstances.length,
-        provider,
-        totalLocks: lockCount
-      });
-
       return new Response(JSON.stringify({
         status: 'ok',
         data: {
@@ -1800,7 +1798,7 @@ async function handleRequest(request, env, ctx) {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (e) {
-      await requestLogger.error('Instance query failed', { error: e.message });
+      await log.error('Instance query failed', { error: e.message });
       return new Response(JSON.stringify({
         status: 'error',
         message: e.message,
@@ -1811,18 +1809,13 @@ async function handleRequest(request, env, ctx) {
       });
     }
   }
-
-  if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204 });
-  }
-
   // 验证签名
   let body = null;
   try {
     if (request.method === 'GET' || request.method === 'HEAD') {
-      body = await verifyQStashSignature(request, env, true, ctx, requestLogger);
+      body = await verifyQStashSignature(request, env, true, ctx, log);
     } else {
-      body = await verifyQStashSignature(request, env, false, ctx, requestLogger);
+      body = await verifyQStashSignature(request, env, false, ctx, log);
     }
     if (body === null) body = new Uint8Array();
   } catch (error) {
@@ -1830,7 +1823,7 @@ async function handleRequest(request, env, ctx) {
     const qstashMsgId = request.headers.get('Upstash-Message-Id');
     const retryCount = request.headers.get('Upstash-Retries');
     
-    await requestLogger.warn('签名验证失败', {
+    await log.warn('签名验证失败', {
       error: error.message,
       url: request.url,
       qstashMsgId,
@@ -1855,9 +1848,9 @@ async function handleRequest(request, env, ctx) {
     // 获取活跃实例
     const activeInstances = await getActiveInstances(env, ctx, requestLogger);
     console.log(`[AXIOM_DEBUG] ${requestId}: After getActiveInstances, found ${activeInstances.length} instances, buffer size=${requestLogBuffer.length}`);
-    await requestLogger.debug('getActiveInstances complete', { count: activeInstances.length, module: 'instanceSelector' });
-    await requestLogger.info('活跃实例查询完成', { count: activeInstances.length });
-    await requestLogger.info('存活标记: getActiveInstances 完成', {
+    await log.debug('getActiveInstances complete', { count: activeInstances.length, module: 'instanceSelector' });
+    await log.info('活跃实例查询完成', { count: activeInstances.length });
+    await log.info('存活标记: getActiveInstances 完成', {
       alive: true,
       count: activeInstances.length,
       timestamp: Date.now()
@@ -1867,11 +1860,11 @@ async function handleRequest(request, env, ctx) {
       const qstashMsgId = request.headers.get('Upstash-Message-Id');
       const retryCount = request.headers.get('Upstash-Retries');
 
-      await requestLogger.warn('无活跃实例可用', {
-        qstashMsgId,
-        retryCount,
-        path: normalizedUrl.pathname
-      });
+await log.warn('无活跃实例可用', {
+      qstashMsgId,
+      retryCount,
+      path: normalizedUrl.pathname
+    });
 
       result = new Response(JSON.stringify({
         error: 'No active instances available',
@@ -1884,7 +1877,7 @@ async function handleRequest(request, env, ctx) {
           'Retry-After': '60'
         }
       });
-      await requestLogger.warn('返回 503 响应：无活跃实例可用', { qstashMsgId, retryCount, path: normalizedUrl.pathname, status: 503 });
+      await log.warn('返回 503 响应：无活跃实例可用', { qstashMsgId, retryCount, path: normalizedUrl.pathname, status: 503 });
     } else {
       // 选择目标实例：下载任务优先分配给锁持有者
       let targetInstance = null;
@@ -1895,16 +1888,16 @@ async function handleRequest(request, env, ctx) {
       if (!targetInstance) {
         targetInstance = await selectTargetInstance(activeInstances, env, ctx, requestLogger);
       }
-      await requestLogger.debug('targetInstance selected', { id: targetInstance?.id || 'NONE', module: 'instanceSelector' });
+      await log.debug('targetInstance selected', { id: targetInstance?.id || 'NONE', module: 'instanceSelector' });
       if (!targetInstance) {
         result = new Response('No target instance selected', { status: 503 });
       } else {
         // 转发请求
         const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], normalizedUrl, request, env, body, ctx, requestLogger);
 
-        await requestLogger.debug('负载均衡请求完成', { status: response.status });
+        await log.debug('负载均衡请求完成', { status: response.status });
 
-        await requestLogger.info('核心 Fetch 诊断', {
+        await log.info('核心 Fetch 诊断', {
           finalStatus: response.status,
           finalStatusText: response.statusText,
           instanceId: targetInstance.id,
@@ -1916,7 +1909,7 @@ async function handleRequest(request, env, ctx) {
       }
     }
   } catch (error) {
-    await requestLogger.error('handleRequest 处理失败', { error: error.message });
+    await log.error('handleRequest 处理失败', { error: error.message });
     result = new Response(JSON.stringify({
       error: 'Internal Server Error',
       message: error.message,
@@ -1926,16 +1919,31 @@ async function handleRequest(request, env, ctx) {
       headers: { 'Content-Type': 'application/json' }
     });
   } finally {
-    console.log(`[AXIOM_DEBUG] ${requestId}: finally block entered, buffer size=${requestLogBuffer.length}`);
+    console.log(`[AXIOM_DEBUG] ${requestId}: finally block entered, requestLogBuffer size=${requestLogBuffer.length}`);
+
+    // 刷新全局 logger buffer（防止 fallback 产生的"暗物质日志"丢失）
+    const globalFlushTask = flushGlobalLoggerBuffer();
+
     // 确保在请求结束时，所有缓冲的日志都被发送
     if (ctx && ctx.waitUntil) {
-      console.log(`[AXIOM_DEBUG] ${requestId}: calling ctx.waitUntil(flushLogs)`);
-      ctx.waitUntil(flushLogs(requestLogBuffer, ctx));
+      const requestFlushTask = flushLogs(requestLogBuffer);
+
+      // 确保 flushLogs 返回有效的 Promise
+      if (requestFlushTask) {
+        ctx.waitUntil(requestFlushTask);
+      }
+
+      // 如果全局 buffer 有内容，也 waitUntil
+      if (globalFlushTask) {
+        console.log(`[AXIOM_DEBUG] ${requestId}: also flushing global logger buffer`);
+        ctx.waitUntil(globalFlushTask);
+      }
     } else {
       console.log(`[AXIOM_DEBUG] ${requestId}: calling flushLogs synchronously`);
-      await flushLogs(requestLogBuffer, ctx);
+      await flushLogs(requestLogBuffer);
     }
   }
-
+  
   return result;
 }
+

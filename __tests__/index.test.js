@@ -183,7 +183,7 @@ describe('Worker Tests', () => {
 
   describe('Basic Functionality', () => {
     test('should_forward_unknown_routes_with_200_status', async () => {
-      // Use CF KV only for this basic test
+      // Use CF KV only for this basic test, but ensure proper instance mocking
       const basicEnv = {
         KV_STORAGE: mockKV,
         QSTASH_CURRENT_SIGNING_KEY: 'test-key',
@@ -193,7 +193,17 @@ describe('Worker Tests', () => {
       };
       const request = new Request('https://test.url/unknown');
       const ctx = { waitUntil: jest.fn() };
+      
+      // Debug: Check what mockKV returns
+      const mockListResult = await mockKV.list({ prefix: 'instance:' });
+      console.log('Mock list result:', mockListResult);
+      const mockGetResult = await mockKV.get('instance:server1');
+      console.log('Mock get result:', mockGetResult);
+      
       const result = await handleRequest(request, basicEnv, ctx);
+      console.log('Final result status:', result.status);
+      const resultText = await result.text();
+      console.log('Final result body:', resultText);
       expect(result.status).toBe(200);
     });
 

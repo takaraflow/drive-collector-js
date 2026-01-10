@@ -78,7 +78,20 @@ const getNodeEnv = () => {
   return undefined;
 };
 
-export const isTestEnvironment = getNodeEnv() === 'test' || typeof jest !== 'undefined';
+// CF Worker 兼容性：更准确的测试环境判断
+export const isTestEnvironment = (() => {
+  // 1. 检查 Jest 环境
+  if (typeof jest !== 'undefined') return true;
+  
+  // 2. 检查 Node.js 测试环境
+  const nodeEnv = getNodeEnv();
+  if (nodeEnv === 'test') return true;
+  
+  // 3. 检查 CF Workers 测试环境（通过全局变量）
+  if (typeof globalThis !== 'undefined' && globalThis.__TEST__) return true;
+  
+  return false;
+})();
 
 // 定义 LoggerContext 类型
 /**
@@ -214,7 +227,7 @@ function getByteSize(str) {
   return new Blob([str]).size;
 }
 
-/**
+  /**
  * 发送日志到 Axiom
  * @param {Object} logData - 日志数据
  * @param {Array<Object>} logBuffer - 当前请求的日志缓冲
@@ -245,9 +258,8 @@ async function sendToAxiom(logData, logBuffer, ctx = null) {
 /**
  * 刷新日志缓冲，将所有待发送日志发送到 Axiom
  * @param {Array<Object>} logBuffer - 当前请求的日志缓冲
- * @param {Object} ctx - Cloudflare context (可选)
  */
-export async function flushLogs(logBuffer, ctx = null) {
+export async function flushLogs(logBuffer) {
   // 1. 基础防御检查
   if (!baseLoggerConfig.token || !baseLoggerConfig.dataset) {
     console.warn('⚠️ [Axiom] 配置缺失，跳过刷新 (Config missing, skipping flush)');
@@ -256,7 +268,9 @@ export async function flushLogs(logBuffer, ctx = null) {
     if (logBuffer && logBuffer.length > 0) {
       logBuffer.length = 0;
     }
-    return;
+
+    // 返回 resolved Promise 防止 waitUntil(undefined)
+    return Promise.resolve(null);
   }
 
   if (!logBuffer || logBuffer.length === 0) {
@@ -373,18 +387,13 @@ export async function flushLogs(logBuffer, ctx = null) {
     console.error(`[Axiom] Network Error: ${error.message}`);
   });
 
-  // 9. 生命周期管理 (防止 Worker 提前结束)
-  if (ctx && ctx.waitUntil) {
-    ctx.waitUntil(uploadTask);
-  } else {
-    // 本地测试环境可能没有 waitUntil，使用 await
-    // 在测试环境中，我们需要确保 fetch 被调用
-    if (isTestEnvironment) {
-      await uploadTask;
-    } else {
-      await uploadTask;
-    }
+  // 9. 返回uploadTask让调用方管理生命周期
+  if (isTestEnvironment) {
+    // 测试环境：确保 fetch 被调用
+    await uploadTask;
   }
+  // CF Worker 环境：调用方负责 ctx.waitUntil(uploadTask)
+  return uploadTask;
 }
 
 /**
@@ -417,6 +426,14 @@ function addOtelEvent(level, message, data = {}, providedSpan = null) {
  * @param {Object} bindings - 绑定的上下文数据
  */
 function createLoggerFactory(context, bindings = {}) {
+  // 保存 logBuffer 引用到全局变量，用于 flushGlobalLoggerBuffer
+  const logBuffer = context.logBuffer || [];
+
+  // 如果是全局 logger（没有 logBuffer），保存引用
+  if (!context.logBuffer) {
+    globalLoggerInstance = null;  // 防止引用旧的实例
+  }
+
   const logger = {
     // 基础属性
     version: VERSION,
@@ -536,11 +553,157 @@ function createLoggerFactory(context, bindings = {}) {
     }
   };
 
+  // 保存 logBuffer 引用到私有字段，用于 flushGlobalLoggerBuffer
+  logger._privateBuffer = logBuffer;
+
+  // 如果是全局 logger（没有传入 logBuffer），保存到全局变量
+  if (!context.logBuffer) {
+    globalLoggerInstance = logger;
+  }
+
   return logger;
 }
 
+// 全局 logger buffer 引用（用于防止"暗物质日志"泄漏）
+let globalLoggerInstance = null;
+
+// 获取全局 logger 的 buffer（如果存在）
+export function getGlobalLoggerBuffer() {
+  if (globalLoggerInstance && globalLoggerInstance._privateBuffer) {
+    return globalLoggerInstance._privateBuffer;
+  }
+  return [];
+}
+
+// 刷新全局 logger 的 buffer（防止 fallback 产生的日志丢失）
+export async function flushGlobalLoggerBuffer() {
+  if (!globalLoggerInstance || !globalLoggerInstance._privateBuffer) {
+    return;
+  }
+
+  const buffer = globalLoggerInstance._privateBuffer;
+
+  if (!buffer || buffer.length === 0) {
+    return;
+  }
+
+  console.log(`[AXIOM_DEBUG] Flushing global logger buffer, size=${buffer.length}`);
+
+  // 使用和 flushLogs 相同的逻辑发送
+  if (!baseLoggerConfig.token || !baseLoggerConfig.dataset) {
+    console.warn('⚠️ [Axiom] 全局 buffer 配置缺失，跳过刷新 (Config missing, skipping global flush)');
+    buffer.length = 0;
+
+    // 返回 resolved Promise 防止 waitUntil(undefined)
+    return Promise.resolve(null);
+  }
+
+  // 1. 冻结并清空缓冲区
+  const logsToSend = [...buffer];
+  buffer.length = 0;
+
+  // 2. 清洗数据
+  const sanitizedLogs = logsToSend.map(log => {
+    try {
+      return sanitizeLogData(log);
+    } catch (error) {
+      return {
+        level: 'error',
+        message: '[LOG_SANITIZE_FAILED]',
+        timestamp: new Date().toISOString(),
+        version: VERSION
+      };
+    }
+  });
+
+  // 3. 序列化并检查体积
+  let batchBody;
+  try {
+    batchBody = JSON.stringify(sanitizedLogs);
+  } catch (error) {
+    console.error(`[Axiom] Global buffer serialization failed: ${error.message}`);
+    return;
+  }
+
+  const batchSize = getByteSize(batchBody);
+  const maxBatchSize = 2 * 1024 * 1024; // 2MB
+
+  // 4. 体积超限处理
+  if (batchSize > maxBatchSize) {
+    let truncatedLogs = [];
+    let currentSize = 0;
+
+    for (const log of sanitizedLogs) {
+      const logStr = JSON.stringify(log);
+      const logSize = getByteSize(logStr);
+
+      if (currentSize + logSize > maxBatchSize && truncatedLogs.length > 0) {
+        truncatedLogs.push({
+          level: 'warn',
+          message: '[GLOBAL_BATCH_TRUNCATED]',
+          details: `Original count: ${sanitizedLogs.length}, sent: ${truncatedLogs.length}`,
+          timestamp: new Date().toISOString(),
+          version: VERSION
+        });
+        break;
+      }
+
+      truncatedLogs.push(log);
+      currentSize += logSize;
+    }
+
+    if (truncatedLogs.length === 0 || getByteSize(JSON.stringify(truncatedLogs)) > maxBatchSize) {
+      console.error(`[Axiom] Global buffer still too large after truncation. Dropping all.`);
+      return;
+    }
+
+    batchBody = JSON.stringify(truncatedLogs);
+  }
+
+  // 5. 发送到 Axiom
+  const url = `https://api.axiom.co/v1/datasets/${baseLoggerConfig.dataset}/ingest`;
+
+  const headers = {
+    'Authorization': `Bearer ${baseLoggerConfig.token}`,
+    'Content-Type': 'application/json',
+    'User-Agent': 'cf-worker-custom-logger/1.0'
+  };
+
+  if (baseLoggerConfig.orgId) {
+    headers['X-Axiom-Org-Id'] = baseLoggerConfig.orgId;
+  }
+
+  // 6. 执行原生 Fetch
+  const uploadTask = fetch(url, {
+    method: 'POST',
+    headers: headers,
+    body: batchBody
+  })
+  .then(async (res) => {
+    if (res.ok) {
+      console.log(`[Axiom] Global buffer Success: ${res.status} OK. Ingested ${batchSize > 0 ? sanitizedLogs.length : 0} logs.`);
+    } else {
+      const errText = await res.text();
+      console.error(`[Axiom] Global buffer Failed: Status ${res.status} - ${errText}`);
+    }
+  })
+  .catch((error) => {
+    console.error(`[Axiom] Global buffer Network Error: ${error.message}`);
+  });
+
+  // 测试环境等待，CF Worker 环境返回 task
+  if (isTestEnvironment) {
+    await uploadTask;
+  }
+
+  return uploadTask;
+}
+
 // 基础 logger 实例
-export const logger = createLoggerFactory({ env: baseLoggerConfig.env, logBuffer: [] }); // 初始 logger 实例带有自己的缓冲
+export const logger = createLoggerFactory({
+  env: baseLoggerConfig.env,
+  logBuffer: []
+}); // 初始 logger 实例带有自己的缓冲
 
 // 导出清洗函数供测试使用
 export { sanitizeLogData };
