@@ -6,6 +6,18 @@
 import Redis from 'ioredis';
 import { BaseCache } from './BaseCache.js';
 
+function maskAuth(url) {
+    if (!url) return '';
+    return url.replace(/:\/\/(.*@)/, '://[REDACTED]@');
+}
+
+function formatConnectionSummary(config) {
+    if (config?.url) {
+        return `${config.name || 'redis'} -> ${maskAuth(config.url)}`;
+    }
+    return `${config.name || 'redis'} -> ${config.host || 'unknown'}:${config.port || 'unknown'}`;
+}
+
 class RedisCache extends BaseCache {
     /**
      * @param {Object} config - Redis configuration
@@ -19,8 +31,7 @@ class RedisCache extends BaseCache {
     constructor(config) {
         super(config);
         this.options = config;
-        
-        console.log('[RedisCache] Constructor called with:', config);
+        console.log('[RedisCache] Constructor called:', formatConnectionSummary(config));
         
         // Initialize ioredis instance with URL parsing support
         if (config?.url) {
@@ -30,7 +41,7 @@ class RedisCache extends BaseCache {
             this.client = new Redis(config);
         }
         
-        console.log('[RedisCache] Client created:', typeof this.client, this.client);
+        console.log('[RedisCache] Client created:', formatConnectionSummary(config));
         
         // Error handling - only add event listeners if client supports them
         if (this.client.on) {
