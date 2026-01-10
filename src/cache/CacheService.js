@@ -174,6 +174,7 @@ class CacheService {
     }
 
     _instantiateProvider(config) {
+        const log = this._getLoggerWithBuffer(ctx);
         const { type, name, host, port, username, password, db, tls, replicas } = config;
 
         if (replicas) {
