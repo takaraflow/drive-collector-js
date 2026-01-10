@@ -247,7 +247,7 @@
         "required": false,
         "description": "运行环境（prod/dev/pre）"
       },
-      "CACHE_PROVIDER": {
+      "CACHE_PROVIDERS": {
         "type": "string",
         "required": false,
         "description": "缓存提供者（cloudflare/upstash/nf-redis），自动检测"

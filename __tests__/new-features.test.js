@@ -318,7 +318,7 @@ describe('任务调度失败处理优化测试', () => {
  
     describe('Cache Provider Detection', () => {
      it('should_prioritize_CACHE_PROVIDER_env_variable', () => {
-       const env = { CACHE_PROVIDER: 'redis' };
+       const env = { CACHE_PROVIDERS: 'redis' };
        expect(detectCacheProvider(env)).toBe('redis');
      });
  

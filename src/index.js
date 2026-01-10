@@ -95,7 +95,7 @@ function getProviderPriority(env) {
  * 检测缓存提供者
  */
 function detectCacheProvider(env) {
-  if (env.CACHE_PROVIDER) return env.CACHE_PROVIDER;
+  if (env.CACHE_PROVIDERS) return env.CACHE_PROVIDERS;
   const prios = getProviderPriority(env);
   return prios[0] || 'none';
 }
@@ -1729,7 +1729,7 @@ log.debug('Request Received', { method: request.method, url: request.url });
     hasKv: !!env.KV_STORAGE,
     hasRedis: !!(env.NF_REDIS_URL || env.REDIS_TLS_URL),
     hasUpstash: !!(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN),
-    envOverride: env.CACHE_PROVIDER || 'none'
+    envOverride: env.CACHE_PROVIDERS || 'none'
   });
 
   // 健康检查 - 增加日志采样过滤
