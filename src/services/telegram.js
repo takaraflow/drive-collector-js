@@ -244,9 +244,83 @@ function applyTelegramDcConfig(client, config) {
     client.session.setDC(dcConfig.dcId, dcConfig.serverIp, dcConfig.serverPort);
 }
 
+/**
+ * 输出当前客户端的 DC 信息
+ * 同时显示期望的 DC（根据配置）和实际的 DC（实际连接的）
+ */
+async function logCurrentDCInfo(client, config) {
+    try {
+        // 获取期望的 DC 配置
+        const dcConfig = getTelegramDcConfig(config);
+        const expectedDC = dcConfig.mode !== "default" ? {
+            id: dcConfig.dcId,
+            ipAddress: dcConfig.serverIp,
+            port: dcConfig.serverPort
+        } : null;
+        
+        // 获取实际的 DC 信息
+        const actualDC = await client.getDC();
+        
+        if (expectedDC) {
+            log.info(`📡 DC 信息 - 实际: DC ${actualDC.id} @ ${actualDC.ipAddress}:${actualDC.port} | 期望: DC ${expectedDC.id} @ ${expectedDC.ipAddress}:${expectedDC.port}`);
+        } else {
+            log.info(`📡 DC 信息 - 实际: DC ${actualDC.id} @ ${actualDC.ipAddress}:${actualDC.port}`);
+        }
+    } catch (e) {
+        // 即使无法获取实际 DC，也要显示期望的 DC 配置
+        const dcConfig = getTelegramDcConfig(config);
+        const expectedDC = dcConfig.mode !== "default" ? {
+            id: dcConfig.dcId,
+            ipAddress: dcConfig.serverIp,
+            port: dcConfig.serverPort
+        } : null;
+        
+        if (expectedDC) {
+            log.warn(`⚠️ 无法获取实际 DC 信息: ${e.message} | 期望: DC ${expectedDC.id} @ ${expectedDC.ipAddress}:${expectedDC.port}`);
+        } else {
+            log.warn(`⚠️ 无法获取 DC 信息: ${e.message}`);
+        }
+    }
+}
+
+/**
+ * 获取当前 DC 信息（供外部调用）
+ * 同时返回期望的 DC 和实际的 DC
+ */
+export async function getCurrentDCInfo() {
+    if (!telegramClient) {
+        return null;
+    }
+    try {
+        const config = getConfig();
+        const dcConfig = getTelegramDcConfig(config);
+        
+        const expectedDC = dcConfig.mode !== "default" ? {
+            id: dcConfig.dcId,
+            ipAddress: dcConfig.serverIp,
+            port: dcConfig.serverPort
+        } : null;
+        
+        const actualDC = await telegramClient.getDC();
+        
+        return {
+            expected: expectedDC,
+            actual: {
+                dcId: actualDC.id,
+                serverAddress: actualDC.ipAddress,
+                port: actualDC.port
+            }
+        };
+    } catch (e) {
+        return null;
+    }
+}
+
 export function resetTelegramDcConfig() {
     telegramDcConfig = null;
     telegramDcConfigLogged = false;
+    telegramClient = null;
+    isClientInitializing = false;
 }
 
 /**
@@ -406,6 +480,11 @@ async function initTelegramClient() {
                     if (msgStr.includes('TIMEOUT') || msgStr.includes('timeout') || msgStr.includes('ETIMEDOUT')) {
                         log.error(`⚠️ Telegram timeout detected: ${msgStr}`, { service: 'telegram', ...args });
                         telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
+                    } else if (msgStr.includes('Not connected')) {
+                        // 降级 "Not connected" 错误为警告，避免刷屏和误报
+                        log.warn(`⚠️ Telegram connection warning: ${msgStr}`, { service: 'telegram', ...args });
+                        // 触发 NOT_CONNECTED 类型的故障处理，但不视为严重错误
+                        telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.NOT_CONNECTED);
                     } else {
                         log.error(msg, ...args);
                     }
@@ -433,12 +512,32 @@ async function initTelegramClient() {
             if (!config.apiId || !config.apiHash) {
                 throw new Error("Your API ID or Hash cannot be empty or undefined");
             }
-            return new TelegramClient(
-                new StringSession(sessionString),
+            
+            const session = new StringSession(sessionString);
+            
+            // 根据配置决定是否使用 testServers
+            if (dcConfig.mode === "test-default") {
+                // 使用 testServers 参数
+                clientConfig.testServers = true;
+                log.info(`📡 使用测试服务器模式 (testServers: true)`);
+            } else if (dcConfig.mode === "custom") {
+                clientConfig.testServers = true;
+                log.info(`📡 尝试使用测试服务器模式 (testServers: true)，保留自定义 DC 设置: DC ${dcConfig.dcId} @ ${dcConfig.serverIp}:${dcConfig.serverPort}`);
+            }
+            
+            const client = new TelegramClient(
+                session,
                 config.apiId,
                 config.apiHash,
                 clientConfig
             );
+            
+            // 同时使用 session.setDC() 保持向后兼容（测试需要）
+            if (dcConfig.mode !== "default") {
+                client.session.setDC(dcConfig.dcId, dcConfig.serverIp, dcConfig.serverPort);
+            }
+            
+            return client;
         }, TelegramErrorClassifier.ERROR_TYPES.UNKNOWN);
         
         setupEventListeners(telegramClient);
@@ -711,7 +810,6 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
 
         // 使用电路断路器保护重连
         await telegramCircuitBreaker.execute(async () => {
-            applyTelegramDcConfig(client, config);
             await client.connect();
             await client.start({ botAuthToken: config.botToken });
             await saveSession();
@@ -897,7 +995,6 @@ export const connectAndStart = async () => {
             
             // 使用电路断路器保护连接过程，捕获 FloodWaitError
             await telegramCircuitBreaker.execute(async () => {
-                applyTelegramDcConfig(client, config);
                 await client.connect();
             }, TelegramErrorClassifier.ERROR_TYPES.UNKNOWN);
             
@@ -912,6 +1009,9 @@ export const connectAndStart = async () => {
             
             enableTelegramConsoleProxy();
             log.info("✅ Telegram 控制台代理已启用");
+            
+            // 输出当前 DC 信息（在连接后）
+            await logCurrentDCInfo(client, getConfig());
         }
         
         return client;

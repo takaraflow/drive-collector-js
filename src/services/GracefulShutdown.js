@@ -101,6 +101,7 @@ class GracefulShutdown {
             'ECONNREFUSED',
             'ECONNRESET',
             'EPIPE',
+            'AUTH_KEY_DUPLICATED',
             'FLOOD',
             'Network error',
             'Connection lost',

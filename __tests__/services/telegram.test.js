@@ -220,30 +220,28 @@ describe("Telegram Service", () => {
     });
 
     describe("Telegram DC configuration", () => {
-        let telegramInstance;
-
         beforeEach(async () => {
             resetMockTelegramConfig();
+            if (module.stopWatchdog) {
+                module.stopWatchdog();
+            }
             if (module.resetTelegramDcConfig) {
                 module.resetTelegramDcConfig();
             }
+            if (module.resetCircuitBreaker) {
+                module.resetCircuitBreaker();
+            }
             mockLoggerInfo.mockClear();
             mockLoggerWarn.mockClear();
-            telegramInstance = await module.getClient();
-            telegramInstance.session.setDC.mockClear();
-            telegramInstance.connected = false;
-        });
-
-        afterEach(() => {
-            telegramInstance.connected = true;
+            mockLoggerError.mockClear();
         });
 
         test("should uses built-in test DC defaults when TG_TEST_MODE is true", async () => {
             mockConfig.telegram.testMode = true;
-            await module.connectAndStart();
+            const instance = await module.connectAndStart();
 
-            expect(telegramInstance.session.setDC).toHaveBeenCalledWith(2, "149.154.167.40", 443);
-            expect(mockLoggerInfo.mock.calls.some(call => String(call[0]).includes("testMode=true"))).toBe(true);
+            expect(instance.session.setDC).toHaveBeenCalledWith(2, "149.154.167.40", 443);
+            expect(mockLoggerInfo.mock.calls.some(call => String(call[0]).includes("testMode=true") || String(call[0]).includes("testServers: true"))).toBe(true);
         });
 
         test("should honors TG_SERVER_DC/IP/PORT when all values provided", async () => {
@@ -252,10 +250,10 @@ describe("Telegram Service", () => {
             mockConfig.telegram.serverIp = "1.2.3.4";
             mockConfig.telegram.serverPort = 10234;
 
-            await module.connectAndStart();
+            const instance = await module.connectAndStart();
 
-            expect(telegramInstance.session.setDC).toHaveBeenCalledWith(5, "1.2.3.4", 10234);
-            expect(mockLoggerInfo.mock.calls.some(call => String(call[0]).includes("customServer=true"))).toBe(true);
+            expect(instance.session.setDC).toHaveBeenCalledWith(5, "1.2.3.4", 10234);
+            expect(mockLoggerInfo.mock.calls.some(call => String(call[0]).includes("customServer=true") || String(call[0]).includes("保留自定义 DC 设置"))).toBe(true);
         });
 
         test("should ignores incomplete TG_SERVER overrides and warns", async () => {
@@ -264,9 +262,9 @@ describe("Telegram Service", () => {
             mockConfig.telegram.serverIp = null;
             mockConfig.telegram.serverPort = 443;
 
-            await module.connectAndStart();
+            const instance = await module.connectAndStart();
 
-            expect(telegramInstance.session.setDC).not.toHaveBeenCalled();
+            expect(instance.session.setDC).not.toHaveBeenCalled();
             expect(mockLoggerWarn.mock.calls.some(call => String(call[0]).includes("TG_SERVER_DC/IP/PORT incomplete"))).toBe(true);
         });
     });

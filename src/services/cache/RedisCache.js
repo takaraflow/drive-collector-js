@@ -31,7 +31,6 @@ class RedisCache extends BaseCache {
     constructor(config) {
         super(config);
         this.options = config;
-        console.log('[RedisCache] Constructor called:', formatConnectionSummary(config));
         
         // Initialize ioredis instance with URL parsing support
         if (config?.url) {
@@ -41,18 +40,17 @@ class RedisCache extends BaseCache {
             this.client = new Redis(config);
         }
         
-        console.log('[RedisCache] Client created:', formatConnectionSummary(config));
+        console.log(`📦 [RedisCache] 客户端已创建: ${formatConnectionSummary(config)}`);
         
         // Error handling - only add event listeners if client supports them
         if (this.client.on) {
             this.client.on('error', (error) => {
-                console.error('[RedisCache] Connection error:', error.message);
+                console.error(`❌ [RedisCache] 连接错误: ${error.message}`);
                 // Propagate error to orchestrator if needed
                 this._reportError(error);
             });
             
             this.client.on('connect', () => {
-                console.log('[RedisCache] Connected to Redis');
             });
         }
     }
@@ -65,7 +63,7 @@ class RedisCache extends BaseCache {
         // This will be handled by the orchestrator/error handler
         // For now, just log and rethrow for visibility
         if (error.code === 'ECONNREFUSED') {
-            console.error('[RedisCache] ECONNREFUSED - Will trigger failover');
+            console.error('⚠️ [RedisCache] ECONNREFUSED - 将触发故障转移');
         }
     }
 
@@ -80,7 +78,7 @@ class RedisCache extends BaseCache {
             const status = this.client?.status;
             if (status === 'ready') {
                 this.connected = true;
-                console.log('[RedisCache] Connection successful');
+                console.log('✅ [RedisCache] 连接成功');
                 return;
             }
 
@@ -108,9 +106,9 @@ class RedisCache extends BaseCache {
             }
             
             this.connected = true;
-            console.log('[RedisCache] Connection successful');
+            console.log('✅ [RedisCache] 连接成功');
         } catch (error) {
-            console.error('[RedisCache] Connection failed:', error.message);
+            console.error(`❌ [RedisCache] 连接失败: ${error.message}`);
             throw error;
         }
     }
@@ -129,9 +127,9 @@ class RedisCache extends BaseCache {
                 await this.client.disconnect();
             }
             this.connected = false;
-            console.log('[RedisCache] Connection closed');
+            console.log('🔌 [RedisCache] 连接已关闭');
         } catch (error) {
-            console.error('[RedisCache] Disconnect error:', error.message);
+            console.error(`❌ [RedisCache] 断开连接错误: ${error.message}`);
         }
     }
 
@@ -160,7 +158,7 @@ class RedisCache extends BaseCache {
             if (type === 'json' && error instanceof SyntaxError) {
                 return null;
             }
-            console.error('[RedisCache] Get error:', error.message);
+            console.error(`❌ [RedisCache] Get 错误: ${error.message}`);
             throw error;
         }
     }
@@ -189,7 +187,7 @@ class RedisCache extends BaseCache {
             if (error.message.includes('circular') || error.message.includes('Converting circular')) {
                 return false;
             }
-            console.error('[RedisCache] Set error:', error.message);
+            console.error(`❌ [RedisCache] Set 错误: ${error.message}`);
             throw error;
         }
     }
@@ -204,7 +202,7 @@ class RedisCache extends BaseCache {
             const result = await this.client.del(key);
             return result > 0;
         } catch (error) {
-            console.error('[RedisCache] Delete error:', error.message);
+            console.error(`❌ [RedisCache] Delete 错误: ${error.message}`);
             throw error;
         }
     }
@@ -219,7 +217,7 @@ class RedisCache extends BaseCache {
             const result = await this.client.exists(key);
             return result === 1;
         } catch (error) {
-            console.error('[RedisCache] Exists error:', error.message);
+            console.error(`❌ [RedisCache] Exists 错误: ${error.message}`);
             throw error;
         }
     }
@@ -234,7 +232,7 @@ class RedisCache extends BaseCache {
             const result = await this.client.incr(key);
             return result;
         } catch (error) {
-            console.error('[RedisCache] Incr error:', error.message);
+            console.error(`❌ [RedisCache] Incr 错误: ${error.message}`);
             throw error;
         }
     }
@@ -252,7 +250,7 @@ class RedisCache extends BaseCache {
             const result = await this.client.set(key, 1, 'NX', 'PX', ttlMs);
             return result === 'OK';
         } catch (error) {
-            console.error('[RedisCache] Lock error:', error.message);
+            console.error(`❌ [RedisCache] Lock 错误: ${error.message}`);
             throw error;
         }
     }
@@ -276,7 +274,7 @@ class RedisCache extends BaseCache {
             const result = await this.client.eval(luaScript, 1, key);
             return result === 1;
         } catch (error) {
-            console.error('[RedisCache] Unlock error:', error.message);
+            console.error(`❌ [RedisCache] Unlock 错误: ${error.message}`);
             throw error;
         }
     }
@@ -309,7 +307,7 @@ class RedisCache extends BaseCache {
 
             return keys;
         } catch (error) {
-            console.error('[RedisCache] ListKeys error:', error.message);
+            console.error(`❌ [RedisCache] ListKeys 错误: ${error.message}`);
             throw error;
         }
     }
