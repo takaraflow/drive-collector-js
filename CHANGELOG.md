@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.18.2](https://github.com/YoungSx/drive-collector-js/compare/v4.18.1...v4.18.2) (2026-01-10)
+
+
+### 📝 文档更新
+
+* adds SQL initialization scripts for project setup ([80703ba](https://github.com/YoungSx/drive-collector-js/commit/80703baf43b43bb3e93e4c06af31c2990a524ea4))
+
+
+### 🐛 问题修复
+
+* improves Telegram error handling for connection issues ([8379fbe](https://github.com/YoungSx/drive-collector-js/commit/8379fbecf7a2fec052c637346e057f3d90f845d6))
+
+
+### 🔧 其他任务
+
+* adds AUTH_KEY_DUPLICATED to graceful shutdown error list ([959ac8c](https://github.com/YoungSx/drive-collector-js/commit/959ac8ca69b1e55808b021efafc34c202cb9c5c3))
+* fly.toml ([4848e75](https://github.com/YoungSx/drive-collector-js/commit/4848e751e4cac691129c3f1b3fc9924ac0ff1c85))
+* improves RedisCache logging with emoji indicators ([5561330](https://github.com/YoungSx/drive-collector-js/commit/55613307d2de50d727eb5bcacf6eda6c0db1e00b))
+
 ### [4.18.1](https://github.com/YoungSx/drive-collector-js/compare/v4.18.0...v4.18.1) (2026-01-10)
 
 
