@@ -109,7 +109,7 @@ describe("DriveRepository", () => {
             expect(mockLocalCache.get).toHaveBeenCalledWith("drive_user1");
             expect(mockCache.get).toHaveBeenCalledWith("drive:user1", "json");
             expect(mockD1.fetchOne).toHaveBeenCalledWith(
-                "SELECT id, user_id, name, type, config_data, status, created_at FROM drives WHERE user_id = ? AND status = 'active'",
+                "SELECT id, user_id, name, type, config_data, remote_folder, status, created_at FROM drives WHERE user_id = ? AND status = 'active'",
                 ["user1"]
             );
             expect(mockCache.set).toHaveBeenCalledWith("drive:user1", mockDrive);
@@ -147,7 +147,7 @@ describe("DriveRepository", () => {
             expect(mockLocalCache.get).not.toHaveBeenCalled();
             expect(mockCache.get).not.toHaveBeenCalled();
             expect(mockD1.fetchOne).toHaveBeenCalledWith(
-                "SELECT id, user_id, name, type, config_data, status, created_at FROM drives WHERE user_id = ? AND status = 'active'",
+                "SELECT id, user_id, name, type, config_data, remote_folder, status, created_at FROM drives WHERE user_id = ? AND status = 'active'",
                 ["user1"]
             );
             expect(result).toEqual(mockDrive);
@@ -374,7 +374,7 @@ describe("DriveRepository", () => {
 
             expect(mockCache.get).toHaveBeenCalledWith("drive_id:drive123", "json");
             expect(mockD1.fetchOne).toHaveBeenCalledWith(
-                "SELECT id, user_id, name, type, config_data, status, created_at FROM drives WHERE id = ? AND status = 'active'",
+                "SELECT id, user_id, name, type, config_data, remote_folder, status, created_at FROM drives WHERE id = ? AND status = 'active'",
                 ["drive123"]
             );
             expect(mockCache.set).toHaveBeenCalledWith("drive_id:drive123", mockDrive);
@@ -468,7 +468,7 @@ describe("DriveRepository", () => {
 
             expect(result).toHaveLength(2);
             expect(mockD1.fetchOne).toHaveBeenCalledWith(
-                "SELECT id, user_id, name, type, config_data, status, created_at FROM drives WHERE id = ? AND status = 'active'",
+                "SELECT id, user_id, name, type, config_data, remote_folder, status, created_at FROM drives WHERE id = ? AND status = 'active'",
                 ["drive2"]
             );
         });

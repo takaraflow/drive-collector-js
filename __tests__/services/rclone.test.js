@@ -450,5 +450,76 @@ describe('CloudTool', () => {
         it('should have killTask method (empty implementation)', async () => {
             await expect(CloudTool.killTask('task1')).resolves.toBeUndefined();
         });
+    
+        describe('Custom Upload Path', () => {
+            describe('_validatePath', () => {
+                it('should return true for valid paths', () => {
+                    expect(CloudTool._validatePath('/Movies')).toBe(true);
+                    expect(CloudTool._validatePath('/Movies/2024')).toBe(true);
+                    expect(CloudTool._validatePath('/My.Files_2024-01')).toBe(true);
+                });
+    
+                it('should return false for paths not starting with /', () => {
+                    expect(CloudTool._validatePath('Movies')).toBe(false);
+                });
+    
+                it('should return false for paths ending with /', () => {
+                    expect(CloudTool._validatePath('/Movies/')).toBe(false);
+                });
+    
+                it('should return false for paths with double slashes', () => {
+                    expect(CloudTool._validatePath('/Movies//2024')).toBe(false);
+                });
+    
+                it('should return false for invalid characters', () => {
+                    expect(CloudTool._validatePath('/Movies$')).toBe(false);
+                    expect(CloudTool._validatePath('/Movies?')).toBe(false);
+                });
+    
+                it('should return false for too long paths', () => {
+                    expect(CloudTool._validatePath('/' + 'a'.repeat(256))).toBe(false);
+                });
+            });
+    
+            describe('_normalizePath', () => {
+                it('should remove leading slashes and add trailing slash', () => {
+                    expect(CloudTool._normalizePath('/Movies')).toBe('Movies/');
+                    expect(CloudTool._normalizePath('///Movies')).toBe('Movies/');
+                });
+    
+                it('should handle root directory', () => {
+                    expect(CloudTool._normalizePath('/')).toBe('/');
+                    expect(CloudTool._normalizePath('')).toBe('/');
+                });
+    
+                it('should ensure trailing slash', () => {
+                    expect(CloudTool._normalizePath('/Movies/2024')).toBe('Movies/2024/');
+                });
+            });
+    
+            describe('_getUploadPath', () => {
+                it('should return custom path if set in D1', async () => {
+                    mockFindByUserId.mockResolvedValue({
+                        remote_folder: '/Custom/Path'
+                    });
+                    const path = await CloudTool._getUploadPath('user123');
+                    expect(path).toBe('Custom/Path/');
+                });
+    
+                it('should return default path if not set in D1', async () => {
+                    mockFindByUserId.mockResolvedValue({
+                        remote_folder: null
+                    });
+                    const path = await CloudTool._getUploadPath('user123');
+                    expect(path).toBe('test-folder/');
+                });
+    
+                it('should return default path if D1 query fails', async () => {
+                    mockFindByUserId.mockRejectedValue(new Error('DB Error'));
+                    const path = await CloudTool._getUploadPath('user123');
+                    expect(path).toBe('test-folder/');
+                });
+            });
+        });
     });
 });

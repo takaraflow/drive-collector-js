@@ -62,7 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_drives_status ON drives(status);
 CREATE INDEX IF NOT EXISTS idx_drives_type ON drives(type);
 CREATE INDEX IF NOT EXISTS idx_drives_user_status ON drives(user_id, status);
 
--- 4. 系统设置表：用于存储系统配置项
+-- 4. 系统设置表：用于存储系统配置项和用户自定义设置
 -- 注意：SettingsRepository 使用 Cache 作为主存储，此表仅作为备份或特殊场景使用
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,

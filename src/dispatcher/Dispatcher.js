@@ -19,6 +19,7 @@ import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { cache } from "../services/CacheService.js";
 import { queueService } from "../services/QueueService.js";
 import { logger } from "../services/logger.js";
+import { localCache } from "../utils/LocalCache.js";
 import fs from "fs";
 import path from "path";
 
@@ -172,6 +173,9 @@ export class Dispatcher {
         } else if (data.startsWith("files_")) {
             await this._handleFilesCallback(event, data, userId, answer);
 
+        } else if (data.startsWith("remote_folder_")) {
+            await this._handleRemoteFolderCallback(event, userId, answer);
+
         } else {
             await answer();
         }
@@ -233,6 +237,9 @@ export class Dispatcher {
         if (session) {
             const handled = await DriveConfigFlow.handleInput(event, userId, session);
             if (handled) return;
+            // 处理 remote_folder 会话输入
+            const remoteFolderHandled = await this._handleRemoteFolderInput(event, userId, session);
+            if (remoteFolderHandled) return;
         }
 
         // 🚀 性能优化：并发获取网盘设置，避免串行查询
@@ -273,6 +280,10 @@ export class Dispatcher {
                     return await this._handleModeSwitchCommand(target, userId, 'public');
                 case "/status_private":
                     return await this._handleModeSwitchCommand(target, userId, 'private');
+                case "/remote_folder":
+                    return await this._handleRemoteFolderCommand(target, userId);
+                case "/set_remote_folder":
+                    return await this._handleSetRemoteFolderCommand(target, userId, text);
                 // 更多命令可在此添加...
             }
 
@@ -628,5 +639,238 @@ export class Dispatcher {
             message: format(STRINGS.status.mode_changed, { mode: mode === 'public' ? '公开' : '私有(维护)' }),
             parseMode: "html"
         }), userId, {}, false, 3);
+    }
+
+    /**
+     * [私有] 处理 /remote_folder 命令 - 显示上传路径设置菜单
+     * @param {Object} target - 消息目标
+     * @param {string} userId - 用户ID
+     */
+    static async _handleRemoteFolderCommand(target, userId) {
+        // 检查是否已绑定网盘
+        const drive = await DriveRepository.findByUserId(userId);
+        if (!drive) {
+            const driveFallback = await DriveRepository.findByUserId(userId, true);
+            if (!driveFallback) {
+                return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: STRINGS.remote_folder.no_permission,
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            }
+        }
+
+        // 获取当前路径
+        const currentPath = await this._getUserUploadPathFromD1(userId);
+        const displayPath = currentPath || config.remoteFolder;
+
+        let message = format(STRINGS.remote_folder.menu_title, {});
+        message += format(STRINGS.remote_folder.show_current, { path: displayPath });
+
+        const buttons = [
+            [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))],
+            [Button.inline(STRINGS.remote_folder.btn_reset_path, Buffer.from("remote_folder_reset"))]
+        ];
+
+        return await runBotTaskWithRetry(() => client.sendMessage(target, {
+            message: message,
+            buttons: buttons,
+            parseMode: "html"
+        }), userId, {}, false, 3);
+    }
+
+    /**
+     * [私有] 处理 /set_remote_folder 命令
+     * @param {Object} target - 消息目标
+     * @param {string} userId - 用户ID
+     * @param {string} fullText - 完整命令文本
+     */
+    static async _handleSetRemoteFolderCommand(target, userId, fullText) {
+        // 检查是否已绑定网盘
+        const drive = await DriveRepository.findByUserId(userId);
+        if (!drive) {
+            const driveFallback = await DriveRepository.findByUserId(userId, true);
+            if (!driveFallback) {
+                return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: STRINGS.remote_folder.no_permission,
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            }
+        }
+
+        // 解析命令参数
+        const parts = fullText.split(' ');
+        const pathArg = parts.length > 1 ? parts.slice(1).join(' ').trim() : '';
+
+        try {
+            // 情况1: 无参数 - 启动交互式设置流程
+            if (!pathArg) {
+                await SessionManager.start(userId, "REMOTE_FOLDER_WAIT_PATH");
+                return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: STRINGS.remote_folder.input_prompt,
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            }
+
+            // 情况2: 重置为默认路径
+            if (pathArg === 'reset' || pathArg === 'default') {
+                await this._setUserUploadPathInD1(userId, null);
+                
+                return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: format(STRINGS.remote_folder.reset_success, { path: config.remoteFolder }),
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            }
+
+            // 情况3: 设置新路径
+            if (!CloudTool._validatePath(pathArg)) {
+                return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: STRINGS.remote_folder.invalid_path,
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            }
+
+            await this._setUserUploadPathInD1(userId, pathArg);
+
+            // 清除该用户的文件缓存
+            const cacheKey = `files_${userId}`;
+            localCache.del(cacheKey);
+            try {
+                await cache.del(cacheKey);
+            } catch (e) {
+                log.warn(`Failed to clear cache for user ${userId}:`, e.message);
+            }
+
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: format(STRINGS.remote_folder.set_success, { path: pathArg }),
+                parseMode: "html"
+            }), userId, {}, false, 3);
+
+        } catch (error) {
+            log.error(`Error handling /set_remote_folder for user ${userId}:`, error);
+            
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.remote_folder.error_saving,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        }
+    }
+
+    /**
+     * [私有] 处理远程文件夹设置的会话输入
+     * @param {Object} event - Telegram 事件对象
+     * @param {string} userId - 用户ID
+     * @param {Object} session - 当前会话状态
+     * @returns {Promise<boolean>} 是否拦截了消息
+     */
+    static async _handleRemoteFolderInput(event, userId, session) {
+        const text = event.message.message.trim();
+        const peerId = event.message.peerId;
+
+        if (session.current_step === "REMOTE_FOLDER_WAIT_PATH") {
+            // 验证路径格式
+            if (!CloudTool._validatePath(text)) {
+                await runBotTaskWithRetry(() => client.sendMessage(peerId, {
+                    message: STRINGS.remote_folder.invalid_path,
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+                return true;
+            }
+
+            try {
+                await this._setUserUploadPathInD1(userId, text);
+
+                // 清除缓存
+                const cacheKey = `files_${userId}`;
+                localCache.del(cacheKey);
+                try {
+                    await cache.del(cacheKey);
+                } catch (e) {
+                    log.warn(`Failed to clear cache for user ${userId}:`, e.message);
+                }
+
+                await SessionManager.clear(userId);
+                await runBotTaskWithRetry(() => client.sendMessage(peerId, {
+                    message: format(STRINGS.remote_folder.set_success, { path: text }),
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            } catch (error) {
+                log.error(`Error saving remote folder for user ${userId}:`, error);
+                await SessionManager.clear(userId);
+                await runBotTaskWithRetry(() => client.sendMessage(peerId, {
+                    message: STRINGS.remote_folder.error_saving,
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * 从D1数据库获取用户上传路径
+     * @param {string} userId - 用户ID
+     * @returns {Promise<string|null>} 用户自定义路径或null
+     */
+    static async _getUserUploadPathFromD1(userId) {
+        try {
+            // 从drives表获取用户的网盘配置
+            const drive = await DriveRepository.findByUserId(userId);
+            
+            if (drive && drive.remote_folder) {
+                return drive.remote_folder;
+            }
+            
+            return null;
+        } catch (error) {
+            log.error(`Failed to query upload path from D1 for user ${userId}:`, error);
+            return null;
+        }
+    }
+
+    /**
+     * 设置用户上传路径到D1数据库
+     * @param {string} userId - 用户ID
+     * @param {string|null} path - 上传路径，null表示重置为默认
+     * @returns {Promise<void>}
+     */
+    static async _setUserUploadPathInD1(userId, path) {
+        try {
+            // 获取用户的网盘记录
+            const drive = await DriveRepository.findByUserId(userId);
+            
+            if (!drive) {
+                throw new Error('Drive not found');
+            }
+            
+            // 更新drives表的remote_folder字段
+            await DriveRepository.updateRemoteFolder(drive.id, path);
+            
+        } catch (error) {
+            log.error(`Failed to set upload path in D1 for user ${userId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * [私有] 处理 remote_folder 菜单的回调按钮
+     * @param {Object} event - Telegram 事件对象
+     * @param {string} userId - 用户ID
+     * @param {Function} answerCallback - 回调回答函数
+     */
+    static async _handleRemoteFolderCallback(event, userId, answerCallback) {
+        const data = event.data.toString();
+
+        if (data === "remote_folder_set") {
+            await SessionManager.start(userId, "REMOTE_FOLDER_WAIT_PATH");
+            await safeEdit(event.userId, event.msgId, STRINGS.remote_folder.input_prompt, null, userId);
+            await answerCallback("");
+        } else if (data === "remote_folder_reset") {
+            await this._setUserUploadPathInD1(userId, null);
+            await safeEdit(event.userId, event.msgId, format(STRINGS.remote_folder.reset_success, { path: config.remoteFolder }), null, userId);
+            await answerCallback("");
+        } else {
+            await answerCallback("");
+        }
     }
 }

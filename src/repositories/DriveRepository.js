@@ -179,7 +179,7 @@ export class DriveRepository {
 
             // Cache miss，从 D1 回源
             drive = await d1.fetchOne(
-                "SELECT id, user_id, name, type, config_data, status, created_at FROM drives WHERE id = ? AND status = 'active'",
+                "SELECT id, user_id, name, type, config_data, remote_folder, status, created_at FROM drives WHERE id = ? AND status = 'active'",
                 [driveId]
             );
 
@@ -245,13 +245,46 @@ export class DriveRepository {
 
         try {
             const result = await d1.fetchOne(
-                "SELECT id, user_id, name, type, config_data, status, created_at FROM drives WHERE user_id = ? AND status = 'active'",
+                "SELECT id, user_id, name, type, config_data, remote_folder, status, created_at FROM drives WHERE user_id = ? AND status = 'active'",
                 [safeUserId]
             );
             return result;
         } catch (e) {
             log.error(`DriveRepository._findDriveInD1 error for ${safeUserId}:`, e);
             return null;
+        }
+    }
+
+    /**
+     * 更新网盘的remote_folder字段
+     * @param {string} driveId - 网盘ID
+     * @param {string|null} remoteFolder - 上传路径，null表示重置为默认
+     * @returns {Promise<void>}
+     */
+    static async updateRemoteFolder(driveId, remoteFolder) {
+        if (!driveId) return;
+        
+        const now = Date.now();
+        
+        try {
+            // 更新 D1
+            await d1.run(
+                "UPDATE drives SET remote_folder = ?, updated_at = ? WHERE id = ?",
+                [remoteFolder, now, driveId]
+            );
+            
+            // 清除缓存，强制下次读取时回源
+            const drive = await this.findById(driveId);
+            if (drive) {
+                await cache.delete(this.getDriveKey(drive.user_id));
+                await cache.delete(this.getDriveIdKey(driveId));
+                localCache.del(`drive_${drive.user_id}`);
+            }
+            
+            log.info(`Updated remote_folder for drive ${driveId}: ${remoteFolder}`);
+        } catch (e) {
+            log.error(`DriveRepository.updateRemoteFolder failed for ${driveId}:`, e);
+            throw e;
         }
     }
 

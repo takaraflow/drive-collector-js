@@ -77,6 +77,106 @@ export class CloudTool {
     }
 
     /**
+     * 获取用户的上传路径
+     * 优先级：用户自定义路径 > 系统默认路径
+     * @param {string} userId - 用户ID
+     * @returns {Promise<string>} 上传路径（不带开头斜杠，带结尾斜杠）
+     */
+    static async _getUploadPath(userId) {
+        try {
+            // 尝试从D1数据库获取用户自定义路径
+            const userPath = await this._getUserUploadPathFromD1(userId);
+            
+            if (userPath) {
+                // 验证路径格式并标准化
+                const normalizedPath = this._normalizePath(userPath);
+                if (normalizedPath) {
+                    return normalizedPath;
+                }
+            }
+            
+            // 兜底：使用系统默认路径
+            return this._normalizePath(config.remoteFolder);
+        } catch (error) {
+            log.error(`Failed to get upload path for user ${userId}:`, error);
+            // 出错时使用默认路径
+            return this._normalizePath(config.remoteFolder);
+        }
+    }
+
+    /**
+     * 从D1数据库获取用户上传路径
+     * @param {string} userId - 用户ID
+     * @returns {Promise<string|null>} 用户自定义路径或null
+     */
+    static async _getUserUploadPathFromD1(userId) {
+        try {
+            // 从drives表获取用户的网盘配置
+            const drive = await DriveRepository.findByUserId(userId);
+            
+            if (drive && drive.remote_folder) {
+                return drive.remote_folder;
+            }
+            
+            return null;
+        } catch (error) {
+            log.error(`Failed to query upload path from D1 for user ${userId}:`, error);
+            return null;
+        }
+    }
+
+    /**
+     * 路径标准化处理
+     * @param {string} path - 原始路径
+     * @returns {string} 标准化后的路径（不带开头斜杠，带结尾斜杠）
+     */
+    static _normalizePath(path) {
+        if (!path) return "/";
+        
+        // 移除开头的斜杠（rclone 路径不需要开头斜杠）
+        let normalized = path.replace(/^\/+/, '');
+        
+        // 如果为空了，返回根目录
+        if (!normalized) return "/";
+        
+        // 确保以斜杠结尾
+        if (!normalized.endsWith('/')) {
+            normalized += '/';
+        }
+        
+        return normalized;
+    }
+
+    /**
+     * 验证路径格式
+     * @param {string} path - 待验证的路径
+     * @returns {boolean} 是否有效
+     */
+    static _validatePath(path) {
+        if (!path || typeof path !== 'string') return false;
+        
+        // 移除开头和结尾的空白
+        path = path.trim();
+        
+        // 必须以 / 开头
+        if (!path.startsWith('/')) return false;
+        
+        // 不能包含特殊字符（除了 /, -, _, ., 空格）
+        if (!/^[\/a-zA-Z0-9\s_\-\.]+$/.test(path)) return false;
+        
+        // 不能包含连续的斜杠
+        if (path.includes('//')) return false;
+        
+        // 不能以 / 结尾（因为我们会自动添加）
+        if (path.endsWith('/')) return false;
+        
+        // 路径长度限制
+        if (path.length > 255) return false;
+        
+        return true;
+    }
+
+    /**
      * 【重构】验证配置是否有效 (异步非阻塞版)
      */
     static async validateConfig(type, configData) {
@@ -135,7 +235,10 @@ export class CloudTool {
                 const firstTask = tasks[0];
                 const conf = await this._getUserConfig(firstTask.userId);
                 const connectionString = this._getConnectionString(conf);
-                const remotePath = `${connectionString}${config.remoteFolder}/`;
+                
+                // 获取用户自定义上传路径
+                const userUploadPath = await this._getUploadPath(firstTask.userId);
+                const remotePath = `${connectionString}${userUploadPath}`;
 
                 // 准备 --files-from 数据 (使用 stdin 传递以支持大量文件且避免路径转义问题)
                 // 注意：rclone copy 的 source 应该是这些文件共同的父目录
@@ -283,6 +386,9 @@ export class CloudTool {
             const conf = await this._getUserConfig(userId);
             const connectionString = this._getConnectionString(conf);
             
+            // 获取用户自定义上传路径
+            const userUploadPath = await this._getUploadPath(userId);
+            
             // 尝试获取文件列表，如果目录不存在则尝试创建 (异步化)
             const runLsJson = (path) => {
                 return new Promise((resolve, reject) => {
@@ -304,11 +410,11 @@ export class CloudTool {
                 });
             };
 
-            const fullRemotePath = `${connectionString}${config.remoteFolder}/`;
+            const fullRemotePath = `${connectionString}${userUploadPath}`;
             let ret = await runLsJson(fullRemotePath);
 
             if (ret.code !== 0 && ret.stderr && (ret.stderr.includes("directory not found") || ret.stderr.includes("error listing"))) {
-                log.info(`Directory ${config.remoteFolder} not found, attempting to create it...`);
+                log.info(`Directory ${userUploadPath} not found, attempting to create it...`);
                 // 尝试创建一个空目录/触发目录初始化
                 spawnSync(rcloneBinary, ["--config", "/dev/null", "mkdir", fullRemotePath], { env: process.env });
                 // 再次尝试
@@ -416,6 +522,9 @@ export class CloudTool {
             try {
                 const conf = await this._getUserConfig(userId);
                 const connectionString = this._getConnectionString(conf);
+                
+                // 获取用户自定义上传路径
+                const userUploadPath = await this._getUploadPath(userId);
 
                 const runLsJson = (path, args = [], timeout = 10000) => {
                     return new Promise((resolve, reject) => {
@@ -461,15 +570,14 @@ export class CloudTool {
                 };
 
                 // 优先尝试直接查询文件（更高效）
-                const fullRemotePath = `${connectionString}${config.remoteFolder}/${fileName}`;
+                const fullRemotePath = `${connectionString}${userUploadPath}${fileName}`;
                 let ret = await runLsJson(fullRemotePath, [], 10000);
 
                 // 如果直接查询失败，尝试列出目录
                 if (ret.code !== 0) {
-                    // console.warn(`[getRemoteFileInfo] Direct lsjson failed for ${fileName}, trying directory listing`);
                     // 仅当非超时错误时尝试 fallback
                     if (ret.stderr !== "TIMEOUT") {
-                        const fullRemoteFolder = `${connectionString}${config.remoteFolder}/`;
+                        const fullRemoteFolder = `${connectionString}${userUploadPath}`;
                         ret = await runLsJson(fullRemoteFolder, ["--files-only", "--max-depth", "1"], 15000);
 
                         if (ret.code === 0) {

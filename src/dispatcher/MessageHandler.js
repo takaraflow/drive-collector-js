@@ -35,6 +35,8 @@ export class MessageHandler {
                     new Api.BotCommand({ command: 'drive', description: '🔑 绑定或管理网盘' }),
                     new Api.BotCommand({ command: 'files', description: '📁 浏览已转存文件' }),
                     new Api.BotCommand({ command: 'status', description: '📊 查看系统状态' }),
+                    new Api.BotCommand({ command: 'remote_folder', description: '📂 上传路径设置' }),
+                    new Api.BotCommand({ command: 'set_remote_folder', description: '⚙️ 设置上传目录' }),
                     new Api.BotCommand({ command: 'help', description: '📖 显示帮助菜单' }),
                 ];
 

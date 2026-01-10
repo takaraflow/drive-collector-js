@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS drives (
     name TEXT,
     type TEXT NOT NULL,
     config_data TEXT NOT NULL,
+    remote_folder TEXT,  -- 用户自定义上传目录
     status TEXT DEFAULT 'active',
     created_at INTEGER,
     updated_at INTEGER,
