@@ -14,7 +14,7 @@ async function closeHttpServer() {
     if (!httpServer) return;
     return new Promise(resolve => {
         httpServer.close(() => {
-            console.log('? HTTP Server 已关闭');
+            console.log('✅ HTTP Server 已关闭');
             resolve();
         });
     });
@@ -34,7 +34,7 @@ export async function registerShutdownHooks() {
     // 2. 停止实例协调器 (priority: 20)
     gracefulShutdown.register(async () => {
         await instanceCoordinator.stop();
-        console.log('? InstanceCoordinator 已停止');
+        console.log('✅ InstanceCoordinator 已停止');
     }, 20, 'instance-coordinator');
 
     // 3. 停止 Telegram 看门狗和客户端 (priority: 30)
@@ -42,20 +42,20 @@ export async function registerShutdownHooks() {
         stopWatchdog();
         if (client && client.connected) {
             await client.disconnect();
-            console.log('? Telegram 客户端已断开');
+            console.log('✅ Telegram 客户端已断开');
         }
     }, 30, 'telegram-client');
 
     // 4. 刷新待处理的任务更新 (priority: 40)
     gracefulShutdown.register(async () => {
         await TaskRepository.flushUpdates();
-        console.log('? TaskRepository 待更新任务已刷新');
+        console.log('✅ TaskRepository 待更新任务已刷新');
     }, 40, 'task-repository');
 
     // 5. 断开 Cache 连接 (priority: 50)
     gracefulShutdown.register(async () => {
         await cache.destroy();
-        console.log('? Cache 服务已断开');
+        console.log('✅ Cache 服务已断开');
     }, 50, 'cache-service');
 }
 
