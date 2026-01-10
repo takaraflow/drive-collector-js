@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.19.0](https://github.com/YoungSx/lb-worker-js/compare/v0.18.0...v0.19.0) (2026-01-10)
+
+
+### 🐛 Bug Fixes
+
+* adds lock expiration check for Telegram lock routing ([1e2e8d2](https://github.com/YoungSx/lb-worker-js/commit/1e2e8d2bc46ca2949831156a263ed3f448a4e471))
+* increases log data depth limit from 4 to 5 levels and serial read redis ([5d930c4](https://github.com/YoungSx/lb-worker-js/commit/5d930c4b398f275064c0d00260a87625329ad043))
+* replaces while loop with do-while for Redis key scanning ([b0bf53d](https://github.com/YoungSx/lb-worker-js/commit/b0bf53d9927f976328893b5a38b24c5c9fdf6891))
+
+
+### 🔧 Maintenance
+
+* improve test coverage and logging consistency ([c59eb16](https://github.com/YoungSx/lb-worker-js/commit/c59eb163fdc89de8a94ea5404803449159019f15))
+
 ## [0.18.0](https://github.com/YoungSx/lb-worker-js/compare/v0.17.0...v0.18.0) (2026-01-09)
 
 
