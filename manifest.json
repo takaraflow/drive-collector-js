@@ -791,6 +791,21 @@
         "required": false,
         "description": "Enable Telegram test mode"
       },
+      "TG_SERVER_DC": {
+        "type": "number",
+        "required": false,
+        "description": "Telegram DC override (requires TG_SERVER_IP and TG_SERVER_PORT)"
+      },
+      "TG_SERVER_IP": {
+        "type": "string",
+        "required": false,
+        "description": "Telegram server IP override (requires TG_SERVER_DC and TG_SERVER_PORT)"
+      },
+      "TG_SERVER_PORT": {
+        "type": "number",
+        "required": false,
+        "description": "Telegram server port override (requires TG_SERVER_DC and TG_SERVER_IP)"
+      },
       "TG_PROXY_HOST": {
         "type": "string",
         "required": false,

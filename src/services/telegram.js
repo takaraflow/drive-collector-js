@@ -161,9 +161,93 @@ let connectionStatusCallback = null;
 let watchdogTimer = null;
 let reconnectTimeout = null;
 
+const TEST_MODE_DC_CONFIG = {
+    dcId: 2,
+    serverIp: "149.154.167.40",
+    serverPort: 443
+};
+
+let telegramDcConfig = null;
+let telegramDcConfigLogged = false;
+
 // 错误类型跟踪
 let lastErrorType = null;
 let errorTypeFailures = {}; // 按错误类型记录失败次数
+
+function resolveTelegramDcConfig(config) {
+    const serverDc = Number.isFinite(config.telegram?.serverDc) ? config.telegram.serverDc : null;
+    const serverIp = config.telegram?.serverIp || null;
+    const serverPort = Number.isFinite(config.telegram?.serverPort) ? config.telegram.serverPort : null;
+    const customServerConfigured = serverDc !== null && serverIp && serverPort !== null;
+    const hasAnyCustom = serverDc !== null || Boolean(serverIp) || serverPort !== null;
+    const testMode = Boolean(config.telegram?.testMode);
+
+    if (customServerConfigured) {
+        return {
+            testMode,
+            customServerConfigured,
+            hasAnyCustom,
+            mode: "custom",
+            dcId: serverDc,
+            serverIp,
+            serverPort
+        };
+    }
+
+    if (testMode) {
+        return {
+            testMode,
+            customServerConfigured,
+            hasAnyCustom,
+            mode: "test-default",
+            ...TEST_MODE_DC_CONFIG
+        };
+    }
+
+    return {
+        testMode,
+        customServerConfigured,
+        hasAnyCustom,
+        mode: "default",
+        dcId: null,
+        serverIp: null,
+        serverPort: null
+    };
+}
+
+function getTelegramDcConfig(config) {
+    if (telegramDcConfig) {
+        return telegramDcConfig;
+    }
+    telegramDcConfig = resolveTelegramDcConfig(config);
+    return telegramDcConfig;
+}
+
+function logTelegramDcConfig(dcConfig) {
+    if (telegramDcConfigLogged) {
+        return;
+    }
+    telegramDcConfigLogged = true;
+    const customServerUsed = dcConfig.mode === "custom";
+    log.info(`[Telegram DC] testMode=${dcConfig.testMode}, customServer=${customServerUsed}, source=${dcConfig.mode}`);
+    if (!customServerUsed && dcConfig.hasAnyCustom) {
+        log.warn("[Telegram DC] TG_SERVER_DC/IP/PORT incomplete; ignoring custom DC override");
+    }
+}
+
+function applyTelegramDcConfig(client, config) {
+    const dcConfig = getTelegramDcConfig(config);
+    logTelegramDcConfig(dcConfig);
+    if (dcConfig.mode === "default") {
+        return;
+    }
+    client.session.setDC(dcConfig.dcId, dcConfig.serverIp, dcConfig.serverPort);
+}
+
+export function resetTelegramDcConfig() {
+    telegramDcConfig = null;
+    telegramDcConfigLogged = false;
+}
 
 /**
  * 获取持久化的 Session 字符串
@@ -263,6 +347,8 @@ async function initTelegramClient() {
     
     try {
         const config = getConfig();
+        const dcConfig = getTelegramDcConfig(config);
+        logTelegramDcConfig(dcConfig);
         const proxyOptions = config.telegram?.proxy?.host ? {
             proxy: {
                 ip: config.telegram.proxy.host,
@@ -292,7 +378,6 @@ async function initTelegramClient() {
             pingIntervalMs: 45000,
             keepAliveTimeout: 45000,
             floodSleepThreshold: 300, // 增大 Flood 睡眠阈值，支持长时间等待
-            testMode: config.telegram?.testMode || false,
             deviceModel: config.telegram?.deviceModel || "DriveCollector-Server",
             systemVersion: config.telegram?.systemVersion || "Linux",
             appVersion: config.telegram?.appVersion || "2.3.3",
@@ -338,9 +423,6 @@ async function initTelegramClient() {
             },
             ...proxyOptions
         };
-
-        // Log test mode configuration
-        log.info(`[Telegram Init] testMode: ${config.telegram?.testMode}, connection: default (obfuscated)`);
 
         enableTelegramConsoleProxy();
         
@@ -581,6 +663,7 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
     
     try {
         const client = await getClient();
+        const config = getConfig();
         const strategy = TelegramErrorClassifier.getReconnectStrategy(errorType, errorTypeFailures[errorType] || 0);
         
         log.info(`🔄 Starting reconnection [type=${errorType}, lightweight=${lightweight}, delay=${strategy.delay}ms]`);
@@ -628,6 +711,7 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
 
         // 使用电路断路器保护重连
         await telegramCircuitBreaker.execute(async () => {
+            applyTelegramDcConfig(client, config);
             await client.connect();
             await client.start({ botAuthToken: config.botToken });
             await saveSession();
@@ -813,6 +897,7 @@ export const connectAndStart = async () => {
             
             // 使用电路断路器保护连接过程，捕获 FloodWaitError
             await telegramCircuitBreaker.execute(async () => {
+                applyTelegramDcConfig(client, config);
                 await client.connect();
             }, TelegramErrorClassifier.ERROR_TYPES.UNKNOWN);
             

@@ -5,8 +5,12 @@ const mockConfig = {
     apiId: 123456,       // 模拟 ID
     apiHash: 'test_api_hash', // 模拟 Hash
     botToken: "mock_token",
-    telegram: { 
-        proxy: { host: "proxy.example.com", port: "1080", type: "socks5", username: "proxy_user", password: "proxy_pass" } 
+    telegram: {
+        proxy: { host: "proxy.example.com", port: "1080", type: "socks5", username: "proxy_user", password: "proxy_pass" },
+        testMode: false,
+        serverDc: null,
+        serverIp: null,
+        serverPort: null
     }
 };
 
@@ -52,13 +56,16 @@ jest.unstable_mockModule('../../src/services/logger.js', () => ({
 // 对于外部库，jest.mock 在 ESM 环境下更可靠
 jest.mock("telegram", () => ({
     TelegramClient: jest.fn().mockImplementation(() => ({
-        connect: jest.fn().mockResolvedValue(undefined),
+        connect: jest.fn().mockImplementation(function () {
+            this.connected = true;
+            return Promise.resolve();
+        }),
         start: jest.fn().mockResolvedValue(undefined),
         disconnect: jest.fn().mockResolvedValue(undefined),
         on: jest.fn(),
         addEventHandler: jest.fn(), // Telegram 库通常使用这个方法注册事件
         getMe: jest.fn().mockResolvedValue({ id: 123 }),
-        session: { save: jest.fn().mockReturnValue("mock_session") },
+        session: { save: jest.fn().mockReturnValue("mock_session"), setDC: jest.fn() },
         connected: true,
         _sender: { disconnect: jest.fn().mockResolvedValue(undefined) }
     })),
@@ -97,6 +104,12 @@ jest.unstable_mockModule("../../src/services/InstanceCoordinator.js", () => ({
 describe("Telegram Service", () => {
     let client;
     let module;
+    const resetMockTelegramConfig = () => {
+        mockConfig.telegram.testMode = false;
+        mockConfig.telegram.serverDc = null;
+        mockConfig.telegram.serverIp = null;
+        mockConfig.telegram.serverPort = null;
+    };
 
     beforeAll(async () => {
         jest.useFakeTimers();
@@ -204,5 +217,57 @@ describe("Telegram Service", () => {
             console.log("⚠️ Skipping event handler verification - check source code for addEventHandler usage");
             expect(mockLoggerError).toBeDefined();
         }
+    });
+
+    describe("Telegram DC configuration", () => {
+        let telegramInstance;
+
+        beforeEach(async () => {
+            resetMockTelegramConfig();
+            if (module.resetTelegramDcConfig) {
+                module.resetTelegramDcConfig();
+            }
+            mockLoggerInfo.mockClear();
+            mockLoggerWarn.mockClear();
+            telegramInstance = await module.getClient();
+            telegramInstance.session.setDC.mockClear();
+            telegramInstance.connected = false;
+        });
+
+        afterEach(() => {
+            telegramInstance.connected = true;
+        });
+
+        test("should uses built-in test DC defaults when TG_TEST_MODE is true", async () => {
+            mockConfig.telegram.testMode = true;
+            await module.connectAndStart();
+
+            expect(telegramInstance.session.setDC).toHaveBeenCalledWith(2, "149.154.167.40", 443);
+            expect(mockLoggerInfo.mock.calls.some(call => String(call[0]).includes("testMode=true"))).toBe(true);
+        });
+
+        test("should honors TG_SERVER_DC/IP/PORT when all values provided", async () => {
+            mockConfig.telegram.testMode = false;
+            mockConfig.telegram.serverDc = 5;
+            mockConfig.telegram.serverIp = "1.2.3.4";
+            mockConfig.telegram.serverPort = 10234;
+
+            await module.connectAndStart();
+
+            expect(telegramInstance.session.setDC).toHaveBeenCalledWith(5, "1.2.3.4", 10234);
+            expect(mockLoggerInfo.mock.calls.some(call => String(call[0]).includes("customServer=true"))).toBe(true);
+        });
+
+        test("should ignores incomplete TG_SERVER overrides and warns", async () => {
+            mockConfig.telegram.testMode = false;
+            mockConfig.telegram.serverDc = 3;
+            mockConfig.telegram.serverIp = null;
+            mockConfig.telegram.serverPort = 443;
+
+            await module.connectAndStart();
+
+            expect(telegramInstance.session.setDC).not.toHaveBeenCalled();
+            expect(mockLoggerWarn.mock.calls.some(call => String(call[0]).includes("TG_SERVER_DC/IP/PORT incomplete"))).toBe(true);
+        });
     });
 });

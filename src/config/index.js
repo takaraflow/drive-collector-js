@@ -44,6 +44,14 @@ function sanitizeValue(val) {
     return val.trim();
 }
 
+function parseOptionalInt(value) {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+    const parsed = parseInt(value, 10);
+    return Number.isNaN(parsed) ? null : parsed;
+}
+
 export const CACHE_TTL = 10 * 60 * 1000;
 
 export async function initConfig() {
@@ -186,6 +194,9 @@ export async function initConfig() {
             deviceModel: env.TG_DEVICE_MODEL || 'DriveCollector',
             systemVersion: env.TG_SYSTEM_VERSION || '1.0.0',
             appVersion: env.TG_APP_VERSION || '4.7.1',
+            serverDc: parseOptionalInt(env.TG_SERVER_DC),
+            serverIp: env.TG_SERVER_IP || null,
+            serverPort: parseOptionalInt(env.TG_SERVER_PORT),
             // Test mode logic: Explicit TG_TEST_MODE overrides dev mode default
             testMode: env.TG_TEST_MODE !== undefined
                 ? env.TG_TEST_MODE === 'true'
