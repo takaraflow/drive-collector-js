@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.21.0](https://github.com/YoungSx/lb-worker-js/compare/v0.20.0...v0.21.0) (2026-01-10)
+
+
+### 🐛 Bug Fixes
+
+* add context parameter to provider instantiation ([69b95fd](https://github.com/YoungSx/lb-worker-js/commit/69b95fd3d043e92a15ad18a2dd3dc330fcaee72e))
+* adds log size analysis and fixes log buffer handling ([6db6900](https://github.com/YoungSx/lb-worker-js/commit/6db6900244d69052f0db7a76ecec89d9f1320e06))
+* adds logger initialization to cache provider instantiation ([89e88b2](https://github.com/YoungSx/lb-worker-js/commit/89e88b28b878a019cef15fac4f9d3ec304424916))
+* extracts Redis response decoding logic into reusable method ([26e3df9](https://github.com/YoungSx/lb-worker-js/commit/26e3df9b78e5d2e67211d13c2fd542eb2b1bf7d4))
+* redis ([4a2a4d4](https://github.com/YoungSx/lb-worker-js/commit/4a2a4d45d0533186087b39d7be6e99f30b19e8cd))
+
 ## [0.20.0](https://github.com/YoungSx/lb-worker-js/compare/v0.19.0...v0.20.0) (2026-01-10)
 
 
