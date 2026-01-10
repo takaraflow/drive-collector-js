@@ -254,6 +254,24 @@ describe("Logger Service", () => {
         expect(dataset).toBe('test-dataset');
     });
 
+    test("suspends Axiom when service is unavailable", async () => {
+        mockAxiomIngest.mockRejectedValueOnce(new Error("Service unavailable"));
+
+        const moduleName = "TestModule";
+        const firstLogPromise = logger.withModule(moduleName).info("first message");
+        jest.advanceTimersByTime(5000);
+        await firstLogPromise;
+        const callsAfterFirst = mockAxiomIngest.mock.calls.length;
+        await logger.withModule(moduleName).info("second message");
+
+        expect(mockAxiomIngest).toHaveBeenCalledTimes(callsAfterFirst);
+        expect(
+            consoleLogSpy.mock.calls.some(
+                (call) => typeof call[0] === 'string' && call[0].includes("second message")
+            )
+        ).toBe(true);
+    });
+
     test("should handle circular references in data", async () => {
         const moduleName = "TestModule";
         const circularData = {};

@@ -28,6 +28,17 @@ let config = null;
 // Version caching
 let version = 'unknown';
 
+const AXIOM_UNAVAILABLE_BACKOFF_MS = 3 * 1000; // 3 seconds
+let axiomSuspendedUntil = 0;
+
+const isAxiomSuspended = () => Date.now() < axiomSuspendedUntil;
+
+const suspendAxiomLogging = () => {
+  axiomSuspendedUntil = Date.now() + AXIOM_UNAVAILABLE_BACKOFF_MS;
+  axiom = null;
+  axiomInitialized = false;
+};
+
 const initVersion = async () => {
     if (version !== 'unknown') return;
 
@@ -81,12 +92,17 @@ export const retryWithDelay = async (fn, maxRetries = 3, delayFn = (attempt) => 
 const handleAxiomError = (error) => {
   if (!error) return;
   const message = String(error.message || '');
+  const lowerMessage = message.toLowerCase();
   const isJsonParseError =
     error instanceof SyntaxError &&
     message.includes('Unexpected end of JSON input');
 
   if (isJsonParseError) {
     return;
+  }
+
+  if (lowerMessage.includes('unavailable')) {
+    suspendAxiomLogging();
   }
 
   originalConsoleError.call(console, 'Axiom ingest error:', message);
@@ -189,6 +205,11 @@ const safeAxiomIngest = async (dataset, payload) => {
     
     return true;
   } catch (error) {
+    const lowerErrorMessage = String(error.message || '').toLowerCase();
+    if (lowerErrorMessage.includes('unavailable')) {
+      suspendAxiomLogging();
+    }
+
     // 检查是否是 JSON 解析错误
     if (error instanceof SyntaxError && error.message.includes('JSON')) {
       // JSON 解析错误，可能是空响应或非 JSON 响应
@@ -225,6 +246,11 @@ const mergeContext = (baseContext, extraContext) => {
     return { ...baseContext, ...normalizeContext(extraContext) };
 };
 
+const fallbackToConsole = (level, message, data) => {
+    const fallback = { error: originalConsoleError, warn: originalConsoleWarn, log: originalConsoleLog }[level] || originalConsoleLog;
+    fallback.call(console, message, data);
+};
+
 const log = async (instanceId, level, message, data = {}, context = {}) => {
   // 确保 data 是一个对象且不是 Error 实例
   let finalData = data;
@@ -236,9 +262,6 @@ const log = async (instanceId, level, message, data = {}, context = {}) => {
 
   // 确保版本已初始化
   await initVersion();
-  if (!axiom) {
-    await initAxiom();
-  }
 
   const contextFields = normalizeContext(context);
   if (contextFields.module != null) {
@@ -248,10 +271,17 @@ const log = async (instanceId, level, message, data = {}, context = {}) => {
   const modulePrefix = contextFields.module ? `[${contextFields.module}] ` : '';
   const displayMessage = `[v${version}] ${modulePrefix}${message}`;
 
+  if (isAxiomSuspended()) {
+    fallbackToConsole(level, displayMessage, finalData);
+    return;
+  }
+
   if (!axiom) {
-    // Axiom 未初始化时，降级到原生 console，防止触发 Proxy 递归
-    const fallback = { error: originalConsoleError, warn: originalConsoleWarn, log: originalConsoleLog }[level] || originalConsoleLog;
-    fallback.call(console, displayMessage, finalData);
+    await initAxiom();
+  }
+
+  if (!axiom) {
+    fallbackToConsole(level, displayMessage, finalData);
     return;
   }
   
@@ -283,6 +313,11 @@ const log = async (instanceId, level, message, data = {}, context = {}) => {
     const dataset = getSafeDatasetName();
     await safeAxiomIngest(dataset, [finalPayload]);
   } catch (err) {
+    if (isAxiomSuspended()) {
+      fallbackToConsole(level, displayMessage, finalData);
+      return;
+    }
+
     // Retry logic with exponential backoff (max 3 attempts)
     // 使用 retryWithDelay 以便测试中可以 mock
     await retryWithDelay(async () => {
