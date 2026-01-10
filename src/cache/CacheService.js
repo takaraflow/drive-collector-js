@@ -39,11 +39,24 @@ class CacheService {
         return this.logger || logger;
     }
 
+    _getLoggerWithBuffer(ctx = null) {
+        const baseLogger = this.logger || logger;
+        // CF Worker 生命周期管理：如果有ctx.logBuffer，创建带缓冲的logger
+        if (ctx?.logBuffer) {
+            return baseLogger.child({ 
+                module: 'CacheService',
+                logBuffer: ctx.logBuffer 
+            });
+        }
+        return baseLogger.child({ module: 'CacheService' });
+    }
+
     async initialize(ctx = null) {
         if (this.isInitialized) return;
         this.isInitialized = true;
 
-        const log = this._getLogger();
+        // CF Worker 生命周期管理：确保日志能被正确缓冲和发送
+        const log = this._getLoggerWithBuffer(ctx);
 
         try {
             this.providerList = this._loadProvidersFromConfig(ctx);
@@ -89,7 +102,7 @@ class CacheService {
     }
 
     _loadProvidersFromConfig(ctx = null) {
-        const log = this._getLogger();
+        const log = this._getLoggerWithBuffer(ctx);
         const providersJson = this.env.CACHE_PROVIDERS;
         const hasCacheProviders = typeof providersJson === 'string'
             ? providersJson.trim().length > 0
@@ -134,7 +147,7 @@ class CacheService {
     }
 
     _loadLegacyProvider(ctx = null) {
-        const log = this._getLogger();
+        const log = this._getLoggerWithBuffer(ctx);
         const env = this.env || {};
         const redisUrl = env.NF_REDIS_URL || env.REDIS_TLS_URL;
         if (!redisUrl) return null;
@@ -210,7 +223,7 @@ class CacheService {
 
     async get(key, type = 'json', options = {}, ctx = null) {
         await this._ensureInitialized(ctx);
-        const log = this._getLogger();
+        const log = this._getLoggerWithBuffer(ctx);
 
         if (!this.primaryProvider) {
             return null;
@@ -233,7 +246,7 @@ class CacheService {
 
     async set(key, value, ttl = 3600, options = {}, ctx = null) {
         await this._ensureInitialized(ctx);
-        const log = this._getLogger();
+        const log = this._getLoggerWithBuffer(ctx);
 
         if (!this.primaryProvider) {
             return true;
@@ -266,7 +279,7 @@ class CacheService {
 
     async delete(key, ctx = null) {
         await this._ensureInitialized(ctx);
-        const log = this._getLogger();
+        const log = this._getLoggerWithBuffer(ctx);
 
         if (!this.primaryProvider) return true;
 
@@ -282,7 +295,7 @@ class CacheService {
 
     async _handleProviderFailure(error, ctx = null) {
         this.failureCount++;
-        const log = this._getLogger();
+        const log = this._getLoggerWithBuffer(ctx);
 
         if (this.failureCount >= this.maxFailuresBeforeFailover && !this.isFailoverMode) {
             await log.warn(`Max failures (${this.maxFailuresBeforeFailover}) reached. Triggering failover.`, {}, null, ctx);
@@ -291,7 +304,7 @@ class CacheService {
     }
 
     async _failover(ctx = null) {
-        const log = this._getLogger();
+        const log = this._getLoggerWithBuffer(ctx);
         this.isFailoverMode = true;
         log.warn('Cache failover active. External writes disabled.', this._createProviderLogContext(this.primaryProviderEntry));
 
@@ -318,6 +331,12 @@ class CacheService {
         const log = this._getLogger();
         if (this.recoveryTimer) return;
 
+        // CF Worker 兼容性检查：确保定时器 API 可用
+        if (typeof setInterval === 'undefined') {
+            log.warn('setInterval not available in this environment, skipping recovery check');
+            return;
+        }
+
         this.recoveryTimer = setInterval(async () => {
             if (!this.isFailoverMode) return;
 
@@ -337,8 +356,12 @@ class CacheService {
                 this.failureCount = 0;
                 this.fallbackProvider = null;
                 this.fallbackProviderEntry = null;
-                clearInterval(this.recoveryTimer);
-                this.recoveryTimer = null;
+                
+                // CF Worker 兼容性：安全清理定时器
+                if (this.recoveryTimer && typeof clearInterval !== 'undefined') {
+                    clearInterval(this.recoveryTimer);
+                    this.recoveryTimer = null;
+                }
             } catch (e) {
                 log.debug('Cache recovery attempt failed.');
             }
@@ -402,7 +425,7 @@ class CacheService {
 
     async listKeys(prefix = '', ctx = null) {
         await this._ensureInitialized(ctx);
-        const log = this._getLogger();
+        const log = this._getLoggerWithBuffer(ctx);
 
         if (!this.primaryProvider) {
             return [];
@@ -431,7 +454,7 @@ class CacheService {
     }
 
     stopRecoveryCheck() {
-        if (this.recoveryTimer) {
+        if (this.recoveryTimer && typeof clearInterval !== 'undefined') {
             clearInterval(this.recoveryTimer);
             this.recoveryTimer = null;
         }

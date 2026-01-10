@@ -16,7 +16,8 @@ const normalizeEnvName = (value = 'prod') => {
 
 const isDevEnv = (value) => normalizeEnvName(value) === 'dev';
 
-function resolveBuildVersion() {
+export function resolveBuildVersion() {
+  // CF Worker 兼容性检查：优先使用 globalThis
   if (typeof globalThis !== 'undefined') {
     if (globalThis.VERSION !== undefined && globalThis.VERSION !== null && globalThis.VERSION !== '') {
       return String(globalThis.VERSION);
@@ -26,6 +27,7 @@ function resolveBuildVersion() {
     }
   }
 
+  // Node.js 环境回退：仅在 Node.js 环境中使用 process.env
   if (typeof process !== 'undefined' && process.env) {
     const envVersion = process.env.VERSION;
     if (envVersion) {
@@ -63,7 +65,20 @@ export function updateVersionFromEnv(envVersion) {
 }
 
 syncGlobalVersion();
-export const isTestEnvironment = process.env.NODE_ENV === 'test' || typeof jest !== 'undefined';
+
+// CF Worker 兼容性：安全检查 process.env
+const getNodeEnv = () => {
+  if (typeof process !== 'undefined' && process.env) {
+    return process.env.NODE_ENV;
+  }
+  // CF Worker 环境下可能通过 globalThis 或其他方式传递
+  if (typeof globalThis !== 'undefined' && globalThis.NODE_ENV) {
+    return globalThis.NODE_ENV;
+  }
+  return undefined;
+};
+
+export const isTestEnvironment = getNodeEnv() === 'test' || typeof jest !== 'undefined';
 
 // 定义 LoggerContext 类型
 /**

@@ -6,7 +6,7 @@
  * @param {Object} env - Environment variables object
  * @returns {any} - The processed value
  */
-function interpolateEnv(value, env = process.env) {
+function interpolateEnv(value, env = (typeof process !== 'undefined' && process.env) ? process.env : {}) {
     if (typeof value === 'string') {
         const match = value.match(/^\$\{([A-Z0-9_]+)\}$/);
         if (match) {
@@ -44,7 +44,7 @@ function interpolateEnv(value, env = process.env) {
  * @returns {object|object[]} - The parsed and interpolated configuration
  * @throws {Error} - If JSON parsing fails
  */
-function parseCacheConfig(jsonString, env = process.env) {
+function parseCacheConfig(jsonString, env = (typeof process !== 'undefined' && process.env) ? process.env : {}) {
     if (!jsonString) return null;
 
     try {

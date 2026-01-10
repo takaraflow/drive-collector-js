@@ -118,8 +118,10 @@ function describeRedisEndpoint(env) {
 /**
  * 验证管理员API Token
  */
-async function verifyAdminToken(request, env, ctx = null) {
-  const verifyAdminTokenLogger = logger.child({ module: 'AdminToken' });
+async function verifyAdminToken(request, env, ctx = null, requestLogger = null) {
+  // CF Worker 生命周期管理：确保日志能被正确缓冲和发送
+  const verifyAdminTokenLogger = requestLogger || 
+    (ctx?.logBuffer ? logger.child({ module: 'AdminToken', logBuffer: ctx.logBuffer }) : logger.child({ module: 'AdminToken' }));
   
   // 跳过验证（开发环境）
   if (env.SKIP_ADMIN_AUTH === 'true') {
@@ -156,8 +158,10 @@ async function verifyAdminToken(request, env, ctx = null) {
 /**
  * 验证 QStash 签名 - 重构版本
  */
-async function verifyQStashSignature(request, env, isGetRequest = false, ctx = null) {
-  const verifyQStashSignatureLogger = logger.child({ module: 'QStashSignature' });
+async function verifyQStashSignature(request, env, isGetRequest = false, ctx = null, requestLogger = null) {
+  // CF Worker 生命周期管理：确保日志能被正确缓冲和发送
+  const verifyQStashSignatureLogger = requestLogger || 
+    (ctx?.logBuffer ? logger.child({ module: 'QStashSignature', logBuffer: ctx.logBuffer }) : logger.child({ module: 'QStashSignature' }));
   // 跳过签名验证
   if (env.SKIP_SIGNATURE_VERIFY === 'true') {
     await verifyQStashSignatureLogger.debug('⏭️ 跳过签名验证 (Skipping signature verification)', {}, ctx);
@@ -364,7 +368,11 @@ async function scanLockKeys(env, ctx = null, parentLogger = logger) {
  * 获取活跃实例
  */
 async function getActiveInstances(env, ctx = null, parentLogger = logger) {
-  const getActiveInstancesLogger = parentLogger.child({ module: 'getActiveInstances' });
+  // CF Worker 生命周期管理：确保日志能被正确缓冲和发送
+  const getActiveInstancesLogger = parentLogger.child({ 
+    module: 'getActiveInstances',
+    ...(ctx?.logBuffer ? { logBuffer: ctx.logBuffer } : {})
+  });
   const redisEndpointSummary = describeRedisEndpoint(env);
   await getActiveInstancesLogger.debug('📊 Redis 终端摘要 (Redis endpoint summary)', { endpoint: redisEndpointSummary }, null, ctx);
   try {
@@ -539,7 +547,10 @@ async function getActiveInstances(env, ctx = null, parentLogger = logger) {
  * 根据锁持有者选择实例（用于需要会话锁的下载任务）
  */
 async function selectInstanceByLock(instances, env, ctx, parentLogger = logger) {
-  const lockRoutingLogger = parentLogger.child({ module: 'lockRouting' });
+  const lockRoutingLogger = parentLogger.child({ 
+    module: 'lockRouting',
+    ...(ctx?.logBuffer ? { logBuffer: ctx.logBuffer } : {})
+  });
   if (!instances || instances.length === 0) return null;
 
   let lockValue;
@@ -602,7 +613,10 @@ async function selectInstanceByLock(instances, env, ctx, parentLogger = logger) 
  * 选择目标实例 (轮询)
  */
 async function selectTargetInstance(instances, env, ctx, parentLogger = logger) {
-  const selectTargetInstanceLogger = parentLogger.child({ module: 'selectTargetInstance' });
+  const selectTargetInstanceLogger = parentLogger.child({ 
+    module: 'selectTargetInstance',
+    ...(ctx?.logBuffer ? { logBuffer: ctx.logBuffer } : {})
+  });
   if (instances.length === 0) {
     return null;
   }
@@ -631,7 +645,10 @@ async function selectTargetInstance(instances, env, ctx, parentLogger = logger) 
  * 转发请求到目标实例
  */
 async function forwardToInstance(instance, normalizedUrl, request, originalBody, ctx = null, parentLogger = logger) {
-  const forwardToInstanceLogger = parentLogger.child({ module: 'forwardToInstance' });
+  const forwardToInstanceLogger = parentLogger.child({ 
+    module: 'forwardToInstance',
+    ...(ctx?.logBuffer ? { logBuffer: ctx.logBuffer } : {})
+  });
   const url = new URL(normalizedUrl.href);
   url.host = new URL(instance.url).host;
   url.protocol = new URL(instance.url).protocol;
@@ -682,7 +699,10 @@ async function forwardToInstance(instance, normalizedUrl, request, originalBody,
  * 带重试的转发逻辑
  */
 async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx, parentLogger = logger) {
-  const fetchWithRetryLogger = parentLogger.child({ module: 'fetchWithRetry' });
+  const fetchWithRetryLogger = parentLogger.child({ 
+    module: 'fetchWithRetry',
+    ...(ctx?.logBuffer ? { logBuffer: ctx.logBuffer } : {})
+  });
   let lastError;
   let last5xxResponse = null;
 
@@ -785,8 +805,10 @@ function shouldFailover(error, env) {
   return false;
 }
 
-function failover(env) {
-  const failoverLogger = logger.child({ module: 'failover' });
+function failover(env, ctx = null, requestLogger = null) {
+  // CF Worker 生命周期管理：确保日志能被正确缓冲和发送
+  const failoverLogger = requestLogger || 
+    (ctx?.logBuffer ? logger.child({ module: 'failover', logBuffer: ctx.logBuffer }) : logger.child({ module: 'failover' }));
   const hasUpstash = env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN;
   const hasNFRedis = !!(env.NF_REDIS_URL || env.REDIS_TLS_URL);
   
@@ -827,8 +849,10 @@ function isRetryableError(error) {
 /**
  * 带有重试逻辑的 Redis 命令执行器
  */
-async function retryRedisCommand(client, command, args = [], maxRetries = 3, initialDelay = 100, ctx = null) {
-  const retryRedisCommandLogger = logger.child({ module: 'retryRedisCommand' });
+async function retryRedisCommand(client, command, args = [], maxRetries = 3, initialDelay = 100, ctx = null, requestLogger = null) {
+  // CF Worker 生命周期管理：确保日志能被正确缓冲和发送
+  const retryRedisCommandLogger = requestLogger || 
+    (ctx?.logBuffer ? logger.child({ module: 'retryRedisCommand', logBuffer: ctx.logBuffer }) : logger.child({ module: 'retryRedisCommand' }));
   let retries = 0;
   let delay = initialDelay;
   let timerId = null;
@@ -1549,7 +1573,8 @@ const createSafeEnv = (env) => {
 export default {
   async fetch(request, env, ctx) {
     // [AXIOM_DEBUG] Request lifecycle tracing
-    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    // CF Worker 兼容性：使用 crypto.randomUUID() 替代 Math.random() 提供更好的随机性
+    const requestId = `req_${Date.now()}_${(typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11))}`;
     ctx._axiomDebugRequestId = requestId; // Attach to context for tracing
     console.log(`[AXIOM_DEBUG] ${requestId}: export.default.fetch entered`);
 
@@ -1747,7 +1772,7 @@ async function handleRequest(request, env, ctx) {
   if (request.method === 'GET' && normalizedUrl.pathname === '/api/instances') {
     try {
       // 验证管理员Token
-      await verifyAdminToken(request, env, ctx);
+      await verifyAdminToken(request, env, ctx, requestLogger);
       
       const activeInstances = await getActiveInstances(env, ctx, requestLogger);
       const provider = getCurrentProvider();
@@ -1795,9 +1820,9 @@ async function handleRequest(request, env, ctx) {
   let body = null;
   try {
     if (request.method === 'GET' || request.method === 'HEAD') {
-      body = await verifyQStashSignature(request, env, true, ctx);
+      body = await verifyQStashSignature(request, env, true, ctx, requestLogger);
     } else {
-      body = await verifyQStashSignature(request, env, false, ctx);
+      body = await verifyQStashSignature(request, env, false, ctx, requestLogger);
     }
     if (body === null) body = new Uint8Array();
   } catch (error) {
