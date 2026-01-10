@@ -363,12 +363,20 @@
       "API_HASH": {
         "type": "string",
         "required": true,
-        "description": "Telegram API Hash"
+        "description": "Telegram API Hash",
+        "sensitive": true,
+        "configPaths": [
+          "apiHash"
+        ]
       },
       "BOT_TOKEN": {
         "type": "string",
         "required": true,
-        "description": "Telegram Bot Token"
+        "description": "Telegram Bot Token",
+        "sensitive": true,
+        "configPaths": [
+          "botToken"
+        ]
       },
       "OWNER_ID": {
         "type": "string",
@@ -413,12 +421,20 @@
       "QSTASH_TOKEN": {
         "type": "string",
         "required": true,
-        "description": "Upstash QStash Token"
+        "description": "Upstash QStash Token",
+        "sensitive": true,
+        "configPaths": [
+          "token"
+        ]
       },
       "QSTASH_AUTH_TOKEN": {
         "type": "string",
         "required": false,
-        "description": "Upstash QStash auth token (legacy publishing token)"
+        "description": "Upstash QStash auth token (legacy publishing token)",
+        "sensitive": true,
+        "configPaths": [
+          "token"
+        ]
       },
       "QSTASH_URL": {
         "type": "string",
@@ -428,12 +444,20 @@
       "QSTASH_CURRENT_SIGNING_KEY": {
         "type": "string",
         "required": false,
-        "description": "QStash Webhook current signing key"
+        "description": "QStash Webhook current signing key",
+        "sensitive": true,
+        "configPaths": [
+          "currentSigningKey"
+        ]
       },
       "QSTASH_NEXT_SIGNING_KEY": {
         "type": "string",
         "required": false,
-        "description": "QStash Webhook next signing key"
+        "description": "QStash Webhook next signing key",
+        "sensitive": true,
+        "configPaths": [
+          "nextSigningKey"
+        ]
       },
       "LB_WEBHOOK_URL": {
         "type": "string",
@@ -463,7 +487,11 @@
       "OSS_WORKER_SECRET": {
         "type": "string",
         "required": false,
-        "description": "OSS Worker secret for authentication"
+        "description": "OSS Worker secret for authentication",
+        "sensitive": true,
+        "configPaths": [
+          "workerSecret"
+        ]
       },
       "R2_ENDPOINT": {
         "type": "string",
@@ -473,12 +501,20 @@
       "R2_ACCESS_KEY_ID": {
         "type": "string",
         "required": false,
-        "description": "Cloudflare R2 access key ID"
+        "description": "Cloudflare R2 access key ID",
+        "sensitive": true,
+        "configPaths": [
+          "accessKeyId"
+        ]
       },
       "R2_SECRET_ACCESS_KEY": {
         "type": "string",
         "required": false,
-        "description": "Cloudflare R2 secret access key"
+        "description": "Cloudflare R2 secret access key",
+        "sensitive": true,
+        "configPaths": [
+          "secretAccessKey"
+        ]
       },
       "R2_BUCKET": {
         "type": "string",
@@ -812,7 +848,11 @@
       "VALKEY_PASSWORD": {
         "type": "string",
         "required": false,
-        "description": "Valkey 数据库密码"
+        "description": "Valkey 数据库密码",
+        "sensitive": true,
+        "configPaths": [
+          "password"
+        ]
       },
       "VALKEY_USER": {
         "type": "string",
@@ -842,12 +882,20 @@
       "INFISICAL_CLIENT_SECRET": {
         "type": "string",
         "required": false,
-        "description": "Infisical client secret"
+        "description": "Infisical client secret",
+        "sensitive": true,
+        "configPaths": [
+          "clientSecret"
+        ]
       },
       "INFISICAL_TOKEN": {
         "type": "string",
         "required": false,
-        "description": "Infisical access token"
+        "description": "Infisical access token",
+        "sensitive": true,
+        "configPaths": [
+          "token"
+        ]
       },
       "INFISICAL_PROJECT_ID": {
         "type": "string",
