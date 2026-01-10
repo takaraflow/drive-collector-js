@@ -82,6 +82,18 @@ export class RedisTLSCache {
     }
   }
 
+  _decode(result) {
+    if (result === null || result === undefined) return result;
+    if (result instanceof Uint8Array) {
+      return new TextDecoder().decode(result);
+    } else if (ArrayBuffer.isView(result)) {
+      return new TextDecoder().decode(result.buffer);
+    } else if (result instanceof ArrayBuffer) {
+      return new TextDecoder().decode(new Uint8Array(result));
+    }
+    return String(result);
+  }
+
   async get(key, type = "json") {
     if (!this.client) {
       await this.connect();
@@ -90,16 +102,7 @@ export class RedisTLSCache {
     const result = await this.client.send('GET', [key]);
     if (result === null) return null;
 
-    let value;
-    if (result instanceof Uint8Array) {
-      value = new TextDecoder().decode(result);
-    } else if (ArrayBuffer.isView(result)) {
-      value = new TextDecoder().decode(result.buffer);
-    } else if (result instanceof ArrayBuffer) {
-      value = new TextDecoder().decode(new Uint8Array(result));
-    } else {
-      value = String(result);
-    }
+    const value = this._decode(result);
 
     if (type === 'json') {
       try {
@@ -186,8 +189,8 @@ export class RedisTLSCache {
         throw new Error('Invalid SCAN response');
       }
 
-      cursor = String(res[0]);
-      const batch = res[1].map(String);
+      cursor = this._decode(res[0]);
+      const batch = res[1].map(k => this._decode(k));
       keys.push(...batch);
 
       if (keys.length >= limit) {
