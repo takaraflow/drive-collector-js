@@ -19,9 +19,7 @@ import { Receiver } from '@upstash/qstash';
 
 // 静态导入 Redis client
 import { createRedis } from 'redis-on-workers';
-// 导入新的缓存客户端抽象
-import { getNFCacheClient } from './cache/client-factory.js';
-// 导入 CacheService（新的统一缓存系统，优先于旧配置）
+// 导入 CacheService（新的统一缓存系统）
 import { CacheService, cacheService } from './cache/CacheService.js';
 
 const ENV_ALIASES = {
@@ -78,14 +76,10 @@ function coerceCacheKeyName(value) {
 }
 
 /**
- * 获取提供者优先级
+ * 获取提供者优先级 (使用 CACHE_PROVIDERS)
  */
 function getProviderPriority(env) {
   const prios = [];
-  // 支持两种命名方式：NF_REDIS_* 和 REDIS_TLS_*
-  const hasNFRedis = !!(env.NF_REDIS_URL || env.REDIS_TLS_URL);
-  
-  if (hasNFRedis) prios.push('redis');
   if (env.KV_STORAGE) prios.push('cloudflare');
   if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) prios.push('upstash');
   return prios;
@@ -101,16 +95,7 @@ function detectCacheProvider(env) {
 }
 
 function describeRedisEndpoint(env) {
-  const redisUrl = env.NF_REDIS_URL || env.REDIS_TLS_URL;
-  if (!redisUrl) return 'not configured';
-  try {
-    const parsed = new URL(redisUrl);
-    const portSegment = parsed.port ? `:${parsed.port}` : '';
-    const pathSegment = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname : '';
-    return `${parsed.protocol}//${parsed.hostname}${portSegment}${pathSegment}`;
-  } catch (error) {
-    return redisUrl;
-  }
+  return 'using CACHE_PROVIDERS';
 }
 
 
@@ -595,7 +580,7 @@ async function selectInstanceByLock(instances, env, ctx, requestLogger = null) {
     }
   }
   if (!lockOwnerId) {
-    await lockRoutingLogger.debug('⚠️ 锁值缺少实例信息，回退轮询', { lockKey: TELEGRAM_LOCK_KEY });
+    await lockRoutingLogger.debug('⚠️ 锁值缺失实例信息，回退轮询', { lockKey: TELEGRAM_LOCK_KEY });
     return null;
   }
 
@@ -752,24 +737,23 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx,
 }
 
 /**
- * 故障转移相关函数
+ * 故障转移相关函数 (使用 CACHE_PROVIDERS)
  */
 function shouldFailover(error, env) {
   // 检查是否有可用的故障转移提供者
   const hasUpstash = env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN;
-  const hasNFRedis = !!(env.NF_REDIS_URL || env.REDIS_TLS_URL);
-  
-  if (!hasUpstash && !hasNFRedis) {
+
+  if (!hasUpstash) {
     return false;
   }
 
   // 如果当前已经是故障转移模式，不再故障转移
-  if (currentProvider === 'upstash' || currentProvider === 'redis') {
+  if (currentProvider === 'upstash') {
     return false;
   }
 
   const errorMessage = error.message.toLowerCase();
-  
+
   // 配额错误或网络错误立即故障转移
   if (errorMessage.includes('free usage limit') ||
       errorMessage.includes('quota exceeded') ||
@@ -784,7 +768,7 @@ function shouldFailover(error, env) {
   if (now - lastFailureTime > 60000) { // 1分钟窗口
     failureCount = 0;
   }
-  
+
   failureCount++;
   lastFailureTime = now;
 
@@ -800,27 +784,20 @@ function failover(env, ctx = null, requestLogger = null) {
   // 使用统一的 requestLogger
   const failoverLogger = requestLogger || logger.child({ module: 'failover' });
   const hasUpstash = env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN;
-  const hasNFRedis = !!(env.NF_REDIS_URL || env.REDIS_TLS_URL);
-  
-  // 优先级：Upstash > NF Redis
+
+  // 优先级：Upstash
   if (hasUpstash) {
     currentProvider = 'upstash';
     failoverLogger.info('🔄 故障转移到 Upstash Redis (Failover to Upstash Redis)', { reason: failoverReason });
     return true;
-  } else if (hasNFRedis) {
-    currentProvider = 'redis';
-    failoverLogger.info('🔄 故障转移到 NF Redis (Failover to NF Redis)', { reason: failoverReason });
-    return true;
   }
-  
+
   return false;
 }
 
 function getCurrentProvider() {
   if (currentProvider === 'upstash') {
     return 'Upstash Redis';
-  } else if (currentProvider === 'redis') {
-    return 'Redis';
   }
   return 'Cloudflare KV';
 }
@@ -910,11 +887,19 @@ async function retryRedisCommand(client, command, args = [], maxRetries = 3, ini
 }
 
 /**
- * 获取 Redis TLS Client (优先使用 CACHE_PROVIDERS，fallback 到旧配置)
+ * 获取 Redis TLS Client (优先使用 CACHE_PROVIDERS)
  */
-let redisClient = null;
-let redisInitPromise = null;
 let cacheServiceInstance = null;
+
+async function _getInitializedCacheService(env, ctx, log) {
+  if (!cacheServiceInstance) {
+    cacheServiceInstance = new CacheService({ env, logger: log });
+  } else {
+    cacheServiceInstance.logger = log;
+  }
+  await cacheServiceInstance.initialize(ctx, env);
+  return cacheServiceInstance;
+}
 
 async function getRedisClient(env, ctx, requestLogger) {
   const getRedisClientLogger = requestLogger || logger.child({ module: 'getRedisClient' });
@@ -925,307 +910,122 @@ async function getRedisClient(env, ctx, requestLogger) {
     if (mockClient) return mockClient;
   }
 
-  // 优先使用 CACHE_PROVIDERS
+  // 使用 CACHE_PROVIDERS
   if (env.CACHE_PROVIDERS) {
-    if (!cacheServiceInstance) {
-      cacheServiceInstance = new CacheService({ env, logger: getRedisClientLogger });
-    } else {
-      cacheServiceInstance.logger = getRedisClientLogger;
-    }
-    await cacheServiceInstance.initialize(ctx);
+    const service = await _getInitializedCacheService(env, ctx, getRedisClientLogger);
 
-    if (cacheServiceInstance.primaryProvider) {
+    if (service.primaryProvider) {
       await getRedisClientLogger.info('使用 CACHE_PROVIDERS 缓存系统', {
-        provider: cacheServiceInstance.getCurrentProvider()
+        provider: service.getCurrentProvider()
       });
       return {
-        get: (key) => cacheServiceInstance.get(key, 'string', {}),
-        set: (key, value, ttl) => cacheServiceInstance.set(key, value, ttl, {}),
-        send: undefined, // CacheService 不支持 send
+        get: (key) => service.get(key, 'string', {}, ctx),
+        set: (key, value, ttl) => service.set(key, value, ttl, {}, ctx),
+        send: async (command, ...args) => {
+          const provider = service.primaryProvider;
+          if (provider && provider.client && typeof provider.client.send === 'function') {
+            return await provider.client.send(command, ...args);
+          }
+          throw new Error(`Command ${command} not supported by current provider`);
+        },
         connect: () => Promise.resolve(),
-        disconnect: () => cacheServiceInstance.destroy()
+        disconnect: () => service.destroy()
       };
     }
   }
 
-  // Fallback: 使用旧的 NFCacheClient
-  if (redisClient) return redisClient;
-
-  // 如果已经在初始化了，直接返回同一个 Promise
-  if (redisInitPromise) return redisInitPromise;
-
-  redisInitPromise = (async () => {
-    try {
-      // 支持两种命名方式
-      const effectiveEnv = {
-        ...env,
-        NF_REDIS_URL: env.NF_REDIS_URL || env.REDIS_TLS_URL,
-        NF_REDIS_PASSWORD: env.NF_REDIS_PASSWORD || env.REDIS_TLS_PASSWORD
-      };
-
-      const client = getNFCacheClient(effectiveEnv);
-      await client.connect();
-      redisClient = client;
-      await getRedisClientLogger.info('NF Redis Client 初始化成功', { url: effectiveEnv.NF_REDIS_URL });
-      return client;
-    } catch (e) {
-      redisClient = null;
-      redisInitPromise = null; // 失败后允许下次重试
-      await getRedisClientLogger.error('NF Redis Client 初始化失败', { error: e.message });
-      throw e;
-    }
-  })();
-
-  return redisInitPromise;
+  throw new Error('CACHE_PROVIDERS not configured or no valid provider available');
 }
 
 /**
- * 执行 Redis TLS 操作 (优先使用 CACHE_PROVIDERS，fallback 到旧配置)
+ * 执行 Redis TLS 操作 (使用 CACHE_PROVIDERS)
  */
 async function executeRedis(operation, env, key, value = null, ctx = null, requestLogger = null) {
   const log = requestLogger || logger.child({ module: 'executeRedis' });
 
-  // 优先使用 CACHE_PROVIDERS
-  if (env.CACHE_PROVIDERS) {
-    if (!cacheServiceInstance) {
-      cacheServiceInstance = new CacheService({ env, logger: log });
-    } else {
-      cacheServiceInstance.logger = log;
-    }
-    await cacheServiceInstance.initialize(ctx);
-
-    const start = Date.now();
-    try {
-      switch (operation) {
-        case '_redis_get':
-        case '_kv_get': {
-          const result = await cacheServiceInstance.get(key, 'string', {});
-          await log.debug(`executeRedis GET (CacheService): key=${key}, result=${result}, duration=${Date.now() - start}ms`, {});
-          return result;
-        }
-        case '_redis_put':
-        case '_kv_put': {
-          const valStr = typeof value === 'string' ? value : JSON.stringify(value);
-          await cacheServiceInstance.set(key, valStr, 3600, {});
-          await log.debug(`executeRedis PUT (CacheService): key=${key}, duration=${Date.now() - start}ms`, {});
-          return true;
-        }
-        default:
-          throw new Error(`Unsupported Redis operation: ${operation}`);
-      }
-    } catch (e) {
-      await log.error(`executeRedis error (CacheService): ${e.message}`, {});
-      throw e;
-    }
+  if (!env.CACHE_PROVIDERS) {
+    throw new Error('CACHE_PROVIDERS not configured');
   }
 
-  // Fallback: 使用旧的 NFCacheClient
-  const redisUrl = env.NF_REDIS_URL || env.REDIS_TLS_URL;
-  const redisPassword = env.NF_REDIS_PASSWORD || env.REDIS_TLS_PASSWORD;
+  const service = await _getInitializedCacheService(env, ctx, log);
 
-  if (!redisUrl) {
-    throw new Error('Redis URL not found in environment variables.');
-  }
-
-  const client = await getRedisClient({
-    NF_REDIS_URL: redisUrl,
-    NF_REDIS_PASSWORD: redisPassword
-  }, ctx, log);
   const start = Date.now();
-
   try {
     switch (operation) {
       case '_redis_get':
       case '_kv_get': {
-        // 支持 mock client 的 send 方法和真实 client 的 get 方法
-        let result;
-        await log.debug(`executeRedis GET: key=${key}`, {});
-        if (client.send) {
-          result = await client.send('GET', key);
-        } else if (client.get) {
-          result = await client.get(key);
-        } else {
-          throw new Error('Client does not support get or send method');
-        }
-        const duration = Date.now() - start;
-        await log.debug(`executeRedis GET result: key=${key}, result=${result}, duration=${duration}ms`, {});
+        const result = await service.get(key, 'string', {}, ctx);
+        await log.debug(`executeRedis GET (CacheService): key=${key}, result=${result}, duration=${Date.now() - start}ms`, {});
         return result;
       }
       case '_redis_put':
       case '_kv_put': {
         const valStr = typeof value === 'string' ? value : JSON.stringify(value);
-        // 支持 mock client 的 send 方法和真实 client 的 set 方法
-        if (client.send) {
-          await client.send('SET', key, valStr);
-        } else if (client.set) {
-          await client.set(key, valStr);
-        } else {
-          throw new Error('Client does not support set or send method');
-        }
-        const duration = Date.now() - start;
+        await service.set(key, valStr, 3600, {}, ctx);
+        await log.debug(`executeRedis PUT (CacheService): key=${key}, duration=${Date.now() - start}ms`, {});
         return true;
       }
       default:
         throw new Error(`Unsupported Redis operation: ${operation}`);
     }
   } catch (e) {
-    const duration = Date.now() - start;
+    await log.error(`executeRedis error (CacheService): ${e.message}`, {});
     throw e;
   }
 }
 
 /**
- * 执行 Redis TLS Scan 操作 (优先使用 CACHE_PROVIDERS，fallback 到旧配置)
+ * 执行 Redis TLS Scan 操作 (使用 CACHE_PROVIDERS)
  */
 async function executeRedisScan(env, prefix, ctx = null, requestLogger = null) {
   const scanLogger = requestLogger || logger.child({ module: 'executeRedisScan', logBuffer: ctx?.logBuffer });
 
-  // 优先使用 CACHE_PROVIDERS
-  if (env.CACHE_PROVIDERS) {
-    if (!cacheServiceInstance) {
-      cacheServiceInstance = new CacheService({ env, logger: scanLogger });
-    } else {
-      cacheServiceInstance.logger = scanLogger;
-    }
-    await cacheServiceInstance.initialize(ctx);
-
-    const keys = await cacheServiceInstance.listKeys(prefix, ctx);
-    await scanLogger.debug(`executeRedisScan (CacheService): prefix=${prefix}, keysFound=${keys.length}`, {});
-    return { keys: keys.map(k => ({ name: k })) };
+  if (!env.CACHE_PROVIDERS) {
+    throw new Error('CACHE_PROVIDERS not configured');
   }
 
-  // Fallback: 使用旧的 NFCacheClient
-  const redisUrl = env.NF_REDIS_URL || env.REDIS_TLS_URL;
-  const redisPassword = env.NF_REDIS_PASSWORD || env.REDIS_TLS_PASSWORD;
+  const service = await _getInitializedCacheService(env, ctx, scanLogger);
 
-  if (!redisUrl) {
-    throw new Error('Redis URL not found in environment variables.');
-  }
-
-  const client = await getRedisClient({
-    NF_REDIS_URL: redisUrl,
-    NF_REDIS_PASSWORD: redisPassword
-  });
-
-  const keys = [];
-  let cursor = '0';
-
-  do {
-    // 支持 mock client 的 send 方法和真实 client 的 scan 方法
-    let res;
-    // 添加日志，记录使用的 client 类型和 scan 参数
-    const isNFCacheClient = !!client.scan && !client.send;
-    const clientType = isNFCacheClient ? 'NFCacheClient' : (client.send ? 'RedisClient' : 'Unknown');
-    await scanLogger.debug(`executeRedisScan: clientType=${clientType}, prefix=${prefix}, cursor=${cursor}`, {});
-
-    if (client.send) {
-      // 原生 redis-on-workers 或类似 client，直接发送命令
-      // 必须显式包含 MATCH 和 COUNT 关键字
-      // 修复：MATCH pattern 应该是 'instance:*' 而不是 'instance:instance:*'
-      // 传入的 prefix 是 'instance:'
-      const matchPattern = prefix === '' ? '*' : (prefix.endsWith(':') ? `${prefix}*` : `${prefix}:*`);
-      await scanLogger.debug(`Executing Redis SCAN (send)`, { clientType, prefix, matchPattern, cursor });
-      res = await client.send('SCAN', cursor, 'MATCH', matchPattern, 'COUNT', 100);
-    } else if (client.scan) {
-      // NFCacheClient 或兼容接口
-      // 假设 scan 方法签名是 (cursor, matchPattern, count)
-      // 这里的 matchPattern 应该是完整的 pattern (如 "instance:*")
-      const matchPattern = prefix === '' ? '*' : (prefix.endsWith(':') ? `${prefix}*` : `${prefix}:*`);
-      await scanLogger.debug(`Executing Redis SCAN (scan)`, { clientType, prefix, matchPattern, cursor });
-      res = await client.scan(cursor, matchPattern, 100);
-    } else {
-      throw new Error('Client does not support scan or send method');
-    }
-
-    cursor = res[0];
-    const batchKeys = res[1];
-
-    // 诊断日志：记录 SCAN 返回的原始数据
-    await scanLogger.debug(`executeRedisScan: SCAN response`, {
-      prefix,
-      nextCursor: cursor,
-      batchKeysCount: Array.isArray(batchKeys) ? batchKeys.length : 0,
-      batchKeys: Array.isArray(batchKeys) ? batchKeys.map(k => String(k)) : batchKeys,
-      batchKeysType: Array.isArray(batchKeys) ? 'array' : typeof batchKeys
-    });
-
-    if (Array.isArray(batchKeys)) {
-      for (const k of batchKeys) {
-        keys.push({ name: coerceCacheKeyName(k) });
-      }
-    }
-  } while (cursor !== '0');
-
-  await scanLogger.debug(`executeRedisScan: finished scanning`, { prefix, keysFound: keys.length, keys: keys.map(k => k.name) });
-  return { keys };
+  const keys = await service.listKeys(prefix, ctx);
+  await scanLogger.debug(`executeRedisScan (CacheService): prefix=${prefix}, keysFound=${keys.length}`, {});
+  return { keys: keys.map(k => ({ name: k })) };
 }
 
 /**
- * 检查 Redis 健康状况 (优先使用 CACHE_PROVIDERS，fallback 到旧配置)
+ * 检查 Redis 健康状况 (使用 CACHE_PROVIDERS)
  */
 async function checkRedisHealth(env, ctx, executor = executeWithPriorityFallback) {
   const checkRedisHealthLogger = logger.child({ module: 'checkRedisHealth' });
+
+  if (!env.CACHE_PROVIDERS) {
+    await checkRedisHealthLogger.warn('CACHE_PROVIDERS not configured', {});
+    return false;
+  }
+
   try {
-    // 优先使用 CACHE_PROVIDERS
-    if (env.CACHE_PROVIDERS) {
-      if (!cacheServiceInstance) {
-        cacheServiceInstance = new CacheService({ env });
-      }
-      await cacheServiceInstance.initialize();
+    const service = await _getInitializedCacheService(env, ctx, checkRedisHealthLogger);
 
-      if (cacheServiceInstance.primaryProvider) {
-        const provider = cacheServiceInstance.getCurrentProvider();
-        const start = Date.now();
-        try {
-          if (cacheServiceInstance.primaryProvider.ping) {
-            await cacheServiceInstance.primaryProvider.ping();
-          } else {
-            await cacheServiceInstance.get('healthcheck_ping');
-          }
-          const duration = Date.now() - start;
-          await checkRedisHealthLogger.info(`Redis 健康检查成功 (CacheService, provider=${provider})`, { duration: `${duration}ms`, provider });
-          return true;
-        } catch (pingError) {
-          await checkRedisHealthLogger.warn(`CacheService Redis PING 健康检查失败: ${pingError.message}`, { provider });
-        }
-      }
-    }
-
-    // Fallback: 使用旧的 NFCacheClient
-    const redisUrl = env.NF_REDIS_URL || env.REDIS_TLS_URL;
-    const redisPassword = env.NF_REDIS_PASSWORD || env.REDIS_TLS_PASSWORD;
-
-    // 如果配置了 Redis，直接通过 PING 命令检查健康状况
-    if (redisUrl) {
+    if (service.primaryProvider) {
+      const provider = service.getCurrentProvider();
+      const start = Date.now();
       try {
-        const client = await getRedisClient({
-          NF_REDIS_URL: redisUrl,
-          NF_REDIS_PASSWORD: redisPassword
-        });
-        const start = Date.now();
-        const pong = await client.ping();
-        const duration = Date.now() - start;
-        if (pong === 'PONG' || pong === 'OK') {
-          await checkRedisHealthLogger.info(`Redis 健康检查成功 (通过 PING)`, { duration: `${duration}ms` });
-          return true;
+        if (service.primaryProvider.ping) {
+          await service.primaryProvider.ping();
         } else {
-          await checkRedisHealthLogger.warn(`Redis 健康检查失败 (PING 响应: ${pong})`, { duration: `${duration}ms` });
-          return false;
+          await service.get('healthcheck_ping', 'string', {}, ctx);
         }
+        const duration = Date.now() - start;
+        await checkRedisHealthLogger.info(`Redis 健康检查成功 (CacheService, provider=${provider})`, { duration: `${duration}ms`, provider });
+        return true;
       } catch (pingError) {
-        await checkRedisHealthLogger.warn(`Redis PING 健康检查失败: ${pingError.message}`, {});
-        // 如果直接 PING 失败，不立即返回 false，而是继续尝试通过 _kv_get 进行检查
+        await checkRedisHealthLogger.warn(`CacheService Redis PING 健康检查失败: ${pingError.message}`, { provider });
       }
     }
 
-    // 回退：通过 executeWithPriorityFallback 读取一个预设的键，检查可用的、基于 HTTP 的 provider (如 Upstash)
-    const start = Date.now();
-    await executor('_kv_get', env, ctx, 'healthcheck_ping');
-    const duration = Date.now() - start;
-    await checkRedisHealthLogger.info(`备用 provider 健康检查成功 (通过 _kv_get)`, { duration: `${duration}ms` });
-    return true;
+    await checkRedisHealthLogger.error(`所有 provider 健康检查失败`, {});
+    return false;
   } catch (e) {
-    await checkRedisHealthLogger.error(`所有 provider 健康检查失败`, { error: e.message });
+    await checkRedisHealthLogger.error(`健康检查异常`, { error: e.message });
     return false;
   }
 }
@@ -1278,175 +1078,67 @@ async function executeUpstashScan(env, prefix) {
 async function executeWithPriorityFallback(operation, env, ctx, ...args) {
   const lastArg = args[args.length - 1];
   const requestLogger = (lastArg && typeof lastArg.debug === 'function') ? args.pop() : null;
-  let executeWithPriorityFallbackLogger = requestLogger;
-  if (!executeWithPriorityFallbackLogger) {
+  let log = requestLogger || logger.child({ module: 'executeWithPriorityFallback' });
+
+  // 优先使用 CACHE_PROVIDERS
+  if (env.CACHE_PROVIDERS) {
     try {
-      executeWithPriorityFallbackLogger = logger.child({ module: 'executeWithPriorityFallback' });
+      const service = await _getInitializedCacheService(env, ctx, log);
+      switch (operation) {
+        case '_kv_get':
+        case '_redis_get':
+          return await service.get(args[0], 'string', {}, ctx);
+        case '_kv_put':
+        case '_redis_put':
+          return await service.set(args[0], args[1], 3600, {}, ctx);
+        case '_kv_list':
+          const keys = await service.listKeys(args[0], ctx);
+          return { keys: keys.map(k => ({ name: k })) };
+        default:
+          throw new Error(`Unsupported operation for CacheService: ${operation}`);
+      }
     } catch (e) {
-      console.error('Failed to create child logger, using global logger:', e.message);
-      executeWithPriorityFallbackLogger = logger;
+      await log.error(`CacheService operation ${operation} failed: ${e.message}`);
+      // 如果 CacheService 失败，且没有配置 legacy 变量，则直接抛出
+      if (!env.KV_STORAGE && !env.UPSTASH_REDIS_REST_URL) {
+        throw e;
+      }
+      // 否则继续尝试 legacy 逻辑
     }
   }
-  if (typeof executeWithPriorityFallbackLogger.debug !== 'function') {
-    console.warn('[executeWithPriorityFallback] Logger 不合法，降级到全局 logger (Logger invalid, fallback to global logger)');
-    executeWithPriorityFallbackLogger = logger;
-  }
-  const providers = getProviderPriority(env);
-  await executeWithPriorityFallbackLogger.debug(`执行 ${operation}，优先级: ${JSON.stringify(providers)}`, { args: args.slice(0, 1), providers });
 
+  // Legacy 逻辑 (向后兼容)
+  const providers = getProviderPriority(env);
   const providerOps = {
-    'redis': {
-      '_kv_get': async () => {
-        return await executeRedis('_redis_get', env, args[0], null, ctx, executeWithPriorityFallbackLogger);
-      },
-      '_kv_put': async () => {
-        return await executeRedis('_redis_put', env, args[0], args[1], ctx, executeWithPriorityFallbackLogger);
-      },
-      '_kv_list': async () => {
-        return await executeRedisScan(env, args[0], ctx, executeWithPriorityFallbackLogger);
-      }
-    },
     'cloudflare': {
-      '_kv_get': async () => {
-        if (env.KV_STORAGE) {
-          const start = Date.now();
-          const res = await env.KV_STORAGE.get(args[0]);
-          await executeWithPriorityFallbackLogger.debug(`Cloudflare KV GET: key=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' });
-          return res;
-        }
-        throw new Error('KV_STORAGE not available');
-      },
-      '_kv_put': async () => {
-        if (env.KV_STORAGE) {
-          const start = Date.now();
-          await env.KV_STORAGE.put(args[0], args[1]);
-          await executeWithPriorityFallbackLogger.debug(`Cloudflare KV PUT: key=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' });
-          return true;
-        }
-        throw new Error('KV_STORAGE not available');
-      },
-      '_kv_list': async () => {
-        if (env.KV_STORAGE) {
-          const start = Date.now();
-          const res = await env.KV_STORAGE.list({ prefix: args[0] });
-          await executeWithPriorityFallbackLogger.debug(`Cloudflare KV LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'KV' });
-          return res;
-        }
-        throw new Error('KV_STORAGE not available');
-      }
+      '_kv_get': async () => env.KV_STORAGE.get(args[0]),
+      '_kv_put': async () => { await env.KV_STORAGE.put(args[0], args[1]); return true; },
+      '_kv_list': async () => env.KV_STORAGE.list({ prefix: args[0] })
     },
     'upstash': {
-      '_kv_get': async () => {
-        const start = Date.now();
-        const response = await fetch(`${env.UPSTASH_REDIS_REST_URL}/get/${args[0]}`, {
-          headers: { 'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}` }
-        });
-        const duration = Date.now() - start;
-
-        await executeWithPriorityFallbackLogger.debug(`Upstash GET ${args[0]}: status ${response.status}, duration=${duration}ms`, { cache: true, provider: 'Upstash' });
-
-        if (response.status === 404) {
-          await executeWithPriorityFallbackLogger.debug(`Upstash GET 404 for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' });
-          await response.body.cancel();
-          return null;
-        }
-
-        if (!response.ok) {
-          await executeWithPriorityFallbackLogger.debug(`Upstash GET error ${response.status} for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' });
-          await response.body?.cancel();
-          throw new Error(`Upstash Get Error: ${response.status} ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        await executeWithPriorityFallbackLogger.debug(`Upstash GET ${args[0]} success`, { cache: true, provider: 'Upstash' });
-        return data.result;
-      },
+      '_kv_get': async () => upstash_get(env, args[0]),
       '_kv_put': async () => {
-        const start = Date.now();
-        const response = await fetch(`${env.UPSTASH_REDIS_REST_URL}/set/${args[0]}`, {
+        const res = await fetch(`${env.UPSTASH_REDIS_REST_URL}/set/${args[0]}`, {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`,
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Authorization': `Bearer ${env.UPSTASH_REDIS_REST_TOKEN}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ value: args[1] })
         });
-        const duration = Date.now() - start;
-
-        await executeWithPriorityFallbackLogger.debug(`Upstash PUT ${args[0]}: status ${response.status}, duration=${duration}ms`, { cache: true, provider: 'Upstash' });
-
-        if (!response.ok) {
-          await executeWithPriorityFallbackLogger.debug(`Upstash PUT error ${response.status} for ${args[0]}, canceling body`, { cache: true, provider: 'Upstash' });
-          await response.body?.cancel();
-          throw new Error(`Upstash Put Error: ${response.status} ${response.statusText}`);
-        }
-
-        await executeWithPriorityFallbackLogger.debug(`Upstash PUT ${args[0]} success`, { cache: true, provider: 'Upstash' });
+        if (!res.ok) throw new Error(`Upstash Put Error: ${res.status}`);
         return true;
       },
-      '_kv_list': async () => {
-        const start = Date.now();
-        const res = await executeUpstashScan(env, args[0]);
-        await executeWithPriorityFallbackLogger.debug(`Upstash LIST: prefix=${args[0]} success, duration=${Date.now() - start}ms`, { cache: true, provider: 'Upstash' });
-        return res;
-      }
+      '_kv_list': async () => executeUpstashScan(env, args[0])
     }
   };
 
-  // 按优先级顺序尝试每个提供者
-  let lastUsedProvider = null;
-  /** @type {Array<{ provider: string; error: string; errorCode: string; duration: number; }>} */
-  const failedProviders = []; // 新增：收集所有失败的提供者信息
-
-  for (let i = 0; i < providers.length; i++) {
-    const p = providers[i];
+  for (const p of providers) {
     if (!providerOps[p][operation]) continue;
-    
-    const start = Date.now();
-    const providerName = p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis';
     try {
-      await executeWithPriorityFallbackLogger.info(`尝试 ${p} ${operation} ${args[0] || ''}`, {
-        cache: true,
-        provider: providerName,
-        providerType: p,
-        priorityIndex: i
-      });
-      const result = await providerOps[p][operation]();
-      const duration = Date.now() - start;
-      await executeWithPriorityFallbackLogger.info(`使用 ${p} ${operation} 成功, duration=${duration}ms`, {
-        cache: true,
-        provider: providerName,
-        actualProvider: p
-      });
-      lastUsedProvider = p;
-      return result;
+      return await providerOps[p][operation]();
     } catch (e) {
-      const duration = Date.now() - start;
-      let errorCode = e.status || e.code || 'unknown';
-
-      // 修复 CF KV "KV list() limit exceeded" 的 code 解析
-      if (p === 'cloudflare' && e.message && e.message.includes('limit exceeded')) {
-        errorCode = 'quota_exceeded';
-      }
-
-      // 新增：收集失败信息
-      failedProviders.push({ provider: p, error: e.message, errorCode, duration });
-
-      const nextProvider = providers[i + 1];
-      const providerName = p === 'cloudflare' ? 'KV' : p === 'upstash' ? 'Upstash' : 'Redis';
-      if (nextProvider) {
-        await executeWithPriorityFallbackLogger.warn(`尝试 ${p} → 失败: ${e.message} (code:${errorCode}), duration=${duration}ms, fallback to ${nextProvider}`, { cache: true, provider: providerName, failedProviders });
-      } else {
-        // 新增：在所有提供者失败时记录更详细的错误日志
-        await executeWithPriorityFallbackLogger.error(`所有提供者失败，操作 ${operation}，所有提供者尝试结果:`, { args: args.slice(0, 1), failedAttempts: failedProviders });
-        throw new Error(`All providers failed for ${operation}`);
-      }
-      // 继续尝试下一个提供者
-      continue;
+      await log.warn(`Legacy provider ${p} failed for ${operation}: ${e.message}`);
     }
   }
 
-  // 所有提供者都失败 (理论上不会执行到这里，因为上面的 catch 块会抛出错误)
   throw new Error(`All providers failed for ${operation}`);
 }
 
@@ -1523,12 +1215,17 @@ const setCurrentProviderState = (state) => {
   if (state.failoverReason !== undefined) failoverReason = state.failoverReason;
 };
 
-// 暴露 redisClient 的 setter 供测试使用
-const __test_setRedisClient = (client) => {
-  redisClient = client;
+// 暴露 cacheServiceInstance 的重置函数供测试使用
+const __test_resetCacheService = () => {
+  cacheServiceInstance = null;
 };
 
-export { getCurrentProviderState, setCurrentProviderState, __test_setRedisClient };
+// 暴露 cacheServiceInstance 的注入函数供测试使用
+const __test_setCacheServiceInstance = (instance) => {
+  cacheServiceInstance = instance;
+};
+
+export { getCurrentProviderState, setCurrentProviderState, __test_resetCacheService, __test_setCacheServiceInstance };
 
 /**
  * Worker 处理器
@@ -1733,7 +1430,6 @@ log.debug('Request Received', { method: request.method, url: request.url });
     primary: primaryProvider,
     priorities: priorities,
     hasKv: !!env.KV_STORAGE,
-    hasRedis: !!(env.NF_REDIS_URL || env.REDIS_TLS_URL),
     hasUpstash: !!(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN),
     envOverride: env.CACHE_PROVIDERS || 'none'
   });
@@ -1952,4 +1648,3 @@ await log.warn('无活跃实例可用', {
   
   return result;
 }
-

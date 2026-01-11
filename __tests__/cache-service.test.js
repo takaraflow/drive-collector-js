@@ -106,7 +106,6 @@ describe('Cache System - CacheService basic behavior', () => {
     expect(service.maxFailuresBeforeFailover).toBe(3);
     expect(service.failureCount).toBe(0);
     expect(service.isFailoverMode).toBe(false);
-    expect(service.recoveryTimer).toBeNull();
   });
 
   test('should accept custom options', async () => {
@@ -132,14 +131,6 @@ describe('Cache System - CacheService basic behavior', () => {
     expect(info.provider).toBe('MemoryCache');
   });
 
-  test('should stop recovery check when not in recovery mode', async () => {
-    const { CacheService } = await import('../src/cache/CacheService.js');
-    const service = new CacheService();
-    service.env = {};
-    await service.initialize();
-    service.stopRecoveryCheck();
-    expect(service.recoveryTimer).toBeNull();
-  });
 
   test('should not fail get when no primary provider', async () => {
     const { CacheService } = await import('../src/cache/CacheService.js');

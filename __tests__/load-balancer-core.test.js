@@ -51,8 +51,7 @@ import {
   normalizePath,
   executeRedis,
   scanLockKeys,
-  executeWithFailover,
-  __test_setRedisClient
+  executeWithFailover
 } from '../src/index.js';
 import { __mockSend, createRedis } from 'redis-on-workers';
 
@@ -86,10 +85,6 @@ describe('任务调度失败处理优化测试', () => {
     global.__QSTASH_MOCK_VERIFY__ = mockVerify;
     global.fetch.mockReset();
     
-    // Pre-mock the redis client for all tests in this suite
-    const mockClient = createRedis({});
-    __test_setRedisClient(mockClient);
-
     // Suppress console output during tests
     consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
     consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
@@ -97,9 +92,6 @@ describe('任务调度失败处理优化测试', () => {
   });
   
   afterEach(() => {
-    if (typeof __test_setRedisClient === 'function') {
-      __test_setRedisClient(null);
-    }
     consoleLogSpy.mockRestore();
     consoleWarnSpy.mockRestore();
     consoleErrorSpy.mockRestore();
@@ -318,13 +310,8 @@ describe('任务调度失败处理优化测试', () => {
  
     describe('Cache Provider Detection', () => {
      it('should_prioritize_CACHE_PROVIDER_env_variable', () => {
-       const env = { CACHE_PROVIDERS: 'redis' };
-       expect(detectCacheProvider(env)).toBe('redis');
-     });
- 
-     it('should_detect_redis_tls_with_password', () => {
-       const env = { REDIS_TLS_URL: 'https://redis.example.com', REDIS_TLS_PASSWORD: 'password' };
-       expect(detectCacheProvider(env)).toBe('redis');
+       const env = { CACHE_PROVIDERS: 'cloudflare' };
+       expect(detectCacheProvider(env)).toBe('cloudflare');
      });
  
      it('应该检测 Cloudflare KV', () => {
@@ -335,17 +322,6 @@ describe('任务调度失败处理优化测试', () => {
      it('应该检测 Upstash', () => {
        const env = { UPSTASH_REDIS_REST_URL: 'https://redis.example.com', UPSTASH_REDIS_REST_TOKEN: 'token' };
        expect(detectCacheProvider(env)).toBe('upstash');
-     });
- 
-     it('should_prioritize_redis_tls_over_cloudflare_kv_and_upstash', () => {
-       const env = {
-         KV_STORAGE: mockKV,
-         UPSTASH_REDIS_REST_URL: 'https://redis.example.com',
-         UPSTASH_REDIS_REST_TOKEN: 'token',
-         REDIS_TLS_URL: 'https://redis-tls.example.com',
-         REDIS_TLS_PASSWORD: 'password'
-       };
-       expect(detectCacheProvider(env)).toBe('redis');
      });
  
      it('应该优先 Cloudflare KV > Upstash', () => {
@@ -363,106 +339,6 @@ describe('任务调度失败处理优化测试', () => {
      });
    });
  
-    describe('Redis 故障转移', () => {
-     it('应该执行 Redis GET 操作', async () => {
-       const env = {
-         REDIS_TLS_URL: 'https://redis.example.com',
-         REDIS_TLS_PASSWORD: 'test-password',
-       };
-
-       __mockSend.mockResolvedValueOnce('test-value');
-
-       const result = await executeRedis('_redis_get', env, 'test-key');
-       
-       expect(result).toBe('test-value');
-       expect(__mockSend).toHaveBeenCalledWith('GET', 'test-key');
-     });
-
-     it('应该执行 Redis PUT 操作', async () => {
-       const env = {
-         REDIS_TLS_URL: 'https://redis.example.com',
-         REDIS_TLS_PASSWORD: 'test-password',
-       };
-
-       __mockSend.mockResolvedValueOnce('OK');
-
-       const result = await executeRedis('_redis_put', env, 'test-key', 'test-value');
-       
-       expect(result).toBe(true);
-       expect(__mockSend).toHaveBeenCalledWith('SET', 'test-key', 'test-value');
-     });
-
-     it('应该处理 Redis 404 返回 null', async () => {
-       const env = {
-         REDIS_TLS_URL: 'https://redis.example.com',
-         REDIS_TLS_PASSWORD: 'test-password',
-       };
-
-       __mockSend.mockResolvedValueOnce(null);
-
-       const result = await executeRedis('_redis_get', env, 'nonexistent-key');
-       
-       expect(result).toBe(null);
-     });
-
-     it('应该在 executeWithFailover 中使用 Redis 作为第一优先级', async () => {
-       const env = {
-         KV_STORAGE: mockKV,
-         UPSTASH_REDIS_REST_URL: 'https://test.upstash.io',
-         UPSTASH_REDIS_REST_TOKEN: 'test-password',
-         REDIS_TLS_URL: 'https://redis.example.com',
-         REDIS_TLS_PASSWORD: 'redis-password',
-       };
-
-       __mockSend.mockResolvedValueOnce('redis-value');
-
-       const result = await executeWithFailover('_kv_get', env, {}, 'test-key');
-       
-       expect(result).toBe('redis-value');
-     });
-
-     it('应该在 Redis 失败时 fallback 到 CF KV', async () => {
-       const env = {
-         KV_STORAGE: mockKV,
-         REDIS_TLS_URL: 'https://redis.example.com',
-         REDIS_TLS_PASSWORD: 'redis-password',
-       };
-
-       __mockSend.mockRejectedValueOnce(new Error('Redis error'));
-       
-       // CF KV 成功
-       mockKV.get.mockResolvedValueOnce('cf-value');
-
-       const result = await executeWithFailover('_kv_get', env, {}, 'test-key');
-       
-       expect(result).toBe('cf-value');
-     });
-
-     it('应该在 Redis TLS 和 CF KV 都失败时 fallback 到 Upstash', async () => {
-       const env = {
-         KV_STORAGE: mockKV,
-         UPSTASH_REDIS_REST_URL: 'https://test.upstash.io',
-         UPSTASH_REDIS_REST_TOKEN: 'test-password',
-         REDIS_TLS_URL: 'https://redis.example.com',
-         REDIS_TLS_PASSWORD: 'redis-password',
-       };
-
-       __mockSend.mockRejectedValueOnce(new Error('Redis error'));
-       
-       // CF KV 失败
-       mockKV.get.mockRejectedValueOnce(new Error('KV error'));
-       
-       // Upstash 成功
-       global.fetch.mockResolvedValueOnce({
-         ok: true,
-         json: async () => ({ result: 'upstash-value' }),
-       });
-
-       const result = await executeWithFailover('_kv_get', env, {}, 'test-key');
-       
-       expect(result).toBe('upstash-value');
-     });
-   });
  
     describe('路径映射与负载均衡集成', () => {
      it('应该在转发前规范化契约路径', async () => {

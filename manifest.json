@@ -3,7 +3,7 @@
   "id": "lb-worker-js",
   "name": "QStash Load Balancer",
   "version": "0.21.0",
-  "description": "专为 drive-collector-js 设计的高可用负载均衡器，支持 QStash 签名验证、动态实例发现与多层级故障转移。",
+  "description": "专为 drive-collector-js 设计的高可用负载均衡器，支持 QStash 签名验证、动态实例发现与多层级故障转移。使用统一的 CacheService 管理多级缓存。",
   "type": "worker",
   "capabilities": [
     "load-balancing",
@@ -47,10 +47,10 @@
       }
     },
     "instanceDiscovery": {
-      "description": "从存储后端发现活跃的 drive-collector-js 实例",
+      "description": "从存储后端发现活跃的 drive-collector-js 实例 (使用统一的 CacheService)",
       "storage": {
-        "primary": "Cloudflare KV",
-        "secondary": "Upstash Redis",
+        "primary": "CacheService Providers",
+        "secondary": "CacheService Providers",
         "prefix": "instance:",
         "heartbeatThreshold": 900000
       },
@@ -250,7 +250,7 @@
       "CACHE_PROVIDERS": {
         "type": "string",
         "required": false,
-        "description": "缓存提供者（cloudflare/upstash/nf-redis），自动检测"
+        "description": "JSON 格式的缓存提供者配置，支持 cloudflare, upstash, redis。例如: {\"cloudflare\": {\"namespace\": \"KV_STORAGE\"}, \"upstash\": {\"url\": \"UPSTASH_REDIS_REST_URL\", \"token\": \"UPSTASH_REDIS_REST_TOKEN\"}}"
       },
       "CF_CACHE_ACCOUNT_ID": {
         "type": "string",
@@ -266,48 +266,6 @@
         "type": "string",
         "required": false,
         "description": "Cloudflare Cache API 命名空间 ID"
-      },
-      "NF_REDIS_URL": {
-        "type": "string",
-        "required": false,
-        "priority": "highest",
-        "description": "Northflank Redis URL (redis://host:port 或 rediss://host:port, 支持 TCP+TLS)"
-      },
-      "NF_REDIS_PASSWORD": {
-        "type": "string",
-        "required": false,
-        "priority": "highest",
-        "description": "Northflank Redis Password（优先级最高，与 URL 配合使用）"
-      },
-      "REDIS_TLS_REJECT_UNAUTHORIZED": {
-        "type": "boolean",
-        "required": false,
-        "description": "是否拒绝未授权的 TLS 证书（通用 TLS 配置）"
-      },
-      "REDIS_TLS_CA": {
-        "type": "string",
-        "required": false,
-        "description": "自定义 Redis TLS CA 证书（通用 TLS 配置）"
-      },
-      "REDIS_TLS_CA_CERT": {
-        "type": "string",
-        "required": false,
-        "description": "自定义 Redis TLS CA 证书（通用 TLS 配置，别名）"
-      },
-      "REDIS_TLS_CLIENT_CERT": {
-        "type": "string",
-        "required": false,
-        "description": "Redis TLS 客户端证书（通用 TLS 配置）"
-      },
-      "REDIS_TLS_CLIENT_KEY": {
-        "type": "string",
-        "required": false,
-        "description": "Redis TLS 客户端密钥（通用 TLS 配置）"
-      },
-      "REDIS_TLS_SNI_SERVERNAME": {
-        "type": "string",
-        "required": false,
-        "description": "Redis TLS SNI 服务器名称（通用 TLS 配置）"
       }
     }
   },

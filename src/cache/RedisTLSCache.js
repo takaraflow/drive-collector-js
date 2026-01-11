@@ -16,7 +16,7 @@ export class RedisTLSCache {
   providerName = 'RedisTLS';
 
   constructor(options = {}) {
-    const { url, password, rejectUnauthorized, servername, db = 0 } = options;
+    const { url, password, rejectUnauthorized, servername, ca, cert, key, db = 0 } = options;
     
     if (!url) {
       throw new Error('RedisTLSCache requires url option');
@@ -26,11 +26,14 @@ export class RedisTLSCache {
     this.password = password;
     this.tlsOptions = {};
 
-    if (url.startsWith('rediss://') || rejectUnauthorized !== undefined || servername) {
+    if (url.startsWith('rediss://') || rejectUnauthorized !== undefined || servername || ca || cert || key) {
       this.tlsOptions.rejectUnauthorized = rejectUnauthorized !== false;
-      if (servername) {
-        this.tlsOptions.servername = servername;
-      } else {
+      if (servername) this.tlsOptions.servername = servername;
+      if (ca) this.tlsOptions.ca = ca;
+      if (cert) this.tlsOptions.cert = cert;
+      if (key) this.tlsOptions.key = key;
+
+      if (!this.tlsOptions.servername) {
         try {
           this.tlsOptions.servername = new URL(url).hostname;
         } catch (e) {
