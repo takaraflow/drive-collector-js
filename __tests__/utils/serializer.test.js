@@ -196,7 +196,12 @@ describe('Serializer Utils', () => {
             const obj = { big: BigInt(123) };
             const result = serializeToString(obj);
             
+            // 验证结果包含 "123n" 格式
             expect(result).toContain('"123n"');
+            
+            // 额外验证：解析后可以正确识别
+            const parsed = JSON.parse(result);
+            expect(parsed.big).toBe('123n');
         });
 
         test('should truncate long strings', () => {

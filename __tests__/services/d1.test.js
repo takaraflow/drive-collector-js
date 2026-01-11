@@ -187,7 +187,7 @@ describe("D1 Service", () => {
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
         // Mock logger.error since we are importing a real logger instance in the actual code
         // but here we are testing the behavior through console or logger mocks
-        // Since logger.js likely uses console in tests or we can spy on the logger itself if it was exported/mocked.
+        // Since logger/index.js likely uses console in tests or we can spy on the logger itself if it was exported/mocked.
         // Assuming logger prints to console or we can rely on result throwing.
         
         // Let's actually check if it throws correctly, logging verification is harder without mocking the logger module specifically.

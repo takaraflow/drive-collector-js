@@ -48,7 +48,7 @@ export async function handleQStashWebhook(req, res) {
     // 其他请求需要导入服务
     const { queueService } = await import("./src/services/QueueService.js");
     const { TaskManager } = await import("./src/processor/TaskManager.js");
-    const { logger } = await import("./src/services/logger.js");
+    const { logger } = await import("./src/services/logger/index.js");
     const log = logger.withModule ? logger.withModule('App') : logger;
 
     try {
@@ -112,7 +112,7 @@ export async function handleQStashWebhook(req, res) {
         res.end(result.success ? 'OK' : (result.message || 'Error'));
 
     } catch (error) {
-        const { logger } = await import("./src/services/logger.js");
+        const { logger } = await import("./src/services/logger/index.js");
         const log = logger.withModule ? logger.withModule('App') : logger;
         log.error("❌ Webhook 处理发生异常:", error);
         res.writeHead(500);
@@ -120,7 +120,7 @@ export async function handleQStashWebhook(req, res) {
     }
 }
 
-async function main() {
+export async function main() {
     await initConfig();
 
     if (process.argv.includes('--show-config')) {
@@ -153,7 +153,7 @@ async function main() {
     const { queueService } = await import("./src/services/QueueService.js");
     const { cache } = await import("./src/services/CacheService.js");
     const { d1 } = await import("./src/services/d1.js");
-    const { logger } = await import("./src/services/logger.js");
+    const { logger } = await import("./src/services/logger/index.js");
     const log = logger.withModule ? logger.withModule('App') : logger;
 
     console.log("🛠️ 正在初始化核心服务...");

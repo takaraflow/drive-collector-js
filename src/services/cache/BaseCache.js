@@ -3,7 +3,7 @@
  * Defines the standard interface that all cache implementations must follow
  */
 
-import { logger } from '../logger.js';
+import { logger } from '../logger/index.js';
 
 /**
  * @typedef {'json' | 'text' | 'buffer'} CacheValueType
@@ -18,7 +18,7 @@ class BaseCache {
         this.isInitialized = false;
         this.connected = false;
         this.providerName = this.constructor.name;
-        this.log = logger.withModule(this.providerName);
+        this.log = logger.withModule ? logger.withModule(this.providerName) : console;
     }
 
     /**

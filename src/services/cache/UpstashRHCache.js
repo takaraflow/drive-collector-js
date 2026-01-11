@@ -4,7 +4,7 @@
  */
 
 import { RedisHTTPCache } from './RedisHTTPCache.js';
-import { logger } from '../logger.js';
+import { logger } from '../logger/index.js';
 
 class UpstashRHCache extends RedisHTTPCache {
     static detectConfig(env = process.env) {

@@ -45,7 +45,7 @@ const mockClient = {
 
 // --- 2. Register Mocks (Before Imports) ---
 
-vi.mock('../../src/services/logger.js', () => ({
+vi.mock('../../src/services/logger/index.js', () => ({
     default: mockLogger,
     logger: mockLogger,
     enableTelegramConsoleProxy: vi.fn()

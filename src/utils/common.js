@@ -1,7 +1,7 @@
 import { Button } from "telegram/tl/custom/button.js";
 import { runBotTask, runBotTaskWithRetry } from "./limiter.js";
 import { STRINGS } from "../locales/zh-CN.js";
-import { logger } from "../services/logger.js";
+import { logger } from "../services/logger/index.js";
 
 const log = logger.withModule ? logger.withModule('CommonUtils') : logger;
 

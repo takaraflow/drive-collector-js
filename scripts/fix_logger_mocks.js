@@ -46,11 +46,11 @@ function fixLoggerMock(content) {
             }
           }
           
-          return `vi.mock('../../src/services/logger.js', () => {${updatedContent}})`;
+          return `vi.mock('../../src/services/logger/index.js', () => {${updatedContent}})`;
         }
         
         // 如果没有 logger 对象，创建完整的 mock
-        return `vi.mock('../../src/services/logger.js', () => ({
+        return `vi.mock('../../src/services/logger/index.js', () => ({
           logger: {
             info: vi.fn(),
             warn: vi.fn(),

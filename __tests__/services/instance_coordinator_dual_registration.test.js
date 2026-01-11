@@ -40,14 +40,13 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
 
         /**
          * 【核心修复】：补全命名导出 setInstanceIdProvider
-         * InstanceCoordinator.js 内部 import { setInstanceIdProvider } from "./logger.js"
+         * InstanceCoordinator.js 内部 import { setInstanceIdProvider } from "./logger/index.js"
          * 如果不 Mock 这个命名导出，动态 import 时会报 SyntaxError
          */
-        vi.mock("../../src/services/logger.js", () => ({
+        vi.mock("../../src/services/logger/index.js", () => ({
             default: mockLogger,
             logger: mockLogger,
             setInstanceIdProvider: vi.fn(), // 必须包含这个
-            resetLogger: vi.fn(),
             enableTelegramConsoleProxy: vi.fn(),
             disableTelegramConsoleProxy: vi.fn()
         }));

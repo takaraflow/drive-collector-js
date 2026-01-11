@@ -7,7 +7,7 @@ vi.mock("../../src/services/d1.js", () => ({
     },
 }));
 
-vi.mock("../../src/services/logger.js", () => ({
+vi.mock("../../src/services/logger/index.js", () => ({
     default: {
         info: vi.fn(),
         error: vi.fn(),
@@ -30,7 +30,7 @@ describe("InstanceRepository", () => {
         vi.resetModules();
         
         const d1Module = await import("../../src/services/d1.js");
-        const loggerModule = await import("../../src/services/logger.js");
+        const loggerModule = await import("../../src/services/logger/index.js");
         const repoModule = await import("../../src/repositories/InstanceRepository.js");
 
         d1 = d1Module.d1;

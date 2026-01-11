@@ -18,7 +18,7 @@ import { NetworkDiagnostic } from "../utils/NetworkDiagnostic.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { cache } from "../services/CacheService.js";
 import { queueService } from "../services/QueueService.js";
-import { logger } from "../services/logger.js";
+import { logger } from "../services/logger/index.js";
 import { localCache } from "../utils/LocalCache.js";
 import fs from "fs";
 import path from "path";

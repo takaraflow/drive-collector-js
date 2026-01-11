@@ -1,6 +1,6 @@
 import { cache } from "../services/CacheService.js";
 import { localCache } from "../utils/LocalCache.js";
-import { logger } from "../services/logger.js";
+import { logger } from "../services/logger/index.js";
 
 const log = logger.withModule ? logger.withModule('SettingsRepository') : logger;
 

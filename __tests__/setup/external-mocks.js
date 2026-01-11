@@ -69,11 +69,6 @@ globalMocks.localCache = {
 // Mock logger - Removed to allow tests to import the real logger module
 // Tests that need to mock logger should do so explicitly in their own test files
 
-// Mock Axiom (logger.js) - 使用全局 mock
-vi.mock('@axiomhq/js', () => ({
-    Axiom: globalMocks.axiomConstructor
-}));
-
 // Mock QStash - 使用全局 mock
 vi.mock('@upstash/qstash', () => ({
   Client: vi.fn().mockImplementation(() => ({

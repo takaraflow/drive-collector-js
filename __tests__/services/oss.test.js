@@ -78,7 +78,7 @@ const mockLogger = {
   withContext: vi.fn().mockReturnThis()
 };
 
-vi.mock('../../src/services/logger.js', () => ({
+vi.mock('../../src/services/logger/index.js', () => ({
   default: mockLogger,
   logger: mockLogger
 }));

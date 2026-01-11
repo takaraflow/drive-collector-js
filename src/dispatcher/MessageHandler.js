@@ -1,7 +1,7 @@
 import { Api } from "telegram";
 import { Dispatcher } from "./Dispatcher.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
-import { logger } from "../services/logger.js";
+import { logger } from "../services/logger/index.js";
 import { config } from "../config/index.js";
 
 const log = logger.withModule('MessageHandler');

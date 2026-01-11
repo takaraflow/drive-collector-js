@@ -25,7 +25,7 @@ export async function registerShutdownHooks() {
     const { cache } = await import("../services/CacheService.js");
     const { stopWatchdog, client } = await import("../services/telegram.js");
     const { TaskRepository } = await import("../repositories/TaskRepository.js");
-    const { flushLogBuffer } = await import("../services/logger.js");
+    const { flushLogBuffer } = await import("../services/logger/index.js");
 
     // 0. 在关闭开始前先刷新一次日志，确保关闭前的错误日志被保存 (priority: 5)
     gracefulShutdown.register(async () => {

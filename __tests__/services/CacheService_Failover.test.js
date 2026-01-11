@@ -5,7 +5,7 @@ vi.mock("../../src/config/index.js", () => ({
     config: { kv: {} }
 }));
 
-vi.mock("../../src/services/logger.js", () => ({
+vi.mock("../../src/services/logger/index.js", () => ({
     logger: {
         info: vi.fn(),
         warn: vi.fn(),

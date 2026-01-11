@@ -16,7 +16,7 @@ console.log('[INIT] NF_REDIS_URL:', process.env.NF_REDIS_URL ? 'exists' : 'missi
 
 import { config } from "../src/config/index.js";
 import { cache } from "../src/services/CacheService.js";
-import logger from "../src/services/logger.js";
+import logger from "../src/services/logger/index.js";
 
 async function runRedisDiagnostics() {
     console.log('[SCRIPT] runRedisDiagnostics 函数开始执行');

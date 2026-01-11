@@ -1,6 +1,6 @@
 import { config } from "../config/index.js";
 import { d1 } from "../services/d1.js";
-import { logger } from "../services/logger.js";
+import { logger } from "../services/logger/index.js";
 
 const log = logger.withModule ? logger.withModule('AuthGuard') : logger;
 

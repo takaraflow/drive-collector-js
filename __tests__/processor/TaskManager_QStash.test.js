@@ -90,7 +90,7 @@ vi.mock("../../src/utils/common.js", () => ({
 }));
 
 // Mock logger
-vi.mock("../../src/services/logger.js", () => ({
+vi.mock("../../src/services/logger/index.js", () => ({
     logger: {
         info: vi.fn(),
         error: vi.fn(),

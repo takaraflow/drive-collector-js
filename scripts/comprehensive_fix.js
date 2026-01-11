@@ -85,7 +85,7 @@ function fixLoggerMockMethods(content) {
         );
       }
       
-      return `vi.${mockType}('../../src/services/logger.js', () => (${updatedInner}))`;
+      return `vi.${mockType}('../../src/services/logger/index.js', () => (${updatedInner}))`;
     }
     return match;
   });
@@ -96,7 +96,7 @@ function fixLoggerMockMethods(content) {
   content = content.replace(loggerObjectPattern, (match, mockType, inner) => {
     if (inner.includes('logger:') && (!inner.includes('withModule') || !inner.includes('withContext'))) {
       // 添加缺失的方法到 logger 对象
-      return `vi.${mockType}('../../src/services/logger.js', () => {
+      return `vi.${mockType}('../../src/services/logger/index.js', () => {
 ${inner.replace(
   /logger:\s*\{([^}]+)\}/,
   (loggerMatch, loggerContent) => {

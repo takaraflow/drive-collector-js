@@ -31,7 +31,7 @@ await vi.doMock('../../src/services/InstanceCoordinator.js', () => ({
 }));
 
 // Mock logger to verify output
-await vi.doMock('../../src/services/logger.js', () => ({
+await vi.doMock('../../src/services/logger/index.js', () => ({
     logger: {
         info: vi.fn(),
         debug: vi.fn(),
@@ -43,7 +43,7 @@ await vi.doMock('../../src/services/logger.js', () => ({
 }));
 
 const { MessageHandler } = await import('../../src/dispatcher/MessageHandler.js');
-const { logger } = await import('../../src/services/logger.js');
+const { logger } = await import('../../src/services/logger/index.js');
 
 describe('Reproduce Unknown Event Logging', () => {
     let mockClient;

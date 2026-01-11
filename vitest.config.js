@@ -5,8 +5,7 @@ export default defineConfig({
     environment: 'node',
     include: ['**/__tests__/**/*.test.js', '**/?(*.)+(spec|test).js'],
     exclude: [
-      '**/node_modules/**',
-      '**/integration/startup-resilience.test.js'
+      '**/node_modules/**'
     ],
     globals: true,
     testTimeout: 5000,

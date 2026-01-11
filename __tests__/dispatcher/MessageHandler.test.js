@@ -35,7 +35,7 @@ await vi.doMock('../../src/services/InstanceCoordinator.js', () => ({
 }));
 
 // Mock logger
-await vi.doMock('../../src/services/logger.js', () => ({
+await vi.doMock('../../src/services/logger/index.js', () => ({
     logger: {
         info: vi.fn(),
         warn: vi.fn(),
@@ -50,7 +50,7 @@ await vi.doMock('../../src/services/logger.js', () => ({
 const { MessageHandler } = await import('../../src/dispatcher/MessageHandler.js');
 const { Dispatcher } = await import('../../src/dispatcher/Dispatcher.js');
 const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-const { logger } = await import('../../src/services/logger.js');
+const { logger } = await import('../../src/services/logger/index.js');
 
 describe('MessageHandler Integration Tests', () => {
     let mockClient;

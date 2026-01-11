@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { d1 } from '../src/services/d1.js';
-import { logger } from '../src/services/logger.js';
+import { logger } from '../src/services/logger/index.js';
 
 async function main() {
   console.log('🔍 D1 诊断脚本');

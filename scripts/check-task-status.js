@@ -1,6 +1,6 @@
 import { d1 } from "../src/services/d1.js";
 import { cache } from "../src/services/CacheService.js";
-import { logger } from "../src/services/logger.js";
+import { logger } from "../src/services/logger/index.js";
 
 const log = logger.withModule ? logger.withModule('TaskDebug') : logger;
 

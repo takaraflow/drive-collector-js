@@ -9,7 +9,7 @@
 import { cache } from "../src/services/CacheService.js";
 import { d1 } from "../src/services/d1.js";
 import { InstanceCoordinator } from "../src/services/InstanceCoordinator.js";
-import { logger } from "../src/services/logger.js";
+import { logger } from "../src/services/logger/index.js";
 
 async function migrateDriveData() {
     const lockKey = 'drive-migration-lock';

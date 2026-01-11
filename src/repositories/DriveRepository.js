@@ -1,7 +1,7 @@
 import { cache } from "../services/CacheService.js";
 import { localCache } from "../utils/LocalCache.js";
 import { d1 } from "../services/d1.js";
-import { logger } from "../services/logger.js";
+import { logger } from "../services/logger/index.js";
 
 const log = logger.withModule ? logger.withModule('DriveRepository') : logger;
 

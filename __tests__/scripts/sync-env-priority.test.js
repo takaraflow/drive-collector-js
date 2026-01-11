@@ -1,11 +1,27 @@
 import fs from 'fs';
 
 const originalEnv = { ...process.env };
-let syncEnv;
-let listSecretsMock;
 
 describe("sync-env - Environment Variable Priority", () => {
-  beforeAll(async () => {
+  let syncEnv;
+  let listSecretsMock;
+
+  beforeEach(async () => {
+    // 重置环境
+    process.env = { ...originalEnv };
+    process.env.INFISICAL_TOKEN = "";
+    process.env.INFISICAL_PROJECT_ID = "";
+    process.env.SKIP_INFISICAL_RUNTIME = "true";
+    
+    // 重置 mocks
+    vi.clearAllMocks();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+
+    // 每个测试独立 mock 依赖
     listSecretsMock = vi.fn(async () => ({ secrets: [] }));
     await vi.doMock('@infisical/sdk', () => {
       return {
@@ -30,21 +46,9 @@ describe("sync-env - Environment Variable Priority", () => {
       }
     }));
 
+    // 动态导入以确保每次测试都有干净的模块状态
     const module = await import("../../scripts/sync-env.js");
     syncEnv = module.syncEnv;
-  });
-
-  beforeEach(() => {
-    process.env = { ...originalEnv };
-    if (listSecretsMock) listSecretsMock.mockClear();
-    process.env.INFISICAL_TOKEN = "";
-    process.env.INFISICAL_PROJECT_ID = "";
-    process.env.SKIP_INFISICAL_RUNTIME = "true";
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
-    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
   });
 
   afterEach(() => {
@@ -98,6 +102,8 @@ describe("sync-env - Environment Variable Priority", () => {
 
       await syncEnv();
 
+      // sync-env 脚本不执行标准化，所以保持原始值
+      // 这与 src/config/index.js 的行为不同
       expect(process.env.NODE_ENV).toBe("production");
     });
 
@@ -109,6 +115,7 @@ describe("sync-env - Environment Variable Priority", () => {
 
       await syncEnv();
 
+      // sync-env 脚本不执行标准化，所以保持原始值
       expect(process.env.NODE_ENV).toBe("development");
     });
   });
@@ -122,6 +129,8 @@ describe("sync-env - Environment Variable Priority", () => {
 
       await syncEnv();
 
+      // sync-env.js does not modify process.env.NODE_ENV directly
+      // It only uses normalized values internally for Infisical mapping
       expect(process.env.NODE_ENV).toBe("production");
     });
 

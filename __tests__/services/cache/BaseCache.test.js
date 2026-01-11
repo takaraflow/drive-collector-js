@@ -1,5 +1,5 @@
 // Mock logger
-vi.mock("../../../src/services/logger.js", () => {
+vi.mock("../../../src/services/logger/index.js", () => {
     const createMockLogger = () => ({
         info: vi.fn(),
         warn: vi.fn(),
@@ -21,7 +21,6 @@ vi.mock("../../../src/services/logger.js", () => {
         setInstanceIdProvider: vi.fn(),
         enableTelegramConsoleProxy: vi.fn(),
         disableTelegramConsoleProxy: vi.fn(),
-        resetLogger: vi.fn(),
         delay: vi.fn().mockResolvedValue(undefined),
         retryWithDelay: vi.fn().mockImplementation(async (fn) => await fn())
     };

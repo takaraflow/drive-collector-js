@@ -1,5 +1,5 @@
 // Mock logger
-vi.mock('../../src/services/logger.js', () => {
+vi.mock('../../src/services/logger/index.js', () => {
     const mockLogger = {
         info: vi.fn(),
         warn: vi.fn(),
@@ -86,6 +86,7 @@ describe('CircuitBreaker', () => {
                 await expect(circuitBreaker.execute(mockFn)).rejects.toThrow('test error');
             }
             
+            // 状态更新是同步的，直接验证
             expect(circuitBreaker.state).toBe('OPEN');
             expect(circuitBreaker.failureCount).toBe(5);
             expect(circuitBreaker.lastFailureTime).toBeGreaterThanOrEqual(0);

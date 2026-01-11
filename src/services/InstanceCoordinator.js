@@ -1,7 +1,7 @@
 import { cache } from "./CacheService.js";
 import { queueService } from "./QueueService.js";
 import { InstanceRepository } from "../repositories/InstanceRepository.js";
-import logger, { setInstanceIdProvider } from "./logger.js";
+import logger, { setInstanceIdProvider } from "./logger/index.js";
 
 const log = logger.withModule('InstanceCoordinator');
 

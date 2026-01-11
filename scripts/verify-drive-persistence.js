@@ -7,7 +7,7 @@
 
 import { cache } from "../src/services/CacheService.js";
 import { DriveRepository } from "../src/repositories/DriveRepository.js";
-import { logger } from "../src/services/logger.js";
+import { logger } from "../src/services/logger/index.js";
 
 async function verifyDrivePersistence() {
     try {

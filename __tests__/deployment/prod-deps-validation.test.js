@@ -24,7 +24,7 @@ const DYNAMIC_IMPORT_MODULES = [
         description: 'Redis client for caching'
     },
     {
-        file: 'src/services/logger.js',
+        file: 'src/services/logger/index.js',
         packages: ['@axiomhq/js'],
         description: 'Axiom logging service'
     }

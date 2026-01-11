@@ -1,5 +1,5 @@
 import { getConfig } from "../config/index.js";
-import { logger } from "./logger.js";
+import { logger } from "./logger/index.js";
 import { QstashQueue } from "./queue/QstashQueue.js";
 
 const log = logger.withModule?.('QueueService') || logger;

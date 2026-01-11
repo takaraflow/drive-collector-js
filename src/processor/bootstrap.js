@@ -1,6 +1,6 @@
 import { TaskManager } from "./TaskManager.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
-import { logger } from "../services/logger.js";
+import { logger } from "../services/logger/index.js";
 
 const log = logger.withModule ? logger.withModule('ProcessorBootstrap') : logger;
 

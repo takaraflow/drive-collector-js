@@ -33,7 +33,7 @@ vi.mock("../../src/services/d1.js", () => ({
     d1: mockD1,
 }));
 
-vi.mock("../../src/services/logger.js", () => ({
+vi.mock("../../src/services/logger/index.js", () => ({
     default: {
         info: vi.fn(),
         error: vi.fn(),
@@ -52,7 +52,7 @@ const { DriveRepository } = await import("../../src/repositories/DriveRepository
 const { cache } = await import("../../src/services/CacheService.js");
 const { localCache } = await import("../../src/utils/LocalCache.js");
 const { d1 } = await import("../../src/services/d1.js");
-const { logger } = await import("../../src/services/logger.js");
+const { logger } = await import("../../src/services/logger/index.js");
 
 describe("DriveRepository", () => {
     beforeEach(() => {

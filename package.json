@@ -20,7 +20,7 @@
     "test:perf:report": "node scripts/test-performance.js --report",
     "test:fast": "vitest run --maxWorkers=50%",
     "test:unit": "vitest run --exclude **/integration/** --maxWorkers=75%",
-    "test:integration": "vitest run --include **/integration/** --maxWorkers=50%",
+    "test:integration": "vitest run __tests__/integration/ --maxWorkers=50%",
     "test:optimized": "vitest run --maxWorkers=100%",
     "test:full-optimized": "cross-env NODE_OPTIONS=--max-old-space-size=8192 vitest run --maxWorkers=100%",
     "release": "vitest run && standard-version",

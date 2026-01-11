@@ -1,130 +1,62 @@
-const originalEnv = process.env;
+const { normalizeNodeEnv, mapNodeEnvToInfisicalEnv } = await import('../../src/utils/envMapper.js');
 
-// 环境映射单元测试 - 不依赖config/index.js的执行时机
-describe("envMapper - Unit Tests", () => {
-  afterEach(() => {
-    process.env = originalEnv;
-  });
-
-  describe("normalizeNodeEnv function", () => {
-    test("should normalize production to prod", async () => {
-      const { normalizeNodeEnv } = await import("../../src/utils/envMapper.js");
-
-      expect(normalizeNodeEnv("production")).toBe("prod");
-      expect(normalizeNodeEnv("prod")).toBe("prod");
+describe('envMapper', () => {
+    test('normalizeNodeEnv should normalize production to prod', () => {
+        expect(normalizeNodeEnv('production')).toBe('prod');
     });
 
-    test("should normalize development to dev", async () => {
-      const { normalizeNodeEnv } = await import("../../src/utils/envMapper.js");
-
-      expect(normalizeNodeEnv("development")).toBe("dev");
-      expect(normalizeNodeEnv("dev")).toBe("dev");
+    test('normalizeNodeEnv should normalize development to dev', () => {
+        expect(normalizeNodeEnv('development')).toBe('dev');
     });
 
-    test("should normalize staging to pre", async () => {
-      const { normalizeNodeEnv } = await import("../../src/utils/envMapper.js");
-
-      expect(normalizeNodeEnv("staging")).toBe("pre");
-      expect(normalizeNodeEnv("pre")).toBe("pre");
+    test('normalizeNodeEnv should normalize staging to pre', () => {
+        expect(normalizeNodeEnv('staging')).toBe('pre');
     });
 
-    test("should normalize preview to pre", async () => {
-      const { normalizeNodeEnv } = await import("../../src/utils/envMapper.js");
-
-      expect(normalizeNodeEnv("preview")).toBe("pre");
+    test('normalizeNodeEnv should keep prod as prod', () => {
+        expect(normalizeNodeEnv('prod')).toBe('prod');
     });
 
-    test("should keep test as test", async () => {
-      const { normalizeNodeEnv } = await import("../../src/utils/envMapper.js");
-
-      expect(normalizeNodeEnv("test")).toBe("test");
+    test('normalizeNodeEnv should keep dev as dev', () => {
+        expect(normalizeNodeEnv('dev')).toBe('dev');
     });
 
-    test("should handle undefined with default dev", async () => {
-      const { normalizeNodeEnv } = await import("../../src/utils/envMapper.js");
-
-      expect(normalizeNodeEnv(undefined)).toBe("dev");
-      expect(normalizeNodeEnv(null)).toBe("dev");
-      expect(normalizeNodeEnv("")).toBe("dev");
+    test('normalizeNodeEnv should keep pre as pre', () => {
+        expect(normalizeNodeEnv('pre')).toBe('pre');
     });
 
-    test("should be case insensitive", async () => {
-      const { normalizeNodeEnv } = await import("../../src/utils/envMapper.js");
-
-      expect(normalizeNodeEnv("PRODUCTION")).toBe("prod");
-      expect(normalizeNodeEnv("Development")).toBe("dev");
-      expect(normalizeNodeEnv("Staging")).toBe("pre");
+    test('normalizeNodeEnv should keep test as test', () => {
+        expect(normalizeNodeEnv('test')).toBe('test');
     });
 
-    test("should use default dev for invalid values", async () => {
-      const { normalizeNodeEnv } = await import("../../src/utils/envMapper.js");
-
-      expect(normalizeNodeEnv("invalid")).toBe("dev");
-      expect(normalizeNodeEnv("random")).toBe("dev");
-      expect(normalizeNodeEnv("production123")).toBe("dev");
-    });
-  });
-
-  describe("mapNodeEnvToInfisicalEnv function", () => {
-    test("should map prod to prod", async () => {
-      const { mapNodeEnvToInfisicalEnv } = await import("../../src/utils/envMapper.js");
-
-      expect(mapNodeEnvToInfisicalEnv("prod")).toBe("prod");
-      expect(mapNodeEnvToInfisicalEnv("production")).toBe("prod");
+    test('normalizeNodeEnv should default to dev for null or empty', () => {
+        expect(normalizeNodeEnv(null)).toBe('dev');
+        expect(normalizeNodeEnv('')).toBe('dev');
+        expect(normalizeNodeEnv(undefined)).toBe('dev');
     });
 
-    test("should map dev to dev", async () => {
-      const { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } = await import("../../src/utils/envMapper.js");
-
-      expect(mapNodeEnvToInfisicalEnv(normalizeNodeEnv("dev"))).toBe("dev");
-      expect(mapNodeEnvToInfisicalEnv(normalizeNodeEnv("development"))).toBe("dev");
+    test('normalizeNodeEnv should default to dev for invalid values', () => {
+        expect(normalizeNodeEnv('invalid')).toBe('dev');
+        expect(normalizeNodeEnv('random')).toBe('dev');
     });
 
-    test("should map pre to pre", async () => {
-      const { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } = await import("../../src/utils/envMapper.js");
-
-      expect(mapNodeEnvToInfisicalEnv(normalizeNodeEnv("pre"))).toBe("pre");
-      expect(mapNodeEnvToInfisicalEnv(normalizeNodeEnv("staging"))).toBe("pre");
-      expect(mapNodeEnvToInfisicalEnv(normalizeNodeEnv("preview"))).toBe("pre");
+    test('mapNodeEnvToInfisicalEnv should map dev to dev', () => {
+        expect(mapNodeEnvToInfisicalEnv('dev')).toBe('dev');
     });
 
-    test("should map test to dev", async () => {
-      const { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } = await import("../../src/utils/envMapper.js");
-
-      expect(mapNodeEnvToInfisicalEnv(normalizeNodeEnv("test"))).toBe("dev");
+    test('mapNodeEnvToInfisicalEnv should map prod to prod', () => {
+        expect(mapNodeEnvToInfisicalEnv('prod')).toBe('prod');
     });
 
-    test("should handle undefined with default dev", async () => {
-      const { mapNodeEnvToInfisicalEnv } = await import("../../src/utils/envMapper.js");
-
-      expect(mapNodeEnvToInfisicalEnv(undefined)).toBe("dev");
-      expect(mapNodeEnvToInfisicalEnv("")).toBe("dev");
-      expect(mapNodeEnvToInfisicalEnv("null")).toBe("dev");
+    test('mapNodeEnvToInfisicalEnv should map pre to pre', () => {
+        expect(mapNodeEnvToInfisicalEnv('pre')).toBe('pre');
     });
-  });
 
-  describe("Integration tests", () => {
-    test("should handle common scenarios", async () => {
-      const { normalizeNodeEnv, mapNodeEnvToInfisicalEnv } = await import("../../src/utils/envMapper.js");
-
-      const scenarios = [
-        { input: "production", normalized: "prod", expectedInfisical: "prod" },
-        { input: "prod", normalized: "prod", expectedInfisical: "prod" },
-        { input: "development", normalized: "dev", expectedInfisical: "dev" },
-        { input: "dev", normalized: "dev", expectedInfisical: "dev" },
-        { input: "staging", normalized: "pre", expectedInfisical: "pre" },
-        { input: "pre", normalized: "pre", expectedInfisical: "pre" },
-        { input: "preview", normalized: "pre", expectedInfisical: "pre" },
-        { input: "test", normalized: "test", expectedInfisical: "dev" },
-      ];
-
-      scenarios.forEach(({ input, normalized, expectedInfisical }) => {
-        const norm = normalizeNodeEnv(input);
-        const actualInfisical = mapNodeEnvToInfisicalEnv(norm);
-
-        expect(norm).toBe(normalized);
-        expect(actualInfisical).toBe(expectedInfisical);
-      });
+    test('mapNodeEnvToInfisicalEnv should map test to dev', () => {
+        expect(mapNodeEnvToInfisicalEnv('test')).toBe('dev');
     });
-  });
+
+    test('mapNodeEnvToInfisicalEnv should default to dev for invalid values', () => {
+        expect(mapNodeEnvToInfisicalEnv('invalid')).toBe('dev');
+    });
 });

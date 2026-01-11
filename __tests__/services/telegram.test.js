@@ -25,7 +25,7 @@ let mockLoggerWarn = vi.fn();
 let mockLoggerInfo = vi.fn();
 let mockLoggerDebug = vi.fn();
 
-vi.mock('../../src/services/logger.js', () => ({
+vi.mock('../../src/services/logger/index.js', () => ({
     logger: {
         error: mockLoggerError,
         warn: mockLoggerWarn,
@@ -37,7 +37,6 @@ vi.mock('../../src/services/logger.js', () => ({
     },
     enableTelegramConsoleProxy: vi.fn(),
     disableTelegramConsoleProxy: vi.fn(),
-    resetLogger: vi.fn(),
     setInstanceIdProvider: vi.fn(),
     default: {
         error: mockLoggerError,

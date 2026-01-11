@@ -1,6 +1,6 @@
 // Mock env.js instead of accessing process.env
 let mockEnv = {
-  NODE_ENV: 'development',
+  NODE_ENV: 'test',
   API_ID: '123456789',
   API_HASH: 'test_api_hash',
   BOT_TOKEN: 'test_bot_token',
@@ -14,73 +14,127 @@ const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 describe("Application Startup Resilience and Degradation", () => {
-    let mockSettingsRepository;
     let mockInstanceCoordinator;
-    let mockClient;
+    let mockQueueService;
+    let mockCache;
+    let mockD1;
+    let mockLogger;
+    let mockGracefulShutdown;
 
     beforeEach(async () => {
         vi.useFakeTimers();
         vi.clearAllMocks();
         
-        // Mock env access instead of modifying process.env
-        await vi.doMock('../../src/config/env.js', () => ({
-            getEnv: () => mockEnv,
-            NODE_ENV: mockEnv.NODE_ENV,
-            API_ID: mockEnv.API_ID,
-            API_HASH: mockEnv.API_HASH,
-            BOT_TOKEN: mockEnv.BOT_TOKEN,
-            INFISICAL_ENV: mockEnv.INFISICAL_ENV,
-            INFISICAL_TOKEN: mockEnv.INFISICAL_TOKEN,
-            INFISICAL_PROJECT_ID: mockEnv.INFISICAL_PROJECT_ID
-        }));
-
         // Mock console to prevent log pollution
         vi.spyOn(console, 'log').mockImplementation(() => {});
         vi.spyOn(console, 'warn').mockImplementation(() => {});
         vi.spyOn(console, 'error').mockImplementation(() => {});
 
-        // Mock SettingsRepository
-        mockSettingsRepository = {
-            get: vi.fn(),
-            set: vi.fn()
-        };
-
         // Mock InstanceCoordinator
         mockInstanceCoordinator = {
-            getInstanceInfo: vi.fn(),
-            claim: vi.fn().mockResolvedValue(true),
-            release: vi.fn()
+            start: vi.fn().mockResolvedValue(undefined),
+            stop: vi.fn().mockResolvedValue(undefined)
         };
 
-        // Mock Telegram client
-        mockClient = {
-            connect: vi.fn().mockResolvedValue(true),
-            start: vi.fn().mockResolvedValue(true),
-            stop: vi.fn().mockResolvedValue(true)
+        // Mock QueueService
+        mockQueueService = {
+            initialize: vi.fn().mockResolvedValue(undefined),
+            verifyWebhookSignature: vi.fn().mockResolvedValue(true)
         };
 
-        await vi.doMock('../../src/repositories/SettingsRepository.js', () => ({
-            SettingsRepository: mockSettingsRepository
+        // Mock CacheService
+        mockCache = {
+            initialize: vi.fn().mockResolvedValue(undefined),
+            getCurrentProvider: vi.fn().mockReturnValue('test')
+        };
+
+        // Mock D1
+        mockD1 = {
+            initialize: vi.fn().mockResolvedValue(undefined)
+        };
+
+        // Mock Logger
+        mockLogger = {
+            withModule: vi.fn().mockReturnThis(),
+            info: vi.fn(),
+            warn: vi.fn(),
+            error: vi.fn(),
+            debug: vi.fn()
+        };
+
+        // Mock GracefulShutdown
+        mockGracefulShutdown = {
+            shutdown: vi.fn(),
+            exitCode: 0
+        };
+
+        // Mock config module
+        await vi.doMock('../../src/config/index.js', () => ({
+            initConfig: vi.fn().mockResolvedValue(undefined),
+            validateConfig: vi.fn().mockReturnValue(true),
+            getConfig: vi.fn().mockReturnValue({
+                apiId: 12345,
+                apiHash: 'test_api_hash',
+                botToken: 'test_bot_token'
+            })
+        }));
+
+        // Mock env module
+        await vi.doMock('../../src/config/env.js', () => ({
+            getEnv: () => mockEnv,
+            NODE_ENV: mockEnv.NODE_ENV,
+            API_ID: mockEnv.API_ID,
+            API_HASH: mockEnv.API_HASH,
+            BOT_TOKEN: mockEnv.BOT_TOKEN
+        }));
+
+        // Mock services
+        await vi.doMock('../../src/services/QueueService.js', () => ({
+            queueService: mockQueueService
+        }));
+
+        await vi.doMock('../../src/services/CacheService.js', () => ({
+            cache: mockCache
+        }));
+
+        await vi.doMock('../../src/services/d1.js', () => ({
+            d1: mockD1
+        }));
+
+        await vi.doMock('../../src/services/logger/index.js', () => ({
+            logger: mockLogger
         }));
 
         await vi.doMock('../../src/services/InstanceCoordinator.js', () => ({
             instanceCoordinator: mockInstanceCoordinator
         }));
 
+        await vi.doMock('../../src/dispatcher/bootstrap.js', () => ({
+            startDispatcher: vi.fn().mockResolvedValue(undefined)
+        }));
+
+        await vi.doMock('../../src/processor/bootstrap.js', () => ({
+            startProcessor: vi.fn().mockResolvedValue(undefined)
+        }));
+
         await vi.doMock('../../src/services/telegram.js', () => ({
-            client: mockClient
+            client: {
+                connect: vi.fn().mockResolvedValue(undefined),
+                start: vi.fn().mockResolvedValue(undefined)
+            }
         }));
 
-        await vi.doMock('../../src/services/InfisicalClient.js', () => ({
-            fetchInfisicalSecrets: vi.fn().mockResolvedValue({
-                API_ID: '123456789',
-                API_HASH: 'test_api_hash',
-                BOT_TOKEN: 'test_bot_token'
-            })
+        await vi.doMock('../../src/utils/lifecycle.js', () => ({
+            buildWebhookServer: vi.fn().mockResolvedValue(undefined),
+            registerShutdownHooks: vi.fn().mockResolvedValue(undefined)
         }));
 
-        await vi.doMock('../../src/config/dotenv.js', () => ({
-            loadDotenv: vi.fn()
+        await vi.doMock('../../src/services/GracefulShutdown.js', () => ({
+            gracefulShutdown: mockGracefulShutdown
+        }));
+
+        await vi.doMock('../../src/utils/startupConfig.js', () => ({
+            summarizeStartupConfig: vi.fn().mockResolvedValue({})
         }));
     });
 
@@ -90,65 +144,16 @@ describe("Application Startup Resilience and Degradation", () => {
     });
 
     test("should handle successful startup", async () => {
-        mockSettingsRepository.get.mockResolvedValue({
-            instanceId: 'test-instance',
-            telegramAuthorized: true
-        });
-
-        mockInstanceCoordinator.getInstanceInfo.mockResolvedValue({
-            instanceId: 'test-instance',
-            role: 'primary',
-            isActive: true
-        });
-
-        // Simulate startup
-        const { default: app } = await import('../../src/index.js');
+        // Import and call main function
+        const { main } = await import('../../index.js');
         
-        // Advance timers to complete any async operations
-        vi.advanceTimersByTime(1000);
+        // Call main function
+        await main();
         
         // Verify initialization calls
-        expect(mockInstanceCoordinator.claim).toHaveBeenCalled();
-        expect(mockClient.connect).toHaveBeenCalled();
-    });
-
-    test("should handle connection timeout gracefully", async () => {
-        mockSettingsRepository.get.mockResolvedValue({
-            instanceId: 'test-instance',
-            telegramAuthorized: false
-        });
-
-        mockInstanceCoordinator.getInstanceInfo.mockRejectedValue(new Error('Connection timeout'));
-
-        // Mock backoff mechanism
-        const backoffSeconds = 5;
-        
-        // Simulate connection timeout
-        try {
-            await mockInstanceCoordinator.getInstanceInfo();
-        } catch (error) {
-            // Expected error
-        }
-        
-        // Advance time to simulate backoff without real setTimeout
-        vi.advanceTimersByTime(backoffSeconds * 1000);
-        
-        expect(mockInstanceCoordinator.getInstanceInfo).toHaveBeenCalled();
-    });
-
-    test("should handle configuration loading failures", async () => {
-        // Mock configuration error
-        await vi.doMock('../../src/config/env.js', () => ({
-            getEnv: () => {
-                throw new Error('Configuration loading failed');
-            },
-            NODE_ENV: undefined,
-            API_ID: undefined,
-            API_HASH: undefined,
-            BOT_TOKEN: undefined
-        }));
-
-        // The application should handle this gracefully
-        expect(() => import('../../src/config/env.js')).not.toThrow();
+        expect(mockQueueService.initialize).toHaveBeenCalled();
+        expect(mockCache.initialize).toHaveBeenCalled();
+        expect(mockD1.initialize).toHaveBeenCalled();
+        expect(mockInstanceCoordinator.start).toHaveBeenCalled();
     });
 });

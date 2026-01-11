@@ -15,7 +15,7 @@ const mockLogger = {
     withContext: vi.fn().mockReturnThis()
 };
 
-vi.mock('../../src/services/logger.js', () => ({
+vi.mock('../../src/services/logger/index.js', () => ({
     default: mockLogger,
     logger: mockLogger
 }));
@@ -188,7 +188,7 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
         // Re-import to get updated mock
         vi.resetModules();
         const { d1: newD1Instance } = await import("../../src/services/d1.js");
-        const { default: logger } = await import("../../src/services/logger.js");
+        const { default: logger } = await import("../../src/services/logger/index.js");
 
         await expect(newD1Instance.run("INVALID SQL"))
             .rejects.toThrow("D1 HTTP 400 [N/A]: Invalid SQL syntax");

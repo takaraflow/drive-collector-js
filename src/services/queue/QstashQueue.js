@@ -1,6 +1,6 @@
 import { Client, Receiver } from "@upstash/qstash";
 import { getConfig } from "../../config/index.js";
-import { logger } from "../../services/logger.js";
+import { logger } from "../../services/logger/index.js";
 import { CircuitBreakerManager } from "../../services/CircuitBreaker.js";
 import { BaseQueue } from "./BaseQueue.js";
 

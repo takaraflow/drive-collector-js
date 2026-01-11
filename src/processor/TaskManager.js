@@ -16,7 +16,7 @@ import { d1 } from "../services/d1.js";
 import { cache } from "../services/CacheService.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { queueService } from "../services/QueueService.js";
-import { logger } from "../services/logger.js";
+import { logger } from "../services/logger/index.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 
 const log = logger.withModule('TaskManager');

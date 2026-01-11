@@ -8,7 +8,7 @@
  * 4. 在清理完成后退出进程
  */
 
-import { logger } from "./logger.js";
+import { logger } from "./logger/index.js";
 
 const log = logger.withModule ? logger.withModule('GracefulShutdown') : logger;
 

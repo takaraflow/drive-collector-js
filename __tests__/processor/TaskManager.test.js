@@ -68,7 +68,7 @@ vi.mock('../../src/services/d1.js', () => ({
     }
 }));
 
-vi.mock('../../src/services/logger.js', () => ({
+vi.mock('../../src/services/logger/index.js', () => ({
     default: {
         info: vi.fn(),
         warn: vi.fn(),

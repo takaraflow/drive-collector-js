@@ -1,6 +1,6 @@
 import { instanceCoordinator } from "../../src/services/InstanceCoordinator.js";
 import { cache } from "../../src/services/CacheService.js";
-import logger from "../../src/services/logger.js";
+import logger from "../../src/services/logger/index.js";
 
 // Create a mock time provider
 const fixedTime = 1700000000000;

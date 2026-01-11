@@ -4,7 +4,7 @@ import { getConfig } from "../config/index.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
 import { cache } from "./CacheService.js";
-import logger, { enableTelegramConsoleProxy } from "./logger.js";
+import logger, { enableTelegramConsoleProxy } from "./logger/index.js";
 import { TelegramErrorClassifier } from "./telegram-error-classifier.js";
 
 const log = logger.withModule ? logger.withModule('TelegramService') : logger;
