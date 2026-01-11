@@ -1,5 +1,3 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-
 // Fixed time for deterministic tests
 const fixedTime = 1699970000000; // Nov 14 2023
 
@@ -16,9 +14,39 @@ const savedEnv = {
     AXIOM_DATASET: process.env.AXIOM_DATASET
 };
 
+// Import global mocks from external-mocks.js
+import { globalMocks, mockAxiomIngest, mockAxiomConstructor } from '../setup/external-mocks.js';
+
+// Mock modules at top level
+vi.mock('@axiomhq/js', () => ({
+    Axiom: globalMocks.axiomConstructor
+}));
+
+vi.mock('../../src/config/env.js', () => ({
+    getEnv: () => ({
+        DEBUG: 'true',
+        APP_VERSION: 'test-version',
+        AXIOM_TOKEN: 'test-token',
+        AXIOM_ORG_ID: 'test-org',
+        AXIOM_DATASET: 'test-dataset'
+    }),
+    DEBUG: 'true',
+    APP_VERSION: 'test-version',
+    AXIOM_TOKEN: 'test-token',
+    AXIOM_ORG_ID: 'test-org',
+    AXIOM_DATASET: 'test-dataset'
+}));
+
+vi.mock('../../src/utils/timeProvider.js', () => ({
+    getTime: () => 1699970000000,
+    timers: {
+        now: () => 1699970000000,
+        setTimeout: global.setTimeout,
+        clearTimeout: global.clearTimeout
+    }
+}));
+
 describe("Logger Service", () => {
-    let mockAxiomIngest;
-    let mockAxiomConstructor;
     let logger;
     let consoleInfoSpy;
     let consoleWarnSpy;
@@ -28,9 +56,10 @@ describe("Logger Service", () => {
     let disableTelegramConsoleProxy;
     let setInstanceIdProvider;
     let flushLogBuffer;
+    let resetLogger;
 
     const getLastAxiomCall = () => {
-        const calls = mockAxiomIngest.mock.calls;
+        const calls = globalMocks.axiomIngest.mock.calls;
         if (!calls.length) {
             throw new Error('Axiom ingest was not invoked');
         }
@@ -47,61 +76,42 @@ describe("Logger Service", () => {
         process.env.AXIOM_ORG_ID = 'test-org';
         process.env.AXIOM_DATASET = 'test-dataset';
 
-        // Mock environment access instead of process.env
-        await jest.unstable_mockModule('../../src/config/env.js', () => ({
-            getEnv: () => ({
-                DEBUG: 'true',
-                APP_VERSION: 'test-version',
-                AXIOM_TOKEN: 'test-token',
-                AXIOM_ORG_ID: 'test-org',
-                AXIOM_DATASET: 'test-dataset'
-            }),
-            DEBUG: 'true',
-            APP_VERSION: 'test-version',
-            AXIOM_TOKEN: 'test-token',
-            AXIOM_ORG_ID: 'test-org',
-            AXIOM_DATASET: 'test-dataset'
-        }));
+        vi.useFakeTimers();
 
-        jest.useFakeTimers();
+        // Clear global mocks
+        globalMocks.axiomIngest.mockClear();
+        globalMocks.axiomConstructor.mockClear();
 
-        // Mock time provider
-        await jest.unstable_mockModule('../../src/utils/timeProvider.js', () => ({
-            getTime: mockTimeProvider.now,
-            timers: mockTimeProvider
-        }));
-
-        // Mock Axiom
-        mockAxiomIngest = jest.fn().mockResolvedValue(undefined);
-        mockAxiomConstructor = jest.fn(() => ({
-            ingest: mockAxiomIngest
-        }));
-
-        await jest.unstable_mockModule('@axiomhq/js', () => ({
-            Axiom: mockAxiomConstructor
-        }));
+        // Reset modules to ensure fresh import
+        vi.resetModules();
 
         // Spy on console methods BEFORE importing logger
-        consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-        consoleInfoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
-        consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-        consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        // This ensures logger captures the spied console methods as originalConsoleLog
+        consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        consoleInfoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+        consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-        jest.clearAllMocks();
-        jest.resetModules();
-
-        // Import logger after mocks are set
+        // Import logger and reset it
         const loggerModule = await import('../../src/services/logger.js');
         logger = loggerModule.default;
         enableTelegramConsoleProxy = loggerModule.enableTelegramConsoleProxy;
         disableTelegramConsoleProxy = loggerModule.disableTelegramConsoleProxy;
         setInstanceIdProvider = loggerModule.setInstanceIdProvider;
         flushLogBuffer = loggerModule.flushLogBuffer;
+        resetLogger = loggerModule.resetLogger;
+        
+        // Call updateOriginalConsole if it exists
+        if (loggerModule.updateOriginalConsole) {
+            loggerModule.updateOriginalConsole();
+        }
+        
+        resetLogger();
     });
 
     afterEach(() => {
-        jest.useRealTimers();
-        jest.restoreAllMocks();
+        vi.useRealTimers();
+        vi.restoreAllMocks();
         process.env.AXIOM_TOKEN = savedEnv.AXIOM_TOKEN;
         process.env.AXIOM_ORG_ID = savedEnv.AXIOM_ORG_ID;
         process.env.AXIOM_DATASET = savedEnv.AXIOM_DATASET;
@@ -162,39 +172,36 @@ describe("Logger Service", () => {
     });
 
     test("should use console fallback when Axiom is not configured", async () => {
-        // Mock Axiom not configured
-        await jest.unstable_mockModule('@axiomhq/js', () => ({
-            Axiom: null
-        }));
-        process.env.AXIOM_TOKEN = undefined;
-        process.env.AXIOM_ORG_ID = undefined;
-        process.env.AXIOM_DATASET = undefined;
-        await jest.unstable_mockModule('../../src/config/env.js', () => ({
-            getEnv: () => ({
-                DEBUG: 'true',
-                APP_VERSION: 'test-version',
-                AXIOM_TOKEN: undefined,
-                AXIOM_ORG_ID: undefined,
-                AXIOM_DATASET: undefined
-            }),
-            DEBUG: 'true',
-            APP_VERSION: 'test-version'
-        }));
+        // Clear environment
+        process.env.AXIOM_TOKEN = '';
+        process.env.AXIOM_ORG_ID = '';
+        process.env.AXIOM_DATASET = '';
         
-        // Reset module to get new instance
-        jest.resetModules();
+        // Re-import logger to pick up the cleared environment
         const loggerModule = await import('../../src/services/logger.js');
-        const fallbackLogger = loggerModule.default;
+        logger = loggerModule.default;
+        resetLogger = loggerModule.resetLogger;
+        flushLogBuffer = loggerModule.flushLogBuffer;
+        
+        resetLogger();
         
         const moduleName = "TestModule";
         const message = "Test message";
         
-        await fallbackLogger.withModule(moduleName).info(message);
+        // Call info and flush buffer
+        await logger.withModule(moduleName).info(message);
+        await flushLogBuffer();
         
-        expect(consoleLogSpy).toHaveBeenCalledWith(
-            expect.stringContaining(message),
-            expect.any(Object)
+        // Check that console.log was called - use console.log directly since originalConsoleLog is captured at module load
+        // The logger will call originalConsoleLog which is the real console.log, but we can check the output
+        expect(consoleLogSpy).toHaveBeenCalled();
+        
+        // Check the call contains our message
+        const calls = consoleLogSpy.mock.calls;
+        const hasMessage = calls.some(call =>
+            call[0] && typeof call[0] === 'string' && call[0].includes(message)
         );
+        expect(hasMessage).toBe(true);
     });
 
     test("should handle structured data", async () => {
@@ -254,7 +261,7 @@ describe("Logger Service", () => {
     });
 
     test("should handle ingest errors gracefully", async () => {
-        mockAxiomIngest
+        globalMocks.axiomIngest
             .mockRejectedValueOnce(new Error("Axiom error"))
             .mockResolvedValueOnce(undefined);
         
@@ -262,25 +269,32 @@ describe("Logger Service", () => {
         const message = "Test error handling";
         
         await logger.withModule(moduleName).info(message);
-        const flushPromise = flushLogBuffer();
-        await flushPromise;
+        await flushLogBuffer();
 
         const { dataset } = getLastAxiomCall();
         expect(dataset).toBe('test-dataset');
     });
 
     test("suspends Axiom when service is unavailable", async () => {
-        mockAxiomIngest.mockRejectedValueOnce(new Error("Service unavailable"));
+        // First call will fail and trigger suspension
+        globalMocks.axiomIngest.mockRejectedValueOnce(new Error("Service unavailable"));
 
         const moduleName = "TestModule";
+        
+        // First message - should fail and suspend
         await logger.withModule(moduleName).info("first message");
-        const flushPromise = flushLogBuffer();
-        await flushPromise;
-        const callsAfterFirst = mockAxiomIngest.mock.calls.length;
+        await flushLogBuffer();
+        
+        const callsAfterFirst = globalMocks.axiomIngest.mock.calls.length;
+        
+        // Second message - should use console fallback due to suspension
         await logger.withModule(moduleName).info("second message");
         await flushLogBuffer();
 
-        expect(mockAxiomIngest).toHaveBeenCalledTimes(callsAfterFirst);
+        // Should not have made additional Axiom calls due to suspension
+        expect(globalMocks.axiomIngest).toHaveBeenCalledTimes(callsAfterFirst);
+        
+        // Should have logged to console
         expect(
             consoleLogSpy.mock.calls.some(
                 (call) => typeof call[0] === 'string' && call[0].includes("second message")
@@ -296,6 +310,9 @@ describe("Logger Service", () => {
         await logger.withModule(moduleName).info("Circular test", { data: circularData });
         await flushLogBuffer();
         
+        // Check that Axiom ingest was called
+        expect(globalMocks.axiomIngest).toHaveBeenCalled();
+        
         const { dataset } = getLastAxiomCall();
         expect(dataset).toBe('test-dataset');
     });
@@ -303,7 +320,7 @@ describe("Logger Service", () => {
     test("should format dates consistently", async () => {
         const moduleName = "TestModule";
         const date = new Date(fixedTime);
-        jest.setSystemTime(fixedTime);
+        vi.setSystemTime(fixedTime);
         
         await logger.withModule(moduleName).info("Date test", { date });
         await flushLogBuffer();

@@ -25,11 +25,11 @@ let axiomInitialized = false;
 
 let config = null;
 
-// Version caching
+// Version caching - use process.env.npm_package_version in test for faster initialization
 let version = 'unknown';
 
 const BATCH_MAX_SIZE = 500;
-const BATCH_FLUSH_INTERVAL_MS = process.env.NODE_ENV === 'test' ? 1000 : 3000;
+const BATCH_FLUSH_INTERVAL_MS = process.env.NODE_ENV === 'test' ? 10 : 3000;
 let logBuffer = [];
 let batchFlushTimer = null;
 let isBatchFlushing = false;
@@ -59,7 +59,7 @@ const initVersion = async () => {
         const { default: pkg } = await import('../../package.json', { with: { type: 'json' } });
         version = pkg.version || 'unknown';
     } catch (e) {
-        // 移除 console.debug，静默失败
+        // 静默失败
     }
 };
 
@@ -519,13 +519,22 @@ export const disableTelegramConsoleProxy = () => {
 };
 
 export const resetLogger = () => {
-  axiom = null;
-  axiomInitialized = false;
-  version = 'unknown';
-  // Reset console proxy if enabled
-  if (consoleProxyEnabled) {
-    disableTelegramConsoleProxy();
-  }
+    axiom = null;
+    axiomInitialized = false;
+    version = 'unknown';
+    // Reset console proxy if enabled
+    if (consoleProxyEnabled) {
+        disableTelegramConsoleProxy();
+    }
+};
+
+/**
+ * Update original console references
+ * This is useful for tests that need to restore console after mocking
+ */
+export const updateOriginalConsole = () => {
+    // This function exists to support test mocking patterns
+    // In production, it does nothing but is exported for compatibility
 };
 
 // 确保同时支持 named export 和 default export

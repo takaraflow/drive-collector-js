@@ -1,6 +1,4 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-
-jest.mock("../../../src/config/index.js", () => {
+vi.mock("../../../src/config/index.js", () => {
     const config = {
         qstash: {
             token: 'test-token',
@@ -11,27 +9,27 @@ jest.mock("../../../src/config/index.js", () => {
     };
     return {
         config: config,
-        getConfig: jest.fn(() => config),
-        default: { config: config, getConfig: jest.fn(() => config) }
+        getConfig: vi.fn(() => config),
+        default: { config: config, getConfig: vi.fn(() => config) }
     };
 });
 
-jest.mock("../../../src/services/logger.js", () => ({
+vi.mock("../../../src/services/logger.js", () => ({
     logger: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn()
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn()
     },
     default: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn()
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn()
     }
 }));
 
-jest.mock("../../../src/services/CircuitBreaker.js", () => ({
+vi.mock("../../../src/services/CircuitBreaker.js", () => ({
     CircuitBreakerManager: {
-        get: jest.fn().mockReturnValue({
+        get: vi.fn().mockReturnValue({
             execute: async (cmd, fallback) => cmd(),
             getStatus: () => ({ state: 'CLOSED', failureCount: 0 }),
             reset: () => {}
@@ -46,14 +44,14 @@ describe("QstashQueue - Unit Tests", () => {
     let queue;
 
     beforeEach(() => {
-        jest.useFakeTimers({ timerLimit: 10000, advanceTimers: true });
-        jest.spyOn(global.Math, 'random').mockReturnValue(0.5);
-        jest.clearAllMocks();
+        vi.useFakeTimers({ timerLimit: 10000, advanceTimers: true });
+        vi.spyOn(global.Math, 'random').mockReturnValue(0.5);
+        vi.clearAllMocks();
     });
 
     afterEach(() => {
-        jest.useRealTimers();
-        jest.restoreAllMocks();
+        vi.useRealTimers();
+        vi.restoreAllMocks();
     });
 
     test("should extend BaseQueue", async () => {

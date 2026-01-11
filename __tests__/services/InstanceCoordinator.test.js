@@ -1,4 +1,3 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
 import { instanceCoordinator } from "../../src/services/InstanceCoordinator.js";
 import { cache } from "../../src/services/CacheService.js";
 import logger from "../../src/services/logger.js";
@@ -22,8 +21,8 @@ describe("Core InstanceCoordinator Tests", () => {
     });
 
     beforeEach(() => {
-        jest.useFakeTimers();
-        jest.setSystemTime(fixedTime);
+        vi.useFakeTimers();
+        vi.setSystemTime(fixedTime);
 
         // Reset instanceCoordinator state
         instanceCoordinator.instanceId = 'test-instance';
@@ -35,24 +34,24 @@ describe("Core InstanceCoordinator Tests", () => {
         }
 
         // Mock cache methods
-        mockCacheGet = jest.fn().mockResolvedValue(null);
-        mockCacheSet = jest.fn().mockResolvedValue(true);
-        mockCacheDelete = jest.fn().mockResolvedValue(true);
-        mockCacheListKeys = jest.fn().mockResolvedValue([]);
+        mockCacheGet = vi.fn().mockResolvedValue(null);
+        mockCacheSet = vi.fn().mockResolvedValue(true);
+        mockCacheDelete = vi.fn().mockResolvedValue(true);
+        mockCacheListKeys = vi.fn().mockResolvedValue([]);
         
         cache.get = mockCacheGet;
         cache.set = mockCacheSet;
         cache.delete = mockCacheDelete;
         cache.listKeys = mockCacheListKeys;
-        cache.getCurrentProvider = jest.fn().mockReturnValue("cloudflare");
+        cache.getCurrentProvider = vi.fn().mockReturnValue("cloudflare");
 
         // Mock logger methods
-        logger.info = jest.fn();
-        logger.error = jest.fn();
-        logger.warn = jest.fn();
-        logger.debug = jest.fn();
-        logger.withModule = jest.fn().mockReturnThis();
-        logger.withContext = jest.fn().mockReturnThis();
+        logger.info = vi.fn();
+        logger.error = vi.fn();
+        logger.warn = vi.fn();
+        logger.debug = vi.fn();
+        logger.withModule = vi.fn().mockReturnThis();
+        logger.withContext = vi.fn().mockReturnThis();
     });
 
     afterAll(() => {
@@ -66,7 +65,7 @@ describe("Core InstanceCoordinator Tests", () => {
     });
 
     afterEach(() => {
-        jest.useRealTimers();
+        vi.useRealTimers();
     });
 
     test("should initialize correctly", async () => {
@@ -178,7 +177,7 @@ describe("Core InstanceCoordinator Tests", () => {
 
         // Mock getAllInstances directly on the instance for this test
         const originalGetAllInstances = instanceCoordinator.getAllInstances;
-        instanceCoordinator.getAllInstances = jest.fn().mockResolvedValue(instances);
+        instanceCoordinator.getAllInstances = vi.fn().mockResolvedValue(instances);
 
         const result = await instanceCoordinator.getActiveInstances();
 

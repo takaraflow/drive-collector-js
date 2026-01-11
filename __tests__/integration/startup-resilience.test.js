@@ -1,5 +1,3 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-
 // Mock env.js instead of accessing process.env
 let mockEnv = {
   NODE_ENV: 'development',
@@ -12,7 +10,7 @@ let mockEnv = {
 };
 
 // Mock fetch globally
-const mockFetch = jest.fn();
+const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 describe("Application Startup Resilience and Degradation", () => {
@@ -21,11 +19,11 @@ describe("Application Startup Resilience and Degradation", () => {
     let mockClient;
 
     beforeEach(async () => {
-        jest.useFakeTimers();
-        jest.clearAllMocks();
+        vi.useFakeTimers();
+        vi.clearAllMocks();
         
         // Mock env access instead of modifying process.env
-        await jest.unstable_mockModule('../../src/config/env.js', () => ({
+        await vi.doMock('../../src/config/env.js', () => ({
             getEnv: () => mockEnv,
             NODE_ENV: mockEnv.NODE_ENV,
             API_ID: mockEnv.API_ID,
@@ -37,58 +35,58 @@ describe("Application Startup Resilience and Degradation", () => {
         }));
 
         // Mock console to prevent log pollution
-        jest.spyOn(console, 'log').mockImplementation(() => {});
-        jest.spyOn(console, 'warn').mockImplementation(() => {});
-        jest.spyOn(console, 'error').mockImplementation(() => {});
+        vi.spyOn(console, 'log').mockImplementation(() => {});
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => {});
 
         // Mock SettingsRepository
         mockSettingsRepository = {
-            get: jest.fn(),
-            set: jest.fn()
+            get: vi.fn(),
+            set: vi.fn()
         };
 
         // Mock InstanceCoordinator
         mockInstanceCoordinator = {
-            getInstanceInfo: jest.fn(),
-            claim: jest.fn().mockResolvedValue(true),
-            release: jest.fn()
+            getInstanceInfo: vi.fn(),
+            claim: vi.fn().mockResolvedValue(true),
+            release: vi.fn()
         };
 
         // Mock Telegram client
         mockClient = {
-            connect: jest.fn().mockResolvedValue(true),
-            start: jest.fn().mockResolvedValue(true),
-            stop: jest.fn().mockResolvedValue(true)
+            connect: vi.fn().mockResolvedValue(true),
+            start: vi.fn().mockResolvedValue(true),
+            stop: vi.fn().mockResolvedValue(true)
         };
 
-        await jest.unstable_mockModule('../../src/repositories/SettingsRepository.js', () => ({
+        await vi.doMock('../../src/repositories/SettingsRepository.js', () => ({
             SettingsRepository: mockSettingsRepository
         }));
 
-        await jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () => ({
+        await vi.doMock('../../src/services/InstanceCoordinator.js', () => ({
             instanceCoordinator: mockInstanceCoordinator
         }));
 
-        await jest.unstable_mockModule('../../src/services/telegram.js', () => ({
+        await vi.doMock('../../src/services/telegram.js', () => ({
             client: mockClient
         }));
 
-        await jest.unstable_mockModule('../../src/services/InfisicalClient.js', () => ({
-            fetchInfisicalSecrets: jest.fn().mockResolvedValue({
+        await vi.doMock('../../src/services/InfisicalClient.js', () => ({
+            fetchInfisicalSecrets: vi.fn().mockResolvedValue({
                 API_ID: '123456789',
                 API_HASH: 'test_api_hash',
                 BOT_TOKEN: 'test_bot_token'
             })
         }));
 
-        await jest.unstable_mockModule('../../src/config/dotenv.js', () => ({
-            loadDotenv: jest.fn()
+        await vi.doMock('../../src/config/dotenv.js', () => ({
+            loadDotenv: vi.fn()
         }));
     });
 
     afterEach(() => {
-        jest.useRealTimers();
-        jest.restoreAllMocks();
+        vi.useRealTimers();
+        vi.restoreAllMocks();
     });
 
     test("should handle successful startup", async () => {
@@ -107,7 +105,7 @@ describe("Application Startup Resilience and Degradation", () => {
         const { default: app } = await import('../../src/index.js');
         
         // Advance timers to complete any async operations
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
         
         // Verify initialization calls
         expect(mockInstanceCoordinator.claim).toHaveBeenCalled();
@@ -133,14 +131,14 @@ describe("Application Startup Resilience and Degradation", () => {
         }
         
         // Advance time to simulate backoff without real setTimeout
-        jest.advanceTimersByTime(backoffSeconds * 1000);
+        vi.advanceTimersByTime(backoffSeconds * 1000);
         
         expect(mockInstanceCoordinator.getInstanceInfo).toHaveBeenCalled();
     });
 
     test("should handle configuration loading failures", async () => {
         // Mock configuration error
-        await jest.unstable_mockModule('../../src/config/env.js', () => ({
+        await vi.doMock('../../src/config/env.js', () => ({
             getEnv: () => {
                 throw new Error('Configuration loading failed');
             },

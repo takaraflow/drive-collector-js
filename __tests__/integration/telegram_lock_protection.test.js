@@ -1,14 +1,12 @@
-import { jest, describe, test, expect, beforeEach } from "@jest/globals";
-
 describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
     let mockClient;
     let mockCoordinator;
     
     beforeEach(async () => {
-        jest.useFakeTimers();
+        vi.useFakeTimers();
         
         mockClient = {
-            disconnect: jest.fn(() => {
+            disconnect: vi.fn(() => {
                 // Use fake timer instead of real setTimeout
                 return new Promise(resolve => {
                     // This will be resolved by advanceTimersByTimeAsync
@@ -16,19 +14,19 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
                     return timer;
                 });
             }),
-            start: jest.fn().mockResolvedValue(undefined),
+            start: vi.fn().mockResolvedValue(undefined),
             connected: true
         };
 
         mockCoordinator = {
-            acquireLock: jest.fn().mockResolvedValue(true),
-            hasLock: jest.fn().mockResolvedValue(false),
+            acquireLock: vi.fn().mockResolvedValue(true),
+            hasLock: vi.fn().mockResolvedValue(false),
             instanceId: "inst_1"
         };
     });
 
     afterEach(() => {
-        jest.useRealTimers();
+        vi.useRealTimers();
     });
 
     /**
@@ -96,7 +94,7 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
         const promise = simulateStartTelegramClient(context);
         
         // 推进时间以完成 disconnect (2s)
-        await jest.advanceTimersByTimeAsync(2000);
+        await vi.advanceTimersByTimeAsync(2000);
         
         const result = await promise;
         expect(result).toBe(false);
@@ -111,14 +109,14 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
         // 模拟一个永久卡死的 disconnect
         mockClient.disconnect.mockReturnValue(new Promise(() => {})); 
 
-        const logSpy = jest.fn();
+        const logSpy = vi.fn();
         const originalLog = console.log;
         console.log = logSpy;
         
         const promise = simulateStartTelegramClient(context);
         
         // 推进时间超过 5s 保护阈值
-        await jest.advanceTimersByTimeAsync(5100);
+        await vi.advanceTimersByTimeAsync(5100);
         
         await promise;
         
@@ -137,7 +135,7 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
     });
 
     test("should release lock during graceful shutdown (index.js logic)", async () => {
-        const mockReleaseLock = jest.fn().mockResolvedValue(undefined);
+        const mockReleaseLock = vi.fn().mockResolvedValue(undefined);
         const coordinator = {
             releaseLock: mockReleaseLock
         };

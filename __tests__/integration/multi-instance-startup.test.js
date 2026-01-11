@@ -1,42 +1,40 @@
-import { jest } from "@jest/globals";
-
 // Mock 外部依赖
 const mockClientInstance = {
-    start: jest.fn().mockResolvedValue(undefined),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-    getMe: jest.fn().mockResolvedValue({ id: 123 }),
+    start: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    getMe: vi.fn().mockResolvedValue({ id: 123 }),
     session: {
-        save: jest.fn().mockReturnValue("mock_session")
+        save: vi.fn().mockReturnValue("mock_session")
     },
     connected: true,
-    addEventHandler: jest.fn()
+    addEventHandler: vi.fn()
 };
 
-jest.unstable_mockModule("../../src/services/telegram.js", () => ({
+vi.mock("../../src/services/telegram.js", () => ({
     client: mockClientInstance,
-    saveSession: jest.fn().mockResolvedValue(undefined),
-    clearSession: jest.fn().mockResolvedValue(undefined),
-    resetClientSession: jest.fn().mockResolvedValue(undefined)
+    saveSession: vi.fn().mockResolvedValue(undefined),
+    clearSession: vi.fn().mockResolvedValue(undefined),
+    resetClientSession: vi.fn().mockResolvedValue(undefined)
 }));
 
 const mockInstanceCoordinator = {
-    start: jest.fn().mockResolvedValue(undefined),
-    acquireLock: jest.fn(),
+    start: vi.fn().mockResolvedValue(undefined),
+    acquireLock: vi.fn(),
     instanceId: "test_instance"
 };
 
-jest.unstable_mockModule("../../src/services/InstanceCoordinator.js", () => ({
+vi.mock("../../src/services/InstanceCoordinator.js", () => ({
     instanceCoordinator: mockInstanceCoordinator
 }));
 
-jest.unstable_mockModule("../../src/repositories/SettingsRepository.js", () => ({
+vi.mock("../../src/repositories/SettingsRepository.js", () => ({
     SettingsRepository: {
-        get: jest.fn().mockResolvedValue("0"),
-        set: jest.fn().mockResolvedValue(undefined)
+        get: vi.fn().mockResolvedValue("0"),
+        set: vi.fn().mockResolvedValue(undefined)
     }
 }));
 
-jest.unstable_mockModule("../../src/config/index.js", () => ({
+vi.mock("../../src/config/index.js", () => ({
     config: {
         botToken: "mock_token",
         port: 3000
@@ -44,30 +42,30 @@ jest.unstable_mockModule("../../src/config/index.js", () => ({
 }));
 
 // Mock 其他不相关的依赖
-jest.unstable_mockModule("../../src/processor/TaskManager.js", () => ({
+vi.mock("../../src/processor/TaskManager.js", () => ({
     TaskManager: {
-        init: jest.fn().mockResolvedValue(undefined),
-        startAutoScaling: jest.fn(),
-        stopAutoScaling: jest.fn()
+        init: vi.fn().mockResolvedValue(undefined),
+        startAutoScaling: vi.fn(),
+        stopAutoScaling: vi.fn()
     }
 }));
 
-jest.unstable_mockModule("../../src/dispatcher/Dispatcher.js", () => ({
+vi.mock("../../src/dispatcher/Dispatcher.js", () => ({
     Dispatcher: {
-        handle: jest.fn()
+        handle: vi.fn()
     }
 }));
 
-const flushPromises = () => new Promise(resolve => jest.requireActual("timers").setImmediate(resolve));
+const flushPromises = () => new Promise(resolve => vi.requireActual("timers").setImmediate(resolve));
 
 describe("Multi-Instance Startup Logic", () => {
     beforeEach(() => {
-        jest.clearAllMocks();
-        jest.useFakeTimers();
+        vi.clearAllMocks();
+        vi.useFakeTimers();
     });
 
     afterEach(() => {
-        jest.useRealTimers();
+        vi.useRealTimers();
     });
 
     test("只有获取锁的实例应当启动 Telegram 客户端", async () => {

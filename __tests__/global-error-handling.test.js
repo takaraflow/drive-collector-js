@@ -1,4 +1,3 @@
-import { jest } from "@jest/globals";
 import { gracefulShutdown } from "../src/services/GracefulShutdown.js";
 
 describe("Global Error Handling with Graceful Shutdown", () => {
@@ -13,10 +12,10 @@ describe("Global Error Handling with Graceful Shutdown", () => {
         };
 
         global.console = {
-            error: jest.fn(),
-            warn: jest.fn(),
-            log: jest.fn(),
-            info: jest.fn()
+            error: vi.fn(),
+            warn: vi.fn(),
+            log: vi.fn(),
+            info: vi.fn()
         };
 
         gracefulShutdown.isShuttingDown = false;
@@ -64,7 +63,7 @@ describe("Global Error Handling with Graceful Shutdown", () => {
 
     describe("Shutdown Process", () => {
         test("应当能够注册关闭钩子", () => {
-            const mockCleanup = jest.fn().mockResolvedValue();
+            const mockCleanup = vi.fn().mockResolvedValue();
 
             gracefulShutdown.register(mockCleanup, 10, 'test-hook');
 
@@ -73,9 +72,9 @@ describe("Global Error Handling with Graceful Shutdown", () => {
         });
 
         test("应该按照优先级排序关闭钩子", () => {
-            const hook1 = jest.fn().mockResolvedValue();
-            const hook2 = jest.fn().mockResolvedValue();
-            const hook3 = jest.fn().mockResolvedValue();
+            const hook1 = vi.fn().mockResolvedValue();
+            const hook2 = vi.fn().mockResolvedValue();
+            const hook3 = vi.fn().mockResolvedValue();
 
             gracefulShutdown.register(hook2, 20, 'hook2');
             gracefulShutdown.register(hook1, 10, 'hook1');
@@ -87,9 +86,9 @@ describe("Global Error Handling with Graceful Shutdown", () => {
         });
 
         test("即使某个钩子失败，也应该继续执行其他钩子", async () => {
-            const hook1 = jest.fn().mockResolvedValue();
-            const hook2 = jest.fn().mockRejectedValue(new Error('Hook 2 failed'));
-            const hook3 = jest.fn().mockResolvedValue();
+            const hook1 = vi.fn().mockResolvedValue();
+            const hook2 = vi.fn().mockRejectedValue(new Error('Hook 2 failed'));
+            const hook3 = vi.fn().mockResolvedValue();
 
             gracefulShutdown.register(hook1, 10, 'hook1');
             gracefulShutdown.register(hook2, 20, 'hook2');

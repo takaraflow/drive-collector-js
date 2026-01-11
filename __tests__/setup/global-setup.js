@@ -1,6 +1,6 @@
 // Mock ioredis with disconnect method
 import { globalMocks } from './external-mocks.js';
-import { afterEach, afterAll, jest, beforeEach, beforeAll } from '@jest/globals';
+import { afterEach, afterAll, beforeEach, beforeAll } from 'vitest';
 import { cleanupSingletonTimers, quickMockCleanup } from './test-helpers.js';
 import { cleanupDatabaseState, closeSharedDatabase, resetDbTracking } from './test-db.js';
 import { disableTelegramConsoleProxy, resetLogger } from '../../src/services/logger.js';
@@ -46,7 +46,7 @@ afterEach(async () => {
   quickMockCleanup();
   
   // 移除 jest.useRealTimers() 以保持全局 fakeTimers 的状态
-  // 全局 fakeTimers 由 jest.config.js 控制
+  // 全局 fakeTimers 由 vitest.config.js 控制
 });
 
 /**

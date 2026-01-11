@@ -1,5 +1,3 @@
-import { jest, describe, test, expect } from '@jest/globals';
-
 describe('Basic Compliance', () => {
     test('should pass simple arithmetic test', () => {
         const result = 2 + 2;

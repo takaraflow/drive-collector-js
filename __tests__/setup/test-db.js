@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { expect } from 'vitest';
 
 // 共享数据库实例 - 在测试套件间复用
 let sharedDbInstance = null;

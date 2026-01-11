@@ -1,7 +1,5 @@
-import { jest, describe, test, expect, beforeAll, afterAll, afterEach } from "@jest/globals";
-
 // Mock global fetch
-const mockFetch = jest.fn();
+const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 const originalEnv = process.env;
@@ -9,17 +7,17 @@ let instanceCoordinator;
 let mockLogger; 
 
 const mockCache = {
-    get: jest.fn(),
-    set: jest.fn(),
-    delete: jest.fn(),
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
     isFailoverMode: true,
-    getCurrentProvider: jest.fn().mockReturnValue("Cloudflare KV"),
+    getCurrentProvider: vi.fn().mockReturnValue("Cloudflare KV"),
 };
 
 describe("InstanceCoordinator Heartbeat (KV Only)", () => {
     beforeAll(async () => {
         // 强制使用真实定时器，防止 setTimeout 挂起
-        jest.useRealTimers();
+        vi.useRealTimers();
 
         process.env = {
             ...originalEnv,
@@ -32,12 +30,12 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
 
         // Mock Logger
         mockLogger = {
-            info: jest.fn(),
-            error: jest.fn(),
-            warn: jest.fn(),
-            debug: jest.fn(),
-            withModule: jest.fn().mockReturnThis(),
-            withContext: jest.fn().mockReturnThis()
+            info: vi.fn(),
+            error: vi.fn(),
+            warn: vi.fn(),
+            debug: vi.fn(),
+            withModule: vi.fn().mockReturnThis(),
+            withContext: vi.fn().mockReturnThis()
         };
 
         /**
@@ -45,37 +43,37 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
          * InstanceCoordinator.js 内部 import { setInstanceIdProvider } from "./logger.js"
          * 如果不 Mock 这个命名导出，动态 import 时会报 SyntaxError
          */
-        jest.unstable_mockModule("../../src/services/logger.js", () => ({
+        vi.mock("../../src/services/logger.js", () => ({
             default: mockLogger,
             logger: mockLogger,
-            setInstanceIdProvider: jest.fn(), // 必须包含这个
-            resetLogger: jest.fn(),
-            enableTelegramConsoleProxy: jest.fn(),
-            disableTelegramConsoleProxy: jest.fn()
+            setInstanceIdProvider: vi.fn(), // 必须包含这个
+            resetLogger: vi.fn(),
+            enableTelegramConsoleProxy: vi.fn(),
+            disableTelegramConsoleProxy: vi.fn()
         }));
 
-        jest.unstable_mockModule("../../src/repositories/InstanceRepository.js", () => ({
+        vi.mock("../../src/repositories/InstanceRepository.js", () => ({
             InstanceRepository: {
-                createTableIfNotExists: jest.fn().mockResolvedValue(undefined),
-                upsert: jest.fn().mockResolvedValue(true),
-                updateHeartbeat: jest.fn().mockResolvedValue(true),
-                findAll: jest.fn().mockResolvedValue([]),
+                createTableIfNotExists: vi.fn().mockResolvedValue(undefined),
+                upsert: vi.fn().mockResolvedValue(true),
+                updateHeartbeat: vi.fn().mockResolvedValue(true),
+                findAll: vi.fn().mockResolvedValue([]),
             },
         }));
 
-        jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+        vi.mock("../../src/services/CacheService.js", () => ({
             cache: mockCache,
             default: { cache: mockCache }
         }));
 
         // 处理 QueueService 依赖，防止 import InstanceCoordinator 时报错
-        jest.unstable_mockModule("../../src/services/QueueService.js", () => ({
+        vi.mock("../../src/services/QueueService.js", () => ({
             queueService: {
-                broadcastSystemEvent: jest.fn().mockResolvedValue(undefined)
+                broadcastSystemEvent: vi.fn().mockResolvedValue(undefined)
             }
         }));
 
-        jest.resetModules();
+        vi.resetModules();
         
         const { instanceCoordinator: importedIC } = await import("../../src/services/InstanceCoordinator.js");
         instanceCoordinator = importedIC;
@@ -83,12 +81,12 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
 
     afterAll(() => {
         process.env = originalEnv;
-        jest.useRealTimers();
+        vi.useRealTimers();
     });
 
     afterEach(() => {
         // 清理 Mocks
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         
         // 清理定时器
         if (instanceCoordinator && instanceCoordinator.heartbeatTimer) {
@@ -104,7 +102,7 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
 
     test("should send heartbeat to KV", async () => {
         // 使用 Jest Fake Timers
-        jest.useFakeTimers();
+        vi.useFakeTimers();
 
         const instanceData = {
             id: "test_instance_heartbeat",
@@ -117,7 +115,7 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         instanceCoordinator.startHeartbeat();
 
         // 快进时间以触发心跳
-        jest.advanceTimersByTime(30 * 1000); // 30秒心跳间隔
+        vi.advanceTimersByTime(30 * 1000); // 30秒心跳间隔
 
         // 等待异步操作完成
         await Promise.resolve();
@@ -136,12 +134,12 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         if (instanceCoordinator.heartbeatTimer) {
             clearInterval(instanceCoordinator.heartbeatTimer);
         }
-        jest.useRealTimers();
+        vi.useRealTimers();
     });
 
     test("should re-register if instance data missing in KV", async () => {
         // 使用 Jest Fake Timers
-        jest.useFakeTimers();
+        vi.useFakeTimers();
 
         mockCache.get.mockResolvedValue(null);
         mockCache.set.mockResolvedValue(true);
@@ -149,7 +147,7 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         instanceCoordinator.startHeartbeat();
 
         // 快进时间以触发心跳
-        jest.advanceTimersByTime(30 * 1000); // 30秒心跳间隔
+        vi.advanceTimersByTime(30 * 1000); // 30秒心跳间隔
 
         // 等待异步操作完成
         await Promise.resolve();
@@ -170,22 +168,22 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         if (instanceCoordinator.heartbeatTimer) {
             clearInterval(instanceCoordinator.heartbeatTimer);
         }
-        jest.useRealTimers();
+        vi.useRealTimers();
     });
 
     test("should handle KV errors gracefully", async () => {
         // 使用 Jest Fake Timers
-        jest.useFakeTimers();
+        vi.useFakeTimers();
 
         // 根据 InstanceCoordinator.js 第 126 行：logger.error(`[${cache.getCurrentProvider()}] Cache心跳更新失败...`)
-        const loggerSpy = jest.spyOn(mockLogger, "error").mockImplementation(() => {});
+        const loggerSpy = vi.spyOn(mockLogger, "error").mockImplementation(() => {});
 
         mockCache.get.mockRejectedValue(new Error("KV Network Error"));
 
         instanceCoordinator.startHeartbeat();
 
         // 快进时间以触发心跳
-        jest.advanceTimersByTime(30 * 1000); // 30秒心跳间隔
+        vi.advanceTimersByTime(30 * 1000); // 30秒心跳间隔
 
         // 等待异步操作完成
         await Promise.resolve();
@@ -198,6 +196,6 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
         if (instanceCoordinator.heartbeatTimer) {
             clearInterval(instanceCoordinator.heartbeatTimer);
         }
-        jest.useRealTimers();
+        vi.useRealTimers();
     });
 });

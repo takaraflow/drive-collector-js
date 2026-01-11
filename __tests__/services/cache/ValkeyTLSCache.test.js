@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach } from "@jest/globals";
 import { globalMocks } from "../../setup/external-mocks.js";
 
 const defaultConfig = { url: "valkeys://valkey-host:6380" };

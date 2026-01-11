@@ -1,81 +1,198 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-
 // Mock dependencies to prevent real I/O
-jest.mock("../../src/utils/LocalCache.js", () => ({
+vi.mock("../../src/utils/LocalCache.js", () => ({
     localCache: {
-        isUnchanged: jest.fn(() => false),
-        set: jest.fn(),
-        get: jest.fn(() => undefined),
-        del: jest.fn(),
-        delete: jest.fn()
+        isUnchanged: vi.fn(() => false),
+        set: vi.fn(),
+        get: vi.fn(() => undefined),
+        del: vi.fn(),
+        delete: vi.fn()
     }
 }));
 
-jest.mock("../../src/config/index.js", () => ({
-    getConfig: jest.fn(() => ({ kv: {} })),
-    initConfig: jest.fn(async () => ({ kv: {} })),
+vi.mock("../../src/config/index.js", () => ({
+    getConfig: vi.fn(() => ({ kv: {} })),
+    initConfig: vi.fn(async () => ({ kv: {} })),
     config: { kv: {} }
 }));
 
-jest.mock("../../src/services/logger.js", () => ({
+vi.mock("../../src/services/logger.js", () => ({
     logger: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn()
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis()
     }
 }));
 
 // Mock all provider classes to prevent real connections
-jest.mock("../../src/services/cache/CloudflareKVCache.js", () => ({
-    CloudflareKVCache: jest.fn().mockImplementation(() => ({
-        initialize: jest.fn(),
-        getProviderName: jest.fn(() => 'cloudflare'),
-        get: jest.fn(),
-        set: jest.fn(),
-        delete: jest.fn(),
-        listKeys: jest.fn(),
-        disconnect: jest.fn(),
-        getConnectionInfo: jest.fn(() => ({ provider: 'cloudflare' }))
-    }))
+vi.mock("../../src/services/cache/CloudflareKVCache.js", () => ({
+    CloudflareKVCache: vi.fn().mockImplementation(function(config) {
+        const apiUrl = `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/storage/kv/namespaces/${config.namespaceId}`;
+        
+        return {
+            config,
+            accountId: config.accountId,
+            namespaceId: config.namespaceId,
+            token: config.token,
+            apiUrl,
+            connected: false,
+            REQUEST_TIMEOUT: 5000,
+            
+            connect: vi.fn().mockImplementation(async function() {
+                this.connected = true;
+                return Promise.resolve();
+            }),
+            
+            getProviderName: vi.fn().mockReturnValue('cloudflare'),
+            
+            get: vi.fn().mockImplementation(async function(key, type = "json") {
+                try {
+                    const res = await fetch(`${apiUrl}/values/${key}`, {
+                        headers: { 'Authorization': `Bearer ${config.token}` }
+                    });
+                    
+                    if (res.status === 404) return null;
+                    if (!res.ok) return null;
+                    
+                    const value = type === "json" ? await res.json() :
+                                 type === "text" ? await res.text() :
+                                 await res.arrayBuffer();
+                    
+                    return value;
+                } catch (e) {
+                    return null;
+                }
+            }),
+            
+            set: vi.fn().mockImplementation(async function(key, value, ttl = 3600) {
+                if (!ttl || ttl < 60) ttl = 60;
+                
+                const url = new URL(`${apiUrl}/values/${key}`);
+                url.searchParams.set('expiration_ttl', ttl.toString());
+                
+                const body = typeof value === 'string' ? value : JSON.stringify(value);
+                
+                try {
+                    const res = await fetch(url.toString(), {
+                        method: 'PUT',
+                        headers: {
+                            'Authorization': `Bearer ${config.token}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: body
+                    });
+                    
+                    if (!res.ok) throw new Error("Cache Set Error");
+                    return true;
+                } catch (e) {
+                    return false;
+                }
+            }),
+            
+            delete: vi.fn().mockImplementation(async function(key) {
+                try {
+                    const res = await fetch(`${apiUrl}/values/${key}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${config.token}` }
+                    });
+                    return res.ok;
+                } catch (e) {
+                    return false;
+                }
+            }),
+            
+            listKeys: vi.fn().mockImplementation(async function(prefix = '') {
+                try {
+                    const url = new URL(`${apiUrl}/keys`);
+                    if (prefix) url.searchParams.set('prefix', prefix);
+                    
+                    const res = await fetch(url.toString(), {
+                        headers: { 'Authorization': `Bearer ${config.token}` }
+                    });
+                    
+                    if (!res.ok) return [];
+                    
+                    const data = await res.json();
+                    return data.result.map(k => k.name);
+                } catch (e) {
+                    return [];
+                }
+            }),
+            
+            disconnect: vi.fn(),
+            
+            getConnectionInfo: vi.fn().mockReturnValue({ provider: 'cloudflare' })
+        };
+    })
 }));
 
-jest.mock("../../src/services/cache/RedisCache.js", () => ({
-    RedisCache: jest.fn().mockImplementation(() => ({
-        initialize: jest.fn(),
-        getProviderName: jest.fn(() => 'redis'),
-        get: jest.fn(),
-        set: jest.fn(),
-        delete: jest.fn(),
-        disconnect: jest.fn()
-    }))
+vi.mock("../../src/services/cache/RedisCache.js", () => ({
+    RedisCache: vi.fn().mockImplementation(function() {
+        return {
+            connect: vi.fn().mockResolvedValue(undefined),
+            initialize: vi.fn(),
+            getProviderName: vi.fn().mockReturnValue('redis'),
+            get: vi.fn(),
+            set: vi.fn().mockResolvedValue(true),
+            delete: vi.fn().mockResolvedValue(true),
+            disconnect: vi.fn()
+        };
+    })
 }));
 
-jest.mock("../../src/services/cache/UpstashRHCache.js", () => ({
-    UpstashRHCache: jest.fn().mockImplementation(() => ({
-        initialize: jest.fn(),
-        getProviderName: jest.fn(() => 'upstash'),
-        get: jest.fn(),
-        set: jest.fn(),
-        delete: jest.fn(),
-        disconnect: jest.fn()
-    }))
+vi.mock("../../src/services/cache/UpstashRHCache.js", () => ({
+    UpstashRHCache: vi.fn().mockImplementation(function() {
+        return {
+            connect: vi.fn().mockResolvedValue(undefined),
+            initialize: vi.fn(),
+            getProviderName: vi.fn().mockReturnValue('upstash'),
+            get: vi.fn(),
+            set: vi.fn().mockResolvedValue(true),
+            delete: vi.fn().mockResolvedValue(true),
+            disconnect: vi.fn()
+        };
+    }),
+    UpstashRHCache: {
+        detectConfig: vi.fn(() => null)
+    }
 }));
 
-jest.mock("../../src/services/cache/MemoryCache.js", () => ({
-    MemoryCache: jest.fn().mockImplementation(() => ({
-        initialize: jest.fn(),
-        getProviderName: jest.fn(() => 'MemoryCache'),
-        get: jest.fn(() => null),
-        set: jest.fn(() => true),
-        delete: jest.fn(() => true),
-        listKeys: jest.fn(() => []),
-        disconnect: jest.fn()
-    }))
+vi.mock("../../src/services/cache/NorthFlankRTCache.js", () => ({
+    NorthFlankRTCache: vi.fn().mockImplementation(function() {
+        return {
+            connect: vi.fn().mockResolvedValue(undefined),
+            initialize: vi.fn(),
+            getProviderName: vi.fn().mockReturnValue('northflank'),
+            get: vi.fn(),
+            set: vi.fn().mockResolvedValue(true),
+            delete: vi.fn().mockResolvedValue(true),
+            disconnect: vi.fn()
+        };
+    }),
+    NorthFlankRTCache: {
+        detectConfig: vi.fn(() => null)
+    }
+}));
+
+vi.mock("../../src/services/cache/MemoryCache.js", () => ({
+    MemoryCache: vi.fn().mockImplementation(function() {
+        return {
+            connect: vi.fn().mockResolvedValue(undefined),
+            initialize: vi.fn(),
+            getProviderName: vi.fn(() => 'MemoryCache'),
+            get: vi.fn(() => null),
+            set: vi.fn(() => true),
+            delete: vi.fn(() => true),
+            listKeys: vi.fn(() => []),
+            disconnect: vi.fn()
+        };
+    })
 }));
 
 // Mock fetch globally
-const mockFetch = jest.fn();
+const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 // Import after mocking
@@ -87,9 +204,10 @@ describe("CacheService Integration Tests", () => {
 
     beforeEach(() => {
         process.env = { ...originalEnv };
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         mockFetch.mockClear();
-        jest.useFakeTimers();
+        vi.useFakeTimers();
+        vi.resetModules();
     });
 
     afterEach(async () => {
@@ -97,8 +215,8 @@ describe("CacheService Integration Tests", () => {
             await service.destroy().catch(() => {});
         }
         service = null;
-        jest.useRealTimers();
-        jest.clearAllTimers();
+        vi.useRealTimers();
+        vi.clearAllTimers();
     });
 
     describe("Cloudflare KV Provider", () => {

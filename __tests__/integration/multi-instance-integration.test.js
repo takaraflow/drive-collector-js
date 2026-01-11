@@ -1,7 +1,5 @@
-import { jest, describe, test, expect, beforeEach, beforeAll, afterAll } from "@jest/globals";
-
 // Mock the global fetch function
-const mockFetch = jest.fn();
+const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 // Store original process.env
@@ -21,17 +19,17 @@ describe("Multi-Instance Integration", () => {
       CF_D1_TOKEN: "mock_d1_token",
       INSTANCE_ID: "integration_test_instance",
     };
-    jest.resetModules();
+    vi.resetModules();
 
     // Mock CacheService to avoid actual Cloudflare API calls
-    jest.unstable_mockModule("../../src/services/CacheService.js", () => {
+    vi.mock("../../src/services/CacheService.js", () => {
       const mockCache = {
-        set: jest.fn().mockResolvedValue(true),
-        get: jest.fn().mockResolvedValue(null),
-        delete: jest.fn().mockResolvedValue(true),
-        listKeys: jest.fn().mockResolvedValue([]),
-        getCurrentProvider: jest.fn().mockReturnValue('mock'),
-        initialize: jest.fn().mockResolvedValue(undefined)
+        set: vi.fn().mockResolvedValue(true),
+        get: vi.fn().mockResolvedValue(null),
+        delete: vi.fn().mockResolvedValue(true),
+        listKeys: vi.fn().mockResolvedValue([]),
+        getCurrentProvider: vi.fn().mockReturnValue('mock'),
+        initialize: vi.fn().mockResolvedValue(undefined)
       };
       return {
         cache: mockCache,
@@ -49,7 +47,7 @@ describe("Multi-Instance Integration", () => {
   });
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     // Reset instance state
     instanceCoordinator.instanceId = "integration_test_instance";
     instanceCoordinator.isLeader = false;
@@ -72,8 +70,8 @@ describe("Multi-Instance Integration", () => {
 
   test("should handle task lock lifecycle", async () => {
     // Mock successful lock operations
-    const acquireLockSpy = jest.spyOn(instanceCoordinator, 'acquireTaskLock').mockResolvedValue(true);
-    const releaseLockSpy = jest.spyOn(instanceCoordinator, 'releaseTaskLock');
+    const acquireLockSpy = vi.spyOn(instanceCoordinator, 'acquireTaskLock').mockResolvedValue(true);
+    const releaseLockSpy = vi.spyOn(instanceCoordinator, 'releaseTaskLock');
 
     // Test task lock acquisition
     const lockAcquired = await instanceCoordinator.acquireTaskLock("test_task_123");
@@ -92,7 +90,7 @@ describe("Multi-Instance Integration", () => {
   test("should handle concurrent task processing simulation", async () => {
     // Simulate multiple instances trying to acquire the same task lock
     let lockCalls = 0;
-    const acquireLockSpy = jest.spyOn(instanceCoordinator, 'acquireTaskLock').mockImplementation(async (taskId) => {
+    const acquireLockSpy = vi.spyOn(instanceCoordinator, 'acquireTaskLock').mockImplementation(async (taskId) => {
       lockCalls++;
       // First call succeeds, second fails (simulating another instance holding the lock)
       return lockCalls === 1;
@@ -133,7 +131,7 @@ describe("Multi-Instance Integration", () => {
     instanceCoordinator.instanceId = instance1Id;
 
     // Instance 1 acquires the task lock
-    const acquireSpy = jest.spyOn(instanceCoordinator, 'acquireTaskLock').mockResolvedValue(true);
+    const acquireSpy = vi.spyOn(instanceCoordinator, 'acquireTaskLock').mockResolvedValue(true);
     const result1 = await instanceCoordinator.acquireTaskLock(taskId);
     expect(result1).toBe(true);
 
@@ -145,7 +143,7 @@ describe("Multi-Instance Integration", () => {
 
     // Instance 1 releases the lock
     instanceCoordinator.instanceId = instance1Id;
-    const releaseSpy = jest.spyOn(instanceCoordinator, 'releaseTaskLock');
+    const releaseSpy = vi.spyOn(instanceCoordinator, 'releaseTaskLock');
     await instanceCoordinator.releaseTaskLock(taskId);
     expect(releaseSpy).toHaveBeenCalledWith(taskId);
 

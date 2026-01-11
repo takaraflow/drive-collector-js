@@ -1,5 +1,3 @@
-import { jest } from '@jest/globals';
-
 describe('release-ai.js - Core Functions', () => {
   // 简化测试：只测试逻辑函数，不测试 git 命令
   describe('generateChineseChangelog', () => {

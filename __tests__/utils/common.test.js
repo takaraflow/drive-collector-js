@@ -1,21 +1,19 @@
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
-
 // Mock dependencies
 const mockClient = {
-    editMessage: jest.fn()
+    editMessage: vi.fn()
 };
-const mockRunBotTaskWithRetry = jest.fn();
+const mockRunBotTaskWithRetry = vi.fn();
 
-jest.unstable_mockModule('../../src/services/telegram.js', () => ({
+vi.mock('../../src/services/telegram.js', () => ({
     client: mockClient
 }));
 
-jest.unstable_mockModule('../../src/utils/limiter.js', () => ({
-    runBotTask: jest.fn(),
+vi.mock('../../src/utils/limiter.js', () => ({
+    runBotTask: vi.fn(),
     runBotTaskWithRetry: mockRunBotTaskWithRetry
 }));
 
-jest.unstable_mockModule('../../src/locales/zh-CN.js', () => ({
+vi.mock('../../src/locales/zh-CN.js', () => ({
     STRINGS: {
         task: {
             cancel_transfer_btn: 'cancel_transfer',
@@ -24,9 +22,9 @@ jest.unstable_mockModule('../../src/locales/zh-CN.js', () => ({
     }
 }));
 
-jest.unstable_mockModule('telegram/tl/custom/button.js', () => ({
+vi.mock('telegram/tl/custom/button.js', () => ({
     Button: {
-        inline: jest.fn((text, data) => ({ text, data: data.toString() }))
+        inline: vi.fn((text, data) => ({ text, data: data.toString() }))
     }
 }));
 
@@ -34,7 +32,7 @@ const { escapeHTML, safeEdit, getMediaInfo, updateStatus } = await import('../..
 
 describe('common utils', () => {
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         mockRunBotTaskWithRetry.mockImplementation(async (fn) => {
             return fn();
         });

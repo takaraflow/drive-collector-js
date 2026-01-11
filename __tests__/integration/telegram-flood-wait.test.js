@@ -1,4 +1,3 @@
-import { jest, describe, it, expect, beforeEach, afterEach, beforeAll } from '@jest/globals';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -8,11 +7,11 @@ const __dirname = path.dirname(__filename);
 // --- 1. Define Mock Data ---
 
 const mockLogger = {
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn()
-};
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn()
+, withModule: vi.fn().mockReturnThis(), withContext: vi.fn().mockReturnThis()};
 
 const mockConfig = {
     botToken: 'fake-token',
@@ -22,64 +21,76 @@ const mockConfig = {
 };
 
 const mockInstanceCoordinator = {
-    hasLock: jest.fn().mockResolvedValue(true),
-    releaseLock: jest.fn().mockResolvedValue(true)
+    hasLock: vi.fn().mockResolvedValue(true),
+    releaseLock: vi.fn().mockResolvedValue(true)
 };
 
 const mockSettingsRepository = {
-    get: jest.fn().mockResolvedValue(''),
-    set: jest.fn().mockResolvedValue(true)
+    get: vi.fn().mockResolvedValue(''),
+    set: vi.fn().mockResolvedValue(true)
 };
 
 const mockClient = {
-    connect: jest.fn(),
-    start: jest.fn(),
-    disconnect: jest.fn(),
+    connect: vi.fn(),
+    start: vi.fn(),
+    disconnect: vi.fn(),
     session: {
-        save: jest.fn().mockReturnValue('mock-session')
+        save: vi.fn().mockReturnValue('mock-session')
     },
     connected: false,
-    on: jest.fn(),
-    addEventHandler: jest.fn(),
-    getMe: jest.fn()
+    on: vi.fn(),
+    addEventHandler: vi.fn(),
+    getMe: vi.fn()
 };
 
-// --- 2. Calculate Absolute Path for Config ---
-// This ensures we mock the exact file instance regardless of import style
-const configAbsolutePath = path.resolve(__dirname, '../../src/config/index.js');
 
-// --- 3. Register Mocks (Before Imports) ---
 
-jest.unstable_mockModule('../../src/services/logger.js', () => ({
+vi.mock('../../src/services/logger.js', () => ({
     default: mockLogger,
     logger: mockLogger,
-    enableTelegramConsoleProxy: jest.fn()
+    enableTelegramConsoleProxy: vi.fn()
 }));
 
-jest.unstable_mockModule('../../src/repositories/SettingsRepository.js', () => ({
+vi.mock('../../src/repositories/SettingsRepository.js', () => ({
     SettingsRepository: mockSettingsRepository
 }));
 
-jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () => ({
+vi.mock('../../src/services/InstanceCoordinator.js', () => ({
     instanceCoordinator: mockInstanceCoordinator
 }));
 
-// CRITICAL: Mock using the absolute path to guarantee interception
-jest.unstable_mockModule(configAbsolutePath, () => ({
-    getConfig: jest.fn(() => mockConfig),
-    initConfig: jest.fn().mockResolvedValue(mockConfig),
+// CRITICAL: Mock using relative path to avoid initialization order issues
+vi.mock('../../src/config/index.js', () => ({
+    getConfig: vi.fn(() => mockConfig),
+    initConfig: vi.fn().mockResolvedValue(mockConfig),
     config: mockConfig,
     isInitialized: true,
-    validateConfig: jest.fn().mockReturnValue(true),
-    getRedisConnectionConfig: jest.fn().mockReturnValue({ url: '', options: {} })
+    validateConfig: vi.fn().mockReturnValue(true),
+    getRedisConnectionConfig: vi.fn().mockReturnValue({ url: '', options: {} })
 }));
 
-jest.unstable_mockModule('telegram', () => ({
-    TelegramClient: jest.fn(() => mockClient)
+// 创建一个 MockClient 类来模拟 TelegramClient
+class MockTelegramClient {
+    constructor() {
+        this.connect = vi.fn();
+        this.start = vi.fn();
+        this.disconnect = vi.fn();
+        this.session = {
+            save: vi.fn().mockReturnValue('mock-session')
+        };
+        this.connected = false;
+        this.on = vi.fn();
+        this.addEventHandler = vi.fn();
+        this.getMe = vi.fn();
+    }
+}
+
+vi.mock('telegram', () => ({
+    TelegramClient: vi.fn().mockImplementation(function() { return mockClient; })
 }));
 
-jest.unstable_mockModule('telegram/sessions/index.js', () => ({
-    StringSession: jest.fn()
+vi.mock('telegram/sessions/index.js', () => ({
+    StringSession: vi.fn()
 }));
 
 // --- 4. Import Variables ---
@@ -92,39 +103,41 @@ beforeAll(async () => {
     process.env.BOT_TOKEN = 'fake-token';
     process.env.NODE_ENV = 'test';
 
-    // CRITICAL: Isolate modules to force a fresh load with mocks active
-    await jest.isolateModulesAsync(async () => {
-        // Import Config first
-        const configModule = await import('../../src/config/index.js');
-        await configModule.initConfig();
+    // Import Config first - mocks are already active at module level
+    const configModule = await import('../../src/config/index.js');
+    await configModule.initConfig();
 
-        // Verify Mock
-        const config = configModule.getConfig();
-        if (!config._isMock) {
-            console.warn('[Test Setup] WARNING: Real config detected. Mock may have failed.');
-        }
+    // Verify Mock
+    const config = configModule.getConfig();
+    if (!config._isMock) {
+        console.warn('[Test Setup] WARNING: Real config detected. Mock may have failed.');
+    }
 
-        // Import Telegram Service
-        const telegramModule = await import('../../src/services/telegram.js');
-        connectAndStart = telegramModule.connectAndStart;
-        getCircuitBreakerState = telegramModule.getCircuitBreakerState;
-        resetCircuitBreaker = telegramModule.resetCircuitBreaker;
+    // Import Telegram Service
+    const telegramServiceModule = await import('../../src/services/telegram.js');
+    connectAndStart = telegramServiceModule.connectAndStart;
+    getCircuitBreakerState = telegramServiceModule.getCircuitBreakerState;
+    resetCircuitBreaker = telegramServiceModule.resetCircuitBreaker;
 
-        // Import Error Classifier
-        const classifierModule = await import('../../src/services/telegram-error-classifier.js');
-        TelegramErrorClassifier = classifierModule.TelegramErrorClassifier;
-    });
+    // Import Error Classifier
+    const classifierModule = await import('../../src/services/telegram-error-classifier.js');
+    TelegramErrorClassifier = classifierModule.TelegramErrorClassifier;
 });
 
 describe('Telegram Flood Wait Handling', () => {
     beforeEach(async () => {
-        jest.useFakeTimers();
-        jest.clearAllMocks();
+        vi.useFakeTimers();
+        vi.clearAllMocks();
 
         // Reset Client State
         mockClient.connected = false;
         mockClient.connect.mockReset();
         mockClient.start.mockReset();
+        mockClient.disconnect.mockReset();
+        mockClient.on.mockReset();
+        mockClient.addEventHandler.mockReset();
+        mockClient.getMe.mockReset();
+        mockClient.session.save.mockReset().mockReturnValue('mock-session');
 
         // Reset Circuit Breaker
         if (resetCircuitBreaker) {
@@ -133,7 +146,7 @@ describe('Telegram Flood Wait Handling', () => {
     });
 
     afterEach(() => {
-        jest.useRealTimers();
+        vi.useRealTimers();
     });
 
     it('should handle FloodWaitError during connect/start', async () => {
@@ -196,7 +209,7 @@ describe('Telegram Flood Wait Handling', () => {
         expect(state.state).toBe('OPEN');
 
         // Fast forward time past the wait duration (50s + buffer)
-        await jest.advanceTimersByTimeAsync(55000);
+        await vi.advanceTimersByTimeAsync(55000);
 
         // Verify it attempts recovery
         expect(mockLogger.info).toHaveBeenCalledWith(
@@ -216,7 +229,7 @@ describe('Telegram Flood Wait Handling', () => {
         expect(getCircuitBreakerState().state).toBe('OPEN');
 
         // 2. 快进时间超过等待时间 (30s + buffer)
-        await jest.advanceTimersByTimeAsync(35000);
+        await vi.advanceTimersByTimeAsync(35000);
 
         // 3. 此时重试应该成功（Mock 恢复正常）
         mockClient.connect.mockResolvedValueOnce(undefined);

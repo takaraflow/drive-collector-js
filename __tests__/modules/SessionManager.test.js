@@ -1,11 +1,9 @@
-import { jest, describe, test, expect, beforeEach } from "@jest/globals";
-
 // Mock kv service
-jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+vi.mock("../../src/services/CacheService.js", () => ({
   cache: {
-    get: jest.fn(),
-    set: jest.fn(),
-    delete: jest.fn(),
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
   },
 }));
 
@@ -14,7 +12,7 @@ const { cache: kv } = await import("../../src/services/CacheService.js");
 
 describe("SessionManager", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   test("should have the required static methods", () => {

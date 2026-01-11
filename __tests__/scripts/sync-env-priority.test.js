@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach, afterEach, beforeAll, jest } from "@jest/globals";
 import fs from 'fs';
 
 const originalEnv = { ...process.env };
@@ -7,8 +6,8 @@ let listSecretsMock;
 
 describe("sync-env - Environment Variable Priority", () => {
   beforeAll(async () => {
-    listSecretsMock = jest.fn(async () => ({ secrets: [] }));
-    await jest.unstable_mockModule('@infisical/sdk', () => {
+    listSecretsMock = vi.fn(async () => ({ secrets: [] }));
+    await vi.doMock('@infisical/sdk', () => {
       return {
         InfisicalSDK: class {
           auth() {
@@ -24,10 +23,10 @@ describe("sync-env - Environment Variable Priority", () => {
         }
       };
     });
-    await jest.unstable_mockModule('dotenv', () => ({
+    await vi.doMock('dotenv', () => ({
       default: {
-        config: jest.fn(),
-        parse: jest.fn()
+        config: vi.fn(),
+        parse: vi.fn()
       }
     }));
 
@@ -41,16 +40,16 @@ describe("sync-env - Environment Variable Priority", () => {
     process.env.INFISICAL_TOKEN = "";
     process.env.INFISICAL_PROJECT_ID = "";
     process.env.SKIP_INFISICAL_RUNTIME = "true";
-    jest.spyOn(console, 'log').mockImplementation(() => {});
-    jest.spyOn(console, 'warn').mockImplementation(() => {});
-    jest.spyOn(console, 'error').mockImplementation(() => {});
-    jest.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
-    jest.spyOn(fs, 'existsSync').mockReturnValue(false);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
   });
 
   afterEach(() => {
     process.env = { ...originalEnv };
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe("INFISICAL_ENV Priority", () => {

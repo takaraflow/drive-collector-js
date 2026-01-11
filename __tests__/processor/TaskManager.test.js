@@ -1,131 +1,129 @@
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
-
 // Mock all external dependencies
-jest.unstable_mockModule('../../src/services/telegram.js', () => ({
+vi.mock('../../src/services/telegram.js', () => ({
     default: {
-        sendMessage: jest.fn().mockResolvedValue(true),
-        editMessageText: jest.fn().mockResolvedValue(true),
-        sendChatAction: jest.fn().mockResolvedValue(true),
+        sendMessage: vi.fn().mockResolvedValue(true),
+        editMessageText: vi.fn().mockResolvedValue(true),
+        sendChatAction: vi.fn().mockResolvedValue(true),
     },
     client: {
-        getMessages: jest.fn().mockResolvedValue([]),
-        sendMessage: jest.fn().mockResolvedValue(true),
-        downloadMedia: jest.fn().mockResolvedValue(true),
+        getMessages: vi.fn().mockResolvedValue([]),
+        sendMessage: vi.fn().mockResolvedValue(true),
+        downloadMedia: vi.fn().mockResolvedValue(true),
         connected: true,
     }
 }));
 
-jest.unstable_mockModule('../../src/services/oss.js', () => ({
+vi.mock('../../src/services/oss.js', () => ({
     default: {
-        uploadFile: jest.fn().mockResolvedValue({ url: 'https://example.com/file.mp4' }),
+        uploadFile: vi.fn().mockResolvedValue({ url: 'https://example.com/file.mp4' }),
     },
     ossService: {
-        upload: jest.fn().mockResolvedValue({ success: true }),
+        upload: vi.fn().mockResolvedValue({ success: true }),
     }
 }));
 
-jest.unstable_mockModule('../../src/services/rclone.js', () => ({
+vi.mock('../../src/services/rclone.js', () => ({
     default: {
-        uploadFile: jest.fn().mockResolvedValue({ url: 'https://example.com/file.mp4' }),
+        uploadFile: vi.fn().mockResolvedValue({ url: 'https://example.com/file.mp4' }),
     },
     CloudTool: {
-        getRemoteFileInfo: jest.fn().mockResolvedValue(null),
-        uploadFile: jest.fn().mockResolvedValue({ success: true }),
-        listRemoteFiles: jest.fn().mockResolvedValue([]),
+        getRemoteFileInfo: vi.fn().mockResolvedValue(null),
+        uploadFile: vi.fn().mockResolvedValue({ success: true }),
+        listRemoteFiles: vi.fn().mockResolvedValue([]),
     }
 }));
 
-jest.unstable_mockModule('../../src/services/CacheService.js', () => ({
+vi.mock('../../src/services/CacheService.js', () => ({
     cache: {
-        get: jest.fn().mockResolvedValue(null),
-        set: jest.fn().mockResolvedValue(true),
-        delete: jest.fn().mockResolvedValue(true),
+        get: vi.fn().mockResolvedValue(null),
+        set: vi.fn().mockResolvedValue(true),
+        delete: vi.fn().mockResolvedValue(true),
     }
 }));
 
-jest.unstable_mockModule('../../src/repositories/TaskRepository.js', () => ({
+vi.mock('../../src/repositories/TaskRepository.js', () => ({
     TaskRepository: {
-        updateStatus: jest.fn().mockResolvedValue(),
-        findById: jest.fn().mockResolvedValue(null),
-        createBatch: jest.fn().mockResolvedValue(true),
-        markCancelled: jest.fn().mockResolvedValue(),
-        claimTask: jest.fn().mockResolvedValue(true),
+        updateStatus: vi.fn().mockResolvedValue(),
+        findById: vi.fn().mockResolvedValue(null),
+        createBatch: vi.fn().mockResolvedValue(true),
+        markCancelled: vi.fn().mockResolvedValue(),
+        claimTask: vi.fn().mockResolvedValue(true),
     }
 }));
 
-jest.unstable_mockModule('../../src/services/oss.js', () => ({
+vi.mock('../../src/services/oss.js', () => ({
     ossService: {
-        upload: jest.fn().mockResolvedValue({ url: 'https://oss.example.com/file.mp4' }),
+        upload: vi.fn().mockResolvedValue({ url: 'https://oss.example.com/file.mp4' }),
     }
 }));
 
-jest.unstable_mockModule('../../src/services/d1.js', () => ({
+vi.mock('../../src/services/d1.js', () => ({
     d1: {
-        prepare: jest.fn().mockReturnThis(),
-        bind: jest.fn().mockReturnThis(),
-        run: jest.fn().mockResolvedValue({ success: true }),
-        all: jest.fn().mockResolvedValue({ results: [] }),
-        first: jest.fn().mockResolvedValue(null),
-        batch: jest.fn().mockResolvedValue([{ success: true }]),
+        prepare: vi.fn().mockReturnThis(),
+        bind: vi.fn().mockReturnThis(),
+        run: vi.fn().mockResolvedValue({ success: true }),
+        all: vi.fn().mockResolvedValue({ results: [] }),
+        first: vi.fn().mockResolvedValue(null),
+        batch: vi.fn().mockResolvedValue([{ success: true }]),
     }
 }));
 
-jest.unstable_mockModule('../../src/services/logger.js', () => ({
+vi.mock('../../src/services/logger.js', () => ({
     default: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn(),
-        withModule: jest.fn().mockReturnThis(),
-        withContext: jest.fn().mockReturnThis(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis(),
     },
     logger: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn(),
-        withModule: jest.fn().mockReturnThis(),
-        withContext: jest.fn().mockReturnThis(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis(),
     }
 }));
 
-jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () => ({
+vi.mock('../../src/services/InstanceCoordinator.js', () => ({
     default: {
-        getInstanceId: jest.fn().mockReturnValue('test-instance'),
-        isPrimary: jest.fn().mockReturnValue(true),
-        acquireLock: jest.fn().mockResolvedValue(true),
-        releaseLock: jest.fn().mockResolvedValue(true),
-        hasLock: jest.fn().mockResolvedValue(true),
-        acquireTaskLock: jest.fn().mockResolvedValue(true),
-        releaseTaskLock: jest.fn().mockResolvedValue(true),
+        getInstanceId: vi.fn().mockReturnValue('test-instance'),
+        isPrimary: vi.fn().mockReturnValue(true),
+        acquireLock: vi.fn().mockResolvedValue(true),
+        releaseLock: vi.fn().mockResolvedValue(true),
+        hasLock: vi.fn().mockResolvedValue(true),
+        acquireTaskLock: vi.fn().mockResolvedValue(true),
+        releaseTaskLock: vi.fn().mockResolvedValue(true),
     },
     instanceCoordinator: {
-        getInstanceId: jest.fn().mockReturnValue('test-instance'),
-        isPrimary: jest.fn().mockReturnValue(true),
-        acquireLock: jest.fn().mockResolvedValue(true),
-        releaseLock: jest.fn().mockResolvedValue(true),
-        hasLock: jest.fn().mockResolvedValue(true),
-        acquireTaskLock: jest.fn().mockResolvedValue(true),
-        releaseTaskLock: jest.fn().mockResolvedValue(true),
+        getInstanceId: vi.fn().mockReturnValue('test-instance'),
+        isPrimary: vi.fn().mockReturnValue(true),
+        acquireLock: vi.fn().mockResolvedValue(true),
+        releaseLock: vi.fn().mockResolvedValue(true),
+        hasLock: vi.fn().mockResolvedValue(true),
+        acquireTaskLock: vi.fn().mockResolvedValue(true),
+        releaseTaskLock: vi.fn().mockResolvedValue(true),
     }
 }));
 
-jest.unstable_mockModule('../../src/services/QueueService.js', () => ({
+vi.mock('../../src/services/QueueService.js', () => ({
     queueService: {
-        publishTask: jest.fn().mockResolvedValue({ success: true }),
-        cancelTask: jest.fn().mockResolvedValue({ success: true }),
-        publishBatchTasks: jest.fn().mockResolvedValue({ success: true }),
+        publishTask: vi.fn().mockResolvedValue({ success: true }),
+        cancelTask: vi.fn().mockResolvedValue({ success: true }),
+        publishBatchTasks: vi.fn().mockResolvedValue({ success: true }),
     }
 }));
 
-jest.unstable_mockModule('../../src/utils/limiter.js', () => ({
-    handle429Error: jest.fn((fn) => fn()),
-    checkCooling: jest.fn().mockResolvedValue(false),
-    runBotTask: jest.fn((fn) => fn()),
-    runMtprotoTask: jest.fn((fn) => fn()),
-    runBotTaskWithRetry: jest.fn((fn) => fn()),
-    runMtprotoTaskWithRetry: jest.fn((fn) => fn()),
-    runMtprotoFileTaskWithRetry: jest.fn((fn) => fn()),
+vi.mock('../../src/utils/limiter.js', () => ({
+    handle429Error: vi.fn((fn) => fn()),
+    checkCooling: vi.fn().mockResolvedValue(false),
+    runBotTask: vi.fn((fn) => fn()),
+    runMtprotoTask: vi.fn((fn) => fn()),
+    runBotTaskWithRetry: vi.fn((fn) => fn()),
+    runMtprotoTaskWithRetry: vi.fn((fn) => fn()),
+    runMtprotoFileTaskWithRetry: vi.fn((fn) => fn()),
     PRIORITY: { UI: 20, HIGH: 10, NORMAL: 0, LOW: -10, BACKGROUND: -20 }
 }));
 
@@ -134,7 +132,7 @@ const { TaskManager } = await import('../../src/processor/TaskManager.js');
 
 describe('TaskManager', () => {
     beforeEach(async () => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         // Reset static properties
         TaskManager.waitingTasks = [];
         TaskManager.processingTasks = new Map();

@@ -1,21 +1,21 @@
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
-
 // Mock KV
 const mockKV = {
-    get: jest.fn(),
-    set: jest.fn().mockResolvedValue(true)
+    get: vi.fn(),
+    set: vi.fn().mockResolvedValue(true)
 };
-jest.unstable_mockModule('../../src/services/CacheService.js', () => ({
+vi.mock('../../src/services/CacheService.js', () => ({
     cache: mockKV
 }));
 
 // Mock logger
 const mockLogger = {
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    withModule: vi.fn().mockReturnThis(),
+    withContext: vi.fn().mockReturnThis()
 };
-jest.unstable_mockModule('../../src/services/logger.js', () => ({
+vi.mock('../../src/services/logger.js', () => ({
     default: mockLogger,
     logger: mockLogger
 }));
@@ -25,14 +25,14 @@ const { handle429Error } = await import('../../src/utils/limiter.js');
 
 describe('Limiter 429 & FloodWait Handling', () => {
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         mockKV.get.mockResolvedValue(null);
     });
 
     it('should handle 429 errors with retry', async () => {
         let callCount = 0;
-        const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
-        const mockTask = jest.fn().mockImplementation(() => {
+        const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+        const mockTask = vi.fn().mockImplementation(() => {
             callCount++;
             if (callCount === 1) {
                 const err = new Error('FloodWait');
@@ -44,18 +44,18 @@ describe('Limiter 429 & FloodWait Handling', () => {
         });
 
         // Use fake timers
-        jest.useFakeTimers();
+        vi.useFakeTimers();
         
         const promise = handle429Error(mockTask, 10);
         
         // Advance time for retry
-        await jest.advanceTimersByTimeAsync(1000);
+        await vi.advanceTimersByTimeAsync(1000);
         
         const result = await promise;
         expect(result).toBe('success');
         expect(callCount).toBe(2);
         
-        jest.useRealTimers();
+        vi.useRealTimers();
         randomSpy.mockRestore();
     });
 });

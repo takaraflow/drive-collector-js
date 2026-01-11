@@ -1,33 +1,95 @@
-import { jest } from '@jest/globals';
-
 // --- Mocks ---
-const mockSendMessage = jest.fn().mockResolvedValue({ id: 123 });
-const mockInvoke = jest.fn().mockResolvedValue({});
-const mockFindByUserId = jest.fn();
-const mockUpdateRemoteFolder = jest.fn();
-const mockSessionStart = jest.fn();
-const mockSessionGet = jest.fn();
-const mockSessionClear = jest.fn();
-const mockSettingsGet = jest.fn();
+vi.mock('../../src/config/index.js', () => ({
+    config: {
+        apiId: 12345,
+        apiHash: 'test-api-hash',
+        botToken: 'test-bot-token',
+        ownerId: '123456789',
+        downloadDir: '/tmp/downloads',
+        remoteName: 'test-remote',
+        remoteFolder: 'test-folder',
+        port: '3000',
+        http2: { enabled: false, plain: false, allowHttp1: true, keyPath: null, certPath: null },
+        redis: { url: null, token: null, tls: { enabled: false } },
+        kv: { accountId: null, namespaceId: null, token: null },
+        qstash: { token: null, currentSigningKey: null, nextSigningKey: null, webhookUrl: null },
+        oss: { endpoint: null, accessKeyId: null, secretAccessKey: null, bucket: 'drive-collector', publicUrl: null, workerUrl: null, workerSecret: null },
+        d1: { accountId: null, databaseId: null, token: null },
+        telegram: {
+            apiId: 12345,
+            apiHash: 'test-api-hash',
+            deviceModel: 'DriveCollector',
+            systemVersion: '1.0.0',
+            appVersion: '4.7.1',
+            serverDc: null,
+            serverIp: null,
+            serverPort: null,
+            testMode: false,
+            proxy: null
+        }
+    },
+    getConfig: vi.fn().mockReturnValue({
+        apiId: 12345,
+        apiHash: 'test-api-hash',
+        botToken: 'test-bot-token',
+        ownerId: '123456789',
+        downloadDir: '/tmp/downloads',
+        remoteName: 'test-remote',
+        remoteFolder: 'test-folder',
+        port: '3000',
+        http2: { enabled: false, plain: false, allowHttp1: true, keyPath: null, certPath: null },
+        redis: { url: null, token: null, tls: { enabled: false } },
+        kv: { accountId: null, namespaceId: null, token: null },
+        qstash: { token: null, currentSigningKey: null, nextSigningKey: null, webhookUrl: null },
+        oss: { endpoint: null, accessKeyId: null, secretAccessKey: null, bucket: 'drive-collector', publicUrl: null, workerUrl: null, workerSecret: null },
+        d1: { accountId: null, databaseId: null, token: null },
+        telegram: {
+            apiId: 12345,
+            apiHash: 'test-api-hash',
+            deviceModel: 'DriveCollector',
+            systemVersion: '1.0.0',
+            appVersion: '4.7.1',
+            serverDc: null,
+            serverIp: null,
+            serverPort: null,
+            testMode: false,
+            proxy: null
+        }
+    }),
+    initConfig: vi.fn(),
+    validateConfig: vi.fn().mockReturnValue(true),
+    getRedisConnectionConfig: vi.fn().mockReturnValue({ url: '', options: {} }),
+    __resetConfigForTests: vi.fn()
+}));
 
-await jest.unstable_mockModule('../../src/services/telegram.js', () => ({
+vi.mock('../../src/services/telegram.js', () => ({
     client: {
-        sendMessage: mockSendMessage,
-        invoke: mockInvoke
+        sendMessage: vi.fn().mockResolvedValue({ id: 123 }),
+        invoke: vi.fn().mockResolvedValue({})
     },
     isClientActive: () => true,
     getUpdateHealth: () => ({ lastUpdate: Date.now(), timeSince: 0 })
 }));
 
-await jest.unstable_mockModule('../../src/repositories/DriveRepository.js', () => ({
+// Create mock functions for DriveRepository
+const mockFindByUserId = vi.fn();
+const mockFindById = vi.fn().mockResolvedValue({ id: 'drive1', type: 'mega', remote_folder: null });
+const mockUpdateRemoteFolder = vi.fn();
+
+vi.mock('../../src/repositories/DriveRepository.js', () => ({
     DriveRepository: {
         findByUserId: mockFindByUserId,
-        findById: jest.fn().mockResolvedValue({ id: 'drive1', type: 'mega', remote_folder: null }),
+        findById: mockFindById,
         updateRemoteFolder: mockUpdateRemoteFolder
     }
 }));
 
-await jest.unstable_mockModule('../../src/modules/SessionManager.js', () => ({
+// Create mock functions for SessionManager
+const mockSessionStart = vi.fn();
+const mockSessionGet = vi.fn();
+const mockSessionClear = vi.fn();
+
+vi.mock('../../src/modules/SessionManager.js', () => ({
     SessionManager: {
         start: mockSessionStart,
         get: mockSessionGet,
@@ -35,47 +97,66 @@ await jest.unstable_mockModule('../../src/modules/SessionManager.js', () => ({
     }
 }));
 
-await jest.unstable_mockModule('../../src/repositories/SettingsRepository.js', () => ({
+// Create mock functions for SettingsRepository
+const mockSettingsGet = vi.fn();
+const mockSettingsSet = vi.fn();
+
+vi.mock('../../src/repositories/SettingsRepository.js', () => ({
     SettingsRepository: {
         get: mockSettingsGet,
-        set: jest.fn()
+        set: mockSettingsSet
     }
 }));
 
-await jest.unstable_mockModule('../../src/modules/AuthGuard.js', () => ({
+vi.mock('../../src/modules/AuthGuard.js', () => ({
     AuthGuard: {
-        getRole: jest.fn().mockResolvedValue('user'),
-        can: jest.fn().mockResolvedValue(true)
+        getRole: vi.fn().mockResolvedValue('user'),
+        can: vi.fn().mockResolvedValue(true)
     }
 }));
 
-await jest.unstable_mockModule('../../src/utils/limiter.js', () => ({
-    runBotTask: jest.fn((fn) => fn()),
-    runBotTaskWithRetry: jest.fn((fn) => fn()),
-    runMtprotoTask: jest.fn((fn) => fn()),
-    runMtprotoTaskWithRetry: jest.fn((fn) => fn()),
-    runMtprotoFileTask: jest.fn((fn) => fn()),
-    runMtprotoFileTaskWithRetry: jest.fn((fn) => fn()),
-    runAuthTask: jest.fn((fn) => fn()),
-    runAuthTaskWithRetry: jest.fn((fn) => fn()),
-    handle429Error: jest.fn((fn) => fn()),
-    createAutoScalingLimiter: jest.fn(() => ({ run: jest.fn((fn) => fn()) })),
+vi.mock('../../src/utils/limiter.js', () => ({
+    runBotTask: vi.fn((fn) => fn()),
+    runBotTaskWithRetry: vi.fn((fn) => fn()),
+    runMtprotoTask: vi.fn((fn) => fn()),
+    runMtprotoTaskWithRetry: vi.fn((fn) => fn()),
+    runMtprotoFileTask: vi.fn((fn) => fn()),
+    runMtprotoFileTaskWithRetry: vi.fn((fn) => fn()),
+    runAuthTask: vi.fn((fn) => fn()),
+    runAuthTaskWithRetry: vi.fn((fn) => fn()),
+    handle429Error: vi.fn((fn) => fn()),
+    createAutoScalingLimiter: vi.fn(() => ({ run: vi.fn((fn) => fn()) })),
     PRIORITY: { UI: 1, TASK: 2, NORMAL: 0, HIGH: 10, LOW: -10, BACKGROUND: -20 },
-    botLimiter: { run: jest.fn((fn) => fn()) }
+    botLimiter: { run: vi.fn((fn) => fn()) }
+}));
+
+// Create mock function for telegram client sendMessage
+const mockSendMessage = vi.fn().mockResolvedValue({ id: 123 });
+
+vi.doMock('../../src/services/telegram.js', () => ({
+    client: {
+        sendMessage: mockSendMessage,
+        invoke: vi.fn().mockResolvedValue({})
+    },
+    isClientActive: () => true,
+    getUpdateHealth: () => ({ lastUpdate: Date.now(), timeSince: 0 })
 }));
 
 // --- Import under test ---
 const { Dispatcher } = await import('../../src/dispatcher/Dispatcher.js');
-const { STRINGS } = await import('../../src/locales/zh-CN.js');
+import { STRINGS } from '../../src/locales/zh-CN.js';
 
 describe('Remote Folder Integration Tests', () => {
     const userId = '123456789';
     const target = { className: 'PeerUser', userId: BigInt(userId) };
 
-    beforeEach(() => {
-        jest.clearAllMocks();
-        mockSettingsGet.mockResolvedValue('public');
-        mockFindByUserId.mockResolvedValue({ id: 'drive1', type: 'mega', remote_folder: null });
+    beforeEach(async () => {
+        vi.clearAllMocks();
+        const { SettingsRepository } = await import('../../src/repositories/SettingsRepository.js');
+        const { DriveRepository } = await import('../../src/repositories/DriveRepository.js');
+        
+        SettingsRepository.get.mockResolvedValue('public');
+        DriveRepository.findByUserId.mockResolvedValue({ id: 'drive1', type: 'mega', remote_folder: null });
     });
 
     describe('/remote_folder command', () => {

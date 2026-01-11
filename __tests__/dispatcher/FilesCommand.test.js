@@ -1,50 +1,48 @@
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
-
 // --- Mocks ---
 const mockClient = {
-    sendMessage: jest.fn().mockResolvedValue({ id: 123 }),
+    sendMessage: vi.fn().mockResolvedValue({ id: 123 }),
 };
 const mockCloudTool = {
-    listRemoteFiles: jest.fn(),
-    isLoading: jest.fn().mockReturnValue(false)
+    listRemoteFiles: vi.fn(),
+    isLoading: vi.fn().mockReturnValue(false)
 };
 const mockDriveRepository = {
-    findByUserId: jest.fn().mockResolvedValue({ id: 1, type: 'mega' })
+    findByUserId: vi.fn().mockResolvedValue({ id: 1, type: 'mega' })
 };
 const mockUIHelper = {
-    renderFilesPage: jest.fn().mockReturnValue({ text: 'file list', buttons: [] })
+    renderFilesPage: vi.fn().mockReturnValue({ text: 'file list', buttons: [] })
 };
-const mockSafeEdit = jest.fn();
+const mockSafeEdit = vi.fn();
 const mockCacheService = {
-    get: jest.fn(),
-    set: jest.fn()
+    get: vi.fn(),
+    set: vi.fn()
 };
 
-jest.unstable_mockModule('../../src/services/telegram.js', () => ({
+vi.mock('../../src/services/telegram.js', () => ({
   client: mockClient,
-  isClientActive: jest.fn(() => true),
-  getUpdateHealth: jest.fn(() => ({
+  isClientActive: vi.fn(() => true),
+  getUpdateHealth: vi.fn(() => ({
     lastUpdate: 1699970000000,
     timeSince: 30000
   }))
 }));
-jest.unstable_mockModule('../../src/services/rclone.js', () => ({ CloudTool: mockCloudTool }));
-jest.unstable_mockModule('../../src/repositories/DriveRepository.js', () => ({ DriveRepository: mockDriveRepository }));
-jest.unstable_mockModule('../../src/ui/templates.js', () => ({ UIHelper: mockUIHelper }));
-jest.unstable_mockModule('../../src/utils/common.js', () => ({
+vi.mock('../../src/services/rclone.js', () => ({ CloudTool: mockCloudTool }));
+vi.mock('../../src/repositories/DriveRepository.js', () => ({ DriveRepository: mockDriveRepository }));
+vi.mock('../../src/ui/templates.js', () => ({ UIHelper: mockUIHelper }));
+vi.mock('../../src/utils/common.js', () => ({
     safeEdit: mockSafeEdit,
     escapeHTML: (t) => t,
-    getMediaInfo: jest.fn(),
-    updateStatus: jest.fn()
+    getMediaInfo: vi.fn(),
+    updateStatus: vi.fn()
 }));
 const mockPriority = { UI: 10, NORMAL: 0, LOW: -10, BACKGROUND: -20 };
 global.PRIORITY = mockPriority; // 注入全局变量
-jest.unstable_mockModule('../../src/utils/limiter.js', () => ({
-    runBotTask: jest.fn((fn) => fn()),
-    runBotTaskWithRetry: jest.fn((fn) => fn()),
-    runMtprotoTask: jest.fn((fn) => fn()),
-    runMtprotoTaskWithRetry: jest.fn((fn) => fn()),
-    runMtprotoFileTaskWithRetry: jest.fn((fn) => fn()),
+vi.mock('../../src/utils/limiter.js', () => ({
+    runBotTask: vi.fn((fn) => fn()),
+    runBotTaskWithRetry: vi.fn((fn) => fn()),
+    runMtprotoTask: vi.fn((fn) => fn()),
+    runMtprotoTaskWithRetry: vi.fn((fn) => fn()),
+    runMtprotoFileTaskWithRetry: vi.fn((fn) => fn()),
     PRIORITY: mockPriority
 }));
 
@@ -53,7 +51,7 @@ const { Dispatcher } = await import('../../src/dispatcher/Dispatcher.js');
 
 describe('Dispatcher /files command', () => {
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
     });
 
     it('should show loading immediately and then update with file list', async () => {

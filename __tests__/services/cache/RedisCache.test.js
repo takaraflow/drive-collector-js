@@ -1,4 +1,3 @@
-import { jest, describe, test, expect, beforeEach } from "@jest/globals";
 import { globalMocks, mockRedisConstructor } from "../../setup/external-mocks.js";
 
 const defaultConfig = { url: "redis://localhost:6379" };
@@ -9,9 +8,9 @@ const importRedisCache = async () => {
 };
 
 const createPipeline = () => ({
-  set: jest.fn().mockReturnThis(),
-  del: jest.fn().mockReturnThis(),
-  exec: jest.fn().mockResolvedValue([])
+  set: vi.fn().mockReturnThis(),
+  del: vi.fn().mockReturnThis(),
+  exec: vi.fn().mockResolvedValue([])
 });
 
 const resetRedisClientMocks = () => {
@@ -32,7 +31,7 @@ const resetRedisClientMocks = () => {
   globalMocks.redisClient.pipeline.mockReset().mockImplementation(createPipeline);
   globalMocks.redisClient.multi.mockReset().mockImplementation(createPipeline);
   globalMocks.redisClient.status = "ready";
-  mockRedisConstructor.mock.calls = [];
+  mockRedisConstructor.mockClear();
 };
 
 const buildCache = async (config = defaultConfig) => {
@@ -58,16 +57,19 @@ describe("RedisCache", () => {
   });
 
   test("should connect successfully", async () => {
-    const cache = await buildCache();
+      const cache = await buildCache();
 
-    expect(cache.client).toBeDefined();
-    expect(typeof cache.client.connect).toBe("function");
+      expect(cache.client).toBeDefined();
+      expect(typeof cache.client.connect).toBe("function");
 
-    globalMocks.redisClient.status = "end";
-    await cache.connect();
+      // Set status on the actual instance to trigger connect logic
+      cache.client.status = "end";
+      // For RedisCache.connect(), when client has connect method, it should call it
+      cache.client.connect.mockResolvedValueOnce(undefined);
+      await cache.connect();
 
-    expect(globalMocks.redisClient.connect).toHaveBeenCalledTimes(1);
-    expect(cache.connected).toBe(true);
+      expect(cache.client.connect).toHaveBeenCalledTimes(1);
+      expect(cache.connected).toBe(true);
   });
 
   test("should get value as JSON by default", async () => {

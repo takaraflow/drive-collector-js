@@ -1,4 +1,3 @@
-import { jest } from "@jest/globals";
 import { gracefulShutdown, registerShutdownHook } from "../../src/services/GracefulShutdown.js";
 
 describe("GracefulShutdown", () => {
@@ -15,7 +14,7 @@ describe("GracefulShutdown", () => {
         };
 
         // Mock process.exit
-        mockExit = jest.spyOn(process, 'exit').mockImplementation(() => {});
+        mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {});
     });
 
     afterEach(() => {
@@ -40,7 +39,7 @@ describe("GracefulShutdown", () => {
 
     describe("Shutdown Hooks", () => {
         test("应当能够注册关闭钩子", () => {
-            const mockCleanup = jest.fn().mockResolvedValue();
+            const mockCleanup = vi.fn().mockResolvedValue();
             registerShutdownHook(mockCleanup, 10, 'test-hook');
 
             expect(gracefulShutdown.shutdownHooks).toHaveLength(1);
@@ -48,9 +47,9 @@ describe("GracefulShutdown", () => {
         });
 
         test("应当按照优先级顺序排列关闭钩子", () => {
-            const hook1 = jest.fn().mockResolvedValue();
-            const hook2 = jest.fn().mockResolvedValue();
-            const hook3 = jest.fn().mockResolvedValue();
+            const hook1 = vi.fn().mockResolvedValue();
+            const hook2 = vi.fn().mockResolvedValue();
+            const hook3 = vi.fn().mockResolvedValue();
 
             registerShutdownHook(hook2, 20, 'hook2');
             registerShutdownHook(hook1, 10, 'hook1');
@@ -106,7 +105,7 @@ describe("GracefulShutdown", () => {
 
     describe("Shutdown Process", () => {
         test("应当能够触发关闭", async () => {
-            const mockCleanup = jest.fn().mockResolvedValue();
+            const mockCleanup = vi.fn().mockResolvedValue();
             registerShutdownHook(mockCleanup, 10, 'test-hook');
 
             await gracefulShutdown.executeCleanupHooks();
@@ -115,9 +114,9 @@ describe("GracefulShutdown", () => {
         });
 
         test("即使某个钩子失败，也应该继续执行其他钩子", async () => {
-            const hook1 = jest.fn().mockResolvedValue();
-            const hook2 = jest.fn().mockRejectedValue(new Error('Hook 2 failed'));
-            const hook3 = jest.fn().mockResolvedValue();
+            const hook1 = vi.fn().mockResolvedValue();
+            const hook2 = vi.fn().mockRejectedValue(new Error('Hook 2 failed'));
+            const hook3 = vi.fn().mockResolvedValue();
 
             registerShutdownHook(hook1, 10, 'hook1');
             registerShutdownHook(hook2, 20, 'hook2');
@@ -131,7 +130,7 @@ describe("GracefulShutdown", () => {
         });
 
         test("防止重复关闭", async () => {
-            const mockCleanup = jest.fn().mockResolvedValue();
+            const mockCleanup = vi.fn().mockResolvedValue();
             registerShutdownHook(mockCleanup, 10, 'test-hook');
 
             // 第一次触发

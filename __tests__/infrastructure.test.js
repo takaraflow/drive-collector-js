@@ -1,48 +1,56 @@
-import { jest } from '@jest/globals';
-
 // Simple deterministic test infrastructure
-const fixedTime = 1700000000000; 
+const fixedTime = 1700000000000;
 const mockTimeProvider = {
     now: () => fixedTime,
     setTimeout: global.setTimeout,
     clearTimeout: global.clearTimeout
 };
 
+// Mock time
+vi.mock('../src/utils/timeProvider.js', () => ({
+    default: {
+        now: () => 1700000000000,
+        setTimeout: global.setTimeout,
+        clearTimeout: global.clearTimeout
+    },
+    now: () => 1700000000000,
+    setTimeout: global.setTimeout,
+    clearTimeout: global.clearTimeout
+}));
+
+// Mock environment
+vi.mock('../src/config/env.js', () => ({
+    getEnv: () => ({ NODE_ENV: 'test', DEBUG: 'false' }),
+    NODE_ENV: 'test',
+    DEBUG: 'false'
+}));
+
 // Setup before any tests
 beforeAll(() => {
-    // Mock time
-    jest.unstable_mockModule('../src/utils/timeProvider.js', () => mockTimeProvider);
-    
-    // Mock environment
-    jest.unstable_mockModule('../src/config/env.js', () => ({
-        getEnv: () => ({ NODE_ENV: 'test', DEBUG: 'false' }),
-        NODE_ENV: 'test',
-        DEBUG: 'false'
-    }));
     
     // Mock console globally
     global.console = {
-        log: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn()
+        log: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
     };
     
     // Mock Math.random
     Object.defineProperty(Math, 'random', {
-        value: jest.fn(() => 0.5),
+        value: vi.fn(() => 0.5),
         configurable: true
     });
 });
 
 beforeEach(() => {
-    jest.clearAllMocks();
-    jest.useFakeTimers();
+    vi.clearAllMocks();
+    vi.useFakeTimers();
 });
 
 afterEach(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
 });
 
 describe('Test Infrastructure Compliance', () => {
@@ -71,7 +79,7 @@ describe('Test Infrastructure Compliance', () => {
 
     test('should use fake timers', () => {
         const startTime = mockTimeProvider.now();
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
         
         // With fake timers, we control time explicitly
         const endTime = mockTimeProvider.now();
@@ -121,8 +129,8 @@ describe('Test Infrastructure Compliance', () => {
 
     test('should have explicit mocks', () => {
         // All external dependencies should be explicitly mocked
-        expect(jest.isMockFunction(global.console.log)).toBe(true);
-        expect(jest.isMockFunction(Math.random)).toBe(true);
+        expect(vi.isMockFunction(global.console.log)).toBe(true);
+        expect(vi.isMockFunction(Math.random)).toBe(true);
     });
 
     test('should not use sleep', () => {

@@ -1,66 +1,64 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-
 // Mock dependencies to prevent real I/O
-jest.mock("../../src/config/index.js", () => ({
-    getConfig: jest.fn(() => ({ kv: {} })),
-    initConfig: jest.fn(async () => ({ kv: {} })),
+vi.mock("../../src/config/index.js", () => ({
+    getConfig: vi.fn(() => ({ kv: {} })),
+    initConfig: vi.fn(async () => ({ kv: {} })),
     config: { kv: {} }
 }));
 
-jest.mock("../../src/services/logger.js", () => ({
+vi.mock("../../src/services/logger.js", () => ({
     logger: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn()
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
     }
 }));
 
 // Mock all provider classes to prevent real connections
-jest.mock("../../src/services/cache/CloudflareKVCache.js", () => ({
-    CloudflareKVCache: jest.fn().mockImplementation(() => ({
-        initialize: jest.fn(),
-        getProviderName: jest.fn(() => 'cloudflare'),
-        get: jest.fn(),
-        set: jest.fn(),
-        delete: jest.fn(),
-        listKeys: jest.fn(),
-        disconnect: jest.fn(),
-        getConnectionInfo: jest.fn(() => ({ provider: 'cloudflare' }))
+vi.mock("../../src/services/cache/CloudflareKVCache.js", () => ({
+    CloudflareKVCache: vi.fn().mockImplementation(() => ({
+        initialize: vi.fn(),
+        getProviderName: vi.fn(() => 'cloudflare'),
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+        listKeys: vi.fn(),
+        disconnect: vi.fn(),
+        getConnectionInfo: vi.fn(() => ({ provider: 'cloudflare' }))
     }))
 }));
 
-jest.mock("../../src/services/cache/RedisCache.js", () => ({
-    RedisCache: jest.fn().mockImplementation(() => ({
-        initialize: jest.fn(),
-        getProviderName: jest.fn(() => 'redis'),
-        get: jest.fn(),
-        set: jest.fn(),
-        delete: jest.fn(),
-        disconnect: jest.fn()
+vi.mock("../../src/services/cache/RedisCache.js", () => ({
+    RedisCache: vi.fn().mockImplementation(() => ({
+        initialize: vi.fn(),
+        getProviderName: vi.fn(() => 'redis'),
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+        disconnect: vi.fn()
     }))
 }));
 
-jest.mock("../../src/services/cache/UpstashRHCache.js", () => ({
-    UpstashRHCache: jest.fn().mockImplementation(() => ({
-        initialize: jest.fn(),
-        getProviderName: jest.fn(() => 'upstash'),
-        get: jest.fn(),
-        set: jest.fn(),
-        delete: jest.fn(),
-        disconnect: jest.fn()
+vi.mock("../../src/services/cache/UpstashRHCache.js", () => ({
+    UpstashRHCache: vi.fn().mockImplementation(() => ({
+        initialize: vi.fn(),
+        getProviderName: vi.fn(() => 'upstash'),
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+        disconnect: vi.fn()
     }))
 }));
 
-jest.mock("../../src/services/cache/MemoryCache.js", () => ({
-    MemoryCache: jest.fn().mockImplementation(() => ({
-        initialize: jest.fn(),
-        getProviderName: jest.fn(() => 'MemoryCache'),
-        get: jest.fn(() => null),
-        set: jest.fn(() => true),
-        delete: jest.fn(() => true),
-        listKeys: jest.fn(() => []),
-        disconnect: jest.fn()
+vi.mock("../../src/services/cache/MemoryCache.js", () => ({
+    MemoryCache: vi.fn().mockImplementation(() => ({
+        initialize: vi.fn(),
+        getProviderName: vi.fn(() => 'MemoryCache'),
+        get: vi.fn(() => null),
+        set: vi.fn(() => true),
+        delete: vi.fn(() => true),
+        listKeys: vi.fn(() => []),
+        disconnect: vi.fn()
     }))
 }));
 
@@ -74,8 +72,8 @@ describe("CacheService Failover and Recovery Tests", () => {
 
     beforeEach(() => {
         process.env = { ...originalEnv };
-        jest.clearAllMocks();
-        jest.useFakeTimers();
+        vi.clearAllMocks();
+        vi.useFakeTimers();
         localCache.clear();
     });
 
@@ -84,8 +82,8 @@ describe("CacheService Failover and Recovery Tests", () => {
             await service.destroy().catch(() => {});
         }
         service = null;
-        jest.useRealTimers();
-        jest.clearAllTimers();
+        vi.useRealTimers();
+        vi.clearAllTimers();
         localCache.clear();
     });
 
@@ -93,13 +91,13 @@ describe("CacheService Failover and Recovery Tests", () => {
         test("should trigger failover after 3 consecutive failures", async () => {
             // Create a mock provider that always fails
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'failing-provider'),
-                get: jest.fn().mockRejectedValue(new Error("Connection failed")),
-                set: jest.fn().mockRejectedValue(new Error("Connection failed")),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'failing-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'failing-provider'),
+                get: vi.fn().mockRejectedValue(new Error("Connection failed")),
+                set: vi.fn().mockRejectedValue(new Error("Connection failed")),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'failing-provider' }))
             };
 
             service = new CacheService({ env: {} });
@@ -126,13 +124,13 @@ describe("CacheService Failover and Recovery Tests", () => {
 
         test("should not trigger failover if failures are below threshold", async () => {
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'failing-provider'),
-                get: jest.fn().mockRejectedValue(new Error("Connection failed")),
-                set: jest.fn(),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'failing-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'failing-provider'),
+                get: vi.fn().mockRejectedValue(new Error("Connection failed")),
+                set: vi.fn(),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'failing-provider' }))
             };
 
             service = new CacheService({ env: {} });
@@ -151,13 +149,13 @@ describe("CacheService Failover and Recovery Tests", () => {
 
         test("should handle mixed operations in failure counting", async () => {
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'failing-provider'),
-                get: jest.fn().mockRejectedValue(new Error("Get failed")),
-                set: jest.fn().mockRejectedValue(new Error("Set failed")),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'failing-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'failing-provider'),
+                get: vi.fn().mockRejectedValue(new Error("Get failed")),
+                set: vi.fn().mockRejectedValue(new Error("Set failed")),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'failing-provider' }))
             };
 
             service = new CacheService({ env: {} });
@@ -179,13 +177,13 @@ describe("CacheService Failover and Recovery Tests", () => {
     describe("Failover Behavior", () => {
         test("should degrade to Memory (L1) mode during failover", async () => {
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'failing-provider'),
-                get: jest.fn().mockRejectedValue(new Error("Connection failed")),
-                set: jest.fn(),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'failing-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'failing-provider'),
+                get: vi.fn().mockRejectedValue(new Error("Connection failed")),
+                set: vi.fn(),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'failing-provider' }))
             };
 
             service = new CacheService({ env: {} });
@@ -211,13 +209,13 @@ describe("CacheService Failover and Recovery Tests", () => {
 
         test("should not write to L2 during failover", async () => {
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'failing-provider'),
-                get: jest.fn().mockRejectedValue(new Error("Connection failed")),
-                set: jest.fn(),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'failing-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'failing-provider'),
+                get: vi.fn().mockRejectedValue(new Error("Connection failed")),
+                set: vi.fn(),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'failing-provider' }))
             };
 
             service = new CacheService({ env: {} });
@@ -232,7 +230,7 @@ describe("CacheService Failover and Recovery Tests", () => {
             await service.get("test-key");
 
             // Clear mock to track new calls
-            jest.clearAllMocks();
+            vi.clearAllMocks();
 
             // Try to set during failover
             await service.set("new-key", "new-value", 3600);
@@ -243,13 +241,13 @@ describe("CacheService Failover and Recovery Tests", () => {
 
         test("should return null for get operations when in failover mode and L1 miss", async () => {
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'failing-provider'),
-                get: jest.fn().mockRejectedValue(new Error("Connection failed")),
-                set: jest.fn(),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'failing-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'failing-provider'),
+                get: vi.fn().mockRejectedValue(new Error("Connection failed")),
+                set: vi.fn(),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'failing-provider' }))
             };
 
             service = new CacheService({ env: {} });
@@ -274,9 +272,9 @@ describe("CacheService Failover and Recovery Tests", () => {
         test("should attempt recovery periodically when in failover mode", async () => {
             let recoveryAttempts = 0;
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'failing-provider'),
-                get: jest.fn().mockImplementation((key) => {
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'failing-provider'),
+                get: vi.fn().mockImplementation((key) => {
                     if (key === '__recovery_check__') {
                         recoveryAttempts++;
                         if (recoveryAttempts >= 2) {
@@ -285,10 +283,10 @@ describe("CacheService Failover and Recovery Tests", () => {
                     }
                     return Promise.reject(new Error("Connection failed"));
                 }),
-                set: jest.fn(),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'failing-provider' }))
+                set: vi.fn(),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'failing-provider' }))
             };
 
             service = new CacheService({ env: {} });
@@ -306,7 +304,7 @@ describe("CacheService Failover and Recovery Tests", () => {
             expect(service.recoveryTimer).toBeDefined();
 
             // Fast-forward 30 seconds (recovery interval)
-            jest.advanceTimersByTime(30000);
+            vi.advanceTimersByTime(30000);
 
             // Should have attempted recovery
             expect(recoveryAttempts).toBeGreaterThan(0);
@@ -315,18 +313,18 @@ describe("CacheService Failover and Recovery Tests", () => {
         test("should recover from failover when provider comes back online", async () => {
             let shouldFail = true;
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'recovering-provider'),
-                get: jest.fn().mockImplementation((key) => {
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'recovering-provider'),
+                get: vi.fn().mockImplementation((key) => {
                     if (shouldFail) {
                         return Promise.reject(new Error("Connection failed"));
                     }
                     return Promise.resolve({ data: "recovered-value" });
                 }),
-                set: jest.fn().mockResolvedValue(true),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'recovering-provider' }))
+                set: vi.fn().mockResolvedValue(true),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'recovering-provider' }))
             };
 
             service = new CacheService({ env: {} });
@@ -346,7 +344,7 @@ describe("CacheService Failover and Recovery Tests", () => {
             shouldFail = false;
 
             // Fast-forward to trigger recovery check
-            jest.advanceTimersByTime(30000);
+            vi.advanceTimersByTime(30000);
 
             // Wait for recovery to complete
             await Promise.resolve();
@@ -362,13 +360,13 @@ describe("CacheService Failover and Recovery Tests", () => {
 
         test("should continue failover if recovery attempt fails", async () => {
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'still-failing-provider'),
-                get: jest.fn().mockRejectedValue(new Error("Still failing")),
-                set: jest.fn(),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'still-failing-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'still-failing-provider'),
+                get: vi.fn().mockRejectedValue(new Error("Still failing")),
+                set: vi.fn(),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'still-failing-provider' }))
             };
 
             service = new CacheService({ env: {} });
@@ -386,7 +384,7 @@ describe("CacheService Failover and Recovery Tests", () => {
 
             // Multiple recovery attempts
             for (let i = 0; i < 3; i++) {
-                jest.advanceTimersByTime(30000);
+                vi.advanceTimersByTime(30000);
                 await Promise.resolve();
             }
 
@@ -411,13 +409,13 @@ describe("CacheService Failover and Recovery Tests", () => {
 
         test("should stop recovery timer when destroy is called", async () => {
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'test-provider'),
-                get: jest.fn().mockRejectedValue(new Error("Fail")),
-                set: jest.fn(),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'test-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'test-provider'),
+                get: vi.fn().mockRejectedValue(new Error("Fail")),
+                set: vi.fn(),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'test-provider' }))
             };
 
             service = new CacheService({ env: {} });
@@ -440,13 +438,13 @@ describe("CacheService Failover and Recovery Tests", () => {
 
         test("should not start multiple recovery timers", async () => {
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'test-provider'),
-                get: jest.fn().mockRejectedValue(new Error("Fail")),
-                set: jest.fn(),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'test-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'test-provider'),
+                get: vi.fn().mockRejectedValue(new Error("Fail")),
+                set: vi.fn(),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'test-provider' }))
             };
 
             service = new CacheService({ env: {} });
@@ -463,7 +461,7 @@ describe("CacheService Failover and Recovery Tests", () => {
             const timer1 = service.recoveryTimer;
 
             // Try to trigger recovery again (should not create new timer)
-            jest.advanceTimersByTime(30000);
+            vi.advanceTimersByTime(30000);
             
             const timer2 = service.recoveryTimer;
             expect(timer1).toBe(timer2); // Same timer

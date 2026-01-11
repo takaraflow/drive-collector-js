@@ -1,5 +1,3 @@
-import { jest } from "@jest/globals";
-
 // ================== Mock 1: Config (Internal - 使用 unstable_mockModule) ==================
 const mockConfig = {
     apiId: 123456,       // 模拟 ID
@@ -15,89 +13,95 @@ const mockConfig = {
 };
 
 // 使用 unstable_mockModule 拦截内部 ESM 模块
-jest.unstable_mockModule("../../src/config/index.js", () => ({
+vi.mock("../../src/config/index.js", () => ({
     config: mockConfig,
-    getConfig: jest.fn(() => mockConfig),
-    default: { config: mockConfig, getConfig: jest.fn(() => mockConfig) }
+    getConfig: vi.fn(() => mockConfig),
+    default: { config: mockConfig, getConfig: vi.fn(() => mockConfig) }
 }));
 
 // ================== Mock 2: Logger (Internal) ==================
-let mockLoggerError = jest.fn();
-let mockLoggerWarn = jest.fn();
-let mockLoggerInfo = jest.fn();
-let mockLoggerDebug = jest.fn();
+let mockLoggerError = vi.fn();
+let mockLoggerWarn = vi.fn();
+let mockLoggerInfo = vi.fn();
+let mockLoggerDebug = vi.fn();
 
-jest.unstable_mockModule('../../src/services/logger.js', () => ({
+vi.mock('../../src/services/logger.js', () => ({
     logger: {
         error: mockLoggerError,
         warn: mockLoggerWarn,
         info: mockLoggerInfo,
         debug: mockLoggerDebug,
-        configure: jest.fn(),
-        isInitialized: jest.fn(() => true),
-        canSend: jest.fn(() => true)
+        configure: vi.fn(),
+        isInitialized: vi.fn(() => true),
+        canSend: vi.fn(() => true)
     },
-    enableTelegramConsoleProxy: jest.fn(),
-    disableTelegramConsoleProxy: jest.fn(),
-    resetLogger: jest.fn(),
-    setInstanceIdProvider: jest.fn(),
+    enableTelegramConsoleProxy: vi.fn(),
+    disableTelegramConsoleProxy: vi.fn(),
+    resetLogger: vi.fn(),
+    setInstanceIdProvider: vi.fn(),
     default: {
         error: mockLoggerError,
         warn: mockLoggerWarn,
         info: mockLoggerInfo,
         debug: mockLoggerDebug,
-        configure: jest.fn(),
-        isInitialized: jest.fn(() => true),
-        canSend: jest.fn(() => true)
+        configure: vi.fn(),
+        isInitialized: vi.fn(() => true),
+        canSend: vi.fn(() => true)
     }
 }));
 
-// ================== Mock 3: Telegram Library (External - 使用标准 jest.mock) ==================
-// 对于外部库，jest.mock 在 ESM 环境下更可靠
-jest.mock("telegram", () => ({
-    TelegramClient: jest.fn().mockImplementation(() => ({
-        connect: jest.fn().mockImplementation(function () {
+// ================== Mock 3: Telegram Library (External - 使用标准 vi.mock) ==================
+// 对于外部库，vi.mock 在 ESM 环境下更可靠
+vi.mock("telegram", () => ({
+    TelegramClient: vi.fn().mockImplementation(function() {
+        // 构造函数返回实例
+        this.connect = vi.fn().mockImplementation(function () {
             this.connected = true;
             return Promise.resolve();
-        }),
-        start: jest.fn().mockResolvedValue(undefined),
-        disconnect: jest.fn().mockResolvedValue(undefined),
-        on: jest.fn(),
-        addEventHandler: jest.fn(), // Telegram 库通常使用这个方法注册事件
-        getMe: jest.fn().mockResolvedValue({ id: 123 }),
-        session: { save: jest.fn().mockReturnValue("mock_session"), setDC: jest.fn() },
-        connected: true,
-        _sender: { disconnect: jest.fn().mockResolvedValue(undefined) }
-    })),
-    Api: { messages: { GetHistory: jest.fn() } }
+        });
+        this.start = vi.fn().mockResolvedValue(undefined);
+        this.disconnect = vi.fn().mockResolvedValue(undefined);
+        this.on = vi.fn();
+        this.addEventHandler = vi.fn(); // Telegram 库通常使用这个方法注册事件
+        this.getMe = vi.fn().mockResolvedValue({ id: 123 });
+        this.session = { save: vi.fn().mockReturnValue("mock_session"), setDC: vi.fn() };
+        this.connected = true;
+        this._sender = { disconnect: vi.fn().mockResolvedValue(undefined) };
+        
+        // 支持 new 关键字
+        return this;
+    }),
+    Api: { messages: { GetHistory: vi.fn() } }
 }));
 
-jest.mock("telegram/sessions/index.js", () => ({
-    StringSession: jest.fn().mockImplementation((sessionString) => ({
-        save: jest.fn().mockReturnValue(sessionString || "mock_session")
-    }))
+vi.mock("telegram/sessions/index.js", () => ({
+    StringSession: vi.fn().mockImplementation(function(sessionString) {
+      this.save = vi.fn().mockReturnValue(sessionString || "mock_session");
+      this.setDC = vi.fn();
+      return this;
+    })
 }));
 
 // ================== Mock 4: Axiom (External) ==================
-let mockAxiomIngest = jest.fn();
-jest.mock('@axiomhq/js', () => ({
-    Axiom: jest.fn().mockImplementation(() => ({
+let mockAxiomIngest = vi.fn();
+vi.mock('@axiomhq/js', () => ({
+    Axiom: vi.fn().mockImplementation(() => ({
         ingest: mockAxiomIngest
     }))
 }));
 
 // ================== Mock 5: Repositories (Internal) ==================
-jest.unstable_mockModule("../../src/repositories/SettingsRepository.js", () => ({
+vi.mock("../../src/repositories/SettingsRepository.js", () => ({
     SettingsRepository: {
-        get: jest.fn().mockResolvedValue(""),
-        set: jest.fn().mockResolvedValue(undefined)
+        get: vi.fn().mockResolvedValue(""),
+        set: vi.fn().mockResolvedValue(undefined)
     }
 }));
 
-jest.unstable_mockModule("../../src/services/InstanceCoordinator.js", () => ({
+vi.mock("../../src/services/InstanceCoordinator.js", () => ({
     instanceCoordinator: {
-        hasLock: jest.fn().mockResolvedValue(true),
-        releaseLock: jest.fn().mockResolvedValue(undefined)
+        hasLock: vi.fn().mockResolvedValue(true),
+        releaseLock: vi.fn().mockResolvedValue(undefined)
     }
 }));
 
@@ -112,10 +116,10 @@ describe("Telegram Service", () => {
     };
 
     beforeAll(async () => {
-        jest.useFakeTimers();
+        vi.useFakeTimers();
         
         // 【关键修复】重置模块缓存，确保使用最新的 Mock
-        jest.resetModules();
+        vi.resetModules();
 
         // 导入源代码
         module = await import("../../src/services/telegram.js");
@@ -123,7 +127,7 @@ describe("Telegram Service", () => {
     });
 
     afterAll(async () => {
-        jest.useRealTimers();
+        vi.useRealTimers();
         if (module.stopWatchdog) {
             module.stopWatchdog();
         }
@@ -136,19 +140,19 @@ describe("Telegram Service", () => {
         } catch (e) {
             // ignore
         }
-        jest.restoreAllMocks();
+        vi.restoreAllMocks();
     });
 
     beforeEach(() => {
-        jest.clearAllMocks();
-        jest.clearAllTimers();
+        vi.clearAllMocks();
+        vi.clearAllTimers();
     });
 
     afterEach(async () => {
         if (module.stopWatchdog) {
             module.stopWatchdog();
         }
-        jest.clearAllTimers();
+        vi.clearAllTimers();
     });
 
     test("should export client and related functions", () => {

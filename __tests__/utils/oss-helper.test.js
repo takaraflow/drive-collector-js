@@ -1,9 +1,22 @@
-import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import fs from 'fs';
 import path from 'path';
 import { Readable } from 'stream';
 
-jest.unstable_mockModule('../../src/config/index.js', () => ({
+// Mock AWS SDK modules first
+vi.mock('@aws-sdk/client-s3', () => ({
+  S3Client: vi.fn().mockImplementation(function() {
+    this.send = vi.fn();
+  })
+}));
+
+vi.mock('@aws-sdk/lib-storage', () => ({
+  Upload: vi.fn().mockImplementation(function() {
+    this.on = vi.fn();
+    this.done = vi.fn().mockResolvedValue({ Location: 's3://test' });
+  })
+}));
+
+vi.mock('../../src/config/index.js', () => ({
   config: {
     oss: {
       endpoint: 'https://test.r2',
@@ -13,7 +26,7 @@ jest.unstable_mockModule('../../src/config/index.js', () => ({
       publicUrl: 'https://test.public'
     }
   },
-  getConfig: jest.fn().mockReturnValue({
+  getConfig: vi.fn().mockReturnValue({
     oss: {
       endpoint: 'https://test.r2',
       accessKeyId: 'test-key',
@@ -25,26 +38,31 @@ jest.unstable_mockModule('../../src/config/index.js', () => ({
 }));
 
 const mockLogger = {
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  debug: jest.fn()
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+  withModule: vi.fn().mockReturnThis(),
+  withContext: vi.fn().mockReturnThis()
 };
 
-jest.unstable_mockModule('../../src/services/logger.js', () => ({
+vi.mock('../../src/services/logger.js', () => ({
   default: mockLogger,
   logger: mockLogger
 }));
 
-jest.mock('fs', () => ({
-  createReadStream: jest.fn()
+vi.mock('fs', () => ({
+  default: {
+    createReadStream: vi.fn()
+  },
+  createReadStream: vi.fn()
 }));
 
 const { ossHelper } = await import('../../src/utils/oss-helper.js');
 
 describe('OSSHelper', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('should initialize S3Client with valid config', () => {
@@ -57,20 +75,14 @@ describe('OSSHelper', () => {
   });
 
   it('should upload to S3 successfully', async () => {
-    const mockUpload = {
-      on: jest.fn(),
-      done: jest.fn().mockResolvedValue({ Location: 's3://test' })
-    };
-    const { Upload: UploadMock } = await import('@aws-sdk/lib-storage');
-    UploadMock.mockReturnValue(mockUpload);
-
     // Mock fs.createReadStream to return a readable stream
-    jest.spyOn(fs, 'createReadStream').mockReturnValue(Readable.from('test content'));
+    vi.spyOn(fs, 'createReadStream').mockReturnValue(Readable.from('test content'));
 
     const result = await ossHelper.uploadToS3('./test.mp4', 'remote.mp4');
 
-    expect(UploadMock).toHaveBeenCalledTimes(1);
-    expect(mockUpload.done).toHaveBeenCalledTimes(1);
+    // Verify Upload was called with correct parameters
+    const { Upload } = await import('@aws-sdk/lib-storage');
+    expect(Upload).toHaveBeenCalledTimes(1);
     expect(result.Location).toBe('s3://test');
   });
 
@@ -80,7 +92,7 @@ describe('OSSHelper', () => {
     ossHelper.s3Client = null;
 
     // Mock fs.createReadStream to return a readable stream
-    jest.spyOn(fs, 'createReadStream').mockReturnValue(Readable.from('test content'));
+    vi.spyOn(fs, 'createReadStream').mockReturnValue(Readable.from('test content'));
 
     await expect(ossHelper.uploadToS3('./test.mp4', 'remote.mp4')).rejects.toThrow('S3 客户端未初始化');
 

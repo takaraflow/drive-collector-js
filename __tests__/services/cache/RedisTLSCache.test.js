@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach } from "@jest/globals";
 import { globalMocks } from "../../setup/external-mocks.js";
 
 const defaultConfig = { url: "rediss://redis-host:6380" };
@@ -71,16 +70,19 @@ describe("RedisTLSCache", () => {
   });
 
   test("should connect successfully with TLS", async () => {
-    const cache = await buildCache({
-      url: defaultConfig.url,
-      rejectUnauthorized: true
-    });
+      const cache = await buildCache({
+          url: defaultConfig.url,
+          rejectUnauthorized: true
+      });
 
-    globalMocks.redisClient.status = "end";
-    await cache.connect();
+      // Set status on the actual instance to trigger connect logic
+      cache.client.status = "end";
+      // For RedisTLSCache.connect(), when client has connect method, it should call it
+      cache.client.connect.mockResolvedValueOnce(undefined);
+      await cache.connect();
 
-    expect(globalMocks.redisClient.connect).toHaveBeenCalledTimes(1);
-    expect(cache.connected).toBe(true);
+      expect(cache.client.connect).toHaveBeenCalledTimes(1);
+      expect(cache.connected).toBe(true);
   });
 
   test("should get provider name", async () => {

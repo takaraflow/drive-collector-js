@@ -1,7 +1,5 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-
-jest.mock("../../src/config/index.js", () => ({
-    getConfig: jest.fn(() => ({
+vi.mock("../../src/config/index.js", () => ({
+    getConfig: vi.fn(() => ({
         qstash: {
             token: 'test-token',
             webhookUrl: 'https://example.com',
@@ -9,7 +7,7 @@ jest.mock("../../src/config/index.js", () => ({
             nextSigningKey: 'key2'
         }
     })),
-    initConfig: jest.fn(async () => ({
+    initConfig: vi.fn(async () => ({
         qstash: {
             token: 'test-token',
             webhookUrl: 'https://example.com',
@@ -27,16 +25,22 @@ jest.mock("../../src/config/index.js", () => ({
     }
 }));
 
-jest.mock("../../src/services/logger.js", () => ({
+vi.mock("../../src/services/logger.js", () => ({
     logger: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn()
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis()
     },
     default: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn()
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis()
     }
 }));
 
@@ -47,14 +51,14 @@ describe("QueueService - Unit Tests", () => {
     let mockProvider;
 
     beforeEach(() => {
-        jest.useFakeTimers({ timerLimit: 10000, advanceTimers: true });
-        jest.spyOn(global.Math, 'random').mockReturnValue(0.5);
-        jest.clearAllMocks();
+        vi.useFakeTimers({ timerLimit: 10000, advanceTimers: true });
+        vi.spyOn(global.Math, 'random').mockReturnValue(0.5);
+        vi.clearAllMocks();
     });
 
     afterEach(() => {
-        jest.useRealTimers();
-        jest.restoreAllMocks();
+        vi.useRealTimers();
+        vi.restoreAllMocks();
     });
 
     test("should use QstashQueue as default provider", async () => {
@@ -67,12 +71,12 @@ describe("QueueService - Unit Tests", () => {
 
     test("should accept custom queue provider", async () => {
         mockProvider = {
-            initialize: jest.fn(),
-            publish: jest.fn().mockResolvedValue({ messageId: 'custom-id' }),
-            batchPublish: jest.fn().mockResolvedValue([{ messageId: 'custom-id' }]),
-            verifyWebhook: jest.fn().mockResolvedValue(true),
-            getCircuitBreakerStatus: jest.fn().mockReturnValue({ state: 'CLOSED' }),
-            resetCircuitBreaker: jest.fn()
+            initialize: vi.fn(),
+            publish: vi.fn().mockResolvedValue({ messageId: 'custom-id' }),
+            batchPublish: vi.fn().mockResolvedValue([{ messageId: 'custom-id' }]),
+            verifyWebhook: vi.fn().mockResolvedValue(true),
+            getCircuitBreakerStatus: vi.fn().mockReturnValue({ state: 'CLOSED' }),
+            resetCircuitBreaker: vi.fn()
         };
 
         service = new QueueService(mockProvider);
@@ -84,12 +88,12 @@ describe("QueueService - Unit Tests", () => {
 
     test("should add metadata to published messages", async () => {
         mockProvider = {
-            initialize: jest.fn(),
-            publish: jest.fn().mockResolvedValue({ messageId: 'msg-123' }),
-            batchPublish: jest.fn().mockResolvedValue([]),
-            verifyWebhook: jest.fn(),
-            getCircuitBreakerStatus: jest.fn(),
-            resetCircuitBreaker: jest.fn()
+            initialize: vi.fn(),
+            publish: vi.fn().mockResolvedValue({ messageId: 'msg-123' }),
+            batchPublish: vi.fn().mockResolvedValue([]),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
         };
 
         service = new QueueService(mockProvider);
@@ -116,12 +120,12 @@ describe("QueueService - Unit Tests", () => {
 
     test("should preserve original message properties", async () => {
         mockProvider = {
-            initialize: jest.fn(),
-            publish: jest.fn().mockResolvedValue({ messageId: 'msg-123' }),
-            batchPublish: jest.fn().mockResolvedValue([]),
-            verifyWebhook: jest.fn(),
-            getCircuitBreakerStatus: jest.fn(),
-            resetCircuitBreaker: jest.fn()
+            initialize: vi.fn(),
+            publish: vi.fn().mockResolvedValue({ messageId: 'msg-123' }),
+            batchPublish: vi.fn().mockResolvedValue([]),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
         };
 
         service = new QueueService(mockProvider);
@@ -137,12 +141,12 @@ describe("QueueService - Unit Tests", () => {
 
     test("should call enqueueDownloadTask with correct topic and data", async () => {
         mockProvider = {
-            initialize: jest.fn(),
-            publish: jest.fn().mockResolvedValue({ messageId: 'msg-123' }),
-            batchPublish: jest.fn().mockResolvedValue([]),
-            verifyWebhook: jest.fn(),
-            getCircuitBreakerStatus: jest.fn(),
-            resetCircuitBreaker: jest.fn()
+            initialize: vi.fn(),
+            publish: vi.fn().mockResolvedValue({ messageId: 'msg-123' }),
+            batchPublish: vi.fn().mockResolvedValue([]),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
         };
 
         service = new QueueService(mockProvider);
@@ -163,12 +167,12 @@ describe("QueueService - Unit Tests", () => {
 
     test("should call enqueueUploadTask with correct topic and data", async () => {
         mockProvider = {
-            initialize: jest.fn(),
-            publish: jest.fn().mockResolvedValue({ messageId: 'msg-123' }),
-            batchPublish: jest.fn().mockResolvedValue([]),
-            verifyWebhook: jest.fn(),
-            getCircuitBreakerStatus: jest.fn(),
-            resetCircuitBreaker: jest.fn()
+            initialize: vi.fn(),
+            publish: vi.fn().mockResolvedValue({ messageId: 'msg-123' }),
+            batchPublish: vi.fn().mockResolvedValue([]),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
         };
 
         service = new QueueService(mockProvider);
@@ -189,12 +193,12 @@ describe("QueueService - Unit Tests", () => {
 
     test("should call broadcastSystemEvent with correct topic and data", async () => {
         mockProvider = {
-            initialize: jest.fn(),
-            publish: jest.fn().mockResolvedValue({ messageId: 'msg-123' }),
-            batchPublish: jest.fn().mockResolvedValue([]),
-            verifyWebhook: jest.fn(),
-            getCircuitBreakerStatus: jest.fn(),
-            resetCircuitBreaker: jest.fn()
+            initialize: vi.fn(),
+            publish: vi.fn().mockResolvedValue({ messageId: 'msg-123' }),
+            batchPublish: vi.fn().mockResolvedValue([]),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
         };
 
         service = new QueueService(mockProvider);
@@ -214,12 +218,12 @@ describe("QueueService - Unit Tests", () => {
 
     test("should batch publish with enhanced messages", async () => {
         mockProvider = {
-            initialize: jest.fn(),
-            publish: jest.fn().mockResolvedValue({ messageId: 'msg-123' }),
-            batchPublish: jest.fn().mockResolvedValue([{ messageId: 'msg-123' }]),
-            verifyWebhook: jest.fn(),
-            getCircuitBreakerStatus: jest.fn(),
-            resetCircuitBreaker: jest.fn()
+            initialize: vi.fn(),
+            publish: vi.fn().mockResolvedValue({ messageId: 'msg-123' }),
+            batchPublish: vi.fn().mockResolvedValue([{ messageId: 'msg-123' }]),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
         };
 
         service = new QueueService(mockProvider);
@@ -254,12 +258,12 @@ describe("QueueService - Unit Tests", () => {
 
     test("should verify webhook signature through provider", async () => {
         mockProvider = {
-            initialize: jest.fn(),
-            publish: jest.fn(),
-            batchPublish: jest.fn(),
-            verifyWebhook: jest.fn().mockResolvedValue(true),
-            getCircuitBreakerStatus: jest.fn(),
-            resetCircuitBreaker: jest.fn()
+            initialize: vi.fn(),
+            publish: vi.fn(),
+            batchPublish: vi.fn(),
+            verifyWebhook: vi.fn().mockResolvedValue(true),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
         };
 
         service = new QueueService(mockProvider);
@@ -274,12 +278,12 @@ describe("QueueService - Unit Tests", () => {
     test("should get circuit breaker status from provider", async () => {
         const mockStatus = { state: 'OPEN', failureCount: 5 };
         mockProvider = {
-            initialize: jest.fn(),
-            publish: jest.fn(),
-            batchPublish: jest.fn(),
-            verifyWebhook: jest.fn(),
-            getCircuitBreakerStatus: jest.fn().mockReturnValue(mockStatus),
-            resetCircuitBreaker: jest.fn()
+            initialize: vi.fn(),
+            publish: vi.fn(),
+            batchPublish: vi.fn(),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn().mockReturnValue(mockStatus),
+            resetCircuitBreaker: vi.fn()
         };
 
         service = new QueueService(mockProvider);
@@ -293,12 +297,12 @@ describe("QueueService - Unit Tests", () => {
 
     test("should reset circuit breaker through provider", async () => {
         mockProvider = {
-            initialize: jest.fn(),
-            publish: jest.fn(),
-            batchPublish: jest.fn(),
-            verifyWebhook: jest.fn(),
-            getCircuitBreakerStatus: jest.fn(),
-            resetCircuitBreaker: jest.fn()
+            initialize: vi.fn(),
+            publish: vi.fn(),
+            batchPublish: vi.fn(),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
         };
 
         service = new QueueService(mockProvider);
@@ -311,10 +315,10 @@ describe("QueueService - Unit Tests", () => {
 
     test("should handle provider without circuit breaker methods", async () => {
         mockProvider = {
-            initialize: jest.fn(),
-            publish: jest.fn(),
-            batchPublish: jest.fn(),
-            verifyWebhook: jest.fn()
+            initialize: vi.fn(),
+            publish: vi.fn(),
+            batchPublish: vi.fn(),
+            verifyWebhook: vi.fn()
         };
 
         service = new QueueService(mockProvider);

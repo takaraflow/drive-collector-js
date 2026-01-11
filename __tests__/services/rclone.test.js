@@ -1,41 +1,40 @@
-import { jest } from '@jest/globals';
 import { EventEmitter } from 'events';
 
 // --- Mocks Definitions ---
-const mockFindByUserId = jest.fn();
-const mockSpawn = jest.fn();
-const mockSpawnSync = jest.fn();
+const mockFindByUserId = vi.fn();
+const mockSpawn = vi.fn();
+const mockSpawnSync = vi.fn();
 const mockCache = new Map();
 const mockCacheService = {
-    get: jest.fn((key) => mockCache.get(key)),
-    set: jest.fn((key, val) => mockCache.set(key, val)),
+    get: vi.fn((key) => mockCache.get(key)),
+    set: vi.fn((key, val) => mockCache.set(key, val)),
 };
 
 // --- Module Mocks ---
-jest.unstable_mockModule('../../src/repositories/DriveRepository.js', () => ({
+vi.mock('../../src/repositories/DriveRepository.js', () => ({
     DriveRepository: {
         findByUserId: mockFindByUserId
     }
 }));
 
-jest.unstable_mockModule('child_process', () => ({
+vi.mock('child_process', () => ({
     spawn: mockSpawn,
     spawnSync: mockSpawnSync,
-    execSync: jest.fn()
+    execSync: vi.fn()
 }));
 
-jest.unstable_mockModule('../../src/config/index.js', () => ({
+vi.mock('../../src/config/index.js', () => ({
     config: {
         remoteFolder: 'test-folder'
     }
 }));
 
 const mockKv = {
-    get: jest.fn(),
-    set: jest.fn().mockResolvedValue(true)
+    get: vi.fn(),
+    set: vi.fn().mockResolvedValue(true)
 };
 
-jest.unstable_mockModule('../../src/services/CacheService.js', () => ({
+vi.mock('../../src/services/CacheService.js', () => ({
     cache: mockKv
 }));
 
@@ -48,8 +47,8 @@ const createAutoProcess = (onSpawn) => {
     const proc = new EventEmitter();
     proc.stdout = new EventEmitter();
     proc.stderr = new EventEmitter();
-    proc.stdin = { write: jest.fn(), end: jest.fn() };
-    proc.kill = jest.fn();
+    proc.stdin = { write: vi.fn(), end: vi.fn() };
+    proc.kill = vi.fn();
 
     if (onSpawn) {
         setTimeout(() => onSpawn(proc), 0);
@@ -60,8 +59,8 @@ const createAutoProcess = (onSpawn) => {
 
 describe('CloudTool', () => {
     beforeEach(() => {
-        jest.useRealTimers();
-        jest.clearAllMocks();
+        vi.useRealTimers();
+        vi.clearAllMocks();
         mockCache.clear();
         mockKv.get.mockClear();
         mockKv.set.mockClear();
@@ -81,7 +80,7 @@ describe('CloudTool', () => {
                 proc.stdin?.write?.mockClear(); // stdin 是对象，不需要 remove listeners
             }
         });
-        jest.useRealTimers();
+        vi.useRealTimers();
     });
 
     describe('_getUserConfig', () => {
@@ -223,7 +222,7 @@ describe('CloudTool', () => {
                 p.emit('exit', 0);
                 p.emit('close', 0);
             }));
-            const onProgress = jest.fn();
+            const onProgress = vi.fn();
             const task = { userId: 'user123', localPath: '/local/path' }; // 移除 id
             await CloudTool.uploadFile('/local/path', task, onProgress);
             expect(onProgress).toHaveBeenCalled();
@@ -349,15 +348,15 @@ describe('CloudTool', () => {
                     p.emit('close', 0);
                 }));
 
-            jest.useFakeTimers();
+            vi.useFakeTimers();
 
             const infoPromise = CloudTool.getRemoteFileInfo('retry.txt', 'user123', 3);
 
-            jest.runAllTicks();
+            vi.runAllTicks();
 
             for (let i = 0; i < 50; i++) {
-                jest.advanceTimersByTime(10000);
-                jest.runAllTicks();
+                vi.advanceTimersByTime(10000);
+                vi.runAllTicks();
                 await Promise.resolve();
                 await Promise.resolve();
             }
@@ -367,7 +366,7 @@ describe('CloudTool', () => {
             expect(info.Name).toBe('retry.txt');
             expect(mockSpawn).toHaveBeenCalledTimes(3);
 
-            jest.useRealTimers();
+            vi.useRealTimers();
         });
 
         it('should return null after all retries fail', async () => {
@@ -381,15 +380,15 @@ describe('CloudTool', () => {
                 p.emit('close', 1);
             }));
 
-            jest.useFakeTimers();
+            vi.useFakeTimers();
 
             const infoPromise = CloudTool.getRemoteFileInfo('missing.txt', 'user123', 2);
 
-            jest.runAllTicks();
+            vi.runAllTicks();
 
             for (let i = 0; i < 50; i++) {
-                jest.advanceTimersByTime(10000);
-                jest.runAllTicks();
+                vi.advanceTimersByTime(10000);
+                vi.runAllTicks();
                 await Promise.resolve();
                 await Promise.resolve();
             }
@@ -398,7 +397,7 @@ describe('CloudTool', () => {
 
             expect(info).toBeNull();
 
-            jest.useRealTimers();
+            vi.useRealTimers();
         });
 
         it('should handle JSON parsing errors and retry', async () => {
@@ -422,13 +421,13 @@ describe('CloudTool', () => {
                     p.emit('close', 0);
                 }));
 
-            jest.useFakeTimers();
+            vi.useFakeTimers();
 
             const infoPromise = CloudTool.getRemoteFileInfo('ok.txt', 'user123', 2);
 
             for (let i = 0; i < 50; i++) {
-                jest.advanceTimersByTime(10000);
-                jest.runAllTicks();
+                vi.advanceTimersByTime(10000);
+                vi.runAllTicks();
                 await Promise.resolve();
                 await Promise.resolve();
             }
@@ -437,7 +436,7 @@ describe('CloudTool', () => {
 
             expect(info.Name).toBe('ok.txt');
 
-            jest.useRealTimers();
+            vi.useRealTimers();
         });
     });
 

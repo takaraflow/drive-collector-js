@@ -1,37 +1,39 @@
-import { jest, describe, test, expect, beforeEach, beforeAll } from "@jest/globals";
-
 // Mock fetch
-const mockFetch = jest.fn();
+const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 // Mock logger
-await jest.unstable_mockModule("../../../src/services/logger.js", () => ({
+await vi.doMock("../../../src/services/logger.js", () => ({
     logger: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn(),
-        child: jest.fn().mockReturnThis(),
-        configure: jest.fn(),
-        isInitialized: jest.fn().mockReturnValue(true),
-        canSend: jest.fn().mockReturnValue(true)
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        child: vi.fn().mockReturnThis(),
+        configure: vi.fn(),
+        isInitialized: vi.fn().mockReturnValue(true),
+        canSend: vi.fn().mockReturnValue(true),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis()
     },
     default: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn(),
-        child: jest.fn().mockReturnThis(),
-        configure: jest.fn(),
-        isInitialized: jest.fn().mockReturnValue(true),
-        canSend: jest.fn().mockReturnValue(true)
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        child: vi.fn().mockReturnThis(),
+        configure: vi.fn(),
+        isInitialized: vi.fn().mockReturnValue(true),
+        canSend: vi.fn().mockReturnValue(true),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis()
     },
-    setInstanceIdProvider: jest.fn(),
-    enableTelegramConsoleProxy: jest.fn(),
-    disableTelegramConsoleProxy: jest.fn(),
-    resetLogger: jest.fn(),
-    delay: jest.fn().mockResolvedValue(undefined),
-    retryWithDelay: jest.fn().mockImplementation(async (fn) => await fn())
+    setInstanceIdProvider: vi.fn(),
+    enableTelegramConsoleProxy: vi.fn(),
+    disableTelegramConsoleProxy: vi.fn(),
+    resetLogger: vi.fn(),
+    delay: vi.fn().mockResolvedValue(undefined),
+    retryWithDelay: vi.fn().mockImplementation(async (fn) => await fn())
 }));
 
 let CloudflareKVCache;
@@ -43,7 +45,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
     mockFetch.mockReset();
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 });
 
 describe("CloudflareKVCache", () => {
