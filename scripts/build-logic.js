@@ -366,6 +366,9 @@ function generateWranglerToml() {
         process.exit(1);
     }
 
+    // 移除模板中已有的 [vars] 表，避免重复定义
+    tomlContent = tomlContent.replace(/\[vars\][\s\S]*?(?=\[|$)/g, '');
+
     const varsResult = buildVarsSection(envConfig);
     tomlContent = `${tomlContent.trimEnd()}\n\n${varsResult.section}\n`;
     fs.writeFileSync(tomlPath, tomlContent);
