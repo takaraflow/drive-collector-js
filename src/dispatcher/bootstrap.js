@@ -29,10 +29,14 @@ export async function startDispatcher() {
         }
     });
 
+    let loopCount = 0;
     const startTelegramClient = async () => {
+        const currentLoop = ++loopCount;
+        log.debug(`[Loop ${currentLoop}] 🔄 开始执行 startTelegramClient...`);
+        
         // 防止重入：如果正在启动中，直接返回
         if (isClientStarting) {
-            log.debug("⏳ 客户端正在启动中，跳过本次重试...");
+            log.debug(`[Loop ${currentLoop}] ⏳ 客户端正在启动中，跳过本次重试...`);
             return false;
         }
 
@@ -146,6 +150,7 @@ export async function startDispatcher() {
         } finally {
             // 无论成功失败，最后都要清除启动标志
             isClientStarting = false;
+            log.debug(`[Loop ${currentLoop}] ✅ startTelegramClient 执行完毕`);
         }
         return isClientActive;
     };

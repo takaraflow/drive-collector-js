@@ -1,46 +1,8 @@
 import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
 
-jest.mock("../../../src/config/index.js", () => {
-    const config = {
-        qstash: {
-            token: 'test-token',
-            webhookUrl: 'https://example.com',
-            currentSigningKey: 'key1',
-            nextSigningKey: 'key2'
-        }
-    };
-    return {
-        config: config,
-        getConfig: jest.fn(() => config),
-        default: { config: config, getConfig: jest.fn(() => config) }
-    };
-});
-
-jest.mock("../../../src/services/logger.js", () => ({
-    logger: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn()
-    },
-    default: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn()
-    }
-}));
-
-jest.mock("../../../src/services/CircuitBreaker.js", () => ({
-    CircuitBreakerManager: {
-        get: jest.fn().mockReturnValue({
-            execute: async (cmd, fallback) => cmd(),
-            getStatus: () => ({ state: 'CLOSED', failureCount: 0 }),
-            reset: () => {}
-        })
-    }
-}));
-
-import { QstashQueue } from "../../../src/services/queue/QstashQueue.js";
-import { BaseQueue } from "../../../src/services/queue/BaseQueue.js";
+// 动态导入模块
+const { QstashQueue } = await import("../../../src/services/queue/QstashQueue.js");
+const { BaseQueue } = await import("../../../src/services/queue/BaseQueue.js");
 
 describe("QstashQueue - Unit Tests", () => {
     let queue;

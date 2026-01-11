@@ -1,9 +1,4 @@
 import { jest, describe, it, expect, beforeEach, afterEach, beforeAll } from '@jest/globals';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // --- 1. Define Mock Data ---
 
@@ -44,11 +39,7 @@ const mockClient = {
     getMe: jest.fn()
 };
 
-// --- 2. Calculate Absolute Path for Config ---
-// This ensures we mock the exact file instance regardless of import style
-const configAbsolutePath = path.resolve(__dirname, '../../src/config/index.js');
-
-// --- 3. Register Mocks (Before Imports) ---
+// --- 2. Register Mocks (Before Imports) ---
 
 jest.unstable_mockModule('../../src/services/logger.js', () => ({
     default: mockLogger,
@@ -64,8 +55,7 @@ jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () => ({
     instanceCoordinator: mockInstanceCoordinator
 }));
 
-// CRITICAL: Mock using the absolute path to guarantee interception
-jest.unstable_mockModule(configAbsolutePath, () => ({
+jest.unstable_mockModule('../../src/config/index.js', () => ({
     getConfig: jest.fn(() => mockConfig),
     initConfig: jest.fn().mockResolvedValue(mockConfig),
     config: mockConfig,
@@ -82,7 +72,7 @@ jest.unstable_mockModule('telegram/sessions/index.js', () => ({
     StringSession: jest.fn()
 }));
 
-// --- 4. Import Variables ---
+// --- 3. Import Variables ---
 let connectAndStart, getCircuitBreakerState, resetCircuitBreaker, TelegramErrorClassifier;
 
 beforeAll(async () => {
@@ -92,28 +82,25 @@ beforeAll(async () => {
     process.env.BOT_TOKEN = 'fake-token';
     process.env.NODE_ENV = 'test';
 
-    // CRITICAL: Isolate modules to force a fresh load with mocks active
-    await jest.isolateModulesAsync(async () => {
-        // Import Config first
-        const configModule = await import('../../src/config/index.js');
-        await configModule.initConfig();
+    // Import Config first
+    const configModule = await import('../../src/config/index.js');
+    await configModule.initConfig();
 
-        // Verify Mock
-        const config = configModule.getConfig();
-        if (!config._isMock) {
-            console.warn('[Test Setup] WARNING: Real config detected. Mock may have failed.');
-        }
+    // Verify Mock
+    const config = configModule.getConfig();
+    if (!config._isMock) {
+        console.warn('[Test Setup] WARNING: Real config detected. Mock may have failed.');
+    }
 
-        // Import Telegram Service
-        const telegramModule = await import('../../src/services/telegram.js');
-        connectAndStart = telegramModule.connectAndStart;
-        getCircuitBreakerState = telegramModule.getCircuitBreakerState;
-        resetCircuitBreaker = telegramModule.resetCircuitBreaker;
+    // Import Telegram Service
+    const telegramModule = await import('../../src/services/telegram.js');
+    connectAndStart = telegramModule.connectAndStart;
+    getCircuitBreakerState = telegramModule.getCircuitBreakerState;
+    resetCircuitBreaker = telegramModule.resetCircuitBreaker;
 
-        // Import Error Classifier
-        const classifierModule = await import('../../src/services/telegram-error-classifier.js');
-        TelegramErrorClassifier = classifierModule.TelegramErrorClassifier;
-    });
+    // Import Error Classifier
+    const classifierModule = await import('../../src/services/telegram-error-classifier.js');
+    TelegramErrorClassifier = classifierModule.TelegramErrorClassifier;
 });
 
 describe('Telegram Flood Wait Handling', () => {
@@ -196,7 +183,7 @@ describe('Telegram Flood Wait Handling', () => {
         expect(state.state).toBe('OPEN');
 
         // Fast forward time past the wait duration (50s + buffer)
-        await jest.advanceTimersByTimeAsync(55000);
+        jest.advanceTimersByTime(55000);
 
         // Verify it attempts recovery
         expect(mockLogger.info).toHaveBeenCalledWith(
@@ -216,7 +203,7 @@ describe('Telegram Flood Wait Handling', () => {
         expect(getCircuitBreakerState().state).toBe('OPEN');
 
         // 2. 快进时间超过等待时间 (30s + buffer)
-        await jest.advanceTimersByTimeAsync(35000);
+        jest.advanceTimersByTime(35000);
 
         // 3. 此时重试应该成功（Mock 恢复正常）
         mockClient.connect.mockResolvedValueOnce(undefined);

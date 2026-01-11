@@ -15,7 +15,14 @@ const logWithProvider = () => log.withContext({ provider: cache.getCurrentProvid
  */
 export class InstanceCoordinator {
     constructor() {
-        this.instanceId = process.env.INSTANCE_ID || `instance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        // 增强实例 ID 生成：确保唯一性，防止多进程冲突
+        // 如果是多进程环境，使用 PID + 时间戳 + 随机数
+        const pid = process.pid || 'unknown';
+        const timestamp = Date.now();
+        const random = Math.random().toString(36).substr(2, 9);
+        const hostname = process.env.HOSTNAME || 'unknown';
+        
+        this.instanceId = process.env.INSTANCE_ID || `instance_${hostname}_${pid}_${timestamp}_${random}`;
         
         // Register this instance as the ID provider for logger
         setInstanceIdProvider(() => this.instanceId);
@@ -26,11 +33,14 @@ export class InstanceCoordinator {
         this.heartbeatInterval = 30 * 1000;  // 默认 30 秒
         this.instanceTimeout = 90 * 1000;  // 90 秒超时（3个心跳周期）
         this.heartbeatTimer = null;
+        this.lockRenewalTimer = null;  // 新增：锁续租定时器
         this.isLeader = false;
         this.activeInstances = new Set();
         
         // 延迟调整定时器（启动后 30 秒再检查实例数量并调整）
         this.heartbeatAdjustTimer = null;
+        
+        log.info(`🔧 实例 ID 生成: ${this.instanceId} (PID: ${pid}, Host: ${hostname})`);
     }
 
     /**
@@ -71,6 +81,12 @@ export class InstanceCoordinator {
         if (this.heartbeatTimer) {
             clearInterval(this.heartbeatTimer);
             this.heartbeatTimer = null;
+        }
+        
+        // 清理锁续租定时器
+        if (this.lockRenewalTimer) {
+            clearInterval(this.lockRenewalTimer);
+            this.lockRenewalTimer = null;
         }
         
         // 清理心跳调整定时器
@@ -123,6 +139,42 @@ export class InstanceCoordinator {
      */
     async startHeartbeat() {
         logWithProvider().debug(`启动心跳，当前间隔: ${this.heartbeatInterval / 1000}s`);
+        
+        // 独立的锁续租逻辑 - 不会被其他操作阻塞
+        const startLockRenewal = () => {
+            // 立即执行一次，然后按间隔重复
+            const renew = async () => {
+                try {
+                    // 检查当前是否持有锁
+                    const hasLock = await this.hasLock("telegram_client");
+                    if (hasLock) {
+                        // 续租锁
+                        const lockData = await cache.get(`lock:telegram_client`, "json", { skipCache: true });
+                        if (lockData && lockData.instanceId === this.instanceId) {
+                            // 更新锁的 TTL
+                            await cache.set(`lock:telegram_client`, {
+                                ...lockData,
+                                acquiredAt: Date.now() // 更新获取时间，相当于续租
+                            }, 300, { skipCache: true });
+                            logWithProvider().debug(`🔒 锁续租成功`);
+                        }
+                    }
+                } catch (e) {
+                    logWithProvider().warn(`🔒 锁续租失败: ${e.message}`);
+                }
+            };
+            
+            // 立即执行一次
+            renew();
+            
+            // 每 30 秒续租一次（锁 TTL 为 300 秒，提前续租）
+            return setInterval(renew, 30000);
+        };
+        
+        // 启动锁续租定时器（独立于心跳）
+        this.lockRenewalTimer = startLockRenewal();
+        
+        // 原有的心跳逻辑（仅负责实例注册）
         this.heartbeatTimer = setInterval(async () => {
             const now = Date.now();
 
@@ -182,7 +234,9 @@ export class InstanceCoordinator {
             const isOwner = existing && existing.instanceId === this.instanceId;
             if (existing && !isOwner) {
                 // 明确被其他实例持有
-                // log.debug(`[Lock] ${lockKey} is held by ${existing.instanceId}`);
+                log.warn(`[Lock] ${lockKey} is held by ${existing.instanceId} (self: ${this.instanceId})`);
+            } else if (!existing) {
+                log.warn(`[Lock] ${lockKey} is NOT held by anyone (expired or never acquired)`);
             }
             return isOwner;
         } catch (e) {
@@ -372,20 +426,9 @@ export class InstanceCoordinator {
             clearInterval(this.heartbeatTimer);
             this.heartbeatTimer = null;
         }
-        if (this.heartbeatAdjustTimer) {
-            clearInterval(this.heartbeatAdjustTimer);
-            this.heartbeatAdjustTimer = null;
-        }
-    }
-
-    /**
-     * 停止心跳
-     */
-    async stopHeartbeat() {
-        logWithProvider().debug(`停止心跳`);
-        if (this.heartbeatTimer) {
-            clearInterval(this.heartbeatTimer);
-            this.heartbeatTimer = null;
+        if (this.lockRenewalTimer) {
+            clearInterval(this.lockRenewalTimer);
+            this.lockRenewalTimer = null;
         }
         if (this.heartbeatAdjustTimer) {
             clearInterval(this.heartbeatAdjustTimer);

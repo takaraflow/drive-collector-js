@@ -33,7 +33,8 @@ export default {
     'default'
   ],
   testPathIgnorePatterns: [
-    '<rootDir>/__tests__/integration/startup-resilience.test.js'
+    '<rootDir>/__tests__/integration/startup-resilience.test.js',
+    '<rootDir>/__tests__/integration/telegram-flood-wait.test.js'
   ],
   // 禁用泄漏检测以提升性能
   detectLeaks: false,

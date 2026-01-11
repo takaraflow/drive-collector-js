@@ -1,36 +1,6 @@
 import { jest, describe, test, expect, beforeEach } from "@jest/globals";
 import { BaseCache } from "../../../src/services/cache/BaseCache.js";
 
-// Mock logger
-await jest.unstable_mockModule("../../../src/services/logger.js", () => ({
-    logger: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn(),
-        child: jest.fn().mockReturnThis(),
-        configure: jest.fn(),
-        isInitialized: jest.fn().mockReturnValue(true),
-        canSend: jest.fn().mockReturnValue(true)
-    },
-    default: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn(),
-        child: jest.fn().mockReturnThis(),
-        configure: jest.fn(),
-        isInitialized: jest.fn().mockReturnValue(true),
-        canSend: jest.fn().mockReturnValue(true)
-    },
-    setInstanceIdProvider: jest.fn(),
-    enableTelegramConsoleProxy: jest.fn(),
-    disableTelegramConsoleProxy: jest.fn(),
-    resetLogger: jest.fn(),
-    delay: jest.fn().mockResolvedValue(undefined),
-    retryWithDelay: jest.fn().mockImplementation(async (fn) => await fn())
-}));
-
 describe("BaseCache", () => {
     class TestCache extends BaseCache {
         constructor(options) {

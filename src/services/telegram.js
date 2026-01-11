@@ -3,6 +3,7 @@ import { StringSession } from "telegram/sessions/index.js";
 import { getConfig } from "../config/index.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
+import { cache } from "./CacheService.js";
 import logger, { enableTelegramConsoleProxy } from "./logger.js";
 import { TelegramErrorClassifier } from "./telegram-error-classifier.js";
 
@@ -753,12 +754,33 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
         return;
     }
     
-    // 检查锁所有权
+    // 检查锁所有权 - 增强逻辑：允许在锁缺失时尝试重新获取
     try {
         const hasLock = await instanceCoordinator.hasLock("telegram_client");
         if (!hasLock) {
-            log.warn("🚨 Lost lock ownership, cancelling reconnection");
-            return;
+            // 检查锁是否被其他实例持有
+            const lockData = await cache.get(`lock:telegram_client`, "json", { skipCache: true });
+            
+            if (!lockData) {
+                // 锁不存在（已过期或从未获取），且当前实例是 Leader，允许尝试重新获取
+                if (instanceCoordinator.isLeader) {
+                    log.warn("🔒 锁已缺失且本实例是 Leader，尝试重新获取锁...");
+                    const acquired = await instanceCoordinator.acquireLock("telegram_client", 300);
+                    if (acquired) {
+                        log.info("✅ 重新获取锁成功，继续重连");
+                    } else {
+                        log.warn("⚠️ 重新获取锁失败，取消重连");
+                        return;
+                    }
+                } else {
+                    log.warn("🚨 锁已缺失但本实例不是 Leader，取消重连");
+                    return;
+                }
+            } else if (lockData.instanceId !== instanceCoordinator.getInstanceId()) {
+                // 锁被其他实例持有
+                log.warn(`🚨 锁被其他实例持有 (${lockData.instanceId})，取消重连`);
+                return;
+            }
         }
     } catch (e) {
         log.warn(`⚠️ Lock check failed: ${e.message},暂缓重连`);
@@ -863,6 +885,8 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
  */
 export const startWatchdog = () => {
     if (watchdogTimer) clearInterval(watchdogTimer);
+    const watchdogId = Math.random().toString(36).substring(7);
+    log.info(`🐶 Starting watchdog [ID: ${watchdogId}] for instance [${instanceCoordinator.getInstanceId()}]`);
     
     watchdogTimer = setInterval(async () => {
         const now = Date.now();
@@ -928,13 +952,31 @@ export const startWatchdog = () => {
             }
 
             const errorType = TelegramErrorClassifier.classify(e);
-            log.warn(`💔 Heartbeat failed (${consecutiveFailures}/3): [${errorType}] ${e.message || e}`);
+            log.warn(`💔 Heartbeat failed (${consecutiveFailures}/3) [ID: ${watchdogId}]: [${errorType}] ${e.message || e}`);
 
             const currentNow = Date.now();
             const diff = currentNow - lastHeartbeat;
 
             if (diff >= 5 * 60 * 1000 || consecutiveFailures >= 3) {
                 log.error(`🚨 Heartbeat threshold exceeded, triggering reconnection... (diff=${diff}, failures=${consecutiveFailures})`);
+                
+                // 增强重连逻辑：先检查锁状态，如果锁缺失且本实例是 Leader，尝试重新获取
+                try {
+                    const hasLock = await instanceCoordinator.hasLock("telegram_client");
+                    if (!hasLock) {
+                        const lockData = await cache.get(`lock:telegram_client`, "json", { skipCache: true });
+                        if (!lockData && instanceCoordinator.isLeader) {
+                            log.warn("🔒 看门狗检测到锁缺失，Leader 尝试重新获取锁...");
+                            const acquired = await instanceCoordinator.acquireLock("telegram_client", 300);
+                            if (acquired) {
+                                log.info("✅ 看门狗重新获取锁成功");
+                            }
+                        }
+                    }
+                } catch (lockCheckError) {
+                    log.warn(`⚠️ 看门狗锁检查失败: ${lockCheckError.message}`);
+                }
+                
                 handleConnectionIssue(true, errorType);
             }
         }
