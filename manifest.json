@@ -245,7 +245,7 @@
       "NODE_ENV": {
         "type": "string",
         "required": false,
-        "description": "运行环境（prod/dev/pre）"
+        "description": "运行环境（prod/dev/pre）。此值会添加到所有日志的 env 字段中。"
       },
       "CACHE_PROVIDERS": {
         "type": "string",

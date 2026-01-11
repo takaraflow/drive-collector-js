@@ -487,3 +487,80 @@ describe('Logger Safeguard - Integration', () => {
     expect(bodySize).toBeLessThanOrEqual(2 * 1024 * 1024);
   });
 });
+
+describe('Logger env field', () => {
+  beforeEach(() => {
+    // 清除所有 mock
+    jest.clearAllMocks();
+    
+    // 模拟 fetch
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => 'OK'
+    });
+  });
+
+  test('should include env field in info logs', async () => {
+    const logBuffer = [];
+    const testLogger = logger.child({ logBuffer: logBuffer, env: 'test' });
+    await testLogger.info('test message', { custom: 'data' });
+    expect(logBuffer[0].env).toBe('test');
+  });
+
+  test('should include env field in warn logs', async () => {
+    const logBuffer = [];
+    const testLogger = logger.child({ logBuffer: logBuffer, env: 'test' });
+    await testLogger.warn('test message', { custom: 'data' });
+    expect(logBuffer[0].env).toBe('test');
+  });
+
+  test('should include env field in error logs', async () => {
+    const logBuffer = [];
+    const testLogger = logger.child({ logBuffer: logBuffer, env: 'test' });
+    await testLogger.error('test message', { custom: 'data' });
+    expect(logBuffer[0].env).toBe('test');
+  });
+
+  test('should include env field in debug logs', async () => {
+    const logBuffer = [];
+    const testLogger = logger.child({ logBuffer: logBuffer, env: 'test' });
+    await testLogger.debug('test message', { custom: 'data' });
+    expect(logBuffer[0].env).toBe('test');
+  });
+
+  test('should use default env when not specified', async () => {
+    const logBuffer = [];
+    const testLogger = logger.child({ logBuffer: logBuffer });
+    await testLogger.info('test message', { custom: 'data' });
+    expect(logBuffer[0].env).toBe('prod');
+  });
+
+  test('should convert development to dev', async () => {
+    const logBuffer = [];
+    const testLogger = logger.child({ logBuffer: logBuffer, env: 'development' });
+    await testLogger.info('test message', { custom: 'data' });
+    expect(logBuffer[0].env).toBe('dev');
+  });
+
+  test('should convert staging to pre', async () => {
+    const logBuffer = [];
+    const testLogger = logger.child({ logBuffer: logBuffer, env: 'staging' });
+    await testLogger.info('test message', { custom: 'data' });
+    expect(logBuffer[0].env).toBe('pre');
+  });
+
+  test('should handle production environment', async () => {
+    const logBuffer = [];
+    const testLogger = logger.child({ logBuffer: logBuffer, env: 'production' });
+    await testLogger.info('test message', { custom: 'data' });
+    expect(logBuffer[0].env).toBe('prod');
+  });
+
+  test('should handle null or undefined env gracefully', async () => {
+    const logBuffer = [];
+    const testLogger = logger.child({ logBuffer: logBuffer, env: null });
+    await testLogger.info('test message', { custom: 'data' });
+    expect(logBuffer[0].env).toBe('prod');
+  });
+});

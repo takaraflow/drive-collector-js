@@ -460,6 +460,7 @@ function createLoggerFactory(context, bindings = {}) {
       const logData = {
         level: 'info',
         message,
+        env: normalizeEnvName(context.env || 'prod'),
         ...bindings,
         ...data,
         version: VERSION,
@@ -482,6 +483,7 @@ function createLoggerFactory(context, bindings = {}) {
       const logData = {
         level: 'warn',
         message,
+        env: normalizeEnvName(context.env || 'prod'),
         ...bindings,
         ...data,
         version: VERSION,
@@ -503,6 +505,7 @@ function createLoggerFactory(context, bindings = {}) {
       const logData = {
         level: 'error',
         message,
+        env: normalizeEnvName(context.env || 'prod'),
         ...bindings,
         ...data,
         version: VERSION,
@@ -524,6 +527,7 @@ function createLoggerFactory(context, bindings = {}) {
       const logData = {
         level: 'debug',
         message,
+        env: normalizeEnvName(context.env || 'prod'),
         ...bindings,
         ...data,
         version: VERSION,
@@ -548,13 +552,18 @@ function createLoggerFactory(context, bindings = {}) {
     child: function(bindings) {
       // 关键修复：将 logBuffer 从 bindings 中分离
       // logBuffer 属于上下文(context)，不应作为日志字段(bindings)被记录，否则会导致日志呈指数级膨胀
-      const { logBuffer, ...incomingBindings } = bindings;
+      const { logBuffer, env, ...incomingBindings } = bindings;
       
       const mergedBindings = { ...logger.bindings, ...incomingBindings };
       const newContext = { ...context };
       
       if (logBuffer !== undefined) {
         newContext.logBuffer = logBuffer;
+      }
+      
+      // 处理 env 参数，确保归一化
+      if (env !== undefined) {
+        newContext.env = normalizeEnvName(env);
       }
       
       return createLoggerFactory(newContext, mergedBindings);
