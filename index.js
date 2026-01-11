@@ -7,15 +7,11 @@ import { buildWebhookServer, registerShutdownHooks } from "./src/utils/lifecycle
  * QStash Webhook 处理程序 (供外部 HTTP Server 或测试使用)
  */
 export async function handleQStashWebhook(req, res) {
-    const { queueService } = await import("./src/services/QueueService.js");
-    const { TaskManager } = await import("./src/processor/TaskManager.js");
-    const { logger } = await import("./src/services/logger.js");
-    const log = logger.withModule ? logger.withModule('App') : logger;
-
-    try {
-        const healthPath = '/health';
-        const hostHeader = req.headers?.host || req.headers?.[':authority'] || 'localhost';
-        if ((req.method === 'GET' || req.method === 'HEAD') && req.url) {
+    // 优先处理 /health 端点，不依赖任何服务导入
+    const healthPath = '/health';
+    const hostHeader = req.headers?.host || req.headers?.[':authority'] || 'localhost';
+    if ((req.method === 'GET' || req.method === 'HEAD') && req.url) {
+        try {
             const url = new URL(req.url, `http://${hostHeader}`);
             if (url.pathname === healthPath) {
                 res.writeHead(200);
@@ -26,7 +22,18 @@ export async function handleQStashWebhook(req, res) {
                 }
                 return;
             }
+        } catch (e) {
+            // URL 解析失败，继续处理其他请求
         }
+    }
+
+    // 其他请求需要导入服务
+    const { queueService } = await import("./src/services/QueueService.js");
+    const { TaskManager } = await import("./src/processor/TaskManager.js");
+    const { logger } = await import("./src/services/logger.js");
+    const log = logger.withModule ? logger.withModule('App') : logger;
+
+    try {
 
         // 1. 获取 Body
         let body = '';
@@ -147,6 +154,18 @@ async function main() {
 
     await registerShutdownHooks();
 
+    // 先启动 HTTP 服务器，确保 /health 端点始终可用
+    const config = getConfig();
+    try {
+        await buildWebhookServer(config, handleQStashWebhook, log);
+        log.info("✅ HTTP 服务器已启动，/health 端点可用");
+    } catch (error) {
+        log.error("❌ HTTP 服务器启动失败:", error);
+        gracefulShutdown.exitCode = 1;
+        gracefulShutdown.shutdown('http-server-failed', error);
+        return;
+    }
+
     try {
         const { instanceCoordinator } = await import("./src/services/InstanceCoordinator.js");
         const { startDispatcher } = await import("./src/dispatcher/bootstrap.js");
@@ -155,23 +174,34 @@ async function main() {
 
         log.info("🚀 启动业务模块: InstanceCoordinator, Telegram, Dispatcher, Processor");
         
-        await instanceCoordinator.start();
-        await startDispatcher();
-        await startProcessor();
+        // 使用 try-catch 包裹 Telegram 相关启动，确保即使失败也不影响 HTTP 服务器
+        try {
+            await instanceCoordinator.start();
+        } catch (error) {
+            log.error("⚠️ InstanceCoordinator 启动失败，但 HTTP 服务器继续运行:", error);
+        }
 
-        const config = getConfig();
-        await buildWebhookServer(config, handleQStashWebhook, log);
+        try {
+            await startDispatcher();
+        } catch (error) {
+            log.error("⚠️ Dispatcher (Telegram) 启动失败，但 HTTP 服务器继续运行:", error);
+        }
+
+        try {
+            await startProcessor();
+        } catch (error) {
+            log.error("⚠️ Processor 启动失败，但 HTTP 服务器继续运行:", error);
+        }
         
-        log.info("✅ 应用启动成功，正在运行中");
+        log.info("✅ 应用启动完成，HTTP 服务器正在运行中");
         
         if (process.env.NODE_ENV !== 'test') {
             setInterval(() => {}, 1000 * 60 * 60);
         }
 
     } catch (error) {
-        console.error("💥 应用启动过程中发生致命错误:", error);
-        gracefulShutdown.exitCode = 1;
-        gracefulShutdown.shutdown('startup-failed', error);
+        log.error("⚠️ 业务模块启动过程中发生错误，但 HTTP 服务器继续运行:", error);
+        // 不再因为业务模块错误而退出，HTTP 服务器应该继续运行
     }
 }
 

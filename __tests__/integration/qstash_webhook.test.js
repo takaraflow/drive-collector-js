@@ -268,6 +268,49 @@ describe("QStash Webhook Integration", () => {
         expect(res.end).toHaveBeenCalledWith('OK');
     });
 
+    test("health 端点应该在服务导入失败时仍能响应", async () => {
+        // 确保 health 端点不依赖任何服务导入
+        const req = {
+            url: '/health',
+            method: 'GET',
+            headers: {
+                host: 'localhost'
+            }
+        };
+        const res = createMockResponse();
+
+        // 即使服务模块有问题，health 端点也应该工作
+        // 因为它在导入服务之前就返回了
+        await handleQStashWebhook(req, res);
+
+        // 验证没有调用任何服务相关的函数
+        expect(mockVerifySignature).not.toHaveBeenCalled();
+        expect(mockHandleDownloadWebhook).not.toHaveBeenCalled();
+        expect(mockHandleUploadWebhook).not.toHaveBeenCalled();
+        expect(mockHandleMediaBatchWebhook).not.toHaveBeenCalled();
+        
+        // 验证响应正确
+        expect(res.writeHead).toHaveBeenCalledWith(200);
+        expect(res.end).toHaveBeenCalledWith('OK');
+    });
+
+    test("health 端点应该支持 HEAD 请求", async () => {
+        const req = {
+            url: '/health',
+            method: 'HEAD',
+            headers: {
+                host: 'localhost'
+            }
+        };
+        const res = createMockResponse();
+
+        await handleQStashWebhook(req, res);
+
+        expect(mockVerifySignature).not.toHaveBeenCalled();
+        expect(res.writeHead).toHaveBeenCalledWith(200);
+        expect(res.end).toHaveBeenCalled(); // HEAD 请求也应该调用 end
+    });
+
     test("应当拒绝非法签名", async () => {
         mockVerifySignature.mockResolvedValue(false);
 
