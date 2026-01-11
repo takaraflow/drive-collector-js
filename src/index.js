@@ -1325,6 +1325,13 @@ async function handleRequest(request, env, ctx) {
   const requestId = ctx._axiomDebugRequestId || 'unknown';
   console.log(`[AXIOM_DEBUG] ${requestId}: handleRequest started`);
 
+  // 1. 重新配置 Axiom 传输（统一使用 env，此时 env 已经是 safeEnv）
+  configureBaseLoggerTransport(env);
+
+  // 2. 初始化基础状态 - 必须在创建 requestLogger 之前执行
+  const runtimeEnv = normalizeEnvName(env.NODE_ENV || 'prod');
+  logger.configure({ env: runtimeEnv });
+
   const requestLogBuffer = []; // 为每个请求创建独立的日志缓冲
   const requestLogger = logger.child({ module: 'handleRequest', logBuffer: requestLogBuffer }); // 将缓冲传递给子 logger
 
@@ -1399,13 +1406,6 @@ log.debug('Request Received', { method: request.method, url: request.url });
     });
   }
 
-  // 1. 重新配置 Axiom 传输（统一使用 env，此时 env 已经是 safeEnv）
-  configureBaseLoggerTransport(env);
-  
-  // 2. 初始化基础状态
-  const runtimeEnv = normalizeEnvName(env.NODE_ENV || 'prod');
-  logger.configure({ env: runtimeEnv });
-
   await log.debug('Axiom 配置检查', {
     axiomEnabled,
     hasToken: !!axiomToken,
@@ -1414,7 +1414,7 @@ log.debug('Request Received', { method: request.method, url: request.url });
     hasOrgId: !!axiomOrg
   });
 
-  // 2. 简洁的启动日志（这会被 Axiom 捕获并关联到当前 Trace）
+  // 3. 简洁的启动日志（这会被 Axiom 捕获并关联到当前 Trace）
   await log.info('LB Request Started', {
     path: normalizedUrl.pathname,
     method: request.method,
