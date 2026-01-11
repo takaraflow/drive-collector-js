@@ -477,16 +477,28 @@ async function initTelegramClient() {
                 warn: log.warn.bind(log),
                 error: (msg, ...args) => {
                     const msgStr = msg?.toString() || '';
-                    if (msgStr.includes('TIMEOUT') || msgStr.includes('timeout') || msgStr.includes('ETIMEDOUT')) {
+                    const isTimeout = msgStr.includes('TIMEOUT') || msgStr.includes('timeout') || msgStr.includes('ETIMEDOUT');
+                    const isNotConnected = msgStr.includes('Not connected');
+
+                    if (isTimeout) {
                         log.error(`⚠️ Telegram timeout detected: ${msgStr}`, { service: 'telegram', ...args });
                         telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
-                    } else if (msgStr.includes('Not connected')) {
-                        // 降级 "Not connected" 错误为警告，避免刷屏和误报
+                    } else if (isNotConnected) {
                         log.warn(`⚠️ Telegram connection warning: ${msgStr}`, { service: 'telegram', ...args });
-                        // 触发 NOT_CONNECTED 类型的故障处理，但不视为严重错误
                         telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.NOT_CONNECTED);
                     } else {
                         log.error(msg, ...args);
+                    }
+
+                    // 如果不是在初始化，且遇到了连接问题，尝试触发快速恢复
+                    if (!isClientInitializing && !isReconnecting && (isTimeout || isNotConnected)) {
+                        const errorType = isTimeout ? TelegramErrorClassifier.ERROR_TYPES.TIMEOUT : TelegramErrorClassifier.ERROR_TYPES.NOT_CONNECTED;
+                        log.info(`🔄 Detected ${errorType} in library logs, scheduling immediate recovery check...`);
+                        setImmediate(() => {
+                            handleConnectionIssue(true, errorType).catch(err => {
+                                log.error("❌ Background reconnection trigger failed:", err);
+                            });
+                        });
                     }
                 },
                 debug: log.debug.bind(log),
@@ -554,6 +566,7 @@ async function initTelegramClient() {
 function setupEventListeners(client) {
     client.on("connected", () => {
         log.info("🔗 Telegram 客户端连接已建立");
+        lastUpdateTimestamp = Date.now(); // 重置更新时间戳，防止误报
         if (connectionStatusCallback) {
             connectionStatusCallback(true);
         }
