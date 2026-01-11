@@ -1,81 +1,68 @@
 import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import { instanceCoordinator } from "../../src/services/InstanceCoordinator.js";
+import { cache } from "../../src/services/CacheService.js";
+import logger from "../../src/services/logger.js";
 
 // Create a mock time provider
 const fixedTime = 1700000000000;
-const mockTimeProvider = {
-    now: () => fixedTime,
-    setTimeout: global.setTimeout,
-    clearTimeout: global.clearTimeout,
-    setInterval: global.setInterval,
-    clearInterval: global.clearInterval
-};
-
-const importInstanceCoordinator = async () => {
-    const module = await import("../../src/services/InstanceCoordinator.js");
-    return module.instanceCoordinator ?? module.default;
-};
 
 describe("Core InstanceCoordinator Tests", () => {
-    let instanceCoordinator;
-    let mockCache;
-    let mockLogger;
+    let mockCacheGet, mockCacheSet, mockCacheDelete, mockCacheListKeys;
+    let originalCacheMethods = {};
+    let originalLoggerMethods = {};
 
-    beforeEach(async () => {
-        jest.resetModules();
-        jest.clearAllMocks();
+    beforeAll(() => {
+        // Save original methods
+        ['get', 'set', 'delete', 'listKeys', 'getCurrentProvider'].forEach(m => {
+            originalCacheMethods[m] = cache[m];
+        });
+        ['info', 'error', 'warn', 'debug', 'withModule', 'withContext'].forEach(m => {
+            originalLoggerMethods[m] = logger[m];
+        });
+    });
+
+    beforeEach(() => {
         jest.useFakeTimers();
+        jest.setSystemTime(fixedTime);
 
-        // Mock time provider
-        await jest.unstable_mockModule('../../src/utils/timeProvider.js', () => ({
-            getTime: mockTimeProvider.now,
-            timers: mockTimeProvider
-        }));
+        // Reset instanceCoordinator state
+        instanceCoordinator.instanceId = 'test-instance';
+        instanceCoordinator.activeInstances = new Set();
+        instanceCoordinator.isLeader = false;
+        if (instanceCoordinator.heartbeatTimer) {
+            clearInterval(instanceCoordinator.heartbeatTimer);
+            instanceCoordinator.heartbeatTimer = null;
+        }
 
-        // Mock environment
-        await jest.unstable_mockModule('../../src/config/env.js', () => ({
-            getEnv: () => ({ NODE_ENV: 'test' }),
-            NODE_ENV: 'test'
-        }));
+        // Mock cache methods
+        mockCacheGet = jest.fn().mockResolvedValue(null);
+        mockCacheSet = jest.fn().mockResolvedValue(true);
+        mockCacheDelete = jest.fn().mockResolvedValue(true);
+        mockCacheListKeys = jest.fn().mockResolvedValue([]);
+        
+        cache.get = mockCacheGet;
+        cache.set = mockCacheSet;
+        cache.delete = mockCacheDelete;
+        cache.listKeys = mockCacheListKeys;
+        cache.getCurrentProvider = jest.fn().mockReturnValue("cloudflare");
 
-        // Mock logger (already done by global setup)
-        mockLogger = {
-            info: jest.fn(),
-            error: jest.fn(),
-            warn: jest.fn(),
-            debug: jest.fn(),
-            withModule: jest.fn().mockReturnThis(),
-            withContext: jest.fn().mockReturnThis()
-        };
+        // Mock logger methods
+        logger.info = jest.fn();
+        logger.error = jest.fn();
+        logger.warn = jest.fn();
+        logger.debug = jest.fn();
+        logger.withModule = jest.fn().mockReturnThis();
+        logger.withContext = jest.fn().mockReturnThis();
+    });
 
-        // Mock CacheService
-        mockCache = {
-            initialize: jest.fn().mockResolvedValue(undefined),
-            get: jest.fn(),
-            set: jest.fn(),
-            delete: jest.fn(),
-            listKeys: jest.fn(),
-            getCurrentProvider: jest.fn().mockReturnValue("cloudflare"),
-            _startHeartbeat: jest.fn()
-        };
-
-        await jest.unstable_mockModule("../../src/services/logger.js", () => ({
-            default: mockLogger,
-            logger: mockLogger,
-            setInstanceIdProvider: jest.fn()
-        }));
-
-        await jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
-            cache: mockCache
-        }));
-
-        await jest.unstable_mockModule("../../src/repositories/InstanceRepository.js", () => ({
-            InstanceRepository: {
-                createTableIfNotExists: jest.fn().mockResolvedValue(undefined),
-                findAll: jest.fn().mockResolvedValue([]),
-                upsert: jest.fn().mockResolvedValue(true),
-                updateHeartbeat: jest.fn().mockResolvedValue(true)
-            }
-        }));
+    afterAll(() => {
+        // Restore original methods
+        Object.keys(originalCacheMethods).forEach(m => {
+            cache[m] = originalCacheMethods[m];
+        });
+        Object.keys(originalLoggerMethods).forEach(m => {
+            logger[m] = originalLoggerMethods[m];
+        });
     });
 
     afterEach(() => {
@@ -83,19 +70,16 @@ describe("Core InstanceCoordinator Tests", () => {
     });
 
     test("should initialize correctly", async () => {
-        const instanceCoordinator = await importInstanceCoordinator();
-        
         expect(instanceCoordinator).toBeDefined();
         expect(instanceCoordinator.getInstanceId()).toEqual(expect.any(String));
     });
 
     test("should register instance", async () => {
-        const instanceCoordinator = await importInstanceCoordinator();
         instanceCoordinator.instanceId = 'test-instance';
 
         await instanceCoordinator.registerInstance();
 
-        expect(mockCache.set).toHaveBeenCalledWith(
+        expect(mockCacheSet).toHaveBeenCalledWith(
             "instance:test-instance",
             expect.objectContaining({
                 id: "test-instance",
@@ -106,7 +90,6 @@ describe("Core InstanceCoordinator Tests", () => {
     });
 
     test("should refresh heartbeat data", async () => {
-        const instanceCoordinator = await importInstanceCoordinator();
         instanceCoordinator.instanceId = 'heartbeat-instance';
 
         const existingInstance = {
@@ -115,40 +98,36 @@ describe("Core InstanceCoordinator Tests", () => {
             status: 'active'
         };
 
-        mockCache.get.mockResolvedValue(existingInstance);
-        mockCache.set.mockResolvedValue(true);
-        jest.setSystemTime(fixedTime);
+        mockCacheGet.mockResolvedValue(existingInstance);
 
         await instanceCoordinator._sendHeartbeat();
 
-        expect(mockCache.set).toHaveBeenCalledWith(
+        expect(mockCacheSet).toHaveBeenCalledWith(
             `instance:${instanceCoordinator.instanceId}`,
             expect.objectContaining({
                 status: 'active',
-                lastHeartbeat: expect.any(Number)
+                lastHeartbeat: fixedTime
             }),
             instanceCoordinator.instanceTimeout / 1000
         );
     });
 
     test("should acquire lock successfully", async () => {
-        const instanceCoordinator = await importInstanceCoordinator();
         instanceCoordinator.instanceId = 'lock-instance';
         const lockKey = 'test-lock';
 
-        mockCache.get
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce({
+        mockCacheGet
+            .mockResolvedValueOnce(null) // First check in _tryAcquire
+            .mockResolvedValueOnce({ // Verification check in _tryAcquire
                 instanceId: instanceCoordinator.instanceId,
                 acquiredAt: fixedTime,
                 ttl: 60
             });
-        mockCache.set.mockResolvedValue(true);
 
         const result = await instanceCoordinator.acquireLock(lockKey, 60, { maxAttempts: 1 });
 
         expect(result).toBe(true);
-        expect(mockCache.set).toHaveBeenCalledWith(
+        expect(mockCacheSet).toHaveBeenCalledWith(
             `lock:${lockKey}`,
             expect.objectContaining({ instanceId: instanceCoordinator.instanceId }),
             60,
@@ -157,21 +136,14 @@ describe("Core InstanceCoordinator Tests", () => {
     });
 
     test("should fail to acquire existing lock", async () => {
-        const instanceCoordinator = await importInstanceCoordinator();
+        instanceCoordinator.instanceId = 'lock-instance';
         const lockKey = 'existing-lock';
 
-        mockCache.get
-            .mockResolvedValueOnce({
-                instanceId: 'other-instance',
-                acquiredAt: fixedTime,
-                ttl: 60
-            })
-            .mockResolvedValueOnce({
-                instanceId: 'other-instance',
-                acquiredAt: fixedTime,
-                ttl: 60
-            });
-        mockCache.set.mockResolvedValue(true);
+        mockCacheGet.mockResolvedValue({
+            instanceId: 'other-instance',
+            acquiredAt: fixedTime,
+            ttl: 60
+        });
 
         const result = await instanceCoordinator.acquireLock(lockKey, 60, { maxAttempts: 1 });
 
@@ -179,48 +151,49 @@ describe("Core InstanceCoordinator Tests", () => {
     });
 
     test("should release lock", async () => {
-        const instanceCoordinator = await importInstanceCoordinator();
         instanceCoordinator.instanceId = 'lock-instance';
         const lockKey = 'test-lock';
 
-        mockCache.get.mockResolvedValue({ instanceId: 'lock-instance' });
+        mockCacheGet.mockResolvedValue({ instanceId: 'lock-instance' });
         await instanceCoordinator.releaseLock(lockKey);
 
-        expect(mockCache.delete).toHaveBeenCalledWith(`lock:${lockKey}`);
+        expect(mockCacheDelete).toHaveBeenCalledWith(`lock:${lockKey}`);
     });
 
     test("should verify lock ownership", async () => {
-        const instanceCoordinator = await importInstanceCoordinator();
+        instanceCoordinator.instanceId = 'owner-instance';
         const lockKey = 'owner-lock';
 
-        mockCache.get.mockResolvedValue({ instanceId: instanceCoordinator.instanceId });
+        mockCacheGet.mockResolvedValue({ instanceId: 'owner-instance' });
         const result = await instanceCoordinator.hasLock(lockKey);
 
         expect(result).toBe(true);
     });
 
     test("should list active instances", async () => {
-        const instanceCoordinator = await importInstanceCoordinator();
         const instances = [
             { id: 'inst1', lastHeartbeat: fixedTime - 1000 },
             { id: 'inst2', lastHeartbeat: fixedTime - 2000 }
         ];
 
+        // Mock getAllInstances directly on the instance for this test
+        const originalGetAllInstances = instanceCoordinator.getAllInstances;
         instanceCoordinator.getAllInstances = jest.fn().mockResolvedValue(instances);
-        jest.setSystemTime(fixedTime);
 
         const result = await instanceCoordinator.getActiveInstances();
 
         expect(result).toHaveLength(2);
         expect(instanceCoordinator.activeInstances.size).toBe(2);
+        
+        // Restore
+        instanceCoordinator.getAllInstances = originalGetAllInstances;
     });
 
     test("should unregister instance", async () => {
-        const instanceCoordinator = await importInstanceCoordinator();
         instanceCoordinator.instanceId = 'cleanup-instance';
 
         await instanceCoordinator.unregisterInstance();
 
-        expect(mockCache.delete).toHaveBeenCalledWith(`instance:${instanceCoordinator.instanceId}`);
+        expect(mockCacheDelete).toHaveBeenCalledWith(`instance:${instanceCoordinator.instanceId}`);
     });
 });

@@ -1,13 +1,43 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from "@jest/globals";
+import { describe, test, expect, beforeEach, afterEach, jest, beforeAll } from "@jest/globals";
 
 // Mock process.env completely
 const originalEnv = { ...process.env };
 let mockEnv = { ...originalEnv };
 
+// Mock dependencies at top level
+await jest.unstable_mockModule('dotenv', () => ({
+  default: {
+    config: jest.fn(() => ({ parsed: {} }))
+  },
+  loadDotenv: jest.fn()
+}));
+
+await jest.unstable_mockModule('../../src/config/env.js', () => ({
+  getEnv: () => mockEnv,
+  getProtectedEnv: () => ({
+    NODE_ENV: mockEnv.NODE_ENV,
+    INFISICAL_ENV: mockEnv.INFISICAL_ENV,
+    INFISICAL_TOKEN: mockEnv.INFISICAL_TOKEN,
+    INFISICAL_PROJECT_ID: mockEnv.INFISICAL_PROJECT_ID
+  }),
+  NODE_ENV: mockEnv.NODE_ENV || 'test',
+  INFISICAL_ENV: mockEnv.INFISICAL_ENV,
+  INFISICAL_TOKEN: mockEnv.INFISICAL_TOKEN,
+  INFISICAL_PROJECT_ID: mockEnv.INFISICAL_PROJECT_ID,
+  API_ID: mockEnv.API_ID,
+  API_HASH: mockEnv.API_HASH,
+  BOT_TOKEN: mockEnv.BOT_TOKEN,
+  OWNER_ID: mockEnv.OWNER_ID
+}));
+
+// Import after mocking
+const { initConfig, __resetConfigForTests } = await import("../../src/config/index.js");
+const { getEnv } = await import("../../src/config/env.js");
+
 describe("config - Environment Variable Protection", () => {
-  beforeEach(async () => {
-    jest.resetModules();
+  beforeEach(() => {
     jest.clearAllMocks();
+    __resetConfigForTests();
     
     // Reset mock environment
     mockEnv = { ...originalEnv };
@@ -16,27 +46,6 @@ describe("config - Environment Variable Protection", () => {
     jest.spyOn(console, 'log').mockImplementation(() => {});
     jest.spyOn(console, 'warn').mockImplementation(() => {});
     jest.spyOn(console, 'error').mockImplementation(() => {});
-    
-    // Mock dotenv
-    await jest.unstable_mockModule('dotenv', () => ({
-      default: {
-        config: jest.fn(() => ({ parsed: {} }))
-      }
-    }));
-    
-    // Mock process.env access
-    jest.unstable_mockModule('../../src/config/env.js', () => ({
-      // Export a function that returns our mock env
-      getEnv: () => mockEnv,
-      NODE_ENV: mockEnv.NODE_ENV || 'test',
-      INFISICAL_ENV: mockEnv.INFISICAL_ENV,
-      INFISICAL_TOKEN: mockEnv.INFISICAL_TOKEN,
-      INFISICAL_PROJECT_ID: mockEnv.INFISICAL_PROJECT_ID,
-      API_ID: mockEnv.API_ID,
-      API_HASH: mockEnv.API_HASH,
-      BOT_TOKEN: mockEnv.BOT_TOKEN,
-      OWNER_ID: mockEnv.OWNER_ID
-    }));
   });
 
   afterEach(() => {
@@ -45,7 +54,6 @@ describe("config - Environment Variable Protection", () => {
 
   describe("Protected Environment Variables", () => {
     test("should protect NODE_ENV when set before import", async () => {
-      // Set up mock environment
       mockEnv = {
         ...mockEnv,
         NODE_ENV: "prod",
@@ -58,14 +66,9 @@ describe("config - Environment Variable Protection", () => {
         OWNER_ID: "owner_id"
       };
 
-      const { initConfig } = await import("../../src/config/index.js");
       const config = await initConfig();
-
       expect(config).toBeDefined();
-      // Verify environment variables are accessible through mocked module
-      const { getEnv } = await import("../../src/config/env.js");
-      const env = getEnv();
-      expect(env.NODE_ENV).toBe("prod");
+      expect(getEnv().NODE_ENV).toBe("prod");
     });
 
     test("should protect INFISICAL_ENV when set before import", async () => {
@@ -81,13 +84,9 @@ describe("config - Environment Variable Protection", () => {
         OWNER_ID: "owner_id"
       };
 
-      const { initConfig } = await import("../../src/config/index.js");
       const config = await initConfig();
-
       expect(config).toBeDefined();
-      const { getEnv } = await import("../../src/config/env.js");
-      const env = getEnv();
-      expect(env.INFISICAL_ENV).toBe("pre");
+      expect(getEnv().INFISICAL_ENV).toBe("pre");
     });
 
     test("should protect INFISICAL_TOKEN from being overwritten", async () => {
@@ -102,13 +101,9 @@ describe("config - Environment Variable Protection", () => {
         OWNER_ID: "owner_id"
       };
 
-      const { initConfig } = await import("../../src/config/index.js");
       const config = await initConfig();
-
       expect(config).toBeDefined();
-      const { getEnv } = await import("../../src/config/env.js");
-      const env = getEnv();
-      expect(env.INFISICAL_TOKEN).toBe("protected_token");
+      expect(getEnv().INFISICAL_TOKEN).toBe("protected_token");
     });
 
     test("should protect INFISICAL_PROJECT_ID from being overwritten", async () => {
@@ -123,13 +118,9 @@ describe("config - Environment Variable Protection", () => {
         OWNER_ID: "owner_id"
       };
 
-      const { initConfig } = await import("../../src/config/index.js");
       const config = await initConfig();
-
       expect(config).toBeDefined();
-      const { getEnv } = await import("../../src/config/env.js");
-      const env = getEnv();
-      expect(env.INFISICAL_PROJECT_ID).toBe("protected_project_id");
+      expect(getEnv().INFISICAL_PROJECT_ID).toBe("protected_project_id");
     });
   });
 
@@ -147,9 +138,7 @@ describe("config - Environment Variable Protection", () => {
         OWNER_ID: "owner_id"
       };
 
-      const { initConfig } = await import("../../src/config/index.js");
       const config = await initConfig();
-
       expect(config).toBeDefined();
     });
 
@@ -165,9 +154,7 @@ describe("config - Environment Variable Protection", () => {
         OWNER_ID: "owner_id"
       };
 
-      const { initConfig } = await import("../../src/config/index.js");
       const config = await initConfig();
-
       expect(config).toBeDefined();
     });
   });
@@ -192,13 +179,9 @@ describe("config - Environment Variable Protection", () => {
         OWNER_ID: "owner_id"
       };
 
-      const { initConfig } = await import("../../src/config/index.js");
       const config = await initConfig();
-
       expect(config).toBeDefined();
-      const { getEnv } = await import("../../src/config/env.js");
-      const env = getEnv();
-      expect(env.NODE_ENV).toBe(NODE_ENV);
+      expect(getEnv().NODE_ENV).toBe(NODE_ENV);
     });
   });
 });

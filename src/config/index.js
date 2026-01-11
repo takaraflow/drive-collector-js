@@ -57,6 +57,9 @@ export const CACHE_TTL = 10 * 60 * 1000;
 export async function initConfig() {
     if (isInitialized) return config;
 
+    // 确保 NODE_ENV 得到规范化（支持测试中动态修改后的重新规范化）
+    process.env.NODE_ENV = normalizeNodeEnv(process.env.NODE_ENV);
+
     console.log(`🚀 Initializing configuration...`);
 
     // 环境验证机制

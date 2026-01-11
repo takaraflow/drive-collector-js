@@ -1,23 +1,31 @@
 import { describe, test, expect, beforeEach, afterEach, jest } from "@jest/globals";
+import { initConfig, __resetConfigForTests } from "../../src/config/index.js";
 
-const originalEnv = process.env;
+// Mock dependencies at top level
+await jest.unstable_mockModule('dotenv', () => ({
+  default: {
+    config: jest.fn(() => ({ parsed: {} }))
+  },
+  loadDotenv: jest.fn()
+}));
+
+await jest.unstable_mockModule('../../src/services/InfisicalClient.js', () => ({
+  fetchInfisicalSecrets: jest.fn().mockResolvedValue({})
+}));
+
+const originalEnv = { ...process.env };
 
 describe("config - Environment Validation", () => {
-  beforeEach(async () => {
-    jest.resetModules();
-    await jest.unstable_mockModule('dotenv', () => ({
-      default: {
-        config: jest.fn(() => ({ parsed: {} }))
-      }
-    }));
+  beforeEach(() => {
     jest.spyOn(console, 'log').mockImplementation(() => {});
     jest.spyOn(console, 'warn').mockImplementation(() => {});
     jest.spyOn(console, 'error').mockImplementation(() => {});
     process.env.SKIP_INFISICAL_RUNTIME = "true";
+    __resetConfigForTests();
   });
 
   afterEach(() => {
-    process.env = originalEnv;
+    process.env = { ...originalEnv };
     jest.restoreAllMocks();
   });
 
@@ -32,10 +40,7 @@ describe("config - Environment Validation", () => {
       process.env.BOT_TOKEN = "test_bot_token";
       process.env.OWNER_ID = "owner_id";
 
-      const { initConfig } = await import("../../src/config/index.js");
-
       const config = await initConfig();
-
       expect(config).toBeDefined();
     });
 
@@ -43,7 +48,7 @@ describe("config - Environment Validation", () => {
       const validEnvs = ["dev", "pre", "prod"];
 
       for (const env of validEnvs) {
-        jest.resetModules();
+        __resetConfigForTests();
         process.env.NODE_ENV = env;
         process.env.INFISICAL_ENV = env;
         process.env.INFISICAL_TOKEN = "test_token";
@@ -53,10 +58,7 @@ describe("config - Environment Validation", () => {
         process.env.BOT_TOKEN = "test_bot_token";
         process.env.OWNER_ID = "owner_id";
 
-        const { initConfig } = await import("../../src/config/index.js");
-
         const config = await initConfig();
-
         expect(config).toBeDefined();
       }
     });
@@ -72,11 +74,9 @@ describe("config - Environment Validation", () => {
       process.env.BOT_TOKEN = "test_bot_token";
       process.env.OWNER_ID = "owner_id";
 
-      const { initConfig } = await import("../../src/config/index.js");
-
       const config = await initConfig();
-
       expect(config).toBeDefined();
+      expect(process.env.NODE_ENV).toBe("prod");
     });
 
     test("should normalize staging to pre in initConfig", async () => {
@@ -89,11 +89,9 @@ describe("config - Environment Validation", () => {
       process.env.BOT_TOKEN = "test_bot_token";
       process.env.OWNER_ID = "owner_id";
 
-      const { initConfig } = await import("../../src/config/index.js");
-
       const config = await initConfig();
-
       expect(config).toBeDefined();
+      expect(process.env.NODE_ENV).toBe("pre");
     });
   });
 
@@ -108,8 +106,6 @@ describe("config - Environment Validation", () => {
       process.env.BOT_TOKEN = "test_bot_token";
       process.env.OWNER_ID = "owner_id";
 
-      const { initConfig } = await import("../../src/config/index.js");
-
       await expect(initConfig()).rejects.toThrow();
     });
 
@@ -123,10 +119,7 @@ describe("config - Environment Validation", () => {
       process.env.BOT_TOKEN = "test_bot_token";
       process.env.OWNER_ID = "owner_id";
 
-      const { initConfig } = await import("../../src/config/index.js");
-
       const config = await initConfig();
-
       expect(config).toBeDefined();
     });
   });

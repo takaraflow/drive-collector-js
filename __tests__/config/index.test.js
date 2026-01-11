@@ -1,36 +1,32 @@
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
+import { initConfig, getRedisConnectionConfig, __resetConfigForTests, CACHE_TTL } from "../../src/config/index.js";
 
 // Store original process.env
-const originalEnv = process.env;
+const originalEnv = { ...process.env };
 
 describe("Config Module", () => {
   beforeAll(() => {
     // Set up mock environment variables
-    process.env = {
-      ...originalEnv,
-      API_ID: "12345",
-      API_HASH: "mock_hash",
-      BOT_TOKEN: "mock_token",
-      OWNER_ID: "owner_id",
-      RCLONE_REMOTE: "mega_test",
-      REMOTE_FOLDER: "/test",
-      PORT: "8080",
-      TELEGRAM_PROXY_HOST: "proxy.example.com",
-      TELEGRAM_PROXY_PORT: "1080",
-      TELEGRAM_PROXY_TYPE: "socks5",
-      TELEGRAM_PROXY_USERNAME: "proxy_user",
-      TELEGRAM_PROXY_PASSWORD: "proxy_pass",
-    };
+    process.env.API_ID = "12345";
+    process.env.API_HASH = "mock_hash";
+    process.env.BOT_TOKEN = "mock_token";
+    process.env.OWNER_ID = "owner_id";
+    process.env.RCLONE_REMOTE = "mega_test";
+    process.env.REMOTE_FOLDER = "/test";
+    process.env.PORT = "8080";
+    process.env.TELEGRAM_PROXY_HOST = "proxy.example.com";
+    process.env.TELEGRAM_PROXY_PORT = "1080";
+    process.env.TELEGRAM_PROXY_TYPE = "socks5";
+    process.env.TELEGRAM_PROXY_USERNAME = "proxy_user";
+    process.env.TELEGRAM_PROXY_PASSWORD = "proxy_pass";
   });
 
   afterAll(() => {
     // Restore original environment variables
-    process.env = originalEnv;
+    process.env = { ...originalEnv };
   });
 
   test("should have the required config object and properties", async () => {
-    // Dynamically import the module to use the mocked env
-    const { initConfig, __resetConfigForTests } = await import("../../src/config/index.js");
     __resetConfigForTests();
     const config = await initConfig();
     expect(config).toBeDefined();
@@ -55,7 +51,6 @@ describe("Config Module", () => {
   });
 
   test("should have the CACHE_TTL constant", async () => {
-    const { CACHE_TTL } = await import("../../src/config/index.js");
     // CACHE_TTL is exported as a named export
     expect(CACHE_TTL).toBeDefined();
     expect(typeof CACHE_TTL).toBe("number");
@@ -67,7 +62,6 @@ describe("Config Module", () => {
     process.env.NF_REDIS_URL = "rediss://user:pass@redis.example.com:6379";
     process.env.REDIS_TLS_ENABLED = "false";
     
-    const { initConfig, __resetConfigForTests } = await import("../../src/config/index.js");
     __resetConfigForTests();
     const config1 = await initConfig();
     expect(config1.redis.tls.enabled).toBe(false);
@@ -81,7 +75,6 @@ describe("Config Module", () => {
     // Test case 2: rediss:// URL without TLS disabled
     process.env.NF_REDIS_URL = "rediss://user:pass@redis.example.com:6379";
     
-    const { initConfig, __resetConfigForTests } = await import("../../src/config/index.js");
     __resetConfigForTests();
     const config2 = await initConfig();
     expect(config2.redis.tls.enabled).toBe(true);
@@ -95,7 +88,6 @@ describe("Config Module", () => {
     process.env.NF_REDIS_URL = "rediss://user:pass@redis.example.com:6379";
     process.env.NF_REDIS_TLS_ENABLED = "false";
     
-    const { initConfig, __resetConfigForTests } = await import("../../src/config/index.js");
     __resetConfigForTests();
     const config3 = await initConfig();
     expect(config3.redis.tls.enabled).toBe(false);
@@ -109,7 +101,6 @@ describe("Config Module", () => {
     process.env.REDIS_URL = "redis://redis.example.com:6379";
     process.env.REDIS_TOKEN = "test_token_123";
 
-    const { initConfig, getRedisConnectionConfig, __resetConfigForTests } = await import("../../src/config/index.js");
     __resetConfigForTests();
     await initConfig();
     const { options } = getRedisConnectionConfig();
@@ -124,7 +115,6 @@ describe("Config Module", () => {
     process.env.REDIS_URL = "redis://redis.example.com:6379";
     process.env.UPSTASH_REDIS_REST_TOKEN = "upstash_token_123";
 
-    const { initConfig, getRedisConnectionConfig, __resetConfigForTests } = await import("../../src/config/index.js");
     __resetConfigForTests();
     await initConfig();
     const { options } = getRedisConnectionConfig();
@@ -140,7 +130,6 @@ describe("Config Module", () => {
     process.env.REDIS_TOKEN = "priority_token";
     process.env.UPSTASH_REDIS_REST_TOKEN = "upstash_token_123";
 
-    const { initConfig, getRedisConnectionConfig, __resetConfigForTests } = await import("../../src/config/index.js");
     __resetConfigForTests();
     await initConfig();
     const { options } = getRedisConnectionConfig();
