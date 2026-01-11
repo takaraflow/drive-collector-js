@@ -4,6 +4,9 @@ main = "dist/index.js"
 compatibility_date = "2023-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+[vars]
+NODE_ENV = "${NODE_ENV:-prod}"
+
 [[kv_namespaces]]
 binding = "KV_STORAGE"
 id = "${CF_KV_NAMESPACE_ID}"
