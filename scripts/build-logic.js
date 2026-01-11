@@ -389,22 +389,20 @@ function buildVarsSection(envConfig = {}, envSource = process.env) {
     const lines = ['[vars]', `VERSION = "${escapeTomlString(versionValue)}"`];
     let manifestCount = 0;
 
-    if (envSource.GITHUB_ACTIONS !== 'true') {
-        const entries = Object.entries(envConfig)
-            .filter(([_, config]) => ['string', 'number', 'boolean'].includes(config.type));
+    const entries = Object.entries(envConfig)
+        .filter(([_, config]) => ['string', 'number', 'boolean'].includes(config.type));
 
-        for (const [key, config] of entries) {
-            const val = envSource[key];
-            const finalVal = val || config.default || '';
+    for (const [key, config] of entries) {
+        const val = envSource[key];
+        const finalVal = val || config.default || '';
 
-            if (finalVal === '') continue;
+        if (finalVal === '') continue;
 
-            manifestCount++;
-            if (config.type === 'string') {
-                lines.push(`${key} = "${escapeTomlString(finalVal)}"`);
-            } else {
-                lines.push(`${key} = ${finalVal}`);
-            }
+        manifestCount++;
+        if (config.type === 'string') {
+            lines.push(`${key} = "${escapeTomlString(finalVal)}"`);
+        } else {
+            lines.push(`${key} = ${finalVal}`);
         }
     }
 
