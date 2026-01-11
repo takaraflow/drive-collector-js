@@ -331,7 +331,7 @@ describe("Logger Service", () => {
         expect(payload.module).toBe(moduleName);
     });
 
-    test("should support dynamic fields via withContext", async () => {
+test("should support dynamic fields via withContext", async () => {
         const dynamicFields = {
             taskId: "T-123",
             userId: "U-456",
@@ -343,10 +343,145 @@ describe("Logger Service", () => {
         
         const { payload } = getLastAxiomCall();
         
-        // Dynamic fields should be at the top level of the payload
         expect(payload.taskId).toBe("T-123");
         expect(payload.userId).toBe("U-456");
         expect(payload.customFlag).toBe(true);
         expect(payload.message).toBe("Dynamic fields test");
+    });
+
+    test("should inject env field from NODE_ENV", async () => {
+        const savedNodeEnv = process.env.NODE_ENV;
+        const savedAxiomToken = process.env.AXIOM_TOKEN;
+        const savedAxiomOrgId = process.env.AXIOM_ORG_ID;
+        const savedAxiomDataset = process.env.AXIOM_DATASET;
+        
+        process.env.NODE_ENV = 'test';
+        process.env.AXIOM_TOKEN = 'test-token';
+        process.env.AXIOM_ORG_ID = 'test-org';
+        process.env.AXIOM_DATASET = 'test-dataset';
+        
+        vi.resetModules();
+        
+        const loggerModule = await import('../../src/services/logger.js');
+        logger = loggerModule.default;
+        resetLogger = loggerModule.resetLogger;
+        flushLogBuffer = loggerModule.flushLogBuffer;
+        
+        resetLogger();
+        
+        await logger.info("Env field test");
+        await flushLogBuffer();
+        
+        const { payload } = getLastAxiomCall();
+        expect(payload.env).toBe('test');
+        
+        process.env.NODE_ENV = savedNodeEnv;
+        process.env.AXIOM_TOKEN = savedAxiomToken;
+        process.env.AXIOM_ORG_ID = savedAxiomOrgId;
+        process.env.AXIOM_DATASET = savedAxiomDataset;
+    });
+
+    test("should use 'unknown' when NODE_ENV is not set", async () => {
+        const savedAxiomToken = process.env.AXIOM_TOKEN;
+        const savedAxiomOrgId = process.env.AXIOM_ORG_ID;
+        const savedAxiomDataset = process.env.AXIOM_DATASET;
+        
+        delete process.env.NODE_ENV;
+        process.env.AXIOM_TOKEN = 'test-token';
+        process.env.AXIOM_ORG_ID = 'test-org';
+        process.env.AXIOM_DATASET = 'test-dataset';
+        
+        vi.resetModules();
+        
+        const loggerModule = await import('../../src/services/logger.js');
+        logger = loggerModule.default;
+        resetLogger = loggerModule.resetLogger;
+        flushLogBuffer = loggerModule.flushLogBuffer;
+        
+        resetLogger();
+        
+        await logger.info("Env unknown test");
+        await flushLogBuffer();
+        
+        const { payload } = getLastAxiomCall();
+        expect(payload.env).toBe('unknown');
+        
+        process.env.AXIOM_TOKEN = savedAxiomToken;
+        process.env.AXIOM_ORG_ID = savedAxiomOrgId;
+        process.env.AXIOM_DATASET = savedAxiomDataset;
+    });
+
+    test("should not override env if provided in context", async () => {
+        const savedNodeEnv = process.env.NODE_ENV;
+        const savedAxiomToken = process.env.AXIOM_TOKEN;
+        const savedAxiomOrgId = process.env.AXIOM_ORG_ID;
+        const savedAxiomDataset = process.env.AXIOM_DATASET;
+        
+        process.env.NODE_ENV = 'prod';
+        process.env.AXIOM_TOKEN = 'test-token';
+        process.env.AXIOM_ORG_ID = 'test-org';
+        process.env.AXIOM_DATASET = 'test-dataset';
+        
+        vi.resetModules();
+        
+        const loggerModule = await import('../../src/services/logger.js');
+        logger = loggerModule.default;
+        resetLogger = loggerModule.resetLogger;
+        flushLogBuffer = loggerModule.flushLogBuffer;
+        
+        resetLogger();
+        
+        await logger.withContext({ env: 'custom-env' }).info("Custom env test");
+        await flushLogBuffer();
+        
+        const { payload } = getLastAxiomCall();
+        expect(payload.env).toBe('custom-env');
+        
+        process.env.NODE_ENV = savedNodeEnv;
+        process.env.AXIOM_TOKEN = savedAxiomToken;
+        process.env.AXIOM_ORG_ID = savedAxiomOrgId;
+        process.env.AXIOM_DATASET = savedAxiomDataset;
+    });
+
+    test("should include env in all log levels", async () => {
+        const savedNodeEnv = process.env.NODE_ENV;
+        const savedAxiomToken = process.env.AXIOM_TOKEN;
+        const savedAxiomOrgId = process.env.AXIOM_ORG_ID;
+        const savedAxiomDataset = process.env.AXIOM_DATASET;
+        
+        process.env.NODE_ENV = 'test';
+        process.env.AXIOM_TOKEN = 'test-token';
+        process.env.AXIOM_ORG_ID = 'test-org';
+        process.env.AXIOM_DATASET = 'test-dataset';
+        
+        vi.resetModules();
+        
+        const loggerModule = await import('../../src/services/logger.js');
+        logger = loggerModule.default;
+        resetLogger = loggerModule.resetLogger;
+        flushLogBuffer = loggerModule.flushLogBuffer;
+        
+        resetLogger();
+        
+        await logger.info("Info with env");
+        await logger.warn("Warn with env");
+        await logger.error("Error with env");
+        await flushLogBuffer();
+        
+        const calls = globalMocks.axiomIngest.mock.calls;
+        expect(calls.length).toBe(1);
+        
+        const [dataset, payloadArray] = calls[calls.length - 1];
+        expect(dataset).toBe('test-dataset');
+        expect(payloadArray.length).toBe(3);
+        
+        for (const payload of payloadArray) {
+            expect(payload.env).toBe('test');
+        }
+        
+        process.env.NODE_ENV = savedNodeEnv;
+        process.env.AXIOM_TOKEN = savedAxiomToken;
+        process.env.AXIOM_ORG_ID = savedAxiomOrgId;
+        process.env.AXIOM_DATASET = savedAxiomDataset;
     });
 });

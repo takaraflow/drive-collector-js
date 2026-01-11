@@ -464,12 +464,14 @@ const canSend = (level) => true;
 
 export const createLogger = (context = {}) => {
     const baseContext = normalizeContext(context);
+    if (!baseContext.env) {
+        baseContext.env = process.env.NODE_ENV || 'unknown';
+    }
     return {
         info: (message, data) => log(getSafeInstanceId(), 'info', message, data, baseContext),
         warn: (message, data) => log(getSafeInstanceId(), 'warn', message, data, baseContext),
         error: (message, data) => log(getSafeInstanceId(), 'error', message, data, baseContext),
         debug: (message, data) => {
-            // Debug logs should not be output to console when Axiom is not configured
             if (!process.env.AXIOM_TOKEN && (!config || !config.axiom)) return;
             return log(getSafeInstanceId(), 'debug', message, data, baseContext);
         },
