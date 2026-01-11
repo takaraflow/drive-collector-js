@@ -42,7 +42,9 @@ describe("Core InstanceCoordinator Tests", () => {
             info: jest.fn(),
             error: jest.fn(),
             warn: jest.fn(),
-            debug: jest.fn()
+            debug: jest.fn(),
+            withModule: jest.fn().mockReturnThis(),
+            withContext: jest.fn().mockReturnThis()
         };
 
         // Mock CacheService

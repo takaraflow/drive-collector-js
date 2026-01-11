@@ -19,7 +19,7 @@ import { queueService } from "../services/QueueService.js";
 import { logger } from "../services/logger.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 
-const log = logger.withModule ? logger.withModule('TaskManager') : logger;
+const log = logger.withModule('TaskManager');
 
 // QStash 延迟队列替代了 UploadBatcher
 
@@ -996,18 +996,18 @@ export class TaskManager {
                     if (validationAttempts < maxValidationAttempts) {
                         // 如果是最后一次尝试，强制刷新文件列表缓存
                         if (validationAttempts === maxValidationAttempts - 1) {
-                            log.info(`[Validation] Final attempt for ${actualFileName}, forcing cache refresh...`);
+                            log.info(`Final attempt for ${actualFileName}, forcing cache refresh...`);
                             try {
                                 await CloudTool.listRemoteFiles(task.userId, true); // 强制刷新缓存
                                 // 再试一次
                                 finalRemote = await CloudTool.getRemoteFileInfo(actualFileName, task.userId, 1);
                                 if (finalRemote) break;
                             } catch (e) {
-                                log.warn(`[Validation] Cache refresh failed:`, e);
+                                log.warn(`Cache refresh failed:`, e);
                             }
                         }
 
-                        log.info(`[Validation] Attempt ${validationAttempts} failed for ${actualFileName}, retrying in ${validationAttempts * 5}s...`);
+                        log.info(`Attempt ${validationAttempts} failed for ${actualFileName}, retrying in ${validationAttempts * 5}s...`);
                         await new Promise(resolve => setTimeout(resolve, validationAttempts * 5000)); // 递增延迟: 5s, 10s, 15s, 20s
                     }
                 }
@@ -1016,7 +1016,7 @@ export class TaskManager {
                 const isOk = finalRemote && this._isSizeMatch(finalRemote.Size, localSize);
 
                 if (!isOk) {
-                    log.error(`[Validation Failed] Task: ${task.id}, File: ${actualFileName}`);
+                    log.error(`Validation Failed - Task: ${task.id}, File: ${actualFileName}`);
                     log.error(`- Local Size: ${localSize}`);
                     log.error(`- Remote Size: ${finalRemote ? finalRemote.Size : 'N/A'}`);
                     log.error(`- Remote Info: ${JSON.stringify(finalRemote)}`);

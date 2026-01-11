@@ -36,6 +36,8 @@ describe("InstanceCoordinator Heartbeat (KV Only)", () => {
             error: jest.fn(),
             warn: jest.fn(),
             debug: jest.fn(),
+            withModule: jest.fn().mockReturnThis(),
+            withContext: jest.fn().mockReturnThis()
         };
 
         /**

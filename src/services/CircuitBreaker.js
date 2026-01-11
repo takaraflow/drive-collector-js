@@ -1,6 +1,9 @@
 import logger from "./logger.js";
 
-const log = logger.withModule ? logger.withModule('CircuitBreaker') : logger;
+const log = logger.withModule('CircuitBreaker');
+
+// 创建带 name 上下文的 logger 用于动态 name 信息
+const logWithName = (name) => log.withContext({ breaker: name });
 
 /**
  * --- 熔断器 ---
@@ -36,7 +39,7 @@ export class CircuitBreaker {
         // 检查熔断器状态
         if (this.state === 'OPEN') {
             if (Date.now() - this.lastFailureTime > this.timeout) {
-                log.info(`[${this.name}] Circuit breaker half-open, attempting recovery`);
+                logWithName(this.name).info(`Circuit breaker half-open, attempting recovery`);
                 this.state = 'HALF_OPEN';
             } else {
                 // 熔断中，执行 fallback 或直接失败
@@ -82,7 +85,7 @@ export class CircuitBreaker {
         this.failureCount = 0;
         this.successCount = 0;
         this.lastFailureTime = null;
-        log.info(`[${this.name}] Circuit breaker manually reset`);
+        logWithName(this.name).info(`Circuit breaker manually reset`);
     }
     
     /**
@@ -91,14 +94,14 @@ export class CircuitBreaker {
     forceOpen() {
         this.state = 'OPEN';
         this.lastFailureTime = Date.now();
-        log.warn(`[${this.name}] Circuit breaker force opened`);
+        logWithName(this.name).warn(`Circuit breaker force opened`);
     }
     
     _onSuccess() {
         if (this.state === 'HALF_OPEN') {
             this.successCount++;
             if (this.successCount >= this.successThreshold) {
-                log.info(`[${this.name}] Circuit breaker recovered, closing`);
+                logWithName(this.name).info(`Circuit breaker recovered, closing`);
                 this._reset();
             }
         } else {
@@ -112,11 +115,11 @@ export class CircuitBreaker {
         
         if (this.state === 'HALF_OPEN') {
             // 半开状态下的失败直接重新打开
-            log.warn(`[${this.name}] Circuit breaker half-open failed, reopening`, { error: error.message });
+            logWithName(this.name).warn(`Circuit breaker half-open failed, reopening`, { error: error.message });
             this.state = 'OPEN';
         } else if (this.failureCount >= this.failureThreshold) {
             // 达到阈值，打开熔断器
-            log.warn(`[${this.name}] Circuit breaker opened after ${this.failureCount} failures`, { error: error.message });
+            logWithName(this.name).warn(`Circuit breaker opened after ${this.failureCount} failures`, { error: error.message });
             this.state = 'OPEN';
         }
     }

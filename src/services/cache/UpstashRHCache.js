@@ -4,6 +4,7 @@
  */
 
 import { RedisHTTPCache } from './RedisHTTPCache.js';
+import { logger } from '../logger.js';
 
 class UpstashRHCache extends RedisHTTPCache {
     static detectConfig(env = process.env) {
@@ -34,7 +35,8 @@ class UpstashRHCache extends RedisHTTPCache {
 
         super(finalConfig);
         
-        console.log('[UpstashRHCache] Initialized with Upstash REST API');
+        this.log = logger.withModule('UpstashRHCache');
+        this.log.info('Initialized with Upstash REST API');
     }
 
     /**
@@ -67,7 +69,7 @@ class UpstashRHCache extends RedisHTTPCache {
             const cost = response.headers.get('Upstash-Request-Cost');
             const latency = response.headers.get('Upstash-Latency');
             if (cost || latency) {
-                console.debug(`[UpstashRHCache] Telemetry - Cost: ${cost}, Latency: ${latency}ms`);
+                this.log.debug(`Telemetry - Cost: ${cost}, Latency: ${latency}ms`);
             }
             
             if (!response.ok) {
@@ -115,23 +117,23 @@ class UpstashRHCache extends RedisHTTPCache {
             }
             
             // If we get here, return the data as-is but log a warning
-            console.warn('[UpstashRHCache] Unexpected response format:', data);
+            this.log.warn('Unexpected response format:', data);
             return data;
         } catch (error) {
             clearTimeout(id);
             
             // Network errors
             if (error.name === 'AbortError') {
-                console.error('[UpstashRHCache] Request timeout');
+                this.log.error('Request timeout');
                 throw new Error('Upstash request timeout');
             }
             
             if (error.message.includes('fetch')) {
-                console.error('[UpstashRHCache] Network error:', error.message);
+                this.log.error('Network error:', error.message);
                 throw new Error('Network error connecting to Upstash');
             }
             
-            console.error('[UpstashRHCache] Command error:', error.message);
+            this.log.error('Command error:', error.message);
             throw error;
         }
     }
@@ -162,13 +164,13 @@ class UpstashRHCache extends RedisHTTPCache {
             if (result === 1) {
                 this._lockTokens = this._lockTokens || new Map();
                 this._lockTokens.set(key, lockToken);
-                console.log(`[UpstashRHCache] Lock acquired: ${key}`);
+                this.log.info(`Lock acquired: ${key}`);
                 return true;
             }
-            console.log(`[UpstashRHCache] Lock failed: ${key} (already locked)`);
+            this.log.info(`Lock failed: ${key} (already locked)`);
             return false;
         } catch (error) {
-            console.error('[UpstashRHCache] Lock error:', error.message);
+            this.log.error('Lock error:', error.message);
             return false;
         }
     }
@@ -186,7 +188,7 @@ class UpstashRHCache extends RedisHTTPCache {
             const lockToken = this._lockTokens.get(key);
             
             if (!lockToken) {
-                console.warn('[UpstashRHCache] No token found for lock:', key);
+                this.log.warn('No token found for lock:', key);
                 return false;
             }
             
@@ -204,13 +206,13 @@ class UpstashRHCache extends RedisHTTPCache {
             
             if (result === 1) {
                 this._lockTokens.delete(key);
-                console.log(`[UpstashRHCache] Lock released: ${key}`);
+                this.log.info(`Lock released: ${key}`);
                 return true;
             }
-            console.log(`[UpstashRHCache] Lock release failed: ${key} (token mismatch or already released)`);
+            this.log.info(`Lock release failed: ${key} (token mismatch or already released)`);
             return false;
         } catch (error) {
-            console.error('[UpstashRHCache] Unlock error:', error.message);
+            this.log.error('Unlock error:', error.message);
             return false;
         }
     }
@@ -221,7 +223,7 @@ class UpstashRHCache extends RedisHTTPCache {
      * @returns {UpstashPipeline} - Pipeline instance
      */
     pipeline() {
-        console.log('[UpstashRHCache] Creating pipeline for batch operations');
+        this.log.info('Creating pipeline for batch operations');
         return new UpstashPipeline(this);
     }
 
@@ -259,13 +261,13 @@ class UpstashRHCache extends RedisHTTPCache {
             const cost = response.headers.get('Upstash-Request-Cost');
             const latency = response.headers.get('Upstash-Latency');
             if (cost || latency) {
-                console.debug(`[UpstashRHCache] Pipeline Telemetry - Cost: ${cost}, Latency: ${latency}ms`);
+                this.log.debug(`Pipeline Telemetry - Cost: ${cost}, Latency: ${latency}ms`);
             }
 
             if (!response.ok) {
                 // If /pipeline not supported, fall back to /exec
                 if (response.status === 404) {
-                    console.log('[UpstashRHCache] /pipeline not available, falling back to /exec');
+                    this.log.info('/pipeline not available, falling back to /exec');
                     return await this._sendCommand(commands);
                 }
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -298,11 +300,11 @@ class UpstashRHCache extends RedisHTTPCache {
             clearTimeout(id);
             
             if (error.name === 'AbortError') {
-                console.error('[UpstashRHCache] Pipeline timeout');
+                this.log.error('Pipeline timeout');
                 throw new Error('Pipeline request timeout');
             }
 
-            console.error('[UpstashRHCache] Pipeline error:', error.message);
+            this.log.error('Pipeline error:', error.message);
             throw error;
         }
     }
@@ -334,7 +336,7 @@ class UpstashRHCache extends RedisHTTPCache {
      */
     async destroy() {
         this._lockTokens?.clear();
-        console.log('[UpstashRHCache] Connection closed');
+        this.log.info('Connection closed');
     }
 }
 
@@ -423,7 +425,7 @@ class UpstashPipeline {
                 return result;
             });
         } catch (error) {
-            console.error('[UpstashPipeline] Execution error:', error.message);
+            this.cache.log.error('Execution error:', error.message);
             throw error;
         }
     }

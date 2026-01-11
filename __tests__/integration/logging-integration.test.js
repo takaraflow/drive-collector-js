@@ -162,7 +162,7 @@ describe('Logger Integration Tests (Unified)', () => {
     });
 
     describe('Other integrations', () => {
-        test('logger adds version prefix', async () => {
+        test('logger includes version as separate field and clean message', async () => {
             await loggerModule.logger.info('test');
             
             await Promise.resolve();
@@ -170,7 +170,11 @@ describe('Logger Integration Tests (Unified)', () => {
             
             expect(mockAxiomIngest).toHaveBeenCalled();
             const payload = mockAxiomIngest.mock.calls[0][1][0];
-            expect(payload.message).toMatch(/^\[v[\w\.\-]+\]/);
+            // Message should be clean without version prefix
+            expect(payload.message).toBe('test');
+            // Version should be a separate field
+            expect(payload.version).toBeDefined();
+            expect(payload.version).not.toBe('unknown');
         });
     });
 });

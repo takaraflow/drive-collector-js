@@ -42,7 +42,9 @@ await jest.unstable_mockModule('../../src/services/logger.js', () => ({
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
-        debug: jest.fn()
+        debug: jest.fn(),
+        withModule: jest.fn().mockReturnThis(),
+        withContext: jest.fn().mockReturnThis()
     }
 }));
 

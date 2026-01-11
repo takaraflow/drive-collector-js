@@ -4,7 +4,10 @@ import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { logger } from "../services/logger.js";
 import { config } from "../config/index.js";
 
-const log = logger.withModule ? logger.withModule('MessageHandler') : logger;
+const log = logger.withModule('MessageHandler');
+
+// 创建带 perf 上下文的 logger 用于性能日志
+const logPerf = () => log.withContext({ perf: true });
 
 // 全局消息去重缓存 (防止多实例重复处理)
 const processedMessages = new Map();
@@ -128,12 +131,12 @@ export class MessageHandler {
                 const lockTime = Date.now() - lockStart;
                 
                 if (!hasLock) {
-                    log.info(`[PERF] 消息 ${msgId} 锁竞争失败 (lock: ${lockTime}ms)`);
+                    logPerf().info(`消息 ${msgId} 锁竞争失败 (lock: ${lockTime}ms)`);
                     // 标记为本地已处理，避免后续重复请求 KV
                     processedMessages.set(msgId, now);
                     return;
                 }
-                log.info(`[PERF] 消息 ${msgId} 获取锁耗时 ${lockTime}ms`);
+                logPerf().info(`消息 ${msgId} 获取锁耗时 ${lockTime}ms`);
             } catch (lockError) {
                 log.error(`⚠️ 获取消息锁时发生异常, 降级处理继续执行`, lockError);
                 // 如果锁服务完全挂了，为了不丢消息，我们可以选择继续处理（但这可能导致重复回复）
@@ -217,17 +220,17 @@ export class MessageHandler {
                     event: safeSerializeEvent(event)
                 });
                 // 未知类型事件降级为 debug 日志，减少噪音
-                log.debug(`[PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+                logPerf().debug(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
             } else if (isUpdateConnectionState) {
                 // UpdateConnectionState 是常规心跳，改为 debug 级别
-                log.debug(`[PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+                logPerf().debug(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
             } else {
                 // 已知类型事件保留 info 日志
-                log.info(`[PERF] 消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+                logPerf().info(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
             }
             // 性能监控：如果总耗时超过 500ms，记录警告
             if (totalTime > 500) {
-                log.warn(`[PERF] 慢响应警告: 消息处理耗时 ${totalTime}ms，超过阈值 500ms`);
+                logPerf().warn(`慢响应警告: 消息处理耗时 ${totalTime}ms，超过阈值 500ms`);
             }
         } catch (e) {
             log.error("Critical: Unhandled Dispatcher Error", e);

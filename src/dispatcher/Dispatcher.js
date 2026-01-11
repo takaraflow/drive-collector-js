@@ -23,7 +23,10 @@ import { localCache } from "../utils/LocalCache.js";
 import fs from "fs";
 import path from "path";
 
-const log = logger.withModule ? logger.withModule('Dispatcher') : logger;
+const log = logger.withModule('Dispatcher');
+
+// 创建带 perf 上下文的 logger 用于性能日志
+const logPerf = () => log.withContext({ perf: true });
 
 /**
  * 消息分发器 (Dispatcher)
@@ -59,21 +62,21 @@ export class Dispatcher {
         const passed = await this._globalGuard(event, ctx);
         const guardTime = Date.now() - guardStart;
         if (!passed) {
-            log.info(`[PERF] 消息被全局守卫拦截 (User: ${ctx.userId}, guard: ${guardTime}ms, total: ${Date.now() - start}ms)`);
+            logPerf().info(`消息被全局守卫拦截 (User: ${ctx.userId}, guard: ${guardTime}ms, total: ${Date.now() - start}ms)`);
             return;
         }
 
         // 3. 路由分发
         // 使用 className 检查替代 instanceof，提高鲁棒性并方便测试
         if (event.className === 'UpdateBotCallbackQuery') {
-            log.info(`[PERF] 回调处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
+            logPerf().info(`回调处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
             await this._handleCallback(event, ctx);
         } else if (event.className === 'UpdateNewMessage' && event.message) {
-            log.info(`[PERF] 消息处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
+            logPerf().info(`消息处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
             await this._handleMessage(event, ctx);
         }
         
-        log.info(`[PERF] 总耗时 ${Date.now() - start}ms`);
+        logPerf().info(`总耗时 ${Date.now() - start}ms`);
     }
 
     /**

@@ -348,10 +348,10 @@ const log = async (instanceId, level, message, data = {}, context = {}) => {
   }
 
   const modulePrefix = contextFields.module ? `[${contextFields.module}] ` : '';
-  const displayMessage = `[v${version}] ${modulePrefix}${message}`;
+  const consoleMessage = `[v${version}] ${modulePrefix}${message}`;
 
   if (isAxiomSuspended()) {
-    fallbackToConsole(level, displayMessage, finalData);
+    fallbackToConsole(level, consoleMessage, finalData);
     return;
   }
 
@@ -360,17 +360,20 @@ const log = async (instanceId, level, message, data = {}, context = {}) => {
   }
 
   if (!axiom) {
-    fallbackToConsole(level, displayMessage, finalData);
+    fallbackToConsole(level, consoleMessage, finalData);
     return;
   }
-  
+
   // 构建 payload，details 永远是字符串
+  // message 使用原始消息（不带前缀），version 和 module 作为独立字段发送到 Axiom
+  // 确保 message 是字符串，处理 Error 对象的情况
+  const axiomMessage = message instanceof Error ? message.message : String(message);
   const payload = {
     ...contextFields,
     version,
     instanceId,
     level,
-    message: displayMessage,
+    message: axiomMessage,
     timestamp: new Date().toISOString(),
     details: serializeToString(finalData) // ✅ 永远字符串，已处理循环引用和特殊值
   };

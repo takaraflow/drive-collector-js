@@ -107,7 +107,7 @@ describe("Logger Service", () => {
         process.env.AXIOM_DATASET = savedEnv.AXIOM_DATASET;
     });
 
-    test("should log info message", async () => {
+    test("should log info message with clean message and separate fields", async () => {
         const moduleName = "TestModule";
         const message = "Test info message";
         
@@ -118,13 +118,14 @@ describe("Logger Service", () => {
         expect(dataset).toBe('test-dataset');
         expect(payload).toEqual(expect.objectContaining({
             level: "info",
-            message: expect.stringContaining(message),
+            message: message, // Exact match, no prefixes
             module: moduleName,
+            version: expect.any(String),
             timestamp: expect.any(String)
         }));
     });
 
-    test("should log error message", async () => {
+    test("should log error message with clean message and separate fields", async () => {
         const moduleName = "TestModule";
         const error = new Error("Test error");
         
@@ -135,13 +136,14 @@ describe("Logger Service", () => {
         expect(dataset).toBe('test-dataset');
         expect(payload).toEqual(expect.objectContaining({
             level: "error",
-            message: expect.stringContaining(error.message),
+            message: error.message, // Exact match
             module: moduleName,
+            version: expect.any(String),
             timestamp: expect.any(String)
         }));
     });
 
-    test("should log warning message", async () => {
+    test("should log warning message with clean message and separate fields", async () => {
         const moduleName = "TestModule";
         const message = "Test warning";
         
@@ -152,8 +154,9 @@ describe("Logger Service", () => {
         expect(dataset).toBe('test-dataset');
         expect(payload).toEqual(expect.objectContaining({
             level: "warn",
-            message: expect.stringContaining(message),
+            message: message, // Exact match
             module: moduleName,
+            version: expect.any(String),
             timestamp: expect.any(String)
         }));
     });
@@ -309,5 +312,24 @@ describe("Logger Service", () => {
         expect(dataset).toBe('test-dataset');
         expect(payload.timestamp).toBe(new Date(fixedTime).toISOString());
         expect(payload.module).toBe(moduleName);
+    });
+
+    test("should support dynamic fields via withContext", async () => {
+        const dynamicFields = {
+            taskId: "T-123",
+            userId: "U-456",
+            customFlag: true
+        };
+        
+        await logger.withContext(dynamicFields).info("Dynamic fields test");
+        await flushLogBuffer();
+        
+        const { payload } = getLastAxiomCall();
+        
+        // Dynamic fields should be at the top level of the payload
+        expect(payload.taskId).toBe("T-123");
+        expect(payload.userId).toBe("U-456");
+        expect(payload.customFlag).toBe(true);
+        expect(payload.message).toBe("Dynamic fields test");
     });
 });
