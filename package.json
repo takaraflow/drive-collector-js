@@ -13,22 +13,22 @@
     "start:pre": "cross-env NODE_ENV=pre npm run sync:env && cross-env NODE_ENV=pre NODE_MODE=all node index.js",
     "start:dev": "npm run sync:env && cross-env NODE_ENV=dev NODE_MODE=all node index.js",
     "dev": "npm run sync:env && cross-env NODE_ENV=dev NODE_MODE=dev node --watch --watch-path=src --watch-path=index.js index.js",
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
-    "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
-    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
     "test:perf": "node scripts/test-performance.js",
     "test:perf:report": "node scripts/test-performance.js --report",
-    "test:fast": "node --experimental-vm-modules node_modules/jest/bin/jest.js --maxWorkers=50%",
-    "test:unit": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern='!(integration)' --maxWorkers=75%",
-    "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern='integration' --maxWorkers=50%",
-    "test:optimized": "node --experimental-vm-modules node_modules/jest/bin/jest.js --maxWorkers=100%",
-    "test:full-optimized": "cross-env NODE_OPTIONS=--max-old-space-size=8192 node --experimental-vm-modules node_modules/jest/bin/jest.js --maxWorkers=100%",
-    "release": "npm test && standard-version",
-    "release:patch": "npm test && standard-version --release-as patch",
-    "release:minor": "npm test && standard-version --release-as minor",
-    "release:major": "npm test && standard-version --release-as major",
+    "test:fast": "vitest run --maxWorkers=50%",
+    "test:unit": "vitest run --exclude **/integration/** --maxWorkers=75%",
+    "test:integration": "vitest run --include **/integration/** --maxWorkers=50%",
+    "test:optimized": "vitest run --maxWorkers=100%",
+    "test:full-optimized": "cross-env NODE_OPTIONS=--max-old-space-size=8192 vitest run --maxWorkers=100%",
+    "release": "vitest run && standard-version",
+    "release:patch": "vitest run && standard-version --release-as patch",
+    "release:minor": "vitest run && standard-version --release-as minor",
+    "release:major": "vitest run && standard-version --release-as major",
     "postrelease": "git push --follow-tags origin main",
-    "release:ai": "npm test && node scripts/release-ai.js"
+    "release:ai": "vitest run && node scripts/release-ai.js"
   },
   "keywords": [
     "telegram",
@@ -56,9 +56,10 @@
     "node": "^20.0.0"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.16",
     "cross-env": "^7.0.3",
-    "jest": "^30.2.0",
-    "standard-version": "^9.5.0"
+    "standard-version": "^9.5.0",
+    "vitest": "^4.0.16"
   },
   "dockerfile": {
     "litestream": true

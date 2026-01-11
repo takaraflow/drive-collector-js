@@ -1,16 +1,78 @@
-import { jest, describe, it, expect } from '@jest/globals';
-
 // Mock telegram to avoid initialization issues in integration tests
-jest.mock('../../src/services/telegram.js', () => ({
+vi.mock('../../src/services/telegram.js', () => ({
   client: {
-    start: jest.fn().mockResolvedValue(true),
-    addEventHandler: jest.fn(),
-    invoke: jest.fn().mockResolvedValue(true),
-    sendMessage: jest.fn().mockResolvedValue({ id: 1 })
+    start: vi.fn().mockResolvedValue(true),
+    addEventHandler: vi.fn(),
+    invoke: vi.fn().mockResolvedValue(true),
+    sendMessage: vi.fn().mockResolvedValue({ id: 1 })
   },
-  saveSession: jest.fn().mockResolvedValue(true),
-  clearSession: jest.fn().mockResolvedValue(true)
+  saveSession: vi.fn().mockResolvedValue(true),
+  clearSession: vi.fn().mockResolvedValue(true)
 }), { virtual: true });
+
+// Mock config to provide valid config for integration test
+vi.mock('../../src/config/index.js', () => ({
+  config: {
+    apiId: 12345,
+    apiHash: 'test-api-hash',
+    botToken: 'test-bot-token',
+    ownerId: 'test-owner',
+    downloadDir: '/tmp/downloads',
+    remoteName: 'test-remote',
+    remoteFolder: 'test-folder',
+    port: '3000',
+    http2: { enabled: false, plain: false, allowHttp1: true, keyPath: null, certPath: null },
+    redis: { url: null, token: null, tls: { enabled: false } },
+    kv: { accountId: null, namespaceId: null, token: null },
+    qstash: { token: null, currentSigningKey: null, nextSigningKey: null, webhookUrl: null },
+    oss: { endpoint: null, accessKeyId: null, secretAccessKey: null, bucket: 'drive-collector', publicUrl: null, workerUrl: null, workerSecret: null },
+    d1: { accountId: null, databaseId: null, token: null },
+    telegram: {
+      apiId: 12345,
+      apiHash: 'test-api-hash',
+      deviceModel: 'DriveCollector',
+      systemVersion: '1.0.0',
+      appVersion: '4.7.1',
+      serverDc: null,
+      serverIp: null,
+      serverPort: null,
+      testMode: false,
+      proxy: null
+    }
+  },
+  getConfig: vi.fn().mockReturnValue({
+    apiId: 12345,
+    apiHash: 'test-api-hash',
+    botToken: 'test-bot-token',
+    ownerId: 'test-owner',
+    downloadDir: '/tmp/downloads',
+    remoteName: 'test-remote',
+    remoteFolder: 'test-folder',
+    port: '3000',
+    http2: { enabled: false, plain: false, allowHttp1: true, keyPath: null, certPath: null },
+    redis: { url: null, token: null, tls: { enabled: false } },
+    kv: { accountId: null, namespaceId: null, token: null },
+    qstash: { token: null, currentSigningKey: null, nextSigningKey: null, webhookUrl: null },
+    oss: { endpoint: null, accessKeyId: null, secretAccessKey: null, bucket: 'drive-collector', publicUrl: null, workerUrl: null, workerSecret: null },
+    d1: { accountId: null, databaseId: null, token: null },
+    telegram: {
+      apiId: 12345,
+      apiHash: 'test-api-hash',
+      deviceModel: 'DriveCollector',
+      systemVersion: '1.0.0',
+      appVersion: '4.7.1',
+      serverDc: null,
+      serverIp: null,
+      serverPort: null,
+      testMode: false,
+      proxy: null
+    }
+  }),
+  initConfig: vi.fn(),
+  validateConfig: vi.fn().mockReturnValue(true),
+  getRedisConnectionConfig: vi.fn().mockReturnValue({ url: '', options: {} }),
+  __resetConfigForTests: vi.fn()
+}));
 
 describe('集成测试示例', () => {
   describe('消息处理流程集成测试', () => {

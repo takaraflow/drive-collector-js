@@ -1,50 +1,48 @@
-import { jest } from '@jest/globals';
-
 // 使用 unstable_mockModule 以支持 ESM 环境下的 Mock
 // 必须在 import 被测试模块之前执行
 
 // Mock config
-await jest.unstable_mockModule('../../src/config/index.js', () => ({
+await vi.doMock('../../src/config/index.js', () => ({
     config: {
         ownerId: null  // 默认无 owner，确保测试可预测
     }
 }));
 
 // Mock telegram.js 避免副作用
-await jest.unstable_mockModule('../../src/services/telegram.js', () => ({
+await vi.doMock('../../src/services/telegram.js', () => ({
     client: {
         session: { save: () => '' },
-        getMe: jest.fn(),
-        invoke: jest.fn().mockResolvedValue({})
+        getMe: vi.fn(),
+        invoke: vi.fn().mockResolvedValue({})
     },
-    saveSession: jest.fn(),
-    clearSession: jest.fn(),
-    resetClientSession: jest.fn()
+    saveSession: vi.fn(),
+    clearSession: vi.fn(),
+    resetClientSession: vi.fn()
 }));
 
 // Mock Dispatcher
-await jest.unstable_mockModule('../../src/dispatcher/Dispatcher.js', () => ({
+await vi.doMock('../../src/dispatcher/Dispatcher.js', () => ({
     Dispatcher: {
-        handle: jest.fn().mockResolvedValue(true)
+        handle: vi.fn().mockResolvedValue(true)
     }
 }));
 
 // Mock InstanceCoordinator
-await jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () => ({
+await vi.doMock('../../src/services/InstanceCoordinator.js', () => ({
     instanceCoordinator: {
-        acquireLock: jest.fn()
+        acquireLock: vi.fn()
     }
 }));
 
 // Mock logger
-await jest.unstable_mockModule('../../src/services/logger.js', () => ({
+await vi.doMock('../../src/services/logger.js', () => ({
     logger: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn(),
-        withModule: jest.fn().mockReturnThis(),
-        withContext: jest.fn().mockReturnThis()
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis()
     }
 }));
 
@@ -58,14 +56,14 @@ describe('MessageHandler Integration Tests', () => {
     let mockClient;
 
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         // 重置静态属性
         MessageHandler.botId = null;
 
         mockClient = {
             session: { save: () => 'mock_session' },
-            getMe: jest.fn().mockResolvedValue({ id: 123456 }),
-            invoke: jest.fn().mockResolvedValue({}),
+            getMe: vi.fn().mockResolvedValue({ id: 123456 }),
+            invoke: vi.fn().mockResolvedValue({}),
             connected: true
         };
     });

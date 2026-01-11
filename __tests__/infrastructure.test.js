@@ -1,40 +1,62 @@
-import { jest, describe, test, expect } from '@jest/globals';
-
 // Simple deterministic test infrastructure
 const fixedTime = 1700000000000;
+const mockTimeProvider = {
+    now: () => fixedTime,
+    setTimeout: global.setTimeout,
+    clearTimeout: global.clearTimeout
+};
+
+// Mock time
+vi.mock('../src/utils/timeProvider.js', () => ({
+    default: {
+        now: () => 1700000000000,
+        setTimeout: global.setTimeout,
+        clearTimeout: global.clearTimeout
+    },
+    now: () => 1700000000000,
+    setTimeout: global.setTimeout,
+    clearTimeout: global.clearTimeout
+}));
+
+// Mock environment
+vi.mock('../src/config/env.js', () => ({
+    getEnv: () => ({ NODE_ENV: 'test', DEBUG: 'false' }),
+    NODE_ENV: 'test',
+    DEBUG: 'false'
+}));
 
 // Setup before any tests - 只设置全局状态，不尝试 mock 已加载的模块
 beforeAll(() => {
     // Mock console globally
     global.console = {
-        log: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn()
+        log: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
     };
     
     // Mock Math.random
     Object.defineProperty(Math, 'random', {
-        value: jest.fn(() => 0.5),
+        value: vi.fn(() => 0.5),
         configurable: true
     });
 });
 
 beforeEach(() => {
-    jest.clearAllMocks();
-    jest.useFakeTimers();
+    vi.clearAllMocks();
+    vi.useFakeTimers();
     // 设置固定的系统时间
-    jest.setSystemTime(fixedTime);
+    vi.setSystemTime(fixedTime);
 });
 
 afterEach(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
 });
 
 describe('Test Infrastructure Compliance', () => {
     test('should have deterministic time', () => {
-        // 使用 Jest fake timers 的时间
+        // 使用 Vitest fake timers 的时间
         expect(Date.now()).toBe(fixedTime);
     });
 
@@ -54,7 +76,7 @@ describe('Test Infrastructure Compliance', () => {
         // advanceTimersByTime 会推进 Date.now()，这是预期行为
         // 我们验证 fake timers 正在工作（timer 返回 object）
         const startTime = Date.now();
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
         const endTime = Date.now();
         
         // 在 legacy fake timers 中，Date.now() 会前进
@@ -101,8 +123,8 @@ describe('Test Infrastructure Compliance', () => {
 
     test('should have explicit mocks', () => {
         // All external dependencies should be explicitly mocked
-        expect(jest.isMockFunction(global.console.log)).toBe(true);
-        expect(jest.isMockFunction(Math.random)).toBe(true);
+        expect(vi.isMockFunction(global.console.log)).toBe(true);
+        expect(vi.isMockFunction(Math.random)).toBe(true);
     });
 
     test('should not use sleep', () => {

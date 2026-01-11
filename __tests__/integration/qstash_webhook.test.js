@@ -1,29 +1,27 @@
-import { jest } from "@jest/globals";
-
 // Move http mock to top level for ESM
 const mockServer = {
-    listen: jest.fn().mockReturnThis(),
-    on: jest.fn().mockReturnThis(),
-    close: jest.fn(cb => { if (cb) cb(); return mockServer; })
+    listen: vi.fn().mockReturnThis(),
+    on: vi.fn().mockReturnThis(),
+    close: vi.fn(cb => { if (cb) cb(); return mockServer; })
 };
 
-jest.unstable_mockModule("http", () => ({
+vi.mock("http", () => ({
     default: {
-        createServer: jest.fn(() => mockServer)
+        createServer: vi.fn(() => mockServer)
     },
-    createServer: jest.fn(() => mockServer)
+    createServer: vi.fn(() => mockServer)
 }));
 
 // Mock QueueService
-const mockVerifySignature = jest.fn().mockResolvedValue(true);
+const mockVerifySignature = vi.fn().mockResolvedValue(true);
 const mockQueueService = {
     verifyWebhookSignature: mockVerifySignature
 };
 
 // Mock TaskManager
-const mockHandleDownloadWebhook = jest.fn();
-const mockHandleUploadWebhook = jest.fn();
-const mockHandleMediaBatchWebhook = jest.fn();
+const mockHandleDownloadWebhook = vi.fn();
+const mockHandleUploadWebhook = vi.fn();
+const mockHandleMediaBatchWebhook = vi.fn();
 
 const mockTaskManager = {
     handleDownloadWebhook: mockHandleDownloadWebhook,
@@ -33,16 +31,16 @@ const mockTaskManager = {
 
 // Mock telegram client to avoid initialization
 const mockClient = {};
-jest.mock("../../src/services/telegram.js", () => ({
+vi.mock("../../src/services/telegram.js", () => ({
     client: mockClient
 }));
 
 // Mock modules
-jest.unstable_mockModule("../../src/services/QueueService.js", () => ({
+vi.mock("../../src/services/QueueService.js", () => ({
     queueService: mockQueueService
 }));
 
-jest.unstable_mockModule("../../src/processor/TaskManager.js", () => ({
+vi.mock("../../src/processor/TaskManager.js", () => ({
     TaskManager: mockTaskManager
 }));
 
@@ -52,20 +50,20 @@ describe("QStash Webhook Integration", () => {
     beforeAll(async () => {
         // Mock process methods to prevent exit
         const originalExit = process.exit;
-        process.exit = jest.fn();
+        process.exit = vi.fn();
 
         // Import the handler function and mock all dependencies
-        jest.unstable_mockModule("../../src/services/telegram.js", () => ({
+        vi.mock("../../src/services/telegram.js", () => ({
             client: mockClient,
-            stopWatchdog: jest.fn(),
-            startWatchdog: jest.fn()
+            stopWatchdog: vi.fn(),
+            startWatchdog: vi.fn()
         }));
 
-        jest.unstable_mockModule("../../src/services/QueueService.js", () => ({
+        vi.mock("../../src/services/QueueService.js", () => ({
             queueService: mockQueueService
         }));
 
-        jest.unstable_mockModule("../../src/processor/TaskManager.js", () => ({
+        vi.mock("../../src/processor/TaskManager.js", () => ({
             TaskManager: {
                 handleDownloadWebhook: mockHandleDownloadWebhook,
                 handleUploadWebhook: mockHandleUploadWebhook,
@@ -73,58 +71,58 @@ describe("QStash Webhook Integration", () => {
             }
         }));
 
-        jest.unstable_mockModule("../../src/services/InstanceCoordinator.js", () => ({
+        vi.mock("../../src/services/InstanceCoordinator.js", () => ({
             instanceCoordinator: {
-                start: jest.fn().mockResolvedValue(undefined),
-                stop: jest.fn().mockResolvedValue(undefined)
+                start: vi.fn().mockResolvedValue(undefined),
+                stop: vi.fn().mockResolvedValue(undefined)
             }
         }));
 
-        jest.unstable_mockModule("../../src/repositories/SettingsRepository.js", () => ({
+        vi.mock("../../src/repositories/SettingsRepository.js", () => ({
             SettingsRepository: {
-                get: jest.fn().mockResolvedValue("0"),
-                set: jest.fn().mockResolvedValue(undefined)
+                get: vi.fn().mockResolvedValue("0"),
+                set: vi.fn().mockResolvedValue(undefined)
             }
         }));
 
-        jest.unstable_mockModule("../../src/services/d1.js", () => ({
+        vi.mock("../../src/services/d1.js", () => ({
             d1: {
-                batch: jest.fn().mockResolvedValue(undefined)
+                batch: vi.fn().mockResolvedValue(undefined)
             }
         }));
 
-        jest.unstable_mockModule("../../src/dispatcher/bootstrap.js", () => ({
-            startDispatcher: jest.fn()
+        vi.mock("../../src/dispatcher/bootstrap.js", () => ({
+            startDispatcher: vi.fn()
         }));
 
-        jest.unstable_mockModule("../../src/processor/bootstrap.js", () => ({
-            startProcessor: jest.fn(),
-            stopProcessor: jest.fn()
+        vi.mock("../../src/processor/bootstrap.js", () => ({
+            startProcessor: vi.fn(),
+            stopProcessor: vi.fn()
         }));
 
-        jest.unstable_mockModule("../../src/repositories/DriveRepository.js", () => ({
+        vi.mock("../../src/repositories/DriveRepository.js", () => ({
             DriveRepository: {
-                findAll: jest.fn().mockResolvedValue([])
+                findAll: vi.fn().mockResolvedValue([])
             }
         }));
 
-        jest.unstable_mockModule("../../src/services/rclone.js", () => ({
+        vi.mock("../../src/services/rclone.js", () => ({
             CloudTool: {
-                listRemoteFiles: jest.fn().mockResolvedValue([])
+                listRemoteFiles: vi.fn().mockResolvedValue([])
             }
         }));
 
-        jest.unstable_mockModule("../../src/services/logger.js", () => ({
+        vi.mock("../../src/services/logger.js", () => ({
             logger: {
-                info: jest.fn(),
-                error: jest.fn(),
-                warn: jest.fn(),
-                debug: jest.fn()
+                info: vi.fn(),
+                error: vi.fn(),
+                warn: vi.fn(),
+                debug: vi.fn()
             }
         }));
 
         // Mock initConfig before importing index.js
-        jest.unstable_mockModule("../../src/config/index.js", () => ({
+        vi.mock("../../src/config/index.js", () => ({
             config: {
                 qstash: {
                     token: "mock-token",
@@ -135,9 +133,9 @@ describe("QStash Webhook Integration", () => {
                     proxy: {}
                 }
             },
-            initConfig: jest.fn().mockResolvedValue({}),
-            validateConfig: jest.fn().mockReturnValue(true),
-            getConfig: jest.fn().mockReturnValue({
+            initConfig: vi.fn().mockResolvedValue({}),
+            validateConfig: vi.fn().mockReturnValue(true),
+            getConfig: vi.fn().mockReturnValue({
                 qstash: {
                     token: "mock-token",
                     url: "https://qstash.upstash.io",
@@ -176,7 +174,7 @@ describe("QStash Webhook Integration", () => {
     });
 
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         mockVerifySignature.mockResolvedValue(true);
         // Set up default successful returns for TaskManager methods
         mockHandleDownloadWebhook.mockResolvedValue({ success: true, statusCode: 200 });
@@ -205,8 +203,8 @@ describe("QStash Webhook Integration", () => {
 
     const createMockResponse = () => {
         const res = {
-            writeHead: jest.fn(),
-            end: jest.fn()
+            writeHead: vi.fn(),
+            end: vi.fn()
         };
         return res;
     };

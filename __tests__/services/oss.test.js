@@ -1,21 +1,19 @@
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
-
 const mockFs = {
-  existsSync: jest.fn(),
-  statSync: jest.fn(),
-  createReadStream: jest.fn(),
-  readFileSync: jest.fn()
+  existsSync: vi.fn(),
+  statSync: vi.fn(),
+  createReadStream: vi.fn(),
+  readFileSync: vi.fn()
 };
 
-jest.unstable_mockModule('fs', () => ({ default: mockFs }));
+vi.mock('fs', () => ({ default: mockFs }));
 
 const mockPath = {
-  basename: jest.fn()
+  basename: vi.fn()
 };
 
-jest.unstable_mockModule('path', () => ({ default: mockPath }));
+vi.mock('path', () => ({ default: mockPath }));
 
-jest.unstable_mockModule('../../src/config/index.js', () => ({
+vi.mock('../../src/config/index.js', () => ({
   config: {
     oss: {
       workerUrl: 'http://test.worker',
@@ -73,34 +71,36 @@ jest.unstable_mockModule('../../src/config/index.js', () => ({
 }));
 
 const mockLogger = {
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  withModule: vi.fn().mockReturnThis(),
+  withContext: vi.fn().mockReturnThis()
 };
 
-jest.unstable_mockModule('../../src/services/logger.js', () => ({
+vi.mock('../../src/services/logger.js', () => ({
   default: mockLogger,
   logger: mockLogger
 }));
 
 const mockOssHelper = {
-  uploadToS3: jest.fn(),
-  getPublicUrl: jest.fn().mockReturnValue('https://test/public/remote.mp4')
+  uploadToS3: vi.fn(),
+  getPublicUrl: vi.fn().mockReturnValue('https://test/public/remote.mp4')
 };
 
-jest.unstable_mockModule('../../src/utils/oss-helper.js', () => ({
+vi.mock('../../src/utils/oss-helper.js', () => ({
   ossHelper: mockOssHelper
 }));
 
 const mockCloudTool = {
-  uploadFile: jest.fn()
+  uploadFile: vi.fn()
 };
 
-jest.unstable_mockModule('../../src/services/rclone.js', () => ({
+vi.mock('../../src/services/rclone.js', () => ({
   CloudTool: mockCloudTool
 }));
 
-const mockFetch = jest.fn();
+const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 // Mock File constructor for Node.js environment
@@ -116,7 +116,7 @@ const { ossService } = await import('../../src/services/oss.js');
 
 describe('OSSService', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     mockFs.existsSync.mockReturnValue(true);
     mockFs.statSync.mockReturnValue({ size: 1024 });
     mockPath.basename.mockReturnValue('test.mp4');

@@ -1,27 +1,26 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from "@jest/globals";
+// Mock the dotenv.js module which is what config/index.js imports
+const mockLoadDotenv = vi.fn();
+vi.mock('../../src/config/dotenv.js', () => ({
+  loadDotenv: mockLoadDotenv,
+  default: {
+    config: mockLoadDotenv
+  }
+}));
 
 describe("dotenv priority in config", () => {
   let originalProcessEnv;
-  let mockDotEnvConfig;
 
   beforeEach(() => {
-    jest.resetModules();
-    jest.clearAllMocks();
+    vi.resetModules();
+    vi.clearAllMocks();
+    mockLoadDotenv.mockClear();
     
     // Save original process.env
     originalProcessEnv = { ...process.env };
-    
-    // Mock dotenv
-    mockDotEnvConfig = jest.fn();
-    
-    // Mock dotenv module before any imports
-    jest.mock('dotenv', () => ({
-      config: mockDotEnvConfig
-    }));
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
     // Restore process.env
     process.env = originalProcessEnv;
   });
@@ -36,8 +35,8 @@ describe("dotenv priority in config", () => {
     // Import config module (it will use mocked dotenv)
     const config = await import('../../src/config/index.js');
 
-    // Verify dotenv was called with override: true for non-test env
-    expect(mockDotEnvConfig).toHaveBeenCalledWith(
+    // Verify loadDotenv was called with override: true for non-test env
+    expect(mockLoadDotenv).toHaveBeenCalledWith(
       expect.objectContaining({
         override: true,
         path: '.env'
@@ -52,14 +51,11 @@ describe("dotenv priority in config", () => {
       NODE_ENV: 'test'
     };
 
-    // Reset mock for clean test
-    mockDotEnvConfig.mockClear();
-
     // Import config module
     const config = await import('../../src/config/index.js');
 
-    // Verify dotenv was called with override: false for test env
-    expect(mockDotEnvConfig).toHaveBeenCalledWith(
+    // Verify loadDotenv was called with override: false for test env
+    expect(mockLoadDotenv).toHaveBeenCalledWith(
       expect.objectContaining({
         override: false,
         path: '.env.test'

@@ -1,4 +1,32 @@
-import { jest, describe, test, expect, beforeEach } from "@jest/globals";
+// Mock logger
+vi.mock("../../../src/services/logger.js", () => {
+    const createMockLogger = () => ({
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        child: vi.fn().mockReturnThis(),
+        configure: vi.fn(),
+        isInitialized: vi.fn().mockReturnValue(true),
+        canSend: vi.fn().mockReturnValue(true),
+        withModule: vi.fn().mockImplementation(() => createMockLogger()),
+        withContext: vi.fn().mockImplementation(() => createMockLogger())
+    });
+    
+    const mockLoggerInstance = createMockLogger();
+    
+    return {
+        logger: mockLoggerInstance,
+        default: createMockLogger(),
+        setInstanceIdProvider: vi.fn(),
+        enableTelegramConsoleProxy: vi.fn(),
+        disableTelegramConsoleProxy: vi.fn(),
+        resetLogger: vi.fn(),
+        delay: vi.fn().mockResolvedValue(undefined),
+        retryWithDelay: vi.fn().mockImplementation(async (fn) => await fn())
+    };
+});
+
 import { BaseCache } from "../../../src/services/cache/BaseCache.js";
 
 describe("BaseCache", () => {
@@ -53,7 +81,7 @@ describe("BaseCache", () => {
 
     test("connect() should be idempotent", async () => {
         const cache = new TestCache();
-        const connectSpy = jest.spyOn(cache, '_connect');
+        const connectSpy = vi.spyOn(cache, '_connect');
         
         await cache.connect();
         await cache.connect();

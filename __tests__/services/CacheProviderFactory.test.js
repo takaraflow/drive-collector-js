@@ -1,25 +1,170 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+// Import external mocks first to ensure ioredis is mocked
+import { mockRedisConstructor } from "../setup/external-mocks.js";
 
 // Mock the logger to suppress output
-jest.mock("../../src/services/logger.js", () => ({
+vi.mock("../../src/services/logger.js", () => ({
     logger: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn()
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis()
     }
 }));
 
 // Mock config to prevent Infisical calls
-jest.mock("../../src/config/index.js", () => ({
-    getConfig: jest.fn(() => ({ kv: {} })),
-    initConfig: jest.fn(async () => ({ kv: {} })),
+vi.mock("../../src/config/index.js", () => ({
+    getConfig: vi.fn(() => ({ kv: {} })),
+    initConfig: vi.fn(async () => ({ kv: {} })),
     config: { kv: {} }
 }));
 
+// Mock individual provider classes - define classes directly in mocks
+vi.mock("../../src/services/cache/RedisCache.js", () => {
+    const RedisCache = vi.fn().mockImplementation(function(config) {
+        this.config = config;
+        this.connect = vi.fn().mockResolvedValue(undefined);
+        this.disconnect = vi.fn().mockResolvedValue(undefined);
+        this.getProviderName = vi.fn().mockReturnValue('Redis');
+        this.get = vi.fn().mockResolvedValue(null);
+        this.set = vi.fn().mockResolvedValue(true);
+        this.delete = vi.fn().mockResolvedValue(true);
+    });
+    return { RedisCache };
+});
+
+vi.mock("../../src/services/cache/RedisTLSCache.js", () => {
+    const RedisTLSCache = vi.fn().mockImplementation(function(config) {
+        this.config = config;
+        this.connect = vi.fn().mockResolvedValue(undefined);
+        this.disconnect = vi.fn().mockResolvedValue(undefined);
+        this.getProviderName = vi.fn().mockReturnValue('RedisTLS');
+        this.get = vi.fn().mockResolvedValue(null);
+        this.set = vi.fn().mockResolvedValue(true);
+        this.delete = vi.fn().mockResolvedValue(true);
+    });
+    return { RedisTLSCache };
+});
+
+vi.mock("../../src/services/cache/UpstashRHCache.js", () => {
+    const UpstashRHCache = vi.fn().mockImplementation(function(config) {
+        this.config = config;
+        this.connect = vi.fn().mockResolvedValue(undefined);
+        this.disconnect = vi.fn().mockResolvedValue(undefined);
+        this.getProviderName = vi.fn().mockReturnValue('UpstashRHCache');
+        this.get = vi.fn().mockResolvedValue(null);
+        this.set = vi.fn().mockResolvedValue(true);
+        this.delete = vi.fn().mockResolvedValue(true);
+    });
+    // Add static detectConfig method
+    UpstashRHCache.detectConfig = vi.fn().mockImplementation(function(env) {
+        if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
+            return { url: env.UPSTASH_REDIS_REST_URL, token: env.UPSTASH_REDIS_REST_TOKEN };
+        }
+        return null;
+    });
+    return { UpstashRHCache };
+});
+
+vi.mock("../../src/services/cache/CloudflareKVCache.js", () => {
+    const CloudflareKVCache = vi.fn().mockImplementation(function(config) {
+        this.config = config;
+        this.connect = vi.fn().mockResolvedValue(undefined);
+        this.disconnect = vi.fn().mockResolvedValue(undefined);
+        this.getProviderName = vi.fn().mockReturnValue('cloudflare');
+        this.get = vi.fn().mockResolvedValue(null);
+        this.set = vi.fn().mockResolvedValue(true);
+        this.delete = vi.fn().mockResolvedValue(true);
+    });
+    return { CloudflareKVCache };
+});
+
+vi.mock("../../src/services/cache/AivenVTCache.js", () => {
+    const AivenVTCache = vi.fn().mockImplementation(function(config) {
+        this.config = config;
+        this.connect = vi.fn().mockResolvedValue(undefined);
+        this.disconnect = vi.fn().mockResolvedValue(undefined);
+        this.getProviderName = vi.fn().mockReturnValue('AivenValkey');
+        this.get = vi.fn().mockResolvedValue(null);
+        this.set = vi.fn().mockResolvedValue(true);
+        this.delete = vi.fn().mockResolvedValue(true);
+    });
+    // Add static detectConfig method
+    AivenVTCache.detectConfig = vi.fn((env) => {
+        if (env.VALKEY_HOST && env.VALKEY_PORT && env.VALKEY_PASSWORD) {
+            return {
+                url: `valkey://:${env.VALKEY_PASSWORD}@${env.VALKEY_HOST}:${env.VALKEY_PORT}`,
+                caCert: env.VALKEY_CA_CERT,
+                sniServername: env.VALKEY_HOST
+            };
+        }
+        return null;
+    });
+    return { AivenVTCache };
+});
+
+vi.mock("../../src/services/cache/ValkeyCache.js", () => {
+    const ValkeyCache = vi.fn().mockImplementation(function(config) {
+        this.config = config;
+        this.connect = vi.fn().mockResolvedValue(undefined);
+        this.disconnect = vi.fn().mockResolvedValue(undefined);
+        this.getProviderName = vi.fn().mockReturnValue('Valkey');
+        this.get = vi.fn().mockResolvedValue(null);
+        this.set = vi.fn().mockResolvedValue(true);
+        this.delete = vi.fn().mockResolvedValue(true);
+    });
+    return { ValkeyCache };
+});
+
+vi.mock("../../src/services/cache/ValkeyTLSCache.js", () => {
+    const ValkeyTLSCache = vi.fn().mockImplementation(function(config) {
+        this.config = config;
+        this.connect = vi.fn().mockResolvedValue(undefined);
+        this.disconnect = vi.fn().mockResolvedValue(undefined);
+        this.getProviderName = vi.fn().mockReturnValue('ValkeyTLS');
+        this.get = vi.fn().mockResolvedValue(null);
+        this.set = vi.fn().mockResolvedValue(true);
+        this.delete = vi.fn().mockResolvedValue(true);
+    });
+    return { ValkeyTLSCache };
+});
+
+vi.mock("../../src/services/cache/NorthFlankRTCache.js", () => {
+    const NorthFlankRTCache = vi.fn().mockImplementation(function(config) {
+        this.config = config;
+        this.connect = vi.fn().mockResolvedValue(undefined);
+        this.disconnect = vi.fn().mockResolvedValue(undefined);
+        this.getProviderName = vi.fn().mockReturnValue('NorthFlank');
+        this.get = vi.fn().mockResolvedValue(null);
+        this.set = vi.fn().mockResolvedValue(true);
+        this.delete = vi.fn().mockResolvedValue(true);
+    });
+    // Add static detectConfig method
+    NorthFlankRTCache.detectConfig = vi.fn((env) => {
+        if (env.REDIS_URL && env.REDIS_URL.includes('northflank')) {
+            return { nfRedisUrl: env.REDIS_URL };
+        }
+        return null;
+    });
+    return { NorthFlankRTCache };
+});
+
+vi.mock("../../src/services/cache/RedisHTTPCache.js", () => {
+    const RedisHTTPCache = vi.fn().mockImplementation(function(config) {
+        this.config = config;
+        this.connect = vi.fn().mockResolvedValue(undefined);
+        this.disconnect = vi.fn().mockResolvedValue(undefined);
+        this.getProviderName = vi.fn().mockReturnValue('RedisHTTP');
+        this.get = vi.fn().mockResolvedValue(null);
+        this.set = vi.fn().mockResolvedValue(true);
+        this.delete = vi.fn().mockResolvedValue(true);
+    });
+    return { RedisHTTPCache };
+});
+
 // Import CacheService after mocks
 import { CacheService } from "../../src/services/CacheService.js";
-import { mockRedisConstructor } from "../setup/external-mocks.js";
 
 describe("CacheProviderFactory Tests", () => {
     let service;
@@ -27,8 +172,10 @@ describe("CacheProviderFactory Tests", () => {
 
     beforeEach(() => {
         process.env = { ...originalEnv };
-        jest.clearAllMocks();
-        mockRedisConstructor.mock.calls = [];
+        vi.clearAllMocks();
+        if (mockRedisConstructor.mockClear) {
+            mockRedisConstructor.mockClear();
+        }
     });
 
     afterEach(async () => {
@@ -273,9 +420,11 @@ describe("CacheProviderFactory Tests", () => {
             service = new CacheService({ env });
             await service.initialize();
 
-            const calls = mockRedisConstructor.mock.calls;
+            // Check that RedisCache was instantiated with correct config
+            const RedisCache = await import("../../src/services/cache/RedisCache.js");
+            const calls = RedisCache.RedisCache.mock.calls;
             expect(calls.length).toBeGreaterThan(0);
-            expect(calls[0][0]).toContain("redis://:secret@localhost:6379/0");
+            expect(calls[0][0].url).toBe("redis://:secret@localhost:6379/0");
         }, 50);
     });
 

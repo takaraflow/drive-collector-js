@@ -1,29 +1,27 @@
-import { jest } from "@jest/globals";
-
 // Mock dependencies
-const mockFindById = jest.fn();
-const mockUpdateStatus = jest.fn();
+const mockFindById = vi.fn();
+const mockUpdateStatus = vi.fn();
 const mockTaskRepository = {
     findById: mockFindById,
     updateStatus: mockUpdateStatus
 };
 
-const mockGetMessages = jest.fn();
+const mockGetMessages = vi.fn();
 const mockClient = {
     getMessages: mockGetMessages
 };
 
-const mockAcquireTaskLock = jest.fn();
-const mockReleaseTaskLock = jest.fn();
-const mockHasLock = jest.fn();
+const mockAcquireTaskLock = vi.fn();
+const mockReleaseTaskLock = vi.fn();
+const mockHasLock = vi.fn();
 const mockInstanceCoordinator = {
     acquireTaskLock: mockAcquireTaskLock,
     releaseTaskLock: mockReleaseTaskLock,
     hasLock: mockHasLock
 };
 
-const mockEnqueueDownloadTask = jest.fn();
-const mockEnqueueUploadTask = jest.fn();
+const mockEnqueueDownloadTask = vi.fn();
+const mockEnqueueUploadTask = vi.fn();
 const mockQueueService = {
     enqueueDownloadTask: mockEnqueueDownloadTask,
     enqueueUploadTask: mockEnqueueUploadTask
@@ -34,117 +32,117 @@ const mockConfig = {
 };
 
 // Mock fs
-const mockExistsSync = jest.fn();
-const mockStatSync = jest.fn();
-jest.mock("fs", () => ({
+const mockExistsSync = vi.fn();
+const mockStatSync = vi.fn();
+vi.mock("fs", () => ({
     existsSync: mockExistsSync,
     statSync: mockStatSync,
-    readFileSync: jest.fn(),
-    writeFileSync: jest.fn(),
-    mkdirSync: jest.fn(),
-    readdirSync: jest.fn(),
-    unlinkSync: jest.fn(),
-    createReadStream: jest.fn(),
-    createWriteStream: jest.fn()
+    readFileSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    readdirSync: vi.fn(),
+    unlinkSync: vi.fn(),
+    createReadStream: vi.fn(),
+    createWriteStream: vi.fn()
 }));
 
 
 // Mock modules
-jest.unstable_mockModule("../../src/repositories/TaskRepository.js", () => ({
+vi.mock("../../src/repositories/TaskRepository.js", () => ({
     TaskRepository: mockTaskRepository
 }));
 
-jest.unstable_mockModule("../../src/services/telegram.js", () => ({
+vi.mock("../../src/services/telegram.js", () => ({
     client: mockClient
 }));
 
-jest.unstable_mockModule("../../src/services/InstanceCoordinator.js", () => ({
+vi.mock("../../src/services/InstanceCoordinator.js", () => ({
     instanceCoordinator: mockInstanceCoordinator
 }));
 
-jest.unstable_mockModule("../../src/services/QueueService.js", () => ({
+vi.mock("../../src/services/QueueService.js", () => ({
     queueService: mockQueueService
 }));
 
-jest.unstable_mockModule("../../src/config/index.js", () => ({
+vi.mock("../../src/config/index.js", () => ({
     config: mockConfig
 }));
 
 // Mock limiter
-const mockRunMtprotoTaskWithRetry = jest.fn(async (fn) => await fn());
-jest.unstable_mockModule("../../src/utils/limiter.js", () => ({
+const mockRunMtprotoTaskWithRetry = vi.fn(async (fn) => await fn());
+vi.mock("../../src/utils/limiter.js", () => ({
     runMtprotoTaskWithRetry: mockRunMtprotoTaskWithRetry,
-    runBotTask: jest.fn(async (fn) => await fn()),
-    runMtprotoTask: jest.fn(async (fn) => await fn()),
-    runBotTaskWithRetry: jest.fn(async (fn) => await fn()),
-    runMtprotoFileTaskWithRetry: jest.fn(async (fn) => await fn()),
+    runBotTask: vi.fn(async (fn) => await fn()),
+    runMtprotoTask: vi.fn(async (fn) => await fn()),
+    runBotTaskWithRetry: vi.fn(async (fn) => await fn()),
+    runMtprotoFileTaskWithRetry: vi.fn(async (fn) => await fn()),
     PRIORITY: {
         BACKGROUND: -20
     }
 }));
 
 // Mock updateStatus
-jest.unstable_mockModule("../../src/utils/common.js", () => ({
-    updateStatus: jest.fn(),
-    getMediaInfo: jest.fn(() => ({ name: 'test.mp4', size: 1024 })),
-    escapeHTML: jest.fn((str) => str),
-    safeEdit: jest.fn()
+vi.mock("../../src/utils/common.js", () => ({
+    updateStatus: vi.fn(),
+    getMediaInfo: vi.fn(() => ({ name: 'test.mp4', size: 1024 })),
+    escapeHTML: vi.fn((str) => str),
+    safeEdit: vi.fn()
 }));
 
 // Mock logger
-jest.unstable_mockModule("../../src/services/logger.js", () => ({
+vi.mock("../../src/services/logger.js", () => ({
     logger: {
-        info: jest.fn(),
-        error: jest.fn(),
-        warn: jest.fn(),
-        debug: jest.fn(),
-        withModule: jest.fn().mockReturnThis(),
-        withContext: jest.fn().mockReturnThis()
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis()
     }
 }));
 
 // Mock CacheService
-jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+vi.mock("../../src/services/CacheService.js", () => ({
     cache: {
         isFailoverMode: false
     }
 }));
 
 // Mock d1
-jest.unstable_mockModule("../../src/services/d1.js", () => ({
+vi.mock("../../src/services/d1.js", () => ({
     d1: {
-        batch: jest.fn()
+        batch: vi.fn()
     }
 }));
 
 // Mock oss
-jest.unstable_mockModule("../../src/services/oss.js", () => ({
+vi.mock("../../src/services/oss.js", () => ({
     ossService: {
-        upload: jest.fn()
+        upload: vi.fn()
     }
 }));
 
 // Mock rclone
-jest.unstable_mockModule("../../src/services/rclone.js", () => ({
+vi.mock("../../src/services/rclone.js", () => ({
     CloudTool: {
-        uploadFile: jest.fn(),
-        getRemoteFileInfo: jest.fn(),
-        listRemoteFiles: jest.fn()
+        uploadFile: vi.fn(),
+        getRemoteFileInfo: vi.fn(),
+        listRemoteFiles: vi.fn()
     }
 }));
 
 // Mock UI templates
-jest.unstable_mockModule("../../src/ui/templates.js", () => ({
+vi.mock("../../src/ui/templates.js", () => ({
     UIHelper: {
-        renderProgress: jest.fn(),
-        renderBatchMonitor: jest.fn()
+        renderProgress: vi.fn(),
+        renderBatchMonitor: vi.fn()
     }
 }));
 
 // Mock AuthGuard
-jest.unstable_mockModule("../../src/modules/AuthGuard.js", () => ({
+vi.mock("../../src/modules/AuthGuard.js", () => ({
     AuthGuard: {
-        can: jest.fn()
+        can: vi.fn()
     }
 }));
 
@@ -157,7 +155,7 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
     });
 
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         mockAcquireTaskLock.mockResolvedValue(true);
         mockHasLock.mockResolvedValue(true);
         mockGetMessages.mockResolvedValue([{ media: { type: 'document' } }]);
@@ -168,8 +166,8 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
         TaskManager.processingUploadTasks.clear();
         TaskManager.waitingTasks = [];
         TaskManager.waitingUploadTasks = [];
-        TaskManager.downloadTask = jest.fn().mockResolvedValue();
-        TaskManager.uploadTask = jest.fn().mockResolvedValue();
+        TaskManager.downloadTask = vi.fn().mockResolvedValue();
+        TaskManager.uploadTask = vi.fn().mockResolvedValue();
     });
 
     describe("_classifyError", () => {
@@ -246,7 +244,7 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
         beforeEach(() => {
             mockFindById.mockResolvedValue(mockDbTask);
             mockGetMessages.mockResolvedValue([mockMessage]);
-            TaskManager.downloadTask = jest.fn().mockResolvedValue();
+            TaskManager.downloadTask = vi.fn().mockResolvedValue();
         });
 
         test("应当返回 {success: true, statusCode: 200} 对于成功处理", async () => {
@@ -304,13 +302,13 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
             mockFindById.mockResolvedValue(mockDbTask);
             mockGetMessages.mockResolvedValue([mockMessage]);
             mockExistsSync.mockReturnValue(true);
-            TaskManager.uploadTask = jest.fn().mockResolvedValue();
+            TaskManager.uploadTask = vi.fn().mockResolvedValue();
         });
 
         test("应当返回 {success: true, statusCode: 200} 对于成功处理", async () => {
             // Mock the entire handleUploadWebhook method to bypass fs check
             const originalMethod = TaskManager.handleUploadWebhook;
-            TaskManager.handleUploadWebhook = jest.fn(async (taskId) => {
+            TaskManager.handleUploadWebhook = vi.fn(async (taskId) => {
                 // Simulate the logic without fs check
                 if (!(await mockInstanceCoordinator.hasLock("telegram_client"))) {
                     return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
@@ -345,7 +343,7 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
         test("应当返回 {success: false, statusCode: 503} 当不是 Leader", async () => {
             // Mock the entire handleUploadWebhook method
             const originalMethod = TaskManager.handleUploadWebhook;
-            TaskManager.handleUploadWebhook = jest.fn(async (taskId) => {
+            TaskManager.handleUploadWebhook = vi.fn(async (taskId) => {
                 if (!(await mockInstanceCoordinator.hasLock("telegram_client"))) {
                     return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
                 }
@@ -363,7 +361,7 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
         test("应当返回 {success: false, statusCode: 404} 当本地文件不存在", async () => {
             // Mock the entire handleUploadWebhook method to simulate fs check failure
             const originalMethod = TaskManager.handleUploadWebhook;
-            TaskManager.handleUploadWebhook = jest.fn(async (taskId) => {
+            TaskManager.handleUploadWebhook = vi.fn(async (taskId) => {
                 if (!(await mockInstanceCoordinator.hasLock("telegram_client"))) {
                     return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
                 }
@@ -387,7 +385,7 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
         test("应当返回 {success: false, statusCode: 404} 当任务不存在", async () => {
             // Mock the entire handleUploadWebhook method
             const originalMethod = TaskManager.handleUploadWebhook;
-            TaskManager.handleUploadWebhook = jest.fn(async (taskId) => {
+            TaskManager.handleUploadWebhook = vi.fn(async (taskId) => {
                 if (!(await mockInstanceCoordinator.hasLock("telegram_client"))) {
                     return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
                 }
@@ -411,7 +409,7 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
         test("应当返回 {success: false, statusCode: 503} 当网络超时", async () => {
             // Mock the entire handleUploadWebhook method with proper error handling
             const originalMethod = TaskManager.handleUploadWebhook;
-            TaskManager.handleUploadWebhook = jest.fn(async (taskId) => {
+            TaskManager.handleUploadWebhook = vi.fn(async (taskId) => {
                 try {
                     if (!(await mockInstanceCoordinator.hasLock("telegram_client"))) {
                         return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
@@ -449,7 +447,7 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
         test("应当返回 {success: false, statusCode: 500} 当上传失败", async () => {
             // Mock the entire handleUploadWebhook method with proper error handling
             const originalMethod = TaskManager.handleUploadWebhook;
-            TaskManager.handleUploadWebhook = jest.fn(async (taskId) => {
+            TaskManager.handleUploadWebhook = vi.fn(async (taskId) => {
                 try {
                     if (!(await mockInstanceCoordinator.hasLock("telegram_client"))) {
                         return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
@@ -487,7 +485,7 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
 
     describe("handleMediaBatchWebhook - Error Handling", () => {
         beforeEach(() => {
-            TaskManager.handleDownloadWebhook = jest.fn();
+            TaskManager.handleDownloadWebhook = vi.fn();
         });
 
         test("应当返回 {success: true, statusCode: 200} 当所有任务成功", async () => {

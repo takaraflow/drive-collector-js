@@ -1,56 +1,56 @@
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
-
-jest.unstable_mockModule('../../src/services/telegram.js', () => {
+vi.mock('../../src/services/telegram.js', () => {
   const mockClient = {
-    start: jest.fn(),
-    disconnect: jest.fn(),
-    addEventHandler: jest.fn(),
+    start: vi.fn(),
+    disconnect: vi.fn(),
+    addEventHandler: vi.fn(),
   };
   
   return {
     client: mockClient,
-    getClient: jest.fn().mockResolvedValue(mockClient),
-    saveSession: jest.fn(),
-    clearSession: jest.fn(),
-    resetClientSession: jest.fn(),
-    setConnectionStatusCallback: jest.fn(),
+    getClient: vi.fn().mockResolvedValue(mockClient),
+    saveSession: vi.fn(),
+    clearSession: vi.fn(),
+    resetClientSession: vi.fn(),
+    setConnectionStatusCallback: vi.fn(),
   };
 });
 
-jest.unstable_mockModule('../../src/dispatcher/MessageHandler.js', () => ({
+vi.mock('../../src/dispatcher/MessageHandler.js', () => ({
   MessageHandler: {
-    handleEvent: jest.fn(),
-    init: jest.fn(),
+    handleEvent: vi.fn(),
+    init: vi.fn(),
   }
 }));
 
-jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () => ({
+vi.mock('../../src/services/InstanceCoordinator.js', () => ({
   instanceCoordinator: {
-    acquireLock: jest.fn(),
-    hasLock: jest.fn(),
+    acquireLock: vi.fn(),
+    hasLock: vi.fn(),
   }
 }));
 
-jest.unstable_mockModule('../../src/config/index.js', () => ({
+vi.mock('../../src/config/index.js', () => ({
   config: {
     botToken: 'test-bot-token'
   }
 }));
 
 const mockLogger = {
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  debug: jest.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+  withModule: vi.fn().mockReturnThis(),
+  withContext: vi.fn().mockReturnThis()
 };
 
-jest.unstable_mockModule('../../src/services/logger.js', () => ({
+vi.mock('../../src/services/logger.js', () => ({
    default: mockLogger,
    logger: mockLogger
 }));
 
 // Mock config/index.js explicitly
-jest.unstable_mockModule('../../src/config/index.js', () => ({
+vi.mock('../../src/config/index.js', () => ({
   config: {
     botToken: 'mock_token',
     ownerId: 'owner_id',
@@ -58,23 +58,23 @@ jest.unstable_mockModule('../../src/config/index.js', () => ({
       url: 'redis://localhost:6379'
     }
   },
-  getConfig: jest.fn().mockReturnValue({
+  getConfig: vi.fn().mockReturnValue({
     botToken: 'mock_token',
     ownerId: 'owner_id',
     redis: {
       url: 'redis://localhost:6379'
     }
   }),
-  initConfig: jest.fn().mockResolvedValue({})
+  initConfig: vi.fn().mockResolvedValue({})
 }));
 
 const { startDispatcher } = await import('../../src/dispatcher/bootstrap.js');
 
 describe('Dispatcher Bootstrap', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    jest.spyOn(global, 'setTimeout').mockImplementation((fn) => fn());
-    jest.spyOn(global, 'setInterval').mockImplementation(() => {});
+    vi.clearAllMocks();
+    vi.spyOn(global, 'setTimeout').mockImplementation((fn) => fn());
+    vi.spyOn(global, 'setInterval').mockImplementation(() => {});
   });
 
   it('should start successfully when lock acquired', async () => {

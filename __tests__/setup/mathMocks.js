@@ -1,10 +1,10 @@
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 
 const originalMathRandom = Math.random;
 
 // Mock Math.random for deterministic tests
 const mockMath = {
-    random: jest.fn(() => 0.5), // Fixed value for deterministic tests
+    random: vi.fn(() => 0.5), // Fixed value for deterministic tests
     floor: Math.floor,
     ceil: Math.ceil,
     round: Math.round,
@@ -14,7 +14,7 @@ const mockMath = {
     sqrt: Math.sqrt
 };
 
-// Apply global mocks immediately for Jest setup
+// Apply global mocks immediately for Vitest setup
 Object.defineProperty(Math, 'random', {
     value: mockMath.random,
     configurable: true

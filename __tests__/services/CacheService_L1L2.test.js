@@ -1,66 +1,64 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-
 // Mock dependencies to prevent real I/O
-jest.mock("../../src/config/index.js", () => ({
-    getConfig: jest.fn(() => ({ kv: {} })),
-    initConfig: jest.fn(async () => ({ kv: {} })),
+vi.mock("../../src/config/index.js", () => ({
+    getConfig: vi.fn(() => ({ kv: {} })),
+    initConfig: vi.fn(async () => ({ kv: {} })),
     config: { kv: {} }
 }));
 
-jest.mock("../../src/services/logger.js", () => ({
+vi.mock("../../src/services/logger.js", () => ({
     logger: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn()
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
     }
 }));
 
 // Mock all provider classes to prevent real connections
-jest.mock("../../src/services/cache/CloudflareKVCache.js", () => ({
-    CloudflareKVCache: jest.fn().mockImplementation(() => ({
-        initialize: jest.fn(),
-        getProviderName: jest.fn(() => 'cloudflare'),
-        get: jest.fn(),
-        set: jest.fn(),
-        delete: jest.fn(),
-        listKeys: jest.fn(),
-        disconnect: jest.fn(),
-        getConnectionInfo: jest.fn(() => ({ provider: 'cloudflare' }))
+vi.mock("../../src/services/cache/CloudflareKVCache.js", () => ({
+    CloudflareKVCache: vi.fn().mockImplementation(() => ({
+        initialize: vi.fn(),
+        getProviderName: vi.fn(() => 'cloudflare'),
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+        listKeys: vi.fn(),
+        disconnect: vi.fn(),
+        getConnectionInfo: vi.fn(() => ({ provider: 'cloudflare' }))
     }))
 }));
 
-jest.mock("../../src/services/cache/RedisCache.js", () => ({
-    RedisCache: jest.fn().mockImplementation(() => ({
-        initialize: jest.fn(),
-        getProviderName: jest.fn(() => 'redis'),
-        get: jest.fn(),
-        set: jest.fn(),
-        delete: jest.fn(),
-        disconnect: jest.fn()
+vi.mock("../../src/services/cache/RedisCache.js", () => ({
+    RedisCache: vi.fn().mockImplementation(() => ({
+        initialize: vi.fn(),
+        getProviderName: vi.fn(() => 'redis'),
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+        disconnect: vi.fn()
     }))
 }));
 
-jest.mock("../../src/services/cache/UpstashRHCache.js", () => ({
-    UpstashRHCache: jest.fn().mockImplementation(() => ({
-        initialize: jest.fn(),
-        getProviderName: jest.fn(() => 'upstash'),
-        get: jest.fn(),
-        set: jest.fn(),
-        delete: jest.fn(),
-        disconnect: jest.fn()
+vi.mock("../../src/services/cache/UpstashRHCache.js", () => ({
+    UpstashRHCache: vi.fn().mockImplementation(() => ({
+        initialize: vi.fn(),
+        getProviderName: vi.fn(() => 'upstash'),
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+        disconnect: vi.fn()
     }))
 }));
 
-jest.mock("../../src/services/cache/MemoryCache.js", () => ({
-    MemoryCache: jest.fn().mockImplementation(() => ({
-        initialize: jest.fn(),
-        getProviderName: jest.fn(() => 'MemoryCache'),
-        get: jest.fn(() => null),
-        set: jest.fn(() => true),
-        delete: jest.fn(() => true),
-        listKeys: jest.fn(() => []),
-        disconnect: jest.fn()
+vi.mock("../../src/services/cache/MemoryCache.js", () => ({
+    MemoryCache: vi.fn().mockImplementation(() => ({
+        initialize: vi.fn(),
+        getProviderName: vi.fn(() => 'MemoryCache'),
+        get: vi.fn(() => null),
+        set: vi.fn(() => true),
+        delete: vi.fn(() => true),
+        listKeys: vi.fn(() => []),
+        disconnect: vi.fn()
     }))
 }));
 
@@ -74,8 +72,8 @@ describe("CacheService L1/L2 Interaction Tests", () => {
 
     beforeEach(() => {
         process.env = { ...originalEnv };
-        jest.clearAllMocks();
-        jest.useFakeTimers();
+        vi.clearAllMocks();
+        vi.useFakeTimers();
         // Clear LocalCache before each test
         localCache.clear();
     });
@@ -85,8 +83,8 @@ describe("CacheService L1/L2 Interaction Tests", () => {
             await service.destroy().catch(() => {});
         }
         service = null;
-        jest.useRealTimers();
-        jest.clearAllTimers();
+        vi.useRealTimers();
+        vi.clearAllTimers();
         localCache.clear();
     });
 
@@ -94,13 +92,13 @@ describe("CacheService L1/L2 Interaction Tests", () => {
         test("L1 miss should trigger L2 read and populate L1", async () => {
             // Create a mock provider
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'mock-provider'),
-                get: jest.fn().mockResolvedValue({ data: "cached-value" }),
-                set: jest.fn(),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'mock-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'mock-provider'),
+                get: vi.fn().mockResolvedValue({ data: "cached-value" }),
+                set: vi.fn(),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'mock-provider' }))
             };
 
             // Create service and manually set provider
@@ -131,13 +129,13 @@ describe("CacheService L1/L2 Interaction Tests", () => {
 
             // Create a mock provider
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'mock-provider'),
-                get: jest.fn().mockResolvedValue({ data: "should-not-be-called" }),
-                set: jest.fn(),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'mock-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'mock-provider'),
+                get: vi.fn().mockResolvedValue({ data: "should-not-be-called" }),
+                set: vi.fn(),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'mock-provider' }))
             };
 
             // Create service and manually set provider
@@ -162,13 +160,13 @@ describe("CacheService L1/L2 Interaction Tests", () => {
 
             // Create a mock provider
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'mock-provider'),
-                get: jest.fn().mockResolvedValue({ data: "l2-value" }),
-                set: jest.fn(),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'mock-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'mock-provider'),
+                get: vi.fn().mockResolvedValue({ data: "l2-value" }),
+                set: vi.fn(),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'mock-provider' }))
             };
 
             // Create service and manually set provider
@@ -190,13 +188,13 @@ describe("CacheService L1/L2 Interaction Tests", () => {
         test("L2 write should also update L1 (write-through to L1)", async () => {
             // Create a mock provider
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'mock-provider'),
-                get: jest.fn(),
-                set: jest.fn().mockResolvedValue(true),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'mock-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'mock-provider'),
+                get: vi.fn(),
+                set: vi.fn().mockResolvedValue(true),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'mock-provider' }))
             };
 
             // Create service and manually set provider
@@ -220,13 +218,13 @@ describe("CacheService L1/L2 Interaction Tests", () => {
         test("L2 write failure should still update L1", async () => {
             // Create a mock provider
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'mock-provider'),
-                get: jest.fn(),
-                set: jest.fn().mockRejectedValue(new Error("L2 write failed")),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'mock-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'mock-provider'),
+                get: vi.fn(),
+                set: vi.fn().mockRejectedValue(new Error("L2 write failed")),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'mock-provider' }))
             };
 
             // Create service and manually set provider
@@ -249,13 +247,13 @@ describe("CacheService L1/L2 Interaction Tests", () => {
         test("L2 read failure should not populate L1", async () => {
             // Create a mock provider
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'mock-provider'),
-                get: jest.fn().mockRejectedValue(new Error("L2 read failed")),
-                set: jest.fn(),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'mock-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'mock-provider'),
+                get: vi.fn().mockRejectedValue(new Error("L2 read failed")),
+                set: vi.fn(),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'mock-provider' }))
             };
 
             // Create service and manually set provider
@@ -278,13 +276,13 @@ describe("CacheService L1/L2 Interaction Tests", () => {
         test("skipL1 option in set should only write to L2", async () => {
             // Create a mock provider
             const mockProvider = {
-                initialize: jest.fn(),
-                getProviderName: jest.fn(() => 'mock-provider'),
-                get: jest.fn(),
-                set: jest.fn().mockResolvedValue(true),
-                delete: jest.fn(),
-                disconnect: jest.fn(),
-                getConnectionInfo: jest.fn(() => ({ provider: 'mock-provider' }))
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'mock-provider'),
+                get: vi.fn(),
+                set: vi.fn().mockResolvedValue(true),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'mock-provider' }))
             };
 
             // Create service and manually set provider

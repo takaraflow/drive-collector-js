@@ -1,19 +1,18 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
 import { parseCacheConfig } from "../../src/utils/configParser.js";
 
 const originalEnv = process.env;
 
 beforeEach(() => {
     // Silence console output during tests to improve performance and keep output clean
-    jest.spyOn(console, 'error').mockImplementation(() => {});
-    jest.spyOn(console, 'warn').mockImplementation(() => {});
-    jest.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
     process.env = { ...originalEnv, NODE_ENV: 'test' };
 });
 
 afterEach(() => {
     process.env = originalEnv;
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
 });
 
 

@@ -1,14 +1,13 @@
-import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 import { localCache } from "../../src/utils/LocalCache.js";
 
 describe("LocalCache", () => {
     beforeEach(() => {
         localCache.clear();
-        jest.useFakeTimers();
+        vi.useFakeTimers();
     });
 
     afterEach(() => {
-        jest.useRealTimers();
+        vi.useRealTimers();
     });
 
     it("should set and get cache", () => {
@@ -18,7 +17,7 @@ describe("LocalCache", () => {
 
     it("should return null for expired cache", () => {
         localCache.set("test", "value", 1000);
-        jest.advanceTimersByTime(1001);
+        vi.advanceTimersByTime(1001);
         expect(localCache.get("test")).toBeNull();
     });
 
@@ -29,7 +28,7 @@ describe("LocalCache", () => {
     });
 
     it("should use getOrSet correctly", async () => {
-        const loader = jest.fn().mockResolvedValue("loaded");
+        const loader = vi.fn().mockResolvedValue("loaded");
         const result1 = await localCache.getOrSet("key", loader, 1000);
         expect(result1).toBe("loaded");
         expect(loader).toHaveBeenCalledTimes(1);

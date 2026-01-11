@@ -1,21 +1,57 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+vi.mock("../../../src/config/index.js", () => {
+    const config = {
+        qstash: {
+            token: 'test-token',
+            webhookUrl: 'https://example.com',
+            currentSigningKey: 'key1',
+            nextSigningKey: 'key2'
+        }
+    };
+    return {
+        config: config,
+        getConfig: vi.fn(() => config),
+        default: { config: config, getConfig: vi.fn(() => config) }
+    };
+});
 
-// 动态导入模块
-const { QstashQueue } = await import("../../../src/services/queue/QstashQueue.js");
-const { BaseQueue } = await import("../../../src/services/queue/BaseQueue.js");
+vi.mock("../../../src/services/logger.js", () => ({
+    logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn()
+    },
+    default: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn()
+    }
+}));
+
+vi.mock("../../../src/services/CircuitBreaker.js", () => ({
+    CircuitBreakerManager: {
+        get: vi.fn().mockReturnValue({
+            execute: async (cmd, fallback) => cmd(),
+            getStatus: () => ({ state: 'CLOSED', failureCount: 0 }),
+            reset: () => {}
+        })
+    }
+}));
+
+import { QstashQueue } from "../../../src/services/queue/QstashQueue.js";
+import { BaseQueue } from "../../../src/services/queue/BaseQueue.js";
 
 describe("QstashQueue - Unit Tests", () => {
     let queue;
 
     beforeEach(() => {
-        jest.useFakeTimers({ timerLimit: 10000, advanceTimers: true });
-        jest.spyOn(global.Math, 'random').mockReturnValue(0.5);
-        jest.clearAllMocks();
+        vi.useFakeTimers({ timerLimit: 10000, advanceTimers: true });
+        vi.spyOn(global.Math, 'random').mockReturnValue(0.5);
+        vi.clearAllMocks();
     });
 
     afterEach(() => {
-        jest.useRealTimers();
-        jest.restoreAllMocks();
+        vi.useRealTimers();
+        vi.restoreAllMocks();
     });
 
     test("should extend BaseQueue", async () => {

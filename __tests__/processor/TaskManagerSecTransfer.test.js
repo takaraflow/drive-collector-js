@@ -1,7 +1,5 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-
 // 1. Mock dependencies
-jest.unstable_mockModule("../../src/config/index.js", () => ({
+vi.mock("../../src/config/index.js", () => ({
     config: {
         downloadDir: "/tmp/downloads",
         remoteFolder: "remote_folder",
@@ -23,60 +21,60 @@ jest.unstable_mockModule("../../src/config/index.js", () => ({
 }));
 
 const mockClient = {
-    downloadMedia: jest.fn(),
-    editMessage: jest.fn().mockResolvedValue(),
-    sendMessage: jest.fn().mockResolvedValue({ id: 123 })
+    downloadMedia: vi.fn(),
+    editMessage: vi.fn().mockResolvedValue(),
+    sendMessage: vi.fn().mockResolvedValue({ id: 123 })
 };
-jest.unstable_mockModule("../../src/services/telegram.js", () => ({
+vi.mock("../../src/services/telegram.js", () => ({
     client: mockClient,
 }));
 
 const mockCloudTool = {
-    getRemoteFileInfo: jest.fn(),
-    uploadBatch: jest.fn().mockResolvedValue({ success: true }),
+    getRemoteFileInfo: vi.fn(),
+    uploadBatch: vi.fn().mockResolvedValue({ success: true }),
 };
-jest.unstable_mockModule("../../src/services/rclone.js", () => ({
+vi.mock("../../src/services/rclone.js", () => ({
     CloudTool: mockCloudTool,
 }));
 
 const mockTaskRepository = {
-    updateStatus: jest.fn(),
-    findByMsgId: jest.fn().mockResolvedValue([]),
-    create: jest.fn(),
-    findCompletedByFile: jest.fn(),
-    findAllCompletedByUser: jest.fn().mockResolvedValue([]),
+    updateStatus: vi.fn(),
+    findByMsgId: vi.fn().mockResolvedValue([]),
+    create: vi.fn(),
+    findCompletedByFile: vi.fn(),
+    findAllCompletedByUser: vi.fn().mockResolvedValue([]),
 };
-jest.unstable_mockModule("../../src/repositories/TaskRepository.js", () => ({
+vi.mock("../../src/repositories/TaskRepository.js", () => ({
     TaskRepository: mockTaskRepository,
 }));
 
 // Mock InstanceCoordinator
 const mockInstanceCoordinator = {
-    acquireTaskLock: jest.fn().mockResolvedValue(true),
-    releaseTaskLock: jest.fn().mockResolvedValue(),
+    acquireTaskLock: vi.fn().mockResolvedValue(true),
+    releaseTaskLock: vi.fn().mockResolvedValue(),
 };
-jest.unstable_mockModule("../../src/services/InstanceCoordinator.js", () => ({
+vi.mock("../../src/services/InstanceCoordinator.js", () => ({
     instanceCoordinator: mockInstanceCoordinator,
 }));
 
 // Mock utils
-jest.unstable_mockModule("../../src/utils/common.js", () => ({
-    getMediaInfo: jest.fn((msg) => ({ name: "test_file.mp4", size: 10485760 })), // 10MB
-    updateStatus: jest.fn(),
-    escapeHTML: jest.fn(s => s),
-    safeEdit: jest.fn(),
+vi.mock("../../src/utils/common.js", () => ({
+    getMediaInfo: vi.fn((msg) => ({ name: "test_file.mp4", size: 10485760 })), // 10MB
+    updateStatus: vi.fn(),
+    escapeHTML: vi.fn(s => s),
+    safeEdit: vi.fn(),
 }));
 
-jest.unstable_mockModule("../../src/utils/limiter.js", () => ({
-    runBotTask: jest.fn(fn => fn()),
-    runMtprotoTask: jest.fn(fn => fn()),
-    runBotTaskWithRetry: jest.fn(fn => fn()),
-    runMtprotoTaskWithRetry: jest.fn(fn => fn()),
-    runMtprotoFileTaskWithRetry: jest.fn(fn => fn()),
+vi.mock("../../src/utils/limiter.js", () => ({
+    runBotTask: vi.fn(fn => fn()),
+    runMtprotoTask: vi.fn(fn => fn()),
+    runBotTaskWithRetry: vi.fn(fn => fn()),
+    runMtprotoTaskWithRetry: vi.fn(fn => fn()),
+    runMtprotoFileTaskWithRetry: vi.fn(fn => fn()),
     PRIORITY: { UI: 1 }
 }));
 
-jest.unstable_mockModule("../../src/locales/zh-CN.js", () => ({
+vi.mock("../../src/locales/zh-CN.js", () => ({
     STRINGS: {
         task: {
             parse_failed: "parse failed",
@@ -86,40 +84,40 @@ jest.unstable_mockModule("../../src/locales/zh-CN.js", () => ({
             error_prefix: "error: "
         }
     },
-    format: jest.fn((s, args) => s)
+    format: vi.fn((s, args) => s)
 }));
 
-jest.unstable_mockModule("../../src/modules/AuthGuard.js", () => ({
-    AuthGuard: { can: jest.fn().mockResolvedValue(true) }
+vi.mock("../../src/modules/AuthGuard.js", () => ({
+    AuthGuard: { can: vi.fn().mockResolvedValue(true) }
 }));
 
-jest.unstable_mockModule("../../src/services/d1.js", () => ({
-    d1: { batch: jest.fn() }
+vi.mock("../../src/services/d1.js", () => ({
+    d1: { batch: vi.fn() }
 }));
 
-jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+vi.mock("../../src/services/CacheService.js", () => ({
     cache: {}
 }));
 
 const mockQueueService = {
-    enqueueUploadTask: jest.fn(),
-    enqueueDownloadTask: jest.fn()
+    enqueueUploadTask: vi.fn(),
+    enqueueDownloadTask: vi.fn()
 };
-jest.unstable_mockModule("../../src/services/QueueService.js", () => ({
+vi.mock("../../src/services/QueueService.js", () => ({
     queueService: mockQueueService
 }));
 
 // Mock fs
 const mockFs = {
-    existsSync: jest.fn(),
+    existsSync: vi.fn(),
     promises: {
-        stat: jest.fn(),
-        unlink: jest.fn().mockResolvedValue()
+        stat: vi.fn(),
+        unlink: vi.fn().mockResolvedValue()
     },
-    statSync: jest.fn(),
-    unlinkSync: jest.fn()
+    statSync: vi.fn(),
+    unlinkSync: vi.fn()
 };
-jest.unstable_mockModule("fs", () => ({
+vi.mock("fs", () => ({
     default: mockFs
 }));
 
@@ -130,7 +128,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
     let task;
 
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         TaskManager.activeProcessors.clear();
         TaskManager.waitingTasks = [];
 

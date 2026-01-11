@@ -1,24 +1,22 @@
-import { jest } from '@jest/globals';
+const mockSpawn = vi.fn();
 
-const mockSpawn = jest.fn();
-
-jest.unstable_mockModule('child_process', () => ({
+vi.mock('child_process', () => ({
     spawn: mockSpawn,
-    spawnSync: jest.fn(),
-    execSync: jest.fn()
+    spawnSync: vi.fn(),
+    execSync: vi.fn()
 }));
 
-jest.unstable_mockModule('../../src/repositories/DriveRepository.js', () => ({
+vi.mock('../../src/repositories/DriveRepository.js', () => ({
     DriveRepository: {
-        findByUserId: jest.fn()
+        findByUserId: vi.fn()
     }
 }));
 
-jest.unstable_mockModule('../../src/services/CacheService.js', () => ({
-    cache: jest.fn()
+vi.mock('../../src/services/CacheService.js', () => ({
+    cache: vi.fn()
 }));
 
-jest.unstable_mockModule('../../src/config/index.js', () => ({
+vi.mock('../../src/config/index.js', () => ({
     config: {
         downloadDir: '/tmp/downloads',
         remoteFolder: 'test-remote'
@@ -39,8 +37,8 @@ const waitFor = async (callback, timeout = 200, interval = 10) => {
         if (Date.now() - startTime > timeout) break;
         
         // 如果是 Fake Timers 环境，必须推进时间，否则会死锁
-        if (jest.isMockFunction(setTimeout)) {
-            await jest.advanceTimersByTimeAsync(interval);
+        if (vi.isMockFunction(setTimeout)) {
+            await vi.advanceTimersByTimeAsync(interval);
         } else {
             await new Promise(r => setTimeout(r, interval));
         }
@@ -50,24 +48,24 @@ const waitFor = async (callback, timeout = 200, interval = 10) => {
 
 describe('CloudTool Batch Upload', () => {
     beforeEach(() => {
-        jest.useRealTimers();
-        jest.clearAllMocks();
+        vi.useRealTimers();
+        vi.clearAllMocks();
     });
 
     it('should call rclone with correct batch arguments', async () => {
         const mockProc = {
-            stderr: { on: jest.fn() },
-            on: jest.fn((event, cb) => {
+            stderr: { on: vi.fn() },
+            on: vi.fn((event, cb) => {
                 if (event === 'close') {
                     // 模拟异步关闭
                     process.nextTick(() => cb(0));
                 }
             }),
             stdin: {
-                write: jest.fn(),
-                end: jest.fn()
+                write: vi.fn(),
+                end: vi.fn()
             },
-            stdout: { on: jest.fn() }
+            stdout: { on: vi.fn() }
         };
         mockSpawn.mockReturnValue(mockProc);
 
@@ -77,7 +75,7 @@ describe('CloudTool Batch Upload', () => {
         ];
 
         // 模拟 _getUserConfig
-        jest.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({
+        vi.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({
             type: 'onedrive',
             user: 'test',
             pass: 'pass'
@@ -109,16 +107,16 @@ describe('CloudTool Batch Upload', () => {
         let progressCallback;
         const mockProc = {
             stderr: { 
-                on: jest.fn((event, cb) => {
+                on: vi.fn((event, cb) => {
                     if (event === 'data') progressCallback = cb;
                 }) 
             },
-            on: jest.fn((event, cb) => {
+            on: vi.fn((event, cb) => {
                 if (event === 'close') {
                     process.nextTick(() => cb(0));
                 }
             }),
-            stdin: { write: jest.fn(), end: jest.fn() }
+            stdin: { write: vi.fn(), end: vi.fn() }
         };
         mockSpawn.mockReturnValue(mockProc);
 
@@ -126,9 +124,9 @@ describe('CloudTool Batch Upload', () => {
             { id: 'task-1', userId: 'u1', localPath: '/tmp/downloads/movie.mp4' }
         ];
 
-        jest.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({ type: 'drive', user: 'u', pass: 'p' });
+        vi.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({ type: 'drive', user: 'u', pass: 'p' });
 
-        const onProgress = jest.fn();
+        const onProgress = vi.fn();
         const uploadPromise = CloudTool.uploadBatch(tasks, onProgress);
 
         // 等待 stderr.on('data') 被注册

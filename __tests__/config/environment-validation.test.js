@@ -1,32 +1,31 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { initConfig, __resetConfigForTests } from "../../src/config/index.js";
 
 // Mock dependencies at top level
-await jest.unstable_mockModule('dotenv', () => ({
+await vi.doMock('dotenv', () => ({
   default: {
-    config: jest.fn(() => ({ parsed: {} }))
+    config: vi.fn(() => ({ parsed: {} }))
   },
-  loadDotenv: jest.fn()
+  loadDotenv: vi.fn()
 }));
 
-await jest.unstable_mockModule('../../src/services/InfisicalClient.js', () => ({
-  fetchInfisicalSecrets: jest.fn().mockResolvedValue({})
+await vi.doMock('../../src/services/InfisicalClient.js', () => ({
+  fetchInfisicalSecrets: vi.fn().mockResolvedValue({})
 }));
 
 const originalEnv = { ...process.env };
 
 describe("config - Environment Validation", () => {
   beforeEach(() => {
-    jest.spyOn(console, 'log').mockImplementation(() => {});
-    jest.spyOn(console, 'warn').mockImplementation(() => {});
-    jest.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     process.env.SKIP_INFISICAL_RUNTIME = "true";
     __resetConfigForTests();
   });
 
   afterEach(() => {
     process.env = { ...originalEnv };
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe("Environment Consistency Validation", () => {

@@ -1,10 +1,8 @@
-import { jest, describe, test, expect, beforeEach } from "@jest/globals";
-
 // Mock processedMessages Map
 const processedMessages = new Map();
 
 // Mock console.log
-const logSpy = jest.fn();
+const logSpy = vi.fn();
 const originalLog = console.log;
 
 describe("Message Handling Logic (Post-Sharding Removal)", () => {

@@ -1,5 +1,3 @@
-import { jest, describe, it, expect, beforeAll, afterAll } from '@jest/globals';
-
 /**
  * 数据库集成测试
  *
@@ -13,12 +11,12 @@ describe('数据库集成测试', () => {
   beforeAll(() => {
     // Mock D1服务以避免真实的数据库连接
     mockD1Service = {
-      fetchOne: jest.fn(),
-      fetchAll: jest.fn(),
-      execute: jest.fn()
+      fetchOne: vi.fn(),
+      fetchAll: vi.fn(),
+      execute: vi.fn()
     };
 
-    jest.mock('../src/services/d1.js', () => ({
+    vi.mock('../src/services/d1.js', () => ({
       D1Service: class {
         constructor() {
           return mockD1Service;

@@ -1,52 +1,50 @@
 // Updated test file - V3
-import { jest, describe, it, expect, beforeEach } from "@jest/globals";
-
 const mockCache = {
-    get: jest.fn(),
-    set: jest.fn(),
-    delete: jest.fn(),
-    getOrSet: jest.fn(),
-    del: jest.fn(),
-    listKeys: jest.fn(),
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    getOrSet: vi.fn(),
+    del: vi.fn(),
+    listKeys: vi.fn(),
 };
 
 const mockLocalCache = {
-    get: jest.fn(),
-    set: jest.fn(),
-    del: jest.fn(),
-    getOrSet: jest.fn(),
+    get: vi.fn(),
+    set: vi.fn(),
+    del: vi.fn(),
+    getOrSet: vi.fn(),
 };
 
 const mockD1 = {
-    fetchOne: jest.fn(),
-    fetchAll: jest.fn(),
-    run: jest.fn(),
+    fetchOne: vi.fn(),
+    fetchAll: vi.fn(),
+    run: vi.fn(),
 };
 
-jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+vi.mock("../../src/services/CacheService.js", () => ({
     cache: mockCache,
 }));
 
-jest.unstable_mockModule("../../src/utils/LocalCache.js", () => ({
+vi.mock("../../src/utils/LocalCache.js", () => ({
     localCache: mockLocalCache,
 }));
 
-jest.unstable_mockModule("../../src/services/d1.js", () => ({
+vi.mock("../../src/services/d1.js", () => ({
     d1: mockD1,
 }));
 
-jest.unstable_mockModule("../../src/services/logger.js", () => ({
+vi.mock("../../src/services/logger.js", () => ({
     default: {
-        info: jest.fn(),
-        error: jest.fn(),
-        warn: jest.fn(),
-        debug: jest.fn(),
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
     },
     logger: {
-        info: jest.fn(),
-        error: jest.fn(),
-        warn: jest.fn(),
-        debug: jest.fn(),
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
     }
 }));
 
@@ -58,7 +56,7 @@ const { logger } = await import("../../src/services/logger.js");
 
 describe("DriveRepository", () => {
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         mockLocalCache.getOrSet.mockImplementation(async (key, loader) => {
             return await loader();
         });
@@ -66,7 +64,7 @@ describe("DriveRepository", () => {
 
     describe("findByUserId", () => {
         beforeEach(() => {
-            jest.clearAllMocks();
+            vi.clearAllMocks();
             mockLocalCache.get.mockReturnValue(null);
             mockCache.get.mockResolvedValue(null);
             mockD1.fetchOne.mockResolvedValue(null);
@@ -194,7 +192,7 @@ describe("DriveRepository", () => {
 
     describe("create", () => {
         beforeEach(() => {
-            jest.clearAllMocks();
+            vi.clearAllMocks();
             mockD1.run.mockResolvedValue({ changes: 1 });
             mockCache.set.mockResolvedValue(true);
         });
@@ -247,7 +245,7 @@ describe("DriveRepository", () => {
 
     describe("deleteByUserId", () => {
         beforeEach(() => {
-            jest.clearAllMocks();
+            vi.clearAllMocks();
             mockD1.run.mockResolvedValue({ changes: 1 });
             mockD1.fetchOne.mockResolvedValue(null);
             mockCache.delete.mockResolvedValue(true);
@@ -294,7 +292,7 @@ describe("DriveRepository", () => {
 
     describe("delete", () => {
         beforeEach(() => {
-            jest.clearAllMocks();
+            vi.clearAllMocks();
             mockD1.run.mockResolvedValue({ changes: 1 });
             mockD1.fetchOne.mockResolvedValue({ id: "drive123", user_id: "user1", status: "active" });
             mockCache.get.mockResolvedValue({ id: "drive123", user_id: "user1" });
@@ -384,8 +382,8 @@ describe("DriveRepository", () => {
 
     describe("findAll", () => {
         beforeEach(() => {
-            jest.clearAllMocks();
-            mockCache.listKeys = jest.fn();
+            vi.clearAllMocks();
+            mockCache.listKeys = vi.fn();
         });
 
         it("should return drives from the active list", async () => {
@@ -490,7 +488,7 @@ describe("DriveRepository", () => {
 
     describe("Persistence and Cache Failover", () => {
         beforeEach(() => {
-            jest.clearAllMocks();
+            vi.clearAllMocks();
         });
 
         it("should recover from cache failure using D1", async () => {
@@ -535,7 +533,7 @@ describe("DriveRepository", () => {
 
     describe("_updateActiveDrivesList", () => {
         beforeEach(() => {
-            jest.clearAllMocks();
+            vi.clearAllMocks();
         });
 
         it("should update active drives list successfully", async () => {

@@ -1,14 +1,19 @@
-import { jest, describe, test, expect, beforeEach } from '@jest/globals';
-
 // Mock logger
-jest.mock('../../src/services/logger.js', () => ({
-    default: {
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn()
-    }
-}));
+vi.mock('../../src/services/logger.js', () => {
+    const mockLogger = {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis()
+    };
+    return {
+        default: mockLogger,
+        logger: mockLogger,
+        createLogger: vi.fn(() => mockLogger)
+    };
+});
 
 const { CircuitBreaker, CircuitBreakerManager } = await import('../../src/services/CircuitBreaker.js');
 
@@ -16,13 +21,13 @@ describe('CircuitBreaker', () => {
     let circuitBreaker;
 
     beforeEach(() => {
-        jest.clearAllMocks();
-        jest.useFakeTimers();
+        vi.clearAllMocks();
+        vi.useFakeTimers();
         circuitBreaker = new CircuitBreaker({ name: 'test-breaker' });
     });
 
     afterEach(() => {
-        jest.useRealTimers();
+        vi.useRealTimers();
     });
 
     describe('constructor', () => {
@@ -53,7 +58,7 @@ describe('CircuitBreaker', () => {
 
     describe('execute', () => {
         test('should execute successfully when CLOSED', async () => {
-            const mockFn = jest.fn().mockResolvedValue('success');
+            const mockFn = vi.fn().mockResolvedValue('success');
             const result = await circuitBreaker.execute(mockFn);
             
             expect(result).toBe('success');
@@ -64,7 +69,7 @@ describe('CircuitBreaker', () => {
 
         test('should handle failures and increment count', async () => {
             const error = new Error('test error');
-            const mockFn = jest.fn().mockRejectedValue(error);
+            const mockFn = vi.fn().mockRejectedValue(error);
             
             await expect(circuitBreaker.execute(mockFn)).rejects.toThrow('test error');
             
@@ -74,7 +79,7 @@ describe('CircuitBreaker', () => {
 
         test('should open after failure threshold reached', async () => {
             const error = new Error('test error');
-            const mockFn = jest.fn().mockRejectedValue(error);
+            const mockFn = vi.fn().mockRejectedValue(error);
             
             // Trigger failures to reach threshold
             for (let i = 0; i < 5; i++) {
@@ -91,7 +96,7 @@ describe('CircuitBreaker', () => {
             circuitBreaker.state = 'OPEN';
             circuitBreaker.lastFailureTime = Date.now();
             
-            const mockFn = jest.fn().mockResolvedValue('success');
+            const mockFn = vi.fn().mockResolvedValue('success');
             
             await expect(circuitBreaker.execute(mockFn)).rejects.toThrow('Circuit breaker is OPEN for test-breaker');
             expect(mockFn).not.toHaveBeenCalled();
@@ -101,8 +106,8 @@ describe('CircuitBreaker', () => {
             circuitBreaker.state = 'OPEN';
             circuitBreaker.lastFailureTime = Date.now();
             
-            const mockFn = jest.fn().mockResolvedValue('success');
-            const fallbackFn = jest.fn().mockReturnValue('fallback');
+            const mockFn = vi.fn().mockResolvedValue('success');
+            const fallbackFn = vi.fn().mockReturnValue('fallback');
             
             const result = await circuitBreaker.execute(mockFn, fallbackFn);
             
@@ -113,7 +118,7 @@ describe('CircuitBreaker', () => {
 
         test('should transition to HALF_OPEN after timeout', async () => {
             const error = new Error('test error');
-            const mockFn = jest.fn().mockRejectedValue(error);
+            const mockFn = vi.fn().mockRejectedValue(error);
             
             // Open circuit
             for (let i = 0; i < 5; i++) {
@@ -123,10 +128,10 @@ describe('CircuitBreaker', () => {
             expect(circuitBreaker.state).toBe('OPEN');
             
             // Fast forward past timeout
-            jest.advanceTimersByTime(31000);
+            vi.advanceTimersByTime(31000);
             
             // Next call should allow execution
-            const successFn = jest.fn().mockResolvedValue('success');
+            const successFn = vi.fn().mockResolvedValue('success');
             const result = await circuitBreaker.execute(successFn);
             
             expect(result).toBe('success');
@@ -137,16 +142,16 @@ describe('CircuitBreaker', () => {
         test('should close after success threshold in HALF_OPEN', async () => {
             // Open circuit
             const error = new Error('test error');
-            const mockFn = jest.fn().mockRejectedValue(error);
+            const mockFn = vi.fn().mockRejectedValue(error);
             for (let i = 0; i < 5; i++) {
                 await expect(circuitBreaker.execute(mockFn)).rejects.toThrow('test error');
             }
             
             // Advance to HALF_OPEN
-            jest.advanceTimersByTime(31000);
+            vi.advanceTimersByTime(31000);
             
             // Successful executions
-            const successFn = jest.fn().mockResolvedValue('success');
+            const successFn = vi.fn().mockResolvedValue('success');
             for (let i = 0; i < 2; i++) {
                 await circuitBreaker.execute(successFn);
             }
@@ -159,13 +164,13 @@ describe('CircuitBreaker', () => {
         test('should reopen on failure in HALF_OPEN', async () => {
             // Open circuit
             const error = new Error('test error');
-            const mockFn = jest.fn().mockRejectedValue(error);
+            const mockFn = vi.fn().mockRejectedValue(error);
             for (let i = 0; i < 5; i++) {
                 await expect(circuitBreaker.execute(mockFn)).rejects.toThrow('test error');
             }
             
             // Advance to HALF_OPEN
-            jest.advanceTimersByTime(31000);
+            vi.advanceTimersByTime(31000);
             
             // Fail in HALF_OPEN
             await expect(circuitBreaker.execute(mockFn)).rejects.toThrow('test error');
@@ -175,7 +180,7 @@ describe('CircuitBreaker', () => {
         });
 
         test('should not increment success count in CLOSED state', async () => {
-            const successFn = jest.fn().mockResolvedValue('success');
+            const successFn = vi.fn().mockResolvedValue('success');
             await circuitBreaker.execute(successFn);
             
             expect(circuitBreaker.successCount).toBe(0);

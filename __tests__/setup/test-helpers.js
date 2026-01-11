@@ -1,4 +1,4 @@
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 import { Api } from 'telegram';
 import { stopWatchdog as stopTelegramWatchdog } from "../../src/services/telegram.js";
 import { mockRedisClient, mockCache } from "./external-mocks.js";
@@ -48,12 +48,12 @@ export function createMockCallbackEvent(callbackData, userId = '123') {
  */
 export function createMockTelegramClient() {
   return {
-    start: jest.fn().mockResolvedValue(true),
-    addEventHandler: jest.fn(),
-    invoke: jest.fn().mockResolvedValue(true),
-    sendMessage: jest.fn().mockResolvedValue({ id: 1 }),
-    saveSession: jest.fn().mockResolvedValue(true),
-    clearSession: jest.fn().mockResolvedValue(true)
+    start: vi.fn().mockResolvedValue(true),
+    addEventHandler: vi.fn(),
+    invoke: vi.fn().mockResolvedValue(true),
+    sendMessage: vi.fn().mockResolvedValue({ id: 1 }),
+    saveSession: vi.fn().mockResolvedValue(true),
+    clearSession: vi.fn().mockResolvedValue(true)
   };
 }
 
@@ -63,11 +63,11 @@ export function createMockTelegramClient() {
  */
 export function createMockTaskManager() {
   return {
-    init: jest.fn().mockResolvedValue(true),
-    startAutoScaling: jest.fn(),
-    addTask: jest.fn().mockResolvedValue('task123'),
-    addBatchTasks: jest.fn().mockResolvedValue(['task1', 'task2']),
-    cancelTask: jest.fn().mockResolvedValue(true),
+    init: vi.fn().mockResolvedValue(true),
+    startAutoScaling: vi.fn(),
+    addTask: vi.fn().mockResolvedValue('task123'),
+    addBatchTasks: vi.fn().mockResolvedValue(['task1', 'task2']),
+    cancelTask: vi.fn().mockResolvedValue(true),
     waitingTasks: [],
     currentTask: null
   };
@@ -79,8 +79,8 @@ export function createMockTaskManager() {
  */
 export function createMockAuthGuard() {
   return {
-    getRole: jest.fn().mockResolvedValue('user'),
-    can: jest.fn().mockResolvedValue(true)
+    getRole: vi.fn().mockResolvedValue('user'),
+    can: vi.fn().mockResolvedValue(true)
   };
 }
 
@@ -90,9 +90,9 @@ export function createMockAuthGuard() {
  */
 export function createMockSessionManager() {
   return {
-    get: jest.fn().mockResolvedValue(null),
-    set: jest.fn(),
-    delete: jest.fn()
+    get: vi.fn().mockResolvedValue(null),
+    set: vi.fn(),
+    delete: vi.fn()
   };
 }
 
@@ -175,9 +175,9 @@ export async function cleanupSingletonTimers() {
  */
 export function quickMockCleanup() {
   // 只清理全局 mock 函数，不清理其他状态
-  if (typeof jest !== 'undefined') {
+  if (typeof vi !== 'undefined') {
     // 清理所有 mock 的调用历史，但保留实现
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   }
 }
 
@@ -187,13 +187,13 @@ export function quickMockCleanup() {
  */
 export function withTimeout(testFn, timeout = 15000) {
   return async function () {
-    const originalTimeout = jest.setTimeout;
-    jest.setTimeout(timeout);
+    const originalTimeout = vi.getTimerCount();
+    vi.setConfig({ testTimeout: timeout });
     
     try {
       await testFn();
     } finally {
-      jest.setTimeout(originalTimeout);
+      vi.setConfig({ testTimeout: originalTimeout });
     }
   };
 }

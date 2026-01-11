@@ -1,11 +1,8 @@
-import { jest, describe, test, expect } from "@jest/globals";
-
 // Mock config for startup tests using unstable_mockModule
 // Jest ESM mockModule 在 Windows 下对相对路径的处理有时不可预测，使用绝对路径确保成功
 import { join } from 'path';
-const configPath = join(process.cwd(), 'src/config/index.js').replace(/\\/g, '/');
 
-jest.unstable_mockModule(configPath, () => ({
+vi.mock('../../src/config/index.js', () => ({
   config: {
     apiId: 12345,
     apiHash: "test_api_hash",
@@ -13,15 +10,15 @@ jest.unstable_mockModule(configPath, () => ({
     downloadDir: "/tmp",
     remoteFolder: "test"
   },
-  getConfig: jest.fn(() => ({
+  getConfig: vi.fn(() => ({
     apiId: 12345,
     apiHash: "test_api_hash",
     botToken: "test_token",
     downloadDir: "/tmp",
     remoteFolder: "test"
   })),
-  initConfig: jest.fn().mockResolvedValue({}),
-  validateConfig: jest.fn().mockReturnValue(true)
+  initConfig: vi.fn().mockResolvedValue({}),
+  validateConfig: vi.fn().mockReturnValue(true)
 }));
 
 describe("Project Smoke Test (Startup)", () => {

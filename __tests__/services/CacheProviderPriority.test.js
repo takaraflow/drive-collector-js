@@ -1,11 +1,9 @@
-import { jest, describe, test, expect, beforeEach, afterEach, beforeAll } from "@jest/globals";
-
 // Mock global fetch
-const mockFetch = jest.fn();
+const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 // Mock config/index.js - Only needed for the default case where no env is provided
-jest.unstable_mockModule("../../src/config/index.js", () => ({
+vi.mock("../../src/config/index.js", () => ({
     getConfig: () => ({
         kv: {
             accountId: 'mock-cf-account-id',
@@ -34,7 +32,7 @@ describe('CacheService Cloudflare KV Priority', () => {
     // Helper function: Create instance with specified env
     async function createCacheService(env) {
         // Re-import to ensure fresh module state
-        jest.resetModules();
+        vi.resetModules();
         const module = await import("../../src/services/CacheService.js");
         const Service = module.CacheService;
         
@@ -44,7 +42,7 @@ describe('CacheService Cloudflare KV Priority', () => {
     }
 
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         mockFetch.mockClear();
         mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ result: "OK" }) });
         
@@ -122,8 +120,8 @@ describe('CacheService Cloudflare KV Priority', () => {
 
     test('should fallback to memory when no Cloudflare credentials in env or config', async () => {
         // Mock getConfig to return empty kv config
-        jest.resetModules();
-        jest.unstable_mockModule("../../src/config/index.js", () => ({
+        vi.resetModules();
+        vi.doMock("../../src/config/index.js", () => ({
             getConfig: () => ({
                 kv: null,
                 redis: {},
@@ -169,10 +167,10 @@ describe('CacheService Cloudflare KV Priority', () => {
 
     test('should expose correct properties in memory mode', async () => {
         // Reset modules to ensure clean state
-        jest.resetModules();
+        vi.resetModules();
         
-        // Re-apply the config mock
-        jest.unstable_mockModule("../../src/config/index.js", () => ({
+        // Re-apply the config mock using doMock
+        vi.doMock("../../src/config/index.js", () => ({
             getConfig: () => ({
                 kv: {
                     accountId: 'mock-cf-account-id',
@@ -202,8 +200,8 @@ describe('CacheService Cloudflare KV Priority', () => {
 
     test('should handle missing config gracefully', async () => {
         // Mock getConfig to throw error
-        jest.resetModules();
-        jest.unstable_mockModule("../../src/config/index.js", () => ({
+        vi.resetModules();
+        vi.doMock("../../src/config/index.js", () => ({
             getConfig: () => {
                 throw new Error('Config not available');
             }

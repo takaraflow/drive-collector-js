@@ -1,21 +1,21 @@
-import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-
 // Mock Cache
 const mockCache = {
-    get: jest.fn(),
-    set: jest.fn()
+    get: vi.fn(),
+    set: vi.fn()
 };
-jest.unstable_mockModule('../../src/services/CacheService.js', () => ({
+vi.mock('../../src/services/CacheService.js', () => ({
     cache: mockCache
 }));
 
 // Mock logger
 const mockLogger = {
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  withModule: vi.fn().mockReturnThis(),
+  withContext: vi.fn().mockReturnThis()
 };
-jest.unstable_mockModule('../../src/services/logger.js', () => ({
+vi.mock('../../src/services/logger.js', () => ({
   default: mockLogger,
   logger: mockLogger
 }));
@@ -25,12 +25,12 @@ const { PRIORITY, runBotTask, handle429Error, botLimiter, runAuthTask, createAut
 
 describe('Limiter Priority & Distribution', () => {
     beforeEach(() => {
-        jest.clearAllMocks();
-        jest.useFakeTimers('modern');
+        vi.clearAllMocks();
+        vi.useFakeTimers('modern');
     });
 
     afterEach(() => {
-        jest.useRealTimers();
+        vi.useRealTimers();
     });
 
     it('should respect priority in p-queue', async () => {
@@ -51,7 +51,7 @@ describe('Limiter Priority & Distribution', () => {
         const p3 = runBotTask(task(3), userId, { priority: PRIORITY.BACKGROUND });
 
         // 立即推进定时器并等待所有任务完成
-        await jest.runAllTimersAsync();
+        await vi.runAllTimersAsync();
         await Promise.all([p1, p2, p3]);
 
         expect(results).toContain(2);
@@ -63,12 +63,12 @@ describe('Limiter Priority & Distribution', () => {
 
 describe('AutoScalingLimiter', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    jest.useFakeTimers('modern');
+    vi.clearAllMocks();
+    vi.useFakeTimers('modern');
   });
 
   afterEach(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   it('should increase concurrency on high success rate', async () => {
@@ -97,21 +97,21 @@ describe('AutoScalingLimiter', () => {
 
 describe('TokenBucketLimiter', () => {
   beforeEach(() => {
-    jest.useFakeTimers('modern');
+    vi.useFakeTimers('modern');
   });
 
   afterEach(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   it('should limit auth tasks with token bucket and async wait', async () => {
-    const fn = jest.fn().mockResolvedValue('auth ok');
+    const fn = vi.fn().mockResolvedValue('auth ok');
     const promises = [];
     for (let i = 0; i < 5; i++) {
       promises.push(runAuthTask(fn));
     }
     // 使用 runAllTimersAsync 替代固定时间推进
-    await jest.runAllTimersAsync();
+    await vi.runAllTimersAsync();
     await Promise.all(promises);
     expect(fn).toHaveBeenCalledTimes(5);
   });
@@ -119,17 +119,17 @@ describe('TokenBucketLimiter', () => {
 
 describe('handle429Error', () => {
   beforeEach(() => {
-      jest.clearAllMocks();
+      vi.clearAllMocks();
       mockCache.get.mockResolvedValue(null);
       mockLogger.warn.mockClear();
       mockLogger.error.mockClear();
       mockCache.set.mockClear();
-      jest.useFakeTimers('modern');
+      vi.useFakeTimers('modern');
       // No longer need to mock setTimeout directly, fakeTimers will handle it.
   });
 
   afterEach(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   it('should retry on 429 errors up to maxRetries', async () => {
@@ -143,7 +143,7 @@ describe('handle429Error', () => {
     };
 
     const promise = handle429Error(fn, 10);
-    await jest.runAllTimersAsync();
+    await vi.runAllTimersAsync();
     const result = await promise;
 
     expect(callCount).toBe(2);
@@ -163,7 +163,7 @@ describe('handle429Error', () => {
 
     // Should succeed with default 10 retries
     const promise = handle429Error(fn);
-    await jest.runAllTimersAsync();
+    await vi.runAllTimersAsync();
     const result = await promise;
 
     expect(callCount).toBe(5);
@@ -183,7 +183,7 @@ describe('handle429Error', () => {
     };
 
     const promise = handle429Error(fn, 10);
-    await jest.runAllTimersAsync();
+    await vi.runAllTimersAsync();
     const result = await promise;
 
     expect(callCount).toBe(3);
@@ -219,7 +219,7 @@ describe('handle429Error', () => {
     mockCache.get.mockResolvedValue(null);
     
     const promise = handle429Error(fn, 2);
-    await jest.runAllTimersAsync();
+    await vi.runAllTimersAsync();
     const result = await promise;
     
     expect(callCount).toBe(2);

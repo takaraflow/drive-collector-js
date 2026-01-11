@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import { initConfig, getRedisConnectionConfig, __resetConfigForTests, CACHE_TTL } from "../../src/config/index.js";
 
 // Store original process.env

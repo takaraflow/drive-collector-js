@@ -1,7 +1,5 @@
-import { jest, describe, test, expect, beforeEach, beforeAll, afterAll } from "@jest/globals";
-
 // Mock the global fetch function
-const mockFetch = jest.fn();
+const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 // Store original process.env
@@ -18,7 +16,7 @@ describe("D1 Service", () => {
       CF_D1_DATABASE_ID: "mock_database_id",
       CF_D1_TOKEN: "mock_token",
     };
-    jest.resetModules(); // Reset modules to re-import d1 with new env
+    vi.resetModules(); // Reset modules to re-import d1 with new env
 
     // Dynamically import d1 after setting up mocks
     const { d1: importedD1 } = await import("../../src/services/d1.js");
@@ -31,10 +29,10 @@ describe("D1 Service", () => {
   });
 
   beforeEach(async () => {
-    jest.useFakeTimers();
-    jest.clearAllMocks();
+    vi.useFakeTimers();
+    vi.clearAllMocks();
     // Mock setTimeout to execute immediately to eliminate real delays
-    jest.spyOn(global, 'setTimeout').mockImplementation((cb) => {
+    vi.spyOn(global, 'setTimeout').mockImplementation((cb) => {
       cb();
       return 1;
     });
@@ -46,9 +44,9 @@ describe("D1 Service", () => {
   });
 
   afterEach(() => {
-    jest.runOnlyPendingTimers();
-    jest.useRealTimers();
-    jest.restoreAllMocks();
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   test("should initialize the D1 service", () => {
@@ -186,7 +184,7 @@ describe("D1 Service", () => {
     });
 
     test("should log param types but not values for 400 error", async () => {
-        const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
         // Mock logger.error since we are importing a real logger instance in the actual code
         // but here we are testing the behavior through console or logger mocks
         // Since logger.js likely uses console in tests or we can spy on the logger itself if it was exported/mocked.
@@ -215,7 +213,7 @@ describe("D1 Service", () => {
     test("should fetch all results", async () => {
       const mockResults = [{ id: 1 }, { id: 2 }];
       const mockExecuteResponse = { result: [{ results: mockResults }] };
-      jest.spyOn(d1Instance, "_execute").mockResolvedValueOnce(mockExecuteResponse);
+      vi.spyOn(d1Instance, "_execute").mockResolvedValueOnce(mockExecuteResponse);
 
       const sql = "SELECT * FROM items";
       const results = await d1Instance.fetchAll(sql);
@@ -226,7 +224,7 @@ describe("D1 Service", () => {
 
     test("should return empty array if no results", async () => {
       const mockExecuteResponse = { result: [{ results: [] }] };
-      jest.spyOn(d1Instance, "_execute").mockResolvedValueOnce(mockExecuteResponse);
+      vi.spyOn(d1Instance, "_execute").mockResolvedValueOnce(mockExecuteResponse);
 
       const sql = "SELECT * FROM items WHERE false";
       const results = await d1Instance.fetchAll(sql);
@@ -238,7 +236,7 @@ describe("D1 Service", () => {
   describe("fetchOne", () => {
     test("should fetch one result", async () => {
       const mockResult = { id: 1 };
-      jest.spyOn(d1Instance, "fetchAll").mockResolvedValueOnce([mockResult]);
+      vi.spyOn(d1Instance, "fetchAll").mockResolvedValueOnce([mockResult]);
 
       const sql = "SELECT * FROM items WHERE id = ?";
       const result = await d1Instance.fetchOne(sql, [1]);
@@ -248,7 +246,7 @@ describe("D1 Service", () => {
     });
 
     test("should return null if no result found", async () => {
-      jest.spyOn(d1Instance, "fetchAll").mockResolvedValueOnce([]);
+      vi.spyOn(d1Instance, "fetchAll").mockResolvedValueOnce([]);
 
       const sql = "SELECT * FROM items WHERE id = ?";
       const result = await d1Instance.fetchOne(sql, [99]);
@@ -261,7 +259,7 @@ describe("D1 Service", () => {
     test("should execute a run operation", async () => {
       const mockRunResult = { id: 1, status: "ok" };
       const mockExecuteResponse = { result: [{ results: [mockRunResult] }] };
-      jest.spyOn(d1Instance, "_execute").mockResolvedValueOnce(mockExecuteResponse);
+      vi.spyOn(d1Instance, "_execute").mockResolvedValueOnce(mockExecuteResponse);
 
       const sql = "INSERT INTO logs (message) VALUES (?)";
       const result = await d1Instance.run(sql, ["log message"]);
@@ -278,7 +276,7 @@ describe("D1 Service", () => {
       
       // Spy on the prototype to intercept all calls
       const D1Service = d1Instance.constructor;
-      jest.spyOn(D1Service.prototype, "_execute")
+      vi.spyOn(D1Service.prototype, "_execute")
           .mockResolvedValueOnce(mockResult1)
           .mockRejectedValueOnce(mockError);
 

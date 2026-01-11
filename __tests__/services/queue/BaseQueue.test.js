@@ -1,4 +1,3 @@
-import { jest } from "@jest/globals";
 import { BaseQueue } from "../../../src/services/queue/BaseQueue.js";
 
 describe("BaseQueue - Abstract Class Behavior", () => {
@@ -99,7 +98,7 @@ describe("BaseQueue - Abstract Class Behavior", () => {
     });
 
     test("should call _publish when connected", async () => {
-        const mockPublish = jest.fn().mockResolvedValue({ messageId: "test-id" });
+        const mockPublish = vi.fn().mockResolvedValue({ messageId: "test-id" });
 
         class MockQueue extends BaseQueue {
             async _connect() {}
@@ -134,7 +133,7 @@ describe("BaseQueue - Abstract Class Behavior", () => {
     });
 
     test("should call _batchPublish when connected", async () => {
-        const mockBatchPublish = jest.fn().mockResolvedValue([{ messageId: "test-id" }]);
+        const mockBatchPublish = vi.fn().mockResolvedValue([{ messageId: "test-id" }]);
 
         class MockQueue extends BaseQueue {
             async _connect() {}
@@ -170,7 +169,7 @@ describe("BaseQueue - Abstract Class Behavior", () => {
     });
 
     test("should call _verifyWebhook when implemented", async () => {
-        const mockVerify = jest.fn().mockResolvedValue(true);
+        const mockVerify = vi.fn().mockResolvedValue(true);
 
         class MockQueue extends BaseQueue {
             async _connect() {}
@@ -262,7 +261,7 @@ describe("BaseQueue - Abstract Class Behavior", () => {
     });
 
     test("should skip connect if already connected", async () => {
-        const mockConnect = jest.fn();
+        const mockConnect = vi.fn();
 
         class MockQueue extends BaseQueue {
             async _connect() {
@@ -284,7 +283,7 @@ describe("BaseQueue - Abstract Class Behavior", () => {
     });
 
     test("should skip disconnect if not connected", async () => {
-        const mockDisconnect = jest.fn();
+        const mockDisconnect = vi.fn();
 
         class MockQueue extends BaseQueue {
             async _connect() {}

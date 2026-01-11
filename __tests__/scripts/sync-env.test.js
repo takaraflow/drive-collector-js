@@ -1,10 +1,8 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from "@jest/globals";
-
 const originalEnv = process.env;
 
 describe("sync-env script", () => {
   beforeEach(() => {
-    jest.resetModules();
+    vi.resetModules();
     process.env = {
       ...originalEnv,
       INFISICAL_TOKEN: "test-token",
@@ -15,44 +13,44 @@ describe("sync-env script", () => {
 
   afterEach(() => {
     process.env = originalEnv;
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   test("should skip local .env fallback when Infisical sync succeeds", async () => {
-    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-    const exitSpy = jest.spyOn(process, "exit").mockImplementation(() => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
       throw new Error("process.exit called");
     });
 
     const fsMock = {
-      existsSync: jest.fn((targetPath) => !targetPath.endsWith("manifest.json")),
-      readFileSync: jest.fn(),
-      writeFileSync: jest.fn()
+      existsSync: vi.fn((targetPath) => !targetPath.endsWith("manifest.json")),
+      readFileSync: vi.fn(),
+      writeFileSync: vi.fn()
     };
 
     const dotenvMock = {
-      config: jest.fn(),
-      parse: jest.fn()
+      config: vi.fn(),
+      parse: vi.fn()
     };
 
-    const listSecretsMock = jest.fn().mockResolvedValue({
+    const listSecretsMock = vi.fn().mockResolvedValue({
       secrets: [{ secretKey: "API_ID", secretValue: "12345" }]
     });
 
     class MockInfisicalSDK {
       auth() {
-        return { accessToken: jest.fn() };
+        return { accessToken: vi.fn() };
       }
       secrets() {
         return { listSecrets: listSecretsMock };
       }
     }
 
-    await jest.unstable_mockModule("fs", () => ({ default: fsMock }));
-    await jest.unstable_mockModule("dotenv", () => ({ default: dotenvMock }));
-    await jest.unstable_mockModule("@infisical/sdk", () => ({ InfisicalSDK: MockInfisicalSDK }));
+    await vi.doMock("fs", () => ({ default: fsMock }));
+    await vi.doMock("dotenv", () => ({ default: dotenvMock }));
+    await vi.doMock("@infisical/sdk", () => ({ InfisicalSDK: MockInfisicalSDK }));
 
     let importError;
     try {

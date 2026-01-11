@@ -1,18 +1,16 @@
-import { describe, test, expect, beforeEach, afterEach, jest, beforeAll } from "@jest/globals";
-
 // Mock process.env completely
 const originalEnv = { ...process.env };
 let mockEnv = { ...originalEnv };
 
 // Mock dependencies at top level
-await jest.unstable_mockModule('dotenv', () => ({
+await vi.doMock('dotenv', () => ({
   default: {
-    config: jest.fn(() => ({ parsed: {} }))
+    config: vi.fn(() => ({ parsed: {} }))
   },
-  loadDotenv: jest.fn()
+  loadDotenv: vi.fn()
 }));
 
-await jest.unstable_mockModule('../../src/config/env.js', () => ({
+await vi.doMock('../../src/config/env.js', () => ({
   getEnv: () => mockEnv,
   getProtectedEnv: () => ({
     NODE_ENV: mockEnv.NODE_ENV,
@@ -36,20 +34,20 @@ const { getEnv } = await import("../../src/config/env.js");
 
 describe("config - Environment Variable Protection", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     __resetConfigForTests();
     
     // Reset mock environment
     mockEnv = { ...originalEnv };
     
     // Mock console to prevent log pollution
-    jest.spyOn(console, 'log').mockImplementation(() => {});
-    jest.spyOn(console, 'warn').mockImplementation(() => {});
-    jest.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe("Protected Environment Variables", () => {

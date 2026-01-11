@@ -1,24 +1,22 @@
-import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-
 // Mock dependencies
 const mockD1 = {
-    run: jest.fn(),
-    fetchOne: jest.fn(),
-    fetchAll: jest.fn(),
-    batch: jest.fn()
+    run: vi.fn(),
+    fetchOne: vi.fn(),
+    fetchAll: vi.fn(),
+    batch: vi.fn()
 };
-jest.unstable_mockModule('../../src/services/d1.js', () => ({
+vi.mock('../../src/services/d1.js', () => ({
     d1: mockD1
 }));
 
 // Mock services/CacheService.js
 const mockCache = {
-    set: jest.fn().mockResolvedValue(true),
-    get: jest.fn().mockResolvedValue(null),
-    del: jest.fn().mockResolvedValue(true),
-    listKeys: jest.fn().mockResolvedValue([])
+    set: vi.fn().mockResolvedValue(true),
+    get: vi.fn().mockResolvedValue(null),
+    del: vi.fn().mockResolvedValue(true),
+    listKeys: vi.fn().mockResolvedValue([])
 };
-jest.unstable_mockModule('../../src/services/CacheService.js', () => ({
+vi.mock('../../src/services/CacheService.js', () => ({
     cache: mockCache
 }));
 
@@ -29,18 +27,18 @@ const { cache } = await import('../../src/services/CacheService.js');
 
 describe('TaskRepository', () => {
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         // Clear static properties
         TaskRepository.pendingUpdates.clear();
         if (TaskRepository.flushTimer) {
             clearInterval(TaskRepository.flushTimer);
             TaskRepository.flushTimer = null;
         }
-        jest.useFakeTimers();
+        vi.useFakeTimers();
     });
 
     afterEach(() => {
-        jest.useRealTimers();
+        vi.useRealTimers();
     });
 
     describe('create', () => {

@@ -1,10 +1,10 @@
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 
 const fixedTime = 1700000000000;
 
 const applyFakeClock = () => {
-    jest.useFakeTimers();
-    jest.setSystemTime(fixedTime);
+    vi.useFakeTimers();
+    vi.setSystemTime(fixedTime);
 };
 
 // Apply fake clock immediately so setup hooks see deterministic time
@@ -15,8 +15,8 @@ export const setupTimeMocks = () => {
 };
 
 export const cleanupTimeMocks = () => {
-    jest.clearAllTimers();
-    jest.setSystemTime(fixedTime);
+    vi.clearAllTimers();
+    vi.setSystemTime(fixedTime);
 };
 
 export const mockDateNow = () => Date.now();

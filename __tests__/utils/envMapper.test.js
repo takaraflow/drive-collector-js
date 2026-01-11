@@ -1,5 +1,3 @@
-import { describe, test, expect } from "@jest/globals";
-
 const originalEnv = process.env;
 
 // 环境映射单元测试 - 不依赖config/index.js的执行时机

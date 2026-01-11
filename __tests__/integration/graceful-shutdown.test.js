@@ -1,4 +1,3 @@
-import { jest } from "@jest/globals";
 import { gracefulShutdown, registerShutdownHook } from "../../src/services/GracefulShutdown.js";
 
 describe("GracefulShutdown Integration", () => {
@@ -6,7 +5,7 @@ describe("GracefulShutdown Integration", () => {
     let originalConsole;
 
     beforeEach(() => {
-        mockExit = jest.spyOn(process, 'exit').mockImplementation(() => {});
+        mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {});
 
         originalConsole = {
             error: global.console.error,
@@ -17,10 +16,10 @@ describe("GracefulShutdown Integration", () => {
 
         // Mock console
         global.console = {
-            error: jest.fn(),
-            warn: jest.fn(),
-            log: jest.fn(),
-            info: jest.fn()
+            error: vi.fn(),
+            warn: vi.fn(),
+            log: vi.fn(),
+            info: vi.fn()
         };
     });
 
@@ -36,23 +35,23 @@ describe("GracefulShutdown Integration", () => {
         test("完整的优雅关闭流程", async () => {
             const executionLog = [];
 
-            const httpServerHook = jest.fn().mockImplementation(async () => {
+            const httpServerHook = vi.fn().mockImplementation(async () => {
                 executionLog.push('http-server');
             });
 
-            const instanceCoordinatorHook = jest.fn().mockImplementation(async () => {
+            const instanceCoordinatorHook = vi.fn().mockImplementation(async () => {
                 executionLog.push('instance-coordinator');
             });
 
-            const telegramHook = jest.fn().mockImplementation(async () => {
+            const telegramHook = vi.fn().mockImplementation(async () => {
                 executionLog.push('telegram');
             });
 
-            const taskRepoHook = jest.fn().mockImplementation(async () => {
+            const taskRepoHook = vi.fn().mockImplementation(async () => {
                 executionLog.push('task-repository');
             });
 
-            const cacheHook = jest.fn().mockImplementation(async () => {
+            const cacheHook = vi.fn().mockImplementation(async () => {
                 executionLog.push('cache');
             });
 
@@ -80,8 +79,8 @@ describe("GracefulShutdown Integration", () => {
         });
 
         test("关闭失败时记录错误并继续", async () => {
-            const successHook = jest.fn().mockResolvedValue();
-            const failingHook = jest.fn().mockRejectedValue(new Error('Hook failed'));
+            const successHook = vi.fn().mockResolvedValue();
+            const failingHook = vi.fn().mockRejectedValue(new Error('Hook failed'));
 
             registerShutdownHook(successHook, 10, 'success-hook');
             registerShutdownHook(failingHook, 20, 'failing-hook');
@@ -104,7 +103,7 @@ describe("GracefulShutdown Integration", () => {
         });
 
         test("关闭钩子本身抛出同步错误应该被捕获", async () => {
-            const syncErrorHook = jest.fn(() => {
+            const syncErrorHook = vi.fn(() => {
                 throw new Error('Synchronous error');
             });
 
@@ -117,7 +116,7 @@ describe("GracefulShutdown Integration", () => {
 
     describe("Performance", () => {
         test("关闭流程应该在合理时间内完成", async () => {
-            const fastHook = jest.fn().mockResolvedValue();
+            const fastHook = vi.fn().mockResolvedValue();
             registerShutdownHook(fastHook, 10, 'fast-hook');
 
             const startTime = Date.now();

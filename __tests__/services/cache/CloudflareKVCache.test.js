@@ -1,8 +1,40 @@
-import { jest, describe, test, expect, beforeEach, beforeAll } from "@jest/globals";
-
 // Mock fetch
-const mockFetch = jest.fn();
+const mockFetch = vi.fn();
 global.fetch = mockFetch;
+
+// Mock logger
+vi.mock("../../../src/services/logger.js", () => ({
+    logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        child: vi.fn().mockReturnThis(),
+        configure: vi.fn(),
+        isInitialized: vi.fn().mockReturnValue(true),
+        canSend: vi.fn().mockReturnValue(true),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis()
+    },
+    default: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        child: vi.fn().mockReturnThis(),
+        configure: vi.fn(),
+        isInitialized: vi.fn().mockReturnValue(true),
+        canSend: vi.fn().mockReturnValue(true),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis()
+    },
+    setInstanceIdProvider: vi.fn(),
+    enableTelegramConsoleProxy: vi.fn(),
+    disableTelegramConsoleProxy: vi.fn(),
+    resetLogger: vi.fn(),
+    delay: vi.fn().mockResolvedValue(undefined),
+    retryWithDelay: vi.fn().mockImplementation(async (fn) => await fn())
+}));
 
 let CloudflareKVCache;
 
@@ -13,7 +45,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
     mockFetch.mockReset();
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 });
 
 describe("CloudflareKVCache", () => {

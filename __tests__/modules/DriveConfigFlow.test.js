@@ -1,64 +1,62 @@
-import { jest, describe, test, expect, beforeEach } from "@jest/globals";
-
 // 1. Mock 依赖项
 // Mock config
-jest.unstable_mockModule("../../src/config/index.js", () => ({
+vi.mock("../../src/config/index.js", () => ({
     config: {
         remoteFolder: "remote_folder"
     }
 }));
 
 const mockClient = {
-    sendMessage: jest.fn(),
-    editMessage: jest.fn(),
-    deleteMessages: jest.fn(),
+    sendMessage: vi.fn(),
+    editMessage: vi.fn(),
+    deleteMessages: vi.fn(),
 };
-jest.unstable_mockModule("../../src/services/telegram.js", () => ({
+vi.mock("../../src/services/telegram.js", () => ({
     client: mockClient,
 }));
 
 // Mock services/rclone
 const mockCloudTool = {
-    validateConfig: jest.fn(),
+    validateConfig: vi.fn(),
 };
-jest.unstable_mockModule("../../src/services/rclone.js", () => ({
+vi.mock("../../src/services/rclone.js", () => ({
     CloudTool: mockCloudTool,
 }));
 
 // Mock repositories
 const mockDriveRepository = {
-    findByUserId: jest.fn(),
-    create: jest.fn(),
-    delete: jest.fn(),
+    findByUserId: vi.fn(),
+    create: vi.fn(),
+    delete: vi.fn(),
 };
-jest.unstable_mockModule("../../src/repositories/DriveRepository.js", () => ({
+vi.mock("../../src/repositories/DriveRepository.js", () => ({
     DriveRepository: mockDriveRepository,
 }));
 
 const mockSettingsRepository = {
-    get: jest.fn(),
-    set: jest.fn(),
+    get: vi.fn(),
+    set: vi.fn(),
 };
-jest.unstable_mockModule("../../src/repositories/SettingsRepository.js", () => ({
+vi.mock("../../src/repositories/SettingsRepository.js", () => ({
     SettingsRepository: mockSettingsRepository,
 }));
 
 // Mock modules/SessionManager
 const mockSessionManager = {
-    start: jest.fn(),
-    update: jest.fn(),
-    clear: jest.fn(),
+    start: vi.fn(),
+    update: vi.fn(),
+    clear: vi.fn(),
 };
-jest.unstable_mockModule("../../src/modules/SessionManager.js", () => ({
+vi.mock("../../src/modules/SessionManager.js", () => ({
     SessionManager: mockSessionManager,
 }));
 
 // Mock utils/limiter
-jest.unstable_mockModule("../../src/utils/limiter.js", () => ({
-    runBotTask: jest.fn((fn) => fn()),
-    runMtprotoTask: jest.fn((fn) => fn()),
-    runBotTaskWithRetry: jest.fn((fn) => fn()),
-    runMtprotoTaskWithRetry: jest.fn((fn) => fn()),
+vi.mock("../../src/utils/limiter.js", () => ({
+    runBotTask: vi.fn((fn) => fn()),
+    runMtprotoTask: vi.fn((fn) => fn()),
+    runBotTaskWithRetry: vi.fn((fn) => fn()),
+    runMtprotoTaskWithRetry: vi.fn((fn) => fn()),
     PRIORITY: {
         HIGH: 10,
         UI: 20
@@ -66,7 +64,7 @@ jest.unstable_mockModule("../../src/utils/limiter.js", () => ({
 }));
 
 // Mock locales
-jest.unstable_mockModule("../../src/locales/zh-CN.js", () => ({
+vi.mock("../../src/locales/zh-CN.js", () => ({
     STRINGS: {
         drive: {
             menu_title: "网盘管理",
@@ -102,12 +100,12 @@ jest.unstable_mockModule("../../src/locales/zh-CN.js", () => ({
         }
         return res;
     },
-    escapeHTML: jest.fn(str => str)
+    escapeHTML: vi.fn(str => str)
 }));
 
 // Mock utils/common
-jest.unstable_mockModule("../../src/utils/common.js", () => ({
-    escapeHTML: jest.fn(str => str)
+vi.mock("../../src/utils/common.js", () => ({
+    escapeHTML: vi.fn(str => str)
 }));
 
 // 导入 DriveConfigFlow
@@ -115,7 +113,7 @@ const { DriveConfigFlow } = await import("../../src/modules/DriveConfigFlow.js")
 
 describe("DriveConfigFlow", () => {
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         // Reset all mocks to default behavior
         mockClient.sendMessage.mockResolvedValue({ id: 300 });
         mockClient.editMessage.mockResolvedValue();

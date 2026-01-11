@@ -1,46 +1,44 @@
-import { jest } from '@jest/globals';
-
 // Mock config
-await jest.unstable_mockModule('../../src/config/index.js', () => ({
+await vi.doMock('../../src/config/index.js', () => ({
     config: {
         ownerId: '12345'
     }
 }));
 
 // Mock telegram.js
-await jest.unstable_mockModule('../../src/services/telegram.js', () => ({
+await vi.doMock('../../src/services/telegram.js', () => ({
     client: {
         session: { save: () => '' },
-        getMe: jest.fn().mockResolvedValue({ id: 'bot123' }),
-        invoke: jest.fn().mockResolvedValue({}),
+        getMe: vi.fn().mockResolvedValue({ id: 'bot123' }),
+        invoke: vi.fn().mockResolvedValue({}),
         connected: true
     },
     isClientActive: () => true
 }));
 
 // Mock Dispatcher
-await jest.unstable_mockModule('../../src/dispatcher/Dispatcher.js', () => ({
+await vi.doMock('../../src/dispatcher/Dispatcher.js', () => ({
     Dispatcher: {
-        handle: jest.fn().mockResolvedValue(true)
+        handle: vi.fn().mockResolvedValue(true)
     }
 }));
 
 // Mock InstanceCoordinator
-await jest.unstable_mockModule('../../src/services/InstanceCoordinator.js', () => ({
+await vi.doMock('../../src/services/InstanceCoordinator.js', () => ({
     instanceCoordinator: {
-        acquireLock: jest.fn().mockResolvedValue(true)
+        acquireLock: vi.fn().mockResolvedValue(true)
     }
 }));
 
 // Mock logger to verify output
-await jest.unstable_mockModule('../../src/services/logger.js', () => ({
+await vi.doMock('../../src/services/logger.js', () => ({
     logger: {
-        info: jest.fn(),
-        debug: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        withModule: jest.fn().mockReturnThis(),
-        withContext: jest.fn().mockReturnThis()
+        info: vi.fn(),
+        debug: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis()
     }
 }));
 
@@ -51,12 +49,12 @@ describe('Reproduce Unknown Event Logging', () => {
     let mockClient;
 
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         MessageHandler.botId = 'bot123';
         mockClient = {
             session: { save: () => 'mock_session' },
-            getMe: jest.fn().mockResolvedValue({ id: 'bot123' }),
-            invoke: jest.fn().mockResolvedValue({}),
+            getMe: vi.fn().mockResolvedValue({ id: 'bot123' }),
+            invoke: vi.fn().mockResolvedValue({}),
             connected: true
         };
     });

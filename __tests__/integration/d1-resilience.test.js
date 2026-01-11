@@ -1,7 +1,5 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-
 // Mock the global fetch function
-const mockFetch = jest.fn();
+const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 // Store original process.env
@@ -9,13 +7,15 @@ const originalEnv = process.env;
 
 // Mock logger
 const mockLogger = {
-    info: jest.fn(),
-    error: jest.fn(),
-    warn: jest.fn(),
-    debug: jest.fn(),
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
+    withModule: vi.fn().mockReturnThis(),
+    withContext: vi.fn().mockReturnThis()
 };
 
-jest.unstable_mockModule("../../src/services/logger.js", () => ({
+vi.mock('../../src/services/logger.js', () => ({
     default: mockLogger,
     logger: mockLogger
 }));
@@ -31,8 +31,8 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
             CF_D1_DATABASE_ID: "test_db",
             CF_D1_TOKEN: "test_token",
         };
-        jest.useFakeTimers();
-        jest.resetModules();
+        vi.useFakeTimers();
+        vi.resetModules();
 
         // Dynamically import d1 after setting up mocks
         const { d1: importedD1 } = await import("../../src/services/d1.js");
@@ -41,8 +41,8 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
 
     afterEach(() => {
         process.env = originalEnv;
-        jest.useRealTimers();
-        jest.clearAllMocks();
+        vi.useRealTimers();
+        vi.clearAllMocks();
     });
 
     test("should retry on network connection errors", async () => {
@@ -59,7 +59,7 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
             });
 
         const promise = d1Instance.fetchAll("SELECT * FROM test");
-        await jest.advanceTimersByTimeAsync(10000); // Advance for retry delays
+        await vi.advanceTimersByTimeAsync(10000); // Advance for retry delays
         const result = await promise;
 
         expect(mockFetch).toHaveBeenCalledTimes(3); // 2 failures + 1 success
@@ -90,7 +90,7 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
             });
 
         const promise = d1Instance.run("UPDATE test SET status = ?", ["ok"]);
-        await jest.advanceTimersByTimeAsync(10000); // Advance for retry delays
+        await vi.advanceTimersByTimeAsync(10000); // Advance for retry delays
         const result = await promise;
 
         expect(mockFetch).toHaveBeenCalledTimes(3);
@@ -121,7 +121,7 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
             });
 
         const promise = d1Instance.run("DELETE FROM test WHERE id = ?", [1]);
-        await jest.advanceTimersByTimeAsync(10000); // Advance for retry delays
+        await vi.advanceTimersByTimeAsync(10000); // Advance for retry delays
         const result = await promise;
 
         expect(mockFetch).toHaveBeenCalledTimes(3);
@@ -134,7 +134,7 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
 
         const promise = expect(d1Instance.fetchOne("SELECT * FROM test WHERE id = ?", [1]))
             .rejects.toThrow("D1 Error: Network connection lost (Max retries exceeded)");
-        await jest.advanceTimersByTimeAsync(10000); // Advance for retry delays
+        await vi.advanceTimersByTimeAsync(10000); // Advance for retry delays
         await promise;
 
         expect(mockFetch).toHaveBeenCalledTimes(3); // Max 3 attempts
@@ -164,7 +164,7 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
         delete process.env.CF_D1_DATABASE_ID;
 
         // Re-import to get new instance without config
-        jest.resetModules();
+        vi.resetModules();
         const { d1: badD1Instance } = await import("../../src/services/d1.js");
 
         await expect(badD1Instance.fetchAll("SELECT 1"))
@@ -186,7 +186,7 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
         });
 
         // Re-import to get updated mock
-        jest.resetModules();
+        vi.resetModules();
         const { d1: newD1Instance } = await import("../../src/services/d1.js");
         const { default: logger } = await import("../../src/services/logger.js");
 
@@ -230,8 +230,8 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
         const promise = d1Instance.run("SELECT 1");
 
         // Advance timers for retry delays: 2s, then 4s
-        await jest.advanceTimersByTimeAsync(2000);
-        await jest.advanceTimersByTimeAsync(4000);
+        await vi.advanceTimersByTimeAsync(2000);
+        await vi.advanceTimersByTimeAsync(4000);
 
         const result = await promise;
 

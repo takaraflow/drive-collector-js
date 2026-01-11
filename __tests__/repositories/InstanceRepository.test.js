@@ -1,26 +1,24 @@
-import { jest, describe, it, expect, beforeEach, beforeAll } from "@jest/globals";
-
 // Mock d1 和 logger
-jest.unstable_mockModule("../../src/services/d1.js", () => ({
+vi.mock("../../src/services/d1.js", () => ({
     d1: {
-        fetchAll: jest.fn(),
-        fetchOne: jest.fn(),
-        run: jest.fn(),
+        fetchAll: vi.fn(),
+        fetchOne: vi.fn(),
+        run: vi.fn(),
     },
 }));
 
-jest.unstable_mockModule("../../src/services/logger.js", () => ({
+vi.mock("../../src/services/logger.js", () => ({
     default: {
-        info: jest.fn(),
-        error: jest.fn(),
-        warn: jest.fn(),
-        debug: jest.fn(),
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
     },
     logger: {
-        info: jest.fn(),
-        error: jest.fn(),
-        warn: jest.fn(),
-        debug: jest.fn(),
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
     }
 }));
 
@@ -29,7 +27,7 @@ describe("InstanceRepository", () => {
 
     // 【修复】使用 beforeAll + resetModules 确保 Mock 生效
     beforeAll(async () => {
-        jest.resetModules();
+        vi.resetModules();
         
         const d1Module = await import("../../src/services/d1.js");
         const loggerModule = await import("../../src/services/logger.js");
@@ -41,7 +39,7 @@ describe("InstanceRepository", () => {
     });
 
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
     });
 
     describe("createTableIfNotExists", () => {

@@ -1,12 +1,10 @@
-import { jest, describe, test, expect, beforeEach } from "@jest/globals";
-
 // Mock utils/common
-jest.unstable_mockModule("../../src/utils/common.js", () => ({
-    escapeHTML: jest.fn(str => str)
+vi.mock("../../src/utils/common.js", () => ({
+    escapeHTML: vi.fn(str => str)
 }));
 
 // Mock locales
-jest.unstable_mockModule("../../src/locales/zh-CN.js", () => ({
+vi.mock("../../src/locales/zh-CN.js", () => ({
     STRINGS: {
         diagnosis: {
             title: "🔍 <b>系统诊断报告</b>",
@@ -51,7 +49,7 @@ const { UIHelper } = await import("../../src/ui/templates.js");
 
 describe("UIHelper", () => {
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
     });
 
     describe("renderProgress", () => {

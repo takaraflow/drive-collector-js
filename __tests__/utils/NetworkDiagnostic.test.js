@@ -1,39 +1,37 @@
-import { jest, describe, it, expect, beforeEach } from "@jest/globals";
-
-jest.unstable_mockModule("../../src/services/telegram.js", () => ({
+vi.mock("../../src/services/telegram.js", () => ({
     client: {
-        getMe: jest.fn(),
+        getMe: vi.fn(),
     },
-    getUpdateHealth: jest.fn(() => ({
+    getUpdateHealth: vi.fn(() => ({
         lastUpdate: Date.now() - 30000,
         timeSince: 30000
     })),
 }));
 
-jest.unstable_mockModule("../../src/services/d1.js", () => ({
+vi.mock("../../src/services/d1.js", () => ({
     d1: {
-        fetchAll: jest.fn(),
+        fetchAll: vi.fn(),
     },
 }));
 
 const mockCache = {
-    get: jest.fn(),
-    getCurrentProvider: jest.fn().mockReturnValue("Cloudflare KV"),
+    get: vi.fn(),
+    getCurrentProvider: vi.fn().mockReturnValue("Cloudflare KV"),
 };
 
-jest.unstable_mockModule("../../src/services/CacheService.js", () => ({
+vi.mock("../../src/services/CacheService.js", () => ({
     cache: mockCache,
 }));
 
-jest.unstable_mockModule("../../src/services/rclone.js", () => ({
+vi.mock("../../src/services/rclone.js", () => ({
     CloudTool: {
-        validateConfig: jest.fn(),
+        validateConfig: vi.fn(),
     },
 }));
 
-jest.unstable_mockModule("../../src/repositories/DriveRepository.js", () => ({
+vi.mock("../../src/repositories/DriveRepository.js", () => ({
     DriveRepository: {
-        findAll: jest.fn(),
+        findAll: vi.fn(),
     },
 }));
 
@@ -43,18 +41,18 @@ const mockConfig = {
         testMode: false
     }
 };
-jest.unstable_mockModule("../../src/config/index.js", () => ({
+vi.mock("../../src/config/index.js", () => ({
     config: mockConfig,
     getConfig: () => mockConfig,
     validateConfig: () => true
 }));
 
-jest.unstable_mockModule("child_process", () => ({
-    spawnSync: jest.fn(),
+vi.mock("child_process", () => ({
+    spawnSync: vi.fn(),
 }));
 
-jest.unstable_mockModule("fs", () => ({
-    existsSync: jest.fn(),
+vi.mock("fs", () => ({
+    existsSync: vi.fn(),
 }));
 
 const { NetworkDiagnostic } = await import("../../src/utils/NetworkDiagnostic.js");
@@ -69,9 +67,9 @@ const fs = await import("fs");
 
 describe("NetworkDiagnostic", () => {
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         // Mock fetch globally for all tests to prevent real network calls
-        global.fetch = jest.fn().mockResolvedValue({
+        global.fetch = vi.fn().mockResolvedValue({
             ok: true,
             status: 200,
             json: () => Promise.resolve({ ok: true, result: { username: "mockbot" } })

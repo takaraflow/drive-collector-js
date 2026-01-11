@@ -1,53 +1,51 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
-
 // Mock the global fetch function
-const mockFetch = jest.fn();
+const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 
 
 describe("Telegram Startup Protection and Re-entrance Prevention", () => {
-    // Remove jest.setTimeout - use fake timers instead
+    // Remove vi.setTimeout - use fake timers instead
     let mockClient;
     let mockCoordinator;
     let mockSettingsRepository;
 
     beforeEach(async () => {
-        jest.useFakeTimers();
+        vi.useFakeTimers();
 
         // Mock Telegram client
         mockClient = {
-            start: jest.fn().mockResolvedValue(undefined),
-            disconnect: jest.fn().mockResolvedValue(undefined),
+            start: vi.fn().mockResolvedValue(undefined),
+            disconnect: vi.fn().mockResolvedValue(undefined),
             connected: false
         };
 
         // Mock coordinator
         mockCoordinator = {
-            acquireLock: jest.fn().mockResolvedValue(true),
+            acquireLock: vi.fn().mockResolvedValue(true),
             instanceId: "test_instance"
         };
 
         // Mock settings repository
         mockSettingsRepository = {
-            get: jest.fn().mockResolvedValue(""),
-            set: jest.fn().mockResolvedValue(undefined)
+            get: vi.fn().mockResolvedValue(""),
+            set: vi.fn().mockResolvedValue(undefined)
         };
 
         // Mock global modules
-        jest.doMock("../../src/services/telegram.js", () => ({
+        vi.doMock("../../src/services/telegram.js", () => ({
             client: mockClient,
-            saveSession: jest.fn().mockResolvedValue(undefined),
-            clearSession: jest.fn().mockResolvedValue(undefined),
-            resetClientSession: jest.fn().mockResolvedValue(undefined),
-            setConnectionStatusCallback: jest.fn()
+            saveSession: vi.fn().mockResolvedValue(undefined),
+            clearSession: vi.fn().mockResolvedValue(undefined),
+            resetClientSession: vi.fn().mockResolvedValue(undefined),
+            setConnectionStatusCallback: vi.fn()
         }));
 
-        jest.doMock("../../src/services/InstanceCoordinator.js", () => ({
+        vi.doMock("../../src/services/InstanceCoordinator.js", () => ({
             instanceCoordinator: mockCoordinator
         }));
 
-        jest.doMock("../../src/repositories/SettingsRepository.js", () => ({
+        vi.doMock("../../src/repositories/SettingsRepository.js", () => ({
             SettingsRepository: mockSettingsRepository
         }));
 
@@ -55,8 +53,8 @@ describe("Telegram Startup Protection and Re-entrance Prevention", () => {
     });
 
     afterEach(() => {
-        jest.useRealTimers();
-        jest.clearAllMocks();
+        vi.useRealTimers();
+        vi.clearAllMocks();
     });
 
     /**
