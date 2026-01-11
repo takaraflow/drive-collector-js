@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.22.0](https://github.com/YoungSx/lb-worker-js/compare/v0.21.0...v0.22.0) (2026-01-11)
+
+
+### ✅ Testing
+
+* adds comprehensive cache implementation tests ([760a9fe](https://github.com/YoungSx/lb-worker-js/commit/760a9feccd00442a98e520059771d019fceea4ef))
+
+
+### ✨ Features
+
+* adds env field to logger and improves environment handling ([15ccb2b](https://github.com/YoungSx/lb-worker-js/commit/15ccb2b7a6546f230bca4aa12ebcd589a220f965))
+* adds NODE_ENV configuration variable ([18f295b](https://github.com/YoungSx/lb-worker-js/commit/18f295b3103ab19538d811a2d70fcdac11a98fd8))
+
+
+### 🐛 Bug Fixes
+
+* ensure NODE_ENV and other vars are added to wrangler.toml in GHA environment ([590b756](https://github.com/YoungSx/lb-worker-js/commit/590b756b86c5da77022b322e7ffc43b2b4d2e283))
+* remove duplicate [vars] table in generated wrangler.toml ([c2c4776](https://github.com/YoungSx/lb-worker-js/commit/c2c47761323ee1d2f6d98d1583526a12f62982c5))
+* remove shell-style default value syntax from wrangler.build.toml ([304e972](https://github.com/YoungSx/lb-worker-js/commit/304e972e03f325aa9fe8d8d873a851d9add2cbbb))
+
+
+### 🔧 Maintenance
+
+* logger initialization to ensure proper environment configuration ([37d58db](https://github.com/YoungSx/lb-worker-js/commit/37d58db3e13f55aad3a98625410b3824d0845506))
+* unify cache system with CacheService ([e1011e9](https://github.com/YoungSx/lb-worker-js/commit/e1011e9a3aa9120349009da919950a07d9f0f948))
+
 ## [0.21.0](https://github.com/YoungSx/lb-worker-js/compare/v0.20.0...v0.21.0) (2026-01-10)
 
 
