@@ -302,8 +302,48 @@ const queuePayloadForBatch = (payload) => {
   scheduleBatchFlush();
 };
 
-export const flushLogBuffer = async () => {
-  await flushLogsBatch();
+/**
+ * 刷新日志缓冲区，确保所有待发送的日志都被发送
+ * @param {number} timeoutMs - 超时时间（毫秒），默认 10 秒
+ * @returns {Promise<void>}
+ */
+export const flushLogBuffer = async (timeoutMs = 10000) => {
+  // 如果缓冲区为空，直接返回
+  if (!logBuffer.length && !isBatchFlushing) {
+    return;
+  }
+
+  // 创建超时 Promise
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Log flush timeout')), timeoutMs);
+  });
+
+  // 执行刷新，带超时保护
+  try {
+    await Promise.race([
+      flushLogsBatch(),
+      timeoutPromise
+    ]);
+    
+    // 如果还有新的日志被添加到缓冲区（在刷新过程中），继续刷新
+    // 但只再尝试一次，避免无限循环
+    if (logBuffer.length > 0) {
+      await Promise.race([
+        flushLogsBatch(),
+        timeoutPromise
+      ]);
+    }
+  } catch (error) {
+    // 超时或错误时，将剩余日志输出到 console
+    if (logBuffer.length > 0) {
+      const remainingLogs = logBuffer.splice(0);
+      originalConsoleError.call(console, `⚠️ 日志刷新超时或失败，剩余 ${remainingLogs.length} 条日志输出到控制台:`);
+      for (const payload of remainingLogs) {
+        fallbackToConsole(payload.level || 'log', payload.message, payload);
+      }
+    }
+    // 不抛出错误，确保关闭流程可以继续
+  }
 };
 
 const normalizeContext = (context) => {

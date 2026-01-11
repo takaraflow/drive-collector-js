@@ -25,6 +25,14 @@ export async function registerShutdownHooks() {
     const { cache } = await import("../services/CacheService.js");
     const { stopWatchdog, client } = await import("../services/telegram.js");
     const { TaskRepository } = await import("../repositories/TaskRepository.js");
+    const { flushLogBuffer } = await import("../services/logger.js");
+
+    // 0. 在关闭开始前先刷新一次日志，确保关闭前的错误日志被保存 (priority: 5)
+    gracefulShutdown.register(async () => {
+        console.log('🔄 正在刷新日志缓冲区...');
+        await flushLogBuffer();
+        console.log('✅ 日志缓冲区已刷新');
+    }, 5, 'logger-flush-before');
 
     // 1. 停止接受新请求 (priority: 10)
     gracefulShutdown.register(async () => {
@@ -57,6 +65,15 @@ export async function registerShutdownHooks() {
         await cache.destroy();
         console.log('✅ Cache 服务已断开');
     }, 50, 'cache-service');
+
+    // 6. 在关闭完成后再次刷新日志，确保关闭过程中的日志也被保存 (priority: 60)
+    gracefulShutdown.register(async () => {
+        console.log('🔄 正在刷新关闭过程中的日志...');
+        await flushLogBuffer();
+        // 给日志发送一些时间完成
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log('✅ 所有日志已刷新完成');
+    }, 60, 'logger-flush-after');
 }
 
 export async function buildWebhookServer(config, handler, log) {
