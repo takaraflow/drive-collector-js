@@ -105,6 +105,8 @@
       },
       "endpoints": {
         "health": "/health",
+        "healthz": "/healthz",
+        "ready": "/ready",
         "webhookBase": "/api/tasks",
         "download": "/api/tasks/download",
         "upload": "/api/tasks/upload",
@@ -941,6 +943,8 @@
   },
   "endpoints": {
     "health": "/health",
+    "healthz": "/healthz",
+    "ready": "/ready",
     "webhookBase": "/api/tasks",
     "download": "/api/tasks/download",
     "upload": "/api/tasks/upload",

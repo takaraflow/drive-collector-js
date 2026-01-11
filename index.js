@@ -7,8 +7,9 @@ import { buildWebhookServer, registerShutdownHooks } from "./src/utils/lifecycle
  * QStash Webhook 处理程序 (供外部 HTTP Server 或测试使用)
  */
 export async function handleQStashWebhook(req, res) {
-    // 优先处理 /health 端点，不依赖任何服务导入
     const healthPath = '/health';
+    const healthzPath = '/healthz';
+    const readyPath = '/ready';
     const hostHeader = req.headers?.host || req.headers?.[':authority'] || 'localhost';
     if ((req.method === 'GET' || req.method === 'HEAD') && req.url) {
         try {
@@ -22,8 +23,25 @@ export async function handleQStashWebhook(req, res) {
                 }
                 return;
             }
+            if (url.pathname === healthzPath) {
+                res.writeHead(200);
+                if (req.method === 'HEAD') {
+                    res.end();
+                } else {
+                    res.end('OK');
+                }
+                return;
+            }
+            if (url.pathname === readyPath) {
+                res.writeHead(200);
+                if (req.method === 'HEAD') {
+                    res.end();
+                } else {
+                    res.end('OK');
+                }
+                return;
+            }
         } catch (e) {
-            // URL 解析失败，继续处理其他请求
         }
     }
 
