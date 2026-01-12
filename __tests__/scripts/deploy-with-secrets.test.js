@@ -1,37 +1,49 @@
-import { jest } from '@jest/globals';
+import { vi, describe, test, expect, beforeEach } from 'vitest';
 import fs from 'fs';
 
 // Mock modules
-const execSyncMock = jest.fn();
-const spawnSyncMock = jest.fn(() => ({ status: 0, stdout: '', stderr: '' }));
-const spawnMock = jest.fn(() => ({
-    on: jest.fn((event, callback) => {
+const execSyncMock = vi.fn();
+const spawnSyncMock = vi.fn(() => ({ status: 0, stdout: '', stderr: '' }));
+const spawnMock = vi.fn(() => ({
+    on: vi.fn((event, callback) => {
         if (event === 'exit') callback(0);
     })
 }));
 
-jest.unstable_mockModule('child_process', () => ({
+vi.mock('child_process', async () => {
+  const actual = await import('child_process');
+  return {
+    ...actual,
     execSync: execSyncMock,
     spawnSync: spawnSyncMock,
     spawn: spawnMock
-}));
+  };
+});
 
-jest.unstable_mockModule('dotenv', () => ({
+vi.mock('dotenv', async () => {
+  const actual = await import('dotenv');
+  return {
+    ...actual,
     default: {
-        config: jest.fn(),
-        parse: jest.fn(() => ({}))
+      config: vi.fn(),
+      parse: vi.fn(() => ({}))
     }
-}));
+  };
+});
 
-jest.unstable_mockModule('fs', () => ({
+vi.mock('fs', async () => {
+  const actual = await import('fs');
+  return {
+    ...actual,
     default: {
-        ...fs,
-        writeFileSync: jest.fn(),
-        readFileSync: jest.fn(),
-        existsSync: jest.fn(),
-        unlinkSync: jest.fn()
+      ...actual,
+      writeFileSync: vi.fn(),
+      readFileSync: vi.fn(),
+      existsSync: vi.fn(),
+      unlinkSync: vi.fn()
     }
-}));
+  };
+});
 
 // Dynamic import
 const { extractSecretsFromEnv, generateSecretsJson, uploadSecrets, deployWorker } = await import('../../scripts/deploy-with-secrets.js');
@@ -48,7 +60,7 @@ describe('deploy-with-secrets.js (Unit)', () => {
     };
 
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         // Get the mocked fs
     });
 

@@ -1,17 +1,17 @@
-import { describe, test, expect, beforeEach, jest } from '@jest/globals';
+import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { BaseCache } from '../src/cache/BaseCache.js';
 
 describe('BaseCache', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    jest.useFakeTimers();
-    jest.spyOn(Math, 'random').mockReturnValue(0.123);
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.123);
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
-    jest.useRealTimers();
-    jest.restoreAllMocks();
+    vi.clearAllMocks();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   describe('Constructor', () => {
@@ -96,7 +96,7 @@ describe('BaseCache', () => {
     });
 
     test('should call _disconnect if defined', async () => {
-      const disconnectSpy = jest.fn().mockResolvedValue(undefined);
+      const disconnectSpy = vi.fn().mockResolvedValue(undefined);
       class TestCache extends BaseCache {
         async _disconnect() {
           disconnectSpy();
@@ -125,7 +125,7 @@ describe('BaseCache', () => {
     });
 
     test('should call _get when implemented', async () => {
-      const getSpy = jest.fn().mockResolvedValue('value');
+      const getSpy = vi.fn().mockResolvedValue('value');
       class TestCache extends BaseCache {
         async _get(key, type) {
           getSpy(key, type);
@@ -140,7 +140,7 @@ describe('BaseCache', () => {
     });
 
     test('should pass type parameter with default value', async () => {
-      const getSpy = jest.fn().mockResolvedValue('value');
+      const getSpy = vi.fn().mockResolvedValue('value');
       class TestCache extends BaseCache {
         async _get(key, type) {
           getSpy(key, type);
@@ -169,7 +169,7 @@ describe('BaseCache', () => {
     });
 
     test('should call _set with default ttl', async () => {
-      const setSpy = jest.fn().mockResolvedValue(true);
+      const setSpy = vi.fn().mockResolvedValue(true);
       class TestCache extends BaseCache {
         async _set(key, value, ttl) {
           setSpy(key, value, ttl);
@@ -183,7 +183,7 @@ describe('BaseCache', () => {
     });
 
     test('should call _set with custom ttl', async () => {
-      const setSpy = jest.fn().mockResolvedValue(true);
+      const setSpy = vi.fn().mockResolvedValue(true);
       class TestCache extends BaseCache {
         async _set(key, value, ttl) {
           setSpy(key, value, ttl);
@@ -212,7 +212,7 @@ describe('BaseCache', () => {
     });
 
     test('should call _delete when implemented', async () => {
-      const deleteSpy = jest.fn().mockResolvedValue(true);
+      const deleteSpy = vi.fn().mockResolvedValue(true);
       class TestCache extends BaseCache {
         async _delete(key) {
           deleteSpy(key);
@@ -295,7 +295,7 @@ describe('BaseCache', () => {
     });
 
     test('lock should call _lock with default ttl', async () => {
-      const lockSpy = jest.fn().mockResolvedValue(true);
+      const lockSpy = vi.fn().mockResolvedValue(true);
       class TestCache extends BaseCache {
         async _lock(key, ttl) {
           lockSpy(key, ttl);
@@ -322,7 +322,7 @@ describe('BaseCache', () => {
     });
 
     test('unlock should call _unlock when implemented', async () => {
-      const unlockSpy = jest.fn().mockResolvedValue(true);
+      const unlockSpy = vi.fn().mockResolvedValue(true);
       class TestCache extends BaseCache {
         async _unlock(key) {
           unlockSpy(key);

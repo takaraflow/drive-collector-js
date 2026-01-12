@@ -1,25 +1,33 @@
-import { jest } from '@jest/globals';
+import { vi, describe, test, expect, beforeEach, afterEach, afterAll } from 'vitest';
 
 // Mock IO
-jest.unstable_mockModule('fs', () => {
-  const actualFs = jest.requireActual('fs');
+vi.mock('fs', async () => {
+  const actual = await import('fs');
   return {
-    ...actualFs,
-    existsSync: jest.fn(),
+    ...actual,
+    existsSync: vi.fn(),
   };
 });
 
-jest.unstable_mockModule('dotenv', () => ({
-  default: {
-    config: jest.fn()
-  }
-}));
+vi.mock('dotenv', async () => {
+  const actual = await import('dotenv');
+  return {
+    ...actual,
+    default: {
+      config: vi.fn()
+    }
+  };
+});
 
-jest.unstable_mockModule('@axiomhq/js', () => ({
-  Axiom: jest.fn().mockImplementation(() => ({
-    query: jest.fn()
-  }))
-}));
+vi.mock('@axiomhq/js', async () => {
+  const actual = await import('@axiomhq/js');
+  return {
+    ...actual,
+    Axiom: vi.fn().mockImplementation(() => ({
+      query: vi.fn()
+    }))
+  };
+});
 
 const fs = await import('fs');
 const dotenv = (await import('dotenv')).default;
@@ -32,30 +40,30 @@ describe('diagnose-axiom-logs.js', () => {
 
   beforeEach(() => {
     // Use global fake timers from setup, but set system time for this test
-    jest.setSystemTime(new Date('2026-01-01T12:00:00Z'));
+    vi.setSystemTime(new Date('2026-01-01T12:00:00Z'));
     
-    consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     
     // Reset mocks
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     
     fs.existsSync.mockReturnValue(false);
     dotenv.config.mockReturnValue({});
 
     mockAxiomClient = {
-      query: jest.fn()
+      query: vi.fn()
     };
   });
 
   afterEach(() => {
     consoleLogSpy.mockRestore();
     consoleErrorSpy.mockRestore();
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   afterAll(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   test('should_parse_args_with_default_values', () => {

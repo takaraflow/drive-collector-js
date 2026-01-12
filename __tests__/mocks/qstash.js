@@ -1,5 +1,5 @@
 // Mock for @upstash/qstash
-export const mockVerify = jest.fn();
+export const mockVerify = vi.fn();
 
 export class Receiver {
   constructor(options) {

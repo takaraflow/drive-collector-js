@@ -1,36 +1,44 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
 
 // Mock fs module
 // Create shared mock functions so both default and named exports use the same mock
-const existsSyncMock = jest.fn();
-const readFileSyncMock = jest.fn();
-const copyFileSyncMock = jest.fn();
-const unlinkSyncMock = jest.fn();
-const writeFileSyncMock = jest.fn();
+const existsSyncMock = vi.fn();
+const readFileSyncMock = vi.fn();
+const copyFileSyncMock = vi.fn();
+const unlinkSyncMock = vi.fn();
+const writeFileSyncMock = vi.fn();
 
-jest.unstable_mockModule('fs', () => ({
+vi.mock('fs', async () => {
+  const actual = await import('fs');
+  return {
+    ...actual,
     default: {
-        existsSync: existsSyncMock,
-        readFileSync: readFileSyncMock,
-        copyFileSync: copyFileSyncMock,
-        unlinkSync: unlinkSyncMock,
-        writeFileSync: writeFileSyncMock,
+      existsSync: existsSyncMock,
+      readFileSync: readFileSyncMock,
+      copyFileSync: copyFileSyncMock,
+      unlinkSync: unlinkSyncMock,
+      writeFileSync: writeFileSyncMock,
     },
     existsSync: existsSyncMock,
     readFileSync: readFileSyncMock,
     copyFileSync: copyFileSyncMock,
     unlinkSync: unlinkSyncMock,
     writeFileSync: writeFileSyncMock,
-}));
+  };
+});
 
 // Mock dotenv module
-const configMock = jest.fn();
-jest.unstable_mockModule('dotenv', () => ({
+const configMock = vi.fn();
+vi.mock('dotenv', async () => {
+  const actual = await import('dotenv');
+  return {
+    ...actual,
     default: {
-        config: configMock,
+      config: configMock,
     }
-}));
+  };
+});
 
 // Import mocked modules
 const fs = await import('fs');
@@ -85,7 +93,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
 
     // Override beforeEach for setupEnvironment tests
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         // Don't set up fs mocks here - each test will do it
     });
 
@@ -284,7 +292,7 @@ describe('generate-wrangler-vars.js (Unit)', () => {
           GHA_VARS_JSON: JSON.stringify({})
         };
 
-        const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
         expect(() => {
           generateWranglerCommand(mockEnv);

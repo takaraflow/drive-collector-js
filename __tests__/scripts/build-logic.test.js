@@ -1,17 +1,21 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
 
 const originalEnv = { ...process.env };
 
 // Mock fs module
-jest.unstable_mockModule('fs', () => ({
+vi.mock('fs', async () => { 
+  const actual = await import('fs'); 
+  return { 
+    ...actual, 
     default: {
-        existsSync: jest.fn(),
-        readFileSync: jest.fn(),
+      existsSync: vi.fn(),
+      readFileSync: vi.fn(),
     },
-    existsSync: jest.fn(),
-    readFileSync: jest.fn(),
-}));
+    existsSync: vi.fn(),
+    readFileSync: vi.fn(),
+  }; 
+});
 
 // Import mocked modules
 const fs = await import('fs');
@@ -20,12 +24,12 @@ const { loadEnvFile, hasInfisicalCredentials } = await import('../../scripts/bui
 describe('build-logic.js - loadEnvFile', () => {
 
     beforeEach(() => {
-        jest.clearAllMocks();
+        vi.clearAllMocks();
         // Reset process.env
         process.env = { ...originalEnv };
         
         // Mock path.join to return predictable paths
-        jest.spyOn(path, 'join').mockImplementation((...args) => {
+        vi.spyOn(path, 'join').mockImplementation((...args) => {
             const lastArg = args[args.length - 1];
             if (lastArg === '.env.dev' || lastArg === '.env.prod' || lastArg === '.env') {
                 return `/test/project/${lastArg}`;
@@ -37,7 +41,7 @@ describe('build-logic.js - loadEnvFile', () => {
     afterEach(() => {
         // Restore process.env
         process.env = { ...originalEnv };
-        jest.restoreAllMocks();
+        vi.restoreAllMocks();
     });
 
     test('should_load_env_dev_then_env_when_loading_dev_environment', () => {

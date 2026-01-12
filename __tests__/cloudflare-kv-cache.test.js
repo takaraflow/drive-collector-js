@@ -1,36 +1,38 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { CloudflareKVCache } from '../src/cache/CloudflareKVCache.js';
 
 describe('CloudflareKVCache', () => {
   let mockFetch;
-  let mockAbortController;
   let mockAbortSignal;
   let clearTimeoutSpy;
   let cache;
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    jest.useFakeTimers();
-    jest.spyOn(Math, 'random').mockReturnValue(0.123);
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.123);
 
     mockAbortSignal = {};
-    mockAbortController = {
-      signal: mockAbortSignal,
-      abort: jest.fn()
-    };
+    class MockAbortController {
+      constructor() {
+        this.signal = mockAbortSignal;
+      }
+      abort() {
+        mockAbortSignal.aborted = true;
+      }
+    }
+    global.AbortController = MockAbortController;
 
-    global.AbortController = jest.fn().mockImplementation(() => mockAbortController);
+    clearTimeoutSpy = vi.spyOn(global, 'clearTimeout');
 
-    clearTimeoutSpy = jest.spyOn(global, 'clearTimeout');
-
-    mockFetch = jest.fn();
+    mockFetch = vi.fn();
     global.fetch = mockFetch;
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
-    jest.useRealTimers();
-    jest.restoreAllMocks();
+    vi.clearAllMocks();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   describe('Constructor', () => {

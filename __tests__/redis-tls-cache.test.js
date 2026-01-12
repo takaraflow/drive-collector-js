@@ -1,34 +1,51 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
+
+vi.mock('redis-on-workers', () => ({
+  createRedis: vi.fn(() => ({
+    send: vi.fn().mockResolvedValue('OK'),
+    connect: vi.fn().mockResolvedValue(undefined),
+  })),
+}));
+
+vi.mock('../src/logger.js', () => ({
+  logger: {
+    info: vi.fn().mockResolvedValue(undefined),
+    warn: vi.fn().mockResolvedValue(undefined),
+    error: vi.fn().mockResolvedValue(undefined),
+    debug: vi.fn().mockResolvedValue(undefined),
+  }
+}));
+
 import { RedisTLSCache } from '../src/cache/RedisTLSCache.js';
 
 describe('RedisTLSCache', () => {
   let cache;
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    jest.useFakeTimers();
-    jest.spyOn(Math, 'random').mockReturnValue(0.123);
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.123);
 
-    // Mock TextDecoder
-    global.TextDecoder = jest.fn().mockImplementation(() => ({
-      decode: jest.fn((buffer) => {
+    global.TextDecoder = class TextDecoder {
+      decode(buffer) {
         if (buffer instanceof Uint8Array) {
           return String.fromCharCode.apply(null, buffer);
         }
         return String(buffer);
-      })
-    }));
+      }
+    };
 
-    // Mock TextEncoder
-    global.TextEncoder = jest.fn().mockImplementation(() => ({
-      encode: jest.fn((str) => new Uint8Array(str.split('').map(c => c.charCodeAt(0))))
-    }));
+    global.TextEncoder = class TextEncoder {
+      encode(str) {
+        return new Uint8Array(str.split('').map(c => c.charCodeAt(0)));
+      }
+    };
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
-    jest.useRealTimers();
-    jest.restoreAllMocks();
+    vi.clearAllMocks();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   describe('Constructor', () => {
@@ -85,7 +102,7 @@ describe('RedisTLSCache', () => {
 
     test('should disconnect and clean up when connected', async () => {
       const cache = new RedisTLSCache({ url: 'redis://localhost:6379' });
-      const mockClose = jest.fn().mockResolvedValue(undefined);
+      const mockClose = vi.fn().mockResolvedValue(undefined);
       cache.client = { close: mockClose };
 
       await cache.disconnect();
@@ -177,7 +194,7 @@ describe('RedisTLSCache', () => {
   describe('destroy', () => {
     test('should disconnect and destroy', async () => {
       const cache = new RedisTLSCache({ url: 'redis://localhost:6379' });
-      const mockClose = jest.fn().mockResolvedValue(undefined);
+      const mockClose = vi.fn().mockResolvedValue(undefined);
       cache.client = { close: mockClose };
 
       await cache.destroy();

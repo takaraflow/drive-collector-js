@@ -1,6 +1,6 @@
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 
-const mockSend = jest.fn();
+const mockSend = vi.fn();
 
 // Helper to inject errors for specific call indices
 // Usage: __mockSend.mockImplementationOnce(__mockSend.injectError(new Error('ECONNRESET'), 0));
@@ -21,7 +21,7 @@ mockSend.injectError = (error, callIndex = 0) => {
 export function createRedis(options) {
   return {
     send: mockSend,
-    connect: jest.fn(),
+    connect: vi.fn(),
     options,
   };
 }

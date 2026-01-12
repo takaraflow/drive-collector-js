@@ -1,5 +1,46 @@
 // 管理员API和鉴权功能测试
-import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
+
+vi.mock('../src/logger.js', () => ({
+  logger: {
+    info: vi.fn().mockResolvedValue(undefined),
+    warn: vi.fn().mockResolvedValue(undefined),
+    error: vi.fn().mockResolvedValue(undefined),
+    debug: vi.fn().mockResolvedValue(undefined),
+    child: vi.fn().mockReturnThis(),
+    configure: vi.fn(),
+    version: 'dev',
+    env: 'test',
+  },
+  configureBaseLoggerTransport: vi.fn(),
+  sanitizeLogData: vi.fn(data => data),
+  flushLogs: vi.fn().mockResolvedValue(undefined),
+  flushGlobalLoggerBuffer: vi.fn().mockResolvedValue(undefined),
+  isTestEnvironment: true,
+  VERSION: 'dev',
+  updateVersionFromEnv: vi.fn(),
+}));
+
+vi.mock('@opentelemetry/api', () => ({
+  trace: {
+    getTracer: vi.fn(() => ({
+      startSpan: vi.fn(() => ({ end: vi.fn(), setAttribute: vi.fn(), addEvent: vi.fn() })),
+    })),
+    getActiveSpan: vi.fn(() => ({ end: vi.fn(), setAttribute: vi.fn(), addEvent: vi.fn() })),
+  },
+  metrics: {
+    getMeter: vi.fn(() => ({
+      createCounter: vi.fn(),
+      createHistogram: vi.fn(),
+    })),
+  },
+}));
+
+vi.mock('redis-on-workers', () => ({
+  createRedis: vi.fn(() => ({ send: vi.fn() })),
+  __mockSend: vi.fn(),
+}));
+
 import { handleRequest, verifyAdminToken } from '../src/index.js';
 
 // Mock Cloudflare Workers environment
@@ -46,9 +87,9 @@ global.Headers = class Headers extends Map {
 
 // Mock KV
 const mockKV = {
-  get: jest.fn(),
-  put: jest.fn(),
-  list: jest.fn(),
+  get: vi.fn(),
+  put: vi.fn(),
+  list: vi.fn(),
 };
 
 describe('管理员API鉴权功能', () => {
@@ -56,7 +97,7 @@ describe('管理员API鉴权功能', () => {
   let ctx;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     
     env = {
       KV_STORAGE: mockKV,
@@ -65,7 +106,7 @@ describe('管理员API鉴权功能', () => {
     };
     
     ctx = {
-      waitUntil: jest.fn(),
+      waitUntil: vi.fn(),
       _axiomDebugRequestId: 'test-req-id'
     };
 

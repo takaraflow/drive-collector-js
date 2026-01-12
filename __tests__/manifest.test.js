@@ -1,16 +1,18 @@
-import { describe, expect, it, beforeAll, afterAll, jest } from '@jest/globals';
+import { vi, describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import Ajv from 'ajv';
 
 // Mock fs and child_process to avoid real IO
-jest.unstable_mockModule('fs', () => ({
-  readFileSync: jest.fn(),
-}));
+vi.mock('fs', async () => { 
+  const actual = await import('fs'); 
+  return { ...actual, readFileSync: vi.fn() }; 
+});
 
-jest.unstable_mockModule('child_process', () => ({
-  execSync: jest.fn(),
-}));
+vi.mock('child_process', async () => { 
+  const actual = await import('child_process'); 
+  return { ...actual, execSync: vi.fn() }; 
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -115,7 +117,7 @@ describe('Manifest Validation Tests', () => {
   });
 
   afterAll(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   describe('Required Fields', () => {

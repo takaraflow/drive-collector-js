@@ -1,35 +1,73 @@
 // 新功能测试 - 任务调度失败处理优化
-import { jest } from '@jest/globals';
+import { vi, describe, expect, it, beforeEach, afterEach, afterAll } from 'vitest';
 
-// 确保全局 Web API 可用
+vi.mock('../src/logger.js', () => ({
+  logger: {
+    info: vi.fn().mockResolvedValue(undefined),
+    warn: vi.fn().mockResolvedValue(undefined),
+    error: vi.fn().mockResolvedValue(undefined),
+    debug: vi.fn().mockResolvedValue(undefined),
+    child: vi.fn().mockReturnThis(),
+    configure: vi.fn(),
+    version: 'dev',
+    env: 'test',
+  },
+  configureBaseLoggerTransport: vi.fn(),
+  sanitizeLogData: vi.fn(data => data),
+  flushLogs: vi.fn().mockResolvedValue(undefined),
+  flushGlobalLoggerBuffer: vi.fn().mockResolvedValue(undefined),
+  isTestEnvironment: true,
+  VERSION: 'dev',
+  updateVersionFromEnv: vi.fn(),
+}));
+
+vi.mock('@opentelemetry/api', () => ({
+  trace: {
+    getTracer: vi.fn(() => ({
+      startSpan: vi.fn(() => ({ end: vi.fn(), setAttribute: vi.fn(), addEvent: vi.fn() })),
+    })),
+    getActiveSpan: vi.fn(() => ({ end: vi.fn(), setAttribute: vi.fn(), addEvent: vi.fn() })),
+  },
+  metrics: {
+    getMeter: vi.fn(() => ({
+      createCounter: vi.fn(),
+      createHistogram: vi.fn(),
+    })),
+  },
+  context: {
+    active: vi.fn(),
+    with: vi.fn((ctx, fn) => fn()),
+  },
+}));
+
+vi.mock('redis-on-workers', () => ({
+  createRedis: vi.fn(() => ({ send: vi.fn() })),
+  __mockSend: vi.fn(),
+}));
+
 if (typeof globalThis.TextEncoder === 'undefined') {
-  const { TextEncoder, TextDecoder } = require('util');
+  const { TextEncoder, TextDecoder } = await import('util');
   globalThis.TextEncoder = TextEncoder;
   globalThis.TextDecoder = TextDecoder;
 }
 
-// Mock global.fetch (already in setup, but per-test override if needed)
-// Note: global.fetch is already mocked in jest.setup.js
-
-// Helper function to create mock response with body.cancel
 function createMockResponse(status, body = {}) {
     return {
         status,
         ok: status >= 200 && status < 300,
         body: {
-            cancel: jest.fn().mockResolvedValue(undefined)
+            cancel: vi.fn().mockResolvedValue(undefined)
         },
-        text: jest.fn(() => '{}'),
-        json: jest.fn(() => ({})),
+        text: vi.fn(() => '{}'),
+        json: vi.fn(() => ({})),
         ...body
     };
 }
 
-// Mock @upstash/qstash
-const mockVerify = jest.fn();
+const mockVerify = vi.fn();
 global.__QSTASH_MOCK_VERIFY__ = mockVerify;
 
-jest.mock('@upstash/qstash', () => ({
+vi.mock('@upstash/qstash', () => ({
   Receiver: class {
     constructor(options) {
       this.currentSigningKey = options.currentSigningKey;
@@ -42,8 +80,6 @@ jest.mock('@upstash/qstash', () => ({
   },
 }));
 
-// 导入需要测试的函数
-import { describe, expect, it, beforeEach, afterEach, afterAll } from '@jest/globals';
 import {
   fetchWithRetry,
   getActiveInstances,
@@ -55,11 +91,10 @@ import {
 } from '../src/index.js';
 import { __mockSend, createRedis } from 'redis-on-workers';
 
-// Mock KV Storage
 const mockKV = {
-  list: jest.fn(),
-  get: jest.fn(),
-  put: jest.fn(),
+  list: vi.fn(),
+  get: vi.fn(),
+  put: vi.fn(),
 };
 
 const mockEnv = {
@@ -75,31 +110,37 @@ describe('任务调度失败处理优化测试', () => {
   let consoleErrorSpy;
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    jest.clearAllTimers();
+    vi.clearAllMocks();
+    vi.clearAllTimers();
     __mockSend.mockReset();
     mockVerify.mockReset();
     mockVerify.mockImplementation(async (options) => {
       return options.body;
     });
     global.__QSTASH_MOCK_VERIFY__ = mockVerify;
-    global.fetch.mockReset();
     
-    // Suppress console output during tests
-    consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
-    consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
-    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+    if (!global.fetch) {
+      global.fetch = vi.fn();
+    } else if (global.fetch.mockReset) {
+      global.fetch.mockReset();
+    } else {
+      global.fetch = vi.fn();
+    }
+    
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation();
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation();
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation();
   });
   
   afterEach(() => {
     consoleLogSpy.mockRestore();
     consoleWarnSpy.mockRestore();
     consoleErrorSpy.mockRestore();
-    jest.clearAllTimers();
+    vi.clearAllTimers();
   });
 
   afterAll(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   describe('fetchWithRetry - 4xx Stop Retry Logic', () => {
@@ -239,12 +280,12 @@ describe('任务调度失败处理优化测试', () => {
            ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
            ['Upstash-Timestamp', timestamp],
          ]),
-         text: jest.fn().mockResolvedValue('body'),
-         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
-       };
+          text: vi.fn().mockResolvedValue('body'),
+          arrayBuffer: vi.fn().mockResolvedValue(new Uint8Array()),
+        };
 
-        const lb = await import('../src/index.js');
-        const response = await lb.default.fetch(request, mockEnv, {});
+         const lb = await import('../src/index.js');
+         const response = await lb.default.fetch(request, mockEnv, {});
 
         // 验证请求被处理（路径规范化成功）
         // 注意：日志被发送到logBuffer，不检查console（规则13：禁止console.log）
@@ -365,12 +406,12 @@ describe('任务调度失败处理优化测试', () => {
              ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
              ['Upstash-Timestamp', timestamp],
            ]),
-           text: jest.fn().mockResolvedValue('body'),
-           arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
-         };
+            text: vi.fn().mockResolvedValue('body'),
+            arrayBuffer: vi.fn().mockResolvedValue(new Uint8Array()),
+          };
 
-         const lb = await import('../src/index.js');
-         const response = await lb.default.fetch(request, mockEnv, {});
+          const lb = await import('../src/index.js');
+          const response = await lb.default.fetch(request, mockEnv, {});
 
          // 验证请求被处理（路径规范化成功）
          // 注意：日志被发送到logBuffer，不检查console（规则13：禁止console.log）
@@ -521,93 +562,93 @@ describe('任务调度失败处理优化测试', () => {
            ['Upstash-Message-Id', 'msg_test_123'],
            ['Upstash-Retries', '3'],
          ]),
-         text: jest.fn().mockResolvedValue('body'),
-         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
-        };
+          text: vi.fn().mockResolvedValue('body'),
+          arrayBuffer: vi.fn().mockResolvedValue(new Uint8Array()),
+         };
 
-        const lb = await import('../src/index.js');
-        const response = await lb.default.fetch(request, mockEnv, {});
+         const lb = await import('../src/index.js');
+         const response = await lb.default.fetch(request, mockEnv, {});
 
-        expect(response.status).toBe(503);
+         expect(response.status).toBe(503);
 
-        // 注意：日志被发送到logBuffer，不检查console（规则13：禁止console.log）
-        // 验证请求返回503（无活跃实例）
-        expect(response.status).toBe(503);
-      });
+         // 注意：日志被发送到logBuffer，不检查console（规则13：禁止console.log）
+         // 验证请求返回503（无活跃实例）
+         expect(response.status).toBe(503);
+       });
 
-      it('应该在签名验证失败时记录 QStash 元数据到日志', async () => {
+       it('应该在签名验证失败时记录 QStash 元数据到日志', async () => {
+         const timestamp = Math.floor(Date.now() / 1000).toString();
+         mockVerify.mockRejectedValue(new Error('Signature verification failed'));
+
+         const request = {
+           url: 'https://lb.example.com/webhook',
+           headers: new Map([
+             ['Upstash-Message-Id', 'msg_error_456'],
+             ['Upstash-Retries', '1'],
+           ]),
+           text: vi.fn().mockResolvedValue('body'),
+           arrayBuffer: vi.fn().mockResolvedValue(new Uint8Array()),
+         };
+
+         const lb = await import('../src/index.js');
+         const response = await lb.default.fetch(request, mockEnv, {});
+
+         expect(response.status).toBe(401);
+
+         // 注意：日志被发送到logBuffer，不检查console（规则13：禁止console.log）
+         // 验证请求返回401（签名验证失败）
+         expect(response.status).toBe(401);
+       });
+     });
+  
+     describe('Retry-After 头部', () => {
+      it('应该在返回503时包含Retry-After头部', async () => {
         const timestamp = Math.floor(Date.now() / 1000).toString();
-        mockVerify.mockRejectedValue(new Error('Signature verification failed'));
-
+        mockVerify.mockResolvedValue('body');
+        mockKV.list.mockResolvedValue({ keys: [] });
+  
         const request = {
           url: 'https://lb.example.com/webhook',
           headers: new Map([
-            ['Upstash-Message-Id', 'msg_error_456'],
-            ['Upstash-Retries', '1'],
+            ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
+            ['Upstash-Timestamp', timestamp],
           ]),
-          text: jest.fn().mockResolvedValue('body'),
-          arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
+          text: vi.fn().mockResolvedValue('body'),
+          arrayBuffer: vi.fn().mockResolvedValue(new Uint8Array()),
         };
-
+  
         const lb = await import('../src/index.js');
         const response = await lb.default.fetch(request, mockEnv, {});
-
-        expect(response.status).toBe(401);
-
-        // 注意：日志被发送到logBuffer，不检查console（规则13：禁止console.log）
-        // 验证请求返回401（签名验证失败）
-        expect(response.status).toBe(401);
+  
+        expect(response.status).toBe(503);
+        expect(response.headers.get('Retry-After')).toBe('60');
       });
     });
- 
-    describe('Retry-After 头部', () => {
-     it('应该在返回503时包含Retry-After头部', async () => {
-       const timestamp = Math.floor(Date.now() / 1000).toString();
-       mockVerify.mockResolvedValue('body');
-       mockKV.list.mockResolvedValue({ keys: [] });
- 
-       const request = {
-         url: 'https://lb.example.com/webhook',
-         headers: new Map([
-           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-           ['Upstash-Timestamp', timestamp],
-         ]),
-         text: jest.fn().mockResolvedValue('body'),
-         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
-       };
- 
-       const lb = await import('../src/index.js');
-       const response = await lb.default.fetch(request, mockEnv, {});
- 
-       expect(response.status).toBe(503);
-       expect(response.headers.get('Retry-After')).toBe('60');
-     });
-   });
- 
-    describe('响应体包含 QStash 元数据', () => {
-     it('应该在错误响应体中包含 qstashMsgId', async () => {
-       const timestamp = Math.floor(Date.now() / 1000).toString();
-       mockVerify.mockResolvedValue('body');
-       mockKV.list.mockResolvedValue({ keys: [] });
- 
-       const request = {
-         url: 'https://lb.example.com/webhook',
-         headers: new Map([
-           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-           ['Upstash-Timestamp', timestamp],
-           ['Upstash-Message-Id', 'msg_response_test'],
-         ]),
-         text: jest.fn().mockResolvedValue('body'),
-         arrayBuffer: jest.fn().mockResolvedValue(new Uint8Array()),
-       };
- 
-       const lb = await import('../src/index.js');
-       const response = await lb.default.fetch(request, mockEnv, {});
- 
-       const body = await response.json();
-       expect(body.qstashMsgId).toBe('msg_response_test');
-       expect(body.timestamp).toBeDefined();
-       expect(body.error).toBeDefined();
-     });
-   });
- });
+  
+     describe('响应体包含 QStash 元数据', () => {
+      it('应该在错误响应体中包含 qstashMsgId', async () => {
+        const timestamp = Math.floor(Date.now() / 1000).toString();
+        mockVerify.mockResolvedValue('body');
+        mockKV.list.mockResolvedValue({ keys: [] });
+  
+        const request = {
+          url: 'https://lb.example.com/webhook',
+          headers: new Map([
+            ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
+            ['Upstash-Timestamp', timestamp],
+            ['Upstash-Message-Id', 'msg_response_test'],
+          ]),
+          text: vi.fn().mockResolvedValue('body'),
+          arrayBuffer: vi.fn().mockResolvedValue(new Uint8Array()),
+        };
+  
+        const lb = await import('../src/index.js');
+        const response = await lb.default.fetch(request, mockEnv, {});
+  
+        const body = await response.json();
+        expect(body.qstashMsgId).toBe('msg_response_test');
+        expect(body.timestamp).toBeDefined();
+        expect(body.error).toBeDefined();
+      });
+    });
+  });

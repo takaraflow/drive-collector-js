@@ -1,4 +1,32 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
+
+vi.mock('../src/logger.js', () => ({
+  logger: {
+    info: vi.fn().mockResolvedValue(undefined),
+    warn: vi.fn().mockResolvedValue(undefined),
+    error: vi.fn().mockResolvedValue(undefined),
+    debug: vi.fn().mockResolvedValue(undefined),
+    child: vi.fn().mockReturnThis(),
+    configure: vi.fn(),
+    version: 'dev',
+    env: 'test',
+  },
+  configureBaseLoggerTransport: vi.fn(),
+  sanitizeLogData: vi.fn(data => data),
+  flushLogs: vi.fn().mockResolvedValue(undefined),
+  flushGlobalLoggerBuffer: vi.fn().mockResolvedValue(undefined),
+  isTestEnvironment: true,
+  VERSION: 'dev',
+}));
+
+vi.mock('redis-on-workers', () => ({
+  createRedis: vi.fn(() => ({
+    send: vi.fn().mockResolvedValue('OK'),
+    connect: vi.fn().mockResolvedValue(undefined),
+  })),
+  __mockSend: vi.fn(),
+}));
+
 import { 
   executeRedis, 
   executeRedisScan, 
@@ -23,37 +51,37 @@ describe('CacheService Integration', () => {
     
     // Setup mock provider
     mockProvider = {
-      get: jest.fn().mockResolvedValue('mock-value'),
-      set: jest.fn().mockResolvedValue(true),
-      ping: jest.fn().mockResolvedValue(true),
-      listKeys: jest.fn().mockResolvedValue(['key1', 'key2']),
-      disconnect: jest.fn()
+      get: vi.fn().mockResolvedValue('mock-value'),
+      set: vi.fn().mockResolvedValue(true),
+      ping: vi.fn().mockResolvedValue(true),
+      listKeys: vi.fn().mockResolvedValue(['key1', 'key2']),
+      disconnect: vi.fn()
     };
 
     // Create mock CacheService instance
     const mockInstance = {
-      initialize: jest.fn().mockResolvedValue(undefined),
-      logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+      initialize: vi.fn().mockResolvedValue(undefined),
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       primaryProvider: mockProvider,
-      getCurrentProvider: jest.fn().mockReturnValue('cloudflare'),
-      get: jest.fn((key, type, options) => mockProvider.get(key, type, options)),
-      set: jest.fn((key, value, ttl, options) => mockProvider.set(key, value, ttl, options)),
-      listKeys: jest.fn((prefix, ctx) => mockProvider.listKeys(prefix, ctx)),
-      destroy: jest.fn().mockResolvedValue(undefined)
+      getCurrentProvider: vi.fn().mockReturnValue('cloudflare'),
+      get: vi.fn((key, type, options) => mockProvider.get(key, type, options)),
+      set: vi.fn((key, value, ttl, options) => mockProvider.set(key, value, ttl, options)),
+      listKeys: vi.fn((prefix, ctx) => mockProvider.listKeys(prefix, ctx)),
+      destroy: vi.fn().mockResolvedValue(undefined)
     };
 
     // Inject mock instance
     __test_setCacheServiceInstance(mockInstance);
 
     // Suppress console output during tests
-    consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
     // Restore console spies
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe('executeRedis', () => {
