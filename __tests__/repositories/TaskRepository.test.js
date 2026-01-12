@@ -13,7 +13,7 @@ vi.mock('../../src/services/d1.js', () => ({
 const mockCache = {
     set: vi.fn().mockResolvedValue(true),
     get: vi.fn().mockResolvedValue(null),
-    del: vi.fn().mockResolvedValue(true),
+    delete: vi.fn().mockResolvedValue(true),
     listKeys: vi.fn().mockResolvedValue([])
 };
 vi.mock('../../src/services/CacheService.js', () => ({
@@ -260,7 +260,7 @@ describe('TaskRepository', () => {
                 "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
                 ['completed', 'All good', expect.any(Number), 'task1']
             );
-            expect(mockCache.del).toHaveBeenCalledWith('task_status:task1');
+            expect(mockCache.delete).toHaveBeenCalledWith('task_status:task1');
         });
 
         it('should use Redis for important status updates', async () => {

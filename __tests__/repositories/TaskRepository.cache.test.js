@@ -13,7 +13,7 @@ vi.mock("../../src/services/d1.js", () => ({
 const mockCache = {
     set: vi.fn().mockResolvedValue(true),
     get: vi.fn().mockResolvedValue(null),
-    del: vi.fn().mockResolvedValue(true),
+    delete: vi.fn().mockResolvedValue(true),
     getKeys: vi.fn().mockResolvedValue([])
 };
 vi.mock("../../src/services/CacheService.js", () => ({
@@ -72,7 +72,7 @@ describe("TaskRepository Cache", () => {
         await TaskRepository.updateStatus("task1", "completed");
         expect(TaskRepository.pendingUpdates.has("task1")).toBe(false);
         expect(d1.run).toHaveBeenCalled();
-        expect(cache.del).toHaveBeenCalledWith("task_status:task1");
+        expect(cache.delete).toHaveBeenCalledWith("task_status:task1");
     });
 
     it("should immediately write critical status updates (failed)", async () => {

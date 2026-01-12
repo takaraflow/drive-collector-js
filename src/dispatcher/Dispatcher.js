@@ -753,7 +753,7 @@ export class Dispatcher {
             const cacheKey = `files_${userId}`;
             localCache.del(cacheKey);
             try {
-                await cache.del(cacheKey);
+                await cache.delete(cacheKey);
             } catch (e) {
                 log.warn(`Failed to clear cache for user ${userId}:`, e.message);
             }
@@ -801,7 +801,7 @@ export class Dispatcher {
                 const cacheKey = `files_${userId}`;
                 localCache.del(cacheKey);
                 try {
-                    await cache.del(cacheKey);
+                    await cache.delete(cacheKey);
                 } catch (e) {
                     log.warn(`Failed to clear cache for user ${userId}:`, e.message);
                 }

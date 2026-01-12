@@ -258,7 +258,7 @@ export class TaskRepository {
             }
             // 也从 Redis 中清除
             try {
-                await cache.del(`task_status:${taskId}`);
+                await cache.delete(`task_status:${taskId}`);
             } catch (e) {
                 // Ignore Redis errors
             }
