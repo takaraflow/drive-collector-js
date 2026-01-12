@@ -50,7 +50,7 @@ class D1Service {
                 const response = await fetch(this.apiUrl, {
                     method: "POST",
                     headers: {
-                        "Authorization": `Bearer ${this.token.substring(0, 10)}...`,
+                        "Authorization": `Bearer ${this.token}`,
                         "Content-Type": "application/json",
                     },
                     body: JSON.stringify({ sql, params }),
@@ -60,6 +60,11 @@ class D1Service {
                 log.debug(`🔍 D1 Response [Attempt ${attempts + 1}] - Status: ${response.status}, Duration: ${duration}ms`);
 
                 if (!response.ok) {
+                    // 对于 401 错误，记录更详细的上下文但不泄露完整 token
+                    if (response.status === 401) {
+                        log.error(`🚨 D1 Authentication Failed. Token length: ${this.token?.length || 0}, Token preview: ${this.token?.substring(0, 5)}***`);
+                    }
+
                     let errorDetails = "";
                     let errorCode = "N/A";
                     let errorMessage = "";
