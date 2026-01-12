@@ -2,27 +2,31 @@ import { Client, Receiver } from "@upstash/qstash";
 import { getConfig } from "../../config/index.js";
 import { logger } from "../../services/logger/index.js";
 import { CircuitBreakerManager } from "../../services/CircuitBreaker.js";
+import CloudQueueBase from "./CloudQueueBase.js";
 import { BaseQueue } from "./BaseQueue.js";
 
 const log = logger.withModule?.('QstashQueue') || logger;
 
-export class QstashQueue extends BaseQueue {
+/**
+ * QstashQueue - QStash 消息队列实现
+ * 继承 CloudQueueBase 的通用功能，添加 QStash 特有功能
+ */
+export class QstashQueue extends CloudQueueBase {
     constructor(options = {}) {
         super(options);
         this.client = null;
         this.receiver = null;
-        this.isMockMode = true;
+        
+        // QStash 特有的熔断器
         this.publishBreaker = CircuitBreakerManager.get('qstash_publish', {
             failureThreshold: 3,
             successThreshold: 2,
             timeout: 10000
         });
 
-        // 批量处理配置
+        // 覆盖批量配置为 QStash 优化
         this.batchSize = options.batchSize || parseInt(process.env.QSTASH_BATCH_SIZE) || 10;
         this.batchTimeout = options.batchTimeout || parseInt(process.env.QSTASH_BATCH_TIMEOUT) || 100;
-        this.buffer = [];
-        this.flushTimer = null;
     }
 
     async initialize() {
@@ -66,90 +70,38 @@ export class QstashQueue extends BaseQueue {
                 });
                 log.info(`Qstash Published, MsgID: ${result.messageId}`);
                 return result;
-            }, "publish"),
+            }, 3, '[QstashQueue]'),
             () => ({ messageId: "fallback-message-id", fallback: true })
         );
     }
 
     /**
-     * 添加任务到缓冲区
-     */
-    async _addToBuffer(task) {
-        this.buffer.push(task);
-        
-        // 立即刷新如果达到批量大小
-        if (this.buffer.length >= this.batchSize) {
-            return this._flushBuffer();
-        }
-
-        // 设置定时刷新
-        if (!this.flushTimer) {
-            this.flushTimer = setTimeout(() => {
-                this._flushBuffer();
-            }, this.batchTimeout);
-        }
-
-        // 返回延迟的 promise
-        return new Promise((resolve) => {
-            task.resolve = resolve;
-        });
-    }
-
-    /**
-     * 刷新缓冲区 - 发送批量任务
+     * 刷新缓冲区 - 发送批量任务（重写父类方法）
      */
     async _flushBuffer() {
         if (this.buffer.length === 0) return;
 
-        // 清除定时器
-        if (this.flushTimer) {
-            clearTimeout(this.flushTimer);
-            this.flushTimer = null;
-        }
-
-        const batch = [...this.buffer];
-        this.buffer = [];
-
-        log.info(`Flushing batch: ${batch.length} tasks`);
-
-        try {
-            const results = await this._batchPublish(batch.map(task => ({
+        // 调用父类的 _flushBuffer，传入 QStash 特有的批量发布函数
+        return super._flushBuffer(async (batch) => {
+            const messages = batch.map(task => ({
                 topic: task.topic,
                 message: task.message
-            })));
+            }));
 
-            // 处理结果
-            results.forEach((result, index) => {
-                if (batch[index].resolve) {
-                    if (result.status === 'fulfilled') {
-                        batch[index].resolve(result.value);
-                    } else {
-                        batch[index].resolve({
-                            messageId: "fallback-message-id",
-                            fallback: true,
-                            error: result.reason?.message
-                        });
-                    }
-                }
-            });
+            if (this.isMockMode) {
+                return messages.map(() => ({ messageId: "mock-message-id" }));
+            }
 
-            return results;
-        } catch (error) {
-            log.error(`Batch publish failed: ${error.message}`);
-            
-            // 所有任务都返回降级结果
-            batch.forEach(task => {
-                if (task.resolve) {
-                    task.resolve({
-                        messageId: "fallback-message-id",
-                        fallback: true,
-                        error: error.message
-                    });
-                }
-            });
-        }
+            return this.publishBreaker.execute(
+                () => this._executeBatch(messages),
+                () => messages.map(() => ({ messageId: "fallback-message-id", fallback: true }))
+            );
+        }, '[QstashQueue]');
     }
 
+    /**
+     * 批量发布（QStash 特有实现）
+     */
     async _batchPublish(messages) {
         if (this.isMockMode) {
             return messages.map(() => ({ messageId: "mock-message-id" }));
@@ -161,79 +113,29 @@ export class QstashQueue extends BaseQueue {
         );
     }
 
+    /**
+     * 执行批量任务（QStash 特有实现）
+     */
     async _executeBatch(messages) {
-        // 使用并发控制，避免同时发送过多请求
         const maxConcurrent = parseInt(process.env.QSTASH_MAX_CONCURRENT) || 5;
-        const results = [];
         
-        for (let i = 0; i < messages.length; i += maxConcurrent) {
-            const batch = messages.slice(i, i + maxConcurrent);
-            const batchResults = await Promise.allSettled(
-                batch.map(async (msg) => {
-                    return this._executeWithRetry(async () => {
-                        return await this.client.publishJSON({
-                            url: msg.topic,
-                            body: msg.message
-                        });
-                    }, "batchPublish");
-                })
-            );
-            results.push(...batchResults);
-            
-            // 批次间添加小延迟，避免突发流量
-            if (i + maxConcurrent < messages.length) {
-                await new Promise(resolve => setTimeout(resolve, 10));
-            }
-        }
-        
-        return results;
+        // 调用父类的 _executeBatch，传入 QStash 特有的单个任务执行函数
+        return super._executeBatch(
+            messages,
+            maxConcurrent,
+            async (msg) => {
+                return await this.client.publishJSON({
+                    url: msg.topic,
+                    body: msg.message
+                });
+            },
+            '[QstashQueue]'
+        );
     }
 
     /**
-     * 强制刷新缓冲区（用于关闭或紧急情况）
+     * 验证 Webhook 签名（QStash 特有功能）
      */
-    async flush() {
-        if (this.buffer.length > 0) {
-            return this._flushBuffer();
-        }
-    }
-
-    /**
-     * 获取缓冲区状态
-     */
-    getBufferStatus() {
-        return {
-            size: this.buffer.length,
-            batchSize: this.batchSize,
-            batchTimeout: this.batchTimeout,
-            hasActiveTimer: !!this.flushTimer
-        };
-    }
-
-    /**
-     * 清空缓冲区（用于测试或紧急情况）
-     */
-    clearBuffer() {
-        if (this.flushTimer) {
-            clearTimeout(this.flushTimer);
-            this.flushTimer = null;
-        }
-        const cleared = this.buffer.length;
-        this.buffer = [];
-        return cleared;
-    }
-
-    /**
-     * 关闭队列，确保所有缓冲任务都已发送
-     */
-    async close() {
-        await this.flush();
-        if (this.flushTimer) {
-            clearTimeout(this.flushTimer);
-            this.flushTimer = null;
-        }
-    }
-
     async _verifyWebhook(signature, body) {
         if (this.isMockMode) return true;
         if (!signature) {
@@ -249,40 +151,36 @@ export class QstashQueue extends BaseQueue {
         }
     }
 
-    async _executeWithRetry(operation, operationName) {
-        const maxRetries = 3;
-        const baseDelay = 100;
-
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                return await operation();
-            } catch (error) {
-                const errorCode = this._extractErrorCode(error.message);
-                if (errorCode && errorCode >= 400 && errorCode < 500) throw error;
-                if (attempt === maxRetries) throw error;
-
-                const jitter = process.env.NODE_ENV === 'test' ? 25 : Math.random() * 50;
-                const delay = baseDelay * Math.pow(2, attempt - 1) + jitter;
-                log.warn(`${operationName} attempt ${attempt} failed, retrying in ${delay.toFixed(0)}ms`);
-
-                if (process.env.NODE_ENV === 'test' && typeof jest !== 'undefined') {
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                } else {
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                }
-            }
+    /**
+     * 强制刷新缓冲区（重写父类方法）
+     */
+    async flush() {
+        if (this.buffer.length > 0) {
+            return this._flushBuffer();
         }
     }
 
-    _extractErrorCode(errorMessage) {
-        const match = errorMessage.match(/(\d{3})/);
-        return match ? parseInt(match[1]) : null;
+    /**
+     * 关闭队列（重写父类方法）
+     */
+    async close() {
+        await this.flush();
+        if (this.flushTimer) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = null;
+        }
     }
 
+    /**
+     * 获取熔断器状态
+     */
     getCircuitBreakerStatus() {
         return this.publishBreaker.getStatus();
     }
 
+    /**
+     * 重置熔断器
+     */
     resetCircuitBreaker() {
         this.publishBreaker.reset();
     }
