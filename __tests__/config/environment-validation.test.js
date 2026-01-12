@@ -1,4 +1,5 @@
 import { initConfig, __resetConfigForTests } from "../../src/config/index.js";
+import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
 
 const originalEnv = { ...process.env };
 
@@ -21,8 +22,16 @@ describe("config - Environment Validation", () => {
       loadDotenv: vi.fn()
     }));
 
-    await vi.doMock('../../src/services/InfisicalClient.js', () => ({
-      fetchInfisicalSecrets: vi.fn().mockResolvedValue({})
+    await vi.doMock('../../src/services/secrets/InfisicalSecretsProvider.js', () => ({
+      default: class {
+        constructor() {
+          this.authType = null;
+        }
+        async authenticate() {}
+        async fetchSecrets() {
+          return vi.fn().mockResolvedValue({});
+        }
+      }
     }));
     
     __resetConfigForTests();

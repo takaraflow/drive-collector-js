@@ -12,7 +12,7 @@
 
 ### 1. 运行时安全同步（推荐生产环境）
 
-应用启动时，通过 `src/services/InfisicalClient.js` 直接从 Infisical API 获取密钥，并注入到 `config` 对象中，**不写入磁盘**。
+应用启动时，通过 `src/services/secrets/InfisicalSecretsProvider.js` 直接从 Infisical API 获取密钥，并注入到 `config` 对象中，**不写入磁盘**。
 
 **启动流程**：
 ```javascript
