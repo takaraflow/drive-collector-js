@@ -56,6 +56,21 @@ export class Dispatcher {
         if (!ctx.userId) {
             return;
         }
+        
+        // 🔍 诊断日志：记录消息处理开始
+        const eventId = event.id || event.message?.id || event.queryId || 'unknown';
+        const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
+        const version = pkg.version || 'unknown';
+        
+        log.info(`🔍 [MSG_DEDUP] 消息处理开始 - EventID: ${eventId}, UserID: ${ctx.userId}, Instance: ${instanceCoordinator.getInstanceId()}, Version: ${version}`);
+        
+        // 🔍 诊断日志：检查锁状态
+        try {
+            const hasLock = await instanceCoordinator.hasLock('telegram_client');
+            log.info(`🔍 [MSG_DEDUP] 锁状态检查 - EventID: ${eventId}, HasLock: ${hasLock}, Instance: ${instanceCoordinator.getInstanceId()}`);
+        } catch (e) {
+            log.warn(`🔍 [MSG_DEDUP] 锁状态检查失败 - EventID: ${eventId}, Error: ${e.message}`);
+        }
 
         // 2. 全局前置守卫 (权限、维护模式)
         const guardStart = Date.now();
