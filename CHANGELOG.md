@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.19.0](https://github.com/YoungSx/drive-collector-js/compare/v4.18.2...v4.19.0) (2026-01-12)
+
+
+### ✅ 测试相关
+
+* automated testing migrated from jest to vitest ([ff0e84f](https://github.com/YoungSx/drive-collector-js/commit/ff0e84f013d0e4794c1bc7e33a70947c78c323b1))
+* improve test mocking and environment handling in configuration tests ([6e55cac](https://github.com/YoungSx/drive-collector-js/commit/6e55cace1ebbed0b84e8dde458ba28f5ef3ee50f))
+
+
+### ✨ 新特性
+
+* add custom upload path configuration for drives ([b63d643](https://github.com/YoungSx/drive-collector-js/commit/b63d643dcca0363a33252ad4c83087ccd9602356))
+* adds healthz and ready endpoints for service monitoring ([9db2870](https://github.com/YoungSx/drive-collector-js/commit/9db2870f44a6e3c45bbb99d201a4c7bdb73fbd9a))
+* enhance log flushing with timeout and graceful shutdown integration ([483dcd3](https://github.com/YoungSx/drive-collector-js/commit/483dcd3745091de1f7e60b5777c0a4c0f1ebfc0a))
+
+
+### 🔧 其他任务
+
+* adds ~/ to .gitignore ([fd01347](https://github.com/YoungSx/drive-collector-js/commit/fd01347922a9662b98fe3d44dba67b5ba18cce45))
+* adds comprehensive env field testing to logger service ([e957430](https://github.com/YoungSx/drive-collector-js/commit/e957430ad1478c923e84e043acfed611aa51441c))
+* adds remote_folder column to drives table ([050bd5c](https://github.com/YoungSx/drive-collector-js/commit/050bd5c0db2a4999206f8395f34ced88ffcc23fc))
+* min_machines_running on fly.io ([402194e](https://github.com/YoungSx/drive-collector-js/commit/402194e54ce2bef665c1bbd4e28f991434b3b844))
+
+
+### ♻️ 代码重构
+
+* enhance health endpoint resilience and startup error handling ([9a842fc](https://github.com/YoungSx/drive-collector-js/commit/9a842fce281c7cdc344a781af1104378b382e9fb))
+* improve logger functionality and performance tracking ([454bc0d](https://github.com/YoungSx/drive-collector-js/commit/454bc0dc69623c6f5bad33a87e391be7a35ae409))
+* LoggerService ([780139d](https://github.com/YoungSx/drive-collector-js/commit/780139d3515e800158a808db95f5b5ba34d3078b))
+
+
+### 🐛 问题修复
+
+* add Redis connection keepalive and fix startup resilience test ([052d89c](https://github.com/YoungSx/drive-collector-js/commit/052d89c36cc13fe70ba7623b9f40fc5daaad0bb1))
+* improves logger initialization sequence and reliability ([94e3809](https://github.com/YoungSx/drive-collector-js/commit/94e380946aeeaf725b1a7f197fda62ff17a9291f))
+* improves Telegram client connection reliability ([3aa8b29](https://github.com/YoungSx/drive-collector-js/commit/3aa8b29fcf317452d08b861d526782567f9fb51e))
+* improves Telegram error handling and recovery logic ([7d23d0f](https://github.com/YoungSx/drive-collector-js/commit/7d23d0fd8f2d691515f5e3e58cbfae6a14bd3138))
+* remove mistakenly tracked ~ directory file ([f2aa937](https://github.com/YoungSx/drive-collector-js/commit/f2aa9376b5bf618d114297a3a85f4ad32ad55cc0))
+
 ### [4.18.2](https://github.com/YoungSx/drive-collector-js/compare/v4.18.1...v4.18.2) (2026-01-10)
 
 
