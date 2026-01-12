@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.19.1](https://github.com/YoungSx/drive-collector-js/compare/v4.19.0...v4.19.1) (2026-01-12)
+
+
+### 🐛 问题修复
+
+* ensures logger instance ID is set for all logging services ([c3aaec8](https://github.com/YoungSx/drive-collector-js/commit/c3aaec8ecd7e12b77247c2f1f8d2fb9b6f50885e))
+
 ## [4.19.0](https://github.com/YoungSx/drive-collector-js/compare/v4.18.2...v4.19.0) (2026-01-12)
 
 
