@@ -158,6 +158,10 @@ export async function main() {
 
     console.log("🛠️ 正在初始化核心服务...");
     try {
+        // 先初始化 logger，确保其他服务可以使用它
+        await logger.initialize();
+        
+        // 然后并行初始化其他服务
         await Promise.all([
             queueService.initialize(),
             cache.initialize(),

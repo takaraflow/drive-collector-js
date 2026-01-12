@@ -150,11 +150,10 @@ class LoggerService {
 
     _ensureInitialized() {
         if (!this.isInitialized) {
-            console.warn('LoggerService not initialized, using fallback');
-            if (!this.fallbackLogger) {
-                this.fallbackLogger = new ConsoleLogger();
-                this.fallbackLogger.initialize();
-            }
+            // 自动初始化，而不是只输出警告
+            this.initialize().catch(err => {
+                console.error('LoggerService auto-initialization failed:', err.message);
+            });
         }
     }
 
