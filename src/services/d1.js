@@ -38,17 +38,26 @@ class D1Service {
 
         let attempts = 0;
         const maxAttempts = 3;
+        const startTime = Date.now();
 
         while (attempts < maxAttempts) {
             try {
+                // 📊 诊断日志：请求开始
+                log.debug(`🔍 D1 Request [Attempt ${attempts + 1}/${maxAttempts}] - URL: ${this.apiUrl}`);
+                log.debug(`🔍 D1 SQL: ${sql.substring(0, 100)}${sql.length > 100 ? '...' : ''}`);
+                log.debug(`🔍 D1 Params: ${JSON.stringify(params)}`);
+                
                 const response = await fetch(this.apiUrl, {
                     method: "POST",
                     headers: {
-                        "Authorization": `Bearer ${this.token}`,
+                        "Authorization": `Bearer ${this.token.substring(0, 10)}...`,
                         "Content-Type": "application/json",
                     },
                     body: JSON.stringify({ sql, params }),
                 });
+                
+                const duration = Date.now() - startTime;
+                log.debug(`🔍 D1 Response [Attempt ${attempts + 1}] - Status: ${response.status}, Duration: ${duration}ms`);
 
                 if (!response.ok) {
                     let errorDetails = "";
@@ -79,8 +88,11 @@ class D1Service {
                     // Check for D1 network error code 7500
                     const isD1NetworkError = response.status === 400 && errorCode === 7500;
                     
-                    // Log detailed error info
+                    // 📊 诊断日志：详细错误信息
                     log.error(`🚨 D1 HTTP ${response.status} - ${response.statusText}${errorDetails}`);
+                    log.error(`🚨 D1 Error Details - Code: ${errorCode}, Message: ${errorMessage}`);
+                    log.error(`🚨 D1 Request Context - Attempt: ${attempts + 1}/${maxAttempts}, Duration: ${duration}ms`);
+                    log.error(`🚨 D1 Config - AccountId: ${this.accountId}, DatabaseId: ${this.databaseId}`);
 
                     // Client errors (4xx) should not retry, except 400 with 7500
                     if (response.status >= 400 && response.status < 500 && !isD1NetworkError) {
@@ -113,18 +125,28 @@ class D1Service {
                 }
                 return result;
             } catch (error) {
+                const errorDuration = Date.now() - startTime;
+                
                 // Network errors (TypeError: Failed to fetch)
                 if (error instanceof TypeError) {
                     log.error(`🚨 D1 Network Error: ${error.message}`);
+                    log.error(`🚨 D1 Network Error Context - Attempt: ${attempts + 1}/${maxAttempts}, Duration: ${errorDuration}ms`);
+                    log.error(`🚨 D1 Network Error Details - Error Type: ${error.name}, Stack: ${error.stack?.split('\n')[1]?.trim() || 'N/A'}`);
                     
                     if (attempts < maxAttempts - 1) {
                         attempts++;
+                        log.warn(`⏳ D1 Retrying in 2s... (Attempt ${attempts + 1}/${maxAttempts})`);
                         await new Promise(resolve => setTimeout(resolve, 2000));
                         continue;
                     }
                     
+                    log.error(`💥 D1 Max retries exceeded after ${maxAttempts} attempts, total duration: ${errorDuration}ms`);
                     throw new Error("D1 Error: Network connection lost (Max retries exceeded)");
                 }
+                
+                // 📊 诊断日志：其他错误
+                log.error(`🚨 D1 Unexpected Error - Type: ${error.constructor.name}, Message: ${error.message}`);
+                log.error(`🚨 D1 Error Context - Attempt: ${attempts + 1}/${maxAttempts}, Duration: ${errorDuration}ms`);
                 
                 // Re-throw other errors (like client errors already handled above)
                 throw error;

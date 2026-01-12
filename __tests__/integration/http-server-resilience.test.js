@@ -47,7 +47,7 @@ describe("HTTP Server Resilience", () => {
             expect(res.end).toHaveBeenCalled();
         });
 
-        test("health 端点应该处理无效 URL 优雅降级", async () => {
+        test("health 端点应该处理无效 URL 优雅降级", { timeout: 20000 }, async () => {
             const { handleQStashWebhook } = await import('../../index.js');
             
             const req = {

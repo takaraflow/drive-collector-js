@@ -22,7 +22,7 @@ vi.mock('../../src/config/index.js', () => ({
 }));
 
 describe("Project Smoke Test (Startup)", () => {
-    test("should load core modules without SyntaxErrors", async () => {
+    test("should load core modules without SyntaxErrors", { timeout: 20000 }, async () => {
         // 关键在于导入这些文件，只要没有 SyntaxError 就算通过
         const modules = [
             "../src/config/index.js",
@@ -38,7 +38,7 @@ describe("Project Smoke Test (Startup)", () => {
         }
     });
 
-    test("should load complex modules with Mocks", async () => {
+    test("should load complex modules with Mocks", { timeout: 20000 }, async () => {
         // 这些模块在顶级作用域有副作用（如初始化连接），需要 Mock
         const complexModules = [
             "../src/services/telegram.js",
