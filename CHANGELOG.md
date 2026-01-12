@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.20.0](https://github.com/YoungSx/drive-collector-js/compare/v4.19.2...v4.20.0) (2026-01-12)
+
+
+### 🐛 问题修复
+
+* ensure cache is properly cleared when updating remote folder ([738e4b0](https://github.com/YoungSx/drive-collector-js/commit/738e4b088db4445147299a8f2c93dd3ff5e70379))
+* improve test resilience and add detailed logging for D1 service ([c67035f](https://github.com/YoungSx/drive-collector-js/commit/c67035f820d01d3197ba98724c75a4acaa29493a))
+* improves error handling for D1 authentication failures ([5982f83](https://github.com/YoungSx/drive-collector-js/commit/5982f83eea1f7bc580011be34fe3116884b8236a))
+
+
+### ♻️ 代码重构
+
+* add CloudQueueBase abstract class and improve QstashQueue implementation ([9137823](https://github.com/YoungSx/drive-collector-js/commit/91378231e031a4fdc3c38851ea2d6e255618d01b))
+
 ### [4.19.2](https://github.com/YoungSx/drive-collector-js/compare/v4.19.1...v4.19.2) (2026-01-12)
 
 
