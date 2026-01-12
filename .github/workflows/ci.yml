@@ -87,7 +87,7 @@ jobs:
       - name: Run Tests (${{ matrix.test-type }})
         run: |
           TEST_START=$(date +%s)
-          npm test -- --verbose
+          npm test
           echo "TEST_DURATION=$(($(date +%s) - $TEST_START))" >> $GITHUB_ENV
       - name: Report Performance Metrics
         run: |
