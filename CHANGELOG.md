@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.19.2](https://github.com/YoungSx/drive-collector-js/compare/v4.19.1...v4.19.2) (2026-01-12)
+
+
+### 🔧 其他任务
+
+* adds diagnostic logging for message processing ([13916f3](https://github.com/YoungSx/drive-collector-js/commit/13916f325fa5ec7bfffabb580828b3780a1be246))
+
 ### [4.19.1](https://github.com/YoungSx/drive-collector-js/compare/v4.19.0...v4.19.1) (2026-01-12)
 
 
