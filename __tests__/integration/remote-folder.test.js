@@ -228,7 +228,7 @@ describe('Remote Folder Integration Tests', () => {
 
             await Dispatcher.handle(event);
 
-            expect(mockUpdateRemoteFolder).toHaveBeenCalledWith('drive1', '/Movies/2024');
+            expect(mockUpdateRemoteFolder).toHaveBeenCalledWith('drive1', '/Movies/2024', userId);
             expect(mockSendMessage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
                 message: expect.stringContaining('上传路径已设置')
             }));
@@ -246,7 +246,7 @@ describe('Remote Folder Integration Tests', () => {
 
             await Dispatcher.handle(event);
 
-            expect(mockUpdateRemoteFolder).toHaveBeenCalledWith('drive1', null);
+            expect(mockUpdateRemoteFolder).toHaveBeenCalledWith('drive1', null, userId);
             expect(mockSendMessage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
                 message: expect.stringContaining('已重置为默认路径')
             }));
@@ -285,7 +285,7 @@ describe('Remote Folder Integration Tests', () => {
 
             await Dispatcher.handle(event);
 
-            expect(mockUpdateRemoteFolder).toHaveBeenCalledWith('drive1', '/Movies/2024');
+            expect(mockUpdateRemoteFolder).toHaveBeenCalledWith('drive1', '/Movies/2024', userId);
             expect(mockSessionClear).toHaveBeenCalledWith(userId);
             expect(mockSendMessage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
                 message: expect.stringContaining('上传路径已设置')

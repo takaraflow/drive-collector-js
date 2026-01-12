@@ -259,9 +259,10 @@ export class DriveRepository {
      * 更新网盘的remote_folder字段
      * @param {string} driveId - 网盘ID
      * @param {string|null} remoteFolder - 上传路径，null表示重置为默认
+     * @param {string} userId - 用户ID（用于清理缓存）
      * @returns {Promise<void>}
      */
-    static async updateRemoteFolder(driveId, remoteFolder) {
+    static async updateRemoteFolder(driveId, remoteFolder, userId) {
         if (!driveId) return;
         
         const now = Date.now();
@@ -274,11 +275,11 @@ export class DriveRepository {
             );
             
             // 清除缓存，强制下次读取时回源
-            const drive = await this.findById(driveId);
-            if (drive) {
-                await cache.delete(this.getDriveKey(drive.user_id));
+            // 直接使用传入的 userId，避免通过 findById 获取旧缓存数据
+            if (userId) {
+                await cache.delete(this.getDriveKey(userId));
                 await cache.delete(this.getDriveIdKey(driveId));
-                localCache.del(`drive_${drive.user_id}`);
+                localCache.del(`drive_${userId}`);
             }
             
             log.info(`Updated remote_folder for drive ${driveId}: ${remoteFolder}`);

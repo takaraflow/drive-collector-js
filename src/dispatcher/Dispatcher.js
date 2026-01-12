@@ -861,8 +861,8 @@ export class Dispatcher {
                 throw new Error('Drive not found');
             }
             
-            // 更新drives表的remote_folder字段
-            await DriveRepository.updateRemoteFolder(drive.id, path);
+            // 更新drives表的remote_folder字段，传递userId用于清理缓存
+            await DriveRepository.updateRemoteFolder(drive.id, path, userId);
             
         } catch (error) {
             log.error(`Failed to set upload path in D1 for user ${userId}:`, error);
