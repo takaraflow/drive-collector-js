@@ -48,6 +48,7 @@
     "@infisical/sdk": "^4.0.6",
     "@upstash/qstash": "^2.0.0",
     "better-sqlite3": "^12.5.0",
+    "bloom-filters": "^3.0.4",
     "dotenv": "^17.2.3",
     "ioredis": "^5.8.2",
     "p-queue": "^8.0.1",

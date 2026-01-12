@@ -251,7 +251,7 @@ describe("CacheService Integration Tests", () => {
 
         test("should handle expirationTtl in URL", async () => {
             mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ success: true }) });
-            await service.set("k1", "v1", 3600);
+            await service.set("k1", "v1", 3600, { skipTtlRandomization: true });
             expect(mockFetch.mock.calls[0][0]).toContain("expiration_ttl=3600");
         });
 

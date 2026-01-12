@@ -48,6 +48,22 @@ class CacheService {
         
         // L1 Cache Config
         this.l1Ttl = 10000; // 10 seconds default for L1
+        
+        // L3 Cache Config (Persistent Layer)
+        this.l3Cache = null;
+        this.l3Enabled = process.env.CACHE_L3_ENABLED === 'true';
+        
+        // Cache Statistics
+        this.stats = {
+            hits: { l1: 0, l2: 0, l3: 0 },
+            misses: 0,
+            totalRequests: 0,
+            lastReset: Date.now()
+        };
+        
+        // Bloom Filter for cache penetration protection
+        this.bloomFilter = null;
+        this.bloomFilterEnabled = process.env.CACHE_BLOOM_FILTER === 'true';
     }
 
     /**
@@ -278,36 +294,71 @@ class CacheService {
     }
 
     /**
-     * Core Get Method with L1/L2 and Failover
+     * Core Get Method with L1/L2/L3 and Failover
      */
     async get(key, type = "json", options = {}) {
         await this._ensureInitialized();
 
-        // 1. L1 Cache Check (LocalCache)
-        // Skip L1 if explicitly requested or if we are in a critical failover state (optional logic)
+        // Update stats
+        this.stats.totalRequests++;
+
+        // 1. Bloom Filter Check (Penetration Protection)
+        if (this.bloomFilterEnabled && this.bloomFilter) {
+            if (!this.bloomFilter.mightContain(key)) {
+                // Definitely not in cache, skip all checks
+                this.stats.misses++;
+                return null;
+            }
+        }
+
+        // 2. L1 Cache Check (LocalCache)
         if (!options.skipL1) {
             const l1Value = localCache.get(key);
             if (l1Value !== null && l1Value !== undefined) {
-                // Refresh L1 TTL if needed (LocalCache handles this via set, but here we just return)
+                this.stats.hits.l1++;
                 return l1Value;
             }
         }
 
-        // 2. L2 Cache Check (Provider)
+        // 3. L2 Cache Check (Provider)
         if (!this.primaryProvider && this.currentProviderName === 'MemoryCache') {
-            return null; // No L2 available
+            this.stats.misses++;
+            return null;
         }
 
         try {
             const value = await this.primaryProvider.get(key, type);
             
-            // If value found in L2, populate L1
             if (value !== null && value !== undefined) {
+                // Populate L1
                 const ttl = options.l1Ttl || this.l1Ttl;
                 localCache.set(key, value, ttl);
+                this.stats.hits.l2++;
+                return value;
             }
             
-            return value;
+            // 4. L3 Cache Check (Persistent Layer)
+            if (this.l3Enabled && this.l3Cache) {
+                const l3Value = await this.l3Cache.get(key, type);
+                if (l3Value !== null && l3Value !== undefined) {
+                    // Promote to L2 and L1
+                    if (this.primaryProvider) {
+                        await this.primaryProvider.set(key, l3Value, 3600);
+                    }
+                    localCache.set(key, l3Value, this.l1Ttl);
+                    this.stats.hits.l3++;
+                    return l3Value;
+                }
+            }
+
+            this.stats.misses++;
+            
+            // Add to bloom filter if enabled
+            if (this.bloomFilterEnabled && this.bloomFilter) {
+                this.bloomFilter.add(key);
+            }
+            
+            return null;
         } catch (error) {
             log.error(`Get error on ${this.currentProviderName}: ${error.message}`);
             await this._handleProviderFailure(error);
@@ -317,20 +368,29 @@ class CacheService {
                 return this._getWithFallback(key, type, options);
             }
             
+            this.stats.misses++;
             return null;
         }
     }
 
     /**
-     * Core Set Method with L1/L2
+     * Core Set Method with L1/L2/L3
      */
     async set(key, value, ttl = 3600, options = {}) {
         await this._ensureInitialized();
 
+        // TTL Randomization (±10%) to prevent cache stampede
+        let actualTtl = ttl;
+        if (!options.skipTtlRandomization) {
+            const variance = ttl * 0.1; // 10% variance
+            const randomOffset = (Math.random() - 0.5) * 2 * variance;
+            actualTtl = Math.floor(ttl + randomOffset);
+        }
+
         // 1. Update L1 (LocalCache)
         // Convert seconds to ms for LocalCache
         if (!options.skipL1) {
-            localCache.set(key, value, ttl * 1000);
+            localCache.set(key, value, actualTtl * 1000);
         }
 
         // 2. Update L2 (Provider)
@@ -345,9 +405,21 @@ class CacheService {
         }
 
         try {
-            const result = await this.primaryProvider.set(key, value, ttl);
+            const result = await this.primaryProvider.set(key, value, actualTtl);
             
             if (!result) throw new Error('Provider returned false');
+
+            // 3. Update L3 (Persistent Layer) if enabled
+            if (this.l3Enabled && this.l3Cache && !options.skipL3) {
+                try {
+                    // L3 gets longer TTL (2x)
+                    await this.l3Cache.set(key, value, actualTtl * 2);
+                } catch (l3Error) {
+                    log.warn(`L3 cache write failed: ${l3Error.message}`);
+                    // Don't fail the operation if L3 fails
+                }
+            }
+
             return true;
         } catch (error) {
             log.error(`Set error on ${this.currentProviderName}: ${error.message}`);
@@ -356,7 +428,7 @@ class CacheService {
             // Failover write?
             if (this.isFailoverMode && this.fallbackProvider) {
                 try {
-                    await this.fallbackProvider.set(key, value, ttl);
+                    await this.fallbackProvider.set(key, value, actualTtl);
                     return true;
                 } catch (e) {
                     return false;
@@ -364,6 +436,292 @@ class CacheService {
             }
             
             return false;
+        }
+    }
+
+    /**
+     * Enhanced Delete Method with pattern support
+     */
+    async delete(key, options = {}) {
+        await this._ensureInitialized();
+
+        // Pattern-based deletion
+        if (options.pattern) {
+            return this._deleteByPattern(options.pattern);
+        }
+
+        // Single key deletion
+        // 1. Delete from L1
+        localCache.del(key);
+
+        // 2. Delete from L2
+        if (!this.primaryProvider) return true;
+
+        try {
+            await this.primaryProvider.delete(key);
+            
+            // 3. Delete from L3 if enabled
+            if (this.l3Enabled && this.l3Cache) {
+                try {
+                    await this.l3Cache.delete(key);
+                } catch (l3Error) {
+                    log.warn(`L3 cache delete failed: ${l3Error.message}`);
+                }
+            }
+            
+            return true;
+        } catch (error) {
+            log.error(`Delete error: ${error.message}`);
+            await this._handleProviderFailure(error);
+            return false;
+        }
+    }
+
+    /**
+     * Delete by pattern (e.g., "user:*")
+     */
+    async _deleteByPattern(pattern) {
+        if (!this.primaryProvider) return 0;
+
+        try {
+            // Get all keys from provider
+            const keys = await this.listKeys();
+            const matchingKeys = keys.filter(k => this._matchPattern(k, pattern));
+            
+            // Delete matching keys
+            const deletePromises = matchingKeys.map(key => this.delete(key));
+            await Promise.all(deletePromises);
+
+            log.info(`Deleted ${matchingKeys.length} keys matching pattern: ${pattern}`);
+            return matchingKeys.length;
+        } catch (error) {
+            log.error(`Pattern delete error: ${error.message}`);
+            return 0;
+        }
+    }
+
+    /**
+     * Simple pattern matching (supports * and ? wildcards)
+     */
+    _matchPattern(key, pattern) {
+        // Convert pattern to regex
+        const regexPattern = pattern
+            .replace(/\*/g, '.*')
+            .replace(/\?/g, '.');
+        
+        const regex = new RegExp(`^${regexPattern}$`);
+        return regex.test(key);
+    }
+
+    /**
+     * Preheat cache with specific keys
+     */
+    async preheat(keys = []) {
+        if (!Array.isArray(keys) || keys.length === 0) {
+            log.warn('Preheat called with empty keys array');
+            return { success: 0, failed: 0 };
+        }
+
+        log.info(`Starting cache preheat for ${keys.length} keys`);
+        
+        const results = {
+            success: 0,
+            failed: 0,
+            totalTime: 0
+        };
+
+        const startTime = Date.now();
+
+        // Process in batches to avoid overwhelming the system
+        const batchSize = 3;
+        for (let i = 0; i < keys.length; i += batchSize) {
+            const batch = keys.slice(i, i + batchSize);
+            const batchPromises = batch.map(keyConfig => this._preheatKey(keyConfig));
+            const batchResults = await Promise.allSettled(batchPromises);
+            
+            batchResults.forEach(result => {
+                if (result.status === 'fulfilled' && result.value) {
+                    results.success++;
+                } else {
+                    results.failed++;
+                }
+            });
+        }
+
+        results.totalTime = Date.now() - startTime;
+        log.info(`Preheat completed: ${results.success} succeeded, ${results.failed} failed in ${results.totalTime}ms`);
+
+        return results;
+    }
+
+    /**
+     * Preheat single key
+     */
+    async _preheatKey(keyConfig) {
+        try {
+            const key = typeof keyConfig === 'string' ? keyConfig : keyConfig.key;
+            const loader = keyConfig.loader;
+            const ttl = keyConfig.ttl || 3600;
+
+            if (!key || !loader) {
+                log.warn(`Invalid preheat config: ${JSON.stringify(keyConfig)}`);
+                return false;
+            }
+
+            // Check if already cached
+            const existing = await this.get(key, 'json', { skipL1: false });
+            if (existing !== null) {
+                log.debug(`Key ${key} already cached, skipping`);
+                return true;
+            }
+
+            // Load data
+            const data = await loader();
+            if (data === null || data === undefined) {
+                log.warn(`Preheat loader returned null for key: ${key}`);
+                return false;
+            }
+
+            // Cache with extended TTL
+            await this.set(key, data, ttl, { skipL3: false });
+            log.debug(`Key ${key} preheated successfully`);
+            return true;
+
+        } catch (error) {
+            log.error(`Preheat failed: ${error.message}`);
+            return false;
+        }
+    }
+
+    /**
+     * Get cache statistics
+     */
+    getStats() {
+        const total = this.stats.totalRequests;
+        const hits = this.stats.hits.l1 + this.stats.hits.l2 + this.stats.hits.l3;
+        const missRate = total > 0 ? (this.stats.misses / total * 100).toFixed(2) : 0;
+        const hitRate = total > 0 ? (hits / total * 100).toFixed(2) : 0;
+
+        return {
+            totalRequests: total,
+            hits: this.stats.hits,
+            misses: this.stats.misses,
+            hitRate: `${hitRate}%`,
+            missRate: `${missRate}%`,
+            l1HitRate: total > 0 ? (this.stats.hits.l1 / total * 100).toFixed(2) : 0,
+            l2HitRate: total > 0 ? (this.stats.hits.l2 / total * 100).toFixed(2) : 0,
+            l3HitRate: total > 0 ? (this.stats.hits.l3 / total * 100).toFixed(2) : 0,
+            lastReset: new Date(this.stats.lastReset).toISOString(),
+            provider: this.currentProviderName,
+            failoverMode: this.isFailoverMode
+        };
+    }
+
+    /**
+     * Reset cache statistics
+     */
+    resetStats() {
+        this.stats = {
+            hits: { l1: 0, l2: 0, l3: 0 },
+            misses: 0,
+            totalRequests: 0,
+            lastReset: Date.now()
+        };
+        log.info('Cache statistics reset');
+    }
+
+    /**
+     * Initialize L3 cache (persistent layer)
+     */
+    async _initializeL3Cache() {
+        if (!this.l3Enabled) return;
+
+        try {
+            // Try to create a simple file-based cache for L3
+            // This could be replaced with a proper persistent store
+            const { FileCache } = await import('./cache/FileCache.js');
+            this.l3Cache = new FileCache({
+                basePath: './data/cache/l3',
+                ttl: 3600 * 24 // 24 hours default
+            });
+            await this.l3Cache.connect();
+            log.info('L3 cache initialized');
+        } catch (error) {
+            log.warn(`L3 cache initialization failed: ${error.message}`);
+            this.l3Enabled = false;
+        }
+    }
+
+    /**
+     * Initialize Bloom Filter
+     */
+    async _initializeBloomFilter() {
+        if (!this.bloomFilterEnabled) return;
+
+        try {
+            // Simple bloom filter implementation
+            // In production, use a proper library like 'bloom-filters'
+            const { BloomFilter } = await import('bloom-filters');
+            this.bloomFilter = new BloomFilter(1000, 0.01); // 1000 items, 1% false positive rate
+            log.info('Bloom filter initialized');
+        } catch (error) {
+            log.warn(`Bloom filter initialization failed: ${error.message}`);
+            this.bloomFilterEnabled = false;
+        }
+    }
+
+    /**
+     * Override initialize to add L3 and Bloom Filter
+     */
+    async initialize() {
+        if (this.isInitialized) return;
+        this.isInitialized = true;
+
+        try {
+            // ... existing initialization code ...
+            this.providerList = this._loadProvidersFromConfig();
+            
+            if (this.providerList.length === 0) {
+                log.warn('No CACHE_PROVIDERS found. Falling back to legacy detection.');
+                const legacyProvider = this._createProviderFromLegacyEnv();
+                if (legacyProvider) {
+                    this.providerList.push({ instance: legacyProvider, config: { name: 'legacy' } });
+                }
+            }
+
+            this.providerList.sort((a, b) => (a.config.priority || 99) - (b.config.priority || 99));
+
+            for (const providerEntry of this.providerList) {
+                try {
+                    if (typeof providerEntry.instance.connect === 'function') {
+                        await providerEntry.instance.connect();
+                    } else if (typeof providerEntry.instance.initialize === 'function') {
+                        await providerEntry.instance.initialize();
+                    }
+                    this.primaryProvider = providerEntry.instance;
+                    this.currentProviderName = providerEntry.instance.getProviderName();
+                    this.isFailoverMode = false;
+                    
+                    log.info(`Connected to primary provider: ${this.currentProviderName} (${providerEntry.config.name})`);
+                    break;
+                } catch (error) {
+                    log.error(`Failed to connect to ${providerEntry.config.name}: ${error.message}`);
+                }
+            }
+
+            if (!this.primaryProvider) {
+                this.currentProviderName = 'MemoryCache';
+                log.warn('No external cache provider connected. Using MemoryCache (L1 only).');
+            }
+
+            // Initialize L3 and Bloom Filter
+            await this._initializeL3Cache();
+            await this._initializeBloomFilter();
+
+            this.isInitialized = true;
+        } catch (error) {
+            log.error(`Initialization failed: ${error.message}`);
+            this.isInitialized = true;
         }
     }
 

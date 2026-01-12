@@ -203,8 +203,8 @@ describe("CacheService L1/L2 Interaction Tests", () => {
             service.primaryProvider = mockProvider;
             service.currentProviderName = 'mock-provider';
 
-            // Execute
-            await service.set("test-key", { data: "new-value" }, 3600);
+            // Execute with skipTtlRandomization to ensure exact TTL
+            await service.set("test-key", { data: "new-value" }, 3600, { skipTtlRandomization: true });
 
             // Verify L2 was called
             expect(mockProvider.set).toHaveBeenCalledWith("test-key", { data: "new-value" }, 3600);
@@ -233,8 +233,8 @@ describe("CacheService L1/L2 Interaction Tests", () => {
             service.primaryProvider = mockProvider;
             service.currentProviderName = 'mock-provider';
 
-            // Execute
-            const result = await service.set("test-key", { data: "new-value" }, 3600);
+            // Execute with skipTtlRandomization to ensure exact TTL
+            const result = await service.set("test-key", { data: "new-value" }, 3600, { skipTtlRandomization: true });
 
             // Verify L2 failed
             expect(result).toBe(false);
@@ -291,8 +291,8 @@ describe("CacheService L1/L2 Interaction Tests", () => {
             service.primaryProvider = mockProvider;
             service.currentProviderName = 'mock-provider';
 
-            // Execute with skipL1
-            await service.set("test-key", { data: "new-value" }, 3600, { skipL1: true });
+            // Execute with skipL1 and skipTtlRandomization
+            await service.set("test-key", { data: "new-value" }, 3600, { skipL1: true, skipTtlRandomization: true });
 
             // Verify L2 was called
             expect(mockProvider.set).toHaveBeenCalledWith("test-key", { data: "new-value" }, 3600);
