@@ -1,8 +1,8 @@
-import { getClient, saveSession, clearSession, resetClientSession, setConnectionStatusCallback } from "../services/telegram.js";
+import { getClient, startTelegramWatchdog, saveSession, resetClientSession, clearSession, setConnectionStatusCallback } from "../services/telegram.js";
 import { MessageHandler } from "./MessageHandler.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
-import { getConfig } from "../config/index.js";
 import { logger } from "../services/logger/index.js";
+import { getConfig } from "../config/index.js";
 
 const log = logger.withModule ? logger.withModule('DispatcherBootstrap') : logger;
 
@@ -20,13 +20,35 @@ export async function startDispatcher() {
     // --- 🤖 Telegram 客户端多实例协调启动 ---
     let isClientActive = false;
     let isClientStarting = false; // 防止重入标志
+    let connectionRetries = 0;
+    const MAX_CONNECTION_RETRIES = 5;
 
     // 设置连接状态回调，当连接断开时重置 isClientActive
     setConnectionStatusCallback((isConnected) => {
+        log.debug(`🔌 Telegram 连接状态变化: ${isConnected ? '已连接' : '已断开'}`);
         if (!isConnected && isClientActive) {
             log.info("🔌 Telegram 连接已断开，重置客户端状态");
             isClientActive = false;
+            
+            // 自动尝试重新连接
+            if (connectionRetries < MAX_CONNECTION_RETRIES) {
+                connectionRetries++;
+                log.info(`🔄 尝试重新连接 (${connectionRetries}/${MAX_CONNECTION_RETRIES})...`);
+                setTimeout(startTelegramClient, 3000);
+            } else {
+                log.error("🚨 达到最大重连次数，请检查网络连接");
+            }
         }
+    });
+
+    // 添加全局错误处理
+    process.on('uncaughtException', async (err) => {
+        if (err.message.includes('Not connected')) {
+            log.warn("⚠️ 捕获到 'Not connected' 错误，正在重置客户端状态");
+            isClientActive = false;
+            return;
+        }
+        log.error("🚨 未捕获的异常:", err);
     });
 
     let loopCount = 0;
@@ -54,10 +76,18 @@ export async function startDispatcher() {
                 try {
                     // 强制断开，并设置较短的超时防止卡死在 disconnect
                     const client = await getClient();
-                    await Promise.race([
-                        client.disconnect(),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error("Disconnect Timeout")), 5000))
-                    ]);
+                    try {
+                        await Promise.race([
+                            client.disconnect(),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error("Disconnect Timeout")), 5000))
+                        ]);
+                    } catch (e) {
+                        if (e.message === "Not connected") {
+                            log.debug("ℹ️ 客户端已断开，无需再次断开");
+                        } else {
+                            throw e;
+                        }
+                    }
                 } catch (e) {
                     log.error("⚠️ 断开连接时出错:", e.message);
                 }
@@ -191,6 +221,12 @@ export async function startDispatcher() {
 
     // 延迟初始化 Bot ID (等待连接建立)
     setTimeout(() => MessageHandler.init(client), 5000);
+
+    // 延迟启动看门狗（确保 InstanceCoordinator 完成初始化后再启动）
+    setTimeout(() => {
+        startTelegramWatchdog();
+        log.info("🐶 Telegram 看门狗已启动");
+    }, 1000);
 
     log.info("🎉 Dispatcher 组件启动完成！");
     return await getClient();

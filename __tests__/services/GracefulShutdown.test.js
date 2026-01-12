@@ -82,12 +82,18 @@ describe("GracefulShutdown", () => {
                 new Error('FLOOD'),
                 new Error('Network error'),
                 new Error('Connection lost'),
-                new Error('Connection timeout')
+                new Error('Connection timeout'),
+                new Error('Not connected')
             ];
 
             recoverableErrors.forEach(err => {
                 expect(gracefulShutdown.isRecoverableError(err)).toBe(true);
             });
+        });
+
+        test("应当识别 'Not connected' 错误为可恢复", () => {
+            const notConnectedError = new Error('Not connected');
+            expect(gracefulShutdown.isRecoverableError(notConnectedError)).toBe(true);
         });
     });
 

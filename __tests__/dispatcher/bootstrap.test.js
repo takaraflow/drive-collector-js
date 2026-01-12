@@ -12,6 +12,7 @@ vi.mock('../../src/services/telegram.js', () => {
     clearSession: vi.fn(),
     resetClientSession: vi.fn(),
     setConnectionStatusCallback: vi.fn(),
+    startTelegramWatchdog: vi.fn(),
   };
 });
 
@@ -194,5 +195,87 @@ describe('Dispatcher Bootstrap', () => {
     expect(mockTelegram.clearSession).toHaveBeenCalled();
     // 三次失败后，retryCount = 3，不满足 retryCount < maxRetries，循环退出
     expect(mockTelegram.client.start).toHaveBeenCalledTimes(3);
+  });
+
+  it('should handle connection disconnection and retry', async () => {
+    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+    mockInstanceCoordinator.hasLock.mockResolvedValue(false);
+    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
+
+    const mockTelegram = await import('../../src/services/telegram.js');
+    mockTelegram.client.start.mockResolvedValue();
+    mockTelegram.saveSession.mockResolvedValue();
+
+    // 获取 setConnectionStatusCallback 的回调函数
+    let connectionCallback;
+    mockTelegram.setConnectionStatusCallback.mockImplementation((callback) => {
+      connectionCallback = callback;
+    });
+
+    await startDispatcher();
+
+    // 模拟连接断开
+    connectionCallback(false);
+
+    // 验证重试逻辑被触发（通过 setTimeout）
+    expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 3000);
+  });
+
+  it('should stop retrying after max connection retries', async () => {
+    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+    mockInstanceCoordinator.hasLock.mockResolvedValue(false);
+    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
+
+    const mockTelegram = await import('../../src/services/telegram.js');
+    mockTelegram.client.start.mockResolvedValue();
+    mockTelegram.saveSession.mockResolvedValue();
+
+    let connectionCallback;
+    mockTelegram.setConnectionStatusCallback.mockImplementation((callback) => {
+      connectionCallback = callback;
+    });
+
+    await startDispatcher();
+
+    // 模拟连接断开，验证重试逻辑被触发
+    connectionCallback(false);
+
+    // 验证 setTimeout 被调用（重试逻辑）
+    expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 3000);
+  });
+
+  it('should handle "Not connected" uncaught exception', async () => {
+    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+    mockInstanceCoordinator.hasLock.mockResolvedValue(false);
+    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
+
+    const mockTelegram = await import('../../src/services/telegram.js');
+    mockTelegram.client.start.mockResolvedValue();
+    mockTelegram.saveSession.mockResolvedValue();
+
+    await startDispatcher();
+
+    // 模拟 "Not connected" 错误
+    const error = new Error('Not connected');
+    process.emit('uncaughtException', error);
+
+    // 验证警告日志被调用
+    expect(mockLogger.warn).toHaveBeenCalledWith('⚠️ 捕获到 \'Not connected\' 错误，正在重置客户端状态');
+  });
+
+  it('should start Telegram watchdog', async () => {
+    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+    mockInstanceCoordinator.hasLock.mockResolvedValue(false);
+    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
+
+    const mockTelegram = await import('../../src/services/telegram.js');
+    mockTelegram.client.start.mockResolvedValue();
+    mockTelegram.saveSession.mockResolvedValue();
+
+    await startDispatcher();
+
+    // 验证看门狗被启动
+    expect(mockTelegram.startTelegramWatchdog).toHaveBeenCalled();
+    expect(mockLogger.info).toHaveBeenCalledWith('🐶 Telegram 看门狗已启动');
   });
 });

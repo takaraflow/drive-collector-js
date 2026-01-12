@@ -105,7 +105,8 @@ class GracefulShutdown {
             'FLOOD',
             'Network error',
             'Connection lost',
-            'Connection timeout'
+            'Connection timeout',
+            'Not connected'
         ];
         
         return recoverablePatterns.some(pattern => message.includes(pattern));

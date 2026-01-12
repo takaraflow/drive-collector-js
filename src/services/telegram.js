@@ -1106,7 +1106,9 @@ export const setConnectionStatusCallback = (callback) => {
     connectionStatusCallback = callback;
 };
 
-// 启动看门狗 (在测试环境下不自动启动)
-if (process.env.NODE_ENV !== 'test') {
-    startWatchdog();
-}
+// 导出启动函数（不在模块加载时自动启动，由应用显式调用）
+export const startTelegramWatchdog = () => {
+    if (process.env.NODE_ENV !== 'test') {
+        startWatchdog();
+    }
+};
