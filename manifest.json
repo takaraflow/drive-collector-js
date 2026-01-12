@@ -938,6 +938,18 @@
         "type": "boolean",
         "required": false,
         "description": "Skip Infisical runtime fetch"
+      },
+      "INFISICAL_POLLING_ENABLED": {
+        "type": "boolean",
+        "required": false,
+        "default": false,
+        "description": "Enable Infisical secrets polling (auto-update on remote changes)"
+      },
+      "INFISICAL_POLLING_INTERVAL": {
+        "type": "number",
+        "required": false,
+        "default": 300000,
+        "description": "Infisical polling interval in milliseconds (default: 300000ms = 5 minutes)"
       }
     }
   },
