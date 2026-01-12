@@ -95,9 +95,14 @@ export async function startDispatcher() {
                 try {
                     const config = getConfig();
                     const client = await getClient();
-                    await client.start({ botAuthToken: config.botToken });
-                    await saveSession();
-                    log.info("🚀 Telegram 客户端已连接");
+                    try {
+                        await client.start({ botAuthToken: config.botToken });
+                        await saveSession();
+                        log.info("🚀 Telegram 客户端已连接");
+                    } catch (error) {
+                        log.error("❌ Telegram 客户端连接失败", error);
+                        throw error; // 确保被全局错误处理器捕获
+                    }
                     isClientActive = true;
                     isClientStarting = false;
                     return true;
