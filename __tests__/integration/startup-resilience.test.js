@@ -1,26 +1,123 @@
-// Mock env.js instead of accessing process.env
-let mockEnv = {
-  NODE_ENV: 'test',
-  API_ID: '123456789',
-  API_HASH: 'test_api_hash',
-  BOT_TOKEN: 'test_bot_token',
-  INFISICAL_ENV: 'test',
-  INFISICAL_TOKEN: 'test_token',
-  INFISICAL_PROJECT_ID: 'test_project'
-};
-
 // Mock fetch globally
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
-describe("Application Startup Resilience and Degradation", () => {
-    let mockInstanceCoordinator;
-    let mockQueueService;
-    let mockCache;
-    let mockD1;
-    let mockLogger;
-    let mockGracefulShutdown;
+// Mock services before import
+const mockQueueService = {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    verifyWebhookSignature: vi.fn().mockResolvedValue(true)
+};
 
+const mockCache = {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    getCurrentProvider: vi.fn().mockReturnValue('test')
+};
+
+const mockD1 = {
+    initialize: vi.fn().mockResolvedValue(undefined)
+};
+
+const mockLogger = {
+    withModule: vi.fn().mockReturnThis(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    initialize: vi.fn().mockResolvedValue(undefined)
+};
+
+const mockInstanceCoordinator = {
+    start: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue(undefined)
+};
+
+const mockGracefulShutdown = {
+    shutdown: vi.fn(),
+    exitCode: 0
+};
+
+// Set up mocks before importing modules
+vi.mock('../../src/config/index.js', () => ({
+    initConfig: vi.fn().mockResolvedValue(undefined),
+    validateConfig: vi.fn().mockReturnValue(true),
+    getConfig: vi.fn().mockReturnValue({
+        apiId: 12345,
+        apiHash: 'test_api_hash',
+        botToken: 'test_bot_token'
+    })
+}));
+
+vi.mock('../../src/config/env.js', () => ({
+    getEnv: () => ({ NODE_ENV: 'test', API_ID: '123456789', API_HASH: 'test_api_hash', BOT_TOKEN: 'test_bot_token' }),
+    NODE_ENV: 'test',
+    API_ID: '123456789',
+    API_HASH: 'test_api_hash',
+    BOT_TOKEN: 'test_bot_token'
+}));
+
+vi.mock('../../src/services/QueueService.js', () => ({
+    __esModule: true,
+    default: mockQueueService,
+    queueService: mockQueueService
+}));
+
+vi.mock('../../src/services/CacheService.js', () => ({
+    __esModule: true,
+    default: mockCache,
+    cache: mockCache
+}));
+
+vi.mock('../../src/services/d1.js', () => ({
+    __esModule: true,
+    default: mockD1,
+    d1: mockD1
+}));
+
+vi.mock('../../src/services/logger/index.js', () => ({
+    __esModule: true,
+    default: mockLogger,
+    logger: mockLogger
+}));
+
+vi.mock('../../src/services/InstanceCoordinator.js', () => ({
+    __esModule: true,
+    default: mockInstanceCoordinator,
+    instanceCoordinator: mockInstanceCoordinator
+}));
+
+vi.mock('../../src/dispatcher/bootstrap.js', () => ({
+    __esModule: true,
+    startDispatcher: vi.fn().mockResolvedValue(undefined)
+}));
+
+vi.mock('../../src/processor/bootstrap.js', () => ({
+    __esModule: true,
+    startProcessor: vi.fn().mockResolvedValue(undefined)
+}));
+
+vi.mock('../../src/services/telegram.js', () => ({
+    __esModule: true,
+    default: { client: { connect: vi.fn().mockResolvedValue(undefined), start: vi.fn().mockResolvedValue(undefined) } }
+}));
+
+vi.mock('../../src/utils/lifecycle.js', () => ({
+    __esModule: true,
+    buildWebhookServer: vi.fn().mockResolvedValue(undefined),
+    registerShutdownHooks: vi.fn().mockResolvedValue(undefined)
+}));
+
+vi.mock('../../src/services/GracefulShutdown.js', () => ({
+    __esModule: true,
+    default: mockGracefulShutdown,
+    gracefulShutdown: mockGracefulShutdown
+}));
+
+vi.mock('../../src/utils/startupConfig.js', () => ({
+    __esModule: true,
+    summarizeStartupConfig: vi.fn().mockResolvedValue({})
+}));
+
+describe("Application Startup Resilience and Degradation", () => {
     beforeEach(async () => {
         vi.useFakeTimers();
         vi.clearAllMocks();
@@ -29,113 +126,6 @@ describe("Application Startup Resilience and Degradation", () => {
         vi.spyOn(console, 'log').mockImplementation(() => {});
         vi.spyOn(console, 'warn').mockImplementation(() => {});
         vi.spyOn(console, 'error').mockImplementation(() => {});
-
-        // Mock InstanceCoordinator
-        mockInstanceCoordinator = {
-            start: vi.fn().mockResolvedValue(undefined),
-            stop: vi.fn().mockResolvedValue(undefined)
-        };
-
-        // Mock QueueService
-        mockQueueService = {
-            initialize: vi.fn().mockResolvedValue(undefined),
-            verifyWebhookSignature: vi.fn().mockResolvedValue(true)
-        };
-
-        // Mock CacheService
-        mockCache = {
-            initialize: vi.fn().mockResolvedValue(undefined),
-            getCurrentProvider: vi.fn().mockReturnValue('test')
-        };
-
-        // Mock D1
-        mockD1 = {
-            initialize: vi.fn().mockResolvedValue(undefined)
-        };
-
-        // Mock Logger
-        mockLogger = {
-            withModule: vi.fn().mockReturnThis(),
-            info: vi.fn(),
-            warn: vi.fn(),
-            error: vi.fn(),
-            debug: vi.fn()
-        };
-
-        // Mock GracefulShutdown
-        mockGracefulShutdown = {
-            shutdown: vi.fn(),
-            exitCode: 0
-        };
-
-        // Mock config module
-        await vi.doMock('../../src/config/index.js', () => ({
-            initConfig: vi.fn().mockResolvedValue(undefined),
-            validateConfig: vi.fn().mockReturnValue(true),
-            getConfig: vi.fn().mockReturnValue({
-                apiId: 12345,
-                apiHash: 'test_api_hash',
-                botToken: 'test_bot_token'
-            })
-        }));
-
-        // Mock env module
-        await vi.doMock('../../src/config/env.js', () => ({
-            getEnv: () => mockEnv,
-            NODE_ENV: mockEnv.NODE_ENV,
-            API_ID: mockEnv.API_ID,
-            API_HASH: mockEnv.API_HASH,
-            BOT_TOKEN: mockEnv.BOT_TOKEN
-        }));
-
-        // Mock services
-        await vi.doMock('../../src/services/QueueService.js', () => ({
-            queueService: mockQueueService
-        }));
-
-        await vi.doMock('../../src/services/CacheService.js', () => ({
-            cache: mockCache
-        }));
-
-        await vi.doMock('../../src/services/d1.js', () => ({
-            d1: mockD1
-        }));
-
-        await vi.doMock('../../src/services/logger/index.js', () => ({
-            logger: mockLogger
-        }));
-
-        await vi.doMock('../../src/services/InstanceCoordinator.js', () => ({
-            instanceCoordinator: mockInstanceCoordinator
-        }));
-
-        await vi.doMock('../../src/dispatcher/bootstrap.js', () => ({
-            startDispatcher: vi.fn().mockResolvedValue(undefined)
-        }));
-
-        await vi.doMock('../../src/processor/bootstrap.js', () => ({
-            startProcessor: vi.fn().mockResolvedValue(undefined)
-        }));
-
-        await vi.doMock('../../src/services/telegram.js', () => ({
-            client: {
-                connect: vi.fn().mockResolvedValue(undefined),
-                start: vi.fn().mockResolvedValue(undefined)
-            }
-        }));
-
-        await vi.doMock('../../src/utils/lifecycle.js', () => ({
-            buildWebhookServer: vi.fn().mockResolvedValue(undefined),
-            registerShutdownHooks: vi.fn().mockResolvedValue(undefined)
-        }));
-
-        await vi.doMock('../../src/services/GracefulShutdown.js', () => ({
-            gracefulShutdown: mockGracefulShutdown
-        }));
-
-        await vi.doMock('../../src/utils/startupConfig.js', () => ({
-            summarizeStartupConfig: vi.fn().mockResolvedValue({})
-        }));
     });
 
     afterEach(() => {

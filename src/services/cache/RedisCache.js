@@ -34,12 +34,32 @@ class RedisCache extends BaseCache {
         super(config);
         this.options = config;
         
+        // Build Redis options with connection keepalive settings
+        const redisOptions = {
+            ...config,
+            // Connection keepalive settings to prevent "Connection closed while receiving data"
+            keepAlive: 10000, // Send keepalive every 10 seconds
+            retryStrategy: (times) => {
+                // Exponential backoff with max 30 seconds
+                const delay = Math.min(times * 100, 30000);
+                this.log.info(`Redis 重连尝试 ${times}, 等待 ${delay}ms`);
+                return delay;
+            },
+            reconnectOnError: (err) => {
+                // Reconnect on "Connection closed" errors
+                const targetErrors = ['ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ECONNREFUSED'];
+                return targetErrors.some(target => err.message.includes(target));
+            },
+            // Enable lazy connect to control when connection is established
+            lazyConnect: true
+        };
+        
         // Initialize ioredis instance with URL parsing support
         if (config?.url) {
-            const { url, ...redisOptions } = config;
-            this.client = new Redis(url, redisOptions);
+            const { url, ...options } = redisOptions;
+            this.client = new Redis(url, options);
         } else {
-            this.client = new Redis(config);
+            this.client = new Redis(redisOptions);
         }
         
         this.log.info(`客户端已创建: ${formatConnectionSummary(config)}`);
@@ -53,6 +73,14 @@ class RedisCache extends BaseCache {
             });
             
             this.client.on('connect', () => {
+            });
+            
+            this.client.on('close', () => {
+                this.log.warn('Redis 连接已关闭');
+            });
+            
+            this.client.on('reconnecting', () => {
+                this.log.info('Redis 正在重连...');
             });
         }
     }
