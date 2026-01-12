@@ -118,7 +118,7 @@ export class InstanceCoordinator {
         // 写入 Cache (核心 Cache 模块，用于关键数据存储)
         try {
             await cache.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
-            logWithProvider().info(`📝 实例已注册到 Cache: ${this.instanceId}`);
+            logWithProvider().info(`📝 实例已注册到 Cache: ${cache.getCurrentProvider()}`);
         } catch (cacheError) {
             logWithProvider().error(`❌ Cache注册失败: ${cacheError.message}`);
             throw cacheError; // Cache 是主存储，失败时抛出异常

@@ -126,6 +126,7 @@ export async function initConfig() {
                     envName: infisicalEnvName
                 });
                 
+                // 首次拉取
                 const secrets = await provider.fetchSecrets();
                 
                 if (secrets) {
@@ -135,6 +136,31 @@ export async function initConfig() {
                     }
                 }
                 console.log(`✅ Successfully fetched Infisical secrets.`);
+                
+                // 启动轮询（可配置）
+                const pollingEnabled = process.env.INFISICAL_POLLING_ENABLED === 'true';
+                if (pollingEnabled) {
+                    const pollInterval = parseInt(process.env.INFISICAL_POLLING_INTERVAL) || 300000;
+                    
+                    // 监听配置变更
+                    provider.on('configChanged', (changes) => {
+                        console.log(`🔄 Infisical config changed: ${changes.length} keys`);
+                        changes.forEach(change => {
+                            if (change.newValue !== undefined) {
+                                const cleanValue = sanitizeValue(change.newValue);
+                                process.env[change.key] = cleanValue;
+                                console.log(`  ✓ ${change.key}: ${change.oldValue} → ${change.newValue}`);
+                            } else {
+                                delete process.env[change.key];
+                                console.log(`  ✗ ${change.key}: ${change.oldValue} → (deleted)`);
+                            }
+                        });
+                    });
+                    
+                    // 启动轮询
+                    provider.startPolling(pollInterval);
+                    console.log(`🚀 Infisical polling started (interval: ${pollInterval}ms)`);
+                }
             } catch (error) {
                 console.warn(`⚠️ Infisical fetch failed, falling back to .env or system envs: ${error.message}`);
             }
