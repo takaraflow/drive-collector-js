@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.20.1](https://github.com/YoungSx/drive-collector-js/compare/v4.20.0...v4.20.1) (2026-01-12)
+
+
+### ♻️ 代码重构
+
+* Infisical secrets provider with base provider architecture ([87a9476](https://github.com/YoungSx/drive-collector-js/commit/87a94766fb733084f2a8b1e58f15a4db563521f0))
+* secrets provider tests into comprehensive suite ([116736e](https://github.com/YoungSx/drive-collector-js/commit/116736ee79313dda085bf16ad38799a3159f7bd2))
+
+
+### ✨ 新特性
+
+* adds Infisical secrets polling functionality ([363d4e6](https://github.com/YoungSx/drive-collector-js/commit/363d4e62daeccb9cde880830e49cef6ac337c7fc))
+
+
+### 🐛 问题修复
+
+* updates cache registration log to include provider information ([e258307](https://github.com/YoungSx/drive-collector-js/commit/e25830747676df4cea5a5d3a801a6225697fc7f3))
+* updates cache service method names to use 'delete' instead of 'del' ([55a9fb5](https://github.com/YoungSx/drive-collector-js/commit/55a9fb522b3a4ac40f489bff030af9de80a27e38))
+
 ## [4.20.0](https://github.com/YoungSx/drive-collector-js/compare/v4.19.2...v4.20.0) (2026-01-12)
 
 
