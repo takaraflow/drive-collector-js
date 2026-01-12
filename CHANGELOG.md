@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.21.0](https://github.com/YoungSx/drive-collector-js/compare/v4.20.0...v4.21.0) (2026-01-12)
+
+
+### ♻️ 代码重构
+
+* Infisical secrets provider with base provider architecture ([87a9476](https://github.com/YoungSx/drive-collector-js/commit/87a94766fb733084f2a8b1e58f15a4db563521f0))
+* secrets provider tests into comprehensive suite ([116736e](https://github.com/YoungSx/drive-collector-js/commit/116736ee79313dda085bf16ad38799a3159f7bd2))
+
 ## [4.20.0](https://github.com/YoungSx/drive-collector-js/compare/v4.19.2...v4.20.0) (2026-01-12)
 
 
