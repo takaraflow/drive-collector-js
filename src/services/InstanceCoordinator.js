@@ -2,6 +2,7 @@ import { cache } from "./CacheService.js";
 import { queueService } from "./QueueService.js";
 import { InstanceRepository } from "../repositories/InstanceRepository.js";
 import logger, { setInstanceIdProvider } from "./logger/index.js";
+import { setInstanceIdProvider as setAxiomInstanceIdProvider } from "./logger/AxiomLogger.js";
 
 const log = logger.withModule('InstanceCoordinator');
 
@@ -26,6 +27,8 @@ export class InstanceCoordinator {
         
         // Register this instance as the ID provider for logger
         setInstanceIdProvider(() => this.instanceId);
+        // Also register for AxiomLogger
+        setAxiomInstanceIdProvider(() => this.instanceId);
         this.nodeType = process.env.NODE_MODE || 'bot';
         
         // 动态调整心跳：根据实例数量优化 KV 写入频率

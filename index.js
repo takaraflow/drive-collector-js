@@ -150,6 +150,10 @@ export async function main() {
         return;
     }
 
+    // 先导入 InstanceCoordinator 以设置 instanceId provider
+    // 这必须在任何 logger 使用之前完成
+    await import("./src/services/InstanceCoordinator.js");
+    
     const { queueService } = await import("./src/services/QueueService.js");
     const { cache } = await import("./src/services/CacheService.js");
     const { d1 } = await import("./src/services/d1.js");
@@ -158,7 +162,7 @@ export async function main() {
 
     console.log("🛠️ 正在初始化核心服务...");
     try {
-        // 先初始化 logger，确保其他服务可以使用它
+        // 初始化 logger，确保其他服务可以使用它
         await logger.initialize();
         
         // 然后并行初始化其他服务
