@@ -1,7 +1,7 @@
 import { loadDotenv } from './dotenv.js';
 import os from 'os';
 import path from 'path';
-import { fetchInfisicalSecrets } from '../services/InfisicalClient.js';
+import InfisicalSecretsProvider from '../services/secrets/InfisicalSecretsProvider.js';
 import { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } from '../utils/envMapper.js';
 
 // 保护重要环境变量不被 .env 覆盖
@@ -116,12 +116,17 @@ export async function initConfig() {
             try {
                 const infisicalEnvName = mapNodeEnvToInfisicalEnv(process.env.NODE_ENV || 'dev');
                 console.log(`ℹ️ Attempting to fetch Infisical secrets for environment: ${infisicalEnvName} (mapped from NODE_ENV: ${process.env.NODE_ENV || 'dev'})`);
-                const secrets = await fetchInfisicalSecrets({
-                    clientId,
-                    clientSecret,
-                    projectId,
+                
+                // 使用新的 InfisicalSecretsProvider
+                const provider = new InfisicalSecretsProvider({
+                    token: process.env.INFISICAL_TOKEN,
+                    clientId: clientId,
+                    clientSecret: clientSecret,
+                    projectId: projectId,
                     envName: infisicalEnvName
                 });
+                
+                const secrets = await provider.fetchSecrets();
                 
                 if (secrets) {
                     for (const key in secrets) {
