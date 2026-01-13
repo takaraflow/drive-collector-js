@@ -43,7 +43,9 @@ async function verifyQStashSignature(request, env, ctx = null, requestLogger = n
       throw new Error('缺少 Upstash-Signature 头');
     }
 
-    const body = await request.clone().text();
+    // 修复：直接读取请求体而不是克隆，防止内存膨胀
+    // 注意：这将消耗 request 流，因此必须返回 body 给后续流程使用
+    const body = await request.text();
     
     // 验证签名
     const isValid = await receiver.verify({

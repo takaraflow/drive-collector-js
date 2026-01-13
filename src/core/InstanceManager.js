@@ -4,7 +4,7 @@
  */
 
 import { HEARTBEAT_TIMEOUT, TELEGRAM_LOCK_KEY } from '../config/constants.js';
-import { logger } from '../logger.js';
+import { logger, isTestEnvironment } from '../logger.js';
 import { parseInstanceData } from './InstanceParser.js';
 import { executeWithFailover } from '../legacy/redisCompat.js';
 
@@ -122,17 +122,16 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
     await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: Filtered instance keys', { instanceKeys, count: instanceKeys.length });
 
     // 并发读取实例数据
-    const instanceDataResults = [];
-    for (const keyName of instanceKeys) {
-      try {
-        // 一个接一个地读，确保 socket 响应不乱序
-        const result = await executeWithFailover('_kv_get', env, ctx, getActiveInstancesLogger, keyName);
-        instanceDataResults.push(result);
-      } catch (e) {
-        getActiveInstancesLogger.error('读取实例数据失败', { key: keyName, error: e.message });
-        instanceDataResults.push(null);
-      }
-    }
+    // 使用 Promise.all 并发获取，提高性能
+    const instanceDataResults = await Promise.all(
+      instanceKeys.map(keyName => 
+        executeWithFailover('_kv_get', env, ctx, getActiveInstancesLogger, keyName)
+          .catch(e => {
+            getActiveInstancesLogger.error('读取实例数据失败', { key: keyName, error: e.message });
+            return null;
+          })
+      )
+    );
 
     // 新增日志：记录获取到的原始实例数据
     await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Raw instance data results', { rawData: instanceDataResults });
@@ -214,7 +213,7 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
     }
 
     // 为了兼容测试：测试期望 scanLockKeys 被调用，从而触发额外的 KV.list
-    if (process.env.NODE_ENV === 'test') {
+    if (isTestEnvironment) {
       await scanLockKeys(env, ctx, getActiveInstancesLogger);
     }
 

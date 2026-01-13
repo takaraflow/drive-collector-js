@@ -118,22 +118,52 @@ class CacheService {
 
     _loadProvidersFromConfig(ctx = null) {
         const log = this._getLoggerWithBuffer(ctx);
-        const providersJson = this.env.CACHE_PROVIDERS;
-        const hasCacheProviders = typeof providersJson === 'string'
-            ? providersJson.trim().length > 0
-            : !!providersJson;
-
-        if (!hasCacheProviders) {
-            return [];
-        }
-
-        const configs = parseCacheConfig(providersJson, this.env);
-        if (!Array.isArray(configs)) {
-            log.error('CACHE_PROVIDERS must be a JSON array');
-            return [];
-        }
-
         const instances = [];
+        
+        // 1. 尝试解析 CACHE_PROVIDERS
+        let configs = [];
+        const providersJson = this.env.CACHE_PROVIDERS;
+        if (providersJson && (typeof providersJson === 'string' ? providersJson.trim().length > 0 : true)) {
+            configs = parseCacheConfig(providersJson, this.env);
+            if (!Array.isArray(configs)) {
+                log.error('CACHE_PROVIDERS must be a JSON array');
+                configs = [];
+            }
+        }
+
+        // 2. 自动检测 KV_STORAGE (向后兼容)
+        // 如果没有配置任何 Provider，或者虽然配置了但没有覆盖 KV，且环境变量中有 KV_STORAGE，则自动添加
+        const hasKvConfig = configs.some(c => c.type === 'cloudflare-kv-binding' || c.binding === 'KV_STORAGE');
+        if (!hasKvConfig && this.env.KV_STORAGE) {
+            log.info('Auto-detecting KV_STORAGE binding as cache provider');
+            configs.push({
+                name: 'default-kv',
+                type: 'cloudflare-kv-binding',
+                binding: 'KV_STORAGE',
+                priority: 100 // 低优先级作为默认回退
+            });
+        }
+
+        // 3. 自动检测 Upstash (向后兼容)
+        const hasUpstashConfig = configs.some(c => c.type === 'redis' && c.url && c.url.includes('upstash'));
+        if (!hasUpstashConfig && this.env.UPSTASH_REDIS_REST_URL && this.env.UPSTASH_REDIS_REST_TOKEN) {
+             // 只有当提供了完整的 URL (非 REST) 时才能作为 Redis 使用，
+             // 但通常环境变量给的是 REST URL。这里我们主要依赖 RedisTLSCache，它需要标准 Redis 协议。
+             // 如果 env 中有 REDIS_URL，则添加
+             if (this.env.REDIS_URL) {
+                 log.info('Auto-detecting REDIS_URL as cache provider');
+                 configs.push({
+                     name: 'default-redis',
+                     type: 'redis',
+                     url: this.env.REDIS_URL,
+                     priority: 50 // 高优先级
+                 });
+             }
+        }
+
+        if (configs.length === 0) {
+            return [];
+        }
 
         for (const config of configs) {
             if (!config || !config.name) {
