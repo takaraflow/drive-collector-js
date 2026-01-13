@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [1.0.0](https://github.com/YoungSx/lb-worker-js/compare/v0.22.0...v1.0.0) (2026-01-13)
+
+
+### ✅ Testing
+
+* migration of testing framework from Jest to Vitest ([e795746](https://github.com/YoungSx/lb-worker-js/commit/e795746bae3a90c00db48c390e514af70be6f41e))
+
+
+### 📝 Documentation
+
+* adds agent development guide for LB Worker JS ([3754fae](https://github.com/YoungSx/lb-worker-js/commit/3754faedabee0d51e16b031ee2b941938baaecb1))
+
+
+### 🔧 Maintenance
+
+* enhances instance data parsing and adds robust state management ([2ed8249](https://github.com/YoungSx/lb-worker-js/commit/2ed8249c408a5c6fe677cbd89ed5708dacd3de81))
+
+
+### 🐛 Bug Fixes
+
+* improve Redis cache reliability and add health monitoring ([8ec3e78](https://github.com/YoungSx/lb-worker-js/commit/8ec3e7800250da59f6edf84ee59b4580166aa2a5))
+* memory safety and concurrency issues in QStash and InstanceManager ([e082d52](https://github.com/YoungSx/lb-worker-js/commit/e082d52ebadcde15f56f9cb415606c35c65a3162))
+* resolve npm test failures by fixing mocks and test expectations ([1aa6409](https://github.com/YoungSx/lb-worker-js/commit/1aa6409c4e3cec9498f2982e8583e6e7da8331ed))
+* updates cleanup strategy for Cloudflare Worker compatibility ([14bfb66](https://github.com/YoungSx/lb-worker-js/commit/14bfb66bf803e978bf02f21ba01c399d855326d6))
+
 ## [0.22.0](https://github.com/YoungSx/lb-worker-js/compare/v0.21.0...v0.22.0) (2026-01-11)
 
 
