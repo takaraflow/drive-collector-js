@@ -36,6 +36,11 @@ vi.mock("async-mutex", () => {
                 this.acquire = vi.fn().mockResolvedValue(() => {});
                 this.release = vi.fn();
                 this.isLocked = vi.fn().mockReturnValue(false);
+                this.runExclusive = vi.fn(async (fn) => {
+                    return await fn();
+                });
+                this.waitForUnlock = vi.fn().mockResolvedValue(undefined);
+                this.cancel = vi.fn();
             }
         }
     };
@@ -187,9 +192,10 @@ describe("QstashQueue - publish", () => {
 
         const result = await mockQueue._publish('test-topic', { data: 'test' });
         
-        // In mock mode with batch size > 1, it goes to buffer and returns fallback
+        // In mock mode with batch size > 1, it goes to buffer and returns a message ID
         expect(result).toBeDefined();
-        expect(result.messageId).toBe("fallback-message-id");
+        expect(result.messageId).toBeDefined();
+        expect(result.messageId).toMatch(/^msg_/); // New format with idempotency
     });
 });
 
