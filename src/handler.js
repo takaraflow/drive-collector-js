@@ -196,8 +196,7 @@ async function handleRequest(request, env, ctx) {
   const requestId = ctx?._axiomDebugRequestId || 'unknown';
   console.log(`[AXIOM_DEBUG] ${requestId}: handleRequest started`);
 
-  // 重新配置 Axiom 传输（统一使用 env，此时 env 已经是 safeEnv）
-  configureBaseLoggerTransport(env);
+  // 注意：Axiom 传输已在 index.js 中配置，这里不需要重复配置
 
   // 初始化基础状态 - 必须在创建 requestLogger 之前执行
   const runtimeEnv = normalizeEnvName(env.NODE_ENV || 'prod');
