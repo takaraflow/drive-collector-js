@@ -164,7 +164,12 @@ describe("CloudQueueBase - Retry Logic", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.useFakeTimers();
         queue = new TestCloudQueue();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     test("should execute successfully on first try", async () => {
@@ -185,7 +190,9 @@ describe("CloudQueueBase - Retry Logic", () => {
             return Promise.resolve('success');
         });
         
-        const result = await queue._executeWithRetry(operation, 3, '[Test]');
+        const promise = queue._executeWithRetry(operation, 3, '[Test]');
+        await vi.advanceTimersByTimeAsync(1000);
+        const result = await promise;
         
         expect(result).toBe('success');
         expect(operation).toHaveBeenCalledTimes(2);
@@ -198,8 +205,11 @@ describe("CloudQueueBase - Retry Logic", () => {
             return Promise.reject(new Error('Persistent error'));
         });
         
-        await expect(queue._executeWithRetry(operation, 3, '[Test]'))
-            .rejects.toThrow('Persistent error');
+        const promise = queue._executeWithRetry(operation, 3, '[Test]');
+        const expectPromise = expect(promise).rejects.toThrow('Persistent error');
+        await vi.advanceTimersByTimeAsync(1000);
+        
+        await expectPromise;
         
         expect(operation).toHaveBeenCalledTimes(3);
     });

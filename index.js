@@ -3,6 +3,12 @@ import { initConfig, validateConfig, getConfig } from "./src/config/index.js";
 import { summarizeStartupConfig } from "./src/utils/startupConfig.js";
 import { buildWebhookServer, registerShutdownHooks } from "./src/utils/lifecycle.js";
 
+let appReady = false;
+
+export function setAppReadyState(value) {
+    appReady = Boolean(value);
+}
+
 /**
  * QStash Webhook 处理程序 (供外部 HTTP Server 或测试使用)
  */
@@ -14,25 +20,17 @@ export async function handleQStashWebhook(req, res) {
     if ((req.method === 'GET' || req.method === 'HEAD') && req.url) {
         try {
             const url = new URL(req.url, `http://${hostHeader}`);
-            if (url.pathname === healthPath) {
-                res.writeHead(200);
-                if (req.method === 'HEAD') {
-                    res.end();
-                } else {
-                    res.end('OK');
+            if ([healthPath, healthzPath, readyPath].includes(url.pathname)) {
+                if (url.pathname === readyPath && !appReady) {
+                    res.writeHead(503);
+                    if (req.method === 'HEAD') {
+                        res.end();
+                    } else {
+                        res.end('Not Ready');
+                    }
+                    return;
                 }
-                return;
-            }
-            if (url.pathname === healthzPath) {
-                res.writeHead(200);
-                if (req.method === 'HEAD') {
-                    res.end();
-                } else {
-                    res.end('OK');
-                }
-                return;
-            }
-            if (url.pathname === readyPath) {
+
                 res.writeHead(200);
                 if (req.method === 'HEAD') {
                     res.end();
@@ -43,6 +41,12 @@ export async function handleQStashWebhook(req, res) {
             }
         } catch (e) {
         }
+    }
+
+    if (!appReady) {
+        res.writeHead(503);
+        res.end('Not Ready');
+        return;
     }
 
     // 其他请求需要导入服务
@@ -200,26 +204,36 @@ export async function main() {
 
         log.info("🚀 启动业务模块: InstanceCoordinator, Telegram, Dispatcher, Processor");
         
+        let businessReady = true;
+
         // 使用 try-catch 包裹 Telegram 相关启动，确保即使失败也不影响 HTTP 服务器
         try {
             await instanceCoordinator.start();
         } catch (error) {
+            businessReady = false;
             log.error("⚠️ InstanceCoordinator 启动失败，但 HTTP 服务器继续运行:", error);
         }
 
         try {
             await startDispatcher();
         } catch (error) {
+            businessReady = false;
             log.error("⚠️ Dispatcher (Telegram) 启动失败，但 HTTP 服务器继续运行:", error);
         }
 
         try {
             await startProcessor();
         } catch (error) {
+            businessReady = false;
             log.error("⚠️ Processor 启动失败，但 HTTP 服务器继续运行:", error);
         }
         
-        log.info("✅ 应用启动完成，HTTP 服务器正在运行中");
+        if (businessReady) {
+            setAppReadyState(true);
+            log.info("✅ 应用启动完成，HTTP 服务器正在运行中");
+        } else {
+            log.warn("⚠️ 业务模块启动过程中存在异常，health/ready 端点将返回 503 以阻止流量注入");
+        }
         
         if (process.env.NODE_ENV !== 'test') {
             setInterval(() => {}, 1000 * 60 * 60);

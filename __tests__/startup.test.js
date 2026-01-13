@@ -1,5 +1,5 @@
 // Mock config for startup tests using unstable_mockModule
-// Jest ESM mockModule �?Windows 下对相对路径的处理有时不可预测，使用绝对路径确保成功
+// Jest ESM mockModule �?Windows 下对相对路径的处理有时不可预测，使用绝对路径确保成功
 import { join } from 'path';
 
 vi.mock('../../src/config/index.js', () => ({
@@ -20,6 +20,68 @@ vi.mock('../../src/config/index.js', () => ({
   initConfig: vi.fn().mockResolvedValue({}),
   validateConfig: vi.fn().mockReturnValue(true)
 }));
+
+vi.mock('../src/services/logger/index.js', () => ({
+    logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis()
+    },
+    enableTelegramConsoleProxy: vi.fn(),
+    default: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        withModule: vi.fn().mockReturnThis(),
+        withContext: vi.fn().mockReturnThis()
+    }
+}));
+
+vi.mock('../src/repositories/SettingsRepository.js', () => ({
+    SettingsRepository: {
+        get: vi.fn(),
+        set: vi.fn()
+    }
+}));
+
+vi.mock('../src/services/InstanceCoordinator.js', () => ({
+    instanceCoordinator: {
+        getInstanceId: vi.fn().mockReturnValue('test-instance')
+    }
+}));
+
+vi.mock('../src/services/CacheService.js', () => ({
+    cache: {
+        get: vi.fn()
+    }
+}));
+
+vi.mock('telegram', () => ({
+    TelegramClient: vi.fn().mockImplementation(() => ({
+        on: vi.fn(),
+        addEventHandler: vi.fn(),
+        start: vi.fn(),
+        connect: vi.fn()
+    })),
+    StringSession: vi.fn()
+}));
+
+vi.mock('../src/services/d1.js', () => ({
+    d1: {}
+}));
+
+vi.mock('../src/services/rclone.js', () => ({
+    CloudTool: {}
+}));
+
+vi.mock('../src/services/oss.js', () => ({
+    ossService: {}
+}));
+
 
 describe("Project Smoke Test (Startup)", () => {
     test("should load config module", async () => {

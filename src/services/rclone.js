@@ -9,6 +9,12 @@ import { cache } from "./CacheService.js";
 import { logger } from "./logger/index.js";
 const log = logger.withModule ? logger.withModule('RcloneService') : logger;
 
+const buildRcloneEnv = () => ({
+    ...process.env,
+    LC_ALL: "C",
+    LANG: "C"
+});
+
 // 确定 rclone 二进制路径 (兼容 Zeabur 和 本地)
 const rcloneBinary = fs.existsSync("/app/rclone/rclone") 
     ? "/app/rclone/rclone" 
@@ -48,7 +54,7 @@ export class CloudTool {
     static _obscure(password) {
         try {
             // 使用参数数组传递密码，杜绝 Shell 注入 and 转义干扰
-            const ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "obscure", password], { encoding: 'utf-8' });
+            const ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "obscure", password], { encoding: 'utf-8', env: buildRcloneEnv() });
             
             if (ret.error) {
                 log.error("Obscure spawn error:", ret.error);
@@ -190,7 +196,7 @@ export class CloudTool {
                 const connectionString = this._getConnectionString({ type, user: configData.user, pass: finalPass });
                 const args = ["--config", "/dev/null", "about", connectionString, "--json", "--timeout", "15s"];
                 
-                const proc = spawn(rcloneBinary, args, { env: process.env });
+                const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
 
                 let errorLog = "";
                 proc.stderr.on("data", (data) => {
@@ -264,7 +270,7 @@ export class CloudTool {
                     "--buffer-size", "32M"          // 增加缓冲区提升速度
                 ];
 
-                const proc = spawn(rcloneBinary, args, { env: process.env });
+                const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
 
                 // 将进程关联到所有相关任务，以便统一取消
                 tasks.forEach(t => t.proc = proc);
@@ -393,7 +399,7 @@ export class CloudTool {
             const runLsJson = (path) => {
                 return new Promise((resolve, reject) => {
                     const proc = spawn(rcloneBinary, ["--config", "/dev/null", "lsjson", path], {
-                        env: process.env
+                        env: buildRcloneEnv()
                     });
                     
                     let stdout = "";
@@ -416,7 +422,7 @@ export class CloudTool {
             if (ret.code !== 0 && ret.stderr && (ret.stderr.includes("directory not found") || ret.stderr.includes("error listing"))) {
                 log.info(`Directory ${userUploadPath} not found, attempting to create it...`);
                 // 尝试创建一个空目录/触发目录初始化
-                spawnSync(rcloneBinary, ["--config", "/dev/null", "mkdir", fullRemotePath], { env: process.env });
+                spawnSync(rcloneBinary, ["--config", "/dev/null", "mkdir", fullRemotePath], { env: buildRcloneEnv() });
                 // 再次尝试
                 ret = await runLsJson(fullRemotePath);
             }
@@ -529,7 +535,7 @@ export class CloudTool {
                 const runLsJson = (path, args = [], timeout = 10000) => {
                     return new Promise((resolve, reject) => {
                         const proc = spawn(rcloneBinary, ["--config", "/dev/null", "lsjson", ...args, path], {
-                            env: process.env
+                            env: buildRcloneEnv()
                         });
                         
                         let stdout = "";

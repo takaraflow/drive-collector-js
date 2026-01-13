@@ -27,6 +27,7 @@ export async function registerShutdownHooks() {
     const { TaskRepository } = await import("../repositories/TaskRepository.js");
     const { flushLogBuffer } = await import("../services/logger/index.js");
     const { mediaGroupBuffer } = await import("../services/MediaGroupBuffer.js");
+    const { distributedLock } = await import("../services/DistributedLock.js");
 
     // 注册任务计数器（用于任务排空）
     gracefulShutdown.registerTaskCounter(() => {
@@ -76,13 +77,29 @@ export async function registerShutdownHooks() {
         console.log('✅ TaskRepository 待更新任务已刷新');
     }, 40, 'task-repository');
 
-    // 6. 断开 Cache 连接 (priority: 50)
+    // 6. 停止分布式锁服务 (priority: 45)
+    gracefulShutdown.register(async () => {
+        if (distributedLock) {
+            await distributedLock.shutdown();
+            console.log('✅ DistributedLock 已停止');
+        }
+    }, 45, 'distributed-lock');
+
+    // 7. 停止 MediaGroupBuffer 清理任务 (priority: 48)
+    gracefulShutdown.register(async () => {
+        if (mediaGroupBuffer && typeof mediaGroupBuffer.stopCleanup === 'function') {
+            mediaGroupBuffer.stopCleanup();
+            console.log('✅ MediaGroupBuffer 清理任务已停止');
+        }
+    }, 48, 'media-group-buffer-cleanup');
+
+    // 8. 断开 Cache 连接 (priority: 50)
     gracefulShutdown.register(async () => {
         await cache.destroy();
         console.log('✅ Cache 服务已断开');
     }, 50, 'cache-service');
 
-    // 7. 在关闭完成后再次刷新日志，确保关闭过程中的日志也被保存 (priority: 60)
+    // 9. 在关闭完成后再次刷新日志，确保关闭过程中的日志也被保存 (priority: 60)
     gracefulShutdown.register(async () => {
         console.log('🔄 正在刷新关闭过程中的日志...');
         await flushLogBuffer();

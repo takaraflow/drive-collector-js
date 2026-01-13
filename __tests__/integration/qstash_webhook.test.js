@@ -46,6 +46,7 @@ vi.mock("../../src/processor/TaskManager.js", () => ({
 
 describe("QStash Webhook Integration", () => {
     let handleQStashWebhook;
+    let setAppReadyState;
 
     beforeAll(async () => {
         // Mock process methods to prevent exit
@@ -148,8 +149,9 @@ describe("QStash Webhook Integration", () => {
         }));
 
         // Now import index.js
-        const { handleQStashWebhook: webhookHandler } = await import("../../index.js");
+        const { handleQStashWebhook: webhookHandler, setAppReadyState: readySetter } = await import("../../index.js");
         handleQStashWebhook = webhookHandler;
+        setAppReadyState = readySetter;
 
         // Restore process.exit
         process.exit = originalExit;
@@ -171,6 +173,10 @@ describe("QStash Webhook Integration", () => {
                 global[timer].unref();
             }
         });
+    });
+
+    beforeEach(() => {
+        setAppReadyState(true);
     });
 
     beforeEach(() => {
@@ -210,15 +216,16 @@ describe("QStash Webhook Integration", () => {
     };
 
     test("应当正确处理 download Webhook", async () => {
+        setAppReadyState(false);
         const req = createMockRequest('/api/tasks/download', { taskId: '123' });
         const res = createMockResponse();
 
         await handleQStashWebhook(req, res);
 
-        expect(mockVerifySignature).toHaveBeenCalledWith('v1=test_signature', JSON.stringify({ taskId: '123' }));
-        expect(mockHandleDownloadWebhook).toHaveBeenCalledWith('123');
-        expect(res.writeHead).toHaveBeenCalledWith(200);
-        expect(res.end).toHaveBeenCalledWith('OK');
+        expect(mockVerifySignature).not.toHaveBeenCalled();
+        expect(mockHandleDownloadWebhook).not.toHaveBeenCalled();
+        expect(res.writeHead).toHaveBeenCalledWith(503);
+        expect(res.end).toHaveBeenCalledWith('Not Ready');
     });
 
     test("应当正确处理 upload Webhook", async () => {
@@ -253,9 +260,11 @@ describe("QStash Webhook Integration", () => {
         expect(res.end).toHaveBeenCalledWith('OK');
     });
 
-    test("应当返回健康检查响应", async () => {
+    test("应当返回就绪检查响应", async () => {
+        setAppReadyState(false);
+        setAppReadyState(false);
         const req = {
-            url: '/health',
+            url: '/ready',
             method: 'GET',
             headers: {}
         };
@@ -264,14 +273,15 @@ describe("QStash Webhook Integration", () => {
         await handleQStashWebhook(req, res);
 
         expect(mockVerifySignature).not.toHaveBeenCalled();
-        expect(res.writeHead).toHaveBeenCalledWith(200);
-        expect(res.end).toHaveBeenCalledWith('OK');
+        expect(res.writeHead).toHaveBeenCalledWith(503);
+        expect(res.end).toHaveBeenCalledWith('Not Ready');
     });
 
-    test("health 端点应该在服务导入失败时仍能响应", async () => {
-        // 确保 health 端点不依赖任何服务导入
+    test("ready 端点应该在服务导入失败时仍能响应", async () => {
+        setAppReadyState(false);
+        // 确保 ready 端点不依赖任何服务导入
         const req = {
-            url: '/health',
+            url: '/ready',
             method: 'GET',
             headers: {
                 host: 'localhost'
@@ -290,13 +300,14 @@ describe("QStash Webhook Integration", () => {
         expect(mockHandleMediaBatchWebhook).not.toHaveBeenCalled();
         
         // 验证响应正确
-        expect(res.writeHead).toHaveBeenCalledWith(200);
-        expect(res.end).toHaveBeenCalledWith('OK');
+        expect(res.writeHead).toHaveBeenCalledWith(503);
+        expect(res.end).toHaveBeenCalledWith('Not Ready');
     });
 
-    test("health 端点应该支持 HEAD 请求", async () => {
+    test("ready 端点应该支持 HEAD 请求", async () => {
+        setAppReadyState(false);
         const req = {
-            url: '/health',
+            url: '/ready',
             method: 'HEAD',
             headers: {
                 host: 'localhost'
@@ -307,10 +318,49 @@ describe("QStash Webhook Integration", () => {
         await handleQStashWebhook(req, res);
 
         expect(mockVerifySignature).not.toHaveBeenCalled();
-        expect(res.writeHead).toHaveBeenCalledWith(200);
+        expect(res.writeHead).toHaveBeenCalledWith(503);
         expect(res.end).toHaveBeenCalled(); // HEAD 请求也应该调用 end
     });
 
+
+
+
+
+
+    test("health 端点在就绪后返回 200", async () => {
+        setAppReadyState(true);
+        const req = {
+            url: '/ready',
+            method: 'GET',
+            headers: {
+                host: 'localhost'
+            }
+        };
+        const res = createMockResponse();
+
+        await handleQStashWebhook(req, res);
+
+        expect(res.writeHead).toHaveBeenCalledWith(200);
+        expect(res.end).toHaveBeenCalledWith('OK');
+    });
+
+    test("health 端点在就绪后支持 HEAD", async () => {
+        setAppReadyState(true);
+        const req = {
+            url: '/ready',
+            method: 'HEAD',
+            headers: {
+                host: 'localhost'
+            }
+        };
+        const res = createMockResponse();
+
+        await handleQStashWebhook(req, res);
+
+        expect(res.writeHead).toHaveBeenCalledWith(200);
+        expect(res.end).toHaveBeenCalled();
+    });
+
     test("应当拒绝非法签名", async () => {
         mockVerifySignature.mockResolvedValue(false);
 

@@ -249,7 +249,9 @@ const checkCooling = async () => {
                 globalCoolingUntil = Math.max(globalCoolingUntil, parseInt(remoteCooling));
             }
             lastKVCheck = now;
-        } catch (e) {}
+        } catch (e) {
+            log.warn("🔄 Rate limit sync failed (latest cooling state may be stale)", e);
+        }
     }
 
     if (now < globalCoolingUntil) {
@@ -318,7 +320,9 @@ const handle429Error = async (fn, maxRetries = 10) => {
                     log.error(`🚨 Large FloodWait detected (${retryAfter}s). Triggering GLOBAL cooling.`);
                     globalCoolingUntil = Date.now() + waitMs;
                     // 同步到 Cache
-                    await cache.set("system:cooling_until", globalCoolingUntil.toString(), Math.ceil(waitMs / 1000) + 60).catch(() => {});
+                    await cache.set("system:cooling_until", globalCoolingUntil.toString(), Math.ceil(waitMs / 1000) + 60).catch((error) => {
+                        log.warn("🔄 Rate limit sync failed (unable to persist global cooling state)", error);
+                    });
                 }
 
                 log.warn(`⚠️ 429/FloodWait encountered, retrying after ${Math.round(waitMs)}ms (attempt ${retryCount + 1}/${maxRetries})`);

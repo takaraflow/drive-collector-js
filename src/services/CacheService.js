@@ -29,6 +29,72 @@ import { AivenVTCache } from './cache/AivenVTCache.js';
 
 const log = logger.withModule ? logger.withModule('CacheService') : logger;
 
+/**
+ * Atomic capability metadata for cache providers
+ * Defines which providers support truly atomic operations
+ */
+const PROVIDER_ATOMIC_CAPABILITIES = {
+    // ✅ Truly Atomic - Support native atomic operations
+    'Redis': {
+        atomic: true,
+        lock: true,
+        compareAndSet: false, // Uses get-then-set fallback in CacheService
+        notes: 'Supports atomic SET NX/PX and Lua scripts'
+    },
+    'RedisTLS': {
+        atomic: true,
+        lock: true,
+        compareAndSet: false,
+        notes: 'Same as Redis, with TLS encryption'
+    },
+    'Valkey': {
+        atomic: true,
+        lock: true,
+        compareAndSet: false,
+        notes: 'Redis fork with same atomic guarantees'
+    },
+    'ValkeyTLS': {
+        atomic: true,
+        lock: true,
+        compareAndSet: false,
+        notes: 'Valkey with TLS encryption'
+    },
+    'AivenValkey': {
+        atomic: true,
+        lock: true,
+        compareAndSet: false,
+        notes: 'Managed Valkey with TLS, atomic operations preserved'
+    },
+    'UpstashRHCache': {
+        atomic: true,
+        lock: true,
+        compareAndSet: true, // Has native compareAndSet implementation
+        notes: 'HTTP Redis with atomic EVAL scripts and native CAS support'
+    },
+    'NorthFlankRTCache': {
+        atomic: true,
+        lock: true,
+        compareAndSet: false,
+        notes: 'Redis with TLS, atomic operations preserved'
+    },
+    
+    // ⚠️ Eventually Consistent - Use with caution
+    'cloudflare': {
+        atomic: false,
+        lock: false,
+        compareAndSet: false,
+        notes: '⚠️ EVENTUALLY CONSISTENT - Locks NOT safe for critical operations'
+    },
+    
+    // ❌ Memory Only - No distributed atomic guarantees
+    'MemoryCache': {
+        atomic: false,
+        lock: false,
+        compareAndSet: false,
+        notes: 'Single-instance only, no distributed guarantees'
+    }
+};
+
 class CacheService {
     constructor(options = {}) {
         this.env = options.env || process.env;
@@ -45,6 +111,9 @@ class CacheService {
         this.recoveryTimer = null;
         this.failureCount = 0;
         this.maxFailuresBeforeFailover = 3;
+        
+        // Atomic Operation Warnings
+        this.atomicWarningsShown = new Set(); // Track warnings to avoid duplicates
         
         // L1 Cache Config
         this.l1Ttl = 10000; // 10 seconds default for L1
@@ -104,6 +173,10 @@ class CacheService {
                     this.isFailoverMode = false;
                     
                     log.info(`Connected to primary provider: ${this.currentProviderName} (${providerEntry.config.name})`);
+                    
+                    // Check and warn about atomic capabilities
+                    this._checkAtomicCapabilities(this.currentProviderName);
+                    
                     break; // Stop on first successful connection
                 } catch (error) {
                     log.error(`Failed to connect to ${providerEntry.config.name}: ${error.message}`);
@@ -115,6 +188,10 @@ class CacheService {
                 this.currentProviderName = 'MemoryCache';
                 log.warn('No external cache provider connected. Using MemoryCache (L1 only).');
             }
+
+            // Initialize L3 and Bloom Filter
+            await this._initializeL3Cache();
+            await this._initializeBloomFilter();
 
             this.isInitialized = true;
         } catch (error) {
@@ -478,6 +555,191 @@ class CacheService {
     }
 
     /**
+     * Compare and Set (CAS) - Atomic operation for distributed locks
+     * @param {string} key - Cache key
+     * @param {*} value - New value to set
+     * @param {Object} options - Options including condition checks
+     * @returns {Promise<boolean>} - Success status
+     */
+    async compareAndSet(key, value, options = {}) {
+        await this._ensureInitialized();
+
+        const {
+            ifNotExists = false,  // Set only if key doesn't exist
+            ifEquals = null,      // Set only if current value equals this
+            metadata = {}         // Additional metadata for the operation
+        } = options;
+
+        // For distributed systems, we need to use provider's atomic operations
+        if (!this.primaryProvider || this.currentProviderName === 'MemoryCache') {
+            // Fallback to non-atomic operation for memory-only mode
+            const current = await this.get(key, 'json');
+            
+            if (ifNotExists && current !== null) {
+                return false;
+            }
+            
+            if (ifEquals !== null && JSON.stringify(current) !== JSON.stringify(ifEquals)) {
+                return false;
+            }
+            
+            await this.set(key, value, 3600, { skipL1: false });
+            return true;
+        }
+
+        try {
+            // Check if provider supports atomic operations
+            if (typeof this.primaryProvider.compareAndSet === 'function') {
+                return await this.primaryProvider.compareAndSet(key, value, options);
+            }
+
+            // ⚠️ WARNING: Non-atomic fallback - potential race condition
+            this._warnAboutAtomicity('compareAndSet');
+            
+            // Fallback: Use get-then-set with version checking
+            const current = await this.primaryProvider.get(key, 'json');
+            
+            // Check conditions
+            if (ifNotExists && current !== null) {
+                return false;
+            }
+            
+            if (ifEquals !== null) {
+                const currentStr = JSON.stringify(current);
+                const expectedStr = JSON.stringify(ifEquals);
+                if (currentStr !== expectedStr) {
+                    return false;
+                }
+            }
+
+            // Perform the set
+            const success = await this.primaryProvider.set(key, value, 3600);
+            
+            if (success) {
+                // Update L1
+                localCache.set(key, value, this.l1Ttl);
+            }
+            
+            return success;
+        } catch (error) {
+            log.error(`CompareAndSet error: ${error.message}`);
+            await this._handleProviderFailure(error);
+            return false;
+        }
+    }
+
+    /**
+     * Check and warn about atomic capabilities of current provider
+     * @private
+     */
+    _checkAtomicCapabilities(providerName) {
+        const capabilities = PROVIDER_ATOMIC_CAPABILITIES[providerName];
+        
+        if (!capabilities) {
+            log.warn(`⚠️  Unknown provider: ${providerName}. Atomic capabilities unknown.`);
+            return;
+        }
+
+        if (!capabilities.atomic) {
+            log.warn(`⚠️  ATOMICITY WARNING: ${providerName} does NOT support atomic operations!`);
+            log.warn(`   ${capabilities.notes}`);
+            log.warn(`   ⚠️  Distributed locks may not be safe in production!`);
+        }
+
+        if (capabilities.lock === false) {
+            log.warn(`⚠️  LOCK WARNING: ${providerName} does NOT support safe locking!`);
+            log.warn(`   ${capabilities.notes}`);
+        }
+
+        if (capabilities.compareAndSet === false && capabilities.atomic) {
+            log.warn(`⚠️  CAS WARNING: ${providerName} supports atomic operations but NOT native compareAndSet.`);
+            log.warn(`   Will use get-then-set fallback which has race condition risks.`);
+        }
+    }
+
+    /**
+     * Warn about atomicity issues for specific operations
+     * @private
+     */
+    _warnAboutAtomicity(operation) {
+        const providerName = this.currentProviderName;
+        const warningKey = `${providerName}:${operation}`;
+        
+        if (this.atomicWarningsShown.has(warningKey)) {
+            return; // Already warned
+        }
+
+        const capabilities = PROVIDER_ATOMIC_CAPABILITIES[providerName];
+        
+        if (capabilities && !capabilities.atomic) {
+            log.warn(`⚠️  ATOMIC OPERATION WARNING: ${operation} called on ${providerName}`);
+            log.warn(`   Provider: ${providerName}`);
+            log.warn(`   Operation: ${operation}`);
+            log.warn(`   Issue: ${capabilities.notes}`);
+            log.warn(`   Risk: Race conditions possible in distributed environment`);
+            log.warn(`   Recommendation: Use a truly atomic provider (Redis, Valkey, Upstash)`);
+            
+            this.atomicWarningsShown.add(warningKey);
+        }
+    }
+
+    /**
+     * Get atomic capability information for current provider
+     * @returns {Object} - Atomic capability metadata
+     */
+    getAtomicCapabilities() {
+        const capabilities = PROVIDER_ATOMIC_CAPABILITIES[this.currentProviderName];
+        
+        return {
+            provider: this.currentProviderName,
+            atomic: capabilities?.atomic || false,
+            lock: capabilities?.lock || false,
+            compareAndSet: capabilities?.compareAndSet || false,
+            notes: capabilities?.notes || 'Unknown provider',
+            safeForDistributedLocks: capabilities?.atomic === true && capabilities?.lock === true
+        };
+    }
+
+    /**
+     * Get all provider atomic capabilities
+     * @returns {Object} - Map of provider names to their atomic capabilities
+     */
+    getAllProviderCapabilities() {
+        return { ...PROVIDER_ATOMIC_CAPABILITIES };
+    }
+
+    /**
+     * Validate if current provider is safe for distributed operations
+     * @returns {Object} - Validation result with warnings
+     */
+    validateDistributedSafety() {
+        const caps = this.getAtomicCapabilities();
+        const warnings = [];
+        
+        if (!caps.atomic) {
+            warnings.push('Provider does not support atomic operations');
+        }
+        
+        if (!caps.lock) {
+            warnings.push('Provider does not support safe distributed locking');
+        }
+        
+        if (caps.compareAndSet === false && caps.atomic) {
+            warnings.push('Provider uses non-atomic compareAndSet fallback');
+        }
+
+        return {
+            safe: caps.safeForDistributedLocks,
+            provider: this.currentProviderName,
+            capabilities: caps,
+            warnings: warnings,
+            recommendation: caps.safeForDistributedLocks
+                ? '✅ Safe for production distributed operations'
+                : '⚠️  NOT recommended for critical distributed operations'
+        };
+    }
+
+    /**
      * Delete by pattern (e.g., "user:*")
      */
     async _deleteByPattern(pattern) {
@@ -667,83 +929,6 @@ class CacheService {
         } catch (error) {
             log.warn(`Bloom filter initialization failed: ${error.message}`);
             this.bloomFilterEnabled = false;
-        }
-    }
-
-    /**
-     * Override initialize to add L3 and Bloom Filter
-     */
-    async initialize() {
-        if (this.isInitialized) return;
-        this.isInitialized = true;
-
-        try {
-            // ... existing initialization code ...
-            this.providerList = this._loadProvidersFromConfig();
-            
-            if (this.providerList.length === 0) {
-                log.warn('No CACHE_PROVIDERS found. Falling back to legacy detection.');
-                const legacyProvider = this._createProviderFromLegacyEnv();
-                if (legacyProvider) {
-                    this.providerList.push({ instance: legacyProvider, config: { name: 'legacy' } });
-                }
-            }
-
-            this.providerList.sort((a, b) => (a.config.priority || 99) - (b.config.priority || 99));
-
-            for (const providerEntry of this.providerList) {
-                try {
-                    if (typeof providerEntry.instance.connect === 'function') {
-                        await providerEntry.instance.connect();
-                    } else if (typeof providerEntry.instance.initialize === 'function') {
-                        await providerEntry.instance.initialize();
-                    }
-                    this.primaryProvider = providerEntry.instance;
-                    this.currentProviderName = providerEntry.instance.getProviderName();
-                    this.isFailoverMode = false;
-                    
-                    log.info(`Connected to primary provider: ${this.currentProviderName} (${providerEntry.config.name})`);
-                    break;
-                } catch (error) {
-                    log.error(`Failed to connect to ${providerEntry.config.name}: ${error.message}`);
-                }
-            }
-
-            if (!this.primaryProvider) {
-                this.currentProviderName = 'MemoryCache';
-                log.warn('No external cache provider connected. Using MemoryCache (L1 only).');
-            }
-
-            // Initialize L3 and Bloom Filter
-            await this._initializeL3Cache();
-            await this._initializeBloomFilter();
-
-            this.isInitialized = true;
-        } catch (error) {
-            log.error(`Initialization failed: ${error.message}`);
-            this.isInitialized = true;
-        }
-    }
-
-    /**
-     * Core Delete Method
-     */
-    async delete(key) {
-        await this._ensureInitialized();
-
-        // 1. Delete from L1
-        localCache.del(key);
-
-        // 2. Delete from L2
-        if (!this.primaryProvider) return true;
-
-        try {
-            await this.primaryProvider.delete(key);
-            return true;
-        } catch (error) {
-            log.error(`Delete error: ${error.message}`);
-            await this._handleProviderFailure(error);
-            return false;
         }
     }
 

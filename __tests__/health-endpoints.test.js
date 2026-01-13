@@ -1,183 +1,88 @@
-vi.mock('../index.js', () => ({
-    handleQStashWebhook: vi.fn().mockImplementation(async (req, res) => {
-        const healthPath = '/health';
-        const healthzPath = '/healthz';
-        const readyPath = '/ready';
-        
-        if ((req.method === 'GET' || req.method === 'HEAD') && req.url) {
-            try {
-                const url = new URL(req.url, `http://${req.headers.host}`);
-                if (url.pathname === healthPath || url.pathname === healthzPath || url.pathname === readyPath) {
-                    res.writeHead(200);
-                    if (req.method === 'HEAD') {
-                        res.end();
-                    } else {
-                        res.end('OK');
-                    }
-                    return;
-                }
-            } catch (e) {
-            }
-        }
-    })
-}));
+import { handleQStashWebhook, setAppReadyState } from "../index.js";
 
-describe("Health & Readiness Endpoints", () => {
-    let handleQStashWebhook;
+const healthPaths = ["/health", "/healthz", "/ready"];
 
-    beforeAll(async () => {
-        const indexModule = await import('../index.js');
-        handleQStashWebhook = indexModule.handleQStashWebhook;
+const createHealthRequest = (path, method = "GET") => ({
+    url: path,
+    method,
+    headers: {
+        host: "localhost"
+    }
+});
+
+const createMockResponse = () => ({
+    writeHead: vi.fn(),
+    end: vi.fn()
+});
+
+describe("Health & Readiness Endpoints - before ready", () => {
+    beforeEach(() => {
+        setAppReadyState(false);
     });
 
-    describe("/healthz endpoint", () => {
-        test("healthz 端点应该在服务导入之前就能响应", async () => {
-            const req = {
-                url: '/healthz',
-                method: 'GET',
-                headers: {
-                    host: 'localhost'
-                }
-            };
-            
-            const res = {
-                writeHead: vi.fn(),
-                end: vi.fn()
-            };
-            
-            await handleQStashWebhook(req, res);
-            
-            expect(res.writeHead).toHaveBeenCalledWith(200);
-            expect(res.end).toHaveBeenCalledWith('OK');
-        });
+    test.each(["/health", "/healthz"])("GET %s should return 200 OK (Liveness)", async (path) => {
+        const req = createHealthRequest(path, "GET");
+        const res = createMockResponse();
 
-        test("healthz 端点应该支持 HEAD 请求", async () => {
-            const req = {
-                url: '/healthz',
-                method: 'HEAD',
-                headers: {
-                    host: 'localhost'
-                }
-            };
-            
-            const res = {
-                writeHead: vi.fn(),
-                end: vi.fn()
-            };
-            
-            await handleQStashWebhook(req, res);
-            
-            expect(res.writeHead).toHaveBeenCalledWith(200);
-            expect(res.end).toHaveBeenCalled();
-        });
+        await handleQStashWebhook(req, res);
 
-        test("healthz 端点应该在所有服务模块未导入时也能工作", async () => {
-            const req = {
-                url: '/healthz',
-                method: 'GET',
-                headers: {
-                    host: 'localhost'
-                }
-            };
-            
-            const res = {
-                writeHead: vi.fn(),
-                end: vi.fn()
-            };
-            
-            await handleQStashWebhook(req, res);
-            
-            expect(res.writeHead).toHaveBeenCalledWith(200);
-            expect(res.end).toHaveBeenCalledWith('OK');
-        });
+        expect(res.writeHead).toHaveBeenCalledWith(200);
+        expect(res.end).toHaveBeenCalledWith("OK");
     });
 
-    describe("/ready endpoint", () => {
-        test("ready 端点应该在服务导入之前就能响应", async () => {
-            const req = {
-                url: '/ready',
-                method: 'GET',
-                headers: {
-                    host: 'localhost'
-                }
-            };
-            
-            const res = {
-                writeHead: vi.fn(),
-                end: vi.fn()
-            };
-            
-            await handleQStashWebhook(req, res);
-            
-            expect(res.writeHead).toHaveBeenCalledWith(200);
-            expect(res.end).toHaveBeenCalledWith('OK');
-        });
+    test.each(["/health", "/healthz"])("HEAD %s should return 200 (Liveness)", async (path) => {
+        const req = createHealthRequest(path, "HEAD");
+        const res = createMockResponse();
 
-        test("ready 端点应该支持 HEAD 请求", async () => {
-            const req = {
-                url: '/ready',
-                method: 'HEAD',
-                headers: {
-                    host: 'localhost'
-                }
-            };
-            
-            const res = {
-                writeHead: vi.fn(),
-                end: vi.fn()
-            };
-            
-            await handleQStashWebhook(req, res);
-            
-            expect(res.writeHead).toHaveBeenCalledWith(200);
-            expect(res.end).toHaveBeenCalled();
-        });
+        await handleQStashWebhook(req, res);
 
-        test("ready 端点应该在所有服务模块未导入时也能工作", async () => {
-            const req = {
-                url: '/ready',
-                method: 'GET',
-                headers: {
-                    host: 'localhost'
-                }
-            };
-            
-            const res = {
-                writeHead: vi.fn(),
-                end: vi.fn()
-            };
-            
-            await handleQStashWebhook(req, res);
-            
-            expect(res.writeHead).toHaveBeenCalledWith(200);
-            expect(res.end).toHaveBeenCalledWith('OK');
-        });
+        expect(res.writeHead).toHaveBeenCalledWith(200);
+        expect(res.end).toHaveBeenCalled();
     });
 
-    describe("Endpoint isolation", () => {
-        test("所有健康检查端点都不应该依赖服务导入", async () => {
-            const endpoints = ['/health', '/healthz', '/ready'];
-            const methods = ['GET', 'HEAD'];
-            
-            for (const path of endpoints) {
-                for (const method of methods) {
-                    const req = {
-                        url: path,
-                        method,
-                        headers: {
-                            host: 'localhost'
-                        }
-                    };
-                    
-                    const res = {
-                        writeHead: vi.fn(),
-                        end: vi.fn()
-                    };
-                    
-                    await handleQStashWebhook(req, res);
-                    expect(res.writeHead).toHaveBeenCalledWith(200);
-                }
-            }
-        });
+    test("GET /ready should return 503 with Not Ready body", async () => {
+        const req = createHealthRequest("/ready", "GET");
+        const res = createMockResponse();
+
+        await handleQStashWebhook(req, res);
+
+        expect(res.writeHead).toHaveBeenCalledWith(503);
+        expect(res.end).toHaveBeenCalledWith("Not Ready");
+    });
+
+    test("HEAD /ready should return 503 with empty body", async () => {
+        const req = createHealthRequest("/ready", "HEAD");
+        const res = createMockResponse();
+
+        await handleQStashWebhook(req, res);
+
+        expect(res.writeHead).toHaveBeenCalledWith(503);
+        expect(res.end).toHaveBeenCalled();
+    });
+});
+
+describe("Health & Readiness Endpoints - after ready", () => {
+    beforeEach(() => {
+        setAppReadyState(true);
+    });
+
+    test.each(healthPaths)("GET %s should return 200 OK", async (path) => {
+        const req = createHealthRequest(path, "GET");
+        const res = createMockResponse();
+
+        await handleQStashWebhook(req, res);
+
+        expect(res.writeHead).toHaveBeenCalledWith(200);
+        expect(res.end).toHaveBeenCalledWith("OK");
+    });
+
+    test.each(healthPaths)("HEAD %s should return 200 with empty body", async (path) => {
+        const req = createHealthRequest(path, "HEAD");
+        const res = createMockResponse();
+
+        await handleQStashWebhook(req, res);
+
+        expect(res.writeHead).toHaveBeenCalledWith(200);
+        expect(res.end).toHaveBeenCalled();
     });
 });

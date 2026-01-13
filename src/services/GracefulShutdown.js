@@ -13,7 +13,7 @@ import { logger } from "./logger/index.js";
 
 const log = logger.withModule ? logger.withModule('GracefulShutdown') : logger;
 
-class GracefulShutdown {
+export class GracefulShutdown {
     constructor() {
         this.shutdownHooks = [];
         this.isShuttingDown = false;
@@ -26,6 +26,7 @@ class GracefulShutdown {
         // 任务排空相关
         this.taskCheckInterval = null;
         this.activeTaskCount = 0;
+        this.recoveryCheckInterval = null;
     }
 
     /**
@@ -154,7 +155,7 @@ class GracefulShutdown {
                 this.activeTaskCount = count;
 
                 // 检查是否完成
-                if (count === 0) {
+                if (count <= 0) {
                     clearInterval(this.taskCheckInterval);
                     this.taskCheckInterval = null;
                     log.info('✅ All tasks drained');
@@ -256,6 +257,13 @@ class GracefulShutdown {
                     process.exit(this.exitCode);
                 }, 1000);
             }
+        }
+    }
+
+    stopRecoveryCheck() {
+        if (this.recoveryCheckInterval) {
+            clearInterval(this.recoveryCheckInterval);
+            this.recoveryCheckInterval = null;
         }
     }
 

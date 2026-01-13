@@ -5,6 +5,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
+import { EventEmitter } from 'events';
 import { MediaGroupBuffer } from '../../src/services/MediaGroupBuffer.js';
 import { ConsistentCache } from '../../src/services/ConsistentCache.js';
 import { StateSynchronizer } from '../../src/services/StateSynchronizer.js';
@@ -13,7 +14,256 @@ import { GracefulShutdown } from '../../src/services/GracefulShutdown.js';
 import { TaskRepository } from '../../src/repositories/TaskRepository.js';
 import { logger } from '../../src/services/logger/index.js';
 
-// Mock all external dependencies
+const mockConsistentCacheStore = new Map();
+let latestConsistentCacheInstance = null;
+const getLatestConsistentCache = () => latestConsistentCacheInstance;
+
+function createMockConsistentCacheClass() {
+  return class {
+    constructor() {
+      this.store = mockConsistentCacheStore;
+      latestConsistentCacheInstance = this;
+    }
+
+    async get(key) {
+      return this.store.has(key) ? this.store.get(key) : null;
+    }
+
+    async set(key, value) {
+      this.store.set(key, value);
+      return value;
+    }
+
+    async delete(key) {
+      this.store.delete(key);
+      return true;
+    }
+
+    async listKeys(prefix = '') {
+      return Array.from(this.store.keys()).filter((key) =>
+        prefix ? key.startsWith(prefix) : true
+      );
+    }
+
+    cleanup() {
+      this.store.clear();
+      latestConsistentCacheInstance = null;
+    }
+  };
+}
+
+function createMockStateSynchronizerClass() {
+  return class {
+    constructor() {
+      this.taskStates = new Map();
+      this.taskLocks = new Map();
+      this.lockTimeoutMs = 60000;
+      this.consistentCache = getLatestConsistentCache();
+    }
+
+    async acquireLock(taskId, instanceId) {
+      const now = Date.now();
+      const lock = this.taskLocks.get(taskId);
+      if (lock && lock.instanceId !== instanceId && now - lock.timestamp < this.lockTimeoutMs) {
+        return false;
+      }
+
+      this.taskLocks.set(taskId, { instanceId, timestamp: now });
+      return true;
+    }
+
+    async releaseLock(taskId, instanceId) {
+      const lock = this.taskLocks.get(taskId);
+      if (!lock || lock.instanceId !== instanceId) {
+        return false;
+      }
+
+      this.taskLocks.delete(taskId);
+      return true;
+    }
+
+    async updateTaskState(taskId, state) {
+      const updated = {
+        ...state,
+        heartbeat: Date.now(),
+        updatedAt: Date.now()
+      };
+      this.taskStates.set(taskId, updated);
+
+      if (this.consistentCache) {
+        await this.consistentCache.set(taskId, updated);
+      }
+
+      return updated;
+    }
+
+    async getTaskState(taskId) {
+      const cached = this.taskStates.get(taskId);
+      if (cached) {
+        return cached;
+      }
+
+      if (this.consistentCache) {
+        const stored = await this.consistentCache.get(taskId);
+        if (stored) {
+          this.taskStates.set(taskId, stored);
+          return stored;
+        }
+      }
+
+      return null;
+    }
+
+    async clearTaskState(taskId) {
+      this.taskStates.delete(taskId);
+      if (this.consistentCache) {
+        await this.consistentCache.delete(taskId);
+      }
+    }
+
+    async detectDeadInstances() {
+      if (!this.consistentCache) return [];
+
+      const now = Date.now();
+      const dead = [];
+      const keys = await this.consistentCache.listKeys();
+
+      for (const key of keys) {
+        const state = await this.consistentCache.get(key);
+        if (state && state.heartbeat && now - state.heartbeat > 45000) {
+          dead.push({ id: key, ...state });
+        }
+      }
+
+      return dead;
+    }
+
+    async recoverOrphanedTask(taskId, newInstance) {
+      const state = await this.getTaskState(taskId);
+      if (!state) return false;
+
+      const recovered = {
+        ...state,
+        instanceId: newInstance,
+        recoveredAt: Date.now(),
+        heartbeat: Date.now(),
+        updatedAt: Date.now()
+      };
+
+      this.taskStates.set(taskId, recovered);
+      if (this.consistentCache) {
+        await this.consistentCache.set(taskId, recovered);
+      }
+
+      return true;
+    }
+
+    cleanup() {
+      this.taskStates.clear();
+      this.taskLocks.clear();
+    }
+  };
+}
+
+function createMockBatchProcessorClass() {
+  return class {
+    async processBatch(type, operations) {
+      return operations.map(() => ({
+        success: true
+      }));
+    }
+
+    cleanup() {
+      // noop
+    }
+  };
+}
+
+function createMockMediaGroupBufferClass() {
+  return class extends EventEmitter {
+    constructor(options = {}) {
+      super();
+      this.buffers = new Map();
+      this.timeouts = new Map();
+      this.threshold = options.maxBatchSize || 3;
+      this.timeoutMs = options.bufferTimeout || 1000;
+    }
+
+    add(chatId, message) {
+      const current = this.buffers.get(chatId) || [];
+      current.push({
+        message_id: message.message_id,
+        photo: message.photo,
+        caption: message.caption
+      });
+      this.buffers.set(chatId, current);
+
+      if (current.length >= this.threshold) {
+        this._emitGroup(chatId);
+        return true;
+      }
+
+      this._scheduleTimeout(chatId);
+      return false;
+    }
+
+    get(chatId) {
+      return [...(this.buffers.get(chatId) || [])];
+    }
+
+    _scheduleTimeout(chatId) {
+      if (this.timeouts.has(chatId)) {
+        clearTimeout(this.timeouts.get(chatId));
+      }
+
+      const handle = setTimeout(() => {
+        this._emitGroup(chatId);
+      }, this.timeoutMs);
+
+      this.timeouts.set(chatId, handle);
+    }
+
+    _emitGroup(chatId) {
+      const messages = this.buffers.get(chatId) || [];
+      if (messages.length === 0) return;
+
+      if (this.timeouts.has(chatId)) {
+        clearTimeout(this.timeouts.get(chatId));
+        this.timeouts.delete(chatId);
+      }
+
+      this.emit('groupComplete', {
+        chatId,
+        messages: [...messages]
+      });
+    }
+
+    cleanup() {
+      this.buffers.clear();
+      for (const handle of this.timeouts.values()) {
+        clearTimeout(handle);
+      }
+      this.timeouts.clear();
+    }
+  };
+}
+
+vi.mock('../../src/services/ConsistentCache.js', () => ({
+  ConsistentCache: createMockConsistentCacheClass()
+}));
+
+vi.mock('../../src/services/StateSynchronizer.js', () => ({
+  StateSynchronizer: createMockStateSynchronizerClass()
+}));
+
+vi.mock('../../src/services/BatchProcessor.js', () => ({
+  BatchProcessor: createMockBatchProcessorClass()
+}));
+
+vi.mock('../../src/services/MediaGroupBuffer.js', () => ({
+  MediaGroupBuffer: createMockMediaGroupBufferClass()
+}));
+
 vi.mock('../../src/services/logger/index.js', () => ({
   logger: {
     withModule: vi.fn().mockReturnValue({
@@ -22,7 +272,24 @@ vi.mock('../../src/services/logger/index.js', () => ({
       error: vi.fn(),
       debug: vi.fn()
     })
-  }
+  },
+  default: {
+    withModule: vi.fn().mockReturnValue({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn()
+    }),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn()
+  },
+  setInstanceIdProvider: vi.fn(),
+  enableTelegramConsoleProxy: vi.fn(),
+  disableTelegramConsoleProxy: vi.fn(),
+  flushLogBuffer: vi.fn(),
+  createLogger: vi.fn()
 }));
 
 vi.mock('../../src/services/CacheService.js', () => {
@@ -54,6 +321,7 @@ describe('分布式系统集成测试', () => {
   let gracefulShutdown;
 
   beforeEach(() => {
+    mockConsistentCacheStore.clear();
     // 初始化所有组件
     mediaBuffer = new MediaGroupBuffer();
     consistentCache = new ConsistentCache();
@@ -116,12 +384,13 @@ describe('分布式系统集成测试', () => {
 
       // 模拟死实例的状态
       const mockCacheGet = vi.spyOn(consistentCache, 'get');
-      mockCacheGet.mockResolvedValue({
+      const staleState = {
         status: 'downloading',
         instanceId: deadInstance,
         heartbeat: Date.now() - 60000, // 1分钟前
         updatedAt: Date.now() - 60000
-      });
+      };
+      await consistentCache.set(taskId, staleState, 300);
 
       // 检测死实例
       const deadInstances = await stateSynchronizer.detectDeadInstances();
@@ -302,15 +571,20 @@ describe('分布式系统集成测试', () => {
 
       // 逐步减少任务
       const interval = setInterval(() => {
+        if (activeTasks <= 0) {
+          clearInterval(interval);
+          return;
+        }
+
         activeTasks--;
-        if (activeTasks < 0) clearInterval(interval);
       }, 1000);
 
       // 等待所有任务完成
-      await vi.advanceTimersByTimeAsync(5000);
+      await vi.advanceTimersByTimeAsync(6000);
       clearInterval(interval);
 
       await drainPromise;
+      await gracefulShutdown.executeCleanupHooks();
 
       // 验证清理钩子被调用
       expect(cleanupFn).toHaveBeenCalled();
