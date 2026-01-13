@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [1.1.0](https://github.com/YoungSx/lb-worker-js/compare/v1.0.0...v1.1.0) (2026-01-13)
+
+
+### 🐛 Bug Fixes
+
+* ensures logger transport configuration in handleRequest ([c810c8b](https://github.com/YoungSx/lb-worker-js/commit/c810c8b329d5a03812900295fa6217e1a24fde8f))
+* improves error handling for log upload failures ([624023f](https://github.com/YoungSx/lb-worker-js/commit/624023f99457fd42f29d08001bf9579a1db442a7))
+* removes redundant Axiom transport configuration ([ea04962](https://github.com/YoungSx/lb-worker-js/commit/ea04962d17a5cbd8ba9de566c73dd87d57d63c40))
+
 ## [1.0.0](https://github.com/YoungSx/lb-worker-js/compare/v0.22.0...v1.0.0) (2026-01-13)
 
 
