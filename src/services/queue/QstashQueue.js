@@ -1,4 +1,5 @@
 import { Client, Receiver } from "@upstash/qstash";
+import { Mutex } from "async-mutex";
 import { getConfig } from "../../config/index.js";
 import { logger } from "../../services/logger/index.js";
 import { CircuitBreakerManager } from "../../services/CircuitBreaker.js";
@@ -15,6 +16,7 @@ export class QstashQueue extends CloudQueueBase {
     constructor(options = {}) {
         super(options);
         this.client = null;
+        this.bufferMutex = new Mutex();
         this.receiver = null;
         
         // QStash 特有的熔断器

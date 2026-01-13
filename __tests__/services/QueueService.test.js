@@ -103,17 +103,66 @@ describe("QueueService - Unit Tests", () => {
         await service.publish("test-topic", originalMessage);
 
         expect(mockProvider.publish).toHaveBeenCalledWith(
-            "https://example.com/api/tasks/test-topic",
+            "https://example.com/api/v2/tasks/test-topic",
             expect.objectContaining({
                 data: "test",
                 taskId: "task-1",
                 _meta: expect.objectContaining({
-                    triggerSource: 'direct-qstash',
+                    triggerSource: 'qstash-v2',
                     timestamp: expect.any(Number),
-                    instanceId: expect.any(String),
-                    caller: expect.any(String)
+                    instanceId: expect.any(String)
                 })
             }),
+            {}
+        );
+    });
+
+    test("should add caller context in production mode", async () => {
+        process.env.CALLER_TRACKING_MODE = 'production';
+        process.env.INSTANCE_ID = 'test-instance-123';
+
+        mockProvider = {
+            initialize: vi.fn(),
+            publish: vi.fn().mockResolvedValue({ messageId: 'msg-123' }),
+            batchPublish: vi.fn().mockResolvedValue([]),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
+        };
+
+        service = new QueueService(mockProvider);
+        await service.initialize();
+
+        const originalMessage = { data: "test" };
+        await service.publish("test-topic", originalMessage);
+
+        const callArgs = mockProvider.publish.mock.calls[0][1];
+        expect(callArgs._meta.callerContext).toBeDefined();
+        expect(Array.isArray(callArgs._meta.callerContext)).toBe(true);
+        
+        delete process.env.CALLER_TRACKING_MODE;
+        delete process.env.INSTANCE_ID;
+    });
+
+    test("should use default template when pathTemplate not configured", async () => {
+        // The config is already mocked at module level, so we can use it directly
+        mockProvider = {
+            initialize: vi.fn(),
+            publish: vi.fn().mockResolvedValue({ messageId: 'msg-123' }),
+            batchPublish: vi.fn().mockResolvedValue([]),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
+        };
+
+        service = new QueueService(mockProvider);
+        await service.initialize();
+
+        await service.publish("test-topic", { data: "test" });
+
+        expect(mockProvider.publish).toHaveBeenCalledWith(
+            "https://example.com/api/v2/tasks/test-topic",
+            expect.any(Object),
             {}
         );
     });
@@ -155,7 +204,7 @@ describe("QueueService - Unit Tests", () => {
         await service.enqueueDownloadTask("task-123", { url: "https://example.com/file.mp4" });
 
         expect(mockProvider.publish).toHaveBeenCalledWith(
-            "https://example.com/api/tasks/download",
+            "https://example.com/api/v2/tasks/download",
             expect.objectContaining({
                 taskId: "task-123",
                 type: "download",
@@ -181,7 +230,7 @@ describe("QueueService - Unit Tests", () => {
         await service.enqueueUploadTask("task-456", { fileId: "file-789" });
 
         expect(mockProvider.publish).toHaveBeenCalledWith(
-            "https://example.com/api/tasks/upload",
+            "https://example.com/api/v2/tasks/upload",
             expect.objectContaining({
                 taskId: "task-456",
                 type: "upload",
@@ -207,7 +256,7 @@ describe("QueueService - Unit Tests", () => {
         await service.broadcastSystemEvent("task-completed", { taskId: "task-789" });
 
         expect(mockProvider.publish).toHaveBeenCalledWith(
-            "https://example.com/api/tasks/system-events",
+            "https://example.com/api/v2/tasks/system-events",
             expect.objectContaining({
                 event: "task-completed",
                 taskId: "task-789"
@@ -239,14 +288,14 @@ describe("QueueService - Unit Tests", () => {
         expect(mockProvider.batchPublish).toHaveBeenCalledWith(
             expect.arrayContaining([
                 expect.objectContaining({
-                    topic: "https://example.com/api/tasks/download",
+                    topic: "https://example.com/api/v2/tasks/download",
                     message: expect.objectContaining({
                         taskId: "1",
                         _meta: expect.any(Object)
                     })
                 }),
                 expect.objectContaining({
-                    topic: "https://example.com/api/tasks/upload",
+                    topic: "https://example.com/api/v2/tasks/upload",
                     message: expect.objectContaining({
                         taskId: "2",
                         _meta: expect.any(Object)
