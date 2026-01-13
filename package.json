@@ -29,7 +29,14 @@
     "release:minor": "vitest run && standard-version --release-as minor",
     "release:major": "vitest run && standard-version --release-as major",
     "postrelease": "git push --follow-tags origin main",
-    "release:ai": "vitest run && node scripts/release-ai.js"
+    "release:ai": "vitest run && node scripts/release-ai.js",
+    "mcp:init": "node .mcp/mcp-cli.js init",
+    "mcp:status": "node .mcp/mcp-cli.js status",
+    "mcp:sync": "node .mcp/mcp-cli.js sync",
+    "mcp:index": "node .mcp/mcp-cli.js index",
+    "mcp:index:force": "node .mcp/mcp-cli.js index --force",
+    "mcp:search": "node .mcp/mcp-cli.js search",
+    "mcp:help": "node .mcp/mcp-cli.js"
   },
   "keywords": [
     "telegram",
@@ -61,6 +68,7 @@
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.0.16",
+    "@modelcontextprotocol/server": "^1.0.0",
     "cross-env": "^7.0.3",
     "standard-version": "^9.5.0",
     "vitest": "^4.0.16"

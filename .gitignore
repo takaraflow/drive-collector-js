@@ -7,7 +7,6 @@ yarn-error.log*
 # --- 环境与敏感信息 ---
 .env
 .env.local
-.env.development.local
 .env.test.local
 .env.production.local
 .env.dev
@@ -15,6 +14,11 @@ yarn-error.log*
 .env.prod
 .env.debug
 .roomodes
+
+# --- MCP 相关 (整个目录忽略) ---
+.mcp/
+embeddings-cache.json
+mcp.json
 
 # --- 运行时产生的临时文件 ---
 coverage/
@@ -30,6 +34,8 @@ wrangler.lb.build.toml
 # --- 操作系统文件 ---
 .DS_Store
 Thumbs.db
+
+
 
 # --- 编辑器配置 ---
 .vscode/

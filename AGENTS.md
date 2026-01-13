@@ -285,6 +285,7 @@ drive-collector-js/
 │   │   ├── limiter.js
 │   │   └── serializer.js
 │   └── config/            # Configuration management
+├── .mcp/                 # Model Context Protocol servers
 ├── __tests__/              # Test suite
 │   ├── services/           # Service tests
 │   ├── repositories/       # Repository tests
