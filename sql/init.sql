@@ -1,23 +1,6 @@
 -- 数据库初始化脚本
 -- 包含项目首次创建和 D1 数据库初始化所需的所有 SQL 语句
 
--- 1. 实例表：用于管理多实例运行状态
-CREATE TABLE IF NOT EXISTS instances (
-    id TEXT PRIMARY KEY,
-    hostname TEXT,
-    region TEXT,
-    started_at INTEGER,
-    last_heartbeat INTEGER,
-    status TEXT DEFAULT 'active',
-    created_at INTEGER,
-    updated_at INTEGER
-);
-
--- 实例表索引
-CREATE INDEX IF NOT EXISTS idx_instances_status ON instances(status);
-CREATE INDEX IF NOT EXISTS idx_instances_last_heartbeat ON instances(last_heartbeat);
-CREATE INDEX IF NOT EXISTS idx_instances_status_heartbeat ON instances(status, last_heartbeat);
-
 -- 2. 任务表：用于存储文件传输任务
 CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,

@@ -1,61 +1,24 @@
-import { d1 } from "../services/d1.js";
+import { cache } from "../services/CacheService.js";
 import { logger } from "../services/logger/index.js";
 
 const log = logger.withModule ? logger.withModule('InstanceRepository') : logger;
 
 /**
- * 实例数据仓储层
- * 负责管理多实例相关的数据持久化
+ * 实例数据仓储层 (Cache 版)
+ * 负责管理多实例相关的数据，完全基于 Cache 实现以支持异地多实例和快速心跳
  */
 export class InstanceRepository {
-
-    /**
-     * 创建实例表（如果不存在）
-     */
-    static async createTableIfNotExists() {
-        try {
-            await d1.run(`
-                CREATE TABLE IF NOT EXISTS instances (
-                    id TEXT PRIMARY KEY,
-                    hostname TEXT,
-                    region TEXT,
-                    started_at INTEGER,
-                    last_heartbeat INTEGER,
-                    status TEXT DEFAULT 'active',
-                    created_at INTEGER,
-                    updated_at INTEGER
-                )
-            `);
-        } catch (e) {
-            log.error("InstanceRepository.createTableIfNotExists failed:", e);
-        }
-    }
+    static PREFIX = 'instance:';
+    static DEFAULT_TIMEOUT = 120000; // 120秒
 
     /**
      * 注册或更新实例信息
+     * 使用 Cache 存储，设置 TTL 自动过期
      */
     static async upsert(instanceData) {
-        const now = Date.now();
+        const timeoutMs = instanceData.timeoutMs || this.DEFAULT_TIMEOUT;
         try {
-            await d1.run(`
-                INSERT INTO instances (id, hostname, region, started_at, last_heartbeat, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    hostname = excluded.hostname,
-                    region = excluded.region,
-                    last_heartbeat = excluded.last_heartbeat,
-                    status = excluded.status,
-                    updated_at = excluded.updated_at
-            `, [
-                instanceData.id,
-                instanceData.hostname || 'unknown',
-                instanceData.region || 'unknown',
-                instanceData.startedAt,
-                instanceData.lastHeartbeat,
-                instanceData.status || 'active',
-                now,
-                now
-            ]);
+            await cache.set(`${this.PREFIX}${instanceData.id}`, instanceData, timeoutMs / 1000);
             return true;
         } catch (e) {
             log.error(`InstanceRepository.upsert failed for ${instanceData.id}:`, e);
@@ -66,17 +29,13 @@ export class InstanceRepository {
     /**
      * 获取所有活跃实例
      */
-    static async findAllActive(timeoutMs = 120000) {
-        const now = Date.now();
-        const deadline = now - timeoutMs;
-
+    static async findAllActive(timeoutMs = this.DEFAULT_TIMEOUT) {
         try {
-            return await d1.fetchAll(`
-                SELECT * FROM instances
-                WHERE last_heartbeat >= ?
-                AND status = 'active'
-                ORDER BY id ASC
-            `, [deadline]);
+            const instances = await this.findAll();
+            const now = Date.now();
+            return instances.filter(inst => 
+                inst.lastHeartbeat && (now - inst.lastHeartbeat) < timeoutMs
+            );
         } catch (e) {
             log.error("InstanceRepository.findAllActive failed:", e);
             return [];
@@ -84,14 +43,19 @@ export class InstanceRepository {
     }
 
     /**
-     * 获取所有实例（包括过期的）
+     * 获取所有实例
      */
     static async findAll() {
         try {
-            return await d1.fetchAll(`
-                SELECT * FROM instances
-                ORDER BY id ASC
-            `);
+            const keys = await cache.listKeys(this.PREFIX);
+            const instances = [];
+            for (const key of keys) {
+                const data = await cache.get(key, "json", { cacheTtl: 30000 });
+                if (data) {
+                    instances.push(data);
+                }
+            }
+            return instances;
         } catch (e) {
             log.error("InstanceRepository.findAll failed:", e);
             return [];
@@ -103,9 +67,7 @@ export class InstanceRepository {
      */
     static async findById(instanceId) {
         try {
-            return await d1.fetchOne(`
-                SELECT * FROM instances WHERE id = ?
-            `, [instanceId]);
+            return await cache.get(`${this.PREFIX}${instanceId}`, "json");
         } catch (e) {
             log.error(`InstanceRepository.findById failed for ${instanceId}:`, e);
             return null;
@@ -115,14 +77,17 @@ export class InstanceRepository {
     /**
      * 更新实例心跳
      */
-    static async updateHeartbeat(instanceId, heartbeatTime = Date.now()) {
+    static async updateHeartbeat(instanceId, heartbeatTime = Date.now(), timeoutMs = this.DEFAULT_TIMEOUT) {
         try {
-            await d1.run(`
-                UPDATE instances
-                SET last_heartbeat = ?, updated_at = ?
-                WHERE id = ?
-            `, [heartbeatTime, Date.now(), instanceId]);
-            return true;
+            const existing = await this.findById(instanceId);
+            if (!existing) return false;
+
+            const updated = {
+                ...existing,
+                lastHeartbeat: heartbeatTime,
+                updatedAt: Date.now()
+            };
+            return await this.upsert(updated);
         } catch (e) {
             log.error(`InstanceRepository.updateHeartbeat failed for ${instanceId}:`, e);
             return false;
@@ -130,15 +95,11 @@ export class InstanceRepository {
     }
 
     /**
-     * 标记实例为离线
+     * 标记实例为离线 (直接删除)
      */
     static async markOffline(instanceId) {
         try {
-            await d1.run(`
-                UPDATE instances
-                SET status = 'offline', updated_at = ?
-                WHERE id = ?
-            `, [Date.now(), instanceId]);
+            await cache.delete(`${this.PREFIX}${instanceId}`);
             return true;
         } catch (e) {
             log.error(`InstanceRepository.markOffline failed for ${instanceId}:`, e);
@@ -147,20 +108,20 @@ export class InstanceRepository {
     }
 
     /**
-     * 删除过期实例
+     * 清理过期实例 (Cache 自动清理，此处为手动辅助)
      */
-    static async deleteExpired(timeoutMs = 300000) { // 5分钟超时
+    static async deleteExpired(timeoutMs = 300000) {
         const now = Date.now();
-        const deadline = now - timeoutMs;
-
         try {
-            const result = await d1.run(`
-                DELETE FROM instances
-                WHERE last_heartbeat < ?
-                OR (status != 'active' AND updated_at < ?)
-            `, [deadline, deadline]);
-
-            return result.changes || 0;
+            const all = await this.findAll();
+            let count = 0;
+            for (const inst of all) {
+                if ((now - inst.lastHeartbeat) > timeoutMs) {
+                    await this.markOffline(inst.id);
+                    count++;
+                }
+            }
+            return count;
         } catch (e) {
             log.error("InstanceRepository.deleteExpired failed:", e);
             return 0;
@@ -171,36 +132,20 @@ export class InstanceRepository {
      * 获取实例统计信息
      */
     static async getStats(timeoutMs = 120000) {
-        const now = Date.now();
-        const deadline = now - timeoutMs;
-
         try {
-            const stats = await d1.fetchOne(`
-                SELECT
-                    COUNT(CASE WHEN last_heartbeat >= ? AND status = 'active' THEN 1 END) as active_count,
-                    COUNT(CASE WHEN status = 'offline' THEN 1 END) as offline_count,
-                    COUNT(*) as total_count,
-                    MIN(last_heartbeat) as oldest_heartbeat,
-                    MAX(last_heartbeat) as newest_heartbeat
-                FROM instances
-            `, [deadline]);
-
+            const all = await this.findAll();
+            const now = Date.now();
+            const active = all.filter(inst => (now - inst.lastHeartbeat) < timeoutMs);
+            
             return {
-                activeCount: stats.active_count || 0,
-                offlineCount: stats.offline_count || 0,
-                totalCount: stats.total_count || 0,
-                oldestHeartbeat: stats.oldest_heartbeat,
-                newestHeartbeat: stats.newest_heartbeat
+                activeCount: active.length,
+                totalCount: all.length,
+                offlineCount: all.length - active.length,
+                newestHeartbeat: Math.max(...all.map(i => i.lastHeartbeat || 0)) || null
             };
         } catch (e) {
             log.error("InstanceRepository.getStats failed:", e);
-            return {
-                activeCount: 0,
-                offlineCount: 0,
-                totalCount: 0,
-                oldestHeartbeat: null,
-                newestHeartbeat: null
-            };
+            return { activeCount: 0, totalCount: 0, offlineCount: 0, newestHeartbeat: null };
         }
     }
 }

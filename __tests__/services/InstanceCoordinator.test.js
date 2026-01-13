@@ -1,6 +1,20 @@
+import { vi, describe, test, expect, beforeEach, beforeAll, afterAll, afterEach } from "vitest";
 import { instanceCoordinator } from "../../src/services/InstanceCoordinator.js";
 import { cache } from "../../src/services/CacheService.js";
+import { InstanceRepository } from "../../src/repositories/InstanceRepository.js";
 import logger from "../../src/services/logger/index.js";
+
+// Mock InstanceRepository
+vi.mock("../../src/repositories/InstanceRepository.js", () => ({
+    InstanceRepository: {
+        upsert: vi.fn(),
+        findById: vi.fn(),
+        findAll: vi.fn(),
+        findAllActive: vi.fn(),
+        markOffline: vi.fn(),
+        deleteExpired: vi.fn(),
+    },
+}));
 
 // Create a mock time provider
 const fixedTime = 1700000000000;
@@ -52,6 +66,13 @@ describe("Core InstanceCoordinator Tests", () => {
         logger.debug = vi.fn();
         logger.withModule = vi.fn().mockReturnThis();
         logger.withContext = vi.fn().mockReturnThis();
+
+        // Reset Repository Mocks
+        vi.mocked(InstanceRepository.upsert).mockResolvedValue(true);
+        vi.mocked(InstanceRepository.findById).mockResolvedValue(null);
+        vi.mocked(InstanceRepository.findAll).mockResolvedValue([]);
+        vi.mocked(InstanceRepository.findAllActive).mockResolvedValue([]);
+        vi.mocked(InstanceRepository.markOffline).mockResolvedValue(true);
     });
 
     afterAll(() => {
@@ -78,13 +99,11 @@ describe("Core InstanceCoordinator Tests", () => {
 
         await instanceCoordinator.registerInstance();
 
-        expect(mockCacheSet).toHaveBeenCalledWith(
-            "instance:test-instance",
+        expect(InstanceRepository.upsert).toHaveBeenCalledWith(
             expect.objectContaining({
                 id: "test-instance",
                 status: "active"
-            }),
-            instanceCoordinator.instanceTimeout / 1000
+            })
         );
     });
 
@@ -97,17 +116,15 @@ describe("Core InstanceCoordinator Tests", () => {
             status: 'active'
         };
 
-        mockCacheGet.mockResolvedValue(existingInstance);
+        vi.mocked(InstanceRepository.findById).mockResolvedValue(existingInstance);
 
         await instanceCoordinator._sendHeartbeat();
 
-        expect(mockCacheSet).toHaveBeenCalledWith(
-            `instance:${instanceCoordinator.instanceId}`,
+        expect(InstanceRepository.upsert).toHaveBeenCalledWith(
             expect.objectContaining({
-                status: 'active',
+                id: 'heartbeat-instance',
                 lastHeartbeat: fixedTime
-            }),
-            instanceCoordinator.instanceTimeout / 1000
+            })
         );
     });
 
@@ -175,17 +192,12 @@ describe("Core InstanceCoordinator Tests", () => {
             { id: 'inst2', lastHeartbeat: fixedTime - 2000 }
         ];
 
-        // Mock getAllInstances directly on the instance for this test
-        const originalGetAllInstances = instanceCoordinator.getAllInstances;
-        instanceCoordinator.getAllInstances = vi.fn().mockResolvedValue(instances);
+        vi.mocked(InstanceRepository.findAllActive).mockResolvedValue(instances);
 
         const result = await instanceCoordinator.getActiveInstances();
 
         expect(result).toHaveLength(2);
         expect(instanceCoordinator.activeInstances.size).toBe(2);
-        
-        // Restore
-        instanceCoordinator.getAllInstances = originalGetAllInstances;
     });
 
     test("should unregister instance", async () => {
@@ -193,6 +205,6 @@ describe("Core InstanceCoordinator Tests", () => {
 
         await instanceCoordinator.unregisterInstance();
 
-        expect(mockCacheDelete).toHaveBeenCalledWith(`instance:${instanceCoordinator.instanceId}`);
+        expect(InstanceRepository.markOffline).toHaveBeenCalledWith(instanceCoordinator.instanceId);
     });
 });

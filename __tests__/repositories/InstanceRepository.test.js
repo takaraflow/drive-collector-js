@@ -1,9 +1,14 @@
-// Mock d1 和 logger
-vi.mock("../../src/services/d1.js", () => ({
-    d1: {
-        fetchAll: vi.fn(),
-        fetchOne: vi.fn(),
-        run: vi.fn(),
+import { vi, describe, it, expect, beforeEach, beforeAll } from "vitest";
+import { cache } from "../../src/services/CacheService.js";
+import { logger } from "../../src/services/logger/index.js";
+
+// Mock cache 和 logger
+vi.mock("../../src/services/CacheService.js", () => ({
+    cache: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+        listKeys: vi.fn(),
     },
 }));
 
@@ -22,19 +27,12 @@ vi.mock("../../src/services/logger/index.js", () => ({
     }
 }));
 
-describe("InstanceRepository", () => {
-    let InstanceRepository, d1, logger;
+describe("InstanceRepository (Cache Based)", () => {
+    let InstanceRepository;
 
-    // 【修复】使用 beforeAll + resetModules 确保 Mock 生效
     beforeAll(async () => {
         vi.resetModules();
-        
-        const d1Module = await import("../../src/services/d1.js");
-        const loggerModule = await import("../../src/services/logger/index.js");
         const repoModule = await import("../../src/repositories/InstanceRepository.js");
-
-        d1 = d1Module.d1;
-        logger = loggerModule.logger;
         InstanceRepository = repoModule.InstanceRepository;
     });
 
@@ -42,32 +40,9 @@ describe("InstanceRepository", () => {
         vi.clearAllMocks();
     });
 
-    describe("createTableIfNotExists", () => {
-        it("should create table successfully", async () => {
-            d1.run.mockResolvedValue(undefined);
-
-            await InstanceRepository.createTableIfNotExists();
-
-            expect(d1.run).toHaveBeenCalledWith(
-                expect.stringContaining("CREATE TABLE IF NOT EXISTS instances")
-            );
-        });
-
-        it("should handle database errors", async () => {
-            d1.run.mockRejectedValue(new Error("DB Error"));
-
-            await InstanceRepository.createTableIfNotExists();
-
-            expect(logger.error).toHaveBeenCalledWith(
-                "InstanceRepository.createTableIfNotExists failed:",
-                expect.anything()
-            );
-        });
-    });
-
     describe("upsert", () => {
-        it("should insert new instance successfully", async () => {
-            d1.run.mockResolvedValue({ success: true });
+        it("should set instance data in cache successfully", async () => {
+            cache.set.mockResolvedValue(true);
 
             const instanceData = {
                 id: "instance1",
@@ -75,62 +50,24 @@ describe("InstanceRepository", () => {
                 region: "us-east",
                 startedAt: Date.now(),
                 lastHeartbeat: Date.now(),
-                status: "active"
+                status: "active",
+                timeoutMs: 120000
             };
 
             const result = await InstanceRepository.upsert(instanceData);
 
             expect(result).toBe(true);
-            expect(d1.run).toHaveBeenCalledWith(
-                expect.stringContaining("INSERT INTO instances"),
-                expect.arrayContaining([
-                    "instance1",
-                    "host1",
-                    "us-east",
-                    instanceData.startedAt,
-                    instanceData.lastHeartbeat,
-                    "active",
-                    expect.any(Number), // created_at
-                    expect.any(Number)  // updated_at
-                ])
+            expect(cache.set).toHaveBeenCalledWith(
+                "instance:instance1",
+                instanceData,
+                120 // 120000 / 1000
             );
         });
 
-        it("should use default values for missing fields", async () => {
-            d1.run.mockResolvedValue({ success: true });
+        it("should return false on cache error", async () => {
+            cache.set.mockRejectedValue(new Error("Cache Error"));
 
-            const instanceData = {
-                id: "instance1",
-                startedAt: Date.now(),
-                lastHeartbeat: Date.now()
-            };
-
-            await InstanceRepository.upsert(instanceData);
-
-            expect(d1.run).toHaveBeenCalledWith(
-                expect.stringContaining("INSERT INTO instances"),
-                expect.arrayContaining([
-                    "instance1",
-                    "unknown", // default hostname
-                    "unknown", // default region
-                    instanceData.startedAt,
-                    instanceData.lastHeartbeat,
-                    "active", // default status
-                    expect.any(Number),
-                    expect.any(Number)
-                ])
-            );
-        });
-
-        it("should return false on database error", async () => {
-            d1.run.mockRejectedValue(new Error("DB Error"));
-
-            const instanceData = {
-                id: "instance1",
-                startedAt: Date.now(),
-                lastHeartbeat: Date.now()
-            };
-
+            const instanceData = { id: "instance1" };
             const result = await InstanceRepository.upsert(instanceData);
 
             expect(result).toBe(false);
@@ -142,297 +79,91 @@ describe("InstanceRepository", () => {
     });
 
     describe("findAllActive", () => {
-        it("should return active instances within timeout", async () => {
+        it("should return only active instances within timeout", async () => {
+            const now = Date.now();
             const mockInstances = [
-                { id: "instance1", status: "active", last_heartbeat: Date.now() },
-                { id: "instance2", status: "active", last_heartbeat: Date.now() }
+                { id: "active1", lastHeartbeat: now - 1000 },
+                { id: "stale1", lastHeartbeat: now - 200000 }
             ];
-            d1.fetchAll.mockResolvedValue(mockInstances);
+            
+            cache.listKeys.mockResolvedValue(["instance:active1", "instance:stale1"]);
+            cache.get.mockImplementation((key) => {
+                if (key === "instance:active1") return Promise.resolve(mockInstances[0]);
+                if (key === "instance:stale1") return Promise.resolve(mockInstances[1]);
+                return Promise.resolve(null);
+            });
 
-            const result = await InstanceRepository.findAllActive();
+            const result = await InstanceRepository.findAllActive(120000);
 
-            expect(result).toEqual(mockInstances);
-            expect(d1.fetchAll).toHaveBeenCalledWith(
-                expect.stringContaining("SELECT * FROM instances"),
-                expect.arrayContaining([expect.any(Number)])
-            );
-            const callArgs = d1.fetchAll.mock.calls[0][0];
-            expect(callArgs).toContain("last_heartbeat >= ?");
-            expect(callArgs).toContain("status = 'active'");
-        });
-
-        it("should use custom timeout", async () => {
-            d1.fetchAll.mockResolvedValue([]);
-
-            await InstanceRepository.findAllActive(60000); // 1 minute timeout
-
-            expect(d1.fetchAll).toHaveBeenCalledWith(
-                expect.any(String),
-                expect.arrayContaining([expect.any(Number)])
-            );
-        });
-
-        it("should return empty array on database error", async () => {
-            d1.fetchAll.mockRejectedValue(new Error("DB Error"));
-
-            const result = await InstanceRepository.findAllActive();
-
-            expect(result).toEqual([]);
-            expect(logger.error).toHaveBeenCalledWith(
-                "InstanceRepository.findAllActive failed:",
-                expect.any(Error)
-            );
-        });
-    });
-
-    describe("findAll", () => {
-        it("should return all instances", async () => {
-            const mockInstances = [
-                { id: "instance1", status: "active" },
-                { id: "instance2", status: "offline" }
-            ];
-            d1.fetchAll.mockResolvedValue(mockInstances);
-
-            const result = await InstanceRepository.findAll();
-
-            expect(result).toEqual(mockInstances);
-            expect(d1.fetchAll).toHaveBeenCalledWith(
-                expect.stringContaining("SELECT * FROM instances")
-            );
-        });
-
-        it("should return empty array on database error", async () => {
-            d1.fetchAll.mockRejectedValue(new Error("DB Error"));
-
-            const result = await InstanceRepository.findAll();
-
-            expect(result).toEqual([]);
-            expect(logger.error).toHaveBeenCalledWith(
-                "InstanceRepository.findAll failed:",
-                expect.any(Error)
-            );
+            expect(result).toHaveLength(1);
+            expect(result[0].id).toBe("active1");
         });
     });
 
     describe("findById", () => {
-        it("should return instance by id", async () => {
+        it("should return instance from cache", async () => {
             const mockInstance = { id: "instance1", hostname: "host1" };
-            d1.fetchOne.mockResolvedValue(mockInstance);
+            cache.get.mockResolvedValue(mockInstance);
 
             const result = await InstanceRepository.findById("instance1");
 
             expect(result).toEqual(mockInstance);
-            expect(d1.fetchOne).toHaveBeenCalledWith(
-                expect.stringContaining("SELECT * FROM instances WHERE id = ?"),
-                ["instance1"]
-            );
-        });
-
-        it("should return null when instance not found", async () => {
-            d1.fetchOne.mockResolvedValue(null);
-
-            const result = await InstanceRepository.findById("nonexistent");
-
-            expect(result).toBeNull();
-        });
-
-        it("should return null on database error", async () => {
-            d1.fetchOne.mockRejectedValue(new Error("DB Error"));
-
-            const result = await InstanceRepository.findById("instance1");
-
-            expect(result).toBeNull();
-            expect(logger.error).toHaveBeenCalledWith(
-                "InstanceRepository.findById failed for instance1:",
-                expect.any(Error)
-            );
+            expect(cache.get).toHaveBeenCalledWith("instance:instance1", "json");
         });
     });
 
     describe("updateHeartbeat", () => {
         it("should update heartbeat successfully", async () => {
-            d1.run.mockResolvedValue({ success: true });
+            const now = Date.now();
+            const mockInstance = { id: "instance1", status: "active" };
+            cache.get.mockResolvedValue(mockInstance);
+            cache.set.mockResolvedValue(true);
 
-            const result = await InstanceRepository.updateHeartbeat("instance1");
+            const result = await InstanceRepository.updateHeartbeat("instance1", now);
 
             expect(result).toBe(true);
-            const callArgs = d1.run.mock.calls[0][0];
-            expect(callArgs).toContain("UPDATE instances");
-            expect(callArgs).toContain("SET last_heartbeat = ?, updated_at = ?");
-            expect(callArgs).toContain("WHERE id = ?");
-            expect(d1.run).toHaveBeenCalledWith(
-                expect.any(String),
-                expect.arrayContaining([
-                    expect.any(Number), // heartbeat time
-                    expect.any(Number), // updated_at
-                    "instance1"
-                ])
-            );
-        });
-
-        it("should use custom heartbeat time", async () => {
-            d1.run.mockResolvedValue({ success: true });
-            const customTime = Date.now() - 1000;
-
-            await InstanceRepository.updateHeartbeat("instance1", customTime);
-
-            expect(d1.run).toHaveBeenCalledWith(
-                expect.any(String),
-                expect.arrayContaining([customTime, expect.any(Number), "instance1"])
-            );
-        });
-
-        it("should return false on database error", async () => {
-            d1.run.mockRejectedValue(new Error("DB Error"));
-
-            const result = await InstanceRepository.updateHeartbeat("instance1");
-
-            expect(result).toBe(false);
-            expect(logger.error).toHaveBeenCalledWith(
-                "InstanceRepository.updateHeartbeat failed for instance1:",
-                expect.any(Error)
+            expect(cache.set).toHaveBeenCalledWith(
+                "instance:instance1",
+                expect.objectContaining({
+                    id: "instance1",
+                    lastHeartbeat: now
+                }),
+                expect.any(Number)
             );
         });
     });
 
     describe("markOffline", () => {
-        it("should mark instance as offline", async () => {
-            d1.run.mockResolvedValue({ success: true });
+        it("should delete instance from cache", async () => {
+            cache.delete.mockResolvedValue(true);
 
             const result = await InstanceRepository.markOffline("instance1");
 
             expect(result).toBe(true);
-            const callArgs = d1.run.mock.calls[0][0];
-            expect(callArgs).toContain("UPDATE instances");
-            expect(callArgs).toContain("SET status = 'offline', updated_at = ?");
-            expect(callArgs).toContain("WHERE id = ?");
-            expect(d1.run).toHaveBeenCalledWith(
-                expect.any(String),
-                expect.arrayContaining([
-                    expect.any(Number), // updated_at
-                    "instance1"
-                ])
-            );
-        });
-
-        it("should return false on database error", async () => {
-            d1.run.mockRejectedValue(new Error("DB Error"));
-
-            const result = await InstanceRepository.markOffline("instance1");
-
-            expect(result).toBe(false);
-            expect(logger.error).toHaveBeenCalledWith(
-                "InstanceRepository.markOffline failed for instance1:",
-                expect.any(Error)
-            );
-        });
-    });
-
-    describe("deleteExpired", () => {
-        it("should delete expired instances", async () => {
-            d1.run.mockResolvedValue({ changes: 5 });
-
-            const result = await InstanceRepository.deleteExpired();
-
-            expect(result).toBe(5);
-            const callArgs = d1.run.mock.calls[0][0];
-            expect(callArgs).toContain("DELETE FROM instances");
-            expect(callArgs).toContain("last_heartbeat < ?");
-            expect(callArgs).toContain("status != 'active'");
-            expect(callArgs).toContain("updated_at < ?");
-            expect(d1.run).toHaveBeenCalledWith(
-                expect.any(String),
-                expect.arrayContaining([expect.any(Number), expect.any(Number)])
-            );
-        });
-
-        it("should use custom timeout", async () => {
-            d1.run.mockResolvedValue({ changes: 0 });
-
-            await InstanceRepository.deleteExpired(300000); // 5 minutes
-
-            expect(d1.run).toHaveBeenCalledWith(
-                expect.any(String),
-                expect.arrayContaining([expect.any(Number), expect.any(Number)])
-            );
-        });
-
-        it("should return 0 on database error", async () => {
-            d1.run.mockRejectedValue(new Error("DB Error"));
-
-            const result = await InstanceRepository.deleteExpired();
-
-            expect(result).toBe(0);
-            expect(logger.error).toHaveBeenCalledWith(
-                "InstanceRepository.deleteExpired failed:",
-                expect.any(Error)
-            );
+            expect(cache.delete).toHaveBeenCalledWith("instance:instance1");
         });
     });
 
     describe("getStats", () => {
-        it("should return instance statistics", async () => {
-            const mockStats = {
-                active_count: 3,
-                offline_count: 1,
-                total_count: 4,
-                oldest_heartbeat: Date.now() - 3600000,
-                newest_heartbeat: Date.now()
-            };
-            d1.fetchOne.mockResolvedValue(mockStats);
-
-            const result = await InstanceRepository.getStats();
-
-            expect(result).toEqual({
-                activeCount: 3,
-                offlineCount: 1,
-                totalCount: 4,
-                oldestHeartbeat: mockStats.oldest_heartbeat,
-                newestHeartbeat: mockStats.newest_heartbeat
-            });
-            const callArgs = d1.fetchOne.mock.calls[0][0];
-            expect(callArgs).toContain("SELECT");
-            expect(callArgs).toContain("COUNT(CASE WHEN last_heartbeat >= ?");
-            expect(callArgs).toContain("FROM instances");
-            expect(d1.fetchOne).toHaveBeenCalledWith(
-                expect.any(String),
-                expect.arrayContaining([expect.any(Number)])
-            );
-        });
-
-        it("should use custom timeout", async () => {
-            d1.fetchOne.mockResolvedValue({
-                active_count: 0,
-                offline_count: 0,
-                total_count: 0,
-                oldest_heartbeat: null,
-                newest_heartbeat: null
+        it("should calculate correct statistics", async () => {
+            const now = Date.now();
+            const mockInstances = [
+                { id: "i1", lastHeartbeat: now - 1000 }, // active
+                { id: "i2", lastHeartbeat: now - 500000 } // offline
+            ];
+            
+            cache.listKeys.mockResolvedValue(["instance:i1", "instance:i2"]);
+            cache.get.mockImplementation((key) => {
+                if (key === "instance:i1") return Promise.resolve(mockInstances[0]);
+                if (key === "instance:i2") return Promise.resolve(mockInstances[1]);
+                return Promise.resolve(null);
             });
 
-            await InstanceRepository.getStats(60000);
+            const stats = await InstanceRepository.getStats(120000);
 
-            expect(d1.fetchOne).toHaveBeenCalledWith(
-                expect.any(String),
-                expect.arrayContaining([expect.any(Number)])
-            );
-        });
-
-        it("should return default stats on database error", async () => {
-            d1.fetchOne.mockRejectedValue(new Error("DB Error"));
-
-            const result = await InstanceRepository.getStats();
-
-            expect(result).toEqual({
-                activeCount: 0,
-                offlineCount: 0,
-                totalCount: 0,
-                oldestHeartbeat: null,
-                newestHeartbeat: null
-            });
-            expect(logger.error).toHaveBeenCalledWith(
-                "InstanceRepository.getStats failed:",
-                expect.any(Error)
-            );
+            expect(stats.activeCount).toBe(1);
+            expect(stats.totalCount).toBe(2);
+            expect(stats.offlineCount).toBe(1);
         });
     });
 });

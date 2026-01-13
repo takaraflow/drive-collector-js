@@ -118,16 +118,17 @@ export class InstanceCoordinator {
             startedAt: now,
             lastHeartbeat: now,
             status: 'active',
-            activeTaskCount: this.getLocalActiveTaskCount()
+            activeTaskCount: this.getLocalActiveTaskCount(),
+            timeoutMs: this.instanceTimeout
         };
 
-        // 写入 Cache (核心 Cache 模块，用于关键数据存储)
+        // 使用 InstanceRepository 进行注册
         try {
-            await cache.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
+            await InstanceRepository.upsert(instanceData);
             logWithProvider().info(`📝 实例已注册到 Cache: ${cache.getCurrentProvider()}`);
-        } catch (cacheError) {
-            logWithProvider().error(`❌ Cache注册失败: ${cacheError.message}`);
-            throw cacheError; // Cache 是主存储，失败时抛出异常
+        } catch (error) {
+            logWithProvider().error(`❌ 实例注册失败: ${error.message}`);
+            throw error;
         }
     }
 
@@ -136,7 +137,7 @@ export class InstanceCoordinator {
      */
     async unregisterInstance() {
         try {
-            await cache.delete(`instance:${this.instanceId}`);
+            await InstanceRepository.markOffline(this.instanceId);
             logWithProvider().info(`📝 实例已注销: ${this.instanceId}`);
         } catch (error) {
             logWithProvider().error(`❌ 实例注销失败: ${error.message}`);
@@ -185,26 +186,22 @@ export class InstanceCoordinator {
         
         // 原有的心跳逻辑（仅负责实例注册）
         this.heartbeatTimer = setInterval(async () => {
-            const now = Date.now();
-
             try {
-                // 检查实例是否仍然存在于 Cache 中
-                const existing = await cache.get(`instance:${this.instanceId}`);
+                // 检查并更新心跳
+                const existing = await InstanceRepository.findById(this.instanceId);
                 if (!existing) {
-                    // 实例不存在，重新注册
                     await this.registerInstance();
                 } else {
-                    // 实例存在，更新心跳
                     const instanceData = {
                         ...existing,
-                        lastHeartbeat: now,
-                        status: 'active',
-                        activeTaskCount: this.getLocalActiveTaskCount()
+                        lastHeartbeat: Date.now(),
+                        activeTaskCount: this.getLocalActiveTaskCount(),
+                        timeoutMs: this.instanceTimeout
                     };
-                    await cache.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
+                    await InstanceRepository.upsert(instanceData);
                 }
-            } catch (cacheError) {
-                logWithProvider().error(`Cache心跳更新失败: ${cacheError.message}`);
+            } catch (error) {
+                logWithProvider().error(`心跳更新失败: ${error.message}`);
             }
         }, this.heartbeatInterval);
     }
@@ -252,17 +249,7 @@ export class InstanceCoordinator {
      */
     async getActiveInstances() {
         try {
-            // 获取所有实例键
-            const allInstances = await this.getAllInstances();
-            const now = Date.now();
-            const activeInstances = [];
-
-            for (const instance of allInstances) {
-                if (instance.lastHeartbeat && (now - instance.lastHeartbeat) < this.instanceTimeout) {
-                    activeInstances.push(instance);
-                }
-            }
-
+            const activeInstances = await InstanceRepository.findAllActive(this.instanceTimeout);
             this.activeInstances = new Set(activeInstances.map(inst => inst.id));
             return activeInstances;
         } catch (e) {
@@ -306,30 +293,7 @@ export class InstanceCoordinator {
      */
     async getAllInstances() {
         try {
-            // 使用 listKeys 主动发现所有实例键
-            const instanceKeys = await cache.listKeys('instance:');
-            const instances = [];
-
-            for (const key of instanceKeys) {
-                try {
-                    // 从键名中提取实例ID
-                    const instanceId = key.replace('instance:', '');
-                    // 获取实例数据，使用缓存防止高频调用
-                    const instance = await cache.get(key, "json", { cacheTtl: 30000 });
-                    if (instance) {
-                        // 确保实例数据包含 id 字段
-                        instances.push({
-                            id: instanceId, // 确保 ID 一致
-                            ...instance
-                        });
-                    }
-                } catch (e) {
-                    logWithProvider().warn(`获取实例 ${key} 失败，跳过:`, e?.message || String(e));
-                    // 忽略单个实例获取失败，继续处理其他实例
-                }
-            }
-
-            // 更新活跃实例集合（用于向后兼容）
+            const instances = await InstanceRepository.findAll();
             this.activeInstances = new Set(instances.map(inst => inst.id));
             return instances;
         } catch (e) {
@@ -369,17 +333,7 @@ export class InstanceCoordinator {
      */
     async cleanupExpiredInstances() {
         try {
-            const allInstances = await this.getAllInstances();
-            const now = Date.now();
-            let cleanedCount = 0;
-
-            for (const instance of allInstances) {
-                if ((now - instance.lastHeartbeat) > this.instanceTimeout * 2) {
-                    await cache.delete(`instance:${instance.id}`);
-                    cleanedCount++;
-                }
-            }
-
+            const cleanedCount = await InstanceRepository.deleteExpired(this.instanceTimeout * 2);
             if (cleanedCount > 0) {
                 logWithProvider().info(`🧹 清理了 ${cleanedCount} 个过期实例`);
             }
