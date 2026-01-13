@@ -218,12 +218,16 @@
         "CacheService"
       ],
       "reliability": {
-        "heartbeatInterval": 300,
-        "timeout": 900,
+        "heartbeatInterval": 30,
+        "timeout": 90,
         "cleanupInterval": 300,
         "leaderElection": {
           "strategy": "minimum-id",
           "description": "所有活跃实例按 ID 字典序排序，排名第一的实例自动成为 Leader"
+        },
+        "dynamicAdjustment": {
+          "enabled": true,
+          "description": "根据实例规模自动调整心跳频率：<50实例为30s，>200实例自动降频至60s以保护 KV 写入配额"
         }
       }
     },
@@ -246,8 +250,8 @@
   },
   "instanceRegistration": {
     "mechanism": "Distributed Cache (Redis/KV/Upstash)",
-    "heartbeatInterval": 300,
-    "timeout": 900,
+    "heartbeatInterval": 30,
+    "timeout": 90,
     "keys": [
       {
         "pattern": "instance:{instanceId}",
