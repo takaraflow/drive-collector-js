@@ -161,8 +161,22 @@ describe('TaskRepository', () => {
     });
 
     describe('getActiveTaskCount', () => {
+        it('should prefer instance-level activeTaskCount aggregation', async () => {
+            mockCache.listKeys.mockResolvedValueOnce(['instance:i1', 'instance:i2']);
+            mockCache.get
+                .mockResolvedValueOnce({ id: 'i1', lastHeartbeat: Date.now(), activeTaskCount: 2 })
+                .mockResolvedValueOnce({ id: 'i2', lastHeartbeat: Date.now(), activeTaskCount: 3 });
+
+            const refreshed = await TaskRepository.refreshActiveTaskCount();
+
+            expect(refreshed).toBe(5);
+            expect(TaskRepository.getActiveTaskCount()).toBe(5);
+            expect(mockCache.listKeys).toHaveBeenCalledWith('instance:');
+        });
+
         it('should refresh and return cached active task count', async () => {
             mockCache.listKeys
+                .mockResolvedValueOnce([]) // instance:
                 .mockResolvedValueOnce(['task_status:task1', 'task_status:task2'])
                 .mockResolvedValueOnce(['consistent:task:task2', 'consistent:task:task3']);
 
@@ -171,6 +185,7 @@ describe('TaskRepository', () => {
 
             expect(refreshed).toBe(3);
             expect(cached).toBe(3);
+            expect(mockCache.listKeys).toHaveBeenCalledWith('instance:');
             expect(mockCache.listKeys).toHaveBeenCalledWith('task_status:');
             expect(mockCache.listKeys).toHaveBeenCalledWith('consistent:task:');
         });

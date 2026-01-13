@@ -188,7 +188,7 @@
       }
     },
     "instanceCoordinator": {
-      "description": "多实例协调器，负责注册、心跳、领导者选举与分布式锁管理",
+      "description": "多实例协调器，负责注册、心跳、领导者选举与分布式锁管理，并上报 activeTaskCount 用于全局活跃任务统计",
       "input": "internal-timer",
       "inputSchema": {
         "type": "object",
@@ -251,7 +251,7 @@
     "keys": [
       {
         "pattern": "instance:{instanceId}",
-        "description": "实例元数据"
+        "description": "实例元数据（包含 activeTaskCount）"
       },
       {
         "pattern": "lock:{lockKey}",
@@ -304,6 +304,10 @@
               "active",
               "offline"
             ]
+          },
+          "activeTaskCount": {
+            "type": "number",
+            "description": "该实例当前活跃任务数量（由实例自上报，用于全局聚合统计）"
           }
         },
         "required": [

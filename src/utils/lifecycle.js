@@ -31,6 +31,13 @@ export async function registerShutdownHooks() {
     const mediaGroupBuffer = mediaGroupBufferModule.default;
     const { distributedLock } = await import("../services/DistributedLock.js");
 
+    // 注册实例活跃任务计数器（用于多实例统计/监控）
+    if (instanceCoordinator && typeof instanceCoordinator.registerActiveTaskCounter === 'function') {
+        instanceCoordinator.registerActiveTaskCounter(() => {
+            return TaskManager.getProcessingCount() + TaskManager.getWaitingCount();
+        });
+    }
+
     // 注册任务计数器（用于任务排空）
     gracefulShutdown.registerTaskCounter(() => {
         return TaskManager.getProcessingCount() + TaskManager.getWaitingCount();

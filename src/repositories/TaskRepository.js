@@ -21,6 +21,8 @@ export class TaskRepository {
     // 重要的中间状态（需要 Redis 中转，避免实例崩溃时丢失）
     static IMPORTANT_STATUSES = ['downloading', 'uploading'];
     static ACTIVE_TASK_PREFIXES = ['task_status:', 'consistent:task:'];
+    static INSTANCE_PREFIX = 'instance:';
+    static INSTANCE_STALE_MS = 2 * 60 * 1000;
 
     /**
      * 启动定时刷新任务
@@ -133,6 +135,46 @@ export class TaskRepository {
 
         const refreshPromise = (async () => {
             try {
+                // 1) Prefer instance-level activeTaskCount aggregation (best-effort, cache-native)
+                const instanceKeys = await cache.listKeys(this.INSTANCE_PREFIX);
+                if (Array.isArray(instanceKeys) && instanceKeys.length > 0) {
+                    const now = Date.now();
+                    const instanceDatas = await Promise.allSettled(
+                        instanceKeys.map(key => cache.get(key, 'json', { cacheTtl: 30000 }))
+                    );
+
+                    let sum = 0;
+                    let hasAny = false;
+
+                    instanceDatas.forEach((result) => {
+                        if (result.status !== 'fulfilled') return;
+                        const data = result.value;
+                        if (!data) return;
+
+                        const lastHeartbeat = Number.parseInt(data.lastHeartbeat, 10);
+                        if (Number.isFinite(lastHeartbeat) && now - lastHeartbeat > this.INSTANCE_STALE_MS) {
+                            return;
+                        }
+
+                        const count = Number.parseInt(data.activeTaskCount, 10);
+                        if (!Number.isFinite(count) || Number.isNaN(count)) return;
+                        hasAny = true;
+                        sum += Math.max(0, count);
+                    });
+
+                    // Include local in-memory buffer as a tiny safety net (in case instance counter not wired)
+                    if (this.pendingUpdates.size > 0) {
+                        hasAny = true;
+                        sum += this.pendingUpdates.size;
+                    }
+
+                    if (hasAny) {
+                        this.activeTaskCountCache = { value: sum, updatedAt: Date.now() };
+                        return sum;
+                    }
+                }
+
+                // 2) Fallback: derive from task status keys
                 const results = await Promise.allSettled(
                     this.ACTIVE_TASK_PREFIXES.map(prefix => cache.listKeys(prefix))
                 );

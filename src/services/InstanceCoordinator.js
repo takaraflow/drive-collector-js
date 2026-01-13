@@ -39,6 +39,10 @@ export class InstanceCoordinator {
         this.lockRenewalTimer = null;  // 新增：锁续租定时器
         this.isLeader = false;
         this.activeInstances = new Set();
+
+        // Active task counter (optional, set by lifecycle/TaskManager)
+        this.activeTaskCount = 0;
+        this.getActiveTaskCountFn = null;
         
         // 延迟调整定时器（启动后 30 秒再检查实例数量并调整）
         this.heartbeatAdjustTimer = null;
@@ -105,14 +109,16 @@ export class InstanceCoordinator {
      * 注册实例 (Cache 存储，符合低频关键数据规则)
      */
     async registerInstance() {
+        const now = Date.now();
         const instanceData = {
             id: this.instanceId,
             url: process.env.APP_EXTERNAL_URL, // 新增：外部可访问的 URL，用于 LB 转发
             hostname: process.env.HOSTNAME || 'unknown',
             region: process.env.INSTANCE_REGION || 'unknown',
-            startedAt: Date.now(),
-            lastHeartbeat: Date.now(),
-            status: 'active'
+            startedAt: now,
+            lastHeartbeat: now,
+            status: 'active',
+            activeTaskCount: this.getLocalActiveTaskCount()
         };
 
         // 写入 Cache (核心 Cache 模块，用于关键数据存储)
@@ -192,7 +198,8 @@ export class InstanceCoordinator {
                     const instanceData = {
                         ...existing,
                         lastHeartbeat: now,
-                        status: 'active'
+                        status: 'active',
+                        activeTaskCount: this.getLocalActiveTaskCount()
                     };
                     await cache.set(`instance:${this.instanceId}`, instanceData, this.instanceTimeout / 1000);
                 }
@@ -200,6 +207,44 @@ export class InstanceCoordinator {
                 logWithProvider().error(`Cache心跳更新失败: ${cacheError.message}`);
             }
         }, this.heartbeatInterval);
+    }
+
+    /**
+     * Register a function that returns the current active task count for this instance.
+     * The function should be synchronous and fast.
+     * @param {() => number} getActiveTaskCountFn
+     */
+    registerActiveTaskCounter(getActiveTaskCountFn) {
+        this.getActiveTaskCountFn = getActiveTaskCountFn;
+    }
+
+    /**
+     * Set local active task count (fallback when no counter function is registered).
+     * @param {number} count
+     */
+    setActiveTaskCount(count) {
+        const parsed = Number.parseInt(count, 10);
+        if (!Number.isFinite(parsed) || Number.isNaN(parsed)) return;
+        this.activeTaskCount = Math.max(0, parsed);
+    }
+
+    /**
+     * Get current active task count from registered function or local value.
+     * @returns {number}
+     */
+    getLocalActiveTaskCount() {
+        try {
+            if (typeof this.getActiveTaskCountFn === 'function') {
+                const value = this.getActiveTaskCountFn();
+                const parsed = Number.parseInt(value, 10);
+                if (Number.isFinite(parsed) && !Number.isNaN(parsed)) {
+                    this.activeTaskCount = Math.max(0, parsed);
+                }
+            }
+        } catch (e) {
+            // Ignore counter errors and keep last known value
+        }
+        return this.activeTaskCount;
     }
 
     /**
