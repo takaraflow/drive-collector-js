@@ -259,6 +259,23 @@ describe("Telegram Service", () => {
             expect(mockLoggerInfo.mock.calls.some(call => String(call[0]).includes("customServer=true") || String(call[0]).includes("保留自定义 DC 设置"))).toBe(true);
         });
 
+        test("should verify DC setting is enforced after connection", async () => {
+            mockConfig.telegram.testMode = false;
+            mockConfig.telegram.serverDc = 2;
+            mockConfig.telegram.serverIp = "149.154.167.40";
+            mockConfig.telegram.serverPort = 443;
+
+            const instance = await module.connectAndStart();
+
+            // 验证 DC 设置被调用
+            expect(instance.session.setDC).toHaveBeenCalledWith(2, "149.154.167.40", 443);
+            // 验证日志显示 DC 配置信息
+            expect(mockLoggerInfo.mock.calls.some(call =>
+                String(call[0]).includes("DC 2") &&
+                String(call[0]).includes("149.154.167.40")
+            )).toBe(true);
+        });
+
         test("should ignores incomplete TG_SERVER overrides and warns", async () => {
             mockConfig.telegram.testMode = false;
             mockConfig.telegram.serverDc = 3;

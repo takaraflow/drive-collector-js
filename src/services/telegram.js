@@ -545,7 +545,7 @@ async function initTelegramClient() {
                 clientConfig
             );
             
-            // 同时使用 session.setDC() 保持向后兼容（测试需要）
+            // 强制设置 DC 配置
             if (dcConfig.mode !== "default") {
                 client.session.setDC(dcConfig.dcId, dcConfig.serverIp, dcConfig.serverPort);
             }
