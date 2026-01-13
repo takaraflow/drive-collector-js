@@ -142,7 +142,7 @@ describe('任务调度失败处理优化测试', () => {
   });
 
   afterAll(() => {
-    vi.useRealTimers();
+    vi.clearAllTimers();
   });
 
   describe('fetchWithRetry - 4xx Stop Retry Logic', () => {

@@ -10,7 +10,7 @@ describe('BaseCache', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
-    vi.useRealTimers();
+    vi.clearAllTimers();
     vi.restoreAllMocks();
   });
 

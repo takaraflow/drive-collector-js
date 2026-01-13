@@ -23,19 +23,8 @@ describe('build-logic.js - hasInfisicalCredentials', () => {
         process.env.INFISICAL_PROJECT_ID = 'proj-id';
         process.env.INFISICAL_TOKEN = 'token';
         
-        // Debug: let's check what we actually have
-        console.log('DEBUG INFISICAL_PROJECT_ID:', JSON.stringify(process.env.INFISICAL_PROJECT_ID));
-        console.log('DEBUG INFISICAL_TOKEN:', JSON.stringify(process.env.INFISICAL_TOKEN));
-        
-        // Let's manually check the logic
         const projectId = (process.env.INFISICAL_PROJECT_ID || '').trim();
         const token = (process.env.INFISICAL_TOKEN || '').trim();
-        console.log('DEBUG projectId after trim:', JSON.stringify(projectId));
-        console.log('DEBUG token after trim:', JSON.stringify(token));
-        console.log('DEBUG projectId && token:', !!(projectId && token));
-        
-        console.log('DEBUG hasInfisicalCredentials result:', hasInfisicalCredentials(process.env));
-        
         expect(hasInfisicalCredentials(process.env)).toBe(true);
     });
 
@@ -111,14 +100,8 @@ describe('build-logic.js - loadEnvFile (Integration Tests)', () => {
 
     test('should set simple key=value pairs', () => {
         const mockFs = {
-            existsSync: vi.fn((path) => {
-                console.log('DEBUG existsSync called with:', path);
-                return true;
-            }),
-            readFileSync: vi.fn((path) => {
-                console.log('DEBUG readFileSync called with:', path);
-                return 'VAR1=value1\nVAR2=value2';
-            }),
+            existsSync: vi.fn(() => true),
+            readFileSync: vi.fn(() => 'VAR1=value1\nVAR2=value2'),
         };
 
         delete process.env.VAR1;
@@ -126,9 +109,6 @@ describe('build-logic.js - loadEnvFile (Integration Tests)', () => {
 
         // Pass overrideExisting: true to ensure env vars are set
         loadEnvFile(mockFs, 'dev', { overrideExisting: true });
-
-        console.log('DEBUG final VAR1:', process.env.VAR1);
-        console.log('DEBUG final VAR2:', process.env.VAR2);
 
         expect(process.env.VAR1).toBe('value1');
         expect(process.env.VAR2).toBe('value2');

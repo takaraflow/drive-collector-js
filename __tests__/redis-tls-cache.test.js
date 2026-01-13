@@ -44,7 +44,7 @@ describe('RedisTLSCache', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
-    vi.useRealTimers();
+    vi.clearAllTimers();
     vi.restoreAllMocks();
   });
 

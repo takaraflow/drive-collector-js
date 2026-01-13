@@ -30,8 +30,6 @@ async function verifyQStashSignature(request, env, ctx = null, requestLogger = n
     throw new Error('QSTASH_CURRENT_SIGNING_KEY 未设置');
   }
 
-  const qstashUrl = env.QSTASH_URL || 'https://qstash.upstash.io';
-  
   try {
     const receiver = new Receiver({
       currentSigningKey: currentSigningKey,
@@ -51,7 +49,7 @@ async function verifyQStashSignature(request, env, ctx = null, requestLogger = n
     const isValid = await receiver.verify({
       signature,
       body: body || '',
-      url: `${qstashUrl}${new URL(request.url).pathname}`,
+      url: request.url,
     });
 
     if (!isValid) {

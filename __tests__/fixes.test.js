@@ -66,11 +66,16 @@ describe('Fix Verification Tests', () => {
 
   describe('InstanceManager Concurrency Fix', () => {
     beforeEach(() => {
-      vi.useRealTimers(); // 使用真实定时器以测试并发
       vi.resetAllMocks();
     });
 
     it('should fetch instances concurrently', async () => {
+      let releaseGate;
+      const gate = new Promise(resolve => {
+        releaseGate = resolve;
+      });
+      let startedGets = 0;
+
       // Mock executeWithFailover to simulate latency
       executeWithFailover.mockImplementation(async (op, env, ctx, log, arg) => {
         if (op === '_kv_list') {
@@ -80,8 +85,8 @@ describe('Fix Verification Tests', () => {
             return { keys: [] };
         }
         if (op === '_kv_get') {
-          // Simulate network delay
-          await new Promise(resolve => setTimeout(resolve, 50)); 
+          startedGets += 1;
+          await gate;
           return JSON.stringify({ 
             id: arg, 
             status: 'active', 
@@ -96,9 +101,16 @@ describe('Fix Verification Tests', () => {
       const ctx = {};
       const log = mockLogger;
 
-      const start = Date.now();
-      const instances = await getActiveInstances(env, ctx, log);
-      const duration = Date.now() - start;
+      const instancesPromise = getActiveInstances(env, ctx, log);
+
+      for (let i = 0; i < 10 && startedGets < 3; i += 1) {
+        await Promise.resolve();
+      }
+
+      const startedSnapshot = startedGets;
+      releaseGate();
+
+      const instances = await instancesPromise;
 
       expect(instances).toHaveLength(3);
       
@@ -108,13 +120,7 @@ describe('Fix Verification Tests', () => {
       expect(executeWithFailover).toHaveBeenCalledWith('_kv_get', env, ctx, expect.anything(), 'instance:2');
       expect(executeWithFailover).toHaveBeenCalledWith('_kv_get', env, ctx, expect.anything(), 'instance:3');
 
-      // 验证时间：如果是串行，应该是 50 * 3 = 150ms 以上
-      // 如果是并发，应该是 50ms 左右
-      // 考虑到 overhead，我们设置一个较宽的阈值
-      console.log(`Duration: ${duration}ms`);
-      // 注意：在某些极快的 CI 环境中，overhead 可能很小，但如果机器慢，overhead 可能大。
-      // 只要远小于 150ms 即可。
-      expect(duration).toBeLessThan(140);
+      expect(startedSnapshot).toBe(3);
     });
   });
 });

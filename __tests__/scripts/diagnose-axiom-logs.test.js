@@ -63,7 +63,7 @@ describe('diagnose-axiom-logs.js', () => {
   });
 
   afterAll(() => {
-    vi.useRealTimers();
+    vi.clearAllTimers();
   });
 
   test('should_parse_args_with_default_values', () => {

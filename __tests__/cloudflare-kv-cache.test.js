@@ -31,7 +31,7 @@ describe('CloudflareKVCache', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
-    vi.useRealTimers();
+    vi.clearAllTimers();
     vi.restoreAllMocks();
   });
 

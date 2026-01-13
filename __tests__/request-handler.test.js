@@ -219,7 +219,7 @@ describe('Worker Tests', () => {
   });
 
   afterAll(() => {
-    vi.useRealTimers();
+    vi.clearAllTimers();
   });
 
   describe('Basic Functionality', () => {

@@ -10,10 +10,10 @@ export default defineConfig({
       '@microlabs/otel-cf-workers': resolve(__dirname, './__tests__/mocks/otel-cf-workers.js'),
       '@opentelemetry/api': resolve(__dirname, './__tests__/mocks/opentelemetry-api.js'),
       'redis-on-workers': resolve(__dirname, './__tests__/mocks/redis-on-workers.js'),
-      'cloudflare:test': resolve(__dirname, './__tests__/mocks/cloudflare-test.js'),
     }
   },
   test: {
+    name: 'unit',
     environment: 'node',
     globals: true,
     setupFiles: ['./__tests__/vitest.setup.js'],
@@ -22,11 +22,9 @@ export default defineConfig({
       '__tests__/**/*.test.js',
       '__tests__/**/*.test.ts',
       '__tests__/**/*.spec.js',
-      '__tests__/**/*.spec.ts',
-      'test/integration/**/*.test.js',
-      'test/integration/**/*.test.ts'
+      '__tests__/**/*.spec.ts'
     ],
-    exclude: ['**/node_modules/**'],
+    exclude: ['test/**', '**/node_modules/**', '__tests__/lifecycle.unit.test.ts'],
     deps: {
       optimizer: {
         ssr: {

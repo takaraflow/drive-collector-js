@@ -170,7 +170,7 @@ vi.mock('../src/logger.js', () => ({
 describe('Cache System - configParser', () => {
   afterEach(() => {
     vi.clearAllMocks();
-    vi.useRealTimers();
+    vi.clearAllTimers();
   });
 
   test('should parse valid json config', () => {
@@ -243,7 +243,7 @@ describe('Cache System - CacheService basic behavior', () => {
   afterEach(() => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
-    vi.useRealTimers();
+    vi.clearAllTimers();
     process.env = originalEnv;
   });
 

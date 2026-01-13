@@ -117,7 +117,7 @@ describe('Manifest Validation Tests', () => {
   });
 
   afterAll(() => {
-    vi.useRealTimers();
+    vi.clearAllTimers();
   });
 
   describe('Required Fields', () => {
@@ -151,9 +151,7 @@ describe('Manifest Validation Tests', () => {
     it('should_pass_manifest_schema_validation', () => {
       const valid = validate(manifest);
       expect(valid).toBe(true);
-      if (!valid) {
-        console.log('Validation errors:', validate.errors);
-      }
+      void validate.errors;
     });
 
     it('应该包含 endpoints 对象且有新的任务相关接口', () => {

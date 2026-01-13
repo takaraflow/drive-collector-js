@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { env } from "cloudflare:test";
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import worker from "../src/index";
@@ -17,6 +17,9 @@ describe("lifecycle: waitUntil compliance", () => {
 
     expect(res.status).toBeGreaterThanOrEqual(200);
 
+    if (vi.isFakeTimers()) {
+      await vi.runAllTimersAsync();
+    }
     await waitOnExecutionContext(ctx);
   });
 
@@ -31,6 +34,9 @@ describe("lifecycle: waitUntil compliance", () => {
     expect(data.status).toBe('ok');
     expect(data.activeInstances).toBe(0);
 
+    if (vi.isFakeTimers()) {
+      await vi.runAllTimersAsync();
+    }
     await waitOnExecutionContext(ctx);
   });
 });

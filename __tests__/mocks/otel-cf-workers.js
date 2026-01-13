@@ -1,6 +1,5 @@
 // Mock for @microlabs/otel-cf-workers
 export const instrument = (handler, config) => {
-  console.log('Mock instrument called with config:', config);
   return handler;
 };
 
@@ -18,5 +17,4 @@ export const extractConfigFromEnv = (config, env) => {
 
 export const init = (config) => {
   // Mock implementation
-  console.log('Mock init called with config:', config);
 };
