@@ -102,6 +102,7 @@ const mockEnv = {
   QSTASH_CURRENT_SIGNING_KEY: 'test-secret-key',
   UPSTASH_REDIS_REST_URL: 'https://test.upstash.io',
   UPSTASH_REDIS_REST_TOKEN: 'test-password',
+  SKIP_QSTASH_AUTH: 'true', // 跳过 QStash 验证，让测试专注于核心逻辑
 };
 
 describe('任务调度失败处理优化测试', () => {
@@ -114,8 +115,9 @@ describe('任务调度失败处理优化测试', () => {
     vi.clearAllTimers();
     __mockSend.mockReset();
     mockVerify.mockReset();
+    // QStash 验证应该返回布尔值，而不是 body 内容
     mockVerify.mockImplementation(async (options) => {
-      return options.body;
+      return true; // 验证成功
     });
     global.__QSTASH_MOCK_VERIFY__ = mockVerify;
     
@@ -259,7 +261,7 @@ describe('任务调度失败处理优化测试', () => {
 
      it('should_log_path_normalization_in_handleRequest', async () => {
        const timestamp = Math.floor(Date.now() / 1000).toString();
-       mockVerify.mockResolvedValue('body');
+       mockVerify.mockResolvedValue(true); // 验证成功返回 true
        mockKV.list.mockResolvedValue({ keys: [{ name: 'instance:1' }] });
        mockKV.get.mockResolvedValue({
          id: '1',
@@ -384,7 +386,7 @@ describe('任务调度失败处理优化测试', () => {
     describe('路径映射与负载均衡集成', () => {
      it('应该在转发前规范化契约路径', async () => {
        const timestamp = Math.floor(Date.now() / 1000).toString();
-       mockVerify.mockResolvedValue('body');
+       mockVerify.mockResolvedValue(true); // 验证成功返回 true
        mockKV.list.mockResolvedValue({ keys: [{ name: 'instance:1' }] });
        mockKV.get.mockResolvedValue({
          id: '1',
@@ -392,7 +394,7 @@ describe('任务调度失败处理优化测试', () => {
          status: 'active',
          lastHeartbeat: Date.now(),
        });
- 
+
        // 模拟实例返回成功
        global.fetch.mockResolvedValueOnce(createMockResponse(200, {
          text: () => Promise.resolve('OK'),
@@ -562,62 +564,64 @@ describe('任务调度失败处理优化测试', () => {
   });
  
     describe('QStash 元数据记录', () => {
-     it('应该在无活跃实例时记录 QStash 元数据到日志', async () => {
-       const timestamp = Math.floor(Date.now() / 1000).toString();
-       mockVerify.mockResolvedValue('body');
-       mockKV.list.mockResolvedValue({ keys: [] });
- 
-       const request = {
-         url: 'https://lb.example.com/webhook',
-         headers: new Map([
-           ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
-           ['Upstash-Timestamp', timestamp],
-           ['Upstash-Message-Id', 'msg_test_123'],
-           ['Upstash-Retries', '3'],
-         ]),
-          text: vi.fn().mockResolvedValue('body'),
-          arrayBuffer: vi.fn().mockResolvedValue(new Uint8Array()),
-         };
+      it('应该在无活跃实例时记录 QStash 元数据到日志', async () => {
+        const timestamp = Math.floor(Date.now() / 1000).toString();
+        mockVerify.mockResolvedValue(true); // 验证成功返回 true
+        mockKV.list.mockResolvedValue({ keys: [] });
 
-         const lb = await import('../src/index.js');
-         const response = await lb.default.fetch(request, mockEnv, {});
-
-         expect(response.status).toBe(503);
-
-         // 注意：日志被发送到logBuffer，不检查console（规则13：禁止console.log）
-         // 验证请求返回503（无活跃实例）
-         expect(response.status).toBe(503);
-       });
-
-       it('应该在签名验证失败时记录 QStash 元数据到日志', async () => {
-         const timestamp = Math.floor(Date.now() / 1000).toString();
-         mockVerify.mockRejectedValue(new Error('Signature verification failed'));
-
-         const request = {
-           url: 'https://lb.example.com/webhook',
-           headers: new Map([
-             ['Upstash-Message-Id', 'msg_error_456'],
-             ['Upstash-Retries', '1'],
-           ]),
+        const request = {
+          url: 'https://lb.example.com/webhook',
+          headers: new Map([
+            ['Upstash-Signature', 'v1a=ZXhwZWN0ZWQtc2lnbmF0dXJl'],
+            ['Upstash-Timestamp', timestamp],
+            ['Upstash-Message-Id', 'msg_test_123'],
+            ['Upstash-Retries', '3'],
+          ]),
            text: vi.fn().mockResolvedValue('body'),
            arrayBuffer: vi.fn().mockResolvedValue(new Uint8Array()),
-         };
+          };
 
-         const lb = await import('../src/index.js');
-         const response = await lb.default.fetch(request, mockEnv, {});
+          const lb = await import('../src/index.js');
+          const response = await lb.default.fetch(request, mockEnv, {});
 
-         expect(response.status).toBe(401);
+          expect(response.status).toBe(503);
 
-         // 注意：日志被发送到logBuffer，不检查console（规则13：禁止console.log）
-         // 验证请求返回401（签名验证失败）
-         expect(response.status).toBe(401);
-       });
-     });
+          // 注意：日志被发送到logBuffer，不检查console（规则13：禁止console.log）
+          // 验证请求返回503（无活跃实例）
+          expect(response.status).toBe(503);
+        });
+
+        it('应该在签名验证失败时记录 QStash 元数据到日志', async () => {
+          const timestamp = Math.floor(Date.now() / 1000).toString();
+          mockVerify.mockRejectedValue(new Error('Signature verification failed'));
+
+          const request = {
+            url: 'https://lb.example.com/webhook',
+            headers: new Map([
+              ['Upstash-Message-Id', 'msg_error_456'],
+              ['Upstash-Retries', '1'],
+            ]),
+            text: vi.fn().mockResolvedValue('body'),
+            arrayBuffer: vi.fn().mockResolvedValue(new Uint8Array()),
+          };
+
+          const lb = await import('../src/index.js');
+          // Override env to NOT skip auth for this test
+          const testEnv = { ...mockEnv, SKIP_QSTASH_AUTH: 'false' };
+          const response = await lb.default.fetch(request, testEnv, {});
+
+          expect(response.status).toBe(401);
+
+          // 注意：日志被发送到logBuffer，不检查console（规则13：禁止console.log）
+          // 验证请求返回401（签名验证失败）
+          expect(response.status).toBe(401);
+        });
+      });
   
      describe('Retry-After 头部', () => {
       it('应该在返回503时包含Retry-After头部', async () => {
         const timestamp = Math.floor(Date.now() / 1000).toString();
-        mockVerify.mockResolvedValue('body');
+        mockVerify.mockResolvedValue(true); // 验证成功返回 true
         mockKV.list.mockResolvedValue({ keys: [] });
   
         const request = {
@@ -641,7 +645,7 @@ describe('任务调度失败处理优化测试', () => {
      describe('响应体包含 QStash 元数据', () => {
       it('应该在错误响应体中包含 qstashMsgId', async () => {
         const timestamp = Math.floor(Date.now() / 1000).toString();
-        mockVerify.mockResolvedValue('body');
+        mockVerify.mockResolvedValue(true); // 验证成功返回 true
         mockKV.list.mockResolvedValue({ keys: [] });
   
         const request = {

@@ -591,7 +591,10 @@ export async function flushLogs(logBuffer) {
       size: getByteSize(JSON.stringify(log))
     }));
     logSizes.sort((a, b) => b.size - a.size);
-    const top5 = logSizes.slice(0, 5);
+    const top5 = logSizes.slice(0, 5).map(item => ({
+      ...item,
+      message: item.message.length > 100 ? item.message.substring(0, 100) + '...' : item.message
+    }));
     console.warn('[Axiom] Top 5 largest logs:', JSON.stringify(top5, null, 2));
   }
 

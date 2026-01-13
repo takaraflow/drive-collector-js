@@ -1,24 +1,6 @@
 import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
 
-vi.mock('../src/logger.js', () => ({
-  logger: {
-    info: vi.fn().mockResolvedValue(undefined),
-    warn: vi.fn().mockResolvedValue(undefined),
-    error: vi.fn().mockResolvedValue(undefined),
-    debug: vi.fn().mockResolvedValue(undefined),
-    child: vi.fn().mockReturnThis(),
-    configure: vi.fn(),
-    version: 'dev',
-    env: 'test',
-  },
-  configureBaseLoggerTransport: vi.fn(),
-  sanitizeLogData: vi.fn(data => data),
-  flushLogs: vi.fn().mockResolvedValue(undefined),
-  flushGlobalLoggerBuffer: vi.fn().mockResolvedValue(undefined),
-  isTestEnvironment: true,
-  VERSION: 'dev',
-}));
-
+// Mock redis-on-workers first (before importing from src/index.js)
 vi.mock('redis-on-workers', () => ({
   createRedis: vi.fn(() => ({
     send: vi.fn().mockResolvedValue('OK'),
@@ -27,23 +9,78 @@ vi.mock('redis-on-workers', () => ({
   __mockSend: vi.fn(),
 }));
 
-import { 
-  executeRedis, 
-  executeRedisScan, 
-  checkRedisHealth, 
-  __test_resetCacheService, 
-  __test_setCacheServiceInstance 
+// Mock logger (before importing from src/index.js)
+vi.mock('../src/logger.js', () => {
+  const mockLogger = {
+    info: vi.fn().mockResolvedValue(undefined),
+    warn: vi.fn().mockResolvedValue(undefined),
+    error: vi.fn().mockResolvedValue(undefined),
+    debug: vi.fn().mockResolvedValue(undefined),
+    configure: vi.fn(),
+    version: 'dev',
+    env: 'test',
+  };
+  mockLogger.child = vi.fn().mockReturnValue(mockLogger);
+  
+  return {
+    logger: mockLogger,
+    configureBaseLoggerTransport: vi.fn(),
+    sanitizeLogData: vi.fn(data => data),
+    flushLogs: vi.fn().mockResolvedValue(undefined),
+    flushGlobalLoggerBuffer: vi.fn().mockResolvedValue(undefined),
+    isTestEnvironment: true,
+    VERSION: 'dev',
+  };
+});
+
+// Mock CacheService class (NEW)
+vi.mock('../src/cache/CacheService.js', async () => {
+  const actual = await vi.importActual('../src/cache/CacheService.js');
+  return {
+    ...actual,
+    CacheService: vi.fn(),
+  };
+});
+
+// Import after mocking
+import {
+  executeRedis,
+  executeRedisScan,
+  checkRedisHealth,
+  __test_resetCacheService,
+  __test_setCacheServiceInstance
 } from '../src/index.js';
+import { CacheService } from '../src/cache/CacheService.js'; // Import mocked class
+import { logger } from '../src/logger.js'; // Import mocked logger
 
 describe('CacheService Integration', () => {
   let consoleLogSpy;
   let consoleWarnSpy;
   let consoleErrorSpy;
   
-  // Mock provider
+  // Mock provider (updated in beforeEach)
   let mockProvider;
 
+  // Stable mock instance that delegates to the current mockProvider
+  const mockInstance = {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    // Dynamic property to access current mockProvider
+    get primaryProvider() { return mockProvider; },
+    getCurrentProvider: vi.fn().mockReturnValue('cloudflare'),
+    get: vi.fn((key, type, options) => mockProvider.get(key, type, options)),
+    set: vi.fn((key, value, ttl, options) => mockProvider.set(key, value, ttl, options)),
+    listKeys: vi.fn((prefix, ctx) => mockProvider.listKeys(prefix, ctx)),
+    destroy: vi.fn().mockResolvedValue(undefined),
+    isInvalid: false
+  };
+
   beforeEach(() => {
+    // Ensure logger.child returns logger
+    if (logger && logger.child) {
+      logger.child.mockReturnValue(logger);
+    }
+
     // Reset cache service instance using the test hook
     if (__test_resetCacheService) {
       __test_resetCacheService();
@@ -58,19 +95,11 @@ describe('CacheService Integration', () => {
       disconnect: vi.fn()
     };
 
-    // Create mock CacheService instance
-    const mockInstance = {
-      initialize: vi.fn().mockResolvedValue(undefined),
-      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-      primaryProvider: mockProvider,
-      getCurrentProvider: vi.fn().mockReturnValue('cloudflare'),
-      get: vi.fn((key, type, options) => mockProvider.get(key, type, options)),
-      set: vi.fn((key, value, ttl, options) => mockProvider.set(key, value, ttl, options)),
-      listKeys: vi.fn((prefix, ctx) => mockProvider.listKeys(prefix, ctx)),
-      destroy: vi.fn().mockResolvedValue(undefined)
-    };
+    // Setup Mock Implementation for CacheService class
+    // Always return the SAME instance because redisCompat.js caches it
+    CacheService.mockImplementation(() => mockInstance);
 
-    // Inject mock instance
+    // Inject mock instance (legacy)
     __test_setCacheServiceInstance(mockInstance);
 
     // Suppress console output during tests
