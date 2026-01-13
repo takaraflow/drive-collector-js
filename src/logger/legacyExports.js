@@ -165,13 +165,13 @@ export async function flushLogs(logBuffer) {
     body: batchBody
   });
 
-  if (typeof ctx !== 'undefined' && ctx && typeof ctx.waitUntil === 'function') {
-    ctx.waitUntil(uploadTask.catch(error => {
-      console.error(`[Axiom] Global buffer upload failed: ${error.message}`);
-    }));
-  }
-
-  uploadTask.catch(error => {
+  return uploadTask.then(resp => {
+    if (!resp.ok) {
+      return resp.text().then(text => {
+        console.error(`[Axiom] Upload failed: ${resp.status} ${text}`);
+      });
+    }
+  }).catch(error => {
     console.error(`[Axiom] Global buffer Network Error: ${error.message}`);
   });
 }
