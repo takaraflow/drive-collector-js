@@ -196,13 +196,17 @@ async function handleRequest(request, env, ctx) {
   const requestId = ctx?._axiomDebugRequestId || 'unknown';
   console.log(`[AXIOM_DEBUG] ${requestId}: handleRequest started`);
 
-  // 注意：Axiom 传输已在 index.js 中配置，这里不需要重复配置
+  // Ensure logger transport is configured even when handleRequest is called directly.
+  configureBaseLoggerTransport(env);
 
   // 初始化基础状态 - 必须在创建 requestLogger 之前执行
   const runtimeEnv = normalizeEnvName(env.NODE_ENV || 'prod');
   logger.configure({ env: runtimeEnv });
 
   const requestLogBuffer = []; // 为每个请求创建独立的日志缓冲
+  if (ctx && ctx.logBuffer === undefined) {
+    ctx.logBuffer = requestLogBuffer;
+  }
   const requestLogger = logger.child({ module: 'handleRequest', logBuffer: requestLogBuffer });
 
   // 1. 在上下文还在时，显式捕获顶级 Span
