@@ -15,9 +15,12 @@ export class TaskRepository {
     static pendingUpdates = new Map();
     static flushTimer = null;
     static cleanupTimer = null;
+    static activeTaskCountCache = { value: 0, updatedAt: 0 };
+    static activeTaskCountPromise = null;
     
     // 重要的中间状态（需要 Redis 中转，避免实例崩溃时丢失）
     static IMPORTANT_STATUSES = ['downloading', 'uploading'];
+    static ACTIVE_TASK_PREFIXES = ['task_status:', 'consistent:task:'];
 
     /**
      * 启动定时刷新任务
@@ -101,6 +104,76 @@ export class TaskRepository {
             // 如果 batch 本身抛出异常（极少见，因为我们用了 Promise.allSettled）
             log.error("TaskRepository.flushUpdates critical error:", error);
         }
+    }
+
+    /**
+     * 获取活跃任务数量（缓存层估算，同步返回缓存值，后台刷新）
+     * 如需最新值，请调用 refreshActiveTaskCount 并 await
+     */
+    static getActiveTaskCount(options = {}) {
+        const maxAgeMs = Number.isFinite(options.maxAgeMs) ? options.maxAgeMs : 10000;
+        const now = Date.now();
+        const lastUpdated = this.activeTaskCountCache.updatedAt;
+
+        if (now - lastUpdated > maxAgeMs && !this.activeTaskCountPromise) {
+            void this.refreshActiveTaskCount();
+        }
+
+        return this.activeTaskCountCache.value;
+    }
+
+    /**
+     * 刷新活跃任务数量缓存（D1 查询）
+     * @returns {Promise<number>} 当前活跃任务数量
+     */
+    static async refreshActiveTaskCount() {
+        if (this.activeTaskCountPromise) {
+            return this.activeTaskCountPromise;
+        }
+
+        const refreshPromise = (async () => {
+            try {
+                const results = await Promise.allSettled(
+                    this.ACTIVE_TASK_PREFIXES.map(prefix => cache.listKeys(prefix))
+                );
+
+                const taskIds = new Set();
+                let hasFulfilled = false;
+
+                results.forEach((result, index) => {
+                    if (result.status !== 'fulfilled') return;
+                    hasFulfilled = true;
+                    const prefix = this.ACTIVE_TASK_PREFIXES[index];
+                    result.value.forEach((key) => {
+                        if (key.startsWith(prefix)) {
+                            taskIds.add(key.slice(prefix.length));
+                        }
+                    });
+                });
+
+                for (const taskId of this.pendingUpdates.keys()) {
+                    taskIds.add(String(taskId));
+                }
+
+                if (!hasFulfilled && this.pendingUpdates.size === 0) {
+                    return this.activeTaskCountCache.value;
+                }
+
+                this.activeTaskCountCache = { value: taskIds.size, updatedAt: Date.now() };
+                return taskIds.size;
+            } catch (error) {
+                log.warn('TaskRepository.refreshActiveTaskCount failed:', error.message);
+            }
+
+            return this.activeTaskCountCache.value;
+        })();
+
+        this.activeTaskCountPromise = refreshPromise;
+        refreshPromise.finally(() => {
+            this.activeTaskCountPromise = null;
+        });
+
+        return refreshPromise;
     }
 
     /**

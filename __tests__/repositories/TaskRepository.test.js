@@ -30,6 +30,8 @@ describe('TaskRepository', () => {
         vi.clearAllMocks();
         // Clear static properties
         TaskRepository.pendingUpdates.clear();
+        TaskRepository.activeTaskCountCache = { value: 0, updatedAt: 0 };
+        TaskRepository.activeTaskCountPromise = null;
         if (TaskRepository.flushTimer) {
             clearInterval(TaskRepository.flushTimer);
             TaskRepository.flushTimer = null;
@@ -155,6 +157,31 @@ describe('TaskRepository', () => {
 
             const result = await TaskRepository.findStalledTasks(3600000);
             expect(result).toEqual([]);
+        });
+    });
+
+    describe('getActiveTaskCount', () => {
+        it('should refresh and return cached active task count', async () => {
+            mockCache.listKeys
+                .mockResolvedValueOnce(['task_status:task1', 'task_status:task2'])
+                .mockResolvedValueOnce(['consistent:task:task2', 'consistent:task:task3']);
+
+            const refreshed = await TaskRepository.refreshActiveTaskCount();
+            const cached = TaskRepository.getActiveTaskCount();
+
+            expect(refreshed).toBe(3);
+            expect(cached).toBe(3);
+            expect(mockCache.listKeys).toHaveBeenCalledWith('task_status:');
+            expect(mockCache.listKeys).toHaveBeenCalledWith('consistent:task:');
+        });
+
+        it('should return cached value when refresh fails', async () => {
+            TaskRepository.activeTaskCountCache = { value: 5, updatedAt: Date.now() };
+            mockCache.listKeys.mockRejectedValue(new Error('Cache error'));
+
+            const refreshed = await TaskRepository.refreshActiveTaskCount();
+
+            expect(refreshed).toBe(5);
         });
     });
 
