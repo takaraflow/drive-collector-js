@@ -38,6 +38,238 @@ export function resolveBuildVersion() {
   return 'dev';
 }
 
+// 新增：循环缓冲区实现
+class CircularLogBuffer {
+  constructor(maxSize = 1000) {
+    this.maxSize = maxSize;
+    this.buffer = new Array(maxSize);
+    this.head = 0;
+    this.size = 0;
+    this.totalPushed = 0;
+  }
+
+  push(item) {
+    this.buffer[this.head] = item;
+    this.head = (this.head + 1) % this.maxSize;
+    if (this.size < this.maxSize) {
+      this.size++;
+    }
+    this.totalPushed++;
+  }
+
+  getAll() {
+    if (this.size === 0) return [];
+    
+    const result = [];
+    for (let i = 0; i < this.size; i++) {
+      const index = (this.head - this.size + i + this.maxSize) % this.maxSize;
+      result.push(this.buffer[index]);
+    }
+    return result;
+  }
+
+  clear() {
+    this.size = 0;
+    this.head = 0;
+    this.totalPushed = 0;
+  }
+
+  getStats() {
+    return {
+      currentSize: this.size,
+      maxSize: this.maxSize,
+      totalPushed: this.totalPushed,
+      utilizationRate: (this.size / this.maxSize * 100).toFixed(2) + '%'
+    };
+  }
+
+  isFull() {
+    return this.size >= this.maxSize;
+  }
+
+  isEmpty() {
+    return this.size === 0;
+  }
+}
+
+// 新增：内存安全的日志上下文
+class SafeLogContext {
+  constructor(options = {}) {
+    this.env = options.env || 'unknown';
+    this.requestId = options.requestId || generateRequestId();
+    this.maxBufferSize = options.maxBufferSize || 500;
+    this.startTime = Date.now();
+    this.maxLogAge = options.maxLogAge || 300000; // 5分钟
+    
+    // 兼容性处理：如果提供了logBuffer且不是CircularLogBuffer，使用它
+    if (options.logBuffer && !options.logBuffer.constructor?.name?.includes('Circular')) {
+      this.logBuffer = options.logBuffer;
+    } else {
+      this.logBuffer = new CircularLogBuffer(this.maxBufferSize);
+    }
+  }
+
+  addLogEntry(entry) {
+    // 检查日志年龄，清理过期日志
+    this.cleanupOldLogs();
+    
+    // 添加新日志
+    const logEntry = {
+      ...entry,
+      _meta: {
+        timestamp: Date.now(),
+        age: Date.now() - this.startTime,
+        contextId: this.requestId
+      }
+    };
+    
+    // 兼容性处理：如果logBuffer是包装器
+    if (this.logBuffer && typeof this.logBuffer.push === 'function') {
+      this.logBuffer.push(logEntry);
+    } else if (this.logBuffer && this.logBuffer instanceof CircularLogBuffer) {
+      this.logBuffer.push(logEntry);
+    }
+
+    // 如果缓冲区满，记录警告
+    if (this.logBuffer && this.logBuffer.isFull && this.logBuffer.isFull()) {
+      console.warn(`⚠️ [SafeLogContext] 日志缓冲区已满 (requestId: ${this.requestId})`);
+    }
+  }
+
+  cleanupOldLogs() {
+    const now = Date.now();
+    const allLogs = this.logBuffer.getAll();
+    
+    // 过滤过期日志
+    const validLogs = allLogs.filter(log => {
+      if (!log._meta) return true;
+      return (now - log._meta.timestamp) < this.maxLogAge;
+    });
+
+    // 如果有过期日志被清理，重建缓冲区
+    if (validLogs.length !== allLogs.length) {
+      this.logBuffer.clear();
+      validLogs.forEach(log => this.logBuffer.push(log));
+    }
+  }
+
+  getAllLogs() {
+    this.cleanupOldLogs();
+    return this.logBuffer.getAll();
+  }
+
+  clearLogs() {
+    this.logBuffer.clear();
+  }
+
+  getStats() {
+    return {
+      ...this.logBuffer.getStats(),
+      requestId: this.requestId,
+      age: Date.now() - this.startTime,
+      env: this.env
+    };
+  }
+
+  destroy() {
+    this.clearLogs();
+    this.logBuffer = null;
+  }
+}
+
+// 全局日志上下文管理器
+class GlobalLogManager {
+  constructor() {
+    this.contexts = new Map();
+    this.maxContexts = 1000;
+    this.cleanupInterval = 60000; // 1分钟
+    this.startCleanupTimer();
+  }
+
+  createContext(options) {
+    const context = new SafeLogContext(options);
+    
+    // 如果上下文数量超限，清理最旧的
+    if (this.contexts.size >= this.maxContexts) {
+      this.cleanupOldestContext();
+    }
+    
+    this.contexts.set(context.requestId, context);
+    return context;
+  }
+
+  getContext(requestId) {
+    return this.contexts.get(requestId);
+  }
+
+  destroyContext(requestId) {
+    const context = this.contexts.get(requestId);
+    if (context) {
+      context.destroy();
+      this.contexts.delete(requestId);
+    }
+  }
+
+  cleanupOldestContext() {
+    let oldestTime = Date.now();
+    let oldestId = null;
+    
+    for (const [id, context] of this.contexts) {
+      if (context.startTime < oldestTime) {
+        oldestTime = context.startTime;
+        oldestId = id;
+      }
+    }
+    
+    if (oldestId) {
+      this.destroyContext(oldestId);
+      console.warn(`⚠️ [GlobalLogManager] 清理过期上下文: ${oldestId}`);
+    }
+  }
+
+  startCleanupTimer() {
+    if (typeof setInterval === 'function') {
+      setInterval(() => {
+        this.performCleanup();
+      }, this.cleanupInterval);
+    }
+  }
+
+  performCleanup() {
+    const now = Date.now();
+    const maxAge = 600000; // 10分钟
+    const toDelete = [];
+    
+    for (const [id, context] of this.contexts) {
+      if (now - context.startTime > maxAge) {
+        toDelete.push(id);
+      }
+    }
+    
+    toDelete.forEach(id => this.destroyContext(id));
+    
+    if (toDelete.length > 0) {
+      console.warn(`⚠️ [GlobalLogManager] 清理了 ${toDelete.length} 个过期上下文`);
+    }
+  }
+
+  getStats() {
+    return {
+      activeContexts: this.contexts.size,
+      maxContexts: this.maxContexts,
+      utilizationRate: (this.contexts.size / this.maxContexts * 100).toFixed(2) + '%'
+    };
+  }
+}
+
+// 实例化全局管理器
+const globalLogManager = new GlobalLogManager();
+
+// 生成请求ID的辅助函数
+function generateRequestId() {
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+}
+
 // 全局类型定义（解决 TypeScript 警告）
 /** @type {string} */
 let BUILD_VERSION = resolveBuildVersion();
@@ -245,15 +477,25 @@ async function sendToAxiom(logData, logBuffer, ctx = null) {
     console.error(`[Axiom] Sanitization failed: ${error.message}`);
     sanitizedData = {
       level: logData.level || 'error',
-      message: '[SANITATION_ERROR]',
+      message: '[SANITIZATION_ERROR]',
       timestamp: new Date().toISOString(),
       version: VERSION
     };
   }
 
-  // 将清洗后的日志添加到缓冲
-  logBuffer.push(sanitizedData);
+  // 只添加到缓冲区一次 - 简化逻辑避免重复
+  if (logBuffer && Array.isArray(logBuffer)) {
+    logBuffer.push(sanitizedData);
+    // 防止内存泄漏
+    if (logBuffer.length > 1000) {
+      logBuffer.splice(0, logBuffer.length - 1000);
+    }
+  } else if (logBuffer && logBuffer instanceof CircularLogBuffer) {
+    logBuffer.push(sanitizedData);
+  }
 }
+
+ 
 
 /**
  * 刷新日志缓冲，将所有待发送日志发送到 Axiom
@@ -265,21 +507,41 @@ export async function flushLogs(logBuffer) {
     console.warn('⚠️ [Axiom] 配置缺失，跳过刷新 (Config missing, skipping flush)');
 
     // 即使没有配置，也要清空缓冲区防止内存泄漏
-    if (logBuffer && logBuffer.length > 0) {
-      logBuffer.length = 0;
+    if (logBuffer) {
+      if (logBuffer instanceof CircularLogBuffer) {
+        logBuffer.clear();
+      } else if (Array.isArray(logBuffer) && logBuffer.length > 0) {
+        logBuffer.length = 0;
+      }
     }
 
     // 返回 resolved Promise 防止 waitUntil(undefined)
     return Promise.resolve(null);
   }
 
-  if (!logBuffer || logBuffer.length === 0) {
+  if (!logBuffer) {
+    return;
+  }
+
+  // 处理不同类型的缓冲区
+  let logsToSend;
+  if (logBuffer instanceof CircularLogBuffer) {
+    logsToSend = logBuffer.getAll();
+    if (logsToSend.length === 0) return;
+  } else if (Array.isArray(logBuffer)) {
+    if (logBuffer.length === 0) return;
+    logsToSend = [...logBuffer]; // 创建副本
+  } else {
+    console.warn('⚠️ [Axiom] 未知的日志缓冲区类型，跳过刷新');
     return;
   }
 
   // 2. 关键步骤：冻结并清空缓冲区 (防止引用问题)
-  const logsToSend = [...logBuffer];
-  logBuffer.length = 0; // 立即清空原数组
+  if (logBuffer instanceof CircularLogBuffer) {
+    logBuffer.clear();
+  } else if (Array.isArray(logBuffer)) {
+    logBuffer.length = 0; // 立即清空原数组
+  }
 
   console.log(`📤 [Axiom] 准备发送事件 (Preparing to send events)...`);
 
@@ -467,6 +729,11 @@ function createLoggerFactory(context, bindings = {}) {
         timestamp: new Date().toISOString()
       };
 
+      // 确保env字段来自context，确保child传入的env被正确使用
+      if (context.env) {
+        logData.env = normalizeEnvName(context.env);
+      }
+
       addOtelEvent('info', message, logData, span);
       await sendToAxiom(logData, context.logBuffer, ctx);
 
@@ -546,7 +813,7 @@ function createLoggerFactory(context, bindings = {}) {
       }
     },
 
-    /**
+/**
      * 创建子日志记录器
      */
     child: function(bindings) {
@@ -557,10 +824,18 @@ function createLoggerFactory(context, bindings = {}) {
       const mergedBindings = { ...logger.bindings, ...incomingBindings };
       const newContext = { ...context };
       
+      // 处理 logBuffer - 确保可用性
       if (logBuffer !== undefined) {
-        newContext.logBuffer = logBuffer;
+        // 支持数组和对象 - 使用原始引用而不是副本
+        if (Array.isArray(logBuffer)) {
+          newContext.logBuffer = logBuffer; // 使用原始引用
+        } else if (typeof logBuffer.getAll === 'function') {
+          newContext.logBuffer = logBuffer.getAll();
+        } else {
+          newContext.logBuffer = [];
+        }
       }
-      
+       
       // 处理 env 参数，确保归一化
       if (env !== undefined) {
         newContext.env = normalizeEnvName(env);

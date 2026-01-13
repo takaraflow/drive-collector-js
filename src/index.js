@@ -1,15 +1,85 @@
 import { logger, configureBaseLoggerTransport, isTestEnvironment, VERSION, flushLogs, updateVersionFromEnv, flushGlobalLoggerBuffer } from './logger.js';
 
-// 全局状态
+// 导入状态管理模块
+import { LoadBalancerState, createLoadBalancerState } from './state/LoadBalancerState.js';
+
+// 向后兼容的全局状态访问器
+let globalStateInstance = null;
+
+// 初始化状态管理器
+async function initializeGlobalState(env, ctx, logger, cacheService) {
+  globalStateInstance = createLoadBalancerState(env, logger);
+  await globalStateInstance.initialize(cacheService);
+  return globalStateInstance;
+}
+
+// 获取全局状态实例
+function getGlobalState() {
+  if (!globalStateInstance) {
+    throw new Error('Global state not initialized. Call initializeGlobalState first.');
+  }
+  return globalStateInstance;
+}
+
+// 向后兼容的全局变量（用于向后兼容，但标记为废弃）
+/** @deprecated */
 let currentProvider = 'cloudflare';
+/** @deprecated */
 let failureCount = 0;
+/** @deprecated */
 let lastFailureTime = 0;
+/** @deprecated */
 let failoverReason = '';
+
+// 向后兼容的函数
+async function getCurrentProvider() {
+  if (globalStateInstance) {
+    return await globalStateInstance.getCurrentProvider();
+  }
+  return currentProvider; // 回退值
+}
+
+async function shouldFailover(maxFailures, cooldownMs) {
+  if (globalStateInstance) {
+    return await globalStateInstance.shouldFailover(maxFailures, cooldownMs);
+  }
+  return failureCount >= maxFailures && (Date.now() - lastFailureTime) >= cooldownMs;
+}
+
+async function incrementFailureCount(reason) {
+  if (globalStateInstance) {
+    return await globalStateInstance.incrementFailureCount(reason);
+  }
+  failureCount++;
+  lastFailureTime = Date.now();
+  failoverReason = reason;
+  return { failureCount, lastFailureTime, failoverReason };
+}
+
+async function resetFailureCount() {
+  if (globalStateInstance) {
+    return await globalStateInstance.resetFailureCount();
+  }
+  failureCount = 0;
+  lastFailureTime = 0;
+  failoverReason = '';
+  return { failureCount: 0, lastFailureTime: 0, failoverReason: '' };
+}
+
+async function switchProvider(provider, reason) {
+  if (globalStateInstance) {
+    return await globalStateInstance.switchProvider(provider, reason);
+  }
+  currentProvider = provider;
+  failoverReason = reason;
+  return { currentProvider, failoverReason };
+}
 
 // 常量
 const ROUND_ROBIN_KEY = 'lb:round_robin_index';
 const HEARTBEAT_TIMEOUT = 15 * 60 * 1000; // 15分钟
 const TELEGRAM_LOCK_KEY = 'lock:telegram_client';
+const MAX_JSON_SIZE = 1024 * 1024; // 1MB JSON 解析限制
 
 // 静态导入 OpenTelemetry API
 import { trace } from '@opentelemetry/api';
@@ -40,8 +110,20 @@ const normalizeEnvName = (value = 'prod') => {
 /**
  * 稳健的 JSON 解析函数，支持自动修复无引号键
  */
+// 检查是否为字符串类型（排除其他类型）
+function isString(value) {
+  return typeof value === 'string' || value instanceof String;
+}
+
 function safeJsonParse(data, context = '') {
+  // 检查数据大小
+  if (data && typeof data === 'string' && data.length > MAX_JSON_SIZE) {
+    throw new Error(`JSON 数据过大: ${data.length} bytes (最大 ${MAX_JSON_SIZE} bytes)`);
+  }
+  
   if (data === null || data === undefined) return null;
+  
+  // 优先处理二进制数据
   if (data instanceof Uint8Array) {
     data = new TextDecoder().decode(data);
   } else if (ArrayBuffer.isView(data)) {
@@ -49,7 +131,9 @@ function safeJsonParse(data, context = '') {
   } else if (data instanceof ArrayBuffer) {
     data = new TextDecoder().decode(new Uint8Array(data));
   }
-  if (typeof data === 'object') return data;
+  
+  // 检查是否已经是解析好的对象（但不处理字符串）
+  if (typeof data === 'object' && !isString(data)) return data;
 
   try {
     return JSON.parse(data);
@@ -288,12 +372,112 @@ function normalizeHeartbeat(rawValue) {
 /**
  * 解析实例数据
  */
+// 获取对象深度
+function getObjectDepth(obj, currentDepth = 0) {
+  if (currentDepth > 20) return currentDepth; // 防止无限递归
+  
+  if (obj === null || typeof obj !== 'object') {
+    return currentDepth;
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.length === 0 ? currentDepth : 
+           Math.max(...obj.map(item => getObjectDepth(item, currentDepth + 1)));
+  }
+  
+  const keys = Object.keys(obj);
+  return keys.length === 0 ? currentDepth :
+         Math.max(...keys.map(key => getObjectDepth(obj[key], currentDepth + 1)));
+}
+
+// 新增：增强的JSON解析函数
+function enhancedSafeJsonParse(data, context = 'unknown', options = {}) {
+  const {
+    returnNullOnFailure = true,
+    logErrors = true,
+    maxDepth = 10,
+    maxStringLength = 100000
+  } = options;
+
+  // 输入验证
+  if (data === null || data === undefined) {
+    if (logErrors) {
+      console.warn(`⚠️ [JSON Parse] ${context}: 输入为空`);
+    }
+    return null;
+  }
+
+  if (typeof data !== 'string') {
+    if (logErrors) {
+      console.warn(`⚠️ [JSON Parse] ${context}: 输入不是字符串类型`, { 
+        type: typeof data, 
+        value: String(data).substring(0, 100) 
+      });
+    }
+    return returnNullOnFailure ? null : data;
+  }
+
+  // 字符串长度检查
+  if (data.length > maxStringLength) {
+    if (logErrors) {
+      console.error(`❌ [JSON Parse] ${context}: 字符串过长 (${data.length} > ${maxStringLength})`);
+    }
+    return returnNullOnFailure ? null : { error: 'String too long' };
+  }
+
+  try {
+    const parsed = JSON.parse(data);
+    
+    // 深度检查
+    const depth = getObjectDepth(parsed);
+    if (depth > maxDepth) {
+      if (logErrors) {
+        console.warn(`⚠️ [JSON Parse] ${context}: 对象嵌套过深 (${depth} > ${maxDepth})`);
+      }
+      return returnNullOnFailure ? null : { error: 'Object too deep' };
+    }
+
+    return parsed;
+  } catch (error) {
+    if (logErrors) {
+      console.error(`❌ [JSON Parse] ${context}: 解析失败`, {
+        error: error.message,
+        dataLength: data.length,
+        dataPreview: data.substring(0, 200)
+      });
+    }
+    
+    return returnNullOnFailure ? null : { 
+      error: `JSON parse failed: ${error.message}`,
+      originalData: data.length > 1000 ? data.substring(0, 1000) + '...' : data
+    };
+  }
+}
+
+// 修复后的parseInstanceData函数 - 兼容现有测试
 function parseInstanceData(data) {
   if (!data) return null;
   
   try {
+    // 首先使用原有的safeJsonParse来保持兼容性
     let parsed = safeJsonParse(data, 'instance');
-    if (!parsed) return null;
+    
+    // 如果输入已经是对象（但不是字符串类型），直接使用
+    if (typeof data === 'object' && data !== null && typeof data !== 'string') {
+      parsed = data;
+    }
+    
+    if (!parsed) {
+      console.warn('⚠️ [Instance Data] 解析失败', { 
+        dataType: typeof data, 
+        isArrayBuffer: ArrayBuffer.isView(data),
+        isUint8Array: data instanceof Uint8Array,
+        dataPreview: typeof data === 'string' ? data.substring(0, 100) : 'non-string'
+      });
+      return null;
+    }
+    
+    // 处理嵌套的value字段
     if (parsed && typeof parsed === 'object' && parsed.value !== undefined) {
       const inner = safeJsonParse(parsed.value, 'instance.value');
       if (inner) {
@@ -305,8 +489,8 @@ function parseInstanceData(data) {
     const startedAt = normalizeHeartbeat(parsed.startedAt);
     
     return {
-      id: parsed.id,
-      url: parsed.url,
+      id: parsed.id || 'unknown',
+      url: parsed.url || '',
       hostname: parsed.hostname,
       status: parsed.status || 'active',
       lastHeartbeat: lastHeartbeat ?? Date.now(),
@@ -314,9 +498,16 @@ function parseInstanceData(data) {
       region: parsed.region || 'unknown'
     };
   } catch (e) {
+    console.error('❌ [Instance Data] 解析异常', { 
+      error: e.message, 
+      dataType: typeof data,
+      stack: e.stack 
+    });
     return null;
   }
 }
+
+
 
 /**
  * 扫描锁键（用于 leader election 提示）
@@ -597,30 +788,108 @@ async function selectInstanceByLock(instances, env, ctx, requestLogger = null) {
 /**
  * 选择目标实例 (轮询)
  */
+// 新增：原子化轮询索引操作
 async function selectTargetInstance(instances, env, ctx, requestLogger = null) {
   const selectTargetInstanceLogger = requestLogger || logger.child({ module: 'selectTargetInstance' });
   if (instances.length === 0) {
     return null;
   }
 
-  let currentIndex = 0;
-  try {
-    const stored = await executeWithFailover('_kv_get', env, ctx, selectTargetInstanceLogger, ROUND_ROBIN_KEY);
-    currentIndex = stored ? parseInt(stored) : 0;
-  } catch (e) {
-    await selectTargetInstanceLogger.error('轮询索引获取失败', { error: e.message });
+  if (instances.length === 1) {
+    return instances[0];
   }
 
-  const targetIndex = currentIndex % instances.length;
-  const targetInstance = instances[targetIndex];
-
   try {
-    await executeWithFailover('_kv_put', env, ctx, selectTargetInstanceLogger, ROUND_ROBIN_KEY, (currentIndex + 1).toString());
-  } catch (e) {
-    await selectTargetInstanceLogger.error('轮询索引更新失败', { error: e.message });
+    if (env.REDIS_URL || env.UPSTASH_REDIS_REST_URL) {
+      // 使用Redis原子操作
+      const result = await executeWithFailover('EVAL', env, ctx, selectTargetInstanceLogger, `
+        -- KEYS[1]: 轮询索引键
+        -- ARGV[1]: 实例总数
+        local current = redis.call('GET', KEYS[1])
+        if not current then
+          current = '0'
+        end
+        local currentIndex = tonumber(current)
+        local targetIndex = currentIndex % tonumber(ARGV[1])
+        local nextIndex = (currentIndex + 1) % tonumber(ARGV[1])
+        redis.call('SET', KEYS[1], tostring(nextIndex))
+        return targetIndex
+      `, ROUND_ROBIN_KEY, instances.length.toString());
+      
+      return instances[parseInt(result)];
+    } else {
+      // 使用KV的条件更新操作
+      return await selectTargetInstanceWithKVAtomic(instances, env, ctx, selectTargetInstanceLogger);
+    }
+  } catch (error) {
+    await selectTargetInstanceLogger.error('原子轮询操作失败，回退到普通模式', { error: error.message });
+    // 回退到原有逻辑，但增加重试机制
+    return await selectTargetInstanceWithRetry(instances, env, ctx, selectTargetInstanceLogger);
   }
+}
 
-  return targetInstance;
+// KV原子操作实现
+async function selectTargetInstanceWithKVAtomic(instances, env, ctx, logger) {
+  const maxRetries = 3;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      // 获取当前值和metadata
+      const stored = await executeWithFailover('_kv_get', env, ctx, logger, ROUND_ROBIN_KEY);
+      const currentIndex = stored ? parseInt(stored) : 0;
+      const targetIndex = currentIndex % instances.length;
+      
+      // 尝试条件更新 (简化版本，KV可能不支持条件更新)
+      await executeWithFailover('_kv_put', env, ctx, logger, ROUND_ROBIN_KEY, (currentIndex + 1).toString());
+      return instances[targetIndex];
+      
+    } catch (error) {
+      await logger.error(`KV原子操作异常，重试 ${attempt + 1}/${maxRetries}`, { error: error.message });
+      
+      if (attempt === maxRetries - 1) {
+        // 最后一次重试失败，使用随机选择
+        const randomIndex = Math.floor(Math.random() * instances.length);
+        await logger.warn(`所有KV重试失败，使用随机选择`, { randomIndex, lastError: error.message });
+        return instances[randomIndex];
+      }
+      
+      // CF Workers 优化：减少延迟上限，避免超出 CPU 限制
+      // 最大延迟 10ms（原为 100ms）
+      await new Promise(resolve => setTimeout(resolve, Math.random() * 10 + 5));
+    }
+  }
+}
+
+// 带重试的备用方案
+async function selectTargetInstanceWithRetry(instances, env, ctx, logger) {
+  const maxRetries = 3;
+  let lastError = null;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const stored = await executeWithFailover('_kv_get', env, ctx, logger, ROUND_ROBIN_KEY);
+      const currentIndex = stored ? parseInt(stored) : 0;
+      const targetIndex = currentIndex % instances.length;
+      
+      // CF Workers 优化：减少延迟上限
+      // 最大延迟 10ms（原为 50ms）
+      if (attempt > 0) {
+        await new Promise(resolve => setTimeout(resolve, Math.random() * 10 + 3));
+      }
+      
+      await executeWithFailover('_kv_put', env, ctx, logger, ROUND_ROBIN_KEY, (currentIndex + 1).toString());
+      
+      return instances[targetIndex];
+    } catch (error) {
+      lastError = error;
+      await logger.error(`轮询操作重试 ${attempt + 1}/${maxRetries} 失败`, { error: error.message });
+    }
+  }
+  
+  // 所有重试失败，使用随机选择
+  const randomIndex = Math.floor(Math.random() * instances.length);
+  await logger.warn(`所有轮询重试失败，使用随机选择`, { randomIndex, lastError: lastError?.message });
+  return instances[randomIndex];
 }
 
 /**
@@ -739,7 +1008,7 @@ async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx,
 /**
  * 故障转移相关函数 (使用 CACHE_PROVIDERS)
  */
-function shouldFailover(error, env) {
+function shouldTriggerFailover(error, env) {
   // 检查是否有可用的故障转移提供者
   const hasUpstash = env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN;
 
@@ -780,26 +1049,27 @@ function shouldFailover(error, env) {
   return false;
 }
 
-function failover(env, ctx = null, requestLogger = null) {
+async function failover(env, ctx = null, requestLogger = null) {
   // 使用统一的 requestLogger
   const failoverLogger = requestLogger || logger.child({ module: 'failover' });
   const hasUpstash = env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN;
 
   // 优先级：Upstash
   if (hasUpstash) {
-    currentProvider = 'upstash';
-    failoverLogger.info('🔄 故障转移到 Upstash Redis (Failover to Upstash Redis)', { reason: failoverReason });
+    if (globalStateInstance) {
+      await globalStateInstance.switchProvider('upstash', 'Automatic failover');
+      failoverLogger.info('🔄 故障转移到 Upstash Redis (Failover to Upstash Redis)', { 
+        reason: 'Automatic failover' 
+      });
+    } else {
+      // 向后兼容
+      currentProvider = 'upstash';
+      failoverLogger.info('🔄 故障转移到 Upstash Redis (Failover to Upstash Redis)', { reason: failoverReason });
+    }
     return true;
   }
 
   return false;
-}
-
-function getCurrentProvider() {
-  if (currentProvider === 'upstash') {
-    return 'Upstash Redis';
-  }
-  return 'Cloudflare KV';
 }
 
 function isRetryableError(error) {

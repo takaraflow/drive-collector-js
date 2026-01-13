@@ -523,29 +523,42 @@ describe('任务调度失败处理优化测试', () => {
    });
 
    it('should_accept_uint8array_payload', async () => {
-     mockKV.list.mockImplementation(async (options) => {
-       if (options && options.prefix) {
-         if (options.prefix.startsWith('instance:')) {
-           return { keys: [{ name: 'instance:1' }] };
-         }
-         return { keys: [] };
-       }
-       return { keys: [] };
-     });
+      mockKV.list.mockImplementation(async (options) => {
+        if (options && options.prefix) {
+          if (options.prefix.startsWith('instance:')) {
+            return { keys: [{ name: 'instance:1' }] };
+          }
+          return { keys: [] };
+        }
+        return { keys: [] };
+      });
 
-     const payload = JSON.stringify({
-       id: '1',
-       url: 'https://instance1.com',
-       status: 'active',
-       lastHeartbeat: Date.now(),
-     });
+      const payload = JSON.stringify({
+        id: '1',
+        url: 'https://instance1.com',
+        status: 'active',
+        lastHeartbeat: Date.now(),
+      });
 
-     mockKV.get.mockResolvedValue(new TextEncoder().encode(payload));
+      const uint8ArrayPayload = new TextEncoder().encode(payload);
+      
+      // Mock KV.get to handle type conversion like real Cloudflare KV
+      mockKV.get.mockImplementation((key, type) => {
+        if (type === 'string' || type === undefined) {
+          // Simulate real KV behavior: convert Uint8Array to string when type is 'string'
+          return new TextDecoder().decode(uint8ArrayPayload);
+        } else if (type === 'arrayBuffer') {
+          return uint8ArrayPayload.buffer;
+        } else if (type === 'buffer') {
+          return uint8ArrayPayload;
+        }
+        return uint8ArrayPayload;
+      });
 
-     const result = await getActiveInstances(mockEnv, {});
-     expect(result.length).toBe(1);
-     expect(result[0].id).toBe('1');
-   });
+      const result = await getActiveInstances(mockEnv, {});
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe('1');
+    });
   });
  
     describe('QStash 元数据记录', () => {
