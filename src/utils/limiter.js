@@ -1,6 +1,7 @@
 import PQueue from "p-queue";
 import { cache } from "../services/CacheService.js";
 import { logger } from "../services/logger/index.js";
+import { ensureConnected } from "../services/telegram.js";
 
 const log = logger.withModule ? logger.withModule('Limiter') : logger;
 
@@ -184,7 +185,10 @@ export const runBotTask = (fn, userId, addOptions = {}, isFileUpload = false) =>
         ? botFileUploadLimiter.run(() => getUserLimiter(userId).run(fn, taskOptions), taskOptions)
         : getUserLimiter(userId).run(fn, taskOptions);
     
-    return botGlobalLimiter.run(() => limiterChain, taskOptions);
+    return botGlobalLimiter.run(async () => {
+        await ensureConnected();
+        return limiterChain;
+    }, taskOptions);
 };
 
 // MTProto 文件传输：使用 token bucket 算法，30 请求突发，25/秒填充（带自动缩放）
