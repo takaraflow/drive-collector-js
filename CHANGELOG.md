@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.22.0](https://github.com/YoungSx/drive-collector-js/compare/v4.20.1...v4.22.0) (2026-01-13)
+
+
+### ♻️ 代码重构
+
+* enhance QueueService with metadata improvements and validation ([b9f0b26](https://github.com/YoungSx/drive-collector-js/commit/b9f0b26986098781e3c3ed97a709ed3e77b62c8b))
+* enhances QstashQueue with robust messaging features ([cd8a164](https://github.com/YoungSx/drive-collector-js/commit/cd8a1648e499d3e6145e8176afbc057f7b6efbd0))
+
+## [4.21.0](https://github.com/YoungSx/drive-collector-js/compare/v4.20.0...v4.21.0) (2026-01-12)
+
+
+### 🔧 其他任务
+
+* **release:** 4.21.0 ([35bc9ff](https://github.com/YoungSx/drive-collector-js/commit/35bc9ffe69772bcefcb26a381140b0947214e9cc))
+
 ## [4.21.0](https://github.com/YoungSx/drive-collector-js/compare/v4.20.0...v4.21.0) (2026-01-12)
 
 
