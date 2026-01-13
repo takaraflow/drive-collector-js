@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.24.0](https://github.com/YoungSx/drive-collector-js/compare/v4.22.0...v4.24.0) (2026-01-13)
+
+
+### 📝 文档更新
+
+* add AGENTS.md with development guidelines ([44d4e57](https://github.com/YoungSx/drive-collector-js/commit/44d4e576879c17bbeab0366563044463ad09622c))
+
+
+### 🐛 问题修复
+
+* adds active task count tracking functionality ([64d3269](https://github.com/YoungSx/drive-collector-js/commit/64d32697712fddd5fd9417f78a394c7ac1fb6a81))
+* enhances logger mocking to support full LoggerService interface ([4882170](https://github.com/YoungSx/drive-collector-js/commit/48821706e67981df11629d506d4aab2a3f14ebbb))
+* ensures Telegram connection before running bot tasks ([e127d91](https://github.com/YoungSx/drive-collector-js/commit/e127d9198c8be19e049fd913a46e865fdb7d3c37))
+* updates mediaGroupBuffer import to use default export ([8edc8b9](https://github.com/YoungSx/drive-collector-js/commit/8edc8b9248f0b2ec50bf140ace1c051f69599d77))
+
+
+### ✨ 新特性
+
+* adds instance-level active task count aggregation ([f553540](https://github.com/YoungSx/drive-collector-js/commit/f55354071567e00592948ec4284f67695a51812d))
+
+
+### 🔧 其他任务
+
+* adds dynamic heartbeat adjustment for reliability ([e1c06e1](https://github.com/YoungSx/drive-collector-js/commit/e1c06e120557d2af5c39f936e403adc47dfc5de8))
+* adds MCP support and updates .gitignore ([8a524a3](https://github.com/YoungSx/drive-collector-js/commit/8a524a33f56f374e4e1a3a81bab1777804c2cfa6))
+* **release:** 4.23.0 ([991fe3f](https://github.com/YoungSx/drive-collector-js/commit/991fe3f4847711f07a1c1f51e6c64ce269888e31))
+
+
+### ♻️ 代码重构
+
+* consistent variable naming for Cloudflare KV configuration ([e97d2ae](https://github.com/YoungSx/drive-collector-js/commit/e97d2aec97cc9aba11793d5fe291296e73fe860c))
+* enhance distributed system reliability with new services and fixes ([d079c3d](https://github.com/YoungSx/drive-collector-js/commit/d079c3df92b191a2b89766d5ddab8dcf5f2ca39e))
+* instance tracking to use cache-only storage ([8d0ffb8](https://github.com/YoungSx/drive-collector-js/commit/8d0ffb88ca44c4930556c4685062deb6d249a38a))
+
+
+### ✅ 测试相关
+
+* add Cloudflare KV and D1 configuration tests ([91d2851](https://github.com/YoungSx/drive-collector-js/commit/91d2851d5e2de879204c11846abe1ef516ccdb75))
+* adds test for verifying DC setting enforcement ([9467567](https://github.com/YoungSx/drive-collector-js/commit/94675674bedfd2ca04c6951c06e533c69edf4a36))
+* improve test environment setup and mocking ([5d1fef3](https://github.com/YoungSx/drive-collector-js/commit/5d1fef387600c4993dd54586682ce7f740dae870))
+
 ## [4.23.0](https://github.com/YoungSx/drive-collector-js/compare/v4.22.0...v4.23.0) (2026-01-13)
 
 
