@@ -5,9 +5,9 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 export default {
   testEnvironment: 'node',
-  testMatch: ['**/__tests__/**/*.test.js', '**/?(*.)+(spec|test).js'],
   globals: true,
   setupFiles: ['./__tests__/vitest.setup.js'],
+  testMatch: ['**/__tests__/**/*.test.js', '**/?(*.)+(spec|test).js'],
   resolve: {
     alias: {
       '@microlabs/otel-cf-workers': resolve(__dirname, './__tests__/mocks/otel-cf-workers.js'),

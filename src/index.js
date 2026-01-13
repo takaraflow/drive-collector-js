@@ -269,7 +269,15 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
   if (!isJwt && timestamp) {
     const now = Math.floor(Date.now() / 1000);
     const expWindow = parseInt(env.SIGNATURE_EXPIRATION_WINDOW || '900');
-    if (now - parseInt(timestamp) > expWindow) {
+    // P1修复：验证 expWindow 是有效数字
+    const parsedTimestamp = parseInt(timestamp);
+    if (isNaN(parsedTimestamp)) {
+      throw new Error('Invalid timestamp format');
+    }
+    if (isNaN(expWindow) || expWindow <= 0) {
+      throw new Error('Invalid expiration window configuration');
+    }
+    if (now - parsedTimestamp > expWindow) {
       throw new Error('Signature expired');
     }
   }
@@ -882,7 +890,11 @@ async function selectTargetInstanceWithRetry(instances, env, ctx, logger) {
       return instances[targetIndex];
     } catch (error) {
       lastError = error;
-      await logger.error(`轮询操作重试 ${attempt + 1}/${maxRetries} 失败`, { error: error.message });
+      // P1修复：限制错误消息长度，防止泄露敏感信息
+      const safeErrorMessage = error.message.length > 200 
+        ? error.message.substring(0, 200) + '...[TRUNCATED]' 
+        : error.message;
+      await logger.error(`轮询操作重试 ${attempt + 1}/${maxRetries} 失败`, { error: safeErrorMessage });
     }
   }
   
@@ -1162,12 +1174,23 @@ async function retryRedisCommand(client, command, args = [], maxRetries = 3, ini
 let cacheServiceInstance = null;
 
 async function _getInitializedCacheService(env, ctx, log) {
-  if (!cacheServiceInstance) {
+  // 检查是否需要重新创建（如果初始化失败或无效）
+  if (!cacheServiceInstance || cacheServiceInstance.isInvalid) {
     cacheServiceInstance = new CacheService({ env, logger: log });
-  } else {
+    cacheServiceInstance.isInvalid = false;
+  } else if (log) {
+    // 不要完全覆盖 logger，而是更新必要的上下文
     cacheServiceInstance.logger = log;
   }
-  await cacheServiceInstance.initialize(ctx, env);
+  
+  try {
+    await cacheServiceInstance.initialize(ctx, env);
+  } catch (error) {
+    // 如果初始化失败，标记为无效，下次重新创建
+    cacheServiceInstance.isInvalid = true;
+    throw error;
+  }
+  
   return cacheServiceInstance;
 }
 
@@ -1302,6 +1325,7 @@ async function checkRedisHealth(env, ctx, executor = executeWithPriorityFallback
 
 /**
  * 执行 Upstash Redis Scan 操作
+ * P1修复：添加最大迭代次数限制和超时保护
  */
 async function executeUpstashScan(env, prefix) {
   const executeUpstashScanLogger = logger.child({ module: 'executeUpstashScan' });
@@ -1315,8 +1339,18 @@ async function executeUpstashScan(env, prefix) {
   let keys = [];
   let cursor = 0;
   const start = Date.now();
+  const maxIterations = 100; // P1修复：最大迭代次数限制
+  const maxDuration = 30000; // P1修复：最大执行时间 30 秒
+  let iterations = 0;
   
-  while (true) {
+  while (iterations < maxIterations) {
+    // P1修复：检查超时
+    if (Date.now() - start > maxDuration) {
+      await executeUpstashScanLogger.warn(`Upstash Scan 超时: prefix=${prefix}, iterations=${iterations}, keysFound=${keys.length}`, {}, null);
+      break;
+    }
+    
+    iterations++;
     const url = `${baseUrl}/scan/${cursor}?match=${encodeURIComponent(prefix + '*')}&count=100`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` }
@@ -1592,7 +1626,7 @@ function normalizePath(pathname) {
  * Worker 主逻辑
  */
 async function handleRequest(request, env, ctx) {
-  const requestId = ctx._axiomDebugRequestId || 'unknown';
+  const requestId = ctx?._axiomDebugRequestId || 'unknown';
   console.log(`[AXIOM_DEBUG] ${requestId}: handleRequest started`);
 
   // 1. 重新配置 Axiom 传输（统一使用 env，此时 env 已经是 safeEnv）

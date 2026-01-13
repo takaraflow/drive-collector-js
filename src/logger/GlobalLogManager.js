@@ -3,10 +3,12 @@
  * 适配 CF Workers 环境：轻量级、无状态、按需执行
  */
 export class GlobalLogManager {
-  constructor(maxContexts = 50, maxContextAge = 300000) {
+  constructor(options = {}) {
     this.contexts = new Map();
-    this.maxContexts = maxContexts;
-    this.maxContextAge = maxContextAge;
+    this.maxContexts = options.maxContexts || 50;
+    this.maxContextAge = options.maxContextAge || 300000; // 5分钟
+    this.maxTotalLogs = options.maxTotalLogs || 10000; // P2修复：总日志数量限制
+    this.totalLogCount = 0;
     
     // CF Workers 不需要定时器 - 在每次创建上下文时触发清理
     this.lastCleanupTime = Date.now();
@@ -17,7 +19,7 @@ export class GlobalLogManager {
    * CF Workers 优化：按需清理，避免定时器
    */
   createContext(options) {
-    // 按需清理 - 每30秒或每10个上下文创建时清理一次
+    // P2修复：按需清理 - 每30秒或每10个上下文创建时清理一次
     const now = Date.now();
     if (now - this.lastCleanupTime > 30000 || this.contexts.size > this.maxContexts * 0.8) {
       this.cleanupExpiredContexts();
@@ -26,9 +28,14 @@ export class GlobalLogManager {
     
     const context = new SafeLogContext(options);
     
-    // 如果上下文数量超限，强制清理最旧的
+    // P2修复：如果上下文数量超限，强制清理最旧的
     if (this.contexts.size >= this.maxContexts) {
       this.cleanupOldestContext();
+    }
+    
+    // P2修复：检查总日志数量，如果超限则清理最旧的
+    if (this.totalLogCount >= this.maxTotalLogs) {
+      this.cleanupOldestLogs();
     }
     
     this.contexts.set(context.requestId, context);
@@ -96,6 +103,47 @@ export class GlobalLogManager {
   }
 
   /**
+   * P2修复：当总日志数量超限时，清理最旧的日志
+   */
+  cleanupOldestLogs() {
+    const now = Date.now();
+    let totalCleaned = 0;
+    const targetCount = this.maxTotalLogs * 0.7; // 清理到 70%
+    
+    // 按时间排序所有上下文
+    const sortedContexts = [...this.contexts.entries()]
+      .sort((a, b) => a[1].startTime - b[1].startTime);
+    
+    for (const [requestId, context] of sortedContexts) {
+      if (this.totalLogCount <= targetCount) break;
+      
+      const logsBefore = context.logBuffer.size;
+      if (logsBefore > 0) {
+        const removed = Math.ceil(logsBefore * 0.3); // 移除每个上下文的 30% 最旧日志
+        const logs = context.logBuffer.getAll();
+        const remaining = logs.slice(removed);
+        
+        context.logBuffer.clear();
+        remaining.forEach(log => context.logBuffer.push(log));
+        
+        this.totalLogCount -= removed;
+        totalCleaned += removed;
+      }
+    }
+    
+    if (totalCleaned > 0) {
+      console.log(`🧹 [GlobalLogManager] 清理了 ${totalCleaned} 条最旧日志，总数: ${this.totalLogCount}`);
+    }
+  }
+
+  /**
+   * P2修复：添加日志时更新计数器
+   */
+  incrementLogCount(count = 1) {
+    this.totalLogCount += count;
+  }
+
+  /**
    * 获取管理器统计信息
    */
   getStats() {
@@ -113,6 +161,8 @@ export class GlobalLogManager {
     return {
       totalContexts: this.contexts.size,
       maxContexts: this.maxContexts,
+      totalLogCount: this.totalLogCount,
+      maxTotalLogs: this.maxTotalLogs,
       contexts,
       memoryUsage: this.estimateMemoryUsage()
     };

@@ -18,6 +18,7 @@ class CacheService {
     constructor(options = {}) {
         this.env = options.env || {};
         this.isInitialized = false;
+        this.isInvalid = false; // P0修复：标记是否处于无效状态
         this.initPromise = null;
         this.logger = options.logger;
 

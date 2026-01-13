@@ -14,9 +14,15 @@ export class RedisTLSCache {
   tlsOptions;
   /** @type {string} */
   providerName = 'RedisTLS';
+  /** @type {number} */
+  connectionTimeout = 5000; // P2修复：连接超时 5秒
+  /** @type {number} */
+  lastConnectionTime = 0;
+  /** @type {boolean} */
+  isHealthy = false;
 
   constructor(options = {}) {
-    const { url, password, rejectUnauthorized, servername, ca, cert, key, db = 0 } = options;
+    const { url, password, rejectUnauthorized, servername, ca, cert, key, db = 0, connectionTimeout = 5000 } = options;
     
     if (!url) {
       throw new Error('RedisTLSCache requires url option');
@@ -24,6 +30,7 @@ export class RedisTLSCache {
 
     this.url = url;
     this.password = password;
+    this.connectionTimeout = connectionTimeout;
     this.tlsOptions = {};
 
     if (url.startsWith('rediss://') || rejectUnauthorized !== undefined || servername || ca || cert || key) {
@@ -43,11 +50,23 @@ export class RedisTLSCache {
   }
 
   async connect() {
-    if (this.client) return;
+    if (this.client) {
+      // P2修复：检查连接是否超时（5分钟无活动则重新连接）
+      if (Date.now() - this.lastConnectionTime > 300000) {
+        await this.disconnect();
+      } else {
+        return;
+      }
+    }
     if (this.connectPromise) return this.connectPromise;
 
     this.connectPromise = (async () => {
       try {
+        // P2修复：添加连接超时
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Redis connection timeout')), this.connectionTimeout);
+        });
+
         const redisOptions = {
           url: this.url,
         };
@@ -64,19 +83,45 @@ export class RedisTLSCache {
         redisOptions.logger = (msg) => logger.debug(`[redis-on-workers] ${msg}`);
         
         const client = createRedis(redisOptions);
-        await client.send('PING');
+        
+        // P2修复：使用 Promise.race 实现超时
+        await Promise.race([client.send('PING'), timeoutPromise]);
+        
         this.client = client;
+        this.lastConnectionTime = Date.now();
+        this.isHealthy = true;
+        
         logger.info('RedisTLSCache initialized successfully', { 
-          host: this.tlsOptions.servername || new URL(this.url).hostname 
+          host: this.tlsOptions.servername || new URL(this.url).hostname,
+          connectionTime: this.lastConnectionTime
         });
       } catch (e) {
         this.client = null;
         this.connectPromise = null;
+        this.isHealthy = false;
         logger.error('RedisTLSCache initialization failed', { error: e.message, url: this.url });
         throw e;
       }
     })();
     await this.connectPromise;
+  }
+
+  /**
+   * P2修复：健康检查
+   */
+  async healthCheck() {
+    try {
+      if (!this.client) {
+        return { healthy: false, error: 'Not connected' };
+      }
+      
+      await this.client.send('PING');
+      this.isHealthy = true;
+      return { healthy: true, latency: Date.now() - this.lastConnectionTime };
+    } catch (error) {
+      this.isHealthy = false;
+      return { healthy: false, error: error.message };
+    }
   }
 
   async disconnect() {

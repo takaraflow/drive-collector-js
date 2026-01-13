@@ -179,8 +179,8 @@ export async function flushLogs(logBuffer) {
 // 版本和环境访问器
 export { VERSION };
 export function updateVersionFromEnv() {
-  if (typeof globalThis !== 'undefined' && globalThis.VERSION) {
-    globalThis.VERSION = globalThis.VERSION;
+  if (typeof globalThis !== 'undefined' && VERSION) {
+    globalThis.VERSION = VERSION;
   }
 }
 
