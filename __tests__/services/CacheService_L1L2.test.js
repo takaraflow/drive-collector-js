@@ -15,19 +15,6 @@ vi.mock("../../src/services/logger/index.js", () => ({
 }));
 
 // Mock all provider classes to prevent real connections
-vi.mock("../../src/services/cache/CloudflareKVCache.js", () => ({
-    CloudflareKVCache: vi.fn().mockImplementation(() => ({
-        initialize: vi.fn(),
-        getProviderName: vi.fn(() => 'cloudflare'),
-        get: vi.fn(),
-        set: vi.fn(),
-        delete: vi.fn(),
-        listKeys: vi.fn(),
-        disconnect: vi.fn(),
-        getConnectionInfo: vi.fn(() => ({ provider: 'cloudflare' }))
-    }))
-}));
-
 vi.mock("../../src/services/cache/RedisCache.js", () => ({
     RedisCache: vi.fn().mockImplementation(() => ({
         initialize: vi.fn(),

@@ -241,6 +241,54 @@ describe("CloudflareKVCache", () => {
         });
     });
 
+    describe("detectConfig", () => {
+        test("should detect config from CLOUDFLARE_KV_* variables", () => {
+            const env = {
+                CLOUDFLARE_KV_ACCOUNT_ID: "acc_kv",
+                CLOUDFLARE_KV_NAMESPACE_ID: "ns_kv",
+                CLOUDFLARE_KV_TOKEN: "tok_kv"
+            };
+            const config = CloudflareKVCache.detectConfig(env);
+            expect(config).toEqual({
+                accountId: "acc_kv",
+                namespaceId: "ns_kv",
+                token: "tok_kv"
+            });
+        });
+
+        test("should fallback to CLOUDFLARE_ACCOUNT_ID", () => {
+            const env = {
+                CLOUDFLARE_ACCOUNT_ID: "acc_gen",
+                CLOUDFLARE_KV_NAMESPACE_ID: "ns_kv",
+                CLOUDFLARE_KV_TOKEN: "tok_kv"
+            };
+            const config = CloudflareKVCache.detectConfig(env);
+            expect(config).toEqual({
+                accountId: "acc_gen",
+                namespaceId: "ns_kv",
+                token: "tok_kv"
+            });
+        });
+
+        test("should return null if missing namespaceId", () => {
+            const env = {
+                CLOUDFLARE_KV_ACCOUNT_ID: "acc_kv",
+                CLOUDFLARE_KV_TOKEN: "tok_kv"
+            };
+            const config = CloudflareKVCache.detectConfig(env);
+            expect(config).toBeNull();
+        });
+
+        test("should return null if missing token", () => {
+            const env = {
+                CLOUDFLARE_KV_ACCOUNT_ID: "acc_kv",
+                CLOUDFLARE_KV_NAMESPACE_ID: "ns_kv"
+            };
+            const config = CloudflareKVCache.detectConfig(env);
+            expect(config).toBeNull();
+        });
+    });
+
     test("should handle API errors gracefully", async () => {
         const cache = new CloudflareKVCache({
             accountId: "acc123",

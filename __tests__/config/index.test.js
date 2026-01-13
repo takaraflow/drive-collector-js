@@ -139,4 +139,50 @@ describe("Config Module", () => {
     delete process.env.REDIS_TOKEN;
     delete process.env.UPSTASH_REDIS_REST_TOKEN;
   });
+
+  test("should map Cloudflare KV configuration correctly", async () => {
+    process.env.CLOUDFLARE_KV_ACCOUNT_ID = "acc_kv";
+    process.env.CLOUDFLARE_KV_NAMESPACE_ID = "ns_kv";
+    process.env.CLOUDFLARE_KV_TOKEN = "tok_kv";
+
+    __resetConfigForTests();
+    const config = await initConfig();
+    expect(config.kv.accountId).toBe("acc_kv");
+    expect(config.kv.namespaceId).toBe("ns_kv");
+    expect(config.kv.token).toBe("tok_kv");
+
+    delete process.env.CLOUDFLARE_KV_ACCOUNT_ID;
+    delete process.env.CLOUDFLARE_KV_NAMESPACE_ID;
+    delete process.env.CLOUDFLARE_KV_TOKEN;
+  });
+
+  test("should fallback to CLOUDFLARE_ACCOUNT_ID for KV", async () => {
+    process.env.CLOUDFLARE_ACCOUNT_ID = "acc_gen";
+    process.env.CLOUDFLARE_KV_NAMESPACE_ID = "ns_kv";
+    process.env.CLOUDFLARE_KV_TOKEN = "tok_kv";
+
+    __resetConfigForTests();
+    const config = await initConfig();
+    expect(config.kv.accountId).toBe("acc_gen");
+
+    delete process.env.CLOUDFLARE_ACCOUNT_ID;
+    delete process.env.CLOUDFLARE_KV_NAMESPACE_ID;
+    delete process.env.CLOUDFLARE_KV_TOKEN;
+  });
+
+  test("should map Cloudflare D1 configuration correctly", async () => {
+    process.env.CLOUDFLARE_D1_ACCOUNT_ID = "acc_d1";
+    process.env.CLOUDFLARE_D1_DATABASE_ID = "db_d1";
+    process.env.CLOUDFLARE_D1_TOKEN = "tok_d1";
+
+    __resetConfigForTests();
+    const config = await initConfig();
+    expect(config.d1.accountId).toBe("acc_d1");
+    expect(config.d1.databaseId).toBe("db_d1");
+    expect(config.d1.token).toBe("tok_d1");
+
+    delete process.env.CLOUDFLARE_D1_ACCOUNT_ID;
+    delete process.env.CLOUDFLARE_D1_DATABASE_ID;
+    delete process.env.CLOUDFLARE_D1_TOKEN;
+  });
 });
