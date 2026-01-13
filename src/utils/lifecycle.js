@@ -26,7 +26,8 @@ export async function registerShutdownHooks() {
     const { stopWatchdog, client } = await import("../services/telegram.js");
     const { TaskRepository } = await import("../repositories/TaskRepository.js");
     const { flushLogBuffer } = await import("../services/logger/index.js");
-    const { mediaGroupBuffer } = await import("../services/MediaGroupBuffer.js");
+    const mediaGroupBufferModule = await import("../services/MediaGroupBuffer.js");
+    const mediaGroupBuffer = mediaGroupBufferModule.default;
     const { distributedLock } = await import("../services/DistributedLock.js");
 
     // 注册任务计数器（用于任务排空）

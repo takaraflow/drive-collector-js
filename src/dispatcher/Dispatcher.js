@@ -20,7 +20,7 @@ import { cache } from "../services/CacheService.js";
 import { queueService } from "../services/QueueService.js";
 import { logger } from "../services/logger/index.js";
 import { localCache } from "../utils/LocalCache.js";
-import { mediaGroupBuffer } from "../services/MediaGroupBuffer.js";
+import mediaGroupBuffer from "../services/MediaGroupBuffer.js";
 import fs from "fs";
 import path from "path";
 
