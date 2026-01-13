@@ -183,10 +183,17 @@ class GlobalLogManager {
     this.contexts = new Map();
     this.maxContexts = 1000;
     this.cleanupInterval = 60000; // 1分钟
-    this.startCleanupTimer();
+    this.lastCleanupTime = Date.now();
   }
 
   createContext(options) {
+    // Cloudflare Worker 全局作用域不允许定时器，这里改为按需清理
+    const now = Date.now();
+    if (now - this.lastCleanupTime > this.cleanupInterval) {
+      this.performCleanup();
+      this.lastCleanupTime = now;
+    }
+
     const context = new SafeLogContext(options);
     
     // 如果上下文数量超限，清理最旧的
