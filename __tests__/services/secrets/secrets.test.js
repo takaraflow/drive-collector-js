@@ -1,7 +1,7 @@
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import BaseSecretsProvider from '../../../src/services/secrets/BaseSecretsProvider.js';
 import CloudSecretsProvider from '../../../src/services/secrets/CloudSecretsProvider.js';
 import InfisicalSecretsProvider from '../../../src/services/secrets/InfisicalSecretsProvider.js';
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 describe('BaseSecretsProvider', () => {
   describe('constructor', () => {

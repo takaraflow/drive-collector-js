@@ -154,6 +154,8 @@ describe("QstashQueue - publish", () => {
     });
 
     test("should publish directly when batch size is 1", async () => {
+        // Override batch size to 1 for direct publishing
+        queue.batchSize = 1;
         mockPublishJSON.mockResolvedValue({ messageId: 'msg-1' });
 
         const result = await queue._publish('test-topic', { data: 'test' });
@@ -187,15 +189,15 @@ describe("QstashQueue - publish", () => {
             qstash: { token: '' }
         });
 
-        const mockQueue = new QstashQueue();
+        const mockQueue = new QstashQueue({ batchSize: 1 }); // Force direct mode
         await mockQueue.initialize();
 
         const result = await mockQueue._publish('test-topic', { data: 'test' });
         
-        // In mock mode with batch size > 1, it goes to buffer and returns a message ID
+        // In mock mode with batch size 1, it should return a message ID
         expect(result).toBeDefined();
         expect(result.messageId).toBeDefined();
-        expect(result.messageId).toMatch(/^msg_/); // New format with idempotency
+        expect(result.messageId).toMatch(/^msg_/);
     });
 });
 

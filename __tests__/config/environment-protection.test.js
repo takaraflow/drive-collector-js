@@ -1,35 +1,34 @@
 describe("config - Environment Variable Protection", () => {
-  const originalEnv = { ...process.env };
+  const originalEnvKeys = Object.keys(process.env);
   let mockEnv;
 
   beforeEach(() => {
     vi.clearAllMocks();
     
-    // Reset mock environment
-    mockEnv = { ...originalEnv };
+    mockEnv = { NODE_ENV: 'test' };
     
-    // Mock console to prevent log pollution
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    
-    // Reset process.env
-    process.env = { ...originalEnv };
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    process.env = { ...originalEnv };
+    originalEnvKeys.forEach(key => {
+      if (process.env[key] === undefined) {
+        delete process.env[key];
+      }
+    });
   });
 
-  // Helper function to initialize config with mocked dependencies
   const initTestConfig = async (envOverrides = {}) => {
+    vi.resetModules();
+    
     mockEnv = {
-      ...mockEnv,
+      NODE_ENV: 'test',
       ...envOverrides
     };
 
-    // Mock dependencies locally
     await vi.doMock('dotenv', () => ({
       default: {
         config: vi.fn(() => ({ parsed: {} }))
@@ -159,10 +158,6 @@ describe("config - Environment Variable Protection", () => {
   });
 
   describe("Environment Normalization Integration", () => {
-    // Note: The config module normalizes NODE_ENV at module load time (lines 18-20 in src/config/index.js)
-    // This means by the time initConfig() is called, NODE_ENV is already normalized.
-    // These tests verify that the config can be initialized successfully with various input values.
-    
     const testEnvs = [
       { NODE_ENV: "production", description: "production -> prod" },
       { NODE_ENV: "development", description: "development -> dev" },
@@ -181,7 +176,6 @@ describe("config - Environment Variable Protection", () => {
         OWNER_ID: "owner_id"
       });
 
-      // Verify config initializes successfully regardless of input NODE_ENV
       expect(config).toBeDefined();
     });
   });

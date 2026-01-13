@@ -129,7 +129,6 @@ describe('Telegram Flood Wait Handling', () => {
         vi.useFakeTimers();
         vi.clearAllMocks();
 
-        // Reset Client State
         mockClient.connected = false;
         mockClient.connect.mockReset();
         mockClient.start.mockReset();
@@ -139,7 +138,6 @@ describe('Telegram Flood Wait Handling', () => {
         mockClient.getMe.mockReset();
         mockClient.session.save.mockReset().mockReturnValue('mock-session');
 
-        // Reset Circuit Breaker
         if (resetCircuitBreaker) {
             resetCircuitBreaker();
         }

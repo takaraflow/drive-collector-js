@@ -1,5 +1,5 @@
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { initConfig, __resetConfigForTests } from "../../src/config/index.js";
-import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
 
 const originalEnv = { ...process.env };
 
@@ -13,26 +13,6 @@ describe("config - Environment Validation", () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    
-    // Mock dependencies per test
-    await vi.doMock('dotenv', () => ({
-      default: {
-        config: vi.fn(() => ({ parsed: {} }))
-      },
-      loadDotenv: vi.fn()
-    }));
-
-    await vi.doMock('../../src/services/secrets/InfisicalSecretsProvider.js', () => ({
-      default: class {
-        constructor() {
-          this.authType = null;
-        }
-        async authenticate() {}
-        async fetchSecrets() {
-          return vi.fn().mockResolvedValue({});
-        }
-      }
-    }));
     
     __resetConfigForTests();
   });
@@ -79,7 +59,6 @@ describe("config - Environment Validation", () => {
 
   describe("Environment Normalization", () => {
     test("should normalize production to prod in initConfig", async () => {
-      // Set the raw value before module loads
       process.env.NODE_ENV = "production";
       process.env.INFISICAL_TOKEN = "test_token";
       process.env.INFISICAL_PROJECT_ID = "test_project";
@@ -88,16 +67,11 @@ describe("config - Environment Validation", () => {
       process.env.BOT_TOKEN = "test_bot_token";
       process.env.OWNER_ID = "owner_id";
 
-      // The config module normalizes NODE_ENV on load, so by the time initConfig runs,
-      // NODE_ENV should already be "prod" due to the module-level normalization
       const config = await initConfig();
-      expect(config).toBeDefined();
-      // Verify the config was created successfully with normalized environment
       expect(config).toBeDefined();
     });
 
     test("should normalize staging to pre in initConfig", async () => {
-      // Set the raw value before module loads
       process.env.NODE_ENV = "staging";
       process.env.INFISICAL_ENV = "pre";
       process.env.INFISICAL_TOKEN = "test_token";
@@ -107,11 +81,7 @@ describe("config - Environment Validation", () => {
       process.env.BOT_TOKEN = "test_bot_token";
       process.env.OWNER_ID = "owner_id";
 
-      // The config module normalizes NODE_ENV on load, so by the time initConfig runs,
-      // NODE_ENV should already be "pre" due to the module-level normalization
       const config = await initConfig();
-      expect(config).toBeDefined();
-      // Verify the config was created successfully with normalized environment
       expect(config).toBeDefined();
     });
   });

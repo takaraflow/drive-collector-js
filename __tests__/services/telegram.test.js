@@ -115,22 +115,16 @@ describe("Telegram Service", () => {
     };
 
     beforeAll(async () => {
-        vi.useFakeTimers();
-        
-        // 【关键修复】重置模块缓存，确保使用最新的 Mock
         vi.resetModules();
 
-        // 导入源代码
         module = await import("../../src/services/telegram.js");
         client = module.client;
     });
 
     afterAll(async () => {
-        vi.useRealTimers();
         if (module.stopWatchdog) {
             module.stopWatchdog();
         }
-        // Attempt to disconnect client if initialized to clear any pending timers in library
         try {
             const clientInstance = await module.getClient();
             if (clientInstance && typeof clientInstance.disconnect === 'function') {
@@ -144,14 +138,12 @@ describe("Telegram Service", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
-        vi.clearAllTimers();
     });
 
     afterEach(async () => {
         if (module.stopWatchdog) {
             module.stopWatchdog();
         }
-        vi.clearAllTimers();
     });
 
     test("should export client and related functions", () => {

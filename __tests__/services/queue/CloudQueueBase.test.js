@@ -5,6 +5,7 @@
 
 import CloudQueueBase from "../../../src/services/queue/CloudQueueBase.js";
 
+// Mock config and logger
 vi.mock("../../../src/config/index.js", () => ({
     getConfig: vi.fn(() => ({
         qstash: {
@@ -175,9 +176,14 @@ describe("CloudQueueBase - Retry Logic", () => {
     });
 
     test("should retry on failure and eventually succeed", async () => {
-        const operation = vi.fn()
-            .mockRejectedValueOnce(new Error('Network error'))
-            .mockResolvedValue('success');
+        let attempt = 0;
+        const operation = vi.fn().mockImplementation(() => {
+            attempt++;
+            if (attempt === 1) {
+                return Promise.reject(new Error('Network error'));
+            }
+            return Promise.resolve('success');
+        });
         
         const result = await queue._executeWithRetry(operation, 3, '[Test]');
         
@@ -186,9 +192,15 @@ describe("CloudQueueBase - Retry Logic", () => {
     });
 
     test("should fail after max retries", async () => {
-        const operation = vi.fn().mockRejectedValue(new Error('Persistent error'));
+        let attempt = 0;
+        const operation = vi.fn().mockImplementation(() => {
+            attempt++;
+            return Promise.reject(new Error('Persistent error'));
+        });
         
-        await expect(queue._executeWithRetry(operation, 3, '[Test]')).rejects.toThrow('Persistent error');
+        await expect(queue._executeWithRetry(operation, 3, '[Test]'))
+            .rejects.toThrow('Persistent error');
+        
         expect(operation).toHaveBeenCalledTimes(3);
     });
 
@@ -205,7 +217,12 @@ describe("CloudQueueBase - Batch Execution", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.useFakeTimers();
         queue = new TestCloudQueue({ maxConcurrent: 2 });
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     test("should execute batch sequentially", async () => {
@@ -214,9 +231,14 @@ describe("CloudQueueBase - Batch Execution", () => {
             { topic: 'test-2', data: { id: 2 } }
         ];
         
-        const results = await queue._executeBatch(messages, 2, async (msg) => {
+        const promise = queue._executeBatch(messages, 2, async (msg) => {
             return { messageId: `msg-${msg.data.id}` };
         }, '[Test]');
+        
+        // Fast-forward through any batch delays
+        await vi.advanceTimersByTimeAsync(10);
+        
+        const results = await promise;
         
         expect(results).toHaveLength(2);
         expect(results[0].value.messageId).toBe('msg-1');
@@ -237,12 +259,19 @@ describe("CloudQueueBase - Batch Execution", () => {
             { topic: 'test-2', data: { id: 2 } }
         ];
         
-        const results = await queue._executeBatch(messages, 2, async (msg) => {
+        const promise = queue._executeBatch(messages, 2, async (msg) => {
             if (msg.data.id === 1) {
                 throw new Error('Processing error');
             }
             return { messageId: `msg-${msg.data.id}` };
         }, '[Test]');
+        
+        // Fast-forward through retry delays for the failed operation
+        await vi.advanceTimersByTimeAsync(125);
+        await vi.advanceTimersByTimeAsync(225);
+        await vi.advanceTimersByTimeAsync(425);
+        
+        const results = await promise;
         
         expect(results).toHaveLength(2);
         expect(results[0].status).toBe('rejected');

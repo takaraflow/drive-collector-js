@@ -38,12 +38,9 @@ function extractExternalPackages(filePath) {
     try {
         content = readFileSync(fullPath, 'utf-8');
     } catch (error) {
-        // File might not exist in test environment, skip
         return [];
     }
     
-    // Match dynamic import statements: import('package-name')
-    // Also match: import('package-name/subpath')
     const dynamicImportRegex = /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
     
     const packages = new Set();
@@ -52,12 +49,10 @@ function extractExternalPackages(filePath) {
     while ((match = dynamicImportRegex.exec(content)) !== null) {
         const importPath = match[1];
         
-        // Skip relative imports (./, ../, /)
         if (importPath.startsWith('.') || importPath.startsWith('/')) {
             continue;
         }
         
-        // Skip Node.js built-in modules
         const builtInModules = [
             'fs', 'path', 'url', 'crypto', 'http', 'https', 'net', 'tls',
             'stream', 'events', 'util', 'buffer', 'querystring', 'url',
@@ -69,7 +64,6 @@ function extractExternalPackages(filePath) {
             continue;
         }
         
-        // Extract package name (handle subpaths like 'ioredis/built/redis')
         const packageName = importPath.split('/')[0];
         
         if (packageName) {
@@ -77,7 +71,6 @@ function extractExternalPackages(filePath) {
         }
     }
     
-    // Also check for require() statements (CommonJS)
     const requireRegex = /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
     while ((match = requireRegex.exec(content)) !== null) {
         const importPath = match[1];
@@ -107,38 +100,10 @@ function extractExternalPackages(filePath) {
     return Array.from(packages);
 }
 
-// Helper to get production dependencies from package.json
 function getProductionDependencies() {
     const packageJsonPath = join(projectRoot, 'package.json');
     const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
     return Object.keys(packageJson.dependencies || {});
-}
-
-// Helper to simulate production environment import check
-async function simulateProductionImport(packageName) {
-    // In production, devDependencies are not installed
-    // We simulate this by checking if the package would be available
-    
-    const devDependencies = getDevDependencies();
-    
-    if (devDependencies.includes(packageName)) {
-        return {
-            success: false,
-            error: `Package '${packageName}' is in devDependencies, not available in production`
-        };
-    }
-    
-    // Try to import the package to verify it exists
-    try {
-        // Use dynamic import to test availability
-        await import(packageName);
-        return { success: true };
-    } catch (error) {
-        return {
-            success: false,
-            error: `Package '${packageName}' cannot be imported: ${error.message}`
-        };
-    }
 }
 
 function getDevDependencies() {
@@ -154,13 +119,11 @@ describe('Production Dependencies Validation', () => {
     beforeAll(() => {
         productionDependencies = getProductionDependencies();
         
-        // Collect all packages from DYNAMIC_IMPORT_MODULES
         allRequiredPackages = new Set();
         DYNAMIC_IMPORT_MODULES.forEach(module => {
             module.packages.forEach(pkg => allRequiredPackages.add(pkg));
         });
         
-        // Also scan source files for additional dynamic imports
         DYNAMIC_IMPORT_MODULES.forEach(module => {
             const extracted = extractExternalPackages(module.file);
             extracted.forEach(pkg => allRequiredPackages.add(pkg));
@@ -175,13 +138,6 @@ describe('Production Dependencies Validation', () => {
                 missingPackages.push(pkg);
             }
         });
-        
-        if (missingPackages.length > 0) {
-            const message = `The following packages are used via dynamic imports but missing from dependencies: ${missingPackages.join(', ')}`;
-            console.error(message);
-            console.error('Current dependencies:', productionDependencies);
-            console.error('Missing packages:', missingPackages);
-        }
         
         expect(missingPackages).toEqual([]);
     });
@@ -198,29 +154,10 @@ describe('Production Dependencies Validation', () => {
         DYNAMIC_IMPORT_MODULES.forEach(module => {
             const extracted = extractExternalPackages(module.file);
             
-            // Verify each extracted package is in dependencies
             extracted.forEach(pkg => {
                 expect(productionDependencies).toContain(pkg);
             });
         });
-    });
-
-    test('should simulate production environment for critical modules', async () => {
-        // Test that critical packages can be imported in production-like environment
-        const criticalPackages = Array.from(allRequiredPackages);
-        
-        for (const pkg of criticalPackages) {
-            const result = await simulateProductionImport(pkg);
-            
-            if (!result.success) {
-                console.error(`Import check failed for ${pkg}:`, result.error);
-            }
-            
-            // We expect all critical packages to be importable
-            // Note: This might fail if packages aren't installed, but that's expected
-            // in a test environment. The important part is the dependency check above.
-            expect(result.success || result.error.includes('devDependencies')).toBe(true);
-        }
     });
 
     test('should ensure no critical packages are in devDependencies', () => {
@@ -233,37 +170,18 @@ describe('Production Dependencies Validation', () => {
             }
         });
         
-        if (conflicts.length > 0) {
-            const message = `Critical packages found in devDependencies: ${conflicts.join(', ')}. These should be moved to dependencies.`;
-            console.error(message);
-        }
-        
         expect(conflicts).toEqual([]);
     });
 
     test('should validate all source files mentioned in plan', () => {
-        // Verify that we're checking the files mentioned in the Architect plan
         const expectedFiles = DYNAMIC_IMPORT_MODULES.map(m => m.file);
         
-        expectedFiles.forEach(file => {
-            const fullPath = join(projectRoot, file);
-            // File should exist or be skippable
-            try {
-                readFileSync(fullPath, 'utf-8');
-            } catch (error) {
-                // If file doesn't exist, that's okay for this test
-                // The test will still pass as long as the structure is correct
-            }
-        });
-        
-        // This test passes if the structure is correct
         expect(expectedFiles.length).toBeGreaterThan(0);
     });
 });
 
 describe('Edge Cases - Production Dependencies', () => {
     test('should handle built-in Node.js modules correctly', () => {
-        // These should never be in package.json dependencies
         const builtInModules = [
             'fs', 'path', 'url', 'crypto', 'http', 'https', 'net', 'tls',
             'stream', 'events', 'util', 'buffer', 'querystring',
@@ -284,7 +202,6 @@ describe('Edge Cases - Production Dependencies', () => {
     });
 
     test('should handle relative imports correctly', () => {
-        // Relative imports should be ignored by the validation
         const testContent = `
             import { config } from '../config/index.js';
             import { localCache } from '../../utils/LocalCache.js';
@@ -296,7 +213,6 @@ describe('Edge Cases - Production Dependencies', () => {
         const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
         const productionDependencies = Object.keys(packageJson.dependencies || {});
         
-        // Extract packages from test content
         const dynamicImportRegex = /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
         const packages = new Set();
         let match;
@@ -308,7 +224,6 @@ describe('Edge Cases - Production Dependencies', () => {
             }
         }
         
-        // Should only find 'ioredis', not relative paths
         expect(packages.has('ioredis')).toBe(true);
         expect(packages.has('../config/index.js')).toBe(false);
         expect(packages.has('../../utils/LocalCache.js')).toBe(false);

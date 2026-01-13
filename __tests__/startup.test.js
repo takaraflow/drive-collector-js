@@ -22,33 +22,43 @@ vi.mock('../../src/config/index.js', () => ({
 }));
 
 describe("Project Smoke Test (Startup)", () => {
-    test("should load core modules without SyntaxErrors", { timeout: 20000 }, async () => {
-        // 关键在于导入这些文件，只要没有 SyntaxError 就算通过
-        const modules = [
-            "../src/config/index.js",
-            "../src/utils/common.js",
-            "../src/utils/limiter.js",
-            "../src/ui/templates.js",
-            "../src/locales/zh-CN.js"
-        ];
-
-        for (const path of modules) {
-            const module = await import(path);
-            expect(module).toBeDefined();
-        }
+    test("should load config module", async () => {
+        const config = await import("../src/config/index.js");
+        expect(config).toBeDefined();
     });
 
-    test("should load complex modules with Mocks", { timeout: 20000 }, async () => {
-        // 这些模块在顶级作用域有副作用（如初始化连接），需要 Mock
-        const complexModules = [
-            "../src/services/telegram.js",
-            "../src/processor/TaskManager.js",
-            "../src/repositories/TaskRepository.js"
-        ];
+    test("should load common utils module", async () => {
+        const common = await import("../src/utils/common.js");
+        expect(common).toBeDefined();
+    });
 
-        for (const path of complexModules) {
-            const module = await import(path);
-            expect(module).toBeDefined();
-        }
+    test("should load limiter utils module", async () => {
+        const limiter = await import("../src/utils/limiter.js");
+        expect(limiter).toBeDefined();
+    });
+
+    test("should load templates module", async () => {
+        const templates = await import("../src/ui/templates.js");
+        expect(templates).toBeDefined();
+    });
+
+    test("should load locales module", async () => {
+        const locales = await import("../src/locales/zh-CN.js");
+        expect(locales).toBeDefined();
+    });
+
+    test("should load telegram module with Mocks", async () => {
+        const telegram = await import("../src/services/telegram.js");
+        expect(telegram).toBeDefined();
+    });
+
+    test("should load TaskManager module with Mocks", async () => {
+        const taskManager = await import("../src/processor/TaskManager.js");
+        expect(taskManager).toBeDefined();
+    });
+
+    test("should load TaskRepository module with Mocks", async () => {
+        const taskRepository = await import("../src/repositories/TaskRepository.js");
+        expect(taskRepository).toBeDefined();
     });
 });

@@ -1,7 +1,7 @@
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import InfisicalSecretsProvider from '../../../src/services/secrets/InfisicalSecretsProvider.js';
 import CloudSecretsProvider from '../../../src/services/secrets/CloudSecretsProvider.js';
 import BaseSecretsProvider from '../../../src/services/secrets/BaseSecretsProvider.js';
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
 describe('Infisical Secrets Auto-Update (Polling)', () => {
   let provider;
