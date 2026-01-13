@@ -1,6 +1,9 @@
 import { d1 } from "../services/d1.js";
 import { cache } from "../services/CacheService.js";
 import { logger } from "../services/logger/index.js";
+import { ConsistentCache } from "../services/ConsistentCache.js";
+import { StateSynchronizer } from "../services/StateSynchronizer.js";
+import { BatchProcessor } from "../services/BatchProcessor.js";
 
 const log = logger.withModule ? logger.withModule('TaskRepository') : logger;
 
@@ -407,6 +410,373 @@ export class TaskRepository {
         } catch (e) {
             log.error("TaskRepository.createBatch failed:", e);
             throw e;
+        }
+    }
+
+    /**
+     * 使用 ConsistentCache 更新任务状态（一致性缓存）
+     * 确保多实例间状态同步，避免重复处理
+     */
+    static async updateStatusWithConsistency(taskId, status, errorMsg = null) {
+        const isCritical = ['completed', 'failed', 'cancelled'].includes(status);
+        const isImportant = this.IMPORTANT_STATUSES.includes(status);
+        
+        // Critical: 立即写入 D1 + 清除缓存
+        if (isCritical) {
+            this.pendingUpdates.delete(taskId);
+            try {
+                await d1.run(
+                    "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
+                    [status, errorMsg, Date.now(), taskId]
+                );
+            } catch (e) {
+                log.error(`TaskRepository.updateStatusWithConsistency (critical) failed for ${taskId}:`, e);
+            }
+            // 清除 ConsistentCache
+            try {
+                await ConsistentCache.delete(`task:${taskId}`);
+            } catch (e) {
+                // Ignore
+            }
+            return;
+        }
+        
+        // Important: 使用 ConsistentCache（带 TTL）
+        if (isImportant) {
+            try {
+                await ConsistentCache.set(
+                    `task:${taskId}`,
+                    { status, errorMsg, updatedAt: Date.now() },
+                    300  // 5分钟过期
+                );
+            } catch (e) {
+                log.warn(`TaskRepository ConsistentCache update failed for ${taskId}:`, e.message);
+                // Fallback to memory buffer
+                this.pendingUpdates.set(taskId, {
+                    taskId,
+                    status,
+                    errorMsg,
+                    timestamp: Date.now(),
+                    updatedAt: Date.now(),
+                    source: 'consistent_fallback'
+                });
+                this.startFlushing();
+            }
+            return;
+        }
+        
+        // Minor: 继续缓冲
+        this.pendingUpdates.set(taskId, {
+            taskId,
+            status,
+            errorMsg,
+            timestamp: Date.now(),
+            updatedAt: Date.now(),
+            source: 'memory_buffer'
+        });
+        this.startFlushing();
+    }
+
+    /**
+     * 使用 StateSynchronizer 更新任务状态（状态同步）
+     * 确保状态变更的原子性和一致性
+     */
+    static async updateStatusSynchronized(taskId, status, errorMsg = null) {
+        const isCritical = ['completed', 'failed', 'cancelled'].includes(status);
+        const isImportant = this.IMPORTANT_STATUSES.includes(status);
+        
+        // Critical: 立即写入 D1
+        if (isCritical) {
+            this.pendingUpdates.delete(taskId);
+            try {
+                await d1.run(
+                    "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
+                    [status, errorMsg, Date.now(), taskId]
+                );
+            } catch (e) {
+                log.error(`TaskRepository.updateStatusSynchronized (critical) failed for ${taskId}:`, e);
+            }
+            // 清除同步状态
+            try {
+                await StateSynchronizer.clearTaskState(taskId);
+            } catch (e) {
+                // Ignore
+            }
+            return;
+        }
+        
+        // Important: 使用 StateSynchronizer
+        if (isImportant) {
+            try {
+                await StateSynchronizer.updateTaskState(taskId, {
+                    status,
+                    errorMsg,
+                    updatedAt: Date.now()
+                });
+            } catch (e) {
+                log.warn(`TaskRepository StateSynchronizer update failed for ${taskId}:`, e.message);
+                // Fallback to memory buffer
+                this.pendingUpdates.set(taskId, {
+                    taskId,
+                    status,
+                    errorMsg,
+                    timestamp: Date.now(),
+                    updatedAt: Date.now(),
+                    source: 'synchronizer_fallback'
+                });
+                this.startFlushing();
+            }
+            return;
+        }
+        
+        // Minor: 继续缓冲
+        this.pendingUpdates.set(taskId, {
+            taskId,
+            status,
+            errorMsg,
+            timestamp: Date.now(),
+            updatedAt: Date.now(),
+            source: 'memory_buffer'
+        });
+        this.startFlushing();
+    }
+
+    /**
+     * 使用 BatchProcessor 批量更新任务状态
+     * @param {Array<Object>} updates - 更新数组 [{taskId, status, errorMsg}]
+     */
+    static async updateStatusBatch(updates) {
+        if (!updates || updates.length === 0) return;
+
+        // 分类处理
+        const criticalUpdates = updates.filter(u => ['completed', 'failed', 'cancelled'].includes(u.status));
+        const importantUpdates = updates.filter(u => this.IMPORTANT_STATUSES.includes(u.status));
+        const minorUpdates = updates.filter(u => !criticalUpdates.includes(u) && !importantUpdates.includes(u));
+
+        // Critical: 立即写入 D1
+        if (criticalUpdates.length > 0) {
+            const statements = criticalUpdates.map(u => ({
+                sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
+                params: [u.status, u.errorMsg, Date.now(), u.taskId]
+            }));
+
+            try {
+                await d1.batch(statements);
+                // 清除缓存
+                for (const u of criticalUpdates) {
+                    this.pendingUpdates.delete(u.taskId);
+                    try {
+                        await ConsistentCache.delete(`task:${u.taskId}`);
+                        await StateSynchronizer.clearTaskState(u.taskId);
+                    } catch (e) {
+                        // Ignore
+                    }
+                }
+            } catch (e) {
+                log.error("TaskRepository.updateStatusBatch critical updates failed:", e);
+            }
+        }
+
+        // Important: 使用 BatchProcessor + ConsistentCache
+        if (importantUpdates.length > 0) {
+            try {
+                // 使用 BatchProcessor 进行批量操作
+                const batchOps = importantUpdates.map(u => ({
+                    type: 'set',
+                    key: `task:${u.taskId}`,
+                    value: { status: u.status, errorMsg: u.errorMsg, updatedAt: Date.now() },
+                    ttl: 300
+                }));
+                await BatchProcessor.processBatch('consistent-cache', batchOps);
+            } catch (e) {
+                log.warn(`TaskRepository updateStatusBatch important updates failed:`, e.message);
+                // Fallback to memory buffer
+                for (const u of importantUpdates) {
+                    this.pendingUpdates.set(u.taskId, {
+                        taskId: u.taskId,
+                        status: u.status,
+                        errorMsg: u.errorMsg,
+                        timestamp: Date.now(),
+                        updatedAt: Date.now(),
+                        source: 'batch_fallback'
+                    });
+                }
+                this.startFlushing();
+            }
+        }
+
+        // Minor: 使用 BatchProcessor 内存缓冲
+        if (minorUpdates.length > 0) {
+            for (const u of minorUpdates) {
+                this.pendingUpdates.set(u.taskId, {
+                    taskId: u.taskId,
+                    status: u.status,
+                    errorMsg: u.errorMsg,
+                    timestamp: Date.now(),
+                    updatedAt: Date.now(),
+                    source: 'batch_memory'
+                });
+            }
+            this.startFlushing();
+        }
+    }
+
+    /**
+     * 从 ConsistentCache 读取任务状态
+     * 用于多实例间状态同步
+     */
+    static async getTaskStatusFromCache(taskId) {
+        try {
+            return await ConsistentCache.get(`task:${taskId}`);
+        } catch (e) {
+            log.warn(`TaskRepository getTaskStatusFromCache failed for ${taskId}:`, e.message);
+            return null;
+        }
+    }
+
+    /**
+     * 从 StateSynchronizer 读取任务状态
+     * 用于状态同步和故障恢复
+     */
+    static async getTaskStatusSynchronized(taskId) {
+        try {
+            return await StateSynchronizer.getTaskState(taskId);
+        } catch (e) {
+            log.warn(`TaskRepository getTaskStatusSynchronized failed for ${taskId}:`, e.message);
+            return null;
+        }
+    }
+
+    /**
+     * 获取任务的完整状态（多层查询）
+     * 优先级：D1 > StateSynchronizer > ConsistentCache > Memory Buffer
+     */
+    static async getTaskStatusFull(taskId) {
+        // 1. 查询 D1
+        const d1Task = await this.findById(taskId);
+        if (d1Task) return { source: 'd1', data: d1Task };
+
+        // 2. 查询 StateSynchronizer
+        const syncState = await this.getTaskStatusSynchronized(taskId);
+        if (syncState) return { source: 'synchronizer', data: syncState };
+
+        // 3. 查询 ConsistentCache
+        const cacheState = await this.getTaskStatusFromCache(taskId);
+        if (cacheState) return { source: 'consistent_cache', data: cacheState };
+
+        // 4. 查询 Memory Buffer
+        const memoryState = this.pendingUpdates.get(taskId);
+        if (memoryState) return { source: 'memory', data: memoryState };
+
+        return null;
+    }
+
+    /**
+     * 批量获取任务状态
+     */
+    static async getTaskStatusBatch(taskIds) {
+        if (!taskIds || taskIds.length === 0) return {};
+
+        const results = {};
+
+        // 1. 批量查询 D1
+        try {
+            const placeholders = taskIds.map(() => '?').join(',');
+            const d1Tasks = await d1.fetchAll(
+                `SELECT id, status, error_msg, updated_at FROM tasks WHERE id IN (${placeholders})`,
+                taskIds
+            );
+            d1Tasks.forEach(task => {
+                results[task.id] = { source: 'd1', data: task };
+            });
+        } catch (e) {
+            log.error("TaskRepository.getTaskStatusBatch D1 query failed:", e);
+        }
+
+        // 2. 批量查询 ConsistentCache（未在 D1 中找到的）
+        const remainingIds = taskIds.filter(id => !results[id]);
+        if (remainingIds.length > 0) {
+            try {
+                const cacheKeys = remainingIds.map(id => `task:${id}`);
+                const cacheResults = await BatchProcessor.processBatch('consistent-cache-read', cacheKeys);
+                cacheResults.forEach((cacheData, index) => {
+                    if (cacheData) {
+                        results[remainingIds[index]] = { source: 'consistent_cache', data: cacheData };
+                    }
+                });
+            } catch (e) {
+                log.warn("TaskRepository.getTaskStatusBatch cache query failed:", e.message);
+            }
+        }
+
+        // 3. 查询 Memory Buffer（前两层都未找到的）
+        const stillRemaining = taskIds.filter(id => !results[id]);
+        for (const id of stillRemaining) {
+            const memoryState = this.pendingUpdates.get(id);
+            if (memoryState) {
+                results[id] = { source: 'memory', data: memoryState };
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * 获取任务的完整信息（包含缓存状态）
+     * 用于任务详情展示和故障排查
+     */
+    static async getTaskInfo(taskId) {
+        const baseInfo = await this.findById(taskId);
+        if (!baseInfo) return null;
+
+        // 获取缓存状态
+        const cacheStatus = await this.getTaskStatusFull(taskId);
+
+        return {
+            ...baseInfo,
+            cacheStatus: cacheStatus ? cacheStatus.source : 'none',
+            cacheData: cacheStatus ? cacheStatus.data : null
+        };
+    }
+
+    /**
+     * 清理任务缓存（用于任务完成或取消后）
+     */
+    static async cleanupTaskCache(taskId) {
+        try {
+            await Promise.allSettled([
+                ConsistentCache.delete(`task:${taskId}`),
+                StateSynchronizer.clearTaskState(taskId),
+                cache.delete(`task_status:${taskId}`)
+            ]);
+            this.pendingUpdates.delete(taskId);
+        } catch (e) {
+            log.warn(`TaskRepository cleanupTaskCache failed for ${taskId}:`, e.message);
+        }
+    }
+
+    /**
+     * 批量清理任务缓存
+     */
+    static async cleanupTaskCacheBatch(taskIds) {
+        if (!taskIds || taskIds.length === 0) return;
+
+        try {
+            // 批量清理 ConsistentCache
+            const cacheOps = taskIds.map(id => ({ type: 'delete', key: `task:${id}` }));
+            await BatchProcessor.processBatch('consistent-cache', cacheOps);
+
+            // 批量清理 StateSynchronizer
+            await Promise.allSettled(taskIds.map(id => StateSynchronizer.clearTaskState(id)));
+
+            // 批量清理 Redis
+            const redisKeys = taskIds.map(id => `task_status:${id}`);
+            await BatchProcessor.processBatch('redis-delete', redisKeys);
+
+            // 清理内存
+            taskIds.forEach(id => this.pendingUpdates.delete(id));
+        } catch (e) {
+            log.warn(`TaskRepository cleanupTaskCacheBatch failed:`, e.message);
         }
     }
 }

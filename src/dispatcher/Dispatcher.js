@@ -20,6 +20,7 @@ import { cache } from "../services/CacheService.js";
 import { queueService } from "../services/QueueService.js";
 import { logger } from "../services/logger/index.js";
 import { localCache } from "../utils/LocalCache.js";
+import { mediaGroupBuffer } from "../services/MediaGroupBuffer.js";
 import fs from "fs";
 import path from "path";
 
@@ -41,6 +42,19 @@ export class Dispatcher {
 
     // 防止刷新按钮被疯狂点击
     static lastRefreshTime = 0;
+
+    /**
+     * 初始化 Dispatcher
+     */
+    static async init() {
+        try {
+            // 恢复媒体组缓冲区
+            await mediaGroupBuffer.restore();
+            log.info('MediaGroupBuffer restored successfully');
+        } catch (error) {
+            log.error('Failed to restore MediaGroupBuffer:', error);
+        }
+    }
 
     /**
      * 主入口：处理所有事件
@@ -333,25 +347,11 @@ export class Dispatcher {
 
             // 🚀 核心逻辑：如果是媒体组消息
             if (message.groupedId) {
-                const gid = message.groupedId.toString();
-
-                // 如果是该组的第一条消息，启动收集计时器
-                if (!this.groupBuffers.has(gid)) {
-                    this.groupBuffers.set(gid, {
-                        messages: [],
-                        timer: setTimeout(async () => {
-                            const buffer = this.groupBuffers.get(gid);
-                            this.groupBuffers.delete(gid);
-                            // 创建批量任务并调度 QStash 延迟批处理
-                            const taskIds = await TaskManager.addBatchTasks(target, buffer.messages, userId);
-                            // TODO: scheduleMediaGroupBatch method not implemented in queueService
-                            // qstashService.scheduleMediaGroupBatch(gid, taskIds, 1);
-                        }, 800) // 800ms 收集时间
-                    });
+                // 使用新的 MediaGroupBuffer 服务
+                const result = await mediaGroupBuffer.add(message, target, userId);
+                if (!result.added && result.reason !== 'duplicate') {
+                    log.warn(`Failed to add message to buffer: ${result.reason}`);
                 }
-
-                // 将消息加入缓存
-                this.groupBuffers.get(gid).messages.push(message);
                 return;
             }
 

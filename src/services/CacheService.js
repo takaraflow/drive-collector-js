@@ -895,6 +895,236 @@ class CacheService {
             await this.fallbackProvider.disconnect();
         }
     }
+
+    /**
+     * 增强的故障转移 - 支持多层回退策略
+     * 1. 尝试切换到备用提供者
+     * 2. 如果所有提供者都失败，降级到内存模式
+     * 3. 支持自动恢复
+     */
+    async enhancedFailover() {
+        log.info('Starting enhanced failover process...');
+        
+        // 1. 尝试切换到备用提供者
+        if (this.providerList.length > 1) {
+            const currentIndex = this.providerList.findIndex(p => p.instance === this.primaryProvider);
+            const nextIndex = (currentIndex + 1) % this.providerList.length;
+            const nextProvider = this.providerList[nextIndex];
+            
+            if (nextProvider && nextProvider.instance !== this.primaryProvider) {
+                try {
+                    log.info(`Attempting to switch to backup provider: ${nextProvider.config.name}`);
+                    
+                    // 尝试连接备用提供者
+                    if (typeof nextProvider.instance.connect === 'function') {
+                        await nextProvider.instance.connect();
+                    } else if (typeof nextProvider.instance.initialize === 'function') {
+                        await nextProvider.instance.initialize();
+                    }
+                    
+                    // 切换提供者
+                    this.fallbackProvider = this.primaryProvider;
+                    this.primaryProvider = nextProvider.instance;
+                    this.currentProviderName = nextProvider.instance.getProviderName();
+                    this.isFailoverMode = false;
+                    this.failureCount = 0;
+                    
+                    log.info(`✅ Successfully switched to backup provider: ${this.currentProviderName}`);
+                    return true;
+                } catch (error) {
+                    log.error(`Failed to switch to backup provider ${nextProvider.config.name}:`, error.message);
+                    // 继续到下一步
+                }
+            }
+        }
+        
+        // 2. 如果所有外部提供者都失败，降级到内存模式
+        log.warn('All external providers failed, degrading to Memory (L1) mode');
+        this.isFailoverMode = true;
+        this.currentProviderName = 'MemoryCache';
+        
+        // 3. 启动恢复监控
+        this._startEnhancedRecoveryCheck();
+        
+        return false;
+    }
+
+    /**
+     * 增强的恢复检查 - 支持多提供者轮询
+     */
+    _startEnhancedRecoveryCheck() {
+        if (this.recoveryTimer) return;
+
+        this.recoveryTimer = setInterval(async () => {
+            if (!this.isFailoverMode && this.providerList.length <= 1) return;
+            
+            log.info('Enhanced recovery: Checking all providers...');
+            
+            // 按优先级顺序尝试所有提供者
+            for (const providerEntry of this.providerList) {
+                if (providerEntry.instance === this.primaryProvider) continue; // 跳过当前失败的
+                
+                try {
+                    log.info(`Trying to recover: ${providerEntry.config.name}`);
+                    
+                    // 尝试简单的 ping 或 get 操作
+                    if (typeof providerEntry.instance.get === 'function') {
+                        await providerEntry.instance.get('__recovery_check__');
+                    } else if (typeof providerEntry.instance.ping === 'function') {
+                        await providerEntry.instance.ping();
+                    } else if (typeof providerEntry.instance.connect === 'function') {
+                        await providerEntry.instance.connect();
+                    }
+                    
+                    // 如果成功，切换到这个提供者
+                    log.info(`✅ Provider ${providerEntry.config.name} recovered!`);
+                    this.fallbackProvider = this.primaryProvider;
+                    this.primaryProvider = providerEntry.instance;
+                    this.currentProviderName = providerEntry.instance.getProviderName();
+                    this.isFailoverMode = false;
+                    this.failureCount = 0;
+                    
+                    clearInterval(this.recoveryTimer);
+                    this.recoveryTimer = null;
+                    return;
+                    
+                } catch (e) {
+                    log.debug(`Provider ${providerEntry.config.name} still unavailable: ${e.message}`);
+                }
+            }
+            
+            log.debug('Enhanced recovery: All providers still unavailable');
+        }, 30000); // 每30秒检查一次
+    }
+
+    /**
+     * 批量操作 - 支持故障转移的批量 get/set
+     */
+    async batchOperation(operations) {
+        await this._ensureInitialized();
+        
+        const results = [];
+        
+        for (const op of operations) {
+            try {
+                if (op.type === 'get') {
+                    const value = await this.get(op.key, op.type || 'json', op.options || {});
+                    results.push({ success: true, key: op.key, value });
+                } else if (op.type === 'set') {
+                    const success = await this.set(op.key, op.value, op.ttl || 3600, op.options || {});
+                    results.push({ success, key: op.key });
+                } else if (op.type === 'delete') {
+                    const success = await this.delete(op.key, op.options || {});
+                    results.push({ success, key: op.key });
+                }
+            } catch (error) {
+                log.error(`Batch operation failed for ${op.key}:`, error.message);
+                results.push({ success: false, key: op.key, error: error.message });
+            }
+        }
+        
+        return results;
+    }
+
+    /**
+     * 获取提供者健康状态
+     */
+    async getHealthStatus() {
+        const status = {
+            primary: this.currentProviderName,
+            failoverMode: this.isFailoverMode,
+            failureCount: this.failureCount,
+            providers: [],
+            overall: 'healthy'
+        };
+
+        // 检查所有提供者
+        for (const providerEntry of this.providerList) {
+            const providerStatus = {
+                name: providerEntry.config.name,
+                type: providerEntry.instance.getProviderName(),
+                healthy: false
+            };
+
+            try {
+                if (typeof providerEntry.instance.get === 'function') {
+                    await providerEntry.instance.get('__health_check__');
+                } else if (typeof providerEntry.instance.ping === 'function') {
+                    await providerEntry.instance.ping();
+                }
+                providerStatus.healthy = true;
+            } catch (e) {
+                providerStatus.healthy = false;
+                providerStatus.error = e.message;
+            }
+
+            status.providers.push(providerStatus);
+        }
+
+        // 确定整体状态
+        if (this.isFailoverMode) {
+            status.overall = 'degraded';
+        } else if (status.providers.some(p => !p.healthy)) {
+            status.overall = 'warning';
+        }
+
+        return status;
+    }
+
+    /**
+     * 强制切换到指定提供者
+     */
+    async switchToProvider(name) {
+        const targetProvider = this.providerList.find(p => p.config.name === name);
+        
+        if (!targetProvider) {
+            throw new Error(`Provider ${name} not found`);
+        }
+
+        try {
+            // 确保提供者已连接
+            if (typeof targetProvider.instance.connect === 'function') {
+                await targetProvider.instance.connect();
+            }
+
+            // 切换
+            this.fallbackProvider = this.primaryProvider;
+            this.primaryProvider = targetProvider.instance;
+            this.currentProviderName = targetProvider.instance.getProviderName();
+            this.isFailoverMode = false;
+            this.failureCount = 0;
+
+            log.info(`Manually switched to provider: ${name}`);
+            return true;
+        } catch (error) {
+            log.error(`Failed to switch to provider ${name}:`, error.message);
+            return false;
+        }
+    }
+
+    /**
+     * 获取所有提供者信息
+     */
+    getProviderList() {
+        return this.providerList.map(p => ({
+            name: p.config.name,
+            type: p.instance.getProviderName(),
+            priority: p.config.priority || 99
+        }));
+    }
+
+    /**
+     * 清除故障计数（手动恢复）
+     */
+    resetFailureCount() {
+        this.failureCount = 0;
+        this.isFailoverMode = false;
+        if (this.recoveryTimer) {
+            clearInterval(this.recoveryTimer);
+            this.recoveryTimer = null;
+        }
+        log.info('Failure count reset, failover mode disabled');
+    }
 }
 
 // Singleton Instance
@@ -913,5 +1143,13 @@ export const cache = new Proxy(_instance, {
         return value;
     }
 });
+
+// Enhanced failover functions
+export const enhancedFailover = () => _instance.enhancedFailover();
+export const getHealthStatus = () => _instance.getHealthStatus();
+export const switchToProvider = (name) => _instance.switchToProvider(name);
+export const resetFailureCount = () => _instance.resetFailureCount();
+export const batchOperation = (operations) => _instance.batchOperation(operations);
+export const getProviderList = () => _instance.getProviderList();
 
 export default cache;

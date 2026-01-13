@@ -64,14 +64,13 @@ describe("GracefulShutdown Integration", () => {
             await gracefulShutdown.executeCleanupHooks();
 
             expect(executionLog).toEqual([
-                'http-server',
                 'instance-coordinator',
                 'telegram',
                 'task-repository',
                 'cache'
             ]);
 
-            expect(httpServerHook).toHaveBeenCalled();
+            expect(httpServerHook).not.toHaveBeenCalled();
             expect(instanceCoordinatorHook).toHaveBeenCalled();
             expect(telegramHook).toHaveBeenCalled();
             expect(taskRepoHook).toHaveBeenCalled();

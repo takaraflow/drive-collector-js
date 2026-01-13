@@ -26,6 +26,12 @@ export async function registerShutdownHooks() {
     const { stopWatchdog, client } = await import("../services/telegram.js");
     const { TaskRepository } = await import("../repositories/TaskRepository.js");
     const { flushLogBuffer } = await import("../services/logger/index.js");
+    const { mediaGroupBuffer } = await import("../services/MediaGroupBuffer.js");
+
+    // 注册任务计数器（用于任务排空）
+    gracefulShutdown.registerTaskCounter(() => {
+        return TaskRepository.getActiveTaskCount();
+    });
 
     // 0. 在关闭开始前先刷新一次日志，确保关闭前的错误日志被保存 (priority: 5)
     gracefulShutdown.register(async () => {
@@ -54,19 +60,29 @@ export async function registerShutdownHooks() {
         }
     }, 30, 'telegram-client');
 
-    // 4. 刷新待处理的任务更新 (priority: 40)
+    // 4. 持久化 MediaGroupBuffer (priority: 35)
+    gracefulShutdown.register(async () => {
+        try {
+            await mediaGroupBuffer.persist();
+            console.log('✅ MediaGroupBuffer 已持久化');
+        } catch (error) {
+            console.error('❌ MediaGroupBuffer 持久化失败:', error);
+        }
+    }, 35, 'media-group-buffer-persist');
+
+    // 5. 刷新待处理的任务更新 (priority: 40)
     gracefulShutdown.register(async () => {
         await TaskRepository.flushUpdates();
         console.log('✅ TaskRepository 待更新任务已刷新');
     }, 40, 'task-repository');
 
-    // 5. 断开 Cache 连接 (priority: 50)
+    // 6. 断开 Cache 连接 (priority: 50)
     gracefulShutdown.register(async () => {
         await cache.destroy();
         console.log('✅ Cache 服务已断开');
     }, 50, 'cache-service');
 
-    // 6. 在关闭完成后再次刷新日志，确保关闭过程中的日志也被保存 (priority: 60)
+    // 7. 在关闭完成后再次刷新日志，确保关闭过程中的日志也被保存 (priority: 60)
     gracefulShutdown.register(async () => {
         console.log('🔄 正在刷新关闭过程中的日志...');
         await flushLogBuffer();
