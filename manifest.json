@@ -12,6 +12,7 @@
     "instance-discovery",
     "distributed-state-management",
     "multi-instance-locking",
+    "distributed-locking",
     "qstash-signature-v2",
     "path-normalization"
   ],
@@ -250,7 +251,7 @@
       "CACHE_PROVIDERS": {
         "type": "string",
         "required": false,
-        "description": "JSON 格式的缓存提供者配置，支持 cloudflare, upstash, redis。例如: {\"cloudflare\": {\"namespace\": \"KV_STORAGE\"}, \"upstash\": {\"url\": \"UPSTASH_REDIS_REST_URL\", \"token\": \"UPSTASH_REDIS_REST_TOKEN\"}}"
+        "description": "JSON 格式的缓存提供者配置数组，支持 cloudflare-kv-binding, redis。例如: [{\"name\": \"kv\", \"type\": \"cloudflare-kv-binding\", \"binding\": \"KV_STORAGE\"}, {\"name\": \"redis\", \"type\": \"redis\", \"url\": \"redis://user:pass@host:port\"}]"
       },
       "CF_CACHE_ACCOUNT_ID": {
         "type": "string",
@@ -271,6 +272,7 @@
   },
   "endpoints": {
     "health": "/health",
+    "instances": "/api/instances",
     "webhookBase": "/api/tasks",
     "download": "/api/tasks/download",
     "upload": "/api/tasks/upload",
