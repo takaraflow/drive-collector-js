@@ -60,6 +60,7 @@
     "yargs": "^18.0.0"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.1",
     "@cloudflare/workers-types": "^4.20241205.0",
     "@opentelemetry/api": "^1.9.0",
     "cross-env": "^7.0.3",
@@ -67,7 +68,7 @@
     "redis-on-workers": "^0.4.1",
     "standard-version": "^9.5.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.16",
+    "vitest": "~3.2.0",
     "wrangler": "^4.56.0"
   },
   "overrides": {

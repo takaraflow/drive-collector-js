@@ -182,6 +182,19 @@ function describeRedisEndpoint(env) {
   return 'using CACHE_PROVIDERS';
 }
 
+/**
+ * Safely resolve a logger: prefer provided logger, then child logger, then the default.
+ */
+function resolveLogger({ requestLogger = null, moduleName = 'unknown', ctx = null, extra = {} } = {}) {
+  if (requestLogger) return requestLogger;
+  const bindings = { module: moduleName, ...extra };
+  if (ctx?.logBuffer && bindings.logBuffer === undefined) {
+    bindings.logBuffer = ctx.logBuffer;
+  }
+  const childLogger = typeof logger.child === 'function' ? logger.child(bindings) : undefined;
+  return childLogger || logger;
+}
+
 
 
 /**
@@ -189,8 +202,7 @@ function describeRedisEndpoint(env) {
  */
 async function verifyAdminToken(request, env, ctx = null, requestLogger = null) {
   // CF Worker 生命周期管理：确保日志能被正确缓冲和发送
-  const verifyAdminTokenLogger = requestLogger || 
-    (ctx?.logBuffer ? logger.child({ module: 'AdminToken', logBuffer: ctx.logBuffer }) : logger.child({ module: 'AdminToken' }));
+  const verifyAdminTokenLogger = resolveLogger({ requestLogger, moduleName: 'AdminToken', ctx });
   
   // 跳过验证（开发环境）
   if (env.SKIP_ADMIN_AUTH === 'true') {
@@ -229,8 +241,7 @@ async function verifyAdminToken(request, env, ctx = null, requestLogger = null) 
  */
 async function verifyQStashSignature(request, env, isGetRequest = false, ctx = null, requestLogger = null) {
   // CF Worker 生命周期管理：确保日志能被正确缓冲和发送
-  const verifyQStashSignatureLogger = requestLogger || 
-    (ctx?.logBuffer ? logger.child({ module: 'QStashSignature', logBuffer: ctx.logBuffer }) : logger.child({ module: 'QStashSignature' }));
+  const verifyQStashSignatureLogger = resolveLogger({ requestLogger, moduleName: 'QStashSignature', ctx });
   // 跳过签名验证
   if (env.SKIP_SIGNATURE_VERIFY === 'true') {
     await verifyQStashSignatureLogger.debug('⏭️ 跳过签名验证 (Skipping signature verification)', {});
@@ -556,7 +567,7 @@ async function scanLockKeys(env, ctx = null, parentLogger = logger) {
  */
 async function getActiveInstances(env, ctx = null, requestLogger = null) {
   // 使用统一的 requestLogger，不再创建新的 logger
-  const getActiveInstancesLogger = requestLogger || logger.child({ module: 'getActiveInstances' });
+  const getActiveInstancesLogger = resolveLogger({ requestLogger, moduleName: 'getActiveInstances' });
   const redisEndpointSummary = describeRedisEndpoint(env);
   await getActiveInstancesLogger.debug('📊 Redis 终端摘要 (Redis endpoint summary)', { endpoint: redisEndpointSummary });
   try {
@@ -734,7 +745,7 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
  * 根据锁持有者选择实例（用于需要会话锁的下载任务）
  */
 async function selectInstanceByLock(instances, env, ctx, requestLogger = null) {
-  const lockRoutingLogger = requestLogger || logger.child({ module: 'lockRouting' });
+  const lockRoutingLogger = resolveLogger({ requestLogger, moduleName: 'lockRouting' });
   if (!instances || instances.length === 0) return null;
 
   let lockValue;
@@ -798,7 +809,7 @@ async function selectInstanceByLock(instances, env, ctx, requestLogger = null) {
  */
 // 新增：原子化轮询索引操作
 async function selectTargetInstance(instances, env, ctx, requestLogger = null) {
-  const selectTargetInstanceLogger = requestLogger || logger.child({ module: 'selectTargetInstance' });
+  const selectTargetInstanceLogger = resolveLogger({ requestLogger, moduleName: 'selectTargetInstance' });
   if (instances.length === 0) {
     return null;
   }
@@ -908,7 +919,7 @@ async function selectTargetInstanceWithRetry(instances, env, ctx, logger) {
  * 转发请求到目标实例
  */
 async function forwardToInstance(instance, normalizedUrl, request, originalBody, ctx = null, requestLogger = null) {
-  const forwardToInstanceLogger = requestLogger || logger.child({ module: 'forwardToInstance' });
+  const forwardToInstanceLogger = resolveLogger({ requestLogger, moduleName: 'forwardToInstance', ctx });
   const url = new URL(normalizedUrl.href);
   url.host = new URL(instance.url).host;
   url.protocol = new URL(instance.url).protocol;
@@ -959,7 +970,7 @@ async function forwardToInstance(instance, normalizedUrl, request, originalBody,
  * 带重试的转发逻辑
  */
 async function fetchWithRetry(instances, normalizedUrl, request, env, body, ctx, requestLogger = null) {
-  const fetchWithRetryLogger = requestLogger || logger.child({ module: 'fetchWithRetry' });
+  const fetchWithRetryLogger = resolveLogger({ requestLogger, moduleName: 'fetchWithRetry', ctx });
   let lastError;
   let last5xxResponse = null;
 
@@ -1063,7 +1074,7 @@ function shouldTriggerFailover(error, env) {
 
 async function failover(env, ctx = null, requestLogger = null) {
   // 使用统一的 requestLogger
-  const failoverLogger = requestLogger || logger.child({ module: 'failover' });
+  const failoverLogger = resolveLogger({ requestLogger, moduleName: 'failover', ctx });
   const hasUpstash = env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN;
 
   // 优先级：Upstash
@@ -1100,7 +1111,7 @@ function isRetryableError(error) {
  */
 async function retryRedisCommand(client, command, args = [], maxRetries = 3, initialDelay = 100, ctx = null, requestLogger = null) {
   // 使用统一的 requestLogger
-  const retryRedisCommandLogger = requestLogger || logger.child({ module: 'retryRedisCommand' });
+  const retryRedisCommandLogger = resolveLogger({ requestLogger, moduleName: 'retryRedisCommand', ctx });
   let retries = 0;
   let delay = initialDelay;
   let timerId = null;
@@ -1195,7 +1206,7 @@ async function _getInitializedCacheService(env, ctx, log) {
 }
 
 async function getRedisClient(env, ctx, requestLogger) {
-  const getRedisClientLogger = requestLogger || logger.child({ module: 'getRedisClient' });
+  const getRedisClientLogger = resolveLogger({ requestLogger, moduleName: 'getRedisClient', ctx });
 
   // 测试环境 mock
   if (isTestEnvironment && typeof __test_getRedisClient === 'function') {
@@ -1234,7 +1245,7 @@ async function getRedisClient(env, ctx, requestLogger) {
  * 执行 Redis TLS 操作 (使用 CACHE_PROVIDERS)
  */
 async function executeRedis(operation, env, key, value = null, ctx = null, requestLogger = null) {
-  const log = requestLogger || logger.child({ module: 'executeRedis' });
+  const log = resolveLogger({ requestLogger, moduleName: 'executeRedis', ctx });
 
   if (!env.CACHE_PROVIDERS) {
     throw new Error('CACHE_PROVIDERS not configured');
@@ -1271,7 +1282,7 @@ async function executeRedis(operation, env, key, value = null, ctx = null, reque
  * 执行 Redis TLS Scan 操作 (使用 CACHE_PROVIDERS)
  */
 async function executeRedisScan(env, prefix, ctx = null, requestLogger = null) {
-  const scanLogger = requestLogger || logger.child({ module: 'executeRedisScan', logBuffer: ctx?.logBuffer });
+  const scanLogger = resolveLogger({ requestLogger, moduleName: 'executeRedisScan', ctx });
 
   if (!env.CACHE_PROVIDERS) {
     throw new Error('CACHE_PROVIDERS not configured');
@@ -1288,7 +1299,7 @@ async function executeRedisScan(env, prefix, ctx = null, requestLogger = null) {
  * 检查 Redis 健康状况 (使用 CACHE_PROVIDERS)
  */
 async function checkRedisHealth(env, ctx, executor = executeWithPriorityFallback) {
-  const checkRedisHealthLogger = logger.child({ module: 'checkRedisHealth' });
+  const checkRedisHealthLogger = resolveLogger({ moduleName: 'checkRedisHealth' });
 
   if (!env.CACHE_PROVIDERS) {
     await checkRedisHealthLogger.warn('CACHE_PROVIDERS not configured', {});
@@ -1328,7 +1339,7 @@ async function checkRedisHealth(env, ctx, executor = executeWithPriorityFallback
  * P1修复：添加最大迭代次数限制和超时保护
  */
 async function executeUpstashScan(env, prefix) {
-  const executeUpstashScanLogger = logger.child({ module: 'executeUpstashScan' });
+  const executeUpstashScanLogger = resolveLogger({ moduleName: 'executeUpstashScan' });
   const baseUrl = env.UPSTASH_REDIS_REST_URL;
   const token = env.UPSTASH_REDIS_REST_TOKEN;
   
@@ -1382,7 +1393,7 @@ async function executeUpstashScan(env, prefix) {
 async function executeWithPriorityFallback(operation, env, ctx, ...args) {
   const lastArg = args[args.length - 1];
   const requestLogger = (lastArg && typeof lastArg.debug === 'function') ? args.pop() : null;
-  let log = requestLogger || logger.child({ module: 'executeWithPriorityFallback' });
+  let log = resolveLogger({ requestLogger, moduleName: 'executeWithPriorityFallback', ctx });
 
   // 优先使用 CACHE_PROVIDERS
   if (env.CACHE_PROVIDERS) {
@@ -1637,7 +1648,7 @@ async function handleRequest(request, env, ctx) {
   logger.configure({ env: runtimeEnv });
 
   const requestLogBuffer = []; // 为每个请求创建独立的日志缓冲
-  const requestLogger = logger.child({ module: 'handleRequest', logBuffer: requestLogBuffer }); // 将缓冲传递给子 logger
+  const requestLogger = resolveLogger({ moduleName: 'handleRequest', extra: { logBuffer: requestLogBuffer } }); // 将缓冲传递给子 logger
 
   // 1. 在上下文还在时，显式捕获顶级 Span
   const rootSpan = trace.getActiveSpan();

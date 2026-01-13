@@ -226,7 +226,9 @@ export class RedisTLSCache {
       await this.connect();
     }
 
-    const log = ctx?.logBuffer ? logger.child({ logBuffer: ctx.logBuffer }) : logger;
+    const log = (ctx?.logBuffer && typeof logger.child === 'function')
+      ? (logger.child({ logBuffer: ctx.logBuffer }) || logger)
+      : logger;
     const keys = [];
     let cursor = '0';
     let nextCursorArg = '0';
