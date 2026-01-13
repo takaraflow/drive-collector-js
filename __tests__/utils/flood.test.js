@@ -12,12 +12,31 @@ const mockLogger = {
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
+    debug: vi.fn(),
     withModule: vi.fn().mockReturnThis(),
     withContext: vi.fn().mockReturnThis()
 };
 vi.mock('../../src/services/logger/index.js', () => ({
     default: mockLogger,
-    logger: mockLogger
+    logger: mockLogger,
+    LoggerService: class MockLoggerService {
+        getInstance() { return mockLogger; }
+        info() {}
+        warn() {}
+        error() {}
+        debug() {}
+        withModule() { return mockLogger; }
+        withContext() { return mockLogger; }
+    },
+    setInstanceIdProvider: vi.fn(),
+    enableTelegramConsoleProxy: vi.fn(),
+    disableTelegramConsoleProxy: vi.fn(),
+    flushLogBuffer: vi.fn().mockResolvedValue(undefined),
+    createLogger: () => mockLogger,
+    BaseLogger: class MockBaseLogger {},
+    AxiomLogger: class MockAxiomLogger {},
+    ConsoleLogger: class MockConsoleLogger {},
+    DatadogLogger: class MockDatadogLogger {}
 }));
 
 // Import after mocking
