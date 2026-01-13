@@ -52,11 +52,20 @@ global.Request = class Request {
     this.method = options?.method || 'GET';
     this.headers = new Headers(options?.headers);
     this.body = options?.body;
+    this.bodyUsed = false;
+  }
+  _consumeBody() {
+    if (this.bodyUsed) {
+      throw new Error('Body has already been consumed');
+    }
+    this.bodyUsed = true;
   }
   async json() {
+    this._consumeBody();
     return JSON.parse(this.body);
   }
   async text() {
+    this._consumeBody();
     return this.body;
   }
 };

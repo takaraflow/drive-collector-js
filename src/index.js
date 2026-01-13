@@ -8,6 +8,9 @@ let globalStateInstance = null;
 
 // 初始化状态管理器
 async function initializeGlobalState(env, ctx, logger, cacheService) {
+  if (globalStateInstance) {
+    return globalStateInstance;
+  }
   globalStateInstance = createLoadBalancerState(env, logger);
   await globalStateInstance.initialize(cacheService);
   return globalStateInstance;
@@ -80,6 +83,7 @@ const ROUND_ROBIN_KEY = 'lb:round_robin_index';
 const HEARTBEAT_TIMEOUT = 15 * 60 * 1000; // 15分钟
 const TELEGRAM_LOCK_KEY = 'lock:telegram_client';
 const MAX_JSON_SIZE = 1024 * 1024; // 1MB JSON 解析限制
+const MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024; // 10MB body limit to avoid OOM
 
 // 静态导入 OpenTelemetry API
 import { trace } from '@opentelemetry/api';
@@ -236,12 +240,99 @@ async function verifyAdminToken(request, env, ctx = null, requestLogger = null) 
   return true;
 }
 
+function createPayloadTooLargeError(size, limit = MAX_REQUEST_BODY_SIZE) {
+  const error = new Error(`Payload too large: ${size} bytes (limit ${limit} bytes)`);
+  error.status = 413;
+  error.code = 'PAYLOAD_TOO_LARGE';
+  return error;
+}
+
+function validateContentLengthHeader(request, maxSize = MAX_REQUEST_BODY_SIZE) {
+  if (!request?.headers?.get) return null;
+  const rawLength = request.headers.get('content-length');
+  if (rawLength === null || rawLength === undefined) return null;
+
+  const length = Number(rawLength);
+  if (!Number.isFinite(length) || length < 0) return null;
+
+  if (length > maxSize) {
+    throw createPayloadTooLargeError(length, maxSize);
+  }
+
+  return length;
+}
+
+async function readRequestBodyWithLimit(request, maxSize = MAX_REQUEST_BODY_SIZE) {
+  if (request.body && typeof request.body.getReader === 'function') {
+    const reader = request.body.getReader();
+    const chunks = [];
+    let total = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunkSize = value?.byteLength ?? value?.length ?? 0;
+      total += chunkSize;
+      if (total > maxSize) {
+        throw createPayloadTooLargeError(total, maxSize);
+      }
+      chunks.push(value);
+    }
+
+    const bodyData = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      const view = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+      bodyData.set(view, offset);
+      offset += view.byteLength;
+    }
+
+    return {
+      bodyData,
+      bodyString: new TextDecoder().decode(bodyData)
+    };
+  }
+
+  if (typeof request.text === 'function') {
+    const bodyString = await request.text();
+    const bodyData = new TextEncoder().encode(bodyString);
+
+    if (bodyData.byteLength > maxSize) {
+      throw createPayloadTooLargeError(bodyData.byteLength, maxSize);
+    }
+
+    return { bodyData, bodyString };
+  }
+
+  if (typeof request.arrayBuffer === 'function') {
+    const buffer = await request.arrayBuffer();
+    const bodyData = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+
+    if (bodyData.byteLength > maxSize) {
+      throw createPayloadTooLargeError(bodyData.byteLength, maxSize);
+    }
+
+    return {
+      bodyData,
+      bodyString: new TextDecoder().decode(bodyData)
+    };
+  }
+
+  throw new Error('Request object must have text() or arrayBuffer() method');
+}
+
 /**
  * 验证 QStash 签名 - 重构版本
  */
 async function verifyQStashSignature(request, env, isGetRequest = false, ctx = null, requestLogger = null) {
   // CF Worker 生命周期管理：确保日志能被正确缓冲和发送
   const verifyQStashSignatureLogger = resolveLogger({ requestLogger, moduleName: 'QStashSignature', ctx });
+
+  if (!isGetRequest) {
+    validateContentLengthHeader(request, MAX_REQUEST_BODY_SIZE);
+  }
+
   // 跳过签名验证
   if (env.SKIP_SIGNATURE_VERIFY === 'true') {
     await verifyQStashSignatureLogger.debug('⏭️ 跳过签名验证 (Skipping signature verification)', {});
@@ -249,16 +340,8 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
       return null;
     }
     
-    // 统一读取 body 逻辑，支持 text() 和 arrayBuffer()
-    if (request.text) {
-      const text = await request.text();
-      return new TextEncoder().encode(text);
-    } else if (request.arrayBuffer) {
-      const buffer = await request.arrayBuffer();
-      return new Uint8Array(buffer);
-    } else {
-      throw new Error('Request object must have text() or arrayBuffer() method');
-    }
+    const { bodyData } = await readRequestBodyWithLimit(request, MAX_REQUEST_BODY_SIZE);
+    return bodyData;
   }
 
   // 检查密钥配置
@@ -298,22 +381,7 @@ async function verifyQStashSignature(request, env, isGetRequest = false, ctx = n
     return null;
   }
 
-  // 读取 body 数据（支持 mock 和真实 Request）
-  let bodyData;
-  let bodyString;
-  
-  if (request.text) {
-    // 真实 Request 对象
-    bodyString = await request.text();
-    bodyData = new TextEncoder().encode(bodyString);
-  } else if (request.arrayBuffer) {
-    // Mock 对象
-    const buffer = await request.arrayBuffer();
-    bodyData = new Uint8Array(buffer);
-    bodyString = new TextDecoder().decode(bodyData);
-  } else {
-    throw new Error('Request object must have text() or arrayBuffer() method');
-  }
+  const { bodyData, bodyString } = await readRequestBodyWithLimit(request, MAX_REQUEST_BODY_SIZE);
 
   // 测试环境 mock 验证
   if (isTestEnvironment && typeof globalThis !== 'undefined' && globalThis.__QSTASH_MOCK_VERIFY__) {
@@ -1662,6 +1730,16 @@ async function handleRequest(request, env, ctx) {
     child: (bindings) => requestLogger.child(bindings)
   };
 
+  try {
+    if (!globalStateInstance) {
+      const cacheServiceInstance = await _getInitializedCacheService(env, ctx, log);
+      await initializeGlobalState(env, ctx, log, cacheServiceInstance);
+      await log.debug('Global state initialized', { stateKey: 'lb:provider_state' });
+    }
+  } catch (stateError) {
+    await log.warn('Failed to initialize global state, falling back to legacy variables', { error: stateError.message });
+  }
+
 log.debug('Request Received', { method: request.method, url: request.url });
 
   // CORS preflight 优先处理（必须在所有其他逻辑之前，避免触发不必要的签名验证/KV扫描）
@@ -1847,12 +1925,15 @@ log.debug('Request Received', { method: request.method, url: request.url });
       retryCount
     });
     
+    const statusCode = error.status === 413 ? 413 : 401;
+    const errorLabel = statusCode === 413 ? 'Payload too large' : 'Signature verification failed';
+
     return new Response(JSON.stringify({
-      error: 'Signature verification failed',
+      error: errorLabel,
       message: error.message,
       timestamp: new Date().toISOString()
     }), {
-      status: 401,
+      status: statusCode,
       headers: {
         'Content-Type': 'application/json'
       }

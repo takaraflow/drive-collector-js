@@ -88,9 +88,10 @@ export class LoadBalancerState {
   async getState() {
     try {
       if (this.cache) {
-        return await this.cache.get(this.stateKey, 'json');
+        const state = await this.cache.get(this.stateKey, 'json');
+        if (state) return state;
       }
-      return null;
+      return this.getDefaultState();
     } catch (error) {
       this.logger?.error('获取状态失败', { error: error.message, stateKey: this.stateKey });
       return this.getDefaultState();
