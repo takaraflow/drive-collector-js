@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.23.0](https://github.com/YoungSx/drive-collector-js/compare/v4.22.0...v4.23.0) (2026-01-13)
+
+
+### ✅ 测试相关
+
+* adds test for verifying DC setting enforcement ([9467567](https://github.com/YoungSx/drive-collector-js/commit/94675674bedfd2ca04c6951c06e533c69edf4a36))
+* improve test environment setup and mocking ([5d1fef3](https://github.com/YoungSx/drive-collector-js/commit/5d1fef387600c4993dd54586682ce7f740dae870))
+
+
+### 📝 文档更新
+
+* add AGENTS.md with development guidelines ([44d4e57](https://github.com/YoungSx/drive-collector-js/commit/44d4e576879c17bbeab0366563044463ad09622c))
+
 ## [4.22.0](https://github.com/YoungSx/drive-collector-js/compare/v4.20.1...v4.22.0) (2026-01-13)
 
 
