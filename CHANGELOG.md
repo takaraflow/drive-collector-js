@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.23.0](https://github.com/YoungSx/drive-collector-js/compare/v4.22.0...v4.23.0) (2026-01-13)
+
+
+### ✅ 测试相关
+
+* adds test for verifying DC setting enforcement ([9467567](https://github.com/YoungSx/drive-collector-js/commit/94675674bedfd2ca04c6951c06e533c69edf4a36))
+* improve test environment setup and mocking ([5d1fef3](https://github.com/YoungSx/drive-collector-js/commit/5d1fef387600c4993dd54586682ce7f740dae870))
+
+
+### 📝 文档更新
+
+* add AGENTS.md with development guidelines ([44d4e57](https://github.com/YoungSx/drive-collector-js/commit/44d4e576879c17bbeab0366563044463ad09622c))
+
+
+### 🔧 其他任务
+
+* adds MCP support and updates .gitignore ([8a524a3](https://github.com/YoungSx/drive-collector-js/commit/8a524a33f56f374e4e1a3a81bab1777804c2cfa6))
+
+
+### ♻️ 代码重构
+
+* enhance distributed system reliability with new services and fixes ([d079c3d](https://github.com/YoungSx/drive-collector-js/commit/d079c3df92b191a2b89766d5ddab8dcf5f2ca39e))
+
+
+### 🐛 问题修复
+
+* adds active task count tracking functionality ([64d3269](https://github.com/YoungSx/drive-collector-js/commit/64d32697712fddd5fd9417f78a394c7ac1fb6a81))
+* enhances logger mocking to support full LoggerService interface ([4882170](https://github.com/YoungSx/drive-collector-js/commit/48821706e67981df11629d506d4aab2a3f14ebbb))
+* ensures Telegram connection before running bot tasks ([e127d91](https://github.com/YoungSx/drive-collector-js/commit/e127d9198c8be19e049fd913a46e865fdb7d3c37))
+* updates mediaGroupBuffer import to use default export ([8edc8b9](https://github.com/YoungSx/drive-collector-js/commit/8edc8b9248f0b2ec50bf140ace1c051f69599d77))
+
+
+### ✨ 新特性
+
+* adds instance-level active task count aggregation ([f553540](https://github.com/YoungSx/drive-collector-js/commit/f55354071567e00592948ec4284f67695a51812d))
+
 ## [4.22.0](https://github.com/YoungSx/drive-collector-js/compare/v4.20.1...v4.22.0) (2026-01-13)
 
 
