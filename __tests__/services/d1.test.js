@@ -35,9 +35,9 @@ describe("D1 Service", () => {
     // Set up mock environment variables
     process.env = {
       ...originalEnv,
-      CF_D1_ACCOUNT_ID: "mock_account_id",
-      CF_D1_DATABASE_ID: "mock_database_id",
-      CF_D1_TOKEN: "mock_token",
+      CLOUDFLARE_D1_ACCOUNT_ID: "mock_account_id",
+      CLOUDFLARE_D1_DATABASE_ID: "mock_database_id",
+      CLOUDFLARE_D1_TOKEN: "mock_token",
     };
 
     d1._reset();
@@ -69,25 +69,25 @@ describe("D1 Service", () => {
   });
 
   describe("Token initialization", () => {
-    test("should use CF_D1_TOKEN when CF_D1_TOKEN is set and CF_KV_TOKEN is also set", async () => {
+    test("should use CLOUDFLARE_D1_TOKEN when CLOUDFLARE_D1_TOKEN is set and CLOUDFLARE_KV_TOKEN is also set", async () => {
       // Set up environment with both tokens
-      process.env.CF_D1_ACCOUNT_ID = "test_account";
-      process.env.CF_D1_DATABASE_ID = "test_db";
-      process.env.CF_D1_TOKEN = "valid_d1_token";
-      process.env.CF_KV_TOKEN = "invalid_kv_token";
+      process.env.CLOUDFLARE_D1_ACCOUNT_ID = "test_account";
+      process.env.CLOUDFLARE_D1_DATABASE_ID = "test_db";
+      process.env.CLOUDFLARE_D1_TOKEN = "valid_d1_token";
+      process.env.CLOUDFLARE_KV_TOKEN = "invalid_kv_token";
       
       d1._reset();
       await d1.initialize();
       
-      // Should use CF_D1_TOKEN, not CF_KV_TOKEN
+      // Should use CLOUDFLARE_D1_TOKEN, not CLOUDFLARE_KV_TOKEN
       expect(d1.token).toBe("valid_d1_token");
       expect(d1.token).not.toBe("invalid_kv_token");
     });
 
-    test("should throw error when CF_D1_TOKEN is missing", async () => {
-      // Set up environment without CF_D1_TOKEN
-      delete process.env.CF_D1_TOKEN;
-      process.env.CF_KV_TOKEN = "some_kv_token"; // This should NOT be used as fallback
+    test("should throw error when CLOUDFLARE_D1_TOKEN is missing", async () => {
+      // Set up environment without CLOUDFLARE_D1_TOKEN
+      delete process.env.CLOUDFLARE_D1_TOKEN;
+      process.env.CLOUDFLARE_KV_TOKEN = "some_kv_token"; // This should NOT be used as fallback
       
       d1._reset();
       await d1.initialize();

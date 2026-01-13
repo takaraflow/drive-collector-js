@@ -164,12 +164,12 @@ INFISICAL_PROJECT_ID = "your-project-id"
 STRICT_SYNC = "0"
 
 # 云服务商特定配置
-CF_CACHE_ACCOUNT_ID = "account-id"
-CF_CACHE_NAMESPACE_ID = "namespace-id"
-CF_CACHE_TOKEN = "cache-token"
-CF_KV_ACCOUNT_ID = "kv-account-id"
-CF_KV_NAMESPACE_ID = "kv-namespace-id"
-CF_KV_TOKEN = "kv-token"
+CLOUDFLARE_KV_ACCOUNT_ID = "account-id"
+CLOUDFLARE_KV_NAMESPACE_ID = "namespace-id"
+CLOUDFLARE_KV_TOKEN = "cache-token"
+CLOUDFLARE_KV_ACCOUNT_ID = "kv-account-id"
+CLOUDFLARE_KV_NAMESPACE_ID = "kv-namespace-id"
+CLOUDFLARE_KV_TOKEN = "kv-token"
 ```
 
 **部署命令**：
@@ -655,8 +655,8 @@ node scripts/sync-env.js
 ```javascript
 const cloudVariables = [
     // Cloudflare 相关
-    'CF_CACHE_ACCOUNT_ID', 'CF_CACHE_NAMESPACE_ID', 'CF_CACHE_TOKEN',
-    'CF_KV_ACCOUNT_ID', 'CF_KV_NAMESPACE_ID', 'CF_KV_TOKEN',
+    'CLOUDFLARE_KV_ACCOUNT_ID', 'CLOUDFLARE_KV_NAMESPACE_ID', 'CLOUDFLARE_KV_TOKEN',
+    'CLOUDFLARE_KV_ACCOUNT_ID', 'CLOUDFLARE_KV_NAMESPACE_ID', 'CLOUDFLARE_KV_TOKEN',
     
     // Upstash 相关
     'UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN',

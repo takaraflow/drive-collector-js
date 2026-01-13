@@ -17,7 +17,6 @@ import { parseCacheConfig } from "../utils/configParser.js";
 
 // --- Import Providers ---
 // Concrete Providers
-import { CloudflareKVCache } from './cache/CloudflareKVCache.js';
 import { RedisCache } from './cache/RedisCache.js';
 import { RedisTLSCache } from './cache/RedisTLSCache.js';
 import { NorthFlankRTCache } from './cache/NorthFlankRTCache.js';
@@ -76,14 +75,6 @@ const PROVIDER_ATOMIC_CAPABILITIES = {
         lock: true,
         compareAndSet: false,
         notes: 'Redis with TLS, atomic operations preserved'
-    },
-    
-    // ⚠️ Eventually Consistent - Use with caution
-    'cloudflare': {
-        atomic: false,
-        lock: false,
-        compareAndSet: false,
-        notes: '⚠️ EVENTUALLY CONSISTENT - Locks NOT safe for critical operations'
     },
     
     // ❌ Memory Only - No distributed atomic guarantees
@@ -249,18 +240,7 @@ class CacheService {
             return new UpstashRHCache({ url: restUrl, token: restToken, name });
         }
 
-        // 2. Cloudflare KV
-        if (type === 'cloudflare-kv' || (config.accountId && config.namespaceId)) {
-            log.info(`Instantiating CloudflareKVCache for '${name}'`);
-            return new CloudflareKVCache({
-                accountId: config.accountId,
-                namespaceId: config.namespaceId,
-                token: config.token,
-                name
-            });
-        }
-
-        // 3. Redis / Valkey TCP/TLS
+        // 2. Redis / Valkey TCP/TLS
         if (host && port) {
             let authPart = '';
             if (username) {
@@ -352,20 +332,6 @@ class CacheService {
             if (isTls) return new RedisTLSCache({ url: env.REDIS_URL });
             return new RedisCache({ url: env.REDIS_URL });
         }
-        // Cloudflare KV
-        const cfAccountId = env.CF_CACHE_ACCOUNT_ID || env.CF_KV_ACCOUNT_ID || env.CF_ACCOUNT_ID;
-        const cfNamespaceId = env.CF_CACHE_NAMESPACE_ID || env.CF_KV_NAMESPACE_ID;
-        const cfToken = env.CF_CACHE_TOKEN || env.CF_KV_TOKEN;
-        if (cfAccountId && cfNamespaceId && cfToken) {
-            return new CloudflareKVCache({ accountId: cfAccountId, namespaceId: cfNamespaceId, token: cfToken });
-        }
-        // Config file
-        try {
-            const config = getConfig();
-            if (config.kv?.accountId && config.kv?.namespaceId && config.kv?.token) {
-                return new CloudflareKVCache(config.kv);
-            }
-        } catch (e) {}
 
         return null;
     }

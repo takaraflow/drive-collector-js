@@ -195,9 +195,9 @@ export async function initConfig() {
             }
         },
         kv: {
-            accountId: env.CF_CACHE_ACCOUNT_ID || env.CF_KV_ACCOUNT_ID || env.CF_ACCOUNT_ID || null,
-            namespaceId: env.CF_CACHE_NAMESPACE_ID || env.CF_KV_NAMESPACE_ID || null,
-            token: env.CF_CACHE_TOKEN || env.CF_KV_TOKEN || null
+            accountId: env.CLOUDFLARE_KV_ACCOUNT_ID || env.CLOUDFLARE_ACCOUNT_ID || null,
+            namespaceId: env.CLOUDFLARE_KV_NAMESPACE_ID || null,
+            token: env.CLOUDFLARE_KV_TOKEN || null
         },
         qstash: {
             token: env.QSTASH_TOKEN || null,
@@ -215,9 +215,9 @@ export async function initConfig() {
             workerSecret: env.OSS_WORKER_SECRET || null
         },
         d1: {
-            accountId: env.CF_D1_ACCOUNT_ID || env.CF_ACCOUNT_ID || null,
-            databaseId: env.CF_D1_DATABASE_ID || null,
-            token: env.CF_D1_TOKEN || null
+            accountId: env.CLOUDFLARE_D1_ACCOUNT_ID || env.CLOUDFLARE_ACCOUNT_ID || null,
+            databaseId: env.CLOUDFLARE_D1_DATABASE_ID || null,
+            token: env.CLOUDFLARE_D1_TOKEN || null
         },
         telegram: {
             apiId: parseInt(env.API_ID) || null,

@@ -12,9 +12,9 @@ const mockLocalCache = {
 
 // Mock Config (虽然 SettingsRepository 不直接用，但 CacheService 可能用到)
 const mockConfig = {
-    CF_CACHE_ACCOUNT_ID: 'test-account-id',
-    CF_CACHE_NAMESPACE_ID: 'test-namespace-id',
-    CF_CACHE_API_TOKEN: 'test-api-token'
+    CLOUDFLARE_KV_ACCOUNT_ID: 'test-account-id',
+    CLOUDFLARE_KV_NAMESPACE_ID: 'test-namespace-id',
+    CLOUDFLARE_KV_TOKEN: 'test-api-token'
 };
 
 // 注册 Mocks

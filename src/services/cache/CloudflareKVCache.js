@@ -22,6 +22,22 @@ class CloudflareKVCache extends BaseCache {
     }
 
     /**
+     * Detect configuration from environment variables
+     * @param {Object} env - Environment variables
+     * @returns {Object|null} - Configuration object or null if not detected
+     */
+    static detectConfig(env = process.env) {
+        const accountId = env.CLOUDFLARE_KV_ACCOUNT_ID || env.CLOUDFLARE_ACCOUNT_ID;
+        const namespaceId = env.CLOUDFLARE_KV_NAMESPACE_ID;
+        const token = env.CLOUDFLARE_KV_TOKEN;
+
+        if (accountId && namespaceId && token) {
+            return { accountId, namespaceId, token };
+        }
+        return null;
+    }
+
+    /**
      * Fetch with timeout and error handling
      * @private
      */

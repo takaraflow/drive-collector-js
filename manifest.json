@@ -551,22 +551,22 @@
         "required": false,
         "description": "Axiom dataset name"
       },
-      "CF_D1_ACCOUNT_ID": {
+      "CLOUDFLARE_D1_ACCOUNT_ID": {
         "type": "string",
         "required": false,
         "description": "Cloudflare D1 account ID"
       },
-      "CF_D1_DATABASE_ID": {
+      "CLOUDFLARE_D1_DATABASE_ID": {
         "type": "string",
         "required": false,
         "description": "Cloudflare D1 database ID"
       },
-      "CF_D1_TOKEN": {
+      "CLOUDFLARE_D1_TOKEN": {
         "type": "string",
         "required": false,
         "description": "Cloudflare D1 API token"
       },
-      "CF_ACCOUNT_ID": {
+      "CLOUDFLARE_ACCOUNT_ID": {
         "type": "string",
         "required": false,
         "description": "Cloudflare account ID (fallback for KV/D1)"
@@ -691,7 +691,6 @@
         "required": false,
         "enum": [
           "redis",
-          "cloudflare",
           "upstash"
         ],
         "description": "强制指定缓存提供商 (优先级高于自动检测)"
@@ -701,40 +700,24 @@
         "required": false,
         "enum": [
           "redis",
-          "cloudflare",
           "upstash"
         ],
-        "description": "Legacy 缓存提供商指定 (建议使用 CACHE_PROVIDER)"
+        "description": "分布式键值对存储提供商"
       },
-      "CF_CACHE_ACCOUNT_ID": {
+      "CLOUDFLARE_KV_ACCOUNT_ID": {
         "type": "string",
         "required": false,
-        "description": "Cloudflare Cache account ID (also supports CF_KV_ACCOUNT_ID for backward compatibility)"
+        "description": "Cloudflare account ID for KV storage"
       },
-      "CF_CACHE_NAMESPACE_ID": {
+      "CLOUDFLARE_KV_NAMESPACE_ID": {
         "type": "string",
         "required": false,
-        "description": "Cloudflare Cache namespace ID (also supports CF_KV_NAMESPACE_ID for backward compatibility)"
+        "description": "Cloudflare KV namespace ID"
       },
-      "CF_CACHE_TOKEN": {
+      "CLOUDFLARE_KV_TOKEN": {
         "type": "string",
         "required": false,
-        "description": "Cloudflare Cache API token (also supports CF_KV_TOKEN for backward compatibility)"
-      },
-      "CF_KV_ACCOUNT_ID": {
-        "type": "string",
-        "required": false,
-        "description": "Legacy Cloudflare KV account ID (deprecated, use CF_CACHE_ACCOUNT_ID)"
-      },
-      "CF_KV_NAMESPACE_ID": {
-        "type": "string",
-        "required": false,
-        "description": "Legacy Cloudflare KV namespace ID (deprecated, use CF_CACHE_NAMESPACE_ID)"
-      },
-      "CF_KV_TOKEN": {
-        "type": "string",
-        "required": false,
-        "description": "Legacy Cloudflare KV API token (deprecated, use CF_CACHE_TOKEN)"
+        "description": "Cloudflare KV API token"
       },
       "UPSTASH_REDIS_REST_URL": {
         "type": "string",

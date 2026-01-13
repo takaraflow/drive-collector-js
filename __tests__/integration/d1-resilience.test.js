@@ -27,9 +27,9 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
         // Set up mock environment variables - 使用新的变量名
         process.env = {
             ...originalEnv,
-            CF_D1_ACCOUNT_ID: "test_account",
-            CF_D1_DATABASE_ID: "test_db",
-            CF_D1_TOKEN: "test_token",
+            CLOUDFLARE_D1_ACCOUNT_ID: "test_account",
+            CLOUDFLARE_D1_DATABASE_ID: "test_db",
+            CLOUDFLARE_D1_TOKEN: "test_token",
         };
         vi.useFakeTimers();
         vi.resetModules();
@@ -157,11 +157,11 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
 
     test("should handle configuration missing gracefully", async () => {
         // Temporarily remove required env vars
-        const originalAccountId = process.env.CF_D1_ACCOUNT_ID;
-        const originalDbId = process.env.CF_D1_DATABASE_ID;
+        const originalAccountId = process.env.CLOUDFLARE_D1_ACCOUNT_ID;
+        const originalDbId = process.env.CLOUDFLARE_D1_DATABASE_ID;
 
-        delete process.env.CF_D1_ACCOUNT_ID;
-        delete process.env.CF_D1_DATABASE_ID;
+        delete process.env.CLOUDFLARE_D1_ACCOUNT_ID;
+        delete process.env.CLOUDFLARE_D1_DATABASE_ID;
 
         // Re-import to get new instance without config
         vi.resetModules();
@@ -173,8 +173,8 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
         expect(mockFetch).not.toHaveBeenCalled(); // Should not attempt request
 
         // Restore env vars
-        process.env.CF_D1_ACCOUNT_ID = originalAccountId;
-        process.env.CF_D1_DATABASE_ID = originalDbId;
+        process.env.CLOUDFLARE_D1_ACCOUNT_ID = originalAccountId;
+        process.env.CLOUDFLARE_D1_DATABASE_ID = originalDbId;
     });
 
     test("should provide detailed error logging for debugging", async () => {

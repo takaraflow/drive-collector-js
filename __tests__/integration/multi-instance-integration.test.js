@@ -12,11 +12,11 @@ describe("Multi-Instance Integration", () => {
     // Set up mock environment variables - 使用新的变量名
     process.env = {
       ...originalEnv,
-      CF_KV_ACCOUNT_ID: "mock_account_id",
-      CF_KV_NAMESPACE_ID: "mock_namespace_id",
-      CF_KV_TOKEN: "mock_kv_token",
-      CF_D1_DATABASE_ID: "mock_db_id",
-      CF_D1_TOKEN: "mock_d1_token",
+      CLOUDFLARE_KV_ACCOUNT_ID: "mock_account_id",
+      CLOUDFLARE_KV_NAMESPACE_ID: "mock_namespace_id",
+      CLOUDFLARE_KV_TOKEN: "mock_kv_token",
+      CLOUDFLARE_D1_DATABASE_ID: "mock_db_id",
+      CLOUDFLARE_D1_TOKEN: "mock_d1_token",
       INSTANCE_ID: "integration_test_instance",
     };
     vi.resetModules();

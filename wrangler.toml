@@ -8,5 +8,5 @@
 # KV 命名空间绑定参考
 # [[kv_namespaces]]
 # binding = "KV_STORAGE"
-# id = "${CF_KV_NAMESPACE_ID}"
+# id = "${CLOUDFLARE_KV_NAMESPACE_ID}"
 # preview_id = "${KV_PREVIEW_ID}"

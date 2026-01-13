@@ -312,9 +312,9 @@ describe("CacheProviderFactory Tests", () => {
 
         test("should detect Cloudflare from CF_CACHE_* env vars", async () => {
             const env = {
-                CF_CACHE_ACCOUNT_ID: "acc1",
-                CF_CACHE_NAMESPACE_ID: "ns1",
-                CF_CACHE_TOKEN: "token1"
+                CLOUDFLARE_KV_ACCOUNT_ID: "acc1",
+                CLOUDFLARE_KV_NAMESPACE_ID: "ns1",
+                CLOUDFLARE_KV_TOKEN: "token1"
             };
 
             service = new CacheService({ env });
@@ -325,9 +325,9 @@ describe("CacheProviderFactory Tests", () => {
 
         test("should detect Cloudflare from CF_KV_* env vars", async () => {
             const env = {
-                CF_KV_ACCOUNT_ID: "acc1",
-                CF_KV_NAMESPACE_ID: "ns1",
-                CF_KV_TOKEN: "token1"
+                CLOUDFLARE_KV_ACCOUNT_ID: "acc1",
+                CLOUDFLARE_KV_NAMESPACE_ID: "ns1",
+                CLOUDFLARE_KV_TOKEN: "token1"
             };
 
             service = new CacheService({ env });
@@ -336,11 +336,11 @@ describe("CacheProviderFactory Tests", () => {
             expect(service.currentProviderName).toBe('cloudflare');
         }, 50);
 
-        test("should detect Cloudflare from CF_ACCOUNT_ID with other vars", async () => {
+        test("should detect Cloudflare from CLOUDFLARE_ACCOUNT_ID with other vars", async () => {
             const env = {
-                CF_ACCOUNT_ID: "acc1",
-                CF_KV_NAMESPACE_ID: "ns1",
-                CF_KV_TOKEN: "token1"
+                CLOUDFLARE_ACCOUNT_ID: "acc1",
+                CLOUDFLARE_KV_NAMESPACE_ID: "ns1",
+                CLOUDFLARE_KV_TOKEN: "token1"
             };
 
             service = new CacheService({ env });

@@ -11,7 +11,7 @@ const logWithProvider = () => log.withContext({ provider: cache.getCurrentProvid
 
 /**
  * --- 多实例协调服务 ---
- * 基于 Cloudflare Cache 实现异地多实例支持
+ * 基于分布式缓存实现异地多实例支持
  * 职责：实例注册、心跳、分布式锁、任务协调
  */
 export class InstanceCoordinator {

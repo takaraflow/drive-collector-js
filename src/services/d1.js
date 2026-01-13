@@ -17,12 +17,12 @@ class D1Service {
     async initialize() {
         if (this.isInitialized) return;
 
-        this.accountId = process.env.CF_D1_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
-        this.databaseId = process.env.CF_D1_DATABASE_ID;
-        this.token = process.env.CF_D1_TOKEN;
+        this.accountId = process.env.CLOUDFLARE_D1_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID;
+        this.databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
+        this.token = process.env.CLOUDFLARE_D1_TOKEN;
 
         if (!this.accountId || !this.databaseId || !this.token) {
-            log.warn("⚠️ D1配置不完整: 请检查 CF_D1_ACCOUNT_ID, CF_D1_DATABASE_ID, CF_D1_TOKEN");
+            log.warn("⚠️ D1配置不完整: 请检查 CLOUDFLARE_D1_ACCOUNT_ID, CLOUDFLARE_D1_DATABASE_ID, CLOUDFLARE_D1_TOKEN");
         } else {
             this.apiUrl = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/d1/database/${this.databaseId}/query`;
             this.isInitialized = true;

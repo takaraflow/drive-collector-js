@@ -230,9 +230,9 @@ describe("CacheService Integration Tests", () => {
 
             service = new CacheService({
                 env: {
-                    CF_CACHE_ACCOUNT_ID: "cf_acc",
-                    CF_CACHE_NAMESPACE_ID: "cf_ns",
-                    CF_CACHE_TOKEN: "cf_token"
+                    CLOUDFLARE_KV_ACCOUNT_ID: "cf_acc",
+                    CLOUDFLARE_KV_NAMESPACE_ID: "cf_ns",
+                    CLOUDFLARE_KV_TOKEN: "cf_token"
                 }
             });
             await service.initialize();
@@ -339,9 +339,9 @@ describe("CacheService Integration Tests", () => {
             mockFetch.mockResolvedValue({ ok: true, status: 200, text: () => Promise.resolve("OK") });
             service = new CacheService({
                 env: {
-                    CF_CACHE_ACCOUNT_ID: "cf_acc",
-                    CF_CACHE_NAMESPACE_ID: "cf_ns",
-                    CF_CACHE_TOKEN: "cf_token"
+                    CLOUDFLARE_KV_ACCOUNT_ID: "cf_acc",
+                    CLOUDFLARE_KV_NAMESPACE_ID: "cf_ns",
+                    CLOUDFLARE_KV_TOKEN: "cf_token"
                 }
             });
             await service.initialize();
@@ -358,9 +358,9 @@ describe("CacheService Integration Tests", () => {
             mockFetch.mockResolvedValue({ ok: true, status: 200, text: () => Promise.resolve("OK") });
             service = new CacheService({
                 env: {
-                    CF_CACHE_ACCOUNT_ID: "cf_acc",
-                    CF_CACHE_NAMESPACE_ID: "cf_ns",
-                    CF_CACHE_TOKEN: "cf_token"
+                    CLOUDFLARE_KV_ACCOUNT_ID: "cf_acc",
+                    CLOUDFLARE_KV_NAMESPACE_ID: "cf_ns",
+                    CLOUDFLARE_KV_TOKEN: "cf_token"
                 }
             });
             await service.initialize();
@@ -373,9 +373,9 @@ describe("CacheService Integration Tests", () => {
             mockFetch.mockResolvedValue({ ok: true, status: 200, text: () => Promise.resolve("OK") });
             service = new CacheService({
                 env: {
-                    CF_CACHE_ACCOUNT_ID: "cf_acc",
-                    CF_CACHE_NAMESPACE_ID: "cf_ns",
-                    CF_CACHE_TOKEN: "cf_token"
+                    CLOUDFLARE_KV_ACCOUNT_ID: "cf_acc",
+                    CLOUDFLARE_KV_NAMESPACE_ID: "cf_ns",
+                    CLOUDFLARE_KV_TOKEN: "cf_token"
                 }
             });
             await service.initialize();
@@ -397,9 +397,9 @@ describe("CacheService Integration Tests", () => {
 
             service = new CacheService({
                 env: {
-                    CF_CACHE_ACCOUNT_ID: "cf_acc",
-                    CF_CACHE_NAMESPACE_ID: "cf_ns",
-                    CF_CACHE_TOKEN: "cf_token"
+                    CLOUDFLARE_KV_ACCOUNT_ID: "cf_acc",
+                    CLOUDFLARE_KV_NAMESPACE_ID: "cf_ns",
+                    CLOUDFLARE_KV_TOKEN: "cf_token"
                 }
             });
             await service.initialize();
@@ -412,9 +412,9 @@ describe("CacheService Integration Tests", () => {
             mockFetch.mockRejectedValue(new Error("Network error"));
             service = new CacheService({
                 env: {
-                    CF_CACHE_ACCOUNT_ID: "cf_acc",
-                    CF_CACHE_NAMESPACE_ID: "cf_ns",
-                    CF_CACHE_TOKEN: "cf_token"
+                    CLOUDFLARE_KV_ACCOUNT_ID: "cf_acc",
+                    CLOUDFLARE_KV_NAMESPACE_ID: "cf_ns",
+                    CLOUDFLARE_KV_TOKEN: "cf_token"
                 }
             });
             await service.initialize();
@@ -425,9 +425,9 @@ describe("CacheService Integration Tests", () => {
         test("should handle set operation failures", async () => {
             service = new CacheService({
                 env: {
-                    CF_CACHE_ACCOUNT_ID: "cf_acc",
-                    CF_CACHE_NAMESPACE_ID: "cf_ns",
-                    CF_CACHE_TOKEN: "cf_token"
+                    CLOUDFLARE_KV_ACCOUNT_ID: "cf_acc",
+                    CLOUDFLARE_KV_NAMESPACE_ID: "cf_ns",
+                    CLOUDFLARE_KV_TOKEN: "cf_token"
                 }
             });
             await service.initialize();
@@ -442,9 +442,9 @@ describe("CacheService Integration Tests", () => {
             mockFetch.mockResolvedValue({ ok: false, status: 500 });
             service = new CacheService({
                 env: {
-                    CF_CACHE_ACCOUNT_ID: "cf_acc",
-                    CF_CACHE_NAMESPACE_ID: "cf_ns",
-                    CF_CACHE_TOKEN: "cf_token"
+                    CLOUDFLARE_KV_ACCOUNT_ID: "cf_acc",
+                    CLOUDFLARE_KV_NAMESPACE_ID: "cf_ns",
+                    CLOUDFLARE_KV_TOKEN: "cf_token"
                 }
             });
             await service.initialize();
@@ -456,9 +456,9 @@ describe("CacheService Integration Tests", () => {
             mockFetch.mockRejectedValue(new Error("API error"));
             service = new CacheService({
                 env: {
-                    CF_CACHE_ACCOUNT_ID: "cf_acc",
-                    CF_CACHE_NAMESPACE_ID: "cf_ns",
-                    CF_CACHE_TOKEN: "cf_token"
+                    CLOUDFLARE_KV_ACCOUNT_ID: "cf_acc",
+                    CLOUDFLARE_KV_NAMESPACE_ID: "cf_ns",
+                    CLOUDFLARE_KV_TOKEN: "cf_token"
                 }
             });
             await service.initialize();
@@ -471,9 +471,9 @@ describe("CacheService Integration Tests", () => {
         test("should prioritize env over config for Cloudflare credentials", async () => {
             service = new CacheService({
                 env: {
-                    CF_CACHE_ACCOUNT_ID: "env-acc",
-                    CF_CACHE_NAMESPACE_ID: "env-ns",
-                    CF_CACHE_TOKEN: "env-token"
+                    CLOUDFLARE_KV_ACCOUNT_ID: "env-acc",
+                    CLOUDFLARE_KV_NAMESPACE_ID: "env-ns",
+                    CLOUDFLARE_KV_TOKEN: "env-token"
                 }
             });
             await service.initialize();
@@ -483,21 +483,21 @@ describe("CacheService Integration Tests", () => {
         test("should use alternative env variable names", async () => {
             service = new CacheService({
                 env: {
-                    CF_KV_ACCOUNT_ID: "kv-acc",
-                    CF_KV_NAMESPACE_ID: "kv-ns",
-                    CF_KV_TOKEN: "kv-token"
+                    CLOUDFLARE_KV_ACCOUNT_ID: "kv-acc",
+                    CLOUDFLARE_KV_NAMESPACE_ID: "kv-ns",
+                    CLOUDFLARE_KV_TOKEN: "kv-token"
                 }
             });
             await service.initialize();
             expect(service.currentProviderName).toBe('cloudflare');
         });
 
-        test("should use CF_ACCOUNT_ID as fallback", async () => {
+        test("should use CLOUDFLARE_ACCOUNT_ID as fallback", async () => {
             service = new CacheService({
                 env: {
-                    CF_ACCOUNT_ID: "account-acc",
-                    CF_KV_NAMESPACE_ID: "account-ns",
-                    CF_KV_TOKEN: "account-token"
+                    CLOUDFLARE_ACCOUNT_ID: "account-acc",
+                    CLOUDFLARE_KV_NAMESPACE_ID: "account-ns",
+                    CLOUDFLARE_KV_TOKEN: "account-token"
                 }
             });
             await service.initialize();

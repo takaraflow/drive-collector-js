@@ -36,9 +36,9 @@ function loadEnvConfig() {
     
     // 优先级：系统环境变量 (GHA 注入) > .env 文件
     return {
-        accountId: process.env.CF_D1_ACCOUNT_ID || process.env.CF_ACCOUNT_ID || config.CF_D1_ACCOUNT_ID || config.CF_ACCOUNT_ID,
-        databaseId: process.env.CF_D1_DATABASE_ID || config.CF_D1_DATABASE_ID,
-        token: process.env.CF_D1_TOKEN || process.env.CF_KV_TOKEN || config.CF_D1_TOKEN || config.CF_KV_TOKEN
+        accountId: process.env.CLOUDFLARE_D1_ACCOUNT_ID || process.env.CF_ACCOUNT_ID || config.CLOUDFLARE_D1_ACCOUNT_ID || config.CF_ACCOUNT_ID,
+        databaseId: process.env.CLOUDFLARE_D1_DATABASE_ID || config.CLOUDFLARE_D1_DATABASE_ID,
+        token: process.env.CLOUDFLARE_D1_TOKEN || process.env.CLOUDFLARE_KV_TOKEN || config.CLOUDFLARE_D1_TOKEN || config.CLOUDFLARE_KV_TOKEN
     };
 }
 
@@ -50,9 +50,9 @@ async function runDiagnostics() {
     
     // 1. 配置检查
     console.log('\n📊 1. 配置检查:');
-    console.log(`   CF_D1_ACCOUNT_ID: ${config.accountId || 'MISSING'}`);
-    console.log(`   CF_D1_DATABASE_ID: ${config.databaseId || 'MISSING'}`);
-    console.log(`   CF_D1_TOKEN: ${config.token ? '***' + config.token.slice(-4) : 'MISSING'}`);
+    console.log(`   CLOUDFLARE_D1_ACCOUNT_ID: ${config.accountId || 'MISSING'}`);
+    console.log(`   CLOUDFLARE_D1_DATABASE_ID: ${config.databaseId || 'MISSING'}`);
+    console.log(`   CLOUDFLARE_D1_TOKEN: ${config.token ? '***' + config.token.slice(-4) : 'MISSING'}`);
     
     if (!config.accountId || !config.databaseId || !config.token) {
         console.error('\n❌ 错误: 配置缺失，无法继续诊断。');

@@ -15,9 +15,9 @@ const projectRoot = path.resolve(__dirname, '..');
 // 健壮的配置加载：支持 .env + 环境变量 + 占位符过滤
 function loadConfig() {
     const config = {
-        accountId: process.env.CF_D1_ACCOUNT_ID || process.env.CF_ACCOUNT_ID,
-        databaseId: process.env.CF_D1_DATABASE_ID,
-        token: process.env.CF_D1_TOKEN || process.env.CF_KV_TOKEN
+        accountId: process.env.CLOUDFLARE_D1_ACCOUNT_ID || process.env.CF_ACCOUNT_ID,
+        databaseId: process.env.CLOUDFLARE_D1_DATABASE_ID,
+        token: process.env.CLOUDFLARE_D1_TOKEN || process.env.CLOUDFLARE_KV_TOKEN
     };
 
     // 如果环境变量缺失，尝试解析本地 .env
@@ -32,12 +32,12 @@ function loadConfig() {
                 let v = parts.join('=').trim().replace(/^["']|["']$/g, '');
                 
                 // 仅在当前没值且不是占位符时赋值
-                if (!config[k === 'CF_ACCOUNT_ID' || k === 'CF_D1_ACCOUNT_ID' ? 'accountId' : 
-                            k === 'CF_D1_DATABASE_ID' ? 'databaseId' : 
-                            k === 'CF_D1_TOKEN' || k === 'CF_KV_TOKEN' ? 'token' : 'none'] && v !== `\${${k}}`) {
-                    if (k === 'CF_ACCOUNT_ID' || k === 'CF_D1_ACCOUNT_ID') config.accountId = v;
-                    if (k === 'CF_D1_DATABASE_ID') config.databaseId = v;
-                    if (k === 'CF_D1_TOKEN' || k === 'CF_KV_TOKEN') config.token = v;
+                if (!config[k === 'CF_ACCOUNT_ID' || k === 'CLOUDFLARE_D1_ACCOUNT_ID' ? 'accountId' : 
+                            k === 'CLOUDFLARE_D1_DATABASE_ID' ? 'databaseId' : 
+                            k === 'CLOUDFLARE_D1_TOKEN' || k === 'CLOUDFLARE_KV_TOKEN' ? 'token' : 'none'] && v !== `\${${k}}`) {
+                    if (k === 'CF_ACCOUNT_ID' || k === 'CLOUDFLARE_D1_ACCOUNT_ID') config.accountId = v;
+                    if (k === 'CLOUDFLARE_D1_DATABASE_ID') config.databaseId = v;
+                    if (k === 'CLOUDFLARE_D1_TOKEN' || k === 'CLOUDFLARE_KV_TOKEN') config.token = v;
                 }
             }
         });

@@ -162,7 +162,7 @@ Using GitHub Actions with Node.js 20.x.
 | `CLOUDFLARE_API_TOKEN` | Required | Required | Cloudflare API token for deployment |
 | `CLOUDFLARE_ACCOUNT_ID` | Required | Required | Cloudflare account ID |
 | `WORKER_NAME` | `qstash-lb` | `qstash-lb-dev` | Worker name |
-| `CF_CACHE_NAMESPACE_ID` | Production NS | Staging NS | Cache namespace ID |
+| `CLOUDFLARE_KV_NAMESPACE_ID` | Production NS | Staging NS | Cache namespace ID |
 | `QSTASH_CURRENT_SIGNING_KEY` | Prod Key | Dev Key | Webhook signing key |
 | `UPSTASH_REDIS_REST_URL` | Prod URL | Dev URL | Redis REST URL |
 | `UPSTASH_REDIS_REST_TOKEN` | Prod Token | Dev Token | Redis REST token |

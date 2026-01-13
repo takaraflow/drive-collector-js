@@ -56,13 +56,13 @@ describe('CacheService Cloudflare KV Priority', () => {
         delete cleanEnv.REDIS_URL;
         delete cleanEnv.REDIS_HOST;
         delete cleanEnv.REDIS_PORT;
-        delete cleanEnv.CF_CACHE_ACCOUNT_ID;
-        delete cleanEnv.CF_CACHE_NAMESPACE_ID;
-        delete cleanEnv.CF_CACHE_TOKEN;
-        delete cleanEnv.CF_KV_ACCOUNT_ID;
-        delete cleanEnv.CF_KV_NAMESPACE_ID;
-        delete cleanEnv.CF_KV_TOKEN;
-        delete cleanEnv.CF_ACCOUNT_ID;
+        delete cleanEnv.CLOUDFLARE_KV_ACCOUNT_ID;
+        delete cleanEnv.CLOUDFLARE_KV_NAMESPACE_ID;
+        delete cleanEnv.CLOUDFLARE_KV_TOKEN;
+        delete cleanEnv.CLOUDFLARE_KV_ACCOUNT_ID;
+        delete cleanEnv.CLOUDFLARE_KV_NAMESPACE_ID;
+        delete cleanEnv.CLOUDFLARE_KV_TOKEN;
+        delete cleanEnv.CLOUDFLARE_ACCOUNT_ID;
         delete cleanEnv.UPSTASH_REDIS_REST_URL;
         delete cleanEnv.UPSTASH_REDIS_REST_TOKEN;
         process.env = cleanEnv;
@@ -83,9 +83,9 @@ describe('CacheService Cloudflare KV Priority', () => {
 
     test('should use Cloudflare KV when configured via env', async () => {
         cacheInstance = await createCacheService({
-            CF_CACHE_ACCOUNT_ID: 'cf-acc',
-            CF_CACHE_NAMESPACE_ID: 'cf-ns',
-            CF_CACHE_TOKEN: 'cf-token'
+            CLOUDFLARE_KV_ACCOUNT_ID: 'cf-acc',
+            CLOUDFLARE_KV_NAMESPACE_ID: 'cf-ns',
+            CLOUDFLARE_KV_TOKEN: 'cf-token'
         });
         expect(cacheInstance.getCurrentProvider()).toBe('cloudflare');
         expect(cacheInstance.primaryProvider.apiUrl).toContain('cf-acc');
@@ -93,19 +93,19 @@ describe('CacheService Cloudflare KV Priority', () => {
 
     test('should use Cloudflare KV when using alternative env variable names', async () => {
         cacheInstance = await createCacheService({
-            CF_KV_ACCOUNT_ID: 'kv-acc',
-            CF_KV_NAMESPACE_ID: 'kv-ns',
-            CF_KV_TOKEN: 'kv-token'
+            CLOUDFLARE_KV_ACCOUNT_ID: 'kv-acc',
+            CLOUDFLARE_KV_NAMESPACE_ID: 'kv-ns',
+            CLOUDFLARE_KV_TOKEN: 'kv-token'
         });
         expect(cacheInstance.getCurrentProvider()).toBe('cloudflare');
         expect(cacheInstance.primaryProvider.apiUrl).toContain('kv-acc');
     });
 
-    test('should use Cloudflare KV when using CF_ACCOUNT_ID fallback', async () => {
+    test('should use Cloudflare KV when using CLOUDFLARE_ACCOUNT_ID fallback', async () => {
         cacheInstance = await createCacheService({
-            CF_ACCOUNT_ID: 'account-acc',
-            CF_KV_NAMESPACE_ID: 'account-ns',
-            CF_KV_TOKEN: 'account-token'
+            CLOUDFLARE_ACCOUNT_ID: 'account-acc',
+            CLOUDFLARE_KV_NAMESPACE_ID: 'account-ns',
+            CLOUDFLARE_KV_TOKEN: 'account-token'
         });
         expect(cacheInstance.getCurrentProvider()).toBe('cloudflare');
         expect(cacheInstance.primaryProvider.apiUrl).toContain('account-acc');
@@ -143,9 +143,9 @@ describe('CacheService Cloudflare KV Priority', () => {
 
     test('should prioritize env over config for Cloudflare credentials', async () => {
         cacheInstance = await createCacheService({
-            CF_CACHE_ACCOUNT_ID: 'env-acc',
-            CF_CACHE_NAMESPACE_ID: 'env-ns',
-            CF_CACHE_TOKEN: 'env-token'
+            CLOUDFLARE_KV_ACCOUNT_ID: 'env-acc',
+            CLOUDFLARE_KV_NAMESPACE_ID: 'env-ns',
+            CLOUDFLARE_KV_TOKEN: 'env-token'
         });
         
         // Should use env values, not config values
@@ -155,9 +155,9 @@ describe('CacheService Cloudflare KV Priority', () => {
 
     test('should expose correct provider status properties', async () => {
         cacheInstance = await createCacheService({
-            CF_CACHE_ACCOUNT_ID: 'cf-acc',
-            CF_CACHE_NAMESPACE_ID: 'cf-ns',
-            CF_CACHE_TOKEN: 'cf-token'
+            CLOUDFLARE_KV_ACCOUNT_ID: 'cf-acc',
+            CLOUDFLARE_KV_NAMESPACE_ID: 'cf-ns',
+            CLOUDFLARE_KV_TOKEN: 'cf-token'
         });
 
         expect(cacheInstance.getCurrentProvider()).toBe('cloudflare');

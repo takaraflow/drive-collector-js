@@ -160,7 +160,7 @@ npm test
 | `CLOUDFLARE_API_TOKEN` | 必需 | 必需 | 部署的 Cloudflare API 令牌 |
 | `CLOUDFLARE_ACCOUNT_ID` | 必需 | 必需 | Cloudflare 账户 ID |
 | `WORKER_NAME` | `qstash-lb` | `qstash-lb-dev` | Worker 名称 |
-| `CF_KV_NAMESPACE_ID` | 生产 NS | 暂存 NS | KV 命名空间 ID |
+| `CLOUDFLARE_KV_NAMESPACE_ID` | 生产 NS | 暂存 NS | KV 命名空间 ID |
 | `QSTASH_CURRENT_SIGNING_KEY` | 生产密钥 | 开发密钥 | Webhook 签名密钥 |
 | `UPSTASH_REDIS_REST_URL` | 生产 URL | 开发 URL | Redis REST URL |
 | `UPSTASH_REDIS_REST_TOKEN` | 生产令牌 | 开发令牌 | Redis REST 令牌 |
