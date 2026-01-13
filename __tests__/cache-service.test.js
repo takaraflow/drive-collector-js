@@ -164,7 +164,8 @@ vi.mock('../src/logger.js', () => ({
     warn: vi.fn(),
     error: vi.fn(),
     debug: vi.fn(),
-  }
+    success: vi.fn(),
+  },
 }));
 
 describe('Cache System - configParser', () => {

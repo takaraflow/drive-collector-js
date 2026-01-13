@@ -19,6 +19,7 @@ vi.mock('../src/logger.js', () => ({
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
+    success: vi.fn(),
     child: vi.fn().mockReturnThis()
   },
   isTestEnvironment: true

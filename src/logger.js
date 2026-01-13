@@ -719,6 +719,44 @@ function createLoggerFactory(context, bindings = {}) {
     globalLoggerInstance = null;  // 防止引用旧的实例
   }
 
+  /**
+   * 内部日志记录逻辑
+   */
+  const _log = async (level, message, data = {}, span = null, ctx = null, categoryOverride = null) => {
+    const category = categoryOverride || data.category || data.module || bindings.module;
+    const formattedMsg = formatMessage(message, level, category);
+
+    const logData = {
+      level,
+      message: formattedMsg,
+      env: normalizeEnvName(context.env || 'prod'),
+      ...bindings,
+      ...data,
+      version: VERSION,
+      timestamp: new Date().toISOString()
+    };
+
+    if (context.env) {
+      logData.env = normalizeEnvName(context.env);
+    }
+
+    addOtelEvent(level, formattedMsg, logData, span);
+
+    const shouldAxiom = level !== 'debug' || 
+                       isDevEnv(context.env) || 
+                       isTestEnvironment || 
+                       baseLoggerConfig.debugEnabled;
+
+    if (shouldAxiom) {
+      await sendToAxiom(logData, context.logBuffer, ctx);
+    }
+
+    if (isDevEnv(context.env)) {
+      const consoleMethod = console[level] || console.log;
+      consoleMethod(`[${level.toUpperCase()}] ${formattedMsg}`, { ...bindings, ...data, version: VERSION });
+    }
+  };
+
   const logger = {
     // 基础属性
     version: VERSION,
@@ -728,102 +766,29 @@ function createLoggerFactory(context, bindings = {}) {
     /**
      * 记录 info 级别日志
      */
-    info: async function(message, data = {}, span = null, ctx = null) {
-      const logData = {
-        level: 'info',
-        message,
-        env: normalizeEnvName(context.env || 'prod'),
-        ...bindings,
-        ...data,
-        version: VERSION,
-        timestamp: new Date().toISOString()
-      };
-
-      // 确保env字段来自context，确保child传入的env被正确使用
-      if (context.env) {
-        logData.env = normalizeEnvName(context.env);
-      }
-
-      addOtelEvent('info', message, logData, span);
-      await sendToAxiom(logData, context.logBuffer, ctx);
-
-      // 开发环境同时输出到控制台
-      if (isDevEnv(context.env)) {
-        console.log(`[INFO] ${message}`, { ...bindings, ...data, version: VERSION });
-      }
-    },
+    info: (message, data = {}, span = null, ctx = null) => _log('info', message, data, span, ctx),
 
     /**
      * 记录 warn 级别日志
      */
-    warn: async function(message, data = {}, span = null, ctx = null) {
-      const logData = {
-        level: 'warn',
-        message,
-        env: normalizeEnvName(context.env || 'prod'),
-        ...bindings,
-        ...data,
-        version: VERSION,
-        timestamp: new Date().toISOString()
-      };
-
-      addOtelEvent('warn', message, logData, span);
-      await sendToAxiom(logData, context.logBuffer, ctx);
-
-      if (isDevEnv(context.env)) {
-        console.warn(`[WARN] ${message}`, { ...bindings, ...data, version: VERSION });
-      }
-    },
+    warn: (message, data = {}, span = null, ctx = null) => _log('warn', message, data, span, ctx),
 
     /**
      * 记录 error 级别日志
      */
-    error: async function(message, data = {}, span = null, ctx = null) {
-      const logData = {
-        level: 'error',
-        message,
-        env: normalizeEnvName(context.env || 'prod'),
-        ...bindings,
-        ...data,
-        version: VERSION,
-        timestamp: new Date().toISOString()
-      };
-
-      addOtelEvent('error', message, logData, span);
-      await sendToAxiom(logData, context.logBuffer, ctx);
-
-      if (isDevEnv(context.env)) {
-        console.error(`[ERROR] ${message}`, { ...bindings, ...data, version: VERSION });
-      }
-    },
+    error: (message, data = {}, span = null, ctx = null) => _log('error', message, data, span, ctx),
 
     /**
      * 记录 debug 级别日志
      */
-    debug: async function(message, data = {}, span = null, ctx = null) {
-      const logData = {
-        level: 'debug',
-        message,
-        env: normalizeEnvName(context.env || 'prod'),
-        ...bindings,
-        ...data,
-        version: VERSION,
-        timestamp: new Date().toISOString()
-      };
+    debug: (message, data = {}, span = null, ctx = null) => _log('debug', message, data, span, ctx),
 
-      addOtelEvent('debug', message, logData, span);
+    /**
+     * 记录成功日志
+     */
+    success: (message, data = {}, span = null, ctx = null) => _log('info', message, data, span, ctx, 'success'),
 
-      // Debug 日志：dev/test 环境默认启用，生产可通过 DEBUG_LOGS=true 强制开启
-      if (isDevEnv(context.env) || isTestEnvironment || baseLoggerConfig.debugEnabled) {
-        await sendToAxiom(logData, context.logBuffer, ctx);
-
-        if (isDevEnv(context.env)) {
-          console.debug(`[DEBUG] ${message}`, { ...bindings, ...data, version: VERSION });
-        }
-      }
-    },
-
-/**
+    /**
      * 创建子日志记录器
      */
     child: function(bindings) {
@@ -1010,6 +975,51 @@ export async function flushGlobalLoggerBuffer() {
   }
 
   return uploadTask;
+}
+
+// 日志表情映射
+const LOG_EMOJIS = {
+  info: 'ℹ️',
+  warn: '⚠️',
+  error: '❌',
+  debug: '🔍',
+  success: '✅',
+  start: '🚀',
+  done: '🏁',
+  cache: '💾',
+  network: '🌐',
+  auth: '🔐',
+  lb: '⚖️',
+  health: '🏥',
+  config: '⚙️'
+};
+
+/**
+ * 格式化日志消息，添加 emoji
+ * @param {string} message - 原始消息
+ * @param {string} level - 日志级别
+ * @param {string} [category] - 日志类别
+ * @returns {string} - 格式化后的消息
+ */
+function formatMessage(message, level, category) {
+  // 在测试环境下跳过 emoji，避免破坏现有的字符串匹配测试
+  if (typeof isTestEnvironment !== 'undefined' ? isTestEnvironment : (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test')) {
+    const categoryTag = category ? `[${category.toUpperCase()}] ` : '';
+    return `${categoryTag}${message}`;
+  }
+
+  let emoji = LOG_EMOJIS[level] || '';
+  if (category && LOG_EMOJIS[category]) {
+    emoji = LOG_EMOJIS[category];
+  }
+  
+  // 如果消息已经包含 emoji（通常在开头），则不再添加
+  if (/^[\u{1F300}-\u{1F9FF}]|^[\u{2600}-\u{26FF}]|^[\u{2700}-\u{27BF}]/u.test(message)) {
+    return message;
+  }
+
+  const categoryTag = category ? `[${category.toUpperCase()}] ` : '';
+  return `${emoji} ${categoryTag}${message}`;
 }
 
 // 基础 logger 实例

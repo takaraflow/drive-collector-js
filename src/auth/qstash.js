@@ -20,7 +20,7 @@ async function verifyQStashSignature(request, env, ctx = null, requestLogger = n
   // 跳过验证（开发环境）- 支持两种环境变量名称
   const skipAuth = env.SKIP_QSTASH_AUTH === 'true' || env.SKIP_SIGNATURE_VERIFY === 'true';
   if (skipAuth) {
-    if (log.debug) await log.debug('⏭️ 跳过 QStash 签名验证 (Skipping QStash auth)', {});
+    if (log.debug) await log.debug('Skipping QStash signature verification', { category: 'auth' });
     return true;
   }
 
@@ -53,10 +53,11 @@ async function verifyQStashSignature(request, env, ctx = null, requestLogger = n
     });
 
     if (!isValid) {
-      throw new Error('QStash 签名验证失败');
+      throw new Error('QStash signature verification failed');
     }
 
-    if (log.debug) await log.debug('✅ QStash 签名验证成功', {});
+    if (log.success) await log.success('QStash signature verified', { category: 'auth' });
+    else if (log.debug) await log.debug('QStash signature verified', { category: 'auth' });
     
     // 根据请求方法决定返回值
     const isGetRequest = request.method === 'GET' || request.method === 'HEAD';

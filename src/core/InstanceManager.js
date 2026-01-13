@@ -62,7 +62,7 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
   }
   
   const redisEndpointSummary = describeRedisEndpoint(env);
-  await getActiveInstancesLogger.debug('📊 Redis 终端摘要 (Redis endpoint summary)', { endpoint: redisEndpointSummary });
+  await getActiveInstancesLogger.debug('Redis endpoint summary', { endpoint: redisEndpointSummary });
   
   try {
     // 扫描所有契约键前缀
@@ -88,10 +88,10 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
     }
 
     // 新增日志：记录扫描到的所有原始键
-    await getActiveInstancesLogger.debug('🔎 扫描到所有原始键 (All raw keys scanned)', { keys: allKeys.map(k => k.name) });
+    await getActiveInstancesLogger.debug('Raw keys scanned', { keys: allKeys.map(k => k.name) });
 
     if (allKeys.length === 0) {
-      await getActiveInstancesLogger.debug('⚠️ 未找到键，尝试回退全量扫描 (No keys found, attempting fallback full scan)', {});
+      await getActiveInstancesLogger.debug('No keys found, attempting fallback full scan', {});
       try {
         const fallbackResult = await executeWithFailover('_kv_list', env, ctx, getActiveInstancesLogger, '');
         const fallbackKeys = fallbackResult?.keys || [];
@@ -231,10 +231,10 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
       await getActiveInstancesLogger.debug('去重后实例列表', { before: instances.map(i => i?.id), after: uniqueInstances.map(i => i.id) });
     }
 
-    await getActiveInstancesLogger.debug('👥 获取活跃实例完成 (Active instances fetched)', { count: uniqueInstances.length, totalKeys: allKeys.length });
+    await getActiveInstancesLogger.debug('Active instances retrieved', { count: uniqueInstances.length, totalKeys: allKeys.length });
     return uniqueInstances;
   } catch (error) {
-    await getActiveInstancesLogger.error('获取活跃实例失败', { error: error.message });
+    await getActiveInstancesLogger.error('Failed to retrieve active instances', { error: error.message });
     return [];
   }
 }

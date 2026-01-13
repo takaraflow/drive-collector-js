@@ -24,12 +24,19 @@ async function selectInstanceByLock(instances, env, ctx, requestLogger = null) {
   try {
     lockValue = await executeWithFailover('_kv_get', env, ctx, lockRoutingLogger, TELEGRAM_LOCK_KEY);
   } catch (error) {
-    await lockRoutingLogger.warn('🔒 读取锁失败，回退轮询', { lockKey: TELEGRAM_LOCK_KEY, error: error.message });
+    await lockRoutingLogger.warn('Lock read failed, falling back to round-robin', { 
+      lockKey: TELEGRAM_LOCK_KEY, 
+      error: error.message,
+      category: 'lb'
+    });
     return null;
   }
 
   if (!lockValue) {
-    await lockRoutingLogger.debug('🔍 未找到锁或锁已过期，回退轮询', { lockKey: TELEGRAM_LOCK_KEY });
+    await lockRoutingLogger.debug('No lock found or lock expired, falling back to round-robin', { 
+      lockKey: TELEGRAM_LOCK_KEY,
+      category: 'lb'
+    });
     return null;
   }
 
@@ -68,11 +75,19 @@ async function selectInstanceByLock(instances, env, ctx, requestLogger = null) {
 
   const ownerInstance = instances.find(inst => inst.id === lockOwnerId);
   if (ownerInstance) {
-    await lockRoutingLogger.info('🎯 使用锁持有者作为目标实例', { lockKey: TELEGRAM_LOCK_KEY, instanceId: lockOwnerId });
+    await lockRoutingLogger.success('Using lock owner as target instance', { 
+      lockKey: TELEGRAM_LOCK_KEY, 
+      instanceId: lockOwnerId,
+      category: 'lb'
+    });
     return ownerInstance;
   }
 
-  await lockRoutingLogger.warn('⚠️ 锁持有者不在活跃实例列表，回退轮询', { lockKey: TELEGRAM_LOCK_KEY, instanceId: lockOwnerId });
+  await lockRoutingLogger.warn('Lock owner not in active instances, falling back to round-robin', { 
+    lockKey: TELEGRAM_LOCK_KEY, 
+    instanceId: lockOwnerId,
+    category: 'lb'
+  });
   return null;
 }
 
@@ -146,12 +161,19 @@ async function selectTargetInstanceWithKVAtomic(instances, env, ctx, logger) {
       return instances[targetIndex];
       
     } catch (error) {
-      await logger.error(`KV原子操作异常，重试 ${attempt + 1}/${maxRetries}`, { error: error.message });
+      await logger.error(`KV atomic operation failed, retry ${attempt + 1}/${maxRetries}`, { 
+        error: error.message,
+        category: 'lb'
+      });
       
       if (attempt === maxRetries - 1) {
         // 最后一次重试失败，使用随机选择
         const randomIndex = Math.floor(Math.random() * instances.length);
-        await logger.warn(`所有KV重试失败，使用随机选择`, { randomIndex, lastError: error.message });
+        await logger.warn('All KV retries failed, using random selection', { 
+          randomIndex, 
+          lastError: error.message,
+          category: 'lb'
+        });
         return instances[randomIndex];
       }
       

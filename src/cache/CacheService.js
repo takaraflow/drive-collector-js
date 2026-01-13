@@ -90,10 +90,16 @@ class CacheService {
                         this.fallbackProvider = null;
                         this.fallbackProviderEntry = null;
 
-                        await log.info('Cache provider connected', this._createProviderLogContext(providerEntry), null, ctx);
+                        await log.success('Cache provider connected', {
+                            ...this._createProviderLogContext(providerEntry),
+                            category: 'cache'
+                        }, null, ctx);
                         break;
                     } catch (error) {
-                        await log.error(`Failed to connect to ${providerEntry.config.name}: ${error.message}`, {}, null, ctx);
+                        await log.error(`Failed to connect to cache provider ${providerEntry.config.name}`, {
+                            error: error.message,
+                            category: 'cache'
+                        }, null, ctx);
                     }
                 }
 
@@ -135,7 +141,7 @@ class CacheService {
         // 如果没有配置任何 Provider，或者虽然配置了但没有覆盖 KV，且环境变量中有 KV_STORAGE，则自动添加
         const hasKvConfig = configs.some(c => c.type === 'cloudflare-kv-binding' || c.binding === 'KV_STORAGE');
         if (!hasKvConfig && this.env.KV_STORAGE) {
-            log.info('Auto-detecting KV_STORAGE binding as cache provider');
+            log.info('Auto-detected KV_STORAGE binding', { category: 'cache' });
             configs.push({
                 name: 'default-kv',
                 type: 'cloudflare-kv-binding',
@@ -148,10 +154,10 @@ class CacheService {
         const hasUpstashConfig = configs.some(c => c.type === 'redis' && c.url && c.url.includes('upstash'));
         if (!hasUpstashConfig && this.env.UPSTASH_REDIS_REST_URL && this.env.UPSTASH_REDIS_REST_TOKEN) {
              // 只有当提供了完整的 URL (非 REST) 时才能作为 Redis 使用，
-             // 但通常环境变量给的是 REST URL。这里我们主要依赖 RedisTLSCache，它需要标准 Redis 协议。
+             // 但通常环境变量给的是 REST URL。这里 we 主要依赖 RedisTLSCache，它需要标准 Redis 协议。
              // 如果 env 中有 REDIS_URL，则添加
              if (this.env.REDIS_URL) {
-                 log.info('Auto-detecting REDIS_URL as cache provider');
+                 log.info('Auto-detected REDIS_URL as cache provider', { category: 'cache' });
                  configs.push({
                      name: 'default-redis',
                      type: 'redis',

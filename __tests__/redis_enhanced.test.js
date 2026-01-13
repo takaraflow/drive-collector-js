@@ -16,6 +16,7 @@ vi.mock('../src/logger.js', () => {
     warn: vi.fn().mockResolvedValue(undefined),
     error: vi.fn().mockResolvedValue(undefined),
     debug: vi.fn().mockResolvedValue(undefined),
+    success: vi.fn().mockResolvedValue(undefined),
     configure: vi.fn(),
     version: 'dev',
     env: 'test',

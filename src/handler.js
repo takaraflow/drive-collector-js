@@ -126,12 +126,9 @@ async function handleInstanceQuery(request, env, ctx, log) {
 async function handleLoadBalancing(request, env, ctx, log, normalizedUrl, body) {
   // 获取活跃实例
   const activeInstances = await getActiveInstances(env, ctx, log);
-  await log.debug('getActiveInstances complete', { count: activeInstances.length, module: 'instanceSelector' });
-  await log.info('活跃实例查询完成', { count: activeInstances.length });
-  await log.info('存活标记: getActiveInstances 完成', {
-    alive: true,
-    count: activeInstances.length,
-    timestamp: Date.now()
+  await log.success('Active instances retrieved', { 
+    count: activeInstances.length, 
+    category: 'lb' 
   });
 
   if (activeInstances.length === 0) {
@@ -167,23 +164,23 @@ async function handleLoadBalancing(request, env, ctx, log, normalizedUrl, body) 
     targetInstance = await selectTargetInstance(activeInstances, env, ctx, log);
   }
   
-  await log.debug('targetInstance selected', { id: targetInstance?.id || 'NONE', module: 'instanceSelector' });
+  await log.debug('Target instance selected', { id: targetInstance?.id || 'NONE', category: 'lb' });
   
   if (!targetInstance) {
+    await log.error('No target instance selected', { category: 'lb' });
     return new Response('No target instance selected', { status: 503 });
   }
 
   // 转发请求
   const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], normalizedUrl, request, env, body, ctx, log);
 
-  await log.debug('负载均衡请求完成', { status: response.status });
+  await log.debug('Load balancing request completed', { status: response.status, category: 'network' });
 
-  await log.info('核心 Fetch 诊断', {
+  await log.success('Request forwarded successfully', {
     finalStatus: response.status,
-    finalStatusText: response.statusText,
     instanceId: targetInstance.id,
     path: normalizedUrl.pathname,
-    alive: true
+    category: 'network'
   });
 
   return response;
@@ -218,6 +215,7 @@ async function handleRequest(request, env, ctx) {
     warn: (message, data = {}) => requestLogger.warn(message, data, rootSpan, ctx),
     error: (message, data = {}) => requestLogger.error(message, data, rootSpan, ctx),
     debug: (message, data = {}) => requestLogger.debug(message, data, rootSpan, ctx),
+    success: (message, data = {}) => requestLogger.success(message, data, rootSpan, ctx),
     child: (bindings) => requestLogger.child(bindings)
   };
 
@@ -268,30 +266,33 @@ async function handleRequest(request, env, ctx) {
 
   // 记录路径映射（如果发生映射）
   if (originalPath !== normalizedUrl.pathname) {
-    await log.info('路径规范化', {
+    await log.info('Path normalized', {
       original: originalPath,
-      normalized: normalizedUrl.pathname
+      normalized: normalizedUrl.pathname,
+      category: 'network'
     });
   }
 
   // 简洁的启动日志
-  await log.info('LB Request Started', {
+  await log.info('Load balancer request started', {
     path: normalizedUrl.pathname,
     method: request.method,
     rayId: request.headers.get('cf-ray'),
-    version: VERSION
+    version: VERSION,
+    category: 'start'
   });
 
   // 诊断信息
   const primaryProvider = detectCacheProvider(env);
   const priorities = getProviderPriority(env);
   
-  await log.info('Provider Status', {
+  await log.info('Cache provider status', {
     primary: primaryProvider,
     priorities: priorities,
     hasKv: !!env.KV_STORAGE,
     hasUpstash: !!(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN),
-    envOverride: env.CACHE_PROVIDERS || 'none'
+    envOverride: env.CACHE_PROVIDERS || 'none',
+    category: 'config'
   });
 
   // 健康检查
