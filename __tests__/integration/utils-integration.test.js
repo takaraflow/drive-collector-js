@@ -4,11 +4,53 @@ vi.mock('../../src/services/telegram.js', () => ({
     start: vi.fn().mockResolvedValue(true),
     addEventHandler: vi.fn(),
     invoke: vi.fn().mockResolvedValue(true),
-    sendMessage: vi.fn().mockResolvedValue({ id: 1 })
+    sendMessage: vi.fn().mockResolvedValue({ id: 1 }),
+    editMessage: vi.fn().mockResolvedValue(true)
   },
   saveSession: vi.fn().mockResolvedValue(true),
-  clearSession: vi.fn().mockResolvedValue(true)
+  clearSession: vi.fn().mockResolvedValue(true),
+  ensureConnected: vi.fn().mockResolvedValue(true)
 }), { virtual: true });
+
+// Mock limiter to avoid initialization issues
+vi.mock('../../src/utils/limiter.js', () => ({
+  runBotTask: vi.fn().mockImplementation((fn) => fn()),
+  runBotTaskWithRetry: vi.fn().mockImplementation((fn) => fn())
+}));
+
+// Mock logger to avoid initialization issues
+vi.mock('../../src/services/logger/index.js', () => ({
+  logger: {
+    withModule: vi.fn().mockReturnValue({
+      warn: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn()
+    }),
+    warn: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    debug: vi.fn()
+  }
+}));
+
+// Mock locales to avoid initialization issues
+vi.mock('../../src/locales/zh-CN.js', () => ({
+  STRINGS: {
+    system: { welcome: '欢迎使用' },
+    task: { 
+      cancel_transfer_btn: '取消传输',
+      cancel_task_btn: '取消任务'
+    }
+  },
+  format: vi.fn((str, params) => {
+    let result = str;
+    Object.entries(params).forEach(([key, value]) => {
+      result = result.replace(new RegExp(`{{${key}}}`, 'g'), value);
+    });
+    return result;
+  })
+}));
 
 // Mock config to provide valid config for integration test
 vi.mock('../../src/config/index.js', () => ({

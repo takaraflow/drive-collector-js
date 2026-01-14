@@ -1,0 +1,195 @@
+{
+  "serviceMappings": {
+    "cache": {
+      "name": "缓存服务",
+      "icon": "💾",
+      "description": "多层缓存服务，支持L1/L2/L3缓存",
+      "configKeys": [
+        "CACHE_PROVIDERS",
+        "PRIMARY_CACHE_PROVIDER", 
+        "REDIS_URL",
+        "NF_REDIS_URL",
+        "REDIS_TOKEN",
+        "UPSTASH_REDIS_REST_TOKEN",
+        "CLOUDFLARE_KV_ACCOUNT_ID",
+        "CLOUDFLARE_ACCOUNT_ID",
+        "CLOUDFLARE_KV_NAMESPACE_ID",
+        "CLOUDFLARE_KV_TOKEN",
+        "REDIS_TLS_ENABLED",
+        "NF_REDIS_TLS_ENABLED"
+      ],
+      "reinitializationStrategy": {
+        "type": "destroy_initialize",
+        "graceful": true,
+        "timeout": 30000
+      }
+    },
+    "telegram": {
+      "name": "Telegram服务",
+      "icon": "📱",
+      "description": "Telegram客户端管理，消息处理",
+      "configKeys": [
+        "API_ID",
+        "API_HASH",
+        "BOT_TOKEN",
+        "TG_PROXY_HOST",
+        "TG_PROXY_PORT",
+        "TG_PROXY_TYPE",
+        "TG_PROXY_USERNAME",
+        "TG_PROXY_PASSWORD",
+        "TELEGRAM_PROXY_HOST",
+        "TELEGRAM_PROXY_PORT",
+        "TELEGRAM_PROXY_TYPE",
+        "TELEGRAM_PROXY_USERNAME",
+        "TELEGRAM_PROXY_PASSWORD",
+        "TG_DEVICE_MODEL",
+        "TG_SYSTEM_VERSION",
+        "TG_APP_VERSION",
+        "TG_SERVER_DC",
+        "TG_SERVER_IP",
+        "TG_SERVER_PORT",
+        "TG_TEST_MODE"
+      ],
+      "reinitializationStrategy": {
+        "type": "lightweight_reconnect",
+        "graceful": true,
+        "timeout": 60000
+      }
+    },
+    "queue": {
+      "name": "队列服务",
+      "icon": "📬",
+      "description": "消息队列管理",
+      "configKeys": [
+        "QSTASH_TOKEN",
+        "QSTASH_CURRENT_SIGNING_KEY",
+        "QSTASH_NEXT_SIGNING_KEY",
+        "LB_WEBHOOK_URL"
+      ],
+      "reinitializationStrategy": {
+        "type": "destroy_initialize",
+        "graceful": true,
+        "timeout": 15000
+      }
+    },
+    "logger": {
+      "name": "日志服务",
+      "icon": "📝",
+      "description": "统一日志服务",
+      "configKeys": [
+        "AXIOM_TOKEN",
+        "AXIOM_ORG_ID",
+        "AXIOM_DATASET",
+        "DATADOG_API_KEY"
+      ],
+      "reinitializationStrategy": {
+        "type": "reconfigure",
+        "graceful": true,
+        "timeout": 5000
+      }
+    },
+    "oss": {
+      "name": "对象存储服务",
+      "icon": "☁️",
+      "description": "对象存储服务",
+      "configKeys": [
+        "R2_ENDPOINT",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+        "R2_BUCKET",
+        "R2_PUBLIC_URL",
+        "OSS_WORKER_URL",
+        "OSS_WORKER_SECRET"
+      ],
+      "reinitializationStrategy": {
+        "type": "reconfigure",
+        "graceful": true,
+        "timeout": 10000
+      }
+    },
+    "d1": {
+      "name": "D1数据库服务",
+      "icon": "🗄️",
+      "description": "Cloudflare D1数据库",
+      "configKeys": [
+        "CLOUDFLARE_D1_DATABASE_ID",
+        "CLOUDFLARE_D1_ACCOUNT_ID",
+        "CLOUDFLARE_D1_TOKEN",
+        "CLOUDFLARE_ACCOUNT_ID"
+      ],
+      "reinitializationStrategy": {
+        "type": "reconnect",
+        "graceful": true,
+        "timeout": 8000
+      }
+    },
+    "instanceCoordinator": {
+      "name": "实例协调器",
+      "icon": "🏗️",
+      "description": "多实例协调，分布式锁",
+      "configKeys": [
+        "INSTANCE_ID",
+        "HOSTNAME",
+        "INSTANCE_REGION"
+      ],
+      "reinitializationStrategy": {
+        "type": "restart",
+        "graceful": true,
+        "timeout": 20000
+      }
+    }
+  },
+  "criticalServices": [
+    "cache",
+    "telegram", 
+    "queue"
+  ],
+  "healthChecks": {
+    "cache": {
+      "method": "ping",
+      "timeout": 5000,
+      "expectedResult": true
+    },
+    "telegram": {
+      "method": "getConnectionStatus",
+      "timeout": 10000,
+      "expectedResult": { "connected": true }
+    },
+    "queue": {
+      "method": "getCircuitBreakerStatus",
+      "timeout": 5000,
+      "expectedResult": { "state": "closed" }
+    }
+  },
+  "logging": {
+    "enabled": true,
+    "level": "info",
+    "showDetails": true,
+    "showSummary": true,
+    "showAffectedServices": true,
+    "showReinitializationProgress": true,
+    "showHealthCheckResults": true,
+    "emoji": {
+      "enabled": true,
+      "separator": "🔮",
+      "success": "✅",
+      "warning": "⚠️",
+      "error": "❌",
+      "info": "📊",
+      "progress": "🔄"
+    }
+  },
+  "performance": {
+    "parallelReinitialization": true,
+    "maxConcurrentServices": 10,
+    "healthCheckTimeout": 15000,
+    "reinitializationTimeout": 60000
+  },
+  "errorHandling": {
+    "continueOnFailure": true,
+    "maxRetries": 3,
+    "retryDelay": 1000,
+    "logFailures": true,
+    "alertOnCriticalFailure": true
+  }
+}

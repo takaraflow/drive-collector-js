@@ -3,6 +3,8 @@ import os from 'os';
 import path from 'path';
 import InfisicalSecretsProvider from '../services/secrets/InfisicalSecretsProvider.js';
 import { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } from '../utils/envMapper.js';
+import { serviceConfigManager } from './ServiceConfigManager.js';
+import { ManifestBasedServiceReinitializer } from './ManifestBasedServiceReinitializer.js';
 
 // 保护重要环境变量不被 .env 覆盖
 const PROTECTED_ENV_VARS = ['NODE_ENV', 'INFISICAL_ENV', 'INFISICAL_TOKEN', 'INFISICAL_PROJECT_ID'];
@@ -53,6 +55,142 @@ function parseOptionalInt(value) {
 }
 
 export const CACHE_TTL = 10 * 60 * 1000;
+
+/**
+ * 显示配置更新的醒目日志
+ */
+function logConfigurationUpdate(changes, affectedServices) {
+    const separator = '🔮'.repeat(25);
+    console.log('\n' + separator);
+    console.log('🚀☁️🌩️  云端配置更新检测到！  🌩️☁️🚀');
+    console.log(separator);
+    
+    // 更新统计
+    console.log('📊 配置更新摘要:');
+    console.log(`   🔄 总变更数: ${changes.length}`);
+    console.log(`   📦 新增配置: ${changes.filter(c => c.oldValue === undefined).length}`);
+    console.log(`   ✏️  修改配置: ${changes.filter(c => c.oldValue !== undefined && c.newValue !== undefined).length}`);
+    console.log(`   🗑️  删除配置: ${changes.filter(c => c.newValue === undefined).length}`);
+    
+    // 详细变更
+    console.log('\n⬇️ 详细配置变更:');
+    changes.forEach((change, index) => {
+        const icon = change.newValue === undefined ? '🗑️' : 
+                     change.oldValue === undefined ? '📦' : '✏️';
+        const action = change.newValue === undefined ? '删除' : 
+                      change.oldValue === undefined ? '新增' : '修改';
+        
+        console.log(`   ${index + 1}. ${icon} ${change.key} (${action})`);
+        if (change.newValue !== undefined) {
+            console.log(`      ${change.oldValue || '(空)'} → ${change.newValue}`);
+        } else {
+            console.log(`      ${change.oldValue} → (已删除)`);
+        }
+    });
+    
+    // 影响的服务
+    if (affectedServices.length > 0) {
+        console.log('\n🎯 需要重新初始化的服务:');
+        affectedServices.forEach((service, index) => {
+            const icons = {
+                cache: '💾',
+                telegram: '📱',
+                queue: '📬',
+                logger: '📝',
+                oss: '☁️',
+                d1: '🗄️',
+                instanceCoordinator: '🏗️'
+            };
+            console.log(`   ${index + 1}. ${icons[service] || '⚙️'} ${service}`);
+        });
+    }
+    
+    console.log(separator);
+}
+
+/**
+ * 显示服务重新初始化的醒目日志
+ */
+function logServiceReinitialization(serviceName, success, error = null) {
+    const icons = {
+        cache: '💾',
+        telegram: '📱', 
+        queue: '📬',
+        logger: '📝',
+        oss: '☁️',
+        d1: '🗄️',
+        instanceCoordinator: '🏗️'
+    };
+    
+    const icon = icons[serviceName] || '⚙️';
+    
+    if (success) {
+        console.log(`✨ ${icon} ${serviceName} 服务重新初始化成功！`);
+    } else {
+        console.log(`❌ ${icon} ${serviceName} 服务重新初始化失败: ${error?.message || '未知错误'}`);
+    }
+}
+
+
+
+/**
+ * 验证关键服务健康状态
+ */
+async function validateCriticalServices() {
+    const criticalServices = serviceConfigManager.getCriticalServices();
+    const healthCheckConfig = serviceConfigManager.getHealthCheckConfig();
+    const emojiMapping = serviceConfigManager.getEmojiMapping();
+    
+    for (const serviceName of criticalServices) {
+        try {
+            let isHealthy = false;
+            
+            switch (serviceName) {
+                case 'cache':
+                    try {
+                        const { cache } = await import('../services/CacheService.js');
+                        isHealthy = cache && typeof cache.ping === 'function' ? await cache.ping() : true;
+                    } catch (error) {
+                        isHealthy = false;
+                    }
+                    break;
+                case 'telegram':
+                    try {
+                        const telegramModule = await import('../services/telegram.js');
+                        const { getTelegramStatus } = telegramModule;
+                        if (getTelegramStatus) {
+                            const status = await getTelegramStatus();
+                            isHealthy = status && status.connected;
+                        }
+                    } catch (error) {
+                        isHealthy = false;
+                    }
+                    break;
+                case 'queue':
+                    try {
+                        const { queueService } = await import('../services/QueueService.js');
+                        isHealthy = queueService && typeof queueService.getCircuitBreakerStatus === 'function';
+                    } catch (error) {
+                        isHealthy = false;
+                    }
+                    break;
+            }
+            
+            const emojiMapping = serviceConfigManager.getEmojiMapping();
+            const icon = isHealthy ? (emojiMapping.success || '✅') : (emojiMapping.error || '❌');
+            const serviceConfig = serviceConfigManager.getServiceConfig(serviceName);
+            const displayName = serviceConfig?.name || serviceName;
+            console.log(`   ${icon} ${displayName} (${serviceName}) 健康检查: ${isHealthy ? '正常' : '异常'}`);
+            
+            if (!isHealthy) {
+                console.warn(`${emojiMapping.warning || '⚠️'} 警告: ${displayName} 服务可能需要手动干预`);
+            }
+            
+        } catch (error) {
+            console.error(`❌ ${serviceName} 健康检查失败:`, error.message);
+        }
+    }
+}
 
 export async function initConfig() {
     if (isInitialized) return config;
@@ -143,18 +281,64 @@ export async function initConfig() {
                     const pollInterval = parseInt(process.env.INFISICAL_POLLING_INTERVAL) || 300000;
                     
                     // 监听配置变更
-                    provider.on('configChanged', (changes) => {
-                        console.log(`🔄 Infisical config changed: ${changes.length} keys`);
+                    provider.on('configChanged', async (changes) => {
+                        // 确保ServiceConfigManager已初始化
+                        serviceConfigManager.initialize();
+                        
+                        // 1. 分析变更，确定受影响的服务
+                        const affectedServices = serviceConfigManager.getAffectedServices(changes);
+                        
+                        // 2. 显示醒目的配置更新日志
+                        logConfigurationUpdate(changes, affectedServices);
+                        
+                        // 3. 更新环境变量
                         changes.forEach(change => {
                             if (change.newValue !== undefined) {
                                 const cleanValue = sanitizeValue(change.newValue);
                                 process.env[change.key] = cleanValue;
-                                console.log(`  ✓ ${change.key}: ${change.oldValue} → ${change.newValue}`);
                             } else {
                                 delete process.env[change.key];
-                                console.log(`  ✗ ${change.key}: ${change.oldValue} → (deleted)`);
                             }
                         });
+                        
+                        // 4. 重新初始化受影响的服务
+                        if (affectedServices.length > 0) {
+                            console.log('\n🔄 开始重新初始化受影响的服务...');
+                            
+                            const reinitializer = new ManifestBasedServiceReinitializer();
+                            await reinitializer.initializeServices();
+                            
+                            // 并行重新初始化所有受影响的服务
+                            const reinitPromises = Array.from(affectedServices).map(async serviceName => {
+                                try {
+                                    await reinitializer.reinitializeService(serviceName);
+                                    return { service: serviceName, success: true };
+                                } catch (error) {
+                                    console.error(`重新初始化 ${serviceName} 失败:`, error);
+                                    return { service: serviceName, success: false, error };
+                                }
+                            });
+                            
+                            const reinitResults = await Promise.allSettled(reinitPromises);
+                            
+                            // 5. 显示重新初始化结果摘要
+                            console.log('\n📋 服务重新初始化结果:');
+                            reinitResults.forEach((result, index) => {
+                                if (result.status === 'fulfilled') {
+                                    const { service, success, error } = result.value;
+                                    const status = success ? '✅' : '❌';
+                                    console.log(`   ${status} ${service}`);
+                                } else {
+                                    console.log(`   ❌ 未知服务: ${result.reason?.message || '未知错误'}`);
+                                }
+                            });
+                            
+                            // 6. 验证关键服务健康状态
+                            console.log('\n🔍 验证关键服务健康状态...');
+                            await validateCriticalServices();
+                            
+                            console.log('\n' + '🔮'.repeat(25) + '\n');
+                        }
                     });
                     
                     // 启动轮询
