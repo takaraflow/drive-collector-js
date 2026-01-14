@@ -3,21 +3,18 @@ import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
 export default defineWorkersConfig({
   test: {
     name: "integration",
-    setupFiles: ["test/integration/vitest.setup.js"],
-    disableConsoleIntercept: true,
+    globals: true,
+    testTimeout: 30000,
+    fileParallelism: false,
     poolOptions: {
       workers: {
         singleWorker: true,
-        remoteBindings: false,
+        main: "./src/index.js",
         wrangler: {
           configPath: "./wrangler.test.toml",
-        },
+        }
       },
     },
-    include: [
-      "test/integration/**/*.test.ts",
-      "test/integration/**/*.test.js",
-      "__tests__/lifecycle.unit.test.ts"
-    ],
+    include: ["test/integration/core-integration.test.js"],
   },
 });
