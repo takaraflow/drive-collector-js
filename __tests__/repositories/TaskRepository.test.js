@@ -114,7 +114,7 @@ describe('TaskRepository', () => {
             expect(result).toEqual(mockTasks);
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
                 expect.stringContaining('SELECT * FROM tasks'),
-                [expect.any(Number)]
+                [expect.any(Number), TaskRepository.STALLED_TASKS_DEFAULT_LIMIT]
             );
         });
 
@@ -148,7 +148,24 @@ describe('TaskRepository', () => {
 
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
                 expect.stringContaining('SELECT * FROM tasks'),
-                [expect.any(Number)]
+                [expect.any(Number), TaskRepository.STALLED_TASKS_DEFAULT_LIMIT]
+            );
+        });
+
+        it('should clamp maxResults between configured bounds', async () => {
+            mockD1.fetchAll.mockResolvedValue([]);
+
+            await TaskRepository.findStalledTasks(3600000, { maxResults: 10 });
+            expect(mockD1.fetchAll).toHaveBeenCalledWith(
+                expect.stringContaining('SELECT * FROM tasks'),
+                [expect.any(Number), TaskRepository.STALLED_TASKS_MIN_LIMIT]
+            );
+
+            mockD1.fetchAll.mockClear();
+            await TaskRepository.findStalledTasks(3600000, { maxResults: 5000 });
+            expect(mockD1.fetchAll).toHaveBeenCalledWith(
+                expect.stringContaining('SELECT * FROM tasks'),
+                [expect.any(Number), TaskRepository.STALLED_TASKS_MAX_LIMIT]
             );
         });
 

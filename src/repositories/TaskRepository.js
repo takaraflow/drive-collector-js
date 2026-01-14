@@ -17,6 +17,9 @@ export class TaskRepository {
     static cleanupTimer = null;
     static activeTaskCountCache = { value: 0, updatedAt: 0 };
     static activeTaskCountPromise = null;
+    static STALLED_TASKS_DEFAULT_LIMIT = 200;
+    static STALLED_TASKS_MIN_LIMIT = 50;
+    static STALLED_TASKS_MAX_LIMIT = 1000;
     
     // 重要的中间状态（需要 Redis 中转，避免实例崩溃时丢失）
     static IMPORTANT_STATUSES = ['downloading', 'uploading'];
@@ -252,9 +255,11 @@ export class TaskRepository {
     /**
      * 查找所有“僵尸”任务（长时间未更新的任务）
      */
-    static async findStalledTasks(timeoutMs) {
+    static async findStalledTasks(timeoutMs, options = {}) {
         const safeTimeout = Math.max(0, timeoutMs || 0);
         const deadLine = Date.now() - safeTimeout;
+        const requestedLimit = Number.isFinite(options?.maxResults) ? Number(options.maxResults) : this.STALLED_TASKS_DEFAULT_LIMIT;
+        const limit = Math.min(this.STALLED_TASKS_MAX_LIMIT, Math.max(this.STALLED_TASKS_MIN_LIMIT, requestedLimit));
 
         try {
             // 1. 从 D1 获取僵尸任务
@@ -262,8 +267,9 @@ export class TaskRepository {
                 `SELECT * FROM tasks
                 WHERE status IN ('queued', 'downloading', 'downloaded', 'uploading')
                 AND (updated_at IS NULL OR updated_at < ?)
-                ORDER BY created_at ASC`,
-                [deadLine]
+                ORDER BY created_at ASC
+                LIMIT ?`,
+                [deadLine, limit]
             );
             
             // 2. 从 Redis 获取重要的中间状态任务
