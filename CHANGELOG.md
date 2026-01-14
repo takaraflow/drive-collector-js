@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.24.1](https://github.com/YoungSx/drive-collector-js/compare/v4.24.0...v4.24.1) (2026-01-14)
+
+
+### ✨ 新特性
+
+* implement manifest-based configuration management for dynamic service reinitialization ([dd015bd](https://github.com/YoungSx/drive-collector-js/commit/dd015bd198cb0a51bf557e1ddcd7167a473f2990))
+
+
+### 🐛 问题修复
+
+* improves D1 configuration validation and error handling ([44844eb](https://github.com/YoungSx/drive-collector-js/commit/44844eb49f542c8e530baf843b6d2d45ce0ee3d9))
+* improves user-specific upload path handling in file operations ([a47cc56](https://github.com/YoungSx/drive-collector-js/commit/a47cc56d4373134999a418d71da086c2a6e82b15))
+
 ## [4.24.0](https://github.com/YoungSx/drive-collector-js/compare/v4.22.0...v4.24.0) (2026-01-13)
 
 
