@@ -189,7 +189,16 @@ export class Dispatcher {
 
         if (data === "noop") return await answer();
 
-        if (data.startsWith("cancel_")) {
+        if (data.startsWith("cancel_msg_")) {
+            const msgId = data.split("_")[2];
+            const ok = await TaskManager.cancelTasksByMsgId(msgId, userId);
+            await answer(ok ? STRINGS.task.cmd_sent : STRINGS.task.task_not_found);
+
+        } else if (data.startsWith("cancel_batch_")) {
+            // 兼容历史按钮：旧版使用 groupedId，无法从 DB 反查任务（会导致“点了没反应”）
+            await answer(STRINGS.task.task_not_found);
+
+        } else if (data.startsWith("cancel_")) {
             const taskId = data.split("_")[1];
             const ok = await TaskManager.cancelTask(taskId, userId);
             await answer(ok ? STRINGS.task.cmd_sent : STRINGS.task.task_not_found);

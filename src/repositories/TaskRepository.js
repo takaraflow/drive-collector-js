@@ -453,7 +453,7 @@ export class TaskRepository {
         if (!msgId) return [];
         try {
             return await d1.fetchAll(
-                "SELECT id, file_name, status, error_msg FROM tasks WHERE msg_id = ? ORDER BY created_at ASC",
+                "SELECT id, user_id, chat_id, msg_id, file_name, status, error_msg FROM tasks WHERE msg_id = ? ORDER BY created_at ASC",
                 [msgId]
             );
         } catch (e) {

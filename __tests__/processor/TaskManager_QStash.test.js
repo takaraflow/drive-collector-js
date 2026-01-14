@@ -233,7 +233,8 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
             chat_id: 'chat1',
             msg_id: 456,
             source_msg_id: 789,
-            file_name: 'test.mp4'
+            file_name: 'test.mp4',
+            status: 'queued'
         };
 
         const mockMessage = {
@@ -245,6 +246,16 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
             mockFindById.mockResolvedValue(mockDbTask);
             mockGetMessages.mockResolvedValue([mockMessage]);
             TaskManager.downloadTask = vi.fn().mockResolvedValue();
+        });
+
+        test("应当直接 ACK 并跳过处理当任务已取消", async () => {
+            mockFindById.mockResolvedValue({ ...mockDbTask, status: 'cancelled' });
+
+            const result = await TaskManager.handleDownloadWebhook('123');
+
+            expect(result).toEqual({ success: true, statusCode: 200 });
+            expect(mockGetMessages).not.toHaveBeenCalled();
+            expect(TaskManager.downloadTask).not.toHaveBeenCalled();
         });
 
         test("应当返回 {success: true, statusCode: 200} 对于成功处理", async () => {
@@ -290,7 +301,8 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
             chat_id: 'chat1',
             msg_id: 456,
             source_msg_id: 789,
-            file_name: 'test.mp4'
+            file_name: 'test.mp4',
+            status: 'queued'
         };
 
         const mockMessage = {
@@ -303,6 +315,17 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
             mockGetMessages.mockResolvedValue([mockMessage]);
             mockExistsSync.mockReturnValue(true);
             TaskManager.uploadTask = vi.fn().mockResolvedValue();
+        });
+
+        test("应当直接 ACK 并跳过处理当任务已取消", async () => {
+            mockFindById.mockResolvedValue({ ...mockDbTask, status: 'cancelled' });
+
+            const result = await TaskManager.handleUploadWebhook('123');
+
+            expect(result).toEqual({ success: true, statusCode: 200 });
+            expect(mockExistsSync).not.toHaveBeenCalled();
+            expect(mockGetMessages).not.toHaveBeenCalled();
+            expect(TaskManager.uploadTask).not.toHaveBeenCalled();
         });
 
         test("应当返回 {success: true, statusCode: 200} 对于成功处理", async () => {

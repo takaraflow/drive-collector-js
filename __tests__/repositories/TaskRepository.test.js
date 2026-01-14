@@ -484,7 +484,7 @@ describe('TaskRepository', () => {
             
             expect(result).toEqual(mockTasks);
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
-                expect.stringContaining('SELECT id, file_name, status, error_msg FROM tasks WHERE msg_id = ?'),
+                expect.stringContaining('SELECT id, user_id, chat_id, msg_id, file_name, status, error_msg FROM tasks WHERE msg_id = ?'),
                 ['msg123']
             );
         });

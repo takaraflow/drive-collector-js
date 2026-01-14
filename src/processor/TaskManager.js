@@ -108,6 +108,12 @@ export class TaskManager {
     // 内存中的任务执行锁，防止同一任务被多次 processor 处理
     static activeProcessors = new Set();
 
+    // 运行中任务对象引用（用于取消正在处理的任务）
+    static inFlightTasks = new Map(); // taskId -> task object
+
+    // 用户取消标记（用于 QStash 触发前/中途快速拦截）
+    static cancelledTaskIds = new Set();
+
     // QStash 延迟队列替代了 uploadBatcher
 
     /**
@@ -382,7 +388,8 @@ export class TaskManager {
         const statusMsg = await runBotTaskWithRetry(
             () => client.sendMessage(target, {
                 message: format(STRINGS.task.batch_captured, { count: messages.length }),
-                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_batch_${messages[0].groupedId}`))],
+                // 使用状态消息 msgId 作为批量取消标识，避免 groupedId 无法从 DB 反查的问题
+                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_msg_${statusMsg.id}`))],
                 parseMode: "html"
             }),
             userId,
@@ -602,6 +609,12 @@ export class TaskManager {
                 return { success: false, statusCode: 404, message: "Task not found" };
             }
 
+            // 用户已取消：直接 ACK（防止 QStash 重试/继续处理）
+            if (dbTask.status === 'cancelled') {
+                log.info("Task cancelled, skipping download webhook", { taskId });
+                return { success: true, statusCode: 200 };
+            }
+
             // 获取原始消息
             const messages = await runMtprotoTaskWithRetry(
                 () => client.getMessages(dbTask.chat_id, { ids: [dbTask.source_msg_id] }),
@@ -654,6 +667,12 @@ export class TaskManager {
             if (!dbTask) {
                 log.error(`❌ Task ${taskId} not found in database`);
                 return { success: false, statusCode: 404, message: "Task not found" };
+            }
+
+            // 用户已取消：直接 ACK（防止 QStash 重试/继续处理）
+            if (dbTask.status === 'cancelled') {
+                log.info("Task cancelled, skipping upload webhook", { taskId });
+                return { success: true, statusCode: 200 };
             }
 
             // 验证本地文件存在
@@ -731,6 +750,7 @@ export class TaskManager {
         }
 
         let shouldUpload = false;
+        let didActivate = false;
 
         try {
             // 防重入：检查任务是否已经在处理中
@@ -739,6 +759,8 @@ export class TaskManager {
                 return;
             }
             this.activeProcessors.add(id);
+            this.inFlightTasks.set(id, task);
+            didActivate = true;
 
             this.waitingTasks = this.waitingTasks.filter(t => t.id !== id);
             this.updateQueueUI();
@@ -756,6 +778,7 @@ export class TaskManager {
 
             let lastUpdate = 0;
             const heartbeat = async (status, downloaded = 0, total = 0) => {
+                if (this.cancelledTaskIds.has(task.id)) task.isCancelled = true;
                 if (task.isCancelled) throw new Error("CANCELLED");
                 await TaskRepository.updateStatus(task.id, status);
 
@@ -868,6 +891,7 @@ export class TaskManager {
                 this.activeProcessors.delete(id);
             }
         } finally {
+            if (didActivate) this.inFlightTasks.delete(id);
             // 确保分布式锁被释放
             await instanceCoordinator.releaseTaskLock(id);
         }
@@ -886,6 +910,7 @@ export class TaskManager {
             return;
         }
 
+        let didActivate = false;
         try {
             // 防重入：上传 Task 也增加检查
             if (this.activeProcessors.has(id)) {
@@ -893,6 +918,8 @@ export class TaskManager {
                 return;
             }
             this.activeProcessors.add(id);
+            this.inFlightTasks.set(id, task);
+            didActivate = true;
 
             const info = getMediaInfo(task.message.media);
             if (!info) {
@@ -910,6 +937,7 @@ export class TaskManager {
 
         let lastUpdate = 0;
         const heartbeat = async (status, downloaded = 0, total = 0, uploadProgress = null) => {
+            if (this.cancelledTaskIds.has(task.id)) task.isCancelled = true;
             if (task.isCancelled) throw new Error("CANCELLED");
             await TaskRepository.updateStatus(task.id, status);
 
@@ -1075,6 +1103,7 @@ export class TaskManager {
             this.activeProcessors.delete(id);
         }
     } finally {
+        if (didActivate) this.inFlightTasks.delete(id);
         // 确保分布式锁被释放
         await instanceCoordinator.releaseTaskLock(id);
     }
@@ -1091,6 +1120,9 @@ export class TaskManager {
         const canCancelAny = await AuthGuard.can(userId, "task:cancel:any");
 
         if (!isOwner && !canCancelAny) return false;
+
+        // 标记取消（用于中途快速拦截）
+        this.cancelledTaskIds.add(taskId);
 
         // 检查下载队列
         const downloadTask = this.waitingTasks.find(t => t.id.toString() === taskId) ||
@@ -1110,7 +1142,65 @@ export class TaskManager {
             this.waitingUploadTasks = this.waitingUploadTasks.filter(t => t.id.toString() !== taskId);
         }
 
-        await TaskRepository.markCancelled(taskId);
+        // 检查运行中任务（QStash / Webhook 驱动）
+        const inFlight = this.inFlightTasks.get(taskId);
+        if (inFlight) {
+            inFlight.isCancelled = true;
+            if (inFlight.proc) inFlight.proc.kill("SIGTERM");
+        }
+
+        await TaskRepository.updateStatus(taskId, 'cancelled', '用户手动取消');
+
+        // 立即更新 UI（防止用户感觉“没反应”）
+        try {
+            let peer = dbTask.chat_id;
+            if (typeof peer === 'string' && /^-?\d+$/.test(peer)) peer = BigInt(peer);
+            await safeEdit(peer, parseInt(dbTask.msg_id), STRINGS.task.cancelled, null, userId, "html");
+        } catch (e) {
+            // safeEdit 内部已兜底，这里不再抛出
+        }
+        return true;
+    }
+
+    /**
+     * 按 status 消息 msgId 取消整组任务（媒体组）
+     */
+    static async cancelTasksByMsgId(msgId, userId) {
+        if (!msgId) return false;
+
+        const tasks = await TaskRepository.findByMsgId(msgId);
+        if (!tasks.length) return false;
+
+        // 权限：任务属于自己或具备管理员权限
+        const canCancelAny = await AuthGuard.can(userId, "task:cancel:any");
+        const ownsAll = tasks.every(t => t.user_id === userId.toString());
+        if (!ownsAll && !canCancelAny) return false;
+
+        const updates = tasks.map(t => ({ id: t.id, status: 'cancelled', error: '用户手动取消' }));
+        await this.batchUpdateStatus(updates);
+        tasks.forEach(t => { t.status = 'cancelled'; });
+
+        for (const t of tasks) {
+            this.cancelledTaskIds.add(t.id);
+            const inFlight = this.inFlightTasks.get(t.id);
+            if (inFlight) {
+                inFlight.isCancelled = true;
+                if (inFlight.proc) inFlight.proc.kill("SIGTERM");
+            }
+        }
+
+        // 刷新批量看板 UI
+        try {
+            const meta = tasks[0];
+            let peer = meta.chat_id;
+            if (typeof peer === 'string' && /^-?\d+$/.test(peer)) peer = BigInt(peer);
+            const focusTask = { id: meta.id };
+            const { text } = UIHelper.renderBatchMonitor(tasks, focusTask, 'cancelled');
+            await safeEdit(peer, parseInt(meta.msg_id), text, null, userId, "html");
+        } catch (e) {
+            // safeEdit 内部已兜底
+        }
+
         return true;
     }
 
