@@ -10,7 +10,7 @@ import { trace } from '@opentelemetry/api';
 import { verifyAdminToken } from './auth/admin.js';
 import { verifyQStashSignature } from './auth/qstash.js';
 import { getActiveInstances, scanLockKeys } from './core/InstanceManager.js';
-import { selectInstanceByLock, selectTargetInstance } from './core/LoadBalancerStrategy.js';
+import { selectInstanceByLock, selectInstanceByTemporaryLock, selectTargetInstance } from './core/LoadBalancerStrategy.js';
 import { fetchWithRetry } from './core/ProxyService.js';
 import { checkRedisHealth } from './core/HealthCheck.js';
 import { normalizePath } from './routing/pathUtils.js';
@@ -154,17 +154,31 @@ async function handleLoadBalancing(request, env, ctx, log, normalizedUrl, body) 
     });
   }
 
-  // 选择目标实例：下载任务优先分配给锁持有者
+  // 选择目标实例：支持多种调度策略
   let targetInstance = null;
+  let selectedStrategy = 'round-robin';
+
   if (normalizedUrl.pathname === '/api/tasks/download') {
     targetInstance = await selectInstanceByLock(activeInstances, env, ctx, log);
+    selectedStrategy = 'lock-based';
+  }
+
+  if (!targetInstance && (normalizedUrl.pathname === '/api/tasks/upload' || normalizedUrl.pathname === '/api/tasks/batch')) {
+    targetInstance = await selectInstanceByTemporaryLock(activeInstances, env, ctx, request, log);
+    selectedStrategy = 'temporary-lock';
   }
 
   if (!targetInstance) {
     targetInstance = await selectTargetInstance(activeInstances, env, ctx, log);
+    selectedStrategy = 'round-robin';
   }
   
-  await log.debug('Target instance selected', { id: targetInstance?.id || 'NONE', category: 'lb' });
+  await log.info('Target instance selected', { 
+    id: targetInstance?.id || 'NONE', 
+    strategy: selectedStrategy,
+    path: normalizedUrl.pathname,
+    category: 'lb' 
+  });
   
   if (!targetInstance) {
     await log.error('No target instance selected', { category: 'lb' });

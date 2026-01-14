@@ -3,10 +3,163 @@
  * 处理实例选择和路由逻辑
  */
 
-import { ROUND_ROBIN_KEY, TELEGRAM_LOCK_KEY } from '../config/constants.js';
+import { ROUND_ROBIN_KEY, TELEGRAM_LOCK_KEY, TEMPORARY_SCHEDULING, SUCCESS_MESSAGES, ERROR_MESSAGES } from '../config/constants.js';
 import { logger } from '../logger.js';
 import { safeJsonParse } from '../utils/json.js';
 import { executeWithFailover } from '../legacy/redisCompat.js';
+
+/**
+ * 解析临时锁值
+ * @param {string|Object} lockValue - 锁值
+ * @returns {Object|null} 解析后的锁对象
+ */
+function parseTemporaryLock(lockValue) {
+  let parsed = lockValue;
+  
+  if (typeof lockValue === 'string') {
+    try {
+      parsed = JSON.parse(lockValue);
+    } catch (error) {
+      return { originInstanceId: lockValue };
+    }
+  } else if (lockValue && typeof lockValue === 'object' && lockValue.value !== undefined) {
+    try {
+      parsed = JSON.parse(lockValue.value);
+    } catch (error) {
+      parsed = lockValue;
+    }
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return null;
+  }
+
+  const originInstanceId = 
+    parsed.originInstanceId || 
+    parsed.instanceId || 
+    parsed.instanced || 
+    parsed.ownerId || 
+    parsed.owner || 
+    parsed.id;
+
+  if (!originInstanceId) {
+    return null;
+  }
+
+  return {
+    originInstanceId,
+    timestamp: Number(parsed.timestamp || parsed.acquiredAt || parsed.acquired_at || 0),
+    ttl: Number(parsed.ttl || parsed.expiresIn || TEMPORARY_SCHEDULING.LOCK_TTL_SECONDS)
+  };
+}
+
+/**
+ * 检查临时锁是否过期
+ * @param {Object} parsedLock - 解析后的锁对象
+ * @returns {boolean} 是否过期
+ */
+function isTemporaryLockExpired(parsedLock) {
+  if (!parsedLock.timestamp || !parsedLock.ttl) {
+    return false;
+  }
+
+  const expiresAt = parsedLock.timestamp + parsedLock.ttl * 1000;
+  return Date.now() > expiresAt;
+}
+
+/**
+ * 根据临时锁选择实例（用于上传和批量任务的来源保持）
+ * @param {Array} instances - 实例数组
+ * @param {Object} env - 环境变量
+ * @param {Object} ctx - Cloudflare Workers上下文
+ * @param {Object} request - HTTP请求对象
+ * @param {Object} requestLogger - 请求日志器
+ * @returns {Promise<Object|null>} 选中的实例或null
+ */
+async function selectInstanceByTemporaryLock(instances, env, ctx, request, requestLogger = null) {
+  const tempLockLogger = requestLogger || logger.child({ module: 'temporaryLock' });
+  if (!instances || instances.length === 0) return null;
+
+  const qstashMsgId = request.headers.get('Upstash-Message-Id');
+  if (!qstashMsgId) {
+    await tempLockLogger.debug(SUCCESS_MESSAGES.TEMP_SCHEDULING_NO_MESSAGE_ID, { 
+      category: 'temporary-scheduling'
+    });
+    return null;
+  }
+
+  const tempLockKey = `${TEMPORARY_SCHEDULING.LOCK_PREFIX}${qstashMsgId}`;
+  const startTime = Date.now();
+
+  await tempLockLogger.info(SUCCESS_MESSAGES.TEMP_SCHEDULING_STARTED, {
+    tempLockKey,
+    qstashMsgId,
+    instanceCount: instances.length,
+    category: 'temporary-scheduling'
+  });
+
+  try {
+    const lockValue = await executeWithFailover('_kv_get', env, ctx, tempLockLogger, tempLockKey);
+    if (!lockValue) {
+      await tempLockLogger.debug(SUCCESS_MESSAGES.TEMP_SCHEDULING_LOCK_FOUND, { 
+        tempLockKey, 
+        qstashMsgId,
+        category: 'temporary-scheduling' 
+      });
+      return null;
+    }
+
+    const parsedLock = parseTemporaryLock(lockValue);
+    if (!parsedLock || !parsedLock.originInstanceId) {
+      await tempLockLogger.warn(ERROR_MESSAGES.TEMP_LOCK_INVALID, { 
+        tempLockKey, 
+        rawLock: typeof lockValue === 'string' ? lockValue.substring(0, 100) : String(lockValue),
+        category: 'temporary-scheduling' 
+      });
+      return null;
+    }
+
+    if (isTemporaryLockExpired(parsedLock)) {
+      await tempLockLogger.debug(SUCCESS_MESSAGES.TEMP_SCHEDULING_LOCK_EXPIRED, { 
+        tempLockKey, 
+        originInstanceId: parsedLock.originInstanceId,
+        timestamp: parsedLock.timestamp,
+        ttl: parsedLock.ttl,
+        category: 'temporary-scheduling' 
+      });
+      return null;
+    }
+
+    const targetInstance = instances.find(inst => inst.id === parsedLock.originInstanceId);
+    if (targetInstance) {
+      await tempLockLogger.success(SUCCESS_MESSAGES.TEMP_SCHEDULING_SUCCESS, { 
+        tempLockKey, 
+        originInstanceId: parsedLock.originInstanceId,
+        qstashMsgId,
+        duration: Date.now() - startTime,
+        category: 'temporary-scheduling' 
+      });
+      return targetInstance;
+    }
+
+    await tempLockLogger.warn(SUCCESS_MESSAGES.TEMP_SCHEDULING_ORIGIN_NOT_ACTIVE, { 
+      tempLockKey, 
+      originInstanceId: parsedLock.originInstanceId,
+      activeInstanceIds: instances.map(i => i.id),
+      category: 'temporary-scheduling' 
+    });
+    return null;
+
+  } catch (error) {
+    await tempLockLogger.warn(SUCCESS_MESSAGES.TEMP_SCHEDULING_FALLBACK, { 
+      tempLockKey, 
+      error: error.message,
+      qstashMsgId,
+      category: 'temporary-scheduling' 
+    });
+    return null;
+  }
+}
 
 /**
  * 根据锁持有者选择实例（用于需要会话锁的下载任务）
@@ -229,6 +382,7 @@ async function selectTargetInstanceWithRetry(instances, env, ctx, logger) {
 
 export {
   selectInstanceByLock,
+  selectInstanceByTemporaryLock,
   selectTargetInstance,
   selectTargetInstanceWithKVAtomic,
   selectTargetInstanceWithRetry

@@ -8,6 +8,21 @@ export const ROUND_ROBIN_KEY = 'lb:round_robin_index';
 export const HEARTBEAT_TIMEOUT = 15 * 60 * 1000; // 15分钟
 export const TELEGRAM_LOCK_KEY = 'lock:telegram_client';
 
+// 临时调度配置
+export const TEMPORARY_SCHEDULING = {
+  LOCK_PREFIX: 'temp:msg:',
+  LOCK_TTL_SECONDS: 300, // 5分钟
+  TASK_TYPES: {
+    UPLOAD: '/api/tasks/upload',
+    BATCH: '/api/tasks/batch'
+  },
+  LOCK_FIELDS: {
+    INSTANCE_ID: ['originInstanceId', 'instanceId', 'instanced', 'ownerId', 'owner', 'id'],
+    TIMESTAMP: ['timestamp', 'acquiredAt', 'acquired_at'],
+    TTL: ['ttl', 'expiresIn']
+  }
+};
+
 // 请求大小限制
 export const MAX_JSON_SIZE = 1024 * 1024; // 1MB JSON 解析限制
 export const MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024; // 10MB body limit to avoid OOM
@@ -123,7 +138,12 @@ export const ERROR_MESSAGES = {
   OBJECT_TOO_DEEP: 'Object too deep',
   STRING_TOO_LONG: 'String too long',
   INVALID_INPUT: '输入不是字符串类型',
-  EMPTY_INPUT: '输入为空'
+  EMPTY_INPUT: '输入为空',
+  TEMP_LOCK_NOT_FOUND: '未找到临时调度锁',
+  TEMP_LOCK_EXPIRED: '临时调度锁已过期',
+  TEMP_LOCK_INVALID: '临时调度锁格式无效',
+  TEMP_LOCK_READ_FAILED: '读取临时调度锁失败',
+  ORIGIN_INSTANCE_UNAVAILABLE: '原始实例不可用'
 };
 
 // 成功消息
@@ -204,7 +224,14 @@ export const SUCCESS_MESSAGES = {
   AXIOM_AFTER_GET_ACTIVE_INSTANCES: 'After getActiveInstances',
   AXIOM_FINALLY_BLOCK: 'finally block entered',
   AXIOM_FLUSHING_GLOBAL_BUFFER: 'also flushing global logger buffer',
-  AXIOM_CALLING_FLUSH_SYNCHRONOUSLY: 'calling flushLogs synchronously'
+  AXIOM_CALLING_FLUSH_SYNCHRONOUSLY: 'calling flushLogs synchronously',
+  TEMP_SCHEDULING_STARTED: '临时调度开始',
+  TEMP_SCHEDULING_LOCK_FOUND: '找到临时调度锁',
+  TEMP_SCHEDULING_SUCCESS: '使用临时调度锁路由到原始实例',
+  TEMP_SCHEDULING_LOCK_EXPIRED: '临时调度锁已过期，回退到轮询',
+  TEMP_SCHEDULING_NO_MESSAGE_ID: '无QStash消息ID，回退到轮询',
+  TEMP_SCHEDULING_ORIGIN_NOT_ACTIVE: '原始实例不在活跃列表中，回退到轮询',
+  TEMP_SCHEDULING_FALLBACK: '临时调度失败，回退到轮询'
 };
 
 // 环境变量键名

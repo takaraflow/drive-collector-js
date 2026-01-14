@@ -318,6 +318,286 @@ describe('Worker Tests', () => {
     });
   });
 
+  describe('Temporary Scheduling (Upload/Batch Tasks)', () => {
+    test('should_route_upload_task_to_origin_instance', async () => {
+      mockKV.list.mockImplementation(async (options) => {
+        if (options?.prefix === 'instance:') {
+          return { keys: [{ name: 'instance:server1' }, { name: 'instance:server2' }] };
+        }
+        if (options?.prefix?.startsWith('lock:') || options?.prefix?.startsWith('task:') || options?.prefix?.startsWith('msg_lock:')) {
+          return { keys: [] };
+        }
+        return { keys: [{ name: 'instance:server1' }, { name: 'instance:server2' }] };
+      });
+
+      mockKV.get.mockImplementation(async (key) => {
+        if (key === 'lb:round_robin_index') return '0';
+        if (key === 'instance:server1') {
+          return JSON.stringify({
+            id: 'server1',
+            url: 'https://backend-1.example.com',
+            status: 'active',
+            lastHeartbeat: Date.now()
+          });
+        }
+        if (key === 'instance:server2') {
+          return JSON.stringify({
+            id: 'server2',
+            url: 'https://backend-2.example.com',
+            status: 'active',
+            lastHeartbeat: Date.now()
+          });
+        }
+        if (key.startsWith('temp:msg:')) {
+          const msgId = key.replace('temp:msg:', '');
+          if (msgId === 'msg_upload1') {
+            return JSON.stringify({
+              originInstanceId: 'server2',
+              timestamp: Date.now(),
+              ttl: 300
+            });
+          }
+        }
+        return null;
+      });
+
+      global.fetch.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        headers: new Map(),
+        json: async () => ({ status: 'ok' }),
+        text: async () => 'ok',
+        body: { cancel: vi.fn() }
+      });
+
+      const tempSchedulingEnv = {
+        KV_STORAGE: mockKV,
+        QSTASH_CURRENT_SIGNING_KEY: 'test-key',
+        QSTASH_NEXT_SIGNING_KEY: 'next-key',
+        SKIP_SIGNATURE_VERIFY: 'true',
+      };
+
+      const request = new Request('https://test.url/api/tasks/upload', {
+        method: 'POST',
+        headers: { 'Upstash-Message-Id': 'msg_upload1' },
+        body: JSON.stringify({ taskId: 'task-upload-1' }),
+      });
+      const ctx = { waitUntil: vi.fn() };
+
+      await handleRequest(request, tempSchedulingEnv, ctx);
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      const forwardedRequest = global.fetch.mock.calls[0][0];
+      expect(forwardedRequest.url).toContain('backend-2.example.com');
+    });
+
+    test('should_route_batch_task_to_origin_instance', async () => {
+      mockKV.list.mockImplementation(async (options) => {
+        if (options?.prefix === 'instance:') {
+          return { keys: [{ name: 'instance:server1' }, { name: 'instance:server2' }] };
+        }
+        if (options?.prefix?.startsWith('lock:') || options?.prefix?.startsWith('task:') || options?.prefix?.startsWith('msg_lock:')) {
+          return { keys: [] };
+        }
+        return { keys: [{ name: 'instance:server1' }, { name: 'instance:server2' }] };
+      });
+
+      mockKV.get.mockImplementation(async (key) => {
+        if (key === 'lb:round_robin_index') return '0';
+        if (key === 'instance:server1') {
+          return JSON.stringify({
+            id: 'server1',
+            url: 'https://backend-1.example.com',
+            status: 'active',
+            lastHeartbeat: Date.now()
+          });
+        }
+        if (key === 'instance:server2') {
+          return JSON.stringify({
+            id: 'server2',
+            url: 'https://backend-2.example.com',
+            status: 'active',
+            lastHeartbeat: Date.now()
+          });
+        }
+        if (key.startsWith('temp:msg:')) {
+          const msgId = key.replace('temp:msg:', '');
+          if (msgId === 'msg_batch1') {
+            return JSON.stringify({
+              originInstanceId: 'server1',
+              timestamp: Date.now(),
+              ttl: 300
+            });
+          }
+        }
+        return null;
+      });
+
+      global.fetch.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        headers: new Map(),
+        json: async () => ({ status: 'ok' }),
+        text: async () => 'ok',
+        body: { cancel: vi.fn() }
+      });
+
+      const tempSchedulingEnv = {
+        KV_STORAGE: mockKV,
+        QSTASH_CURRENT_SIGNING_KEY: 'test-key',
+        QSTASH_NEXT_SIGNING_KEY: 'next-key',
+        SKIP_SIGNATURE_VERIFY: 'true',
+      };
+
+      const request = new Request('https://test.url/api/tasks/batch', {
+        method: 'POST',
+        headers: { 'Upstash-Message-Id': 'msg_batch1' },
+        body: JSON.stringify({ taskId: 'task-batch-1' }),
+      });
+      const ctx = { waitUntil: vi.fn() };
+
+      await handleRequest(request, tempSchedulingEnv, ctx);
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      const forwardedRequest = global.fetch.mock.calls[0][0];
+      expect(forwardedRequest.url).toContain('backend-1.example.com');
+    });
+
+    test('should_fallback_to_round_robin_when_temp_lock_not_found_for_upload', async () => {
+      mockKV.list.mockImplementation(async (options) => {
+        if (options?.prefix === 'instance:') {
+          return { keys: [{ name: 'instance:server1' }, { name: 'instance:server2' }] };
+        }
+        if (options?.prefix?.startsWith('lock:') || options?.prefix?.startsWith('task:') || options?.prefix?.startsWith('msg_lock:')) {
+          return { keys: [] };
+        }
+        return { keys: [{ name: 'instance:server1' }, { name: 'instance:server2' }] };
+      });
+
+      mockKV.get.mockImplementation(async (key) => {
+        if (key === 'lb:round_robin_index') return '0';
+        if (key === 'instance:server1') {
+          return JSON.stringify({
+            id: 'server1',
+            url: 'https://backend-1.example.com',
+            status: 'active',
+            lastHeartbeat: Date.now()
+          });
+        }
+        if (key === 'instance:server2') {
+          return JSON.stringify({
+            id: 'server2',
+            url: 'https://backend-2.example.com',
+            status: 'active',
+            lastHeartbeat: Date.now()
+          });
+        }
+        if (key === 'temp:msg:msg_notfound') {
+          return null;
+        }
+        return null;
+      });
+
+      global.fetch.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        headers: new Map(),
+        json: async () => ({ status: 'ok' }),
+        text: async () => 'ok',
+        body: { cancel: vi.fn() }
+      });
+
+      const tempSchedulingEnv = {
+        KV_STORAGE: mockKV,
+        QSTASH_CURRENT_SIGNING_KEY: 'test-key',
+        QSTASH_NEXT_SIGNING_KEY: 'next-key',
+        SKIP_SIGNATURE_VERIFY: 'true',
+      };
+
+      const request = new Request('https://test.url/api/tasks/upload', {
+        method: 'POST',
+        headers: { 'Upstash-Message-Id': 'msg_notfound' },
+        body: JSON.stringify({ taskId: 'task-upload-notfound' }),
+      });
+      const ctx = { waitUntil: vi.fn() };
+
+      await handleRequest(request, tempSchedulingEnv, ctx);
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      const forwardedRequest = global.fetch.mock.calls[0][0];
+      expect(forwardedRequest.url).toContain('backend-1.example.com');
+    });
+
+    test('should_fallback_to_round_robin_when_origin_instance_inactive_for_upload', async () => {
+      mockKV.list.mockImplementation(async (options) => {
+        if (options?.prefix === 'instance:') {
+          return { keys: [{ name: 'instance:server1' }, { name: 'instance:server2' }] };
+        }
+        if (options?.prefix?.startsWith('lock:') || options?.prefix?.startsWith('task:') || options?.prefix?.startsWith('msg_lock:')) {
+          return { keys: [] };
+        }
+        return { keys: [{ name: 'instance:server1' }, { name: 'instance:server2' }] };
+      });
+
+      mockKV.get.mockImplementation(async (key) => {
+        if (key === 'lb:round_robin_index') return '0';
+        if (key === 'instance:server1') {
+          return JSON.stringify({
+            id: 'server1',
+            url: 'https://backend-1.example.com',
+            status: 'active',
+            lastHeartbeat: Date.now()
+          });
+        }
+        if (key === 'instance:server2') {
+          return JSON.stringify({
+            id: 'server2',
+            url: 'https://backend-2.example.com',
+            status: 'active',
+            lastHeartbeat: Date.now()
+          });
+        }
+        if (key === 'temp:msg:msg_inactive') {
+          return JSON.stringify({
+            originInstanceId: 'inactive-server',
+            timestamp: Date.now(),
+            ttl: 300
+          });
+        }
+        return null;
+      });
+
+      global.fetch.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        headers: new Map(),
+        json: async () => ({ status: 'ok' }),
+        text: async () => 'ok',
+        body: { cancel: vi.fn() }
+      });
+
+      const tempSchedulingEnv = {
+        KV_STORAGE: mockKV,
+        QSTASH_CURRENT_SIGNING_KEY: 'test-key',
+        QSTASH_NEXT_SIGNING_KEY: 'next-key',
+        SKIP_SIGNATURE_VERIFY: 'true',
+      };
+
+      const request = new Request('https://test.url/api/tasks/upload', {
+        method: 'POST',
+        headers: { 'Upstash-Message-Id': 'msg_inactive' },
+        body: JSON.stringify({ taskId: 'task-upload-inactive' }),
+      });
+      const ctx = { waitUntil: vi.fn() };
+
+      await handleRequest(request, tempSchedulingEnv, ctx);
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      const forwardedRequest = global.fetch.mock.calls[0][0];
+      expect(forwardedRequest.url).toContain('backend-1.example.com');
+    });
+  });
+
   describe('Error Handling', () => {
     test('should_return_401_when_qstash_key_missing', async () => {
       delete env.QSTASH_CURRENT_SIGNING_KEY;

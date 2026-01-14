@@ -25,7 +25,7 @@ export { verifyQStashSignature, validateQStashMessage } from './auth/qstash.js';
 // 导出核心模块（供测试使用）
 export { parseInstanceData, normalizeHeartbeat, normalizeEpochMillis } from './core/InstanceParser.js';
 export { getActiveInstances, scanLockKeys } from './core/InstanceManager.js';
-export { selectInstanceByLock, selectTargetInstance, selectTargetInstanceWithKVAtomic, selectTargetInstanceWithRetry } from './core/LoadBalancerStrategy.js';
+export { selectInstanceByLock, selectInstanceByTemporaryLock, selectTargetInstance, selectTargetInstanceWithKVAtomic, selectTargetInstanceWithRetry } from './core/LoadBalancerStrategy.js';
 export { forwardToInstance, fetchWithRetry } from './core/ProxyService.js';
 export { checkRedisHealth } from './core/HealthCheck.js';
 
