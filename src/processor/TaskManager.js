@@ -118,7 +118,7 @@ export class TaskManager {
 
         // 安全检查：如果处于 Cache 故障转移模式，延迟任务恢复以优先让主集群处理
         if (cache.isFailoverMode) {
-            log.warn("系统处于 Cache 故障转移模式", { provider: 'upstash', delay: 30000 });
+            log.warn("系统处于 Cache 故障转移模式", { cache_provider: 'upstash', delay: 30000 });
 
             // 先预加载常用数据
             await this._preloadCommonData();

@@ -1002,13 +1002,31 @@ class CacheService {
     }
 
     /**
+     * Get Current Cache Provider Name with priority: config.name > class name
+     */
+    getCurrentCacheProvider() {
+        // Try to find the current provider in the provider list to get config.name
+        const currentProviderEntry = this.providerList.find(entry => 
+            entry.instance.getProviderName() === this.currentProviderName
+        );
+        
+        // Priority: config.name > class name
+        // Check if config.name exists (including empty string), not just truthy
+        if (currentProviderEntry && 'name' in currentProviderEntry.config && currentProviderEntry.config.name !== undefined) {
+            return currentProviderEntry.config.name;
+        }
+        
+        return this.currentProviderName;
+    }
+
+    /**
      * Get Connection Info
      */
     getConnectionInfo() {
         if (this.primaryProvider && typeof this.primaryProvider.getConnectionInfo === 'function') {
             return this.primaryProvider.getConnectionInfo();
         }
-        return { provider: this.currentProviderName };
+        return { provider: this.getCurrentCacheProvider() };
     }
 
     /**

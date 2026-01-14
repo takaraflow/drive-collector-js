@@ -6,8 +6,13 @@ import { setInstanceIdProvider as setAxiomInstanceIdProvider } from "./logger/Ax
 
 const log = logger.withModule('InstanceCoordinator');
 
-// 创建带 provider 上下文的 logger 用于动态 provider 信息
-const logWithProvider = () => log.withContext({ provider: cache.getCurrentProvider() });
+// 创建带 cache_provider 上下文的 logger 用于动态 provider 信息
+const logWithProvider = () => {
+    const cacheProvider = typeof cache.getCurrentCacheProvider === 'function' 
+        ? cache.getCurrentCacheProvider()
+        : (typeof cache.getCurrentProvider === 'function' ? cache.getCurrentProvider() : 'unknown');
+    return log.withContext({ cache_provider: cacheProvider });
+};
 
 /**
  * --- 多实例协调服务 ---
