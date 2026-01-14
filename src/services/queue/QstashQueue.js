@@ -10,6 +10,20 @@ import crypto from "crypto";
 
 const log = logger.withModule?.('QstashQueue') || logger;
 
+function isQstashDebugEnabled() {
+    const value = (process.env.QSTASH_DEBUG || '').toLowerCase();
+    return value === 'true' || value === '1' || value === 'yes';
+}
+
+function summarizeTargetUrl(url) {
+    try {
+        const parsed = new URL(url);
+        return { host: parsed.host, path: parsed.pathname };
+    } catch {
+        return { url };
+    }
+}
+
 /**
  * QstashQueue - QStash 消息队列实现
  * 继承 CloudQueueBase 的通用功能，添加 QStash 特有功能
@@ -61,6 +75,10 @@ export class QstashQueue extends CloudQueueBase {
         await super.initialize();
         const config = getConfig();
 
+        if (isQstashDebugEnabled()) {
+            log.info('QStash debug enabled (QSTASH_DEBUG=true)');
+        }
+
         if (!config.qstash?.token) {
             log.warn('QStash Token 未找到，使用模拟模式');
             this.isMockMode = true;
@@ -84,12 +102,32 @@ export class QstashQueue extends CloudQueueBase {
      * 5. 分布式熔断器 - 初始化 Redis 客户端
      */
     async _initializeRedisClient() {
+        if (process.env.NODE_ENV === 'test') {
+            return;
+        }
         try {
             // 尝试从 CacheService 获取 Redis 客户端
             const { cache } = await import("../CacheService.js");
-            if (cache && cache.redisClient) {
-                this.redisClient = cache.redisClient;
-                log.info('QStashQueue: Redis client initialized for distributed circuit breaker');
+            const rawClient = cache?.primaryProvider?.client;
+
+            if (rawClient && typeof rawClient.get === 'function' && typeof rawClient.setex === 'function') {
+                this.redisClient = rawClient;
+                log.info('QStashQueue: Redis raw client initialized for distributed circuit breaker');
+                return;
+            }
+
+            if (cache && typeof cache.get === 'function' && typeof cache.set === 'function') {
+                // Fallback: use CacheService as the distributed storage backend.
+                // Keep TTL deterministic and avoid L1 cache for this control-plane key.
+                this.redisClient = {
+                    get: async (key) => {
+                        return await cache.get(key, 'text', { skipL1: true });
+                    },
+                    setex: async (key, ttlSeconds, value) => {
+                        await cache.set(key, value, ttlSeconds, { skipTtlRandomization: true, skipL1: true });
+                    }
+                };
+                log.info('QStashQueue: CacheService wrapper initialized for distributed circuit breaker');
             } else {
                 log.warn('QStashQueue: Redis client not available, using local circuit breaker');
             }
@@ -103,13 +141,31 @@ export class QstashQueue extends CloudQueueBase {
     }
 
     async _publish(topic, message, options = {}) {
+        const effectiveOptions = process.env.QSTASH_FORCE_DIRECT === 'true'
+            ? { ...options, forceDirect: true }
+            : options;
+
+        if (isQstashDebugEnabled()) {
+            log.debug('QStash publish requested', {
+                target: summarizeTargetUrl(topic),
+                taskId: message?.taskId,
+                messageType: message?.type,
+                triggerSource: message?._meta?.triggerSource,
+                forceDirect: Boolean(effectiveOptions.forceDirect),
+                batchSize: this.batchSize,
+                batchTimeout: this.batchTimeout,
+                bufferSize: this.buffer.length,
+                mockMode: this.isMockMode
+            });
+        }
+
         // 如果启用了批量处理，将任务加入缓冲区
-        if (this.batchSize > 1 && !options.forceDirect) {
-            return this._addToBuffer({ topic, message, options });
+        if (this.batchSize > 1 && !effectiveOptions.forceDirect) {
+            return this._addToBuffer({ topic, message, options: effectiveOptions });
         }
 
         // 使用新的幂等性发布机制
-        return this._publishWithIdempotency(topic, message, options);
+        return this._publishWithIdempotency(topic, message, effectiveOptions);
     }
 
     /**
@@ -133,12 +189,39 @@ export class QstashQueue extends CloudQueueBase {
                 // 将丢弃的消息移入死信队列
                 for (const droppedMsg of droppedMessages) {
                     this._addToDeadLetterQueue(droppedMsg, 'buffer_overflow');
+                    if (typeof droppedMsg.reject === 'function') {
+                        droppedMsg.reject(new Error('Buffer overflow: message dropped'));
+                    } else if (typeof droppedMsg.resolve === 'function') {
+                        droppedMsg.resolve({
+                            messageId: 'fallback-message-id',
+                            fallback: true,
+                            error: 'Buffer overflow: message dropped'
+                        });
+                    }
                 }
             }
 
             // 添加新消息到缓冲区
             this.buffer.push(task);
             metrics.gauge('buffer.size', this.buffer.length);
+
+            if (isQstashDebugEnabled()) {
+                log.debug('QStash buffered message', {
+                    target: summarizeTargetUrl(task.topic),
+                    taskId: task.message?.taskId,
+                    triggerSource: task.message?._meta?.triggerSource,
+                    bufferSize: this.buffer.length,
+                    batchSize: this.batchSize,
+                    batchTimeout: this.batchTimeout
+                });
+            }
+
+            // 达到批量大小时，尽快触发刷新（避免在锁内直接 await 导致死锁）
+            if (this.buffer.length >= this.batchSize) {
+                queueMicrotask(() => {
+                    this._flushBuffer();
+                });
+            }
 
             // 设置定时刷新
             if (!this.flushTimer) {
@@ -148,8 +231,9 @@ export class QstashQueue extends CloudQueueBase {
             }
 
             // 返回延迟的 promise
-            return new Promise((resolve) => {
+            return new Promise((resolve, reject) => {
                 task.resolve = resolve;
+                task.reject = reject;
             });
         });
     }
@@ -171,6 +255,14 @@ export class QstashQueue extends CloudQueueBase {
             const batch = [...this.buffer];
             this.buffer = [];
 
+            if (isQstashDebugEnabled()) {
+                log.debug('QStash flushing buffer', {
+                    batchSize: batch.length,
+                    configuredBatchSize: this.batchSize,
+                    batchTimeout: this.batchTimeout
+                });
+            }
+
             // 2. 消息顺序性保障 - 顺序发送
             const results = await this._batchPublishSequential(batch);
 
@@ -182,11 +274,15 @@ export class QstashQueue extends CloudQueueBase {
                     } else {
                         // 失败时加入死信队列
                         this._addToDeadLetterQueue(batch[index], 'publish_failed', result.reason);
-                        batch[index].resolve({
-                            messageId: "fallback-message-id",
-                            fallback: true,
-                            error: result.reason?.message
-                        });
+                        if (typeof batch[index].reject === 'function') {
+                            batch[index].reject(result.reason);
+                        } else {
+                            batch[index].resolve({
+                                messageId: "fallback-message-id",
+                                fallback: true,
+                                error: result.reason?.message
+                            });
+                        }
                     }
                 }
             });
@@ -195,7 +291,31 @@ export class QstashQueue extends CloudQueueBase {
             metrics.gauge('buffer.size', this.buffer.length);
 
             return results;
+        }).catch((error) => {
+            // 兜底：确保批次内所有 promise 都能结束，避免调用方永远等待
+            const pending = [...this.buffer];
+            this.buffer = [];
+            pending.forEach(task => {
+                if (typeof task.reject === 'function') task.reject(error);
+                else if (typeof task.resolve === 'function') {
+                    task.resolve({ messageId: "fallback-message-id", fallback: true, error: error.message });
+                }
+            });
+            throw error;
         });
+    }
+
+    clearBuffer() {
+        if (this.flushTimer) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = null;
+        }
+        const pending = [...this.buffer];
+        this.buffer = [];
+        pending.forEach(task => {
+            if (typeof task.reject === 'function') task.reject(new Error('Buffer cleared'));
+        });
+        return pending.length;
     }
 
     /**
@@ -231,6 +351,16 @@ export class QstashQueue extends CloudQueueBase {
     async _publishWithIdempotency(topic, message, options = {}) {
         // 生成消息ID（基于 topic + message 内容）
         const messageId = this._generateMessageId(topic, message);
+
+        if (isQstashDebugEnabled()) {
+            log.debug('QStash publish begin', {
+                messageId,
+                target: summarizeTargetUrl(topic),
+                taskId: message?.taskId,
+                triggerSource: message?._meta?.triggerSource,
+                mockMode: this.isMockMode
+            });
+        }
         
         // 检查是否已处理
         if (this.processedMessages.has(messageId)) {
@@ -269,6 +399,14 @@ export class QstashQueue extends CloudQueueBase {
                 this._addProcessedMessage(messageId);
 
                 metrics.timing('publish.time', Date.now() - startTime);
+                if (isQstashDebugEnabled()) {
+                    log.debug('QStash publish success', {
+                        messageId,
+                        target: summarizeTargetUrl(topic),
+                        taskId: message?.taskId,
+                        durationMs: Date.now() - startTime
+                    });
+                }
                 return result;
             } catch (error) {
                 // 如果是熔断器错误，记录指标
@@ -279,6 +417,14 @@ export class QstashQueue extends CloudQueueBase {
 
                 // 失败时加入死信队列，避免静默丢消息
                 this._addToDeadLetterQueue({ topic, message, options }, 'publish_failed', error);
+                if (isQstashDebugEnabled()) {
+                    log.error('QStash publish failed', {
+                        messageId,
+                        target: summarizeTargetUrl(topic),
+                        taskId: message?.taskId,
+                        error: error?.message
+                    });
+                }
                 throw error;
             }
         })();

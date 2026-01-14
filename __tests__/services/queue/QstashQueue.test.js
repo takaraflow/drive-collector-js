@@ -100,7 +100,8 @@ vi.mock("../../../src/services/CircuitBreaker.js", () => ({
                 try {
                     return await fn();
                 } catch (error) {
-                    return fallback ? fallback() : undefined;
+                    if (fallback) return fallback();
+                    throw error;
                 }
             }),
             getStatus: vi.fn(() => ({ state: 'CLOSED' })),
@@ -181,6 +182,25 @@ describe("QstashQueue - publish", () => {
         
         // Resolve the promise by clearing buffer
         batchingQueue.clearBuffer();
+        await expect(publishPromise).rejects.toThrow('Buffer cleared');
+    });
+
+    test("should reject buffered publish when publish fails", async () => {
+        vi.useFakeTimers();
+
+        const batchingQueue = new QstashQueue({ batchSize: 5, batchTimeout: 10 });
+        await batchingQueue.initialize();
+
+        mockPublishJSON.mockRejectedValue(new Error('publish failed'));
+
+        const publishPromise = batchingQueue._publish('test-topic', { data: 'test' });
+        const assertion = expect(publishPromise).rejects.toThrow('publish failed');
+
+        await vi.advanceTimersByTimeAsync(20);
+        await vi.runAllTimersAsync();
+        await assertion;
+
+        vi.useRealTimers();
     });
 
     test("should return mock message in mock mode", async () => {

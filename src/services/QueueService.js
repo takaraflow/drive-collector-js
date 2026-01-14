@@ -7,6 +7,12 @@ import Joi from 'joi';
 const log = logger.withModule?.('QueueService') || logger;
 
 let warnedMissingWebhookUrl = false;
+let warnedQstashDebug = false;
+
+function isQstashDebugEnabled() {
+    const value = (process.env.QSTASH_DEBUG || '').toLowerCase();
+    return value === 'true' || value === '1' || value === 'yes';
+}
 
 export class QueueService {
     constructor(queueProvider = null) {
@@ -64,6 +70,23 @@ export class QueueService {
         const template = config.qstash?.pathTemplate || '/api/v2/tasks/${topic}';
         const urlPath = template.replace('${topic}', encodeURIComponent(topic.toLowerCase()));
         const fullUrl = `${webhookUrl}${urlPath}`;
+
+        if (isQstashDebugEnabled() && !warnedQstashDebug && process.env.NODE_ENV !== 'test') {
+            warnedQstashDebug = true;
+            log.info('QStash debug enabled (QSTASH_DEBUG=true)');
+        }
+
+        if (isQstashDebugEnabled()) {
+            log.debug('QueueService.publish', {
+                topic,
+                fullUrl,
+                taskId: enhancedMessage?.taskId,
+                messageType: enhancedMessage?.type,
+                triggerSource: enhancedMessage?._meta?.triggerSource,
+                forceDirect: Boolean(options?.forceDirect)
+            });
+        }
+
         return this.queueProvider.publish(fullUrl, enhancedMessage, options);
     }
 
