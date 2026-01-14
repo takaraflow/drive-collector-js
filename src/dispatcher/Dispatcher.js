@@ -233,7 +233,7 @@ export class Dispatcher {
             await new Promise(r => setTimeout(r, 50));
             
             const files = await CloudTool.listRemoteFiles(userId, isRefresh);
-            const { text, buttons } = UIHelper.renderFilesPage(files, page, 6, CloudTool.isLoading());
+            const { text, buttons } = await UIHelper.renderFilesPage(files, page, 6, CloudTool.isLoading(), userId);
             await safeEdit(event.userId, event.msgId, text, buttons, userId);
         }
         await answerCallback(isRefresh ? STRINGS.files.refresh_success : "");
@@ -385,7 +385,7 @@ export class Dispatcher {
 
                 // 如果 listRemoteFiles 命中了 Redis 或内存缓存，这里会非常快
                 const files = await CloudTool.listRemoteFiles(userId);
-                const { text, buttons } = UIHelper.renderFilesPage(files, 0, 6, CloudTool.isLoading());
+                const { text, buttons } = await UIHelper.renderFilesPage(files, 0, 6, CloudTool.isLoading(), userId);
                 await safeEdit(target, placeholder.id, text, buttons, userId);
 
                 // 如果发现数据是加载中的（例如缓存过期正在后台刷新），可以考虑在这里逻辑
@@ -680,9 +680,11 @@ export class Dispatcher {
         // 获取当前路径
         const currentPath = await this._getUserUploadPathFromD1(userId);
         const displayPath = currentPath || config.remoteFolder;
+        const isCustomPath = !!currentPath;
 
         let message = format(STRINGS.remote_folder.menu_title, {});
-        message += format(STRINGS.remote_folder.show_current, { path: displayPath });
+        const pathInfo = displayPath + (isCustomPath ? " (自定义)" : " (默认)");
+        message += format(STRINGS.remote_folder.show_current, { path: pathInfo });
 
         const buttons = [
             [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))],
@@ -733,8 +735,12 @@ export class Dispatcher {
             if (pathArg === 'reset' || pathArg === 'default') {
                 await this._setUserUploadPathInD1(userId, null);
                 
+                const defaultPath = config.remoteFolder;
                 return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                    message: format(STRINGS.remote_folder.reset_success, { path: config.remoteFolder }),
+                    message: format(STRINGS.remote_folder.reset_success, { 
+                        path: defaultPath,
+                        description: "系统默认路径"
+                    }),
                     parseMode: "html"
                 }), userId, {}, false, 3);
             }

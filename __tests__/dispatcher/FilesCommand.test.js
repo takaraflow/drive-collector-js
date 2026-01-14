@@ -10,7 +10,7 @@ const mockDriveRepository = {
     findByUserId: vi.fn().mockResolvedValue({ id: 1, type: 'mega' })
 };
 const mockUIHelper = {
-    renderFilesPage: vi.fn().mockReturnValue({ text: 'file list', buttons: [] })
+    renderFilesPage: vi.fn().mockResolvedValue({ text: 'file list', buttons: [] })
 };
 const mockSafeEdit = vi.fn();
 const mockCacheService = {
@@ -72,7 +72,7 @@ describe('Dispatcher /files command', () => {
         await new Promise(resolve => setImmediate(resolve));
 
         expect(mockCloudTool.listRemoteFiles).toHaveBeenCalledWith(userId);
-        expect(mockUIHelper.renderFilesPage).toHaveBeenCalledWith(mockFiles, 0, 6, false);
+        expect(mockUIHelper.renderFilesPage).toHaveBeenCalledWith(mockFiles, 0, 6, false, userId);
         expect(mockSafeEdit).toHaveBeenCalledWith(target, 123, 'file list', [], userId);
     });
 

@@ -780,7 +780,8 @@ export class TaskManager {
                     if (task.isGroup) {
                         await this._refreshGroupMonitor(task, 'completed');
                     } else {
-                        await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(fileName), folder: config.remoteFolder }), true);
+                        const actualUploadPath = await CloudTool._getUploadPath(task.userId);
+                        await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(fileName), folder: actualUploadPath }), true);
                     }
                     this.activeProcessors.delete(id);
                     // 秒传完成，无需上传
@@ -936,7 +937,8 @@ export class TaskManager {
                 if (task.isGroup) {
                     await this._refreshGroupMonitor(task, 'completed');
                 } else {
-                    await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(fileName), folder: config.remoteFolder }), true);
+                    const actualUploadPath = await CloudTool._getUploadPath(task.userId);
+                    await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(fileName), folder: actualUploadPath }), true);
                 }
                 this.activeProcessors.delete(id);
                 return;

@@ -3,6 +3,7 @@ import path from "path";
 import { config } from "../config/index.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 import { escapeHTML } from "../utils/common.js";
+import { CloudTool } from "../services/rclone.js";
 
 /**
  * --- UI 模板工具库 (UIHelper) ---
@@ -27,12 +28,18 @@ export class UIHelper {
     /**
      * 格式化文件列表页面 (样式：文件名+缩进详情)
      */
-    static renderFilesPage(files, page = 0, pageSize = 6, isLoading = false) {
+    static async renderFilesPage(files, page = 0, pageSize = 6, isLoading = false, userId = null) {
         const start = page * pageSize;
         const pagedFiles = files.slice(start, start + pageSize);
         const totalPages = Math.ceil(files.length / pageSize);
 
-        let text = format(STRINGS.files.directory_prefix, { folder: config.remoteFolder });
+        let text;
+        if (userId) {
+            const userPath = await CloudTool._getUploadPath(userId);
+            text = format(STRINGS.files.directory_prefix, { folder: userPath });
+        } else {
+            text = format(STRINGS.files.directory_prefix, { folder: config.remoteFolder });
+        }
         
         if (files.length === 0 && !isLoading) {
             text += STRINGS.files.dir_empty_or_loading;

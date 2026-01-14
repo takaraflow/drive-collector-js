@@ -173,7 +173,8 @@ export const STRINGS = {
                      "新路径: <code>{{path}}</code>\n" +
                      "后续文件将上传到此目录。",
         reset_success: "✅ <b>已重置为默认路径</b>\n\n" +
-                       "文件将上传到默认目录: <code>{{path}}</code>",
+                        "文件将上传到默认目录: <code>{{path}}</code>\n" +
+                        "{{#description}}<i>提示: {{description}}</i>{{/description}}",
         show_current: "ℹ️ <b>当前上传路径设置</b>\n\n" +
                       "当前路径: <code>{{path}}</code>\n" +
                       "如需修改，请使用 /set_remote_folder [路径]",

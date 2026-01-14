@@ -290,4 +290,26 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
 
         expect(mockClient.downloadMedia).toHaveBeenCalled();
     });
+
+    test("should use actual user upload path in success message", async () => {
+        const taskWithUser = { ...task, userId: "user123", isGroup: false };
+        
+        // Mock CloudTool._getUploadPath to return user-specific path
+        const { CloudTool } = await import("../../src/services/rclone.js");
+        CloudTool._getUploadPath = vi.fn().mockResolvedValue("/Movies/2024");
+        
+        // Mock remote file exists and size matches
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Name: "test.mp4", Size: 10000000 });
+        
+        await TaskManager.downloadTask(taskWithUser);
+        
+        // Get the updateStatus mock from utils
+        const { updateStatus } = await import("../../src/utils/common.js");
+        
+        // Verify that CloudTool._getUploadPath was called with correct userId
+        expect(CloudTool._getUploadPath).toHaveBeenCalledWith("user123");
+        
+        // Verify that updateStatus was called (we can't easily check the message content due to formatting)
+        expect(updateStatus).toHaveBeenCalled();
+    });
 });

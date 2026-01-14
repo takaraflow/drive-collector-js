@@ -274,12 +274,21 @@ export class DriveRepository {
                 [remoteFolder, now, driveId]
             );
             
-            // 清除缓存，强制下次读取时回源
-            // 直接使用传入的 userId，避免通过 findById 获取旧缓存数据
+            // 清除所有相关缓存，强制下次读取时回源
             if (userId) {
+                // 清理网盘配置相关缓存
                 await cache.delete(this.getDriveKey(userId));
                 await cache.delete(this.getDriveIdKey(driveId));
                 localCache.del(`drive_${userId}`);
+                
+                // 清理文件列表缓存，因为路径变更会影响文件列表
+                await cache.delete(`files_${userId}`);
+                localCache.del(`files_${userId}`);
+                
+                // 清理可能的路径缓存
+                localCache.del(`upload_path_${userId}`);
+                
+                log.info(`Cleared all related caches for user ${userId} after path update`);
             }
             
             log.info(`Updated remote_folder for drive ${driveId}: ${remoteFolder}`);

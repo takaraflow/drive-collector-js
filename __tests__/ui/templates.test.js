@@ -3,6 +3,23 @@ vi.mock("../../src/utils/common.js", () => ({
     escapeHTML: vi.fn(str => str)
 }));
 
+// Mock config
+vi.mock("../../src/config/index.js", () => ({
+    config: {
+        remoteFolder: "remote_folder"
+    },
+    getConfig: () => ({
+        remoteFolder: "remote_folder"
+    })
+}));
+
+// Mock CloudTool
+vi.mock("../../src/services/rclone.js", () => ({
+    CloudTool: {
+        _getUploadPath: vi.fn()
+    }
+}));
+
 // Mock locales
 vi.mock("../../src/locales/zh-CN.js", () => ({
     STRINGS: {
@@ -30,11 +47,12 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
             batch_monitor: "📊 <b>媒体组转存看板 ({{current}}/{{total}})</b>\n━━━━━━━━━━━━━━\n{{statusText}}\n━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件"
         },
         files: {
+            directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
             dir_empty_or_loading: "ℹ️ 目录为空或尚未加载。"
         }
     },
     format: (s, args) => {
-        let res = s;
+        let res = s || "";
         if (args) {
             for (const key in args) {
                 res = res.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), args[key]);
@@ -485,6 +503,36 @@ describe("UIHelper", () => {
             expect(result).toContain("KV-ST  : ✅ 正常 (120ms)");
             expect(result).toContain("RCLONE : ✅ 正常 (10ms)");
             expect(result).toContain("⚠️ 发现 1 个服务异常，请检查网络连接或配置。");
+        });
+    });
+
+    describe('renderFilesPage with user paths', () => {
+        test('should use default path when userId is null', async () => {
+            const { CloudTool } = await import("../../src/services/rclone.js");
+            CloudTool._getUploadPath = vi.fn();
+
+            const files = [
+                { Name: "movie.mp4", Size: 1000000, ModTime: "2024-01-01T10:00:00Z" }
+            ];
+
+            const result = await UIHelper.renderFilesPage(files, 0, 6, false, null);
+
+            expect(result.text).toContain("remote_folder");
+            expect(CloudTool._getUploadPath).not.toHaveBeenCalled();
+        });
+
+        test('should use user-specific path when userId is provided', async () => {
+            const { CloudTool } = await import("../../src/services/rclone.js");
+            CloudTool._getUploadPath = vi.fn().mockResolvedValue("/Movies/2024");
+
+            const files = [
+                { Name: "movie.mp4", Size: 1000000, ModTime: "2024-01-01T10:00:00Z" }
+            ];
+
+            const result = await UIHelper.renderFilesPage(files, 0, 6, false, "user123");
+
+            expect(result.text).toContain("/Movies/2024");
+            expect(CloudTool._getUploadPath).toHaveBeenCalledWith("user123");
         });
     });
 });
