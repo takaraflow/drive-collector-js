@@ -109,7 +109,7 @@ export class LoadBalancerState {
 
     try {
       if (this.cache) {
-        await this.cache.set(this.stateKey, stateWithTimestamp, { ttl: 3600 });
+        await this.cache.set(this.stateKey, stateWithTimestamp, 3600);
         // CF Workers 优化：同步持久化到 KV（防止状态丢失）
         await this._persistToKV(stateWithTimestamp);
       }
