@@ -117,6 +117,44 @@ describe("QueueService - Unit Tests", () => {
         );
     });
 
+    test("should merge existing _meta without overwriting it", async () => {
+        mockProvider = {
+            initialize: vi.fn(),
+            publish: vi.fn().mockResolvedValue({ messageId: 'msg-123' }),
+            batchPublish: vi.fn().mockResolvedValue([]),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
+        };
+
+        service = new QueueService(mockProvider);
+        await service.initialize();
+
+        const originalMessage = {
+            data: "test",
+            _meta: {
+                triggerSource: 'direct-qstash',
+                custom: 'keep-me'
+            }
+        };
+
+        await service.publish("test-topic", originalMessage);
+
+        expect(mockProvider.publish).toHaveBeenCalledWith(
+            "https://example.com/api/v2/tasks/test-topic",
+            expect.objectContaining({
+                data: "test",
+                _meta: expect.objectContaining({
+                    triggerSource: 'direct-qstash',
+                    custom: 'keep-me',
+                    instanceId: expect.any(String),
+                    timestamp: expect.any(Number)
+                })
+            }),
+            {}
+        );
+    });
+
     test("should add caller context in production mode", async () => {
         process.env.CALLER_TRACKING_MODE = 'production';
         process.env.INSTANCE_ID = 'test-instance-123';

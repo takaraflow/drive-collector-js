@@ -20,6 +20,7 @@ export class QstashQueue extends CloudQueueBase {
         this.client = null;
         this.bufferMutex = new Mutex();
         this.receiver = null;
+        this.inFlightPublishes = new Map();
         
         // QStash 特有的熔断器
         this.publishBreaker = CircuitBreakerManager.get('qstash_publish', {
@@ -228,7 +229,7 @@ export class QstashQueue extends CloudQueueBase {
      * 4. 消息幂等性处理 - 带幂等性检查的发布
      */
     async _publishWithIdempotency(topic, message, options = {}) {
-        // 生成消息ID（基于topic + message内容 + timestamp）
+        // 生成消息ID（基于 topic + message 内容）
         const messageId = this._generateMessageId(topic, message);
         
         // 检查是否已处理
@@ -241,36 +242,52 @@ export class QstashQueue extends CloudQueueBase {
             return { messageId, duplicate: true };
         }
 
-        // 添加到已处理集合
-        this._addProcessedMessage(messageId);
-
-        if (this.isMockMode) {
-            return { messageId };
+        // 合并并发中的同一消息发布，避免重复请求
+        if (this.inFlightPublishes.has(messageId)) {
+            return this.inFlightPublishes.get(messageId);
         }
 
-        // 实际发布
-        const startTime = Date.now();
-        try {
-            const result = await this.publishBreaker.execute(
-                () => this._executeWithRetry(async () => {
+        const publishPromise = (async () => {
+            if (this.isMockMode) {
+                // Mock 模式：不触发真实发布，但仍返回稳定 messageId 供链路追踪
+                this._addProcessedMessage(messageId);
+                return { messageId, mock: true };
+            }
+
+            // 实际发布：不使用 fallback 静默吞错，避免“看似入队成功但实际未发送”
+            const startTime = Date.now();
+            try {
+                const result = await this.publishBreaker.execute(() => this._executeWithRetry(async () => {
                     return await this.client.publishJSON({
                         url: topic,
                         body: message,
                         ...options
                     });
-                }, 3, '[QstashQueue]'),
-                () => ({ messageId: "fallback-message-id", fallback: true })
-            );
+                }, 3, '[QstashQueue]'));
 
-            metrics.timing('publish.time', Date.now() - startTime);
-            return result;
-        } catch (error) {
-            // 如果是熔断器错误，记录指标
-            if (error.message.includes('CircuitBreaker')) {
-                this.metrics.circuitBreakerTrips++;
-                metrics.increment('circuit.breaker.trips');
+                // 只有成功发布后才标记为已处理，避免失败导致后续重试被误判为 duplicate
+                this._addProcessedMessage(messageId);
+
+                metrics.timing('publish.time', Date.now() - startTime);
+                return result;
+            } catch (error) {
+                // 如果是熔断器错误，记录指标
+                if (error?.message?.includes('CircuitBreaker') || error?.message?.includes('OPEN')) {
+                    this.metrics.circuitBreakerTrips++;
+                    metrics.increment('circuit.breaker.trips');
+                }
+
+                // 失败时加入死信队列，避免静默丢消息
+                this._addToDeadLetterQueue({ topic, message, options }, 'publish_failed', error);
+                throw error;
             }
-            throw error;
+        })();
+
+        this.inFlightPublishes.set(messageId, publishPromise);
+        try {
+            return await publishPromise;
+        } finally {
+            this.inFlightPublishes.delete(messageId);
         }
     }
 

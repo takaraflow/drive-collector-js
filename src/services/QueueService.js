@@ -27,6 +27,9 @@ export class QueueService {
 
     _addMetadata(message) {
         const CALLER_TRACKING_MODE = process.env.CALLER_TRACKING_MODE || 'none';
+        const existingMeta = (message && typeof message === 'object' && message._meta && typeof message._meta === 'object')
+            ? message._meta
+            : null;
         const baseMeta = {
             triggerSource: 'qstash-v2',
             instanceId: process.env.INSTANCE_ID?.slice(0, 8) || 'unknown',
@@ -42,7 +45,7 @@ export class QueueService {
 
         return {
             ...message,
-            _meta: baseMeta
+            _meta: existingMeta ? { ...baseMeta, ...existingMeta } : baseMeta
         };
     }
 

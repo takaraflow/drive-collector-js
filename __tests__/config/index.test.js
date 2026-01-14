@@ -185,4 +185,15 @@ describe("Config Module", () => {
     delete process.env.CLOUDFLARE_D1_DATABASE_ID;
     delete process.env.CLOUDFLARE_D1_TOKEN;
   });
+
+  test("should accept QSTASH_AUTH_TOKEN as fallback for QStash token", async () => {
+    delete process.env.QSTASH_TOKEN;
+    process.env.QSTASH_AUTH_TOKEN = "legacy-qstash-token";
+
+    __resetConfigForTests();
+    const config = await initConfig();
+    expect(config.qstash.token).toBe("legacy-qstash-token");
+
+    delete process.env.QSTASH_AUTH_TOKEN;
+  });
 });

@@ -384,7 +384,8 @@ export async function initConfig() {
             token: env.CLOUDFLARE_KV_TOKEN || null
         },
         qstash: {
-            token: env.QSTASH_TOKEN || null,
+            // Prefer the new v2 token, but keep backward compatibility with legacy naming.
+            token: env.QSTASH_TOKEN || env.QSTASH_AUTH_TOKEN || null,
             currentSigningKey: env.QSTASH_CURRENT_SIGNING_KEY || null,
             nextSigningKey: env.QSTASH_NEXT_SIGNING_KEY || null,
             webhookUrl: env.LB_WEBHOOK_URL || null,
