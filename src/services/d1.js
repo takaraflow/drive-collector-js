@@ -22,7 +22,7 @@ class D1Service {
         this.token = process.env.CLOUDFLARE_D1_TOKEN;
 
         if (!this.accountId || !this.databaseId || !this.token) {
-            log.warn("⚠️ D1配置不完整: 请检查 CLOUDFLARE_D1_ACCOUNT_ID, CLOUDFLARE_D1_DATABASE_ID, CLOUDFLARE_D1_TOKEN");
+            log.warn("⚠️ D1配置不完整: 请检查 CLOUDFLARE_D1_ACCOUNT_ID (或 CLOUDFLARE_ACCOUNT_ID), CLOUDFLARE_D1_DATABASE_ID, CLOUDFLARE_D1_TOKEN");
         } else {
             this.apiUrl = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/d1/database/${this.databaseId}/query`;
             this.isInitialized = true;
@@ -32,8 +32,11 @@ class D1Service {
 
     async _execute(sql, params = []) {
         if (!this.isInitialized) await this.initialize();
-        if (!this.accountId || !this.databaseId) {
-            throw new Error("D1 Error: Missing configuration");
+        if (!this.accountId || !this.databaseId || !this.token) {
+            throw new Error("D1 Error: Missing configuration (accountId/databaseId/token)");
+        }
+        if (!this.apiUrl) {
+            throw new Error("D1 Error: API URL not initialized");
         }
 
         let attempts = 0;
