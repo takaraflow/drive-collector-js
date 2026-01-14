@@ -52,6 +52,40 @@ describe('CloudTool Batch Upload', () => {
         vi.clearAllMocks();
     });
 
+    it('should abort upload when task is cancelled before spawn', async () => {
+        let closeCb;
+        const mockProc = {
+            stderr: { on: vi.fn() },
+            on: vi.fn((event, cb) => {
+                if (event === 'close') closeCb = cb;
+            }),
+            kill: vi.fn(() => {
+                process.nextTick(() => closeCb?.(143));
+            }),
+            stdin: {
+                write: vi.fn(),
+                end: vi.fn()
+            },
+            stdout: { on: vi.fn() }
+        };
+        mockSpawn.mockReturnValue(mockProc);
+
+        vi.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({
+            type: 'onedrive',
+            user: 'test',
+            pass: 'pass'
+        });
+
+        const tasks = [
+            { id: '1', userId: 'user1', localPath: '/tmp/downloads/file1.mp4', isCancelled: true }
+        ];
+
+        const result = await CloudTool.uploadBatch(tasks);
+
+        expect(mockProc.kill).toHaveBeenCalled();
+        expect(result).toEqual({ success: false, error: 'CANCELLED' });
+    });
+
     it('should call rclone with correct batch arguments', async () => {
         const mockProc = {
             stderr: { on: vi.fn() },

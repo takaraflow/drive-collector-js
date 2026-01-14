@@ -986,7 +986,10 @@ export class TaskManager {
                     const now = Date.now();
                     if (now - lastUpdate > 3000) {
                         lastUpdate = now;
-                        heartbeat('uploading', 0, 0, progress);
+                        void heartbeat('uploading', 0, 0, progress).catch((err) => {
+                            if (err?.message === "CANCELLED") return;
+                            log.warn("Upload heartbeat failed", { taskId: task.id, error: err?.message || String(err) });
+                        });
                     }
                 }, task.userId);
                 // 转换 OSS 结果为期望格式
@@ -998,7 +1001,10 @@ export class TaskManager {
                     const now = Date.now();
                     if (now - lastUpdate > 3000) {
                         lastUpdate = now;
-                        heartbeat('uploading', 0, 0, progress);
+                        void heartbeat('uploading', 0, 0, progress).catch((err) => {
+                            if (err?.message === "CANCELLED") return;
+                            log.warn("Upload heartbeat failed", { taskId: task.id, error: err?.message || String(err) });
+                        });
                     }
                 });
             }
@@ -1070,6 +1076,10 @@ export class TaskManager {
                     await updateStatus(task, finalMsg, true);
                 }
             } else {
+                if (task.isCancelled || uploadResult.error === "CANCELLED") {
+                    throw new Error("CANCELLED");
+                }
+
                 await TaskRepository.updateStatus(task.id, 'failed', uploadResult.error || "Upload failed");
                 if (task.isGroup) {
                     await this._refreshGroupMonitor(task, 'failed', 0, 0, uploadResult.error || "Upload failed");

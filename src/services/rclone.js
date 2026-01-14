@@ -237,6 +237,13 @@ export class CloudTool {
         
         return new Promise(async (resolve) => {
             try {
+                let isResolved = false;
+                const safeResolve = (value) => {
+                    if (isResolved) return;
+                    isResolved = true;
+                    resolve(value);
+                };
+
                 // 假设所有任务属于同一用户且目标一致（由调用者确保）
                 const firstTask = tasks[0];
                 const conf = await this._getUserConfig(firstTask.userId);
@@ -275,11 +282,32 @@ export class CloudTool {
                 // 将进程关联到所有相关任务，以便统一取消
                 tasks.forEach(t => t.proc = proc);
 
+                let cancelled = false;
+                const isAnyTaskCancelled = () => tasks.some(t => t?.isCancelled);
+                const markCancelledAndKill = () => {
+                    if (cancelled) return;
+                    cancelled = true;
+                    try {
+                        if (typeof proc.kill === 'function') proc.kill("SIGTERM");
+                    } catch (e) {
+                        log.warn("Failed to kill rclone process", { error: e.message });
+                    }
+                };
+
+                // 处理“先取消后启动上传”的竞态：如果任务已被取消，立即终止进程
+                if (isAnyTaskCancelled()) {
+                    markCancelledAndKill();
+                }
+
                 // 【修复 1】添加缓冲区变量，处理流数据分片
                 let stderrBuffer = "";
                 let errorLog = "";
 
                 proc.stderr.on("data", (data) => {
+                    if (!cancelled && isAnyTaskCancelled()) {
+                        markCancelledAndKill();
+                        return;
+                    }
                     // 拼接到缓冲区
                     stderrBuffer += data.toString();
 
@@ -321,24 +349,27 @@ export class CloudTool {
                 });
 
                 proc.on("close", (code) => {
+                    if (cancelled || isAnyTaskCancelled()) {
+                        return safeResolve({ success: false, error: "CANCELLED" });
+                    }
                     if (code === 0) {
                         // Even with exit code 0, check for errors in the log
                         const hasErrors = errorLog.includes('ERROR') || errorLog.includes('Failed') || errorLog.includes('failed');
                         if (hasErrors) {
                             log.error(`Rclone Batch completed with exit code 0 but contains errors:`, errorLog.slice(-500));
-                            resolve({ success: false, error: `Upload completed but with errors: ${errorLog.slice(-200).trim()}` });
+                            safeResolve({ success: false, error: `Upload completed but with errors: ${errorLog.slice(-200).trim()}` });
                         } else {
-                            resolve({ success: true });
+                            safeResolve({ success: true });
                         }
                     } else {
                         const finalError = errorLog.slice(-500) || `Rclone exited with code ${code}`;
                         log.error(`Rclone Batch Error:`, finalError);
-                        resolve({ success: false, error: finalError.trim() });
+                        safeResolve({ success: false, error: finalError.trim() });
                     }
                 });
 
                 proc.on("error", (err) => {
-                    resolve({ success: false, error: err.message });
+                    safeResolve({ success: false, error: err.message });
                 });
 
                 // 写入文件列表到 stdin 并关闭
@@ -346,7 +377,7 @@ export class CloudTool {
                 proc.stdin.end();
 
             } catch (e) {
-                resolve({ success: false, error: e.message });
+                safeResolve({ success: false, error: e.message });
             }
         });
     }
