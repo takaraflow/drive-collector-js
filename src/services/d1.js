@@ -117,8 +117,10 @@ class D1Service {
 
                     // Max retries exceeded
                     if (isD1NetworkError) {
+                        this._handleTransientFailure();
                         throw new Error("D1 Error: Network connection lost (Max retries exceeded)");
                     }
+                    this._handleTransientFailure();
                     throw new Error(`D1 HTTP ${response.status}${errorDetails}`);
                 }
 
@@ -149,6 +151,7 @@ class D1Service {
                     }
                     
                     log.error(`💥 D1 Max retries exceeded after ${maxAttempts} attempts, total duration: ${errorDuration}ms`);
+                    this._handleTransientFailure();
                     throw new Error("D1 Error: Network connection lost (Max retries exceeded)");
                 }
                 
@@ -183,6 +186,11 @@ class D1Service {
             return result.result[0];
         }
         return result;
+    }
+
+    _handleTransientFailure() {
+        log.warn("⚠️ D1 transient failure detected; resetting HTTP state to recover automatically.");
+        this._reset();
     }
 
     /**

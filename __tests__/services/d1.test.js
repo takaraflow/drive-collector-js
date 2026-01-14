@@ -148,6 +148,26 @@ describe("D1 Service", () => {
       const params = [];
 
       await expect(d1._execute(sql, params)).rejects.toThrow("D1 Error: Network connection lost (Max retries exceeded)");
+      expect(d1.isInitialized).toBe(false);
+    });
+
+    test("should reinitialize after transient failure", async () => {
+      const networkError = new TypeError("Failed to fetch");
+      mockFetch
+        .mockRejectedValueOnce(networkError)
+        .mockRejectedValueOnce(networkError)
+        .mockRejectedValueOnce(networkError)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true, result: [] }),
+        });
+
+      await expect(d1._execute("SELECT 1")).rejects.toThrow("D1 Error: Network connection lost (Max retries exceeded)");
+      expect(d1.isInitialized).toBe(false);
+
+      const response = await d1._execute("SELECT 1");
+      expect(response.success).toBe(true);
+      expect(d1.isInitialized).toBe(true);
     });
 
     test("should throw HTTP error for non-200 responses", async () => {
@@ -165,6 +185,7 @@ describe("D1 Service", () => {
       const params = [];
 
       await expect(d1._execute(sql, params)).rejects.toThrow("D1 HTTP 500 [N/A]: Internal Server Error");
+      expect(d1.isInitialized).toBe(false);
     });
 
     test("should parse and throw detailed 400 error", async () => {
@@ -180,6 +201,7 @@ describe("D1 Service", () => {
         json: () => Promise.resolve(errorBody)
       });
       await expect(d1._execute("SELECT 1")).rejects.toThrow("D1 HTTP 400 [10000]: Invalid token");
+      expect(d1.isInitialized).toBe(true);
     });
 
     test("should log param types but not values for 400 error", async () => {
