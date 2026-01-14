@@ -1,0 +1,10 @@
+#!/bin/sh
+if [ "$TUNNEL_ENABLED" = "true" ]; then
+    PORT=${PORT:-7860}
+    TUNNEL_METRICS_PORT=${TUNNEL_METRICS_PORT:-2000}
+    echo "[s6-cloudflared] Starting tunnel to localhost:$PORT with metrics on $TUNNEL_METRICS_PORT"
+    exec cloudflared tunnel --url http://localhost:$PORT --metrics localhost:$TUNNEL_METRICS_PORT --no-autoupdate
+else
+    echo "[s6-cloudflared] Tunnel disabled (TUNNEL_ENABLED=$TUNNEL_ENABLED)"
+    exec sleep infinity
+fi

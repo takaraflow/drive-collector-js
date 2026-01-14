@@ -2,6 +2,7 @@ import { gracefulShutdown } from "./src/services/GracefulShutdown.js";
 import { initConfig, validateConfig, getConfig } from "./src/config/index.js";
 import { summarizeStartupConfig } from "./src/utils/startupConfig.js";
 import { buildWebhookServer, registerShutdownHooks } from "./src/utils/lifecycle.js";
+import { tunnelService } from "./src/services/TunnelService.js";
 
 let appReady = false;
 
@@ -173,8 +174,15 @@ export async function main() {
         await Promise.all([
             queueService.initialize(),
             cache.initialize(),
-            d1.initialize()
+            d1.initialize(),
+            tunnelService.initialize()
         ]);
+
+        const tunnelUrl = await tunnelService.getPublicUrl();
+        if (tunnelUrl) {
+            log.info(`🌐 Tunnel active at: ${tunnelUrl}`);
+        }
+
     } catch (err) {
         console.error("❌ 服务初始化失败:", err.message);
         gracefulShutdown.exitCode = 1;

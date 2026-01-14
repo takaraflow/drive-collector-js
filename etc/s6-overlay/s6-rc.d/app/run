@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "[s6-app] Starting Node.js application..."
+exec node index.js

@@ -31,16 +31,26 @@ ARG NODE_ENV=production
 ENV NODE_ENV=${NODE_ENV}
 
 # 安装 rclone 和基础工具，包括 ping 工具
-# 3. 修改点：安装完 curl/unzip 后立即卸载，只保留运行 rclone 所需的 ca-certificates 和 ping 工具
 RUN apt-get update && apt-get install -y \
     curl \
     unzip \
     ca-certificates \
     iputils-ping \
+    xz-utils \
     && curl https://rclone.org/install.sh | bash \
-    && apt-get purge -y curl unzip \
+    && curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb \
+    && dpkg -i cloudflared.deb \
+    && rm cloudflared.deb \
+    && apt-get purge -y unzip \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
+
+# Install s6-overlay
+ARG S6_OVERLAY_VERSION=3.1.6.2
+ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz /tmp
+RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz
+ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-x86_64.tar.xz /tmp
+RUN tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz
 
 WORKDIR /app
 
@@ -52,10 +62,14 @@ COPY scripts ./scripts/
 
 # 安装生产依赖
 RUN npm ci --omit=dev && npm cache clean --force
+COPY etc/ /etc/
+RUN find /etc/s6-overlay/s6-rc.d -name "run" -exec chmod +x {} +
 
 COPY . .
+
 RUN mkdir -p /tmp/downloads && chmod 777 /tmp/downloads
 
-CMD ["node", "index.js"]
+ENTRYPOINT ["/init"]
+CMD []
 
 EXPOSE 7860

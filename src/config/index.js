@@ -462,6 +462,12 @@ export async function initConfig() {
                 username: env.TG_PROXY_USERNAME || env.TELEGRAM_PROXY_USERNAME,
                 password: env.TG_PROXY_PASSWORD || env.TELEGRAM_PROXY_PASSWORD
             } : null
+        },
+        tunnel: {
+            enabled: env.TUNNEL_ENABLED === 'true',
+            provider: env.TUNNEL_PROVIDER || 'cloudflare',
+            metricsPort: parseInt(env.TUNNEL_METRICS_PORT) || 2000,
+            metricsHost: env.TUNNEL_METRICS_HOST || '127.0.0.1'
         }
     };
 

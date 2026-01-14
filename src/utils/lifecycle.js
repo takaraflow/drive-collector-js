@@ -108,7 +108,14 @@ export async function registerShutdownHooks() {
         console.log('✅ Cache 服务已断开');
     }, 50, 'cache-service');
 
-    // 9. 在关闭完成后再次刷新日志，确保关闭过程中的日志也被保存 (priority: 60)
+    // 9. 停止 Tunnel 服务 (priority: 55)
+    gracefulShutdown.register(async () => {
+        const { tunnelService } = await import("../services/TunnelService.js");
+        tunnelService.stop();
+        console.log('✅ Tunnel 服务已停止');
+    }, 55, 'tunnel-service');
+
+    // 10. 在关闭完成后再次刷新日志，确保关闭过程中的日志也被保存 (priority: 60)
     gracefulShutdown.register(async () => {
         console.log('🔄 正在刷新关闭过程中的日志...');
         await flushLogBuffer();
