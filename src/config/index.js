@@ -22,7 +22,11 @@ const normalizedNodeEnv = normalizeNodeEnv(process.env.NODE_ENV);
 process.env.NODE_ENV = normalizedNodeEnv;
 
 // 立即执行 dotenv 确保凭证可用
-const shouldOverrideEnv = process.env.NODE_ENV !== 'test';
+// 默认只在 dev 环境允许 .env 覆盖系统环境变量（避免 prod/pre 被空的 .env.* 覆盖导致凭证丢失）
+const dotenvOverrideFlag = (process.env.DOTENV_OVERRIDE || '').toLowerCase();
+const shouldOverrideEnv = normalizedNodeEnv === 'dev'
+    ? dotenvOverrideFlag !== 'false'
+    : dotenvOverrideFlag === 'true';
 
 // 根据 NODE_ENV 加载对应的 .env 文件
 const envFile = normalizedNodeEnv === 'dev' ? '.env' : `.env.${normalizedNodeEnv}`;

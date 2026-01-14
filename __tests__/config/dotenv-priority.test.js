@@ -9,6 +9,7 @@ vi.mock('../../src/config/dotenv.js', () => ({
 
 describe("dotenv priority in config", () => {
   let originalNodeEnv;
+  let originalDotenvOverride;
 
   beforeEach(() => {
     vi.resetModules();
@@ -16,6 +17,7 @@ describe("dotenv priority in config", () => {
     mockLoadDotenv.mockClear();
     
     originalNodeEnv = process.env.NODE_ENV;
+    originalDotenvOverride = process.env.DOTENV_OVERRIDE;
   });
 
   afterEach(() => {
@@ -24,6 +26,12 @@ describe("dotenv priority in config", () => {
       process.env.NODE_ENV = originalNodeEnv;
     } else {
       delete process.env.NODE_ENV;
+    }
+
+    if (originalDotenvOverride !== undefined) {
+      process.env.DOTENV_OVERRIDE = originalDotenvOverride;
+    } else {
+      delete process.env.DOTENV_OVERRIDE;
     }
   });
 
@@ -36,6 +44,33 @@ describe("dotenv priority in config", () => {
       expect.objectContaining({
         override: true,
         path: '.env'
+      })
+    );
+  });
+
+  test("should not override system env in production by default", async () => {
+    process.env.NODE_ENV = 'production';
+
+    await import('../../src/config/index.js');
+
+    expect(mockLoadDotenv).toHaveBeenCalledWith(
+      expect.objectContaining({
+        override: false,
+        path: '.env.prod'
+      })
+    );
+  });
+
+  test("should allow overriding system env in production when DOTENV_OVERRIDE=true", async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.DOTENV_OVERRIDE = 'true';
+
+    await import('../../src/config/index.js');
+
+    expect(mockLoadDotenv).toHaveBeenCalledWith(
+      expect.objectContaining({
+        override: true,
+        path: '.env.prod'
       })
     );
   });

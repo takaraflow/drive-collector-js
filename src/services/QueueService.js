@@ -6,6 +6,8 @@ import Joi from 'joi';
 
 const log = logger.withModule?.('QueueService') || logger;
 
+let warnedMissingWebhookUrl = false;
+
 export class QueueService {
     constructor(queueProvider = null) {
         this.queueProvider = queueProvider || new QstashQueue();
@@ -53,6 +55,12 @@ export class QueueService {
         const enhancedMessage = this._addMetadata(message);
         const config = getConfig();
         const webhookUrl = config.qstash?.webhookUrl || 'https://example.com';
+        if (!config.qstash?.webhookUrl && !warnedMissingWebhookUrl && process.env.NODE_ENV !== 'test') {
+            warnedMissingWebhookUrl = true;
+            log.warn('LB_WEBHOOK_URL 未配置，QStash 将发布到占位地址，回调不会到达你的 LB', {
+                placeholder: webhookUrl
+            });
+        }
         const template = config.qstash?.pathTemplate || '/api/v2/tasks/${topic}';
         const urlPath = template.replace('${topic}', encodeURIComponent(topic.toLowerCase()));
         const fullUrl = `${webhookUrl}${urlPath}`;
