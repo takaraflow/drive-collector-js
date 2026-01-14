@@ -7,10 +7,13 @@
       "configKeys": [
         "CACHE_PROVIDERS",
         "PRIMARY_CACHE_PROVIDER", 
+        "CACHE_L3_ENABLED",
+        "CACHE_BLOOM_FILTER",
         "REDIS_URL",
         "NF_REDIS_URL",
         "REDIS_TOKEN",
         "UPSTASH_REDIS_REST_TOKEN",
+        "UPSTASH_REDIS_REST_URL",
         "CLOUDFLARE_KV_ACCOUNT_ID",
         "CLOUDFLARE_ACCOUNT_ID",
         "CLOUDFLARE_KV_NAMESPACE_ID",
@@ -62,15 +65,42 @@
       "description": "消息队列管理",
       "configKeys": [
         "QSTASH_TOKEN",
+        "QSTASH_AUTH_TOKEN",
+        "QSTASH_URL",
         "QSTASH_CURRENT_SIGNING_KEY",
         "QSTASH_NEXT_SIGNING_KEY",
         "LB_WEBHOOK_URL"
+        ,
+        "QSTASH_DEBUG",
+        "QSTASH_FORCE_DIRECT",
+        "BATCH_SIZE",
+        "BATCH_TIMEOUT",
+        "QSTASH_BATCH_SIZE",
+        "QSTASH_BATCH_TIMEOUT",
+        "QSTASH_MAX_BUFFER_SIZE",
+        "QSTASH_PROCESSED_MESSAGES_LIMIT",
+        "QSTASH_DLQ_SIZE",
+        "QSTASH_MAX_CONCURRENT",
+        "QSTASH_MOCK_DELAY",
+        "QSTASH_MOCK_ERROR",
+        "QSTASH_RATE_LIMIT",
+        "QSTASH_RATE_WINDOW",
+        "QSTASH_ADAPTIVE_RATE",
+        "QSTASH_MIN_RATE",
+        "QSTASH_MAX_RATE",
+        "CALLER_TRACKING_MODE"
       ],
       "reinitializationStrategy": {
         "type": "destroy_initialize",
         "graceful": true,
         "timeout": 15000
       }
+      ,
+      "behaviorNotes": [
+        "QSTASH_DEBUG=true 会记录更多 publish/buffer/debug 信息，帮助判断 QStash 是否真的收到任务",
+        "缺失 LB_WEBHOOK_URL 会记录警告并默认使用占位地址，避免消息被发送到未配置的 webhook",
+        "QSTASH_FORCE_DIRECT=true 可在诊断时跳过缓冲区，强制立刻发送消息"
+      ]
     },
     "logger": {
       "name": "日志服务",
@@ -137,6 +167,11 @@
         "graceful": true,
         "timeout": 20000
       }
+      ,
+      "behaviorNotes": [
+        "DistributedLock 清理过期锁时会容忍非法 expiresAt，并以 unknown 标记日志，防止 toISOString 抛错",
+        "新增 _coerceTimestampMs/_safeToISOString 让历史/异常锁仍能正确被判断为过期"
+      ]
     }
   },
   "criticalServices": [

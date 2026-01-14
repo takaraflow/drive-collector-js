@@ -1,6 +1,7 @@
 import { loadDotenv } from './dotenv.js';
 import os from 'os';
 import path from 'path';
+import fs from 'fs';
 import InfisicalSecretsProvider from '../services/secrets/InfisicalSecretsProvider.js';
 import { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } from '../utils/envMapper.js';
 import { serviceConfigManager } from './ServiceConfigManager.js';
@@ -59,6 +60,38 @@ function parseOptionalInt(value) {
 }
 
 export const CACHE_TTL = 10 * 60 * 1000;
+
+function loadManifestEnvKeys() {
+    try {
+        const manifestPath = path.resolve(process.cwd(), 'manifest.json');
+        const raw = fs.readFileSync(manifestPath, 'utf8');
+        const manifest = JSON.parse(raw);
+        const envConfig = manifest?.config?.env || {};
+        return new Set(Object.keys(envConfig));
+    } catch (error) {
+        return null;
+    }
+}
+
+function warnUnknownInfisicalKeys(secrets) {
+    try {
+        if (!secrets || typeof secrets !== 'object') return;
+        const manifestKeys = loadManifestEnvKeys();
+        if (!manifestKeys) return;
+
+        const secretKeys = Object.keys(secrets);
+        const unknown = secretKeys.filter(key => !manifestKeys.has(key));
+        if (unknown.length === 0) return;
+
+        console.warn(`⚠️ Infisical returned ${unknown.length} key(s) not present in manifest.json config.env (possible typos or stale secrets):`);
+        unknown.slice(0, 30).forEach(key => console.warn(`   - ${key}`));
+        if (unknown.length > 30) {
+            console.warn(`   ...and ${unknown.length - 30} more`);
+        }
+    } catch (e) {
+        // Do not block startup on validation errors
+    }
+}
 
 /**
  * 显示配置更新的醒目日志
@@ -272,6 +305,7 @@ export async function initConfig() {
                 const secrets = await provider.fetchSecrets();
                 
                 if (secrets) {
+                    warnUnknownInfisicalKeys(secrets);
                     for (const key in secrets) {
                         const cleanValue = sanitizeValue(secrets[key]);
                         process.env[key] = cleanValue;

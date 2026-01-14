@@ -107,11 +107,16 @@
         "health": "/health",
         "healthz": "/healthz",
         "ready": "/ready",
-        "webhookBase": "/api/tasks",
-        "download": "/api/tasks/download",
-        "upload": "/api/tasks/upload",
-        "batch": "/api/tasks/batch",
-        "systemEvents": "/api/tasks/system-events"
+        "webhookBase": "/api/v2/tasks",
+        "download": "/api/v2/tasks/download",
+        "upload": "/api/v2/tasks/upload",
+        "batch": "/api/v2/tasks/batch",
+        "systemEvents": "/api/v2/tasks/system-events",
+        "legacyWebhookBase": "/api/tasks",
+        "legacyDownload": "/api/tasks/download",
+        "legacyUpload": "/api/tasks/upload",
+        "legacyBatch": "/api/tasks/batch",
+        "legacySystemEvents": "/api/tasks/system-events"
       },
       "locking": {
         "mechanism": "cache",
@@ -418,6 +423,116 @@
         "required": false,
         "description": "External URL for load balancer routing"
       },
+      "DOWNLOAD_DIR": {
+        "type": "string",
+        "required": false,
+        "description": "Local download directory (defaults to OS temp downloads)"
+      },
+      "QSTASH_DEBUG": {
+        "type": "string",
+        "required": false,
+        "description": "Set to true/1/yes to enable verbose QStash publish debug logs"
+      },
+      "QSTASH_FORCE_DIRECT": {
+        "type": "string",
+        "required": false,
+        "description": "Set to true/1/yes to bypass buffering and send QStash publishes immediately (diagnostics only)"
+      },
+      "DOTENV_OVERRIDE": {
+        "type": "string",
+        "required": false,
+        "description": "Controls whether dotenv files override existing env vars. Default: dev overrides, prod/pre do not. Set true to force override in prod/pre."
+      },
+      "CALLER_TRACKING_MODE": {
+        "type": "string",
+        "required": false,
+        "description": "Set to production to attach caller stack context to queue messages (diagnostics)"
+      },
+      "CACHE_L3_ENABLED": {
+        "type": "string",
+        "required": false,
+        "description": "Set to true to enable persistent L3 cache layer"
+      },
+      "CACHE_BLOOM_FILTER": {
+        "type": "string",
+        "required": false,
+        "description": "Set to true to enable bloom filter protection for cache penetration"
+      },
+      "BATCH_SIZE": {
+        "type": "number",
+        "required": false,
+        "description": "Default batch size for cloud queue buffering (fallback for providers)"
+      },
+      "BATCH_TIMEOUT": {
+        "type": "number",
+        "required": false,
+        "description": "Default batch flush timeout in ms for cloud queue buffering (fallback for providers)"
+      },
+      "QSTASH_BATCH_SIZE": {
+        "type": "number",
+        "required": false,
+        "description": "QStash queue batch size (overrides BATCH_SIZE)"
+      },
+      "QSTASH_BATCH_TIMEOUT": {
+        "type": "number",
+        "required": false,
+        "description": "QStash queue batch timeout in ms (overrides BATCH_TIMEOUT)"
+      },
+      "QSTASH_MAX_BUFFER_SIZE": {
+        "type": "number",
+        "required": false,
+        "description": "Max in-memory buffer size before dropping oldest messages"
+      },
+      "QSTASH_PROCESSED_MESSAGES_LIMIT": {
+        "type": "number",
+        "required": false,
+        "description": "Max size for in-memory idempotency cache"
+      },
+      "QSTASH_DLQ_SIZE": {
+        "type": "number",
+        "required": false,
+        "description": "Max dead-letter queue size"
+      },
+      "QSTASH_MAX_CONCURRENT": {
+        "type": "number",
+        "required": false,
+        "description": "Max concurrent QStash publish operations in batch mode"
+      },
+      "QSTASH_MOCK_DELAY": {
+        "type": "number",
+        "required": false,
+        "description": "Mock mode: artificial delay in ms"
+      },
+      "QSTASH_MOCK_ERROR": {
+        "type": "string",
+        "required": false,
+        "description": "Mock mode: inject error type for testing"
+      },
+      "QSTASH_RATE_LIMIT": {
+        "type": "number",
+        "required": false,
+        "description": "Upstash QStash rate limit (requests per window)"
+      },
+      "QSTASH_RATE_WINDOW": {
+        "type": "number",
+        "required": false,
+        "description": "Upstash QStash rate limit window in ms"
+      },
+      "QSTASH_ADAPTIVE_RATE": {
+        "type": "string",
+        "required": false,
+        "description": "Set to true to enable adaptive rate limit adjustment"
+      },
+      "QSTASH_MIN_RATE": {
+        "type": "number",
+        "required": false,
+        "description": "Adaptive rate limiter minimum requests per window"
+      },
+      "QSTASH_MAX_RATE": {
+        "type": "number",
+        "required": false,
+        "description": "Adaptive rate limiter maximum requests per window"
+      },
       "HOSTNAME": {
         "type": "string",
         "required": false,
@@ -473,6 +588,46 @@
         "type": "string",
         "required": true,
         "description": "Webhook callback URL for QStash"
+      },
+      "DATADOG_SITE": {
+        "type": "string",
+        "required": false,
+        "description": "Datadog site (e.g. datadoghq.com, datadoghq.eu)"
+      },
+      "HTTP2_ENABLED": {
+        "type": "string",
+        "required": false,
+        "description": "Enable HTTP/2 server (true/false)"
+      },
+      "HTTP2_PLAIN": {
+        "type": "string",
+        "required": false,
+        "description": "Use plaintext HTTP/2 (h2c) instead of TLS (true/false)"
+      },
+      "HTTP2_ALLOW_HTTP1": {
+        "type": "string",
+        "required": false,
+        "description": "Allow HTTP/1.1 fallback when HTTP/2 is enabled (true/false)"
+      },
+      "HTTP2_TLS_KEY_PATH": {
+        "type": "string",
+        "required": false,
+        "description": "TLS key path for HTTP/2 server"
+      },
+      "HTTP2_TLS_CERT_PATH": {
+        "type": "string",
+        "required": false,
+        "description": "TLS cert path for HTTP/2 server"
+      },
+      "TLS_KEY_PATH": {
+        "type": "string",
+        "required": false,
+        "description": "TLS key path (legacy)"
+      },
+      "TLS_CERT_PATH": {
+        "type": "string",
+        "required": false,
+        "description": "TLS cert path (legacy)"
       },
       "RCLONE_REMOTE": {
         "type": "string",
@@ -550,6 +705,12 @@
         "type": "string",
         "required": false,
         "description": "Axiom dataset name"
+      },
+      "DATADOG_API_KEY": {
+        "type": "string",
+        "required": false,
+        "description": "Datadog API key for log shipping",
+        "sensitive": true
       },
       "CLOUDFLARE_D1_ACCOUNT_ID": {
         "type": "string",
@@ -948,10 +1109,15 @@
     "health": "/health",
     "healthz": "/healthz",
     "ready": "/ready",
-    "webhookBase": "/api/tasks",
-    "download": "/api/tasks/download",
-    "upload": "/api/tasks/upload",
-    "batch": "/api/tasks/batch",
-    "systemEvents": "/api/tasks/system-events"
+    "webhookBase": "/api/v2/tasks",
+    "download": "/api/v2/tasks/download",
+    "upload": "/api/v2/tasks/upload",
+    "batch": "/api/v2/tasks/batch",
+    "systemEvents": "/api/v2/tasks/system-events",
+    "legacyWebhookBase": "/api/tasks",
+    "legacyDownload": "/api/tasks/download",
+    "legacyUpload": "/api/tasks/upload",
+    "legacyBatch": "/api/tasks/batch",
+    "legacySystemEvents": "/api/tasks/system-events"
   }
 }

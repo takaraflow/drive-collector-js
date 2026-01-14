@@ -6,6 +6,13 @@ on:
     paths:
       - 'manifest.json'  # 只有当 manifest 文件变动时才上报，节省资源
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   update-registry:
     runs-on: ubuntu-latest
@@ -26,6 +33,19 @@ jobs:
       # 2. 检出当前子仓库代码
       - name: Checkout Sub-Repo
         uses: actions/checkout@v4
+
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: 'npm'
+
+      - name: Validate manifest.json (syntax + duplicates + env sync)
+        run: |
+          jq . manifest.json > /dev/null
+          node scripts/check-json-duplicates.js manifest.json
+          node scripts/check-env-manifest.js
+          node scripts/check-service-manifest.js
 
       # 3. 检出契约中心仓库
       - name: Checkout Contract Center

@@ -12,11 +12,19 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   metadata:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: 'npm'
       - name: Validate manifest.json
         run: |
           if [ ! -f "manifest.json" ]; then echo "manifest.json missing"; exit 1; fi
@@ -32,6 +40,10 @@ jobs:
             exit 1
           fi
           echo "✅ Manifest validation passed (v$PACKAGE_VERSION)"
+      - name: Check manifest duplicate keys
+        run: npm run check:manifest:duplicates
+      - name: Check env manifest consistency
+        run: npm run check:env
 
   lint:
     runs-on: ubuntu-latest
@@ -43,62 +55,52 @@ jobs:
           node-version: 20.x
           cache: 'npm'
       - run: npm ci
-      - name: Run ESLint (if available)
+      - name: Run lint (if configured)
         run: |
-          if [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f "eslint.config.js" ]; then
-            npm run lint || echo "⚠️ ESLint configured but failed"
+          if node -e "process.exit(require('./package.json').scripts?.lint ? 0 : 1)"; then
+            npm run lint
           else
-            echo "ℹ️ No ESLint configuration found, skipping lint check"
+            echo "ℹ️ No lint script found, skipping"
           fi
-      - name: Check code formatting
+      - name: Check formatting (if configured)
         run: |
-          if command -v prettier &> /dev/null; then
-            npm run format:check || echo "⚠️ Prettier check failed"
+          if node -e "process.exit(require('./package.json').scripts?.['format:check'] ? 0 : 1)"; then
+            npm run format:check
           else
-            echo "ℹ️ Prettier not configured, skipping format check"
+            echo "ℹ️ No format:check script found, skipping"
           fi
 
   test:
     needs: [metadata, lint]
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [20.x]
-        test-type: [jest]
     steps:
       - uses: actions/checkout@v4
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Use Node.js 20.x
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 20.x
           cache: 'npm'
-      - name: Cache node_modules
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ matrix.node-version }}-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-${{ matrix.node-version }}-
       - name: Install dependencies
         run: |
           START_TIME=$(date +%s)
           npm ci
           echo "INSTALL_DURATION=$(($(date +%s) - $START_TIME))" >> $GITHUB_ENV
-      - name: Run Tests (${{ matrix.test-type }})
+      - name: Run tests (with coverage)
         run: |
           TEST_START=$(date +%s)
-          npm test
+          npm run test:coverage
           echo "TEST_DURATION=$(($(date +%s) - $TEST_START))" >> $GITHUB_ENV
       - name: Report Performance Metrics
         run: |
-          echo "### Performance Metrics (Node.js ${{ matrix.node-version }}) 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "### Performance Metrics (Node.js 20.x) 🚀" >> $GITHUB_STEP_SUMMARY
           echo "- **Dependency Installation:** ${{ env.INSTALL_DURATION }}s" >> $GITHUB_STEP_SUMMARY
           echo "- **Test Execution:** ${{ env.TEST_DURATION }}s" >> $GITHUB_STEP_SUMMARY
           echo "- **Total Monitored Time:** $((${{ env.INSTALL_DURATION }} + ${{ env.TEST_DURATION }}))s" >> $GITHUB_STEP_SUMMARY
       - name: Upload coverage reports
         uses: actions/upload-artifact@v4
+        if: always() && hashFiles('coverage/**') != ''
         with:
-          name: coverage-${{ matrix.node-version }}
+          name: coverage-node20
           path: coverage/
           retention-days: 7
 
@@ -130,41 +132,6 @@ jobs:
             echo "infisical_env=dev" >> $GITHUB_OUTPUT
             echo "🎯 Target: Development Environment"
           fi
-
-      # 统一方案：从 Infisical 同步环境变量
-      # INFISICAL_TOKEN 使用 secrets (敏感信息)
-      # INFISICAL_PROJECT_ID 使用 vars (非敏感配置)
-      # 根据分支自动选择对应的 Infisical 环境
-      - name: Sync environment variables from Infisical
-        env:
-          INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
-          INFISICAL_PROJECT_ID: ${{ vars.INFISICAL_PROJECT_ID }}
-          INFISICAL_ENV: ${{ steps.set-env.outputs.infisical_env }}
-          INFISICAL_SECRET_PATH: /
-        run: |
-          echo "🔄 Syncing from Infisical environment: $INFISICAL_ENV"
-          npm run sync:env
-        continue-on-error: true  # 允许降级到本地缓存或云配置
-      
-      # 处理环境变量中的多余引号（Infisical 可能返回带引号的值）
-      - name: Clean up quotes in environment variables
-        if: success() || failure()  # 即使 sync 失败也要执行，因为可能有本地 .env
-        run: |
-          if [ -f .env ]; then
-            echo "Cleaning up quotes in .env file..."
-            # 移除值中的外层引号（单引号或双引号）
-            sed -i 's/="\([^"]*\)"/=\1/g' .env
-            sed -i "s/='\([^']*\)'/=\1/g" .env
-            # 移除值开头和结尾的引号（处理特殊情况）
-            sed -i 's/^"\(.*\)"$/\1/' .env
-            sed -i "s/^'\(.*\)'$/\1/" .env
-            echo "✅ Quotes cleaned up"
-            # 显示前几行用于验证
-            head -5 .env
-          else
-            echo "ℹ️ No .env file found, skipping quote cleanup"
-          fi
-      
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
@@ -185,14 +152,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
-      
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -200,13 +159,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # 关键点：将 Infisical 凭据和环境变量传递给 Docker 构建过程
-          # 这样 Dockerfile 内部的 sync-env.js 才能获取变量
           build-args: |
-            INFISICAL_TOKEN=${{ secrets.INFISICAL_TOKEN }}
-            INFISICAL_PROJECT_ID=${{ vars.INFISICAL_PROJECT_ID }}
             NODE_ENV=${{ steps.set-env.outputs.environment }}
-            INFISICAL_ENV=${{ steps.set-env.outputs.infisical_env }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
