@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [1.2.0](https://github.com/YoungSx/lb-worker-js/compare/v1.1.0...v1.2.0) (2026-01-14)
+
+
+### ✨ Features
+
+* add temporary scheduling for upload/batch tasks ([859550d](https://github.com/YoungSx/lb-worker-js/commit/859550d7af629f61e4a0c29861f9236f23a05b3e))
+* adds EVAL command support for Redis cache operations ([01ee77d](https://github.com/YoungSx/lb-worker-js/commit/01ee77d902ecda02eefd60a324d29f3a6f4aec77))
+
+
+### 🐛 Bug Fixes
+
+* adds integration test environment backup and restore ([07d4627](https://github.com/YoungSx/lb-worker-js/commit/07d4627b1d638042fc6b7349c517c27fe3e3be2b))
+* ttl in LoadBanlancerState ([04b5ac3](https://github.com/YoungSx/lb-worker-js/commit/04b5ac348b5447b5395bad6ac873f6c477349e0b))
+
 ## [1.1.0](https://github.com/YoungSx/lb-worker-js/compare/v1.0.0...v1.1.0) (2026-01-13)
 
 
