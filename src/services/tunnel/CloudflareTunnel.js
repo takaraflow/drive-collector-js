@@ -1,5 +1,8 @@
 import { S6ManagedTunnel } from './S6ManagedTunnel.js';
 import { BaseTunnel } from './BaseTunnel.js';
+import { logger } from '../logger/index.js';
+
+const log = logger.withModule ? logger.withModule('CloudflareTunnel') : logger;
 
 /**
  * Cloudflare Tunnel implementation that monitors a local cloudflared process.
@@ -38,9 +41,16 @@ export class CloudflareTunnel extends S6ManagedTunnel {
     async _fetchMetrics() {
         try {
             const res = await fetch(this.metricsUrl);
-            if (!res.ok) return null;
+            if (!res.ok) {
+                log.debug(`Failed to fetch metrics: ${res.status} ${res.statusText}`);
+                return null;
+            }
             return await res.text();
         } catch (error) {
+            // Only log if it's not a connection refused (common during startup)
+            if (error.cause?.code !== 'ECONNREFUSED') {
+                log.debug(`Error fetching metrics: ${error.message}`);
+            }
             return null;
         }
     }
@@ -91,7 +101,7 @@ export class CloudflareTunnel extends S6ManagedTunnel {
                     }
                 }
             } catch (error) {
-                // Silently handle errors in polling loop
+                log.warn(`Error in polling loop: ${error.message}`);
             }
             this._timer = setTimeout(poll, this.pollInterval);
         };

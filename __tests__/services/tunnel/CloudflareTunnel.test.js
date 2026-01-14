@@ -3,6 +3,20 @@ import { CloudflareTunnel } from '../../../src/services/tunnel/CloudflareTunnel.
 import fs from 'fs/promises';
 
 vi.mock('fs/promises');
+vi.mock('../../../src/services/logger/index.js', () => ({
+    logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        withModule: () => ({
+            info: vi.fn(),
+            warn: vi.fn(),
+            error: vi.fn(),
+            debug: vi.fn(),
+        })
+    }
+}));
 
 describe('CloudflareTunnel', () => {
     let tunnel;

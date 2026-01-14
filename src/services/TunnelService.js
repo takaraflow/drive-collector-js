@@ -1,5 +1,8 @@
 import { CloudflareTunnel } from './tunnel/CloudflareTunnel.js';
 import { getConfig } from '../config/index.js';
+import { logger } from './logger/index.js';
+
+const log = logger.withModule ? logger.withModule('TunnelService') : logger;
 
 /**
  * Orchestrator for tunnel operations.
@@ -24,15 +27,15 @@ class TunnelService {
             if (config.provider === 'cloudflare') {
                 this.provider = new CloudflareTunnel(config);
             } else {
-                console.warn(`[TunnelService] Unknown provider: ${config.provider}`);
+                log.warn(`Unknown provider: ${config.provider}`);
             }
             
             if (this.provider) {
-                console.log(`[TunnelService] Initializing ${config.provider} tunnel...`);
+                log.info(`Initializing ${config.provider} tunnel...`);
                 await this.provider.initialize();
             }
         } catch (error) {
-            console.error(`[TunnelService] Initialization failed:`, error.message);
+            log.error(`Initialization failed:`, error);
         }
     }
 
