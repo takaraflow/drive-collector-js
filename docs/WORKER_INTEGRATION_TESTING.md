@@ -9,7 +9,7 @@
 ### 运行测试
 
 ```bash
-# 运行集成测试套件
+# 运行集成测试套件 (自动备份 .env 以实现隔离)
 npm run test:integration
 
 # 运行监视模式 (Watch Mode)
