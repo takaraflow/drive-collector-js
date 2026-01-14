@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.25.0](https://github.com/YoungSx/drive-collector-js/compare/v4.24.1...v4.25.0) (2026-01-14)
+
+
+### 📝 文档更新
+
+* adds INSTANCE_COUNT environment variable configuration ([2621284](https://github.com/YoungSx/drive-collector-js/commit/2621284846256bdbb3404c4833b590ab8ba5296d))
+* STANDARDIZATION_SOP.md ([26b4a79](https://github.com/YoungSx/drive-collector-js/commit/26b4a795b572185c91b7fd65aaf49fc367f434e3))
+
+
+### 🐛 问题修复
+
+* adds limit configuration for stalled task queries ([cbcfe5e](https://github.com/YoungSx/drive-collector-js/commit/cbcfe5edc8c811eb2356b3d74a0b6303de2d57a4))
+* adds production environment dotenv override control ([c207470](https://github.com/YoungSx/drive-collector-js/commit/c2074708c7c68a81f4e614d7f624b52a2b91674f))
+* adds QStash debug logging and improves error handling ([ced0582](https://github.com/YoungSx/drive-collector-js/commit/ced0582a0a54004e616fb6b74dece5790b611a82))
+* enhances queue service metadata handling and QStash token fallback ([304855f](https://github.com/YoungSx/drive-collector-js/commit/304855fd4109dd8ae93ec7c1756d613e612eaf71))
+* improves cache provider logging and performance thresholds ([f6ed931](https://github.com/YoungSx/drive-collector-js/commit/f6ed931f11fca4b0c7dc8421886725edb775f4c1))
+* improves cancellation handling for rclone batch uploads ([3454431](https://github.com/YoungSx/drive-collector-js/commit/345443147d4de2d91c4855560a22d087920ced1c))
+* improves distributed lock robustness with timestamp validation ([e92081b](https://github.com/YoungSx/drive-collector-js/commit/e92081b4655c6eb9d9a417f4d7b603b163f916d1))
+* improves task cancellation handling and adds batch cancellation support ([20cf2a1](https://github.com/YoungSx/drive-collector-js/commit/20cf2a1aa17133aa193b819118caf6a4b5d4b94d))
+
 ### [4.24.1](https://github.com/YoungSx/drive-collector-js/compare/v4.24.0...v4.24.1) (2026-01-14)
 
 
