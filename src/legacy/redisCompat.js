@@ -254,6 +254,27 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
         case '_kv_list':
           const keys = await service.listKeys(args[0], ctx);
           return { keys: keys.map(k => ({ name: k })) };
+        case 'EVAL': {
+          const script = args[0];
+          const key = args[1];
+          const evalArgs = args.slice(2);
+          const activeProvider = (service.isFailoverMode && service.fallbackProvider) ? service.fallbackProvider : service.primaryProvider;
+          if (!activeProvider) {
+            throw new Error('No cache provider available for EVAL');
+          }
+          if (typeof activeProvider.connect === 'function') {
+            await activeProvider.connect();
+          }
+          if (typeof activeProvider.eval === 'function') {
+            return await activeProvider.eval(script, key ? [key] : [], evalArgs);
+          }
+          if (activeProvider.client && typeof activeProvider.client.send === 'function') {
+            const numKeys = key ? 1 : 0;
+            const keyArgs = key ? [key] : [];
+            return await activeProvider.client.send('EVAL', script, numKeys, ...keyArgs, ...evalArgs);
+          }
+          throw new Error('Active cache provider does not support EVAL');
+        }
         default:
           throw new Error(`Unsupported operation for CacheService: ${operation}`);
       }

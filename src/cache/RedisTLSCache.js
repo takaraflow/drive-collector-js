@@ -194,6 +194,14 @@ export class RedisTLSCache {
     return true;
   }
 
+  async eval(script, keys = [], args = []) {
+    if (!this.client) {
+      await this.connect();
+    }
+    const numKeys = keys.length;
+    return await this.client.send('EVAL', script, numKeys, ...keys, ...args);
+  }
+
   async exists(key) {
     if (!this.client) {
       await this.connect();
