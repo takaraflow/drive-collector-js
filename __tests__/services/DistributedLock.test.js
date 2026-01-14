@@ -196,6 +196,36 @@ describe('DistributedLock - core behaviors', () => {
         expect(status.remainingMs).toBe(0);
     });
 
+    test('getLockStatus treats invalid expiresAt as expired', async () => {
+        mockCache.get.mockResolvedValue({
+            instanceId,
+            expiresAt: 'not-a-timestamp',
+            version: 'v1',
+            acquiredAt: Date.now() - 5000
+        });
+
+        const status = await lock.getLockStatus(taskId);
+
+        expect(status.status).toBe('expired');
+        expect(status.remainingMs).toBe(0);
+    });
+
+    test('cleanupExpiredLocks should not throw on missing expiresAt', async () => {
+        mockCache.listKeys.mockResolvedValue(['lock:task:bad']);
+        mockCache.get.mockResolvedValue({
+            instanceId: 'some-instance'
+            // expiresAt missing (corrupted/legacy)
+        });
+
+        await lock.cleanupExpiredLocks();
+
+        expect(mockCache.delete).toHaveBeenCalledWith('lock:task:bad');
+        expect(mockLogger.error).not.toHaveBeenCalledWith(
+            'Error cleaning up expired locks',
+            expect.anything()
+        );
+    });
+
     test('getLockStatus reports released when missing', async () => {
         mockCache.get.mockResolvedValue(null);
 

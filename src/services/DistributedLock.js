@@ -207,7 +207,8 @@ export class DistributedLock {
 
                 // 检查是否需要续期
                 const now = Date.now();
-                const timeUntilExpiry = current.expiresAt - now;
+                const currentExpiresAt = this._coerceTimestampMs(current.expiresAt);
+                const timeUntilExpiry = currentExpiresAt ? (currentExpiresAt - now) : 0;
                 
                 if (timeUntilExpiry <= this.options.renewalThreshold) {
                     // 需要续期
@@ -334,8 +335,33 @@ export class DistributedLock {
      * 检查锁是否过期
      */
     isExpired(lock) {
-        if (!lock || !lock.expiresAt) return true;
-        return Date.now() > lock.expiresAt;
+        const expiresAt = this._coerceTimestampMs(lock?.expiresAt);
+        if (!expiresAt) return true;
+        return Date.now() > expiresAt;
+    }
+
+    _coerceTimestampMs(value) {
+        if (value === undefined || value === null || value === '') return null;
+        if (typeof value === 'number') {
+            return Number.isFinite(value) ? value : null;
+        }
+        if (typeof value === 'string') {
+            const numeric = Number(value);
+            if (Number.isFinite(numeric)) return numeric;
+            const parsed = Date.parse(value);
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+        return null;
+    }
+
+    _safeToISOString(timestampMs) {
+        const parsed = this._coerceTimestampMs(timestampMs);
+        if (!parsed) return null;
+        try {
+            return new Date(parsed).toISOString();
+        } catch {
+            return null;
+        }
     }
 
     /**
@@ -354,8 +380,9 @@ export class DistributedLock {
             };
         }
 
+        const expiresAt = this._coerceTimestampMs(lock.expiresAt);
         const isExpired = this.isExpired(lock);
-        const remainingMs = Math.max(0, lock.expiresAt - Date.now());
+        const remainingMs = expiresAt ? Math.max(0, expiresAt - Date.now()) : 0;
 
         return {
             status: isExpired ? 'expired' : 'held',
@@ -363,7 +390,7 @@ export class DistributedLock {
             owner: lock.instanceId,
             version: lock.version,
             acquiredAt: lock.acquiredAt,
-            expiresAt: lock.expiresAt,
+            expiresAt: expiresAt ?? lock.expiresAt,
             remainingMs,
             heartbeatCount: lock.heartbeatCount || 0,
             stolenFrom: lock.stolenFrom,
@@ -405,8 +432,9 @@ export class DistributedLock {
 
                     // 删除过期锁
                     await this.cache.delete(key);
+                    const expiredAt = this._safeToISOString(lock.expiresAt) || 'unknown';
                     this.logger.info(`Cleaned up expired lock: ${key}`, {
-                        expiredAt: new Date(lock.expiresAt).toISOString(),
+                        expiredAt,
                         owner: lock.instanceId
                     });
                 }
