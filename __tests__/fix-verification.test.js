@@ -77,4 +77,16 @@ describe('Fix Verification Tests', () => {
       expect(content).not.toMatch(/for\s*\(\s*const\s+keyName\s+of\s+instanceKeys\s*\)\s*\{[^}]*await\s+executeWithFailover/s);
     });
   });
+
+  describe('Handler CacheService Wiring Fix', () => {
+    it('should pass cacheService to selectTargetInstance (not lbState)', async () => {
+      const fs = require('fs');
+      const path = require('path');
+      const handlerPath = path.join(__dirname, '../src/handler.js');
+      const content = fs.readFileSync(handlerPath, 'utf8');
+
+      expect(content).toContain('selectTargetInstance(activeInstances, env, ctx, log, cacheService)');
+      expect(content).not.toContain('selectTargetInstance(activeInstances, env, ctx, log, lbState)');
+    });
+  });
 });

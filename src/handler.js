@@ -155,7 +155,7 @@ async function handleLoadBalancing(request, env, ctx, log, normalizedUrl, body, 
   }
 
   if (!targetInstance) {
-    targetInstance = await selectTargetInstance(activeInstances, env, ctx, log, lbState);
+    targetInstance = await selectTargetInstance(activeInstances, env, ctx, log, cacheService);
     selectedStrategy = 'round-robin';
   }
   
