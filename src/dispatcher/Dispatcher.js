@@ -332,6 +332,10 @@ export class Dispatcher {
                     return await this._handleModeSwitchCommand(target, userId, 'public');
                 case "/status_private":
                     return await this._handleModeSwitchCommand(target, userId, 'private');
+                case "/pro_admin":
+                    return await this._handleAdminPromotion(target, userId, text, true);
+                case "/de_admin":
+                    return await this._handleAdminPromotion(target, userId, text, false);
                 case "/remote_folder":
                     return await this._handleRemoteFolderCommand(target, userId);
                 case "/set_remote_folder":
@@ -553,6 +557,7 @@ export class Dispatcher {
      */
     static async _handleHelpCommand(target, userId) {
         const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
+        const isOwner = userId === config.ownerId?.toString();
         const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
         const version = pkg.version || 'unknown';
 
@@ -564,6 +569,10 @@ export class Dispatcher {
             if (parts.length > 1) {
                 message = parts[0] + "如有疑问或建议，请联系管理员。";
             }
+        } else if (!isOwner) {
+            // 如果是普通管理员，移除只有 Owner 才能用的命令
+            message = message.replace("/pro_admin - 👑 设置管理员 (UID)\n", "");
+            message = message.replace("/de_admin - 🗑️ 取消管理员 (UID)\n", "");
         }
 
         return await runBotTaskWithRetry(() => client.sendMessage(target, {
@@ -682,6 +691,52 @@ export class Dispatcher {
             message: format(STRINGS.status.mode_changed, { mode: mode === 'public' ? '公开' : '私有(维护)' }),
             parseMode: "html"
         }), userId, {}, false, 3);
+    }
+
+    /**
+     * [私有] 处理管理员设置命令 (/pro_admin, /de_admin)
+     */
+    static async _handleAdminPromotion(target, userId, fullText, isPromotion) {
+        const isOwner = userId === config.ownerId?.toString();
+        if (!isOwner) {
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.status.no_permission,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        }
+
+        const parts = fullText.split(' ');
+        if (parts.length < 2) {
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: `❌ 请提供 UID。用法: <code>${parts[0]} [UID]</code>`,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        }
+
+        const targetUid = parts[1].trim();
+        try {
+            if (isPromotion) {
+                await d1.execute("INSERT OR REPLACE INTO user_roles (user_id, role) VALUES (?, 'admin')", [targetUid]);
+                AuthGuard.roleCache.delete(targetUid); // 清理缓存
+                return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: `✅ 已将用户 <code>${targetUid}</code> 设置为管理员。`,
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            } else {
+                await d1.execute("DELETE FROM user_roles WHERE user_id = ?", [targetUid]);
+                AuthGuard.roleCache.delete(targetUid); // 清理缓存
+                return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: `✅ 已取消用户 <code>${targetUid}</code> 的管理员权限。`,
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            }
+        } catch (error) {
+            log.error("Failed to update user role:", error);
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: "❌ 数据库操作失败，请检查 UID 是否正确。",
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        }
     }
 
     /**

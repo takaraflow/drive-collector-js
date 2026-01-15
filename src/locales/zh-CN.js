@@ -14,9 +14,11 @@ export const STRINGS = {
               "/logout - ❌ 解绑当前网盘\n\n" +
               "<b>管理员命令：</b>\n" +
               "/open_service - 🔓 开启服务 (公开模式)\n" +
-              "/close_service - 🔒 关闭服务 (维护模式)\n" +
-               "/diagnosis - 🩺 系统诊断\n\n" +
-              "<b>支持的链接类型：</b>\n" +
+               "/close_service - 🔒 关闭服务 (维护模式)\n" +
+               "/diagnosis - 🩺 系统诊断\n" +
+               "/pro_admin - 👑 设置管理员 (UID)\n" +
+               "/de_admin - 🗑️ 取消管理员 (UID)\n\n" +
+               "<b>支持的链接类型：</b>\n" +
               "• Telegram 消息链接\n" +
               "• 直链 (部分支持)\n\n" +
               "如有疑问或建议，请联系管理员。",
