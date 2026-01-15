@@ -116,6 +116,9 @@ describe('任务调度失败处理优化测试', () => {
     vi.clearAllTimers();
     __mockSend.mockReset();
     mockVerify.mockReset();
+    mockKV.list.mockReset();
+    mockKV.get.mockReset();
+    mockKV.put.mockReset();
     // QStash 验证应该返回布尔值，而不是 body 内容
     mockVerify.mockImplementation(async (options) => {
       return true; // 验证成功
@@ -299,9 +302,10 @@ describe('任务调度失败处理优化测试', () => {
     });
  
     describe('Multi-prefix Instance Scanning', () => {
-     it('should_scan_all_contract_key_prefixes', async () => {
+     it('should_scan_only_instance_key_prefix', async () => {
        mockKV.list
          .mockResolvedValueOnce({ keys: [{ name: 'instance:1' }] })
+         // 下面的 mock 是给 scanLockKeys 用的（在测试环境中会被调用）
          .mockResolvedValueOnce({ keys: [{ name: 'lock:task1' }] })
          .mockResolvedValueOnce({ keys: [{ name: 'task:123' }] })
          .mockResolvedValueOnce({ keys: [{ name: 'msg_lock:msg1' }] });
@@ -317,8 +321,8 @@ describe('任务调度失败处理优化测试', () => {
        
        expect(result.length).toBe(1);
        expect(result[0].id).toBe('1');
-       // 验证 list 被调用了4次（每个前缀一次）
-       expect(mockKV.list).toHaveBeenCalledTimes(7);
+       // 验证 list 被调用了4次 (1次 instance: + 3次 scanLockKeys)
+       expect(mockKV.list).toHaveBeenCalledTimes(4);
      });
  
      it('should_scan_lock_keys_and_return_count', async () => {

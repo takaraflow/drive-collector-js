@@ -65,8 +65,10 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
   await getActiveInstancesLogger.debug('Redis endpoint summary', { endpoint: redisEndpointSummary });
   
   try {
-    // 扫描所有契约键前缀
-    const prefixes = ['instance:', 'lock:', 'task:', 'msg_lock:'];
+    // 扫描实例键前缀
+    // 修复：仅扫描 'instance:' 前缀，移除 'lock:', 'task:', 'msg_lock:' 的冗余扫描
+    // 外部调用者应使用 scanLockKeys 获取锁信息
+    const prefixes = ['instance:'];
 
     // 串行获取所有前缀的键（避免 Redis 客户端并发 SCAN 问题）
     const prefixResults = [];
@@ -91,20 +93,10 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
     await getActiveInstancesLogger.debug('Raw keys scanned', { keys: allKeys.map(k => k.name) });
 
     if (allKeys.length === 0) {
-      await getActiveInstancesLogger.debug('No keys found, attempting fallback full scan', {});
-      try {
-        const fallbackResult = await executeWithFailover('_kv_list', env, ctx, getActiveInstancesLogger, '');
-        const fallbackKeys = fallbackResult?.keys || [];
-        await getActiveInstancesLogger.debug('getActiveInstances Fallback Scan: Raw keys', { keys: fallbackKeys.map(k => k.name), count: fallbackKeys.length });
-        allKeys = fallbackKeys;
-      } catch (e) {
-        await getActiveInstancesLogger.error('❌ 回退扫描失败 (Fallback scan failed)', { error: e.message });
-      }
-
-      if (allKeys.length === 0) {
-        await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: No keys found after fallback, returning empty array.', {});
-        return [];
-      }
+      // 修复：移除危险的全量扫描回退 (Fallback Full Scan)
+      // 全量扫描在生产环境中会导致严重的性能问题
+      await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: No instance keys found, returning empty array.', {});
+      return [];
     }
 
     const instances = [];
@@ -136,48 +128,8 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
     // 新增日志：记录获取到的原始实例数据
     await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Raw instance data results', { rawData: instanceDataResults });
 
-    // 新增：输出所有扫描到的键及其值，便于线上调试
-    const instanceDataByKey = new Map();
-    instanceKeys.forEach((keyName, idx) => {
-      instanceDataByKey.set(keyName, instanceDataResults[idx]);
-    });
-
-    const keyValueDump = [];
-    for (const key of allKeys) {
-      const keyName = key.name;
-      if (instanceDataByKey.has(keyName)) {
-        keyValueDump.push({ key: keyName, value: instanceDataByKey.get(keyName) });
-        continue;
-      }
-      try {
-        const value = await executeWithFailover('_kv_get', env, ctx, getActiveInstancesLogger, keyName);
-        keyValueDump.push({ key: keyName, value });
-      } catch (e) {
-        keyValueDump.push({ key: keyName, error: e.message });
-      }
-    }
-    // 将键值对分片输出，避免单条日志过大（Axiom 2MB 限制）
-    const MAX_VALUE_PREVIEW_LENGTH = 2000;
-    const formattedEntries = keyValueDump.map(({ key, value, error }) => {
-      if (error) return { key, error };
-      try {
-        const raw = typeof value === 'string' ? value : JSON.stringify(value);
-        const preview = raw.length > MAX_VALUE_PREVIEW_LENGTH
-          ? `${raw.slice(0, MAX_VALUE_PREVIEW_LENGTH)}...[TRUNCATED]`
-          : raw;
-        return { key, preview, type: typeof value };
-      } catch (e) {
-        return { key, error: `format_error:${e.message}` };
-      }
-    });
-
-    const chunkSize = 20;
-    const totalChunks = Math.max(1, Math.ceil(formattedEntries.length / chunkSize));
-    for (let i = 0; i < formattedEntries.length; i += chunkSize) {
-      const chunkIndex = Math.floor(i / chunkSize) + 1;
-      const chunk = formattedEntries.slice(i, i + chunkSize);
-      await getActiveInstancesLogger.debug(`getActiveInstances Full KV chunk ${chunkIndex}/${totalChunks}`, { entries: chunk });
-    }
+    // 修复：移除 N+1 调试查询循环
+    // 之前的代码遍历所有键并逐个获取值，导致严重的子请求耗尽风险
 
     for (let idx = 0; idx < instanceDataResults.length; idx++) {
       const data = instanceDataResults[idx];
@@ -205,6 +157,8 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
     }
 
     // 记录锁键数量（用于 leader election 监控）
+    // 注意：由于优化了 prefixes 仅扫描 instance:，此处 lockCount 在 getActiveInstances 中通常为 0
+    // 如需获取锁信息，请使用 scanLockKeys 函数
     const lockKeys = allKeys.filter(k => k.name.startsWith('lock:') || k.name.startsWith('task:') || k.name.startsWith('msg_lock:'));
     const lockCount = lockKeys.length;
     
