@@ -142,6 +142,11 @@ export async function handleQStashWebhook(req, res) {
         } else if (path.endsWith('/batch')) {
             result = await TaskManager.handleMediaBatchWebhook(data.groupId, data.taskIds);
         } else if (path.endsWith('/system-events')) {
+            if (data.event === 'media_group_flush' && data.gid) {
+                const mediaGroupBufferModule = await import("./src/services/MediaGroupBuffer.js");
+                const mediaGroupBuffer = mediaGroupBufferModule.default;
+                await mediaGroupBuffer.handleFlushEvent(data);
+            }
             result = { success: true, statusCode: 200 };
         } else {
             log.warn(`❓ 未知的 Webhook 路径: ${path}`);

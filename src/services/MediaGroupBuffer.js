@@ -67,6 +67,7 @@ export class MediaGroupBuffer {
             maxMessageIds: options.maxMessageIds || 1000,
             messageIdsMaxAge: options.messageIdsMaxAge || 3600000,
             useLocalTimers: options.useLocalTimers ?? process.env.NODE_ENV !== "test",
+            remoteFlushEnabled: options.remoteFlushEnabled ?? process.env.NODE_ENV !== "test",
             ...options
         };
 
@@ -167,6 +168,7 @@ export class MediaGroupBuffer {
 
         await this._startTimeoutTimer(gid);
         this._scheduleLocalFlush(gid);
+        await this._scheduleRemoteFlush(gid);
 
         this.localBufferKeys.add(gid);
         this.messageIds.set(msgId, Date.now());
@@ -176,6 +178,52 @@ export class MediaGroupBuffer {
         });
 
         return { added: true, reason: "buffered" };
+    }
+
+    async _scheduleRemoteFlush(gid) {
+        if (!this.options.remoteFlushEnabled) return;
+
+        try {
+            const { queueService } = await import("./QueueService.js");
+            const delaySeconds = Math.max(1, Math.ceil((this.options.bufferTimeout + 200) / 1000));
+            await queueService.publish(
+                "system-events",
+                {
+                    event: "media_group_flush",
+                    gid,
+                    baseKey: this.baseKey
+                },
+                { delay: `${delaySeconds}s` }
+            );
+        } catch (error) {
+            log.warn("Failed to schedule remote media group flush event", { gid, error: error?.message });
+        }
+    }
+
+    async handleFlushEvent(event = {}) {
+        const gid = event.gid?.toString?.();
+        if (!gid) return false;
+
+        const timer = await cache.get(this._timerKey(gid), "json");
+        const now = Date.now();
+
+        if (timer?.expiresAt && now < timer.expiresAt) {
+            const delayMs = Math.max(200, timer.expiresAt - now + 200);
+            try {
+                const { queueService } = await import("./QueueService.js");
+                const delaySeconds = Math.max(1, Math.ceil(delayMs / 1000));
+                await queueService.publish(
+                    "system-events",
+                    { event: "media_group_flush", gid, baseKey: this.baseKey },
+                    { delay: `${delaySeconds}s` }
+                );
+            } catch (error) {
+                log.warn("Failed to reschedule media group flush event", { gid, error: error?.message });
+            }
+            return true;
+        }
+
+        return await this._attemptFlush(gid);
     }
 
     async _attemptFlush(gid) {

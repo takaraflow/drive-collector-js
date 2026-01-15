@@ -368,9 +368,14 @@ export class Dispatcher {
             // 🚀 核心逻辑：如果是媒体组消息
             if (message.groupedId) {
                 // 使用新的 MediaGroupBuffer 服务
-                const result = await mediaGroupBuffer.add(message, target, userId);
-                if (!result.added && result.reason !== 'duplicate') {
-                    log.warn(`Failed to add message to buffer: ${result.reason}`);
+                try {
+                    const result = await mediaGroupBuffer.add(message, target, userId);
+                    if (!result.added && result.reason !== 'duplicate') {
+                        log.warn(`Failed to add message to buffer: ${result.reason}`);
+                    }
+                } catch (error) {
+                    log.error('MediaGroupBuffer.add failed, falling back to single task', { error: error?.message });
+                    await TaskManager.addTask(target, message, userId, "媒体组(降级)");
                 }
                 return;
             }
