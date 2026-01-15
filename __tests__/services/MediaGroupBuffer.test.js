@@ -49,9 +49,33 @@ describe("MediaGroupBuffer", () => {
   const baseKey = "media_group_buffer";
   let buffer;
   let mockLock;
+  let store;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    store = new Map();
+
+    cache.get.mockImplementation(async (key) => (store.has(key) ? store.get(key) : null));
+    cache.set.mockImplementation(async (key, value) => {
+      store.set(key, value);
+      return true;
+    });
+    cache.delete.mockImplementation(async (key) => {
+      store.delete(key);
+      return true;
+    });
+    cache.compareAndSet.mockImplementation(async (key, value, options = {}) => {
+      const current = store.has(key) ? store.get(key) : null;
+
+      if (options.ifNotExists && current !== null) return false;
+      if ("ifEquals" in options) {
+        const expected = options.ifEquals;
+        if (JSON.stringify(current) !== JSON.stringify(expected)) return false;
+      }
+
+      store.set(key, value);
+      return true;
+    });
 
     buffer = new MediaGroupBuffer({
       instanceId: "test-instance",
@@ -78,24 +102,19 @@ describe("MediaGroupBuffer", () => {
     const target = { id: "target-1" };
     const userId = "user-1";
 
-    cache.get.mockImplementation((key) => {
-      if (key === `${baseKey}:processed_messages:msg-1`) return null;
-      return null;
-    });
-
-    cache.listKeys.mockImplementation((pattern) => {
-      if (pattern === `${baseKey}:buffer:group-123:msg:*`) return [`${baseKey}:buffer:group-123:msg:msg-1`];
-      return [];
-    });
+    store.set(`${baseKey}:processed_messages:msg-1`, null);
 
     const result = await buffer.add(message, target, userId);
 
     expect(result).toEqual({ added: true, reason: "buffered" });
     expect(mockLock.acquire).not.toHaveBeenCalled();
-    expect(cache.set).toHaveBeenCalledWith(
-      `${baseKey}:timer:group-123`,
-      expect.objectContaining({ expiresAt: expect.any(Number) }),
-      expect.any(Number)
+    expect(store.get(`${baseKey}:timer:group-123`)).toEqual(expect.objectContaining({ expiresAt: expect.any(Number) }));
+    expect(store.get(`${baseKey}:buffer:group-123`)).toEqual(
+      expect.objectContaining({
+        target,
+        userId,
+        messages: expect.arrayContaining([expect.objectContaining({ id: "msg-1" })])
+      })
     );
   });
 
@@ -110,25 +129,8 @@ describe("MediaGroupBuffer", () => {
     mockLock.acquire.mockResolvedValue({ success: true, version: "v1" });
     mockLock.getLockStatus.mockResolvedValue({ status: "held", owner: "test-instance", version: "v1" });
 
-    cache.get.mockImplementation((key) => {
-      if (key.includes(`${baseKey}:processed_messages:`)) return null;
-      if (key === `${baseKey}:buffer:group-123:meta`) return { target, userId, createdAt: Date.now(), updatedAt: Date.now() };
-      if (key === `${baseKey}:buffer:group-123:msg:msg-1`) return { id: "msg-1", media: { file_id: "photo1" }, groupedId: "group-123", _seq: 1 };
-      if (key === `${baseKey}:buffer:group-123:msg:msg-2`) return { id: "msg-2", media: { file_id: "photo2" }, groupedId: "group-123", _seq: 2 };
-      return null;
-    });
-
-    let sizeCall = 0;
-    cache.listKeys.mockImplementation((pattern) => {
-      if (pattern === `${baseKey}:buffer:group-123:msg:*`) {
-        sizeCall += 1;
-        return sizeCall === 1
-          ? [`${baseKey}:buffer:group-123:msg:msg-1`]
-          : [`${baseKey}:buffer:group-123:msg:msg-1`, `${baseKey}:buffer:group-123:msg:msg-2`];
-      }
-      if (pattern === `${baseKey}:buffer:group-123:*`) return [];
-      return [];
-    });
+    store.set(`${baseKey}:processed_messages:msg-1`, null);
+    store.set(`${baseKey}:processed_messages:msg-2`, null);
 
     await buffer.add(messages[0], target, userId);
     const result = await buffer.add(messages[1], target, userId);
@@ -144,26 +146,20 @@ describe("MediaGroupBuffer", () => {
   });
 
   test("should flush expired buffer during cleanup", async () => {
-    const timerKey = `${baseKey}:timer:group-123`;
     const target = { id: "target-1" };
     const userId = "user-1";
 
     mockLock.acquire.mockResolvedValue({ success: true, version: "v1" });
     mockLock.getLockStatus.mockResolvedValue({ status: "held", owner: "test-instance", version: "v1" });
 
-    cache.listKeys.mockImplementation((pattern) => {
-      if (pattern === `${baseKey}:timer:*`) return [timerKey];
-      if (pattern === `${baseKey}:processed_messages:*`) return [];
-      if (pattern === `${baseKey}:buffer:group-123:msg:*`) return [`${baseKey}:buffer:group-123:msg:msg-1`];
-      if (pattern === `${baseKey}:buffer:group-123:*`) return [];
-      return [];
-    });
-
-    cache.get.mockImplementation((key) => {
-      if (key === timerKey) return { expiresAt: Date.now() - 1000, updatedAt: Date.now(), instanceId: "test-instance" };
-      if (key === `${baseKey}:buffer:group-123:meta`) return { target, userId, createdAt: Date.now(), updatedAt: Date.now() };
-      if (key === `${baseKey}:buffer:group-123:msg:msg-1`) return { id: "msg-1", media: { file_id: "photo1" }, groupedId: "group-123", _seq: 1 };
-      return null;
+    store.set(`${baseKey}:index`, { gids: ["group-123"] });
+    store.set(`${baseKey}:timer:group-123`, { expiresAt: Date.now() - 1000, updatedAt: Date.now(), instanceId: "test-instance" });
+    store.set(`${baseKey}:buffer:group-123`, {
+      target,
+      userId,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [{ id: "msg-1", media: { file_id: "photo1" }, groupedId: "group-123", _seq: 1 }]
     });
 
     await buffer._cleanupStaleBuffers();
@@ -176,16 +172,13 @@ describe("MediaGroupBuffer", () => {
     const target = { id: "target-1" };
     const userId = "user-1";
 
-    cache.listKeys.mockImplementation((pattern) => {
-      if (pattern === `${baseKey}:buffer:*:meta`) return [`${baseKey}:buffer:group-123:meta`];
-      if (pattern === `${baseKey}:buffer:group-123:msg:*`) return [`${baseKey}:buffer:group-123:msg:msg-1`];
-      return [];
-    });
-
-    cache.get.mockImplementation((key) => {
-      if (key === `${baseKey}:buffer:group-123:meta`) return { target, userId, createdAt: Date.now(), updatedAt: Date.now() };
-      if (key === `${baseKey}:buffer:group-123:msg:msg-1`) return { id: "msg-1", media: { file_id: "photo1" }, groupedId: "group-123", _seq: 1 };
-      return null;
+    store.set(`${baseKey}:index`, { gids: ["group-123"] });
+    store.set(`${baseKey}:buffer:group-123`, {
+      target,
+      userId,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [{ id: "msg-1", media: { file_id: "photo1" }, groupedId: "group-123", _seq: 1 }]
     });
 
     await buffer.persist();
@@ -203,19 +196,13 @@ describe("MediaGroupBuffer", () => {
 
     mockLock.acquire.mockResolvedValue({ success: true, version: "v1" });
     mockLock.getLockStatus.mockResolvedValue({ status: "held", owner: "test-instance", version: "v1" });
-
-    cache.listKeys.mockImplementation((pattern) => {
-      if (pattern === `${baseKey}:buffer:*:meta`) return [`${baseKey}:buffer:group-123:meta`];
-      if (pattern === `${baseKey}:buffer:group-123:msg:*`) return [`${baseKey}:buffer:group-123:msg:msg-1`];
-      if (pattern === `${baseKey}:buffer:group-123:*`) return [];
-      return [];
-    });
-
-    cache.get.mockImplementation((key) => {
-      if (key === "test-instance:media_group_buffer") return null;
-      if (key === `${baseKey}:buffer:group-123:meta`) return { target, userId, createdAt: Date.now(), updatedAt: Date.now() };
-      if (key === `${baseKey}:buffer:group-123:msg:msg-1`) return { id: "msg-1", media: { file_id: "photo1" }, groupedId: "group-123", _seq: 1 };
-      return null;
+    store.set(`${baseKey}:index`, { gids: ["group-123"] });
+    store.set(`${baseKey}:buffer:group-123`, {
+      target,
+      userId,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [{ id: "msg-1", media: { file_id: "photo1" }, groupedId: "group-123", _seq: 1 }]
     });
 
     await buffer.restore();
@@ -223,4 +210,3 @@ describe("MediaGroupBuffer", () => {
     expect(TaskManager.addBatchTasks).toHaveBeenCalled();
   });
 });
-

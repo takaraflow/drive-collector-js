@@ -71,6 +71,7 @@ export class MediaGroupBuffer {
         };
 
         this.baseKey = this.options.persistKeyPrefix;
+        this.indexKey = `${this.baseKey}:index`;
 
         this.distributedLock = new DistributedLock(cache, {
             ttlSeconds: this.options.lockTtl,
@@ -103,10 +104,27 @@ export class MediaGroupBuffer {
         return `${this.baseKey}:processed_messages:${msgId}`;
     }
 
-    _gidFromKey(key) {
-        const match = key.match(/:buffer:(.+):meta$/);
-        if (!match) return null;
-        return match[1];
+    async _readIndex() {
+        const data = await cache.get(this.indexKey, "json");
+        if (!data || !Array.isArray(data.gids)) return { gids: [] };
+        return data;
+    }
+
+    async _updateIndex(mutator) {
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+            const current = await this._readIndex();
+            const next = mutator(current);
+            const ok = await cache.compareAndSet(this.indexKey, next, {
+                ifNotExists: false,
+                ifEquals: current
+            });
+            if (ok) return true;
+        }
+
+        const current = await this._readIndex();
+        const next = mutator(current);
+        await cache.set(this.indexKey, next, this.options.staleThreshold / 1000);
+        return false;
     }
 
     _scheduleLocalFlush(gid) {
@@ -140,9 +158,7 @@ export class MediaGroupBuffer {
             return { added: false, reason: "duplicate" };
         }
 
-        await this._addMessageToRedis(gid, message, target, userId);
-
-        const bufferSize = await this._getBufferSize(gid);
+        const bufferSize = await this._addMessageToBuffer(gid, message, target, userId);
         if (bufferSize >= this.options.maxBatchSize) {
             this._clearLocalFlushTimer(gid);
             await this._attemptFlush(gid);
@@ -154,6 +170,10 @@ export class MediaGroupBuffer {
 
         this.localBufferKeys.add(gid);
         this.messageIds.set(msgId, Date.now());
+        await this._updateIndex((current) => {
+            if (current.gids.includes(gid)) return current;
+            return { ...current, gids: [...current.gids, gid] };
+        });
 
         return { added: true, reason: "buffered" };
     }
@@ -175,18 +195,9 @@ export class MediaGroupBuffer {
         return false;
     }
 
-    async _addMessageToRedis(gid, message, target, userId) {
+    async _addMessageToBuffer(gid, message, target, userId) {
         const bufferKey = this._bufferKey(gid);
-
         const now = Date.now();
-        const bufferData = {
-            target,
-            userId,
-            createdAt: now,
-            updatedAt: now
-        };
-
-        await cache.set(`${bufferKey}:meta`, bufferData, this.options.staleThreshold / 1000);
 
         const messageData = {
             id: message.id,
@@ -196,16 +207,41 @@ export class MediaGroupBuffer {
             _seq: now
         };
 
-        await cache.set(`${bufferKey}:msg:${message.id}`, messageData, this.options.staleThreshold / 1000);
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+            const current = await cache.get(bufferKey, "json");
+            const currentMessages = Array.isArray(current?.messages) ? current.messages : [];
+            const exists = currentMessages.some((m) => m?.id?.toString?.() === message.id.toString());
+            if (exists) return currentMessages.length;
 
-        const msgIdsKey = `${bufferKey}:msg_ids`;
-        await cache.set(`${msgIdsKey}:${message.id}`, "1", this.options.staleThreshold / 1000);
-    }
+            const nextMessages = [...currentMessages, messageData];
+            const next = {
+                target: current?.target || target,
+                userId: current?.userId || userId,
+                createdAt: current?.createdAt || now,
+                updatedAt: now,
+                messages: nextMessages
+            };
 
-    async _getBufferSize(gid) {
-        const bufferKey = this._bufferKey(gid);
-        const keys = await cache.listKeys(`${bufferKey}:msg:*`);
-        return keys.length;
+            const ok = await cache.compareAndSet(bufferKey, next, current ? { ifEquals: current } : { ifNotExists: true });
+            if (ok) return nextMessages.length;
+        }
+
+        // Best-effort fallback
+        const current = await cache.get(bufferKey, "json");
+        const currentMessages = Array.isArray(current?.messages) ? current.messages : [];
+        const nextMessages = [...currentMessages, messageData];
+        await cache.set(
+            bufferKey,
+            {
+                target: current?.target || target,
+                userId: current?.userId || userId,
+                createdAt: current?.createdAt || now,
+                updatedAt: now,
+                messages: nextMessages
+            },
+            this.options.staleThreshold / 1000
+        );
+        return nextMessages.length;
     }
 
     async _startTimeoutTimer(gid) {
@@ -229,7 +265,7 @@ export class MediaGroupBuffer {
                 return;
             }
 
-            const messages = await this._getAllMessages(gid);
+            const { messages, meta } = await this._getBuffer(gid);
             if (messages.length === 0) {
                 log.warn(`Buffer empty for group ${gid}`);
                 await this._cleanupBuffer(gid);
@@ -247,8 +283,6 @@ export class MediaGroupBuffer {
                 return;
             }
 
-            const bufferKey = this._bufferKey(gid);
-            const meta = await cache.get(`${bufferKey}:meta`, "json");
             if (!meta) {
                 log.error(`Missing metadata for group ${gid}`);
                 await this._cleanupBuffer(gid);
@@ -262,11 +296,10 @@ export class MediaGroupBuffer {
         } catch (error) {
             log.error(`Error flushing buffer for group ${gid}:`, error);
 
-            const bufferKey = this._bufferKey(gid);
-            const meta = await cache.get(`${bufferKey}:meta`, "json");
+            const { meta } = await this._getBuffer(gid);
             if (meta) {
                 meta.errorCount = (meta.errorCount || 0) + 1;
-                await cache.set(`${bufferKey}:meta`, meta, this.options.staleThreshold / 1000);
+                await cache.set(this._bufferKey(gid), { ...meta, messages: meta.messages || [] }, this.options.staleThreshold / 1000);
 
                 if (meta.errorCount < 3) {
                     setTimeout(() => {
@@ -284,16 +317,24 @@ export class MediaGroupBuffer {
     }
 
     async _getAllMessages(gid) {
-        const bufferKey = this._bufferKey(gid);
-        const keys = await cache.listKeys(`${bufferKey}:msg:*`);
-        const messages = [];
-
-        for (const key of keys) {
-            const message = await cache.get(key, "json");
-            if (message) messages.push(message);
-        }
-
+        const { messages } = await this._getBuffer(gid);
         return messages;
+    }
+
+    async _getBuffer(gid) {
+        const bufferKey = this._bufferKey(gid);
+        const data = await cache.get(bufferKey, "json");
+        if (!data) return { meta: null, messages: [] };
+        const messages = Array.isArray(data.messages) ? data.messages : [];
+        const meta = {
+            target: data.target,
+            userId: data.userId,
+            createdAt: data.createdAt,
+            updatedAt: data.updatedAt,
+            errorCount: data.errorCount,
+            messages
+        };
+        return { meta, messages };
     }
 
     _validateMediaGroup(messages) {
@@ -305,12 +346,12 @@ export class MediaGroupBuffer {
 
     async _cleanupBuffer(gid) {
         const bufferKey = this._bufferKey(gid);
-        const keys = await cache.listKeys(`${bufferKey}:*`);
-        for (const key of keys) await cache.delete(key);
+        await cache.delete(bufferKey);
 
         this.localBufferKeys.delete(gid);
         this._clearLocalFlushTimer(gid);
         await cache.delete(this._timerKey(gid));
+        await this._updateIndex((current) => ({ ...current, gids: current.gids.filter((x) => x !== gid) }));
     }
 
     startCleanupTask() {
@@ -328,23 +369,15 @@ export class MediaGroupBuffer {
 
     async _cleanupStaleBuffers() {
         try {
-            const timerKeys = await cache.listKeys(`${this.baseKey}:timer:*`);
+            const index = await this._readIndex();
             const now = Date.now();
 
-            for (const timerKey of timerKeys) {
-                const timerData = await cache.get(timerKey, "json");
-                if (!timerData) continue;
-                if (now <= timerData.expiresAt) continue;
-
-                const gid = timerKey.split(":").slice(-1)[0];
-                log.warn(`Cleaning up stale buffer: ${gid}`);
-                await this._attemptFlush(gid);
-            }
-
-            const msgKeys = await cache.listKeys(`${this.baseKey}:processed_messages:*`);
-            for (const key of msgKeys) {
-                const value = await cache.get(key, "string");
-                if (!value) await cache.delete(key);
+            for (const gid of index.gids) {
+                const timerData = await cache.get(this._timerKey(gid), "json");
+                if (timerData && now > timerData.expiresAt) {
+                    log.warn(`Cleaning up stale buffer: ${gid}`);
+                    await this._attemptFlush(gid);
+                }
             }
 
             this._cleanupLocalMessageIds();
@@ -377,15 +410,11 @@ export class MediaGroupBuffer {
                 buffers: []
             };
 
-            const metaKeys = await cache.listKeys(`${this.baseKey}:buffer:*:meta`);
-            for (const metaKey of metaKeys) {
-                const gid = this._gidFromKey(metaKey);
-                if (!gid) continue;
-
-                const meta = await cache.get(metaKey, "json");
+            const index = await this._readIndex();
+            for (const gid of index.gids) {
+                const { meta, messages } = await this._getBuffer(gid);
                 if (!meta) continue;
 
-                const messages = await this._getAllMessages(gid);
                 data.buffers.push({
                     gid,
                     target: meta.target,
@@ -409,14 +438,11 @@ export class MediaGroupBuffer {
 
     async restore() {
         try {
-            const metaKeys = await cache.listKeys(`${this.baseKey}:buffer:*:meta`);
-            for (const metaKey of metaKeys) {
-                const meta = await cache.get(metaKey, "json");
+            const index = await this._readIndex();
+            for (const gid of index.gids) {
+                const { meta } = await this._getBuffer(gid);
                 if (!meta) continue;
                 if (Date.now() - (meta.createdAt || 0) > this.options.staleThreshold) continue;
-
-                const gid = this._gidFromKey(metaKey);
-                if (!gid) continue;
                 await this._attemptFlush(gid);
             }
 
@@ -427,7 +453,7 @@ export class MediaGroupBuffer {
                 if (Date.now() - bufferData.createdAt > this.options.staleThreshold) continue;
 
                 for (const message of bufferData.messages) {
-                    await this._addMessageToRedis(
+                    await this._addMessageToBuffer(
                         bufferData.gid,
                         { id: message.id, media: message.media, groupedId: message.groupedId },
                         bufferData.target,
@@ -444,20 +470,19 @@ export class MediaGroupBuffer {
 
     async getStatus() {
         try {
-            const metaKeys = await cache.listKeys(`${this.baseKey}:buffer:*:meta`);
+            const index = await this._readIndex();
 
             let totalMessages = 0;
-            for (const metaKey of metaKeys) {
-                const gid = this._gidFromKey(metaKey);
-                if (!gid) continue;
-                totalMessages += await this._getBufferSize(gid);
+            for (const gid of index.gids) {
+                const { messages } = await this._getBuffer(gid);
+                totalMessages += messages.length;
             }
 
             const lockStats = await this.distributedLock.getStats();
 
             return {
                 instanceId: this.options.instanceId,
-                activeBuffers: metaKeys.length,
+                activeBuffers: index.gids.length,
                 bufferedMessages: totalMessages,
                 localBufferKeys: this.localBufferKeys.size,
                 localMessageIds: this.messageIds.size,
