@@ -131,26 +131,31 @@ export class MessageHandler {
                     new Api.BotCommand({ command: 'help', description: '📖 显示帮助菜单' }),
                 ];
 
+                // 1. 设置默认菜单（所有用户可见）
                 await client.invoke(new Api.bots.SetBotCommands({
                     scope: new Api.BotCommandScopeDefault(),
                     langCode: '',
                     commands: commonCommands
                 }));
 
-                // 为管理员设置专属命令
+                // 2. 为管理员设置专属菜单（包含普通命令 + 管理员指令，排在下方）
                 if (config.ownerId) {
-                    await client.invoke(new Api.bots.SetBotCommands({
-                        scope: new Api.BotCommandScopePeer({
-                            peer: config.ownerId
-                        }),
-                        langCode: '',
-                        commands: [
-                            ...commonCommands,
-                            new Api.BotCommand({ command: 'diagnosis', description: '🩺 系统诊断' }),
-                            new Api.BotCommand({ command: 'open_service', description: '🔓 开启服务' }),
-                            new Api.BotCommand({ command: 'close_service', description: '🔒 关闭服务' }),
-                        ]
-                    }));
+                    try {
+                        await client.invoke(new Api.bots.SetBotCommands({
+                            scope: new Api.BotCommandScopePeer({
+                                peer: config.ownerId
+                            }),
+                            langCode: '',
+                            commands: [
+                                ...commonCommands,
+                                new Api.BotCommand({ command: 'diagnosis', description: '🩺 系统诊断' }),
+                                new Api.BotCommand({ command: 'open_service', description: '🔓 开启服务' }),
+                                new Api.BotCommand({ command: 'close_service', description: '🔒 关闭服务' }),
+                            ]
+                        }));
+                    } catch (e) {
+                        log.warn("⚠️ 设置管理员命令失败 (可能是 OWNER_ID 格式不正确):", e.message);
+                    }
                 }
             } catch (e) {
                 // 忽略获取失败，后续处理中会再次尝试
