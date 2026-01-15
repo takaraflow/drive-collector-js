@@ -72,7 +72,17 @@ export class MessageHandler {
             // POST /api/v2/stream/:taskId/resume
             const resumeMatch = url.pathname.match(/\/api\/v2\/stream\/([^\/]+)\/resume$/);
             if (resumeMatch && request.method === 'POST') {
-                const body = await request.json().catch(() => ({}));
+                let body;
+                try {
+                    body = await request.json();
+                } catch (error) {
+                    log.error('Failed to parse request JSON', {
+                        url: request.url,
+                        method: request.method,
+                        error: error.message
+                    });
+                    return new Response('Invalid JSON', { status: 400 });
+                }
                 const result = await streamTransferService.resumeTask(taskId, body);
                 return new Response(JSON.stringify(result), {
                     headers: { 'Content-Type': 'application/json' }
@@ -179,7 +189,12 @@ export class MessageHandler {
             try {
                 const me = await client.getMe();
                 if (me) this.botId = me.id.toString();
-            } catch (e) {}
+            } catch (error) {
+                log.warn('Failed to get Bot ID during message handling', {
+                    error: error.message,
+                    willContinue: true
+                });
+            }
         }
         
         if (this.botId && message.senderId?.toString() === this.botId) {

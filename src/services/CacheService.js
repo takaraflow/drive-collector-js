@@ -306,7 +306,12 @@ class CacheService {
         // Aiven
         const aivenConfig = AivenVTCache.detectConfig(env);
         if (aivenConfig) {
-            try { return new AivenVTCache(aivenConfig); } catch (e) {}
+            try { return new AivenVTCache(aivenConfig); } catch (error) {
+                log.warn('Failed to create AivenVTCache provider', {
+                    error: error.message,
+                    config: { ...aivenConfig, password: '***' }
+                });
+            }
         }
         // Valkey
         if (env.VALKEY_URL) {

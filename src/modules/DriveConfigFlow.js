@@ -161,7 +161,10 @@ export class DriveConfigFlow {
             const password = text.trim();
 
             // 保护隐私：删除密码消息
-            try { await runMtprotoTask(() => client.deleteMessages(peerId, [event.message.id], { revoke: true }), { priority: PRIORITY.HIGH }); } catch (e) {}
+            try { await runMtprotoTask(() => client.deleteMessages(peerId, [event.message.id], { revoke: true }), { priority: PRIORITY.HIGH }); } catch (error) {
+                // 忽略删除消息失败的错误（可能权限不足或消息已不存在）
+                // 这不影响绑定流程的继续执行
+            }
 
             const tempMsg = await runBotTask(() => client.sendMessage(peerId, { message: "⏳ 正在验证账号，请稍候..." }), userId, { priority: PRIORITY.HIGH });
 

@@ -121,7 +121,13 @@ export class InstanceCoordinator {
         try {
             const { tunnelService } = await import("./TunnelService.js");
             tunnelUrl = await tunnelService.getPublicUrl();
-        } catch (e) {}
+        } catch (error) {
+            logWithProvider().warn('Failed to get Tunnel URL', {
+                error: error.message,
+                willContinue: true
+            });
+            tunnelUrl = null;
+        }
 
         const instanceData = {
             id: this.instanceId,

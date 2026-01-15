@@ -30,7 +30,9 @@ class AxiomLogger extends BaseLogger {
             if (id && typeof id === 'string' && id.trim() !== '' && id !== 'unknown') {
                 return id;
             }
-        } catch (e) {}
+        } catch (error) {
+            process.stderr.write(`[AxiomLogger] Failed to construct log object: ${error?.message || error}\n`);
+        }
         return 'unknown';
     }
 
@@ -49,7 +51,9 @@ class AxiomLogger extends BaseLogger {
             }
             const { default: pkg } = await import('../../../package.json', { with: { type: 'json' } });
             this.version = pkg.version || 'unknown';
-        } catch (e) {}
+        } catch (error) {
+            process.stderr.write(`[AxiomLogger] Failed to send log: ${error?.message || error}\n`);
+        }
     }
 
     async _connect() {

@@ -652,7 +652,13 @@ export class CloudTool {
                                     const file = files.find(f => f.Name === fileName);
                                     if (file) return file;
                                 }
-                            } catch (e) {}
+                            } catch (error) {
+                                log.warn('Failed to parse directory listing JSON', {
+                                    fileName,
+                                    userId,
+                                    error: error.message
+                                });
+                            }
                         }
                     }
                 } else {
@@ -662,7 +668,13 @@ export class CloudTool {
                         if (Array.isArray(files) && files.length > 0) {
                             return files[0]; // 直接查询文件时只返回一个文件
                         }
-                    } catch (e) {}
+                    } catch (error) {
+                        log.warn('Failed to parse direct file query JSON', {
+                            fileName,
+                            userId,
+                            error: error.message
+                        });
+                    }
                 }
 
                 // 如果都没有找到或出错，记录日志（排除找不到文件的情况，减少日志噪音）

@@ -418,7 +418,14 @@ class StreamTransferService {
             const fileNameHtml = `<a href="${fileLink}">${encodeURIComponent(context.fileName)}</a>`;
             const text = format(STRINGS.task.success, { name: fileNameHtml, folder: config.remoteFolder });
             await TelegramBotApi.editMessageText(context.chatId, parseInt(context.msgId), text);
-        } catch (e) {}
+        } catch (error) {
+            log.warn('Failed to update Telegram message after task completion', {
+                taskId,
+                chatId: context.chatId,
+                msgId: context.msgId,
+                error: error.message
+            });
+        }
 
         if (context.leaderUrl) {
             await this.reportProgressToLeader(taskId, { ...context, status: 'completed' });
@@ -432,7 +439,14 @@ class StreamTransferService {
         try {
             const text = `❌ 上传失败: ${errorMsg}`;
             await TelegramBotApi.editMessageText(context.chatId, parseInt(context.msgId), text);
-        } catch (e) {}
+        } catch (error) {
+            log.warn('Failed to update Telegram message after task error', {
+                taskId,
+                chatId: context.chatId,
+                msgId: context.msgId,
+                error: error.message
+            });
+        }
 
         if (context.leaderUrl) {
             await this.reportProgressToLeader(taskId, { ...context, status: 'failed', error: errorMsg });

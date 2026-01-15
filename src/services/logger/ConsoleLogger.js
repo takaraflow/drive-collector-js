@@ -25,7 +25,15 @@ class ConsoleLogger extends BaseLogger {
             }
             const { default: pkg } = await import('../../../package.json', { with: { type: 'json' } });
             this.version = pkg.version || 'unknown';
-        } catch (e) {}
+        } catch (error) {
+            // 如果连console都失败了，我们无能为力，但至少不应该让应用崩溃
+            // 尝试使用原生console
+            try {
+                process.stderr.write(`[Logger Error] ${error?.message || error}\n`);
+            } catch {
+                // 最后的手段
+            }
+        }
     }
 
     _formatMessage(level, message, data, context, instanceId) {

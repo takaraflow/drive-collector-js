@@ -164,7 +164,12 @@ export class Dispatcher {
                         queryId: event.queryId,
                         message: STRINGS.system.maintenance_alert,
                         alert: true
-                    })).catch(() => {}), userId, {}, false, 3);
+                    })).catch((error) => {
+                        log.warn('Failed to send maintenance alert callback', {
+                            userId,
+                            error: error.message
+                        });
+                    }), userId, {}, false, 3);
                 } else if (target) {
                     await runBotTaskWithRetry(() => client.sendMessage(target, {
                         message: text,
@@ -185,7 +190,13 @@ export class Dispatcher {
         const answer = (msg = "") => runBotTaskWithRetry(() => client.invoke(new Api.messages.SetBotCallbackAnswer({
             queryId: event.queryId,
             message: msg
-        })).catch(() => {}), userId, {}, false, 3);
+        })).catch((error) => {
+            log.warn('Failed to send callback answer', {
+                userId,
+                queryId: event.queryId,
+                error: error.message
+            });
+        }), userId, {}, false, 3);
 
         if (data === "noop") return await answer();
 
