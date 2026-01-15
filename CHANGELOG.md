@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [1.3.0](https://github.com/YoungSx/lb-worker-js/compare/v1.2.0...v1.3.0) (2026-01-15)
+
+
+### 🐛 Bug Fixes
+
+* improve test reliability and fix potential memory issues ([964894e](https://github.com/YoungSx/lb-worker-js/commit/964894e173eec325837be0121e6f31b1596b28c8))
+* improves integration test execution with parameter forwarding ([9b9e066](https://github.com/YoungSx/lb-worker-js/commit/9b9e06618dec5cd4346d060f132d229f76de7213))
+* optimize instance scanning and remove dangerous full scans ([f151c2b](https://github.com/YoungSx/lb-worker-js/commit/f151c2b90a1d2dbb57706adc9b0bb2f39ef9bb57))
+
 ## [1.2.0](https://github.com/YoungSx/lb-worker-js/compare/v1.1.0...v1.2.0) (2026-01-14)
 
 
