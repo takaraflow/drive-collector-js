@@ -860,6 +860,29 @@ export class TaskManager {
                 const otherInstances = activeInstances.filter(inst => inst.id !== instanceCoordinator.instanceId);
                 const streamEnabled = config.streamForwarding?.enabled && otherInstances.length > 0;
 
+                // 流式传输状态日志
+                if (streamEnabled) {
+                    log.info(`🚀 流式传输已启用！任务：${task.id} (${task.fileName})`, {
+                        configEnabled: config.streamForwarding?.enabled,
+                        otherInstancesCount: otherInstances.length,
+                        activeInstances: activeInstances.map(i => i.id),
+                        currentInstance: instanceCoordinator.instanceId,
+                        lbUrl: config.streamForwarding?.lbUrl,
+                        externalUrl: config.streamForwarding?.externalUrl
+                    });
+                } else {
+                    const reason = config.streamForwarding?.enabled
+                        ? '❌ 无其他活跃实例'
+                        : '❌ 配置未启用';
+                        
+                    log.info(`⚠️ 流式传输未启用！任务：${task.id} (${task.fileName})，原因：${reason}`, {
+                        configStatus: config.streamForwarding,
+                        activeInstancesCount: activeInstances.length,
+                        otherInstancesCount: otherInstances.length,
+                        currentInstance: instanceCoordinator.instanceId
+                    });
+                }
+
                 if (streamEnabled) {
                     let targetUrl = config.streamForwarding.lbUrl;
                     if (!targetUrl) {
