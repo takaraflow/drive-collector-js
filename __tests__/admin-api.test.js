@@ -281,7 +281,7 @@ describe('管理员API鉴权功能', () => {
     });
 
     test('应该在多个实例时返回正确信息', async () => {
-      // Mock多个实例数据
+      // Mock多个实例数据 - 需要同时mock KV.list和KV.get的多次调用
       mockKV.list.mockResolvedValue({ 
         keys: [
           { name: 'instance:1' },
@@ -289,19 +289,26 @@ describe('管理员API鉴权功能', () => {
         ] 
       });
       
-      mockKV.get
-        .mockResolvedValueOnce(JSON.stringify({
-          id: '1',
-          url: 'https://instance1.com',
-          status: 'active',
-          lastHeartbeat: Date.now()
-        }))
-        .mockResolvedValueOnce(JSON.stringify({
-          id: '2',
-          url: 'https://instance2.com',
-          status: 'active',
-          lastHeartbeat: Date.now()
-        }));
+      // Mock KV.get 为每个实例返回数据
+      mockKV.get.mockImplementation(async (key) => {
+        if (key === 'instance:1') {
+          return JSON.stringify({
+            id: '1',
+            url: 'https://instance1.com',
+            status: 'active',
+            lastHeartbeat: Date.now()
+          });
+        }
+        if (key === 'instance:2') {
+          return JSON.stringify({
+            id: '2',
+            url: 'https://instance2.com',
+            status: 'active',
+            lastHeartbeat: Date.now()
+          });
+        }
+        return null;
+      });
 
       const request = new Request('https://example.com/api/instances', {
         headers: {

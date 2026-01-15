@@ -824,7 +824,16 @@ describe('Logging and Diagnostics', () => {
     __mockSend.mockRejectedValueOnce(new Error('Redis error'));
     mockKV.get.mockResolvedValueOnce('cf-value');
 
-    await executeWithFailover('_kv_get', envWithRedis, null, 'test-key');
+    // Mock CacheService for this test
+    const mockCacheService = {
+      get: vi.fn().mockResolvedValue('cf-value'),
+      set: vi.fn(),
+      listKeys: vi.fn().mockResolvedValue([]),
+      isFailoverMode: false,
+      primaryProvider: { getProviderName: () => 'test' }
+    };
+
+    await executeWithFailover(mockCacheService, '_kv_get', envWithRedis, null, 'test-key');
   });
 
   test('executeWithPriorityFallback should parse CF KV limit exceeded error code', async () => {
@@ -842,7 +851,16 @@ describe('Logging and Diagnostics', () => {
       json: async () => ({ result: 'upstash-value' })
     });
 
-    await executeWithFailover('_kv_get', envWithCF, null, 'test-key');
+    // Mock CacheService for this test
+    const mockCacheService = {
+      get: vi.fn().mockRejectedValueOnce(new Error('KV list() limit exceeded')).mockResolvedValueOnce('upstash-value'),
+      set: vi.fn(),
+      listKeys: vi.fn().mockResolvedValue([]),
+      isFailoverMode: false,
+      primaryProvider: { getProviderName: () => 'test' }
+    };
+
+    await executeWithFailover(mockCacheService, '_kv_get', envWithCF, null, 'test-key');
   });
 
   test('executeUpstashScan should log timing info', async () => {

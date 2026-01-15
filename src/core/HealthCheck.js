@@ -4,7 +4,7 @@
  */
 
 import { logger } from '../logger.js';
-import { _getInitializedCacheService } from '../legacy/redisCompat.js';
+import { CacheService } from '../cache/CacheService.js';
 
 /**
  * 检查 Redis 健康状况 (使用 CACHE_PROVIDERS)
@@ -28,7 +28,8 @@ async function checkRedisHealth(env, ctx, executor = null) {
   }
 
   try {
-    const service = await _getInitializedCacheService(env, ctx, checkRedisHealthLogger);
+    const service = new CacheService();
+    await service.initialize(env);
 
     if (service.primaryProvider) {
       const provider = service.getCurrentProvider();

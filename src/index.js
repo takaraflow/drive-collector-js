@@ -47,7 +47,7 @@ export {
 } from './config/constants.js';
 
 // 导出缓存服务（供测试使用）
-export { CacheService, cacheService } from './cache/CacheService.js';
+export { CacheService, __test_setCacheServiceInstance, __test_resetCacheService, testableCacheService } from './cache/CacheService.js';
 
 // 导出状态管理（供测试使用）
 export { LoadBalancerState, createLoadBalancerState } from './state/LoadBalancerState.js';
@@ -63,37 +63,11 @@ export {
   retryRedisCommand
 } from './legacy/redisCompat.js';
 
-// 导出测试专用的 CacheService 实例管理函数
-export {
-  __test_setCacheServiceInstance,
-  __test_resetCacheService
-} from './cache/CacheService.js';
-
-export {
-  getCurrentProvider,
-  shouldFailover,
-  incrementFailureCount,
-  resetFailureCount,
-  switchProvider,
-  failover,
-  isRetryableError,
-  shouldTriggerFailover,
-  getCurrentProviderState,
-  setCurrentProviderState
-} from './legacy/globalState.js';
-
 // 导出 logger（供测试使用）
 export { logger };
 
 // 导出 handler（供测试使用）
 export { handleRequest } from './handler.js';
-
-// Worker 处理器
-const handler = {
-  async fetch(request, env, ctx) {
-    return handleRequest(request, env, ctx);
-  }
-};
 
 /**
  * 修复 @microlabs/otel-cf-workers 库的 Bug
@@ -137,9 +111,26 @@ export default {
                      safeEnv.AXIOM_DATASET && safeEnv.AXIOM_DATASET.trim() !== '';
     console.log(`[AXIOM_DEBUG] ${requestId}: Axiom decision - useAxiom=${useAxiom}, isTest=${isTestEnvironment}, hasToken=${!!safeEnv.AXIOM_TOKEN}, hasDataset=${!!safeEnv.AXIOM_DATASET}`);
 
+    // The real handler that will be called.
+    const handler = {
+        async fetch(request, env, ctx) {
+            return handleRequest(request, env, ctx);
+        }
+    };
+
     if (useAxiom) {
       console.log(`[AXIOM_DEBUG] ${requestId}: instrument() called with Axiom config`);
-      return instrument(handler, {
+      
+      // Create a specific handler for instrumentation that closes over the *original* `env`
+      const handlerForInstrumentation = {
+          async fetch(instrumentedRequest, instrumentedEnv, instrumentedCtx) {
+              // The `instrument` function will call this fetch with `safeEnv`.
+              // We ignore it and call our real handler with the original `env`.
+              return handleRequest(instrumentedRequest, env, instrumentedCtx);
+          }
+      };
+      
+      const instrumentedHandler = instrument(handlerForInstrumentation, {
         serviceName: 'lb-worker-js',
         exporter: {
           url: 'https://api.axiom.co/v1/traces',
@@ -150,11 +141,15 @@ export default {
             ...(safeEnv.AXIOM_ORG_ID ? { 'X-Axiom-Org-Id': safeEnv.AXIOM_ORG_ID } : {})
           }
         },
-      }).fetch(request, safeEnv, ctx);
+      });
+      
+      // Call the instrumented handler with the `safeEnv` for OTel,
+      // but our wrapper ensures the original `env` is used for the business logic.
+      return instrumentedHandler.fetch(request, safeEnv, ctx);
     }
 
-    // 4. 回退模式：直接运行业务逻辑，也要传递 ctx
+    // 4. 回退模式：直接运行业务逻辑，也要传递原始的 env
     console.log(`[AXIOM_DEBUG] ${requestId}: fallback mode - calling handler.fetch directly`);
-    return handler.fetch(request, safeEnv, ctx);
+    return handler.fetch(request, env, ctx);
   }
 };

@@ -4,6 +4,55 @@
  */
 
 /**
+ * timingSafeEqual compares two strings in constant time.
+ * Compatible with both Cloudflare Workers and Node.js environments.
+ *
+ * @param {string} a The first string.
+ * @param {string} b The second string.
+ * @returns {Promise<boolean>} True if the strings are equal, false otherwise.
+ */
+async function timingSafeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') {
+    return false;
+  }
+
+  const encoder = new TextEncoder();
+  const aEncoded = encoder.encode(a);
+  const bEncoded = encoder.encode(b);
+
+  if (aEncoded.byteLength !== bEncoded.byteLength) {
+    return false;
+  }
+
+  try {
+    // Cloudflare Workers environment
+    if (crypto.subtle && crypto.subtle.timingSafeEqual) {
+      return await crypto.subtle.timingSafeEqual(aEncoded, bEncoded);
+    }
+  } catch (error) {
+    // Fall through to alternative implementations
+  }
+
+  try {
+    // Node.js environment (test environment)
+    if (globalThis.crypto && globalThis.crypto.subtle && globalThis.crypto.subtle.timingSafeEqual) {
+      return await globalThis.crypto.subtle.timingSafeEqual(aEncoded, bEncoded);
+    }
+  } catch (error) {
+    // Fall through to manual implementation
+  }
+
+  // Fallback: manual XOR-based constant-time comparison
+  // This is a simplified version that works in all environments
+  let result = 0;
+  for (let i = 0; i < aEncoded.byteLength; i++) {
+    result |= aEncoded[i] ^ bEncoded[i];
+  }
+  return result === 0;
+}
+
+
+/**
  * 验证管理员API Token
  * @param {Request} request - HTTP请求对象
  * @param {Object} env - 环境变量
@@ -40,7 +89,8 @@ async function verifyAdminToken(request, env, ctx = null, requestLogger = null) 
     providedToken = authHeader;
   }
 
-  if (providedToken !== token) {
+  const isMatch = await timingSafeEqual(providedToken, token);
+  if (!isMatch) {
     throw new Error('无效的 API Token');
   }
 

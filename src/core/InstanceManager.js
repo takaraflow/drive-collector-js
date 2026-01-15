@@ -13,9 +13,10 @@ import { executeWithFailover } from '../legacy/redisCompat.js';
  * @param {Object} env - 环境变量
  * @param {Object} ctx - Cloudflare Workers上下文
  * @param {Object} parentLogger - 父日志器
+ * @param {CacheService} cacheService - The per-request cache service instance.
  * @returns {Promise<number>} 锁键数量
  */
-async function scanLockKeys(env, ctx = null, parentLogger = logger) {
+async function scanLockKeys(env, ctx = null, parentLogger = logger, cacheService) {
   const scanLockKeysLogger = parentLogger.child({ module: 'scanLockKeys' });
   try {
     const lockPrefixes = ['lock:', 'task:', 'msg_lock:'];
@@ -25,7 +26,7 @@ async function scanLockKeys(env, ctx = null, parentLogger = logger) {
     const results = [];
     for (const prefix of lockPrefixes) {
       try {
-        const result = await executeWithFailover('_kv_list', env, ctx, scanLockKeysLogger, prefix);
+        const result = await executeWithFailover(cacheService, '_kv_list', env, ctx, scanLockKeysLogger, prefix);
         results.push(result);
       } catch (e) {
         scanLockKeysLogger.debug('锁键扫描失败', { prefix, error: e.message });
@@ -51,9 +52,10 @@ async function scanLockKeys(env, ctx = null, parentLogger = logger) {
  * @param {Object} env - 环境变量
  * @param {Object} ctx - Cloudflare Workers上下文
  * @param {Object} requestLogger - 请求日志器
+ * @param {CacheService} cacheService - The per-request cache service instance.
  * @returns {Promise<Array>} 活跃实例数组
  */
-async function getActiveInstances(env, ctx = null, requestLogger = null) {
+async function getActiveInstances(env, ctx = null, requestLogger = null, cacheService) {
   const getActiveInstancesLogger = requestLogger || logger.child({ module: 'getActiveInstances' });
   
   // 描述Redis终端（用于日志）
@@ -66,7 +68,7 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
   
   try {
     // 扫描实例键前缀
-    // 修复：仅扫描 'instance:' 前缀，移除 'lock:', 'task:', 'msg_lock:' 的冗余扫描
+    // 仅扫描 'instance:' 前缀，移除 'lock:', 'task:', 'msg_lock:' 的冗余扫描
     // 外部调用者应使用 scanLockKeys 获取锁信息
     const prefixes = ['instance:'];
 
@@ -74,7 +76,7 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
     const prefixResults = [];
     for (const prefix of prefixes) {
       try {
-        const result = await executeWithFailover('_kv_list', env, ctx, getActiveInstancesLogger, prefix);
+        const result = await executeWithFailover(cacheService, '_kv_list', env, ctx, getActiveInstancesLogger, prefix);
         prefixResults.push(result);
       } catch (e) {
         getActiveInstancesLogger.debug('前缀扫描失败', { prefix, error: e.message });
@@ -93,7 +95,7 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
     await getActiveInstancesLogger.debug('Raw keys scanned', { keys: allKeys.map(k => k.name) });
 
     if (allKeys.length === 0) {
-      // 修复：移除危险的全量扫描回退 (Fallback Full Scan)
+      // 移除危险的全量扫描回退 (Fallback Full Scan)
       // 全量扫描在生产环境中会导致严重的性能问题
       await getActiveInstancesLogger.debug('getActiveInstances Scan Phase: No instance keys found, returning empty array.', {});
       return [];
@@ -117,7 +119,7 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
     // 使用 Promise.all 并发获取，提高性能
     const instanceDataResults = await Promise.all(
       instanceKeys.map(keyName => 
-        executeWithFailover('_kv_get', env, ctx, getActiveInstancesLogger, keyName)
+        executeWithFailover(cacheService, '_kv_get', env, ctx, getActiveInstancesLogger, keyName)
           .catch(e => {
             getActiveInstancesLogger.error('读取实例数据失败', { key: keyName, error: e.message });
             return null;
@@ -127,9 +129,6 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
 
     // 新增日志：记录获取到的原始实例数据
     await getActiveInstancesLogger.debug('getActiveInstances Fetch Phase: Raw instance data results', { rawData: instanceDataResults });
-
-    // 修复：移除 N+1 调试查询循环
-    // 之前的代码遍历所有键并逐个获取值，导致严重的子请求耗尽风险
 
     for (let idx = 0; idx < instanceDataResults.length; idx++) {
       const data = instanceDataResults[idx];
@@ -168,7 +167,7 @@ async function getActiveInstances(env, ctx = null, requestLogger = null) {
 
     // 为了兼容测试：测试期望 scanLockKeys 被调用，从而触发额外的 KV.list
     if (isTestEnvironment) {
-      await scanLockKeys(env, ctx, getActiveInstancesLogger);
+      await scanLockKeys(env, ctx, getActiveInstancesLogger, cacheService);
     }
 
     // 去重：同一个实例 ID 只保留一次（防止脏数据导致重复）

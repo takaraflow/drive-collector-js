@@ -4,38 +4,6 @@
  */
 
 import { logger } from '../logger.js';
-import { CacheService } from '../cache/CacheService.js';
-
-// 全局缓存服务实例
-let cacheServiceInstance = null;
-
-/**
- * 获取或创建缓存服务实例
- * @param {Object} env - 环境变量
- * @param {Object} ctx - Cloudflare Workers上下文
- * @param {Object} log - 日志器
- * @returns {Promise<CacheService>} 缓存服务实例
- */
-async function _getInitializedCacheService(env, ctx, log) {
-  // 检查是否需要重新创建（如果初始化失败或无效）
-  if (!cacheServiceInstance || cacheServiceInstance.isInvalid) {
-    cacheServiceInstance = new CacheService({ env, logger: log });
-    cacheServiceInstance.isInvalid = false;
-  } else if (log) {
-    // 不要完全覆盖 logger，而是更新必要的上下文
-    cacheServiceInstance.logger = log;
-  }
-  
-  try {
-    await cacheServiceInstance.initialize(ctx, env);
-  } catch (error) {
-    // 如果初始化失败，标记为无效，下次重新创建
-    cacheServiceInstance.isInvalid = true;
-    throw error;
-  }
-  
-  return cacheServiceInstance;
-}
 
 /**
  * 获取提供者优先级 (使用 CACHE_PROVIDERS)
@@ -44,8 +12,8 @@ async function _getInitializedCacheService(env, ctx, log) {
  */
 function getProviderPriority(env) {
   const prios = [];
-  if (env.KV_STORAGE) prios.push('cloudflare');
-  if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) prios.push('upstash');
+  if (env && env.KV_STORAGE) prios.push('cloudflare');
+  if (env && env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) prios.push('upstash');
   return prios;
 }
 
@@ -137,6 +105,7 @@ async function executeUpstashScan(env, prefix) {
 
 /**
  * 执行 Redis TLS 操作 (使用 CACHE_PROVIDERS)
+ * @param {CacheService} cacheService - The per-request cache service instance.
  * @param {string} operation - 操作类型
  * @param {Object} env - 环境变量
  * @param {string} key - 键名
@@ -145,7 +114,7 @@ async function executeUpstashScan(env, prefix) {
  * @param {Object} requestLogger - 请求日志器
  * @returns {Promise<any>} 操作结果
  */
-async function executeRedis(operation, env, key, value = null, ctx = null, requestLogger = null) {
+async function executeRedis(cacheService, operation, env, key, value = null, ctx = null, requestLogger = null) {
   // 在测试环境中，如果没有提供 logger，使用 mock logger 避免错误
   let log = requestLogger;
   if (!log) {
@@ -166,7 +135,7 @@ async function executeRedis(operation, env, key, value = null, ctx = null, reque
     throw new Error('CACHE_PROVIDERS not configured');
   }
 
-  const service = await _getInitializedCacheService(env, ctx, log);
+  const service = cacheService;
 
   const start = Date.now();
   try {
@@ -195,13 +164,14 @@ async function executeRedis(operation, env, key, value = null, ctx = null, reque
 
 /**
  * 执行 Redis TLS Scan 操作 (使用 CACHE_PROVIDERS)
+ * @param {CacheService} cacheService - The per-request cache service instance.
  * @param {Object} env - 环境变量
  * @param {string} prefix - 前缀
  * @param {Object} ctx - Cloudflare Workers上下文
  * @param {Object} requestLogger - 请求日志器
  * @returns {Promise<Object>} 扫描结果
  */
-async function executeRedisScan(env, prefix, ctx = null, requestLogger = null) {
+async function executeRedisScan(cacheService, env, prefix, ctx = null, requestLogger = null) {
   // 在测试环境中，如果没有提供 logger，使用 mock logger 避免错误
   const scanLogger = requestLogger || (typeof logger !== 'undefined' ? logger.child({ module: 'executeRedisScan' }) : {
     debug: async () => {},
@@ -214,7 +184,7 @@ async function executeRedisScan(env, prefix, ctx = null, requestLogger = null) {
     throw new Error('CACHE_PROVIDERS not configured');
   }
 
-  const service = await _getInitializedCacheService(env, ctx, scanLogger);
+  const service = cacheService;
 
   const keys = await service.listKeys(prefix, ctx);
   await scanLogger.debug(`executeRedisScan (CacheService): prefix=${prefix}, keysFound=${keys.length}`, {});
@@ -223,13 +193,14 @@ async function executeRedisScan(env, prefix, ctx = null, requestLogger = null) {
 
 /**
  * 执行操作并支持优先级故障转移
+ * @param {CacheService} cacheService - The per-request cache service instance.
  * @param {string} operation - 操作类型
  * @param {Object} env - 环境变量
  * @param {Object} ctx - Cloudflare Workers上下文
  * @param {...any} args - 其他参数
  * @returns {Promise<any>} 操作结果
  */
-async function executeWithPriorityFallback(operation, env, ctx, ...args) {
+async function executeWithPriorityFallback(cacheService, operation, env, ctx, ...args) {
   const lastArg = args[args.length - 1];
   const requestLogger = (lastArg && typeof lastArg.debug === 'function') ? args.pop() : null;
   // 在测试环境中，如果没有提供 logger，使用 mock logger 避免错误
@@ -241,9 +212,9 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
   });
 
   // 优先使用 CACHE_PROVIDERS
-  if (env.CACHE_PROVIDERS) {
+  if (env && env.CACHE_PROVIDERS) {
     try {
-      const service = await _getInitializedCacheService(env, ctx, log);
+      const service = cacheService;
       switch (operation) {
         case '_kv_get':
         case '_redis_get':
@@ -325,23 +296,24 @@ async function executeWithPriorityFallback(operation, env, ctx, ...args) {
 
 /**
  * 执行操作并支持故障转移（向后兼容）
+ * @param {CacheService} cacheService - The per-request cache service instance.
  * @param {string} operation - 操作类型
  * @param {Object} env - 环境变量
  * @param {Object} ctx - Cloudflare Workers上下文
  * @param {...any} args - 其他参数
  * @returns {Promise<any>} 操作结果
  */
-async function executeWithFailover(operation, env, ctx, ...args) {
+async function executeWithFailover(cacheService, operation, env, ctx, ...args) {
   // 检查args的第一个参数是否是logger（旧调用方式：parentLogger在第4位，现在是args[0]）
   if (args.length > 0 && typeof args[0].debug === 'function') {
     const parentLogger = args.shift();
-    return await executeWithPriorityFallback(operation, env, ctx, ...args, parentLogger);
+    return await executeWithPriorityFallback(cacheService, operation, env, ctx, ...args, parentLogger);
   }
-  return await executeWithPriorityFallback(operation, env, ctx, ...args);
+  return await executeWithPriorityFallback(cacheService, operation, env, ctx, ...args);
 }
 
 /**
- * 带有重试逻辑的 Redis 命令执行器
+ * 带有重试逻辑和超时中断的 Redis 命令执行器
  * @param {Object} client - Redis客户端
  * @param {string} command - 命令
  * @param {Array} args - 参数
@@ -352,82 +324,78 @@ async function executeWithFailover(operation, env, ctx, ...args) {
  * @returns {Promise<any>} 执行结果
  */
 async function retryRedisCommand(client, command, args = [], maxRetries = 3, initialDelay = 100, ctx = null, requestLogger = null) {
-  // 在测试环境中，如果没有提供 logger，使用 mock logger 避免错误
-  const retryRedisCommandLogger = requestLogger || (typeof logger !== 'undefined' && logger.child ? logger.child({ module: 'retryRedisCommand' }) : {
-    debug: async () => {},
-    info: async () => {},
-    warn: async () => {},
-    error: async () => {}
-  });
-  let retries = 0;
-  let delay = initialDelay;
-  let timerId = null;
-  let isDone = false;
+    const log = requestLogger || (typeof logger !== 'undefined' ? logger.child({ module: 'retryRedisCommand' }) : {
+        debug: async () => {}, info: async () => {}, warn: async () => {}, error: async () => {}
+    });
 
-  const executeWithRetries = async () => {
-    while (retries < maxRetries && !isDone) {
-      try {
-        if (retries > 0) {
-          await retryRedisCommandLogger.warn(`Redis 命令重试: ${command} (尝试 ${retries + 1}/${maxRetries})`, { delay: `${delay}ms` });
-          let retryTimerId = null;
-          try {
-            await new Promise((resolve) => {
-              retryTimerId = setTimeout(resolve, delay);
-            });
-          } finally {
-            if (retryTimerId) clearTimeout(retryTimerId);
-          }
+    const timeout = 15000; // 15秒超时
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+        log.warn(`Redis command ${command} timed out after ${timeout}ms. Aborting...`);
+        controller.abort();
+    }, timeout);
+
+    let retries = 0;
+    let delay = initialDelay;
+
+    try {
+        while (retries < maxRetries) {
+            if (controller.signal.aborted) {
+                throw new Error('Operation aborted by timeout.');
+            }
+
+            try {
+                // We cannot pass the signal to client.send directly if the library does not support it.
+                // But we can race it against a promise that rejects on abort.
+                const abortPromise = new Promise((_, reject) => {
+                    controller.signal.addEventListener('abort', () => {
+                        reject(new Error('Operation aborted.'));
+                    });
+                });
+
+                const result = await Promise.race([
+                    client.send(command, ...args),
+                    abortPromise
+                ]);
+                
+                clearTimeout(timeoutId);
+                return result;
+
+            } catch (e) {
+                if (controller.signal.aborted) {
+                    // If timeout happened, we throw the abort error, which is more specific.
+                    // Also, try to clean up the connection.
+                    if (client && typeof client.disconnect === 'function') {
+                        log.warn(`Attempting to disconnect Redis client due to timeout on command: ${command}`);
+                        // Don't await, just fire and forget to avoid blocking.
+                        client.disconnect();
+                    }
+                    throw new Error(`Redis command ${command} timed out after ${timeout}ms`);
+                }
+                
+                const errorMessage = e.message.toLowerCase();
+                const isRetryable = errorMessage.includes('econnreset') ||
+                                    errorMessage.includes('etimedout') ||
+                                    errorMessage.includes('socketer') || 
+                                    errorMessage.includes('network error');
+
+                if (isRetryable && retries < maxRetries - 1) {
+                    retries++;
+                    await log.warn(`Redis command ${command} failed. Retrying... (${retries}/${maxRetries})`, { error: e.message, delay });
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2; // Exponential backoff
+                } else {
+                    throw e; // Non-retryable error or max retries reached
+                }
+            }
         }
-        
-        if (isDone) throw new Error('Abort'); // 快速退出
-
-        return await client.send(command, ...args);
-      } catch (e) {
-        if (isDone || e.message === 'Abort') throw e;
-
-        const errorMessage = e.message.toLowerCase();
-        if (
-          errorMessage.includes('econnreset') ||
-          errorMessage.includes('etimedout') ||
-          errorMessage.includes('socketer') || 
-          errorMessage.includes('network error')
-        ) {
-          retries++;
-          delay *= 2; // 指数退避
-          if (retries >= maxRetries) {
-            throw e;
-          }
-        } else {
-          throw e;
-        }
-      }
+    } finally {
+        clearTimeout(timeoutId);
     }
-  };
-
-  const timeoutPromise = new Promise((_, reject) => {
-    timerId = setTimeout(() => {
-      timerId = null;
-      isDone = true; // 标记已超时，中止循环
-      reject(new Error(`Redis command ${command} timed out after 15000ms`));
-    }, 15000);
-  });
-
-  try {
-    const result = await Promise.race([executeWithRetries(), timeoutPromise]);
-    isDone = true; // 成功后也要标记
-    clearTimeout(timerId); // 清理定时器
-    return result;
-  } finally {
-    isDone = true; 
-    if (timerId) {
-      clearTimeout(timerId);
-      timerId = null;
-    }
-  }
 }
 
+
 export {
-  _getInitializedCacheService,
   getProviderPriority,
   upstash_get,
   executeUpstashScan,

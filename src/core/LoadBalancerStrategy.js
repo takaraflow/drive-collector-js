@@ -74,9 +74,10 @@ function isTemporaryLockExpired(parsedLock) {
  * @param {Object} ctx - Cloudflare Workers上下文
  * @param {Object} request - HTTP请求对象
  * @param {Object} requestLogger - 请求日志器
+ * @param {CacheService} cacheService - The per-request cache service instance.
  * @returns {Promise<Object|null>} 选中的实例或null
  */
-async function selectInstanceByTemporaryLock(instances, env, ctx, request, requestLogger = null) {
+async function selectInstanceByTemporaryLock(instances, env, ctx, request, requestLogger = null, cacheService) {
   const tempLockLogger = requestLogger || logger.child({ module: 'temporaryLock' });
   if (!instances || instances.length === 0) return null;
 
@@ -99,7 +100,7 @@ async function selectInstanceByTemporaryLock(instances, env, ctx, request, reque
   });
 
   try {
-    const lockValue = await executeWithFailover('_kv_get', env, ctx, tempLockLogger, tempLockKey);
+    const lockValue = await executeWithFailover(cacheService, '_kv_get', env, ctx, tempLockLogger, tempLockKey);
     if (!lockValue) {
       await tempLockLogger.debug(SUCCESS_MESSAGES.TEMP_SCHEDULING_LOCK_FOUND, { 
         tempLockKey, 
@@ -167,15 +168,16 @@ async function selectInstanceByTemporaryLock(instances, env, ctx, request, reque
  * @param {Object} env - 环境变量
  * @param {Object} ctx - Cloudflare Workers上下文
  * @param {Object} requestLogger - 请求日志器
+ * @param {CacheService} cacheService - The per-request cache service instance.
  * @returns {Promise<Object|null>} 选中的实例或null
  */
-async function selectInstanceByLock(instances, env, ctx, requestLogger = null) {
+async function selectInstanceByLock(instances, env, ctx, requestLogger = null, cacheService) {
   const lockRoutingLogger = requestLogger || logger.child({ module: 'lockRouting' });
   if (!instances || instances.length === 0) return null;
 
   let lockValue;
   try {
-    lockValue = await executeWithFailover('_kv_get', env, ctx, lockRoutingLogger, TELEGRAM_LOCK_KEY);
+    lockValue = await executeWithFailover(cacheService, '_kv_get', env, ctx, lockRoutingLogger, TELEGRAM_LOCK_KEY);
   } catch (error) {
     await lockRoutingLogger.warn('Lock read failed, falling back to round-robin', { 
       lockKey: TELEGRAM_LOCK_KEY, 
@@ -250,9 +252,10 @@ async function selectInstanceByLock(instances, env, ctx, requestLogger = null) {
  * @param {Object} env - 环境变量
  * @param {Object} ctx - Cloudflare Workers上下文
  * @param {Object} requestLogger - 请求日志器
+ * @param {CacheService} cacheService - The per-request cache service instance.
  * @returns {Promise<Object|null>} 选中的实例或null
  */
-async function selectTargetInstance(instances, env, ctx, requestLogger = null) {
+async function selectTargetInstance(instances, env, ctx, requestLogger = null, cacheService) {
   const selectTargetInstanceLogger = requestLogger || logger.child({ module: 'selectTargetInstance' });
   if (instances.length === 0) {
     return null;
@@ -265,7 +268,7 @@ async function selectTargetInstance(instances, env, ctx, requestLogger = null) {
   try {
     if (env.REDIS_URL || env.UPSTASH_REDIS_REST_URL) {
       // 使用Redis原子操作
-      const result = await executeWithFailover('EVAL', env, ctx, selectTargetInstanceLogger, `
+      const result = await executeWithFailover(cacheService, 'EVAL', env, ctx, selectTargetInstanceLogger, `
         -- KEYS[1]: 轮询索引键
         -- ARGV[1]: 实例总数
         local current = redis.call('GET', KEYS[1])
@@ -282,12 +285,12 @@ async function selectTargetInstance(instances, env, ctx, requestLogger = null) {
       return instances[parseInt(result)];
     } else {
       // 使用KV的条件更新操作
-      return await selectTargetInstanceWithKVAtomic(instances, env, ctx, selectTargetInstanceLogger);
+      return await selectTargetInstanceWithKVAtomic(instances, env, ctx, selectTargetInstanceLogger, cacheService);
     }
   } catch (error) {
     await selectTargetInstanceLogger.error('原子轮询操作失败，回退到普通模式', { error: error.message });
     // 回退到原有逻辑，但增加重试机制
-    return await selectTargetInstanceWithRetry(instances, env, ctx, selectTargetInstanceLogger);
+    return await selectTargetInstanceWithRetry(instances, env, ctx, selectTargetInstanceLogger, cacheService);
   }
 }
 
@@ -297,20 +300,21 @@ async function selectTargetInstance(instances, env, ctx, requestLogger = null) {
  * @param {Object} env - 环境变量
  * @param {Object} ctx - Cloudflare Workers上下文
  * @param {Object} logger - 日志器
+ * @param {CacheService} cacheService - The per-request cache service instance.
  * @returns {Promise<Object>} 选中的实例
  */
-async function selectTargetInstanceWithKVAtomic(instances, env, ctx, logger) {
+async function selectTargetInstanceWithKVAtomic(instances, env, ctx, logger, cacheService) {
   const maxRetries = 3;
   
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       // 获取当前值和metadata
-      const stored = await executeWithFailover('_kv_get', env, ctx, logger, ROUND_ROBIN_KEY);
+      const stored = await executeWithFailover(cacheService, '_kv_get', env, ctx, logger, ROUND_ROBIN_KEY);
       const currentIndex = stored ? parseInt(stored) : 0;
       const targetIndex = currentIndex % instances.length;
       
       // 尝试条件更新 (简化版本，KV可能不支持条件更新)
-      await executeWithFailover('_kv_put', env, ctx, logger, ROUND_ROBIN_KEY, (currentIndex + 1).toString());
+      await executeWithFailover(cacheService, '_kv_put', env, ctx, logger, ROUND_ROBIN_KEY, (currentIndex + 1).toString());
       return instances[targetIndex];
       
     } catch (error) {
@@ -343,15 +347,16 @@ async function selectTargetInstanceWithKVAtomic(instances, env, ctx, logger) {
  * @param {Object} env - 环境变量
  * @param {Object} ctx - Cloudflare Workers上下文
  * @param {Object} logger - 日志器
+ * @param {CacheService} cacheService - The per-request cache service instance.
  * @returns {Promise<Object>} 选中的实例
  */
-async function selectTargetInstanceWithRetry(instances, env, ctx, logger) {
+async function selectTargetInstanceWithRetry(instances, env, ctx, logger, cacheService) {
   const maxRetries = 3;
   let lastError = null;
   
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      const stored = await executeWithFailover('_kv_get', env, ctx, logger, ROUND_ROBIN_KEY);
+      const stored = await executeWithFailover(cacheService, '_kv_get', env, ctx, logger, ROUND_ROBIN_KEY);
       const currentIndex = stored ? parseInt(stored) : 0;
       const targetIndex = currentIndex % instances.length;
       
@@ -361,7 +366,7 @@ async function selectTargetInstanceWithRetry(instances, env, ctx, logger) {
         await new Promise(resolve => setTimeout(resolve, Math.random() * 10 + 3));
       }
       
-      await executeWithFailover('_kv_put', env, ctx, logger, ROUND_ROBIN_KEY, (currentIndex + 1).toString());
+      await executeWithFailover(cacheService, '_kv_put', env, ctx, logger, ROUND_ROBIN_KEY, (currentIndex + 1).toString());
       
       return instances[targetIndex];
     } catch (error) {

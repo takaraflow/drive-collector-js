@@ -49,7 +49,8 @@ import {
   executeRedisScan,
   checkRedisHealth,
   __test_resetCacheService,
-  __test_setCacheServiceInstance
+  __test_setCacheServiceInstance,
+  testableCacheService
 } from '../src/index.js';
 import { CacheService } from '../src/cache/CacheService.js'; // Import mocked class
 import { logger } from '../src/logger.js'; // Import mocked logger
@@ -117,59 +118,60 @@ describe('CacheService Integration', () => {
   describe('executeRedis', () => {
     test('should_use_CACHE_PROVIDERS_for_get_operation', async () => {
       const env = { CACHE_PROVIDERS: '{"cloudflare": {}}' };
-      const result = await executeRedis('_redis_get', env, 'test-key');
+      // Pass cacheService as first parameter
+      const result = await executeRedis(testableCacheService, '_redis_get', env, 'test-key');
       expect(result).toBe('mock-value');
     });
 
     test('should_handle_redis_get_returning_null', async () => {
       mockProvider.get.mockResolvedValueOnce(null);
       const env = { CACHE_PROVIDERS: '{"cloudflare": {}}' };
-      const result = await executeRedis('_redis_get', env, 'nonexistent-key');
+      const result = await executeRedis(testableCacheService, '_redis_get', env, 'nonexistent-key');
       expect(result).toBeNull();
     });
 
     test('should_handle_redis_put_operation', async () => {
       const env = { CACHE_PROVIDERS: '{"cloudflare": {}}' };
-      await executeRedis('_redis_put', env, 'key', 'value');
+      await executeRedis(testableCacheService, '_redis_put', env, 'key', 'value');
       expect(mockProvider.set).toHaveBeenCalledWith('key', 'value', 3600, {});
     });
     
     test('should_handle_redis_put_with_json_serialized_value', async () => {
       const env = { CACHE_PROVIDERS: '{"cloudflare": {}}' };
       const obj = { foo: 'bar' };
-      await executeRedis('_redis_put', env, 'key', obj);
+      await executeRedis(testableCacheService, '_redis_put', env, 'key', obj);
       expect(mockProvider.set).toHaveBeenCalledWith('key', JSON.stringify(obj), 3600, {});
     });
 
     test('should_throw_error_when_redis_operation_fails', async () => {
       mockProvider.get.mockRejectedValueOnce(new Error('Connection failed'));
       const env = { CACHE_PROVIDERS: '{"cloudflare": {}}' };
-      await expect(executeRedis('_redis_get', env, 'key')).rejects.toThrow('Connection failed');
+      await expect(executeRedis(testableCacheService, '_redis_get', env, 'key')).rejects.toThrow('Connection failed');
     });
 
     test('should_throw_error_when_CACHE_PROVIDERS_not_configured', async () => {
       const env = {};
-      await expect(executeRedis('_redis_get', env, 'key')).rejects.toThrow('CACHE_PROVIDERS not configured');
+      await expect(executeRedis(testableCacheService, '_redis_get', env, 'key')).rejects.toThrow('CACHE_PROVIDERS not configured');
     });
   });
 
   describe('executeRedisScan', () => {
     test('should_scan_keys_with_prefix_correctly', async () => {
       const env = { CACHE_PROVIDERS: '{"cloudflare": {}}' };
-      const result = await executeRedisScan(env, 'prefix:');
+      const result = await executeRedisScan(testableCacheService, env, 'prefix:');
       expect(result.keys).toEqual([{ name: 'key1' }, { name: 'key2' }]);
     });
 
     test('should_handle_empty_scan_results', async () => {
       mockProvider.listKeys.mockResolvedValueOnce([]);
       const env = { CACHE_PROVIDERS: '{"cloudflare": {}}' };
-      const result = await executeRedisScan(env, 'nonexistent:');
+      const result = await executeRedisScan(testableCacheService, env, 'nonexistent:');
       expect(result.keys).toEqual([]);
     });
 
     test('should_throw_error_when_CACHE_PROVIDERS_not_configured', async () => {
       const env = {};
-      await expect(executeRedisScan(env, 'prefix:')).rejects.toThrow('CACHE_PROVIDERS not configured');
+      await expect(executeRedisScan(testableCacheService, env, 'prefix:')).rejects.toThrow('CACHE_PROVIDERS not configured');
     });
   });
 

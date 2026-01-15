@@ -18,34 +18,20 @@ import { normalizeEnvName, detectCacheProvider, getProviderPriority } from './ut
 
 // 导入状态管理模块
 import { LoadBalancerState, createLoadBalancerState } from './state/LoadBalancerState.js';
-import { getCurrentProvider, failover, shouldTriggerFailover, getCurrentProviderState } from './legacy/globalState.js';
+// import { getCurrentProvider, failover, shouldTriggerFailover, getCurrentProviderState } from './legacy/globalState.js';
 
 // 导入缓存服务
 import { CacheService } from './cache/CacheService.js';
 
-// 向后兼容的全局状态访问器
-let globalStateInstance = null;
-
-/**
- * 获取或创建缓存服务实例
- */
-async function _getInitializedCacheService(env, ctx, log) {
-  if (!globalStateInstance) {
-    globalStateInstance = createLoadBalancerState(env, logger);
-    await globalStateInstance.initialize(new CacheService({ env, logger: log }));
-  }
-  return globalStateInstance;
-}
-
 /**
  * 处理健康检查请求
  */
-async function handleHealthCheck(request, env, ctx, log, normalizedUrl) {
+async function handleHealthCheck(request, env, ctx, log, normalizedUrl, lbState, cacheService) {
   try {
-    const activeInstances = await getActiveInstances(env, ctx, log);
+    const activeInstances = await getActiveInstances(env, ctx, log, cacheService);
     const activeCount = activeInstances.length;
-    const provider = await getCurrentProvider();
-    const lockCount = await scanLockKeys(env, ctx, log);
+    const provider = await lbState.getCurrentProvider();
+    const lockCount = await scanLockKeys(env, ctx, log, cacheService);
     
     // 健康检查日志采样：仅在非生产环境或特定条件下记录详细信息
     const runtimeEnv = normalizeEnvName(env.NODE_ENV || 'prod');
@@ -83,14 +69,14 @@ async function handleHealthCheck(request, env, ctx, log, normalizedUrl) {
 /**
  * 处理实例查询请求
  */
-async function handleInstanceQuery(request, env, ctx, log) {
+async function handleInstanceQuery(request, env, ctx, log, lbState, cacheService) {
   try {
     // 验证管理员Token
     await verifyAdminToken(request, env, ctx, log);
     
-    const activeInstances = await getActiveInstances(env, ctx, log);
-    const provider = await getCurrentProvider();
-    const lockCount = await scanLockKeys(env, ctx, log);
+    const activeInstances = await getActiveInstances(env, ctx, log, cacheService);
+    const provider = await lbState.getCurrentProvider();
+    const lockCount = await scanLockKeys(env, ctx, log, cacheService);
     
     return new Response(JSON.stringify({
       status: 'ok',
@@ -123,9 +109,9 @@ async function handleInstanceQuery(request, env, ctx, log) {
 /**
  * 处理负载均衡请求
  */
-async function handleLoadBalancing(request, env, ctx, log, normalizedUrl, body) {
+async function handleLoadBalancing(request, env, ctx, log, normalizedUrl, body, lbState, cacheService) {
   // 获取活跃实例
-  const activeInstances = await getActiveInstances(env, ctx, log);
+  const activeInstances = await getActiveInstances(env, ctx, log, cacheService);
   await log.success('Active instances retrieved', { 
     count: activeInstances.length, 
     category: 'lb' 
@@ -159,17 +145,17 @@ async function handleLoadBalancing(request, env, ctx, log, normalizedUrl, body) 
   let selectedStrategy = 'round-robin';
 
   if (normalizedUrl.pathname === '/api/tasks/download') {
-    targetInstance = await selectInstanceByLock(activeInstances, env, ctx, log);
+    targetInstance = await selectInstanceByLock(activeInstances, env, ctx, log, cacheService);
     selectedStrategy = 'lock-based';
   }
 
   if (!targetInstance && (normalizedUrl.pathname === '/api/tasks/upload' || normalizedUrl.pathname === '/api/tasks/batch')) {
-    targetInstance = await selectInstanceByTemporaryLock(activeInstances, env, ctx, request, log);
+    targetInstance = await selectInstanceByTemporaryLock(activeInstances, env, ctx, request, log, cacheService);
     selectedStrategy = 'temporary-lock';
   }
 
   if (!targetInstance) {
-    targetInstance = await selectTargetInstance(activeInstances, env, ctx, log);
+    targetInstance = await selectTargetInstance(activeInstances, env, ctx, log, lbState);
     selectedStrategy = 'round-robin';
   }
   
@@ -186,7 +172,7 @@ async function handleLoadBalancing(request, env, ctx, log, normalizedUrl, body) 
   }
 
   // 转发请求
-  const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], normalizedUrl, request, env, body, ctx, log);
+  const response = await fetchWithRetry([targetInstance, ...activeInstances.filter(i => i !== targetInstance)], normalizedUrl, request, env, body, ctx, log, lbState);
 
   await log.debug('Load balancing request completed', { status: response.status, category: 'network' });
 
@@ -233,14 +219,25 @@ async function handleRequest(request, env, ctx) {
     child: (bindings) => requestLogger.child(bindings)
   };
 
-  // 初始化全局状态
+  // 初始化每个请求的服务实例
+  let cacheService, lbState;
   try {
-    if (!globalStateInstance) {
-      const cacheServiceInstance = await _getInitializedCacheService(env, ctx, log);
-      await log.debug('Global state initialized', { stateKey: 'lb:provider_state' });
-    }
+    cacheService = new CacheService({ env, logger: log });
+    await cacheService.initialize(ctx, env);
+
+    lbState = createLoadBalancerState(env, log);
+    await lbState.initialize(cacheService);
+    await log.debug('Per-request services initialized (CacheService, LoadBalancerState)', { stateKey: 'lb:provider_state' });
   } catch (stateError) {
-    await log.warn('Failed to initialize global state, falling back to legacy variables', { error: stateError.message });
+    await log.error('Fatal: Failed to initialize services', { error: stateError.message, stack: stateError.stack });
+    return new Response(JSON.stringify({
+      error: 'Internal Server Error',
+      message: 'Failed to initialize core services.',
+      timestamp: new Date().toISOString()
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
   log.debug('Request Received', { method: request.method, url: request.url });
@@ -311,12 +308,12 @@ async function handleRequest(request, env, ctx) {
 
   // 健康检查
   if ((request.method === 'GET' || request.method === 'HEAD') && normalizedUrl.pathname === '/health') {
-    return await handleHealthCheck(request, env, ctx, log, normalizedUrl);
+    return await handleHealthCheck(request, env, ctx, log, normalizedUrl, lbState, cacheService);
   }
 
   // 实例查询接口
   if (request.method === 'GET' && normalizedUrl.pathname === '/api/instances') {
-    return await handleInstanceQuery(request, env, ctx, log);
+    return await handleInstanceQuery(request, env, ctx, log, lbState, cacheService);
   }
 
   // 验证签名
@@ -357,15 +354,25 @@ async function handleRequest(request, env, ctx) {
   try {
     console.log(`[AXIOM_DEBUG] ${requestId}: Before getActiveInstances, buffer size=${requestLogBuffer.length}`);
     
-    result = await handleLoadBalancing(request, env, ctx, log, normalizedUrl, body);
+    result = await handleLoadBalancing(request, env, ctx, log, normalizedUrl, body, lbState, cacheService);
     
     console.log(`[AXIOM_DEBUG] ${requestId}: After load balancing, buffer size=${requestLogBuffer.length}`);
   } catch (error) {
-    await log.error('handleRequest 处理失败', { error: error.message });
+    await log.error('handleRequest 处理失败', { error: error.message, stack: error.stack });
     
-    // 检查是否需要故障转移
-    if (shouldTriggerFailover(error, env)) {
-      await failover(env, ctx, log);
+    // 使用新的 lbState 进行故障转移决策
+    try {
+        if (await lbState.shouldFailover()) {
+            const providers = getProviderPriority(env);
+            const currentProvider = await lbState.getCurrentProvider();
+            const nextProvider = providers.find(p => p !== currentProvider) || providers[0];
+            if (nextProvider && nextProvider !== currentProvider) {
+                await log.warn(`Triggering failover from ${currentProvider} to ${nextProvider}`, { error: error.message });
+                await lbState.switchProvider(nextProvider, error.message);
+            }
+        }
+    } catch (failoverError) {
+        await log.error('Failover logic failed', { error: failoverError.message, stack: failoverError.stack });
     }
     
     result = new Response(JSON.stringify({
