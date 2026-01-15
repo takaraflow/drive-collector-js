@@ -18,29 +18,25 @@ export async function handleQStashWebhook(req, res) {
     const healthzPath = '/healthz';
     const readyPath = '/ready';
     const hostHeader = req.headers?.host || req.headers?.[':authority'] || 'localhost';
+    const url = new URL(req.url, `http://${hostHeader}`);
+    const path = url.pathname;
+
     if ((req.method === 'GET' || req.method === 'HEAD') && req.url) {
         try {
-            const url = new URL(req.url, `http://${hostHeader}`);
-            if ([healthPath, healthzPath, readyPath].includes(url.pathname)) {
-                if (url.pathname === readyPath && !appReady) {
+            if ([healthPath, healthzPath, readyPath].includes(path)) {
+                if (path === readyPath && !appReady) {
                     res.writeHead(503);
-                    if (req.method === 'HEAD') {
-                        res.end();
-                    } else {
-                        res.end('Not Ready');
-                    }
+                    res.end(req.method === 'HEAD' ? '' : 'Not Ready');
                     return;
                 }
-
                 res.writeHead(200);
-                if (req.method === 'HEAD') {
-                    res.end();
-                } else {
-                    res.end('OK');
-                }
+                res.end(req.method === 'HEAD' ? '' : 'OK');
                 return;
             }
         } catch (e) {
+            res.writeHead(500);
+            res.end('Internal Server Error');
+            return;
         }
     }
 
@@ -50,6 +46,36 @@ export async function handleQStashWebhook(req, res) {
         return;
     }
 
+    // --- 新增：实时流式转发 API V2 ---
+    
+    // 1. 处理文件流 (Worker 端)
+    if (path.startsWith('/api/v2/stream/') && req.method === 'POST') {
+        const taskId = path.split('/').pop();
+        const { streamTransferService } = await import("./src/services/StreamTransferService.js");
+        const result = await streamTransferService.handleIncomingChunk(taskId, req);
+        res.writeHead(result.statusCode || 200);
+        res.end(result.success ? 'OK' : (result.message || 'Error'));
+        return;
+    }
+
+    // 2. 处理状态更新 (Leader 端)
+    if (path.startsWith('/api/v2/tasks/') && path.endsWith('/status') && req.method === 'POST') {
+        const parts = path.split('/');
+        const taskId = parts[parts.length - 2];
+        
+        let body = '';
+        for await (const chunk of req) {
+            body += chunk;
+        }
+        
+        const { streamTransferService } = await import("./src/services/StreamTransferService.js");
+        const result = await streamTransferService.handleStatusUpdate(taskId, JSON.parse(body), req.headers);
+        res.writeHead(result.statusCode || 200);
+        res.end(result.success ? 'OK' : (result.message || 'Error'));
+        return;
+    }
+
+    // --- 原有的 QStash Webhook 逻辑 ---
     // 其他请求需要导入服务
     const { queueService } = await import("./src/services/QueueService.js");
     const { TaskManager } = await import("./src/processor/TaskManager.js");
@@ -57,6 +83,12 @@ export async function handleQStashWebhook(req, res) {
     const log = logger.withModule ? logger.withModule('App') : logger;
 
     try {
+        const signature = req.headers['upstash-signature'];
+        if (!signature) {
+            res.writeHead(401);
+            res.end('Unauthorized');
+            return;
+        }
 
         // 1. 获取 Body
         let body = '';
@@ -65,7 +97,6 @@ export async function handleQStashWebhook(req, res) {
         }
 
         // 2. 验证签名
-        const signature = req.headers['upstash-signature'];
         const isValid = await queueService.verifyWebhookSignature(signature, body);
         if (!isValid) {
             // 记录签名和部分 body 信息以便调试
@@ -81,23 +112,27 @@ export async function handleQStashWebhook(req, res) {
             return;
         }
 
-        // 3. 解析路由和数据
+        // 3. 解析数据
         const url = new URL(req.url, `http://${hostHeader}`);
         const data = JSON.parse(body);
         const path = url.pathname;
 
-        // 检查触发来源
-        const triggerSource = data._meta?.triggerSource || 'unknown';
-        const instanceId = data._meta?.instanceId || 'unknown';
-        
+        // 详细 metadata 记录和触发源校验
+        const _meta = data._meta || {};
+        const triggerSource = _meta.triggerSource || 'unknown';
+        const instanceId = _meta.instanceId || 'unknown';
+        const groupId = data.groupId || _meta.groupId || 'unknown';
+        const timestamp = _meta.timestamp || Date.now();
+
         log.info(`📩 收到 Webhook: ${path}`, { 
             taskId: data.taskId, 
-            groupId: data.groupId,
-            triggerSource, // 'direct-qstash' 或 'unknown'
+            groupId,
+            triggerSource, 
             instanceId,
-            isFromQStash: triggerSource === 'direct-qstash'
+            timestamp,
+            isFromQStash: triggerSource === 'direct-qstash',
+            metadata: _meta
         });
-
         let result = { success: true, statusCode: 200 };
 
         if (path.endsWith('/download')) {
@@ -107,7 +142,6 @@ export async function handleQStashWebhook(req, res) {
         } else if (path.endsWith('/batch')) {
             result = await TaskManager.handleMediaBatchWebhook(data.groupId, data.taskIds);
         } else if (path.endsWith('/system-events')) {
-            // 系统事件暂只记录不处理
             result = { success: true, statusCode: 200 };
         } else {
             log.warn(`❓ 未知的 Webhook 路径: ${path}`);
@@ -117,17 +151,17 @@ export async function handleQStashWebhook(req, res) {
         res.end(result.success ? 'OK' : (result.message || 'Error'));
 
     } catch (error) {
-        const { logger } = await import("./src/services/logger/index.js");
-        const log = logger.withModule ? logger.withModule('App') : logger;
-        log.error("❌ Webhook 处理发生异常:", error);
+        console.error("❌ Request handling error:", error);
         res.writeHead(500);
         res.end('Internal Server Error');
     }
 }
 
 export async function main() {
+    // 初始化配置
     await initConfig();
 
+    // 显示配置信息并退出 (用于诊断)
     if (process.argv.includes('--show-config')) {
         setImmediate(async () => {
             try {
@@ -140,7 +174,7 @@ export async function main() {
                 console.log('🔍 最终配置信息:');
                 console.log(JSON.stringify(summary, null, 2));
             } catch (error) {
-            console.error('❌ 显示配置时出错:', error);
+                console.error('❌ 显示配置时出错:', error);
             } finally {
                 gracefulShutdown.shutdown('show-config');
             }
@@ -148,6 +182,7 @@ export async function main() {
         return;
     }
 
+    // 核心配置校验
     if (!validateConfig()) {
         console.error("❌ 核心配置缺失，程序停止启动。");
         gracefulShutdown.exitCode = 1;
@@ -155,10 +190,7 @@ export async function main() {
         return;
     }
 
-    // 先导入 InstanceCoordinator 以设置 instanceId provider
-    // 这必须在任何 logger 使用之前完成
-    await import("./src/services/InstanceCoordinator.js");
-    
+    // 导入核心服务（在此导入以确保配置已加载）
     const { queueService } = await import("./src/services/QueueService.js");
     const { cache } = await import("./src/services/CacheService.js");
     const { d1 } = await import("./src/services/d1.js");
@@ -167,10 +199,7 @@ export async function main() {
 
     console.log("🛠️ 正在初始化核心服务...");
     try {
-        // 初始化 logger，确保其他服务可以使用它
         await logger.initialize();
-        
-        // 然后并行初始化其他服务
         await Promise.all([
             queueService.initialize(),
             cache.initialize(),
@@ -190,13 +219,14 @@ export async function main() {
         return;
     }
 
+    // 注册全局退出钩子
     await registerShutdownHooks();
 
     // 先启动 HTTP 服务器，确保 /health 端点始终可用
     const config = getConfig();
     try {
         await buildWebhookServer(config, handleQStashWebhook, log);
-        log.info("✅ HTTP 服务器已启动，/health 端点可用");
+        log.info("✅ HTTP 服务器已启动");
     } catch (error) {
         log.error("❌ HTTP 服务器启动失败:", error);
         gracefulShutdown.exitCode = 1;
@@ -204,6 +234,7 @@ export async function main() {
         return;
     }
 
+    // 启动业务逻辑
     try {
         const { instanceCoordinator } = await import("./src/services/InstanceCoordinator.js");
         const { startDispatcher } = await import("./src/dispatcher/bootstrap.js");
@@ -214,7 +245,6 @@ export async function main() {
         
         let businessReady = true;
 
-        // 使用 try-catch 包裹 Telegram 相关启动，确保即使失败也不影响 HTTP 服务器
         try {
             await instanceCoordinator.start();
         } catch (error) {
@@ -238,21 +268,22 @@ export async function main() {
         
         if (businessReady) {
             setAppReadyState(true);
-            log.info("✅ 应用启动完成，HTTP 服务器正在运行中");
+            log.info("✅ 应用启动完成");
         } else {
-            log.warn("⚠️ 业务模块启动过程中存在异常，health/ready 端点将返回 503 以阻止流量注入");
+            log.warn("⚠️ 业务模块启动异常");
         }
         
+        // 保持进程运行
         if (process.env.NODE_ENV !== 'test') {
             setInterval(() => {}, 1000 * 60 * 60);
         }
 
     } catch (error) {
-        log.error("⚠️ 业务模块启动过程中发生错误，但 HTTP 服务器继续运行:", error);
-        // 不再因为业务模块错误而退出，HTTP 服务器应该继续运行
+        log.error("⚠️ 业务模块启动异常:", error);
     }
 }
 
+// 执行主函数
 if (process.env.NODE_ENV !== 'test' && (process.argv[1]?.endsWith('index.js') || process.argv[1]?.endsWith('index'))) {
     main().catch(error => {
         console.error("💀 引导程序失败:", error);

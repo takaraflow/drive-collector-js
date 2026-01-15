@@ -393,6 +393,34 @@ export class CloudTool {
     }
 
     /**
+     * 创建 rcat 流式上传进程
+     * @param {string} fileName - 目标文件名
+     * @param {string} userId - 用户ID
+     * @returns {Object} 包含 stdin 流和进程对象的对象
+     */
+    static async createRcatStream(fileName, userId) {
+        const conf = await this._getUserConfig(userId);
+        const connectionString = this._getConnectionString(conf);
+        const userUploadPath = await this._getUploadPath(userId);
+        const fullRemotePath = `${connectionString}${userUploadPath}${fileName}`;
+
+        const args = [
+            "--config", "/dev/null",
+            "rcat", fullRemotePath,
+            "--progress",
+            "--use-json-log",
+            "--buffer-size", "32M"
+        ];
+
+        const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
+
+        return {
+            stdin: proc.stdin,
+            proc: proc
+        };
+    }
+
+    /**
      * 获取文件列表 (带智能缓存策略)
      */
     static async listRemoteFiles(userId, forceRefresh = false) {

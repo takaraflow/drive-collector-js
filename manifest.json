@@ -112,6 +112,8 @@
         "upload": "/api/v2/tasks/upload",
         "batch": "/api/v2/tasks/batch",
         "systemEvents": "/api/v2/tasks/system-events",
+        "streamForward": "/api/v2/stream/:taskId",
+        "statusUpdate": "/api/v2/tasks/:taskId/status",
         "legacyWebhookBase": "/api/tasks",
         "legacyDownload": "/api/tasks/download",
         "legacyUpload": "/api/tasks/upload",
@@ -193,7 +195,7 @@
       }
     },
     "instanceCoordinator": {
-      "description": "多实例协调器，负责注册、心跳、领导者选举与分布式锁管理，并上报 activeTaskCount 用于全局活跃任务统计",
+      "description": "多实例协调器，负责注册、心跳、领导者选举与分布式锁 management，并上报 activeTaskCount 用于全局活跃任务统计",
       "input": "internal-timer",
       "inputSchema": {
         "type": "object",
@@ -1107,6 +1109,36 @@
         "required": false,
         "default": 300000,
         "description": "Infisical polling interval in milliseconds (default: 300000ms = 5 minutes)"
+      },
+      "TUNNEL_ENABLED": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare Tunnel 启用状态"
+      },
+      "TUNNEL_PROVIDER": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare Tunnel 提供商"
+      },
+      "TUNNEL_METRICS_PORT": {
+        "type": "number",
+        "required": false,
+        "description": "Cloudflare Tunnel 指标端口"
+      },
+      "TUNNEL_METRICS_HOST": {
+        "type": "string",
+        "required": false,
+        "description": "Cloudflare Tunnel 指标地址"
+      },
+      "STREAM_FORWARDING_ENABLED": {
+        "type": "boolean",
+        "default": false,
+        "description": "是否开启流式转发上传模式"
+      },
+      "INSTANCE_SECRET": {
+        "type": "string",
+        "required": false,
+        "description": "实例间通信安全秘钥"
       }
     }
   },
@@ -1119,6 +1151,8 @@
     "upload": "/api/v2/tasks/upload",
     "batch": "/api/v2/tasks/batch",
     "systemEvents": "/api/v2/tasks/system-events",
+    "streamForward": "/api/v2/stream/:taskId",
+    "statusUpdate": "/api/v2/tasks/:taskId/status",
     "legacyWebhookBase": "/api/tasks",
     "legacyDownload": "/api/tasks/download",
     "legacyUpload": "/api/tasks/upload",

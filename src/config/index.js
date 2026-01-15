@@ -468,6 +468,12 @@ export async function initConfig() {
             provider: env.TUNNEL_PROVIDER || 'cloudflare',
             metricsPort: parseInt(env.TUNNEL_METRICS_PORT) || 2000,
             metricsHost: env.TUNNEL_METRICS_HOST || '127.0.0.1'
+        },
+        streamForwarding: {
+            enabled: env.STREAM_FORWARDING_ENABLED === 'true',
+            secret: env.INSTANCE_SECRET || 'default_secret',
+            externalUrl: env.APP_EXTERNAL_URL || null,
+            lbUrl: env.LB_WEBHOOK_URL || env.APP_EXTERNAL_URL || null
         }
     };
 

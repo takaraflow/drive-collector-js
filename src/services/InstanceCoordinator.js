@@ -115,9 +115,18 @@ export class InstanceCoordinator {
      */
     async registerInstance() {
         const now = Date.now();
+        
+        // 尝试获取 CF Tunnel URL
+        let tunnelUrl = null;
+        try {
+            const { tunnelService } = await import("./TunnelService.js");
+            tunnelUrl = await tunnelService.getPublicUrl();
+        } catch (e) {}
+
         const instanceData = {
             id: this.instanceId,
             url: process.env.APP_EXTERNAL_URL, // 新增：外部可访问的 URL，用于 LB 转发
+            tunnelUrl: tunnelUrl, // 新增：CF Tunnel 访问地址
             hostname: process.env.HOSTNAME || 'unknown',
             region: process.env.INSTANCE_REGION || 'unknown',
             startedAt: now,

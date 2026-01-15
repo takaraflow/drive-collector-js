@@ -18,13 +18,20 @@ import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { queueService } from "../services/QueueService.js";
 import { logger } from "../services/logger/index.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
+import { streamTransferService } from "../services/StreamTransferService.js";
 
 const log = logger.withModule('TaskManager');
 
-// QStash 延迟队列替代了 UploadBatcher
-
 /**
  * --- 任务管理调度中心 (TaskManager) ---
+ * 
+ * 核心设计决策：
+ * 1. QStash 驱动：移除了传统的基于内存和定时器的 UploadBatcher 机制。
+ *    之前版本在高并发和多实例环境下容易出现内存溢出和状态不一致问题。
+ *    现在的 QStash 延迟队列方案实现了分布式的批处理和自动重试，具备极高的可靠性。
+ * 
+ * 2. 状态机驱动：任务状态流转（queued -> downloading -> downloaded -> uploading -> completed）
+ *    完全由数据库和消息队列共同保障，支持实例重启后的无损恢复。
  * 负责队列管理、任务恢复、以及具体的下载/上传流程编排
  */
 export class TaskManager {
@@ -113,8 +120,6 @@ export class TaskManager {
 
     // 用户取消标记（用于 QStash 触发前/中途快速拦截）
     static cancelledTaskIds = new Set();
-
-    // QStash 延迟队列替代了 uploadBatcher
 
     /**
      * 初始化：恢复因重启中断的僵尸任务
@@ -446,7 +451,7 @@ export class TaskManager {
     }
 
     /**
-     * [私有] 发布任务到 QStash 下载队列
+     * [私 evasion] 发布任务到 QStash 下载队列
      */
     static async _enqueueTask(task) {
         try {
@@ -475,7 +480,7 @@ export class TaskManager {
     }
 
     /**
-     * [私有] 发布任务到 QStash 上传队列
+     * [私ia] 发布任务到 QStash 上传队列
      */
     static async _enqueueUploadTask(task) {
         try {
@@ -647,7 +652,7 @@ export class TaskManager {
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
      static async handleUploadWebhook(taskId) {
-        // Leader 状态校验：只有持有 telegram_client 锁的实例才能处理任务
+        // Leader 状态校验：只有持有 telegram_client 锁 del 实例才能处理任务
         if (!(await instanceCoordinator.hasLock("telegram_client"))) {
             return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
         }
@@ -749,7 +754,6 @@ export class TaskManager {
             return;
         }
 
-        let shouldUpload = false;
         let didActivate = false;
 
         try {
@@ -841,8 +845,60 @@ export class TaskManager {
                     return;
                 }
 
-                // 下载阶段 - MTProto文件下载
                 const isLargeFile = info.size > 100 * 1024 * 1024;
+
+                // 3. 检查是否开启流式转发模式
+                const activeInstances = (await instanceCoordinator.getActiveInstances?.()) || [];
+                const otherInstances = activeInstances.filter(inst => inst.id !== instanceCoordinator.instanceId);
+                const streamEnabled = config.streamForwarding?.enabled && otherInstances.length > 0;
+
+                if (streamEnabled) {
+                    let targetUrl = config.streamForwarding.lbUrl;
+                    if (!targetUrl) {
+                        const bestWorker = otherInstances.sort((a, b) => (a.activeTaskCount || 0) - (b.activeTaskCount || 0))[0];
+                        if (bestWorker) targetUrl = bestWorker.tunnelUrl || bestWorker.url;
+                    }
+
+                    if (targetUrl) {
+                        try {
+                            log.info(`🚀 开启流式转发模式: Task ${task.id}, Target: ${targetUrl}`);
+                            await updateStatus(task, "🚀 **正在通过流式转发上传...**");
+
+                            const { tunnelService } = await import("../services/TunnelService.js");
+                            const tunnelUrl = await tunnelService.getPublicUrl();
+                            const leaderUrl = tunnelUrl || config.streamForwarding.externalUrl || `http://localhost:${config.port}`;
+
+                            let chunkIndex = 0;
+
+                            for await (const chunk of client.iterDownload({
+                                file: message.media,
+                                requestSize: isLargeFile ? 512 * 1024 : 128 * 1024
+                            })) {
+                                if (this.cancelledTaskIds.has(task.id)) throw new Error("CANCELLED");
+                                const isLast = chunkIndex * (isLargeFile ? 512 * 1024 : 128 * 1024) + chunk.length >= info.size;
+                                
+                                await streamTransferService.forwardChunk(task.id, chunk, { 
+                                    fileName, userId: task.userId, chunkIndex, isLast, 
+                                    totalSize: info.size, leaderUrl, chatId: task.chatId, msgId: task.msgId, targetUrl
+                                });
+                                
+                                const downloaded = chunkIndex * (isLargeFile ? 512 * 1024 : 128 * 1024) + chunk.length;
+                                if (chunkIndex % 20 === 0 || isLast) {
+                                    await updateStatus(task, UIHelper.renderProgress(downloaded, info.size, "📥 正在转发流...", fileName));
+                                }
+                                chunkIndex++;
+                            }
+                            log.info(`✅ 流式转发完成: Task ${task.id}`);
+                            this.activeProcessors.delete(id);
+                            return;
+                        } catch (e) {
+                            if (e.message === "CANCELLED") throw e;
+                            log.error(`❌ 流式转发失败，正在回退到本地下载模式: ${e.message}`);
+                        }
+                    }
+                }
+
+                // 下载阶段 - MTProto文件下载
                 const downloadOptions = {
                     outputFile: localPath,
                     chunkSize: isLargeFile ? 512 * 1024 : 128 * 1024,
@@ -1280,9 +1336,4 @@ export class TaskManager {
         await safeEdit(peer, parseInt(task.msgId), text, null, task.userId, "html");
     }
 
-    // QStash 事件驱动：移除轮询机制
-
-    // QStash 事件驱动：移除轮询认领逻辑
-
-    // QStash 事件驱动：移除恢复入队逻辑
 }
