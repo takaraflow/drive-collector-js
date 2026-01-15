@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.26.0](https://github.com/YoungSx/drive-collector-js/compare/v4.25.0...v4.26.0) (2026-01-15)
+
+
+### ✨ 新特性
+
+* add stream forwarding support for distributed uploads ([01c39e2](https://github.com/YoungSx/drive-collector-js/commit/01c39e2b3f509b0336da89952231761ffba01553))
+* adds Cloudflare tunnel and s6-overlay for process management ([1a6b179](https://github.com/YoungSx/drive-collector-js/commit/1a6b1796068f59518520ecca558eeedf18c8947d))
+* adds idempotency check for chunk processing ([866daee](https://github.com/YoungSx/drive-collector-js/commit/866daee69c2b30855a3276ca88ece48be99dbb90))
+* implements breakpoint resume functionality for stream transfers ([0766c91](https://github.com/YoungSx/drive-collector-js/commit/0766c91dbdd432ca0e67574a2512ee0eb8915d24))
+* replaces console logging with structured logging ([f343d7c](https://github.com/YoungSx/drive-collector-js/commit/f343d7c8a8ea4f4926166b6bf85171d79a03b97a))
+
+
+### 🐛 问题修复
+
+* adds custom entrypoint script with process management ([803e889](https://github.com/YoungSx/drive-collector-js/commit/803e88997acf529b6b13f77485d7a262f3aee0ae))
+* adds working directory change to Node.js application startup ([23652f1](https://github.com/YoungSx/drive-collector-js/commit/23652f12cd70396d8ad45e951b2bde77bcc92325))
+* ensures Telegram connection before task execution ([63050f9](https://github.com/YoungSx/drive-collector-js/commit/63050f9bcbbc7fc31b136f242e59e83839c1e8fb))
+* improve error handling and logging across multiple components ([85ac44e](https://github.com/YoungSx/drive-collector-js/commit/85ac44e21074083321027844ce71323f0b5a400f))
+
 ## [4.25.0](https://github.com/YoungSx/drive-collector-js/compare/v4.24.1...v4.25.0) (2026-01-14)
 
 
