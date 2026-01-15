@@ -1,4 +1,5 @@
 import { AxiomLogger } from './AxiomLogger.js';
+import { NewrelicLogger } from './NewrelicLogger.js';
 import { ConsoleLogger } from './ConsoleLogger.js';
 
 let getInstanceIdFunc = () => 'unknown';
@@ -105,7 +106,7 @@ class LoggerService {
     constructor(options = {}) {
         this.options = options;
         this.isInitialized = false;
-        this.primaryLogger = null;
+        this.activeLoggers = [];
         this.fallbackLogger = null;
         this.currentProviderName = 'ConsoleLogger';
         this._baseContext = {};
@@ -122,24 +123,37 @@ class LoggerService {
 
     async initialize() {
         if (this.isInitialized) return;
-        this.isInitialized = true;
+        this.activeLoggers = [];
 
+        // Try Axiom
         try {
             const axiomLogger = new AxiomLogger();
             await axiomLogger.initialize();
             await axiomLogger.connect();
 
             if (axiomLogger.client) {
-                this.primaryLogger = axiomLogger;
-                this.currentProviderName = 'AxiomLogger';
-            } else {
-                this.primaryLogger = null;
+                this.activeLoggers.push(axiomLogger);
             }
         } catch (error) {
-            this.primaryLogger = null;
+            // Ignore error
         }
 
-        if (!this.primaryLogger) {
+        // Try New Relic
+        try {
+            const nrLogger = new NewrelicLogger();
+            await nrLogger.initialize();
+            await nrLogger.connect();
+
+            if (nrLogger.licenseKey) {
+                this.activeLoggers.push(nrLogger);
+            }
+        } catch (error) {
+            // Ignore error
+        }
+
+        if (this.activeLoggers.length > 0) {
+            this.currentProviderName = this.activeLoggers.map(l => l.getProviderName()).join('+');
+        } else {
             this.fallbackLogger = new ConsoleLogger();
             await this.fallbackLogger.initialize();
             this.currentProviderName = 'ConsoleLogger';
@@ -150,16 +164,15 @@ class LoggerService {
 
     _ensureInitialized() {
         if (!this.isInitialized) {
-            // 自动初始化，而不是只输出警告
             this.initialize().catch(err => {
                 console.error('LoggerService auto-initialization failed:', err.message);
             });
         }
     }
 
-    _getActiveLogger() {
+    _getLoggers() {
         this._ensureInitialized();
-        return this.primaryLogger || this.fallbackLogger;
+        return this.activeLoggers.length > 0 ? this.activeLoggers : [this.fallbackLogger];
     }
 
     _normalizeContext(context) {
@@ -186,17 +199,22 @@ class LoggerService {
     }
 
     async _log(level, message, data, context) {
-        const logger = this._getActiveLogger();
-        if (!logger) return;
+        const loggers = this._getLoggers();
+        if (!loggers || loggers.length === 0) return;
 
         const normalizedContext = this._normalizeContext(context);
         const fullContext = { ...this._getContext(), ...normalizedContext };
 
-        try {
-            await logger[level](message, data, fullContext);
-        } catch (error) {
-            console.error(`Logger ${level} failed:`, error.message);
-        }
+        const promises = loggers.map(logger => {
+            if (logger && typeof logger[level] === 'function') {
+                return logger[level](message, data, fullContext).catch(error => {
+                    console.error(`Logger ${logger.getProviderName()} ${level} failed:`, error.message);
+                });
+            }
+            return Promise.resolve();
+        });
+
+        await Promise.all(promises);
     }
 
     async info(message, data = {}, context = {}) {
@@ -216,13 +234,9 @@ class LoggerService {
     }
 
     withContext(extraContext) {
-        const newLogger = LoggerService.getInstance();
-        newLogger._baseContext = { ...this._baseContext, ...this._normalizeContext(extraContext) };
-        newLogger._initialized = this.isInitialized;
-        newLogger.primaryLogger = this.primaryLogger;
-        newLogger.fallbackLogger = this.fallbackLogger;
-        newLogger.currentProviderName = this.currentProviderName;
-        return newLogger;
+        // Return the same instance to ensure mocks on the singleton work globally
+        this._baseContext = { ...this._baseContext, ...this._normalizeContext(extraContext) };
+        return this;
     }
 
     withModule(moduleName) {
@@ -241,9 +255,17 @@ class LoggerService {
     }
 
     async flush(timeoutMs = 10000) {
-        const logger = this._getActiveLogger();
-        if (logger && typeof logger.flush === 'function') {
-            await logger.flush(timeoutMs);
+        const loggers = this._getLoggers();
+        if (loggers && loggers.length > 0) {
+            const promises = loggers.map(logger => {
+                if (logger && typeof logger.flush === 'function') {
+                    return logger.flush(timeoutMs).catch(err => {
+                        console.error(`Logger ${logger.getProviderName()} flush failed:`, err.message);
+                    });
+                }
+                return Promise.resolve();
+            });
+            await Promise.all(promises);
         }
     }
 
@@ -252,9 +274,11 @@ class LoggerService {
     }
 
     getConnectionInfo() {
-        const logger = this._getActiveLogger();
-        if (logger) {
-            return logger.getConnectionInfo();
+        const loggers = this._getLoggers();
+        if (loggers && loggers.length > 0) {
+            return {
+                providers: loggers.map(l => l.getConnectionInfo())
+            };
         }
         return { provider: 'unknown', connected: false };
     }
@@ -262,11 +286,11 @@ class LoggerService {
     async destroy() {
         _singletonInstance = null;
         _singletonTimestamp = Date.now();
-        if (this.primaryLogger) {
-            await this.primaryLogger.destroy();
-        }
-        if (this.fallbackLogger) {
-            await this.fallbackLogger.destroy();
+        const loggers = this.activeLoggers.length > 0 ? this.activeLoggers : [this.fallbackLogger];
+        for (const logger of loggers) {
+            if (logger && typeof logger.destroy === 'function') {
+                await logger.destroy();
+            }
         }
     }
 }

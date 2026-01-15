@@ -2,6 +2,7 @@ export { BaseLogger } from './BaseLogger.js';
 export { AxiomLogger } from './AxiomLogger.js';
 export { ConsoleLogger } from './ConsoleLogger.js';
 export { DatadogLogger } from './DatadogLogger.js';
+export { NewrelicLogger } from './NewrelicLogger.js';
 
 import { LoggerService, createLogger, setInstanceIdProvider, enableTelegramConsoleProxy, disableTelegramConsoleProxy, flushLogBuffer } from './LoggerService.js';
 
