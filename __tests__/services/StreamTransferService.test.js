@@ -88,14 +88,11 @@ const createMockProcess = () => {
 
 describe('StreamTransferService', () => {
     let service;
-    // Get the class from the exported instance
     const StreamTransferServiceClass = streamTransferService.constructor;
 
     beforeEach(() => {
         vi.clearAllMocks();
-        // Create a fresh instance for each test
         service = new StreamTransferServiceClass();
-        // Clear the interval created in constructor
         if (service.cleanupInterval) clearInterval(service.cleanupInterval);
     });
 
@@ -244,13 +241,14 @@ describe('StreamTransferService', () => {
             });
 
             // Re-send chunk 0 (simulate retry)
-            await service.handleIncomingChunk('task-idempotent', {
+            const result = await service.handleIncomingChunk('task-idempotent', {
                 headers: { ...mockReqHeaders, 'x-chunk-index': '0' },
                 [Symbol.asyncIterator]: async function* () { yield Buffer.from('data0'); }
             });
 
-            // Current implementation writes both, which is a bug (revealed by test)
-            expect(mockProc.stdin.write).toHaveBeenCalledTimes(2); 
+            // Should ignore the duplicate chunk and NOT write to stdin again
+            expect(mockProc.stdin.write).toHaveBeenCalledTimes(1);
+            expect(result.message).toBe('Duplicate chunk ignored');
         });
 
         it('CASE-E01: should return 200 and start new stream if session lost', async () => {

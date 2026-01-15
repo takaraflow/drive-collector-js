@@ -113,7 +113,8 @@ class StreamTransferService {
                     chatId,
                     msgId,
                     uploadedBytes: 0,
-                    status: 'uploading'
+                    status: 'uploading',
+                    lastChunkIndex: -1 // 记录最近处理的 Chunk Index
                 };
                 this.activeStreams.set(taskId, streamContext);
 
@@ -135,12 +136,21 @@ class StreamTransferService {
                 });
             }
 
+            // 幂等性检查：如果当前 chunkIndex 已经处理过，直接返回成功 (忽略重复写入)
+            if (chunkIndex <= streamContext.lastChunkIndex) {
+                log.warn(`⚠️ 忽略重复的 Chunk ${chunkIndex} (已处理到: ${streamContext.lastChunkIndex})`);
+                // 必须消费掉请求流，否则可能导致发送端挂起或连接泄漏
+                for await (const _ of req) {} 
+                return { success: true, statusCode: 200, message: "Duplicate chunk ignored" };
+            }
+
             // 获取 Body 数据 (Node.js req is a Readable Stream)
             for await (const chunk of req) {
                 streamContext.stdin.write(chunk);
                 streamContext.uploadedBytes += chunk.length;
             }
             streamContext.lastSeen = Date.now();
+            streamContext.lastChunkIndex = chunkIndex;
 
             // 定期更新 Telegram UI (使用 Bot API)
             if (chunkIndex % 20 === 0 || isLast) {
