@@ -69,7 +69,8 @@ COPY . .
 
 RUN mkdir -p /tmp/downloads && chmod 777 /tmp/downloads
 
-ENTRYPOINT ["/init"]
+RUN chmod +x /app/entrypoint.sh
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD []
 
 EXPOSE 7860
