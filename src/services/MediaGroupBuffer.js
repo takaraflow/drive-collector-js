@@ -66,7 +66,7 @@ export class MediaGroupBuffer {
             lockTtl: options.lockTtl || 30,
             maxMessageIds: options.maxMessageIds || 1000,
             messageIdsMaxAge: options.messageIdsMaxAge || 3600000,
-            useLocalTimers: options.useLocalTimers ?? (process.env.NODE_ENV !== "test" && !process.env.VITEST),
+            useLocalTimers: options.useLocalTimers ?? process.env.NODE_ENV !== "test",
             ...options
         };
 
