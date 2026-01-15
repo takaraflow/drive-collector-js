@@ -23,7 +23,7 @@ export const escapeHTML = (str) => {
 };
 
 // 安全编辑消息，统一处理异常
-export const safeEdit = async (chatId, msgId, text, buttons = null, userId = null, parseMode = "html") => {
+export const safeEdit = async (chatId, msgId, text, buttons = null, userId = null, parseMode = "html", options = {}) => {
     // 延迟导入 client 避免循环依赖
     const { client } = await import("../services/telegram.js");
     try {
@@ -32,7 +32,7 @@ export const safeEdit = async (chatId, msgId, text, buttons = null, userId = nul
                 try {
                     await client.editMessage(chatId, { message: msgId, text, buttons, parseMode });
                 } catch (e) {
-                    // 忽略 "Message Not Modified" 错误，这是由于更新内容完全一致导致的
+                    // 忽略 "Message Not Modified" 错误
                     if (e.message && (e.message.includes("MESSAGE_NOT_MODIFIED") || e.code === 400 && e.errorMessage === "MESSAGE_NOT_MODIFIED")) {
                         return;
                     }
@@ -41,14 +41,13 @@ export const safeEdit = async (chatId, msgId, text, buttons = null, userId = nul
                         const { clearSession } = await import("../services/telegram.js");
                         await clearSession();
                         log.error(`🚨 关键错误: AUTH_KEY_DUPLICATED 检测到，已清除 Session。建议重启服务。`);
-                        // 不再重试，因为 Session 已失效
                         return;
                     }
                     throw e;
                 }
             },
             userId,
-            {},
+            options,
             false,
             3
         );
@@ -82,10 +81,11 @@ export const getMediaInfo = (input) => {
 };
 
 // 统一更新任务状态 (带取消按钮)
-export const updateStatus = async (task, text, isFinal = false) => {
+export const updateStatus = async (task, text, isFinal = false, priority = null) => {
     const cancelText = task.proc ? STRINGS.task.cancel_transfer_btn : STRINGS.task.cancel_task_btn;
     const buttons = isFinal ? null : [Button.inline(cancelText, Buffer.from(`cancel_${task.id}`))];
     // 增强 HTML 检测：包含常见标签即视为 HTML 模式
     const isHtml = /<\/?(b|i|code|pre|a)(\s|>)/i.test(text);
-    await safeEdit(task.chatId, task.msgId, text, buttons, task.userId, isHtml ? 'html' : 'markdown');
+    const options = priority ? { priority } : {};
+    await safeEdit(task.chatId, task.msgId, text, buttons, task.userId, isHtml ? 'html' : 'markdown', options);
 };

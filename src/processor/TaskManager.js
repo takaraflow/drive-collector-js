@@ -784,7 +784,9 @@ export class TaskManager {
             const heartbeat = async (status, downloaded = 0, total = 0) => {
                 if (this.cancelledTaskIds.has(task.id)) task.isCancelled = true;
                 if (task.isCancelled) throw new Error("CANCELLED");
-                await TaskRepository.updateStatus(task.id, status);
+                
+                // 异步更新数据库状态，不阻塞 UI 响应
+                void TaskRepository.updateStatus(task.id, status).catch(e => log.warn("DB status update failed", e));
 
                 if (task.isGroup) {
                     await this._refreshGroupMonitor(task, status, downloaded, total);
@@ -792,18 +794,24 @@ export class TaskManager {
                     const text = (downloaded > 0)
                         ? UIHelper.renderProgress(downloaded, total, STRINGS.task.downloading, fileName)
                         : STRINGS.task.downloading;
+                    
                     await updateStatus(task, text);
                 }
             };
 
             try {
-                await heartbeat('downloading');
-
-                // 1. 优先检查远程秒传 (直接跳过下载)
-                // 使用快速检查模式：不重试，跳过耗时的目录回退，大幅缩短“正在下载”到进度条出现的等待时间
+                // 1. 并发处理：异步发起 UI 更新，不阻塞秒传检查和下载准备
+                const initialHeartbeat = heartbeat('downloading', 0, 0)
+                    .catch(e => log.warn("Initial heartbeat failed", e));
+                
+                // 2. 优先检查远程秒传 (使用快速检查模式：不重试，跳过回退)
                 const remoteFile = await CloudTool.getRemoteFileInfo(fileName, task.userId, 1, true);
+
                 if (remoteFile && this._isSizeMatch(remoteFile.Size, info.size)) {
+                    // 秒传命中，确保 UI 更新完成后再显示成功
+                    await initialHeartbeat; 
                     await TaskRepository.updateStatus(task.id, 'completed');
+
                     if (task.isGroup) {
                         await this._refreshGroupMonitor(task, 'completed');
                     } else {
@@ -954,6 +962,7 @@ export class TaskManager {
                         }
                     }
                 };
+
 
                 await runMtprotoFileTaskWithRetry(() => client.downloadMedia(message, downloadOptions), {}, 10); // 增加重试次数到10次
 
