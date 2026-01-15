@@ -800,8 +800,8 @@ export class TaskManager {
                 await heartbeat('downloading');
 
                 // 1. 优先检查远程秒传 (直接跳过下载)
-                // 如果远程已存在且大小匹配，直接完成
-                const remoteFile = await CloudTool.getRemoteFileInfo(fileName, task.userId);
+                // 使用快速检查模式：不重试，跳过耗时的目录回退，大幅缩短“正在下载”到进度条出现的等待时间
+                const remoteFile = await CloudTool.getRemoteFileInfo(fileName, task.userId, 1, true);
                 if (remoteFile && this._isSizeMatch(remoteFile.Size, info.size)) {
                     await TaskRepository.updateStatus(task.id, 'completed');
                     if (task.isGroup) {
@@ -1055,9 +1055,9 @@ export class TaskManager {
 
         try {
             // 上传前重复检查：如果远程已存在同名且大小匹配的文件，跳过上传
-            // 使用本地文件名进行检查，确保一致性
+            // 使用快速检查模式：不重试，跳过耗时的目录回退
             const fileName = path.basename(localPath);
-            const remoteFile = await CloudTool.getRemoteFileInfo(fileName, task.userId);
+            const remoteFile = await CloudTool.getRemoteFileInfo(fileName, task.userId, 1, true);
             
             if (remoteFile && this._isSizeMatch(remoteFile.Size, info.size)) {
                 await TaskRepository.updateStatus(task.id, 'completed');

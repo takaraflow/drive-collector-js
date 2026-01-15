@@ -579,8 +579,12 @@ export class CloudTool {
 
     /**
      * 简单的文件完整性检查 (带重试机制以应对 API 延迟) - 异步非阻塞版
+     * @param {string} fileName - 文件名
+     * @param {string} userId - 用户ID
+     * @param {number} retries - 重试次数
+     * @param {boolean} skipFallback - 是否跳过目录列表回退 (用于快速检查)
      */
-    static async getRemoteFileInfo(fileName, userId, retries = 3) {
+    static async getRemoteFileInfo(fileName, userId, retries = 3, skipFallback = false) {
         if (!userId) return null;
 
         for (let i = 0; i < retries; i++) {
@@ -608,7 +612,6 @@ export class CloudTool {
                                 if (typeof proc.kill === 'function') {
                                     proc.kill();
                                 }
-                                // 【建议】直接 resolve，不等待 close 回调，防止 kill 后 close 不触发导致卡死
                                 resolve({ code: -1, stdout: "", stderr: "TIMEOUT" });
                             }
                         }, timeout);
@@ -638,8 +641,21 @@ export class CloudTool {
                 const fullRemotePath = `${connectionString}${userUploadPath}${fileName}`;
                 let ret = await runLsJson(fullRemotePath, [], 10000);
 
-                // 如果直接查询失败，尝试列出目录
-                if (ret.code !== 0) {
+                // 如果明确返回“不存在”类错误，直接退出，不重试，不回退
+                if (ret.code !== 0 && ret.stderr) {
+                    const isNotFound = 
+                        ret.stderr.includes("directory not found") || 
+                        ret.stderr.includes("object not found") || 
+                        ret.stderr.includes("error listing");
+                    
+                    if (isNotFound) {
+                        log.debug(`[getRemoteFileInfo] File clearly not found: ${fileName}`);
+                        return null; 
+                    }
+                }
+
+                // 如果直接查询失败（且不是明确的不存在），尝试列出目录（除非禁用了回退）
+                if (ret.code !== 0 && !skipFallback) {
                     // 仅当非超时错误时尝试 fallback
                     if (ret.stderr !== "TIMEOUT") {
                         const fullRemoteFolder = `${connectionString}${userUploadPath}`;
@@ -661,7 +677,7 @@ export class CloudTool {
                             }
                         }
                     }
-                } else {
+                } else if (ret.code === 0) {
                     // 直接查询成功，解析结果
                     try {
                         const files = JSON.parse(ret.stdout || "[]");

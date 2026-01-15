@@ -150,7 +150,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         await TaskManager.downloadTask(task);
 
         // Assertions
-        expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalledWith("test_file.mp4", "user_1");
+        expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalledWith("test_file.mp4", "user_1", 1, true);
         expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "completed");
         expect(mockClient.downloadMedia).not.toHaveBeenCalled(); // Skipped download
         // Should NOT enqueue upload task
