@@ -52,6 +52,20 @@ describe('DistributedLock - core behaviors', () => {
         expect(storedLock?.version).toBe(result.version);
     });
 
+    test('acquire should not throw when ttlSeconds is non-numeric', async () => {
+        mockCache.compareAndSet.mockResolvedValue(true);
+
+        const result = await lock.acquire(taskId, instanceId, { ttlSeconds: 'not-a-number' });
+
+        expect(result.success).toBe(true);
+        expect(mockLogger.info).toHaveBeenCalledWith(
+            expect.stringContaining(`Lock acquired for task ${taskId}`),
+            expect.objectContaining({
+                expiresAt: expect.stringMatching(/Z$/)
+            })
+        );
+    });
+
     test('acquire returns lock_held when another instance keeps the lock', async () => {
         mockCache.compareAndSet.mockResolvedValue(false);
         mockCache.get.mockResolvedValue({

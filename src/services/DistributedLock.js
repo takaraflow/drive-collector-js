@@ -18,14 +18,19 @@ export class DistributedLock {
     constructor(cache, options = {}) {
         this.cache = cache;
         this.logger = options.logger || console;
-        
+
+        const normalizePositiveNumber = (value, fallback) => {
+            const parsed = Number(value);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+        };
+
         this.options = {
-            ttlSeconds: options.ttlSeconds || 120,           // 默认2分钟TTL
-            heartbeatInterval: options.heartbeatInterval || 10000,  // 10秒心跳
-            renewalThreshold: options.renewalThreshold || 30000,    // 30秒续期阈值
-            timeout: options.timeout || 10000,               // 获取锁超时
-            maxRetries: options.maxRetries || 3,             // 最大重试次数
-            ...options
+            ...options,
+            ttlSeconds: normalizePositiveNumber(options.ttlSeconds, 120),           // 默认2分钟TTL
+            heartbeatInterval: normalizePositiveNumber(options.heartbeatInterval, 10000),  // 10秒心跳
+            renewalThreshold: normalizePositiveNumber(options.renewalThreshold, 30000),    // 30秒续期阈值
+            timeout: normalizePositiveNumber(options.timeout, 10000),               // 获取锁超时
+            maxRetries: normalizePositiveNumber(options.maxRetries, 3)              // 最大重试次数
         };
 
         // 本地锁状态管理
@@ -51,9 +56,12 @@ export class DistributedLock {
             maxRetries = this.options.maxRetries
         } = options;
 
+        const effectiveTtlSeconds = this._normalizePositiveNumber(ttlSeconds, this.options.ttlSeconds);
+        const effectiveMaxRetries = this._normalizePositiveNumber(maxRetries, this.options.maxRetries);
+
         const lockKey = `lock:task:${taskId}`;
         const now = Date.now();
-        const expiresAt = now + ttlSeconds * 1000;
+        const expiresAt = now + effectiveTtlSeconds * 1000;
         const version = Math.random().toString(36).substr(2, 9);
 
         const lockValue = {
@@ -66,13 +74,13 @@ export class DistributedLock {
         };
 
         // 尝试获取锁（带重试）
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
+        for (let attempt = 0; attempt < effectiveMaxRetries; attempt++) {
             try {
                 // 尝试原子获取锁
                 const acquired = await this.cache.compareAndSet(lockKey, lockValue, {
                     ifNotExists: true,
                     metadata: { 
-                        ttl: ttlSeconds,
+                        ttl: effectiveTtlSeconds,
                         taskId,
                         instanceId
                     }
@@ -80,11 +88,11 @@ export class DistributedLock {
 
                 if (acquired) {
                     // 成功获取锁，启动心跳
-                    this.startHeartbeat(taskId, instanceId, ttlSeconds, version);
+                    this.startHeartbeat(taskId, instanceId, effectiveTtlSeconds, version);
                     
                     this.logger.info(`Lock acquired for task ${taskId} by ${instanceId}`, {
                         version,
-                        expiresAt: new Date(expiresAt).toISOString()
+                        expiresAt: this._safeToISOString(expiresAt) || 'unknown'
                     });
                     
                     return { 
@@ -98,10 +106,10 @@ export class DistributedLock {
                 const existing = await this.cache.get(lockKey, 'json');
                 if (existing && this.isExpired(existing)) {
                     // 尝试偷取过期锁
-                    const stolen = await this.attemptLockSteal(lockKey, lockValue, existing, ttlSeconds);
+                    const stolen = await this.attemptLockSteal(lockKey, lockValue, existing, effectiveTtlSeconds);
                     
                     if (stolen.success) {
-                        this.startHeartbeat(taskId, instanceId, ttlSeconds, version);
+                        this.startHeartbeat(taskId, instanceId, effectiveTtlSeconds, version);
                         
                         this.logger.warn(`Lock stolen for task ${taskId} from ${existing.instanceId}`, {
                             oldVersion: existing.version,
@@ -123,7 +131,7 @@ export class DistributedLock {
                 }
 
                 // 锁被其他实例持有
-                if (attempt === maxRetries - 1) {
+                if (attempt === effectiveMaxRetries - 1) {
                     return { 
                         success: false, 
                         reason: 'lock_held',
@@ -186,7 +194,8 @@ export class DistributedLock {
      * 启动心跳续期
      */
     startHeartbeat(taskId, instanceId, ttlSeconds, version) {
-        const initialExpiresAt = Date.now() + ttlSeconds * 1000;
+        const effectiveTtlSeconds = this._normalizePositiveNumber(ttlSeconds, this.options.ttlSeconds);
+        const initialExpiresAt = Date.now() + effectiveTtlSeconds * 1000;
         const heartbeat = setInterval(async () => {
             try {
                 const lockKey = `lock:task:${taskId}`;
@@ -212,7 +221,7 @@ export class DistributedLock {
                 
                 if (timeUntilExpiry <= this.options.renewalThreshold) {
                     // 需要续期
-                    const newExpiresAt = now + ttlSeconds * 1000;
+                    const newExpiresAt = now + effectiveTtlSeconds * 1000;
                     const newValue = {
                         ...current,
                         expiresAt: newExpiresAt,
@@ -222,14 +231,14 @@ export class DistributedLock {
                     // 使用 compareAndSet 确保原子性
                     const renewed = await this.cache.compareAndSet(lockKey, newValue, {
                         metadata: { 
-                            ttl: ttlSeconds,
+                            ttl: effectiveTtlSeconds,
                             action: 'renewal'
                         }
                     });
 
                     if (renewed) {
                         this.logger.debug(`Lock renewed for task ${taskId}`, {
-                            newExpiresAt: new Date(newExpiresAt).toISOString(),
+                            newExpiresAt: this._safeToISOString(newExpiresAt) || 'unknown',
                             heartbeatCount: newValue.heartbeatCount
                         });
                     } else {
@@ -362,6 +371,11 @@ export class DistributedLock {
         } catch {
             return null;
         }
+    }
+
+    _normalizePositiveNumber(value, fallback) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
     }
 
     /**
