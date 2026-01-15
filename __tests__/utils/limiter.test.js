@@ -46,6 +46,7 @@ vi.mock('../../src/services/telegram.js', () => ({
 
 // Import after mocking
 const { PRIORITY, runBotTask, handle429Error, botLimiter, runAuthTask, createAutoScalingLimiter } = await import('../../src/utils/limiter.js');
+const { ensureConnected } = await import('../../src/services/telegram.js');
 
 describe('Limiter Priority & Distribution', () => {
     beforeEach(() => {
@@ -83,6 +84,21 @@ describe('Limiter Priority & Distribution', () => {
         expect(results).toContain(3);
         expect(results.length).toBe(3);
     });
+
+    it('should not execute task before ensureConnected resolves', async () => {
+        ensureConnected.mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 100)));
+
+        const fn = vi.fn();
+        const promise = runBotTask(fn, "test_user", { priority: PRIORITY.NORMAL });
+
+        await vi.advanceTimersByTimeAsync(50);
+        await Promise.resolve();
+        expect(fn).not.toHaveBeenCalled();
+
+        await vi.runAllTimersAsync();
+        await promise;
+        expect(fn).toHaveBeenCalledTimes(1);
+    }, 10000);
 });
 
 describe('AutoScalingLimiter', () => {

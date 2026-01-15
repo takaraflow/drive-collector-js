@@ -181,14 +181,24 @@ export const runBotTask = (fn, userId, addOptions = {}, isFileUpload = false) =>
     const priority = addOptions.priority ?? PRIORITY.NORMAL;
     const taskOptions = { ...addOptions, priority };
 
-    const limiterChain = isFileUpload 
-        ? botFileUploadLimiter.run(() => getUserLimiter(userId).run(fn, taskOptions), taskOptions)
-        : getUserLimiter(userId).run(fn, taskOptions);
-    
-    return botGlobalLimiter.run(async () => {
+    const runWithConnection = async () => {
         await ensureConnected();
-        return limiterChain;
-    }, taskOptions);
+        return fn();
+    };
+
+    // Note: Do NOT enqueue user/file tasks before ensureConnected().
+    // Otherwise tasks can execute while Telegram connection is not initialized.
+    const runInUserLimiter = () => {
+        if (!userId) return runWithConnection();
+        return getUserLimiter(userId).run(runWithConnection, taskOptions);
+    };
+
+    const runInUploadLimiter = () => {
+        if (!isFileUpload) return runInUserLimiter();
+        return botFileUploadLimiter.run(runInUserLimiter, taskOptions);
+    };
+
+    return botGlobalLimiter.run(runInUploadLimiter, taskOptions);
 };
 
 // MTProto 文件传输：使用 token bucket 算法，30 请求突发，25/秒填充（带自动缩放）
