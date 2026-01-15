@@ -868,23 +868,66 @@ export class TaskManager {
                             const tunnelUrl = await tunnelService.getPublicUrl();
                             const leaderUrl = tunnelUrl || config.streamForwarding.externalUrl || `http://localhost:${config.port}`;
 
+                            // 断点续传：检查是否可以恢复
                             let chunkIndex = 0;
+                            let resumeInfo = null;
+                            
+                            try {
+                                // 查询Worker端的进度
+                                const progressUrl = `${targetUrl.replace(/\/$/, '')}/api/v2/stream/${task.id}/full-progress`;
+                                const progressResponse = await fetch(progressUrl, {
+                                    method: 'GET',
+                                    headers: {
+                                        'x-instance-secret': config.streamForwarding.secret
+                                    }
+                                });
+                                
+                                if (progressResponse.ok) {
+                                    const progressData = await progressResponse.json();
+                                    if (progressData.isCached || progressData.isActive) {
+                                        chunkIndex = progressData.lastChunkIndex + 1;
+                                        resumeInfo = progressData;
+                                        log.info(`🔄 断点续传: 从 chunk ${chunkIndex} 恢复任务 ${task.id}`);
+                                        await updateStatus(task, `🔄 **断点续传中... (从 ${(progressData.uploadedBytes / 1024 / 1024).toFixed(2)}MB 恢复)**`);
+                                    }
+                                }
+                            } catch (resumeError) {
+                                log.debug(`断点续传检查失败，将从头开始: ${resumeError.message}`);
+                            }
 
-                            for await (const chunk of client.iterDownload({
+                            // 创建下载迭代器
+                            const downloadIterator = client.iterDownload({
                                 file: message.media,
                                 requestSize: isLargeFile ? 512 * 1024 : 128 * 1024
-                            })) {
+                            });
+
+                            // 如果是断点续传，需要跳过已传输的chunk
+                            if (resumeInfo && chunkIndex > 0) {
+                                log.info(`⏭️ 跳过前 ${chunkIndex} 个 chunk (断点续传)`);
+                                for (let i = 0; i < chunkIndex; i++) {
+                                    await downloadIterator.next();
+                                    // 更新下载进度以保持一致
+                                    const downloaded = Math.min((i + 1) * (isLargeFile ? 512 * 1024 : 128 * 1024), info.size);
+                                    if (i % 20 === 0) {
+                                        await updateStatus(task, UIHelper.renderProgress(downloaded, info.size, "⏭️ 跳过已传输部分...", fileName));
+                                    }
+                                }
+                            }
+
+                            // 继续传输剩余的chunk
+                            for await (const chunk of downloadIterator) {
                                 if (this.cancelledTaskIds.has(task.id)) throw new Error("CANCELLED");
                                 const isLast = chunkIndex * (isLargeFile ? 512 * 1024 : 128 * 1024) + chunk.length >= info.size;
                                 
-                                await streamTransferService.forwardChunk(task.id, chunk, { 
+                                await streamTransferService.forwardChunk(task.id, chunk, {
                                     fileName, userId: task.userId, chunkIndex, isLast, 
                                     totalSize: info.size, leaderUrl, chatId: task.chatId, msgId: task.msgId, targetUrl
                                 });
                                 
                                 const downloaded = chunkIndex * (isLargeFile ? 512 * 1024 : 128 * 1024) + chunk.length;
                                 if (chunkIndex % 20 === 0 || isLast) {
-                                    await updateStatus(task, UIHelper.renderProgress(downloaded, info.size, "📥 正在转发流...", fileName));
+                                    const statusText = resumeInfo ? "🔄 断点续传中..." : "📥 正在转发流...";
+                                    await updateStatus(task, UIHelper.renderProgress(downloaded, info.size, statusText, fileName));
                                 }
                                 chunkIndex++;
                             }

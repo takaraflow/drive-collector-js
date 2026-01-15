@@ -31,16 +31,20 @@ await vi.doMock('../../src/services/InstanceCoordinator.js', () => ({
 }));
 
 // Mock logger to verify output
-await vi.doMock('../../src/services/logger/index.js', () => ({
-    logger: {
-        info: vi.fn(),
-        debug: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        withModule: vi.fn().mockReturnThis(),
-        withContext: vi.fn().mockReturnThis()
-    }
-}));
+await vi.doMock('../../src/services/logger/index.js', async (importOriginal) => {
+    const actual = await importOriginal();
+    return {
+        ...actual,
+        logger: {
+            info: vi.fn(),
+            debug: vi.fn(),
+            warn: vi.fn(),
+            error: vi.fn(),
+            withModule: vi.fn().mockReturnThis(),
+            withContext: vi.fn().mockReturnThis()
+        }
+    };
+});
 
 const { MessageHandler } = await import('../../src/dispatcher/MessageHandler.js');
 const { logger } = await import('../../src/services/logger/index.js');

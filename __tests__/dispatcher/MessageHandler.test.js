@@ -35,16 +35,20 @@ await vi.doMock('../../src/services/InstanceCoordinator.js', () => ({
 }));
 
 // Mock logger
-await vi.doMock('../../src/services/logger/index.js', () => ({
-    logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn(),
-        withModule: vi.fn().mockReturnThis(),
-        withContext: vi.fn().mockReturnThis()
-    }
-}));
+await vi.doMock('../../src/services/logger/index.js', async (importOriginal) => {
+    const actual = await importOriginal();
+    return {
+        ...actual,
+        logger: {
+            info: vi.fn(),
+            warn: vi.fn(),
+            error: vi.fn(),
+            debug: vi.fn(),
+            withModule: vi.fn().mockReturnThis(),
+            withContext: vi.fn().mockReturnThis()
+        }
+    };
+});
 
 // 动态导入被测试模块
 const { MessageHandler } = await import('../../src/dispatcher/MessageHandler.js');

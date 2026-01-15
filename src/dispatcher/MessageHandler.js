@@ -3,6 +3,7 @@ import { Dispatcher } from "./Dispatcher.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { logger } from "../services/logger/index.js";
 import { config } from "../config/index.js";
+import { streamTransferService } from "../services/StreamTransferService.js";
 
 const log = logger.withModule('MessageHandler');
 
@@ -19,9 +20,86 @@ export class MessageHandler {
     static botId = null;
 
     /**
+     * 设置自定义路由 (用于内部服务通信)
+     * @param {object} app - Express/Hono app 实例 (如果使用)
+     * 目前这里主要是为了对接 HTTP 请求，如果有单独的 HTTP 服务器
+     * 如果没有，这里暂时作为逻辑占位，实际路由可能在 index.js 或 worker.js 中
+     */
+    static setupRoutes(app) {
+        // 获取流传输进度的路由
+        // GET /api/v2/stream/:taskId/progress
+        // 这里只是示例，实际需要看项目使用的 Web 框架
+        // 假设这里我们通过某种方式暴露了 API
+    }
+
+    /**
+     * 处理内部 API 请求 (模拟路由分发)
+     * 实际项目中可能通过 Worker 的 fetch 事件处理
+     */
+    static async handleApiRequest(request) {
+        try {
+            const url = new URL(request.url);
+            const taskId = url.pathname.match(/\/api\/v2\/stream\/([^\/]+)/)?.[1];
+            
+            if (!taskId) {
+                return null; // Not handled
+            }
+
+            // 校验 Secret
+            const secret = request.headers.get('x-instance-secret');
+            if (secret !== config.streamForwarding.secret) {
+                return new Response('Unauthorized', { status: 401 });
+            }
+
+            // GET /api/v2/stream/:taskId/progress
+            const progressMatch = url.pathname.match(/\/api\/v2\/stream\/([^\/]+)\/progress$/);
+            if (progressMatch && request.method === 'GET') {
+                const progress = streamTransferService.getTaskProgress(taskId);
+                return new Response(JSON.stringify({ lastChunkIndex: progress }), {
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+
+            // GET /api/v2/stream/:taskId/full-progress
+            const fullProgressMatch = url.pathname.match(/\/api\/v2\/stream\/([^\/]+)\/full-progress$/);
+            if (fullProgressMatch && request.method === 'GET') {
+                const fullProgress = await streamTransferService.getTaskFullProgress(taskId);
+                return new Response(JSON.stringify(fullProgress), {
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+
+            // POST /api/v2/stream/:taskId/resume
+            const resumeMatch = url.pathname.match(/\/api\/v2\/stream\/([^\/]+)\/resume$/);
+            if (resumeMatch && request.method === 'POST') {
+                const body = await request.json().catch(() => ({}));
+                const result = await streamTransferService.resumeTask(taskId, body);
+                return new Response(JSON.stringify(result), {
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+
+            // DELETE /api/v2/stream/:taskId/reset
+            const resetMatch = url.pathname.match(/\/api\/v2\/stream\/([^\/]+)\/reset$/);
+            if (resetMatch && request.method === 'DELETE') {
+                const result = await streamTransferService.resetTask(taskId);
+                return new Response(JSON.stringify(result), {
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+
+        } catch (e) {
+            log.error('API Request Error:', e);
+            return new Response('Internal Server Error', { status: 500 });
+        }
+        return null; // Not handled
+}
+
+    /**
      * 初始化 Bot ID
      * @param {object} client - Telegram Client 实例
      */
+
     static async init(client) {
         if (!this.botId && client.session?.save()) {
             // 确保客户端已连接
