@@ -3,7 +3,7 @@
  * 协调认证、负载均衡和代理逻辑
  */
 
-import { logger, configureBaseLoggerTransport, isTestEnvironment, VERSION, flushLogs, updateVersionFromEnv, flushGlobalLoggerBuffer } from './logger.js';
+import { logger, configureBaseLoggerTransport, isTestEnvironment, VERSION, flushLogs, updateVersionFromEnv, flushGlobalLoggerBuffer } from './logger/compat.js';
 import { trace } from '@opentelemetry/api';
 
 // 导入新模块

@@ -1,5 +1,5 @@
 import { createRedis } from 'redis-on-workers';
-import { logger } from '../logger.js';
+import { logger } from '../logger/compat.js';
 
 export class RedisTLSCache {
   /** @type {import('redis-on-workers').RedisClient | null} */

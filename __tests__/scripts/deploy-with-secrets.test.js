@@ -103,7 +103,7 @@ describe('deploy-with-secrets.js (Unit)', () => {
             deployWorker();
 
             expect(execSyncMock).toHaveBeenCalledWith(
-                expect.stringContaining('npx wrangler deploy'),
+                expect.stringMatching(/npx(\.cmd)?\s+wrangler(\s|@).*deploy/),
                 expect.any(Object)
             );
         });

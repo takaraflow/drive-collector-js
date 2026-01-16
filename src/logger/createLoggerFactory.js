@@ -1,69 +1,133 @@
+import { normalizeEnvName } from '../utils/env.js';
+import { baseLoggerConfig } from './baseConfig.js';
+import { isTestEnvironment } from './runtimeEnv.js';
+import { VERSION } from './version.js';
+import { formatMessage } from './formatMessage.js';
+import { sanitizeLogData } from './sanitizeLogData.js';
+import { addOtelEvent } from './otel.js';
+
+const isDevEnv = (env) => normalizeEnvName(env) === 'dev';
+
+let globalLoggerInstance = null;
+
+export function getGlobalLoggerBuffer() {
+  if (globalLoggerInstance && globalLoggerInstance._privateBuffer) {
+    return globalLoggerInstance._privateBuffer;
+  }
+  return [];
+}
+
+function pushToBuffer(logData, logBuffer) {
+  const sanitizedData = sanitizeLogData(logData);
+  if (logBuffer && Array.isArray(logBuffer)) {
+    logBuffer.push(sanitizedData);
+    if (logBuffer.length > 1000) {
+      logBuffer.splice(0, logBuffer.length - 1000);
+    }
+    return;
+  }
+  if (logBuffer && typeof logBuffer.push === 'function') {
+    logBuffer.push(sanitizedData);
+  }
+}
+
 /**
- * CF Workers 优化的工厂函数创建模块
+ * @typedef {Object} LoggerContext
+ * @property {string} env
+ * @property {Array<Object>} [logBuffer]
  */
 
-// 动态导入以避免循环依赖
-let loggerModule = null;
+/**
+ * Legacy-compatible logger factory used across the codebase.
+ * @param {LoggerContext} context
+ * @param {Record<string, any>} bindings
+ */
+export function createLoggerFactory(context, bindings = {}) {
+  const logBuffer = context.logBuffer || [];
 
-// 工具函数
-function normalizeEnvName(env) {
-  if (!env) return 'prod';
-  
-  const envMap = {
-    'development': 'dev',
-    'dev': 'dev',
-    'staging': 'pre',
-    'pre': 'pre',
-    'production': 'prod',
-    'prod': 'prod'
+  if (!context.logBuffer) {
+    globalLoggerInstance = null;
+  }
+
+  const _log = async (level, message, data = {}, span = null, ctx = null, categoryOverride = null) => {
+    const category = categoryOverride || data.category || data.module || bindings.module;
+    const formattedMsg = formatMessage(message, level, category);
+
+    const logData = {
+      level,
+      message: formattedMsg,
+      env: normalizeEnvName(context.env || 'prod'),
+      ...bindings,
+      ...data,
+      version: VERSION,
+      timestamp: new Date().toISOString()
+    };
+
+    if (context.env) {
+      logData.env = normalizeEnvName(context.env);
+    }
+
+    addOtelEvent(level, formattedMsg, logData, span);
+
+    const shouldBuffer =
+      level !== 'debug' || isDevEnv(context.env) || isTestEnvironment || baseLoggerConfig.debugEnabled;
+
+    if (shouldBuffer) {
+      pushToBuffer(logData, context.logBuffer || logBuffer);
+    }
+
+    if (isDevEnv(context.env)) {
+      const consoleMethod = console[level] || console.log;
+      consoleMethod(`[${level.toUpperCase()}] ${formattedMsg}`, { ...bindings, ...data, version: VERSION });
+    }
   };
-  
-  return envMap[env.toLowerCase()] || 'prod';
-}
 
-function isDevEnv(env) {
-  return ['dev', 'development'].includes(normalizeEnvName(env));
-}
+  const logger = {
+    version: VERSION,
+    env: normalizeEnvName(context.env || 'prod'),
+    bindings,
 
-// CF Workers 全局配置
-const baseLoggerConfig = {
-  debugEnabled: typeof globalThis !== 'undefined' && globalThis.DEBUG_LOGS === 'true'
-};
+    info: (message, data = {}, span = null, ctx = null) => _log('info', message, data, span, ctx),
+    warn: (message, data = {}, span = null, ctx = null) => _log('warn', message, data, span, ctx),
+    error: (message, data = {}, span = null, ctx = null) => _log('error', message, data, span, ctx),
+    debug: (message, data = {}, span = null, ctx = null) => _log('debug', message, data, span, ctx),
+    success: (message, data = {}, span = null, ctx = null) => _log('info', message, data, span, ctx, 'success'),
 
-// 检查测试环境
-const isTestEnvironment = typeof globalThis !== 'undefined' && globalThis.VITEST === 'true';
+    child: function child(childBindings = {}) {
+      const { logBuffer: childLogBuffer, env: childEnv, ...incomingBindings } = childBindings;
+      const mergedBindings = { ...logger.bindings, ...incomingBindings };
+      const newContext = { ...context };
 
-// 版本信息
-const VERSION = typeof globalThis !== 'undefined' && globalThis.VERSION ? globalThis.VERSION : 'dev';
-
-// OpenTelemetry 集成（简化版本）
-function addOtelEvent(level, message, data, span) {
-  // CF Workers 环境下轻量化处理
-  if (span && typeof span.addEvent === 'function') {
-    span.addEvent({
-      name: `log.${level}`,
-      attributes: {
-        'log.message': message,
-        'log.level': level,
-        ...Object.fromEntries(Object.entries(data).map(([k, v]) => [`log.${k}`, String(v)]))
+      if (childLogBuffer !== undefined) {
+        if (Array.isArray(childLogBuffer)) {
+          newContext.logBuffer = childLogBuffer;
+        } else if (childLogBuffer && typeof childLogBuffer.getAll === 'function') {
+          newContext.logBuffer = childLogBuffer.getAll();
+        } else {
+          newContext.logBuffer = [];
+        }
       }
-    });
-  }
-}
 
-/**
- * 创建日志工厂函数
- * 适配 CF Workers 的快速启动需求
- */
-export async function createLoggerFactory(context, bindings = {}) {
-  // 延迟加载日志模块以避免循环依赖
-  if (!loggerModule) {
-    loggerModule = await import('./index.js');
-  }
-  
-  const { createLoggerFactory: createOptimizedLoggerFactory } = loggerModule;
-  return createOptimizedLoggerFactory(context, bindings);
-}
+      if (childEnv !== undefined) {
+        newContext.env = normalizeEnvName(childEnv);
+      }
 
-// 导出工具函数
-export { normalizeEnvName, isDevEnv, addOtelEvent, VERSION, isTestEnvironment, baseLoggerConfig };
+      return createLoggerFactory(newContext, mergedBindings);
+    },
+
+    configure: function configure(config = {}) {
+      if (config.env) {
+        const normalized = normalizeEnvName(config.env);
+        context.env = normalized;
+        logger.env = normalized;
+      }
+    }
+  };
+
+  logger._privateBuffer = logBuffer;
+  if (!context.logBuffer) {
+    globalLoggerInstance = logger;
+  }
+
+  return logger;
+}

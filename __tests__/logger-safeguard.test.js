@@ -5,8 +5,8 @@
 
 import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
 
-// 我们要测试的是 src/logger.js 中的实际逻辑
-import { sanitizeLogData, flushLogs, logger, configureBaseLoggerTransport } from '../src/logger.js';
+// 我们要测试的是 src/logger/compat.js 中的实际逻辑
+import { sanitizeLogData, flushLogs, logger, configureBaseLoggerTransport } from '../src/logger/compat.js';
 
 // 模拟 Cloudflare context
 const mockContext = {

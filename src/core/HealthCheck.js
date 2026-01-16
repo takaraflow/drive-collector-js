@@ -3,7 +3,7 @@
  * 处理 Redis 健康检查逻辑
  */
 
-import { logger } from '../logger.js';
+import { logger } from '../logger/compat.js';
 import { CacheService } from '../cache/CacheService.js';
 
 /**

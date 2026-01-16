@@ -12,7 +12,7 @@
 import { parseCacheConfig } from '../utils/configParser.js';
 import { CloudflareKVCache } from './CloudflareKVCache.js';
 import { RedisTLSCache } from './RedisTLSCache.js';
-import { logger } from '../logger.js';
+import { logger } from '../logger/compat.js';
 
 class CacheService {
     constructor(options = {}) {

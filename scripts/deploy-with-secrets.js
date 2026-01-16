@@ -17,6 +17,41 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 
+function sleepMs(ms) {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+        // busy-wait (script-only)
+    }
+}
+
+function resolveNpxCommand() {
+    return process.platform === 'win32' ? 'npx.cmd' : 'npx';
+}
+
+function resolveWranglerArgsPrefix() {
+    const pinned = String(process.env.WRANGLER_VERSION || '').trim();
+    if (!pinned) return ['wrangler'];
+
+    // `-y` avoids interactive prompt in CI when a package install is needed.
+    return ['-y', `wrangler@${pinned}`];
+}
+
+function printWranglerLogTail(combinedOutput) {
+    const match = /Logs were written to \"([^\"]+)\"/.exec(combinedOutput || '');
+    const logPath = match?.[1];
+    if (!logPath) return;
+
+    try {
+        if (!fs.existsSync(logPath)) return;
+        const content = fs.readFileSync(logPath, 'utf8');
+        const lines = content.split(/\r?\n/);
+        const tail = lines.slice(Math.max(0, lines.length - 120)).join('\n');
+        console.error(`\n--- Wrangler log tail: ${logPath} ---\n${tail}\n--- end ---\n`);
+    } catch (e) {
+        console.error(`(Failed to read Wrangler log: ${logPath})`, e?.message || e);
+    }
+}
+
 /**
  * 清理变量中的引号
  */
@@ -114,13 +149,13 @@ function redactSensitiveInfo(str) {
 function uploadSecrets(secretsJsonPath) {
     console.log('🚀 正在上传 Secrets 到 Cloudflare (Uploading secrets)...');
     
-    const args = ['wrangler', 'secret', 'bulk', secretsJsonPath];
-    const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+    const args = [...resolveWranglerArgsPrefix(), 'secret', 'bulk', secretsJsonPath];
+    const npxCommand = resolveNpxCommand();
     const command = `${npxCommand} ${args.map(part => part.includes(' ') ? `"${part}"` : part).join(' ')}`;
     console.log('Command:', redactSensitiveInfo(command));
 
     const result = spawnSync(npxCommand, args, {
-        env: { ...process.env },
+        env: { ...process.env, WRANGLER_LOG_LEVEL: process.env.WRANGLER_LOG_LEVEL || 'debug' },
         encoding: 'utf8',
         shell: process.platform === 'win32'
     });
@@ -137,6 +172,7 @@ function uploadSecrets(secretsJsonPath) {
         .join('\n')
         .trim();
     console.error('❌ Failed to upload secrets:', combined || 'Unknown error');
+    printWranglerLogTail(combined);
     return { ok: false, errorText: combined || 'Unknown error' };
 }
 
@@ -144,6 +180,7 @@ function handleSecretsUpload(initialSecrets) {
     let secrets = { ...initialSecrets };
     let attempt = 0;
     const maxAttempts = Math.max(1, Object.keys(secrets).length + 1);
+    let networkRetries = 0;
 
     while (attempt < maxAttempts) {
         if (Object.keys(secrets).length === 0) {
@@ -164,6 +201,15 @@ function handleSecretsUpload(initialSecrets) {
 
         if (result.ok) {
             return true;
+        }
+
+        // Retry transient network failures (common in CI containers)
+        if ((result.errorText || '').includes('fetch failed') && networkRetries < 3) {
+            const delayMs = Math.min(8000, Math.pow(2, networkRetries) * 1000);
+            networkRetries += 1;
+            console.warn(`Detected network error (fetch failed). Retrying in ${delayMs}ms... (attempt ${networkRetries}/3)`);
+            sleepMs(delayMs);
+            continue;
         }
 
         const conflictMatch = /Binding name ['"]?([A-Z0-9_]+)['"]? already in use/i.exec(result.errorText || '');
@@ -191,12 +237,20 @@ function deployWorker() {
     console.log('🚀 Deploying worker...');
     
     try {
-        const command = 'npx wrangler deploy -c wrangler.toml --compatibility-flags="nodejs_compat"';
+        const npxCommand = resolveNpxCommand();
+        const args = [
+            ...resolveWranglerArgsPrefix(),
+            'deploy',
+            '-c',
+            'wrangler.toml',
+            '--compatibility-flags="nodejs_compat"'
+        ];
+        const command = `${npxCommand} ${args.join(' ')}`;
         console.log('Command:', command);
         
         execSync(command, {
             stdio: 'inherit',
-            env: { ...process.env }
+            env: { ...process.env, WRANGLER_LOG_LEVEL: process.env.WRANGLER_LOG_LEVEL || 'debug' }
         });
         
         console.log('✅ Worker deployed successfully');
@@ -300,8 +354,12 @@ function main() {
         
         const uploadSuccess = handleSecretsUpload(secrets);
         if (!uploadSuccess) {
-            console.error('Secret upload failed, aborting deployment');
-            process.exit(1);
+            if (String(process.env.ALLOW_SECRET_UPLOAD_FAILURE || '').toLowerCase() === 'true') {
+                console.warn('⚠️ Secret upload failed, but ALLOW_SECRET_UPLOAD_FAILURE=true so continuing to deploy...');
+            } else {
+                console.error('Secret upload failed, aborting deployment');
+                process.exit(1);
+            }
         }
         
         console.log('\n4. Deploying worker...');

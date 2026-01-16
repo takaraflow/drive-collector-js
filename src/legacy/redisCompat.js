@@ -3,7 +3,7 @@
  * 提供向后兼容的 Redis 操作和故障转移逻辑
  */
 
-import { logger } from '../logger.js';
+import { logger } from '../logger/compat.js';
 
 /**
  * 获取提供者优先级 (使用 CACHE_PROVIDERS)

@@ -4,7 +4,7 @@
  */
 
 import { HEARTBEAT_TIMEOUT, TELEGRAM_LOCK_KEY } from '../config/constants.js';
-import { logger, isTestEnvironment } from '../logger.js';
+import { logger, isTestEnvironment } from '../logger/compat.js';
 import { parseInstanceData } from './InstanceParser.js';
 import { executeWithFailover } from '../legacy/redisCompat.js';
 

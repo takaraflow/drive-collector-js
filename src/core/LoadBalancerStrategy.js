@@ -4,7 +4,7 @@
  */
 
 import { ROUND_ROBIN_KEY, TELEGRAM_LOCK_KEY, TEMPORARY_SCHEDULING, SUCCESS_MESSAGES, ERROR_MESSAGES } from '../config/constants.js';
-import { logger } from '../logger.js';
+import { logger } from '../logger/compat.js';
 import { safeJsonParse } from '../utils/json.js';
 import { executeWithFailover } from '../legacy/redisCompat.js';
 

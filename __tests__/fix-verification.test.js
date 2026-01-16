@@ -9,7 +9,7 @@ vi.mock('@upstash/qstash', () => ({
   }))
 }));
 
-vi.mock('../src/logger.js', () => ({
+vi.mock('../src/logger/compat.js', () => ({
   logger: {
     debug: vi.fn(),
     info: vi.fn(),

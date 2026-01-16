@@ -2,6 +2,8 @@
  * 安全的日志上下文
  * 为每个请求提供隔离的日志环境
  */
+import { CircularLogBuffer } from './CircularLogBuffer.js';
+
 export class SafeLogContext {
   constructor(options = {}) {
     this.env = options.env || 'unknown';

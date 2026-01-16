@@ -1,6 +1,6 @@
 import { vi, describe, expect, it, beforeEach, afterAll } from 'vitest';
 
-vi.mock('../src/logger.js', () => ({
+vi.mock('../src/logger/compat.js', () => ({
   logger: {
     info: vi.fn().mockResolvedValue(undefined),
     warn: vi.fn().mockResolvedValue(undefined),

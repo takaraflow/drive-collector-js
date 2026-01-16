@@ -11,7 +11,7 @@
  * - state/         状态管理
  */
 
-import { logger, configureBaseLoggerTransport, isTestEnvironment, VERSION, updateVersionFromEnv } from './logger.js';
+import { logger, configureBaseLoggerTransport, isTestEnvironment, VERSION, updateVersionFromEnv } from './logger/compat.js';
 import { instrument } from '@microlabs/otel-cf-workers';
 import { createSafeEnv } from './utils/env.js';
 

@@ -3,7 +3,7 @@
  * 处理故障转移和提供者状态
  */
 
-import { logger } from '../logger.js';
+import { logger } from '../logger/compat.js';
 
 // 向后兼容的全局变量
 let currentProvider = 'cloudflare';

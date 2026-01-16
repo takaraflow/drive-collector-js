@@ -3,7 +3,7 @@
  * 处理请求转发和重试逻辑
  */
 
-import { logger } from '../logger.js';
+import { logger } from '../logger/compat.js';
 
 /**
  * 获取日志器（兼容处理）

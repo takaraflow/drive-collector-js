@@ -2,6 +2,8 @@
  * 全局日志上下文管理器
  * 适配 CF Workers 环境：轻量级、无状态、按需执行
  */
+import { SafeLogContext } from './SafeLogContext.js';
+
 export class GlobalLogManager {
   constructor(options = {}) {
     this.contexts = new Map();

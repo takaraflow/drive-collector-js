@@ -1,6 +1,6 @@
 import { vi, describe, test, expect, beforeEach, afterEach, afterAll } from 'vitest';
 
-vi.mock('../src/logger.js', () => ({
+vi.mock('../src/logger/compat.js', () => ({
   logger: {
     info: vi.fn().mockResolvedValue(undefined),
     warn: vi.fn().mockResolvedValue(undefined),
@@ -18,6 +18,7 @@ vi.mock('../src/logger.js', () => ({
   flushGlobalLoggerBuffer: vi.fn().mockResolvedValue(undefined),
   isTestEnvironment: true,
   VERSION: 'dev',
+  updateVersionFromEnv: vi.fn(),
 }));
 
 vi.mock('@opentelemetry/api', () => ({

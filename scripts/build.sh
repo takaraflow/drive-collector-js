@@ -32,19 +32,35 @@ fi
 echo "执行 esbuild 构建（版本通过 Wrangler 变量注入）..."
 
 # 尝试不同的 esbuild 执行方式
-# 方式1: 使用 node_modules 中的 esbuild
-if [ -f "node_modules/.bin/esbuild" ]; then
-    echo "使用 node_modules 中的 esbuild..."
+# 方式1: 使用 node_modules/esbuild/bin/esbuild（可能是 ELF/Mach-O 二进制，也可能是 JS 包装器）
+if [ -f "node_modules/esbuild/bin/esbuild" ]; then
+    echo "使用 node_modules/esbuild/bin/esbuild..."
+
+    # 检测文件类型，避免把二进制当作 JS 交给 node 执行（会出现 'ELF' SyntaxError）
+    MAGIC_HEX=$(head -c 4 node_modules/esbuild/bin/esbuild 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')
+
+    # 7f454c46 = ELF, cffaedfe/cafebabe 等为 Mach-O/FAT（都应该直接执行）
+    if [ "$MAGIC_HEX" = "7f454c46" ] || [ "$MAGIC_HEX" = "cffaedfe" ] || [ "$MAGIC_HEX" = "cafebabe" ]; then
+        node_modules/esbuild/bin/esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:*
+    else
+        $NODE_CMD node_modules/esbuild/bin/esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:*
+    fi
+
+# 方式2: 使用 node_modules/.bin/esbuild（shell wrapper；在某些 Windows 环境中 node 可能不在 PATH）
+elif [ -f "node_modules/.bin/esbuild" ]; then
+    echo "使用 node_modules/.bin/esbuild..."
+    export PATH="$(dirname "$NODE_CMD"):$PATH"
     node_modules/.bin/esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:*
-# 方式2: 使用 npx
+
+# 方式3: 使用 npx
 elif command -v npx >/dev/null 2>&1; then
     echo "使用 npx 运行 esbuild..."
     npx esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:*
-# 方式3: 使用全局安装的 esbuild
+# 方式4: 使用全局安装的 esbuild
 elif command -v esbuild >/dev/null 2>&1; then
     echo "使用全局 esbuild..."
     esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:*
-# 方式4: 回退到内联 Node.js 方式
+# 方式5: 回退到内联 Node.js 方式
 else
     echo "使用内联 Node.js 方式运行 esbuild..."
     $NODE_CMD --input-type=module -e "

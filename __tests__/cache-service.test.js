@@ -158,7 +158,7 @@ vi.mock('../src/cache/CloudflareKVCache.js', () => ({
   CloudflareKVCache: MockCloudflareKVCache
 }));
 
-vi.mock('../src/logger.js', () => ({
+vi.mock('../src/logger/compat.js', () => ({
   logger: {
     info: vi.fn(),
     warn: vi.fn(),
