@@ -1,7 +1,69 @@
 import { EventEmitter } from 'events';
+import { vi } from 'vitest';
 
 // --- Mocks Definitions ---
 const mockFindByUserId = vi.fn();
+
+// Mock spawnSync reference for use in DriveProviderFactory mock
+const mockSpawnSyncRef = vi.fn();
+
+// 使用 vi.hoisted 将 mockSpawnSync 引用提升到模块作用域顶部
+const { mockSpawnSyncForProvider } = vi.hoisted(() => {
+    // 创建一个可以被 mock 工厂函数访问的引用
+    let spawnSyncMock = null;
+    return {
+        mockSpawnSyncForProvider: {
+            setMock: (mock) => { spawnSyncMock = mock; },
+            call: (pass) => {
+                if (spawnSyncMock) {
+                    const result = spawnSyncMock('rclone', ['--config', '/dev/null', 'obscure', pass], { encoding: 'utf-8' });
+                    if (result && result.status === 0 && result.stdout) {
+                        return result.stdout.trim();
+                    }
+                }
+                return pass;
+            }
+        }
+    };
+});
+
+// Mock DriveProviderFactory to handle different drive types in tests
+vi.mock('../../src/services/drives/DriveProviderFactory.js', () => ({
+    DriveProviderFactory: {
+        getProvider: vi.fn((type) => {
+            if (type === 'mega') {
+                return {
+                    type: 'mega',
+                    name: 'Mega',
+                    // For mega, processPassword uses the hoisted mock reference
+                    processPassword: (pass) => {
+                        return mockSpawnSyncForProvider.call(pass);
+                    },
+                    getConnectionString: (config) => {
+                        const user = (config.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                        const pass = (config.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                        return `:mega,user="${user}",pass="${pass}":`;
+                    },
+                    getInfo: () => ({ type: 'mega', name: 'Mega' })
+                };
+            }
+            // Default: drive type
+            return {
+                type: 'drive',
+                name: 'Google Drive',
+                processPassword: (pass) => pass,
+                getConnectionString: (config) => {
+                    const user = (config.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                    const pass = (config.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                    return `:drive,user="${user}",pass="${pass}":`;
+                },
+                getInfo: () => ({ type: 'drive', name: 'Google Drive' })
+            };
+        }),
+        isSupported: vi.fn(() => true),
+        getSupportedTypes: vi.fn(() => ['drive', 'mega'])
+    }
+}));
 const mockSpawn = vi.fn();
 const mockSpawnSync = vi.fn();
 const mockCache = new Map();
@@ -66,6 +128,8 @@ describe('CloudTool', () => {
         mockKv.set.mockClear();
         CloudTool.loading = false;
         mockSpawnSync.mockReturnValue({ status: 0, stdout: 'obscured\n', stderr: '' });
+        // 将 mockSpawnSync 注册到 hoisted 引用，使 DriveProviderFactory mock 可以访问
+        mockSpawnSyncForProvider.setMock(mockSpawnSync);
         mockKv.get.mockResolvedValue(null);
         mockSpawn.mockReset();
     });

@@ -7,6 +7,7 @@ import { STRINGS } from "../locales/zh-CN.js";
 import { localCache } from "../utils/LocalCache.js";
 import { cache } from "./CacheService.js";
 import { logger } from "./logger/index.js";
+import { DriveProviderFactory } from "./drives/index.js";
 const log = logger.withModule ? logger.withModule('RcloneService') : logger;
 
 const buildRcloneEnv = () => ({
@@ -34,11 +35,11 @@ export class CloudTool {
         }
         
         const driveConfig = JSON.parse(drive.config_data);
-        // 2. 密码混淆处理
-        let finalPass = driveConfig.pass;
-        if (drive.type === 'mega') {
-             finalPass = this._obscure(finalPass);
-        }
+        
+        // 2. 使用 Provider 处理密码混淆
+        const provider = DriveProviderFactory.getProvider(drive.type);
+        let finalPass = provider.processPassword(driveConfig.pass);
+        
         // 3. 返回清洗后的配置对象
         return {
             type: drive.type,
@@ -236,13 +237,14 @@ export class CloudTool {
         if (!tasks || tasks.length === 0) return { success: true };
         
         return new Promise(async (resolve) => {
+            let isResolved = false;
+            const safeResolve = (value) => {
+                if (isResolved) return;
+                isResolved = true;
+                resolve(value);
+            };
+            
             try {
-                let isResolved = false;
-                const safeResolve = (value) => {
-                    if (isResolved) return;
-                    isResolved = true;
-                    resolve(value);
-                };
 
                 // 假设所有任务属于同一用户且目标一致（由调用者确保）
                 const firstTask = tasks[0];

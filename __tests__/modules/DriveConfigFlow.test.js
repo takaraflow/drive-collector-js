@@ -1,3 +1,5 @@
+import { describe, test, expect, beforeEach, vi } from 'vitest';
+
 // 1. Mock 依赖项
 // Mock config
 vi.mock("../../src/config/index.js", () => ({
