@@ -1,6 +1,7 @@
 // Mock dependencies
 const mockD1 = {
-    fetchOne: vi.fn()
+    fetchOne: vi.fn(),
+    run: vi.fn()
 };
 vi.mock('../../src/services/d1.js', () => ({
     d1: mockD1
@@ -130,6 +131,56 @@ describe('AuthGuard', () => {
 
             const result = await AuthGuard.can('regularUser', 'maintenance:bypass');
             expect(result).toBe(false);
+        });
+    });
+
+    describe('setRole', () => {
+        it('should call d1.run with correct params and clear cache', async () => {
+            mockD1.run.mockResolvedValue({ success: true });
+            AuthGuard.roleCache.set('testUser', { role: 'user', ts: Date.now() });
+
+            await AuthGuard.setRole('testUser', 'admin');
+
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "INSERT OR REPLACE INTO user_roles (user_id, role) VALUES (?, ?)",
+                ['testUser', 'admin']
+            );
+            expect(AuthGuard.roleCache.has('testUser')).toBe(false);
+        });
+
+        it('should return false if userId is missing', async () => {
+             const result = await AuthGuard.setRole(null, 'admin');
+             expect(result).toBe(false);
+        });
+
+        it('should throw error if d1 fails', async () => {
+             mockD1.run.mockRejectedValue(new Error('DB Error'));
+             await expect(AuthGuard.setRole('testUser', 'admin')).rejects.toThrow('DB Error');
+        });
+    });
+
+    describe('removeRole', () => {
+        it('should call d1.run with correct params and clear cache', async () => {
+            mockD1.run.mockResolvedValue({ success: true });
+            AuthGuard.roleCache.set('testUser', { role: 'admin', ts: Date.now() });
+
+            await AuthGuard.removeRole('testUser');
+
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "DELETE FROM user_roles WHERE user_id = ?",
+                ['testUser']
+            );
+            expect(AuthGuard.roleCache.has('testUser')).toBe(false);
+        });
+
+        it('should return false if userId is missing', async () => {
+             const result = await AuthGuard.removeRole(null);
+             expect(result).toBe(false);
+        });
+
+        it('should throw error if d1 fails', async () => {
+             mockD1.run.mockRejectedValue(new Error('DB Error'));
+             await expect(AuthGuard.removeRole('testUser')).rejects.toThrow('DB Error');
         });
     });
 });

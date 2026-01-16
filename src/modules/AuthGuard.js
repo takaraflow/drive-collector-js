@@ -48,6 +48,30 @@ export const AuthGuard = {
         const role = await this.getRole(userId);
         const allowedRoles = ACL[action];
         return isRoleAllowed(role, allowedRoles);
+    },
+
+    async setRole(userId, role) {
+        if (!userId) return false;
+        try {
+            await d1.run("INSERT OR REPLACE INTO user_roles (user_id, role) VALUES (?, ?)", [userId.toString(), role]);
+            this.roleCache.delete(userId.toString());
+            return true;
+        } catch (error) {
+            log.error("Failed to set user role:", error);
+            throw error;
+        }
+    },
+
+    async removeRole(userId) {
+        if (!userId) return false;
+        try {
+            await d1.run("DELETE FROM user_roles WHERE user_id = ?", [userId.toString()]);
+            this.roleCache.delete(userId.toString());
+            return true;
+        } catch (error) {
+            log.error("Failed to remove user role:", error);
+            throw error;
+        }
     }
 };
 

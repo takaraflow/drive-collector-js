@@ -716,15 +716,13 @@ export class Dispatcher {
         const targetUid = parts[1].trim();
         try {
             if (isPromotion) {
-                await d1.execute("INSERT OR REPLACE INTO user_roles (user_id, role) VALUES (?, 'admin')", [targetUid]);
-                AuthGuard.roleCache.delete(targetUid); // 清理缓存
+                await AuthGuard.setRole(targetUid, 'admin');
                 return await runBotTaskWithRetry(() => client.sendMessage(target, {
                     message: `✅ 已将用户 <code>${targetUid}</code> 设置为管理员。`,
                     parseMode: "html"
                 }), userId, {}, false, 3);
             } else {
-                await d1.execute("DELETE FROM user_roles WHERE user_id = ?", [targetUid]);
-                AuthGuard.roleCache.delete(targetUid); // 清理缓存
+                await AuthGuard.removeRole(targetUid);
                 return await runBotTaskWithRetry(() => client.sendMessage(target, {
                     message: `✅ 已取消用户 <code>${targetUid}</code> 的管理员权限。`,
                     parseMode: "html"
