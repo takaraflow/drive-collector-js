@@ -18,25 +18,25 @@ import { createSafeEnv } from './utils/env.js';
 // 导入新模块
 import { handleRequest } from './handler.js';
 
-// 导出认证模块（供测试使用）
+// 导出认证模块
 export { verifyAdminToken } from './auth/admin.js';
 export { verifyQStashSignature, validateQStashMessage } from './auth/qstash.js';
 
-// 导出核心模块（供测试使用）
+// 导出核心模块
 export { parseInstanceData, normalizeHeartbeat, normalizeEpochMillis } from './core/InstanceParser.js';
 export { getActiveInstances, scanLockKeys } from './core/InstanceManager.js';
 export { selectInstanceByLock, selectInstanceByTemporaryLock, selectTargetInstance, selectTargetInstanceWithKVAtomic, selectTargetInstanceWithRetry } from './core/LoadBalancerStrategy.js';
 export { forwardToInstance, fetchWithRetry } from './core/ProxyService.js';
 export { checkRedisHealth } from './core/HealthCheck.js';
 
-// 导出工具模块（供测试使用）
+// 导出工具模块
 export { normalizePath, PATH_MAP } from './routing/pathUtils.js';
 export { normalizeEnvName, createSafeEnv } from './utils/env.js';
 export { safeJsonParse, enhancedSafeJsonParse, isString } from './utils/json.js';
 export { createPayloadTooLargeError, validateContentLengthHeader, readRequestBodyWithLimit } from './utils/http.js';
 export { detectCacheProvider, getProviderPriority } from './utils/env.js';
 
-// 导出常量（供测试使用）
+// 导出常量
 export {
   ROUND_ROBIN_KEY,
   HEARTBEAT_TIMEOUT,
@@ -46,13 +46,13 @@ export {
   ENV_ALIASES
 } from './config/constants.js';
 
-// 导出缓存服务（供测试使用）
-export { CacheService, __test_setCacheServiceInstance, __test_resetCacheService, testableCacheService } from './cache/CacheService.js';
+// 导出缓存服务
+export { CacheService } from './cache/CacheService.js';
 
-// 导出状态管理（供测试使用）
+// 导出状态管理
 export { LoadBalancerState, createLoadBalancerState } from './state/LoadBalancerState.js';
 
-// 导出兼容层（供测试使用）
+// 导出兼容层
 export {
   executeWithFailover,
   executeWithPriorityFallback,
@@ -63,10 +63,10 @@ export {
   retryRedisCommand
 } from './legacy/redisCompat.js';
 
-// 导出 logger（供测试使用）
+// 导出 logger
 export { logger };
 
-// 导出 handler（供测试使用）
+// 导出 handler
 export { handleRequest } from './handler.js';
 
 /**

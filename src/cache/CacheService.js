@@ -519,42 +519,4 @@ export const cacheService = new Proxy(_instance, {
     }
 });
 
-// 测试专用：允许测试注入自定义的 CacheService 实例
-let testInstance = null;
-
-/**
- * 为测试设置自定义的 CacheService 实例
- * @param {Object} instance - 自定义的 CacheService 实例
- */
-export function __test_setCacheServiceInstance(instance) {
-    testInstance = instance;
-}
-
-/**
- * 重置测试实例，恢复使用默认的 cacheService
- */
-export function __test_resetCacheService() {
-    testInstance = null;
-}
-
-// 导出一个代理，优先返回测试实例（如果存在）
-export const testableCacheService = new Proxy(_instance, {
-    get: (target, prop) => {
-        // 如果有测试实例，优先使用测试实例
-        if (testInstance && prop in testInstance) {
-            const value = testInstance[prop];
-            if (typeof value === 'function') {
-                return value.bind(testInstance);
-            }
-            return value;
-        }
-        // 否则使用默认实例
-        const value = target[prop];
-        if (typeof value === 'function') {
-            return value.bind(target);
-        }
-        return value;
-    }
-});
-
 export default cacheService;

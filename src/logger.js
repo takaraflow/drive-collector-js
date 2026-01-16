@@ -319,14 +319,11 @@ const getNodeEnv = () => {
 
 // CF Worker 兼容性：更准确的测试环境判断
 export const isTestEnvironment = (() => {
-  // 1. 检查 Jest 环境
-  if (typeof jest !== 'undefined') return true;
-  
-  // 2. 检查 Node.js 测试环境
+  // 1. 检查 Node.js 测试环境
   const nodeEnv = getNodeEnv();
   if (nodeEnv === 'test') return true;
   
-  // 3. 检查 CF Workers 测试环境（通过全局变量）
+  // 2. 检查 CF Workers 测试环境（通过全局变量）
   if (typeof globalThis !== 'undefined' && globalThis.__TEST__) return true;
   
   return false;
