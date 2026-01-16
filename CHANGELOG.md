@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.28.0](https://github.com/YoungSx/drive-collector-js/compare/v4.27.0...v4.28.0) (2026-01-16)
+
+
+### 🔧 其他任务
+
+* add New Relic logging integration ([1fcefd4](https://github.com/YoungSx/drive-collector-js/commit/1fcefd461278c1a53baa9b43ff68411f6a7c8ed6))
+
+
+### ♻️ 代码重构
+
+* add drive provider architecture and Mega implementation ([ba1a750](https://github.com/YoungSx/drive-collector-js/commit/ba1a7503fb1e287056487d9d931da6095cca9b1d))
+
+
+### ✨ 新特性
+
+* add test cases and implementations for multiple cloud storage providers ([33162ea](https://github.com/YoungSx/drive-collector-js/commit/33162ea58169c5ce26e47b486d41e80b1b7afbc3))
+
 ## [4.27.0](https://github.com/YoungSx/drive-collector-js/compare/v4.26.0...v4.27.0) (2026-01-16)
 
 
