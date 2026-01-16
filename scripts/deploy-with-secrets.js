@@ -3,7 +3,7 @@
 /**
  * 使用 secret bulk 方式部署 Cloudflare Worker
  * 解决 --var 导致的 URL 截断和明文暴露问题
- * 支持本地调试环境下自动通过 Infisical 注入变量
+ * 集成 orchestrated secrets 系统，支持 Infisical 自动注入变量
  */
 
 import fs from 'fs';
@@ -11,7 +11,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync, spawn, spawnSync } from 'child_process';
 import dotenv from 'dotenv';
-import { loadEnvFile, normalizeEnvName, hasInfisicalCredentials } from './build-logic.js';
+import { loadEnvFile, normalizeEnvName, hasInfisicalCredentials, hasDopplerCredentials, hasOrchestratedSecrets } from './build-utils.js';
+import { SecretsOrchestrator } from '../src/config/SecretsOrchestrator.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -262,77 +263,93 @@ function deployWorker() {
 }
 
 /**
- * 本地调试环境自动化：检测并自动注入 Infisical 变量
+ * 本地调试环境自动化：检测并使用新的 orchestrated secrets 系统
  */
 function ensureInfisicalInjection() {
-    // 如果已经由 infisical 启动，或者明确跳过自动化，则直接返回
-    if (process.env.INFISICAL_ENV_INJECTED === 'true' || process.env.SKIP_INFISICAL_AUTO === 'true') {
+    // 如果已经由 orchestrated 系统启动，或者明确跳过自动化，则直接返回
+    if (process.env.ORCHESTRATED_SECRETS_USED === 'true' || process.env.SKIP_INFISICAL_AUTO === 'true') {
         return false;
     }
 
-    // 检查是否存在 .act.secrets
-    const actSecretsPath = path.join(projectRoot, '.act.secrets');
-    if (!fs.existsSync(actSecretsPath)) {
+    // 检查是否存在 Infisical 凭据
+    if (!hasInfisicalCredentials()) {
         return false;
     }
 
-    console.log('🛠️ Local debug mode detected, attempting Infisical injection...');
+    console.log('🔐 Local debug mode detected, using orchestrated secrets system...');
     
-    // 加载配置
-    const envConfig = dotenv.parse(fs.readFileSync(actSecretsPath));
-    const projectId = cleanValue(envConfig.INFISICAL_PROJECT_ID);
-    const token = cleanValue(envConfig.INFISICAL_TOKEN);
-
-    if (!projectId) {
-        console.warn('⚠️ INFISICAL_PROJECT_ID not found in .act.secrets, skipping auto-injection');
-        return false;
-    }
-
-    console.log(`🚀 Relaunching with Infisical (Project: ${projectId})`);
+    // 标记已使用 orchestrated 系统
+    process.env.ORCHESTRATED_SECRETS_USED = 'true';
+    process.env.USE_ORCHESTRATED_SECRETS = 'true';
     
-    // 设置注入标记，防止死循环
-    const newEnv = { ...process.env, ...envConfig };
-    newEnv.INFISICAL_ENV_INJECTED = 'true';
-    if (token) newEnv.INFISICAL_TOKEN = token;
-
-    const args = [
-        'run',
-        '--env=dev',
-        `--projectId=${projectId}`,
-        '--',
-        'node',
-        fileURLToPath(import.meta.url)
-    ];
-
-    const child = spawn('infisical', args, {
-        stdio: 'inherit',
-        shell: false,
-        env: newEnv
-    });
-
-    child.on('exit', (code) => {
-        process.exit(code || 0);
-    });
-
-    return true; // 表示已经启动了子进程
+    return false; // 不需要启动子进程，继续当前流程
 }
 
 function applyDotenvFallback() {
     const runtimeEnv = process.env.RUNTIME_ENV || process.env.DEPLOY_ENV || process.env.NODE_ENV || 'dev';
     const normalizedEnv = normalizeEnvName(runtimeEnv);
-    const shouldOverride = !hasInfisicalCredentials();
+    const shouldOverride = !hasInfisicalCredentials() && !hasOrchestratedSecrets();
 
     if (shouldOverride) {
-        console.log('?? 未检测到 Infisical 信息，使用 .env 文件作为部署阶段的降级配置');
+        console.log('?? 未检测到 Infisical/orchestrated 信息，使用 .env 文件作为部署阶段的降级配置');
     }
 
     loadEnvFile(fs, normalizedEnv, { overrideExisting: shouldOverride });
 }
 
 /**
+ * Enhanced secrets injection using the orchestration system
+ */
+async function executeOrchestratedSecretsInjection(environment) {
+    console.log('🔐 Starting enhanced secrets injection...');
+    
+    const orchestrator = new SecretsOrchestrator({
+        environment,
+        provider: 'infisical',
+        providerConfig: {
+            projectId: process.env.INFISICAL_PROJECT_ID,
+            token: process.env.INFISICAL_TOKEN,
+            siteURL: process.env.INFISICAL_SITE_URL
+        },
+        validate: true,
+        dryRun: false,
+        cleanup: false // Don't cleanup yet, we need the files for deployment
+    });
+    
+    try {
+        const result = await orchestrator.executeInjection();
+        
+        if (!result.success) {
+            console.error('❌ Enhanced secrets injection failed:', result.error);
+            // Fall back to legacy method if orchestrated injection fails
+            console.warn('⚠️ Falling back to legacy secrets extraction...');
+            return null;
+        }
+        
+        console.log('✅ Enhanced secrets injection completed successfully');
+        console.log(`   - Secrets fetched: ${result.secrets.size}`);
+        console.log(`   - Files generated: ${result.generatedFiles.length}`);
+        
+        // Return the secrets.json path for upload
+        const secretsJsonPath = result.generatedFiles.find(file => file.endsWith('secrets.json'));
+        if (secretsJsonPath) {
+            console.log(`   - Secrets file: ${secretsJsonPath}`);
+        }
+        
+        return { secretsJsonPath, secrets: result.secrets };
+        
+    } catch (error) {
+        console.error('❌ Critical error during orchestrated secrets injection:', error.message);
+        return null;
+    } finally {
+        await orchestrator.cleanup();
+    }
+}
+
+/**
  * 主函数
  */
-function main() {
+async function main() {
     // 本地自动化检查
     if (ensureInfisicalInjection()) {
         return;
@@ -340,19 +357,50 @@ function main() {
     applyDotenvFallback();
 
     try {
-        console.log('=== Cloudflare Worker Deployment with Secrets ===\n');
+        console.log('=== Cloudflare Worker Deployment with Enhanced Secrets Management ===\n');
         
-        const secrets = extractSecretsFromEnv();
+        // Try orchestrated secrets injection first
+        const environment = process.env.RUNTIME_ENV || process.env.DEPLOY_ENV || process.env.NODE_ENV || 'dev';
+        let secrets = null;
+        let orchestratedResult = null;
         
-        if (Object.keys(secrets).length === 0) {
+        if ((hasInfisicalCredentials() || hasDopplerCredentials()) && hasOrchestratedSecrets()) {
+            orchestratedResult = await executeOrchestratedSecretsInjection(environment);
+        }
+        
+        // Fallback to legacy method if orchestration fails or is disabled
+        if (orchestratedResult) {
+            secrets = orchestratedResult.secrets;
+        } else {
+            secrets = new Map();
+            const legacySecrets = extractSecretsFromEnv();
+            for (const [key, value] of Object.entries(legacySecrets)) {
+                secrets.set(key, value);
+            }
+        }
+        
+        if (secrets.size === 0) {
             console.warn('⚠️ No secrets found in environment variables');
             console.warn('Proceeding with deployment without secrets upload...');
         } else {
-            console.log(`   Found ${Object.keys(secrets).length} secrets:`, 
-                Object.keys(secrets).join(', '));
+            console.log(`   Found ${secrets.size} secrets:`, 
+                Array.from(secrets.keys()).join(', '));
         }
         
-        const uploadSuccess = handleSecretsUpload(secrets);
+        let uploadSuccess = true;
+        
+        // Handle secrets upload differently based on whether we used orchestrated injection
+        if (orchestratedResult && orchestratedResult.secretsJsonPath) {
+            // Use the generated secrets.json file
+            uploadSuccess = handleSecretsUpload(
+                Object.fromEntries(secrets)
+            );
+        } else {
+            // Use legacy method
+            uploadSuccess = handleSecretsUpload(
+                Object.fromEntries(secrets)
+            );
+        }
         if (!uploadSuccess) {
             if (String(process.env.ALLOW_SECRET_UPLOAD_FAILURE || '').toLowerCase() === 'true') {
                 console.warn('⚠️ Secret upload failed, but ALLOW_SECRET_UPLOAD_FAILURE=true so continuing to deploy...');

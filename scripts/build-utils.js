@@ -39,102 +39,82 @@ function hasInfisicalCredentials(env = process.env) {
         return true;
     }
 
-    if (env.INFISICAL_ENV_INJECTED === 'true') {
+    if (env.INFISICAL_ENV_INJECTED === 'true' || env.ORCHESTRATED_SECRETS_USED === 'true') {
         return true;
     }
 
     return false;
 }
 
-function determineVersion(root) {
-    const manifestPath = path.join(root, 'manifest.json');
-    let version = '';
-
-    if (fs.existsSync(manifestPath)) {
-        try {
-            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-            if (manifest && typeof manifest.version === 'string') {
-                version = manifest.version.trim();
-            }
-        } catch (error) {
-            console.warn('解析 manifest.json 版本号失败:', error.message);
-        }
-    }
-
-    if (!version) {
-        const pkgPath = path.join(root, 'package.json');
-        if (fs.existsSync(pkgPath)) {
-            try {
-                const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-                version = (pkg.version || '').trim();
-            } catch (error) {
-                console.warn('解析 package.json 版本号失败:', error.message);
-            }
-        }
-    }
-
-    return version || 'dev';
+function hasOrchestratedSecrets(env = process.env) {
+    return env.USE_ORCHESTRATED_SECRETS === 'true' || env.ORCHESTRATED_SECRETS_USED === 'true';
 }
 
-// 从 .env 文件加载环境变量
-function loadEnvFile(fileSystem = fs, targetEnv = 'dev', { overrideExisting = false } = {}) {
-    const normalizedEnv = normalizeEnvName(targetEnv);
-    const envCandidates = [normalizedEnv];
-    if (normalizedEnv !== targetEnv) {
-        envCandidates.push(targetEnv);
-    }
+function hasDopplerCredentials(env = process.env) {
+    const project = (env.DOPPLER_PROJECT || '').trim();
+    const token = (env.DOPPLER_TOKEN || '').trim();
+    const apiToken = (env.DOPPLER_API_TOKEN || '').trim();
+    const serviceAccountToken = (env.DOPPLER_SERVICE_ACCOUNT_TOKEN || '').trim();
+    const apiKey = (env.DOPPLER_API_KEY || '').trim();
 
-    const applyEnvFromContent = (envContent) => {
-        const lines = envContent.split('\n');
+    return !!(project && (token || apiToken || serviceAccountToken || apiKey));
+}
 
+function loadEnvFile(fileSystem = fs, env = 'dev', options = {}) {
+    const { overrideExisting = false } = options;
+    const envCandidates = [env, 'local'];
+    
+    const applyEnvFromContent = (content) => {
+        const lines = content.split('\n');
         for (const line of lines) {
             const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) {
-                continue;
-            }
-
-            const [key, ...valueParts] = trimmed.split('=');
-            let value = valueParts.join('=');
-
-            let inQuotes = false;
-            let quoteChar = null;
-            let commentStart = -1;
-
-            for (let charIndex = 0; charIndex < value.length; charIndex++) {
-                const char = value[charIndex];
-
-                if ((char === '"' || char === "'") && (charIndex === 0 || value[charIndex - 1] !== '\\')) {
-                    if (!inQuotes) {
-                        inQuotes = true;
-                        quoteChar = char;
-                    } else if (char === quoteChar) {
-                        inQuotes = false;
-                        quoteChar = null;
+            if (trimmed && !trimmed.startsWith('#')) {
+                const eqIndex = trimmed.indexOf('=');
+                if (eqIndex > 0) {
+                    const key = trimmed.substring(0, eqIndex).trim();
+                    let value = trimmed.substring(eqIndex + 1).trim();
+                    
+                    // Handle values with comments and quotes
+                    if (value.startsWith('"')) {
+                        // Double quoted - find closing quote ignoring escaped ones
+                        let end = -1;
+                        for (let i = 1; i < value.length; i++) {
+                            if (value[i] === '"' && value[i-1] !== '\\') {
+                                end = i;
+                                break;
+                            }
+                        }
+                        if (end !== -1) {
+                            value = value.substring(1, end);
+                        }
+                    } else if (value.startsWith("'")) {
+                        // Single quoted
+                        let end = -1;
+                        for (let i = 1; i < value.length; i++) {
+                            if (value[i] === "'" && value[i-1] !== '\\') {
+                                end = i;
+                                break;
+                            }
+                        }
+                        if (end !== -1) {
+                            value = value.substring(1, end);
+                        }
+                    } else {
+                        // Unquoted - first # starts a comment
+                        const commentIndex = value.indexOf('#');
+                        if (commentIndex !== -1) {
+                            value = value.substring(0, commentIndex).trim();
+                        }
                     }
-                } else if (char === '#' && !inQuotes) {
-                    commentStart = charIndex;
-                    break;
+                    
+                    // Only set if not already exists or override is allowed
+                    if (overrideExisting || !process.env[key]) {
+                        process.env[key] = value;
+                    }
                 }
             }
-
-            if (commentStart !== -1) {
-                value = value.substring(0, commentStart).trim();
-            } else {
-                value = value.trim();
-            }
-
-            while (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
-                value = value.substring(1, value.length - 1);
-            }
-
-            const keyTrim = key.trim();
-            const currentVal = process.env[keyTrim];
-            const placeholder = `\${${keyTrim}}`;
-            if (overrideExisting || !currentVal || currentVal === placeholder) {
-                process.env[keyTrim] = value;
-            }
         }
-    };
+};
 
     for (const candidate of envCandidates) {
         const specificEnvPath = path.join(projectRoot, `.env.${candidate}`);
@@ -195,13 +175,13 @@ function extractVariablesFromManifest() {
     const infraVars = Object.keys(infraConfig);
     const allVars = [...vars, ...infraVars];
     
-    // 清理可能误传为占位符字符串的变量，并设置默认值
-    for (const varName of allVars) {
-        // 仅当环境变量的值明确等于其占位符形式 (e.g., VAR="${VAR}") 时，才删除它
-        // 这样可以避免意外删除由外部环境（如 Infisical 或 GHA secrets）注入的、值为空字符串的变量
-        if (process.env[varName] === `\${${varName}}`) {
-            delete process.env[varName];
-        }
+        // 清理可能误传为占位符字符串的变量，并设置默认值
+        for (const varName of allVars) {
+            // 仅当环境变量的值明确等于其占位符形式 (e.g., VAR="${VAR}") 时，才删除它
+            // 这样可以避免意外删除由外部环境（如 orchestrated secrets 或 GHA secrets）注入的、值为空字符串的变量
+            if (process.env[varName] === `\${${varName}}`) {
+                delete process.env[varName];
+            }
         
         // 尝试从 manifest.json 获取默认值
         const defaultValue = envConfig[varName]?.default || '';
@@ -272,17 +252,18 @@ function extractVariablesFromManifest() {
     if (process.env.GITHUB_ACTIONS === 'true') {
         console.log('检测到 GitHub Actions 环境...');
         
-        // 2026-01-04: 增加调试信息（在 Infisical 拉取之后）
-        console.log('DEBUG: GHA 环境变量检查 (Infisical 拉取后):');
+        // 2026-01-16: 增加调试信息（在 orchestrated secrets 拉取之后）
+        console.log('DEBUG: GHA 环境变量检查 (orchestrated secrets 后):');
         console.log('  - GITHUB_ACTIONS:', process.env.GITHUB_ACTIONS);
         console.log('  - CLOUDFLARE_ACCOUNT_ID:', process.env.CLOUDFLARE_ACCOUNT_ID ? '已设置' : '未设置');
         console.log('  - INFISICAL_TOKEN:', process.env.INFISICAL_TOKEN ? '已设置' : '未设置');
         console.log('  - INFISICAL_PROJECT_ID:', process.env.INFISICAL_PROJECT_ID ? '已设置' : '未设置');
+        console.log('  - USE_ORCHESTRATED_SECRETS:', process.env.USE_ORCHESTRATED_SECRETS ? '已启用' : '未启用');
         
         if (!process.env.CLOUDFLARE_ACCOUNT_ID) {
             console.error('错误: GHA 环境下需要 CLOUDFLARE_ACCOUNT_ID');
-            console.error('CLOUDFLARE_ACCOUNT_ID 应该通过 Infisical 从 GHA secrets 中获取');
-            console.error('请检查 GitHub Actions 的 INFISICAL_TOKEN 和 INFISICAL_PROJECT_ID 配置');
+            console.error('CLOUDFLARE_ACCOUNT_ID 应该通过 orchestrated secrets 从 GHA secrets 中获取');
+            console.error('请检查 GitHub Actions 的 INFISICAL_TOKEN、INFISICAL_PROJECT_ID 和 orchestrated secrets 配置');
             process.exit(1);
         }
         
@@ -412,6 +393,16 @@ function buildVarsSection(envConfig = {}, envSource = process.env) {
     };
 }
 
+function determineVersion(projectRoot) {
+    try {
+        const pkgPath = path.join(projectRoot, 'package.json');
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        return pkg.version || 'dev';
+    } catch {
+        return 'dev';
+    }
+}
+
 // 主函数
 function main() {
     try {
@@ -425,9 +416,9 @@ function main() {
         process.env.NODE_ENV = normalizeEnvName(process.env.NODE_ENV || normalizedEnv);
 
         // 2. 加载环境文件
-        const overrideEnvFromDots = !hasInfisicalCredentials();
+        const overrideEnvFromDots = !hasInfisicalCredentials() && !hasOrchestratedSecrets();
         if (overrideEnvFromDots) {
-            console.log('?? 未检测到 Infisical 配置，正在将 .env 文件作为降级来源');
+            console.log('?? 未检测到 Infisical/orchestrated 配置，正在将 .env 文件作为降级来源');
         }
         loadEnvFile(fs, normalizedEnv, { overrideExisting: overrideEnvFromDots });
 
@@ -443,8 +434,8 @@ function main() {
                             while (value.length > 1 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
                                 value = value.substring(1, value.length - 1);
                             }
-                             // 仅当环境变量尚未被外部（如 Infisical）设置时，才从 GHA JSON 中加载
-                             if (!process.env[k]) {
+                              // 仅当环境变量尚未被外部（如 orchestrated secrets）设置时，才从 GHA JSON 中加载
+                              if (!process.env[k]) {
                                  process.env[k] = value;
                              }
                         }
@@ -522,6 +513,8 @@ function generateToml(env, manifest, tomlTemplate, packageJson) {
 export {
     normalizeEnvName,
     hasInfisicalCredentials,
+    hasDopplerCredentials,
+    hasOrchestratedSecrets,
     loadEnvFile,
     checkRequiredVariables,
     extractVariablesFromManifest,

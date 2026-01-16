@@ -17,10 +17,10 @@ process.env.AXIOM_TOKEN = 'test-axiom-token';
 process.env.AXIOM_DATASET = 'test-dataset';
 process.env.AXIOM_ORG_ID = 'test-org-id';
 
-// 2. 模拟构建命令 (仅执行 build-logic 部分)
+// 2. 模拟构建命令 (仅执行 build-utils 部分)
 try {
     console.log('🚀 正在执行构建逻辑 (Executing build logic)...');
-    execSync('node scripts/build-logic.js --env=prod', { stdio: 'inherit' });
+    execSync('node scripts/build-utils.js --env=prod', { stdio: 'inherit' });
     
     // 3. 验证 wrangler.toml 是否生成
     if (fs.existsSync('wrangler.toml')) {

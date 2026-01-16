@@ -1,98 +1,172 @@
-# Cache Service
+# Load Balancer Worker - Documentation
 
-## 配置示例
+## 📚 文档概览
 
-### 环境变量配置
+本文档库提供了Load Balancer Worker的完整使用指南和技术文档。
 
+### 🎯 快速开始
+
+| 需求 | 文档 |
+|------|------|
+| **项目概述** | [📖 系统概览](./architecture/system-overview.md) |
+| **快速部署** | [🚀 快速开始指南](./guides/quick-start.md) |
+| **配置指南** | [⚙️ 配置指南](./guides/configuration.md) |
+
+### 🔧 集成指南
+
+| 功能 | 文档 |
+|------|------|
+| **Secrets管理** | [🔐 Secrets管理指南](./guides/secrets-management.md) |
+| **Infisical集成** | [🔑 Infisical集成指南](./integration/infisical.md) |
+| **Doppler集成** | [🌐 Doppler集成指南](./integration/doppler.md) |
+| **GitHub Actions** | [🔄 CI/CD集成指南](./integration/github-actions.md) |
+| **本地开发** | [💻 本地开发指南](./guides/local-development.md) |
+
+### 🏗️ 架构文档
+
+| 组件 | 文档 |
+|------|------|
+| **系统架构** | [📐 架构概览](./architecture/system-overview.md) |
+| **Secrets架构** | [🔐 Secrets管理架构](./architecture/secrets-architecture.md) |
+| **缓存系统** | [💾 缓存系统设计](./architecture/cache-system.md) |
+| **负载均衡** | [⚖️ 负载均衡策略](./architecture/load-balancing.md) |
+
+### 📖 API文档
+
+| API | 文档 |
+|-----|------|
+| **管理API** | [🔧 管理API](./api/admin-api.md) |
+| **健康检查** | [❤️ 健康检查API](./api/health-check.md) |
+| **Webhook API** | [🪝 Webhook处理API](./api/webhook-api.md) |
+
+### 🧪 测试指南
+
+| 测试类型 | 文档 |
+|----------|------|
+| **单元测试** | [🧪 单元测试指南](./guides/testing-unit.md) |
+| **集成测试** | [🔗 集成测试指南](./guides/testing-integration.md) |
+| **性能测试** | [⚡ 性能测试指南](./guides/testing-performance.md) |
+
+### 🚀 部署指南
+
+| 环境 | 文档 |
+|------|------|
+| **开发环境** | [🛠️ 开发环境部署](./guides/deployment-dev.md) |
+| **预生产环境** | [🧪 预生产部署](./guides/deployment-pre.md) |
+| **生产环境** | [🚀 生产环境部署](./guides/deployment-prod.md) |
+
+### 🔧 故障排除
+
+| 问题类型 | 文档 |
+|----------|------|
+| **常见问题** | [❓ 常见问题](./troubleshooting/faq.md) |
+| **调试指南** | [🔍 调试指南](./troubleshooting/debugging.md) |
+| **性能优化** | [⚡ 性能优化](./troubleshooting/performance.md) |
+| **错误码参考** | [🔢 错误码参考](./troubleshooting/error-codes.md) |
+
+### 📝 参考文档
+
+| 参考 | 文档 |
+|------|------|
+| **环境变量** | [🌍 环境变量参考](./reference/environment-variables.md) |
+| **配置项** | [⚙️ 配置项参考](./reference/configuration-options.md) |
+| **Manifest Schema** | [📋 Manifest Schema参考](./reference/manifest-schema.md) |
+| **更新日志** | [📅 更新日志](./reference/changelog.md) |
+
+---
+
+## 🚀 快速导航
+
+### 我想要...
 ```bash
-# CACHE_PROVIDERS JSON 配置
-export CACHE_PROVIDERS='[
-  {
-    "name":"Cloudflare-Primary",
-    "type":"cloudflare-kv",
-    "priority":1,
-    "accountId":"${CF_ACCOUNT_ID}",
-    "namespaceId":"${CF_NAMESPACE_ID}",
-    "token":"${CF_TOKEN}"
-  },
-  {
-    "name":"Redis-Internal-Backup",
-    "type":"redis",
-    "priority":2,
-    "host":"${REDIS_HOST}",
-    "port":6379,
-    "password":"${REDIS_PASSWORD}",
-    "tls": {
-      "enabled": true,
-      "rejectUnauthorized": true,
-      "servername":"redis.internal"
-    },
-    "replicas": [
-      {"host":"replica1.internal","port":6379},
-      {"host":"replica2.internal","port":6379}
-    ]
-  }
-]'
+# 🚀 快速开始项目
+查看 ./guides/quick-start.md
 
-# 可选：强制使用特定 provider
-export PRIMARY_CACHE="Redis-Internal-Backup"
+# 🔐 设置secrets管理
+查看 ./guides/secrets-management.md
+
+# 🌐 集成Doppler/Infisical
+查看 ./integration/doppler.md 或 ./integration/infisical.md
+
+# 🚀 部署到生产环境
+查看 ./guides/deployment-prod.md
+
+# 🔧 调试问题
+查看 ./troubleshooting/debugging.md
+
+# 🧪 运行测试
+查看 ./guides/testing-integration.md
 ```
 
-### 配置字段说明
+### 找特定信息...
+```bash
+# 🌍 环境变量列表
+查看 ./reference/environment-variables.md
 
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| name | 是 | 提供商唯一标识 |
-| type | 是 | 类型: `cloudflare-kv`, `redis` |
-| priority | 否 | 优先级，值越小越高，默认 99 |
-| accountId | KV必填 | Cloudflare Account ID |
-| namespaceId | KV必填 | Cloudflare KV Namespace ID |
-| token | KV必填 | Cloudflare API Token |
-| host | Redis必填 | Redis 主机地址 |
-| port | Redis必填 | Redis 端口 |
-| password | 否 | Redis 密码 |
-| username | 否 | Redis 用户名 |
-| db | 否 | Redis 数据库编号，默认 0 |
-| tls.enabled | 否 | 是否启用 TLS |
-| tls.rejectUnauthorized | 否 | 是否拒绝未授权证书 |
-| tls.servername | 否 | SNI 服务器名 |
-| replicas | 否 | 预留字段，暂不支持 |
+# 📋 Manifest配置说明
+查看 ./reference/manifest-schema.md
 
-## 使用方式
+# 📅 最近更新内容
+查看 ./reference/changelog.md
 
-```javascript
-import { cacheService } from './cache/index.js';
-
-async function example(env) {
-  // 初始化（首次调用会自动初始化）
-  await cacheService.initialize({ env });
-  
-  // 获取值
-  const value = await cacheService.get('myKey', 'json');
-  
-  // 设置值
-  await cacheService.set('myKey', { foo: 'bar' }, 3600);
-  
-  // 删除值
-  await cacheService.delete('myKey');
-  
-  // 获取当前 provider
-  const provider = cacheService.getCurrentProvider();
-  
-  // 获取连接信息
-  const info = cacheService.getConnectionInfo();
-}
+# ❓ 常见问题解答
+查看 ./troubleshooting/faq.md
 ```
 
-## 向后兼容
+## 📊 文档统计
 
-原有 API 保持不变：
-- `getNFCacheClient(env)` - 继续可用
-- `CacheTLSClient` - 继续可用
-- `NFCacheClient` - 继续可用
+| 类型 | 文档数量 |
+|------|----------|
+| 📖 概览文档 | 1 |
+| 🎯 快速开始 | 2 |
+| 🔧 集成指南 | 5 |
+| 🏗️ 架构文档 | 4 |
+| 📖 API文档 | 3 |
+| 🧪 测试指南 | 3 |
+| 🚀 部署指南 | 3 |
+| 🔧 故障排除 | 4 |
+| 📝 参考文档 | 4 |
 
-## 优先级选择逻辑
+**总计**: 29个核心文档文件
 
-1. 如果设置了 `PRIMARY_CACHE` 环境变量，优先使用匹配的提供商
-2. 否则按 `priority` 字段升序排序选择
-3. 如果所有 provider 都连接失败，降级到内存缓存
+---
+
+## 📝 文档贡献
+
+### 如何贡献
+1. **创建新文档**: 在相应的子目录中创建文件
+2. **更新现有文档**: 编辑对应的文档文件
+3. **更新导航**: 更新本README.md中的导航链接
+4. **遵循规范**: 使用Markdown格式，遵循文档结构规范
+
+### 文档规范
+- ✅ 使用清晰、简洁的中文描述
+- ✅ 包含代码示例和使用说明
+- ✅ 添加适当的emoji图标增强可读性
+- ✅ 提供完整的配置示例
+- ✅ 包含故障排除和调试信息
+
+### 文档结构规范
+```
+docs/
+├── README.md                    # 主导航文档 (本文件)
+├── guides/                      # 用户指南
+├── architecture/                # 架构设计文档
+├── integration/                 # 集成指南
+├── api/                       # API文档
+├── troubleshooting/            # 故障排除
+└── reference/                 # 参考文档
+```
+
+---
+
+## 🔗 相关链接
+
+- [GitHub Repository](https://github.com/your-org/lb-worker-js)
+- [项目主页](https://github.com/your-org/lb-worker-js#readme)
+- [问题反馈](https://github.com/your-org/lb-worker-js/issues)
+- [变更请求](https://github.com/your-org/lb-worker-js/pulls)
+
+---
+
+**💡 提示**: 建议将此页面加入书签，作为访问所有文档的入口点。

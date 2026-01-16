@@ -46,7 +46,7 @@ const dotenv = await import('dotenv');
 
 // Import code under test DYNAMICALLY after mocking
 const { setupEnvironment, generateWranglerCommand } = await import('../scripts/generate-wrangler-vars.js');
-const { generateToml } = await import('../scripts/build-logic.js');
+const { generateToml } = await import('../scripts/build-utils.js');
 
 // Helper to reset all mocks
 function resetAllMocks() {

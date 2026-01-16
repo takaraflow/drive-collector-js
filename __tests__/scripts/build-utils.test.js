@@ -4,9 +4,9 @@ import path from 'path';
 const originalEnv = { ...process.env };
 
 // Import actual functions
-import { loadEnvFile, hasInfisicalCredentials } from '../../scripts/build-logic.js';
+import { loadEnvFile, hasInfisicalCredentials } from '../../scripts/build-utils.js';
 
-describe('build-logic.js - hasInfisicalCredentials', () => {
+describe('build-utils.js - hasInfisicalCredentials', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         // Reset process.env
@@ -47,7 +47,7 @@ describe('build-logic.js - hasInfisicalCredentials', () => {
     });
 });
 
-describe('build-logic.js - loadEnvFile (Integration Tests)', () => {
+    describe('build-utils.js - loadEnvFile (Integration Tests)', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         // Reset process.env
