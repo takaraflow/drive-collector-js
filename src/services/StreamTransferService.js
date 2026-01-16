@@ -2,7 +2,7 @@ import { config } from "../config/index.js";
 import { logger } from "./logger/index.js";
 import { CloudTool } from "./rclone.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
-import { updateStatus } from "../utils/common.js";
+import { updateStatus, escapeHTML } from "../utils/common.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
 import { TelegramBotApi } from "../utils/telegramBotApi.js";
 import { CacheService } from "./CacheService.js";
@@ -27,7 +27,7 @@ class StreamTransferService {
      * Sender (Leader): 转发一个 chunk 到 LB/Worker (支持断点续传)
      */
     async forwardChunk(taskId, chunk, metadata) {
-        const { fileName, userId, isLast, chunkIndex, totalSize, leaderUrl, chatId, msgId } = metadata;
+        const { fileName, userId, isLast, chunkIndex, totalSize, leaderUrl, chatId, msgId, sourceMsgId } = metadata;
         const lbUrl = config.streamForwarding.lbUrl;
         
         if (!lbUrl) {
@@ -72,6 +72,7 @@ class StreamTransferService {
                     'x-source-instance-id': instanceCoordinator.instanceId,
                     'x-chat-id': chatId || '',
                     'x-msg-id': msgId || '',
+                    'x-source-msg-id': sourceMsgId || '',
                     // 断点续传标识头
                     'x-resume-enabled': 'true'
                 },
@@ -157,6 +158,7 @@ class StreamTransferService {
         const sourceInstanceId = req.headers['x-source-instance-id'];
         const chatId = req.headers['x-chat-id'];
         const msgId = req.headers['x-msg-id'];
+        const sourceMsgId = req.headers['x-source-msg-id'];
         const isResumeEnabled = req.headers['x-resume-enabled'] === 'true';
 
         // 增强：如果请求头没带 leaderUrl，尝试从 Cache 中根据 sourceInstanceId 查找
@@ -193,6 +195,7 @@ class StreamTransferService {
                     leaderUrl,
                     chatId,
                     msgId,
+                    sourceMsgId,
                     uploadedBytes: cachedProgress?.uploadedBytes || 0,
                     status: 'uploading',
                     lastChunkIndex: cachedProgress?.lastChunkIndex || -1, // 记录最近处理的 Chunk Index
@@ -414,8 +417,9 @@ class StreamTransferService {
         
         try {
             const { STRINGS, format } = await import("../locales/zh-CN.js");
-            const fileLink = `tg://openmessage?chat_id=${context.chatId}&message_id=${context.msgId}`;
-            const fileNameHtml = `<a href="${fileLink}">${encodeURIComponent(context.fileName)}</a>`;
+            const originalMsgId = context.sourceMsgId || context.msgId;
+            const fileLink = `tg://openmessage?chat_id=${context.chatId}&message_id=${originalMsgId}`;
+            const fileNameHtml = `<a href="${fileLink}">${escapeHTML(context.fileName)}</a>`;
             const text = format(STRINGS.task.success, { name: fileNameHtml, folder: config.remoteFolder });
             await TelegramBotApi.editMessageText(context.chatId, parseInt(context.msgId), text);
         } catch (error) {
@@ -468,6 +472,7 @@ class StreamTransferService {
                 leaderUrl: context.leaderUrl,
                 chatId: context.chatId,
                 msgId: context.msgId,
+                sourceMsgId: context.sourceMsgId,
                 timestamp: Date.now()
             };
             

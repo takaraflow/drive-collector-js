@@ -853,7 +853,9 @@ export class TaskManager {
                         await this._refreshGroupMonitor(task, 'completed');
                     } else {
                         const actualUploadPath = await CloudTool._getUploadPath(task.userId);
-                        await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(fileName), folder: actualUploadPath }), true);
+                        const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
+                        const fileNameHtml = `<a href="${fileLink}">${escapeHTML(fileName)}</a>`;
+                        await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: fileNameHtml, folder: actualUploadPath }), true);
                     }
                     this.activeProcessors.delete(id);
                     // 秒传完成，无需上传
@@ -989,7 +991,8 @@ export class TaskManager {
                                 
                                 await streamTransferService.forwardChunk(task.id, chunk, {
                                     fileName, userId: task.userId, chunkIndex, isLast, 
-                                    totalSize: info.size, leaderUrl, chatId: task.chatId, msgId: task.msgId, targetUrl
+                                    totalSize: info.size, leaderUrl, chatId: task.chatId, msgId: task.msgId, 
+                                    sourceMsgId: task.message.id, targetUrl
                                 });
                                 
                                 const downloaded = chunkIndex * (isLargeFile ? 512 * 1024 : 128 * 1024) + chunk.length;
@@ -1098,7 +1101,9 @@ export class TaskManager {
             const localPath = task.localPath;
             if (!fs.existsSync(localPath)) {
                 await TaskRepository.updateStatus(task.id, 'failed', 'Local file not found');
-                await updateStatus(task, STRINGS.task.failed_validation, true);
+                const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
+                const fileNameHtml = `<a href="${fileLink}">${escapeHTML(info.name)}</a>`;
+                await updateStatus(task, format(STRINGS.task.failed_validation, { name: fileNameHtml }), true);
                 this.activeProcessors.delete(id);
                 return;
             }
@@ -1134,7 +1139,9 @@ export class TaskManager {
                     await this._refreshGroupMonitor(task, 'completed');
                 } else {
                     const actualUploadPath = await CloudTool._getUploadPath(task.userId);
-                    await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: escapeHTML(fileName), folder: actualUploadPath }), true);
+                    const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
+                    const fileNameHtml = `<a href="${fileLink}">${escapeHTML(fileName)}</a>`;
+                    await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: fileNameHtml, folder: actualUploadPath }), true);
                 }
                 this.activeProcessors.delete(id);
                 return;
