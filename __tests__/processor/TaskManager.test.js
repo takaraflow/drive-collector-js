@@ -1,4 +1,17 @@
 // Mock all external dependencies
+vi.mock('../../src/config/index.js', () => ({
+    config: {
+        downloadDir: '/tmp/downloads',
+        streamForwarding: { enabled: false },
+        remoteName: 'drive',
+        oss: {}
+    },
+    getConfig: () => ({
+        downloadDir: '/tmp/downloads',
+        qstash: { webhookUrl: 'http://test', pathTemplate: '/api/${topic}' }
+    })
+}));
+
 vi.mock('../../src/services/telegram.js', () => ({
     default: {
         sendMessage: vi.fn().mockResolvedValue(true),
@@ -46,10 +59,30 @@ vi.mock('../../src/repositories/TaskRepository.js', () => ({
     TaskRepository: {
         updateStatus: vi.fn().mockResolvedValue(),
         findById: vi.fn().mockResolvedValue(null),
+        findByMsgId: vi.fn().mockResolvedValue([]),
         createBatch: vi.fn().mockResolvedValue(true),
         markCancelled: vi.fn().mockResolvedValue(),
         claimTask: vi.fn().mockResolvedValue(true),
     }
+}));
+
+vi.mock('fs', () => ({
+    default: {
+        existsSync: vi.fn().mockReturnValue(true),
+        promises: {
+            stat: vi.fn().mockResolvedValue({ size: 1000 }),
+            unlink: vi.fn().mockResolvedValue(),
+        },
+        statSync: vi.fn().mockReturnValue({ size: 1000 }),
+        unlinkSync: vi.fn(),
+    },
+    existsSync: vi.fn().mockReturnValue(true),
+    promises: {
+        stat: vi.fn().mockResolvedValue({ size: 1000 }),
+        unlink: vi.fn().mockResolvedValue(),
+    },
+    statSync: vi.fn().mockReturnValue({ size: 1000 }),
+    unlinkSync: vi.fn(),
 }));
 
 vi.mock('../../src/services/oss.js', () => ({
@@ -209,14 +242,99 @@ describe('TaskManager', () => {
     });
 
     describe('QStash integration', () => {
-        it('should handle QStash webhook download', async () => {
-            // Test exists but implementation details depend on actual TaskManager logic
-            expect(TaskManager.handleDownloadWebhook).toBeDefined();
+        it('should handle QStash webhook download and detect group task', async () => {
+            const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+            const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+            const { client } = await import('../../src/services/telegram.js');
+            
+            // Mock lock
+            instanceCoordinator.hasLock.mockResolvedValue(true);
+            
+            // Mock DB task
+            const taskId = 'task-123';
+            const msgId = 'msg-group-1';
+            TaskRepository.findById.mockResolvedValue({
+                id: taskId,
+                user_id: 'user-1',
+                chat_id: 'chat-1',
+                msg_id: msgId,
+                file_name: 'test.mp4',
+                source_msg_id: 100
+            });
+            
+            // Mock getMessages
+            client.getMessages.mockResolvedValue([{
+                id: 100,
+                media: { document: { mimeType: 'video/mp4', size: 1000, attributes: [{ className: 'DocumentAttributeFilename', fileName: 'test.mp4' }] } }
+            }]);
+
+            // Mock siblings to simulate group
+            TaskRepository.findByMsgId.mockResolvedValue([
+                { id: taskId },
+                { id: 'task-124' }
+            ]);
+            
+            // Spy on downloadTask
+            const downloadTaskSpy = vi.spyOn(TaskManager, 'downloadTask').mockResolvedValue();
+            
+            await TaskManager.handleDownloadWebhook(taskId);
+            
+            expect(downloadTaskSpy).toHaveBeenCalledWith(expect.objectContaining({
+                id: taskId,
+                isGroup: true
+            }));
+            
+            downloadTaskSpy.mockRestore();
         });
 
-        it('should handle QStash webhook upload', async () => {
-            // Test exists but implementation details depend on actual TaskManager logic
-            expect(TaskManager.handleUploadWebhook).toBeDefined();
+        it('should handle QStash webhook upload and detect group task', async () => {
+            const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+            const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+            const { client } = await import('../../src/services/telegram.js');
+            // fs is already mocked globally
+            
+            // Mock lock
+            instanceCoordinator.hasLock.mockResolvedValue(true);
+            
+            // Mock DB task
+            const taskId = 'task-upload-123';
+            const msgId = 'msg-group-2';
+            TaskRepository.findById.mockResolvedValue({
+                id: taskId,
+                user_id: 'user-1',
+                chat_id: 'chat-1',
+                msg_id: msgId,
+                file_name: 'test.mp4',
+                source_msg_id: 200,
+                status: 'downloaded'
+            });
+
+            // Mock getMessages
+            client.getMessages.mockResolvedValue([{
+                id: 200,
+                media: { document: { mimeType: 'video/mp4', size: 1000, attributes: [{ className: 'DocumentAttributeFilename', fileName: 'test.mp4' }] } }
+            }]);
+
+            // Mock file existence
+            // fs.existsSync is already mocked to return true by default
+            
+            // Mock siblings to simulate group
+            TaskRepository.findByMsgId.mockResolvedValue([
+                { id: taskId },
+                { id: 'task-upload-124' }
+            ]);
+            
+            // Spy on uploadTask
+            const uploadTaskSpy = vi.spyOn(TaskManager, 'uploadTask').mockResolvedValue();
+            
+            await TaskManager.handleUploadWebhook(taskId);
+            
+            expect(uploadTaskSpy).toHaveBeenCalledWith(expect.objectContaining({
+                id: taskId,
+                isGroup: true
+            }));
+            
+            uploadTaskSpy.mockRestore();
         });
     });
 

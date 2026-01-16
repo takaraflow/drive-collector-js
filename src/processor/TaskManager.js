@@ -652,6 +652,16 @@ export class TaskManager {
             const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
             task.fileName = dbTask.file_name;
 
+            // 检查是否属于组任务（通过 msgId 查询同组任务数量）
+            try {
+                const siblings = await TaskRepository.findByMsgId(dbTask.msg_id);
+                if (siblings && siblings.length > 1) {
+                    task.isGroup = true;
+                }
+            } catch (e) {
+                log.warn(`Failed to check group status for task ${taskId}`, e);
+            }
+
             // 执行下载逻辑
             await this.downloadTask(task);
             return { success: true, statusCode: 200 };
@@ -719,6 +729,16 @@ export class TaskManager {
             const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
             task.localPath = localPath;
             task.fileName = dbTask.file_name;
+
+            // 检查是否属于组任务（通过 msgId 查询同组任务数量）
+            try {
+                const siblings = await TaskRepository.findByMsgId(dbTask.msg_id);
+                if (siblings && siblings.length > 1) {
+                    task.isGroup = true;
+                }
+            } catch (e) {
+                log.warn(`Failed to check group status for upload task ${taskId}`, e);
+            }
 
             // 执行上传逻辑
             await this.uploadTask(task);
