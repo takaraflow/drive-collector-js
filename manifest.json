@@ -1153,6 +1153,7 @@
     "systemEvents": "/api/v2/tasks/system-events",
     "streamForward": "/api/v2/stream/:taskId",
     "statusUpdate": "/api/v2/tasks/:taskId/status",
+    "configRefresh": "/api/v2/config/refresh",
     "legacyWebhookBase": "/api/tasks",
     "legacyDownload": "/api/tasks/download",
     "legacyUpload": "/api/tasks/upload",

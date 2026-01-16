@@ -75,6 +75,15 @@ export async function handleQStashWebhook(req, res) {
         return;
     }
 
+    // 3. 触发配置刷新 (Webhook)
+    if (path === '/api/v2/config/refresh' && req.method === 'POST') {
+        const { refreshConfiguration } = await import("./src/config/index.js");
+        const result = await refreshConfiguration();
+        res.writeHead(result.success ? 200 : 500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+        return;
+    }
+
     // --- 原有的 QStash Webhook 逻辑 ---
     // 其他请求需要导入服务
     const { queueService } = await import("./src/services/QueueService.js");

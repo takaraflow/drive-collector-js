@@ -153,6 +153,21 @@ const CONFIG_SERVICE_MAPPING = {
 ### 自动触发
 当启用 `INFISICAL_POLLING_ENABLED=true` 时，配置更新会自动触发服务重新初始化。
 
+### 手动触发 (Webhook)
+可以通过发送 POST 请求到 `/api/v2/config/refresh` 来手动触发配置刷新。这在需要立即应用变更而不等待轮询周期时非常有用。
+
+```bash
+curl -X POST http://your-app-url/api/v2/config/refresh
+```
+
+响应示例：
+```json
+{
+  "success": true,
+  "message": "Configuration refresh completed"
+}
+```
+
 ### 环境变量配置
 ```bash
 # 启用配置轮询

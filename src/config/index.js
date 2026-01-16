@@ -40,6 +40,7 @@ Object.entries(protectedEnvValues).forEach(([key, value]) => {
 
 let config = null;
 let isInitialized = false;
+let provider = null;
 
 function sanitizeValue(val) {
     if (typeof val !== 'string') return val;
@@ -293,7 +294,7 @@ export async function initConfig() {
                 console.log(`ℹ️ Attempting to fetch Infisical secrets for environment: ${infisicalEnvName} (mapped from NODE_ENV: ${process.env.NODE_ENV || 'dev'})`);
                 
                 // 使用新的 InfisicalSecretsProvider
-                const provider = new InfisicalSecretsProvider({
+                provider = new InfisicalSecretsProvider({
                     token: process.env.INFISICAL_TOKEN,
                     clientId: clientId,
                     clientSecret: clientSecret,
@@ -305,6 +306,11 @@ export async function initConfig() {
                 const secrets = await provider.fetchSecrets();
                 
                 if (secrets) {
+                    // 初始化 provider 的 currentSecrets，避免首次轮询误报所有配置为新增
+                    if (provider) {
+                        provider.currentSecrets = { ...secrets };
+                    }
+
                     warnUnknownInfisicalKeys(secrets);
                     for (const key in secrets) {
                         const cleanValue = sanitizeValue(secrets[key]);
@@ -485,6 +491,29 @@ export async function initConfig() {
     console.log(`[Config] NODE_ENV=${process.env.NODE_ENV}, NODE_MODE=${envMode}, Telegram Test Mode: ${config.telegram.testMode}`);
     
     return config;
+}
+
+/**
+ * 手动触发配置刷新
+ */
+export async function refreshConfiguration() {
+    if (!provider) {
+        return { success: false, message: 'Secrets provider is not initialized (Infisical not configured)' };
+    }
+
+    try {
+        console.log('🔄 Manual configuration refresh triggered...');
+        const newSecrets = await provider.fetchSecrets();
+        
+        // detectChanges 会对比配置并在发生变化时触发 configChanged 事件
+        // configChanged 事件已被 initConfig 中的监听器处理
+        provider.detectChanges(newSecrets);
+        
+        return { success: true, message: 'Configuration refresh completed' };
+    } catch (error) {
+        console.error('❌ Manual configuration refresh failed:', error);
+        return { success: false, message: `Refresh failed: ${error.message}` };
+    }
 }
 
 export function validateConfig() {
