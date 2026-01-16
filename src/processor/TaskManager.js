@@ -390,11 +390,9 @@ export class TaskManager {
     static async addBatchTasks(target, messages, userId) {
         const chatIdStr = (target?.userId ?? target?.chatId ?? target?.channelId ?? target?.id ?? target).toString();
 
-        const statusMsg = await runBotTaskWithRetry(
+        let statusMsg = await runBotTaskWithRetry(
             () => client.sendMessage(target, {
                 message: format(STRINGS.task.batch_captured, { count: messages.length }),
-                // 使用状态消息 msgId 作为批量取消标识，避免 groupedId 无法从 DB 反查的问题
-                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_msg_${statusMsg.id}`))],
                 parseMode: "html"
             }),
             userId,
@@ -402,6 +400,25 @@ export class TaskManager {
             false,
             10
         );
+
+        // 使用状态消息 msgId 作为批量取消标识，需在消息发送后更新按钮
+        try {
+            const updatedMsg = await runBotTaskWithRetry(
+                () => client.editMessage(target, {
+                    message: statusMsg.id,
+                    text: format(STRINGS.task.batch_captured, { count: messages.length }),
+                    buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_msg_${statusMsg.id}`))],
+                    parseMode: "html"
+                }),
+                userId,
+                { priority: PRIORITY.UI },
+                false,
+                3
+            );
+            if (updatedMsg) statusMsg = updatedMsg;
+        } catch (e) {
+            log.warn("Failed to add cancel button to batch message", e);
+        }
 
         const tasksData = [];
 

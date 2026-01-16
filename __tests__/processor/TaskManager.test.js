@@ -8,6 +8,7 @@ vi.mock('../../src/services/telegram.js', () => ({
     client: {
         getMessages: vi.fn().mockResolvedValue([]),
         sendMessage: vi.fn().mockResolvedValue(true),
+        editMessage: vi.fn().mockResolvedValue(true),
         downloadMedia: vi.fn().mockResolvedValue(true),
         connected: true,
     }
@@ -110,9 +111,10 @@ vi.mock('../../src/services/InstanceCoordinator.js', () => ({
 
 vi.mock('../../src/services/QueueService.js', () => ({
     queueService: {
-        publishTask: vi.fn().mockResolvedValue({ success: true }),
-        cancelTask: vi.fn().mockResolvedValue({ success: true }),
-        publishBatchTasks: vi.fn().mockResolvedValue({ success: true }),
+        enqueueDownloadTask: vi.fn().mockResolvedValue({ success: true }),
+        enqueueUploadTask: vi.fn().mockResolvedValue({ success: true }),
+        publish: vi.fn().mockResolvedValue({ success: true }),
+        batchPublish: vi.fn().mockResolvedValue({ success: true }),
     }
 }));
 
@@ -219,6 +221,65 @@ describe('TaskManager', () => {
     });
 
     describe('Batch operations', () => {
+        it('should add multiple batch tasks and update status message', async () => {
+            const { client } = await import('../../src/services/telegram.js');
+            const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+            const { queueService } = await import('../../src/services/QueueService.js');
+            
+            // Mock status message
+            const statusMsg = { id: 12345 };
+            client.sendMessage.mockResolvedValue(statusMsg);
+            client.editMessage.mockResolvedValue({ ...statusMsg, buttons: [] });
+            
+            // Mock getMediaInfo used in _createTaskObject
+            // Note: getMediaInfo is imported in TaskManager.js from ../utils/common.js.
+            // But we mocked dependencies in this file. 
+            // The file mocks ../utils/common.js? No, it imports it?
+            // Actually getMediaInfo is imported. We might need to mock it if it relies on complex logic, 
+            // but it usually just checks properties. 
+            // Let's provide mock messages that satisfy getMediaInfo.
+            
+            const messages = [
+                { 
+                    id: 100, 
+                    message: 'file1', 
+                    media: { document: { mimeType: 'video/mp4', size: 1000, attributes: [{ className: 'DocumentAttributeFilename', fileName: 'test1.mp4' }] } } 
+                },
+                { 
+                    id: 101, 
+                    message: 'file2', 
+                    media: { document: { mimeType: 'video/mp4', size: 2000, attributes: [{ className: 'DocumentAttributeFilename', fileName: 'test2.mp4' }] } } 
+                }
+            ];
+            const target = { id: 'chat123' };
+            const userId = 'user123';
+            
+            // We need to ensure _createTaskObject works. It uses getMediaInfo.
+            // Since we didn't mock utils/common.js, it uses real implementation.
+            // Real implementation of getMediaInfo checks msg.media... 
+            
+            await TaskManager.addBatchTasks(target, messages, userId);
+            
+            expect(client.sendMessage).toHaveBeenCalled();
+            
+            // Verify editMessage called with correct ID
+            expect(client.editMessage).toHaveBeenCalledWith(
+                target,
+                expect.objectContaining({
+                    message: 12345,
+                    buttons: expect.arrayContaining([
+                        expect.objectContaining({
+                            text: expect.any(String)
+                        })
+                    ])
+                })
+            );
+            
+            expect(TaskRepository.createBatch).toHaveBeenCalled();
+            // Check enqueueDownloadTask was called
+            expect(queueService.enqueueDownloadTask).toHaveBeenCalled();
+        });
+
         it('should add multiple batch tasks', async () => {
             // Test exists but implementation details depend on actual TaskManager logic
             expect(TaskManager.addBatchTasks).toBeDefined();
