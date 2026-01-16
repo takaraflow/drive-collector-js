@@ -1,5 +1,13 @@
 import { BaseDriveProvider } from "./BaseDriveProvider.js";
 import { MegaProvider } from "./MegaProvider.js";
+import { GoogleDriveProvider } from "./GoogleDriveProvider.js";
+import { OneDriveProvider } from "./OneDriveProvider.js";
+import { PikPakProvider } from "./PikPakProvider.js";
+import { PCloudProvider } from "./PCloudProvider.js";
+import { DropboxProvider } from "./DropboxProvider.js";
+import { BoxProvider } from "./BoxProvider.js";
+import { WebDAVProvider } from "./WebDAVProvider.js";
+import { OSSProvider } from "./OSSProvider.js";
 import { logger } from "../logger/index.js";
 
 const log = logger.withModule ? logger.withModule('DriveProviderFactory') : logger;
@@ -116,3 +124,11 @@ export class DriveProviderFactory {
 
 // 注册内置 Provider
 DriveProviderFactory.register('mega', MegaProvider);
+DriveProviderFactory.register('drive', GoogleDriveProvider);
+DriveProviderFactory.register('onedrive', OneDriveProvider);
+DriveProviderFactory.register('pikpak', PikPakProvider);
+DriveProviderFactory.register('pcloud', PCloudProvider);
+DriveProviderFactory.register('dropbox', DropboxProvider);
+DriveProviderFactory.register('box', BoxProvider);
+DriveProviderFactory.register('webdav', WebDAVProvider);
+DriveProviderFactory.register('oss', OSSProvider);

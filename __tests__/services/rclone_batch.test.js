@@ -110,7 +110,7 @@ describe('CloudTool Batch Upload', () => {
 
         // 模拟 _getUserConfig
         vi.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({
-            type: 'onedrive',
+            type: 'mega',
             user: 'test',
             pass: 'pass'
         });
@@ -126,7 +126,7 @@ describe('CloudTool Batch Upload', () => {
             '--config', '/dev/null',
             'copy',
             expect.stringContaining('downloads'),
-            expect.stringContaining(':onedrive,user="test",pass="pass":test-remote/'),
+            expect.stringContaining(':mega,user="test",pass="pass":test-remote/'),
             '--files-from-raw', '-',
             '--progress',
             '--use-json-log'

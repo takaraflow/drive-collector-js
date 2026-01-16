@@ -1,1 +1,9 @@
 export { STRINGS as MEGA_STRINGS } from './mega.js';
+export { STRINGS as GDRIVE_STRINGS } from './google_drive.js';
+export { STRINGS as ONEDRIVE_STRINGS } from './onedrive.js';
+export { STRINGS as PIKPAK_STRINGS } from './pikpak.js';
+export { STRINGS as PCLOUD_STRINGS } from './pcloud.js';
+export { STRINGS as DROPBOX_STRINGS } from './dropbox.js';
+export { STRINGS as BOX_STRINGS } from './box.js';
+export { STRINGS as WEBDAV_STRINGS } from './webdav.js';
+export { STRINGS as OSS_STRINGS } from './oss.js';

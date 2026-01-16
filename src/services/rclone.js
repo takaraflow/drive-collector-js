@@ -38,14 +38,17 @@ export class CloudTool {
         
         // 2. 使用 Provider 处理密码混淆
         const provider = DriveProviderFactory.getProvider(drive.type);
-        let finalPass = provider.processPassword(driveConfig.pass);
+        
+        // Clone config and inject type
+        const config = { ...driveConfig, type: drive.type };
+        
+        // Allow provider to process password if present
+        if (config.pass) {
+            config.pass = provider.processPassword(config.pass);
+        }
         
         // 3. 返回清洗后的配置对象
-        return {
-            type: drive.type,
-            user: driveConfig.user,
-            pass: finalPass
-        };
+        return config;
     }
 
     /**
@@ -77,10 +80,16 @@ export class CloudTool {
      * 辅助方法：构造安全的连接字符串
      */
     static _getConnectionString(conf) {
-        // 【修复 2】先转义反斜杠，再转义双引号
-        const user = (conf.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        const pass = (conf.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        return `:${conf.type},user="${user}",pass="${pass}":`;
+        try {
+            const provider = DriveProviderFactory.getProvider(conf.type);
+            return provider.getConnectionString(conf);
+        } catch (e) {
+            // Fallback for unknown types or errors (though this shouldn't happen with valid types)
+            log.error(`Failed to get connection string for type ${conf.type}:`, e);
+            const user = (conf.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            const pass = (conf.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            return `:${conf.type},user="${user}",pass="${pass}":`;
+        }
     }
 
     /**
@@ -186,16 +195,17 @@ export class CloudTool {
     /**
      * 【重构】验证配置是否有效 (异步非阻塞版)
      */
-    static async validateConfig(type, configData) {
+    static async validateConfig(type, configData, checkCommand = "about") {
         return new Promise((resolve) => {
             try {
-                let finalPass = configData.pass;
-                if (type === 'mega') {
-                     finalPass = CloudTool._obscure(finalPass);
-                }
+                // Construct the full config object for _getConnectionString
+                // Assuming configData contains the necessary fields (user/pass or token)
+                // Password processing should be done by the caller (Provider) before calling this.
+                const conf = { ...configData, type };
 
-                const connectionString = this._getConnectionString({ type, user: configData.user, pass: finalPass });
-                const args = ["--config", "/dev/null", "about", connectionString, "--json", "--timeout", "15s"];
+                const connectionString = this._getConnectionString(conf);
+                const args = ["--config", "/dev/null", checkCommand, connectionString, "--json", "--timeout", "15s"];
+
                 
                 const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
 
