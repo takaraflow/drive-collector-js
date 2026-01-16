@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.27.0](https://github.com/YoungSx/drive-collector-js/compare/v4.26.0...v4.27.0) (2026-01-16)
+
+
+### ♻️ 代码重构
+
+* media group buffer storage to use atomic operations ([5850b0d](https://github.com/YoungSx/drive-collector-js/commit/5850b0d88e6e20a327f427594df64671d89f4468))
+* MediaGroupBuffer for better testability and reliability ([2307ee2](https://github.com/YoungSx/drive-collector-js/commit/2307ee26639b45ec77839408251f6cddf1eaba6f))
+
+
+### 🔧 其他任务
+
+* adds stream forwarding status logging ([34ac3bb](https://github.com/YoungSx/drive-collector-js/commit/34ac3bb556ece5d1207115c9338380a10248061f))
+
+
+### 🐛 问题修复
+
+* adds batch task processing with status message updates ([d100237](https://github.com/YoungSx/drive-collector-js/commit/d1002371f9c7146b22af5295f730a6346663d815))
+* adds group task detection for QStash webhooks ([5631a1b](https://github.com/YoungSx/drive-collector-js/commit/5631a1bc4ed48acfcec49d3676e5e1a0ef74acc5))
+* adds remote flush support for media group buffer ([f774a36](https://github.com/YoungSx/drive-collector-js/commit/f774a367ced71d827e9f136fb4a09fce5392d82c))
+* adds role management methods to AuthGuard ([06a56b9](https://github.com/YoungSx/drive-collector-js/commit/06a56b958a2c147eecb0be3605aa52a1aa68ce68))
+* improves admin command setup with proper peer validation ([c8dc915](https://github.com/YoungSx/drive-collector-js/commit/c8dc915921f173ef5f5fca9f11ea77fc4df1e09b))
+* improves lock acquisition robustness with non-numeric TTL handling ([e167bef](https://github.com/YoungSx/drive-collector-js/commit/e167bef0e0b58c69277578258603c7e2725cddde))
+* simplifies local timer configuration logic ([6e494c0](https://github.com/YoungSx/drive-collector-js/commit/6e494c0023d3557402ffd70da8bee5fe274fa417))
+
+
+### ✨ 新特性
+
+* adds admin promotion/demotion commands ([ea13938](https://github.com/YoungSx/drive-collector-js/commit/ea13938bc9d4982646fd5bf1885d82e3e85f5de1))
+* adds error handling for admin command setup ([cab07bc](https://github.com/YoungSx/drive-collector-js/commit/cab07bc44039c7ab4d8cd9974ddf9ea193e37f70))
+* adds manual configuration refresh via webhook ([050a5c5](https://github.com/YoungSx/drive-collector-js/commit/050a5c5d7d7ad96bb732c23ec9e209f22411d0d7))
+* adds New Relic logger support and improves logger architecture ([ed2847d](https://github.com/YoungSx/drive-collector-js/commit/ed2847da2baefa8c1ceffdf41b8889ad10d356e9))
+* enhances AuthGuard with RBAC and maintenance mode support ([0eec0a2](https://github.com/YoungSx/drive-collector-js/commit/0eec0a2782ba668d8aa4de964a13b5d0819b19f4))
+
 ## [4.26.0](https://github.com/YoungSx/drive-collector-js/compare/v4.25.0...v4.26.0) (2026-01-15)
 
 
