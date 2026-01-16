@@ -6,6 +6,7 @@
  */
 
 import { execSync } from 'child_process';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { SecretsOrchestrator } from '../src/config/SecretsOrchestrator.js';
@@ -70,7 +71,7 @@ Examples:
  */
 function loadEnvironment(env) {
     const normalizedEnv = normalizeEnvName(env);
-    loadEnvFile(require('fs'), normalizedEnv);
+    loadEnvFile(fs, normalizedEnv);
     
     // Set build-specific environment variables
     process.env.BUILD_TIME = new Date().toISOString();
@@ -136,13 +137,13 @@ async function executeSecretsInjection(options) {
 /**
  * Execute standard build process
  */
-function executeBuild() {
+function executeBuild(options) {
     console.log('🏗️ Starting standard build process...');
     
     try {
-        // Execute the original build script
-        const buildScript = path.join(__dirname, 'build.sh');
-        execSync(`bash "${buildScript}"`, {
+        // Execute the build-utils.js script using Node.js instead of Bash
+        const buildUtilsScript = path.join(__dirname, 'build-utils.js');
+        execSync(`node "${buildUtilsScript}" --env=${options.env}`, {
             stdio: 'inherit',
             cwd: projectRoot
         });
@@ -167,7 +168,7 @@ async function main() {
         process.exit(0);
     }
     
-    console.log('=== Enhanced Build with Secrets Management ===\n');
+    console.log('=== Build with Secrets Management ===\n');
     console.log(`Environment: ${options.env}`);
     console.log(`Dry Run: ${options.dryRun}`);
     console.log(`Skip Secrets: ${options.skipSecrets}`);
@@ -191,7 +192,7 @@ async function main() {
         
         // Execute standard build process
         if (success && !options.dryRun) {
-            success = executeBuild();
+            success = executeBuild(options);
         }
         
         if (success) {

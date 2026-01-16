@@ -8,6 +8,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -403,6 +404,33 @@ function determineVersion(projectRoot) {
     }
 }
 
+// 执行 esbuild 构建
+function runEsbuild() {
+    console.log('执行 esbuild 构建（版本通过 Wrangler 变量注入）...');
+    
+    const esbuildPath = path.join(projectRoot, 'node_modules', '.bin', 'esbuild');
+    const esbuildCmd = process.platform === 'win32' ? `${esbuildPath}.cmd` : esbuildPath;
+    
+    try {
+        if (fs.existsSync(esbuildCmd)) {
+            console.log(`使用 ${esbuildCmd}...`);
+            execSync(`"${esbuildCmd}" src/index.js --bundle --format=esm --outdir=dist --external:node:*`, {
+                stdio: 'inherit',
+                cwd: projectRoot
+            });
+        } else {
+            console.log('使用 npx 运行 esbuild...');
+            execSync('npx esbuild src/index.js --bundle --format=esm --outdir=dist --external:node:*', {
+                stdio: 'inherit',
+                cwd: projectRoot
+            });
+        }
+    } catch (error) {
+        console.error('错误: esbuild 构建失败', error.message);
+        process.exit(1);
+    }
+}
+
 // 主函数
 function main() {
     try {
@@ -453,6 +481,9 @@ function main() {
 
         extractVariablesFromManifest();
         generateWranglerToml();
+        
+        // 增加 esbuild 运行步骤
+        runEsbuild();
     } catch (error) {
         console.error('构建失败:', error.message);
         process.exit(1);

@@ -16,6 +16,7 @@ jobs:
       INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
       # Use secret for project ID to support both GHA vars and local 'act' secrets
       INFISICAL_PROJECT_ID: ${{ vars.INFISICAL_PROJECT_ID }}
+      USE_ORCHESTRATED_SECRETS: 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,35 +40,28 @@ jobs:
             echo "NODE_ENV=$DEFAULT_NODE_ENV" >> "$GITHUB_ENV"
           fi
 
-      - name: Install Infisical CLI and jq
+      - name: Normalize Environment
         run: |
-          curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | sudo -E bash
-          sudo apt-get update && sudo apt-get install -y infisical jq
-
+          ENV_ALIAS=$(echo "${NODE_ENV:-dev}" | tr '[:upper:]' '[:lower:]')
+          case "$ENV_ALIAS" in
+            prod|production) TARGET_ENV="prod" ;;
+            dev|development) TARGET_ENV="dev" ;;
+            pre|staging) TARGET_ENV="pre" ;;
+            *) TARGET_ENV="dev" ;;
+          esac
+          echo "TARGET_ENV=$TARGET_ENV" >> "$GITHUB_ENV"
+          # Override DEPLOY_ENV and NODE_ENV with the normalized short name for consistency
+          echo "DEPLOY_ENV=$TARGET_ENV" >> "$GITHUB_ENV"
+          echo "NODE_ENV=$TARGET_ENV" >> "$GITHUB_ENV"
 
       - name: Validate Manifest
         run: npm run validate:manifest
-      - name: Build
-        run: |
-          ENV_ALIAS=$(echo "${NODE_ENV:-dev}" | tr '[:upper:]' '[:lower:]')
-          case "$ENV_ALIAS" in
-            prod|production) INFISICAL_ENV="prod" ;;
-            dev|development) INFISICAL_ENV="dev" ;;
-            pre|staging) INFISICAL_ENV="pre" ;;
-            *) INFISICAL_ENV="dev" ;;
-          esac
-          infisical run --env="$INFISICAL_ENV" --projectId="$INFISICAL_PROJECT_ID" -- npm run build -- --env=${INFISICAL_ENV}
 
-      - name: Deploy with Secrets
-        run: |
-          ENV_ALIAS=$(echo "${NODE_ENV:-dev}" | tr '[:upper:]' '[:lower:]')
-          case "$ENV_ALIAS" in
-            prod|production) INFISICAL_ENV="prod" ;;
-            dev|development) INFISICAL_ENV="dev" ;;
-            pre|staging) INFISICAL_ENV="pre" ;;
-            *) INFISICAL_ENV="dev" ;;
-          esac
-          infisical run --env="$INFISICAL_ENV" --projectId="$INFISICAL_PROJECT_ID" -- node scripts/deploy-with-secrets.js
+      - name: Build with Secrets Orchestrator
+        run: npm run build -- --env=${{ env.TARGET_ENV }}
+
+      - name: Deploy with Secrets Orchestrator
+        run: node scripts/deploy-with-secrets.js
 
       - name: Notify Bark result
         if: always()

@@ -40,17 +40,13 @@ export class InfisicalSecretsProvider extends CloudSecretsProvider {
             enableHashing: true,
             includePatterns: [],
             excludePatterns: [],
-            ...config
-        });
-        
-        this.config = {
             environment: 'dev',
             path: '/',
             includeSecrets: [],
             excludeSecrets: [],
             importSecrets: true,
             ...config
-        };
+        });
         
         this.client = null;
         this.isAuthenticated = false;
@@ -71,20 +67,26 @@ export class InfisicalSecretsProvider extends CloudSecretsProvider {
      */
     async authenticate() {
         try {
-            const clientConfig = {
-                siteURL: this.config.auth?.siteURL
-            };
+            const clientConfig = {};
+            if (this.config.auth?.siteURL) {
+                clientConfig.siteURL = this.config.auth.siteURL;
+            }
             
             if (this.config.auth?.token) {
                 // Service Token authentication
+                this.client = new InfisicalClient({
+                    ...clientConfig,
+                    accessToken: this.config.auth.token
+                });
+            } else if (this.config.auth?.universalAuthClientId && this.config.auth?.universalAuthClientSecret) {
+                // Universal Auth
                 this.client = new InfisicalClient({
                     ...clientConfig,
                     auth: {
                         universalAuth: {
                             clientId: this.config.auth.universalAuthClientId,
                             clientSecret: this.config.auth.universalAuthClientSecret
-                        },
-                        serviceToken: this.config.auth.token
+                        }
                     }
                 });
             } else if (this.config.auth?.machineIdentityClientId) {
@@ -103,18 +105,12 @@ export class InfisicalSecretsProvider extends CloudSecretsProvider {
                 throw new Error('No valid authentication method provided');
             }
             
-            // Test authentication by fetching a simple secret
-            await this.client.listSecrets({
-                projectId: this.config.projectId,
-                environment: this._mapEnvironment(this.config.environment),
-                path: this.config.path
-            });
-            
             this.isAuthenticated = true;
             
         } catch (error) {
             this.isAuthenticated = false;
-            throw new Error(`Infisical authentication failed: ${error.message}`);
+            const message = error?.message || (typeof error === 'string' ? error : 'Unknown error');
+            throw new Error(`Infisical authentication failed: ${message}`);
         }
     }
     
@@ -128,19 +124,20 @@ export class InfisicalSecretsProvider extends CloudSecretsProvider {
         }
         
         try {
-            const response = await this.client.listSecrets({
+            const secrets = await this.client.listSecrets({
                 projectId: this.config.projectId,
                 environment: this._mapEnvironment(this.config.environment),
                 path: this.config.path,
-                includeSecrets: this.config.includeSecrets.length > 0 ? this.config.includeSecrets : undefined,
-                excludeSecrets: this.config.excludeSecrets.length > 0 ? this.config.excludeSecrets : undefined
+                includeSecrets: (this.config.includeSecrets && this.config.includeSecrets.length > 0) ? this.config.includeSecrets : undefined,
+                excludeSecrets: (this.config.excludeSecrets && this.config.excludeSecrets.length > 0) ? this.config.excludeSecrets : undefined
             });
             
             this.lastFetchTime = new Date().toISOString();
             
             // Transform Infisical response to standard format
+            // The SDK returns an array of secret objects
             const standardResponse = {
-                secrets: response.secrets.map(secret => ({
+                secrets: secrets.map(secret => ({
                     key: secret.secretKey,
                     value: secret.secretValue,
                     version: secret.version,
@@ -152,7 +149,8 @@ export class InfisicalSecretsProvider extends CloudSecretsProvider {
             return this.parseSecrets(standardResponse);
             
         } catch (error) {
-            throw new Error(`Failed to fetch secrets from Infisical: ${error.message}`);
+            const message = error?.message || (typeof error === 'string' ? error : 'Unknown error');
+            throw new Error(`Failed to fetch secrets from Infisical: ${message}`);
         }
     }
     
@@ -168,8 +166,7 @@ export class InfisicalSecretsProvider extends CloudSecretsProvider {
             'development': 'dev',
             'stage': 'staging',
             'staging': 'staging',
-            'pre': 'pre-production',
-            'pre-production': 'pre-production',
+            'pre': 'pre',
             'prod': 'prod',
             'production': 'prod'
         };

@@ -319,11 +319,12 @@ export class BaseSecretsProvider extends EventEmitter {
      * @returns {void}
      */
     _onError(error, context) {
+        const safeError = error || new Error('Unknown error');
         this.emit('error', {
             error: {
-                message: error.message,
-                stack: error.stack,
-                code: error.code
+                message: safeError.message || 'Unknown error',
+                stack: safeError.stack,
+                code: safeError.code
             },
             context,
             provider: this.constructor.name,
