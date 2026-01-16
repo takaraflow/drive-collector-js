@@ -4,13 +4,27 @@ import { logger } from "../services/logger/index.js";
 
 const log = logger.withModule ? logger.withModule('AuthGuard') : logger;
 
-const ROLE_ORDER = ["user", "vip", "admin", "owner"];
+const ROLE_ORDER = ["banned", "user", "trusted", "admin", "owner"];
 const DEFAULT_ROLE = "user";
 const CACHE_MS = 5 * 60 * 1000;
 
 const ACL = {
-    "maintenance:bypass": ["admin", "owner"],
-    "task:cancel:any": ["admin", "owner"]
+    // === 基础功能 ===
+    "task:create": ["user", "trusted", "admin", "owner"], // 提交下载任务
+    "file:view":   ["user", "trusted", "admin", "owner"], // 查看文件列表
+    
+    // === 敏感操作 (核心加固点) ===
+    "drive:view":  ["user", "trusted", "admin", "owner"], // 查看自己的网盘配置
+    "drive:edit":  ["user", "trusted", "admin", "owner"], // 修改/解绑自己的网盘
+    
+    // === 管理功能 ===
+    "task:manage": ["admin", "owner"],                    // 管理(取消)他人的任务
+    "user:manage": ["admin", "owner"],                    // 封禁/解封/提升用户
+    "system:admin":["admin", "owner"],                    // 系统诊断、维护模式切换
+    
+    // === 特殊权限 ===
+    "maintenance:bypass": ["admin", "owner"],             // 绕过维护模式
+    "task:cancel:any":    ["admin", "owner"]              // 取消任意任务
 };
 
 const roleRank = (role) => ROLE_ORDER.indexOf(role);

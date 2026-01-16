@@ -16,6 +16,8 @@ export const STRINGS = {
               "/open_service - 🔓 开启服务 (公开模式)\n" +
                "/close_service - 🔒 关闭服务 (维护模式)\n" +
                "/diagnosis - 🩺 系统诊断\n" +
+               "/ban - 🚫 封禁用户 (UID)\n" +
+               "/unban - ✅ 解封用户 (UID)\n" +
                "/pro_admin - 👑 设置管理员 (UID)\n" +
                "/de_admin - 🗑️ 取消管理员 (UID)\n\n" +
                "<b>支持的链接类型：</b>\n" +

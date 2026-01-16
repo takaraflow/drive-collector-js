@@ -28,6 +28,30 @@ const log = logger.withModule('Dispatcher');
 
 // 创建带 perf 上下文的 logger 用于性能日志
 const logPerf = () => log.withContext({ perf: true });
+const FILES_REFRESH_DELAY_MS = process.env.NODE_ENV === 'test' ? 0 : 50;
+
+// 命令权限映射表 (RBAC)
+const COMMAND_PERMISSIONS = {
+    // 网盘管理 (高危)
+    "/drive":             "drive:edit",
+    "/logout":            "drive:edit",
+    "/unbind":            "drive:edit",
+    "/remote_folder":     "drive:edit",
+    "/set_remote_folder": "drive:edit",
+    
+    // 系统管理
+    "/diagnosis":         "system:admin",
+    "/open_service":      "system:admin",
+    "/close_service":     "system:admin",
+    "/status_public":     "system:admin",
+    "/status_private":    "system:admin",
+    
+    // 用户管理
+    "/pro_admin":         "user:manage",
+    "/de_admin":          "user:manage",
+    "/ban":               "user:manage",
+    "/unban":             "user:manage"
+};
 
 /**
  * 消息分发器 (Dispatcher)
@@ -156,6 +180,12 @@ export class Dispatcher {
 
         const isOwner = userId === config.ownerId?.toString();
 
+        // 1. 黑名单拦截 (最高优先级，连 Owner 也不能例外，防止账号被盗后的紧急风控，虽然 owner 很难被 setRole 修改)
+        if (role === 'banned') {
+            logPerf().info(`消息被黑名单拦截 (User: ${userId})`);
+            return false; 
+        }
+
         if (!isOwner && !(await AuthGuard.can(userId, "maintenance:bypass"))) {
             if (mode !== 'public') {
                 const text = STRINGS.system.maintenance_mode;
@@ -249,14 +279,22 @@ export class Dispatcher {
         }
 
         if (!isNaN(page)) {
-            if (isRefresh) await safeEdit(event.userId, event.msgId, STRINGS.files.syncing, null, userId);
-            await new Promise(r => setTimeout(r, 50));
+        if (isRefresh) await safeEdit(event.userId, event.msgId, STRINGS.files.syncing, null, userId);
+            await this._waitForFilesRefreshDelay();
             
             const files = await CloudTool.listRemoteFiles(userId, isRefresh);
             const { text, buttons } = await UIHelper.renderFilesPage(files, page, 6, CloudTool.isLoading(), userId);
             await safeEdit(event.userId, event.msgId, text, buttons, userId);
         }
         await answerCallback(isRefresh ? STRINGS.files.refresh_success : "");
+    }
+
+    /**
+     * [私有] 在刷新线程中加入延迟以防抖（测试环境下会跳过）
+     */
+    static async _waitForFilesRefreshDelay() {
+        if (FILES_REFRESH_DELAY_MS <= 0) return;
+        await new Promise((resolve) => setTimeout(resolve, FILES_REFRESH_DELAY_MS));
     }
 
     /**
@@ -268,10 +306,13 @@ export class Dispatcher {
 
         // 🚀 性能优化：为 /start 命令添加快速路径，只检查维护模式，避免查询用户角色
         if (text === "/start") {
-            const mode = await SettingsRepository.get("access_mode", "public");
+            const [mode, canBypass] = await Promise.all([
+                SettingsRepository.get("access_mode", "public"),
+                AuthGuard.can(userId, "maintenance:bypass")
+            ]);
             const isOwner = userId === config.ownerId?.toString();
 
-            if (!isOwner && mode !== 'public') {
+            if (!isOwner && mode !== 'public' && !canBypass) {
                 return await runBotTaskWithRetry(() => client.sendMessage(target, {
                     message: STRINGS.system.maintenance_mode,
                     parseMode: "html"
@@ -310,13 +351,30 @@ export class Dispatcher {
 
         // 2. 文本命令路由
         if (text && !message.media) {
-            switch (text.split(' ')[0]) { // 只匹配第一段，如 /drive
+            const command = text.split(' ')[0]; // 只匹配第一段，如 /drive
+            
+            // 🛡️ 统一权限拦截 (RBAC Middleware)
+            const requiredPerm = COMMAND_PERMISSIONS[command];
+            if (requiredPerm) {
+                // Owner 永远有权限，跳过检查 (虽然 AuthGuard.can 也会放行 owner，但这里显式一点)
+                const isOwner = userId === config.ownerId?.toString();
+                if (!isOwner && !(await AuthGuard.can(userId, requiredPerm))) {
+                    return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                        message: STRINGS.status.no_permission || "❌ 您没有权限执行此操作。",
+                        parseMode: "html"
+                    }), userId, {}, false, 3);
+                }
+            }
+
+            switch (command) { 
                 case "/drive":
                     return await DriveConfigFlow.sendDriveManager(target, userId);
                 case "/logout":
                 case "/unbind":
                     return await DriveConfigFlow.handleUnbind(target, userId);
                 case "/files":
+                    // /files 本身是基础权限，AuthGuard 默认 ACL 允许 user/trusted/admin，
+                    // 但如果你想对 guest 限制，可以在 COMMAND_PERMISSIONS 加 "/files": "file:view"
                     return await this._handleFilesCommand(target, userId);
                 case "/status":
                     return await this._handleStatusCommand(target, userId, text);
@@ -336,6 +394,10 @@ export class Dispatcher {
                     return await this._handleAdminPromotion(target, userId, text, true);
                 case "/de_admin":
                     return await this._handleAdminPromotion(target, userId, text, false);
+                case "/ban":
+                    return await this._handleBanCommand(target, userId, text, true);
+                case "/unban":
+                    return await this._handleBanCommand(target, userId, text, false);
                 case "/remote_folder":
                     return await this._handleRemoteFolderCommand(target, userId);
                 case "/set_remote_folder":
@@ -730,6 +792,65 @@ export class Dispatcher {
             }
         } catch (error) {
             log.error("Failed to update user role:", error);
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: "❌ 数据库操作失败，请检查 UID 是否正确。",
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        }
+    }
+
+    /**
+     * [私有] 处理管理员封禁/解封命令 (/ban, /unban)
+     */
+    static async _handleBanCommand(target, userId, fullText, isBan) {
+        // 权限检查已在中间件完成，这里直接执行逻辑
+        const parts = fullText.split(' ');
+        if (parts.length < 2) {
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: `❌ 请提供 UID。用法: <code>${parts[0]} [UID]</code>`,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        }
+
+        const targetUid = parts[1].trim();
+        
+        // 防止封禁自己或 Owner
+        if (isBan) {
+            if (targetUid === userId) {
+                return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: "❌ 不能封禁自己。",
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            }
+            if (targetUid === config.ownerId?.toString()) {
+                return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: "❌ 不能封禁 Owner。",
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            }
+        }
+
+        try {
+            if (isBan) {
+                await AuthGuard.setRole(targetUid, 'banned');
+                // 立即清理该用户的会话
+                await SessionManager.clear(targetUid);
+                // 可以考虑清理该用户的网盘绑定 (可选，暂时不清理，解封后还能用)
+                
+                return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: `🚫 已封禁用户 <code>${targetUid}</code>。`,
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            } else {
+                // 解封恢复为默认角色 'user'
+                await AuthGuard.setRole(targetUid, 'user');
+                return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: `✅ 已解封用户 <code>${targetUid}</code> (重置为 user)。`,
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            }
+        } catch (error) {
+            log.error("Failed to update user ban status:", error);
             return await runBotTaskWithRetry(() => client.sendMessage(target, {
                 message: "❌ 数据库操作失败，请检查 UID 是否正确。",
                 parseMode: "html"
