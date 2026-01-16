@@ -16,7 +16,8 @@
     "rclone-integration",
     "s3-transfer",
     "sec-transfer",
-    "diagnosis-reporting"
+    "diagnosis-reporting",
+    "newrelic-logging"
   ],
   "behaviors": {
     "telegramHandler": {
@@ -1139,6 +1140,27 @@
         "type": "string",
         "required": false,
         "description": "实例间通信安全秘钥"
+      },
+      "NEW_RELIC_LICENSE_KEY": {
+        "type": "string",
+        "required": false,
+        "description": "New Relic 许可证密钥",
+        "sensitive": true
+      },
+      "NEW_RELIC_REGION": {
+        "type": "string",
+        "required": false,
+        "enum": [
+          "US",
+          "EU"
+        ],
+        "default": "US",
+        "description": "New Relic 区域 (US 或 EU)"
+      },
+      "NEW_RELIC_APP_NAME": {
+        "type": "string",
+        "required": false,
+        "description": "New Relic 应用名称"
       }
     }
   },
