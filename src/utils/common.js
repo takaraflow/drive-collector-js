@@ -77,7 +77,8 @@ export const getMediaInfo = (input) => {
         name = `transfer_${timestamp}_${nonce}${ext}`;
     }
     const size = obj.size || (obj.sizes ? obj.sizes[obj.sizes.length - 1].size : 0);
-    return { name, size };
+    const parsedSize = parseInt(size, 10);
+    return { name, size: Number.isFinite(parsedSize) ? parsedSize : 0 };
 };
 
 // 统一更新任务状态 (带取消按钮)

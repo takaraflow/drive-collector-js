@@ -67,7 +67,7 @@ class StreamTransferService {
                     'x-user-id': userId,
                     'x-is-last': isLast ? 'true' : 'false',
                     'x-chunk-index': chunkIndex.toString(),
-                    'x-total-size': totalSize.toString(),
+                    'x-total-size': (totalSize || 0).toString(),
                     'x-leader-url': leaderUrl || '',
                     'x-source-instance-id': instanceCoordinator.instanceId,
                     'x-chat-id': chatId || '',
