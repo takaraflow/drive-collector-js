@@ -141,9 +141,12 @@ export class MessageHandler {
                 // 2. 为管理员设置专属菜单（包含普通命令 + 管理员指令，排在下方）
                 if (config.ownerId) {
                     try {
+                        // 尝试解析 ownerId 为 InputPeer，确保 BotCommandScopePeer 接收到有效的 peer 对象
+                        const ownerPeer = await client.getInputEntity(config.ownerId);
+                        
                         await client.invoke(new Api.bots.SetBotCommands({
                             scope: new Api.BotCommandScopePeer({
-                                peer: config.ownerId
+                                peer: ownerPeer
                             }),
                             langCode: '',
                             commands: [
@@ -154,7 +157,7 @@ export class MessageHandler {
                             ]
                         }));
                     } catch (e) {
-                        log.warn("⚠️ 设置管理员命令失败 (可能是 OWNER_ID 格式不正确):", e.message);
+                        log.warn("⚠️ 设置管理员命令失败 (可能是 OWNER_ID 格式不正确或用户未交互):", e.message);
                     }
                 }
             } catch (e) {
