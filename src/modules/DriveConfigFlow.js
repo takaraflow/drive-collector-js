@@ -14,6 +14,7 @@ const log = logger.withModule ? logger.withModule('DriveConfigFlow') : logger;
 
 // 网盘国际化字符串缓存
 const driveStringsCache = new Map();
+const CANCEL_KEYWORDS = new Set(["/cancel", "cancel", "/取消", "取消"]);
 
 /**
  * 驱动配置流程模块
@@ -26,6 +27,12 @@ export class DriveConfigFlow {
      */
     static getSupportedDrives() {
         return DriveProviderFactory.getSupportedDrives();
+    }
+
+    static _appendCancelHint(prompt, driveStrings) {
+        const hint = driveStrings?.cancel_prompt || STRINGS.drive.cancel_prompt;
+        if (!prompt) return hint || '';
+        return hint ? `${prompt}\n\n${hint}` : prompt;
     }
 
     /**
@@ -150,8 +157,9 @@ export class DriveConfigFlow {
                 // 获取国际化文本
                 const driveStrings = await this._getDriveStrings(driveType);
                 const prompt = driveStrings[firstStep.prompt] || STRINGS.drive.check_input;
+                const message = this._appendCancelHint(prompt, driveStrings);
                 
-                await runBotTask(() => client.sendMessage(event.userId, { message: prompt, parseMode: "html" }), userId, { priority: PRIORITY.HIGH });
+                await runBotTask(() => client.sendMessage(event.userId, { message, parseMode: "html" }), userId, { priority: PRIORITY.HIGH });
                 return STRINGS.drive.check_input;
             }
         }
@@ -194,6 +202,14 @@ export class DriveConfigFlow {
 
         const driveStrings = await this._getDriveStrings(driveType);
 
+        const normalizedText = (text || "").trim();
+        if (CANCEL_KEYWORDS.has(normalizedText.toLowerCase())) {
+            await SessionManager.clear(userId);
+            const cancelMessage = driveStrings.cancelled || STRINGS.drive.cancelled;
+            await runBotTask(() => client.sendMessage(peerId, { message: cancelMessage, parseMode: "html" }), userId, { priority: PRIORITY.HIGH });
+            return true;
+        }
+
         let verifyingMessage = null;
         if (isFinalStep) {
             try {
@@ -230,7 +246,8 @@ export class DriveConfigFlow {
                 await SessionManager.update(userId, `${driveType.toUpperCase()}_${result.nextStep}`, result.data);
 
                 const prompt = driveStrings[result.message] || result.message;
-                await runBotTask(() => client.sendMessage(peerId, { message: prompt, parseMode: "html" }), userId, { priority: PRIORITY.HIGH });
+                const message = this._appendCancelHint(prompt, driveStrings);
+                await runBotTask(() => client.sendMessage(peerId, { message, parseMode: "html" }), userId, { priority: PRIORITY.HIGH });
                 return true;
             }
 

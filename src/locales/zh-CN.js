@@ -78,6 +78,8 @@ export const STRINGS = {
         btn_files: "📁 浏览文件",
         btn_unbind: "❌ 解绑网盘",
         btn_bind_mega: "➕ 绑定 Mega 网盘",
+        cancel_prompt: "发送 /cancel 或输入 取消 可随时退出绑定流程。",
+        cancelled: "绑定流程已取消，输入 /drive 可重新开始。",
         not_found: "🚫 未找到对应网盘",
         unbind_confirm: "⚠️ <b>确定要解绑该网盘吗？</b>\n\n解绑后将无法进行转存，且再次使用需重新输入密码。",
         unbind_success: "✅ <b>解绑成功</b>\n\n您的账号信息已从本系统中移除。",

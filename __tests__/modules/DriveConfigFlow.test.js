@@ -67,6 +67,9 @@ vi.mock("../../src/utils/limiter.js", () => ({
     }
 }));
 
+const CANCEL_PROMPT = "发送 /cancel 或输入 取消 可随时退出绑定流程。";
+const CANCELLED_MESSAGE = "绑定流程已取消，输入 /drive 可重新开始。";
+
 // Mock locales
 vi.mock("../../src/locales/zh-CN.js", () => ({
     STRINGS: {
@@ -96,7 +99,9 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
             set_default_success: "设为默认成功",
             no_drive_found: "没有找到已绑定的网盘",
             btn_bind: "绑定",
-            btn_bind_other: "绑定其他网盘"
+            btn_bind_other: "绑定其他网盘",
+            cancel_prompt: CANCEL_PROMPT,
+            cancelled: CANCELLED_MESSAGE
         }
     },
     format: (s, args) => {
@@ -305,7 +310,23 @@ describe("DriveConfigFlow", () => {
 
             expect(mockSessionManager.update).toHaveBeenCalledWith("user456", "MEGA_WAIT_PASS", { email: "test@example.com" });
             expect(mockClient.sendMessage).toHaveBeenCalledWith("chat123", {
-                message: "mega_input_pass", // From mock return
+                message: `mega_input_pass\n\n${CANCEL_PROMPT}`, // From mock return
+                parseMode: "html"
+            });
+            expect(result).toBe(true);
+        });
+
+        test("should cancel binding when user sends cancel command", async () => {
+            const event = {
+                message: { message: "/cancel", peerId: "chat123", id: "msg201" }
+            };
+            const session = { current_step: "MEGA_WAIT_EMAIL" };
+
+            const result = await DriveConfigFlow.handleInput(event, "user456", session);
+
+            expect(mockSessionManager.clear).toHaveBeenCalledWith("user456");
+            expect(mockClient.sendMessage).toHaveBeenCalledWith("chat123", {
+                message: CANCELLED_MESSAGE,
                 parseMode: "html"
             });
             expect(result).toBe(true);
