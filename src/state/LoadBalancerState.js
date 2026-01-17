@@ -21,20 +21,15 @@ export class LoadBalancerState {
     this.logger = logger;
     this.stateKey = 'lb:provider_state';
     this.cache = null;
-    
-    // CF Workers 优化：初始化锁
-    this._initPromise = null;
   }
 
   /**
-   * 初始化状态管理器（带锁保护）
+   * 初始化状态管理器
+   * CF Workers环境下，每次请求都会创建新实例，因此不需要复杂的初始化锁
    */
   async initialize(cacheService) {
-    // 防止并发初始化（CF Workers 环境下多个请求可能同时到达）
-    if (!this._initPromise) {
-      this._initPromise = this._initializeInternal(cacheService);
-    }
-    return this._initPromise;
+    // 直接初始化，无需锁保护
+    return this._initializeInternal(cacheService);
   }
 
   async _initializeInternal(cacheService) {

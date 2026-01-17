@@ -383,29 +383,23 @@ async function handleRequest(request, env, ctx) {
       status: 500,
       headers: { 'Content-Type': 'application/json' }
     });
-  } finally {
+} finally {
     console.log(`[AXIOM_DEBUG] ${requestId}: finally block entered, requestLogBuffer size=${requestLogBuffer.length}`);
-
-    // 刷新全局 logger buffer
-    const globalFlushTask = flushGlobalLoggerBuffer();
 
     // 确保在请求结束时，所有缓冲的日志都被发送
     if (ctx && ctx.waitUntil) {
-      const requestFlushTask = flushLogs(requestLogBuffer);
-
-      // 确保 flushLogs 返回有效的 Promise
-      if (requestFlushTask) {
-        ctx.waitUntil(requestFlushTask);
-      }
-
-      // 如果全局 buffer 有内容，也 waitUntil
-      if (globalFlushTask) {
-        console.log(`[AXIOM_DEBUG] ${requestId}: also flushing global logger buffer`);
-        ctx.waitUntil(globalFlushTask);
-      }
+      // 使用waitUntil异步刷新日志，不阻塞响应
+      ctx.waitUntil(flushLogs(requestLogBuffer).catch(() => {}));
+      // 异步刷新全局日志缓冲区
+      ctx.waitUntil(flushGlobalLoggerBuffer().catch(() => {}));
     } else {
-      console.log(`[AXIOM_DEBUG] ${requestId}: calling flushLogs synchronously`);
-      await flushLogs(requestLogBuffer);
+      // 在没有waitUntil的环境中同步刷新日志
+      try {
+        await flushLogs(requestLogBuffer);
+        await flushGlobalLoggerBuffer();
+      } catch (error) {
+        console.error('Failed to flush logs:', error?.message || error);
+      }
     }
   }
   
