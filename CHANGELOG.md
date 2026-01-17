@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.28.1](https://github.com/YoungSx/drive-collector-js/compare/v4.28.0...v4.28.1) (2026-01-17)
+
+
+### 🐛 问题修复
+
+* adds bound list title and not found message for drive management ([cf0b2d7](https://github.com/YoungSx/drive-collector-js/commit/cf0b2d71d5126739bb6fa3706369fc7a79c12923))
+* adds drive locale strings import ([c3f0d91](https://github.com/YoungSx/drive-collector-js/commit/c3f0d9112756e82463505a48d3e361fae190e743))
+* adds drive type selection UI for better drive binding ([a90d0ef](https://github.com/YoungSx/drive-collector-js/commit/a90d0ef9802d039b4c9cf6c56cd7ea58429515ad))
+* enhance multi-drive support in DriveConfigFlow and related modules ([7c9be3d](https://github.com/YoungSx/drive-collector-js/commit/7c9be3d570e497573f2df8ac05cce36f0d985f50))
+* enhances file linking in transfer status messages ([3f5111c](https://github.com/YoungSx/drive-collector-js/commit/3f5111ced3ed476fdb0f98353ed9fa5904b3a76e))
+* ensures totalSize is always a valid number ([1ff8f85](https://github.com/YoungSx/drive-collector-js/commit/1ff8f854de7ba71643dfc51cad4177f81fdd6382))
+
+
+### ✨ 新特性
+
+* adds version display across the application ([c1039e4](https://github.com/YoungSx/drive-collector-js/commit/c1039e4a6405a9e6ecd6a21508badf3db47f15fa))
+
 ## [4.28.0](https://github.com/YoungSx/drive-collector-js/compare/v4.27.0...v4.28.0) (2026-01-16)
 
 
