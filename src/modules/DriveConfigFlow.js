@@ -43,10 +43,14 @@ export class DriveConfigFlow {
         if (drives && drives.length > 0) {
             message += `\n${STRINGS.drive.bound_list_title}\n`;
             drives.forEach(drive => {
-                const email = drive.name.split('-').slice(1).join('-') || drive.name;
+                // 安全获取drive.name，避免undefined显示
+                const driveName = drive.name || '未知账号';
+                const email = driveName.split('-').slice(1).join('-') || driveName;
                 const isDefault = drive.id === defaultDriveId;
                 const statusIcon = isDefault ? '⭐️' : '📁';
-                message += `\n${statusIcon} <b>${drive.type.toUpperCase()}</b> - ${escapeHTML(email)}`;
+                // 安全获取drive.type，避免undefined显示
+                const driveType = drive.type || '未知类型';
+                message += `\n${statusIcon} <b>${driveType.toUpperCase()}</b> - ${escapeHTML(email)}`;
                 if (isDefault) {
                     message += ` (${STRINGS.drive.is_default})`;
                 }
@@ -70,11 +74,9 @@ export class DriveConfigFlow {
         }
 
         const supportedDrives = this.getSupportedDrives();
-        supportedDrives.forEach(drive => {
-            buttons.push([
-                Button.inline(`➕ ${STRINGS.drive.btn_bind} ${drive.name}`, Buffer.from(`drive_bind_${drive.type}`))
-            ]);
-        });
+        buttons.push([
+            Button.inline(`➕ ${STRINGS.drive.btn_bind_other}`, Buffer.from("drive_select_type"))
+        ]);
 
         await runBotTaskWithRetry(() => client.sendMessage(chatId, { message, buttons, parseMode: "html" }), userId, {}, false, 3);
     }
@@ -102,10 +104,12 @@ export class DriveConfigFlow {
                 return STRINGS.drive.not_found;
             }
             
-            const email = drive.name.split('-').slice(1).join('-') || drive.name;
+            const driveName = drive.name || '未知账号';
+            const email = driveName.split('-').slice(1).join('-') || driveName;
+            const driveType = drive.type || '未知类型';
             await runBotTaskWithRetry(() => client.editMessage(event.userId, {
                     message: event.msgId,
-                    text: format(STRINGS.drive.unbind_confirm, { type: drive.type.toUpperCase(), account: escapeHTML(email) }),
+                    text: format(STRINGS.drive.unbind_confirm, { type: driveType.toUpperCase(), account: escapeHTML(email) }),
                     parseMode: "html",
                     buttons: [
                         [
@@ -130,6 +134,10 @@ export class DriveConfigFlow {
             return STRINGS.drive.returned;
         }
 
+        if (data === "drive_select_type") {
+            return await this._handleDriveTypeSelection(event, userId);
+        }
+        
         if (data.startsWith("drive_bind_")) {
             const driveType = data.split("_")[2];
             const provider = DriveProviderFactory.create(driveType);
@@ -309,5 +317,36 @@ export class DriveConfigFlow {
 
         const suffix = legacySuffixes[result.reason];
         return suffix ? `${result.message}${suffix}` : result.message;
+    }
+    
+    /**
+     * 处理网盘类型选择 - 显示网盘选择列表
+     * @param {Object} event Telegram 事件对象
+     * @param {string} userId 
+     * @returns {Promise<string|null>}
+     */
+    static async _handleDriveTypeSelection(event, userId) {
+        const supportedDrives = this.getSupportedDrives();
+        
+        const message = `➕ <b>选择要绑定的网盘</b>\n\n请选择您要绑定的网盘类型：`;
+        
+        const buttons = [];
+        supportedDrives.forEach(drive => {
+            buttons.push([
+                Button.inline(drive.name, Buffer.from(`drive_bind_${drive.type}`))
+            ]);
+        });
+        buttons.push([
+            Button.inline(STRINGS.drive.btn_cancel, Buffer.from("drive_manager_back"))
+        ]);
+        
+        await runBotTaskWithRetry(() => client.editMessage(event.userId, {
+            message: event.msgId,
+            text: message,
+            parseMode: "html",
+            buttons: buttons
+        }), userId, {}, false, 3);
+        
+        return STRINGS.drive.please_confirm;
     }
 }

@@ -103,6 +103,7 @@ export const STRINGS = {
         btn_set_default: "设为默认网盘",
         is_default: "(默认)",
         set_default_success: "✅ 默认网盘设置成功！",
+        btn_bind_other: "绑定其他网盘",
     },
 
     // --- 文件浏览 ---

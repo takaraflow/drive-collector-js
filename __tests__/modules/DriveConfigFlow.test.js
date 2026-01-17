@@ -95,7 +95,8 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
             no_drive_unbind: "没有绑定网盘，无需解绑",
             set_default_success: "设为默认成功",
             no_drive_found: "没有找到已绑定的网盘",
-            btn_bind: "绑定"
+            btn_bind: "绑定",
+            btn_bind_other: "绑定其他网盘"
         }
     },
     format: (s, args) => {
@@ -184,9 +185,9 @@ describe("DriveConfigFlow", () => {
                 parseMode: "html"
             });
             
-            // Verify "Bind" buttons are present
+            // Verify "Bind other" button is present
             const callArgs = mockClient.sendMessage.mock.calls[0][1];
-            expect(callArgs.buttons.some(btn => btn[0].text.includes("绑定 Mega"))).toBe(true);
+            expect(callArgs.buttons.some(btn => btn[0].text.includes("绑定其他网盘"))).toBe(true);
         });
 
         test("should send manager panel with multiple drives bound", async () => {
@@ -215,20 +216,20 @@ describe("DriveConfigFlow", () => {
             // drive1 row: Unbind
             // drive2 row: 设为默认, Unbind
             // Final row: 查看文件
-            // Final section: Bind buttons (Mega + Google Drive) -> 2 rows
+            // Final section: Bind other button -> 1 row
             
-            expect(callArgs.buttons.length).toBe(5); // 2 drives + 1 view files + 2 bind buttons
+            expect(callArgs.buttons.length).toBe(4); // 2 drives + 1 view files + 1 bind other button
         });
         
-        test("should show bind buttons even when drives are bound", async () => {
+        test("should show bind other button even when drives are bound", async () => {
              mockDriveRepository.findByUserId.mockResolvedValue([{ id: "drive1", type: "mega", name: "Mega-user1@example.com" }]);
 
             await DriveConfigFlow.sendDriveManager("chat123", "user456");
 
             const callArgs = mockClient.sendMessage.mock.calls[0][1];
-            // The last 2 button groups should be the bind buttons
+            // The last button should be "绑定其他网盘"
             const lastButton = callArgs.buttons[callArgs.buttons.length - 1][0].text;
-            expect(lastButton).toContain("绑定 Google Drive");
+            expect(lastButton).toContain("绑定其他网盘");
         });
     });
 

@@ -591,8 +591,9 @@ export class Dispatcher {
         let status = format(STRINGS.status.header, {}) + '\n\n';
         
         // 网盘状态
+        const driveType = activeDrive?.type ? activeDrive.type.toUpperCase() : '未知';
         status += format(STRINGS.status.drive_status, {
-            status: activeDrive ? `✅ 已绑定 (${activeDrive.type})` : '❌ 未绑定'
+            status: activeDrive ? `✅ 已绑定 (${driveType})` : '❌ 未绑定'
         }) + '\n\n';
         
         // 队列状态
