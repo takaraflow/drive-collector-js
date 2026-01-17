@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import { config } from "../config/index.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
+import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { STRINGS } from "../locales/zh-CN.js";
 import { localCache } from "../utils/LocalCache.js";
 import { cache } from "./CacheService.js";
@@ -28,26 +29,30 @@ export class CloudTool {
         if (!userId) throw new Error(STRINGS.drive.user_id_required);
 
         // 1. 使用 Repo
-        const drive = await DriveRepository.findByUserId(userId);
+        const drives = await DriveRepository.findByUserId(userId);
         
-        if (!drive) {
+        if (!drives || drives.length === 0) {
             throw new Error(STRINGS.drive.no_drive_found);
         }
+
+        // 2. 查找默认网盘，如果没有则使用第一个
+        const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
+        const activeDrive = drives.find(d => d.id === defaultDriveId) || drives[0];
         
-        const driveConfig = JSON.parse(drive.config_data);
+        const driveConfig = JSON.parse(activeDrive.config_data);
         
-        // 2. 使用 Provider 处理密码混淆
-        const provider = DriveProviderFactory.getProvider(drive.type);
+        // 3. 使用 Provider 处理密码混淆
+        const provider = DriveProviderFactory.getProvider(activeDrive.type);
         
         // Clone config and inject type
-        const config = { ...driveConfig, type: drive.type };
+        const config = { ...driveConfig, type: activeDrive.type };
         
         // Allow provider to process password if present
         if (config.pass) {
             config.pass = provider.processPassword(config.pass);
         }
         
-        // 3. 返回清洗后的配置对象
+        // 4. 返回清洗后的配置对象
         return config;
     }
 
@@ -127,11 +132,12 @@ export class CloudTool {
      */
     static async _getUserUploadPathFromD1(userId) {
         try {
-            // 从drives表获取用户的网盘配置
-            const drive = await DriveRepository.findByUserId(userId);
+            const drives = await DriveRepository.findByUserId(userId);
+            const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
+            const activeDrive = drives.length > 0 ? (drives.find(d => d.id === defaultDriveId) || drives[0]) : null;
             
-            if (drive && drive.remote_folder) {
-                return drive.remote_folder;
+            if (activeDrive && activeDrive.remote_folder) {
+                return activeDrive.remote_folder;
             }
             
             return null;

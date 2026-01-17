@@ -335,18 +335,21 @@ export class Dispatcher {
             if (remoteFolderHandled) return;
         }
 
-        // 🚀 性能优化：并发获取网盘设置，避免串行查询
-        const [defaultDriveId, selectedDrive] = await Promise.all([
+        const [defaultDriveId, drives] = await Promise.all([
             SettingsRepository.get(`default_drive_${userId}`, null),
             DriveRepository.findByUserId(userId)
         ]);
 
-        let finalSelectedDrive = selectedDrive;
-        if (defaultDriveId && !selectedDrive) {
-            finalSelectedDrive = await DriveRepository.findById(defaultDriveId);
-        } else if (!selectedDrive) {
-            // 兜底查询：跳过缓存尝试获取，防止缓存不一致导致误报未绑定
-            finalSelectedDrive = await DriveRepository.findByUserId(userId, true);
+        let finalSelectedDrive = null;
+        if (drives && drives.length > 0) {
+            finalSelectedDrive = drives.find(d => d.id === defaultDriveId) || drives[0];
+        }
+        
+        if (!finalSelectedDrive) {
+            const fallbackDrives = await DriveRepository.findByUserId(userId, true);
+            if (fallbackDrives && fallbackDrives.length > 0) {
+                finalSelectedDrive = fallbackDrives[0];
+            }
         }
 
         // 2. 文本命令路由
@@ -464,15 +467,15 @@ export class Dispatcher {
         // 2. 异步处理：并发检查网盘绑定和获取文件列表
         (async () => {
             try {
-                let drive = await DriveRepository.findByUserId(userId);
-                if (!drive) {
-                    // 兜底查询：跳过缓存尝试获取，防止缓存不一致导致误报未绑定
-                    drive = await DriveRepository.findByUserId(userId, true);
+                let drives = await DriveRepository.findByUserId(userId);
+                if (!drives || drives.length === 0) {
+                    drives = await DriveRepository.findByUserId(userId, true);
                 }
-                if (!drive) {
+                if (!drives || drives.length === 0) {
                     await safeEdit(target, placeholder.id, STRINGS.drive.no_drive_found, null, userId);
                     return;
                 }
+                const drive = drives[0];
 
                 // 如果 listRemoteFiles 命中了 Redis 或内存缓存，这里会非常快
                 const files = await CloudTool.listRemoteFiles(userId);
@@ -578,7 +581,10 @@ export class Dispatcher {
      * [私有] 获取通用状态
      */
     static async _getGeneralStatus(userId) {
-        const drive = await DriveRepository.findByUserId(userId);
+        const drives = await DriveRepository.findByUserId(userId);
+        const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
+        const activeDrive = drives.length > 0 ? (drives.find(d => d.id === defaultDriveId) || drives[0]) : null;
+
         const waitingCount = TaskManager.getWaitingCount();
         const processingCount = TaskManager.getProcessingCount();
         
@@ -586,7 +592,7 @@ export class Dispatcher {
         
         // 网盘状态
         status += format(STRINGS.status.drive_status, {
-            status: drive ? `✅ 已绑定 (${drive.type})` : '❌ 未绑定'
+            status: activeDrive ? `✅ 已绑定 (${activeDrive.type})` : '❌ 未绑定'
         }) + '\n\n';
         
         // 队列状态
@@ -865,15 +871,15 @@ export class Dispatcher {
      */
     static async _handleRemoteFolderCommand(target, userId) {
         // 检查是否已绑定网盘
-        const drive = await DriveRepository.findByUserId(userId);
-        if (!drive) {
-            const driveFallback = await DriveRepository.findByUserId(userId, true);
-            if (!driveFallback) {
-                return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                    message: STRINGS.remote_folder.no_permission,
-                    parseMode: "html"
-                }), userId, {}, false, 3);
-            }
+        let drives = await DriveRepository.findByUserId(userId);
+        if (!drives || drives.length === 0) {
+            drives = await DriveRepository.findByUserId(userId, true);
+        }
+        if (!drives || drives.length === 0) {
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.remote_folder.no_permission,
+                parseMode: "html"
+            }), userId, {}, false, 3);
         }
 
         // 获取当前路径
@@ -905,15 +911,15 @@ export class Dispatcher {
      */
     static async _handleSetRemoteFolderCommand(target, userId, fullText) {
         // 检查是否已绑定网盘
-        const drive = await DriveRepository.findByUserId(userId);
-        if (!drive) {
-            const driveFallback = await DriveRepository.findByUserId(userId, true);
-            if (!driveFallback) {
-                return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                    message: STRINGS.remote_folder.no_permission,
-                    parseMode: "html"
-                }), userId, {}, false, 3);
-            }
+        let drives = await DriveRepository.findByUserId(userId);
+        if (!drives || drives.length === 0) {
+            drives = await DriveRepository.findByUserId(userId, true);
+        }
+        if (!drives || drives.length === 0) {
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.remote_folder.no_permission,
+                parseMode: "html"
+            }), userId, {}, false, 3);
         }
 
         // 解析命令参数
@@ -1037,11 +1043,12 @@ export class Dispatcher {
      */
     static async _getUserUploadPathFromD1(userId) {
         try {
-            // 从drives表获取用户的网盘配置
-            const drive = await DriveRepository.findByUserId(userId);
+            const drives = await DriveRepository.findByUserId(userId);
+            const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
+            const activeDrive = drives.length > 0 ? (drives.find(d => d.id === defaultDriveId) || drives[0]) : null;
             
-            if (drive && drive.remote_folder) {
-                return drive.remote_folder;
+            if (activeDrive && activeDrive.remote_folder) {
+                return activeDrive.remote_folder;
             }
             
             return null;
@@ -1059,15 +1066,16 @@ export class Dispatcher {
      */
     static async _setUserUploadPathInD1(userId, path) {
         try {
-            // 获取用户的网盘记录
-            const drive = await DriveRepository.findByUserId(userId);
+            const drives = await DriveRepository.findByUserId(userId);
+            const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
+            const activeDrive = drives.length > 0 ? (drives.find(d => d.id === defaultDriveId) || drives[0]) : null;
             
-            if (!drive) {
+            if (!activeDrive) {
                 throw new Error('Drive not found');
             }
             
             // 更新drives表的remote_folder字段，传递userId用于清理缓存
-            await DriveRepository.updateRemoteFolder(drive.id, path, userId);
+            await DriveRepository.updateRemoteFolder(activeDrive.id, path, userId);
             
         } catch (error) {
             log.error(`Failed to set upload path in D1 for user ${userId}:`, error);

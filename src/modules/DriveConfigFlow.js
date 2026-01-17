@@ -34,42 +34,48 @@ export class DriveConfigFlow {
      * @param {string} userId 
      */
     static async sendDriveManager(chatId, userId) {
-        // 使用 Repository 获取数据
-        const drive = await DriveRepository.findByUserId(userId);
+        const drives = await DriveRepository.findByUserId(userId);
         const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
         
         let message = STRINGS.drive.menu_title;
         const buttons = [];
 
-        if (drive) {
-            const email = drive.name.split('-')[1] || drive.name;
-            const isDefault = drive.id === defaultDriveId;
-            message += format(STRINGS.drive.bound_info, { 
-                type: drive.type.toUpperCase(), 
-                account: escapeHTML(email) 
+        if (drives && drives.length > 0) {
+            message += `\n${STRINGS.drive.bound_list_title}\n`;
+            drives.forEach(drive => {
+                const email = drive.name.split('-').slice(1).join('-') || drive.name;
+                const isDefault = drive.id === defaultDriveId;
+                const statusIcon = isDefault ? '⭐️' : '📁';
+                message += `\n${statusIcon} <b>${drive.type.toUpperCase()}</b> - ${escapeHTML(email)}`;
+                if (isDefault) {
+                    message += ` (${STRINGS.drive.is_default})`;
+                }
             });
-            if (isDefault) {
-                message += ` ${STRINGS.drive.is_default}`;
-            } else {
-                buttons.push([
-                    Button.inline(STRINGS.drive.btn_set_default, Buffer.from(`drive_set_default_${drive.id}`)) 
-                ]);
-            }
+            message += '\n';
+
+            drives.forEach(drive => {
+                const driveButtons = [];
+                if (drive.id !== defaultDriveId) {
+                    driveButtons.push(Button.inline(STRINGS.drive.btn_set_default, Buffer.from(`drive_set_default_${drive.id}`)));
+                }
+                driveButtons.push(Button.inline(STRINGS.drive.btn_unbind, Buffer.from(`drive_unbind_confirm_${drive.id}`)));
+                buttons.push(driveButtons);
+            });
             
             buttons.push([
-                Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0")),
-                Button.inline(STRINGS.drive.btn_unbind, Buffer.from("drive_unbind_confirm"))
+                Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))
             ]);
         } else {
             message += STRINGS.drive.not_bound;
-            // 动态生成绑定按钮
-            const supportedDrives = this.getSupportedDrives();
-            supportedDrives.forEach(drive => {
-                buttons.push([
-                    Button.inline(`➕ 绑定 ${drive.name}`, Buffer.from(`drive_bind_${drive.type}`))
-                ]);
-            });
         }
+
+        const supportedDrives = this.getSupportedDrives();
+        supportedDrives.forEach(drive => {
+            buttons.push([
+                Button.inline(`➕ ${STRINGS.drive.btn_bind} ${drive.name}`, Buffer.from(`drive_bind_${drive.type}`))
+            ]);
+        });
+
         await runBotTaskWithRetry(() => client.sendMessage(chatId, { message, buttons, parseMode: "html" }), userId, {}, false, 3);
     }
 
@@ -89,14 +95,21 @@ export class DriveConfigFlow {
             return STRINGS.drive.set_default_success;
         }
 
-        if (data === "drive_unbind_confirm") {
+        if (data.startsWith("drive_unbind_confirm_")) {
+            const driveId = data.split("_")[3];
+            const drive = await DriveRepository.findById(driveId);
+            if (!drive) {
+                return STRINGS.drive.not_found;
+            }
+            
+            const email = drive.name.split('-').slice(1).join('-') || drive.name;
             await runBotTaskWithRetry(() => client.editMessage(event.userId, {
                     message: event.msgId,
-                    text: STRINGS.drive.unbind_confirm,
+                    text: format(STRINGS.drive.unbind_confirm, { type: drive.type.toUpperCase(), account: escapeHTML(email) }),
                     parseMode: "html",
                     buttons: [
                         [
-                            Button.inline(STRINGS.drive.btn_confirm_unbind, Buffer.from("drive_unbind_execute")), 
+                            Button.inline(STRINGS.drive.btn_confirm_unbind, Buffer.from(`drive_unbind_execute_${driveId}`)), 
                             Button.inline(STRINGS.drive.btn_cancel, Buffer.from("drive_manager_back"))
                         ]
                     ]
@@ -104,42 +117,16 @@ export class DriveConfigFlow {
             return STRINGS.drive.please_confirm;
         }
 
-        if (data === "drive_unbind_execute") {
-            await this.handleUnbind(event.userId, userId);
+        if (data.startsWith("drive_unbind_execute_")) {
+            const driveId = data.split("_")[3];
+            await DriveRepository.delete(driveId);
+            await SettingsRepository.set(`default_drive_${userId}`, null);
+            await this.sendDriveManager(event.userId, userId);
             return STRINGS.drive.success_unbind;
         }
 
         if (data === "drive_manager_back") {
-            const drive = await DriveRepository.findByUserId(userId);
-            const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
-
-            let message = STRINGS.drive.menu_title;
-            const buttons = [];
-            if (drive) {
-                const email = drive.name.split('-')[1] || drive.name;
-                const isDefault = drive.id === defaultDriveId;
-                message += format(STRINGS.drive.bound_info, { type: drive.type.toUpperCase(), account: escapeHTML(email) });
-                if (isDefault) {
-                    message += ` ${STRINGS.drive.is_default}`;
-                } else {
-                    buttons.push([
-                        Button.inline(STRINGS.drive.btn_set_default, Buffer.from(`drive_set_default_${drive.id}`)) 
-                    ]);
-                }
-                buttons.push([
-                    Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0")),
-                    Button.inline(STRINGS.drive.btn_unbind, Buffer.from("drive_unbind_confirm"))
-                ]);
-            } else {
-                message += STRINGS.drive.not_bound;
-                // 动态生成绑定按钮
-                const supportedDrives = this.getSupportedDrives();
-                supportedDrives.forEach(drive => {
-                    buttons.push([Button.inline(`➕ 绑定 ${drive.name}`, Buffer.from(`drive_bind_${drive.type}`))]);
-                });
-            }
-
-            await runBotTask(() => client.editMessage(event.userId, { message: event.msgId, text: message, buttons, parseMode: "html" }), userId);
+            await this.sendDriveManager(event.userId, userId);
             return STRINGS.drive.returned;
         }
 
@@ -261,17 +248,17 @@ export class DriveConfigFlow {
     }
 
     /**
-     * 处理解绑动作
+     * 处理解绑动作 (删除用户所有网盘)
      */
     static async handleUnbind(chatId, userId) { 
-        const drive = await DriveRepository.findByUserId(userId);
+        const drives = await DriveRepository.findByUserId(userId);
 
-        if (!drive) {
+        if (!drives || drives.length === 0) {
             return await runBotTask(() => client.sendMessage(chatId, { message: STRINGS.drive.no_drive_unbind, parseMode: "html" }), userId);
         }
 
-        // 使用 Repository 删除
-        await DriveRepository.delete(drive.id);
+        // 使用 Repository 删除所有网盘
+        await DriveRepository.deleteByUserId(userId);
         await SettingsRepository.set(`default_drive_${userId}`, null);
         await SessionManager.clear(userId);
 

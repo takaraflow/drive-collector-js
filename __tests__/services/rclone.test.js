@@ -158,10 +158,10 @@ describe('CloudTool', () => {
         });
 
         it('should return cleaned config for non-mega drive', async () => {
-            mockFindByUserId.mockResolvedValue({
+            mockFindByUserId.mockResolvedValue([{
                 type: 'drive',
                 config_data: JSON.stringify({ user: 'testuser', pass: 'testpass' })
-            });
+            }]);
 
             const result = await CloudTool._getUserConfig('user123');
             expect(result).toEqual({
@@ -172,10 +172,10 @@ describe('CloudTool', () => {
         });
 
         it('should obscure password for mega drive', async () => {
-            mockFindByUserId.mockResolvedValue({
+            mockFindByUserId.mockResolvedValue([{
                 type: 'mega',
                 config_data: JSON.stringify({ user: 'testuser', pass: 'rawpass' })
-            });
+            }]);
             mockSpawnSync.mockReturnValue({ status: 0, stdout: 'obscuredpass\n', stderr: '' });
 
             const result = await CloudTool._getUserConfig('user123');
@@ -239,10 +239,10 @@ describe('CloudTool', () => {
 
     describe('uploadFile', () => {
         beforeEach(() => {
-            mockFindByUserId.mockResolvedValue({
+            mockFindByUserId.mockResolvedValue([{
                 type: 'drive',
                 config_data: JSON.stringify({ user: 'u', pass: 'p' })
-            });
+            }]);
         });
 
         it('should handle successful upload', async () => {
@@ -296,9 +296,9 @@ describe('CloudTool', () => {
     describe('listRemoteFiles', () => {
         beforeEach(() => {
             mockCacheService.get.mockReturnValue(null);
-            mockFindByUserId.mockResolvedValue({
+            mockFindByUserId.mockResolvedValue([{
                 type: 'drive', config_data: JSON.stringify({ user: 'u', pass: 'p' })
-            });
+            }]);
         });
 
         it('should return files and cache them (Multi-level KV)', async () => {
@@ -361,9 +361,9 @@ describe('CloudTool', () => {
 
     describe('getRemoteFileInfo', () => {
         beforeEach(() => {
-            mockFindByUserId.mockResolvedValue({
+            mockFindByUserId.mockResolvedValue([{
                 type: 'drive', config_data: JSON.stringify({ user: 'u', pass: 'p' })
-            });
+            }]);
         });
 
         it('should return file info if file exists', async () => {
@@ -562,17 +562,17 @@ describe('CloudTool', () => {
     
             describe('_getUploadPath', () => {
                 it('should return custom path if set in D1', async () => {
-                    mockFindByUserId.mockResolvedValue({
+                    mockFindByUserId.mockResolvedValue([{
                         remote_folder: '/Custom/Path'
-                    });
+                    }]);
                     const path = await CloudTool._getUploadPath('user123');
                     expect(path).toBe('Custom/Path/');
                 });
     
                 it('should return default path if not set in D1', async () => {
-                    mockFindByUserId.mockResolvedValue({
+                    mockFindByUserId.mockResolvedValue([{
                         remote_folder: null
-                    });
+                    }]);
                     const path = await CloudTool._getUploadPath('user123');
                     expect(path).toBe('test-folder/');
                 });

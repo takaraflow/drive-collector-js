@@ -156,7 +156,7 @@ describe('Remote Folder Integration Tests', () => {
         const { DriveRepository } = await import('../../src/repositories/DriveRepository.js');
         
         SettingsRepository.get.mockResolvedValue('public');
-        DriveRepository.findByUserId.mockResolvedValue({ id: 'drive1', type: 'mega', remote_folder: null });
+        DriveRepository.findByUserId.mockResolvedValue([{ id: 'drive1', type: 'mega', remote_folder: null }]);
     });
 
     describe('/remote_folder command', () => {
