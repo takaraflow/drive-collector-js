@@ -25,6 +25,8 @@ import fs from "fs";
 import path from "path";
 
 const log = logger.withModule('Dispatcher');
+const packageJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
+const appVersion = packageJson.version || 'unknown';
 
 // 创建带 perf 上下文的 logger 用于性能日志
 const logPerf = () => log.withContext({ perf: true });
@@ -97,8 +99,7 @@ export class Dispatcher {
         
         // 🔍 诊断日志：记录消息处理开始
         const eventId = event.id || event.message?.id || event.queryId || 'unknown';
-        const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
-        const version = pkg.version || 'unknown';
+        const version = appVersion;
         
         log.info(`🔍 [MSG_DEDUP] 消息处理开始 - EventID: ${eventId}, UserID: ${ctx.userId}, Instance: ${instanceCoordinator.getInstanceId()}, Version: ${version}`);
         
@@ -627,8 +628,7 @@ export class Dispatcher {
     static async _handleHelpCommand(target, userId) {
         const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
         const isOwner = userId === config.ownerId?.toString();
-        const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
-        const version = pkg.version || 'unknown';
+        const version = appVersion;
 
         let message = format(STRINGS.system.help, { version });
 
@@ -718,6 +718,7 @@ export class Dispatcher {
      */
     static async _getInstanceInfo() {
         const instanceInfo = {};
+        instanceInfo.version = appVersion;
 
         try {
             // 当前实例信息

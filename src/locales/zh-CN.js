@@ -153,6 +153,7 @@ export const STRINGS = {
         network_title: "🌐 <b>网络诊断</b>",
         system_resources_title: "💾 <b>系统资源</b>",
         current_instance: "当前实例",
+        version_label: "版本",
         leader_status: "领导者状态",
         tg_connection: "TG 连接",
         tg_lock_holder: "TG 锁持有",
