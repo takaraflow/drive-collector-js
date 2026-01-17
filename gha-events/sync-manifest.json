@@ -1,0 +1,9 @@
+{
+  "ref": "refs/heads/main",
+  "act": true,
+  "head_commit": {
+    "modified": [
+      "manifest.json"
+    ]
+  }
+}

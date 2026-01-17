@@ -1,5 +1,9 @@
 name: CI
 
+env:
+  # act 本地运行标识：优先使用事件标记，其次匹配 secrets
+  ACT_LOCAL: ${{ github.event.act == true || secrets.ACT_LOCAL == 'true' }}
+
 on:
   push:
     branches: [main, develop]
@@ -24,7 +28,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20.x
-          cache: 'npm'
+      - name: Install dependencies (act)
+        if: ${{ env.ACT_LOCAL }}
+        run: |
+          apt-get update && apt-get install -y jq
       - name: Validate manifest.json
         run: |
           if [ ! -f "manifest.json" ]; then echo "manifest.json missing"; exit 1; fi
@@ -53,8 +60,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20.x
-          cache: 'npm'
-      - run: npm ci
+      - name: Install dependencies (act)
+        if: ${{ env.ACT_LOCAL }}
+        run: |
+          echo "Node version: $(node -v)"
+          npm install
+      - name: Install dependencies (ci)
+        if: ${{ !env.ACT_LOCAL }}
+        run: npm ci
       - name: Run lint (if configured)
         run: |
           if node -e "process.exit(require('./package.json').scripts?.lint ? 0 : 1)"; then
@@ -79,12 +92,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20.x
-          cache: 'npm'
       - name: Install dependencies
+        if: ${{ !env.ACT_LOCAL }}
         run: |
           START_TIME=$(date +%s)
           npm ci
           echo "INSTALL_DURATION=$(($(date +%s) - $START_TIME))" >> $GITHUB_ENV
+      - name: Install dependencies (act)
+        if: ${{ env.ACT_LOCAL }}
+        run: |
+          echo "Node version: $(node -v)"
+          npm install
       - name: Run tests (with coverage)
         run: |
           TEST_START=$(date +%s)
@@ -97,8 +115,8 @@ jobs:
           echo "- **Test Execution:** ${{ env.TEST_DURATION }}s" >> $GITHUB_STEP_SUMMARY
           echo "- **Total Monitored Time:** $((${{ env.INSTALL_DURATION }} + ${{ env.TEST_DURATION }}))s" >> $GITHUB_STEP_SUMMARY
       - name: Upload coverage reports
+        if: ${{ !env.ACT_LOCAL && env.ACTIONS_RUNTIME_TOKEN && hashFiles('coverage/**') != '' }}
         uses: actions/upload-artifact@v4
-        if: always() && hashFiles('coverage/**') != ''
         with:
           name: coverage-node20
           path: coverage/
@@ -133,15 +151,17 @@ jobs:
             echo "🎯 Target: Development Environment"
           fi
       - name: Log in to the Container registry
+        if: ${{ !env.ACT_LOCAL }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ github.token }}
       
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
+        if: ${{ !env.ACT_LOCAL }}
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -151,9 +171,27 @@ jobs:
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        if: ${{ !env.ACT_LOCAL }}
+      
+      - name: Build Docker image locally (act)
+        if: ${{ env.ACT_LOCAL }}
+        run: |
+          apt-get update && apt-get install -y ca-certificates curl gnupg
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          chmod a+r /etc/apt/keyrings/docker.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bullseye stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+          apt-get update
+          apt-get install -y docker-ce-cli
+          docker pull node:20-slim
+          docker build \
+            --build-arg NODE_ENV=${{ steps.set-env.outputs.environment }} \
+            -t drive-collector-bot:act \
+            .
       
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
+        if: ${{ !env.ACT_LOCAL }}
         with:
           context: .
           push: true

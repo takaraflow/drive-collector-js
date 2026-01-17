@@ -124,6 +124,20 @@ Tests are automatically run on:
 
 Using GitHub Actions with Node.js 20.x.
 
+### Local GitHub Actions Simulation
+
+Use [`act`](https://github.com/nektos/act) to run the CI and manifest-sync workflows on your laptop (e.g. `brew install act`, `choco install act`, or download a binary from the releases page). The repository already ignores `.act.secrets`, so you can keep your private values local.
+
+1. Copy the template: `cp .act.secrets.example .act.secrets`, then replace the placeholders with your values. Anything under `BARK_` will drive the notification step (the workflow skips the HTTP call if those keys stay empty). `CONTRACT_REPO`, `APP_ID`, and `APP_PRIVATE_KEY` are only required when you run the manifest-sync job; the private key can be pasted in a single line using `\n` to represent newlines.
+   - 如果你需要模拟 Docker 镜像上传，在同一个 `.act.secrets` 中添加 `GITHUB_TOKEN=<any string>`，GitHub CI 实际上会自动注入这个 token。
+2. The small payloads inside `gha-events/` set the branch that the workflow sees (dev uses `refs/heads/feature/act-sim-dev`, pre uses `develop`, prod uses `main`; `sync-manifest` also fakes an edit to `manifest.json`). Edit them if you need to test another branch or event shape.
+3. Run `npm run gha:list` to see the jobs that `act` exposes.
+4. Use the provided npm helpers:
+   - `npm run gha:ci:dev`, `npm run gha:ci:pre`, `npm run gha:ci:prod` run the CI `build` job with the corresponding branch context.
+   - `npm run gha:sync-manifest` runs the `update-registry` job from the sync workflow (requires the GitHub App secrets mentioned above).
+
+Each helper passes `--secret-file .act.secrets`, the matching payload from `gha-events/`, and `--platform ubuntu-latest=catthehacker/ubuntu:act-latest`.
+
 ## Architecture
 
 - `src/core/`: Core business logic (TaskManager)

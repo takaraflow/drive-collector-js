@@ -14,6 +14,8 @@ yarn-error.log*
 .env.prod
 .env.debug
 .roomodes
+.act.secrets
+ci-*.json
 
 # --- MCP 相关 (整个目录忽略) ---
 .mcp/
