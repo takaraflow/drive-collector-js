@@ -81,6 +81,21 @@ function loadEnvironment(env) {
 }
 
 /**
+ * Apply injected secrets to the current process env so child builds can reuse them.
+ */
+function applySecretsToEnvironment(secrets, configManager) {
+    if (!secrets || secrets.size === 0) return;
+
+    for (const [key, value] of secrets) {
+        if (!value) continue;
+        if (configManager?.isProtectedKey(key)) continue;
+        if (process.env[key]) continue;
+
+        process.env[key] = typeof value === 'string' ? value.trim() : value;
+    }
+}
+
+/**
  * Execute secrets injection
  */
 async function executeSecretsInjection(options) {
@@ -122,6 +137,10 @@ async function executeSecretsInjection(options) {
         
         if (result.validation) {
             console.log(`   - Validation: ${result.validation.valid ? 'PASSED' : 'FAILED'}`);
+        }
+
+        if (!options.dryRun) {
+            applySecretsToEnvironment(result.secrets, orchestrator.configManager);
         }
         
         return true;
