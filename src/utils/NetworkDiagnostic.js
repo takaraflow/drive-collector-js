@@ -1,8 +1,6 @@
 import { client, getUpdateHealth } from "../services/telegram.js";
 import { d1 } from "../services/d1.js";
 import { cache } from "../services/CacheService.js";
-import { CloudTool } from "../services/rclone.js";
-import { DriveRepository } from "../repositories/DriveRepository.js";
 import { config } from "../config/index.js";
 import { spawnSync } from "child_process";
 import * as fs from "fs";
@@ -42,9 +40,6 @@ export class NetworkDiagnostic {
 
         // 检查 rclone
         results.services.rclone = await this._checkRclone();
-
-        // 检查云存储服务连接
-        results.services.cloudStorage = await this._checkCloudStorage();
 
         return results;
     }
@@ -443,56 +438,5 @@ export class NetworkDiagnostic {
             };
         }
     }
-
-    /**
-     * 检查云存储服务连接
-     */
-    static async _checkCloudStorage() {
-        const startTime = Date.now();
-        try {
-            // 尝试获取第一个用户的云存储配置进行测试
-            const drives = await DriveRepository.findAll();
-            if (!drives || drives.length === 0) {
-                return {
-                    status: 'warning',
-                    responseTime: `${Date.now() - startTime}ms`,
-                    message: '未找到用户云存储配置，跳过连接测试'
-                };
-            }
-
-            // 选择第一个配置进行测试
-            const testDrive = drives[0];
-            const configData = JSON.parse(testDrive.config_data);
-
-            // 使用 CloudTool 的验证方法
-            const validation = await CloudTool.validateConfig(testDrive.type, configData);
-
-            if (validation.success) {
-                const responseTime = Date.now() - startTime;
-                return {
-                    status: 'ok',
-                    responseTime: `${responseTime}ms`,
-                    message: `${testDrive.type.toUpperCase()} 云存储连接正常`
-                };
-            } else {
-                let reason = validation.reason || '未知错误';
-                if (validation.details) {
-                    reason += `: ${validation.details}`;
-                }
-                return {
-                    status: 'error',
-                    responseTime: `${Date.now() - startTime}ms`,
-                    message: `${testDrive.type.toUpperCase()} 云存储连接失败: ${reason}`
-                };
-            }
-        } catch (error) {
-            return {
-                status: 'error',
-                responseTime: `${Date.now() - startTime}ms`,
-                message: `云存储检查失败: ${error.message}`
-            };
-        }
-    }
-
 
 }

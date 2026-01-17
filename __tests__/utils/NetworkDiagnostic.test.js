@@ -23,18 +23,6 @@ vi.mock("../../src/services/CacheService.js", () => ({
     cache: mockCache,
 }));
 
-vi.mock("../../src/services/rclone.js", () => ({
-    CloudTool: {
-        validateConfig: vi.fn(),
-    },
-}));
-
-vi.mock("../../src/repositories/DriveRepository.js", () => ({
-    DriveRepository: {
-        findAll: vi.fn(),
-    },
-}));
-
 const mockConfig = {
     botToken: "mock_token",
     telegram: {
@@ -59,8 +47,6 @@ const { NetworkDiagnostic } = await import("../../src/utils/NetworkDiagnostic.js
 const { client } = await import("../../src/services/telegram.js");
 const { d1 } = await import("../../src/services/d1.js");
 const { cache } = await import("../../src/services/CacheService.js");
-const { CloudTool } = await import("../../src/services/rclone.js");
-const { DriveRepository } = await import("../../src/repositories/DriveRepository.js");
 const { config } = await import("../../src/config/index.js");
 const { spawnSync } = await import("child_process");
 const fs = await import("fs");
@@ -88,8 +74,6 @@ describe("NetworkDiagnostic", () => {
                 stderr: "",
             });
             fs.existsSync.mockReturnValue(true);
-            DriveRepository.findAll.mockResolvedValue([]);
-            CloudTool.validateConfig.mockResolvedValue({ success: true });
 
             const result = await NetworkDiagnostic.diagnoseAll();
 
@@ -99,13 +83,11 @@ describe("NetworkDiagnostic", () => {
             expect(result.services).toHaveProperty("d1");
             expect(result.services).toHaveProperty("kv");
             expect(result.services).toHaveProperty("rclone");
-            expect(result.services).toHaveProperty("cloudStorage");
 
             expect(client.getMe).toHaveBeenCalled();
             expect(d1.fetchAll).toHaveBeenCalledWith("SELECT 1 as test");
             expect(mockCache.get).toHaveBeenCalled();
             expect(spawnSync).toHaveBeenCalled();
-            expect(DriveRepository.findAll).toHaveBeenCalled();
         });
 
         it("should handle errors gracefully", async () => {
@@ -118,8 +100,6 @@ describe("NetworkDiagnostic", () => {
                 stderr: "rclone not found",
             });
             fs.existsSync.mockReturnValue(false); // No rclone binary
-            DriveRepository.findAll.mockRejectedValue(new Error("Repository error"));
-            
             // Mock fetch error for bot API
             global.fetch.mockRejectedValue(new Error("Bot API error"));
 
@@ -129,7 +109,6 @@ describe("NetworkDiagnostic", () => {
             expect(result.services.d1.status).toBe("error");
             expect(result.services.kv.status).toBe("error");
             expect(result.services.rclone.status).toBe("error");
-            expect(result.services.cloudStorage.status).toBe("error");
             expect(result.services.telegramBot.status).toBe("error");
         });
     });
@@ -308,61 +287,5 @@ describe("NetworkDiagnostic", () => {
             expect(result.message).toContain("无法检查");
         });
     });
-
-    describe("_checkCloudStorage", () => {
-        it("should return warning when no drives configured", async () => {
-            DriveRepository.findAll.mockResolvedValue([]);
-
-            const result = await NetworkDiagnostic._checkCloudStorage();
-
-            expect(result.status).toBe("warning");
-            expect(result.message).toContain("未找到");
-        });
-
-        it("should return success when drive validation succeeds", async () => {
-            const mockDrive = {
-                id: 1,
-                type: "mega",
-                config_data: JSON.stringify({ user: "test" })
-            };
-            DriveRepository.findAll.mockResolvedValue([mockDrive]);
-            CloudTool.validateConfig.mockResolvedValue({ success: true });
-
-            const result = await NetworkDiagnostic._checkCloudStorage();
-
-            expect(result.status).toBe("ok");
-            expect(result.message).toContain("MEGA");
-            expect(result.message).toContain("正常");
-        });
-
-        it("should return error when drive validation fails", async () => {
-            const mockDrive = {
-                id: 1,
-                type: "mega",
-                config_data: JSON.stringify({ user: "test" })
-            };
-            DriveRepository.findAll.mockResolvedValue([mockDrive]);
-            CloudTool.validateConfig.mockResolvedValue({
-                success: false,
-                reason: "Invalid credentials"
-            });
-
-            const result = await NetworkDiagnostic._checkCloudStorage();
-
-            expect(result.status).toBe("error");
-            expect(result.message).toContain("MEGA");
-            expect(result.message).toContain("失败");
-        });
-
-        it("should handle repository errors", async () => {
-            DriveRepository.findAll.mockRejectedValue(new Error("DB error"));
-
-            const result = await NetworkDiagnostic._checkCloudStorage();
-
-            expect(result.status).toBe("error");
-            expect(result.message).toContain("失败");
-        });
-    });
-
 
 });
