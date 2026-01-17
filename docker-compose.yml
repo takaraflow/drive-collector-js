@@ -16,6 +16,9 @@ services:
       # Node.js 环境
       - NODE_ENV=prod
       - NODE_MODE=all
+
+      # 分布式配置
+      - INSTANCE_ID=${INSTANCE_ID:-drive-collector-unknwon}
       
       # Infisical 配置 (可选，用于环境变量同步)
       - INFISICAL_TOKEN=${INFISICAL_TOKEN}
