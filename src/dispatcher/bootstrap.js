@@ -63,7 +63,15 @@ export async function startDispatcher() {
         }
 
         // 检查是否已经持有锁（用于区分首次获取和续租）
-        const alreadyHasLock = await instanceCoordinator.hasLock("telegram_client");
+        // 添加错误处理：防止 hasLock 抛出异常导致循环终止
+        let alreadyHasLock = false;
+        try {
+            alreadyHasLock = await instanceCoordinator.hasLock("telegram_client");
+        } catch (error) {
+            log.error(`[Loop ${currentLoop}] 🔒 锁检查失败: ${error.message}`);
+            // 返回 false 但不抛出异常，让循环继续
+            return false;
+        }
         
         // 尝试获取 Telegram 客户端专属锁 (增加 TTL 到 90s，减少因延迟导致的丢失)
         // 增加重试次数到 5 次，以应对发版时新旧实例交替的短暂冲突
@@ -201,9 +209,15 @@ export async function startDispatcher() {
         const interval = 60000 + jitter;
         
         setTimeout(async () => {
-            await startTelegramClient();
-            // 递归调用以实现持续的带抖动的间隔
-            startIntervalWithJitter();
+            try {
+                await startTelegramClient();
+            } catch (error) {
+                // 安全网：捕获所有未处理的异常，防止循环终止
+                log.error(`🛡️ 后台循环错误已捕获，继续执行: ${error.message}`);
+            } finally {
+                // 无论成功失败，始终继续循环
+                startIntervalWithJitter();
+            }
         }, interval);
     };
     
