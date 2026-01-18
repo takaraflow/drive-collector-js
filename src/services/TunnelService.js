@@ -35,7 +35,8 @@ class TunnelService {
                 await this.provider.initialize();
             }
         } catch (error) {
-            log.error(`Initialization failed:`, error);
+            log.warn(`Tunnel initialization failed (tunnel will be disabled):`, error.message);
+            this.provider = null;
         }
     }
 

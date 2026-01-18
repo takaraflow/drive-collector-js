@@ -45,4 +45,25 @@ describe('TunnelService', () => {
         const url = await tunnelService.getPublicUrl();
         expect(url).toBe(mockUrl);
     });
+
+    test('should handle initialization failure gracefully', async () => {
+        const config = {
+            tunnel: {
+                enabled: true,
+                provider: 'cloudflare',
+                metricsPort: 2000
+            }
+        };
+        getConfig.mockReturnValue(config);
+        
+        // Mock CloudflareTunnel to throw an error
+        CloudflareTunnel.mockImplementation(() => ({
+            initialize: vi.fn().mockRejectedValue(new Error('Tunnel failed'))
+        }));
+
+        await tunnelService.initialize();
+        
+        // Should set provider to null and not throw
+        expect(tunnelService.provider).toBeNull();
+    });
 });

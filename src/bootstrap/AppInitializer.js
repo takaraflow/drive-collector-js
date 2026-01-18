@@ -48,17 +48,22 @@ export class AppInitializer {
             await Promise.all([
                 queueService.initialize(),
                 cache.initialize(),
-                d1.initialize(),
-                tunnelService.initialize()
+                d1.initialize()
             ]);
 
-            const tunnelUrl = await tunnelService.getPublicUrl();
-            if (tunnelUrl) {
-                log.info(`🌐 Tunnel active at: ${tunnelUrl}`);
+            // TunnelService 单独初始化，不阻塞主流程
+            try {
+                await tunnelService.initialize();
+                const tunnelUrl = await tunnelService.getPublicUrl();
+                if (tunnelUrl) {
+                    log.info(`🌐 Tunnel active at: ${tunnelUrl}`);
+                }
+            } catch (tunnelError) {
+                log.warn('TunnelService 初始化失败，将禁用隧道功能:', tunnelError.message);
             }
 
         } catch (err) {
-            console.error("❌ 服务初始化失败:", err.message);
+            console.error("❌ 核心服务初始化失败:", err.message);
             gracefulShutdown.exitCode = 1;
             gracefulShutdown.shutdown('service-initialization-failed', err);
             throw err;
