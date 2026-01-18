@@ -1,4 +1,4 @@
-import { handleQStashWebhook, setAppReadyState } from "../index.js";
+import { handleWebhook, setAppReadyState } from "../index.js";
 
 const healthPaths = ["/health", "/healthz", "/ready"];
 
@@ -24,7 +24,7 @@ describe("Health & Readiness Endpoints - before ready", () => {
         const req = createHealthRequest(path, "GET");
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(res.writeHead).toHaveBeenCalledWith(200);
         expect(res.end).toHaveBeenCalledWith("OK");
@@ -34,7 +34,7 @@ describe("Health & Readiness Endpoints - before ready", () => {
         const req = createHealthRequest(path, "HEAD");
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(res.writeHead).toHaveBeenCalledWith(200);
         expect(res.end).toHaveBeenCalled();
@@ -44,7 +44,7 @@ describe("Health & Readiness Endpoints - before ready", () => {
         const req = createHealthRequest("/ready", "GET");
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(res.writeHead).toHaveBeenCalledWith(503);
         expect(res.end).toHaveBeenCalledWith("Not Ready");
@@ -54,7 +54,7 @@ describe("Health & Readiness Endpoints - before ready", () => {
         const req = createHealthRequest("/ready", "HEAD");
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(res.writeHead).toHaveBeenCalledWith(503);
         expect(res.end).toHaveBeenCalled();
@@ -70,7 +70,7 @@ describe("Health & Readiness Endpoints - after ready", () => {
         const req = createHealthRequest(path, "GET");
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(res.writeHead).toHaveBeenCalledWith(200);
         expect(res.end).toHaveBeenCalledWith("OK");
@@ -80,7 +80,7 @@ describe("Health & Readiness Endpoints - after ready", () => {
         const req = createHealthRequest(path, "HEAD");
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(res.writeHead).toHaveBeenCalledWith(200);
         expect(res.end).toHaveBeenCalled();

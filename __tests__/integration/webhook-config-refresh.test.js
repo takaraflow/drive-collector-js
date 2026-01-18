@@ -1,6 +1,6 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import http from 'http';
-import { handleQStashWebhook } from '../../index.js';
+import { handleWebhook } from '../../index.js';
 
 // Mock dependencies
 vi.mock('../../src/config/index.js', async (importOriginal) => {
@@ -16,7 +16,7 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
     };
 });
 
-// Mock services that might be imported by handleQStashWebhook
+// Mock services that might be imported by handleWebhook
 vi.mock('../../src/services/QueueService.js', () => ({
     queueService: {
         verifyWebhookSignature: vi.fn().mockResolvedValue(true)
@@ -49,8 +49,8 @@ vi.mock('../../index.js', async (importOriginal) => {
     const actual = await importOriginal();
     return {
         ...actual,
-        // We need to keep handleQStashWebhook logic but mock internal state if needed
-        // However, handleQStashWebhook is exported and we are testing it directly.
+        // We need to keep handleWebhook logic but mock internal state if needed
+        // However, handleWebhook is exported and we are testing it directly.
         // The issue is appReady state. In index.js it's a module level variable.
         // We can't easily change it without an export.
         // Fortunately index.js exports setAppReadyState.
@@ -76,7 +76,7 @@ describe('Webhook Configuration Refresh Integration', () => {
         indexModule.setAppReadyState(true);
 
         // Start a real HTTP server using the handler
-        server = http.createServer(handleQStashWebhook);
+        server = http.createServer(handleWebhook);
         await new Promise(resolve => server.listen(0, resolve));
         const port = server.address().port;
         baseUrl = `http://localhost:${port}`;

@@ -9,23 +9,20 @@ describe("HTTP Server Resilience", () => {
     });
 
     describe("HTTP Server Startup Resilience", () => {
-        test("验证 index.js 中的启动顺序：HTTP 服务器在 Telegram 连接之前", () => {
-            const buildWebhookServerIndex = indexContent.indexOf('buildWebhookServer');
-            const startDispatcherIndex = indexContent.indexOf('startDispatcher');
+        test("验证 index.js 中的启动顺序：HTTP 服务器在业务模块之前", () => {
+            const httpServerStartIndex = indexContent.indexOf('httpServer.start()');
+            const appInitializerStartIndex = indexContent.indexOf('appInitializer.start()');
             
-            expect(buildWebhookServerIndex).toBeGreaterThan(-1);
-            expect(startDispatcherIndex).toBeGreaterThan(-1);
-            expect(buildWebhookServerIndex).toBeLessThan(startDispatcherIndex);
+            expect(httpServerStartIndex).toBeGreaterThan(-1);
+            expect(appInitializerStartIndex).toBeGreaterThan(-1);
+            expect(httpServerStartIndex).toBeLessThan(appInitializerStartIndex);
         });
 
         test("验证业务模块启动被 try-catch 包裹", () => {
             expect(indexContent).toContain('try {');
-            expect(indexContent).toContain('await instanceCoordinator.start();');
-            expect(indexContent).toContain('InstanceCoordinator 启动失败，但 HTTP 服务器继续运行');
-            expect(indexContent).toContain('await startDispatcher();');
-            expect(indexContent).toContain('Dispatcher (Telegram) 启动失败，但 HTTP 服务器继续运行');
-            expect(indexContent).toContain('await startProcessor();');
-            expect(indexContent).toContain('Processor 启动失败，但 HTTP 服务器继续运行');
+            expect(indexContent).toContain('await appInitializer.start();');
+            expect(indexContent).toContain('} catch (error) {');
+            expect(indexContent).toContain('console.error("💀 引导程序失败:", error);');
         });
     });
 });

@@ -65,7 +65,7 @@ vi.mock("../../src/services/InstanceCoordinator.js", () => ({
 }));
 
 describe("QStash Webhook Integration", () => {
-    let handleQStashWebhook;
+    let handleWebhook;
     let setAppReadyState;
     let originalFetch;
 
@@ -164,8 +164,8 @@ describe("QStash Webhook Integration", () => {
         }));
 
         // Now import index.js
-        const { handleQStashWebhook: webhookHandler, setAppReadyState: readySetter } = await import("../../index.js");
-        handleQStashWebhook = webhookHandler;
+        const { handleWebhook: webhookHandler, setAppReadyState: readySetter } = await import("../../index.js");
+        handleWebhook = webhookHandler;
         setAppReadyState = readySetter;
 
         // Restore process.exit
@@ -238,7 +238,7 @@ describe("QStash Webhook Integration", () => {
         const req = createMockRequest('/api/tasks/download', { taskId: '123' });
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(mockVerifySignature).not.toHaveBeenCalled();
         expect(mockHandleDownloadWebhook).not.toHaveBeenCalled();
@@ -250,7 +250,7 @@ describe("QStash Webhook Integration", () => {
         const req = createMockRequest('/api/tasks/upload', { taskId: '456' });
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(mockHandleUploadWebhook).toHaveBeenCalledWith('456');
         expect(res.writeHead).toHaveBeenCalledWith(200);
@@ -278,7 +278,7 @@ describe("QStash Webhook Integration", () => {
         const req = createMockRequest('/api/tasks/download', { taskId: '123' });
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(global.fetch).toHaveBeenCalledTimes(1);
         expect(global.fetch).toHaveBeenCalledWith(
@@ -301,7 +301,7 @@ describe("QStash Webhook Integration", () => {
         const req = createMockRequest('/api/tasks/batch', { groupId: 'group1', taskIds: ['1', '2'] });
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(mockHandleMediaBatchWebhook).toHaveBeenCalledWith('group1', ['1', '2']);
         expect(res.writeHead).toHaveBeenCalledWith(200);
@@ -312,7 +312,7 @@ describe("QStash Webhook Integration", () => {
         const req = createMockRequest('/api/tasks/system-events', { event: 'test', data: 'value' });
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(res.writeHead).toHaveBeenCalledWith(200);
         expect(res.end).toHaveBeenCalledWith('OK');
@@ -328,7 +328,7 @@ describe("QStash Webhook Integration", () => {
         };
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(mockVerifySignature).not.toHaveBeenCalled();
         expect(res.writeHead).toHaveBeenCalledWith(503);
@@ -349,7 +349,7 @@ describe("QStash Webhook Integration", () => {
 
         // 即使服务模块有问题，health 端点也应该工作
         // 因为它在导入服务之前就返回了
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         // 验证没有调用任何服务相关的函数
         expect(mockVerifySignature).not.toHaveBeenCalled();
@@ -373,7 +373,7 @@ describe("QStash Webhook Integration", () => {
         };
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(mockVerifySignature).not.toHaveBeenCalled();
         expect(res.writeHead).toHaveBeenCalledWith(503);
@@ -396,7 +396,7 @@ describe("QStash Webhook Integration", () => {
         };
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(res.writeHead).toHaveBeenCalledWith(200);
         expect(res.end).toHaveBeenCalledWith('OK');
@@ -413,7 +413,7 @@ describe("QStash Webhook Integration", () => {
         };
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(res.writeHead).toHaveBeenCalledWith(200);
         expect(res.end).toHaveBeenCalled();
@@ -425,7 +425,7 @@ describe("QStash Webhook Integration", () => {
         const req = createMockRequest('/api/tasks/download', { taskId: '123' });
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(mockVerifySignature).toHaveBeenCalled();
         expect(res.writeHead).toHaveBeenCalledWith(401);
@@ -447,10 +447,10 @@ describe("QStash Webhook Integration", () => {
 
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
-        expect(res.writeHead).toHaveBeenCalledWith(500);
-        expect(res.end).toHaveBeenCalledWith('Internal Server Error');
+        expect(res.writeHead).toHaveBeenCalledWith(400);
+        expect(res.end).toHaveBeenCalledWith('Invalid JSON');
     });
 
     test("应当处理下游处理异常", async () => {
@@ -459,7 +459,7 @@ describe("QStash Webhook Integration", () => {
         const req = createMockRequest('/api/tasks/download', { taskId: '123' });
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(mockHandleDownloadWebhook).toHaveBeenCalledWith('123');
         expect(res.writeHead).toHaveBeenCalledWith(500);
@@ -470,7 +470,7 @@ describe("QStash Webhook Integration", () => {
         const req = createMockRequest('/api/tasks/unknown-topic', { data: 'test' });
         const res = createMockResponse();
 
-        await handleQStashWebhook(req, res);
+        await handleWebhook(req, res);
 
         expect(res.writeHead).toHaveBeenCalledWith(200);
         expect(res.end).toHaveBeenCalledWith('OK');
