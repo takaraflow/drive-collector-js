@@ -84,6 +84,13 @@ describe('Webhook Configuration Refresh Integration', () => {
 
     afterEach(async () => {
         if (server) {
+            // Ensure keep-alive connections don't block server.close()
+            if (typeof server.closeIdleConnections === 'function') {
+                server.closeIdleConnections();
+            }
+            if (typeof server.closeAllConnections === 'function') {
+                server.closeAllConnections();
+            }
             await new Promise(resolve => server.close(resolve));
         }
     });
@@ -136,6 +143,8 @@ describe('Webhook Configuration Refresh Integration', () => {
         const response = await fetch(`${baseUrl}/api/v2/config/refresh`, {
             method: 'GET'
         });
+        // Drain body to release undici keep-alive socket back to pool
+        await response.text();
 
         expect(refreshConfigurationMock).not.toHaveBeenCalled();
         // Should fall through to QStash check which requires signature

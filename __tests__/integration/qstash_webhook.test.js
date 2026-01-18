@@ -18,6 +18,15 @@ const mockQueueService = {
     verifyWebhookSignature: mockVerifySignature
 };
 
+// Mock CacheService
+const mockCacheGet = vi.fn();
+const mockCache = {
+    get: mockCacheGet
+};
+vi.mock("../../src/services/CacheService.js", () => ({
+    cache: mockCache
+}));
+
 // Mock TaskManager
 const mockHandleDownloadWebhook = vi.fn();
 const mockHandleUploadWebhook = vi.fn();
@@ -44,11 +53,24 @@ vi.mock("../../src/processor/TaskManager.js", () => ({
     TaskManager: mockTaskManager
 }));
 
+// Mock InstanceCoordinator (used by index.js handler for forwarding)
+const mockGetActiveInstances = vi.fn();
+vi.mock("../../src/services/InstanceCoordinator.js", () => ({
+    instanceCoordinator: {
+        instanceId: 'test-instance',
+        start: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined),
+        getActiveInstances: mockGetActiveInstances
+    }
+}));
+
 describe("QStash Webhook Integration", () => {
     let handleQStashWebhook;
     let setAppReadyState;
+    let originalFetch;
 
     beforeAll(async () => {
+        originalFetch = global.fetch;
         // Mock process methods to prevent exit
         const originalExit = process.exit;
         process.exit = vi.fn();
@@ -69,13 +91,6 @@ describe("QStash Webhook Integration", () => {
                 handleDownloadWebhook: mockHandleDownloadWebhook,
                 handleUploadWebhook: mockHandleUploadWebhook,
                 handleMediaBatchWebhook: mockHandleMediaBatchWebhook
-            }
-        }));
-
-        vi.mock("../../src/services/InstanceCoordinator.js", () => ({
-            instanceCoordinator: {
-                start: vi.fn().mockResolvedValue(undefined),
-                stop: vi.fn().mockResolvedValue(undefined)
             }
         }));
 
@@ -186,6 +201,9 @@ describe("QStash Webhook Integration", () => {
         mockHandleDownloadWebhook.mockResolvedValue({ success: true, statusCode: 200 });
         mockHandleUploadWebhook.mockResolvedValue({ success: true, statusCode: 200 });
         mockHandleMediaBatchWebhook.mockResolvedValue({ success: true, statusCode: 200 });
+        mockCacheGet.mockResolvedValue(null);
+        mockGetActiveInstances.mockResolvedValue([]);
+        global.fetch = originalFetch;
     });
 
     const createMockRequest = (url, body = {}, headers = {}) => {
@@ -235,6 +253,46 @@ describe("QStash Webhook Integration", () => {
         await handleQStashWebhook(req, res);
 
         expect(mockHandleUploadWebhook).toHaveBeenCalledWith('456');
+        expect(res.writeHead).toHaveBeenCalledWith(200);
+        expect(res.end).toHaveBeenCalledWith('OK');
+    });
+
+    test("应当在 Not Leader 时转发 download Webhook 并返回 200", async () => {
+        setAppReadyState(true);
+
+        mockHandleDownloadWebhook.mockResolvedValue({
+            success: false,
+            statusCode: 503,
+            message: "Service Unavailable - Not Leader"
+        });
+
+        mockCacheGet.mockResolvedValue({ instanceId: 'leader-1' });
+        mockGetActiveInstances.mockResolvedValue([{ id: 'leader-1', url: 'http://leader.local' }]);
+
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            text: vi.fn().mockResolvedValue('OK')
+        });
+
+        const req = createMockRequest('/api/tasks/download', { taskId: '123' });
+        const res = createMockResponse();
+
+        await handleQStashWebhook(req, res);
+
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        expect(global.fetch).toHaveBeenCalledWith(
+            'http://leader.local/api/tasks/download',
+            expect.objectContaining({
+                method: 'POST',
+                headers: expect.objectContaining({
+                    'upstash-signature': 'v1=test_signature',
+                    'x-forwarded-by-instance': 'test-instance'
+                }),
+                body: JSON.stringify({ taskId: '123' })
+            })
+        );
+
         expect(res.writeHead).toHaveBeenCalledWith(200);
         expect(res.end).toHaveBeenCalledWith('OK');
     });

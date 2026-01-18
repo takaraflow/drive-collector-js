@@ -133,36 +133,122 @@ export async function handleQStashWebhook(req, res) {
         const groupId = data.groupId || _meta.groupId || 'unknown';
         const timestamp = _meta.timestamp || Date.now();
 
-        log.info(`📩 收到 Webhook: ${path}`, { 
-            taskId: data.taskId, 
-            groupId,
-            triggerSource, 
+         log.info(`📩 收到 Webhook: ${path}`, { 
+             taskId: data.taskId, 
+             groupId,
+             triggerSource, 
             instanceId,
             timestamp,
             isFromQStash: triggerSource === 'direct-qstash',
             metadata: _meta
         });
-        let result = { success: true, statusCode: 200 };
+         let result = { success: true, statusCode: 200 };
 
-        if (path.endsWith('/download')) {
-            result = await TaskManager.handleDownloadWebhook(data.taskId);
-        } else if (path.endsWith('/upload')) {
-            result = await TaskManager.handleUploadWebhook(data.taskId);
-        } else if (path.endsWith('/batch')) {
-            result = await TaskManager.handleMediaBatchWebhook(data.groupId, data.taskIds);
-        } else if (path.endsWith('/system-events')) {
-            if (data.event === 'media_group_flush' && data.gid) {
-                const mediaGroupBufferModule = await import("./src/services/MediaGroupBuffer.js");
-                const mediaGroupBuffer = mediaGroupBufferModule.default;
-                await mediaGroupBuffer.handleFlushEvent(data);
-            }
-            result = { success: true, statusCode: 200 };
-        } else {
-            log.warn(`❓ 未知的 Webhook 路径: ${path}`);
-        }
+         if (path.endsWith('/download')) {
+             result = await TaskManager.handleDownloadWebhook(data.taskId);
+         } else if (path.endsWith('/upload')) {
+             result = await TaskManager.handleUploadWebhook(data.taskId);
+         } else if (path.endsWith('/batch')) {
+             result = await TaskManager.handleMediaBatchWebhook(data.groupId, data.taskIds);
+         } else if (path.endsWith('/system-events')) {
+             if (data.event === 'media_group_flush' && data.gid) {
+                 const mediaGroupBufferModule = await import("./src/services/MediaGroupBuffer.js");
+                 const mediaGroupBuffer = mediaGroupBufferModule.default;
+                 await mediaGroupBuffer.handleFlushEvent(data);
+             }
+             result = { success: true, statusCode: 200 };
+         } else {
+             log.warn(`❓ 未知的 Webhook 路径: ${path}`);
+         }
 
-        res.writeHead(result.statusCode || 200);
-        res.end(result.success ? 'OK' : (result.message || 'Error'));
+         const isNotLeader503 =
+             result?.statusCode === 503 &&
+             typeof result?.message === 'string' &&
+             result.message.includes('Not Leader');
+
+         const alreadyForwarded = Boolean(req.headers?.['x-forwarded-by-instance']);
+
+         if (isNotLeader503 && !alreadyForwarded) {
+             const resolveWebhookLeaderUrl = async () => {
+                 try {
+                     const [{ cache }, { instanceCoordinator }] = await Promise.all([
+                         import("./src/services/CacheService.js"),
+                         import("./src/services/InstanceCoordinator.js")
+                     ]);
+
+                     const lockData = await cache.get('lock:telegram_client', 'json', { skipL1: true });
+                     const leaderInstanceId = lockData?.instanceId;
+                     if (!leaderInstanceId) return null;
+
+                     const activeInstances = (await instanceCoordinator.getActiveInstances?.()) || [];
+                     const leaderInstance = activeInstances.find(i => i.id === leaderInstanceId);
+                     const baseUrl = leaderInstance?.tunnelUrl || leaderInstance?.url;
+                     if (!baseUrl) return null;
+                     return String(baseUrl).replace(/\/$/, '');
+                 } catch (error) {
+                     log.warn('Failed to resolve webhook leader URL', { error: error?.message || String(error) });
+                     return null;
+                 }
+             };
+
+             const forwardWebhookToLeader = async ({ targetBaseUrl, requestPath, signature, bodyString }) => {
+                 const { instanceCoordinator } = await import("./src/services/InstanceCoordinator.js");
+                 const targetUrl = `${targetBaseUrl}${requestPath}`;
+                 const forwardHeaders = {
+                     'upstash-signature': signature,
+                     'content-type': 'application/json',
+                     'x-forwarded-by-instance': instanceCoordinator.instanceId || 'unknown'
+                 };
+
+                 return fetch(targetUrl, {
+                     method: 'POST',
+                     headers: forwardHeaders,
+                     body: bodyString,
+                     signal: AbortSignal.timeout(15000)
+                 });
+             };
+
+             const targetBaseUrl = await resolveWebhookLeaderUrl();
+             if (targetBaseUrl) {
+                 log.info('➡️ Forwarding webhook to leader', {
+                     path,
+                     targetBaseUrl,
+                     taskId: data.taskId,
+                     groupId,
+                     triggerSource,
+                     instanceId
+                 });
+
+                 const forwardedResponse = await forwardWebhookToLeader({
+                     targetBaseUrl,
+                     requestPath: `${url.pathname}${url.search}`,
+                     signature,
+                     bodyString: body
+                 });
+
+                 const upstreamStatus = forwardedResponse.status;
+                 if (forwardedResponse.ok) {
+                     log.info('✅ Webhook forwarded to leader', { path, upstreamStatus, targetBaseUrl });
+                     res.writeHead(200);
+                     res.end('OK');
+                     return;
+                 }
+
+                 const upstreamBody = await forwardedResponse.text();
+                 log.warn('⚠️ Webhook forward returned non-2xx', {
+                     path,
+                     upstreamStatus,
+                     targetBaseUrl,
+                     upstreamBodyPreview: upstreamBody?.substring?.(0, 200) || ''
+                 });
+                 res.writeHead(upstreamStatus || 503);
+                 res.end(upstreamBody || 'Error');
+                 return;
+             }
+         }
+
+         res.writeHead(result.statusCode || 200);
+         res.end(result.success ? 'OK' : (result.message || 'Error'));
 
     } catch (error) {
         console.error("❌ Request handling error:", error);
