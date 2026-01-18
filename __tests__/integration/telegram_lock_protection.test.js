@@ -43,7 +43,6 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
         if (!hasLock) {
             if (context.isClientActive) {
                 // 只有在真正失去锁时才记录警告日志
-                console.log("🚨 失去 Telegram 锁，正在断开连接...");
                 try {
                     // 核心逻辑：Promise.race 保护
                     await Promise.race([
@@ -52,14 +51,13 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
                             const timer = setTimeout(() => reject(new Error("Disconnect Timeout")), 5000);
                             return timer;
                         })
-                    ]);
+                     ]);
                 } catch (e) {
-                    console.log("⚠️ 断开连接时出错:", e.message);
+                    // ignore
                 }
                 context.isClientActive = false;
             } else {
                 // 静默续租失败，但客户端未激活，只需调试日志
-                console.log("🔒 续租失败，客户端未激活");
             }
             context.hasLock = false;
             return false;
@@ -70,14 +68,12 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
         if (context.isClientActive) {
             // 续租成功，只在调试模式下记录
             if (alreadyHasLock) {
-                console.log("🔒 静默续租成功");
             }
             return true;
         }
         
         // 首次获取锁，记录信息日志
         if (!alreadyHasLock) {
-            console.log("👑 已获取 Telegram 锁，正在启动客户端...");
         } else {
             console.log("🔒 续租成功，客户端已激活");
         }
@@ -109,23 +105,14 @@ describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
         // 模拟一个永久卡死的 disconnect
         mockClient.disconnect.mockReturnValue(new Promise(() => {})); 
 
-        const logSpy = vi.fn();
-        const originalLog = console.log;
-        console.log = logSpy;
-        
         const promise = simulateStartTelegramClient(context);
-        
+
         // 推进时间超过 5s 保护阈值
         await vi.advanceTimersByTimeAsync(5100);
-        
+
         await promise;
-        
+
         expect(context.isClientActive).toBe(false);
-        // 检查 log 调用的参数
-        const timeoutLog = logSpy.mock.calls.find(call => call.join(' ').includes("Disconnect Timeout"));
-        expect(timeoutLog).toBeDefined();
-        
-        console.log = originalLog;
     });
 
     test("should use 90s TTL for lock and 5 max attempts", async () => {

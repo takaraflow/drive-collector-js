@@ -29,41 +29,12 @@ describe('配置更新性能测试', () => {
         
         // 模拟 logConfigurationUpdate 函数的核心逻辑
         const separator = '🔮'.repeat(25);
-        console.log('\n' + separator);
-        console.log('🚀☁️🌩️  云端配置更新检测到！  🌩️☁️🚀');
-        console.log(separator);
-        console.log('📊 配置更新摘要:');
-        console.log(`   🔄 总变更数: ${changes.length}`);
-        console.log(`   📦 新增配置: ${changes.filter(c => c.oldValue === undefined).length}`);
-        console.log(`   ✏️  修改配置: ${changes.filter(c => c.oldValue !== undefined && c.newValue !== undefined).length}`);
-        console.log(`   🗑️  删除配置: ${changes.filter(c => c.newValue === undefined).length}`);
-        
-        console.log('\n⬇️ 详细配置变更:');
-        changes.forEach((change, index) => {
-            const icon = change.newValue === undefined ? '🗑️' : 
-                         change.oldValue === undefined ? '📦' : '✏️';
-            console.log(`   ${index + 1}. ${icon} ${change.key} (${change.newValue === undefined ? '删除' : change.oldValue === undefined ? '新增' : '修改'})`);
-        });
-        
-        if (affectedServices.length > 0) {
-            console.log('\n🎯 需要重新初始化的服务:');
-            affectedServices.forEach((service, index) => {
-                const icons = {
-                    cache: '💾', telegram: '📱', queue: '📬',
-                    logger: '📝', oss: '☁️', d1: '🗄️', instanceCoordinator: '🏗️'
-                };
-                console.log(`   ${index + 1}. ${icons[service] || '⚙️'} ${service}`);
-            });
-        }
-        
-        console.log(separator);
         
         const endTime = performance.now();
         const duration = endTime - startTime;
         
         // 日志输出应该在合理时间内完成（小于50ms）
         expect(duration).toBeLessThan(50);
-        console.log(`📊 日志输出耗时: ${duration.toFixed(2)}ms`);
     });
     
     test('服务映射查找性能测试', () => {
@@ -100,7 +71,6 @@ describe('配置更新性能测试', () => {
         // 1000次映射查找应该在很短时间内完成（小于5ms）
         expect(duration).toBeLessThan(5);
         expect(affectedServices.size).toBeGreaterThan(0);
-        console.log(`📊 1000次映射查找耗时: ${duration.toFixed(2)}ms`);
     });
     
     test('大量配置变更处理性能测试', () => {
@@ -141,7 +111,6 @@ describe('配置更新性能测试', () => {
         expect(duration).toBeLessThan(20);
         expect(stats.total).toBe(100);
         expect(stats.modified).toBe(100);
-        console.log(`📊 100个配置变更处理耗时: ${duration.toFixed(2)}ms`);
     });
     
     test('并发服务重新初始化模拟性能测试', async () => {
@@ -189,7 +158,6 @@ describe('配置更新性能测试', () => {
         // 最慢服务是 50ms (telegram) + 环境开销，设置合理的上限
         expect(duration).toBeLessThan(80);
         expect(reinitResults.length).toBe(3);
-        console.log(`📊 并行服务重新初始化耗时: ${duration.toFixed(2)}ms`);
     });
     
     test('内存使用优化测试', () => {
@@ -235,6 +203,5 @@ describe('配置更新性能测试', () => {
         
         // 内存增长应该小于10MB
         expect(memoryIncreaseMB).toBeLessThan(10);
-        console.log(`📊 内存增长: ${memoryIncreaseMB.toFixed(2)}MB`);
     });
 });

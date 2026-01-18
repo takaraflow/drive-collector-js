@@ -154,13 +154,7 @@ describe('配置更新和服务重新初始化', () => {
             expect(actualServices.has(service)).toBe(true);
         });
     });
-    
-    test('服务重新初始化器应该正确工作', async () => {
-        // 由于ServiceReinitializer是在config/index.js内部定义的，
-        // 我们无法直接测试它，但可以通过集成测试验证
-        expect(true).toBe(true); // 占位符测试
-    });
-    
+
     test('健康检查功能应该工作正常', async () => {
         const { cache } = await import('../../src/services/CacheService.js');
         const { getTelegramStatus } = await import('../../src/services/telegram.js');
@@ -177,23 +171,5 @@ describe('配置更新和服务重新初始化', () => {
         expect(queueStatus.state).toBe('closed');
     });
     
-    test('应该记录详细的配置变更信息', () => {
-        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-        
-        // 模拟日志输出
-        const separator = '🔮'.repeat(25);
-        console.log('\n' + separator);
-        console.log('🚀☁️🌩️  云端配置更新检测到！  🌩️☁️🚀');
-        console.log(separator);
-        console.log('📊 配置更新摘要:');
-        console.log('   🔄 总变更数: 2');
-        
-        expect(consoleSpy).toHaveBeenCalledWith('\n' + separator);
-        expect(consoleSpy).toHaveBeenCalledWith('🚀☁️🌩️  云端配置更新检测到！  🌩️☁️🚀');
-        expect(consoleSpy).toHaveBeenCalledWith(separator);
-        expect(consoleSpy).toHaveBeenCalledWith('📊 配置更新摘要:');
-        expect(consoleSpy).toHaveBeenCalledWith('   🔄 总变更数: 2');
-        
-        consoleSpy.mockRestore();
-    });
+
 });

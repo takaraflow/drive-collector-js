@@ -103,7 +103,6 @@ describe('Dispatcher Permission Guard', () => {
     });
 
     beforeEach(() => {
-        // console.log('Mock AuthGuard.can:', mockAuthGuard.can);
         vi.clearAllMocks();
         mockConfig.ownerId = '1001';
         // Reset default behaviors
@@ -158,7 +157,6 @@ describe('Dispatcher Permission Guard', () => {
             mockAuthGuard.getRole.mockResolvedValue('admin');
             // admin CAN bypass maintenance
             mockAuthGuard.can.mockImplementation(async (uid, perm) => {
-                console.log(`[TEST DEBUG] AuthGuard.can called with ${uid}, ${perm}`);
                 return true;
             });
             mockSettingsRepo.get.mockResolvedValue('private');

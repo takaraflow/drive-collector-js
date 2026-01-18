@@ -170,8 +170,7 @@ describe("Telegram Service", () => {
         // Skip this test in ESM environment - mocking is not compatible
         // The circuit breaker logic is already tested in telegram-circuit-breaker.test.js
         // and the integration tests verify the full flow
-        console.log("⚠️ Skipping ESM-incompatible test - circuit breaker logic verified in other tests");
-        
+
         // Verify circuit breaker state is still functional
         const cbState = module.getCircuitBreakerState();
         expect(cbState.state).toBeDefined();
@@ -209,7 +208,6 @@ describe("Telegram Service", () => {
             );
         } else {
             // 如果没有找到注册的监听器，我们至少验证一下 logger 导入是正常的
-            console.log("⚠️ Skipping event handler verification - check source code for addEventHandler usage");
             expect(mockLoggerError).toBeDefined();
         }
     });

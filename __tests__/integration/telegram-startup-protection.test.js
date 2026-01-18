@@ -68,7 +68,6 @@ describe("Telegram Startup Protection and Re-entrance Prevention", () => {
         const startTelegramClient = async () => {
             // 防止重入：如果正在启动中，直接返回
             if (isClientStarting) {
-                console.log("⏳ 客户端正在启动中，跳过本次重试...");
                 return false;
             }
 
@@ -76,7 +75,6 @@ describe("Telegram Startup Protection and Re-entrance Prevention", () => {
             const hasLock = await mockCoordinator.acquireLock("telegram_client", 90, { maxAttempts: 5 });
             if (!hasLock) {
                 if (isClientActive) {
-                    console.log("🚨 失去 Telegram 锁，正在断开连接...");
                     await mockClient.disconnect();
                     isClientActive = false;
                 }
@@ -86,12 +84,10 @@ describe("Telegram Startup Protection and Re-entrance Prevention", () => {
             if (isClientActive) return true; // 已启动且持有锁
 
             isClientStarting = true; // 标记开始启动
-            console.log("👑 已获取 Telegram 锁，正在启动客户端...");
 
             try {
                 await mockClient.start({ botAuthToken: "test_token" });
                 await mockSettingsRepository.set("tg_bot_session", "session_data");
-                console.log("🚀 Telegram 客户端已连接");
                 isClientActive = true;
                 return true;
             } catch (error) {

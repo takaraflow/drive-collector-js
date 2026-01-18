@@ -90,41 +90,7 @@ describe('配置更新集成测试', () => {
         expect(affectedServices.size).toBe(2);
     });
     
-    test('应该生成醒目的日志输出', () => {
-        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-        
-        const changes = [
-            { key: 'REDIS_URL', oldValue: 'redis://old-host:6379', newValue: 'redis://new-host:6379' },
-            { key: 'API_ID', oldValue: '123456', newValue: '789012' },
-            { key: 'NEW_FEATURE', oldValue: undefined, newValue: 'true' }
-        ];
-        
-        const affectedServices = ['cache', 'telegram'];
-        
-        // 模拟日志输出函数的行为
-        const separator = '🔮'.repeat(25);
-        console.log('\n' + separator);
-        console.log('🚀☁️🌩️  云端配置更新检测到！  🌩️☁️🚀');
-        console.log(separator);
-        console.log('📊 配置更新摘要:');
-        console.log(`   🔄 总变更数: ${changes.length}`);
-        console.log(`   📦 新增配置: ${changes.filter(c => c.oldValue === undefined).length}`);
-        console.log(`   ✏️  修改配置: ${changes.filter(c => c.oldValue !== undefined && c.newValue !== undefined).length}`);
-        console.log(`   🗑️  删除配置: ${changes.filter(c => c.newValue === undefined).length}`);
-        
-        // 验证关键日志调用
-        expect(consoleSpy).toHaveBeenCalledWith('\n' + separator);
-        expect(consoleSpy).toHaveBeenCalledWith('🚀☁️🌩️  云端配置更新检测到！  🌩️☁️🚀');
-        expect(consoleSpy).toHaveBeenCalledWith(separator);
-        expect(consoleSpy).toHaveBeenCalledWith('📊 配置更新摘要:');
-        expect(consoleSpy).toHaveBeenCalledWith('   🔄 总变更数: 3');
-        expect(consoleSpy).toHaveBeenCalledWith('   📦 新增配置: 1');
-        expect(consoleSpy).toHaveBeenCalledWith('   ✏️  修改配置: 2');
-        expect(consoleSpy).toHaveBeenCalledWith('   🗑️  删除配置: 0');
-        
-        consoleSpy.mockRestore();
-    });
-    
+
     test('服务重新初始化应该处理错误情况', async () => {
         // Mock 一个会抛出错误的服务
         const mockService = {
