@@ -727,7 +727,111 @@ export class CloudTool {
         return null;
     }
     
+    /**
+     * Generic execute method for rclone commands
+     * @param {Array} commandArgs - Command arguments (e.g., ['copy', 'source', 'destination'])
+     * @param {string} taskId - Optional task ID for tracking
+     * @param {Object} options - Options object
+     * @param {Function} options.onProgress - Progress callback function
+     * @param {AbortSignal} options.signal - AbortSignal for cancellation
+     * @returns {Promise} - Promise that resolves when command completes
+     */
+    static async execute(commandArgs, taskId = null, options = {}) {
+        if (!commandArgs || !Array.isArray(commandArgs) || commandArgs.length === 0) {
+            throw new Error('Command arguments are required');
+        }
+
+        return new Promise((resolve, reject) => {
+            try {
+                const args = ["--config", "/dev/null", ...commandArgs];
+                const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
+
+                let cancelled = false;
+                let errorLog = "";
+
+                // Handle cancellation if signal is provided
+                if (options.signal) {
+                    if (options.signal.aborted) {
+                        cancelled = true;
+                        proc.kill('SIGTERM');
+                        reject(new Error('Command cancelled before execution'));
+                        return;
+                    }
+
+                    options.signal.addEventListener('abort', () => {
+                        if (!cancelled) {
+                            cancelled = true;
+                            proc.kill('SIGTERM');
+                            reject(new Error('Command cancelled'));
+                        }
+                    });
+                }
+
+                // Handle progress output if callback is provided
+                if (options.onProgress) {
+                    proc.stderr.on("data", (data) => {
+                        if (cancelled) return;
+                        
+                        try {
+                            const lines = data.toString().split('\n');
+                            for (const line of lines) {
+                                if (!line.trim()) continue;
+                                try {
+                                    const log = JSON.parse(line);
+                                    // Parse progress information from rclone JSON log
+                                    // Handle both "total_size"/"bytes" and "stats.totalBytes"/"stats.bytes" formats
+                                    let totalBytes = log.total_size || (log.stats && log.stats.totalBytes);
+                                    let transferredBytes = log.bytes || (log.stats && log.stats.bytes);
+                                    
+                                    if (totalBytes && transferredBytes) {
+                                        options.onProgress({
+                                            progress: Math.round((transferredBytes / totalBytes) * 100),
+                                            totalBytes,
+                                            transferredBytes
+                                        });
+                                    }
+                                } catch (e) {
+                                    // Collect non-JSON lines as error log
+                                    errorLog += line + "\n";
+                                }
+                            }
+                        } catch (e) {
+                            errorLog += data.toString();
+                        }
+                    });
+                } else {
+                    proc.stderr.on("data", (data) => {
+                        if (cancelled) return;
+                        errorLog += data.toString();
+                    });
+                }
+
+                proc.on("close", (code) => {
+                    if (cancelled) return;
+                    
+                    if (code === 0) {
+                        resolve({ success: true, exitCode: code });
+                    } else {
+                        const errorMessage = errorLog.trim() || `Command exited with code ${code}`;
+                        reject(new Error(errorMessage));
+                    }
+                });
+
+                proc.on("error", (err) => {
+                    if (cancelled) return;
+                    reject(new Error(`Process error: ${err.message}`));
+                });
+
+            } catch (e) {
+                reject(new Error(`Failed to execute command: ${e.message}`));
+            }
+        });
+    }
+
     static async killTask(taskId) {
         // Implementation in TaskManager
     }
 }
+
+// Export CloudTool as rclone for backward compatibility with tests
+export const rclone = CloudTool;

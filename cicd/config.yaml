@@ -1,0 +1,295 @@
+# CI/CD 配置 - 统一流水线定义
+# 此文件定义了所有环境的CI/CD逻辑，通过scripts/cicd-runner.js执行
+
+# 环境映射配置
+environments:
+  prod:
+    name: "生产环境"
+    docker:
+      registry: "ghcr.io"
+      repository: "${{github_repository}}"
+      tags:
+        - "type=ref,event=branch"
+        - "type=semver,pattern=${{version}}"
+        - "type=sha"
+    notifications:
+      bark:
+        enabled: true
+        group: "GHA"
+    deployment:
+      target: "fly.io"
+      strategy: "blue-green"
+      health_check: true
+      rollback_on_failure: true
+      
+  pre:
+    name: "预发布环境"
+    docker:
+      registry: "ghcr.io"
+      repository: "${{github_repository}}"
+      tags:
+        - "type=ref,event=branch"
+        - "type=sha"
+    notifications:
+      bark:
+        enabled: true
+        group: "GHA"
+    deployment:
+      target: "fly.io"
+      strategy: "canary"
+      health_check: true
+      
+  dev:
+    name: "开发环境"
+    docker:
+      registry: "ghcr.io"
+      repository: "${{github_repository}}"
+      tags:
+        - "type=ref,event=branch"
+        - "type=sha"
+    notifications:
+      bark:
+        enabled: false
+    deployment:
+      target: "local"
+      strategy: "direct"
+
+# CI/CD 步骤定义
+checks:
+  metadata:
+    name: "Metadata Validation"
+    commands: ["node scripts/ci-unified.js validate"]
+    required: true
+    timeout: 300
+    
+  lint:
+    name: "Linting & Quality"
+    commands: ["npm run ci:lint"]
+    required: true
+    timeout: 300
+    
+  test:
+    name: "Unit Testing"
+    commands: ["npm run ci:test"]
+    required: true
+    timeout: 600
+    
+  integration:
+    name: "Integration Testing"
+    commands: ["npm run test:integration"]
+    required: false
+    timeout: 600
+    condition: "github.event_name == 'pull_request' || github.ref == 'refs/heads/main'"
+    
+  security:
+    name: "Security Audit"
+    commands: ["npm audit --audit-level=high"]
+    required: false
+    timeout: 300
+    
+  coverage:
+    name: "Code Coverage"
+    commands: ["npm run test:coverage"]
+    required: false
+    timeout: 600
+    condition: "github.ref == 'refs/heads/main'"
+    
+  build:
+    name: "Docker Build"
+    commands: ["echo 'Starting specialized docker build...'"]
+    required: false
+    timeout: 900
+    condition: "github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')"
+    
+  deploy:
+    name: "Deployment"
+    commands: ["echo 'Starting deployment...'"]
+    required: false
+    timeout: 1200
+    condition: "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+
+# Docker 基础配置
+docker:
+  build:
+    context: "."
+    dockerfile: "Dockerfile"
+    build_args:
+      - "NODE_ENV"
+      - "NODE_MODE"
+    platforms:
+      - "linux/amd64"
+      - "linux/arm64"
+    cache_from:
+      - "type=registry,ref=${{docker.repository}}:latest"
+    cache_to:
+      - "type=inline"
+  
+  login:
+    registry: "ghcr.io"
+    username: "${{github_actor}}"
+    password: "${{github_token}}"
+
+# 通知配置
+notifications:
+  bark:
+    webhook_url: "${{ secrets.BARK_WEBHOOK_URL }}"
+    device_token: "${{ secrets.BARK_DEVICE_TOKEN }}"
+    enabled: true
+    
+  slack:
+    webhook_url: "${{ secrets.SLACK_WEBHOOK_URL }}"
+    channel: "#ci-cd"
+    enabled: false
+
+# 性能配置
+performance:
+  timeout:
+    install: 300 # 依赖安装超时时间(秒)
+    test: 600    # 测试执行超时时间(秒)
+    build: 900   # 构建超时时间(秒)
+    deploy: 1200 # 部署超时时间(秒)
+  
+  metrics:
+    enabled: true
+    thresholds:
+      install_duration: 30  # 依赖安装时间阈值(秒)
+      test_duration: 60     # 测试执行时间阈值(秒)
+      build_duration: 120   # 构建时间阈值(秒)
+      deploy_duration: 300  # 部署时间阈值(秒)
+
+# 缓存配置
+cache:
+  npm:
+    key: "${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}"
+    paths:
+      - "~/.npm"
+      - "node_modules"
+  
+  docker:
+    key: "${{ runner.os }}-docker-${{ hashFiles('Dockerfile') }}"
+    paths:
+      - "/tmp/docker"
+
+# 分支配置
+branches:
+  main:
+    environment: "prod"
+    infisical_env: "prod"
+    target: "Production Environment"
+    deployment:
+      enabled: true
+      strategy: "blue-green"
+      health_check: true
+      
+  develop:
+    environment: "pre"
+    infisical_env: "pre"
+    target: "Pre-production Environment"
+    deployment:
+      enabled: true
+      strategy: "canary"
+      health_check: true
+      
+  default:
+    environment: "dev"
+    infisical_env: "dev"
+    target: "Development Environment"
+    deployment:
+      enabled: false
+
+# 事件触发器配置
+triggers:
+  push:
+    branches:
+      - "main"
+      - "develop"
+    tags:
+      - "v*"
+    paths:
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - "Dockerfile"
+      - "cicd/**"
+      - ".github/workflows/**"
+      
+  pull_request:
+    branches:
+      - "main"
+      - "develop"
+    paths:
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - "cicd/**"
+      - ".github/workflows/**"
+
+# 环境变量配置
+env_vars:
+  common:
+    NODE_ENV: "production"
+    CI: "true"
+    GITHUB_ACTIONS: "true"
+    
+  prod:
+    NODE_MODE: "all"
+    TELEGRAM_BOT_TOKEN: "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+    RCLONE_CONFIG: "${{ secrets.RCLONE_CONFIG }}"
+    
+  pre:
+    NODE_MODE: "all"
+    TELEGRAM_BOT_TOKEN: "${{ secrets.TELEGRAM_BOT_TOKEN_PRE }}"
+    RCLONE_CONFIG: "${{ secrets.RCLONE_CONFIG_PRE }}"
+    
+  dev:
+    NODE_MODE: "all"
+    TELEGRAM_BOT_TOKEN: "${{ secrets.TELEGRAM_BOT_TOKEN_DEV }}"
+    RCLONE_CONFIG: "${{ secrets.RCLONE_CONFIG_DEV }}"
+
+# 质量门禁
+quality_gates:
+  code_coverage:
+    threshold: 80
+    required: false
+    
+  test_success_rate:
+    threshold: 95
+    required: true
+    
+  security_vulnerabilities:
+    threshold: 0
+    required: true
+    
+  performance_regression:
+    threshold: 10
+    required: false
+
+# 报告配置
+reports:
+  test:
+    format: "junit"
+    path: "test-results/junit.xml"
+    
+  coverage:
+    format: "lcov"
+    path: "coverage/lcov.info"
+    
+  security:
+    format: "sarif"
+    path: "security-results.sarif"
+
+# 监控配置
+monitoring:
+  enabled: true
+  metrics:
+    - "build_duration"
+    - "test_duration"
+    - "deployment_duration"
+    - "success_rate"
+    - "failure_rate"
+  
+  alerts:
+    - "build_timeout"
+    - "test_failure"
+    - "deployment_failure"
+    - "security_vulnerability"

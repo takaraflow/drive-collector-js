@@ -1,9 +1,5 @@
 name: CI
 
-env:
-  # act 本地运行标识：优先使用事件标记，其次匹配 secrets
-  ACT_LOCAL: ${{ github.event.act == true || secrets.ACT_LOCAL == 'true' }}
-
 on:
   push:
     branches: [main, develop]
@@ -18,240 +14,31 @@ concurrency:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
-  metadata:
+  unified-ci:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Use Node.js 20.x
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20.x
-      - name: Install dependencies (act)
-        if: ${{ env.ACT_LOCAL }}
-        run: |
-          apt-get update && apt-get install -y jq
-      - name: Validate manifest.json
-        run: |
-          if [ ! -f "manifest.json" ]; then echo "manifest.json missing"; exit 1; fi
-          if [ ! -f "package.json" ]; then echo "package.json missing"; exit 1; fi
-          # Validate JSON syntax
-          jq . manifest.json > /dev/null
-          jq . package.json > /dev/null
-          # Check version consistency
-          PACKAGE_VERSION=$(jq -r .version package.json)
-          MANIFEST_VERSION=$(jq -r .version manifest.json)
-          if [ "$PACKAGE_VERSION" != "$MANIFEST_VERSION" ]; then
-            echo "Version mismatch: package.json=$PACKAGE_VERSION, manifest.json=$MANIFEST_VERSION"
-            exit 1
-          fi
-          echo "✅ Manifest validation passed (v$PACKAGE_VERSION)"
-      - name: Check manifest duplicate keys
-        run: npm run check:manifest:duplicates
-      - name: Check env manifest consistency
-        run: npm run check:env
+          cache: 'npm'
 
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Use Node.js 20.x
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20.x
-      - name: Install dependencies (act)
-        if: ${{ env.ACT_LOCAL }}
-        run: |
-          echo "Node version: $(node -v)"
-          npm install
-      - name: Install dependencies (ci)
-        if: ${{ !env.ACT_LOCAL }}
-        run: npm ci
-      - name: Run lint (if configured)
-        run: |
-          if node -e "process.exit(require('./package.json').scripts?.lint ? 0 : 1)"; then
-            npm run lint
-          else
-            echo "ℹ️ No lint script found, skipping"
-          fi
-      - name: Check formatting (if configured)
-        run: |
-          if node -e "process.exit(require('./package.json').scripts?.['format:check'] ? 0 : 1)"; then
-            npm run format:check
-          else
-            echo "ℹ️ No format:check script found, skipping"
-          fi
-
-  test:
-    needs: [metadata, lint]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Use Node.js 20.x
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20.x
-      - name: Install dependencies
-        if: ${{ !env.ACT_LOCAL }}
-        run: |
-          START_TIME=$(date +%s)
-          npm ci
-          echo "INSTALL_DURATION=$(($(date +%s) - $START_TIME))" >> $GITHUB_ENV
-      - name: Install dependencies (act)
-        if: ${{ env.ACT_LOCAL }}
-        run: |
-          echo "Node version: $(node -v)"
-          npm install
-      - name: Run tests (with coverage)
-        run: |
-          TEST_START=$(date +%s)
-          npm run test:coverage
-          echo "TEST_DURATION=$(($(date +%s) - $TEST_START))" >> $GITHUB_ENV
-      - name: Report Performance Metrics
-        run: |
-          echo "### Performance Metrics (Node.js 20.x) 🚀" >> $GITHUB_STEP_SUMMARY
-          echo "- **Dependency Installation:** ${{ env.INSTALL_DURATION }}s" >> $GITHUB_STEP_SUMMARY
-          echo "- **Test Execution:** ${{ env.TEST_DURATION }}s" >> $GITHUB_STEP_SUMMARY
-          echo "- **Total Monitored Time:** $((${{ env.INSTALL_DURATION }} + ${{ env.TEST_DURATION }}))s" >> $GITHUB_STEP_SUMMARY
-      - name: Upload coverage reports
-        if: ${{ !env.ACT_LOCAL && env.ACTIONS_RUNTIME_TOKEN && hashFiles('coverage/**') != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-node20
-          path: coverage/
-          retention-days: 7
-
-  build:
-    needs: test
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      # 根据分支确定目标环境
-      # main → prod, develop → pre, 其他 → dev
-      - name: Set environment based on branch
-        id: set-env
-        run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "environment=prod" >> $GITHUB_OUTPUT
-            echo "infisical_env=prod" >> $GITHUB_OUTPUT
-            echo "🎯 Target: Production Environment"
-          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
-            echo "environment=pre" >> $GITHUB_OUTPUT
-            echo "infisical_env=pre" >> $GITHUB_OUTPUT
-            echo "🎯 Target: Pre-production Environment"
-          else
-            echo "environment=dev" >> $GITHUB_OUTPUT
-            echo "infisical_env=dev" >> $GITHUB_OUTPUT
-            echo "🎯 Target: Development Environment"
-          fi
-      - name: Log in to the Container registry
-        if: ${{ !env.ACT_LOCAL }}
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        if: ${{ !env.ACT_LOCAL }}
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=sha
-      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        if: ${{ !env.ACT_LOCAL }}
-      
-      - name: Build Docker image locally (act)
-        if: ${{ env.ACT_LOCAL }}
-        run: |
-          apt-get update && apt-get install -y ca-certificates curl gnupg
-          install -m 0755 -d /etc/apt/keyrings
-          curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-          chmod a+r /etc/apt/keyrings/docker.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bullseye stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-          apt-get update
-          apt-get install -y docker-ce-cli
-          docker pull node:20-slim
-          docker build \
-            --build-arg NODE_ENV=${{ steps.set-env.outputs.environment }} \
-            -t drive-collector-bot:act \
-            .
-      
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        if: ${{ !env.ACT_LOCAL }}
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            NODE_ENV=${{ steps.set-env.outputs.environment }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
-  notify:
-    needs: [build]
-    if: always() && needs.build.result == 'success'
-    runs-on: ubuntu-latest
-    environment: production
-    env:
-      BARK_WEBHOOK_URL: ${{ secrets.BARK_WEBHOOK_URL }}
-      BARK_DEVICE_TOKEN: ${{ secrets.BARK_DEVICE_TOKEN }}
-    steps:
-      - name: Determine target environment
-        id: set-env
-        run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "environment=prod" >> $GITHUB_OUTPUT
-            echo "environment_name=生产环境" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
-            echo "environment=pre" >> $GITHUB_OUTPUT
-            echo "environment_name=预发布环境" >> $GITHUB_OUTPUT
-          else
-            echo "environment=dev" >> $GITHUB_OUTPUT
-            echo "environment_name=开发环境" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Notify Bark result
-        run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            TITLE="✅ GHA CI/CD 成功 [${{ steps.set-env.outputs.environment_name }}]"
-            STATUS="success"
-          else
-            TITLE="❌ GHA CI/CD 失败 [${{ steps.set-env.outputs.environment_name }}]"
-            STATUS="failure"
-          fi
-
-          # Use printf to handle multiline content safely for JSON
-          CONTENT="环境: ${{ steps.set-env.outputs.environment_name }}\nWorkflow: ${{ github.workflow }}\nStatus: ${{ job.status }}\nCommit: ${{ github.sha }}\nRef: ${{ github.ref }}"
-
-          # Ensure BARK_WEBHOOK_URL ends with / if it's just the domain
-          BASE_URL="${{ secrets.BARK_WEBHOOK_URL }}"
-          BASE_URL="${BASE_URL%/}"
-
-          # Only send notification if secrets are configured
-          if [ -n "$BASE_URL" ] && [ -n "${{ secrets.BARK_DEVICE_TOKEN }}" ]; then
-            curl -L -X POST "$BASE_URL/push" \
-              -H "Content-Type: application/json; charset=utf-8" \
-              -d "{
-                \"title\": \"$TITLE\",
-                \"body\": \"$CONTENT\",
-                \"device_key\": \"${{ secrets.BARK_DEVICE_TOKEN }}\",
-                \"group\": \"GHA\"
-              }" || echo "⚠️ Bark notification failed (secrets may not be configured)"
-          else
-            echo "ℹ️ Bark notification skipped (secrets not configured)"
-          fi
+      - name: Run Unified CI Pipeline
+        run: bash ci/run.sh full
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BARK_WEBHOOK_URL: ${{ secrets.BARK_WEBHOOK_URL }}
+          BARK_DEVICE_TOKEN: ${{ secrets.BARK_DEVICE_TOKEN }}
+          # 如果需要强制构建 Docker (例如在 PR 中测试构建逻辑)
+          # CI_BUILD_DOCKER: 'true'

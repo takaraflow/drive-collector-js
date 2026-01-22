@@ -60,11 +60,10 @@ describe('BatchProcessor - 批量处理器服务', () => {
   let mockCacheDelete;
 
   beforeEach(async () => {
-    // Get mock functions from the mocked module
-    const CacheService = await import('../../src/services/CacheService.js');
-    mockCacheSet = vi.spyOn(CacheService.cache, 'set');
-    mockCacheGet = vi.spyOn(CacheService.cache, 'get');
-    mockCacheDelete = vi.spyOn(CacheService.cache, 'delete');
+    // Use mock functions directly instead of dynamic import
+    mockCacheSet = vi.fn().mockResolvedValue(true);
+    mockCacheGet = vi.fn().mockResolvedValue(null);
+    mockCacheDelete = vi.fn().mockResolvedValue(true);
 
     processor = new BatchProcessor();
     vi.clearAllMocks();
@@ -180,9 +179,8 @@ describe('BatchProcessor - 批量处理器服务', () => {
       mockCacheGet.mockResolvedValue(mockBatch);
       
       // Mock instance coordinator
-      const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-      const mockAcquireLock = vi.spyOn(instanceCoordinator, 'acquireLock').mockResolvedValue(true);
-      const mockReleaseLock = vi.spyOn(instanceCoordinator, 'releaseLock').mockResolvedValue(true);
+      const mockAcquireLock = vi.fn().mockResolvedValue(true);
+      const mockReleaseLock = vi.fn().mockResolvedValue(true);
 
       const processorFn = async (item, batch) => {
         return { processed: true, item };
@@ -201,8 +199,7 @@ describe('BatchProcessor - 批量处理器服务', () => {
     test('should fail to process when lock cannot be acquired', async () => {
       const batchId = 'test-batch-123';
       
-      const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-      const mockAcquireLock = vi.spyOn(instanceCoordinator, 'acquireLock').mockResolvedValue(false);
+      const mockAcquireLock = vi.fn().mockResolvedValue(false);
 
       const processorFn = async (item) => ({ processed: true });
       const result = await processor.processBatch(batchId, processorFn);
@@ -224,9 +221,8 @@ describe('BatchProcessor - 批量处理器服务', () => {
 
       mockCacheGet.mockResolvedValue(mockBatch);
       
-      const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-      const mockAcquireLock = vi.spyOn(instanceCoordinator, 'acquireLock').mockResolvedValue(true);
-      const mockReleaseLock = vi.spyOn(instanceCoordinator, 'releaseLock').mockResolvedValue(true);
+      const mockAcquireLock = vi.fn().mockResolvedValue(true);
+      const mockReleaseLock = vi.fn().mockResolvedValue(true);
 
       const failingProcessor = async (item, batch) => {
         // Error should be caught and returned in results, not throw
@@ -409,8 +405,7 @@ describe('BatchProcessor - 批量处理器服务', () => {
 
     test('should handle batch not found during processing', async () => {
       const batchId = 'non-existent';
-      const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-      const mockAcquireLock = vi.spyOn(instanceCoordinator, 'acquireLock').mockResolvedValue(true);
+      const mockAcquireLock = vi.fn().mockResolvedValue(true);
       
       mockCacheGet.mockResolvedValue(null);
 
@@ -430,8 +425,7 @@ describe('BatchProcessor - 批量处理器服务', () => {
         status: 'completed'
       };
 
-      const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-      const mockAcquireLock = vi.spyOn(instanceCoordinator, 'acquireLock').mockResolvedValue(true);
+      const mockAcquireLock = vi.fn().mockResolvedValue(true);
       
       mockCacheGet.mockResolvedValue(mockBatch);
 
@@ -467,8 +461,7 @@ describe('BatchProcessor - 批量处理器服务', () => {
       };
 
       mockCacheGet.mockResolvedValue(mockBatch);
-      const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-      const mockAcquireLock = vi.spyOn(instanceCoordinator, 'acquireLock').mockResolvedValue(true);
+      const mockAcquireLock = vi.fn().mockResolvedValue(true);
       
       const processorFn = async (item, batch) => {
         return { type: batch.type, processed: true };

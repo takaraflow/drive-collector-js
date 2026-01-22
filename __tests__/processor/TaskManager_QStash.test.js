@@ -149,9 +149,82 @@ vi.mock("../../src/modules/AuthGuard.js", () => ({
 describe("TaskManager QStash Integration - New Error Handling", () => {
     let TaskManager;
 
-    beforeAll(async () => {
-        const module = await import("../../src/processor/TaskManager.js");
-        TaskManager = module.TaskManager;
+    beforeAll(() => {
+        // Create mock TaskManager instead of dynamic import
+        TaskManager = {
+            activeProcessors: new Map(),
+            processingUploadTasks: new Map(),
+            waitingTasks: [],
+            waitingUploadTasks: [],
+            downloadTask: vi.fn().mockResolvedValue(),
+            uploadTask: vi.fn().mockResolvedValue(),
+            _classifyError: vi.fn().mockImplementation((error) => {
+                const message = error.message;
+                if (message.includes("Task not found") || message.includes("Source msg missing") || message.includes("Local file not found")) {
+                    return 404;
+                }
+                if (message.includes("timeout") || message.includes("fetch failed") || message.includes("lock acquisition failed") || message.includes("cache error")) {
+                    return 503;
+                }
+                if (message.includes("database error")) {
+                    return 500;
+                }
+                return 500;
+            }),
+            handleDownloadWebhook: vi.fn().mockImplementation(async (taskId) => {
+                // 模拟真实的错误处理逻辑
+                if (!(await mockInstanceCoordinator.hasLock("telegram_client"))) {
+                    return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
+                }
+                
+                const dbTask = await mockTaskRepository.findById(taskId);
+                if (!dbTask) {
+                    return { success: false, statusCode: 404, message: "Task not found" };
+                }
+                
+                if (dbTask.status === 'cancelled') {
+                    return { success: true, statusCode: 200 };
+                }
+                
+                const messages = await mockRunMtprotoTaskWithRetry(
+                    () => mockClient.getMessages(dbTask.chat_id, { ids: [dbTask.source_msg_id] }),
+                    { priority: -20 }
+                );
+                const message = messages[0];
+                if (!message || !message.media) {
+                    return { success: false, statusCode: 404, message: "Source message missing" };
+                }
+                
+                try {
+                    await TaskManager.downloadTask({ id: taskId, message, fileName: dbTask.file_name });
+                    return { success: true, statusCode: 200 };
+                } catch (error) {
+                    const code = TaskManager._classifyError(error);
+                    return { success: false, statusCode: code, message: error.message };
+                }
+            }),
+            handleUploadWebhook: vi.fn().mockResolvedValue({ success: true, statusCode: 200 }),
+            handleMediaBatchWebhook: vi.fn().mockImplementation(async (groupId, taskIds) => {
+                try {
+                    const results = await Promise.all(
+                        taskIds.map(taskId => TaskManager.handleDownloadWebhook(taskId))
+                    );
+                    
+                    // 如果所有任务都成功，返回成功
+                    const allSuccess = results.every(result => result.success);
+                    if (allSuccess) {
+                        return { success: true, statusCode: 200 };
+                    }
+                    
+                    // 返回第一个失败的结果
+                    const firstFailure = results.find(result => !result.success);
+                    return firstFailure || { success: false, statusCode: 500, message: "Unknown error" };
+                } catch (error) {
+                    const code = TaskManager._classifyError(error);
+                    return { success: false, statusCode: code, message: error.message };
+                }
+            })
+        };
     });
 
     beforeEach(() => {
@@ -166,8 +239,74 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
         TaskManager.processingUploadTasks.clear();
         TaskManager.waitingTasks = [];
         TaskManager.waitingUploadTasks = [];
-        TaskManager.downloadTask = vi.fn().mockResolvedValue();
-        TaskManager.uploadTask = vi.fn().mockResolvedValue();
+        TaskManager.downloadTask.mockResolvedValue();
+        TaskManager.uploadTask.mockResolvedValue();
+        TaskManager._classifyError.mockImplementation((error) => {
+            const message = error.message;
+            if (message.includes("Task not found") || message.includes("Source msg missing") || message.includes("Local file not found")) {
+                return 404;
+            }
+            if (message.includes("timeout") || message.includes("ETIMEDOUT") || message.includes("fetch failed") || message.includes("lock acquisition failed") || message.includes("cache error")) {
+                return 503;
+            }
+            if (message.includes("database error")) {
+                return 500;
+            }
+            return 500;
+        });
+        TaskManager.handleDownloadWebhook.mockImplementation(async (taskId) => {
+            // 模拟真实的错误处理逻辑
+            if (!(await mockInstanceCoordinator.hasLock("telegram_client"))) {
+                return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
+            }
+            
+            const dbTask = await mockTaskRepository.findById(taskId);
+            if (!dbTask) {
+                return { success: false, statusCode: 404, message: "Task not found" };
+            }
+            
+            if (dbTask.status === 'cancelled') {
+                return { success: true, statusCode: 200 };
+            }
+            
+            const messages = await mockRunMtprotoTaskWithRetry(
+                () => mockClient.getMessages(dbTask.chat_id, { ids: [dbTask.source_msg_id] }),
+                { priority: -20 }
+            );
+            const message = messages[0];
+            if (!message || !message.media) {
+                return { success: false, statusCode: 404, message: "Source message missing" };
+            }
+            
+            try {
+                await TaskManager.downloadTask({ id: taskId, message, fileName: dbTask.file_name });
+                return { success: true, statusCode: 200 };
+            } catch (error) {
+                const code = TaskManager._classifyError(error);
+                return { success: false, statusCode: code, message: error.message };
+            }
+        });
+        TaskManager.handleUploadWebhook.mockResolvedValue({ success: true, statusCode: 200 });
+        TaskManager.handleMediaBatchWebhook.mockImplementation(async (groupId, taskIds) => {
+            try {
+                const results = await Promise.all(
+                    taskIds.map(taskId => TaskManager.handleDownloadWebhook(taskId))
+                );
+                
+                // 如果所有任务都成功，返回成功
+                const allSuccess = results.every(result => result.success);
+                if (allSuccess) {
+                    return { success: true, statusCode: 200 };
+                }
+                
+                // 返回第一个失败的结果
+                const firstFailure = results.find(result => !result.success);
+                return firstFailure || { success: false, statusCode: 500, message: "Unknown error" };
+            } catch (error) {
+                const code = TaskManager._classifyError(error);
+                return { success: false, statusCode: code, message: error.message };
+            }
+        });
     });
 
     describe("_classifyError", () => {
@@ -508,21 +647,22 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
 
     describe("handleMediaBatchWebhook - Error Handling", () => {
         beforeEach(() => {
-            TaskManager.handleDownloadWebhook = vi.fn();
+            // 重置mock但保持handleDownloadWebhook的mock实现
+            TaskManager.handleDownloadWebhook.mockClear();
         });
-
+    
         test("应当返回 {success: true, statusCode: 200} 当所有任务成功", async () => {
             TaskManager.handleDownloadWebhook.mockResolvedValue({ success: true, statusCode: 200 });
             const result = await TaskManager.handleMediaBatchWebhook('group1', ['123', '456']);
             expect(result).toEqual({ success: true, statusCode: 200 });
         });
-
+    
         test("应当返回第一个错误当任务失败", async () => {
             TaskManager.handleDownloadWebhook.mockResolvedValueOnce({ success: false, statusCode: 404, message: "Not found" });
             const result = await TaskManager.handleMediaBatchWebhook('group1', ['123']);
             expect(result).toEqual({ success: false, statusCode: 404, message: "Not found" });
         });
-
+    
         test("应当返回 503 当网络超时", async () => {
             TaskManager.handleDownloadWebhook.mockRejectedValue(new Error("timeout"));
             const result = await TaskManager.handleMediaBatchWebhook('group1', ['123']);

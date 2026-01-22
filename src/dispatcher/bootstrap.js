@@ -42,14 +42,16 @@ export async function startDispatcher() {
     });
 
     // 添加全局错误处理
-    process.on('uncaughtException', async (err) => {
-        if (err.message.includes('Not connected')) {
-            log.warn("⚠️ 捕获到 'Not connected' 错误，正在重置客户端状态");
-            isClientActive = false;
-            return;
-        }
-        log.error("🚨 未捕获的异常:", err);
-    });
+    if (typeof process !== 'undefined' && process.on) {
+        process.on('uncaughtException', async (err) => {
+            if (err.message.includes('Not connected')) {
+                log.warn("⚠️ 捕获到 'Not connected' 错误，正在重置客户端状态");
+                isClientActive = false;
+                return;
+            }
+            log.error("🚨 未捕获的异常:", err);
+        });
+    }
 
     let loopCount = 0;
     const startTelegramClient = async () => {

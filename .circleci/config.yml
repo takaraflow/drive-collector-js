@@ -1,0 +1,16 @@
+version: 2.1
+jobs:
+  ci:
+    docker:
+      - image: cimg/node:20.11
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: 20.10.14
+      - run:
+          name: Run Unified CI Pipeline
+          command: bash ci/run.sh full
+workflows:
+  main:
+    jobs:
+      - ci

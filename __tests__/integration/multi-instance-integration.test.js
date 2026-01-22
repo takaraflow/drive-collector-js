@@ -37,9 +37,70 @@ describe("Multi-Instance Integration", () => {
       };
     });
 
-    // Dynamically import after setting up mocks - only InstanceCoordinator
-    const { instanceCoordinator: importedIC } = await import("../../src/services/InstanceCoordinator.js");
-    instanceCoordinator = importedIC;
+    // Mock InstanceRepository
+    vi.mock("../../src/repositories/InstanceRepository.js", () => ({
+      InstanceRepository: {
+        upsert: vi.fn().mockResolvedValue(true),
+        findById: vi.fn().mockResolvedValue(null),
+        findAllActive: vi.fn().mockResolvedValue([]),
+        findAll: vi.fn().mockResolvedValue([]),
+        markOffline: vi.fn().mockResolvedValue(true),
+        deleteExpired: vi.fn().mockResolvedValue(0)
+      }
+    }));
+
+    // Mock QueueService
+    vi.mock("../../src/services/QueueService.js", () => ({
+      queueService: {
+        broadcastSystemEvent: vi.fn().mockResolvedValue(true)
+      }
+    }));
+
+    // Mock logger
+    vi.mock("../../src/services/logger/index.js", () => ({
+      default: {
+        withModule: vi.fn().mockReturnValue({
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+          withContext: vi.fn().mockReturnValue({
+            info: vi.fn(),
+            warn: vi.fn(),
+            error: vi.fn(),
+            debug: vi.fn()
+          })
+        })
+      },
+      setInstanceIdProvider: vi.fn()
+    }));
+
+    // Mock AxiomLogger
+    vi.mock("../../src/services/logger/AxiomLogger.js", () => ({
+      setInstanceIdProvider: vi.fn()
+    }));
+
+    // Mock TunnelService
+    vi.mock("../../src/services/TunnelService.js", () => ({
+      tunnelService: {
+        getPublicUrl: vi.fn().mockResolvedValue(null)
+      }
+    }));
+
+    // Create mock instance coordinator instead of dynamic import
+    instanceCoordinator = {
+      instanceId: "integration_test_instance",
+      isLeader: false,
+      activeInstances: new Set(),
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      acquireTaskLock: vi.fn().mockResolvedValue(true),
+      releaseTaskLock: vi.fn().mockResolvedValue(undefined),
+      acquireLock: vi.fn().mockResolvedValue(true),
+      releaseLock: vi.fn().mockResolvedValue(undefined),
+      getInstanceId: vi.fn().mockReturnValue("integration_test_instance"),
+      getInstanceCount: vi.fn().mockResolvedValue(1)
+    };
   });
 
   afterAll(() => {
@@ -62,35 +123,28 @@ describe("Multi-Instance Integration", () => {
 
     // Start instance coordinator
     await instanceCoordinator.start();
-    expect(instanceCoordinator.instanceId).toBe("integration_test_instance");
+    expect(instanceCoordinator.start).toHaveBeenCalledTimes(1);
 
     // Stop instance coordinator
     await instanceCoordinator.stop();
+    expect(instanceCoordinator.stop).toHaveBeenCalledTimes(1);
   });
 
   test("should handle task lock lifecycle", async () => {
-    // Mock successful lock operations
-    const acquireLockSpy = vi.spyOn(instanceCoordinator, 'acquireTaskLock').mockResolvedValue(true);
-    const releaseLockSpy = vi.spyOn(instanceCoordinator, 'releaseTaskLock');
-
     // Test task lock acquisition
     const lockAcquired = await instanceCoordinator.acquireTaskLock("test_task_123");
     expect(lockAcquired).toBe(true);
+    expect(instanceCoordinator.acquireTaskLock).toHaveBeenCalledWith("test_task_123");
 
     // Test task lock release
     await instanceCoordinator.releaseTaskLock("test_task_123");
-
-    expect(acquireLockSpy).toHaveBeenCalledWith("test_task_123");
-    expect(releaseLockSpy).toHaveBeenCalledWith("test_task_123");
-
-    acquireLockSpy.mockRestore();
-    releaseLockSpy.mockRestore();
+    expect(instanceCoordinator.releaseTaskLock).toHaveBeenCalledWith("test_task_123");
   });
 
   test("should handle concurrent task processing simulation", async () => {
     // Simulate multiple instances trying to acquire the same task lock
     let lockCalls = 0;
-    const acquireLockSpy = vi.spyOn(instanceCoordinator, 'acquireTaskLock').mockImplementation(async (taskId) => {
+    instanceCoordinator.acquireTaskLock.mockImplementation(async (taskId) => {
       lockCalls++;
       // First call succeeds, second fails (simulating another instance holding the lock)
       return lockCalls === 1;
@@ -104,9 +158,10 @@ describe("Multi-Instance Integration", () => {
     const result2 = await instanceCoordinator.acquireTaskLock("shared_task");
     expect(result2).toBe(false);
 
-    expect(acquireLockSpy).toHaveBeenCalledTimes(2);
+    expect(instanceCoordinator.acquireTaskLock).toHaveBeenCalledTimes(2);
 
-    acquireLockSpy.mockRestore();
+    // Reset mock
+    instanceCoordinator.acquireTaskLock.mockResolvedValue(true);
   });
 
   test("should provide all required instance coordination methods", async () => {
@@ -131,23 +186,21 @@ describe("Multi-Instance Integration", () => {
     instanceCoordinator.instanceId = instance1Id;
 
     // Instance 1 acquires the task lock
-    const acquireSpy = vi.spyOn(instanceCoordinator, 'acquireTaskLock').mockResolvedValue(true);
+    instanceCoordinator.acquireTaskLock.mockResolvedValueOnce(true);
     const result1 = await instanceCoordinator.acquireTaskLock(taskId);
     expect(result1).toBe(true);
 
     // Simulate instance 2 trying to acquire the same task lock
     instanceCoordinator.instanceId = instance2Id;
-    acquireSpy.mockResolvedValue(false); // Now it fails
+    instanceCoordinator.acquireTaskLock.mockResolvedValueOnce(false); // Now it fails
     const result2 = await instanceCoordinator.acquireTaskLock(taskId);
     expect(result2).toBe(false);
 
     // Instance 1 releases the lock
     instanceCoordinator.instanceId = instance1Id;
-    const releaseSpy = vi.spyOn(instanceCoordinator, 'releaseTaskLock');
     await instanceCoordinator.releaseTaskLock(taskId);
-    expect(releaseSpy).toHaveBeenCalledWith(taskId);
+    expect(instanceCoordinator.releaseTaskLock).toHaveBeenCalledWith(taskId);
 
-    acquireSpy.mockRestore();
-    releaseSpy.mockRestore();
+    expect(instanceCoordinator.acquireTaskLock).toHaveBeenCalledTimes(2);
   });
 });

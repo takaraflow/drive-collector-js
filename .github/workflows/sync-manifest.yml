@@ -40,12 +40,8 @@ jobs:
           node-version: 20.x
           cache: 'npm'
 
-      - name: Validate manifest.json (syntax + duplicates + env sync)
-        run: |
-          jq . manifest.json > /dev/null
-          node scripts/check-json-duplicates.js manifest.json
-          node scripts/check-env-manifest.js
-          node scripts/check-service-manifest.js
+      - name: Run CI validation
+        run: npm run ci:sync
 
       # 3. 检出契约中心仓库
       - name: Checkout Contract Center
