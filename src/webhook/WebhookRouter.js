@@ -24,11 +24,25 @@ function handleHealthChecks(req, res) {
     if ((req.method === 'GET' || req.method === 'HEAD') && req.url) {
         try {
             if ([healthPath, healthzPath, readyPath].includes(path)) {
+                // 检查应用就绪状态
                 if (path === readyPath && !appReady) {
                     res.writeHead(503);
                     res.end(req.method === 'HEAD' ? '' : 'Not Ready');
                     return true;
                 }
+
+                // 增强健康检查：验证业务模块是否运行
+                // 注意：这里使用 global 访问 AppInitializer 实例，或者通过其他方式获取状态
+                // 为了简单起见，我们假设 AppInitializer 会在 global 上注册状态
+                const businessRunning = global.appInitializer?.businessModulesRunning !== false;
+                
+                if (!businessRunning) {
+                    log.warn(`⚠️ 健康检查失败: 业务模块未运行 (Path: ${path})`);
+                    res.writeHead(503);
+                    res.end(req.method === 'HEAD' ? '' : 'Service Unavailable: Business Modules Down');
+                    return true;
+                }
+
                 res.writeHead(200);
                 res.end(req.method === 'HEAD' ? '' : 'OK');
                 return true;

@@ -237,6 +237,18 @@ export class GracefulShutdown {
             if (reloadMode) {
                 log.info('Reload mode: Process will continue running');
                 this.isShuttingDown = false;
+                
+                // 触发业务模块重启
+                setTimeout(async () => {
+                    try {
+                        const { AppInitializer } = await import("../bootstrap/AppInitializer.js");
+                        const appInitializer = new AppInitializer();
+                        await appInitializer.startBusinessModules();
+                    } catch (e) {
+                        log.error('Failed to restart business modules after reload:', e);
+                    }
+                }, 1000);
+                
                 return;
             }
 

@@ -30,6 +30,16 @@ class EnvironmentManager {
     let actor = this.envVars.GITHUB_ACTOR || '';
     let repository = this.envVars.GITHUB_REPOSITORY || '';
 
+    // 尝试从 eventpath 获取 ref (act 常用)
+    if (this.envVars.GITHUB_EVENT_PATH && existsSync(this.envVars.GITHUB_EVENT_PATH)) {
+        try {
+            const event = JSON.parse(readFileSync(this.envVars.GITHUB_EVENT_PATH, 'utf8'));
+            if (!ref && event.ref) ref = event.ref;
+            if (!sha && event.after) sha = event.after;
+            if (!repository && event.repository?.full_name) repository = event.repository.full_name;
+        } catch (e) {}
+    }
+
     // 本地开发回退策略
     if (isLocal && !ref) {
       try {

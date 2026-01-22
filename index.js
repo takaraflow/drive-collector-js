@@ -8,6 +8,7 @@ import { getConfig } from "./src/config/index.js";
  */
 async function main() {
     const appInitializer = new AppInitializer();
+    global.appInitializer = appInitializer; // 注册到全局供健康检查使用
     
     try {
         // 初始化应用

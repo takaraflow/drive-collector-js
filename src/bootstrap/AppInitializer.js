@@ -10,6 +10,7 @@ import { tunnelService } from '../services/TunnelService.js';
 export class AppInitializer {
     constructor() {
         this.isInitialized = false;
+        this.businessModulesRunning = false;
     }
 
     /**
@@ -77,6 +78,11 @@ export class AppInitializer {
         const { logger } = await import("../services/logger/index.js");
         const log = logger.withModule ? logger.withModule('App') : logger;
 
+        if (this.businessModulesRunning) {
+            log.info("🔄 业务模块已在运行中，正在尝试重启...");
+            await this.stopBusinessModules();
+        }
+
         try {
             const { instanceCoordinator } = await import("../services/InstanceCoordinator.js");
             const { startDispatcher } = await import("../dispatcher/bootstrap.js");
@@ -110,15 +116,47 @@ export class AppInitializer {
             
             if (businessReady) {
                 log.info("✅ 应用启动完成");
+                this.businessModulesRunning = true;
             } else {
                 log.warn("⚠️ 业务模块启动异常");
+                this.businessModulesRunning = false;
             }
             
             return businessReady;
 
         } catch (error) {
             log.error("⚠️ 业务模块启动异常:", error);
+            this.businessModulesRunning = false;
             return false;
+        }
+    }
+
+    /**
+     * 停止业务模块
+     */
+    async stopBusinessModules() {
+        const { logger } = await import("../services/logger/index.js");
+        const log = logger.withModule ? logger.withModule('App') : logger;
+        
+        log.info("🛑 正在停止业务模块...");
+        try {
+            const { instanceCoordinator } = await import("../services/InstanceCoordinator.js");
+            const { telegramService } = await import("../services/telegram.js");
+            
+            // 停止协调器
+            if (instanceCoordinator && typeof instanceCoordinator.stop === 'function') {
+                await instanceCoordinator.stop();
+            }
+            
+            // 停止 Telegram 服务
+            if (telegramService && typeof telegramService.stop === 'function') {
+                await telegramService.stop();
+            }
+
+            this.businessModulesRunning = false;
+            log.info("✅ 业务模块已停止");
+        } catch (error) {
+            log.error("❌ 停止业务模块时出错:", error);
         }
     }
 
