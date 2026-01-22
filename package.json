@@ -42,7 +42,7 @@
     "gha:list": "act --list",
     "gha:dev": "act push -j unified-ci --secret-file .act.secrets --secret ACT_LOCAL=true --eventpath gha-events/ci-dev.json --platform ubuntu-latest=catthehacker/ubuntu:act-latest --rm",
     "gha:pre": "act push -j unified-ci --secret-file .act.secrets --secret ACT_LOCAL=true --eventpath gha-events/ci-pre.json --platform ubuntu-latest=catthehacker/ubuntu:act-latest --rm",
-    "gha:prod": "act push -j unified-ci --secret-file .act.secrets --secret ACT_LOCAL=true --eventpath gha-events/ci-prod.json --platform ubuntu-latest=node:20-bullseye --rm",
+    "gha:prod": "act push -j unified-ci --secret-file .act.secrets --secret ACT_LOCAL=true --eventpath gha-events/ci-prod.json --platform ubuntu-latest=catthehacker/ubuntu:act-latest --rm",
     "gha:sync-manifest": "act push -j update-registry --secret-file .act.secrets --secret ACT_LOCAL=true --eventpath gha-events/sync-manifest.json --platform ubuntu-latest=catthehacker/ubuntu:act-latest --rm",
     "release": "vitest run && standard-version",
     "release:patch": "vitest run && standard-version --release-as patch",

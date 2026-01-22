@@ -6,9 +6,91 @@
  * 目标：将 YAML 配置文件减少到最小，实现 "Infrastructure as Code" 的最大便携性
  */
 
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
 import https from 'https';
+import crypto from 'crypto';
+
+/**
+ * GitHub App 认证管理器
+ * 负责生成 JWT 并获取 Installation Access Token
+ */
+class GitHubAppAuth {
+  constructor(appId, privateKey) {
+    this.appId = appId;
+    this.privateKey = privateKey;
+  }
+
+  generateJWT() {
+    const header = { alg: 'RS256', typ: 'JWT' };
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      iat: now - 60,
+      exp: now + (10 * 60),
+      iss: this.appId
+    };
+
+    const base64Url = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    const data = `${base64Url(header)}.${base64Url(payload)}`;
+    
+    const sign = crypto.createSign('RSA-SHA256');
+    sign.update(data);
+    const signature = sign.sign(this.privateKey, 'base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+
+    return `${data}.${signature}`;
+  }
+
+  async getInstallationToken(repository) {
+    const jwt = this.generateJWT();
+    
+    // 1. Get Installation ID for the repo
+    // GET /repos/{owner}/{repo}/installation
+    const [owner, repo] = repository.split('/');
+    if (!owner || !repo) throw new Error(`无效的仓库名称: ${repository}`);
+
+    const installation = await this.request(`https://api.github.com/repos/${owner}/${repo}/installation`, jwt);
+    console.log(`   Installation ID: ${installation.id}`);
+    
+    // 2. Get Access Token
+    // POST /app/installations/{installation_id}/access_tokens
+    const tokenData = await this.request(`https://api.github.com/app/installations/${installation.id}/access_tokens`, jwt, 'POST');
+    
+    if (tokenData.permissions) {
+        console.log(`   Token Permissions: ${JSON.stringify(tokenData.permissions)}`);
+    }
+    
+    return tokenData.token;
+  }
+
+  request(url, jwt, method = 'GET') {
+    return new Promise((resolve, reject) => {
+      const req = https.request(url, {
+        method,
+        headers: {
+          'Authorization': `Bearer ${jwt}`,
+          'User-Agent': 'Node.js CI Script',
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+                resolve(JSON.parse(data));
+            } catch (e) {
+                reject(new Error(`JSON Parse Error: ${e.message}`));
+            }
+          } else {
+            reject(new Error(`GitHub API Error: ${res.statusCode} ${data}`));
+          }
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    });
+  }
+}
 
 /**
  * 环境管理器
@@ -22,7 +104,8 @@ class EnvironmentManager {
 
   detectContext() {
     const isGithub = this.envVars.GITHUB_ACTIONS === 'true';
-    const isLocal = this.envVars.ACT_LOCAL === 'true' || !isGithub;
+    // ACT=true 是 act 工具自动注入的环境变量
+    const isLocal = this.envVars.ACT_LOCAL === 'true' || this.envVars.ACT === 'true' || !isGithub;
     
     // 获取Git引用信息
     let ref = this.envVars.GITHUB_REF || '';
@@ -117,8 +200,13 @@ class DockerManager {
   execute(command, description) {
     console.log(`🐳 Docker: ${description}...`);
     try {
-      // 继承stdio以显示进度
-      execSync(command, { stdio: 'inherit', encoding: 'utf8' });
+      // 使用 spawnSync 替代 execSync
+      const [cmd, ...args] = command.split(' ');
+      const result = spawnSync(cmd, args, { stdio: 'inherit', encoding: 'utf8' });
+      
+      if (result.status !== 0) {
+          throw new Error(`Command failed with status ${result.status}`);
+      }
       console.log(`✅ ${description} 成功`);
       return true;
     } catch (error) {
@@ -127,10 +215,27 @@ class DockerManager {
     }
   }
 
-  login() {
-    const { actor } = this.envManager.context;
+  async login() {
+    const { actor, repository } = this.envManager.context;
     // 使用 GITHUB_TOKEN 或 CR_PAT (Container Registry Personal Access Token)
-    const token = process.env.GITHUB_TOKEN || process.env.CR_PAT;
+    let token = process.env.GITHUB_TOKEN || process.env.CR_PAT;
+    let isAppToken = false;
+
+    // 尝试使用 GitHub App 认证
+    if (!token && process.env.APP_ID && process.env.APP_PRIVATE_KEY) {
+        try {
+            console.log(`ℹ️ 检测到 GitHub App 凭证，尝试获取 Installation Token (Repo: ${repository})...`);
+            // 处理私钥格式 (替换 \n 为换行符)
+            const privateKey = process.env.APP_PRIVATE_KEY.replace(/\\n/g, '\n');
+            const appAuth = new GitHubAppAuth(process.env.APP_ID, privateKey);
+            token = await appAuth.getInstallationToken(repository);
+            isAppToken = true;
+            console.log(`✅ GitHub App Token 获取成功 (Prefix: ${token.substring(0, 4)}...)`);
+        } catch (e) {
+            console.error(`❌ GitHub App 认证失败: ${e.message}`);
+            // 不抛出错误，继续后续逻辑（可能会跳过登录）
+        }
+    }
 
     if (!token) {
       if (this.envManager.context.isLocal) {
@@ -142,8 +247,20 @@ class DockerManager {
 
     // 安全起见，不打印token
     // 管道传递密码给docker login
+    // 如果是 App Token，使用 x-access-token 作为用户名
+    const username = isAppToken ? 'x-access-token' : actor;
+
     try {
-        execSync(`echo "${token}" | docker login ${this.registry} -u ${actor} --password-stdin`, { stdio: 'pipe' });
+        console.log(`   Logging in as ${username}...`);
+        // 使用 spawnSync 避免 echo 可能带来的 shell 注入或截断问题
+        const loginResult = spawnSync('docker', ['login', this.registry, '-u', username, '--password-stdin'], {
+            input: token,
+            stdio: ['pipe', 'inherit', 'inherit']
+        });
+        
+        if (loginResult.status !== 0) {
+            throw new Error(`Docker login failed with status ${loginResult.status}`);
+        }
         console.log('✅ Docker Registry 登录成功');
     } catch (e) {
         console.error('❌ Docker Registry 登录失败');
@@ -203,7 +320,14 @@ class DockerManager {
 
     // 推送逻辑
     if (this.envManager.context.isLocal) {
-        console.log('ℹ️ 本地模式：跳过推送 (Push)');
+        console.log('ℹ️ 本地模式：尝试推送...');
+        try {
+            tags.forEach(tag => {
+                this.execute(`docker push ${tag}`, `推送镜像 ${tag}`);
+            });
+        } catch (e) {
+            console.warn('⚠️ 本地推送失败 (可能未登录或网络问题)，已忽略错误');
+        }
     } else {
         tags.forEach(tag => {
             this.execute(`docker push ${tag}`, `推送镜像 ${tag}`);
@@ -330,17 +454,18 @@ class UnifiedCIScript {
         this.executeStep('Tests', 'npm run test:coverage');
 
         // 5. Docker Build & Publish (仅在 push 到主分支或 Tag 时，或者强制开启)
-        // 简单的逻辑：CI环境且是非PR触发
-        const shouldBuildDocker = process.env.CI_BUILD_DOCKER === 'true' || 
+        // 简单的逻辑：CI环境且是非PR触发，或者本地环境（默认构建但不推送）
+        const shouldBuildDocker = process.env.CI_BUILD_DOCKER === 'true' ||
+            this.envManager.context.isLocal ||
             (
-                !this.envManager.context.isLocal && 
+                !this.envManager.context.isLocal &&
                 this.envManager.context.eventName !== 'pull_request'
             );
 
         if (shouldBuildDocker) {
             console.log('\n🔹 [Step] Docker Pipeline...');
             const dockerStart = Date.now();
-            this.dockerManager.login();
+            await this.dockerManager.login();
             await this.dockerManager.buildAndPush(this.targetEnv);
             this.recordMetric('Docker', (Date.now() - dockerStart) / 1000);
         } else {

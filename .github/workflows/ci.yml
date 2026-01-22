@@ -38,6 +38,8 @@ jobs:
         run: bash ci/run.sh full
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
           BARK_WEBHOOK_URL: ${{ secrets.BARK_WEBHOOK_URL }}
           BARK_DEVICE_TOKEN: ${{ secrets.BARK_DEVICE_TOKEN }}
           # 如果需要强制构建 Docker (例如在 PR 中测试构建逻辑)
