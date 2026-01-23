@@ -262,6 +262,10 @@ function resolveDockerTags(envConfig, context) {
 // 2.3 Docker Build Execution
 // ==========================================
 function runDockerBuild(config, context) {
+    console.log(`   [Docker] runDockerBuild called with env: ${context.env}`);
+    console.log(`   [Docker] config.environments exists: ${!!config.environments}`);
+    console.log(`   [Docker] config.environments[${context.env}] exists: ${!!(config.environments && config.environments[context.env])}`);
+    
     if (!config.environments || !config.environments[context.env]) {
         console.log(`   [Docker] No environment config found for ${context.env}, skipping build.`);
         return;
@@ -269,6 +273,7 @@ function runDockerBuild(config, context) {
 
     const envConfig = config.environments[context.env];
     const dockerConfig = config.docker || {};
+    console.log(`   [Docker] dockerConfig:`, JSON.stringify(dockerConfig, null, 2));
     
     // 1. Resolve Tags
     const tags = resolveDockerTags(envConfig, context);
@@ -303,7 +308,9 @@ function runDockerBuild(config, context) {
 
     // 3. Construct Build Command
     const buildConfig = dockerConfig.build || {};
+    console.log(`   [Docker] buildConfig:`, JSON.stringify(buildConfig, null, 2));
     const contextPath = buildConfig.context || '.';
+    console.log(`   [Docker] contextPath: "${contextPath}" (type: ${typeof contextPath})`);
     const dockerfile = buildConfig.dockerfile || 'Dockerfile';
     
     let args = [
@@ -312,6 +319,7 @@ function runDockerBuild(config, context) {
         '-f', dockerfile,
         '--push' // Default to push if in CI/Run mode
     ];
+    console.log(`   [Docker] args before modifications:`, args);
 
     // Tags
     tags.forEach(t => {
@@ -504,9 +512,11 @@ async function main() {
       }
 
       console.log(`\n[STEP] ${check.name} (${key})`);
+      console.log(`   [DEBUG] key="${key}", check.commands=${JSON.stringify(check.commands)}`);
 
       // Specialized handler for 'build' step if commands are just placeholders
       if (key === 'build' && check.commands && check.commands[0] && check.commands[0].includes('echo')) { // Heuristic
+          console.log(`   [DEBUG] Entering specialized docker build handler`);
           // If this is the docker build step, use our specialized function
           try {
               runDockerBuild(config, context);

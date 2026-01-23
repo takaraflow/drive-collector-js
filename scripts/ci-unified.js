@@ -199,10 +199,15 @@ class DockerManager {
 
   execute(command, description) {
     console.log(`🐳 Docker: ${description}...`);
+    console.log(`[DEBUG] command: "${command}"`);
+    console.log(`[DEBUG] command.length: ${command.length}`);
+    const [cmd, ...args] = command.split(' ');
+    console.log(`[DEBUG] cmd: "${cmd}"`);
+    console.log(`[DEBUG] args:`, args);
+    console.log(`[DEBUG] args.length: ${args.length}`);
     try {
       // 使用 spawnSync 替代 execSync
-      const [cmd, ...args] = command.split(' ');
-      const result = spawnSync(cmd, args, { stdio: 'inherit', encoding: 'utf8' });
+      const result = spawnSync(cmd, args, { stdio: 'inherit', encoding: 'utf8', shell: true });
       
       if (result.status !== 0) {
           throw new Error(`Command failed with status ${result.status}`);
@@ -211,6 +216,7 @@ class DockerManager {
       return true;
     } catch (error) {
       console.error(`❌ ${description} 失败`);
+      console.error(`[DEBUG] error:`, error);
       throw error;
     }
   }
@@ -314,8 +320,10 @@ class DockerManager {
         cacheArgs = `--cache-from type=registry,ref=${imageName}:latest --cache-to type=inline`;
     }
 
-    // 构建命令
-    const buildCmd = `docker build . ${buildArgs} ${tagArgs} ${cacheArgs}`;
+    // 构建命令 - 使用 buildx 以支持多平台构建
+    const buildCmd = `docker buildx build . --load ${buildArgs} ${tagArgs} ${cacheArgs}`;
+    console.log(`[DEBUG] buildCmd: "${buildCmd}"`);
+    console.log(`[DEBUG] buildCmd.split(' '):`, buildCmd.split(' '));
     this.execute(buildCmd, '构建镜像');
 
     // 推送逻辑

@@ -20,6 +20,20 @@ jobs:
   unified-ci:
     runs-on: ubuntu-latest
     steps:
+      - name: Configure Git Proxy
+        if: env.HTTP_PROXY != ''
+        run: |
+          git config --global http.proxy $HTTP_PROXY
+          git config --global https.proxy $HTTPS_PROXY
+          echo "Git proxy configured: $HTTP_PROXY"
+      
+      - name: Configure NPM Proxy
+        if: env.HTTP_PROXY != ''
+        run: |
+          npm config set proxy $HTTP_PROXY
+          npm config set https-proxy $HTTPS_PROXY
+          echo "NPM proxy configured: $HTTP_PROXY"
+      
       - name: Checkout
         uses: actions/checkout@v4
         with:
