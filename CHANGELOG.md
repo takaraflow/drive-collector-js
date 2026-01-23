@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.29.0](https://github.com/YoungSx/drive-collector-js/compare/v4.28.1...v4.29.0) (2026-01-23)
+
+
+### 🔧 其他任务
+
+* adds distributed instance configuration ([a0e9696](https://github.com/YoungSx/drive-collector-js/commit/a0e9696a06d185427fdef4dcfaa24630afda6fba))
+* adds Docker Compose configuration for drive collector services ([2ab881a](https://github.com/YoungSx/drive-collector-js/commit/2ab881aefc93fee8ce167c5ffc7a8dde0c7abc3e))
+* removes cloud storage diagnostic functionality ([c47ef91](https://github.com/YoungSx/drive-collector-js/commit/c47ef916304ab2be51ba37939f9f112b09663cdb))
+
+
+### ♻️ 代码重构
+
+* BatchProcessor test mocks and improve test organization ([a193367](https://github.com/YoungSx/drive-collector-js/commit/a193367365a32dc854feeb65ef8341d6b2def990))
+* unify CI/CD pipeline with enhanced Docker and notification support ([4e24633](https://github.com/YoungSx/drive-collector-js/commit/4e246332406fa43dd8b8ad10d7070fa44d3fcf09))
+* webhook handling and improves startup resilience ([57defc6](https://github.com/YoungSx/drive-collector-js/commit/57defc6ef1a1f72d4a2b97b12fb3b2307ade6a69))
+
+
+### 🐛 问题修复
+
+* adds GitHub App authentication for Docker operations ([ac39b76](https://github.com/YoungSx/drive-collector-js/commit/ac39b760fdbbdf9be6d733faeba2f5e0cb6e448c))
+* adds webhook forwarding for non-leader instances ([b90682a](https://github.com/YoungSx/drive-collector-js/commit/b90682a994e47d9ed931591cac0ab9e1cf568959))
+* improves dispatcher robustness with error handling ([8a4080b](https://github.com/YoungSx/drive-collector-js/commit/8a4080b29be94726e2df9a53190a07af21f889d3))
+* improves TunnelService error handling and initialization robustness ([5234193](https://github.com/YoungSx/drive-collector-js/commit/52341935f3548410cfaf045425907668999a52b9))
+
 ### [4.28.1](https://github.com/YoungSx/drive-collector-js/compare/v4.28.0...v4.28.1) (2026-01-17)
 
 
