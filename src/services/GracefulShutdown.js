@@ -264,8 +264,11 @@ export class GracefulShutdown {
 
             // 确保进程退出（非重载模式）
             if (!reloadMode) {
+                log.info(`[DEBUG] About to exit process with code: ${this.exitCode}, source: ${source}`);
+                log.info(`[DEBUG] s6-overlay should detect this exit and restart if exitCode != 0`);
                 // 延迟退出，确保日志发送完成
                 setTimeout(() => {
+                    log.info(`[DEBUG] Calling process.exit(${this.exitCode}) now`);
                     process.exit(this.exitCode);
                 }, 1000);
             }

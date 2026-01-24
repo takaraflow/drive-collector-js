@@ -64,6 +64,7 @@ COPY scripts ./scripts/
 RUN npm ci --omit=dev && npm cache clean --force
 COPY etc/ /etc/
 RUN find /etc/s6-overlay/s6-rc.d -name "run" -exec chmod +x {} +
+RUN find /etc/s6-overlay/s6-rc.d -name "finish" -exec chmod +x {} +
 
 COPY . .
 

@@ -1,0 +1,29 @@
+#!/bin/sh
+# s6-overlay finish script for app service
+# This script runs after the app service exits
+# Return code determines whether s6-overlay restarts the service:
+# - 0: Do not restart (normal exit)
+# - 1: Restart immediately
+# - 2: Restart after a delay
+
+echo "[s6-app-finish] App service exited with code: $1"
+echo "[s6-app-finish] Exit signal: $2"
+
+# Log the exit code and signal for debugging
+echo "[s6-app-finish] Timestamp: $(date -Iseconds)"
+
+# Check if the exit was due to a graceful shutdown
+if [ "$1" -eq 0 ]; then
+    echo "[s6-app-finish] Normal exit (code 0), NOT restarting"
+    exit 0
+fi
+
+# Check if the exit was due to a signal
+if [ -n "$2" ]; then
+    echo "[s6-app-finish] Exited due to signal: $2, NOT restarting"
+    exit 0
+fi
+
+# For any other exit code, restart the service
+echo "[s6-app-finish] Abnormal exit (code $1), RESTARTING service"
+exit 1
