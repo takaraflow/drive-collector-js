@@ -45,7 +45,13 @@ export class AppInitializer {
 
         console.log("🛠️ 正在初始化核心服务...");
         try {
-            await logger.initialize();
+            // 确保 Logger 使用最新的配置（包括刚刚拉取的 Infisical 密钥）重新加载
+            if (logger.reload) {
+                await logger.reload();
+            } else {
+                await logger.initialize();
+            }
+
             await Promise.all([
                 queueService.initialize(),
                 cache.initialize(),

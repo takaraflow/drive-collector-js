@@ -123,6 +123,11 @@ class LoggerService {
 
     async initialize() {
         if (this.isInitialized) return;
+        await this._initLoggers();
+        this.isInitialized = true;
+    }
+
+    async _initLoggers() {
         this.activeLoggers = [];
 
         // Try Axiom
@@ -163,7 +168,23 @@ class LoggerService {
         this.activeLoggers.push(consoleLogger);
 
         this.currentProviderName = this.activeLoggers.map(l => l.getProviderName()).join('+');
-        this.isInitialized = true;
+    }
+
+    /**
+     * 重新加载 Logger 配置（通常在配置初始化完成后调用）
+     */
+    async reload() {
+        console.log('[LoggerService] Reloading loggers with new configuration...');
+        // 关闭旧的 loggers
+        for (const logger of this.activeLoggers) {
+            if (logger && typeof logger.disconnect === 'function') {
+                await logger.disconnect();
+            }
+        }
+
+        // 重新初始化
+        await this._initLoggers();
+        console.log(`[LoggerService] Reloaded. Active providers: ${this.currentProviderName}`);
     }
 
     _ensureInitialized() {
