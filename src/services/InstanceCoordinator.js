@@ -51,14 +51,13 @@ export class InstanceCoordinator {
         
         // 延迟调整定时器（启动后 30 秒再检查实例数量并调整）
         this.heartbeatAdjustTimer = null;
-        
-        log.info(`🔧 实例 ID 生成: ${this.instanceId} (PID: ${pid}, Host: ${hostname})`);
     }
 
     /**
      * 启动实例协调器
      */
     async start() {
+        log.info(`🔧 实例 ID 生成: ${this.instanceId}`);
         log.info(`🚀 启动实例协调器: ${this.instanceId}`);
 
         // 注册实例
