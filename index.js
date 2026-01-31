@@ -1,7 +1,7 @@
+import { getConfig } from "./src/config/index.js";
 import { gracefulShutdown } from "./src/services/GracefulShutdown.js";
 import { AppInitializer } from "./src/bootstrap/AppInitializer.js";
 import { HttpServer } from "./src/http/HttpServer.js";
-import { getConfig } from "./src/config/index.js";
 
 /**
  * 主应用入口
