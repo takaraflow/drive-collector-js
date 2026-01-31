@@ -55,13 +55,29 @@ export class GracefulShutdown {
      */
     setupSignalHandlers() {
         const handleSignal = async (signal) => {
+            // 诊断信息：记录信号来源
+            const stack = new Error().stack;
+            log.warn(`[SIGNAL-DIAGNOSTIC] Received ${signal} signal`);
+            log.warn(`[SIGNAL-DIAGNOSTIC] Uptime: ${Math.floor(process.uptime())}s`);
+            log.warn(`[SIGNAL-DIAGNOSTIC] Memory: ${JSON.stringify(process.memoryUsage())}`);
+            log.warn(`[SIGNAL-DIAGNOSTIC] Active handles: ${process._getActiveHandles?.().length || 'N/A'}`);
+            log.warn(`[SIGNAL-DIAGNOSTIC] Active requests: ${process._getActiveRequests?.().length || 'N/A'}`);
+
+            // 检查是否在启动后很快就收到信号（可能是配置问题）
+            if (process.uptime() < 300) { // 5分钟内
+                log.error(`[SIGNAL-DIAGNOSTIC] ⚠️  Premature shutdown detected! Uptime only ${Math.floor(process.uptime())}s`);
+                log.error(`[SIGNAL-DIAGNOSTIC] This suggests a configuration or health check issue`);
+                // 设置退出码为125，让s6延迟重启
+                this.exitCode = 125;
+            }
+
             log.info(`Received ${signal} signal, initiating graceful shutdown...`);
             await this.shutdown(signal);
         };
 
         process.on('SIGTERM', () => handleSignal('SIGTERM'));
         process.on('SIGINT', () => handleSignal('SIGINT'));
-        
+
         // 处理 SIGUSR2（用于热重载）
         process.on('SIGUSR2', async () => {
             log.info('Received SIGUSR2, performing graceful reload...');
@@ -264,11 +280,23 @@ export class GracefulShutdown {
 
             // 确保进程退出（非重载模式）
             if (!reloadMode) {
-                log.info(`[DEBUG] About to exit process with code: ${this.exitCode}, source: ${source}`);
-                log.info(`[DEBUG] s6-overlay should detect this exit and restart if exitCode != 0`);
+                log.info(`[SHUTDOWN] About to exit process`);
+                log.info(`[SHUTDOWN] Exit code: ${this.exitCode}`);
+                log.info(`[SHUTDOWN] Source: ${source}`);
+                log.info(`[SHUTDOWN] Uptime: ${Math.floor(process.uptime())}s`);
+
+                // 诊断信息
+                if (this.exitCode === 125) {
+                    log.warn(`[SHUTDOWN] Exit code 125 = s6-overlay will restart after delay`);
+                } else if (this.exitCode === 0) {
+                    log.info(`[SHUTDOWN] Exit code 0 = normal exit, s6-overlay will NOT restart`);
+                } else {
+                    log.error(`[SHUTDOWN] Exit code ${this.exitCode} = error exit, s6-overlay will restart`);
+                }
+
                 // 延迟退出，确保日志发送完成
                 setTimeout(() => {
-                    log.info(`[DEBUG] Calling process.exit(${this.exitCode}) now`);
+                    log.info(`[SHUTDOWN] Calling process.exit(${this.exitCode}) now`);
                     process.exit(this.exitCode);
                 }, 1000);
             }

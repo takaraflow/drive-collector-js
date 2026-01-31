@@ -4,26 +4,60 @@
 # Return code determines whether s6-overlay restarts the service:
 # - 0: Do not restart (normal exit)
 # - 1: Restart immediately
-# - 2: Restart after a delay
+# - 125: Restart after a delay
 
-echo "[s6-app-finish] App service exited with code: $1"
-echo "[s6-app-finish] Exit signal: $2"
+EXIT_CODE=$1
+EXIT_SIGNAL=$2
 
-# Log the exit code and signal for debugging
+echo "[s6-app-finish] ========================================"
+echo "[s6-app-finish] App service exited"
+echo "[s6-app-finish] Exit code: $EXIT_CODE"
+echo "[s6-app-finish] Signal: ${EXIT_SIGNAL:-none}"
 echo "[s6-app-finish] Timestamp: $(date -Iseconds)"
+echo "[s6-app-finish] PID: $$, PPID: $PPID"
+echo "[s6-app-finish] ========================================"
 
-# Check if the exit was due to a graceful shutdown
-if [ "$1" -eq 0 ]; then
-    echo "[s6-app-finish] Normal exit (code 0), NOT restarting"
+# CRITICAL FIX: 区分预期关闭和意外关闭
+#
+# 问题：之前的逻辑把所有收到信号的退出都当作"正常不重启"
+# 这导致应用异常时收到SIGTERM也不重启，服务就停了
+#
+# 新逻辑：
+# 1. exit(0) 且无信号 = 主动正常退出 → 不重启
+# 2. exit(0) 但有信号 = 可能是被动关闭 → 重启（除非是s6关闭）
+# 3. exit(非0) = 异常退出 → 必须重启
+
+# Case 1: s6-overlay发送的关闭信号（容器关闭/s6自身关闭）
+# s6会在关闭时发送SIGTERM，这种情况不应该重启
+if [ -f /run/s6-linux-init-container-results/exitcode ]; then
+    echo "[s6-app-finish] Detected s6-overlay shutdown, NOT restarting"
     exit 0
 fi
 
-# Check if the exit was due to a signal
-if [ -n "$2" ]; then
-    echo "[s6-app-finish] Exited due to signal: $2, NOT restarting"
+# Case 2: 应用主动正常退出（exit 0且无信号）
+if [ "$EXIT_CODE" -eq 0 ] && [ -z "$EXIT_SIGNAL" ]; then
+    echo "[s6-app-finish] Normal application exit (code 0, no signal), NOT restarting"
     exit 0
 fi
 
-# For any other exit code, restart the service
-echo "[s6-app-finish] Abnormal exit (code $1), RESTARTING service"
-exit 1
+# Case 3: 应用收到信号退出
+if [ -n "$EXIT_SIGNAL" ]; then
+    # SIGTERM/SIGINT可能来自：
+    # - s6-overlay关闭（已在上面处理）
+    # - 平台重启/健康检查失败
+    # - 应用内部bug触发优雅关闭
+    echo "[s6-app-finish] ⚠️  UNEXPECTED: App exited due to signal: $EXIT_SIGNAL"
+    echo "[s6-app-finish] This indicates premature shutdown - RESTARTING after delay"
+    # 返回125让s6延迟重启，避免疯狂重启
+    exit 125
+fi
+
+# Case 4: 应用异常退出（非0退出码）
+if [ "$EXIT_CODE" -ne 0 ]; then
+    echo "[s6-app-finish] ⚠️  Abnormal exit with code: $EXIT_CODE, RESTARTING after delay"
+    exit 125
+fi
+
+# Fallback: 其他情况不重启
+echo "[s6-app-finish] Unexpected case, NOT restarting"
+exit 0

@@ -46,3 +46,6 @@ Thumbs.db
 *.ntvs*
 *.njsproj
 ~/
+.claude/
+.s8p/
+.salmonloop/
