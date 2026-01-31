@@ -151,14 +151,18 @@ class LoggerService {
             // Ignore error
         }
 
-        if (this.activeLoggers.length > 0) {
-            this.currentProviderName = this.activeLoggers.map(l => l.getProviderName()).join('+');
-        } else {
-            this.fallbackLogger = new ConsoleLogger();
-            await this.fallbackLogger.initialize();
-            this.currentProviderName = 'ConsoleLogger';
-        }
+        const hasExternalLoggers = this.activeLoggers.length > 0;
 
+        // 始终添加 ConsoleLogger
+        // 如果有外部 Logger (Axiom/NewRelic)，开启智能过滤 (smartFilter: true)
+        // 这样控制台只显示关键日志，避免刷屏，而详细日志发送到云端
+        const consoleLogger = new ConsoleLogger({
+            smartFilter: hasExternalLoggers
+        });
+        await consoleLogger.initialize();
+        this.activeLoggers.push(consoleLogger);
+
+        this.currentProviderName = this.activeLoggers.map(l => l.getProviderName()).join('+');
         this.isInitialized = true;
     }
 
@@ -172,7 +176,7 @@ class LoggerService {
 
     _getLoggers() {
         this._ensureInitialized();
-        return this.activeLoggers.length > 0 ? this.activeLoggers : [this.fallbackLogger];
+        return this.activeLoggers;
     }
 
     _normalizeContext(context) {
@@ -286,7 +290,7 @@ class LoggerService {
     async destroy() {
         _singletonInstance = null;
         _singletonTimestamp = Date.now();
-        const loggers = this.activeLoggers.length > 0 ? this.activeLoggers : [this.fallbackLogger];
+        const loggers = this.activeLoggers;
         for (const logger of loggers) {
             if (logger && typeof logger.destroy === 'function') {
                 await logger.destroy();
