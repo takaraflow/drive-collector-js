@@ -2,7 +2,7 @@ import { config } from "../config/index.js";
 import { logger } from "./logger/index.js";
 import { CloudTool } from "./rclone.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
-import { updateStatus, escapeHTML } from "../utils/common.js";
+import { updateStatus, escapeHTML, sanitizeHeaders } from "../utils/common.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
 import { TelegramBotApi } from "../utils/telegramBotApi.js";
 import { CacheService } from "./CacheService.js";

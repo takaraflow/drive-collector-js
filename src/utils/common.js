@@ -90,3 +90,31 @@ export const updateStatus = async (task, text, isFinal = false, priority = null)
     const options = priority ? { priority } : {};
     await safeEdit(task.chatId, task.msgId, text, buttons, task.userId, isHtml ? 'html' : 'markdown', options);
 };
+
+/**
+ * 清洗 HTTP 响应头，剔除 Cloudflare 运维头和无用字段
+ * 符合最佳实践：减少 Redis 存储占用，提升性能
+ */
+export const sanitizeHeaders = (headers) => {
+    if (!headers) return {};
+
+    // 如果是 Headers 对象，转为普通对象
+    const rawHeaders = typeof headers.get === 'function'
+        ? Object.fromEntries(headers.entries())
+        : headers;
+
+    const blacklist = [
+        'nel', 'report-to', 'cf-ray', 'cf-cache-status',
+        'server', 'alt-svc', 'date', 'connection',
+        'x-powered-by', 'x-nf-request-id', 'cf-visitor'
+    ];
+
+    const cleanHeaders = {};
+    for (const [key, value] of Object.entries(rawHeaders)) {
+        const lowerKey = key.toLowerCase();
+        if (!blacklist.includes(lowerKey) && !lowerKey.startsWith('cf-')) {
+            cleanHeaders[key] = value;
+        }
+    }
+    return cleanHeaders;
+};

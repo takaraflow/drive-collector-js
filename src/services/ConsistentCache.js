@@ -2,6 +2,7 @@ import { logger } from "./logger/index.js";
 import { cache } from "./CacheService.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
 import { localCache } from "../utils/LocalCache.js";
+import { sanitizeHeaders } from "../utils/common.js";
 
 const log = logger.withModule('ConsistentCache');
 
