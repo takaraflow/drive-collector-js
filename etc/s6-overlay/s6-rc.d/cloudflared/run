@@ -1,10 +1,17 @@
 #!/bin/sh
-if [ "$TUNNEL_ENABLED" = "true" ]; then
-    PORT=${PORT:-7860}
-    TUNNEL_METRICS_PORT=${TUNNEL_METRICS_PORT:-2000}
-    echo "[s6-cloudflared] Starting tunnel to localhost:$PORT with metrics on $TUNNEL_METRICS_PORT"
-    exec cloudflared tunnel --url http://localhost:$PORT --metrics localhost:$TUNNEL_METRICS_PORT --no-autoupdate
-else
+# 检查是否启用tunnel
+if [ "$TUNNEL_ENABLED" != "true" ]; then
     echo "[s6-cloudflared] Tunnel disabled (TUNNEL_ENABLED=$TUNNEL_ENABLED)"
-    exec sleep infinity
+    echo "[s6-cloudflared] Exiting successfully (not needed)"
+    # 立即退出，让s6知道这个服务"完成"了（不是失败）
+    exit 0
 fi
+
+PORT=${PORT:-7860}
+TUNNEL_METRICS_PORT=${TUNNEL_METRICS_PORT:-2000}
+echo "[s6-cloudflared] Starting tunnel to localhost:$PORT with metrics on $TUNNEL_METRICS_PORT"
+
+# 启动cloudflared
+exec cloudflared tunnel --url http://localhost:$PORT \
+    --metrics localhost:$TUNNEL_METRICS_PORT \
+    --no-autoupdate

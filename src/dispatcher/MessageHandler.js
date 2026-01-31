@@ -280,10 +280,10 @@ export class MessageHandler {
                 const stateName = CONNECTION_STATE[stateNum] || `stateNum_${stateNum}`;
                 msgIdentifier = `[UpdateConnectionState:${stateName}]`;
 
-                log.debug("收到 UpdateConnectionState 事件", {
-                    state: stateNum,
-                    stateName: stateName
-                });
+                // log.debug("收到 UpdateConnectionState 事件", {
+                //    state: stateNum,
+                //    stateName: stateName
+                // });
             }
 
             if (msgIdentifier === 'unknown') {
@@ -324,7 +324,7 @@ export class MessageHandler {
                 logPerf().debug(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
             } else if (isUpdateConnectionState) {
                 // UpdateConnectionState 是常规心跳，改为 debug 级别
-                logPerf().debug(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+                // logPerf().debug(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
             } else {
                 // 已知类型事件保留 info 日志
                 logPerf().info(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);

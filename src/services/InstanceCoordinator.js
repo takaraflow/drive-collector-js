@@ -186,7 +186,7 @@ export class InstanceCoordinator {
                                 ...lockData,
                                 acquiredAt: Date.now() // 更新获取时间，相当于续租
                             }, 300, { skipCache: true });
-                            logWithProvider().debug(`🔒 锁续租成功`);
+                            // logWithProvider().debug(`🔒 锁续租成功`);
                         }
                     }
                 } catch (e) {
