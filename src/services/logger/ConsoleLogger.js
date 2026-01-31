@@ -18,7 +18,41 @@ class ConsoleLogger extends BaseLogger {
         this.isInitialized = true;
     }
 
-    // ... (keep existing methods)
+    async _initVersion() {
+        if (this.version !== 'unknown') return;
+        try {
+            if (process.env.APP_VERSION) {
+                this.version = process.env.APP_VERSION;
+                return;
+            }
+            // 尝试读取 package.json
+            try {
+                const { default: pkg } = await import('../../../package.json', { with: { type: 'json' } });
+                this.version = pkg.version || 'unknown';
+            } catch (e) {
+                // Fallback for environments where dynamic import might fail or file missing
+                this.version = 'unknown';
+            }
+        } catch (error) {
+            // 如果连console都失败了，我们无能为力
+            this.version = 'error';
+        }
+    }
+
+    _formatMessage(level, message, data, context, instanceId) {
+        const modulePrefix = context?.module ? `[${context.module}] ` : '';
+        const envStr = process.env.NODE_ENV || 'unknown';
+        return `[v${this.version}] [${envStr}] [${instanceId}] ${modulePrefix}${message}`;
+    }
+
+    _getConsoleMethod(level) {
+        const methods = {
+            error: this.originalConsoleError,
+            warn: this.originalConsoleWarn,
+            log: this.originalConsoleLog
+        };
+        return methods[level] || this.originalConsoleLog;
+    }
 
     /**
      * 判断是否为关键日志（用于智能过滤）
