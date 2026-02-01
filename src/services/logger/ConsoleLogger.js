@@ -40,9 +40,15 @@ class ConsoleLogger extends BaseLogger {
     }
 
     _formatMessage(level, message, data, context, instanceId) {
-        const modulePrefix = context?.module ? `[${context.module}] ` : '';
-        const envStr = process.env.NODE_ENV || 'unknown';
-        return `[v${this.version}] [${envStr}] [${instanceId}] ${modulePrefix}${message}`;
+        const version = this.version;
+        const env = process.env.NODE_ENV || 'prod';
+        const mod = context?.module || 'System';
+
+        // 简洁清晰的垂直分隔符格式，移除冗余的方括号
+        // 如果 instanceId 是 'console' 则省略，否则展示
+        const instPart = (instanceId && instanceId !== 'console' && instanceId !== 'unknown') ? ` | ${instanceId}` : '';
+
+        return `${version} | ${env}${instPart} | ${mod} | ${message}`;
     }
 
     _getConsoleMethod(level) {

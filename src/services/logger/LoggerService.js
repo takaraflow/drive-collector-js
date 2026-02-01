@@ -227,15 +227,41 @@ class LoggerService {
         const loggers = this._getLoggers();
         if (!loggers || loggers.length === 0) return;
 
-        // 为全局日志添加 Emoji 前缀使级别更直观
-        const emojis = {
-            info: 'ℹ️',
-            warn: '⚠️',
-            error: '🚨',
-            debug: '🔍'
+        // 语义化 Emoji 引擎：根据模块和内容智能选择图标
+        const mod = context?.module || '';
+        const moduleEmojis = {
+            'HttpServer': '🌐', 'Webhook': '🌐',
+            'Telegram': '✈️', 'Dispatcher': '✈️', 'TelegramService': '✈️',
+            'Cache': '💾', 'Redis': '💾', 'CacheService': '💾',
+            'Queue': '📬', 'Qstash': '📬', 'QueueService': '📬',
+            'OSS': '☁️', 'R2': '☁️', 'OssService': '☁️',
+            'D1': '🗄️', 'Database': '🗄️', 'Repository': '🗄️',
+            'Config': '⚙️', 'Infisical': '⚙️',
+            'InstanceCoordinator': '🏗️', 'App': '🏗️',
+            'Processor': '⛓️', 'LinkParser': '⛓️', 'TaskManager': '📋',
+            'Tunnel': '🚇', 'TunnelService': '🚇'
         };
-        const emoji = emojis[level] || '';
-        const formattedMessage = emoji ? `${emoji} ${message}` : message;
+
+        const levelEmojis = { info: 'ℹ️', warn: '⚠️', error: '🚨', debug: '🔍' };
+        let emoji = moduleEmojis[mod] || levelEmojis[level] || '';
+
+        // 智能语义追加：根据消息内容增强图标
+        const msgStr = String(message);
+        if (msgStr.includes('启动') || msgStr.includes('Start')) emoji += '🚀';
+        if (msgStr.includes('完成') || msgStr.includes('成功') || msgStr.includes('success') || msgStr.includes('✅')) {
+            if (!emoji.includes('✅')) emoji += '✅';
+        }
+        if (msgStr.includes('失败') || msgStr.includes('failed') || msgStr.includes('❌')) {
+            if (!emoji.includes('❌')) emoji += '❌';
+        }
+        if (msgStr.includes('连接') || msgStr.includes('Connect') || msgStr.includes('🔗')) {
+            if (!emoji.includes('🔗')) emoji += '🔗';
+        }
+        if (msgStr.includes('停止') || msgStr.includes('Stop') || msgStr.includes('🛑')) {
+            if (!emoji.includes('🛑')) emoji += '🛑';
+        }
+
+        const formattedMessage = `${emoji} ${message}`;
 
         const normalizedContext = this._normalizeContext(context);
         const fullContext = { ...this._getContext(), ...normalizedContext };
