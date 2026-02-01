@@ -97,13 +97,18 @@ class NewrelicLogger extends BaseLogger {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-License-Key': this.licenseKey
+                    'Api-Key': this.licenseKey
                 },
                 body: JSON.stringify(body)
             });
 
             if (!response.ok) {
                 const errorText = await response.text();
+                // 增加更详细的错误日志
+                console.error(`[NewrelicLogger] API Error: ${response.status} - ${errorText}`);
+                if (response.status === 403) {
+                     console.error('[NewrelicLogger] 403 Forbidden: 请检查 License Key 是否正确，以及是否配置了正确的 NEW_RELIC_REGION (EU/US)');
+                }
                 throw new Error(`New Relic API error: ${response.status} ${errorText}`);
             }
         } catch (error) {
@@ -184,6 +189,12 @@ class NewrelicLogger extends BaseLogger {
         try {
             await this._sendBatch(batch);
         } catch (error) {
+            // 打印详细的错误信息，避免静默失败
+            console.error('[NewrelicLogger] Failed to send log batch:', error.message);
+            console.error('[NewrelicLogger] License Key:', this.licenseKey ? `${this.licenseKey.substring(0, 10)}...` : 'NOT SET');
+            console.error('[NewrelicLogger] Region:', this.region);
+            console.error('[NewrelicLogger] Endpoint:', this._getLogUrl());
+            console.error('[NewrelicLogger] Batch size:', batch.length);
             // On failure, logs are currently lost to avoid memory leaks
             // In a more robust system, we might retry or persist them
         } finally {
