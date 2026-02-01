@@ -110,6 +110,9 @@ class NewrelicLogger extends BaseLogger {
                      console.error('[NewrelicLogger] 403 Forbidden: 请检查 License Key 是否正确，以及是否配置了正确的 NEW_RELIC_REGION (EU/US)');
                 }
                 throw new Error(`New Relic API error: ${response.status} ${errorText}`);
+            } else {
+                // 临时调试日志：确认发送成功
+                console.log(`[NewrelicLogger] ✅ Log batch sent. Status: ${response.status}. Count: ${batch.length}`);
             }
         } catch (error) {
             process.stderr.write(`[NewrelicLogger] Log batch failed: ${error.message}\n`);
