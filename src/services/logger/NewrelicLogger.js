@@ -97,7 +97,7 @@ class NewrelicLogger extends BaseLogger {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Api-Key': this.licenseKey
+                    'X-License-Key': this.licenseKey
                 },
                 body: JSON.stringify(body)
             });
