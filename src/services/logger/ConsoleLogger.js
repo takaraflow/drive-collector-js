@@ -75,6 +75,14 @@ class ConsoleLogger extends BaseLogger {
         // 3. 检查白名单关键字（仅针对 INFO/DEBUG）
         const msgStr = (message || '').toString();
 
+        // 优先检查忽略的常见噪音（优先级最高）
+        const ignorePatterns = [
+            '锁续租', 'Heartbeat', 'Ping', 'UpdateConnectionState',
+            'Task draining', 'circuit breaker', 'Watchdog'
+        ];
+
+        if (ignorePatterns.some(p => msgStr.includes(p))) return false;
+
         // 关键状态图标
         if (['🚀', '✅', '❌', '⚠️', '🛑', '✨', '🔒', '👑'].some(icon => msgStr.includes(icon))) return true;
 
@@ -90,14 +98,6 @@ class ConsoleLogger extends BaseLogger {
             '版本', 'Version', 'version',
             '环境', 'Environment', 'env'
         ];
-
-        // 忽略的常见噪音
-        const ignorePatterns = [
-            '锁续租', 'Heartbeat', 'Ping', 'UpdateConnectionState',
-            'Task draining', 'circuit breaker', 'Watchdog'
-        ];
-
-        if (ignorePatterns.some(p => msgStr.includes(p))) return false;
 
         return keyPatterns.some(p => msgStr.includes(p));
     }
