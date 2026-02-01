@@ -740,139 +740,6 @@
         "required": false,
         "description": "Cloudflare account ID (fallback for KV/D1)"
       },
-      "NF_REDIS_URL": {
-        "type": "string",
-        "required": false,
-        "description": "Northflank Redis URL (priority over legacy REDIS_URL)"
-      },
-      "NF_REDIS_HOST": {
-        "type": "string",
-        "required": false,
-        "description": "Northflank Redis host"
-      },
-      "NF_REDIS_PORT": {
-        "type": "number",
-        "default": 6379,
-        "description": "Northflank Redis port"
-      },
-      "NF_REDIS_PASSWORD": {
-        "type": "string",
-        "required": false,
-        "description": "Northflank Redis password"
-      },
-      "REDIS_TOKEN": {
-        "type": "string",
-        "required": false,
-        "description": "General Redis authentication token (used if password is not provided in URL or other variables)"
-      },
-      "REDIS_URL": {
-        "type": "string",
-        "required": false,
-        "description": "Legacy Redis URL (deprecated, use NF_REDIS_URL)"
-      },
-      "REDIS_HOST": {
-        "type": "string",
-        "required": false,
-        "description": "Legacy Redis host (deprecated, use NF_REDIS_HOST)"
-      },
-      "REDIS_PORT": {
-        "type": "number",
-        "default": 6379,
-        "description": "Legacy Redis port (deprecated, use NF_REDIS_PORT)"
-      },
-      "REDIS_PASSWORD": {
-        "type": "string",
-        "required": false,
-        "description": "Legacy Redis password (deprecated, use NF_REDIS_PASSWORD)"
-      },
-      "REDIS_MAX_RETRIES": {
-        "type": "number",
-        "default": 5,
-        "description": "Maximum number of Redis connection retry attempts before failing"
-      },
-      "REDIS_RESTART_DELAY": {
-        "type": "number",
-        "default": 5000,
-        "description": "Delay in milliseconds before restarting Redis client after connection loss"
-      },
-      "REDIS_TLS_ENABLED": {
-        "type": "boolean",
-        "default": false,
-        "description": "启用 Redis TLS"
-      },
-      "REDIS_TLS_REJECT_UNAUTHORIZED": {
-        "type": "boolean",
-        "default": true,
-        "description": "TLS 证书严格验证"
-      },
-      "REDIS_TLS_CA": {
-        "type": "string",
-        "required": false,
-        "description": "CA 证书 (Base64)"
-      },
-      "REDIS_TLS_CLIENT_CERT": {
-        "type": "string",
-        "required": false,
-        "description": "客户端证书 (Base64)"
-      },
-      "REDIS_TLS_CLIENT_KEY": {
-        "type": "string",
-        "required": false,
-        "description": "客户端私钥 (Base64)"
-      },
-      "REDIS_SNI_SERVERNAME": {
-        "type": "string",
-        "required": false,
-        "description": "TLS SNI 主机名"
-      },
-      "NF_REDIS_TLS_ENABLED": {
-        "type": "boolean",
-        "default": false,
-        "description": "Northflank Redis TLS 启用开关"
-      },
-      "NF_REDIS_TLS_REJECT_UNAUTHORIZED": {
-        "type": "boolean",
-        "default": true,
-        "description": "Northflank Redis TLS 证书严格验证"
-      },
-      "NF_REDIS_TLS_CA": {
-        "type": "string",
-        "required": false,
-        "description": "Northflank Redis TLS CA 证书 (Base64)"
-      },
-      "NF_REDIS_TLS_CLIENT_CERT": {
-        "type": "string",
-        "required": false,
-        "description": "Northflank Redis TLS 客户端证书 (Base64)"
-      },
-      "NF_REDIS_TLS_CLIENT_KEY": {
-        "type": "string",
-        "required": false,
-        "description": "Northflank Redis TLS 客户端私钥 (Base64)"
-      },
-      "NF_REDIS_SNI_SERVERNAME": {
-        "type": "string",
-        "required": false,
-        "description": "Northflank Redis TLS SNI 主机名"
-      },
-      "CACHE_PROVIDER": {
-        "type": "string",
-        "required": false,
-        "enum": [
-          "redis",
-          "upstash"
-        ],
-        "description": "强制指定缓存提供商 (优先级高于自动检测)"
-      },
-      "KV_PROVIDER": {
-        "type": "string",
-        "required": false,
-        "enum": [
-          "redis",
-          "upstash"
-        ],
-        "description": "分布式键值对存储提供商"
-      },
       "CLOUDFLARE_KV_ACCOUNT_ID": {
         "type": "string",
         "required": false,
@@ -887,16 +754,6 @@
         "type": "string",
         "required": false,
         "description": "Cloudflare KV API token"
-      },
-      "UPSTASH_REDIS_REST_URL": {
-        "type": "string",
-        "required": false,
-        "description": "Upstash Redis REST API URL"
-      },
-      "UPSTASH_REDIS_REST_TOKEN": {
-        "type": "string",
-        "required": false,
-        "description": "Upstash Redis REST API token"
       },
       "PORT": {
         "type": "number",
@@ -1006,50 +863,6 @@
         "type": "string",
         "required": false,
         "description": "强制指定某个配置的 name 作为主缓存提供者，用于覆盖优先级或故障转移后的选择"
-      },
-      "VALKEY_HOST": {
-        "type": "string",
-        "required": false,
-        "description": "Valkey 数据库主机地址 (自动检测为 Valkey 提供者)"
-      },
-      "VALKEY_PORT": {
-        "type": "number",
-        "default": 6379,
-        "description": "Valkey 数据库端口"
-      },
-      "VALKEY_URL": {
-        "type": "string",
-        "required": false,
-        "description": "Valkey 完整连接 URL (支持 redis:// 或 valkeys://)"
-      },
-      "VALKEY_PASSWORD": {
-        "type": "string",
-        "required": false,
-        "description": "Valkey 数据库密码",
-        "sensitive": true,
-        "configPaths": [
-          "password"
-        ]
-      },
-      "VALKEY_USER": {
-        "type": "string",
-        "required": false,
-        "description": "Valkey 数据库用户名 (Aiven)"
-      },
-      "VALKEY_CA_CERT": {
-        "type": "string",
-        "required": false,
-        "description": "Valkey CA 证书 (Aiven)"
-      },
-      "VALKEY_TLS": {
-        "type": "boolean",
-        "default": false,
-        "description": "启用 Valkey TLS 连接"
-      },
-      "VALKEY_DB": {
-        "type": "number",
-        "default": 0,
-        "description": "Valkey 数据库索引"
       },
       "INFISICAL_CLIENT_ID": {
         "type": "string",

@@ -139,12 +139,7 @@ class CacheService {
             this.providerList = this._loadProvidersFromConfig();
             
             if (this.providerList.length === 0) {
-                // Fallback to legacy detection if JSON config is missing
-                log.warn('No CACHE_PROVIDERS found. Falling back to legacy detection.');
-                const legacyProvider = this._createProviderFromLegacyEnv();
-                if (legacyProvider) {
-                    this.providerList.push({ instance: legacyProvider, config: { name: 'legacy' } });
-                }
+                log.error('未发现有效的 CACHE_PROVIDERS 配置。缓存服务将仅运行在内存模式。');
             }
 
             // 2. Sort by priority (ascending, 1 is highest)
