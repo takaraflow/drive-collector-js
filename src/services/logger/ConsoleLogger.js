@@ -1,5 +1,6 @@
 import { BaseLogger } from './BaseLogger.js';
 import { serializeToString } from '../../utils/serializer.js';
+import { getBeijingTimestamp } from '../../utils/timeUtils.js';
 
 class ConsoleLogger extends BaseLogger {
     constructor(options = {}) {
@@ -40,6 +41,7 @@ class ConsoleLogger extends BaseLogger {
     }
 
     _formatMessage(level, message, data, context, instanceId) {
+        const timestamp = getBeijingTimestamp();
         const version = this.version;
         const env = process.env.NODE_ENV || 'prod';
         const mod = context?.module || 'System';
@@ -48,7 +50,7 @@ class ConsoleLogger extends BaseLogger {
         // 如果 instanceId 是 'console' 则省略，否则展示
         const instPart = (instanceId && instanceId !== 'console' && instanceId !== 'unknown') ? ` | ${instanceId}` : '';
 
-        return `${version} | ${env}${instPart} | ${mod} | ${message}`;
+        return `${timestamp} | ${version} | ${env}${instPart} | ${mod} | ${message}`;
     }
 
     _getConsoleMethod(level) {

@@ -1,5 +1,6 @@
 import { BaseLogger } from './BaseLogger.js';
 import { serializeError, serializeToString, limitFields } from '../../utils/serializer.js';
+import { getBeijingISOString } from '../../utils/timeUtils.js';
 
 let getInstanceIdFunc = () => 'unknown';
 
@@ -141,6 +142,7 @@ class NewrelicLogger extends BaseLogger {
             message: messageStr,
             level: level,
             instanceId: instanceId,
+            local_time: getBeijingISOString(),
             ...context,
             attributes: {
                 details: serializeToString(finalData)

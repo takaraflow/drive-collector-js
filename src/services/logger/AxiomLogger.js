@@ -1,6 +1,7 @@
 import { Axiom } from '@axiomhq/js';
 import { BaseLogger } from './BaseLogger.js';
 import { limitFields, serializeError, serializeToString } from '../../utils/serializer.js';
+import { getBeijingISOString } from '../../utils/timeUtils.js';
 
 const AXIOM_UNAVAILABLE_BACKOFF_MS = 3 * 1000;
 
@@ -130,6 +131,7 @@ class AxiomLogger extends BaseLogger {
             level,
             message: messageStr,
             timestamp: new Date().toISOString(),
+            local_time: getBeijingISOString(),
             details: serializeToString(finalData)
         };
 

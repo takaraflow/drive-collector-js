@@ -137,9 +137,17 @@ class CacheService {
         try {
             // 1. Load and parse providers from environment
             this.providerList = this._loadProvidersFromConfig();
-            
+
             if (this.providerList.length === 0) {
-                log.error('未发现有效的 CACHE_PROVIDERS 配置。缓存服务将仅运行在内存模式。');
+                const legacyInstance = this._createProviderFromLegacyEnv();
+                if (legacyInstance) {
+                    this.providerList.push({
+                        instance: legacyInstance,
+                        config: { name: 'legacy-primary', priority: 1 }
+                    });
+                } else {
+                    log.error('未发现有效的 CACHE_PROVIDERS 配置。缓存服务将仅运行在内存模式。');
+                }
             }
 
             // 2. Sort by priority (ascending, 1 is highest)
