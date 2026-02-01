@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.30.0](https://github.com/YoungSx/drive-collector-js/compare/v4.29.0...v4.30.0) (2026-02-01)
+
+
+### 📝 文档更新
+
+* **cloudflared:** add configuration guide for tunnel setup and troubleshooting ([3148200](https://github.com/YoungSx/drive-collector-js/commit/314820034b45a9f0e60cb7d54b813c2b38329230))
+
+
+### 🐛 问题修复
+
+* adds s6-overlay finish script for controlled service restart logic ([a72cc8f](https://github.com/YoungSx/drive-collector-js/commit/a72cc8fd0e08c62e3db568db60b1fde1a2715567))
+* **telegram:** handle AUTH_KEY_DUPLICATED error with session cleanup ([8e8f82b](https://github.com/YoungSx/drive-collector-js/commit/8e8f82b4a8b27c0b383476626c8b4651cd009dce))
+
+
+### ✨ 新特性
+
+* **config:** relocate config import to top of file for better readability ([1a317d0](https://github.com/YoungSx/drive-collector-js/commit/1a317d07139dad08e03aed587fff448676902d70))
+* **config:** remove legacy Redis and Valkey environment variables ([cfd9c72](https://github.com/YoungSx/drive-collector-js/commit/cfd9c7229493c6a44e828864a54c5cb933c66dac))
+* **docs:** add logging guidelines document ([00f35fb](https://github.com/YoungSx/drive-collector-js/commit/00f35fbbb5a5888073db41915180a9933b9b8379))
+* **InstanceCoordinator:** relocate instance ID log message to start method ([b0b6744](https://github.com/YoungSx/drive-collector-js/commit/b0b6744a199a9c35a62305662789fa8c1171ae35))
+* **logger:** add debug log for successful log batch submission ([21bfc53](https://github.com/YoungSx/drive-collector-js/commit/21bfc53dad671baa54fe95d1befa514eef9de2e5))
+* **logger:** add emoji prefixes to log levels and refine NewrelicLogger diagnostics ([eac3eb0](https://github.com/YoungSx/drive-collector-js/commit/eac3eb031bb43077cf19c079c3fe9693740f1ffb))
+* **logger:** enhance ConsoleLogger with version tracking and improved formatting ([064573b](https://github.com/YoungSx/drive-collector-js/commit/064573b550f1ea75347ff1fe414ef7c58f9cb2fd))
+* **logger:** enhance NewrelicLogger error handling and debugging ([bf31c01](https://github.com/YoungSx/drive-collector-js/commit/bf31c01117027d9eb95fc160013925eec224a93d))
+* **logger:** enhance NewrelicLogger license key handling and debugging ([ad9b60b](https://github.com/YoungSx/drive-collector-js/commit/ad9b60b589e3b8bf971a6bda884d9b9fa4e4c59a))
+* **logger:** implement smart filtering and output optimization ([62c6c1d](https://github.com/YoungSx/drive-collector-js/commit/62c6c1d4e23a3d789497726de85a31203512de0f))
+* **logger:** refactor log formatting and enhance emoji semantics ([16c9180](https://github.com/YoungSx/drive-collector-js/commit/16c9180aa90db01dfa24dc378cd725f5f8c0a45f))
+* **logger:** support dynamic reloading of logger configuration ([57743f4](https://github.com/YoungSx/drive-collector-js/commit/57743f4922f6cc4f26469896d23d6af9fcb1030a))
+* **logger:** update New Relic API key header from Api-Key to X-License-Key ([d8f151a](https://github.com/YoungSx/drive-collector-js/commit/d8f151a2d24d13f94720175307436959a7fb8aa8))
+* **s6-overlay:** refactor app finish logic and add shutdown diagnostics ([b7d53f4](https://github.com/YoungSx/drive-collector-js/commit/b7d53f424291821882c6240b52c0339826228f9c))
+* **utils:** add sanitizeHeaders to clean HTTP response headers ([c646b71](https://github.com/YoungSx/drive-collector-js/commit/c646b71267e27f98bc84e34d3417f6fe2b75aa05))
+
 ## [4.29.0](https://github.com/YoungSx/drive-collector-js/compare/v4.28.1...v4.29.0) (2026-01-23)
 
 
