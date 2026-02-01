@@ -227,12 +227,22 @@ class LoggerService {
         const loggers = this._getLoggers();
         if (!loggers || loggers.length === 0) return;
 
+        // 为全局日志添加 Emoji 前缀使级别更直观
+        const emojis = {
+            info: 'ℹ️',
+            warn: '⚠️',
+            error: '🚨',
+            debug: '🔍'
+        };
+        const emoji = emojis[level] || '';
+        const formattedMessage = emoji ? `${emoji} ${message}` : message;
+
         const normalizedContext = this._normalizeContext(context);
         const fullContext = { ...this._getContext(), ...normalizedContext };
 
         const promises = loggers.map(logger => {
             if (logger && typeof logger[level] === 'function') {
-                return logger[level](message, data, fullContext).catch(error => {
+                return logger[level](formattedMessage, data, fullContext).catch(error => {
                     console.error(`Logger ${logger.getProviderName()} ${level} failed:`, error.message);
                 });
             }

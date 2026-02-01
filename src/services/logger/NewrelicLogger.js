@@ -97,15 +97,6 @@ class NewrelicLogger extends BaseLogger {
         }];
 
         try {
-            // 调试：打印一次关键信息（Key指纹和Payload样本）
-            if (!this.hasLoggedSample) {
-                console.log(`[NewrelicLogger] DIAGNOSTIC:`);
-                console.log(`  - Key Fingerprint: ${this.licenseKey.substring(0, 6)}...${this.licenseKey.slice(-4)} (Length: ${this.licenseKey.length})`);
-                console.log(`  - Endpoint: ${url}`);
-                console.log(`  - Sample Body: ${JSON.stringify(body).substring(0, 300)}...`);
-                this.hasLoggedSample = true;
-            }
-
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
@@ -118,17 +109,17 @@ class NewrelicLogger extends BaseLogger {
             if (!response.ok) {
                 const errorText = await response.text();
                 // 增加更详细的错误日志
-                console.error(`[NewrelicLogger] API Error: ${response.status} - ${errorText}`);
+                console.error(`🚨 [NewrelicLogger] API Error: ${response.status} - ${errorText}`);
                 if (response.status === 403) {
-                     console.error('[NewrelicLogger] 403 Forbidden: 请检查 License Key 是否正确，以及是否配置了正确的 NEW_RELIC_REGION (EU/US)');
+                     console.error('🚫 [NewrelicLogger] 403 Forbidden: 请检查 License Key 是否正确，以及是否配置了正确的 NEW_RELIC_REGION (EU/US)');
                 }
                 throw new Error(`New Relic API error: ${response.status} ${errorText}`);
             } else {
-                // 临时调试日志：确认发送成功
-                console.log(`[NewrelicLogger] ✅ Log batch sent. Status: ${response.status}. Count: ${batch.length}`);
+                // 确认发送成功
+                console.log(`✨ [NewrelicLogger] 📦 Log batch sent! Count: ${batch.length} | Status: ${response.status}`);
             }
         } catch (error) {
-            process.stderr.write(`[NewrelicLogger] Log batch failed: ${error.message}\n`);
+            process.stderr.write(`❌ [NewrelicLogger] Log batch failed: ${error.message}\n`);
             throw error;
         }
     }
