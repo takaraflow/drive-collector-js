@@ -211,7 +211,7 @@ describe('Telegram Flood Wait Handling', () => {
 
         // Verify it attempts recovery
         expect(mockLogger.info).toHaveBeenCalledWith(
-            expect.stringContaining('Circuit breaker: Attempting recovery')
+            expect.stringContaining('电路断路器: 正在尝试恢复')
         );
     });
 

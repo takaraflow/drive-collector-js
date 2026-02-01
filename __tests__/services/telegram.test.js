@@ -275,7 +275,7 @@ describe("Telegram Service", () => {
             const instance = await module.connectAndStart();
 
             expect(instance.session.setDC).not.toHaveBeenCalled();
-            expect(mockLoggerWarn.mock.calls.some(call => String(call[0]).includes("TG_SERVER_DC/IP/PORT incomplete"))).toBe(true);
+            expect(mockLoggerWarn.mock.calls.some(call => String(call[0]).includes("TG_SERVER_DC/IP/PORT"))).toBe(true);
         });
     });
 });
