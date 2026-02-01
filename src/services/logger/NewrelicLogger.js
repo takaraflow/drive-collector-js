@@ -14,7 +14,10 @@ export const setInstanceIdProvider = (provider) => {
 class NewrelicLogger extends BaseLogger {
     constructor(options = {}) {
         super(options);
-        this.licenseKey = options.licenseKey || process.env.NEW_RELIC_LICENSE_KEY;
+        const rawKey = options.licenseKey || process.env.NEW_RELIC_LICENSE_KEY || '';
+        // 严格清理 Key：去除首尾空格、换行符和可能的引号
+        this.licenseKey = rawKey.trim().replace(/['"]/g, '');
+
         this.region = options.region || process.env.NEW_RELIC_REGION || 'US';
         this.service = options.service || process.env.NEW_RELIC_APP_NAME || 'drive-collector';
         this.logBuffer = [];
@@ -23,6 +26,7 @@ class NewrelicLogger extends BaseLogger {
         this.BATCH_MAX_SIZE = 500;
         this.BATCH_FLUSH_INTERVAL_MS = process.env.NODE_ENV === 'test' ? 10 : 5000;
         this.version = 'unknown';
+        this.hasLoggedSample = false; // 用于控制调试日志只打印一次
     }
 
     _getInstanceId() {
@@ -93,6 +97,15 @@ class NewrelicLogger extends BaseLogger {
         }];
 
         try {
+            // 调试：打印一次关键信息（Key指纹和Payload样本）
+            if (!this.hasLoggedSample) {
+                console.log(`[NewrelicLogger] DIAGNOSTIC:`);
+                console.log(`  - Key Fingerprint: ${this.licenseKey.substring(0, 6)}...${this.licenseKey.slice(-4)} (Length: ${this.licenseKey.length})`);
+                console.log(`  - Endpoint: ${url}`);
+                console.log(`  - Sample Body: ${JSON.stringify(body).substring(0, 300)}...`);
+                this.hasLoggedSample = true;
+            }
+
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
@@ -131,7 +144,9 @@ class NewrelicLogger extends BaseLogger {
         const messageStr = message instanceof Error ? message.message : String(message);
 
         const payload = {
-            timestamp: Date.now(),
+            // 移除 timestamp，使用 New Relic 服务器接收时间
+            // 避免因本地环境时间(2026)与服务器时间(2025)偏差过大导致日志被丢弃
+            // timestamp: Date.now(),
             message: messageStr,
             level: level,
             instanceId: instanceId,
