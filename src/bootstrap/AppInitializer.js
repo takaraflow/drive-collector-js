@@ -63,7 +63,7 @@ export class AppInitializer {
                 await tunnelService.initialize();
                 const tunnelUrl = await tunnelService.getPublicUrl();
                 if (tunnelUrl) {
-                    log.info(`🌐 Tunnel active at: ${tunnelUrl}`);
+                    log.info(`🌐 Tunnel 活跃于: ${tunnelUrl}`);
                 }
             } catch (tunnelError) {
                 log.warn('TunnelService 初始化失败，将禁用隧道功能:', tunnelError.message);

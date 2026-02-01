@@ -32,7 +32,7 @@ class EnhancedTelegramCircuitBreaker {
                 throw new Error(`Circuit breaker OPEN. Wait ${waitTime}s more`);
             }
             this.state = 'HALF_OPEN';
-            log.info('🔄 Circuit breaker: HALF_OPEN state');
+            log.info('🔄 电路断路器: 进入 HALF_OPEN 状态');
         }
 
         try {
@@ -47,7 +47,7 @@ class EnhancedTelegramCircuitBreaker {
 
     onSuccess() {
         if (this.state === 'HALF_OPEN') {
-            log.info('✅ Circuit breaker: Connection restored');
+            log.info('✅ 电路断路器: 连接已恢复');
         }
         this.state = 'CLOSED';
         this.failures = 0;
@@ -78,16 +78,16 @@ class EnhancedTelegramCircuitBreaker {
 
             // 如果是 Flood 错误，打印特殊日志
             if (errorType === TelegramErrorClassifier.ERROR_TYPES.FLOOD) {
-                 log.error(`🚨 Circuit breaker OPENED due to FLOOD limit. Stopping requests for ${Math.ceil(effectiveTimeout / 1000)}s.`);
+                 log.error(`🚨 电路断路器开启 (原因: FLOOD 限制)。停止请求 ${Math.ceil(effectiveTimeout / 1000)} 秒。`);
             } else {
-                log.error(`🚨 Circuit breaker OPENED after ${this.failures} failures (threshold: ${effectiveThreshold}, type: ${errorType})`);
+                log.error(`🚨 电路断路器开启 (失败次数: ${this.failures}, 阈值: ${effectiveThreshold}, 类型: ${errorType})`);
             }
             
             if (this.resetTimer) clearTimeout(this.resetTimer);
             this.resetTimer = setTimeout(() => {
                 if (this.state === 'OPEN') {
                     this.state = 'HALF_OPEN';
-                    log.info('🔄 Circuit breaker: Attempting recovery');
+                    log.info('🔄 电路断路器: 正在尝试恢复');
                 }
             }, effectiveTimeout);
         }
@@ -230,9 +230,9 @@ function logTelegramDcConfig(dcConfig) {
     }
     telegramDcConfigLogged = true;
     const customServerUsed = dcConfig.mode === "custom";
-    log.info(`[Telegram DC] testMode=${dcConfig.testMode}, customServer=${customServerUsed}, source=${dcConfig.mode}`);
+    log.info(`✈️ Telegram DC 配置: testMode=${dcConfig.testMode}, customServer=${customServerUsed}, source=${dcConfig.mode}`);
     if (!customServerUsed && dcConfig.hasAnyCustom) {
-        log.warn("[Telegram DC] TG_SERVER_DC/IP/PORT incomplete; ignoring custom DC override");
+        log.warn("⚠️ Telegram DC 配置不完整 (TG_SERVER_DC/IP/PORT); 忽略自定义 DC 覆盖");
     }
 }
 
@@ -482,10 +482,10 @@ async function initTelegramClient() {
                     const isNotConnected = msgStr.includes('Not connected');
 
                     if (isTimeout) {
-                        log.error(`⚠️ Telegram timeout detected: ${msgStr}`, { service: 'telegram', ...args });
+                        log.error(`⚠️ 检测到 Telegram 超时: ${msgStr}`, { service: 'telegram', ...args });
                         telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
                     } else if (isNotConnected) {
-                        log.warn(`⚠️ Telegram connection warning: ${msgStr}`, { service: 'telegram', ...args });
+                        log.warn(`⚠️ Telegram 连接警告: ${msgStr}`, { service: 'telegram', ...args });
                         telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.NOT_CONNECTED);
                     } else {
                         log.error(msg, ...args);
@@ -494,7 +494,7 @@ async function initTelegramClient() {
                     // 如果不是在初始化，且遇到了连接问题，尝试触发快速恢复
                     if (!isClientInitializing && !isReconnecting && (isTimeout || isNotConnected)) {
                         const errorType = isTimeout ? TelegramErrorClassifier.ERROR_TYPES.TIMEOUT : TelegramErrorClassifier.ERROR_TYPES.NOT_CONNECTED;
-                        log.info(`🔄 Detected ${errorType} in library logs, scheduling immediate recovery check...`);
+                        log.info(`🔄 在日志中检测到 ${errorType}，正在安排立即恢复检查...`);
                         setImmediate(() => {
                             handleConnectionIssue(true, errorType).catch(err => {
                                 log.error("❌ Background reconnection trigger failed:", err);
@@ -591,9 +591,9 @@ function setupEventListeners(client) {
         // 特殊处理 FLOOD
         if (errorType === TelegramErrorClassifier.ERROR_TYPES.FLOOD) {
              const waitSeconds = err.seconds || 60;
-             log.error(`🚨 Telegram Flood Wait Detected: A wait of ${waitSeconds} seconds is required.`, { service: 'telegram', waitSeconds });
+             log.error(`🚨 检测到 Telegram Flood Wait: 需要等待 ${waitSeconds} 秒。`, { service: 'telegram', waitSeconds });
         } else {
-             log.error(`⚠️ Telegram error [${errorType}]: ${err.message}`, { service: 'telegram' });
+             log.error(`⚠️ Telegram 错误 [${errorType}]: ${err.message}`, { service: 'telegram' });
         }
 
         // 检查是否需要触发电路断路器
@@ -603,15 +603,15 @@ function setupEventListeners(client) {
 
         // 检查是否需要跳过重连
         if (TelegramErrorClassifier.shouldSkipReconnect(errorType)) {
-            log.warn(`⚠️ Error type ${errorType} requires special handling, skipping normal reconnection`);
+            log.warn(`⚠️ 错误类型 ${errorType} 需要特殊处理，跳过普通重连`);
             return;
         }
 
         // 获取推荐的重连策略
         const strategy = TelegramErrorClassifier.getReconnectStrategy(errorType, errorTypeFailures[errorType], err);
-        
+
         if (!strategy.shouldRetry) {
-            log.warn(`⚠️ Max retries exceeded for error type ${errorType}, stopping reconnection attempts`);
+            log.warn(`⚠️ 错误类型 ${errorType} 已超过最大重试次数，停止重连尝试`);
             return;
         }
 
@@ -642,14 +642,14 @@ function setupEventListeners(client) {
             const timeSinceLastUpdate = Date.now() - lastUpdateTimestamp;
             
             if (timeSinceLastUpdate > 60000 && timeSinceLastUpdate <= 120000) {
-                log.warn(`⚠️ Update loop slow (no updates for ${Math.floor(timeSinceLastUpdate / 1000)}s)`);
+                log.warn(`⚠️ 更新循环缓慢 (已持续 ${Math.floor(timeSinceLastUpdate / 1000)} 秒无更新)`);
                 consecutiveUpdateTimeouts++;
-                
+
                 if (!isReconnecting) {
                     handleConnectionIssue(true, TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
                 }
             } else if (timeSinceLastUpdate > 120000) {
-                log.error(`🚨 Update loop STUCK (${Math.floor(timeSinceLastUpdate / 1000)}s), triggering full reset`, { service: 'telegram', duration: timeSinceLastUpdate });
+                log.error(`🚨 更新循环卡死 (${Math.floor(timeSinceLastUpdate / 1000)} 秒)，触发完整重置`, { service: 'telegram', duration: timeSinceLastUpdate });
                 telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
                 consecutiveUpdateTimeouts++;
                 
@@ -799,8 +799,8 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
         const client = await getClient();
         const config = getConfig();
         const strategy = TelegramErrorClassifier.getReconnectStrategy(errorType, errorTypeFailures[errorType] || 0);
-        
-        log.info(`🔄 Starting reconnection [type=${errorType}, lightweight=${lightweight}, delay=${strategy.delay}ms]`);
+
+        log.info(`🔄 开始重连 [类型=${errorType}, lightweight=${lightweight}, 延迟=${strategy.delay}ms]`);
 
         // 增强断开连接
         try {
@@ -809,10 +809,10 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
                     client.disconnect(),
                     new Promise((_, reject) => setTimeout(() => reject(new Error("Disconnect Timeout")), 8000))
                 ]);
-                log.info("✅ Client disconnected gracefully");
+                log.info("✅ 客户端已优雅断开连接");
             }
         } catch (de) {
-            log.warn("⚠️ Disconnect timeout or error:", de.message);
+            log.warn("⚠️ 断开连接超时或出错:", de.message);
         }
 
         // 清理发送器
@@ -823,9 +823,9 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
                     new Promise((_, reject) => setTimeout(() => reject(new Error("Sender disconnect timeout")), 5000))
                 ]);
                 client._sender = undefined;
-                log.info("✅ Sender state cleaned");
+                log.info("✅ Sender 状态已清理");
             } catch (e) {
-                log.warn("⚠️ Sender cleanup failed:", e.message);
+                log.warn("⚠️ Sender 清理失败:", e.message);
                 client._sender = undefined;
             }
         }
@@ -833,14 +833,14 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
         // Session 管理
         const shouldReset = TelegramErrorClassifier.shouldResetSession(errorType, errorTypeFailures[errorType] || 0);
         if (!lightweight || shouldReset) {
-            log.info("🔄 Resetting session due to error type or strategy");
+            log.info("🔄 因错误类型或策略重置 Session");
             await resetClientSession();
         } else {
-            log.info("🔄 Lightweight reconnection - preserving session");
+            log.info("🔄 轻量重连 - 保留 Session");
         }
 
         // 等待策略延迟
-        log.info(`⏳ Reconnection backoff: ${Math.floor(strategy.delay / 1000)}s`);
+        log.info(`⏳ 重连退避: ${Math.floor(strategy.delay / 1000)} 秒`);
         await new Promise(r => setTimeout(r, strategy.delay));
 
         // 使用电路断路器保护重连
@@ -848,31 +848,31 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
             await client.connect();
             await client.start({ botAuthToken: config.botToken });
             await saveSession();
-            
-            log.info("✅ Reconnection successful");
+
+            log.info("✅ 重连成功");
             lastHeartbeat = Date.now();
             consecutiveFailures = 0;
-            
+
             // 验证连接健康
             const healthCheck = await client.getMe().catch(e => {
-                log.error("❌ Health check failed after reconnection:", e);
+                log.error("❌ 重连后健康检查失败:", e);
                 throw e;
             });
-            
+
             if (healthCheck) {
-                log.info("✅ Connection health verified");
+                log.info("✅ 连接健康状态已验证");
                 // 重置错误统计
                 errorTypeFailures[errorType] = 0;
             }
         }, errorType);
-        
+
     } catch (e) {
-        log.error("❌ Reconnection failed:", e);
+        log.error("❌ 重连失败:", e);
         consecutiveFailures++;
-        
+
         // 如果连续失败次数过多，触发电路断路器
         if (consecutiveFailures >= 3) {
-            log.error("🚨 Multiple reconnection failures, opening circuit breaker");
+            log.error("🚨 多次重连失败，开启电路断路器");
             telegramCircuitBreaker.onFailure(errorType);
         }
     } finally {

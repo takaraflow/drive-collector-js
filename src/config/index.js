@@ -233,7 +233,7 @@ async function validateCriticalServices() {
 export async function initConfig() {
     if (isInitialized) return config;
 
-    console.log(`🚀 Initializing configuration...`);
+    console.log(`🚀 正在初始化配置...`);
 
     // 环境验证机制
     function validateEnvironmentConsistency() {
@@ -285,13 +285,13 @@ export async function initConfig() {
     // 只有当 Infisical 配置存在时才尝试动态拉取
     if (((clientId && clientSecret) || process.env.INFISICAL_TOKEN) && projectId) {
         if (process.env.SKIP_INFISICAL_RUNTIME === 'true') {
-            console.log(`ℹ️ Skipping Infisical runtime fetch (SKIP_INFISICAL_RUNTIME=true)`);
+            console.log(`ℹ️ 跳过 Infisical 运行时获取 (SKIP_INFISICAL_RUNTIME=true)`);
         } else if (process.env.NODE_ENV === 'test') {
-            console.log(`ℹ️ Skipping Infisical fetch in test environment`);
+            console.log(`ℹ️ 测试环境下跳过 Infisical 获取`);
         } else {
             try {
                 const infisicalEnvName = mapNodeEnvToInfisicalEnv(process.env.NODE_ENV || 'dev');
-                console.log(`ℹ️ Attempting to fetch Infisical secrets for environment: ${infisicalEnvName} (mapped from NODE_ENV: ${process.env.NODE_ENV || 'dev'})`);
+                console.log(`ℹ️ 尝试获取 Infisical Secrets，环境: ${infisicalEnvName} (映射自 NODE_ENV: ${process.env.NODE_ENV || 'dev'})`);
                 
                 // 使用新的 InfisicalSecretsProvider
                 provider = new InfisicalSecretsProvider({
@@ -317,7 +317,7 @@ export async function initConfig() {
                         process.env[key] = cleanValue;
                     }
                 }
-                console.log(`✅ Successfully fetched Infisical secrets.`);
+                console.log(`✅ 成功获取 Infisical Secrets。`);
                 
                 // 启动轮询（可配置）
                 const pollingEnabled = process.env.INFISICAL_POLLING_ENABLED === 'true';
@@ -387,10 +387,10 @@ export async function initConfig() {
                     
                     // 启动轮询
                     provider.startPolling(pollInterval);
-                    console.log(`🚀 Infisical polling started (interval: ${pollInterval}ms)`);
+                    console.log(`🚀 Infisical 轮询已启动 (间隔: ${pollInterval}ms)`);
                 }
             } catch (error) {
-                console.warn(`⚠️ Infisical fetch failed, falling back to .env or system envs: ${error.message}`);
+                console.warn(`⚠️ Infisical 获取失败，回退到 .env 或系统环境变量: ${error.message}`);
             }
         }
     }
@@ -488,7 +488,7 @@ export async function initConfig() {
     // Log environment and test mode status
     const envMode = process.env.NODE_MODE || 'unknown';
     const testModeSource = env.TG_TEST_MODE !== undefined ? `TG_TEST_MODE=${env.TG_TEST_MODE}` : `default (NODE_MODE=${envMode})`;
-    console.log(`[Config] NODE_ENV=${process.env.NODE_ENV}, NODE_MODE=${envMode}, Telegram Test Mode: ${config.telegram.testMode}`);
+    console.log(`⚙️ NODE_ENV=${process.env.NODE_ENV}, NODE_MODE=${envMode}, Telegram 测试模式: ${config.telegram.testMode}`);
     
     return config;
 }
@@ -502,7 +502,7 @@ export async function refreshConfiguration() {
     }
 
     try {
-        console.log('🔄 Manual configuration refresh triggered...');
+        console.log('🔄 手动触发配置刷新...');
         const newSecrets = await provider.fetchSecrets();
         
         // detectChanges 会对比配置并在发生变化时触发 configChanged 事件
