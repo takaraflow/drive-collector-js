@@ -210,7 +210,14 @@ export class CloudTool {
                 const conf = { ...configData, type };
 
                 const connectionString = this._getConnectionString(conf);
-                const args = ["--config", "/dev/null", checkCommand, connectionString, "--json", "--timeout", "15s"];
+
+                // 通过 Provider 获取最合适的验证命令
+                const provider = DriveProviderFactory.getProvider(type);
+                const finalCheckCommand = (checkCommand === "about")
+                    ? provider.getValidationCommand()
+                    : checkCommand;
+
+                const args = ["--config", "/dev/null", finalCheckCommand, connectionString, "--max-depth", "1", "--timeout", "15s"];
 
                 
                 const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });

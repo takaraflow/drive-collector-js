@@ -62,13 +62,17 @@ export class WebDAVProvider extends BaseDriveProvider {
         return password;
     }
 
+    getValidationCommand() {
+        return 'lsd';
+    }
+
     getConnectionString(config) {
         const url = (config.url || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const user = (config.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const pass = (config.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         // WebDAV uses 'url', 'user', 'pass' (obscured)
-        // vendor is optional, defaults to other
-        return `:${this.type},url="${url}",user="${user}",pass="${pass}":`;
+        // vendor is optional, but setting 'other' helps compatibility
+        return `:${this.type},url="${url}",user="${user}",pass="${pass}",vendor="other":`;
     }
 
     _validateUrl(url) {

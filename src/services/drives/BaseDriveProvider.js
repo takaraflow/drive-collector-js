@@ -66,6 +66,14 @@ export class BaseDriveProvider {
     }
 
     /**
+     * 获取验证配置时使用的 rclone 命令
+     * @returns {string} rclone 命令 (默认 'about')
+     */
+    getValidationCommand() {
+        return 'about';
+    }
+
+    /**
      * 获取连接字符串
      * @param {Object} config - 配置对象
      * @returns {string} rclone 连接字符串

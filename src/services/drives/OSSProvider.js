@@ -57,6 +57,10 @@ export class OSSProvider extends BaseDriveProvider {
         }
     }
 
+    getValidationCommand() {
+        return 'lsd';
+    }
+
     processPassword(password) {
         if (typeof CloudTool._obscure === "function") {
             return CloudTool._obscure(password);
