@@ -203,15 +203,11 @@ export class CloudTool {
      */
     static async validateConfig(type, configData, checkCommand = "about") {
         return new Promise((resolve) => {
+            let completed = false;
             try {
-                // Construct the full config object for _getConnectionString
-                // Assuming configData contains the necessary fields (user/pass or token)
-                // Password processing should be done by the caller (Provider) before calling this.
                 const conf = { ...configData, type };
-
                 const connectionString = this._getConnectionString(conf);
 
-                // 通过 Provider 获取最合适的验证命令
                 const provider = DriveProviderFactory.getProvider(type);
                 const finalCheckCommand = (checkCommand === "about")
                     ? provider.getValidationCommand()
@@ -219,8 +215,16 @@ export class CloudTool {
 
                 const args = ["--config", "/dev/null", finalCheckCommand, connectionString, "--max-depth", "1", "--timeout", "15s"];
 
-                
                 const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
+
+                // 增加强杀超时保护 (20s，略长于 rclone 内部超时)
+                const timer = setTimeout(() => {
+                    if (!completed) {
+                        completed = true;
+                        try { proc.kill('SIGKILL'); } catch(e) {}
+                        resolve({ success: false, reason: "TIMEOUT", details: "Node.js enforced timeout" });
+                    }
+                }, 20000);
 
                 let errorLog = "";
                 proc.stderr.on("data", (data) => {
@@ -228,25 +232,34 @@ export class CloudTool {
                 });
 
                 proc.on("close", (code) => {
+                    if (completed) return;
+                    completed = true;
+                    clearTimeout(timer);
+
                     if (code === 0) {
                         resolve({ success: true });
                     } else {
                         if (errorLog.includes("Multi-factor authentication") || errorLog.includes("2FA")) {
                             resolve({ success: false, reason: "2FA" });
                         } else {
-                            log.error("Validation failed. Cmd:", `rclone about :${type},user=***,pass=***:`);
-                            log.error("Error Log:", errorLog);
+                            log.error("Validation failed. Type:", type);
                             resolve({ success: false, reason: "ERROR", details: errorLog });
                         }
                     }
                 });
 
                 proc.on("error", (err) => {
+                    if (completed) return;
+                    completed = true;
+                    clearTimeout(timer);
                     resolve({ success: false, reason: "ERROR", details: err.message });
                 });
 
             } catch (e) {
-                resolve({ success: false, reason: "ERROR", details: e.message });
+                if (!completed) {
+                    completed = true;
+                    resolve({ success: false, reason: "ERROR", details: e.message });
+                }
             }
         });
     }
