@@ -37,10 +37,18 @@ if [ "${TUNNEL_ENABLED:-}" = "true" ]; then
   PORT="${PORT:-7860}"
   TUNNEL_METRICS_PORT="${TUNNEL_METRICS_PORT:-2000}"
   echo "[entrypoint] Starting cloudflared tunnel to localhost:${PORT} (metrics: ${TUNNEL_METRICS_PORT})"
+
+  # 启动 cloudflared 并提取 URL 到文件，同时保留日志输出
   cloudflared tunnel \
     --url "http://localhost:${PORT}" \
     --metrics "localhost:${TUNNEL_METRICS_PORT}" \
-    --no-autoupdate &
+    --no-autoupdate 2>&1 | tee /dev/stderr | while read -r line; do
+    URL=$(echo "$line" | grep -o 'https://[-0-9a-z]*\.trycloudflare\.com')
+    if [ -n "$URL" ]; then
+      echo "$URL" > /tmp/cloudflared.url
+      echo "[entrypoint] Captured quick tunnel URL: $URL"
+    fi
+  done &
   CLOUDFLARED_PID=$!
 fi
 

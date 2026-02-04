@@ -56,27 +56,27 @@ export class CloudflareTunnel extends S6ManagedTunnel {
     }
 
     /**
-     * Extract the tunnel URL from Prometheus metrics.
+     * Extract the tunnel URL from Prometheus metrics or local file.
      * @param {string} metricsText - The metrics raw text.
-     * @returns {string|null}
+     * @returns {Promise<string|null>}
      */
-    extractUrl(metricsText) {
-        if (!metricsText) return null;
-        
-        // Match pattern: cloudflared_tunnel_user_hostname{user_hostname="..."} 1
-        // We look for the user_hostname label value
-        const match = metricsText.match(/cloudflared_tunnel_user_hostname\{[^}]*user_hostname="([^"]+)"[^}]*\} [0-9.]+/);
-        if (match) {
-            return `https://${match[1]}`;
+    async extractUrl(metricsText) {
+        // 1. Try metrics first (for Named Tunnels)
+        if (metricsText) {
+            const match = metricsText.match(/cloudflared_tunnel_user_hostname\{[^}]*user_hostname="([^"]+)"[^}]*\} [0-9.]+/);
+            if (match) return `https://${match[1]}`;
+            const match2 = metricsText.match(/user_hostname="([^"]+)"/);
+            if (match2) return `https://${match2[1]}`;
         }
-        
-        // Fallback: search for user_hostname="..." anywhere if the above fails
-        const match2 = metricsText.match(/user_hostname="([^"]+)"/);
-        if (match2) {
-            return `https://${match2[1]}`;
+
+        // 2. Fallback to temporary file (for Quick Tunnels)
+        try {
+            const fs = await import('fs/promises');
+            const content = await fs.readFile('/tmp/cloudflared.url', 'utf8');
+            return content.trim() || null;
+        } catch (e) {
+            return null;
         }
-        
-        return null;
     }
 
     /**
@@ -91,7 +91,7 @@ export class CloudflareTunnel extends S6ManagedTunnel {
                     this.currentUrl = null;
                 } else {
                     const metrics = await this._fetchMetrics();
-                    const url = this.extractUrl(metrics);
+                    const url = await this.extractUrl(metrics);
                     if (url) {
                         this.currentUrl = url;
                         this.isReady = true;

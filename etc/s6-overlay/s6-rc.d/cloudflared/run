@@ -11,7 +11,15 @@ PORT=${PORT:-7860}
 TUNNEL_METRICS_PORT=${TUNNEL_METRICS_PORT:-2000}
 echo "[s6-cloudflared] Starting tunnel to localhost:$PORT with metrics on $TUNNEL_METRICS_PORT"
 
-# 启动cloudflared
-exec cloudflared tunnel --url http://localhost:$PORT \
+# 启动cloudflared并提取临时URL写入文件
+# 使用 tee 将日志同时输出到标准错误（供s6日志查看）和管道
+cloudflared tunnel --url http://localhost:$PORT \
     --metrics localhost:$TUNNEL_METRICS_PORT \
-    --no-autoupdate
+    --no-autoupdate 2>&1 | tee /dev/stderr | while read -r line; do
+    # 匹配 trycloudflare.com 域名
+    URL=$(echo "$line" | grep -o 'https://[-0-9a-z]*\.trycloudflare\.com')
+    if [ -n "$URL" ]; then
+        echo "$URL" > /tmp/cloudflared.url
+        echo "[s6-cloudflared] Captured quick tunnel URL: $URL"
+    fi
+done
