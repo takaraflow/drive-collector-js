@@ -146,13 +146,13 @@ export class DriveConfigFlow {
         }
         
         if (data.startsWith("drive_bind_")) {
-            const driveType = data.split("_")[2];
+            const driveType = data.replace("drive_bind_", "");
             const provider = DriveProviderFactory.create(driveType);
             const steps = provider.getBindingSteps();
-            
+
             if (steps.length > 0) {
                 const firstStep = steps[0];
-                await SessionManager.start(userId, `${driveType.toUpperCase()}_${firstStep.step}`);
+                await SessionManager.start(userId, `${driveType.toUpperCase()}:${firstStep.step}`);
                 
                 // 获取国际化文本
                 const driveStrings = await this._getDriveStrings(driveType);
@@ -181,13 +181,49 @@ export class DriveConfigFlow {
 
         if (!step) return false;
 
-        // 解析步骤：格式为 "DRIVETYPE_STEP"
-        const stepParts = step.split("_");
-        if (stepParts.length < 2) return false;
-        
+        // 解析步骤：格式为 "DRIVETYPE:STEP"
+        const stepParts = step.split(":");
+        if (stepParts.length < 2) {
+            // 尝试兼容旧格式 (DRIVETYPE_STEP)
+            const parts = step.split("_");
+            if (parts.length < 2) return false;
+
+            // 这种兼容逻辑很脆弱，因为 driveType 和 step 都可能有下划线
+            // 我们可以尝试通过匹配已注册的 Provider 来识别
+            const supportedTypes = DriveProviderFactory.getSupportedTypes();
+            let matchedType = null;
+            let matchedStep = null;
+
+            for (const type of supportedTypes) {
+                if (step.toUpperCase().startsWith(type.toUpperCase() + "_")) {
+                    matchedType = type;
+                    matchedStep = step.slice(type.length + 1);
+                    break;
+                }
+            }
+
+            if (!matchedType) return false;
+
+            const driveType = matchedType.toLowerCase();
+            const stepName = matchedStep;
+
+            return await this._processInput(event, userId, session, driveType, stepName);
+        }
+
         const driveType = stepParts[0].toLowerCase();
-        const stepName = stepParts.slice(1).join("_");
-        
+        const stepName = stepParts.slice(1).join(":");
+
+        return await this._processInput(event, userId, session, driveType, stepName);
+    }
+
+    /**
+     * 内部处理输入逻辑
+     * @private
+     */
+    static async _processInput(event, userId, session, driveType, stepName) {
+        const text = event.message.message;
+        const peerId = event.message.peerId;
+
         if (!DriveProviderFactory.isSupported(driveType)) {
             return false;
         }
