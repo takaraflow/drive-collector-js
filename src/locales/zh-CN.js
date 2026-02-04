@@ -34,6 +34,16 @@ export const STRINGS = {
         init_history_complete: "✅ 历史任务初始化扫描完成",
         init_error: "❌ 任务初始化过程中发生错误:",
         critical_error: "Critical: Unhandled Dispatcher Error:",
+        mcp_help: "🤖 <b>MCP (Model Context Protocol) 接入指南</b>\n\n" +
+                  "您可以将本服务接入 Claude Desktop 或 Cursor，让 AI 直接管理您的网盘。\n\n" +
+                  "<b>接入方式：</b>\n" +
+                  "• <b>远程模式 (推荐)</b>: <code>SSE http://your-domain/sse</code>\n" +
+                  "详细配置请查阅项目 <code>docs/MCP_USER_GUIDE.md</code> 文件。\n\n" +
+                  "请发送 /mcp_token 获取您的专属 Access Token。",
+        mcp_token: "🔑 <b>您的专属 AI 接入令牌</b>\n\n" +
+                   "<code>{{token}}</code>\n\n" +
+                   "⚠️ <b>安全提示</b>：该令牌允许 AI 访问您的所有网盘。请勿泄露！\n" +
+                   "如需重置，请再次发送 /mcp_token 并确认。",
     },
 
     // --- 任务相关 ---

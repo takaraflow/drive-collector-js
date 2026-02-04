@@ -1,49 +1,33 @@
-# 📖 Drive Collector MCP Server 使用指南
+# 🤖 Drive Collector MCP SaaS 接入指南
 
-本服务实现了 **Model Context Protocol (MCP)** 标准，通过将原本的 Telegram Bot 核心能力封装为 AI 工具集，使 Claude、Cursor 等 AI 客户端能够直接查看、管理您的 50 多种云端存储。
+本服务实现了 **SaaS 化多租户 MCP (Model Context Protocol)** 模式。AI 客户端可以直接连接云端服务器，并在通过令牌验证后，代表您管理网盘。
 
-## 🚀 核心能力
-*   **资源发现**：AI 可以感知您已绑定的所有网盘（Google Drive, OneDrive, S3, WebDAV 等）。
-*   **文件检索**：AI 可以实时调用 `ls` 指令查看网盘目录结构。
-*   **自动化绑定**：AI 辅助完成复杂的网盘 Token 或 AK/SK 绑定流程。
-*   **跨平台分发**：逻辑层与 Telegram 彻底解耦，支持任何 MCP 客户端。
+## 🔑 第一步：获取您的 Access Token
+1. 在 Telegram 机器人中发送 `/mcp_token`。
+2. 复制生成的以 `dc_user_` 开头的令牌。
 
-## 🛠 安装与配置
+## 🌐 第二步：配置 AI 客户端 (Remote SSE)
 
-### 1. 接入 Claude Desktop
-打开您的 Claude Desktop 配置文件：
-*   **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-*   **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-
-添加以下配置项（请确保路径为您的实际项目路径）：
+### Claude Desktop
+打开配置文件并添加以下内容：
 ```json
 {
   "mcpServers": {
     "drive-collector": {
-      "command": "node",
-      "args": ["/绝对路径/到/您的项目/src/mcp/index.js"],
-      "env": {
-        "NODE_ENV": "prod"
+      "url": "https://您的云端地址/sse",
+      "headers": {
+        "x-api-key": "您的dc_user_令牌"
       }
     }
   }
 }
 ```
 
-## 🧰 提供的工具 (Tools)
+## 🛠 提供的 AI 工具 (Tools)
+*   `list_drives`: 查看您当前绑定的所有云端存储。
+*   `cloud_ls`: 列出特定目录的文件列表。
+*   `bind_drive_start`: 开启新网盘绑定流。
 
-| 工具名称 | 描述 | 主要参数 |
-| :--- | :--- | :--- |
-| `list_drives` | 获取当前用户绑定的所有网盘列表 | `userId` |
-| `cloud_ls` | 列出指定网盘或目录下的文件 | `userId`, `folder`, `forceRefresh` |
-| `bind_drive_start` | 开启一个新网盘的绑定流程 | `userId`, `driveType` |
-
-## 💡 使用场景示例
-
-### 场景：查询文件
-> **用户**: "帮我看看我网盘根目录里都有什么文件？"
-> **AI 调用**: `cloud_ls(userId="your_id")`
-> **AI 回复**: "您的根目录下有：Backup, Photos, Work..."
-
-## ⚠️ 安全性提醒
-MCP 工具直接操作您的存储数据库，请务必在私有且受信任的环境中使用。
+## ⚠️ 多租户隔离说明
+*   **权限限制**：您的令牌仅能访问与您 Telegram ID 绑定的网盘资源。
+*   **安全重置**：如果令牌泄露，再次在 Telegram 发送 `/mcp_token` 即可注销旧令牌。

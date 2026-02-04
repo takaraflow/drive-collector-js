@@ -11,6 +11,7 @@ import { UIHelper } from "../ui/templates.js";
 import { CloudTool } from "../services/rclone.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
+import { ApiKeyRepository } from "../repositories/ApiKeyRepository.js";
 import { safeEdit, escapeHTML } from "../utils/common.js";
 import { runBotTask, runBotTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
@@ -384,6 +385,10 @@ export class Dispatcher {
                     return await this._handleStatusCommand(target, userId, text);
                 case "/help":
                     return await this._handleHelpCommand(target, userId);
+                case "/mcp":
+                    return await this._handleMcpCommand(target, userId);
+                case "/mcp_token":
+                    return await this._handleMcpTokenCommand(target, userId);
                 case "/diagnosis":
                     return await this._handleDiagnosisCommand(target, userId);
                 case "/open_service":
@@ -620,6 +625,34 @@ export class Dispatcher {
         const seconds = Math.floor(uptime % 60);
         
         return `${hours}h ${minutes}m ${seconds}s`;
+    }
+
+    /**
+     * [私有] 处理 /mcp_token 命令
+     */
+    static async _handleMcpTokenCommand(target, userId) {
+        try {
+            const token = await ApiKeyRepository.getOrCreateToken(userId);
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: format(STRINGS.system.mcp_token, { token }),
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        } catch (error) {
+            log.error("Failed to handle /mcp_token:", error);
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: "❌ 令牌获取失败，请稍后重试。"
+            }), userId, {}, false, 3);
+        }
+    }
+
+    /**
+     * [私有] 处理 /mcp 命令
+     */
+    static async _handleMcpCommand(target, userId) {
+        return await runBotTaskWithRetry(() => client.sendMessage(target, {
+            message: STRINGS.system.mcp_help,
+            parseMode: "html"
+        }), userId, {}, false, 3);
     }
 
     /**

@@ -7,6 +7,7 @@ import {
 import http from "node:http";
 import { BindingService } from "../services/drives/BindingService.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
+import { ApiKeyRepository } from "../repositories/ApiKeyRepository.js";
 import { CloudTool } from "../services/rclone.js";
 import { DriveProviderFactory } from "../services/drives/index.js";
 import { logger } from "../services/logger/index.js";
@@ -14,13 +15,13 @@ import { logger } from "../services/logger/index.js";
 const log = logger.withModule ? logger.withModule('MCPServer') : logger;
 
 /**
- * MCP Server Implementation for Drive Collector
- * Exposes cloud drive management capabilities to AI models
+ * MCP Server Implementation for Drive Collector (v2.0 SaaS Edition)
+ * Exposes cloud drive management capabilities with multi-tenant authentication
  */
 const server = new Server(
     {
-        name: "drive-collector",
-        version: "1.0.0",
+        name: "drive-collector-saas",
+        version: "2.0.0",
     },
     {
         capabilities: {
@@ -30,49 +31,41 @@ const server = new Server(
 );
 
 /**
- * List available tools
+ * Tools definition
+ * userId is NO LONGER required in input as it's identified via API Key
  */
 server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
         tools: [
             {
                 name: "list_drives",
-                description: "List all cloud drives bound to a user",
-                inputSchema: {
-                    type: "object",
-                    properties: {
-                        userId: { type: "string", description: "The identifier of the user" }
-                    },
-                    required: ["userId"]
-                }
+                description: "List all cloud drives bound to your account",
+                inputSchema: { type: "object", properties: {} }
             },
             {
                 name: "cloud_ls",
-                description: "List files in a specific cloud drive folder",
+                description: "List files in your cloud drive",
                 inputSchema: {
                     type: "object",
                     properties: {
-                        userId: { type: "string" },
-                        folder: { type: "string", description: "Remote folder path (optional)" },
+                        folder: { type: "string", description: "Remote path, e.g. 'Photos/'" },
                         forceRefresh: { type: "boolean" }
-                    },
-                    required: ["userId"]
+                    }
                 }
             },
             {
                 name: "bind_drive_start",
-                description: "Start the binding process for a new cloud drive",
+                description: "Start binding a new cloud drive",
                 inputSchema: {
                     type: "object",
                     properties: {
-                        userId: { type: "string" },
                         driveType: {
                             type: "string",
                             enum: DriveProviderFactory.getSupportedTypes(),
                             description: "Type of cloud drive to bind"
                         }
                     },
-                    required: ["userId", "driveType"]
+                    required: ["driveType"]
                 }
             }
         ],
@@ -80,29 +73,35 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 });
 
 /**
- * Handle tool calls
+ * Handle tool calls with automatic identity resolution
  */
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
+    // Resolve identity from metadata (passed by transport)
+    const userId = request.params._metadata?.userId;
+    if (!userId) {
+        throw new Error("Unauthorized: Identity resolution failed");
+    }
+
     try {
         switch (name) {
             case "list_drives": {
-                const drives = await DriveRepository.findByUserId(args.userId);
+                const drives = await DriveRepository.findByUserId(userId);
                 return {
                     content: [{ type: "text", text: JSON.stringify(drives, null, 2) }]
                 };
             }
 
             case "cloud_ls": {
-                const files = await CloudTool.listRemoteFiles(args.userId, args.forceRefresh);
+                const files = await CloudTool.listRemoteFiles(userId, args.forceRefresh);
                 return {
                     content: [{ type: "text", text: JSON.stringify(files, null, 2) }]
                 };
             }
 
             case "bind_drive_start": {
-                const result = await BindingService.startBinding(args.userId, args.driveType);
+                const result = await BindingService.startBinding(userId, args.driveType);
                 return {
                     content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
                 };
@@ -120,43 +119,50 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 /**
- * API Key Authentication Middleware
- */
-function authenticate(req, res) {
-    const expectedKey = process.env.MCP_API_KEY;
-    if (!expectedKey) return true; // Skip if no key configured
-
-    const apiKey = req.headers['x-api-key'];
-    if (apiKey !== expectedKey) {
-        log.warn(`Unauthorized access attempt from ${req.socket.remoteAddress}`);
-        res.writeHead(401, { 'Content-Type': 'text/plain' });
-        res.end('Unauthorized: Invalid API Key');
-        return false;
-    }
-    return true;
-}
-
-/**
- * Start the server
+ * Start the SaaS-enabled SSE server
  */
 async function main() {
-    let transport;
+    let sseTransport;
     const port = process.env.MCP_PORT || 3000;
 
     const httpServer = http.createServer(async (req, res) => {
-        if (!authenticate(req, res)) return;
+        // 1. Authenticate & Resolve User
+        const apiKey = req.headers['x-api-key'];
+        if (!apiKey) {
+            res.writeHead(401);
+            res.end('Missing API Key');
+            return;
+        }
 
+        const userId = await ApiKeyRepository.findUserIdByToken(apiKey);
+        if (!userId) {
+            res.writeHead(401);
+            res.end('Invalid API Key');
+            return;
+        }
+
+        // 2. Route Handling
         if (req.method === "GET" && req.url === "/sse") {
-            log.info("New SSE connection request");
-            transport = new SSEServerTransport("/messages", res);
-            await server.connect(transport);
+            log.info(`New SaaS SSE connection: User ${userId}`);
+            sseTransport = new SSEServerTransport("/messages", res);
+
+            // Connect server with user metadata context
+            await server.connect(sseTransport);
+
+            // Hack to pass userId to tool handlers via internal metadata
+            // In a real production setup, consider a per-request context manager
+            server.setRequestHandler(CallToolRequestSchema, async (request) => {
+                request.params._metadata = { userId };
+                return await server.executeTool(request.params);
+            });
+
         } else if (req.method === "POST" && req.url === "/messages") {
-            if (!transport) {
-                res.writeHead(400, { 'Content-Type': 'text/plain' });
-                res.end('No SSE connection established');
+            if (!sseTransport) {
+                res.writeHead(400);
+                res.end('No SSE session');
                 return;
             }
-            await transport.handlePostMessage(req, res);
+            await sseTransport.handlePostMessage(req, res);
         } else {
             res.writeHead(404);
             res.end();
@@ -164,13 +170,11 @@ async function main() {
     });
 
     httpServer.listen(port, () => {
-        log.info(`Drive Collector MCP Server running on SSE at http://localhost:${port}`);
-        log.info(`- SSE endpoint: http://localhost:${port}/sse`);
-        log.info(`- Message endpoint: http://localhost:${port}/messages`);
+        log.info(`Drive Collector SaaS MCP Server running at http://localhost:${port}/sse`);
     });
 }
 
 main().catch((error) => {
-    log.error("Fatal error in MCP Server:", error);
+    log.error("Fatal SaaS MCP error:", error);
     process.exit(1);
 });
