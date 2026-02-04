@@ -7,7 +7,11 @@ const log = logger.withModule ? logger.withModule('GoogleDriveProvider') : logge
 
 export class GoogleDriveProvider extends BaseDriveProvider {
     constructor() {
-        super('drive', 'Google Drive');
+        super('google_drive', 'Google Drive');
+    }
+
+    getRcloneBackendType() {
+        return 'drive';
     }
 
     getBindingSteps() {
@@ -51,7 +55,7 @@ export class GoogleDriveProvider extends BaseDriveProvider {
 
     getConnectionString(config) {
         const token = (config.token || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        return `:${this.type},token="${token}":`;
+        return `:${this.getRcloneBackendType()},token="${token}":`;
     }
 
     _validateToken(input) {

@@ -66,6 +66,15 @@ export class BaseDriveProvider {
     }
 
     /**
+     * 获取在 rclone 中使用的后端类型名称
+     * 默认返回此 Provider 的 type，子类可重写（例如 google_drive 需返回 'drive'）
+     * @returns {string}
+     */
+    getRcloneBackendType() {
+        return this.type;
+    }
+
+    /**
      * 获取验证配置时使用的 rclone 命令
      * @returns {string} rclone 命令 (默认 'about')
      */
@@ -81,7 +90,7 @@ export class BaseDriveProvider {
     getConnectionString(config) {
         const user = (config.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const pass = (config.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        return `:${this.type},user="${user}",pass="${pass}":`;
+        return `:${this.getRcloneBackendType()},user="${user}",pass="${pass}":`;
     }
 
     /**

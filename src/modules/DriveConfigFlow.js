@@ -305,18 +305,32 @@ export class DriveConfigFlow {
             return driveStringsCache.get(driveType);
         }
 
-        // 动态导入对应的国际化文件
+        let strings = {};
+        let fallbackStrings = {};
+
+        // 1. 加载通用兜底字符串 (drive.js)
+        try {
+            const fallbackModule = await import(`../locales/drives/drive.js`);
+            fallbackStrings = fallbackModule.STRINGS || {};
+        } catch (e) {
+            log.warn('Generic drive strings not found');
+        }
+
+        // 2. 尝试加载特定网盘字符串
         try {
             const module = await import(`../locales/drives/${driveType}.js`);
-            const strings = module.STRINGS || {};
+            const specificStrings = module.STRINGS || {};
+            // 合并：特定网盘文案覆盖通用文案
+            strings = { ...fallbackStrings, ...specificStrings };
             driveStringsCache.set(driveType, strings);
             return strings;
         } catch (error) {
-            log.warn(`Failed to load drive strings for ${driveType}:`, error);
+            log.warn(`Failed to load specific drive strings for ${driveType}, using fallback`);
+            strings = fallbackStrings;
         }
-        const emptyStrings = {};
-        driveStringsCache.set(driveType, emptyStrings);
-        return emptyStrings;
+
+        driveStringsCache.set(driveType, strings);
+        return strings;
     }
 
     /**

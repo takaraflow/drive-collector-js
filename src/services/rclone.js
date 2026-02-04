@@ -57,27 +57,71 @@ export class CloudTool {
     }
 
     /**
-     * 【重要修复】调用 rclone obscure 对密码进行混淆
-     * 使用 spawnSync 避免 Shell 特殊字符转义问题
+     * 【重构】统一的 rclone 进程执行助手
+     * 处理 spawn、超时保护、错误缓冲和日志
+     * @private
      */
-    static _obscure(password) {
+    static async _runRclone(args, timeout = 30000) {
+        return new Promise((resolve, reject) => {
+            let completed = false;
+            try {
+                const fullArgs = ["--config", "/dev/null", ...args];
+                const proc = spawn(rcloneBinary, fullArgs, { env: buildRcloneEnv() });
+
+                const timer = setTimeout(() => {
+                    if (!completed) {
+                        completed = true;
+                        try { proc.kill('SIGKILL'); } catch (e) { }
+                        resolve({ code: -1, stdout: "", stderr: "TIMEOUT", error: new Error("Node.js enforced timeout") });
+                    }
+                }, timeout);
+
+                let stdout = "";
+                let stderr = "";
+
+                proc.stdout.on("data", (data) => stdout += data.toString());
+                proc.stderr.on("data", (data) => stderr += data.toString());
+
+                proc.on("close", (code) => {
+                    if (completed) return;
+                    completed = true;
+                    clearTimeout(timer);
+                    resolve({ code, stdout, stderr });
+                });
+
+                proc.on("error", (err) => {
+                    if (completed) return;
+                    completed = true;
+                    clearTimeout(timer);
+                    resolve({ code: -1, stdout, stderr, error: err });
+                });
+            } catch (e) {
+                if (!completed) {
+                    completed = true;
+                    resolve({ code: -1, stdout: "", stderr: e.message, error: e });
+                }
+            }
+        });
+    }
+
+    /**
+     * 【重要修复】调用 rclone obscure 对密码进行混淆
+     * 异步非阻塞版，杜绝 Shell 注入
+     */
+    static async _obscure(password) {
+        if (!password) return "";
         try {
-            // 使用参数数组传递密码，杜绝 Shell 注入 and 转义干扰
-            const ret = spawnSync(rcloneBinary, ["--config", "/dev/null", "obscure", password], { encoding: 'utf-8', env: buildRcloneEnv() });
-            
-            if (ret.error) {
-                log.error("Obscure spawn error:", ret.error);
+            const ret = await this._runRclone(["obscure", password], 5000);
+
+            if (ret.code !== 0) {
+                log.error("Obscure failed:", ret.stderr);
                 return password;
             }
-            if (ret.status !== 0) {
-                log.error("Obscure non-zero exit:", ret.stderr);
-                return password;
-            }
-            
+
             return ret.stdout.trim();
         } catch (e) {
-            log.error("Password obscure failed:", e);
-            return password; // 失败则返回原值尝试
+            log.error("Password obscure error:", e);
+            return password;
         }
     }
 
@@ -89,10 +133,12 @@ export class CloudTool {
             const provider = DriveProviderFactory.getProvider(conf.type);
             return provider.getConnectionString(conf);
         } catch (e) {
-            // Fallback for unknown types or errors (though this shouldn't happen with valid types)
+            // Fallback for unknown types or errors
             log.error(`Failed to get connection string for type ${conf.type}:`, e);
             const user = (conf.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
             const pass = (conf.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+            // 兜底逻辑：如果找不到 Provider，尝试直接使用 type (保持向后兼容)
             return `:${conf.type},user="${user}",pass="${pass}":`;
         }
     }
@@ -488,40 +534,19 @@ export class CloudTool {
         try {
             const conf = await this._getUserConfig(userId);
             const connectionString = this._getConnectionString(conf);
-            
+
             // 获取用户自定义上传路径
             const userUploadPath = await this._getUploadPath(userId);
-            
-            // 尝试获取文件列表，如果目录不存在则尝试创建 (异步化)
-            const runLsJson = (path) => {
-                return new Promise((resolve, reject) => {
-                    const proc = spawn(rcloneBinary, ["--config", "/dev/null", "lsjson", path], {
-                        env: buildRcloneEnv()
-                    });
-                    
-                    let stdout = "";
-                    let stderr = "";
-
-                    proc.stdout.on("data", (data) => stdout += data);
-                    proc.stderr.on("data", (data) => stderr += data);
-
-                    proc.on("close", (code) => {
-                        resolve({ code, stdout, stderr });
-                    });
-
-                    proc.on("error", (err) => reject(err));
-                });
-            };
-
             const fullRemotePath = `${connectionString}${userUploadPath}`;
-            let ret = await runLsJson(fullRemotePath);
+
+            let ret = await this._runRclone(["lsjson", fullRemotePath]);
 
             if (ret.code !== 0 && ret.stderr && (ret.stderr.includes("directory not found") || ret.stderr.includes("error listing"))) {
                 log.info(`Directory ${userUploadPath} not found, attempting to create it...`);
-                // 尝试创建一个空目录/触发目录初始化
-                spawnSync(rcloneBinary, ["--config", "/dev/null", "mkdir", fullRemotePath], { env: buildRcloneEnv() });
+                // 尝试创建一个空目录/触发目录初始化 (异步化)
+                await this._runRclone(["mkdir", fullRemotePath], 10000);
                 // 再次尝试
-                ret = await runLsJson(fullRemotePath);
+                ret = await this._runRclone(["lsjson", fullRemotePath]);
             }
 
             if (ret.code !== 0) {
@@ -629,66 +654,24 @@ export class CloudTool {
             try {
                 const conf = await this._getUserConfig(userId);
                 const connectionString = this._getConnectionString(conf);
-                
+
                 // 获取用户自定义上传路径
                 const userUploadPath = await this._getUploadPath(userId);
 
-                const runLsJson = (path, args = [], timeout = 10000) => {
-                    return new Promise((resolve, reject) => {
-                        const proc = spawn(rcloneBinary, ["--config", "/dev/null", "lsjson", ...args, path], {
-                            env: buildRcloneEnv()
-                        });
-                        
-                        let stdout = "";
-                        let stderr = "";
-                        let completed = false;
-
-                        // 设置超时保护
-                        const timer = setTimeout(() => {
-                            if (!completed) {
-                                completed = true;
-                                if (typeof proc.kill === 'function') {
-                                    proc.kill();
-                                }
-                                resolve({ code: -1, stdout: "", stderr: "TIMEOUT" });
-                            }
-                        }, timeout);
-
-                        proc.stdout.on("data", (data) => stdout += data);
-                        proc.stderr.on("data", (data) => stderr += data);
-
-                        proc.on("close", (code) => {
-                            if (!completed) {
-                                completed = true;
-                                clearTimeout(timer);
-                                resolve({ code, stdout, stderr });
-                            }
-                        });
-
-                        proc.on("error", (err) => {
-                            if (!completed) {
-                                completed = true;
-                                clearTimeout(timer);
-                                reject(err);
-                            }
-                        });
-                    });
-                };
-
                 // 优先尝试直接查询文件（更高效）
                 const fullRemotePath = `${connectionString}${userUploadPath}${fileName}`;
-                let ret = await runLsJson(fullRemotePath, [], 10000);
+                let ret = await this._runRclone(["lsjson", fullRemotePath], 10000);
 
                 // 如果明确返回“不存在”类错误，直接退出，不重试，不回退
                 if (ret.code !== 0 && ret.stderr) {
-                    const isNotFound = 
-                        ret.stderr.includes("directory not found") || 
-                        ret.stderr.includes("object not found") || 
+                    const isNotFound =
+                        ret.stderr.includes("directory not found") ||
+                        ret.stderr.includes("object not found") ||
                         ret.stderr.includes("error listing");
-                    
+
                     if (isNotFound) {
                         log.debug(`[getRemoteFileInfo] File clearly not found: ${fileName}`);
-                        return null; 
+                        return null;
                     }
                 }
 
@@ -697,7 +680,7 @@ export class CloudTool {
                     // 仅当非超时错误时尝试 fallback
                     if (ret.stderr !== "TIMEOUT") {
                         const fullRemoteFolder = `${connectionString}${userUploadPath}`;
-                        ret = await runLsJson(fullRemoteFolder, ["--files-only", "--max-depth", "1"], 15000);
+                        ret = await this._runRclone(["lsjson", "--files-only", "--max-depth", "1", fullRemoteFolder], 15000);
 
                         if (ret.code === 0) {
                             try {

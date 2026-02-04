@@ -124,7 +124,7 @@ export class DriveProviderFactory {
 
 // 注册内置 Provider
 DriveProviderFactory.register('mega', MegaProvider);
-DriveProviderFactory.register('drive', GoogleDriveProvider);
+DriveProviderFactory.register('google_drive', GoogleDriveProvider);
 DriveProviderFactory.register('onedrive', OneDriveProvider);
 DriveProviderFactory.register('pikpak', PikPakProvider);
 DriveProviderFactory.register('pcloud', PCloudProvider);
