@@ -7,7 +7,7 @@ const log = logger.withModule ? logger.withModule('OSSProvider') : logger;
 
 export class OSSProvider extends BaseDriveProvider {
     constructor() {
-        super('oss', 'Aliyun OSS');
+        super('oss', 'S3 / OSS');
     }
 
     getBindingSteps() {
@@ -72,9 +72,8 @@ export class OSSProvider extends BaseDriveProvider {
         const endpoint = (config.endpoint || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const ak = (config.ak || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const sk = (config.sk || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        
-        // Rclone S3 with Alibaba provider
-        // Note: We ignore config.type ('oss') and use 's3'
-        return `:s3,provider="Alibaba",endpoint="${endpoint}",access_key_id="${ak}",secret_access_key="${sk}":`;
+
+        // Use generic S3 connection string to support Aliyun, AWS, Cloudflare, etc.
+        return `:s3,endpoint="${endpoint}",access_key_id="${ak}",secret_access_key="${sk}":`;
     }
 }
