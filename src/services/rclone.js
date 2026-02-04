@@ -49,7 +49,8 @@ export class CloudTool {
         
         // Allow provider to process password if present
         if (config.pass) {
-            config.pass = provider.processPassword(config.pass);
+            // Await the result as processPassword might be async (e.g. using _obscure)
+            config.pass = await provider.processPassword(config.pass);
         }
         
         // 4. 返回清洗后的配置对象
@@ -135,8 +136,8 @@ export class CloudTool {
         } catch (e) {
             // Fallback for unknown types or errors
             log.error(`Failed to get connection string for type ${conf.type}:`, e);
-            const user = (conf.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-            const pass = (conf.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            const user = String(conf.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            const pass = String(conf.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
             // 兜底逻辑：如果找不到 Provider，尝试直接使用 type (保持向后兼容)
             return `:${conf.type},user="${user}",pass="${pass}":`;

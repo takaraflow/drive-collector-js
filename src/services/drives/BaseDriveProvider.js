@@ -50,9 +50,9 @@ export class BaseDriveProvider {
     /**
      * 处理密码（如需要混淆）
      * @param {string} password - 原始密码
-     * @returns {string} 处理后的密码
+     * @returns {Promise<string>} 处理后的密码
      */
-    processPassword(password) {
+    async processPassword(password) {
         return password;
     }
 
