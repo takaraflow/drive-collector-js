@@ -57,6 +57,7 @@
     "mcp:index:force": "node .mcp/mcp-cli.js index --force",
     "mcp:search": "node .mcp/mcp-cli.js search",
     "mcp:help": "node .mcp/mcp-cli.js",
+    "mcp:start": "node src/mcp/index.js",
     "ci:matrix": "node scripts/ci/matrix.mjs generate",
     "ci:changes": "node scripts/ci/changed-packages.mjs detect",
     "ci:release": "node scripts/ci/release.mjs release",

@@ -8,6 +8,7 @@ import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 import { escapeHTML } from "../utils/common.js";
 import { DriveProviderFactory } from "../services/drives/index.js";
+import { BindingService } from "../services/drives/BindingService.js";
 import { logger } from "../services/logger/index.js";
 
 const log = logger.withModule ? logger.withModule('DriveConfigFlow') : logger;
@@ -99,7 +100,7 @@ export class DriveConfigFlow {
 
         if (data.startsWith("drive_set_default_")) {
             const driveId = data.split("_")[3];
-            await SettingsRepository.set(`default_drive_${userId}`, driveId);
+            await BindingService.setDefaultDrive(userId, driveId);
             await this.sendDriveManager(event.userId, userId); // 刷新界面
             return STRINGS.drive.set_default_success;
         }
@@ -110,7 +111,7 @@ export class DriveConfigFlow {
             if (!drive) {
                 return STRINGS.drive.not_found;
             }
-            
+
             const driveName = drive.name || '未知账号';
             const email = driveName.split('-').slice(1).join('-') || driveName;
             const driveType = drive.type || '未知类型';
@@ -120,7 +121,7 @@ export class DriveConfigFlow {
                     parseMode: "html",
                     buttons: [
                         [
-                            Button.inline(STRINGS.drive.btn_confirm_unbind, Buffer.from(`drive_unbind_execute_${driveId}`)), 
+                            Button.inline(STRINGS.drive.btn_confirm_unbind, Buffer.from(`drive_unbind_execute_${driveId}`)),
                             Button.inline(STRINGS.drive.btn_cancel, Buffer.from("drive_manager_back"))
                         ]
                     ]
@@ -130,8 +131,7 @@ export class DriveConfigFlow {
 
         if (data.startsWith("drive_unbind_execute_")) {
             const driveId = data.split("_")[3];
-            await DriveRepository.delete(driveId);
-            await SettingsRepository.set(`default_drive_${userId}`, null);
+            await BindingService.unbindDrive(userId, driveId);
             await this.sendDriveManager(event.userId, userId);
             return STRINGS.drive.success_unbind;
         }
@@ -147,18 +147,14 @@ export class DriveConfigFlow {
         
         if (data.startsWith("drive_bind_")) {
             const driveType = data.replace("drive_bind_", "");
-            const provider = DriveProviderFactory.create(driveType);
-            const steps = provider.getBindingSteps();
+            const result = await BindingService.startBinding(userId, driveType);
 
-            if (steps.length > 0) {
-                const firstStep = steps[0];
-                await SessionManager.start(userId, `${driveType.toUpperCase()}:${firstStep.step}`);
-                
+            if (result.success) {
                 // 获取国际化文本
                 const driveStrings = await this._getDriveStrings(driveType);
-                const prompt = driveStrings[firstStep.prompt] || STRINGS.drive.check_input;
+                const prompt = driveStrings[result.prompt] || STRINGS.drive.check_input;
                 const message = this._appendCancelHint(prompt, driveStrings);
-                
+
                 await runBotTask(() => client.sendMessage(event.userId, { message, parseMode: "html" }), userId, { priority: PRIORITY.HIGH });
                 return STRINGS.drive.check_input;
             }
