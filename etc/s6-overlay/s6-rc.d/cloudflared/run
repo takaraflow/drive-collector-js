@@ -1,11 +1,6 @@
 #!/bin/sh
-# 检查是否启用tunnel
-if [ "$TUNNEL_ENABLED" != "true" ]; then
-    echo "[s6-cloudflared] Tunnel disabled (TUNNEL_ENABLED=$TUNNEL_ENABLED)"
-    echo "[s6-cloudflared] Exiting successfully (not needed)"
-    # 立即退出，让s6知道这个服务"完成"了（不是失败）
-    exit 0
-fi
+# 由 Node.js 通过 s6-svc -u 触发启动
+# 这样可以确保 Infisical 加载的变量生效
 
 PORT=${PORT:-7860}
 TUNNEL_METRICS_PORT=${TUNNEL_METRICS_PORT:-2000}

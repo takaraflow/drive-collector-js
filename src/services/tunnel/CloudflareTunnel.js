@@ -28,20 +28,43 @@ export class CloudflareTunnel extends S6ManagedTunnel {
     async initialize() {
         if (this.config.enabled === false) {
             log.debug('Cloudflare Tunnel is disabled in config');
+            await this._controlS6Service('-d');
             return;
         }
 
-        log.debug(`Initializing Cloudflare Tunnel (servicePath: ${this.servicePath})`);
+        log.debug(`Initializing Cloudflare Tunnel (Managed by s6)`);
 
-        // Wait briefly for service to potentially start
-        const isUp = await this.waitForService(2000);
-        if (!isUp) {
-            log.debug(`S6 service ${this.servicePath} is not up yet, starting background polling`);
-        } else {
-            log.debug(`S6 service ${this.servicePath} is up`);
-        }
+        // 通过 s6 启动服务
+        await this._controlS6Service('-u');
 
         this._startPolling();
+    }
+
+    /**
+     * Control the s6 service using s6-svc.
+     * @param {string} action - The s6-svc action flag (e.g., '-u' for up, '-d' for down)
+     * @private
+     */
+    async _controlS6Service(action) {
+        try {
+            const { exec } = await import('child_process');
+            const { promisify } = await import('util');
+            const execAsync = promisify(exec);
+
+            // 检查 s6-svc 是否可用
+            try {
+                // 在 s6 环境中，servicePath 通常是 /run/service/cloudflared
+                await execAsync(`s6-svc ${action} ${this.servicePath}`);
+                log.info(`Sent s6-svc ${action} signal to ${this.servicePath}`);
+            } catch (e) {
+                // 如果在非 s6 环境（如普通 Windows 开发环境），忽略错误
+                if (process.platform !== 'win32') {
+                    log.debug(`s6-svc signal failed (expected if not in s6): ${e.message}`);
+                }
+            }
+        } catch (error) {
+            log.error(`Error controlling s6 service: ${error.message}`);
+        }
     }
 
     /**

@@ -38,19 +38,27 @@ if [ "${TUNNEL_ENABLED:-}" = "true" ]; then
   TUNNEL_METRICS_PORT="${TUNNEL_METRICS_PORT:-2000}"
   echo "[entrypoint] Starting cloudflared tunnel to localhost:${PORT} (metrics: 127.0.0.1:${TUNNEL_METRICS_PORT})"
 
-  # 启动 cloudflared 并提取 URL 到文件，使用更健壮的重定向
-  cloudflared tunnel \
-    --url "http://127.0.0.1:${PORT}" \
-    --metrics "127.0.0.1:${TUNNEL_METRICS_PORT}" \
-    --no-autoupdate > /tmp/cloudflared.log 2>&1 &
-  CLOUDFLARED_PID=$!
+  # 启动 cloudflared 并提取 URL 到文件
+  if ! command -v cloudflared >/dev/null 2>&1; then
+    echo "[entrypoint] ERROR: cloudflared command not found. Cannot start tunnel."
+  else
+    # 确保 /tmp 目录存在 (兼容性)
+    mkdir -p /tmp
 
-  # 在后台异步提取 URL，不阻塞主进程，也不阻塞 cloudflared 输出
+    cloudflared tunnel \
+      --url "http://127.0.0.1:${PORT}" \
+      --metrics "127.0.0.1:${TUNNEL_METRICS_PORT}" \
+      --no-autoupdate > /tmp/cloudflared.log 2>&1 &
+    CLOUDFLARED_PID=$!
+  fi
+
+  # 在后台异步提取 URL
   (
     timeout=60
     while [ $timeout -gt 0 ]; do
       if [ -f /tmp/cloudflared.log ]; then
-        URL=$(grep -o 'https://[-0-9a-z]*\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1)
+        # 增强正则：兼容不同大小写和更宽泛的字符集
+        URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1)
         if [ -n "$URL" ]; then
           echo "$URL" > /tmp/cloudflared.url
           echo "[entrypoint] Captured quick tunnel URL: $URL"
@@ -60,6 +68,9 @@ if [ "${TUNNEL_ENABLED:-}" = "true" ]; then
       sleep 2
       timeout=$((timeout - 2))
     done
+    if [ ! -f /tmp/cloudflared.url ]; then
+      echo "[entrypoint] Failed to capture tunnel URL after 60s. Check /tmp/cloudflared.log"
+    fi
   ) &
 fi
 

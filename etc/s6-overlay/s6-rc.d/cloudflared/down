@@ -1,0 +1,3 @@
+# This file tells s6 not to start the service automatically at boot.
+# The service will be started by the Node.js application via s6-svc -u
+# once Infisical configurations are loaded.
