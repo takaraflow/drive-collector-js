@@ -26,11 +26,21 @@ export class CloudflareTunnel extends S6ManagedTunnel {
      * @returns {Promise<void>}
      */
     async initialize() {
-        if (this.config.enabled === false) return;
-        
+        if (this.config.enabled === false) {
+            log.debug('Cloudflare Tunnel is disabled in config');
+            return;
+        }
+
+        log.debug(`Initializing Cloudflare Tunnel (servicePath: ${this.servicePath})`);
+
         // Wait briefly for service to potentially start
-        await this.waitForService(2000);
-        
+        const isUp = await this.waitForService(2000);
+        if (!isUp) {
+            log.debug(`S6 service ${this.servicePath} is not up yet, starting background polling`);
+        } else {
+            log.debug(`S6 service ${this.servicePath} is up`);
+        }
+
         this._startPolling();
     }
 
@@ -45,10 +55,13 @@ export class CloudflareTunnel extends S6ManagedTunnel {
                 log.debug(`Failed to fetch metrics: ${res.status} ${res.statusText}`);
                 return null;
             }
-            return await res.text();
+            const text = await res.text();
+            return text;
         } catch (error) {
             // Only log if it's not a connection refused (common during startup)
-            if (error.cause?.code !== 'ECONNREFUSED') {
+            if (error.cause?.code === 'ECONNREFUSED') {
+                log.debug(`Metrics service not reachable at ${this.metricsUrl} (ECONNREFUSED)`);
+            } else {
                 log.debug(`Error fetching metrics: ${error.message}`);
             }
             return null;
@@ -64,17 +77,33 @@ export class CloudflareTunnel extends S6ManagedTunnel {
         // 1. Try metrics first (for Named Tunnels)
         if (metricsText) {
             const match = metricsText.match(/cloudflared_tunnel_user_hostname\{[^}]*user_hostname="([^"]+)"[^}]*\} [0-9.]+/);
-            if (match) return `https://${match[1]}`;
+            if (match) {
+                log.debug(`Captured Named Tunnel URL from metrics: ${match[1]}`);
+                return `https://${match[1]}`;
+            }
             const match2 = metricsText.match(/user_hostname="([^"]+)"/);
-            if (match2) return `https://${match2[1]}`;
+            if (match2) {
+                log.debug(`Captured URL from metrics (fallback): ${match2[1]}`);
+                return `https://${match2[1]}`;
+            }
         }
 
         // 2. Fallback to temporary file (for Quick Tunnels)
         try {
             const fs = await import('fs/promises');
-            const content = await fs.readFile('/tmp/cloudflared.url', 'utf8');
-            return content.trim() || null;
+            const filePath = '/tmp/cloudflared.url';
+            const content = await fs.readFile(filePath, 'utf8');
+            const url = content.trim();
+            if (url) {
+                log.debug(`Captured Quick Tunnel URL from ${filePath}: ${url}`);
+                return url;
+            }
+            log.debug(`Tunnel URL file ${filePath} exists but is empty`);
+            return null;
         } catch (e) {
+            if (e.code !== 'ENOENT') {
+                log.debug(`Error reading tunnel URL file: ${e.message}`);
+            }
             return null;
         }
     }
@@ -84,15 +113,20 @@ export class CloudflareTunnel extends S6ManagedTunnel {
      * @private
      */
     async _startPolling() {
+        log.debug(`Starting tunnel URL polling loop (interval: ${this.pollInterval}ms)`);
         const poll = async () => {
             try {
                 if (!(await this.isServiceUp())) {
+                    if (this.isReady) log.warn('Tunnel service went down');
                     this.isReady = false;
                     this.currentUrl = null;
                 } else {
                     const metrics = await this._fetchMetrics();
                     const url = await this.extractUrl(metrics);
                     if (url) {
+                        if (this.currentUrl !== url) {
+                            log.info(`🚇 Tunnel URL captured: ${url}`);
+                        }
                         this.currentUrl = url;
                         this.isReady = true;
                     } else {
