@@ -26,6 +26,7 @@ const originalConsoleWarn = console.warn;
 const originalConsoleLog = console.log;
 
 let consoleProxyEnabled = false;
+let isLoggingInternal = false;
 
 export const enableTelegramConsoleProxy = () => {
     if (consoleProxyEnabled) return;
@@ -43,14 +44,19 @@ export const enableTelegramConsoleProxy = () => {
             msg.includes('timed out') ||
             msg.includes('TIMEOUT');
 
-        if (isTimeoutPattern) {
-            const wrapper = LoggerService.getInstance();
-            wrapper.error(`Telegram library TIMEOUT captured: ${msg}`, {
-                service: 'telegram',
-                source: 'console_proxy',
-                args: args.length > 1 ? args.slice(1) : undefined,
-                timestamp: Date.now()
-            });
+        if (isTimeoutPattern && !isLoggingInternal) {
+            isLoggingInternal = true;
+            try {
+                const wrapper = LoggerService.getInstance();
+                wrapper.error(`Telegram library TIMEOUT captured: ${msg}`, {
+                    service: 'telegram',
+                    source: 'console_proxy',
+                    args: args.length > 1 ? args.slice(1) : undefined,
+                    timestamp: Date.now()
+                });
+            } finally {
+                isLoggingInternal = false;
+            }
         }
 
         originalConsoleError.call(console, ...args);
