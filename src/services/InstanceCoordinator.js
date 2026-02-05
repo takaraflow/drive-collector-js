@@ -211,8 +211,20 @@ export class InstanceCoordinator {
                 if (!existing) {
                     await this.registerInstance();
                 } else {
+                    // 如果当前没有隧道地址，尝试重新获取一次
+                    let currentTunnelUrl = existing.tunnelUrl;
+                    if (!currentTunnelUrl) {
+                        try {
+                            const { tunnelService } = await import("./TunnelService.js");
+                            currentTunnelUrl = await tunnelService.getPublicUrl();
+                        } catch (e) {
+                            // 忽略获取失败
+                        }
+                    }
+
                     const instanceData = {
                         ...existing,
+                        tunnelUrl: currentTunnelUrl, // 补全或保持地址
                         lastHeartbeat: Date.now(),
                         activeTaskCount: this.getLocalActiveTaskCount(),
                         timeoutMs: this.instanceTimeout
