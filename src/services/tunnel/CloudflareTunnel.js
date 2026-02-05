@@ -116,23 +116,28 @@ export class CloudflareTunnel extends S6ManagedTunnel {
         log.debug(`Starting tunnel URL polling loop (interval: ${this.pollInterval}ms)`);
         const poll = async () => {
             try {
-                if (!(await this.isServiceUp())) {
-                    if (this.isReady) log.warn('Tunnel service went down');
+                const isServiceUp = await this.isServiceUp();
+
+                // Fetch metrics and try to extract URL regardless of S6 status as a fallback
+                // This handles cases where cloudflared is started via entrypoint.sh instead of s6
+                const metrics = await this._fetchMetrics();
+                const url = await this.extractUrl(metrics);
+
+                if (url) {
+                    if (this.currentUrl !== url) {
+                        log.info(`🚇 Tunnel URL captured: ${url}`);
+                    }
+                    this.currentUrl = url;
+                    this.isReady = true;
+                } else if (!isServiceUp) {
+                    // Only set to null if BOTH the service check fails AND no URL could be extracted
+                    if (this.isReady) log.warn('Tunnel service and URL are both unavailable');
                     this.isReady = false;
                     this.currentUrl = null;
                 } else {
-                    const metrics = await this._fetchMetrics();
-                    const url = await this.extractUrl(metrics);
-                    if (url) {
-                        if (this.currentUrl !== url) {
-                            log.info(`🚇 Tunnel URL captured: ${url}`);
-                        }
-                        this.currentUrl = url;
-                        this.isReady = true;
-                    } else {
-                        this.isReady = false;
-                        this.currentUrl = null;
-                    }
+                    // Service is up but URL not yet available
+                    this.isReady = false;
+                    this.currentUrl = null;
                 }
             } catch (error) {
                 log.warn(`Error in polling loop: ${error.message}`);
