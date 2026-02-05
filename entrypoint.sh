@@ -71,10 +71,8 @@ while :; do
   fi
 
   if [ -n "${CLOUDFLARED_PID:-}" ] && ! kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
-    wait "$CLOUDFLARED_PID" || true
-    echo "[entrypoint] cloudflared exited unexpectedly; shutting down"
-    exit_code=100
-    break
+    echo "[entrypoint] WARNING: cloudflared exited unexpectedly. Continuing without tunnel."
+    CLOUDFLARED_PID=""
   fi
 
   sleep 1
