@@ -139,10 +139,7 @@ export class CloudflareTunnel extends S6ManagedTunnel {
         log.debug(`Starting tunnel URL polling loop (interval: ${this.pollInterval}ms)`);
         const poll = async () => {
             try {
-                const isServiceUp = await this.isServiceUp();
-
-                // Fetch metrics and try to extract URL regardless of S6 status as a fallback
-                // This handles cases where cloudflared is started via entrypoint.sh instead of s6
+                // 同时尝试从 Metrics 和 文件 提取
                 const metrics = await this._fetchMetrics();
                 const url = await this.extractUrl(metrics);
 
@@ -152,15 +149,18 @@ export class CloudflareTunnel extends S6ManagedTunnel {
                     }
                     this.currentUrl = url;
                     this.isReady = true;
-                } else if (!isServiceUp) {
-                    // Only set to null if BOTH the service check fails AND no URL could be extracted
-                    if (this.isReady) log.warn('Tunnel service and URL are both unavailable');
-                    this.isReady = false;
-                    this.currentUrl = null;
                 } else {
-                    // Service is up but URL not yet available
-                    this.isReady = false;
-                    this.currentUrl = null;
+                    // 如果没拿到 URL，检查服务是否真的挂了
+                    const isServiceUp = await this.isServiceUp();
+
+                    if (!isServiceUp) {
+                        // 只有当服务确认挂掉时，才置空
+                        if (this.isReady) log.warn('Tunnel service is down, clearing URL');
+                        this.isReady = false;
+                        this.currentUrl = null;
+                    }
+                    // 如果服务还在启动中 (isServiceUp 为 true 但 url 为空)，
+                    // 保持现状，不做任何处理，等待下一轮轮询抓取 URL
                 }
             } catch (error) {
                 log.warn(`Error in polling loop: ${error.message}`);

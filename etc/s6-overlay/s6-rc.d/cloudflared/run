@@ -6,6 +6,37 @@ PORT=${PORT:-7860}
 TUNNEL_METRICS_PORT=${TUNNEL_METRICS_PORT:-2000}
 echo "[s6-cloudflared] Starting tunnel to 127.0.0.1:$PORT with metrics on 127.0.0.1:$TUNNEL_METRICS_PORT"
 
+# 确保 /tmp 目录存在
+mkdir -p /tmp
+
+# 启动 cloudflared
+# 注意：这里不再使用 & 并在末尾使用 wait，因为 s6 期望 run 脚本在前台运行以监控进程
+# 但是由于我们需要后台异步提取 URL，我们保持 cloudflared 后台运行并用 wait 阻塞脚本
+cloudflared tunnel --url "http://127.0.0.1:$PORT" \
+    --metrics "127.0.0.1:$TUNNEL_METRICS_PORT" \
+    --no-autoupdate > /tmp/cloudflared.log 2>&1 &
+CLOUDFLARED_PID=$!
+
+# 异步提取 URL 写入文件供 CloudflareTunnel.js 读取
+(
+    timeout=60
+    while [ $timeout -gt 0 ]; do
+        if [ -f /tmp/cloudflared.log ]; then
+            URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1)
+            if [ -n "$URL" ]; then
+                echo "$URL" > /tmp/cloudflared.url
+                echo "[s6-cloudflared] Captured quick tunnel URL: $URL"
+                break
+            fi
+        fi
+        sleep 2
+        timeout=$((timeout - 2))
+    done
+) &
+
+# 关键：阻塞脚本，让 s6 能够监控 cloudflared 进程
+wait $CLOUDFLARED_PID
+
 # 启动cloudflared并提取临时URL写入文件
 cloudflared tunnel --url http://127.0.0.1:$PORT \
     --metrics 127.0.0.1:$TUNNEL_METRICS_PORT \
