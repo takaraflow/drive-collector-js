@@ -36,20 +36,31 @@ NODE_PID=$!
 if [ "${TUNNEL_ENABLED:-}" = "true" ]; then
   PORT="${PORT:-7860}"
   TUNNEL_METRICS_PORT="${TUNNEL_METRICS_PORT:-2000}"
-  echo "[entrypoint] Starting cloudflared tunnel to localhost:${PORT} (metrics: ${TUNNEL_METRICS_PORT})"
+  echo "[entrypoint] Starting cloudflared tunnel to localhost:${PORT} (metrics: 127.0.0.1:${TUNNEL_METRICS_PORT})"
 
-  # 启动 cloudflared 并提取 URL 到文件，同时保留日志输出
+  # 启动 cloudflared 并提取 URL 到文件，使用更健壮的重定向
   cloudflared tunnel \
-    --url "http://localhost:${PORT}" \
-    --metrics "localhost:${TUNNEL_METRICS_PORT}" \
-    --no-autoupdate 2>&1 | tee /dev/stderr | while read -r line; do
-    URL=$(echo "$line" | grep -o 'https://[-0-9a-z]*\.trycloudflare\.com')
-    if [ -n "$URL" ]; then
-      echo "$URL" > /tmp/cloudflared.url
-      echo "[entrypoint] Captured quick tunnel URL: $URL"
-    fi
-  done &
+    --url "http://127.0.0.1:${PORT}" \
+    --metrics "127.0.0.1:${TUNNEL_METRICS_PORT}" \
+    --no-autoupdate > /tmp/cloudflared.log 2>&1 &
   CLOUDFLARED_PID=$!
+
+  # 在后台异步提取 URL，不阻塞主进程，也不阻塞 cloudflared 输出
+  (
+    timeout=60
+    while [ $timeout -gt 0 ]; do
+      if [ -f /tmp/cloudflared.log ]; then
+        URL=$(grep -o 'https://[-0-9a-z]*\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1)
+        if [ -n "$URL" ]; then
+          echo "$URL" > /tmp/cloudflared.url
+          echo "[entrypoint] Captured quick tunnel URL: $URL"
+          break
+        fi
+      fi
+      sleep 2
+      timeout=$((timeout - 2))
+    done
+  ) &
 fi
 
 exit_code=0
