@@ -1,4 +1,5 @@
 #!/bin/sh
+echo "[s6-cloudflared] === RUN SCRIPT EXECUTED ===" # Debug: Confirm script execution
 # 由 Node.js 通过 s6-svc -u 触发启动
 # 这样可以确保 Infisical 加载的变量生效
 
