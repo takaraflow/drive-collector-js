@@ -28,24 +28,27 @@ export class CloudflareTunnel extends S6ManagedTunnel {
     async initialize() {
         if (this.config.enabled === false) {
             log.debug('Cloudflare Tunnel is disabled in config');
-            await this._controlS6Service('-d');
+            // 在这里不调用 s6-svc -d，因为 s6 服务应该由 s6 自身管理其生命周期
+            // 如果禁用，那么 s6 就不应该启动 cloudflared
             return;
         }
 
         log.debug(`Initializing Cloudflare Tunnel (Managed by s6)`);
 
-        // 通过 s6 启动服务
-        await this._controlS6Service('-u');
+        // 在 s6 环境中，cloudflared 的启动由 s6 自身负责，Node.js 不需要也不应该调用 s6-svc -u
+        // this._controlS6Service('-u');
 
         this._startPolling();
     }
 
     /**
-     * Control the s6 service using s6-svc.
+     * Control the s6 service using s6-svc. (Removed as Node.js should not control s6 services directly)
      * @param {string} action - The s6-svc action flag (e.g., '-u' for up, '-d' for down)
      * @private
      */
     async _controlS6Service(action) {
+        log.warn(`Attempted to call _controlS6Service('${action}'), but this method should not be used in an s6-managed environment.`);
+        // 保留部分逻辑，但不再实际执行 s6-svc
         try {
             const { exec } = await import('child_process');
             const { promisify } = await import('util');
@@ -54,8 +57,9 @@ export class CloudflareTunnel extends S6ManagedTunnel {
             // 检查 s6-svc 是否可用
             try {
                 // 在 s6 环境中，servicePath 通常是 /run/service/cloudflared
-                await execAsync(`s6-svc ${action} ${this.servicePath}`);
-                log.info(`Sent s6-svc ${action} signal to ${this.servicePath}`);
+                // 暂时注释掉实际执行，防止找不到命令报错，并提醒开发者
+                // await execAsync(`s6-svc ${action} ${this.servicePath}`);
+                // log.info(`Sent s6-svc ${action} signal to ${this.servicePath}`);
             } catch (e) {
                 // 如果在非 s6 环境（如普通 Windows 开发环境），忽略错误
                 if (process.platform !== 'win32') {
