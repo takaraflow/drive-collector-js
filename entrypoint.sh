@@ -24,71 +24,14 @@ cleanup() {
 
 trap cleanup INT TERM
 
+# Manual startup fallback (only if S6-overlay didn't start)
+# Note: In production, S6-overlay should handle all processes.
+# This fallback is kept for environments where S6-overlay cannot run as PID 1.
 if [ "$#" -gt 0 ]; then
   echo "[entrypoint] Starting command: $*"
-  "$@" &
-else
-  echo "[entrypoint] Starting Node.js application..."
-  node index.js &
-fi
-NODE_PID=$!
-
-if [ "${TUNNEL_ENABLED:-}" = "true" ]; then
-  PORT="${PORT:-7860}"
-  TUNNEL_METRICS_PORT="${TUNNEL_METRICS_PORT:-2000}"
-  echo "[entrypoint] Starting cloudflared tunnel to localhost:${PORT} (metrics: 127.0.0.1:${TUNNEL_METRICS_PORT})"
-
-  # 启动 cloudflared 并提取 URL 到文件
-  if ! command -v cloudflared >/dev/null 2>&1; then
-    echo "[entrypoint] ERROR: cloudflared command not found. Cannot start tunnel."
-  else
-    # 确保 /tmp 目录存在 (兼容性)
-    mkdir -p /tmp
-
-    cloudflared tunnel \
-      --url "http://127.0.0.1:${PORT}" \
-      --metrics "127.0.0.1:${TUNNEL_METRICS_PORT}" \
-      --no-autoupdate > /tmp/cloudflared.log 2>&1 &
-    CLOUDFLARED_PID=$!
-  fi
-
-  # 在后台异步提取 URL
-  (
-    timeout=60
-    while [ $timeout -gt 0 ]; do
-      if [ -f /tmp/cloudflared.log ]; then
-        # 增强正则：兼容不同大小写和更宽泛的字符集
-        URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1)
-        if [ -n "$URL" ]; then
-          echo "$URL" > /tmp/cloudflared.url
-          echo "[entrypoint] Captured quick tunnel URL: $URL"
-          break
-        fi
-      fi
-      sleep 2
-      timeout=$((timeout - 2))
-    done
-    if [ ! -f /tmp/cloudflared.url ]; then
-      echo "[entrypoint] Failed to capture tunnel URL after 60s. Check /tmp/cloudflared.log"
-    fi
-  ) &
+  exec "$@"
 fi
 
-exit_code=0
-while :; do
-  if ! kill -0 "$NODE_PID" 2>/dev/null; then
-    wait "$NODE_PID" || exit_code=$?
-    break
-  fi
-
-  if [ -n "${CLOUDFLARED_PID:-}" ] && ! kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
-    echo "[entrypoint] WARNING: cloudflared exited unexpectedly. Continuing without tunnel."
-    CLOUDFLARED_PID=""
-  fi
-
-  sleep 1
-done
-
-cleanup
-exit "$exit_code"
+echo "[entrypoint] Starting Node.js application (fallback)..."
+exec node index.js
 

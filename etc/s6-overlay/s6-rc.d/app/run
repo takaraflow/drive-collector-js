@@ -1,3 +1,4 @@
 #!/bin/sh
 echo "[s6-app] === RUN SCRIPT EXECUTED ==="
-exec cross-env NODE_MODE=all node index.js
+# 使用原生环境变量赋值，避免依赖 devDependencies 中的 cross-env
+NODE_MODE=all exec node index.js

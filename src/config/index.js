@@ -44,7 +44,8 @@ let provider = null;
 
 function sanitizeValue(val) {
     if (typeof val !== 'string') return val;
-    const markdownLinkRegex = /\[.*\]\((.*)\)/;
+    // 仅当整个值匹配 [label](url) 格式时提取 URL，防止误伤包含类似字符的复杂密钥
+    const markdownLinkRegex = /^\[.*\]\((.+)\)$/;
     const match = val.match(markdownLinkRegex);
     if (match && match[1]) {
         return match[1];

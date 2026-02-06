@@ -68,7 +68,7 @@ RUN find /etc/s6-overlay/s6-rc.d -name "finish" -exec chmod +x {} +
 
 COPY . .
 
-RUN mkdir -p /tmp/downloads && chmod 777 /tmp/downloads
+RUN mkdir -p /tmp/downloads && chown node:node /tmp/downloads && chmod 755 /tmp/downloads
 
 RUN chmod +x /app/entrypoint.sh
 ENTRYPOINT ["/app/entrypoint.sh"]
