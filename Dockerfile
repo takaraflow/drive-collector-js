@@ -71,7 +71,10 @@ COPY . .
 RUN mkdir -p /tmp/downloads && chmod 777 /tmp/downloads
 
 RUN chmod +x /app/entrypoint.sh
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/init"]
+# 注意：原有的 /app/entrypoint.sh 将不再是容器的直接入口点。
+# 如果 /app/entrypoint.sh 负责启动 Node.js 应用，
+# 你需要将其定义为一个 s6-overlay 服务，例如在 etc/s6-overlay/s6-rc.d/app/run 中执行它。
 CMD []
 
 EXPOSE 7860

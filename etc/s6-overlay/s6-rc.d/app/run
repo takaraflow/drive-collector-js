@@ -1,4 +1,3 @@
 #!/bin/sh
-echo "[s6-app] Starting Node.js application..."
-cd /app || exit 1
-exec node index.js
+echo "[s6-app] === RUN SCRIPT EXECUTED ==="
+exec cross-env NODE_MODE=all node index.js
