@@ -118,14 +118,16 @@ export class CloudflareTunnel extends S6ManagedTunnel {
             const content = await fs.readFile(filePath, 'utf8');
             const url = content.trim();
             if (url) {
-                log.debug(`Captured Quick Tunnel URL from ${filePath}: ${url}`);
+                log.info(`Captured Quick Tunnel URL from ${filePath}: ${url}`);
                 return url;
             }
-            log.debug(`Tunnel URL file ${filePath} exists but is empty`);
+            log.warn(`Tunnel URL file ${filePath} exists but is empty`);
             return null;
         } catch (e) {
             if (e.code !== 'ENOENT') {
-                log.debug(`Error reading tunnel URL file: ${e.message}`);
+                log.error(`Error reading tunnel URL file: ${e.message}`);
+            } else {
+                log.debug(`Tunnel URL file ${filePath} not found yet`);
             }
             return null;
         }

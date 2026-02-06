@@ -120,6 +120,7 @@ export class InstanceCoordinator {
         try {
             const { tunnelService } = await import("./TunnelService.js");
             tunnelUrl = await tunnelService.getPublicUrl();
+            logWithProvider().info(`Fetched tunnel URL for registration: ${tunnelUrl || 'null'}`);
         } catch (error) {
             logWithProvider().warn('Failed to get Tunnel URL', {
                 error: error.message,
