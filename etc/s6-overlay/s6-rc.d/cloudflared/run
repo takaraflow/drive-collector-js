@@ -19,7 +19,6 @@ echo "[s6-cloudflared] Starting cloudflared tunnel..."
     timeout=60
     while [ $timeout -gt 0 ]; do
         if [ -f /tmp/cloudflared.log ]; then
-            # 匹配 https://*.trycloudflare.com
             URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1)
             if [ -n "$URL" ]; then
                 echo "$URL" > /tmp/cloudflared.url
@@ -35,8 +34,9 @@ echo "[s6-cloudflared] Starting cloudflared tunnel..."
     fi
 ) &
 
-# 前台启动 cloudflared，这样 s6 才能正确监控它
-exec cloudflared tunnel --url "http://127.0.0.1:$PORT" \
+# 前台启动 cloudflared，使用 tee 将输出同时写入文件和 stdout/stderr
+cloudflared tunnel --url "http://127.0.0.1:$PORT" \
     --metrics "127.0.0.1:$TUNNEL_METRICS_PORT" \
-    --no-autoupdate > /tmp/cloudflared.log 2>&1
+    --no-autoupdate 2>&1 | tee /tmp/cloudflared.log
+
 

@@ -128,10 +128,11 @@ export class CloudflareTunnel extends S6ManagedTunnel {
             log.warn(`Tunnel URL file ${filePath} exists but is empty`);
             return null;
         } catch (e) {
+            const currentFilePath = '/tmp/cloudflared.url'; // 确保 filePath 可用
             if (e.code !== 'ENOENT') {
-                log.error(`Error reading tunnel URL file: ${e.message}`);
+                log.error(`Error reading tunnel URL file ${currentFilePath}: ${e.message}`, e); // 包含 e 对象以获取堆栈
             } else {
-                log.debug(`Tunnel URL file ${filePath} not found yet`);
+                log.debug(`Tunnel URL file ${currentFilePath} not found yet`);
             }
             return null;
         }
