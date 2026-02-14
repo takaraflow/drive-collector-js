@@ -54,19 +54,21 @@ export class CloudflareTunnel extends S6ManagedTunnel {
             const { promisify } = await import('util');
             const execAsync = promisify(exec);
 
-            const servicePath = '/run/service/cloudflared';
+            const servicePath = this.servicePath || '/run/service/cloudflared';
             
-            try {
-                await execAsync(`s6-svc ${action} ${servicePath}`);
-                log.info(`Sent s6-svc ${action} signal to ${servicePath}`);
-            } catch (e) {
-                // 如果在非 s6 环境（如普通 Windows 开发环境），只记录 debug 日志
-                if (process.platform !== 'win32') {
-                    log.debug(`s6-svc signal failed (expected if not in s6): ${e.message}`);
-                }
-            }
+            log.info(`Executing: s6-svc ${action} ${servicePath}`);
+            const { stdout, stderr } = await execAsync(`s6-svc ${action} ${servicePath}`);
+            if (stdout) log.debug(`s6-svc stdout: ${stdout}`);
+            if (stderr) log.warn(`s6-svc stderr: ${stderr}`);
+            log.info(`Successfully sent s6-svc ${action} signal to ${servicePath}`);
         } catch (error) {
-            log.error(`Error controlling s6 service: ${error.message}`);
+            // 在 s6 环境中，这是错误；在非 s6 环境（如 Windows 开发环境），这是预期的
+            if (process.platform !== 'win32') {
+                log.error(`Failed to execute s6-svc ${action}: ${error.message}`);
+                throw error;
+            } else {
+                log.debug(`s6-svc not available (expected on Windows): ${error.message}`);
+            }
         }
     }
 
