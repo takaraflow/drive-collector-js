@@ -364,6 +364,70 @@ class RedisCache extends BaseCache {
     }
 
     /**
+     * Compare and Set (CAS) - Atomic operation using Lua script
+     * @param {string} key - The cache key
+     * @param {*} value - New value to set
+     * @param {Object} options - Options including condition checks
+     * @param {boolean} options.ifNotExists - Set only if key doesn't exist
+     * @param {*} options.ifEquals - Set only if current value equals this
+     * @returns {Promise<boolean>} - Success status
+     */
+    async compareAndSet(key, value, options = {}) {
+        const { ifNotExists = false, ifEquals = null, ttl = 3600 } = options;
+        
+        try {
+            // Serialize value for comparison and storage
+            const serializedValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+            
+            // Lua script for atomic CAS operation
+            // KEYS[1]: key
+            // ARGV[1]: serializedValue
+            // ARGV[2]: ttl in seconds
+            // ARGV[3]: condition type ('ifNotExists' or 'ifEquals')
+            // ARGV[4]: serialized expected value (for ifEquals)
+            const luaScript = `
+                local current = redis.call('get', KEYS[1])
+                local condition = ARGV[3]
+                local expected = ARGV[4]
+                
+                if condition == 'ifNotExists' then
+                    if current == false or current == nil then
+                        redis.call('set', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
+                        return 1
+                    end
+                    return 0
+                elseif condition == 'ifEquals' then
+                    if current == expected then
+                        redis.call('set', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
+                        return 1
+                    end
+                    return 0
+                else
+                    -- Default: unconditional set
+                    redis.call('set', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
+                    return 1
+                end
+            `;
+            
+            let condition = 'default';
+            let expected = '';
+            
+            if (ifNotExists) {
+                condition = 'ifNotExists';
+            } else if (ifEquals !== null) {
+                condition = 'ifEquals';
+                expected = typeof ifEquals === 'object' ? JSON.stringify(ifEquals) : String(ifEquals);
+            }
+            
+            const result = await this.client.eval(luaScript, 1, key, serializedValue, ttl, condition, expected);
+            return result === 1;
+        } catch (error) {
+            this.log.error(`CompareAndSet error: ${error.message}`);
+            throw error;
+        }
+    }
+
+    /**
      * Cleanup resources
      * @returns {Promise<void>}
      */

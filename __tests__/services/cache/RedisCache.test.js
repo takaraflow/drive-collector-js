@@ -274,4 +274,77 @@ describe("RedisCache", () => {
     expect(typeof multi.del).toBe("function");
     expect(typeof multi.exec).toBe("function");
   });
+
+  test("should compareAndSet with ifNotExists condition", async () => {
+    globalMocks.redisClient.eval.mockResolvedValueOnce(1);
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    const result = await cache.compareAndSet("key", { data: "value" }, { ifNotExists: true });
+
+    expect(globalMocks.redisClient.eval).toHaveBeenCalledTimes(1);
+    const evalCall = globalMocks.redisClient.eval.mock.calls[0];
+    expect(evalCall[1]).toBe(1); // 1 key
+    expect(evalCall[2]).toBe("key"); // key name
+    expect(evalCall[3]).toBe('{"data":"value"}'); // serialized value
+    expect(evalCall[4]).toBe(3600); // ttl
+    expect(evalCall[5]).toBe("ifNotExists"); // condition
+    expect(evalCall[6]).toBe(""); // expected
+    expect(result).toBe(true);
+  });
+
+  test("should compareAndSet with ifEquals condition", async () => {
+    globalMocks.redisClient.eval.mockResolvedValueOnce(1);
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    const current = { version: 1 };
+    const next = { version: 2 };
+    const result = await cache.compareAndSet("key", next, { ifEquals: current });
+
+    expect(globalMocks.redisClient.eval).toHaveBeenCalledTimes(1);
+    const evalCall = globalMocks.redisClient.eval.mock.calls[0];
+    expect(evalCall[5]).toBe("ifEquals"); // condition
+    expect(evalCall[6]).toBe('{"version":1}'); // expected serialized
+    expect(result).toBe(true);
+  });
+
+  test("should compareAndSet unconditionally by default", async () => {
+    globalMocks.redisClient.eval.mockResolvedValueOnce(1);
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    const result = await cache.compareAndSet("key", "value");
+
+    expect(globalMocks.redisClient.eval).toHaveBeenCalledTimes(1);
+    const evalCall = globalMocks.redisClient.eval.mock.calls[0];
+    expect(evalCall[5]).toBe("default"); // condition
+    expect(result).toBe(true);
+  });
+
+  test("should handle compareAndSet failure", async () => {
+    globalMocks.redisClient.eval.mockResolvedValueOnce(0);
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    const result = await cache.compareAndSet("key", "value", { ifNotExists: true });
+
+    expect(result).toBe(false);
+  });
+
+  test("should handle compareAndSet with custom TTL", async () => {
+    globalMocks.redisClient.eval.mockResolvedValueOnce(1);
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    await cache.compareAndSet("key", "value", { ttl: 7200 });
+
+    const evalCall = globalMocks.redisClient.eval.mock.calls[0];
+    expect(evalCall[4]).toBe(7200); // custom ttl
+  });
 });

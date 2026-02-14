@@ -37,14 +37,14 @@ const PROVIDER_ATOMIC_CAPABILITIES = {
     'Redis': {
         atomic: true,
         lock: true,
-        compareAndSet: false, // Uses get-then-set fallback in CacheService
-        notes: 'Supports atomic SET NX/PX and Lua scripts'
+        compareAndSet: true, // Native Lua script implementation
+        notes: 'Supports atomic SET NX/PX, Lua scripts, and native CAS'
     },
     'RedisTLS': {
         atomic: true,
         lock: true,
-        compareAndSet: false,
-        notes: 'Same as Redis, with TLS encryption'
+        compareAndSet: true, // Inherited from RedisCache with Lua script CAS
+        notes: 'Same as Redis, with TLS encryption and native CAS support'
     },
     'Valkey': {
         atomic: true,
