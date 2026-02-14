@@ -62,10 +62,10 @@ export class CloudflareTunnel extends S6ManagedTunnel {
             if (stderr) log.warn(`s6-svc stderr: ${stderr}`);
             log.info(`Successfully sent s6-svc ${action} signal to ${servicePath}`);
         } catch (error) {
+            // 记录错误但不抛出，避免阻塞应用启动
             // 在 s6 环境中，这是错误；在非 s6 环境（如 Windows 开发环境），这是预期的
             if (process.platform !== 'win32') {
                 log.error(`Failed to execute s6-svc ${action}: ${error.message}`);
-                throw error;
             } else {
                 log.debug(`s6-svc not available (expected on Windows): ${error.message}`);
             }
