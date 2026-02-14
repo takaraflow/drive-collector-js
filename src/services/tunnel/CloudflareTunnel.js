@@ -53,8 +53,29 @@ export class CloudflareTunnel extends S6ManagedTunnel {
             const { exec } = await import('child_process');
             const { promisify } = await import('util');
             const execAsync = promisify(exec);
+            const fs = await import('fs/promises');
 
             const servicePath = this.servicePath || '/run/service/cloudflared';
+            
+            // Wait for s6-rc to create the service directory
+            log.info(`Waiting for s6 service directory: ${servicePath}`);
+            let attempts = 0;
+            const maxAttempts = 30;
+            while (attempts < maxAttempts) {
+                try {
+                    await fs.access(servicePath);
+                    log.info(`Service directory exists: ${servicePath}`);
+                    break;
+                } catch {
+                    attempts++;
+                    if (attempts >= maxAttempts) {
+                        log.error(`Timeout waiting for service directory: ${servicePath}`);
+                        return;
+                    }
+                    log.debug(`Service directory not ready yet, waiting... (${attempts}/${maxAttempts})`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
             
             // s6-svc in s6-overlay is typically at /command/s6-svc
             const s6SvcPath = '/command/s6-svc';
