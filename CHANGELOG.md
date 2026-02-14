@@ -2,6 +2,53 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.31.0](https://github.com/YoungSx/drive-collector-js/compare/v4.30.0...v4.31.0) (2026-02-14)
+
+
+### ✨ 新特性
+
+* **docs:** add MCP user guide and server documentation ([7c7e5e8](https://github.com/YoungSx/drive-collector-js/commit/7c7e5e804d889203ba9efa42485bfa97bf4c1dc0))
+* **DriveConfigFlow:** refactor step parsing and add backward compatibility ([87befd5](https://github.com/YoungSx/drive-collector-js/commit/87befd5c1c97a62c4e47c19af5c24e673cc59a54))
+* **drive:** refactor i18n fallback and rclone integration ([8ce79a7](https://github.com/YoungSx/drive-collector-js/commit/8ce79a712ecacb7be1e3745c72bf7e6c3979b317))
+* **drives:** add getValidationCommand support for providers ([0779348](https://github.com/YoungSx/drive-collector-js/commit/0779348fdc7f871d1adb6ca3e10fb07758fc9abe))
+* **drives:** support generic S3 providers alongside OSS ([e80ac20](https://github.com/YoungSx/drive-collector-js/commit/e80ac202ee365380c3922b8d21dc4dd340918483))
+* **entrypoint:** enhance cloudflared tunnel robustness and s6 integration ([d3abf06](https://github.com/YoungSx/drive-collector-js/commit/d3abf065dd2e73fc0a322c967e4752bbdc4f8b92))
+* **entrypoint:** handle cloudflared unexpected exit gracefully ([765315a](https://github.com/YoungSx/drive-collector-js/commit/765315a42632c8ac9e02a8e4b6dc8f7e0ef50843))
+* **entrypoint:** improve cloudflared tunnel URL capture and s6 integration ([60cc615](https://github.com/YoungSx/drive-collector-js/commit/60cc6151025ce6ce56e913bb69f2ef6da65e05c9))
+* **logger:** add Beijing time display for all loggers ([35ab327](https://github.com/YoungSx/drive-collector-js/commit/35ab32726ffbbd147130c9721f6b4325cf1c4840))
+* **logger:** optimize log filtering by prioritizing ignore patterns ([2c05342](https://github.com/YoungSx/drive-collector-js/commit/2c05342bd11cc9f7052adbbad37f8683fa88cc32))
+* **mcp:** implement SaaS multi-tenant MCP server with API key authentication ([7cf525a](https://github.com/YoungSx/drive-collector-js/commit/7cf525afe3b04495ad1d551100f2146a9f7d4b2e))
+* **services/rclone:** improve config validation robustness ([2e7dcd8](https://github.com/YoungSx/drive-collector-js/commit/2e7dcd8aea0f5bd4be35e95d808d12717215ab7c))
+* **tunnel:** capture and persist Cloudflare quick tunnel URL ([5dab26e](https://github.com/YoungSx/drive-collector-js/commit/5dab26e5c36ab297d211d3e0ca0f29bb24377ed5))
+* **tunnel:** enhance CloudflareTunnel logging and error handling ([497209e](https://github.com/YoungSx/drive-collector-js/commit/497209ef5695d2638a21bc77bf365a12c791d0cf))
+* **tunnel:** improve Cloudflare tunnel URL detection robustness ([ba492b5](https://github.com/YoungSx/drive-collector-js/commit/ba492b5c7f5c1b09f69f1f7b111b905dcab47b3b))
+* **utils:** add timeUtils for UTC+8 timestamp formatting ([d58a2ed](https://github.com/YoungSx/drive-collector-js/commit/d58a2ed2db3ddcb2f9c4972895725b58ebea2a9c))
+
+
+### 🔧 其他任务
+
+* **.gitignore:** update ignored directories and files ([10be754](https://github.com/YoungSx/drive-collector-js/commit/10be754007812b30d50f3373519051961505648b))
+* **cloudflared:** add debug echo to confirm script execution ([c6899ed](https://github.com/YoungSx/drive-collector-js/commit/c6899eda8880bd8490262ea3539b88debcf71b21))
+
+
+### ♻️ 代码重构
+
+* **docker:** simplify container entrypoint and improve security ([831cd8b](https://github.com/YoungSx/drive-collector-js/commit/831cd8baa4748353429ff5d117422b224159621f))
+
+
+### 🐛 问题修复
+
+* **docker:** update container entrypoint to use entrypoint.sh script ([f58c29b](https://github.com/YoungSx/drive-collector-js/commit/f58c29bf9f3264a5f8a03dfeb6f3264d77b78586))
+* **entrypoint:** refactor cloudflared tunnel URL capture logic ([2afbdbf](https://github.com/YoungSx/drive-collector-js/commit/2afbdbf1a405890c185ff8729483832ff5ebe39c))
+* **InstanceCoordinator:** update instance heartbeat with tunnel URL recovery ([353b517](https://github.com/YoungSx/drive-collector-js/commit/353b5170dad484045ddd7770fc8c432c3f0c1baa))
+* **logger:** prevent recursive logging in Telegram console proxy ([44c82f3](https://github.com/YoungSx/drive-collector-js/commit/44c82f3531d7748647cb54e598bc8e7705a9bfcc))
+* resolve async password handling bug and test failures ([7fd5344](https://github.com/YoungSx/drive-collector-js/commit/7fd53446e7917a6f5ab5e97f409328230bd3677a))
+* **s6:** prevent Node.js from directly controlling s6 services ([61c6584](https://github.com/YoungSx/drive-collector-js/commit/61c65846657aa03ab36e9d68a20850e7d6790cc6))
+* **s6:** properly integrate Node.js app as s6-overlay service ([0f8c1e8](https://github.com/YoungSx/drive-collector-js/commit/0f8c1e8dc47967f2a70451c2d42d2c098a2f6719))
+* **s6:** use exec for proper cloudflared foreground execution ([b3bf2c3](https://github.com/YoungSx/drive-collector-js/commit/b3bf2c3bec312920276a44380bd915a6a9cf45d3))
+* **services:** update password processing to support async operations ([eb3c958](https://github.com/YoungSx/drive-collector-js/commit/eb3c9582021c812eaba222e0f36e016c982227c4))
+* **tunnel:** improve cloudflared logging and error handling ([0b5ce78](https://github.com/YoungSx/drive-collector-js/commit/0b5ce78a81ecf4ee7476f2f1473c237025f4bbe0))
+
 ## [4.30.0](https://github.com/YoungSx/drive-collector-js/compare/v4.29.0...v4.30.0) (2026-02-01)
 
 
