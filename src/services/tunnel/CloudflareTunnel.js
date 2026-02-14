@@ -35,8 +35,9 @@ export class CloudflareTunnel extends S6ManagedTunnel {
 
         log.debug(`Initializing Cloudflare Tunnel (Managed by s6)`);
 
-        // 在 s6 环境中，cloudflared 的启动由 s6 自身负责，Node.js 不需要也不应该调用 s6-svc -u
-        // this._controlS6Service('-u');
+        // 在 s6 环境中，cloudflared 由 s6 管理，但需要 Node.js 在加载完 Infisical 凭证后手动启动
+        // 因为 cloudflared 服务有 'down' 文件，不会自动启动
+        await this._controlS6Service('-u');
 
         this._startPolling();
     }
@@ -47,21 +48,19 @@ export class CloudflareTunnel extends S6ManagedTunnel {
      * @private
      */
     async _controlS6Service(action) {
-        log.warn(`Attempted to call _controlS6Service('${action}'), but this method should not be used in an s6-managed environment.`);
-        // 保留部分逻辑，但不再实际执行 s6-svc
+        log.debug(`Controlling s6 service with action: ${action}`);
         try {
             const { exec } = await import('child_process');
             const { promisify } = await import('util');
             const execAsync = promisify(exec);
 
-            // 检查 s6-svc 是否可用
+            const servicePath = '/run/service/cloudflared';
+            
             try {
-                // 在 s6 环境中，servicePath 通常是 /run/service/cloudflared
-                // 暂时注释掉实际执行，防止找不到命令报错，并提醒开发者
-                // await execAsync(`s6-svc ${action} ${this.servicePath}`);
-                // log.info(`Sent s6-svc ${action} signal to ${this.servicePath}`);
+                await execAsync(`s6-svc ${action} ${servicePath}`);
+                log.info(`Sent s6-svc ${action} signal to ${servicePath}`);
             } catch (e) {
-                // 如果在非 s6 环境（如普通 Windows 开发环境），忽略错误
+                // 如果在非 s6 环境（如普通 Windows 开发环境），只记录 debug 日志
                 if (process.platform !== 'win32') {
                     log.debug(`s6-svc signal failed (expected if not in s6): ${e.message}`);
                 }
