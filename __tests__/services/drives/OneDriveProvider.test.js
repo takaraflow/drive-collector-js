@@ -3,8 +3,6 @@
  */
 
 import { describe, test, expect, beforeEach, vi } from 'vitest';
-import { OneDriveProvider } from '../../../src/services/drives/OneDriveProvider.js';
-import { BindingStep, ActionResult } from '../../../src/services/drives/BaseDriveProvider.js';
 
 // Mock logger
 vi.mock('../../../src/services/logger/index.js', () => ({
@@ -25,6 +23,9 @@ vi.mock('../../../src/services/rclone.js', () => ({
         _obscure: vi.fn((password) => `obscured_${password}`)
     }
 }));
+
+import { OneDriveProvider } from '../../../src/services/drives/OneDriveProvider.js';
+import { BindingStep, ActionResult } from '../../../src/services/drives/BaseDriveProvider.js';
 
 describe('OneDriveProvider', () => {
     let provider;

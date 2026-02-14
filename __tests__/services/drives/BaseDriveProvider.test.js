@@ -3,9 +3,8 @@
  */
 
 import { describe, test, expect, beforeEach, vi } from 'vitest';
-import { BaseDriveProvider, BindingStep, ActionResult, ValidationResult } from '../../../src/services/drives/BaseDriveProvider.js';
 
-// Mock logger
+// Mock logger - must be before imports
 vi.mock('../../../src/services/logger/index.js', () => ({
     logger: {
         withModule: () => ({
@@ -16,6 +15,8 @@ vi.mock('../../../src/services/logger/index.js', () => ({
         })
     }
 }));
+
+import { BaseDriveProvider, BindingStep, ActionResult, ValidationResult } from '../../../src/services/drives/BaseDriveProvider.js';
 
 describe('BaseDriveProvider', () => {
     let TestProvider;
@@ -110,11 +111,11 @@ describe('BaseDriveProvider', () => {
         await expect(provider.validateConfig({})).rejects.toThrow('validateConfig() must be implemented');
     });
 
-    test('should provide default processPassword implementation', () => {
+    test('should provide default processPassword implementation', async () => {
         const provider = new TestProvider();
         const password = 'myPassword123';
 
-        expect(provider.processPassword(password)).toBe(password);
+        expect(await provider.processPassword(password)).toBe(password);
     });
 
     test('should provide default getErrorMessage implementation', () => {

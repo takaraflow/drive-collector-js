@@ -1,5 +1,6 @@
 import { DriveProviderFactory } from '../../../src/services/drives/DriveProviderFactory.js';
 import { BaseDriveProvider } from '../../../src/services/drives/BaseDriveProvider.js';
+import { vi } from 'vitest';
 
 /**
  * DriveProviderFactory 单元测试
@@ -8,8 +9,13 @@ import { BaseDriveProvider } from '../../../src/services/drives/BaseDriveProvide
 describe('DriveProviderFactory - Unit Tests', () => {
   // 清除所有注册的 Provider
   beforeEach(() => {
+    vi.useFakeTimers();
     // 清除所有注册的 Provider
     DriveProviderFactory.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   test('should register a provider', () => {
@@ -156,7 +162,10 @@ describe('DriveProviderFactory - Unit Tests', () => {
     DriveProviderFactory.register('async', AsyncProvider);
     const provider = DriveProviderFactory.getProvider('async');
 
-    const result = await provider.validateCredentials({ valid: true });
+    // Execute the test - timers are faked so we need to advance them
+    const promise = provider.validateCredentials({ valid: true });
+    vi.advanceTimersByTime(20); // Advance past the 10ms timeout
+    const result = await promise;
     expect(result.success).toBe(true);
   });
 });

@@ -1,6 +1,7 @@
 /**
  * MegaProvider 测试
  * 修复了异步密码处理的测试
+ * 避免循环依赖：使用独立的测试文件
  */
 
 import { describe, test, expect, beforeEach, vi } from 'vitest';
@@ -25,6 +26,8 @@ vi.mock('../../../src/services/rclone.js', () => ({
     }
 }));
 
+// 导入 logger 和 CloudTool 的 mock
+import '../../../src/services/logger/index.js';
 import { MegaProvider } from '../../../src/services/drives/MegaProvider.js';
 import { BindingStep, ActionResult, ValidationResult } from '../../../src/services/drives/BaseDriveProvider.js';
 
@@ -138,6 +141,7 @@ describe('MegaProvider - Unit Tests', () => {
         test('processPassword should be async function', () => {
             // 验证方法签名是异步的
             expect(typeof provider.processPassword).toBe('function');
+            // 检查是否是 async function（通过 constructor name 检查）
             expect(provider.processPassword.constructor.name).toBe('AsyncFunction');
         });
     });

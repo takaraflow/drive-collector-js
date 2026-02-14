@@ -3,8 +3,6 @@
  */
 
 import { describe, test, expect, beforeEach, vi } from 'vitest';
-import { GoogleDriveProvider } from '../../../src/services/drives/GoogleDriveProvider.js';
-import { BindingStep, ActionResult, ValidationResult } from '../../../src/services/drives/BaseDriveProvider.js';
 
 // Mock logger
 vi.mock('../../../src/services/logger/index.js', () => ({
@@ -26,6 +24,9 @@ vi.mock('../../../src/services/rclone.js', () => ({
     }
 }));
 
+import { GoogleDriveProvider } from '../../../src/services/drives/GoogleDriveProvider.js';
+import { BindingStep, ActionResult, ValidationResult } from '../../../src/services/drives/BaseDriveProvider.js';
+
 describe('GoogleDriveProvider', () => {
     let provider;
 
@@ -36,7 +37,7 @@ describe('GoogleDriveProvider', () => {
 
     describe('Basic Properties', () => {
         test('should have correct type and name', () => {
-            expect(provider.type).toBe('drive');
+            expect(provider.type).toBe('google_drive');
             expect(provider.name).toBe('Google Drive');
         });
     });

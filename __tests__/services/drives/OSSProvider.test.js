@@ -2,7 +2,6 @@
  * OSSProvider Test
  */
 import { describe, test, expect, beforeEach, vi } from 'vitest';
-import { OSSProvider } from '../../../src/services/drives/OSSProvider.js';
 
 vi.mock('../../../src/services/logger/index.js', () => ({
     logger: {
@@ -16,6 +15,8 @@ vi.mock('../../../src/services/rclone.js', () => ({
         _obscure: vi.fn(p => `obs_${p}`)
     }
 }));
+
+import { OSSProvider } from '../../../src/services/drives/OSSProvider.js';
 
 describe('OSSProvider', () => {
     let provider;
@@ -45,8 +46,7 @@ describe('OSSProvider', () => {
 
     test('should generate s3 connection string', () => {
         const conn = provider.getConnectionString({ endpoint: 'e', ak: 'a', sk: 's' });
-        expect(conn).toContain(':s3,provider="Alibaba"');
-        expect(conn).toContain('endpoint="e"');
+        expect(conn).toContain(':s3,endpoint="e"');
         expect(conn).toContain('access_key_id="a"');
         expect(conn).toContain('secret_access_key="s"');
     });

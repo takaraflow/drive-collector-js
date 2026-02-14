@@ -2,7 +2,6 @@
  * PCloudProvider Test
  */
 import { describe, test, expect, beforeEach, vi } from 'vitest';
-import { PCloudProvider } from '../../../src/services/drives/PCloudProvider.js';
 
 vi.mock('../../../src/services/logger/index.js', () => ({
     logger: {
@@ -16,6 +15,8 @@ vi.mock('../../../src/services/rclone.js', () => ({
         _obscure: vi.fn(p => `obs_${p}`)
     }
 }));
+
+import { PCloudProvider } from '../../../src/services/drives/PCloudProvider.js';
 
 describe('PCloudProvider', () => {
     let provider;

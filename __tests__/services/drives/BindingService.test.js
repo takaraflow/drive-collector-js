@@ -1,36 +1,26 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
 
-const mockProvider = {
-    getBindingSteps: vi.fn(),
-    handleInput: vi.fn(),
-};
-
-const mockFactory = {
-    isSupported: vi.fn(),
-    create: vi.fn(),
-    getSupportedTypes: vi.fn(),
-};
-
-const mockSession = {
-    start: vi.fn(),
-    update: vi.fn(),
-    clear: vi.fn(),
-};
-
-const mockDriveRepo = {
-    create: vi.fn(),
-};
-
+// Mocks must come before imports
 vi.mock("../../../src/services/drives/DriveProviderFactory.js", () => ({
-    DriveProviderFactory: mockFactory,
+    DriveProviderFactory: {
+        isSupported: vi.fn(),
+        create: vi.fn(),
+        getSupportedTypes: vi.fn(),
+    },
 }));
 
 vi.mock("../../../src/modules/SessionManager.js", () => ({
-    SessionManager: mockSession,
+    SessionManager: {
+        start: vi.fn(),
+        update: vi.fn(),
+        clear: vi.fn(),
+    },
 }));
 
 vi.mock("../../../src/repositories/DriveRepository.js", () => ({
-    DriveRepository: mockDriveRepo,
+    DriveRepository: {
+        create: vi.fn(),
+    },
 }));
 
 vi.mock("../../../src/repositories/SettingsRepository.js", () => ({
@@ -47,14 +37,34 @@ vi.mock("../../../src/services/logger/index.js", () => ({
             error: vi.fn(),
             warn: vi.fn(),
         }),
-    }
+    },
 }));
 
-const { BindingService } = await import("../../../src/services/drives/BindingService.js");
+// Import the mocked modules and the BindingService
+import { DriveProviderFactory } from "../../../src/services/drives/DriveProviderFactory.js";
+import { SessionManager } from "../../../src/modules/SessionManager.js";
+import { DriveRepository } from "../../../src/repositories/DriveRepository.js";
+import { BindingService } from "../../../src/services/drives/BindingService.js";
+import { Mocked } from "vitest";
+
+const mockFactory = DriveProviderFactory;
+const mockSession = SessionManager;
+const mockDriveRepo = DriveRepository;
 
 describe("BindingService", () => {
+    // Create local mocks for provider
+    let mockProvider = {
+        getBindingSteps: vi.fn(),
+        handleInput: vi.fn(),
+    };
+
     beforeEach(() => {
         vi.clearAllMocks();
+        // Reset local mock
+        mockProvider = {
+            getBindingSteps: vi.fn(),
+            handleInput: vi.fn(),
+        };
     });
 
     describe("startBinding", () => {

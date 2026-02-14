@@ -1,3 +1,5 @@
+import { describe, beforeEach, afterEach, test, expect, vi } from 'vitest';
+
 // Mock the global fetch function
 const mockFetch = vi.fn();
 global.fetch = mockFetch;

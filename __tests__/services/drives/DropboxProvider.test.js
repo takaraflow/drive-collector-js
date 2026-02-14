@@ -2,8 +2,8 @@
  * DropboxProvider Test
  */
 import { describe, test, expect, beforeEach, vi } from 'vitest';
-import { DropboxProvider } from '../../../src/services/drives/DropboxProvider.js';
 
+// Mocks must come before imports
 vi.mock('../../../src/services/logger/index.js', () => ({
     logger: {
         withModule: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() })
@@ -15,6 +15,8 @@ vi.mock('../../../src/services/rclone.js', () => ({
         validateConfig: vi.fn(),
     }
 }));
+
+import { DropboxProvider } from '../../../src/services/drives/DropboxProvider.js';
 
 describe('DropboxProvider', () => {
     let provider;

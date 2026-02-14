@@ -42,14 +42,14 @@ export class MegaProvider extends BaseDriveProvider {
      */
     async validateConfig(configData) {
         try {
-            const processedPass = this.processPassword(configData.pass);
-            
+            const processedPass = await this.processPassword(configData.pass);
+
             // 调用 rclone 验证
             const result = await CloudTool.validateConfig(this.type, {
                 user: configData.user,
                 pass: processedPass
             });
-            
+
             if (result.success) {
                 return new ValidationResult(true);
             } else {
@@ -64,9 +64,9 @@ export class MegaProvider extends BaseDriveProvider {
     /**
      * 处理密码（使用 rclone obscure）
      */
-    processPassword(password) {
+    async processPassword(password) {
         if (typeof CloudTool._obscure === "function") {
-            return CloudTool._obscure(password);
+            return await CloudTool._obscure(password);
         }
 
         return password;

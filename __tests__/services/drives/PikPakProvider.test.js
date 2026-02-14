@@ -2,8 +2,6 @@
  * PikPakProvider Test
  */
 import { describe, test, expect, beforeEach, vi } from 'vitest';
-import { PikPakProvider } from '../../../src/services/drives/PikPakProvider.js';
-import { BindingStep, ActionResult } from '../../../src/services/drives/BaseDriveProvider.js';
 
 vi.mock('../../../src/services/logger/index.js', () => ({
     logger: {
@@ -17,6 +15,9 @@ vi.mock('../../../src/services/rclone.js', () => ({
         _obscure: vi.fn((password) => `obscured_${password}`)
     }
 }));
+
+import { PikPakProvider } from '../../../src/services/drives/PikPakProvider.js';
+import { BindingStep, ActionResult } from '../../../src/services/drives/BaseDriveProvider.js';
 
 describe('PikPakProvider', () => {
     let provider;

@@ -54,9 +54,9 @@ export class PCloudProvider extends BaseDriveProvider {
         }
     }
 
-    processPassword(password) {
+    async processPassword(password) {
         if (typeof CloudTool._obscure === "function") {
-            return CloudTool._obscure(password);
+            return await CloudTool._obscure(password);
         }
         return password;
     }

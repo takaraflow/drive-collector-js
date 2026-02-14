@@ -1,3 +1,5 @@
+import { describe, beforeEach, afterEach, test, expect, vi } from 'vitest';
+
 describe("Telegram Client Lock and Timeout Protection (Simulated)", () => {
     let mockClient;
     let mockCoordinator;

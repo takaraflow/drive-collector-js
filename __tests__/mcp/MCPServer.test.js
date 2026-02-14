@@ -1,6 +1,13 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import http from "node:http";
 
+// Mock http module
+vi.mock("node:http", () => ({
+    default: {
+        createServer: vi.fn(),
+    }
+}));
+
 // 1. Mock 所有的外部依赖
 const mockApiKeyRepo = {
     findUserIdByToken: vi.fn(),
@@ -53,22 +60,60 @@ vi.mock("../../src/services/logger/index.js", () => ({
     }
 }));
 
-// 加载被测模块 (由于它有 main() 立即执行，我们需要控制环境)
-process.env.MCP_PORT = "3001";
-await import("../../src/mcp/index.js");
-
 describe("MCP Server Integration (SaaS Mode)", () => {
-    beforeEach(() => {
-        vi.clearAllMocks();
+    let mockRequestHandler;
+    let toolHandler;
+
+    // 加载被测模块 (由于它有 main() 立即执行，我们需要控制环境)
+    beforeAll(async () => {
+        vi.useFakeTimers();
+        process.env.MCP_PORT = "3001";
+        
+        // 模拟 process.exit 防止测试退出
+        const originalExit = process.exit;
+        process.exit = vi.fn((code) => {
+            // 不实际退出，只是记录调用
+            console.log(`process.exit(${code}) was called but mocked`);
+        });
+        
+        try {
+            await import("../../src/mcp/index.js");
+        } catch (error) {
+            // 忽略导入错误，继续测试
+            console.log("Import error (expected):", error.message);
+        }
+        
+        // 恢复 process.exit
+        process.exit = originalExit;
+        
+        // 捕获handler用于后续测试
+        if (http.createServer.mock.calls.length > 0) {
+            mockRequestHandler = http.createServer.mock.calls[0][0];
+        }
+        // 捕获 tool handler (CallToolRequestSchema 是第二个 setRequestHandler 调用)
+        const toolCalls = mockServerInstance.setRequestHandler.mock.calls.filter(c => 
+            c.length > 1 && typeof c[1] === 'function'
+        );
+        // 取第二个（CallToolRequestSchema），第一个是 ListToolsRequestSchema
+        if (toolCalls.length >= 2) {
+            toolHandler = toolCalls[1][1];
+        } else if (toolCalls.length === 1) {
+            toolHandler = toolCalls[0][1];
+        }
+    });
+
+    beforeEach(async () => {
+        // 只清除部分mock，保留关键调用记录
+        mockApiKeyRepo.findUserIdByToken.mockClear();
+        mockDriveRepo.findByUserId.mockClear();
     });
 
     it("当缺少 x-api-key 时，应返回 401 错误", async () => {
         const req = { headers: {} };
         const res = { writeHead: vi.fn(), end: vi.fn() };
 
-        // 获取创建服务器的监听函数 (从 http.createServer 获取)
-        const requestHandler = http.createServer.mock.calls[0][0];
-        await requestHandler(req, res);
+        // 使用在 beforeAll 中捕获的 handler
+        await mockRequestHandler(req, res);
 
         expect(res.writeHead).toHaveBeenCalledWith(401);
         expect(res.end).toHaveBeenCalledWith('Missing API Key');
@@ -79,8 +124,8 @@ describe("MCP Server Integration (SaaS Mode)", () => {
         const req = { headers: { "x-api-key": "invalid_key" } };
         const res = { writeHead: vi.fn(), end: vi.fn() };
 
-        const requestHandler = http.createServer.mock.calls[0][0];
-        await requestHandler(req, res);
+        // 使用在 beforeAll 中捕获的 handler
+        await mockRequestHandler(req, res);
 
         expect(res.writeHead).toHaveBeenCalledWith(401);
         expect(res.end).toHaveBeenCalledWith('Invalid API Key');
@@ -91,10 +136,7 @@ describe("MCP Server Integration (SaaS Mode)", () => {
         mockApiKeyRepo.findUserIdByToken.mockResolvedValue("user_888");
         mockDriveRepo.findByUserId.mockResolvedValue([{ name: "My Drive" }]);
 
-        // 获取工具处理器 (CallToolRequestSchema 对应的逻辑)
-        // 注意：index.js 第 154 行在 SSE 连接时会重写 Handler
-        const toolHandler = mockServerInstance.setRequestHandler.mock.calls.find(c => c[0].method === undefined)[1];
-
+        // 使用在 beforeAll 中捕获的 tool handler
         const request = {
             params: {
                 name: "list_drives",

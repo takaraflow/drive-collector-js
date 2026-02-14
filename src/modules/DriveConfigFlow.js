@@ -275,7 +275,7 @@ export class DriveConfigFlow {
             }
 
             if (result.nextStep) {
-                await SessionManager.update(userId, `${driveType.toUpperCase()}_${result.nextStep}`, result.data);
+                await SessionManager.update(userId, `${driveType.toUpperCase()}:${result.nextStep}`, result.data);
 
                 const prompt = driveStrings[result.message] || result.message;
                 const message = this._appendCancelHint(prompt, driveStrings);

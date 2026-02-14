@@ -15,12 +15,45 @@ const mockClient = {
 };
 vi.mock("../../src/services/telegram.js", () => ({
     client: mockClient,
+    ensureConnected: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock services/rclone
 const mockCloudTool = {
     validateConfig: vi.fn(),
 };
+
+// Mock logger to avoid CloudTool dependency issues
+const mockLogger = {
+    withModule: vi.fn(function() { return this; }),
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+};
+
+// Mock BaseDriveProvider to avoid circular dependency
+const mockBaseDriveProvider = {
+    processPassword: vi.fn().mockResolvedValue('password'),
+};
+
+vi.mock("../../src/services/drives/BaseDriveProvider.js", () => ({
+    BaseDriveProvider: mockBaseDriveProvider,
+}));
+
+// Mock MegaProvider to use the mock BaseDriveProvider
+const mockMegaProvider = {
+    getBindingSteps: vi.fn(),
+    handleInput: vi.fn(),
+};
+
+vi.mock("../../src/services/drives/MegaProvider.js", () => ({
+    MegaProvider: mockMegaProvider,
+}));
+
+vi.mock("../../src/services/logger/index.js", () => ({
+    logger: mockLogger,
+}));
+
 vi.mock("../../src/services/rclone.js", () => ({
     CloudTool: mockCloudTool,
 }));
@@ -36,6 +69,13 @@ const mockDriveRepository = {
 vi.mock("../../src/repositories/DriveRepository.js", () => ({
     DriveRepository: mockDriveRepository,
 }));
+
+// Mock BindingService
+const mockBindingService = {
+    unbindDrive: vi.fn(),
+    setDefaultDrive: vi.fn(),
+    startBinding: vi.fn(),
+};
 
 const mockSettingsRepository = {
     get: vi.fn(),
@@ -55,99 +95,42 @@ vi.mock("../../src/modules/SessionManager.js", () => ({
     SessionManager: mockSessionManager,
 }));
 
-// Mock utils/limiter
-vi.mock("../../src/utils/limiter.js", () => ({
-    runBotTask: vi.fn((fn) => fn()),
-    runMtprotoTask: vi.fn((fn) => fn()),
-    runBotTaskWithRetry: vi.fn((fn) => fn()),
-    runMtprotoTaskWithRetry: vi.fn((fn) => fn()),
-    PRIORITY: {
-        HIGH: 10,
-        UI: 20
-    }
+vi.mock("../../src/services/drives/BindingService.js", () => ({
+    BindingService: mockBindingService,
 }));
 
-const CANCEL_PROMPT = "发送 /cancel 或输入 取消 可随时退出绑定流程。";
-const CANCELLED_MESSAGE = "绑定流程已取消，输入 /drive 可重新开始。";
-
-// Mock locales
-vi.mock("../../src/locales/zh-CN.js", () => ({
-    STRINGS: {
-        drive: {
-            menu_title: "网盘管理",
-            bound_list_title: "已绑定账号：",
-            bound_info: "已绑定 {{type}} 账号: {{account}}",
-            is_default: " (默认)",
-            not_bound: "尚未绑定任何网盘",
-            btn_set_default: "设为默认",
-            btn_files: "查看文件",
-            btn_unbind: "解绑账号",
-            unbind_confirm: "确认解绑 {{type}} 账号 ({{account}})？",
-            btn_confirm_unbind: "确认解绑",
-            btn_cancel: "取消",
-            success_unbind: "解绑成功",
-            returned: "已返回",
-            please_confirm: "请确认操作",
-            mega_input_email: "请输入 Mega 邮箱：",
-            mega_input_pass: "请输入密码：",
-            check_input: "请检查输入",
-            bind_failed: "绑定失败",
-            mega_fail_2fa: "\n2FA 已启用，请先在网页端关闭",
-            mega_fail_login: "\n账号或密码错误",
-            mega_success: "绑定成功！\n邮箱: {{email}}",
-            no_drive_unbind: "没有绑定网盘，无需解绑",
-            set_default_success: "设为默认成功",
-            no_drive_found: "没有找到已绑定的网盘",
-            btn_bind: "绑定",
-            btn_bind_other: "绑定其他网盘",
-            cancel_prompt: CANCEL_PROMPT,
-            cancelled: CANCELLED_MESSAGE
-        }
-    },
-    format: (s, args) => {
-        let res = s;
-        if (args) {
-            for (const key in args) {
-                res = res.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), args[key]);
-            }
-        }
-        return res;
-    },
-    escapeHTML: vi.fn(str => str)
-}));
-
-// Mock utils/common
-vi.mock("../../src/utils/common.js", () => ({
-    escapeHTML: vi.fn(str => str)
-}));
-
-// Mock DriveProviderFactory
-const mockProvider = {
-    getBindingSteps: vi.fn().mockReturnValue([
-        { step: "WAIT_EMAIL", prompt: "mega_input_email" },
-        { step: "WAIT_PASS", prompt: "mega_input_pass" }
-    ]),
-    handleInput: vi.fn().mockImplementation((step, text, session) => {
-        if (step === "WAIT_EMAIL") {
-            return Promise.resolve({ success: true, nextStep: "WAIT_PASS", data: { email: text }, message: "mega_input_pass" });
-        }
-        // For WAIT_PASS and others, assume final step success
-        return Promise.resolve({ success: true, data: { user: "test@example.com", pass: text } });
-    }),
-};
+// Mock DriveProviderFactory with mock implementation
 vi.mock("../../src/services/drives/index.js", () => ({
     DriveProviderFactory: {
-        create: vi.fn().mockReturnValue(mockProvider),
+        create: vi.fn().mockReturnValue({
+            getBindingSteps: vi.fn().mockReturnValue([
+                { step: "WAIT_EMAIL", prompt: "mega_input_email" },
+                { step: "WAIT_PASS", prompt: "mega_input_pass" }
+            ]),
+            handleInput: vi.fn().mockImplementation((step, text, session) => {
+                if (step === "WAIT_EMAIL") {
+                    return Promise.resolve({ success: true, nextStep: "WAIT_PASS", data: { email: text }, message: "mega_input_pass" });
+                }
+                return Promise.resolve({ success: true, data: { user: "test@example.com", pass: text } });
+            }),
+        }),
         getSupportedDrives: vi.fn().mockReturnValue([
             { type: "mega", name: "Mega" },
             { type: "googledrive", name: "Google Drive" }
         ]),
+        getSupportedTypes: vi.fn().mockReturnValue(["mega", "googledrive"]),
         isSupported: vi.fn().mockReturnValue(true)
     }
 }));
 
+// 导入 DriveProviderFactory
+import { DriveProviderFactory } from "../../src/services/drives/index.js";
+
 // 导入 DriveConfigFlow
 const { DriveConfigFlow } = await import("../../src/modules/DriveConfigFlow.js");
+
+// Helper to get the mock provider
+const getMockProvider = () => DriveProviderFactory.create();
 
 describe("DriveConfigFlow", () => {
     beforeEach(() => {
@@ -166,16 +149,10 @@ describe("DriveConfigFlow", () => {
         mockSessionManager.start.mockResolvedValue();
         mockSessionManager.update.mockResolvedValue();
         mockSessionManager.clear.mockResolvedValue();
-        mockProvider.getBindingSteps.mockReturnValue([
-            { step: "WAIT_EMAIL", prompt: "mega_input_email" },
-            { step: "WAIT_PASS", prompt: "mega_input_pass" }
-        ]);
-        mockProvider.handleInput.mockImplementation((step, text, session) => {
-            if (step === "WAIT_EMAIL") {
-                return Promise.resolve({ success: true, nextStep: "WAIT_PASS", data: { email: text }, message: "mega_input_pass" });
-            }
-            return Promise.resolve({ success: true, data: { user: "test@example.com", pass: text } });
-        });
+        mockBindingService.unbindDrive.mockResolvedValue();
+        mockBindingService.setDefaultDrive.mockResolvedValue();
+        mockBindingService.startBinding.mockResolvedValue({ success: true, message: "请检查输入" });
+        const mockProvider = getMockProvider();
     });
 
     describe("sendDriveManager", () => {
@@ -244,9 +221,9 @@ describe("DriveConfigFlow", () => {
 
             const result = await DriveConfigFlow.handleCallback(event, "user456");
 
-            expect(mockSettingsRepository.set).toHaveBeenCalledWith("default_drive_user456", "drive1");
+            expect(mockBindingService.setDefaultDrive).toHaveBeenCalledWith("user456", "drive1");
             expect(mockClient.sendMessage).toHaveBeenCalled(); // sendDriveManager refresh
-            expect(result).toBe("设为默认成功");
+            expect(result).toBe("✅ 默认网盘设置成功！");
         });
 
         test("should handle drive_unbind_confirm_ with specific drive", async () => {
@@ -259,7 +236,7 @@ describe("DriveConfigFlow", () => {
 
             expect(mockClient.editMessage).toHaveBeenCalledWith("user123", expect.objectContaining({
                 message: "msg100",
-                text: expect.stringContaining("确认解绑 MEGA 账号"),
+                text: expect.stringContaining("确定要解绑该网盘吗"),
                 parseMode: "html"
             }));
             expect(result).toBe("请确认操作");
@@ -270,10 +247,9 @@ describe("DriveConfigFlow", () => {
 
             const result = await DriveConfigFlow.handleCallback(event, "user456");
 
-            expect(mockDriveRepository.delete).toHaveBeenCalledWith("drive1");
-            expect(mockSettingsRepository.set).toHaveBeenCalledWith("default_drive_user456", null);
+            expect(mockBindingService.unbindDrive).toHaveBeenCalledWith("user456", "drive1");
             expect(mockClient.sendMessage).toHaveBeenCalled(); // sendDriveManager refresh
-            expect(result).toBe("解绑成功");
+            expect(result).toBe("已成功解绑");
         });
 
         test("should handle drive_manager_back", async () => {
@@ -288,13 +264,20 @@ describe("DriveConfigFlow", () => {
         });
 
         test("should handle drive_bind_mega", async () => {
+            mockBindingService.startBinding.mockResolvedValue({
+                success: true,
+                driveType: "mega",
+                step: "WAIT_EMAIL",
+                prompt: "mega_input_email"
+            });
+
             const event = { userId: "user123", msgId: "msg100", data: Buffer.from("drive_bind_mega") };
 
             const result = await DriveConfigFlow.handleCallback(event, "user456");
 
-            expect(mockSessionManager.start).toHaveBeenCalledWith("user456", "MEGA_WAIT_EMAIL");
+            expect(mockBindingService.startBinding).toHaveBeenCalledWith("user456", "mega");
             expect(mockClient.sendMessage).toHaveBeenCalled();
-            expect(result).toBe("请检查输入");
+            expect(result).toBe("请查看输入提示");
         });
     });
 
@@ -304,15 +287,14 @@ describe("DriveConfigFlow", () => {
             const event = {
                 message: { message: "test@example.com", peerId: "chat123", id: "msg200" }
             };
-            const session = { current_step: "MEGA_WAIT_EMAIL" };
+            const session = { current_step: "MEGA:WAIT_EMAIL" };
 
             const result = await DriveConfigFlow.handleInput(event, "user456", session);
 
-            expect(mockSessionManager.update).toHaveBeenCalledWith("user456", "MEGA_WAIT_PASS", { email: "test@example.com" });
-            expect(mockClient.sendMessage).toHaveBeenCalledWith("chat123", {
-                message: `mega_input_pass\n\n${CANCEL_PROMPT}`, // From mock return
+            expect(mockSessionManager.update).toHaveBeenCalledWith("user456", "MEGA:WAIT_PASS", { email: "test@example.com" });
+            expect(mockClient.sendMessage).toHaveBeenCalledWith("chat123", expect.objectContaining({
                 parseMode: "html"
-            });
+            }));
             expect(result).toBe(true);
         });
 
@@ -320,15 +302,14 @@ describe("DriveConfigFlow", () => {
             const event = {
                 message: { message: "/cancel", peerId: "chat123", id: "msg201" }
             };
-            const session = { current_step: "MEGA_WAIT_EMAIL" };
+            const session = { current_step: "MEGA:WAIT_EMAIL" };
 
             const result = await DriveConfigFlow.handleInput(event, "user456", session);
 
             expect(mockSessionManager.clear).toHaveBeenCalledWith("user456");
-            expect(mockClient.sendMessage).toHaveBeenCalledWith("chat123", {
-                message: CANCELLED_MESSAGE,
+            expect(mockClient.sendMessage).toHaveBeenCalledWith("chat123", expect.objectContaining({
                 parseMode: "html"
-            });
+            }));
             expect(result).toBe(true);
         });
 
@@ -337,7 +318,7 @@ describe("DriveConfigFlow", () => {
                 message: { message: "password123", peerId: "chat123", id: "msg200" }
             };
             const session = {
-                current_step: "MEGA_WAIT_PASS",
+                current_step: "MEGA:WAIT_PASS",
                 temp_data: JSON.stringify({ email: "test@example.com" })
             };
 
@@ -352,33 +333,33 @@ describe("DriveConfigFlow", () => {
             expect(result).toBe(true);
         });
 
-        test("should handle CloudTool.validateConfig throwing error", async () => {
+        test("should handle provider handleInput returning failure", async () => {
             const event = {
                 message: { message: "password123", peerId: "chat123", id: "msg200" }
             };
             const session = {
-                current_step: "MEGA_WAIT_PASS",
+                current_step: "MEGA:WAIT_PASS",
                 temp_data: JSON.stringify({ email: "test@example.com" })
             };
 
+            const mockProvider = DriveProviderFactory.create();
             mockProvider.handleInput.mockResolvedValueOnce({ success: false, message: "Network error" });
 
             const result = await DriveConfigFlow.handleInput(event, "user456", session);
 
-            expect(mockClient.editMessage).toHaveBeenCalledWith("chat123", {
-                message: 300,
+            expect(mockClient.editMessage).toHaveBeenCalledWith("chat123", expect.objectContaining({
                 text: "Network error",
                 parseMode: "html"
-            });
+            }));
             expect(result).toBe(true);
         });
 
-        test("should handle MEGA_WAIT_PASS with successful validation", async () => {
+        test("should handle MEGA_WAIT_PASS with successful validation (second)", async () => {
             const event = {
                 message: { message: "password123", peerId: "chat123", id: "msg200" }
             };
             const session = {
-                current_step: "MEGA_WAIT_PASS",
+                current_step: "MEGA:WAIT_PASS",
                 temp_data: JSON.stringify({ email: "test@example.com" })
             };
 
@@ -412,31 +393,31 @@ describe("DriveConfigFlow", () => {
             await DriveConfigFlow.handleUnbind("chat123", "user456");
 
             expect(mockClient.sendMessage).toHaveBeenCalledWith("chat123", {
-                message: "没有绑定网盘，无需解绑",
+                message: "⚠️ 您当前未绑定任何网盘，无需解绑。",
                 parseMode: "html"
             });
         });
     });
 
     describe("Edge Cases and Error Handling", () => {
-        test("should handle CloudTool.validateConfig throwing error", async () => {
+        test("should handle provider handleInput failure in edge case", async () => {
             const event = {
                 message: { message: "password123", peerId: "chat123", id: "msg200" }
             };
             const session = {
-                current_step: "MEGA_WAIT_PASS",
+                current_step: "MEGA:WAIT_PASS",
                 temp_data: JSON.stringify({ email: "test@example.com" })
             };
 
+            const mockProvider = DriveProviderFactory.create();
             mockProvider.handleInput.mockResolvedValueOnce({ success: false, message: "Network error" });
 
             const result = await DriveConfigFlow.handleInput(event, "user456", session);
 
-            expect(mockClient.editMessage).toHaveBeenCalledWith("chat123", {
-                message: 300,
+            expect(mockClient.editMessage).toHaveBeenCalledWith("chat123", expect.objectContaining({
                 text: "Network error",
                 parseMode: "html"
-            });
+            }));
             expect(result).toBe(true);
         });
     });

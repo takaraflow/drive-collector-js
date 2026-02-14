@@ -38,19 +38,19 @@ describe('CloudflareTunnel', () => {
         tunnel.stop();
     });
 
-    test('should extract URL from metrics correctly', () => {
+    test('should extract URL from metrics correctly', async () => {
         const metrics = `
 # HELP cloudflared_tunnel_user_hostname The user-provided hostname of the tunnel.
 # TYPE cloudflared_tunnel_user_hostname gauge
 cloudflared_tunnel_user_hostname{user_hostname="tender-sand-123.trycloudflare.com"} 1
 `;
-        const url = tunnel.extractUrl(metrics);
+        const url = await tunnel.extractUrl(metrics);
         expect(url).toBe('https://tender-sand-123.trycloudflare.com');
     });
 
-    test('should return null if URL not found in metrics', () => {
+    test('should return null if URL not found in metrics', async () => {
         const metrics = 'some random string';
-        const url = tunnel.extractUrl(metrics);
+        const url = await tunnel.extractUrl(metrics);
         expect(url).toBeNull();
     });
 

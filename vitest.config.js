@@ -14,14 +14,7 @@ export default defineConfig({
     maxWorkers: 1,
     minWorkers: 1,
     pool: 'forks',
-    bail: 1,
-  },
-  poolOptions: {
-    forks: {
-      execArgv: ['--max-old-space-size=8192'],
-      isolate: true,
-    },
-    reporters: ['default'],
+    bail: 0,  // 禁用 bail，看到所有测试结果
     setupFiles: ['./test-setup.js'],
     coverage: {
       provider: 'v8',
@@ -34,5 +27,11 @@ export default defineConfig({
       ],
       include: ['src/**/*.js']
     }
-  }
+  },
+  poolOptions: {
+    forks: {
+      execArgv: ['--max-old-space-size=8192'],
+      isolate: true,
+    },
+  },
 })

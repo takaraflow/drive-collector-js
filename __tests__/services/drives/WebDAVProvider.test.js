@@ -2,7 +2,6 @@
  * WebDAVProvider Test
  */
 import { describe, test, expect, beforeEach, vi } from 'vitest';
-import { WebDAVProvider } from '../../../src/services/drives/WebDAVProvider.js';
 
 vi.mock('../../../src/services/logger/index.js', () => ({
     logger: {
@@ -16,6 +15,8 @@ vi.mock('../../../src/services/rclone.js', () => ({
         _obscure: vi.fn(p => `obs_${p}`)
     }
 }));
+
+import { WebDAVProvider } from '../../../src/services/drives/WebDAVProvider.js';
 
 describe('WebDAVProvider', () => {
     let provider;
@@ -34,6 +35,6 @@ describe('WebDAVProvider', () => {
 
     test('should generate connection string', () => {
         const conn = provider.getConnectionString({ url: 'u', user: 'n', pass: 'p' });
-        expect(conn).toBe(':webdav,url="u",user="n",pass="p":');
+        expect(conn).toBe(':webdav,url="u",user="n",pass="p",vendor="other":');
     });
 });

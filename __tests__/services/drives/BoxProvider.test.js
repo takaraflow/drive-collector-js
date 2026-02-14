@@ -2,8 +2,8 @@
  * BoxProvider Test
  */
 import { describe, test, expect, beforeEach, vi } from 'vitest';
-import { BoxProvider } from '../../../src/services/drives/BoxProvider.js';
 
+// Mocks must come before imports
 vi.mock('../../../src/services/logger/index.js', () => ({
     logger: {
         withModule: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() })
@@ -15,6 +15,8 @@ vi.mock('../../../src/services/rclone.js', () => ({
         validateConfig: vi.fn(),
     }
 }));
+
+import { BoxProvider } from '../../../src/services/drives/BoxProvider.js';
 
 describe('BoxProvider', () => {
     let provider;

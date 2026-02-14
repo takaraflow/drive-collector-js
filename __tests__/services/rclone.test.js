@@ -44,6 +44,7 @@ vi.mock('../../src/services/drives/DriveProviderFactory.js', () => ({
                         const pass = (config.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
                         return `:mega,user="${user}",pass="${pass}":`;
                     },
+                    getValidationCommand: () => 'about',
                     getInfo: () => ({ type: 'mega', name: 'Mega' })
                 };
             }
@@ -57,6 +58,7 @@ vi.mock('../../src/services/drives/DriveProviderFactory.js', () => ({
                     const pass = (config.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
                     return `:drive,user="${user}",pass="${pass}":`;
                 },
+                getValidationCommand: () => 'about',
                 getInfo: () => ({ type: 'drive', name: 'Google Drive' })
             };
         }),
@@ -184,33 +186,70 @@ describe('CloudTool', () => {
     });
 
     describe('_obscure', () => {
-        it('should return obscured password on success', () => {
-            mockSpawnSync.mockReturnValue({ status: 0, stdout: 'obscured\n' });
-            expect(CloudTool._obscure('plain')).toBe('obscured');
+        it('should return obscured password on success', async () => {
+            // mock spawn 行为来模拟 rclone obscure 成功
+            mockSpawn.mockImplementation((cmd, args) => {
+                const proc = createAutoProcess((p) => {
+                    p.stdout.emit('data', 'obscured\n');
+                    p.stdout.emit('end');
+                    p.stderr.emit('end');
+                    p.emit('close', 0);
+                });
+                return proc;
+            });
+
+            const result = await CloudTool._obscure('plain');
+            expect(result).toBe('obscured');
         });
 
-        it('should return original password on failure', () => {
-            mockSpawnSync.mockReturnValue({ status: 1, stderr: 'error' });
-            expect(CloudTool._obscure('plain')).toBe('plain');
+        it('should return original password on failure', async () => {
+            // mock spawn 行为来模拟 rclone obscure 失败
+            mockSpawn.mockImplementation((cmd, args) => {
+                const proc = createAutoProcess((p) => {
+                    p.stderr.emit('data', 'error\n');
+                    p.stdout.emit('end');
+                    p.stderr.emit('end');
+                    p.emit('close', 1);  // 非 0 退出码
+                });
+                return proc;
+            });
+
+            const result = await CloudTool._obscure('plain');
+            expect(result).toBe('plain');
         });
 
-        it('should handle spawn error', () => {
-            mockSpawnSync.mockReturnValue({ error: new Error('spawn error') });
-            expect(CloudTool._obscure('plain')).toBe('plain');
+        it('should handle spawn error', async () => {
+            // mock spawn 抛出错误
+            mockSpawn.mockImplementation((cmd, args) => {
+                const proc = createAutoProcess((p) => {
+                    p.emit('error', new Error('spawn error'));
+                });
+                return proc;
+            });
+
+            const result = await CloudTool._obscure('plain');
+            expect(result).toBe('plain');
         });
     });
 
     describe('validateConfig', () => {
         it('should resolve success true when rclone returns 0', async () => {
-            mockSpawn.mockImplementation(() => createAutoProcess((p) => {
-                p.stdout.emit('end');
-                p.stdout.emit('close');
-                p.stderr.emit('end');
-                p.stderr.emit('close');
-                p.emit('exit', 0);
-                p.emit('close', 0);
-            }));
+            mockSpawn.mockImplementation((cmd, args) => {
+                const proc = createAutoProcess((p) => {
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.emit('exit', 0);
+                    p.emit('close', 0);
+                });
+                return proc;
+            });
             const result = await CloudTool.validateConfig('mega', { user: 'u', pass: 'p' });
+            // 调试输出
+            if (!result.success) {
+                console.error('validateConfig failed:', result);
+            }
             expect(result.success).toBe(true);
         });
 
