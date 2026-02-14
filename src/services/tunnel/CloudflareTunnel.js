@@ -56,8 +56,10 @@ export class CloudflareTunnel extends S6ManagedTunnel {
 
             const servicePath = this.servicePath || '/run/service/cloudflared';
             
-            log.info(`Executing: s6-svc ${action} ${servicePath}`);
-            const { stdout, stderr } = await execAsync(`s6-svc ${action} ${servicePath}`);
+            // s6-svc in s6-overlay is typically at /command/s6-svc
+            const s6SvcPath = '/command/s6-svc';
+            log.info(`Executing: ${s6SvcPath} ${action} ${servicePath}`);
+            const { stdout, stderr } = await execAsync(`${s6SvcPath} ${action} ${servicePath}`);
             if (stdout) log.debug(`s6-svc stdout: ${stdout}`);
             if (stderr) log.warn(`s6-svc stderr: ${stderr}`);
             log.info(`Successfully sent s6-svc ${action} signal to ${servicePath}`);
