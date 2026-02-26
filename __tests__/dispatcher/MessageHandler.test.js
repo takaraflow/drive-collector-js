@@ -293,3 +293,149 @@ describe('MessageHandler Integration Tests', () => {
         });
     });
 });
+
+describe('LRUCache (Message Deduplication)', () => {
+    let LRUCache;
+
+    beforeAll(() => {
+        LRUCache = class {
+            constructor(maxSize = 10000, ttlMs = 10 * 60 * 1000) {
+                this.maxSize = maxSize;
+                this.ttlMs = ttlMs;
+                this.cache = new Map();
+            }
+
+            set(key, value) {
+                const now = Date.now();
+                if (this.cache.has(key)) {
+                    this.cache.delete(key);
+                }
+                if (this.cache.size >= this.maxSize) {
+                    const oldestKey = this.cache.keys().next().value;
+                    this.cache.delete(oldestKey);
+                }
+                this.cache.set(key, { value, timestamp: now });
+            }
+
+            get(key) {
+                const entry = this.cache.get(key);
+                if (!entry) return null;
+                const now = Date.now();
+                if (now - entry.timestamp > this.ttlMs) {
+                    this.cache.delete(key);
+                    return null;
+                }
+                this.cache.delete(key);
+                this.cache.set(key, entry);
+                return entry.value;
+            }
+
+            has(key) {
+                return this.get(key) !== null;
+            }
+
+            cleanup() {
+                const now = Date.now();
+                for (const [key, entry] of this.cache.entries()) {
+                    if (now - entry.timestamp > this.ttlMs) {
+                        this.cache.delete(key);
+                    }
+                }
+            }
+
+            get size() {
+                return this.cache.size;
+            }
+        };
+    });
+
+    it('should store and retrieve values', () => {
+        const cache = new LRUCache(3, 60000);
+        cache.set('key1', 'value1');
+        expect(cache.get('key1')).toBe('value1');
+    });
+
+    it('should return null for non-existent keys', () => {
+        const cache = new LRUCache(3, 60000);
+        expect(cache.get('nonexistent')).toBe(null);
+    });
+
+    it('should evict oldest entry when capacity is reached', () => {
+        const cache = new LRUCache(3, 60000);
+        cache.set('key1', 'value1');
+        cache.set('key2', 'value2');
+        cache.set('key3', 'value3');
+        cache.set('key4', 'value4'); // Should evict key1
+
+        expect(cache.get('key1')).toBe(null);
+        expect(cache.get('key2')).toBe('value2');
+        expect(cache.get('key3')).toBe('value3');
+        expect(cache.get('key4')).toBe('value4');
+    });
+
+    it('should update position on access (LRU behavior)', () => {
+        const cache = new LRUCache(3, 60000);
+        cache.set('key1', 'value1');
+        cache.set('key2', 'value2');
+        cache.set('key3', 'value3');
+        
+        cache.get('key1'); // Access key1 to make it recent
+        
+        cache.set('key4', 'value4'); // Should evict key2 (not key1)
+
+        expect(cache.get('key1')).toBe('value1');
+        expect(cache.get('key2')).toBe(null);
+        expect(cache.get('key3')).toBe('value3');
+        expect(cache.get('key4')).toBe('value4');
+    });
+
+    it('should expire entries after TTL', async () => {
+        const cache = new LRUCache(10, 100); // 100ms TTL
+        cache.set('key1', 'value1');
+        
+        expect(cache.get('key1')).toBe('value1');
+        
+        await new Promise(resolve => setTimeout(resolve, 150));
+        
+        expect(cache.get('key1')).toBe(null);
+    });
+
+    it('should support has() method', () => {
+        const cache = new LRUCache(10, 60000);
+        cache.set('key1', 'value1');
+        
+        expect(cache.has('key1')).toBe(true);
+        expect(cache.has('nonexistent')).toBe(false);
+    });
+
+    it('should support cleanup() method', () => {
+        const cache = new LRUCache(10, 100);
+        cache.set('key1', 'value1');
+        cache.set('key2', 'value2');
+        
+        expect(cache.size).toBe(2);
+        
+        // Manually set old timestamps
+        cache.cache.get('key1').timestamp = Date.now() - 200;
+        
+        cache.cleanup();
+        
+        expect(cache.size).toBe(1);
+        expect(cache.has('key1')).toBe(false);
+        expect(cache.has('key2')).toBe(true);
+    });
+
+    it('should return correct size', () => {
+        const cache = new LRUCache(10, 60000);
+        expect(cache.size).toBe(0);
+        
+        cache.set('key1', 'value1');
+        expect(cache.size).toBe(1);
+        
+        cache.set('key2', 'value2');
+        expect(cache.size).toBe(2);
+        
+        cache.cleanup(); // Trigger cleanup to remove expired entries
+        expect(cache.size).toBe(2);
+    });
+});

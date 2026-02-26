@@ -581,6 +581,22 @@ describe('CloudTool', () => {
                 it('should return false for too long paths', () => {
                     expect(CloudTool._validatePath('/' + 'a'.repeat(256))).toBe(false);
                 });
+    
+                it('should return false for path traversal attempts', () => {
+                    expect(CloudTool._validatePath('/share/../etc/passwd')).toBe(false);
+                    expect(CloudTool._validatePath('/share/..//etc/passwd')).toBe(false);
+                    expect(CloudTool._validatePath('/../etc/passwd')).toBe(false);
+                    expect(CloudTool._validatePath('/share/..')).toBe(false);
+                    expect(CloudTool._validatePath('/share/./secret')).toBe(false);
+                    expect(CloudTool._validatePath('/..')).toBe(false);
+                });
+    
+                it('should return false for URL encoded path traversal', () => {
+                    expect(CloudTool._validatePath('/share/%2e%2e/etc/passwd')).toBe(false);
+                    expect(CloudTool._validatePath('/share/%2e./etc/passwd')).toBe(false);
+                    expect(CloudTool._validatePath('/share/.%2e/etc/passwd')).toBe(false);
+                    expect(CloudTool._validatePath('/%2e%2e/etc/passwd')).toBe(false);
+                });
             });
     
             describe('_normalizePath', () => {

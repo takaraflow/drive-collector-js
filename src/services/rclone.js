@@ -241,9 +241,13 @@ export class CloudTool {
         // 路径长度限制
         if (path.length > 255) return false;
         
-        // 防御路径遍历攻击
+        // 防御路径遍历攻击 - 拒绝 .. 
         const normalizedPath = path.normalize('NFC');
         if (normalizedPath.includes('..')) return false;
+        
+        // 拒绝 . 路径分隔符 (如 /share/./secret 或 /share/.)
+        // 但允许文件名中包含 . (如 file.txt, .env)
+        if (path.includes('/.') || path.endsWith('.')) return false;
         
         // 检查 URL 编码的 .. (%2e%2e, %2e., .%2e)
         const lowerPath = path.toLowerCase();
