@@ -261,6 +261,7 @@ export class Dispatcher {
             await this._handleRemoteFolderCallback(event, userId, answer);
 
         } else {
+            log.warn(`未知回调数据: ${data}`, { userId, eventId: event.id?.toString() });
             await answer();
         }
     }

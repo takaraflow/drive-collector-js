@@ -386,8 +386,15 @@ export async function initConfig() {
                         }
                     });
                     
-                    // 启动轮询
-                    provider.startPolling(pollInterval);
+                    // 启动轮询 - 添加回调以便在更新时记录日志
+                    provider.startPolling(pollInterval, {
+                        onUpdate: (secrets) => {
+                            console.log(`🔄 Infisical 配置已更新 (${Object.keys(secrets).length} 个密钥)`);
+                        },
+                        onError: (error) => {
+                            console.warn(`⚠️ Infisical 轮询错误: ${error.message}`);
+                        }
+                    });
                     console.log(`🚀 Infisical 轮询已启动 (间隔: ${pollInterval}ms)`);
                 }
             } catch (error) {

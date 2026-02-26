@@ -941,8 +941,12 @@ export class TaskManager {
 
             let lastUpdate = 0;
             const heartbeat = async (status, downloaded = 0, total = 0) => {
-                if (this.cancelledTaskIds.has(task.id)) task.isCancelled = true;
-                if (task.isCancelled) throw new Error("CANCELLED");
+                // 原子性检查：先获取标志，再检查
+                const isCancelled = this.cancelledTaskIds.has(task.id);
+                if (isCancelled) {
+                    task.isCancelled = true;
+                    throw new Error("CANCELLED");
+                }
                 
                 // 异步更新数据库状态，不阻塞 UI 响应
                 void TaskRepository.updateStatus(task.id, status).catch(e => log.warn("DB status update failed", e));

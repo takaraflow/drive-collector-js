@@ -412,11 +412,20 @@ class CacheService {
             return null;
         } catch (error) {
             log.error(`Get error on ${this.currentProviderName}: ${error.message}`);
-            await this._handleProviderFailure(error);
+            
+            try {
+                await this._handleProviderFailure(error);
+            } catch (failoverError) {
+                log.error(`Failover failed: ${failoverError.message}`);
+            }
             
             // Retry with failover if available
             if (this.isFailoverMode && this.fallbackProvider) {
-                return this._getWithFallback(key, type, options);
+                try {
+                    return await this._getWithFallback(key, type, options);
+                } catch (fallbackError) {
+                    log.error(`Fallback get failed: ${fallbackError.message}`);
+                }
             }
             
             this.stats.misses++;
