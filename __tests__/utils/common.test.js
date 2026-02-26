@@ -28,7 +28,7 @@ vi.mock('telegram/tl/custom/button.js', () => ({
     }
 }));
 
-const { escapeHTML, safeEdit, getMediaInfo, updateStatus } = await import('../../src/utils/common.js');
+const { escapeHTML, safeEdit, getMediaInfo, updateStatus, sanitizeHeaders } = await import('../../src/utils/common.js');
 
 describe('common utils', () => {
     beforeEach(() => {
@@ -200,6 +200,62 @@ describe('common utils', () => {
             const result = getMediaInfo(media);
             expect(result.name).toMatch(/transfer_\d+_[a-z0-9]+\.bin/);
             expect(result.size).toBe(4096);
+        });
+    });
+
+    describe('sanitizeHeaders', () => {
+        it('should remove blacklisted headers', () => {
+            const headers = {
+                'content-type': 'application/json',
+                'nel': 'no',
+                'report-to': 'group',
+                'cf-ray': 'abc123',
+                'server': 'nginx',
+                'date': 'Thu, 01 Jan 2025 00:00:00 GMT'
+            };
+
+            const result = sanitizeHeaders(headers);
+            expect(result).toEqual({ 'content-type': 'application/json' });
+        });
+
+        it('should remove cf-* headers', () => {
+            const headers = {
+                'content-type': 'application/json',
+                'cf-cache-status': 'HIT',
+                'cf-visitor': '{"scheme":"https"}'
+            };
+
+            const result = sanitizeHeaders(headers);
+            expect(result).toEqual({ 'content-type': 'application/json' });
+        });
+
+        it('should return empty object for null input', () => {
+            expect(sanitizeHeaders(null)).toEqual({});
+        });
+
+        it('should return empty object for undefined input', () => {
+            expect(sanitizeHeaders(undefined)).toEqual({});
+        });
+
+        it('should handle Headers object', () => {
+            const headers = new Map([
+                ['content-type', 'application/json'],
+                ['cf-ray', 'abc123']
+            ]);
+            
+            const result = sanitizeHeaders(headers);
+            expect(result).toEqual({ 'content-type': 'application/json' });
+        });
+
+        it('should be case-insensitive for blacklist matching', () => {
+            const headers = {
+                'Content-Type': 'application/json',
+                'NEL': 'no',
+                'Server': 'nginx'
+            };
+
+            const result = sanitizeHeaders(headers);
+            expect(result).toEqual({ 'Content-Type': 'application/json' });
         });
     });
 
