@@ -2,6 +2,7 @@ import { client, getUpdateHealth } from "../services/telegram.js";
 import { d1 } from "../services/d1.js";
 import { cache } from "../services/CacheService.js";
 import { config } from "../config/index.js";
+import { tunnelService } from "../services/TunnelService.js";
 import { spawnSync } from "child_process";
 import * as fs from "fs";
 import * as net from "net";
@@ -40,6 +41,9 @@ export class NetworkDiagnostic {
 
         // 检查 rclone
         results.services.rclone = await this._checkRclone();
+
+        // 检查 Tunnel (Cloudflare Tunnel)
+        results.services.tunnel = await this._checkTunnel();
 
         return results;
     }
@@ -435,6 +439,69 @@ export class NetworkDiagnostic {
                 status: 'error',
                 responseTime: `${Date.now() - startTime}ms`,
                 message: `rclone 检查失败: ${error.message}`
+            };
+        }
+    }
+
+    /**
+     * 检查 Tunnel (Cloudflare Tunnel) 状态
+     */
+    static async _checkTunnel() {
+        const startTime = Date.now();
+        try {
+            const tunnelConfig = config?.tunnel;
+            
+            if (!tunnelConfig || !tunnelConfig.enabled) {
+                return {
+                    status: 'warning',
+                    responseTime: `${Date.now() - startTime}ms`,
+                    message: 'Tunnel 功能未启用'
+                };
+            }
+
+            const status = tunnelService.getStatus();
+            
+            if (!status.enabled) {
+                return {
+                    status: 'warning',
+                    responseTime: `${Date.now() - startTime}ms`,
+                    message: 'Tunnel 未初始化'
+                };
+            }
+
+            // 获取 tunnel URL
+            const tunnelUrl = await tunnelService.getPublicUrl();
+            const responseTime = Date.now() - startTime;
+
+            if (tunnelUrl) {
+                return {
+                    status: 'ok',
+                    responseTime: `${responseTime}ms`,
+                    message: `Tunnel 正常 (${tunnelUrl})`,
+                    details: {
+                        url: tunnelUrl,
+                        provider: tunnelConfig.provider || 'cloudflare',
+                        serviceUp: status.serviceUp,
+                        lastUpdate: status.lastUpdate
+                    }
+                };
+            } else {
+                return {
+                    status: 'warning',
+                    responseTime: `${responseTime}ms`,
+                    message: 'Tunnel 服务运行中但未获取到公网 URL',
+                    details: {
+                        provider: tunnelConfig.provider || 'cloudflare',
+                        serviceUp: status.serviceUp,
+                        lastUpdate: status.lastUpdate
+                    }
+                };
+            }
+        } catch (error) {
+            return {
+                status: 'error',
+                responseTime: `${Date.now() - startTime}ms`,
+                message: `Tunnel 检查失败: ${error.message}`
             };
         }
     }

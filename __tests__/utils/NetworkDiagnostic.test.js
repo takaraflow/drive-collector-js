@@ -23,10 +23,22 @@ vi.mock("../../src/services/CacheService.js", () => ({
     cache: mockCache,
 }));
 
+const mockTunnelService = {
+    getStatus: vi.fn(),
+    getPublicUrl: vi.fn(),
+};
+
+vi.mock("../../src/services/TunnelService.js", () => ({
+    tunnelService: mockTunnelService,
+}));
+
 const mockConfig = {
     botToken: "mock_token",
     telegram: {
         testMode: false
+    },
+    tunnel: {
+        enabled: false
     }
 };
 vi.mock("../../src/config/index.js", () => ({
@@ -285,6 +297,75 @@ describe("NetworkDiagnostic", () => {
 
             expect(result.status).toBe("error");
             expect(result.message).toContain("无法检查");
+        });
+    });
+
+    describe("_checkTunnel", () => {
+        beforeEach(() => {
+            vi.clearAllMocks();
+        });
+
+        it("should return warning when tunnel is not enabled in config", async () => {
+            mockConfig.tunnel = { enabled: false };
+
+            const result = await NetworkDiagnostic._checkTunnel();
+
+            expect(result.status).toBe("warning");
+            expect(result.message).toContain("未启用");
+        });
+
+        it("should return warning when tunnel is enabled but not initialized", async () => {
+            mockConfig.tunnel = { enabled: true };
+            mockTunnelService.getStatus.mockReturnValue({ enabled: false });
+
+            const result = await NetworkDiagnostic._checkTunnel();
+
+            expect(result.status).toBe("warning");
+            expect(result.message).toContain("未初始化");
+        });
+
+        it("should return ok when tunnel is running and has public URL", async () => {
+            mockConfig.tunnel = { enabled: true, provider: 'cloudflare' };
+            mockTunnelService.getStatus.mockReturnValue({
+                enabled: true,
+                serviceUp: true,
+                lastUpdate: new Date().toISOString()
+            });
+            mockTunnelService.getPublicUrl.mockResolvedValue("https://tunnel-url.trycloudflare.com");
+
+            const result = await NetworkDiagnostic._checkTunnel();
+
+            expect(result.status).toBe("ok");
+            expect(result.message).toContain("正常");
+            expect(result.message).toContain("tunnel-url.trycloudflare.com");
+            expect(result.details.url).toBe("https://tunnel-url.trycloudflare.com");
+        });
+
+        it("should return warning when tunnel is running but no public URL", async () => {
+            mockConfig.tunnel = { enabled: true, provider: 'cloudflare' };
+            mockTunnelService.getStatus.mockReturnValue({
+                enabled: true,
+                serviceUp: true,
+                lastUpdate: new Date().toISOString()
+            });
+            mockTunnelService.getPublicUrl.mockResolvedValue(null);
+
+            const result = await NetworkDiagnostic._checkTunnel();
+
+            expect(result.status).toBe("warning");
+            expect(result.message).toContain("运行中但未获取到公网 URL");
+        });
+
+        it("should return error when tunnel check throws exception", async () => {
+            mockConfig.tunnel = { enabled: true };
+            mockTunnelService.getStatus.mockImplementation(() => {
+                throw new Error("Tunnel service error");
+            });
+
+            const result = await NetworkDiagnostic._checkTunnel();
+
+            expect(result.status).toBe("error");
+            expect(result.message).toContain("检查失败");
         });
     });
 

@@ -249,13 +249,15 @@ export class UIHelper {
              };
  
              // 固定长度的标签名，实现表格对齐效果
-             const serviceLabels = {
-                 'telegram': 'TG-MT',
-                 'd1': 'DB-D1',
-                 'kv': 'KV-ST',
-                 'rclone': 'RCLONE',
-                 'bot': 'TG-BOT'
-             };
+              const serviceLabels = {
+                  'telegram': 'TG-MT',
+                  'd1': 'DB-D1',
+                  'kv': 'KV-ST',
+                  'rclone': 'RCLONE',
+                  'bot': 'TG-BOT',
+                  'tunnel': 'TUNNEL',
+                  'redis': 'REDIS'
+              };
  
              for (const [service, result] of Object.entries(data.networkResults.services)) {
                  const emoji = statusEmojis[result.status] || '❓';
