@@ -3,7 +3,7 @@ const {
     serializeError, 
     pruneData, 
     serializeToString 
-} = await import('../../src/utils/serializer.js');
+} = await import('../../../src/utils/serializer.js');
 
 describe('Serializer Utils', () => {
     
