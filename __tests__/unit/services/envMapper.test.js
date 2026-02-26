@@ -1,4 +1,4 @@
-const { normalizeNodeEnv, mapNodeEnvToInfisicalEnv } = await import('../../src/utils/envMapper.js');
+const { normalizeNodeEnv, mapNodeEnvToInfisicalEnv } = await import('../../../src/utils/envMapper.js');
 
 describe('envMapper', () => {
     test('normalizeNodeEnv should normalize production to prod', () => {
