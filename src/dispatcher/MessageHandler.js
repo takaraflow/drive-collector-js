@@ -10,8 +10,69 @@ const log = logger.withModule('MessageHandler');
 // 创建带 perf 上下文的 logger 用于性能日志
 const logPerf = () => log.withContext({ perf: true });
 
+// LRU 缓存实现 - 带容量限制和 TTL
+class LRUCache {
+    constructor(maxSize = 10000, ttlMs = 10 * 60 * 1000) {
+        this.maxSize = maxSize;
+        this.ttlMs = ttlMs;
+        this.cache = new Map();
+    }
+
+    set(key, value) {
+        const now = Date.now();
+        
+        // 如果 key 已存在，删除旧条目（用于更新位置）
+        if (this.cache.has(key)) {
+            this.cache.delete(key);
+        }
+        
+        // 如果缓存已满，删除最旧的条目
+        if (this.cache.size >= this.maxSize) {
+            const oldestKey = this.cache.keys().next().value;
+            this.cache.delete(oldestKey);
+        }
+        
+        this.cache.set(key, { value, timestamp: now });
+    }
+
+    get(key) {
+        const entry = this.cache.get(key);
+        if (!entry) return null;
+        
+        const now = Date.now();
+        if (now - entry.timestamp > this.ttlMs) {
+            this.cache.delete(key);
+            return null;
+        }
+        
+        // 访问后更新位置（移动到 Map 末尾）
+        this.cache.delete(key);
+        this.cache.set(key, entry);
+        
+        return entry.value;
+    }
+
+    has(key) {
+        return this.get(key) !== null;
+    }
+
+    cleanup() {
+        const now = Date.now();
+        for (const [key, entry] of this.cache.entries()) {
+            if (now - entry.timestamp > this.ttlMs) {
+                this.cache.delete(key);
+            }
+        }
+    }
+
+    get size() {
+        return this.cache.size;
+    }
+}
+
 // 全局消息去重缓存 (防止多实例重复处理)
-const processedMessages = new Map();
+// 使用 LRU 缓存，限制最大容量为 10000 条，TTL 为 10 分钟
+const processedMessages = new LRUCache(10000, 10 * 60 * 1000);
 
 /**
  * 消息处理器：负责消息过滤、去重和分发
@@ -216,7 +277,7 @@ export class MessageHandler {
         if (msgId) {
             const now = Date.now();
 
-            // 1.1 内存快速过滤
+            // 1.1 LRU 缓存快速过滤 (自动处理 TTL 和容量限制)
             if (processedMessages.has(msgId)) {
                 log.debug("跳过重复消息", { msgId, filter: 'memory' });
                 return;
@@ -244,14 +305,12 @@ export class MessageHandler {
                 // 这里选择继续执行，毕竟可用性优先
             }
 
-            // 获取锁成功，标记本地并继续
+            // 获取锁成功，标记本地并继续 (LRU 缓存自动管理容量和 TTL)
             processedMessages.set(msgId, now);
             
-            // 清理超过10分钟的旧消息ID (内存)
-            for (const [id, time] of processedMessages.entries()) {
-                if (now - time > 10 * 60 * 1000) {
-                    processedMessages.delete(id);
-                }
+            // 定期触发缓存清理 (每 100 次操作或手动调用)
+            if (processedMessages.size % 100 === 0) {
+                processedMessages.cleanup();
             }
         }
         

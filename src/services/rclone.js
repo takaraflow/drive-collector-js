@@ -221,11 +221,10 @@ export class CloudTool {
      * @param {string} path - 待验证的路径
      * @returns {boolean} 是否有效
      */
-    static _validatePath(path) {
-        if (!path || typeof path !== 'string') return false;
+    static _validatePath(inputPath) {
+        if (!inputPath || typeof inputPath !== 'string') return false;
         
-        // 移除开头和结尾的空白
-        path = path.trim();
+        let path = inputPath.trim();
         
         // 必须以 / 开头
         if (!path.startsWith('/')) return false;
@@ -241,6 +240,24 @@ export class CloudTool {
         
         // 路径长度限制
         if (path.length > 255) return false;
+        
+        // 防御路径遍历攻击
+        const normalizedPath = path.normalize('NFC');
+        if (normalizedPath.includes('..')) return false;
+        
+        // 检查 URL 编码的 .. (%2e%2e, %2e., .%2e)
+        const lowerPath = path.toLowerCase();
+        if (lowerPath.includes('%2e%2e') || 
+            lowerPath.includes('%2e.') || 
+            lowerPath.includes('.%2e')) {
+            return false;
+        }
+        
+        // 使用 path.normalize 规范化后验证路径仍然有效
+        // 这可以捕获如 /foo/./bar 之类的情况
+        const resolvedPath = path.normalize('NFC');
+        if (!resolvedPath.startsWith('/')) return false;
+        if (resolvedPath.includes('..')) return false;
         
         return true;
     }
