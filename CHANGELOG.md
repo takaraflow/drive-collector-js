@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.32.0](https://github.com/YoungSx/drive-collector-js/compare/v4.31.0...v4.32.0) (2026-02-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* QSTASH_PROCESSED_MESSAGES_LIMIT is deprecated, use QUEUE_LOCAL_IDEMPOTENCY_LIMIT instead
+
+### ✨ 新特性
+
+* **cache:** add native compareAndSet support to RedisCache ([2c1ba94](https://github.com/YoungSx/drive-collector-js/commit/2c1ba94e8a24d550a89fd5a79bdf6794b4c63625))
+
+
+### 🐛 问题修复
+
+* **error-handling:** improve error handling and logging across multiple services ([e9b29a7](https://github.com/YoungSx/drive-collector-js/commit/e9b29a7289c43d64b04e9d4f1eb3451715e1032b))
+* **security:** enhance path traversal protection with dot and URL-encoded detection ([cb3a9ef](https://github.com/YoungSx/drive-collector-js/commit/cb3a9efa429558194413fbc0f7b53fed715e59e6))
+* **security:** prevent path traversal attacks in rclone path validation ([bfc3a50](https://github.com/YoungSx/drive-collector-js/commit/bfc3a5038a8b4555760f2e896611ab24230c8e4c))
+* **tunnel:** add wait loop for s6 service directory creation ([326f2a9](https://github.com/YoungSx/drive-collector-js/commit/326f2a972f89e756d10532d01e00879ed5d2aae2))
+* **tunnel:** improve s6-svc error logging and use instance servicePath ([5acf327](https://github.com/YoungSx/drive-collector-js/commit/5acf32736631eca0cefd8fc5fc9ca660ec6ef039))
+* **tunnel:** remove throw to prevent crash on s6-svc failure ([37e1f6d](https://github.com/YoungSx/drive-collector-js/commit/37e1f6d790a8c06c65794f3039ec1afcb59f64ab))
+* **tunnel:** restore s6-svc control to start cloudflared after Infisical init ([a9a2174](https://github.com/YoungSx/drive-collector-js/commit/a9a2174642a9656524b67567c03aa8e66ae5b4cd))
+* **tunnel:** use absolute path for s6-svc command ([304be54](https://github.com/YoungSx/drive-collector-js/commit/304be547ef4514ad25cd53b69dd4a011fe604dc4))
+
+
+### 🚀 性能优化
+
+* add message idempotency and improve cache/memory management ([37cca0d](https://github.com/YoungSx/drive-collector-js/commit/37cca0d8df044e1e5090bfa65fab55dcdc15a8ae))
+
+
+### 📝 文档更新
+
+* **queue:** add queue idempotency documentation and configuration guide ([71124d7](https://github.com/YoungSx/drive-collector-js/commit/71124d7d8d2dd4b78f83a1af08cc895e3e1c165a))
+
 ## [4.31.0](https://github.com/YoungSx/drive-collector-js/compare/v4.30.0...v4.31.0) (2026-02-14)
 
 
