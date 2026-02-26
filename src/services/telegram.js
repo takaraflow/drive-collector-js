@@ -626,12 +626,16 @@ function setupEventListeners(client) {
     // 更新循环健康监控
     let consecutiveUpdateTimeouts = 0;
     client.addEventHandler((update) => {
-        lastUpdateTimestamp = Date.now();
-        if (consecutiveFailures > 0) {
-            consecutiveFailures = 0;
-        }
-        if (consecutiveUpdateTimeouts > 0) {
-            consecutiveUpdateTimeouts = 0;
+        try {
+            lastUpdateTimestamp = Date.now();
+            if (consecutiveFailures > 0) {
+                consecutiveFailures = 0;
+            }
+            if (consecutiveUpdateTimeouts > 0) {
+                consecutiveUpdateTimeouts = 0;
+            }
+        } catch (error) {
+            log.error('Error in event handler:', { error: error.message, stack: error.stack });
         }
     });
 
@@ -639,27 +643,31 @@ function setupEventListeners(client) {
         if (updateHealthMonitor) clearInterval(updateHealthMonitor);
         
         updateHealthMonitor = setInterval(async () => {
-            const timeSinceLastUpdate = Date.now() - lastUpdateTimestamp;
-            
-            if (timeSinceLastUpdate > 60000 && timeSinceLastUpdate <= 120000) {
-                log.warn(`⚠️ 更新循环缓慢 (已持续 ${Math.floor(timeSinceLastUpdate / 1000)} 秒无更新)`);
-                consecutiveUpdateTimeouts++;
+            try {
+                const timeSinceLastUpdate = Date.now() - lastUpdateTimestamp;
+                
+                if (timeSinceLastUpdate > 60000 && timeSinceLastUpdate <= 120000) {
+                    log.warn(`⚠️ 更新循环缓慢 (已持续 ${Math.floor(timeSinceLastUpdate / 1000)} 秒无更新)`);
+                    consecutiveUpdateTimeouts++;
 
-                if (!isReconnecting) {
-                    handleConnectionIssue(true, TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
+                    if (!isReconnecting) {
+                        handleConnectionIssue(true, TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
+                    }
+                } else if (timeSinceLastUpdate > 120000) {
+                    log.error(`🚨 更新循环卡死 (${Math.floor(timeSinceLastUpdate / 1000)} 秒)，触发完整重置`, { service: 'telegram', duration: timeSinceLastUpdate });
+                    telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
+                    consecutiveUpdateTimeouts++;
+                    
+                    if (consecutiveUpdateTimeouts > 2) {
+                        await resetClientSession();
+                        await handleConnectionIssue(false, TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
+                        consecutiveUpdateTimeouts = 0;
+                    }
+                    
+                    lastUpdateTimestamp = Date.now();
                 }
-            } else if (timeSinceLastUpdate > 120000) {
-                log.error(`🚨 更新循环卡死 (${Math.floor(timeSinceLastUpdate / 1000)} 秒)，触发完整重置`, { service: 'telegram', duration: timeSinceLastUpdate });
-                telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
-                consecutiveUpdateTimeouts++;
-                
-                if (consecutiveUpdateTimeouts > 2) {
-                    await resetClientSession();
-                    await handleConnectionIssue(false, TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
-                    consecutiveUpdateTimeouts = 0;
-                }
-                
-                lastUpdateTimestamp = Date.now();
+            } catch (error) {
+                log.error('Error in health monitor interval:', { error: error.message, stack: error.stack });
             }
         }, 30000);
     });

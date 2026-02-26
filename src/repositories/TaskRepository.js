@@ -20,6 +20,7 @@ export class TaskRepository {
     static STALLED_TASKS_DEFAULT_LIMIT = 200;
     static STALLED_TASKS_MIN_LIMIT = 50;
     static STALLED_TASKS_MAX_LIMIT = 1000;
+    static MAX_PENDING_UPDATES = 1000; // Max size limit for pendingUpdates Map
     
     // 重要的中间状态（需要 Redis 中转，避免实例崩溃时丢失）
     static IMPORTANT_STATUSES = ['downloading', 'uploading'];
@@ -68,6 +69,15 @@ export class TaskRepository {
      */
     static async flushUpdates() {
         if (this.pendingUpdates.size === 0) return;
+        
+        // Size-based eviction: remove oldest entries if over limit
+        if (this.pendingUpdates.size > this.MAX_PENDING_UPDATES) {
+            const sortedEntries = [...this.pendingUpdates.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp);
+            const entriesToRemove = sortedEntries.slice(0, this.pendingUpdates.size - this.MAX_PENDING_UPDATES);
+            for (const [taskId] of entriesToRemove) {
+                this.pendingUpdates.delete(taskId);
+            }
+        }
 
         // 获取待处理的任务列表
         const allUpdates = Array.from(this.pendingUpdates.values());

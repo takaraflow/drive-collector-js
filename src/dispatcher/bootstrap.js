@@ -232,7 +232,11 @@ export async function startDispatcher() {
     // 初始化 MessageHandler (预加载 Bot ID)
     const client = await getClient();
     client.addEventHandler(async (event) => {
-        await MessageHandler.handleEvent(event, client);
+        try {
+            await MessageHandler.handleEvent(event, client);
+        } catch (error) {
+            log.error('Error handling Telegram event:', { error: error.message, stack: error.stack });
+        }
     });
 
     // 延迟初始化 Bot ID (等待连接建立)

@@ -6,7 +6,6 @@ import { CircuitBreakerManager } from "../../services/CircuitBreaker.js";
 import CloudQueueBase from "./CloudQueueBase.js";
 import { BaseQueue } from "./BaseQueue.js";
 import { metrics } from "../../services/MetricsService.js";
-import crypto from "crypto";
 
 const log = logger.withModule?.('QstashQueue') || logger;
 
@@ -34,7 +33,6 @@ export class QstashQueue extends CloudQueueBase {
         this.client = null;
         this.bufferMutex = new Mutex();
         this.receiver = null;
-        this.inFlightPublishes = new Map();
         
         // QStash 特有的熔断器
         this.publishBreaker = CircuitBreakerManager.get('qstash_publish', {
@@ -49,13 +47,6 @@ export class QstashQueue extends CloudQueueBase {
 
         // 1. 缓冲区管理优化 - 最大缓冲区大小
         this.maxBufferSize = parseInt(process.env.QSTASH_MAX_BUFFER_SIZE) || 1000;
-
-        // 4. 消息幂等性处理 - 已处理消息缓存
-        this.processedMessages = new Set();
-        this.processedMessagesLimit = parseInt(process.env.QSTASH_PROCESSED_MESSAGES_LIMIT) || 10000;
-
-        // 5. 分布式熔断器 - Redis 客户端（可选）
-        this.redisClient = null;
 
         // 3. 死信队列 - 存储失败消息
         this.deadLetterQueue = [];
@@ -125,9 +116,12 @@ export class QstashQueue extends CloudQueueBase {
                     },
                     setex: async (key, ttlSeconds, value) => {
                         await cache.set(key, value, ttlSeconds, { skipTtlRandomization: true, skipL1: true });
+                    },
+                    del: async (key) => {
+                        await cache.set(key, '', 0, { skipL1: true });
                     }
                 };
-                log.info('QStashQueue: CacheService wrapper initialized for distributed circuit breaker');
+                log.info('QueueBase: CacheService wrapper initialized for distributed idempotency');
             } else {
                 log.warn('QStashQueue: Redis client not available, using local circuit breaker');
             }
@@ -362,13 +356,12 @@ export class QstashQueue extends CloudQueueBase {
             });
         }
         
-        // 检查是否已处理
-        if (this.processedMessages.has(messageId)) {
+        // 检查是否已处理（使用父类的幂等性检查）
+        const isDuplicate = await this._checkIdempotency(messageId);
+        if (isDuplicate) {
             this.metrics.duplicateMessageCount++;
             metrics.increment('messages.duplicate');
             log.warn(`Duplicate message detected: ${messageId}`);
-            
-            // 返回之前的处理结果
             return { messageId, duplicate: true };
         }
 
@@ -384,7 +377,7 @@ export class QstashQueue extends CloudQueueBase {
                 return { messageId, mock: true };
             }
 
-            // 实际发布：不使用 fallback 静默吞错，避免“看似入队成功但实际未发送”
+            // 实际发布：不使用 fallback 静默吞错，避免"看似入队成功但实际未发送"
             const startTime = Date.now();
             try {
                 const result = await this.publishBreaker.execute(() => this._executeWithRetry(async () => {
@@ -415,6 +408,9 @@ export class QstashQueue extends CloudQueueBase {
                     metrics.increment('circuit.breaker.trips');
                 }
 
+                // 发布失败时清理 Redis key，允许后续重试
+                await this._clearIdempotencyKey(messageId);
+
                 // 失败时加入死信队列，避免静默丢消息
                 this._addToDeadLetterQueue({ topic, message, options }, 'publish_failed', error);
                 if (isQstashDebugEnabled()) {
@@ -434,29 +430,6 @@ export class QstashQueue extends CloudQueueBase {
             return await publishPromise;
         } finally {
             this.inFlightPublishes.delete(messageId);
-        }
-    }
-
-    /**
-     * 生成唯一的消息ID
-     */
-    _generateMessageId(topic, message) {
-        const content = typeof message === 'string' ? message : JSON.stringify(message);
-        const hash = crypto.createHash('md5').update(`${topic}:${content}`).digest('hex');
-        return `msg_${hash}`;
-    }
-
-    /**
-     * 4. 消息幂等性处理 - 添加已处理消息到缓存
-     */
-    _addProcessedMessage(messageId) {
-        this.processedMessages.add(messageId);
-        
-        // 如果超过限制，移除最旧的
-        if (this.processedMessages.size > this.processedMessagesLimit) {
-            const iterator = this.processedMessages.values();
-            const oldest = iterator.next().value;
-            this.processedMessages.delete(oldest);
         }
     }
 
@@ -816,20 +789,6 @@ export class QstashQueue extends CloudQueueBase {
     }
 
     // 这些方法已在前面定义过，移除重复
-
-    /**
-     * 获取处理过的消息ID列表（供测试使用）
-     */
-    getProcessedMessages() {
-        return Array.from(this.processedMessages);
-    }
-
-    /**
-     * 清空已处理消息缓存（供测试使用）
-     */
-    clearProcessedMessages() {
-        this.processedMessages.clear();
-    }
 
     /**
      * 获取队列状态（供监控使用）

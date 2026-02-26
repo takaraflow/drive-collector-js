@@ -121,7 +121,7 @@ class CacheService {
             lastReset: Date.now()
         };
         
-        // Bloom Filter for cache penetration protection
+        // Bloom Filter for cache penetration protection - opt-in via environment variable
         this.bloomFilter = null;
         this.bloomFilterEnabled = process.env.CACHE_BLOOM_FILTER === 'true';
     }
@@ -907,7 +907,8 @@ class CacheService {
             // Simple bloom filter implementation
             // In production, use a proper library like 'bloom-filters'
             const { BloomFilter } = await import('bloom-filters');
-            this.bloomFilter = new BloomFilter(1000, 0.01); // 1000 items, 1% false positive rate
+            // Use optimal parameters: 1000 expected items with 1% false positive rate
+            this.bloomFilter = new BloomFilter(1000, 0.01);
             log.info('Bloom filter initialized');
         } catch (error) {
             log.warn(`Bloom filter initialization failed: ${error.message}`);

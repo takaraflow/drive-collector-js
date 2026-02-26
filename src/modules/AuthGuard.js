@@ -7,6 +7,7 @@ const log = logger.withModule ? logger.withModule('AuthGuard') : logger;
 const ROLE_ORDER = ["banned", "user", "trusted", "admin", "owner"];
 const DEFAULT_ROLE = "user";
 const CACHE_MS = 5 * 60 * 1000;
+const MAX_ROLE_CACHE_SIZE = 1000;
 
 const ACL = {
     // === 基础功能 ===
@@ -35,6 +36,36 @@ const isRoleAllowed = (role, allowedRoles) => {
     return allowedRoles.some((ar) => r >= roleRank(ar));
 };
 
+/**
+ * Evict expired entries from roleCache and perform size-based cleanup
+ * @param {Map} cache - The role cache Map
+ */
+const cleanupRoleCache = (cache) => {
+    const now = Date.now();
+    const keysToDelete = [];
+    
+    // First, remove expired entries (TTL-based eviction)
+    for (const [key, value] of cache.entries()) {
+        if (now - value.ts >= CACHE_MS) {
+            keysToDelete.push(key);
+        }
+    }
+    
+    // Delete expired entries
+    for (const key of keysToDelete) {
+        cache.delete(key);
+    }
+    
+    // If still over max size, remove oldest entries
+    if (cache.size > MAX_ROLE_CACHE_SIZE) {
+        const sortedEntries = [...cache.entries()].sort((a, b) => a[1].ts - b[1].ts);
+        const entriesToRemove = sortedEntries.slice(0, cache.size - MAX_ROLE_CACHE_SIZE);
+        for (const [key] of entriesToRemove) {
+            cache.delete(key);
+        }
+    }
+};
+
 export const AuthGuard = {
     roleCache: new Map(),
 
@@ -51,6 +82,12 @@ export const AuthGuard = {
             const row = await d1.fetchOne("SELECT role FROM user_roles WHERE user_id = ?", [idStr]);
             const role = row?.role || DEFAULT_ROLE;
             this.roleCache.set(idStr, { role, ts: now });
+            
+            // Cleanup if cache is getting large
+            if (this.roleCache.size > MAX_ROLE_CACHE_SIZE) {
+                cleanupRoleCache(this.roleCache);
+            }
+            
             return role;
         } catch (error) {
             log.error("Failed to fetch user role from DB:", error);

@@ -2,6 +2,7 @@ import { Button } from "telegram/tl/custom/button.js";
 import { runBotTask, runBotTaskWithRetry } from "./limiter.js";
 import { STRINGS } from "../locales/zh-CN.js";
 import { logger } from "../services/logger/index.js";
+import crypto from "crypto";
 
 const log = logger.withModule ? logger.withModule('CommonUtils') : logger;
 
@@ -70,11 +71,11 @@ export const getMediaInfo = (input) => {
     if (!obj) return null;
     let name = obj.attributes?.find(a => a.fileName)?.fileName;
     if (!name) {
-        // 使用时间戳 + 6位随机字符串确保文件名唯一，特别是在处理媒体组时
-        const nonce = Math.random().toString(36).substring(2, 8);
+        // 使用时间戳 + UUID 确保文件名唯一，特别是在处理媒体组时
+        const uuid = crypto.randomUUID().substring(0, 8);
         const timestamp = Date.now();
         const ext = media.video ? ".mp4" : (media.photo ? ".jpg" : ".bin");
-        name = `transfer_${timestamp}_${nonce}${ext}`;
+        name = `transfer_${timestamp}_${uuid}${ext}`;
     }
     const size = obj.size || (obj.sizes ? obj.sizes[obj.sizes.length - 1].size : 0);
     const parsedSize = parseInt(size, 10);

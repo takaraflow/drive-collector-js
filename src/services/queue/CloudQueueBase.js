@@ -1,4 +1,8 @@
 import { BaseQueue } from './BaseQueue.js';
+import { logger } from '../logger/index.js';
+import crypto from 'crypto';
+
+const log = logger.withModule?.('CloudQueueBase') || logger;
 
 /**
  * CloudQueueBase - 云消息队列中间抽象组件
@@ -9,6 +13,7 @@ import { BaseQueue } from './BaseQueue.js';
  * - Mock模式
  * - 并发控制
  * - 网络控制
+ * - 消息幂等性（本地 + Redis）
  */
 export default class CloudQueueBase extends BaseQueue {
     constructor(options = {}) {
@@ -21,6 +26,22 @@ export default class CloudQueueBase extends BaseQueue {
         this.batchTimeout = options.batchTimeout || parseInt(process.env.BATCH_TIMEOUT) || 100;
         this.buffer = [];
         this.flushTimer = null;
+
+        // ========== 消息幂等性 ==========
+        // 本地缓存（快速路径）
+        this.processedMessages = new Set();
+        this.processedMessagesLimit = parseInt(process.env.QUEUE_LOCAL_IDEMPOTENCY_LIMIT) || 1000;
+
+        // Redis 分布式去重（可选）
+        this.idempotencyKeyPrefix = 'queue:idempotency:';
+        this.idempotencyKeyTtl = parseInt(process.env.QUEUE_IDEMPOTENCY_TTL) || 86400;
+        this.useRedisIdempotency = process.env.QUEUE_USE_IDEMPOTENCY === 'true';
+        
+        // Redis 客户端（子类初始化）
+        this.redisClient = null;
+        
+        // 并发发布防重
+        this.inFlightPublishes = new Map();
     }
 
     /**
@@ -223,4 +244,111 @@ export default class CloudQueueBase extends BaseQueue {
 
     // Mock模式标志
     isMockMode = false;
+
+    // ========== 消息幂等性方法 ==========
+
+    /**
+     * 生成消息ID（子类可覆盖）
+     * @param {string} topic - 主题
+     * @param {any} message - 消息内容
+     * @returns {string} - 消息ID
+     */
+    _generateMessageId(topic, message) {
+        const content = typeof message === 'string' ? message : JSON.stringify(message);
+        const hash = crypto.createHash('md5').update(`${topic}:${content}`).digest('hex');
+        return `msg_${hash}`;
+    }
+
+    /**
+     * 检查消息是否已处理（本地 + Redis）
+     * @param {string} messageId - 消息ID
+     * @returns {Promise<boolean>} - 是否已处理
+     */
+    async _checkIdempotency(messageId) {
+        // 1. 本地缓存检查（快速路径）
+        if (this.processedMessages.has(messageId)) {
+            return true;
+        }
+
+        // 2. Redis 分布式检查
+        if (this.useRedisIdempotency && this.redisClient) {
+            const redisKey = `${this.idempotencyKeyPrefix}${messageId}`;
+            try {
+                const existing = await this.redisClient.get(redisKey);
+                if (existing !== null && existing !== undefined) {
+                    // 同步到本地缓存
+                    this._addProcessedMessage(messageId);
+                    return true;
+                }
+
+                // 原子设置 key
+                await this.redisClient.setex(redisKey, this.idempotencyKeyTtl, '1');
+            } catch (error) {
+                log.warn(`Redis idempotency check failed: ${error.message}`);
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * 添加已处理消息到本地缓存
+     * @param {string} messageId - 消息ID
+     */
+    _addProcessedMessage(messageId) {
+        this.processedMessages.add(messageId);
+        
+        // FIFO 驱逐
+        if (this.processedMessages.size > this.processedMessagesLimit) {
+            const iterator = this.processedMessages.values();
+            const oldest = iterator.next().value;
+            this.processedMessages.delete(oldest);
+        }
+    }
+
+    /**
+     * 清理 Redis 幂等性 key（发布失败时调用）
+     * @param {string} messageId - 消息ID
+     */
+    async _clearIdempotencyKey(messageId) {
+        if (this.useRedisIdempotency && this.redisClient && this.redisClient.del) {
+            const redisKey = `${this.idempotencyKeyPrefix}${messageId}`;
+            try {
+                await this.redisClient.del(redisKey);
+            } catch (error) {
+                log.warn(`Failed to clear idempotency key: ${error.message}`);
+            }
+        }
+    }
+
+    /**
+     * 获取幂等性状态（供监控使用）
+     */
+    getIdempotencyStatus() {
+        return {
+            localCache: {
+                size: this.processedMessages.size,
+                limit: this.processedMessagesLimit
+            },
+            redis: {
+                enabled: this.useRedisIdempotency,
+                keyPrefix: this.idempotencyKeyPrefix,
+                ttl: this.idempotencyKeyTtl
+            }
+        };
+    }
+
+    /**
+     * 清空本地幂等性缓存（供测试使用）
+     */
+    clearProcessedMessages() {
+        this.processedMessages.clear();
+    }
+
+    /**
+     * 获取已处理消息列表（供测试使用）
+     */
+    getProcessedMessages() {
+        return Array.from(this.processedMessages);
+    }
 }

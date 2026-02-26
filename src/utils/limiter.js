@@ -156,12 +156,45 @@ const botGlobalLimiter = createAutoScalingLimiter(
 
 // Telegram Bot API：单用户 1 QPS
 const botUserLimiters = new Map();
+const MAX_USER_LIMITERS = 1000;
+const LIMITER_IDLE_MS = 30 * 60 * 1000; // 30 minutes
+
+/**
+ * Cleanup idle user limiters to prevent unbounded growth
+ */
+const cleanupIdleUserLimiters = () => {
+    const now = Date.now();
+    const keysToDelete = [];
+    
+    for (const [userId, limiterData] of botUserLimiters.entries()) {
+        if (now - limiterData.lastUsed > LIMITER_IDLE_MS) {
+            keysToDelete.push(userId);
+        }
+    }
+    
+    for (const userId of keysToDelete) {
+        botUserLimiters.delete(userId);
+    }
+};
+
 const getUserLimiter = (userId) => {
     if (!userId) return botGlobalLimiter;
-    if (!botUserLimiters.has(userId)) {
-        botUserLimiters.set(userId, createLimiter({ intervalCap: 1, interval: 1000 }));
+    
+    // Periodic cleanup when map gets large
+    if (botUserLimiters.size > MAX_USER_LIMITERS) {
+        cleanupIdleUserLimiters();
     }
-    return botUserLimiters.get(userId);
+    
+    if (!botUserLimiters.has(userId)) {
+        botUserLimiters.set(userId, {
+            limiter: createLimiter({ intervalCap: 1, interval: 1000 }),
+            lastUsed: Date.now()
+        });
+    }
+    
+    const limiterData = botUserLimiters.get(userId);
+    limiterData.lastUsed = Date.now();
+    return limiterData.limiter;
 };
 
 // Telegram Bot API：文件上传限流 20/分钟（带自动缩放）

@@ -73,6 +73,10 @@ export class TaskManager {
     static processingUploadTasks = new Set(); // 正在上传的任务
     static waitingUploadTasks = []; // 等待上传的任务队列
     
+    // Max queue size limits to prevent unbounded growth
+    static MAX_WAITING_TASKS = 1000;
+    static MAX_WAITING_UPLOAD_TASKS = 500;
+    
     // UI更新节流控制
     static uiUpdateTracker = {
         count: 0,
@@ -96,6 +100,22 @@ export class TaskManager {
      */
     static getWaitingCount() {
         return this.waitingTasks.length + this.waitingUploadTasks.length;
+    }
+    
+    /**
+     * Enforce max queue size limits for waiting tasks arrays
+     * Removes oldest entries when limits are exceeded
+     */
+    static enforceQueueSizeLimits() {
+        // Trim waitingTasks if over limit
+        if (this.waitingTasks.length > this.MAX_WAITING_TASKS) {
+            this.waitingTasks = this.waitingTasks.slice(-this.MAX_WAITING_TASKS);
+        }
+        
+        // Trim waitingUploadTasks if over limit
+        if (this.waitingUploadTasks.length > this.MAX_WAITING_UPLOAD_TASKS) {
+            this.waitingUploadTasks = this.waitingUploadTasks.slice(-this.MAX_WAITING_UPLOAD_TASKS);
+        }
     }
 
     /**
@@ -1530,6 +1550,9 @@ export class TaskManager {
                     if (botGlobalLimiter?.adjustConcurrency) botGlobalLimiter.adjustConcurrency();
                     if (mtprotoLimiter?.adjustConcurrency) mtprotoLimiter.adjustConcurrency();
                     if (mtprotoFileLimiter?.adjustConcurrency) mtprotoFileLimiter.adjustConcurrency();
+                    
+                    // Enforce queue size limits to prevent unbounded growth
+                    this.enforceQueueSizeLimits();
                 } catch (error) {
                     log.error('Auto-scaling adjustment error:', error);
                 }

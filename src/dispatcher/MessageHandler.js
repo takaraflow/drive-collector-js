@@ -16,6 +16,8 @@ class LRUCache {
         this.maxSize = maxSize;
         this.ttlMs = ttlMs;
         this.cache = new Map();
+        this.cleanupCounter = 0;
+        this.cleanupInterval = 100; // Cleanup every 100 operations
     }
 
     set(key, value) {
@@ -33,6 +35,13 @@ class LRUCache {
         }
         
         this.cache.set(key, { value, timestamp: now });
+        
+        // Periodic cleanup
+        this.cleanupCounter++;
+        if (this.cleanupCounter >= this.cleanupInterval) {
+            this.cleanup();
+            this.cleanupCounter = 0;
+        }
     }
 
     get(key) {
@@ -58,10 +67,16 @@ class LRUCache {
 
     cleanup() {
         const now = Date.now();
+        const keysToDelete = [];
+        
         for (const [key, entry] of this.cache.entries()) {
             if (now - entry.timestamp > this.ttlMs) {
-                this.cache.delete(key);
+                keysToDelete.push(key);
             }
+        }
+        
+        for (const key of keysToDelete) {
+            this.cache.delete(key);
         }
     }
 

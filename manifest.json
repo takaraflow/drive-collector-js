@@ -494,7 +494,22 @@
       "QSTASH_PROCESSED_MESSAGES_LIMIT": {
         "type": "number",
         "required": false,
-        "description": "Max size for in-memory idempotency cache"
+        "description": "Max size for in-memory idempotency cache (deprecated, use QUEUE_LOCAL_IDEMPOTENCY_LIMIT)"
+      },
+      "QUEUE_USE_IDEMPOTENCY": {
+        "type": "boolean",
+        "required": false,
+        "description": "Enable Redis-based distributed idempotency check"
+      },
+      "QUEUE_IDEMPOTENCY_TTL": {
+        "type": "number",
+        "required": false,
+        "description": "TTL in seconds for Redis idempotency keys (default: 86400 = 24h)"
+      },
+      "QUEUE_LOCAL_IDEMPOTENCY_LIMIT": {
+        "type": "number",
+        "required": false,
+        "description": "Max size for local in-memory idempotency cache"
       },
       "QSTASH_DLQ_SIZE": {
         "type": "number",
