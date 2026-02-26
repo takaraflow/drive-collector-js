@@ -515,6 +515,14 @@ const PATH_MAP = {
 | `INSTANCE_COUNT` | 总实例数量 | 是* |
 | `PORT` | Webhook 端口 | 否，默认 7860 |
 
+#### 队列幂等性配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `QUEUE_USE_IDEMPOTENCY` | `false` | 启用 Redis 分布式去重 |
+| `QUEUE_IDEMPOTENCY_TTL` | `86400` | Redis key TTL（秒），默认 24 小时 |
+| `QUEUE_LOCAL_IDEMPOTENCY_LIMIT` | `1000` | 本地缓存最大条目数 |
+
 * 启用 QStash 功能时需要
 
 ### Manifest 端点配置
@@ -656,10 +664,11 @@ lb:leader
 
 - [lb-worker-js README](../README.md)
 - [drive-collector-js README](../drive-collector-js/README.md)
+- [队列幂等性指南](./QUEUE_IDEMPOTENCY_GUIDE.md)
 - [QStash 文档](https://upstash.com/docs/qstash)
 - [Cloudflare Workers 文档](https://developers.cloudflare.com/workers/)
 
 ---
 
-**最后更新**: 2026-01-08
+**最后更新**: 2026-02-27
 **维护者**: shangxin <shangxin@outlook.com>

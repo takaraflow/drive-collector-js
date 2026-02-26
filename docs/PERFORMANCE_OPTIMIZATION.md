@@ -42,6 +42,25 @@ this.flushTimer = null;
 - 优化后：10个任务 = 1次API调用
 - **减少90% API调用**
 
+#### 1.3 消息幂等性保障
+**实现位置**: `src/services/queue/CloudQueueBase.js`
+
+**核心特性**:
+```javascript
+// 两层检查：本地缓存 + Redis 分布式
+this.processedMessages = new Set();           // 本地快速路径
+this.useRedisIdempotency = process.env.QUEUE_USE_IDEMPOTENCY === 'true';
+```
+
+**配置**:
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `QUEUE_USE_IDEMPOTENCY` | `false` | 启用 Redis 分布式去重 |
+| `QUEUE_IDEMPOTENCY_TTL` | `86400` | Redis key TTL（秒） |
+| `QUEUE_LOCAL_IDEMPOTENCY_LIMIT` | `1000` | 本地缓存上限 |
+
+**详细文档**: [队列幂等性指南](./QUEUE_IDEMPOTENCY_GUIDE.md)
+
 #### 1.2 本地缓冲队列
 **实现位置**: `src/services/queue/LocalBufferQueue.js`
 
