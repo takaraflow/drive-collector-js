@@ -1228,6 +1228,9 @@ export class TaskManager {
         }
 
         let didActivate = false;
+        let localPath = null;
+        let info = null;
+
         try {
             // 防重入：上传 Task 也增加检查
             if (this.activeProcessors.has(id)) {
@@ -1238,42 +1241,39 @@ export class TaskManager {
             this.inFlightTasks.set(id, task);
             didActivate = true;
 
-            const info = getMediaInfo(task.message.media);
+            info = getMediaInfo(task.message.media);
             if (!info) {
-                this.activeProcessors.delete(id);
                 return;
             }
 
-            const localPath = task.localPath;
+            localPath = task.localPath;
             if (!fs.existsSync(localPath)) {
                 await TaskRepository.updateStatus(task.id, 'failed', 'Local file not found');
                 const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
                 const fileNameHtml = `<a href="${fileLink}">${escapeHTML(info.name)}</a>`;
                 await updateStatus(task, format(STRINGS.task.failed_validation, { name: fileNameHtml }), true);
-                this.activeProcessors.delete(id);
                 return;
             }
 
-        let lastUpdate = 0;
-        const heartbeat = async (status, downloaded = 0, total = 0, uploadProgress = null) => {
-            if (this.cancelledTaskIds.has(task.id)) task.isCancelled = true;
-            if (task.isCancelled) throw new Error("CANCELLED");
-            await TaskRepository.updateStatus(task.id, status);
+            let lastUpdate = 0;
+            const heartbeat = async (status, downloaded = 0, total = 0, uploadProgress = null) => {
+                if (this.cancelledTaskIds.has(task.id)) task.isCancelled = true;
+                if (task.isCancelled) throw new Error("CANCELLED");
+                await TaskRepository.updateStatus(task.id, status);
 
-            if (task.isGroup) {
-                await this._refreshGroupMonitor(task, status, downloaded, total);
-            } else {
-                let text;
-                if (status === 'uploading' && uploadProgress) {
-                    text = UIHelper.renderProgress(uploadProgress.bytes, uploadProgress.size, STRINGS.task.uploading, info.name);
+                if (task.isGroup) {
+                    await this._refreshGroupMonitor(task, status, downloaded, total);
                 } else {
-                    text = STRINGS.task.uploading;
+                    let text;
+                    if (status === 'uploading' && uploadProgress) {
+                        text = UIHelper.renderProgress(uploadProgress.bytes, uploadProgress.size, STRINGS.task.uploading, info.name);
+                    } else {
+                        text = STRINGS.task.uploading;
+                    }
+                    await updateStatus(task, text);
                 }
-                await updateStatus(task, text);
-            }
-        };
+            };
 
-        try {
             // 上传前重复检查：如果远程已存在同名且大小匹配的文件，跳过上传
             // 使用快速检查模式：不重试，跳过耗时的目录回退
             const fileName = path.basename(localPath);
@@ -1289,7 +1289,6 @@ export class TaskManager {
                     const fileNameHtml = `<a href="${fileLink}">${escapeHTML(fileName)}</a>`;
                     await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: fileNameHtml, folder: actualUploadPath }), true);
                 }
-                this.activeProcessors.delete(id);
                 return;
             }
 
@@ -1422,22 +1421,29 @@ export class TaskManager {
             }
         } finally {
             // 上传完成后异步清理本地文件
-            try {
-                if (fs.promises && fs.promises.unlink) {
-                    await fs.promises.unlink(localPath);
-                } else {
-                    fs.unlinkSync(localPath);
+            if (localPath) {
+                try {
+                    if (fs.promises && fs.promises.unlink) {
+                        await fs.promises.unlink(localPath);
+                    } else {
+                        fs.unlinkSync(localPath);
+                    }
+                } catch (e) {
+                    log.warn(`Failed to cleanup local file ${localPath}:`, e);
                 }
-            } catch (e) {
-                log.warn(`Failed to cleanup local file ${localPath}:`, e);
             }
+            
+            // 确保 activeProcessors 被清理
             this.activeProcessors.delete(id);
+            
+            // 确保 inFlightTasks 被清理
+            if (didActivate) {
+                this.inFlightTasks.delete(id);
+            }
+            
+            // 确保分布式锁被释放
+            await instanceCoordinator.releaseTaskLock(id);
         }
-    } finally {
-        if (didActivate) this.inFlightTasks.delete(id);
-        // 确保分布式锁被释放
-        await instanceCoordinator.releaseTaskLock(id);
-    }
     }
 
     /**
