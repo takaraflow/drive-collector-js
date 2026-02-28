@@ -96,7 +96,7 @@ describe('TaskManager error handling', () => {
     expect(TaskRepository.updateStatus).toHaveBeenCalledWith(
       'test-task-1',
       'failed',
-      'Network error'
+      'Upload failed: Network error'
     );
   });
 

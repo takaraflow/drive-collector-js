@@ -32,6 +32,7 @@ vi.mock("../../src/services/telegram.js", () => ({
 const mockCloudTool = {
     getRemoteFileInfo: vi.fn(),
     uploadBatch: vi.fn().mockResolvedValue({ success: true }),
+    _getUploadPath: vi.fn().mockResolvedValue("/user/upload/path"),
 };
 vi.mock("../../src/services/rclone.js", () => ({
     CloudTool: mockCloudTool,

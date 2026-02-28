@@ -431,6 +431,44 @@ export class StateSynchronizer {
             instanceId: instanceCoordinator.getInstanceId()
         };
     }
+
+    /**
+     * 获取任务状态
+     * @param {string} taskId - 任务ID
+     * @returns {Promise<*>} 任务状态
+     */
+    async getTaskState(taskId) {
+        const cacheKey = `task:${taskId}`;
+        return this.getStateSnapshot('system', cacheKey);
+    }
+
+    /**
+     * 清除任务状态
+     * @param {string} taskId - 任务ID
+     * @returns {Promise<boolean>} 是否成功
+     */
+    async clearTaskState(taskId) {
+        const cacheKey = `state:system:task:${taskId}`;
+        try {
+            await cache.delete(cacheKey);
+            localCache.del(cacheKey);
+            return true;
+        } catch (error) {
+            log.warn(`Failed to clear task state for ${taskId}:`, error);
+            return false;
+        }
+    }
+
+    /**
+     * 更新任务状态
+     * @param {string} taskId - 任务ID
+     * @param {Object} state - 任务状态
+     * @returns {Promise<boolean>} 是否成功
+     */
+    async updateTaskState(taskId, state) {
+        const cacheKey = `task:${taskId}`;
+        return this.restoreStateSnapshot('system', cacheKey, state);
+    }
 }
 
 // 单例导出

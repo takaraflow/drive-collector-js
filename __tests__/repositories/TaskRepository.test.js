@@ -20,10 +20,33 @@ vi.mock('../../src/services/CacheService.js', () => ({
     cache: mockCache
 }));
 
+// Mock services/ConsistentCache.js
+const mockConsistentCache = {
+    get: vi.fn().mockResolvedValue(null),
+    set: vi.fn().mockResolvedValue(true),
+    delete: vi.fn().mockResolvedValue(true)
+};
+vi.mock('../../src/services/ConsistentCache.js', () => ({
+    ConsistentCache: mockConsistentCache
+}));
+
+// Mock services/StateSynchronizer.js
+const mockStateSynchronizer = {
+    getTaskState: vi.fn().mockResolvedValue(null),
+    clearTaskState: vi.fn().mockResolvedValue(true),
+    updateTaskState: vi.fn().mockResolvedValue(true)
+};
+vi.mock('../../src/services/StateSynchronizer.js', () => ({
+    StateSynchronizer: mockStateSynchronizer
+}));
+
 // Import after mocking
 const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
 const { d1 } = await import('../../src/services/d1.js');
 const { cache } = await import('../../src/services/CacheService.js');
+const { localCache } = await import('../../src/utils/LocalCache.js');
+const { ConsistentCache } = await import('../../src/services/ConsistentCache.js');
+const { StateSynchronizer } = await import('../../src/services/StateSynchronizer.js');
 
 describe('TaskRepository', () => {
     beforeEach(() => {
@@ -36,6 +59,13 @@ describe('TaskRepository', () => {
             clearInterval(TaskRepository.flushTimer);
             TaskRepository.flushTimer = null;
         }
+        // Clear LocalCache to prevent test interference
+        localCache.clear();
+        // Reset mock implementations
+        mockConsistentCache.get.mockResolvedValue(null);
+        mockStateSynchronizer.getTaskState.mockResolvedValue(null);
+        // Ensure mockCache.get always returns null
+        mockCache.get.mockResolvedValue(null);
         vi.useFakeTimers();
     });
 
