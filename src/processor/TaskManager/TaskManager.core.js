@@ -3,30 +3,26 @@ import { randomUUID } from "crypto";
 import path from "path";
 import fs from "fs";
 import { Button } from "telegram/tl/custom/button.js";
-import { dependencyContainer } from "../services/DependencyContainer.js";
-
-// 导入模块化的方法
-import { downloadTask } from "./TaskManager/TaskManager.download.js";
-import { uploadTask } from "./TaskManager/TaskManager.upload.js";
-
-// 从依赖容器获取依赖项
-const { config, client, CloudTool, UIHelper, getMediaInfo, updateStatus, escapeHTML, safeEdit, runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, runMtprotoFileTaskWithRetry, PRIORITY, AuthGuard, TaskRepository, d1, cache, instanceCoordinator, queueService, logger, STRINGS, format, streamTransferService } = dependencyContainer.getAll();
+import { config } from "../../config/index.js";
+import { client } from "../../services/telegram.js";
+import { CloudTool } from "../../services/rclone.js";
+import { ossService } from "../../services/oss.js";
+import { UIHelper } from "../../ui/templates.js";
+import { getMediaInfo, updateStatus, escapeHTML, safeEdit } from "../../utils/common.js";
+import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, runMtprotoFileTaskWithRetry, PRIORITY } from "../../utils/limiter.js";
+import { AuthGuard } from "../../modules/AuthGuard.js";
+import { TaskRepository } from "../../repositories/TaskRepository.js";
+import { d1 } from "../../services/d1.js";
+import { cache } from "../../services/CacheService.js";
+import { instanceCoordinator } from "../../services/InstanceCoordinator.js";
+import { queueService } from "../../services/QueueService.js";
+import { logger } from "../../services/logger/index.js";
+import { STRINGS, format } from "../../locales/zh-CN.js";
+import { streamTransferService } from "../../services/StreamTransferService.js";
 
 const log = logger.withModule('TaskManager');
 
-/**
- * --- 任务管理调度中心 (TaskManager) ---
- * 
- * 核心设计决策：
- * 1. QStash 驱动：移除了传统的基于内存和定时器的 UploadBatcher 机制。
- *    之前版本在高并发和多实例环境下容易出现内存溢出和状态不一致问题。
- *    现在的 QStash 延迟队列方案实现了分布式的批处理和自动重试，具备极高的可靠性。
- * 
- * 2. 状态机驱动：任务状态流转（queued -> downloading -> downloaded -> uploading -> completed）
- *    完全由数据库和消息队列共同保障，支持实例重启后的无损恢复。
- * 负责队列管理、任务恢复、以及具体的下载/上传流程编排
- */
-export class TaskManager {
+export class TaskManagerCore {
     /**
      * 批量更新任务状态
      * @param {Array<{id: string, status: string, error?: string}>} updates
@@ -204,36 +200,36 @@ export class TaskManager {
             // 并行预加载多个数据源
             preloadTasks.push(
                 // 预加载活跃驱动列表（已实现缓存）
-                import("../repositories/DriveRepository.js").then(({ DriveRepository }) =>
+                import("../../repositories/DriveRepository.js").then(({ DriveRepository }) =>
                     DriveRepository.findAll()
                 ),
 
                 // 预加载配置文件缓存
-                import("../config/index.js").then(({ config }) => {
+                import("../../config/index.js").then(({ config }) => {
                     // 预热配置访问，避免首次访问时的延迟
                     return Promise.resolve(config);
                 }),
 
                 // 预加载本地化字符串缓存
-                import("../locales/zh-CN.js").then(({ STRINGS }) => {
+                import("../../locales/zh-CN.js").then(({ STRINGS }) => {
                     // 预热字符串访问
                     return Promise.resolve(Object.keys(STRINGS).length);
                 }),
 
                 // 预加载常用工具函数
-                import("../utils/common.js").then(({ getMediaInfo, escapeHTML }) => {
+                import("../../utils/common.js").then(({ getMediaInfo, escapeHTML }) => {
                     // 预热函数引用
                     return Promise.resolve({ getMediaInfo, escapeHTML });
                 }),
 
                 // 预热缓存服务
-                import("../utils/LocalCache.js").then(({ localCache }) => {
+                import("../../utils/LocalCache.js").then(({ localCache }) => {
                     // 确保缓存服务已初始化
                     return Promise.resolve(localCache);
                 }),
 
-                // 预加载 Cache 服务
-                import("../services/CacheService.js").then(({ cache }) => {
+                // 预热 Cache 服务
+                import("../../services/CacheService.js").then(({ cache }) => {
                     // 预热 Cache 连接
                     return cache.get("system:health_check", "text").catch(() => "ok");
                 })
@@ -349,24 +345,46 @@ export class TaskManager {
      * 添加新任务到队列
      */
     static async addTask(target, mediaMessage, userId, customLabel = "") {
+        // 输入验证
+        if (!target) {
+            log.error("addTask: target is required");
+            return;
+        }
+        
+        if (!mediaMessage || !mediaMessage.media) {
+            log.error("addTask: mediaMessage with media is required");
+            return;
+        }
+        
+        if (!userId) {
+            log.error("addTask: userId is required");
+            return;
+        }
+        
+        // 验证 customLabel 长度
+        if (customLabel && customLabel.length > 100) {
+            customLabel = customLabel.substring(0, 100);
+            log.warn("addTask: customLabel truncated to 100 characters");
+        }
+
         const taskId = randomUUID();
         const chatIdStr = (target?.userId ?? target?.chatId ?? target?.channelId ?? target?.id ?? target).toString();
 
-        const statusMsg = await runBotTaskWithRetry(
-            () => client.sendMessage(target, {
-                message: format(STRINGS.task.captured, { label: customLabel }),
-                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_${taskId}`))],
-                parseMode: "html"
-            }),
-            userId,
-            { priority: PRIORITY.UI },
-            false,
-            10
-        );
-
-        const info = getMediaInfo(mediaMessage);
-
         try {
+            const statusMsg = await runBotTaskWithRetry(
+                () => client.sendMessage(target, {
+                    message: format(STRINGS.task.captured, { label: customLabel }),
+                    buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_${taskId}`))],
+                    parseMode: "html"
+                }),
+                userId,
+                { priority: PRIORITY.UI },
+                false,
+                10
+            );
+
+            const info = getMediaInfo(mediaMessage);
+
             await TaskRepository.create({
                 id: taskId,
                 userId: userId.toString(),
@@ -386,10 +404,12 @@ export class TaskManager {
             log.error("Task creation failed", e);
             // 尝试更新状态消息，如果失败则记录但不抛出异常
             try {
-                await client.editMessage(target, {
-                    message: statusMsg.id,
-                    text: STRINGS.task.create_failed
-                });
+                if (statusMsg) {
+                    await client.editMessage(target, {
+                        message: statusMsg.id,
+                        text: STRINGS.task.create_failed
+                    });
+                }
             } catch (editError) {
                 log.warn("Failed to update error message", { error: editError.message });
             }
@@ -400,66 +420,99 @@ export class TaskManager {
      * 批量添加媒体组任务
      */
     static async addBatchTasks(target, messages, userId) {
+        // 输入验证
+        if (!target) {
+            log.error("addBatchTasks: target is required");
+            return;
+        }
+        
+        if (!Array.isArray(messages) || messages.length === 0) {
+            log.error("addBatchTasks: messages must be a non-empty array");
+            return;
+        }
+        
+        if (!userId) {
+            log.error("addBatchTasks: userId is required");
+            return;
+        }
+        
+        // 验证消息数量限制
+        if (messages.length > 50) {
+            messages = messages.slice(0, 50);
+            log.warn("addBatchTasks: messages truncated to 50 items");
+        }
+        
+        // 过滤无效消息
+        const validMessages = messages.filter(msg => msg && msg.media);
+        if (validMessages.length === 0) {
+            log.error("addBatchTasks: no valid media messages found");
+            return;
+        }
+
         const chatIdStr = (target?.userId ?? target?.chatId ?? target?.channelId ?? target?.id ?? target).toString();
 
-        let statusMsg = await runBotTaskWithRetry(
-            () => client.sendMessage(target, {
-                message: format(STRINGS.task.batch_captured, { count: messages.length }),
-                parseMode: "html"
-            }),
-            userId,
-            { priority: PRIORITY.UI },
-            false,
-            10
-        );
-
-        // 使用状态消息 msgId 作为批量取消标识，需在消息发送后更新按钮
         try {
-            const updatedMsg = await runBotTaskWithRetry(
-                () => client.editMessage(target, {
-                    message: statusMsg.id,
-                    text: format(STRINGS.task.batch_captured, { count: messages.length }),
-                    buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_msg_${statusMsg.id}`))],
+            let statusMsg = await runBotTaskWithRetry(
+                () => client.sendMessage(target, {
+                    message: format(STRINGS.task.batch_captured, { count: validMessages.length }),
                     parseMode: "html"
                 }),
                 userId,
                 { priority: PRIORITY.UI },
                 false,
-                3
+                10
             );
-            if (updatedMsg) statusMsg = updatedMsg;
-        } catch (e) {
-            log.warn("Failed to add cancel button to batch message", e);
-        }
 
-        const tasksData = [];
-
-        for (const msg of messages) {
-            const taskId = randomUUID();
-            const info = getMediaInfo(msg);
-
-            tasksData.push({
-                id: taskId,
-                userId: userId.toString(),
-                chatId: chatIdStr,
-                msgId: statusMsg.id,
-                sourceMsgId: msg.id,
-                fileName: info?.name,
-                fileSize: info?.size
-            });
-        }
-
-        await TaskRepository.createBatch(tasksData);
-        // 立即推送到 QStash 队列
-        for (const data of tasksData) {
-            const message = messages.find(m => m.id === data.sourceMsgId);
-            if (message) {
-                const task = this._createTaskObject(data.id, data.userId, data.chatId, data.msgId, message);
-                task.isGroup = true;
-                await this._enqueueTask(task);
+            // 使用状态消息 msgId 作为批量取消标识，需在消息发送后更新按钮
+            try {
+                const updatedMsg = await runBotTaskWithRetry(
+                    () => client.editMessage(target, {
+                        message: statusMsg.id,
+                        text: format(STRINGS.task.batch_captured, { count: validMessages.length }),
+                        buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_msg_${statusMsg.id}`))],
+                        parseMode: "html"
+                    }),
+                    userId,
+                    { priority: PRIORITY.UI },
+                    false,
+                    3
+                );
+                if (updatedMsg) statusMsg = updatedMsg;
+            } catch (e) {
+                log.warn("Failed to add cancel button to batch message", e);
             }
+
+            const tasksData = [];
+
+            for (const msg of validMessages) {
+                const taskId = randomUUID();
+                const info = getMediaInfo(msg);
+
+                tasksData.push({
+                    id: taskId,
+                    userId: userId.toString(),
+                    chatId: chatIdStr,
+                    msgId: statusMsg.id,
+                    sourceMsgId: msg.id,
+                    fileName: info?.name,
+                    fileSize: info?.size
+                });
+            }
+
+            await TaskRepository.createBatch(tasksData);
+            // 立即推送到 QStash 队列
+            for (const data of tasksData) {
+                const message = validMessages.find(m => m.id === data.sourceMsgId);
+                if (message) {
+                    const task = this._createTaskObject(data.id, data.userId, data.chatId, data.msgId, message);
+                    task.isGroup = true;
+                    await this._enqueueTask(task);
+                }
+            }
+            log.info("Batch tasks created and enqueued", { count: validMessages.length, status: 'enqueued' });
+        } catch (e) {
+            log.error("Batch task creation failed", e);
         }
-        log.info("Batch tasks created and enqueued", { count: messages.length, status: 'enqueued' });
     }
 
     /**
@@ -618,61 +671,110 @@ export class TaskManager {
     }
 
     /**
-     * 处理下载 Webhook - QStash 事件驱动
-     * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
+     * 检查是否为 Leader 实例
+     * @returns {Promise<{success: boolean, statusCode: number, message?: string} | null>} - 如果不是 Leader，返回错误对象；否则返回 null
      */
-    static async handleDownloadWebhook(taskId) {
-        // Leader 状态校验：只有持有 telegram_client 锁的实例才能处理任务
+    static async _checkLeaderStatus() {
         if (!(await instanceCoordinator.hasLock("telegram_client"))) {
             return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
         }
+        return null;
+    }
 
+    /**
+     * 获取任务信息并检查状态
+     * @param {string} taskId - 任务ID
+     * @returns {Promise<{dbTask: Object, error: {success: boolean, statusCode: number, message?: string} | null}>}
+     */
+    static async _getTaskInfo(taskId) {
+        const dbTask = await TaskRepository.findById(taskId);
+        const triggerSource = dbTask?.source_data?._meta?.triggerSource || 'unknown';
+        const instanceId = dbTask?.source_data?._meta?.instanceId || 'unknown';
+        
+        log.info(`QStash Received webhook for Task: ${taskId}`, {
+            triggerSource, // 'direct-qstash' 或 'unknown'
+            instanceId,
+            isFromQStash: triggerSource === 'direct-qstash'
+        });
+        
+        if (!dbTask) {
+            log.error(`❌ Task ${taskId} not found in database`);
+            return { dbTask: null, error: { success: false, statusCode: 404, message: "Task not found" } };
+        }
+
+        // 用户已取消：直接 ACK（防止 QStash 重试/继续处理）
+        if (dbTask.status === 'cancelled') {
+            log.info("Task cancelled, skipping webhook", { taskId });
+            return { dbTask: null, error: { success: true, statusCode: 200 } };
+        }
+
+        return { dbTask, error: null };
+    }
+
+    /**
+     * 获取原始消息
+     * @param {Object} dbTask - 数据库任务对象
+     * @returns {Promise<{message: Object, error: {success: boolean, statusCode: number, message?: string} | null}>}
+     */
+    static async _getOriginalMessage(dbTask) {
         try {
-            // 从数据库获取任务信息
-            const dbTask = await TaskRepository.findById(taskId);
-            const triggerSource = dbTask?.source_data?._meta?.triggerSource || 'unknown';
-            const instanceId = dbTask?.source_data?._meta?.instanceId || 'unknown';
-            
-            log.info(`QStash Received download webhook for Task: ${taskId}`, {
-                triggerSource, // 'direct-qstash' 或 'unknown'
-                instanceId,
-                isFromQStash: triggerSource === 'direct-qstash'
-            });
-            if (!dbTask) {
-                log.error(`❌ Task ${taskId} not found in database`);
-                return { success: false, statusCode: 404, message: "Task not found" };
-            }
-
-            // 用户已取消：直接 ACK（防止 QStash 重试/继续处理）
-            if (dbTask.status === 'cancelled') {
-                log.info("Task cancelled, skipping download webhook", { taskId });
-                return { success: true, statusCode: 200 };
-            }
-
-            // 获取原始消息
             const messages = await runMtprotoTaskWithRetry(
                 () => client.getMessages(dbTask.chat_id, { ids: [dbTask.source_msg_id] }),
                 { priority: PRIORITY.BACKGROUND }
             );
             const message = messages[0];
             if (!message || !message.media) {
-                await TaskRepository.updateStatus(taskId, 'failed', 'Source msg missing');
-                return { success: false, statusCode: 404, message: "Source message missing" };
+                return { message: null, error: { success: false, statusCode: 404, message: "Source message missing" } };
+            }
+            return { message, error: null };
+        } catch (error) {
+            return { message: null, error: { success: false, statusCode: 500, message: error.message } };
+        }
+    }
+
+    /**
+     * 检查任务是否为组任务
+     * @param {Object} task - 任务对象
+     * @param {string} msgId - 消息ID
+     */
+    static async _checkGroupTaskStatus(task, msgId) {
+        try {
+            const siblings = await TaskRepository.findByMsgId(msgId);
+            if (siblings && siblings.length > 1) {
+                task.isGroup = true;
+            }
+        } catch (e) {
+            log.warn(`Failed to check group status for task ${task.id}`, e);
+        }
+    }
+
+    /**
+     * 处理下载 Webhook - QStash 事件驱动
+     * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
+     */
+    static async handleDownloadWebhook(taskId) {
+        // Leader 状态校验
+        const leaderError = await this._checkLeaderStatus();
+        if (leaderError) return leaderError;
+
+        try {
+            // 获取任务信息
+            const { dbTask, error: taskError } = await this._getTaskInfo(taskId);
+            if (taskError) return taskError;
+
+            // 获取原始消息
+            const { message, error: messageError } = await this._getOriginalMessage(dbTask);
+            if (messageError) {
+                await TaskRepository.updateStatus(taskId, 'failed', messageError.message);
+                return messageError;
             }
 
             // 创建任务对象
             const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
             task.fileName = dbTask.file_name;
 
-            // 检查是否属于组任务（通过 msgId 查询同组任务数量）
-            try {
-                const siblings = await TaskRepository.findByMsgId(dbTask.msg_id);
-                if (siblings && siblings.length > 1) {
-                    task.isGroup = true;
-                }
-            } catch (e) {
-                log.warn(`Failed to check group status for task ${taskId}`, e);
-            }
+            // 检查是否属于组任务
+            await this._checkGroupTaskStatus(task, dbTask.msg_id);
 
             // 执行下载逻辑
             await this.downloadTask(task);
@@ -687,54 +789,44 @@ export class TaskManager {
     }
 
     /**
+     * 验证本地文件是否存在
+     * @param {string} fileName - 文件名
+     * @returns {Promise<{localPath: string, error: {success: boolean, statusCode: number, message?: string} | null}>}
+     */
+    static _validateLocalFile(fileName) {
+        const localPath = path.join(config.downloadDir, fileName);
+        if (!fs.existsSync(localPath)) {
+            return { localPath: null, error: { success: false, statusCode: 404, message: "Local file not found" } };
+        }
+        return { localPath, error: null };
+    }
+
+    /**
      * 处理上传 Webhook - QStash 事件驱动
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
      static async handleUploadWebhook(taskId) {
-        // Leader 状态校验：只有持有 telegram_client 锁 del 实例才能处理任务
-        if (!(await instanceCoordinator.hasLock("telegram_client"))) {
-            return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
-        }
+        // Leader 状态校验
+        const leaderError = await this._checkLeaderStatus();
+        if (leaderError) return leaderError;
 
         try {
-            // 从数据库获取任务信息
-            const dbTask = await TaskRepository.findById(taskId);
-            const triggerSource = dbTask?.source_data?._meta?.triggerSource || 'unknown';
-            const instanceId = dbTask?.source_data?._meta?.instanceId || 'unknown';
-            
-            log.info(`QStash Received upload webhook for Task: ${taskId}`, {
-                triggerSource, // 'direct-qstash' 或 'unknown'
-                instanceId,
-                isFromQStash: triggerSource === 'direct-qstash'
-            });
-            
-            if (!dbTask) {
-                log.error(`❌ Task ${taskId} not found in database`);
-                return { success: false, statusCode: 404, message: "Task not found" };
-            }
-
-            // 用户已取消：直接 ACK（防止 QStash 重试/继续处理）
-            if (dbTask.status === 'cancelled') {
-                log.info("Task cancelled, skipping upload webhook", { taskId });
-                return { success: true, statusCode: 200 };
-            }
+            // 获取任务信息
+            const { dbTask, error: taskError } = await this._getTaskInfo(taskId);
+            if (taskError) return taskError;
 
             // 验证本地文件存在
-            const localPath = path.join(config.downloadDir, dbTask.file_name);
-            if (!fs.existsSync(localPath)) {
-                await TaskRepository.updateStatus(taskId, 'failed', 'Local file not found');
-                return { success: false, statusCode: 404, message: "Local file not found" };
+            const { localPath, error: fileError } = this._validateLocalFile(dbTask.file_name);
+            if (fileError) {
+                await TaskRepository.updateStatus(taskId, 'failed', fileError.message);
+                return fileError;
             }
 
             // 获取原始消息
-            const messages = await runMtprotoTaskWithRetry(
-                () => client.getMessages(dbTask.chat_id, { ids: [dbTask.source_msg_id] }),
-                { priority: PRIORITY.BACKGROUND }
-            );
-            const message = messages[0];
-            if (!message || !message.media) {
-                await TaskRepository.updateStatus(taskId, 'failed', 'Source msg missing');
-                return { success: false, statusCode: 404, message: "Source message missing" };
+            const { message, error: messageError } = await this._getOriginalMessage(dbTask);
+            if (messageError) {
+                await TaskRepository.updateStatus(taskId, 'failed', messageError.message);
+                return messageError;
             }
 
             // 创建任务对象
@@ -742,15 +834,8 @@ export class TaskManager {
             task.localPath = localPath;
             task.fileName = dbTask.file_name;
 
-            // 检查是否属于组任务（通过 msgId 查询同组任务数量）
-            try {
-                const siblings = await TaskRepository.findByMsgId(dbTask.msg_id);
-                if (siblings && siblings.length > 1) {
-                    task.isGroup = true;
-                }
-            } catch (e) {
-                log.warn(`Failed to check group status for upload task ${taskId}`, e);
-            }
+            // 检查是否属于组任务
+            await this._checkGroupTaskStatus(task, dbTask.msg_id);
 
             // 执行上传逻辑
             await this.uploadTask(task);
@@ -771,6 +856,19 @@ export class TaskManager {
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
     static async retryTask(taskId, type = 'auto') {
+        // 输入验证
+        if (!taskId) {
+            log.error("retryTask: taskId is required");
+            return { success: false, statusCode: 400, message: "Task ID is required" };
+        }
+        
+        // 验证 type 参数
+        const validTypes = ['auto', 'download', 'upload'];
+        if (!validTypes.includes(type)) {
+            log.error(`retryTask: invalid type ${type}, must be one of ${validTypes.join(', ')}`);
+            return { success: false, statusCode: 400, message: `Invalid type. Must be one of: ${validTypes.join(', ')}` };
+        }
+
         try {
             // 1. 获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
@@ -815,15 +913,11 @@ export class TaskManager {
      */
     static async _retryDownload(taskId, dbTask) {
         try {
-            // 1. 检查是否需要重新获取消息
-            const messages = await runMtprotoTaskWithRetry(
-                () => client.getMessages(dbTask.chat_id, { ids: [dbTask.source_msg_id] }),
-                { priority: PRIORITY.BACKGROUND }
-            );
-            const message = messages[0];
-            if (!message || !message.media) {
-                await TaskRepository.updateStatus(taskId, 'failed', 'Source msg missing');
-                return { success: false, statusCode: 404, message: "Source message missing" };
+            // 1. 获取原始消息
+            const { message, error: messageError } = await this._getOriginalMessage(dbTask);
+            if (messageError) {
+                await TaskRepository.updateStatus(taskId, 'failed', messageError.message);
+                return messageError;
             }
 
             // 2. 创建任务对象
@@ -852,20 +946,16 @@ export class TaskManager {
     static async _retryUpload(taskId, dbTask) {
         try {
             // 1. 检查本地文件是否存在
-            const localPath = path.join(config.downloadDir, dbTask.file_name);
-            if (!fs.existsSync(localPath)) {
+            const { localPath, error: fileError } = this._validateLocalFile(dbTask.file_name);
+            if (fileError) {
                 // 如果文件不存在，回退到重新下载
                 return await this._retryDownload(taskId, dbTask);
             }
 
             // 2. 获取原始消息
-            const messages = await runMtprotoTaskWithRetry(
-                () => client.getMessages(dbTask.chat_id, { ids: [dbTask.source_msg_id] }),
-                { priority: PRIORITY.BACKGROUND }
-            );
-            const message = messages[0];
-            if (!message || !message.media) {
-                return { success: false, statusCode: 404, message: "Source message missing" };
+            const { message, error: messageError } = await this._getOriginalMessage(dbTask);
+            if (messageError) {
+                return messageError;
             }
 
             // 3. 创建任务对象
@@ -912,181 +1002,97 @@ export class TaskManager {
     }
 
     /**
-     * 下载Task - 负责MTProto下载阶段
-     */
-    static async downloadTask(task) {
-        return downloadTask.call(this, task);
-    }
-
-    /**
-     * 上传Task - 负责rclone转存阶段（无需MTProto）
-     */
-    static async uploadTask(task) {
-        return uploadTask.call(this, task);
-    }
-
-    /**
      * 取消指定任务
      */
     static async cancelTask(taskId, userId) {
-        const dbTask = await TaskRepository.findById(taskId);
-        if (!dbTask) return false;
-
-        const isOwner = dbTask.user_id === userId.toString();
-        const canCancelAny = await AuthGuard.can(userId, "task:cancel:any");
-
-        if (!isOwner && !canCancelAny) return false;
-
-        // 标记取消（用于中途快速拦截）
-        this.cancelledTaskIds.add(taskId);
-
-        // 检查下载队列
-        const downloadTask = this.waitingTasks.find(t => t.id.toString() === taskId) ||
-                            (this.currentTask && this.currentTask.id.toString() === taskId ? this.currentTask : null);
-
-        if (downloadTask) {
-            downloadTask.isCancelled = true;
-            if (downloadTask.proc) downloadTask.proc.kill("SIGTERM");
-            this.waitingTasks = this.waitingTasks.filter(t => t.id.toString() !== taskId);
+        // 输入验证
+        if (!taskId) {
+            log.error("cancelTask: taskId is required");
+            return false;
+        }
+        
+        if (!userId) {
+            log.error("cancelTask: userId is required");
+            return false;
         }
 
-        // 检查上传队列
-        const uploadTask = this.waitingUploadTasks.find(t => t.id.toString() === taskId);
-        if (uploadTask) {
-            uploadTask.isCancelled = true;
-            if (uploadTask.proc) uploadTask.proc.kill("SIGTERM");
-            this.waitingUploadTasks = this.waitingUploadTasks.filter(t => t.id.toString() !== taskId);
-        }
-
-        // 检查运行中任务（QStash / Webhook 驱动）
-        const inFlight = this.inFlightTasks.get(taskId);
-        if (inFlight) {
-            inFlight.isCancelled = true;
-            if (inFlight.proc) inFlight.proc.kill("SIGTERM");
-        }
-
-        await TaskRepository.updateStatus(taskId, 'cancelled', '用户手动取消');
-
-        // 立即更新 UI（防止用户感觉“没反应”）
         try {
-            let peer = dbTask.chat_id;
-            if (typeof peer === 'string' && /^-?\d+$/.test(peer)) peer = BigInt(peer);
-            await safeEdit(peer, parseInt(dbTask.msg_id), STRINGS.task.cancelled, null, userId, "html");
-        } catch (e) {
-            // safeEdit 内部已兜底，这里不再抛出
-        }
-        return true;
-    }
+            const dbTask = await TaskRepository.findById(taskId);
+            if (!dbTask) {
+                log.error(`cancelTask: task ${taskId} not found`);
+                return false;
+            }
 
-    /**
-     * 按 status 消息 msgId 取消整组任务（媒体组）
-     */
-    static async cancelTasksByMsgId(msgId, userId) {
-        if (!msgId) return false;
+            const isOwner = dbTask.user_id === userId.toString();
+            const canCancelAny = await AuthGuard.can(userId, "task:cancel:any");
 
-        const tasks = await TaskRepository.findByMsgId(msgId);
-        if (!tasks.length) return false;
+            if (!isOwner && !canCancelAny) {
+                log.warn(`cancelTask: user ${userId} has no permission to cancel task ${taskId}`);
+                return false;
+            }
 
-        // 权限：任务属于自己或具备管理员权限
-        const canCancelAny = await AuthGuard.can(userId, "task:cancel:any");
-        const ownsAll = tasks.every(t => t.user_id === userId.toString());
-        if (!ownsAll && !canCancelAny) return false;
+            // 标记取消（用于中途快速拦截）
+            this.cancelledTaskIds.add(taskId);
 
-        const updates = tasks.map(t => ({ id: t.id, status: 'cancelled', error: '用户手动取消' }));
-        await this.batchUpdateStatus(updates);
-        tasks.forEach(t => { t.status = 'cancelled'; });
+            // 检查下载队列
+            const downloadTask = this.waitingTasks.find(t => t.id.toString() === taskId) ||
+                                (this.currentTask && this.currentTask.id.toString() === taskId ? this.currentTask : null);
 
-        for (const t of tasks) {
-            this.cancelledTaskIds.add(t.id);
-            const inFlight = this.inFlightTasks.get(t.id);
+            if (downloadTask) {
+                downloadTask.isCancelled = true;
+                if (downloadTask.proc) downloadTask.proc.kill("SIGTERM");
+                this.waitingTasks = this.waitingTasks.filter(t => t.id.toString() !== taskId);
+            }
+
+            // 检查上传队列
+            const uploadTask = this.waitingUploadTasks.find(t => t.id.toString() === taskId);
+            if (uploadTask) {
+                uploadTask.isCancelled = true;
+                if (uploadTask.proc) uploadTask.proc.kill("SIGTERM");
+                this.waitingUploadTasks = this.waitingUploadTasks.filter(t => t.id.toString() !== taskId);
+            }
+
+            // 检查运行中任务（QStash / Webhook 驱动）
+            const inFlight = this.inFlightTasks.get(taskId);
             if (inFlight) {
                 inFlight.isCancelled = true;
                 if (inFlight.proc) inFlight.proc.kill("SIGTERM");
             }
-        }
 
-        // 刷新批量看板 UI
+            await TaskRepository.updateStatus(taskId, 'cancelled', '用户手动取消');
+
+            // 立即更新 UI（防止用户感觉"没反应"）
+            const task = {
+                id: taskId,
+                chatId: dbTask.chat_id,
+                msgId: dbTask.msg_id
+            };
+            await updateStatus(task, STRINGS.task.cancelled, true);
+
+            return true;
+        } catch (error) {
+            log.error(`cancelTask failed for task ${taskId}:`, error);
+            return false;
+        }
+    }
+
+    /**
+     * [私有] 刷新组任务监控状态
+     */
+    static async _refreshGroupMonitor(task, status, downloaded = 0, total = 0, error = null) {
         try {
-            const meta = tasks[0];
-            let peer = meta.chat_id;
-            if (typeof peer === 'string' && /^-?\d+$/.test(peer)) peer = BigInt(peer);
-            const focusTask = { id: meta.id };
-            const { text } = UIHelper.renderBatchMonitor(tasks, focusTask, 'cancelled');
-            await safeEdit(peer, parseInt(meta.msg_id), text, null, userId, "html");
+            // 这里可以实现组任务的监控逻辑
+            // 例如更新组任务的整体状态，计算进度等
         } catch (e) {
-            // safeEdit 内部已兜底
-        }
-
-        return true;
-    }
-
-    static monitorLocks = new Map();
-    static autoScalingInterval = null;
-
-    /**
-     * 启动自动缩放监控
-     */
-    static startAutoScaling() {
-        if (this.autoScalingInterval) return;
-        import('../utils/limiter.js').then((limiterModule) => {
-            this.autoScalingInterval = setInterval(() => {
-                try {
-                    const { botGlobalLimiter, mtprotoLimiter, mtprotoFileLimiter } = limiterModule;
-                    if (botGlobalLimiter?.adjustConcurrency) botGlobalLimiter.adjustConcurrency();
-                    if (mtprotoLimiter?.adjustConcurrency) mtprotoLimiter.adjustConcurrency();
-                    if (mtprotoFileLimiter?.adjustConcurrency) mtprotoFileLimiter.adjustConcurrency();
-                    
-                    // Enforce queue size limits to prevent unbounded growth
-                    this.enforceQueueSizeLimits();
-                } catch (error) {
-                    log.error('Auto-scaling adjustment error:', error);
-                }
-            }, 30000);
-        });
-    }
-
-    /**
-     * 停止自动缩放监控
-     */
-    static stopAutoScaling() {
-        if (this.autoScalingInterval) {
-            clearInterval(this.autoScalingInterval);
-            this.autoScalingInterval = null;
+            log.warn(`Failed to refresh group monitor:`, e);
         }
     }
 
     /**
-     * [私有] 检查文件大小是否匹配（带动态容差）
+     * [私有] 检查文件大小是否匹配
      */
-    static _isSizeMatch(size1, size2) {
-        const diff = Math.abs(size1 - size2);
-        const maxSize = Math.max(size1, size2);
-        if (maxSize < 1024 * 1024) return diff < 10 * 1024;
-        else if (maxSize < 100 * 1024 * 1024) return diff < 1024 * 1024;
-        else return diff < 10 * 1024 * 1024;
+    static _isSizeMatch(remoteSize, localSize) {
+        // 允许 1KB 的误差
+        return Math.abs(remoteSize - localSize) <= 1024;
     }
-
-    /**
-     * [私有] 刷新组任务看板 (智能节流)
-     */
-    static async _refreshGroupMonitor(task, status, downloaded = 0, total = 0, errorMsg = null) {
-        const msgId = task.msgId;
-        const lastUpdate = this.monitorLocks.get(msgId) || 0;
-        const now = Date.now();
-        const isFinal = status === 'completed' || status === 'failed' || status === 'cancelled';
-
-        if (now - lastUpdate < 2000 && !isFinal) return;
-        this.monitorLocks.set(msgId, now);
-
-        const groupTasks = await TaskRepository.findByMsgId(msgId);
-        if (!groupTasks.length) return;
-
-        const { text } = UIHelper.renderBatchMonitor(groupTasks, task, status, downloaded, total, errorMsg);
-
-        let peer = task.chatId;
-        if (typeof peer === 'string' && /^-?\d+$/.test(peer)) peer = BigInt(peer);
-
-        await safeEdit(peer, parseInt(task.msgId), text, null, task.userId, "html");
-    }
-
 }

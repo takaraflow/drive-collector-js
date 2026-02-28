@@ -210,7 +210,7 @@ describe('TaskManager error handling', () => {
     expect(TaskRepository.updateStatus).toHaveBeenCalledWith(
       'test-task-5',
       'failed',
-      expect.stringContaining('校验失败')
+      expect.stringContaining('Validation failed')
     );
   }, 60000); // 增加超时时间到60秒
 });

@@ -113,6 +113,34 @@ class CacheService {
         this.l3Cache = null;
         this.l3Enabled = process.env.CACHE_L3_ENABLED === 'true';
         
+        // 缓存策略配置
+        this.cacheStrategies = {
+            // 任务状态缓存策略
+            taskStatus: {
+                l1Ttl: 30000, // 30秒
+                l2Ttl: 300,   // 5分钟
+                l3Ttl: 600    // 10分钟
+            },
+            // 实例状态缓存策略
+            instanceStatus: {
+                l1Ttl: 15000, // 15秒
+                l2Ttl: 180,   // 3分钟
+                l3Ttl: 360    // 6分钟
+            },
+            // 驱动配置缓存策略
+            driveConfig: {
+                l1Ttl: 60000, // 1分钟
+                l2Ttl: 3600,  // 1小时
+                l3Ttl: 7200   // 2小时
+            },
+            // 常用数据缓存策略
+            commonData: {
+                l1Ttl: 30000, // 30秒
+                l2Ttl: 600,   // 10分钟
+                l3Ttl: 1200   // 20分钟
+            }
+        };
+        
         // Cache Statistics
         this.stats = {
             hits: { l1: 0, l2: 0, l3: 0 },
@@ -183,9 +211,11 @@ class CacheService {
                 log.warn('No external cache provider connected. Using MemoryCache (L1 only).');
             }
 
-            // Initialize L3 and Bloom Filter
-            await this._initializeL3Cache();
-            await this._initializeBloomFilter();
+            // Initialize L3 and Bloom Filter in parallel
+            await Promise.all([
+                this._initializeL3Cache(),
+                this._initializeBloomFilter()
+            ]);
 
             this.isInitialized = true;
         } catch (error) {
@@ -382,7 +412,8 @@ class CacheService {
             
             if (value !== null && value !== undefined) {
                 // Populate L1
-                const ttl = options.l1Ttl || this.l1Ttl;
+                const strategy = this._getCacheStrategy(key, options.strategy);
+                const ttl = options.l1Ttl || strategy.l1Ttl;
                 localCache.set(key, value, ttl);
                 this.stats.hits.l2++;
                 return value;
@@ -394,9 +425,11 @@ class CacheService {
                 if (l3Value !== null && l3Value !== undefined) {
                     // Promote to L2 and L1
                     if (this.primaryProvider) {
-                        await this.primaryProvider.set(key, l3Value, 3600);
+                        const strategy = this._getCacheStrategy(key, options.strategy);
+                        await this.primaryProvider.set(key, l3Value, strategy.l2Ttl);
                     }
-                    localCache.set(key, l3Value, this.l1Ttl);
+                    const strategy = this._getCacheStrategy(key, options.strategy);
+                    localCache.set(key, l3Value, strategy.l1Ttl);
                     this.stats.hits.l3++;
                     return l3Value;
                 }
@@ -434,23 +467,53 @@ class CacheService {
     }
 
     /**
+     * Get cache strategy based on key pattern or explicit strategy
+     */
+    _getCacheStrategy(key, explicitStrategy) {
+        if (explicitStrategy && this.cacheStrategies[explicitStrategy]) {
+            return this.cacheStrategies[explicitStrategy];
+        }
+
+        // Determine strategy based on key pattern
+        if (key.startsWith('task_status:') || key.startsWith('task:')) {
+            return this.cacheStrategies.taskStatus;
+        } else if (key.startsWith('instance:')) {
+            return this.cacheStrategies.instanceStatus;
+        } else if (key.startsWith('drive:') || key.startsWith('config:')) {
+            return this.cacheStrategies.driveConfig;
+        } else {
+            return {
+                l1Ttl: this.l1Ttl,
+                l2Ttl: 3600, // 1 hour default
+                l3Ttl: 7200  // 2 hours default
+            };
+        }
+    }
+
+    /**
      * Core Set Method with L1/L2/L3
      */
-    async set(key, value, ttl = 3600, options = {}) {
+    async set(key, value, ttl = null, options = {}) {
         await this._ensureInitialized();
 
+        // Get cache strategy
+        const strategy = this._getCacheStrategy(key, options.strategy);
+        // Use provided TTL or strategy default
+        const baseTtl = ttl || strategy.l2Ttl;
+
         // TTL Randomization (±10%) to prevent cache stampede
-        let actualTtl = ttl;
+        let actualTtl = baseTtl;
         if (!options.skipTtlRandomization) {
-            const variance = ttl * 0.1; // 10% variance
+            const variance = baseTtl * 0.1; // 10% variance
             const randomOffset = (Math.random() - 0.5) * 2 * variance;
-            actualTtl = Math.floor(ttl + randomOffset);
+            actualTtl = Math.floor(baseTtl + randomOffset);
         }
 
         // 1. Update L1 (LocalCache)
         // Convert seconds to ms for LocalCache
         if (!options.skipL1) {
-            localCache.set(key, value, actualTtl * 1000);
+            const l1Ttl = options.l1Ttl || strategy.l1Ttl;
+            localCache.set(key, value, l1Ttl);
         }
 
         // 2. Update L2 (Provider)
@@ -472,8 +535,9 @@ class CacheService {
             // 3. Update L3 (Persistent Layer) if enabled
             if (this.l3Enabled && this.l3Cache && !options.skipL3) {
                 try {
-                    // L3 gets longer TTL (2x)
-                    await this.l3Cache.set(key, value, actualTtl * 2);
+                    // L3 gets longer TTL based on strategy
+                    const l3Ttl = options.l3Ttl || strategy.l3Ttl;
+                    await this.l3Cache.set(key, value, l3Ttl);
                 } catch (l3Error) {
                     log.warn(`L3 cache write failed: ${l3Error.message}`);
                     // Don't fail the operation if L3 fails

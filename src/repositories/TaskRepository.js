@@ -361,8 +361,29 @@ export class TaskRepository {
      */
     static async findById(taskId) {
         if (!taskId) return null;
+        
+        // 尝试从缓存获取
+        const cacheKey = `task:${taskId}:details`;
         try {
-            return await d1.fetchOne("SELECT * FROM tasks WHERE id = ?", [taskId]);
+            const cachedTask = await cache.get(cacheKey, 'json');
+            if (cachedTask) {
+                return cachedTask;
+            }
+        } catch (e) {
+            // 缓存读取失败，继续查询数据库
+        }
+        
+        try {
+            const task = await d1.fetchOne("SELECT * FROM tasks WHERE id = ?", [taskId]);
+            if (task) {
+                // 缓存任务详情，过期时间 5 分钟
+                try {
+                    await cache.set(cacheKey, task, 300);
+                } catch (e) {
+                    // 缓存写入失败，忽略
+                }
+            }
+            return task;
         } catch (e) {
             log.error(`TaskRepository.findById error for ${taskId}:`, e);
             return null;
@@ -378,6 +399,13 @@ export class TaskRepository {
     static async updateStatus(taskId, status, errorMsg = null) {
         const isCritical = ['completed', 'failed', 'cancelled'].includes(status);
         const isImportant = this.IMPORTANT_STATUSES.includes(status);
+        
+        // 清除任务详情缓存
+        try {
+            await cache.delete(`task:${taskId}:details`);
+        } catch (e) {
+            // 忽略缓存删除错误
+        }
         
         // Critical: 立即写入 D1，从缓冲和 Redis 中清除
         if (isCritical) {
@@ -451,11 +479,32 @@ export class TaskRepository {
      */
     static async findByUserId(userId, limit = 10) {
         if (!userId) return [];
+        
+        // 尝试从缓存获取
+        const cacheKey = `tasks:user:${userId}:recent:${limit}`;
         try {
-            return await d1.fetchAll(
+            const cachedTasks = await cache.get(cacheKey, 'json');
+            if (cachedTasks) {
+                return cachedTasks;
+            }
+        } catch (e) {
+            // 缓存读取失败，继续查询数据库
+        }
+        
+        try {
+            const tasks = await d1.fetchAll(
                 "SELECT id, file_name, status, error_msg, created_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
                 [userId, limit]
             );
+            
+            // 缓存用户最近任务，过期时间 1 分钟
+            try {
+                await cache.set(cacheKey, tasks, 60);
+            } catch (e) {
+                // 缓存写入失败，忽略
+            }
+            
+            return tasks;
         } catch (e) {
             log.error(`TaskRepository.findByUserId error for ${userId}:`, e);
             return [];
@@ -467,11 +516,32 @@ export class TaskRepository {
      */
     static async findByMsgId(msgId) {
         if (!msgId) return [];
+        
+        // 尝试从缓存获取
+        const cacheKey = `tasks:msg:${msgId}:group`;
         try {
-            return await d1.fetchAll(
+            const cachedTasks = await cache.get(cacheKey, 'json');
+            if (cachedTasks) {
+                return cachedTasks;
+            }
+        } catch (e) {
+            // 缓存读取失败，继续查询数据库
+        }
+        
+        try {
+            const tasks = await d1.fetchAll(
                 "SELECT id, user_id, chat_id, msg_id, file_name, status, error_msg FROM tasks WHERE msg_id = ? ORDER BY created_at ASC",
                 [msgId]
             );
+            
+            // 缓存消息组任务，过期时间 2 分钟
+            try {
+                await cache.set(cacheKey, tasks, 120);
+            } catch (e) {
+                // 缓存写入失败，忽略
+            }
+            
+            return tasks;
         } catch (e) {
             log.error(`TaskRepository.findByMsgId error for ${msgId}:`, e);
             return [];
@@ -499,11 +569,32 @@ export class TaskRepository {
      */
     static async findCompletedByFile(userId, fileName, fileSize) {
         if (!userId || !fileName || fileSize == null) return null;
+        
+        // 尝试从缓存获取
+        const cacheKey = `tasks:user:${userId}:file:${fileName}:${fileSize}:completed`;
         try {
-            return await d1.fetchOne(
+            const cachedTask = await cache.get(cacheKey, 'json');
+            if (cachedTask) {
+                return cachedTask;
+            }
+        } catch (e) {
+            // 缓存读取失败，继续查询数据库
+        }
+        
+        try {
+            const task = await d1.fetchOne(
                 "SELECT id, status FROM tasks WHERE user_id = ? AND file_name = ? AND file_size = ? AND status = 'completed' ORDER BY created_at DESC LIMIT 1",
                 [userId, fileName, fileSize]
             );
+            
+            // 缓存已完成文件任务，过期时间 10 分钟
+            try {
+                await cache.set(cacheKey, task, 600);
+            } catch (e) {
+                // 缓存写入失败，忽略
+            }
+            
+            return task;
         } catch (e) {
             log.error(`TaskRepository.findCompletedByFile error for ${userId}/${fileName}:`, e);
             return null;
@@ -878,7 +969,8 @@ export class TaskRepository {
             await Promise.allSettled([
                 ConsistentCache.delete(`task:${taskId}`),
                 StateSynchronizer.clearTaskState(taskId),
-                cache.delete(`task_status:${taskId}`)
+                cache.delete(`task_status:${taskId}`),
+                cache.delete(`task:${taskId}:details`)
             ]);
             this.pendingUpdates.delete(taskId);
         } catch (e) {
