@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.32.2](https://github.com/YoungSx/drive-collector-js/compare/v4.32.1...v4.32.2) (2026-03-25)
+
+
+### 🐛 问题修复
+
+* ensure active processor state is cleared when config is missing before download starts ([f751d8a](https://github.com/YoungSx/drive-collector-js/commit/f751d8a1b87b27097b6e33682d59aa255644755e))
+
 ### [4.32.1](https://github.com/YoungSx/drive-collector-js/compare/v4.32.0...v4.32.1) (2026-03-25)
 
 
