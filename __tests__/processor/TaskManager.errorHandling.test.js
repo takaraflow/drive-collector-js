@@ -58,6 +58,11 @@ vi.mock('fs', () => ({
 describe('TaskManager error handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
+    TaskManager.stopAutoScaling();
+    TaskManager.activeProcessors.clear();
+    TaskManager.inFlightTasks.clear();
+    TaskManager.cancelledTaskIds.clear();
     // 模拟分布式锁获取成功
     instanceCoordinator.acquireTaskLock.mockResolvedValue(true);
     // 模拟文件存在
@@ -70,6 +75,14 @@ describe('TaskManager error handling', () => {
     CloudTool.listRemoteFiles.mockResolvedValue([]);
     // 模拟文件删除成功
     fs.promises.unlink.mockResolvedValue();
+  });
+
+  afterEach(() => {
+    TaskManager.stopAutoScaling();
+    TaskManager.activeProcessors.clear();
+    TaskManager.inFlightTasks.clear();
+    TaskManager.cancelledTaskIds.clear();
+    vi.useRealTimers();
   });
 
   test('should handle network errors gracefully', async () => {
@@ -185,6 +198,8 @@ describe('TaskManager error handling', () => {
   });
 
   test('should handle validation failure gracefully', async () => {
+    vi.useFakeTimers();
+
     const task = {
       id: 'test-task-5',
       chatId: '12345',
@@ -204,7 +219,9 @@ describe('TaskManager error handling', () => {
     // 模拟远程文件不存在（验证失败），确保每次调用都返回null
     CloudTool.getRemoteFileInfo.mockResolvedValue(null);
 
-    await TaskManager.uploadTask(task);
+    const uploadPromise = TaskManager.uploadTask(task);
+    await vi.advanceTimersByTimeAsync(60000);
+    await uploadPromise;
 
     // 验证任务状态被更新为失败
     expect(TaskRepository.updateStatus).toHaveBeenCalledWith(
@@ -212,5 +229,5 @@ describe('TaskManager error handling', () => {
       'failed',
       expect.stringContaining('Validation failed')
     );
-  }, 60000); // 增加超时时间到60秒
+  });
 });
