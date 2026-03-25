@@ -3,15 +3,19 @@ import fs from "fs";
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { createHeartbeat, handleTaskCompletion, handleTaskFailure, handleUploadFailure, escapeHTML } from "./TaskManager.utils.js";
 
-// Get dependencies from dependency container
-const { config, CloudTool, ossService, getMediaInfo, updateStatus, TaskRepository, instanceCoordinator, logger, STRINGS, format } = dependencyContainer.getAll();
-
-const log = logger.withModule('TaskManager.upload');
+// 获取模块日志记录器
+const getLog = () => dependencyContainer.get('logger').withModule('TaskManager.upload');
 
 /**
  * Upload Task - Responsible for rclone transfer phase (no MTProto required)
  */
 export async function uploadTask(task) {
+    const { 
+        config, CloudTool, ossService, getMediaInfo, updateStatus, 
+        TaskRepository, instanceCoordinator, STRINGS, format 
+    } = dependencyContainer.getAll();
+    const log = getLog();
+    
     const { id } = task;
 
     // Distributed lock: Try to acquire task lock to ensure same task won't be processed by multiple instances

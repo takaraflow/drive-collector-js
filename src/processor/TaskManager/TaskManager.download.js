@@ -3,15 +3,21 @@ import fs from "fs";
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { createHeartbeat, handleTaskCompletion, handleTaskFailure, escapeHTML } from "./TaskManager.utils.js";
 
-// Get dependencies from dependency container
-const { config, client, CloudTool, getMediaInfo, updateStatus, safeEdit, runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, runMtprotoFileTaskWithRetry, PRIORITY, TaskRepository, queueService, logger, STRINGS, format, streamTransferService, instanceCoordinator } = dependencyContainer.getAll();
-
-const log = logger.withModule('TaskManager');
+// 获取模块日志记录器
+const getLog = () => dependencyContainer.get('logger').withModule('TaskManager');
 
 /**
  * Download Task - Responsible for MTProto download phase
  */
 export async function downloadTask(task) {
+    const { 
+        config, client, CloudTool, getMediaInfo, updateStatus, safeEdit, 
+        runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, 
+        runMtprotoFileTaskWithRetry, PRIORITY, TaskRepository, queueService, 
+        STRINGS, format, streamTransferService, instanceCoordinator 
+    } = dependencyContainer.getAll();
+    const log = getLog();
+
         const { message, id } = task;
         if (!message.media) return;
 
@@ -270,7 +276,10 @@ export async function downloadTask(task) {
                 this.activeProcessors.delete(id);
             }
         } finally {
-            if (didActivate) this.inFlightTasks.delete(id);
+            if (didActivate) {
+                this.activeProcessors.delete(id);
+                this.inFlightTasks.delete(id);
+            }
             // Ensure distributed lock is released
             await instanceCoordinator.releaseTaskLock(id);
         }

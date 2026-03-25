@@ -404,8 +404,17 @@ describe('TaskManager', () => {
         });
 
         it('should handle media batch webhook', async () => {
-            // Test exists but implementation details depend on actual TaskManager logic
-            expect(TaskManager.handleMediaBatchWebhook).toBeDefined();
+            const handleDownloadWebhookSpy = vi.spyOn(TaskManager, 'handleDownloadWebhook')
+                .mockResolvedValue({ success: true, statusCode: 200 });
+
+            const result = await TaskManager.handleMediaBatchWebhook('group-1', ['task-1', 'task-2']);
+
+            expect(result).toEqual({ success: true, statusCode: 200 });
+            expect(handleDownloadWebhookSpy).toHaveBeenCalledTimes(2);
+            expect(handleDownloadWebhookSpy).toHaveBeenNthCalledWith(1, 'task-1');
+            expect(handleDownloadWebhookSpy).toHaveBeenNthCalledWith(2, 'task-2');
+
+            handleDownloadWebhookSpy.mockRestore();
         });
     });
 

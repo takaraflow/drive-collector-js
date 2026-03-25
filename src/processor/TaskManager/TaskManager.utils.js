@@ -1,9 +1,8 @@
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 
-// Get dependencies from dependency container
-const { TaskRepository, logger, STRINGS, format, UIHelper } = dependencyContainer.getAll();
-
-const log = logger.withModule('TaskManager.utils');
+// 获取依赖项的辅助函数
+const getDeps = () => dependencyContainer.getAll();
+const getLog = () => getDeps().logger.withModule('TaskManager.utils');
 
 /**
  * Create heartbeat function for task status updates
@@ -14,6 +13,7 @@ const log = logger.withModule('TaskManager.utils');
  * @returns {Function} Heartbeat function
  */
 export function createHeartbeat(task, context, updateStatus, fileName = null) {
+    const { TaskRepository, STRINGS, UIHelper } = getDeps();
     let lastUpdate = 0;
     
     return async (status, downloaded = 0, total = 0, uploadProgress = null) => {
@@ -58,6 +58,7 @@ export function createHeartbeat(task, context, updateStatus, fileName = null) {
  * @param {string} fileLink - File link for status display
  */
 export async function handleTaskCompletion(task, context, updateStatus, fileName, actualUploadPath, fileLink) {
+    const { TaskRepository, STRINGS, format } = getDeps();
     await TaskRepository.updateStatus(task.id, 'completed');
     
     if (task.isGroup) {
@@ -77,6 +78,7 @@ export async function handleTaskCompletion(task, context, updateStatus, fileName
  * @param {boolean} isCancelled - Whether task was cancelled
  */
 export async function handleTaskFailure(task, context, updateStatus, errorMessage, isCancelled = false) {
+    const { TaskRepository, STRINGS } = getDeps();
     const status = isCancelled ? 'cancelled' : 'failed';
     await TaskRepository.updateStatus(task.id, status, errorMessage);
     
@@ -96,6 +98,7 @@ export async function handleTaskFailure(task, context, updateStatus, errorMessag
  * @param {Object} uploadResult - Upload result object
  */
 export async function handleUploadFailure(task, context, updateStatus, uploadResult) {
+    const { TaskRepository, STRINGS, format } = getDeps();
     if (task.isCancelled || uploadResult.error === "CANCELLED") {
         throw new Error("CANCELLED");
     }

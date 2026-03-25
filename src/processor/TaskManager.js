@@ -9,10 +9,9 @@ import { dependencyContainer } from "../services/DependencyContainer.js";
 import { downloadTask } from "./TaskManager/TaskManager.download.js";
 import { uploadTask } from "./TaskManager/TaskManager.upload.js";
 
-// 从依赖容器获取依赖项
-const { config, client, CloudTool, UIHelper, getMediaInfo, updateStatus, escapeHTML, safeEdit, runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, runMtprotoFileTaskWithRetry, PRIORITY, AuthGuard, TaskRepository, d1, cache, instanceCoordinator, queueService, logger, STRINGS, format, streamTransferService } = dependencyContainer.getAll();
-
-const log = logger.withModule('TaskManager');
+// 获取依赖项的辅助函数
+const getDeps = () => dependencyContainer.getAll();
+const getLog = () => getDeps().logger.withModule('TaskManager');
 
 /**
  * --- 任务管理调度中心 (TaskManager) ---
@@ -33,6 +32,8 @@ export class TaskManager {
      */
     static async batchUpdateStatus(updates) {
         if (!updates || updates.length === 0) return;
+        const { d1, TaskRepository } = getDeps();
+        const log = getLog();
 
         const statements = updates.map(({id, status, error}) => ({
             sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = datetime('now') WHERE id = ?",
@@ -137,6 +138,8 @@ export class TaskManager {
      * 初始化：恢复因重启中断的僵尸任务
      */
     static async init() {
+        const { cache, TaskRepository } = getDeps();
+        const log = getLog();
         log.info("正在检查数据库中异常中断的任务");
 
         // 安全检查：如果处于 Cache 故障转移模式，延迟任务恢复以优先让主集群处理
@@ -198,6 +201,7 @@ export class TaskManager {
      * [私有] 预加载常用数据，提升后续操作性能
      */
     static async _preloadCommonData() {
+        const log = getLog();
         const preloadTasks = [];
 
         try {
@@ -262,6 +266,8 @@ export class TaskManager {
      * [私有] 批量恢复同一个会话下的任务
      */
     static async _restoreBatchTasks(chatId, rows) {
+        const { client, runMtprotoTaskWithRetry, PRIORITY, config } = getDeps();
+        const log = getLog();
         try {
             const sourceMsgIds = rows.map(r => r.source_msg_id);
             const messages = await runMtprotoTaskWithRetry(() => client.getMessages(chatId, { ids: sourceMsgIds }), { priority: PRIORITY.BACKGROUND });
@@ -349,6 +355,8 @@ export class TaskManager {
      * 添加新任务到队列
      */
     static async addTask(target, mediaMessage, userId, customLabel = "") {
+        const { client, format, STRINGS, PRIORITY, TaskRepository, getMediaInfo, runBotTaskWithRetry } = getDeps();
+        const log = getLog();
         const taskId = randomUUID();
         const chatIdStr = (target?.userId ?? target?.chatId ?? target?.channelId ?? target?.id ?? target).toString();
 
@@ -400,6 +408,8 @@ export class TaskManager {
      * 批量添加媒体组任务
      */
     static async addBatchTasks(target, messages, userId) {
+        const { client, format, STRINGS, PRIORITY, TaskRepository, getMediaInfo, runBotTaskWithRetry } = getDeps();
+        const log = getLog();
         const chatIdStr = (target?.userId ?? target?.chatId ?? target?.channelId ?? target?.id ?? target).toString();
 
         let statusMsg = await runBotTaskWithRetry(
@@ -466,6 +476,7 @@ export class TaskManager {
      * [私有] 标准化构造内存中的任务对象
      */
     static _createTaskObject(id, userId, chatId, msgId, message) {
+        const { getMediaInfo } = getDeps();
         const info = getMediaInfo(message);
         return {
             id,
@@ -483,6 +494,8 @@ export class TaskManager {
      * [私 evasion] 发布任务到 QStash 下载队列
      */
     static async _enqueueTask(task) {
+        const { queueService } = getDeps();
+        const log = getLog();
         try {
             // 添加触发源信息
             const taskPayload = {
@@ -512,6 +525,8 @@ export class TaskManager {
      * [私ia] 发布任务到 QStash 上传队列
      */
     static async _enqueueUploadTask(task) {
+        const { queueService } = getDeps();
+        const log = getLog();
         try {
             await queueService.enqueueUploadTask(task.id, {
                 userId: task.userId,
@@ -551,6 +566,7 @@ export class TaskManager {
      * 批量更新排队中的 UI（带节流控制）
      */
     static async updateQueueUI() {
+        const { format, STRINGS, updateStatus } = getDeps();
         // 获取快照以避免在循环中由于数组变动导致 index 越界
         const snapshot = [...this.waitingTasks];
         const maxTasks = Math.min(snapshot.length, 5);
@@ -622,6 +638,8 @@ export class TaskManager {
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
     static async handleDownloadWebhook(taskId) {
+        const { instanceCoordinator, TaskRepository, client, runMtprotoTaskWithRetry, PRIORITY } = getDeps();
+        const log = getLog();
         // Leader 状态校验：只有持有 telegram_client 锁的实例才能处理任务
         if (!(await instanceCoordinator.hasLock("telegram_client"))) {
             return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
@@ -691,6 +709,8 @@ export class TaskManager {
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
      static async handleUploadWebhook(taskId) {
+        const { instanceCoordinator, TaskRepository, client, runMtprotoTaskWithRetry, PRIORITY, config } = getDeps();
+        const log = getLog();
         // Leader 状态校验：只有持有 telegram_client 锁 del 实例才能处理任务
         if (!(await instanceCoordinator.hasLock("telegram_client"))) {
             return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
@@ -771,6 +791,8 @@ export class TaskManager {
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
     static async retryTask(taskId, type = 'auto') {
+        const { TaskRepository } = getDeps();
+        const log = getLog();
         try {
             // 1. 获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
@@ -814,6 +836,8 @@ export class TaskManager {
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
     static async _retryDownload(taskId, dbTask) {
+        const { client, runMtprotoTaskWithRetry, PRIORITY, TaskRepository } = getDeps();
+        const log = getLog();
         try {
             // 1. 检查是否需要重新获取消息
             const messages = await runMtprotoTaskWithRetry(
@@ -850,6 +874,8 @@ export class TaskManager {
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
     static async _retryUpload(taskId, dbTask) {
+        const { client, runMtprotoTaskWithRetry, PRIORITY, config, TaskRepository } = getDeps();
+        const log = getLog();
         try {
             // 1. 检查本地文件是否存在
             const localPath = path.join(config.downloadDir, dbTask.file_name);
@@ -891,6 +917,7 @@ export class TaskManager {
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
     static async handleMediaBatchWebhook(groupId, taskIds) {
+        const log = getLog();
         try {
             log.info(`QStash Received media-batch webhook for Group: ${groupId}, TaskCount: ${taskIds.length}`);
 
@@ -929,6 +956,7 @@ export class TaskManager {
      * 取消指定任务
      */
     static async cancelTask(taskId, userId) {
+        const { TaskRepository, AuthGuard, safeEdit, STRINGS } = getDeps();
         const dbTask = await TaskRepository.findById(taskId);
         if (!dbTask) return false;
 
@@ -982,6 +1010,7 @@ export class TaskManager {
      * 按 status 消息 msgId 取消整组任务（媒体组）
      */
     static async cancelTasksByMsgId(msgId, userId) {
+        const { TaskRepository, AuthGuard, UIHelper, safeEdit } = getDeps();
         if (!msgId) return false;
 
         const tasks = await TaskRepository.findByMsgId(msgId);
@@ -1028,6 +1057,7 @@ export class TaskManager {
      */
     static startAutoScaling() {
         if (this.autoScalingInterval) return;
+        const log = getLog();
         import('../utils/limiter.js').then((limiterModule) => {
             this.autoScalingInterval = setInterval(() => {
                 try {
@@ -1070,6 +1100,7 @@ export class TaskManager {
      * [私有] 刷新组任务看板 (智能节流)
      */
     static async _refreshGroupMonitor(task, status, downloaded = 0, total = 0, errorMsg = null) {
+        const { TaskRepository, UIHelper, safeEdit } = getDeps();
         const msgId = task.msgId;
         const lastUpdate = this.monitorLocks.get(msgId) || 0;
         const now = Date.now();

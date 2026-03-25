@@ -124,6 +124,7 @@ vi.mock("fs", () => ({
 
 // Import TaskManager
 const { TaskManager } = await import("../../src/processor/TaskManager.js");
+const { dependencyContainer } = await import("../../src/services/DependencyContainer.js");
 
 describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
     let task;
@@ -312,5 +313,16 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         
         // Verify that updateStatus was called (we can't easily check the message content due to formatting)
         expect(updateStatus).toHaveBeenCalled();
+    });
+
+    test("should clear active processor state when config is missing before download starts", async () => {
+        const depsSnapshot = { ...dependencyContainer.getAll(), config: null };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await expect(TaskManager.downloadTask(task)).rejects.toThrow(/downloadDir/);
+
+        expect(TaskManager.activeProcessors.has("task_1")).toBe(false);
+
+        getAllSpy.mockRestore();
     });
 });

@@ -18,7 +18,10 @@ import { streamTransferService } from "./StreamTransferService.js";
 export class DependencyContainer {
     constructor() {
         this.dependencies = {
-            config,
+            // config 使用 getter 确保获取的是最新的 live binding 值
+            get config() {
+                return config;
+            },
             client,
             CloudTool,
             ossService,
@@ -69,7 +72,9 @@ export class DependencyContainer {
      * @returns {Object} 所有依赖项
      */
     getAll() {
-        return { ...this.dependencies };
+        // 返回原始引用以保持 getter 的动态特性
+        // 注意：这允许调用者修改依赖项，但在本项目中通常被视为可接受的折衷
+        return this.dependencies;
     }
 }
 
