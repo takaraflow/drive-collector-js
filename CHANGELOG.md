@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.32.1](https://github.com/YoungSx/drive-collector-js/compare/v4.32.0...v4.32.1) (2026-03-25)
+
+
+### 🔧 其他任务
+
+* add .gitkeep to mocks directory ([fb8059d](https://github.com/YoungSx/drive-collector-js/commit/fb8059d6943c85e0c4909ba9bc9e5667d4cc5776))
+
+
+### 🐛 问题修复
+
+* **TaskManager:** fix error handling and resource cleaning issues for uploading tasks ([e3df01b](https://github.com/YoungSx/drive-collector-js/commit/e3df01b2a2c7ce11dcf243fa3d8234b597c1a38b))
+
+
+### ♻️ 代码重构
+
+* **TaskManager:** refactoring the task manager to a modular structure ([ea2c939](https://github.com/YoungSx/drive-collector-js/commit/ea2c93902ea11944310b96147564110fe1d85455))
+
+
+### ✨ 新特性
+
+* add PathResolver domain module with tests ([de64252](https://github.com/YoungSx/drive-collector-js/commit/de64252338c9863833952d36618bf472e2902928))
+* **network:** add Cloudflare Tunnel status diagnostics to NetworkDiagnostic ([7905153](https://github.com/YoungSx/drive-collector-js/commit/79051533060b12536b6363332b39447aea21358d))
+* **StateSynchronizer:** add task status management method ([acc24dd](https://github.com/YoungSx/drive-collector-js/commit/acc24dd83396798bf22fd30d3f71bf52945ca43b))
+
+
+### ✅ 测试相关
+
+* add FileOpsExecutor integration tests ([675008f](https://github.com/YoungSx/drive-collector-js/commit/675008fe7192a41a7c435456f9880159879023e8))
+* add GitExecutor integration tests ([d250581](https://github.com/YoungSx/drive-collector-js/commit/d2505814a0aee2c82699b3073061e75bca81c097))
+* add layered test scripts ([b2867b5](https://github.com/YoungSx/drive-collector-js/commit/b2867b5b9762f77d5eff8cd32047611c3179abf4))
+* add shared logger mock ([d7a9766](https://github.com/YoungSx/drive-collector-js/commit/d7a97665520e8bafc8b83483c9b1c48c282f9ae0))
+* add shared telegram mock ([035b9f2](https://github.com/YoungSx/drive-collector-js/commit/035b9f20428212a2cd9b43dd8a1675d0204d02c8))
+* create test directory structure for pyramid testing ([c407065](https://github.com/YoungSx/drive-collector-js/commit/c4070659b62eddda55e8c14449d019912291ab37))
+* move envMapper to unit/services ([35c69b4](https://github.com/YoungSx/drive-collector-js/commit/35c69b48384a80c748b4f2edae5e4fd117c1308b))
+* move serializer to unit/services ([9da1be2](https://github.com/YoungSx/drive-collector-js/commit/9da1be29a2b338389cfa414685141541bd5c62c2))
+* **StateSynchronizer:** Add test cases for state synchronizers ([b5923cd](https://github.com/YoungSx/drive-collector-js/commit/b5923cd1b303ffa904d6e73ffe1789db182bd8d5))
+* **utils:** add sanitizeHeaders test cases ([62e00e2](https://github.com/YoungSx/drive-collector-js/commit/62e00e2b92c3a3c2856a3d1de5a0ef8483337347))
+
 ## [4.32.0](https://github.com/YoungSx/drive-collector-js/compare/v4.31.0...v4.32.0) (2026-02-26)
 
 
