@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import http from "node:http";
 
 // Mock http module
@@ -63,6 +63,7 @@ vi.mock("../../src/services/logger/index.js", () => ({
 describe("MCP Server Integration (SaaS Mode)", () => {
     let mockRequestHandler;
     let toolHandler;
+    let originalExit;
 
     // 加载被测模块 (由于它有 main() 立即执行，我们需要控制环境)
     beforeAll(async () => {
@@ -70,7 +71,7 @@ describe("MCP Server Integration (SaaS Mode)", () => {
         process.env.MCP_PORT = "3001";
         
         // 模拟 process.exit 防止测试退出
-        const originalExit = process.exit;
+        originalExit = process.exit;
         process.exit = vi.fn((code) => {
             // 不实际退出，只是记录调用
             console.log(`process.exit(${code}) was called but mocked`);
@@ -99,6 +100,13 @@ describe("MCP Server Integration (SaaS Mode)", () => {
             toolHandler = toolCalls[1][1];
         } else if (toolCalls.length === 1) {
             toolHandler = toolCalls[0][1];
+        }
+    }, 30000);
+
+    afterAll(() => {
+        vi.useRealTimers();
+        if (originalExit) {
+            process.exit = originalExit;
         }
     });
 
