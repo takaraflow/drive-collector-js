@@ -989,7 +989,15 @@
         "type": "string",
         "required": false,
         "description": "New Relic 应用名称"
-      }
+      },
+      "MCP_PORT": "Optional placeholder",
+      "NF_REDIS_TLS_ENABLED": "Optional placeholder",
+      "NF_REDIS_URL": "Optional placeholder",
+      "REDIS_TLS_ENABLED": "Optional placeholder",
+      "REDIS_TOKEN": "Optional placeholder",
+      "REDIS_URL": "Optional placeholder",
+      "UPSTASH_REDIS_REST_TOKEN": "Optional placeholder",
+      "UPSTASH_REDIS_REST_URL": "Optional placeholder"
     }
   },
   "endpoints": {
