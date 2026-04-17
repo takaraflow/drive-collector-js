@@ -815,6 +815,7 @@ class CacheService {
     _matchPattern(key, pattern) {
         // Convert pattern to regex
         const regexPattern = pattern
+            .replace(/[.+^${}()|[\]\\]/g, '\\$&')
             .replace(/\*/g, '.*')
             .replace(/\?/g, '.');
         
