@@ -770,6 +770,46 @@
         "required": false,
         "description": "Cloudflare KV API token"
       },
+      "MCP_PORT": {
+        "type": "number",
+        "required": false,
+        "description": "MCP server port"
+      },
+      "NF_REDIS_TLS_ENABLED": {
+        "type": "boolean",
+        "required": false,
+        "description": "Network failover redis TLS enabled"
+      },
+      "NF_REDIS_URL": {
+        "type": "string",
+        "required": false,
+        "description": "Network failover redis url"
+      },
+      "REDIS_TLS_ENABLED": {
+        "type": "boolean",
+        "required": false,
+        "description": "Redis TLS enabled"
+      },
+      "REDIS_TOKEN": {
+        "type": "string",
+        "required": false,
+        "description": "Redis access token"
+      },
+      "REDIS_URL": {
+        "type": "string",
+        "required": false,
+        "description": "Redis connection URL"
+      },
+      "UPSTASH_REDIS_REST_URL": {
+        "type": "string",
+        "required": false,
+        "description": "Upstash redis rest url"
+      },
+      "UPSTASH_REDIS_REST_TOKEN": {
+        "type": "string",
+        "required": false,
+        "description": "Upstash redis rest token"
+      },
       "PORT": {
         "type": "number",
         "default": 8080,
