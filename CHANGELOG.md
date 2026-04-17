@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### 4.32.3 (2026-04-17)
+
 ### [4.32.2](https://github.com/YoungSx/drive-collector-js/compare/v4.32.1...v4.32.2) (2026-03-25)
 
 
