@@ -7,16 +7,20 @@ export const resolvePaths = (baseDir, inputs) => {
 
 export const shouldIgnore = (path, ignoreRules) => {
     return ignoreRules.some(rule => {
-        // Escape regex special characters except *
-        const escapedRule = rule.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp('^' + escapedRule.replace(/\*/g, '.*') + '$');
+        const regexPattern = rule
+            .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+            .replace(/\*/g, '.*')
+            .replace(/\?/g, '.');
+        const regex = new RegExp('^' + regexPattern + '$');
         return regex.test(path);
     });
 };
 
 export const matchPattern = (path, pattern) => {
-    // Escape regex special characters except *
-    const escapedPattern = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp('^' + escapedPattern.replace(/\*/g, '.*') + '$');
+    const regexPattern = pattern
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, '.*')
+        .replace(/\?/g, '.');
+    const regex = new RegExp('^' + regexPattern + '$');
     return regex.test(path);
 };
