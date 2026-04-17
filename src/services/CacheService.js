@@ -1277,27 +1277,29 @@ class CacheService {
     async batchOperation(operations) {
         await this._ensureInitialized();
         
-        const results = [];
-        
-        for (const op of operations) {
+        // ⚡ Bolt Optimization: Run batch operations concurrently instead of sequentially
+        // This eliminates N+1 I/O waits and significantly improves batch processing performance
+        const promises = operations.map(async (op) => {
             try {
                 if (op.type === 'get') {
-                    const value = await this.get(op.key, op.type || 'json', op.options || {});
-                    results.push({ success: true, key: op.key, value });
+                    // Fix: Use op.dataType instead of op.type for format ('json', 'string')
+                    const value = await this.get(op.key, op.dataType || 'json', op.options || {});
+                    return { success: true, key: op.key, value };
                 } else if (op.type === 'set') {
                     const success = await this.set(op.key, op.value, op.ttl || 3600, op.options || {});
-                    results.push({ success, key: op.key });
+                    return { success, key: op.key };
                 } else if (op.type === 'delete') {
                     const success = await this.delete(op.key, op.options || {});
-                    results.push({ success, key: op.key });
+                    return { success, key: op.key };
                 }
+                return { success: false, key: op.key, error: `Unknown operation type: ${op.type}` };
             } catch (error) {
                 log.error(`Batch operation failed for ${op.key}:`, error.message);
-                results.push({ success: false, key: op.key, error: error.message });
+                return { success: false, key: op.key, error: error.message };
             }
-        }
+        });
         
-        return results;
+        return await Promise.all(promises);
     }
 
     /**
