@@ -133,7 +133,9 @@ describe("QStash Webhook Integration", () => {
                 info: vi.fn(),
                 error: vi.fn(),
                 warn: vi.fn(),
-                debug: vi.fn()
+                debug: vi.fn(),
+                withModule: vi.fn().mockReturnThis(),
+                withContext: vi.fn().mockReturnThis()
             }
         }));
 
