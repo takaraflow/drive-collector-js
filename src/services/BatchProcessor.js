@@ -3,6 +3,7 @@ import { queueService } from "./QueueService.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
 import { cache } from "./CacheService.js";
 import { localCache } from "../utils/LocalCache.js";
+import PQueue from "p-queue";
 
 const log = logger.withModule('BatchProcessor');
 
@@ -170,33 +171,22 @@ export class BatchProcessor {
      * @returns {Promise<Array>} 处理结果
      */
     async processItems(items, processor, options = {}) {
-        const { concurrency = 5, batchSize = 20 } = options;
+        const { concurrency = 5 } = options;
 
-        const results = [];
-        const batches = this._chunkArray(items, batchSize);
+        const queue = new PQueue({ concurrency });
 
-        for (const batch of batches) {
-            // 并行处理批次内的项
-            const batchResults = await Promise.all(
-                batch.map(async (item, index) => {
-                    try {
-                        const result = await processor(item, index);
-                        return { success: true, item, result };
-                    } catch (error) {
-                        return { success: false, item, error: error.message };
-                    }
-                })
-            );
+        const promises = items.map((item, index) => {
+            return queue.add(async () => {
+                try {
+                    const result = await processor(item, index);
+                    return { success: true, item, result };
+                } catch (error) {
+                    return { success: false, item, error: error.message };
+                }
+            });
+        });
 
-            results.push(...batchResults);
-
-            // 控制整体并发
-            if (batches.length > 1) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-        }
-
-        return results;
+        return await Promise.all(promises);
     }
 
     /**
@@ -320,31 +310,21 @@ export class BatchProcessor {
      * @private
      */
     async _processItemsInChunks(batch, processor) {
-        const chunkSize = 10;
-        const chunks = this._chunkArray(batch.items, chunkSize);
-        const allResults = [];
+        // Use PQueue instead of chunks to maximize concurrency without bursts.
+        const queue = new PQueue({ concurrency: 10 });
 
-        for (const chunk of chunks) {
-            const chunkResults = await Promise.all(
-                chunk.map(async (item, index) => {
-                    try {
-                        const result = await processor(item, batch);
-                        return { success: true, item, result, index };
-                    } catch (error) {
-                        return { success: false, item, error: error.message, index };
-                    }
-                })
-            );
+        const promises = batch.items.map((item, index) => {
+            return queue.add(async () => {
+                try {
+                    const result = await processor(item, batch);
+                    return { success: true, item, result, index };
+                } catch (error) {
+                    return { success: false, item, error: error.message, index };
+                }
+            });
+        });
 
-            allResults.push(...chunkResults);
-
-            // 小延迟避免过载
-            if (chunks.length > 1) {
-                await new Promise(resolve => setTimeout(resolve, 50));
-            }
-        }
-
-        return allResults;
+        return await Promise.all(promises);
     }
 
     /**

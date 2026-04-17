@@ -6,6 +6,7 @@ import { CircuitBreakerManager } from "../../services/CircuitBreaker.js";
 import CloudQueueBase from "./CloudQueueBase.js";
 import { BaseQueue } from "./BaseQueue.js";
 import { metrics } from "../../services/MetricsService.js";
+import { createEnhancedMock } from "./mock/QstashMockEnhancer.js";
 
 const log = logger.withModule?.('QstashQueue') || logger;
 
@@ -663,129 +664,7 @@ export class QstashQueue extends CloudQueueBase {
             throw new Error('Not in mock mode');
         }
         
-        return {
-            simulateDelay: (duration) => this.simulateDelay(duration),
-            injectError: (errorType) => this.injectError(errorType),
-            getMetrics: () => this.getMetrics(),
-            getDeadLetterQueue: () => this.getDeadLetterQueue(),
-            getProcessedMessages: () => this.getProcessedMessages(),
-            clearProcessedMessages: () => this.clearProcessedMessages(),
-            clearDeadLetterQueue: () => this.clearDeadLetterQueue(),
-            getQueueStatus: () => this.getQueueStatus(),
-            // 模拟缓冲区溢出
-            simulateBufferOverflow: async (messageCount) => {
-                if (!this.isMockMode) return;
-                const originalMax = this.maxBufferSize;
-                this.maxBufferSize = Math.min(messageCount - 1, 10); // 强制溢出
-                for (let i = 0; i < messageCount; i++) {
-                    await this._addToBuffer({
-                        topic: 'test',
-                        message: { id: i },
-                        options: {},
-                        resolve: () => {}
-                    });
-                }
-                this.maxBufferSize = originalMax;
-            },
-            // 模拟熔断器触发
-            simulateCircuitBreaker: async () => {
-                if (!this.isMockMode) return;
-                // 强制打开熔断器
-                this.publishBreaker.forceOpen();
-            },
-            // 模拟重复消息
-            simulateDuplicateMessage: async (topic, message) => {
-                if (!this.isMockMode) return;
-                // 发送两次相同的消息
-                const result1 = await this._publishWithIdempotency(topic, message);
-                const result2 = await this._publishWithIdempotency(topic, message);
-                return { first: result1, second: result2 };
-            },
-            // 模拟死信队列重试
-            simulateDLQRetry: async (dlqId) => {
-                if (!this.isMockMode) return;
-                return await this.retryDeadLetterMessage(dlqId);
-            },
-            // 获取缓冲区内容（用于测试验证）
-            getBufferContent: () => {
-                return this.buffer;
-            },
-            // 清空所有状态
-            clearAllState: () => {
-                this.buffer = [];
-                this.processedMessages.clear();
-                this.deadLetterQueue = [];
-                this.resetMetrics();
-            },
-            // 设置配置（用于测试）
-            setConfig: (config) => {
-                if (config.maxBufferSize !== undefined) this.maxBufferSize = config.maxBufferSize;
-                if (config.batchSize !== undefined) this.batchSize = config.batchSize;
-                if (config.batchTimeout !== undefined) this.batchTimeout = config.batchTimeout;
-                if (config.maxDeadLetterQueueSize !== undefined) this.maxDeadLetterQueueSize = config.maxDeadLetterQueueSize;
-                if (config.processedMessagesLimit !== undefined) this.processedMessagesLimit = config.processedMessagesLimit;
-            },
-            // 获取内部状态（用于测试验证）
-            getInternalState: () => {
-                return {
-                    buffer: this.buffer,
-                    processedMessages: Array.from(this.processedMessages),
-                    deadLetterQueue: this.deadLetterQueue,
-                    metrics: this.metrics,
-                    maxBufferSize: this.maxBufferSize,
-                    processedMessagesLimit: this.processedMessagesLimit,
-                    maxDeadLetterQueueSize: this.maxDeadLetterQueueSize
-                };
-            },
-            // 模拟分布式熔断器状态同步
-            simulateDistributedCircuitSync: async (globalState) => {
-                if (!this.isMockMode) return;
-                if (this.redisClient) {
-                    await this.redisClient.setex(
-                        'qstash:circuit:state',
-                        60,
-                        JSON.stringify(globalState)
-                    );
-                }
-            },
-            // 模拟处理消息（用于测试幂等性）
-            simulateProcessMessage: async (topic, message) => {
-                if (!this.isMockMode) return;
-                const messageId = this._generateMessageId(topic, message);
-                const isDuplicate = this.processedMessages.has(messageId);
-                if (!isDuplicate) {
-                    this._addProcessedMessage(messageId);
-                }
-                return { messageId, isDuplicate };
-            },
-            // 模拟批量处理
-            simulateBatchProcessing: async (batchSize) => {
-                if (!this.isMockMode) return;
-                const results = [];
-                for (let i = 0; i < batchSize; i++) {
-                    const result = await this._publishWithIdempotency('test', { id: i });
-                    results.push(result);
-                }
-                return results;
-            },
-            // 模拟顺序处理验证
-            simulateSequentialProcessing: async (messageCount) => {
-                if (!this.isMockMode) return;
-                const processingOrder = [];
-                for (let i = 0; i < messageCount; i++) {
-                    processingOrder.push(i);
-                    await this._publishWithIdempotency('test', { order: i });
-                }
-                return processingOrder;
-            },
-            // 模拟缓冲区刷新
-            simulateBufferFlush: async () => {
-                if (!this.isMockMode) return;
-                if (this.buffer.length > 0) {
-                    return await this._flushBuffer();
-                }
-            }
-        };
+        return createEnhancedMock(this);
     }
 
     // 这些方法已在前面定义过，移除重复
