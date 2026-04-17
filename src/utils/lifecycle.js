@@ -20,29 +20,8 @@ async function closeHttpServer() {
     });
 }
 
-export async function registerShutdownHooks() {
-    const { instanceCoordinator } = await import("../services/InstanceCoordinator.js");
-    const { cache } = await import("../services/CacheService.js");
-    const { stopWatchdog, client } = await import("../services/telegram.js");
-    const { TaskRepository } = await import("../repositories/TaskRepository.js");
-    const { TaskManager } = await import("../processor/TaskManager.js");
-    const { flushLogBuffer } = await import("../services/logger/index.js");
-    const mediaGroupBufferModule = await import("../services/MediaGroupBuffer.js");
-    const mediaGroupBuffer = mediaGroupBufferModule.default;
-    const { distributedLock } = await import("../services/DistributedLock.js");
 
-    // 注册实例活跃任务计数器（用于多实例统计/监控）
-    if (instanceCoordinator && typeof instanceCoordinator.registerActiveTaskCounter === 'function') {
-        instanceCoordinator.registerActiveTaskCounter(() => {
-            return TaskManager.getProcessingCount() + TaskManager.getWaitingCount();
-        });
-    }
-
-    // 注册任务计数器（用于任务排空）
-    gracefulShutdown.registerTaskCounter(() => {
-        return TaskManager.getProcessingCount() + TaskManager.getWaitingCount();
-    });
-
+function registerLoggingHooks(flushLogBuffer) {
     // 0. 在关闭开始前先刷新一次日志，确保关闭前的错误日志被保存 (priority: 5)
     gracefulShutdown.register(async () => {
         console.log('🔄 正在刷新日志缓冲区...');
@@ -50,17 +29,39 @@ export async function registerShutdownHooks() {
         console.log('✅ 日志缓冲区已刷新');
     }, 5, 'logger-flush-before');
 
+    // 10. 在关闭完成后再次刷新日志，确保关闭过程中的日志也被保存 (priority: 60)
+    gracefulShutdown.register(async () => {
+        console.log('🔄 正在刷新关闭过程中的日志...');
+        await flushLogBuffer();
+        // 给日志发送一些时间完成
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log('✅ 所有日志已刷新完成');
+    }, 60, 'logger-flush-after');
+}
+
+function registerServerHooks() {
     // 1. 停止接受新请求 (priority: 10)
     gracefulShutdown.register(async () => {
         await closeHttpServer();
     }, 10, 'http-server');
+}
+
+function registerInstanceCoordinatorHooks(instanceCoordinator, TaskManager) {
+    // 注册实例活跃任务计数器（用于多实例统计/监控）
+    if (instanceCoordinator && typeof instanceCoordinator.registerActiveTaskCounter === 'function') {
+        instanceCoordinator.registerActiveTaskCounter(() => {
+            return TaskManager.getProcessingCount() + TaskManager.getWaitingCount();
+        });
+    }
 
     // 2. 停止实例协调器 (priority: 20)
     gracefulShutdown.register(async () => {
         await instanceCoordinator.stop();
         console.log('✅ InstanceCoordinator 已停止');
     }, 20, 'instance-coordinator');
+}
 
+function registerTelegramHooks(stopWatchdog, client) {
     // 3. 停止 Telegram 看门狗和客户端 (priority: 30)
     gracefulShutdown.register(async () => {
         stopWatchdog();
@@ -69,7 +70,9 @@ export async function registerShutdownHooks() {
             console.log('✅ Telegram 客户端已断开');
         }
     }, 30, 'telegram-client');
+}
 
+function registerMediaGroupHooks(mediaGroupBuffer) {
     // 4. 持久化 MediaGroupBuffer (priority: 35)
     gracefulShutdown.register(async () => {
         try {
@@ -80,20 +83,6 @@ export async function registerShutdownHooks() {
         }
     }, 35, 'media-group-buffer-persist');
 
-    // 5. 刷新待处理的任务更新 (priority: 40)
-    gracefulShutdown.register(async () => {
-        await TaskRepository.flushUpdates();
-        console.log('✅ TaskRepository 待更新任务已刷新');
-    }, 40, 'task-repository');
-
-    // 6. 停止分布式锁服务 (priority: 45)
-    gracefulShutdown.register(async () => {
-        if (distributedLock) {
-            await distributedLock.shutdown();
-            console.log('✅ DistributedLock 已停止');
-        }
-    }, 45, 'distributed-lock');
-
     // 7. 停止 MediaGroupBuffer 清理任务 (priority: 48)
     gracefulShutdown.register(async () => {
         if (mediaGroupBuffer && typeof mediaGroupBuffer.stopCleanup === 'function') {
@@ -101,6 +90,29 @@ export async function registerShutdownHooks() {
             console.log('✅ MediaGroupBuffer 清理任务已停止');
         }
     }, 48, 'media-group-buffer-cleanup');
+}
+
+function registerTaskHooks(TaskRepository, TaskManager) {
+    // 注册任务计数器（用于任务排空）
+    gracefulShutdown.registerTaskCounter(() => {
+        return TaskManager.getProcessingCount() + TaskManager.getWaitingCount();
+    });
+
+    // 5. 刷新待处理的任务更新 (priority: 40)
+    gracefulShutdown.register(async () => {
+        await TaskRepository.flushUpdates();
+        console.log('✅ TaskRepository 待更新任务已刷新');
+    }, 40, 'task-repository');
+}
+
+function registerInfrastructureHooks(distributedLock, cache) {
+    // 6. 停止分布式锁服务 (priority: 45)
+    gracefulShutdown.register(async () => {
+        if (distributedLock) {
+            await distributedLock.shutdown();
+            console.log('✅ DistributedLock 已停止');
+        }
+    }, 45, 'distributed-lock');
 
     // 8. 断开 Cache 连接 (priority: 50)
     gracefulShutdown.register(async () => {
@@ -114,15 +126,26 @@ export async function registerShutdownHooks() {
         tunnelService.stop();
         console.log('✅ Tunnel 服务已停止');
     }, 55, 'tunnel-service');
+}
 
-    // 10. 在关闭完成后再次刷新日志，确保关闭过程中的日志也被保存 (priority: 60)
-    gracefulShutdown.register(async () => {
-        console.log('🔄 正在刷新关闭过程中的日志...');
-        await flushLogBuffer();
-        // 给日志发送一些时间完成
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        console.log('✅ 所有日志已刷新完成');
-    }, 60, 'logger-flush-after');
+export async function registerShutdownHooks() {
+    const { instanceCoordinator } = await import("../services/InstanceCoordinator.js");
+    const { cache } = await import("../services/CacheService.js");
+    const { stopWatchdog, client } = await import("../services/telegram.js");
+    const { TaskRepository } = await import("../repositories/TaskRepository.js");
+    const { TaskManager } = await import("../processor/TaskManager.js");
+    const { flushLogBuffer } = await import("../services/logger/index.js");
+    const mediaGroupBufferModule = await import("../services/MediaGroupBuffer.js");
+    const mediaGroupBuffer = mediaGroupBufferModule.default;
+    const { distributedLock } = await import("../services/DistributedLock.js");
+
+    registerInstanceCoordinatorHooks(instanceCoordinator, TaskManager);
+    registerTaskHooks(TaskRepository, TaskManager);
+    registerLoggingHooks(flushLogBuffer);
+    registerServerHooks();
+    registerTelegramHooks(stopWatchdog, client);
+    registerMediaGroupHooks(mediaGroupBuffer);
+    registerInfrastructureHooks(distributedLock, cache);
 }
 
 export async function buildWebhookServer(config, handler, log) {
