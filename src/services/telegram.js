@@ -564,65 +564,55 @@ async function initTelegramClient() {
 /**
  * 设置事件监听器（增强版）
  */
-function setupEventListeners(client) {
-    client.on("connected", () => {
-        log.info("🔗 Telegram 客户端连接已建立");
-        lastUpdateTimestamp = Date.now(); // 重置更新时间戳，防止误报
-        if (connectionStatusCallback) {
-            connectionStatusCallback(true);
-        }
-    });
+/**
+ * 处理 Telegram 客户端错误
+ */
+function handleTelegramError(err) {
+    const errorType = TelegramErrorClassifier.classify(err);
+    lastErrorType = errorType;
 
-    client.on("disconnected", () => {
-        log.info("🔌 Telegram 客户端连接已断开");
-        if (connectionStatusCallback) {
-            connectionStatusCallback(false);
-        }
-    });
+    // 记录错误类型统计
+    errorTypeFailures[errorType] = (errorTypeFailures[errorType] || 0) + 1;
 
-    // 增强错误处理：使用错误分类器
-    client.on("error", (err) => {
-        const errorType = TelegramErrorClassifier.classify(err);
-        lastErrorType = errorType;
-        
-        // 记录错误类型统计
-        errorTypeFailures[errorType] = (errorTypeFailures[errorType] || 0) + 1;
+    // 特殊处理 FLOOD
+    if (errorType === TelegramErrorClassifier.ERROR_TYPES.FLOOD) {
+         const waitSeconds = err.seconds || 60;
+         log.error(`🚨 检测到 Telegram Flood Wait: 需要等待 ${waitSeconds} 秒。`, { service: 'telegram', waitSeconds });
+    } else {
+         log.error(`⚠️ Telegram 错误 [${errorType}]: ${err.message}`, { service: 'telegram' });
+    }
 
-        // 特殊处理 FLOOD
-        if (errorType === TelegramErrorClassifier.ERROR_TYPES.FLOOD) {
-             const waitSeconds = err.seconds || 60;
-             log.error(`🚨 检测到 Telegram Flood Wait: 需要等待 ${waitSeconds} 秒。`, { service: 'telegram', waitSeconds });
-        } else {
-             log.error(`⚠️ Telegram 错误 [${errorType}]: ${err.message}`, { service: 'telegram' });
-        }
+    // 检查是否需要触发电路断路器
+    if (TelegramErrorClassifier.shouldTripCircuitBreaker(errorType, errorTypeFailures[errorType])) {
+        telegramCircuitBreaker.onFailure(errorType, err);
+    }
 
-        // 检查是否需要触发电路断路器
-        if (TelegramErrorClassifier.shouldTripCircuitBreaker(errorType, errorTypeFailures[errorType])) {
-            telegramCircuitBreaker.onFailure(errorType, err);
-        }
+    // 检查是否需要跳过重连
+    if (TelegramErrorClassifier.shouldSkipReconnect(errorType)) {
+        log.warn(`⚠️ 错误类型 ${errorType} 需要特殊处理，跳过普通重连`);
+        return;
+    }
 
-        // 检查是否需要跳过重连
-        if (TelegramErrorClassifier.shouldSkipReconnect(errorType)) {
-            log.warn(`⚠️ 错误类型 ${errorType} 需要特殊处理，跳过普通重连`);
-            return;
-        }
+    // 获取推荐的重连策略
+    const strategy = TelegramErrorClassifier.getReconnectStrategy(errorType, errorTypeFailures[errorType], err);
 
-        // 获取推荐的重连策略
-        const strategy = TelegramErrorClassifier.getReconnectStrategy(errorType, errorTypeFailures[errorType], err);
+    if (!strategy.shouldRetry) {
+        log.warn(`⚠️ 错误类型 ${errorType} 已超过最大重试次数，停止重连尝试`);
+        return;
+    }
 
-        if (!strategy.shouldRetry) {
-            log.warn(`⚠️ 错误类型 ${errorType} 已超过最大重试次数，停止重连尝试`);
-            return;
-        }
+    // 执行重连
+    if (reconnectTimeout) clearTimeout(reconnectTimeout);
+    reconnectTimeout = setTimeout(() => {
+        const shouldFullReset = TelegramErrorClassifier.shouldResetSession(errorType, errorTypeFailures[errorType]);
+        handleConnectionIssue(!shouldFullReset, errorType);
+    }, strategy.delay);
+}
 
-        // 执行重连
-        if (reconnectTimeout) clearTimeout(reconnectTimeout);
-        reconnectTimeout = setTimeout(() => {
-            const shouldFullReset = TelegramErrorClassifier.shouldResetSession(errorType, errorTypeFailures[errorType]);
-            handleConnectionIssue(!shouldFullReset, errorType);
-        }, strategy.delay);
-    });
-
+/**
+ * 设置健康监控，检测更新循环是否卡死
+ */
+function setupHealthMonitor(client) {
     // 更新循环健康监控
     let consecutiveUpdateTimeouts = 0;
     client.addEventHandler((update) => {
@@ -641,11 +631,11 @@ function setupEventListeners(client) {
 
     client.on("connected", () => {
         if (updateHealthMonitor) clearInterval(updateHealthMonitor);
-        
+
         updateHealthMonitor = setInterval(async () => {
             try {
                 const timeSinceLastUpdate = Date.now() - lastUpdateTimestamp;
-                
+
                 if (timeSinceLastUpdate > 60000 && timeSinceLastUpdate <= 120000) {
                     log.warn(`⚠️ 更新循环缓慢 (已持续 ${Math.floor(timeSinceLastUpdate / 1000)} 秒无更新)`);
                     consecutiveUpdateTimeouts++;
@@ -657,13 +647,13 @@ function setupEventListeners(client) {
                     log.error(`🚨 更新循环卡死 (${Math.floor(timeSinceLastUpdate / 1000)} 秒)，触发完整重置`, { service: 'telegram', duration: timeSinceLastUpdate });
                     telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
                     consecutiveUpdateTimeouts++;
-                    
+
                     if (consecutiveUpdateTimeouts > 2) {
                         await resetClientSession();
                         await handleConnectionIssue(false, TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
                         consecutiveUpdateTimeouts = 0;
                     }
-                    
+
                     lastUpdateTimestamp = Date.now();
                 }
             } catch (error) {
@@ -678,6 +668,29 @@ function setupEventListeners(client) {
             updateHealthMonitor = null;
         }
     });
+}
+
+function setupEventListeners(client) {
+    client.on("connected", () => {
+        log.info("🔗 Telegram 客户端连接已建立");
+        lastUpdateTimestamp = Date.now(); // 重置更新时间戳，防止误报
+        if (connectionStatusCallback) {
+            connectionStatusCallback(true);
+        }
+    });
+
+    client.on("disconnected", () => {
+        log.info("🔌 Telegram 客户端连接已断开");
+        if (connectionStatusCallback) {
+            connectionStatusCallback(false);
+        }
+    });
+
+    // 增强错误处理：使用错误分类器
+    client.on("error", handleTelegramError);
+
+    // 设置健康监控
+    setupHealthMonitor(client);
 }
 
 /**
