@@ -219,6 +219,24 @@ describe('TaskManager', () => {
             
             expect(d1.batch).toHaveBeenCalled();
         });
+
+        it('should fallback to individual updates when batchUpdateStatus fails', async () => {
+            const { d1 } = await import('../../src/services/d1.js');
+            const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+
+            const updates = [
+                { id: 't1', status: 'completed' },
+                { id: 't2', status: 'failed', error: 'Test error' }
+            ];
+
+            d1.batch.mockRejectedValueOnce(new Error('Batch update failed'));
+
+            await TaskManager.batchUpdateStatus(updates);
+
+            expect(d1.batch).toHaveBeenCalled();
+            expect(TaskRepository.updateStatus).toHaveBeenCalledWith('t1', 'completed', undefined);
+            expect(TaskRepository.updateStatus).toHaveBeenCalledWith('t2', 'failed', 'Test error');
+        });
     });
 
     describe('queue management', () => {
