@@ -218,7 +218,8 @@ describe('Dispatcher Bootstrap', () => {
     connectionCallback(false);
 
     // 验证重试逻辑被触发（通过 setTimeout）
-    expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 3000);
+    const hasCall = setTimeout.mock.calls.some(call => call[1] === 3000);
+    expect(hasCall).toBe(true);
   });
 
   it('should stop retrying after max connection retries', async () => {
@@ -241,7 +242,8 @@ describe('Dispatcher Bootstrap', () => {
     connectionCallback(false);
 
     // 验证 setTimeout 被调用（重试逻辑）
-    expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 3000);
+    const hasCall = setTimeout.mock.calls.some(call => call[1] === 3000);
+    expect(hasCall).toBe(true);
   });
 
   it('should handle "Not connected" uncaught exception', async () => {

@@ -18,7 +18,7 @@ const mockD1 = {
 };
 
 const mockLogger = {
-    withModule: vi.fn().mockReturnThis(),
+    withModule: vi.fn().mockReturnThis(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
