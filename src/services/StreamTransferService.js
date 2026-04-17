@@ -149,83 +149,20 @@ class StreamTransferService {
             return { success: false, statusCode: 401, message: "Unauthorized" };
         }
 
-        const fileName = decodeURIComponent(req.headers['x-file-name']);
-        const userId = req.headers['x-user-id'];
-        const isLast = req.headers['x-is-last'] === 'true';
-        const chunkIndex = parseInt(req.headers['x-chunk-index']);
-        const totalSize = parseInt(req.headers['x-total-size']);
-        let leaderUrl = req.headers['x-leader-url'];
-        const sourceInstanceId = req.headers['x-source-instance-id'];
-        const chatId = req.headers['x-chat-id'];
-        const msgId = req.headers['x-msg-id'];
-        const sourceMsgId = req.headers['x-source-msg-id'];
-        const isResumeEnabled = req.headers['x-resume-enabled'] === 'true';
-
-        // 增强：如果请求头没带 leaderUrl，尝试从 Cache 中根据 sourceInstanceId 查找
-        if (!leaderUrl && sourceInstanceId) {
-            try {
-                const instances = await instanceCoordinator.getAllInstances();
-                const leader = instances.find(inst => inst.id === sourceInstanceId);
-                if (leader) {
-                    leaderUrl = leader.tunnelUrl || leader.url;
-                }
-            } catch (e) {
-                log.warn(`Failed to lookup leader URL from cache: ${e.message}`);
-            }
-        }
+        const metadata = this._extractChunkMetadata(req.headers);
+        metadata.leaderUrl = await this._resolveLeaderUrl(metadata.leaderUrl, metadata.sourceInstanceId);
 
         let streamContext = this.activeStreams.get(taskId);
 
         try {
             // 断点续传：从缓存恢复进度信息
             if (!streamContext) {
-                // 尝试从缓存恢复进度
-                const cachedProgress = await this.loadProgressFromCache(taskId);
-                
-                log.info(`📦 接收到新流式任务: ${taskId} (${fileName})${cachedProgress ? ` (resume from chunk ${cachedProgress.lastChunkIndex})` : ''}`);
-                const { stdin, proc } = await CloudTool.createRcatStream(fileName, userId);
-                
-                streamContext = {
-                    stdin,
-                    proc,
-                    lastSeen: Date.now(),
-                    fileName,
-                    userId,
-                    totalSize,
-                    leaderUrl,
-                    chatId,
-                    msgId,
-                    sourceMsgId,
-                    uploadedBytes: cachedProgress?.uploadedBytes || 0,
-                    status: 'uploading',
-                    lastChunkIndex: cachedProgress?.lastChunkIndex || -1, // 记录最近处理的 Chunk Index
-                    resumeMode: !!cachedProgress
-                };
-                this.activeStreams.set(taskId, streamContext);
-
-                // 监听 rclone 错误
-                proc.stderr.on('data', (data) => {
-                    const msg = data.toString();
-                    log.error(`rclone rcat error [${taskId}]:`, msg);
-                });
-
-                proc.on('close', async (code) => {
-                    log.info(`rclone rcat exited with code ${code} for task ${taskId}`);
-                    this.activeStreams.delete(taskId);
-                    // 清理缓存
-                    await this.clearProgressFromCache(taskId);
-                    
-                    if (code === 0) {
-                        await this.finishTask(taskId, streamContext);
-                    } else {
-                        await this.reportError(taskId, streamContext, `rclone exited with code ${code}`);
-                    }
-                });
+                streamContext = await this._initializeStreamContext(taskId, metadata);
             }
 
             // 断点续传幂等性检查：如果当前 chunkIndex 已经处理过，直接返回成功
-            if (chunkIndex <= streamContext.lastChunkIndex) {
-                log.info(`⚠️ 忽略重复的 Chunk ${chunkIndex} (已处理到: ${streamContext.lastChunkIndex})`);
+            if (metadata.chunkIndex <= streamContext.lastChunkIndex) {
+                log.info(`⚠️ 忽略重复的 Chunk ${metadata.chunkIndex} (已处理到: ${streamContext.lastChunkIndex})`);
                 // 必须消费掉请求流，否则可能导致发送端挂起或连接泄漏
                 for await (const _ of req) {} 
                 return { success: true, statusCode: 200, message: "Duplicate chunk ignored" };
@@ -233,8 +170,8 @@ class StreamTransferService {
 
             // 断点续传检查：如果当前 chunkIndex 超过预期的下一个 chunk，可能是丢失了中间的 chunk
             const expectedChunkIndex = streamContext.lastChunkIndex + 1;
-            if (chunkIndex > expectedChunkIndex && isResumeEnabled) {
-                log.warn(`⚠️ Chunk 跳跃检测: 期望 ${expectedChunkIndex}, 收到 ${chunkIndex}, 可能存在丢包`);
+            if (metadata.chunkIndex > expectedChunkIndex && metadata.isResumeEnabled) {
+                log.warn(`⚠️ Chunk 跳跃检测: 期望 ${expectedChunkIndex}, 收到 ${metadata.chunkIndex}, 可能存在丢包`);
                 // 仍然继续处理，但记录警告
             }
 
@@ -244,24 +181,11 @@ class StreamTransferService {
                 streamContext.uploadedBytes += chunk.length;
             }
             streamContext.lastSeen = Date.now();
-            streamContext.lastChunkIndex = chunkIndex;
+            streamContext.lastChunkIndex = metadata.chunkIndex;
 
-            // 定期保存进度到缓存（断点续传）
-            if (chunkIndex % 10 === 0 || isLast) {
-                await this.saveProgressToCache(taskId, streamContext);
-            }
+            await this._handlePeriodicTasks(taskId, streamContext, metadata.chunkIndex, metadata.isLast);
 
-            // 定期更新 Telegram UI (使用 Bot API)
-            if (chunkIndex % 20 === 0 || isLast) {
-                await this.updateTelegramUI(taskId, streamContext);
-            }
-
-            // 定期上报进度到 Leader (用于 Leader 端的任务追踪)
-            if (chunkIndex % 50 === 0 || isLast) {
-                await this.reportProgressToLeader(taskId, streamContext);
-            }
-
-            if (isLast) {
+            if (metadata.isLast) {
                 log.info(`🏁 任务数据接收完成: ${taskId}`);
                 streamContext.stdin.end();
             }
@@ -277,9 +201,101 @@ class StreamTransferService {
         }
     }
 
-    /**
-     * Worker 直接调用 Bot API 更新界面
-     */
+
+    _extractChunkMetadata(headers) {
+        return {
+            fileName: decodeURIComponent(headers['x-file-name']),
+            userId: headers['x-user-id'],
+            isLast: headers['x-is-last'] === 'true',
+            chunkIndex: parseInt(headers['x-chunk-index']),
+            totalSize: parseInt(headers['x-total-size']),
+            leaderUrl: headers['x-leader-url'],
+            sourceInstanceId: headers['x-source-instance-id'],
+            chatId: headers['x-chat-id'],
+            msgId: headers['x-msg-id'],
+            sourceMsgId: headers['x-source-msg-id'],
+            isResumeEnabled: headers['x-resume-enabled'] === 'true'
+        };
+    }
+
+    async _resolveLeaderUrl(leaderUrl, sourceInstanceId) {
+        if (!leaderUrl && sourceInstanceId) {
+            try {
+                const instances = await instanceCoordinator.getAllInstances();
+                const leader = instances.find(inst => inst.id === sourceInstanceId);
+                if (leader) {
+                    return leader.tunnelUrl || leader.url;
+                }
+            } catch (e) {
+                log.warn(`Failed to lookup leader URL from cache: ${e.message}`);
+            }
+        }
+        return leaderUrl;
+    }
+
+    async _initializeStreamContext(taskId, metadata) {
+        const cachedProgress = await this.loadProgressFromCache(taskId);
+
+        log.info(`📦 接收到新流式任务: ${taskId} (${metadata.fileName})${cachedProgress ? ` (resume from chunk ${cachedProgress.lastChunkIndex})` : ''}`);
+        const { stdin, proc } = await CloudTool.createRcatStream(metadata.fileName, metadata.userId);
+
+        const streamContext = {
+            stdin,
+            proc,
+            lastSeen: Date.now(),
+            fileName: metadata.fileName,
+            userId: metadata.userId,
+            totalSize: metadata.totalSize,
+            leaderUrl: metadata.leaderUrl,
+            chatId: metadata.chatId,
+            msgId: metadata.msgId,
+            sourceMsgId: metadata.sourceMsgId,
+            uploadedBytes: cachedProgress?.uploadedBytes || 0,
+            status: 'uploading',
+            lastChunkIndex: cachedProgress?.lastChunkIndex || -1, // 记录最近处理的 Chunk Index
+            resumeMode: !!cachedProgress
+        };
+        this.activeStreams.set(taskId, streamContext);
+
+        // 监听 rclone 错误
+        proc.stderr.on('data', (data) => {
+            const msg = data.toString();
+            log.error(`rclone rcat error [${taskId}]:`, msg);
+        });
+
+        proc.on('close', async (code) => {
+            log.info(`rclone rcat exited with code ${code} for task ${taskId}`);
+            this.activeStreams.delete(taskId);
+            // 清理缓存
+            await this.clearProgressFromCache(taskId);
+
+            if (code === 0) {
+                await this.finishTask(taskId, streamContext);
+            } else {
+                await this.reportError(taskId, streamContext, `rclone exited with code ${code}`);
+            }
+        });
+
+        return streamContext;
+    }
+
+    async _handlePeriodicTasks(taskId, streamContext, chunkIndex, isLast) {
+        // 定期保存进度到缓存（断点续传）
+        if (chunkIndex % 10 === 0 || isLast) {
+            await this.saveProgressToCache(taskId, streamContext);
+        }
+
+        // 定期更新 Telegram UI (使用 Bot API)
+        if (chunkIndex % 20 === 0 || isLast) {
+            await this.updateTelegramUI(taskId, streamContext);
+        }
+
+        // 定期上报进度到 Leader (用于 Leader 端的任务追踪)
+        if (chunkIndex % 50 === 0 || isLast) {
+            await this.reportProgressToLeader(taskId, streamContext);
+        }
+    }
+
     async updateTelegramUI(taskId, context) {
         if (!context.chatId || !context.msgId) return;
 
