@@ -1,5 +1,0 @@
-# wrangler.build.toml 已停用，'集成 lb' 已独立
-
-# name = "drive-collector-lb"
-# main = "dist/lb.js"
-# compatibility_date = "2023-01-01"
