@@ -242,33 +242,29 @@ export class MessageHandler {
         }
     }
 
+
     /**
-     * 处理传入的 Telegram 事件
-     * @param {object} event - Telegram 事件对象
-     * @param {object} client - Telegram Client 实例 (用于获取 Bot ID)
+     * 从事件中提取消息对象
+     * @param {object} event
      */
-    static async handleEvent(event, client) {
-        const start = Date.now();
-        
-        // 统一提取 message 对象 (兼容 UpdateNewMessage, Message, UpdateShortMessage 等)
+    static _extractMessage(event) {
         let message = event.message || event;
-        
-        // 特殊处理 UpdateBotCallbackQuery，它没有 message 属性，数据在 event 本身
         if (event.className === 'UpdateBotCallbackQuery') {
-            message = event; // 暂时将 event 视为消息主体进行处理
+            message = event;
         }
+        return message;
+    }
 
-        // 0. 过滤自己发送的消息 (防止无限循环)
-        if (message.out === true) {
-            return;
-        }
-
-        // 补充：双重检查 senderId
+    /**
+     * 验证并初始化 Bot ID，检查发送者是否为自己
+     * @param {object} message
+     * @param {object} client
+     */
+    static async _verifyBotAndSender(message, client) {
         if (!this.botId && client && client.session?.save()) {
-            // 确保客户端已连接
             if (!client.connected) {
                 log.warn("⚠️ Telegram 客户端未连接，跳过 Bot ID 检查");
-                return;
+                return false;
             }
             try {
                 const me = await client.getMe();
@@ -282,133 +278,153 @@ export class MessageHandler {
         }
         
         if (this.botId && message.senderId?.toString() === this.botId) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 获取消息锁，用于去重
+     * @param {string} msgId
+     */
+    static async _acquireMessageLock(msgId) {
+        if (!msgId) return true;
+        
+        const now = Date.now();
+
+        if (processedMessages.has(msgId)) {
+            log.debug("跳过重复消息", { msgId, filter: 'memory' });
+            return false;
+        }
+
+        const lockKey = `msg_lock:${msgId}`;
+        try {
+            const lockStart = Date.now();
+            const hasLock = await instanceCoordinator.acquireLock(lockKey, 60);
+            const lockTime = Date.now() - lockStart;
+            
+            if (!hasLock) {
+                logPerf().info(`消息 ${msgId} 锁竞争失败 (lock: ${lockTime}ms)`);
+                processedMessages.set(msgId, now);
+                return false;
+            }
+            logPerf().info(`消息 ${msgId} 获取锁耗时 ${lockTime}ms`);
+        } catch (lockError) {
+            log.error(`⚠️ 获取消息锁时发生异常, 降级处理继续执行`, lockError);
+        }
+
+        processedMessages.set(msgId, now);
+
+        if (processedMessages.size % 100 === 0) {
+            processedMessages.cleanup();
+        }
+        
+        return true;
+    }
+
+    /**
+     * 记录分发结果
+     * @param {object} event
+     * @param {string} msgId
+     * @param {number} totalTime
+     * @param {number} dispatchTime
+     */
+    static _logDispatchResult(event, msgId, totalTime, dispatchTime) {
+        const CONNECTION_STATE = {
+            0: 'broken',
+            1: 'connected',
+            '-1': 'disconnected'
+        };
+
+        const isUpdateConnectionState = event.constructor?.name === 'UpdateConnectionState';
+        let msgIdentifier = msgId || (event.className ? `[${event.className}]` : 'unknown');
+
+        if (isUpdateConnectionState) {
+            const stateNum = typeof event.state === 'number' ? event.state : -999;
+            const stateName = CONNECTION_STATE[stateNum] || `stateNum_${stateNum}`;
+            msgIdentifier = `[UpdateConnectionState:${stateName}]`;
+        }
+
+        if (msgIdentifier === 'unknown') {
+            log.debug("=== 原始事件调试 ===", {
+                className: event.className,
+                constructorName: event.constructor?.name,
+                keys: Object.keys(event).join(','),
+                stateClassName: event?.state?.className,
+                stateConstructor: event?.state?.constructor?.name,
+                stateKeys: event?.state ? Object.keys(event.state).join(',') : null
+            });
+
+            const safeSerializeEvent = (ev) => {
+                try {
+                    if (!ev) return '{}';
+                    const safeEvent = {
+                        className: ev?.className || 'unknown',
+                        id: (ev?.id || ev?.queryId || ev?.message?.id || 'no-id')?.toString?.() || 'no-id',
+                        text: (ev?.message?.message || '').substring(0, 100),
+                        timestamp: ev?.date,
+                        mediaType: ev?.message?.media?.className || 'none'
+                    };
+                    return JSON.stringify(safeEvent, (k, v) => typeof v === 'bigint' ? v.toString() : v).substring(0, 500);
+                } catch (err) {
+                    return '[SERIALIZE_ERROR]';
+                }
+            };
+
+            log.debug("收到未知类型事件，详细内容:", {
+                className: event.className,
+                constructorName: event.constructor?.name,
+                keys: Object.keys(event),
+                event: safeSerializeEvent(event)
+            });
+            logPerf().debug(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+        } else if (isUpdateConnectionState) {
+            logPerf().debug(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+        } else {
+            logPerf().info(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+        }
+
+        if (totalTime > 500) {
+            logPerf().warn(`慢响应警告: 消息处理耗时 ${totalTime}ms，超过阈值 500ms`);
+        }
+    }
+
+    /**
+     * 处理传入的 Telegram 事件
+     * @param {object} event - Telegram 事件对象
+     * @param {object} client - Telegram Client 实例 (用于获取 Bot ID)
+     */
+    static async handleEvent(event, client) {
+        const start = Date.now();
+
+        const message = this._extractMessage(event);
+
+        if (message.out === true) {
             return;
         }
 
-        // 1. 去重检查：防止多实例部署时的重复处理
-        // 仅对有 ID 的消息进行去重 (Message 类型通常有 id，CallbackQuery 有 queryId)
-        const msgId = message.id || event.queryId?.toString();
-        
-        if (msgId) {
-            const now = Date.now();
-
-            // 1.1 LRU 缓存快速过滤 (自动处理 TTL 和容量限制)
-            if (processedMessages.has(msgId)) {
-                log.debug("跳过重复消息", { msgId, filter: 'memory' });
-                return;
-            }
-            
-            // 1.2 分布式 KV 锁检查 (关键：解决多实例重复响应)
-            // 尝试获取该消息的锁，TTL 60秒
-            const lockKey = `msg_lock:${msgId}`;
-            
-            try {
-                const lockStart = Date.now();
-                const hasLock = await instanceCoordinator.acquireLock(lockKey, 60);
-                const lockTime = Date.now() - lockStart;
-                
-                if (!hasLock) {
-                    logPerf().info(`消息 ${msgId} 锁竞争失败 (lock: ${lockTime}ms)`);
-                    // 标记为本地已处理，避免后续重复请求 KV
-                    processedMessages.set(msgId, now);
-                    return;
-                }
-                logPerf().info(`消息 ${msgId} 获取锁耗时 ${lockTime}ms`);
-            } catch (lockError) {
-                log.error(`⚠️ 获取消息锁时发生异常, 降级处理继续执行`, lockError);
-                // 如果锁服务完全挂了，为了不丢消息，我们可以选择继续处理（但这可能导致重复回复）
-                // 这里选择继续执行，毕竟可用性优先
-            }
-
-            // 获取锁成功，标记本地并继续 (LRU 缓存自动管理容量和 TTL)
-            processedMessages.set(msgId, now);
-            
-            // 定期触发缓存清理 (每 100 次操作或手动调用)
-            if (processedMessages.size % 100 === 0) {
-                processedMessages.cleanup();
-            }
+        const isValidSender = await this._verifyBotAndSender(message, client);
+        if (!isValidSender) {
+            return;
         }
-        
+
+        const msgId = message.id || event.queryId?.toString();
+        const canProcess = await this._acquireMessageLock(msgId);
+
+        if (!canProcess) {
+            return;
+        }
+
         try {
             const dispatchStart = Date.now();
             await Dispatcher.handle(event);
             const dispatchTime = Date.now() - dispatchStart;
             const totalTime = Date.now() - start;
 
-            // GramJS UpdateConnectionState 状态常量
-            const CONNECTION_STATE = {
-                0: 'broken',
-                1: 'connected',
-                '-1': 'disconnected'
-            };
-
-            // 检测 UpdateConnectionState 事件（即使 className 为 unknown）
-            const isUpdateConnectionState = event.constructor?.name === 'UpdateConnectionState';
-
-            // 增强消息标识：优先使用 msgId，其次尝试从 event 中提取类型
-            let msgIdentifier = msgId || (event.className ? `[${event.className}]` : 'unknown');
-
-            // UpdateConnectionState 特殊处理，不走 unknown 分支
-            if (isUpdateConnectionState) {
-                const stateNum = typeof event.state === 'number' ? event.state : -999;
-                const stateName = CONNECTION_STATE[stateNum] || `stateNum_${stateNum}`;
-                msgIdentifier = `[UpdateConnectionState:${stateName}]`;
-
-                // log.debug("收到 UpdateConnectionState 事件", {
-                //    state: stateNum,
-                //    stateName: stateName
-                // });
-            }
-
-            if (msgIdentifier === 'unknown') {
-                // [DEBUG] 打印原始事件的完整结构，用于排查
-                log.debug("=== 原始事件调试 ===", {
-                    className: event.className,
-                    constructorName: event.constructor?.name,
-                    keys: Object.keys(event).join(','),
-                    stateClassName: event?.state?.className,
-                    stateConstructor: event?.state?.constructor?.name,
-                    stateKeys: event?.state ? Object.keys(event.state).join(',') : null
-                });
-
-                // 安全序列化 Telegram 事件，防止循环引用导致崩溃
-                const safeSerializeEvent = (ev) => {
-                    try {
-                        if (!ev) return '{}';
-                        const safeEvent = {
-                            className: ev?.className || 'unknown',
-                            id: (ev?.id || ev?.queryId || ev?.message?.id || 'no-id')?.toString?.() || 'no-id',
-                            text: (ev?.message?.message || '').substring(0, 100),
-                            timestamp: ev?.date,
-                            mediaType: ev?.message?.media?.className || 'none'
-                        };
-                        return JSON.stringify(safeEvent, (k, v) => typeof v === 'bigint' ? v.toString() : v).substring(0, 500);
-                    } catch (err) {
-                        return '[SERIALIZE_ERROR]';
-                    }
-                };
-
-                log.debug("收到未知类型事件，详细内容:", {
-                    className: event.className,
-                    constructorName: event.constructor?.name,
-                    keys: Object.keys(event),
-                    event: safeSerializeEvent(event)
-                });
-                // 未知类型事件降级为 debug 日志，减少噪音
-                logPerf().debug(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
-            } else if (isUpdateConnectionState) {
-                // UpdateConnectionState 是常规心跳，改为 debug 级别
-                logPerf().debug(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
-            } else {
-                // 已知类型事件保留 info 日志
-                logPerf().info(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
-            }
-            // 性能监控：如果总耗时超过 500ms，记录警告
-            if (totalTime > 500) {
-                logPerf().warn(`慢响应警告: 消息处理耗时 ${totalTime}ms，超过阈值 500ms`);
-            }
+            this._logDispatchResult(event, msgId, totalTime, dispatchTime);
         } catch (e) {
             log.error("Critical: Unhandled Dispatcher Error", e);
         }
     }
+
 }
