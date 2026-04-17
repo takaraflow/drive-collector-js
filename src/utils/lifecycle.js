@@ -1,4 +1,7 @@
 import { gracefulShutdown } from "../services/GracefulShutdown.js";
+import { logger } from "../services/logger/index.js";
+
+const log = logger.withModule('Lifecycle');
 
 let httpServer = null;
 
@@ -14,7 +17,7 @@ async function closeHttpServer() {
     if (!httpServer) return;
     return new Promise(resolve => {
         httpServer.close(() => {
-            console.log('✅ HTTP Server 已关闭');
+            log.info('✅ HTTP Server 已关闭');
             resolve();
         });
     });
@@ -45,9 +48,9 @@ export async function registerShutdownHooks() {
 
     // 0. 在关闭开始前先刷新一次日志，确保关闭前的错误日志被保存 (priority: 5)
     gracefulShutdown.register(async () => {
-        console.log('🔄 正在刷新日志缓冲区...');
+        log.info('🔄 正在刷新日志缓冲区...');
         await flushLogBuffer();
-        console.log('✅ 日志缓冲区已刷新');
+        log.info('✅ 日志缓冲区已刷新');
     }, 5, 'logger-flush-before');
 
     // 1. 停止接受新请求 (priority: 10)
@@ -58,7 +61,7 @@ export async function registerShutdownHooks() {
     // 2. 停止实例协调器 (priority: 20)
     gracefulShutdown.register(async () => {
         await instanceCoordinator.stop();
-        console.log('✅ InstanceCoordinator 已停止');
+        log.info('✅ InstanceCoordinator 已停止');
     }, 20, 'instance-coordinator');
 
     // 3. 停止 Telegram 看门狗和客户端 (priority: 30)
@@ -66,7 +69,7 @@ export async function registerShutdownHooks() {
         stopWatchdog();
         if (client && client.connected) {
             await client.disconnect();
-            console.log('✅ Telegram 客户端已断开');
+            log.info('✅ Telegram 客户端已断开');
         }
     }, 30, 'telegram-client');
 
@@ -74,23 +77,23 @@ export async function registerShutdownHooks() {
     gracefulShutdown.register(async () => {
         try {
             await mediaGroupBuffer.persist();
-            console.log('✅ MediaGroupBuffer 已持久化');
+            log.info('✅ MediaGroupBuffer 已持久化');
         } catch (error) {
-            console.error('❌ MediaGroupBuffer 持久化失败:', error);
+            log.error('❌ MediaGroupBuffer 持久化失败:', error);
         }
     }, 35, 'media-group-buffer-persist');
 
     // 5. 刷新待处理的任务更新 (priority: 40)
     gracefulShutdown.register(async () => {
         await TaskRepository.flushUpdates();
-        console.log('✅ TaskRepository 待更新任务已刷新');
+        log.info('✅ TaskRepository 待更新任务已刷新');
     }, 40, 'task-repository');
 
     // 6. 停止分布式锁服务 (priority: 45)
     gracefulShutdown.register(async () => {
         if (distributedLock) {
             await distributedLock.shutdown();
-            console.log('✅ DistributedLock 已停止');
+            log.info('✅ DistributedLock 已停止');
         }
     }, 45, 'distributed-lock');
 
@@ -98,30 +101,30 @@ export async function registerShutdownHooks() {
     gracefulShutdown.register(async () => {
         if (mediaGroupBuffer && typeof mediaGroupBuffer.stopCleanup === 'function') {
             mediaGroupBuffer.stopCleanup();
-            console.log('✅ MediaGroupBuffer 清理任务已停止');
+            log.info('✅ MediaGroupBuffer 清理任务已停止');
         }
     }, 48, 'media-group-buffer-cleanup');
 
     // 8. 断开 Cache 连接 (priority: 50)
     gracefulShutdown.register(async () => {
         await cache.destroy();
-        console.log('✅ Cache 服务已断开');
+        log.info('✅ Cache 服务已断开');
     }, 50, 'cache-service');
 
     // 9. 停止 Tunnel 服务 (priority: 55)
     gracefulShutdown.register(async () => {
         const { tunnelService } = await import("../services/TunnelService.js");
         tunnelService.stop();
-        console.log('✅ Tunnel 服务已停止');
+        log.info('✅ Tunnel 服务已停止');
     }, 55, 'tunnel-service');
 
     // 10. 在关闭完成后再次刷新日志，确保关闭过程中的日志也被保存 (priority: 60)
     gracefulShutdown.register(async () => {
-        console.log('🔄 正在刷新关闭过程中的日志...');
+        log.info('🔄 正在刷新关闭过程中的日志...');
         await flushLogBuffer();
         // 给日志发送一些时间完成
         await new Promise(resolve => setTimeout(resolve, 1000));
-        console.log('✅ 所有日志已刷新完成');
+        log.info('✅ 所有日志已刷新完成');
     }, 60, 'logger-flush-after');
 }
 
