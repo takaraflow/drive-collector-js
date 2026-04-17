@@ -405,14 +405,17 @@ class EnhancedGracefulShutdown {
      * 记录初始资源状态
      */
     async _recordInitialResourceStates() {
-        for (const [resourceId, tracker] of this.cleanupState.resourceStates) {
-            try {
-                const state = await this.updateResourceState(resourceId);
-                log.debug(`Initial state for ${resourceId}:`, state);
-            } catch (error) {
-                log.warn(`Failed to record initial state for ${resourceId}:`, error.message);
+        const promises = Array.from(this.cleanupState.resourceStates.entries()).map(
+            async ([resourceId, tracker]) => {
+                try {
+                    const state = await this.updateResourceState(resourceId);
+                    log.debug(`Initial state for ${resourceId}:`, state);
+                } catch (error) {
+                    log.warn(`Failed to record initial state for ${resourceId}:`, error.message);
+                }
             }
-        }
+        );
+        await Promise.allSettled(promises);
     }
 
     /**

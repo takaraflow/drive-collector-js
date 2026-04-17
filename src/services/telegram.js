@@ -394,6 +394,129 @@ export const resetClientSession = async () => {
     }
 };
 
+function buildProxyOptions(config) {
+    return config.telegram?.proxy?.host ? {
+        proxy: {
+            ip: config.telegram.proxy.host,
+            port: parseInt(config.telegram.proxy.port),
+            socksType: config.telegram.proxy.type === 'socks5' ? 5 : (config.telegram.proxy.type === 'socks4' ? 4 : 5),
+            username: config.telegram.proxy.username || undefined,
+            password: config.telegram.proxy.password || undefined,
+        }
+    } : {};
+}
+
+function buildClientConfig(config, proxyOptions) {
+    return {
+        connectionRetries: 3,
+        requestRetries: 3,
+        retryDelay: {
+            min: 5000,
+            max: 15000
+        },
+        timeout: 120000,
+        connectionTimeout: 60000,
+        socketTimeout: 90000,
+        maxConcurrentDownloads: 2,
+        connectionPoolSize: 3,
+        updateGetIntervalMs: 15000,
+        pingIntervalMs: 45000,
+        keepAliveTimeout: 45000,
+        floodSleepThreshold: 300,
+        deviceModel: config.telegram?.deviceModel || "DriveCollector-Server",
+        systemVersion: config.telegram?.systemVersion || "Linux",
+        appVersion: config.telegram?.appVersion || "2.3.3",
+        useWSS: false,
+        autoReconnect: true,
+        dcId: undefined,
+        useIPv6: false,
+        baseLogger: {
+            levels: ["error", "warn", "info", "debug"],
+            _logLevel: "info",
+            canSend: function(level) {
+                return this._logLevel
+                    ? this.levels.indexOf(this._logLevel) >= this.levels.indexOf(level)
+                    : false;
+            },
+            setLevel: function(level) {
+                this._logLevel = level;
+            },
+            get logLevel() {
+                return this._logLevel;
+            },
+            info: log.info.bind(log),
+            warn: log.warn.bind(log),
+            error: (msg, ...args) => {
+                const msgStr = msg?.toString() || '';
+                const isTimeout = msgStr.includes('TIMEOUT') || msgStr.includes('timeout') || msgStr.includes('ETIMEDOUT');
+                const isNotConnected = msgStr.includes('Not connected');
+
+                if (isTimeout) {
+                    log.error(`⚠️ 检测到 Telegram 超时: ${msgStr}`, { service: 'telegram', ...args });
+                    telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
+                } else if (isNotConnected) {
+                    log.warn(`⚠️ Telegram 连接警告: ${msgStr}`, { service: 'telegram', ...args });
+                    telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.NOT_CONNECTED);
+                } else {
+                    log.error(msg, ...args);
+                }
+
+                if (!isClientInitializing && !isReconnecting && (isTimeout || isNotConnected)) {
+                    const errorType = isTimeout ? TelegramErrorClassifier.ERROR_TYPES.TIMEOUT : TelegramErrorClassifier.ERROR_TYPES.NOT_CONNECTED;
+                    log.info(`🔄 在日志中检测到 ${errorType}，正在安排立即恢复检查...`);
+                    setImmediate(() => {
+                        handleConnectionIssue(true, errorType).catch(err => {
+                            log.error("❌ Background reconnection trigger failed:", err);
+                        });
+                    });
+                }
+            },
+            debug: log.debug.bind(log),
+            raw: (level, msg, ...args) => {
+                if (level === 'error') {
+                    log.error(msg, ...args);
+                } else if (level === 'warn') {
+                    log.warn(msg, ...args);
+                } else {
+                    log.info(msg, ...args);
+                }
+            }
+        },
+        ...proxyOptions
+    };
+}
+
+async function createTelegramClientInstance(config, dcConfig, clientConfig, sessionString) {
+    return await telegramCircuitBreaker.execute(async () => {
+        if (!config.apiId || !config.apiHash) {
+            throw new Error("Your API ID or Hash cannot be empty or undefined");
+        }
+
+        const session = new StringSession(sessionString);
+
+        if (dcConfig.mode === "test-default") {
+            clientConfig.testServers = true;
+            log.info(`📡 使用测试服务器模式 (testServers: true)`);
+        } else if (dcConfig.mode === "custom") {
+            clientConfig.testServers = true;
+            log.info(`📡 尝试使用测试服务器模式 (testServers: true)，保留自定义 DC 设置: DC ${dcConfig.dcId} @ ${dcConfig.serverIp}:${dcConfig.serverPort}`);
+        }
+
+        const client = new TelegramClient(
+            session,
+            config.apiId,
+            config.apiHash,
+            clientConfig
+        );
+
+        if (dcConfig.mode !== "default") {
+            client.session.setDC(dcConfig.dcId, dcConfig.serverIp, dcConfig.serverPort);
+        }
+
+        return client;
+    }, TelegramErrorClassifier.ERROR_TYPES.UNKNOWN);
+}
+
 /**
  * 初始化 Telegram 客户端（增强版）
  */
@@ -401,7 +524,7 @@ async function initTelegramClient() {
     if (telegramClient) {
         return telegramClient;
     }
-    
+
     if (isClientInitializing) {
         return new Promise((resolve, reject) => {
             const checkInit = setInterval(() => {
@@ -410,151 +533,31 @@ async function initTelegramClient() {
                     resolve(telegramClient);
                 }
             }, 100);
-            
+
             setTimeout(() => {
                 clearInterval(checkInit);
                 reject(new Error('Telegram client initialization timeout'));
             }, 30000);
         });
     }
-    
+
     isClientInitializing = true;
-    
+
     try {
         const config = getConfig();
         const dcConfig = getTelegramDcConfig(config);
         logTelegramDcConfig(dcConfig);
-        const proxyOptions = config.telegram?.proxy?.host ? {
-            proxy: {
-                ip: config.telegram.proxy.host,
-                port: parseInt(config.telegram.proxy.port),
-                socksType: config.telegram.proxy.type === 'socks5' ? 5 : (config.telegram.proxy.type === 'socks4' ? 4 : 5),
-                username: config.telegram.proxy.username || undefined,
-                password: config.telegram.proxy.password || undefined,
-            }
-        } : {};
-        
+
+        const proxyOptions = buildProxyOptions(config);
         const sessionString = await getSavedSession();
-        
-        // 增强配置：根据错误类型动态调整
-        const clientConfig = {
-            connectionRetries: 3,
-            requestRetries: 3,
-            retryDelay: {
-                min: 5000,
-                max: 15000
-            },
-            timeout: 120000,
-            connectionTimeout: 60000,
-            socketTimeout: 90000,
-            maxConcurrentDownloads: 2,
-            connectionPoolSize: 3,
-            updateGetIntervalMs: 15000,
-            pingIntervalMs: 45000,
-            keepAliveTimeout: 45000,
-            floodSleepThreshold: 300, // 增大 Flood 睡眠阈值，支持长时间等待
-            deviceModel: config.telegram?.deviceModel || "DriveCollector-Server",
-            systemVersion: config.telegram?.systemVersion || "Linux",
-            appVersion: config.telegram?.appVersion || "2.3.3",
-            useWSS: false,
-            autoReconnect: true,
-            dcId: undefined,
-            useIPv6: false,
-            baseLogger: {
-                levels: ["error", "warn", "info", "debug"],
-                _logLevel: "info",
-                canSend: function(level) {
-                    return this._logLevel
-                        ? this.levels.indexOf(this._logLevel) >= this.levels.indexOf(level)
-                        : false;
-                },
-                setLevel: function(level) {
-                    this._logLevel = level;
-                },
-                get logLevel() {
-                    return this._logLevel;
-                },
-                info: log.info.bind(log),
-                warn: log.warn.bind(log),
-                error: (msg, ...args) => {
-                    const msgStr = msg?.toString() || '';
-                    const isTimeout = msgStr.includes('TIMEOUT') || msgStr.includes('timeout') || msgStr.includes('ETIMEDOUT');
-                    const isNotConnected = msgStr.includes('Not connected');
-
-                    if (isTimeout) {
-                        log.error(`⚠️ 检测到 Telegram 超时: ${msgStr}`, { service: 'telegram', ...args });
-                        telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
-                    } else if (isNotConnected) {
-                        log.warn(`⚠️ Telegram 连接警告: ${msgStr}`, { service: 'telegram', ...args });
-                        telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.NOT_CONNECTED);
-                    } else {
-                        log.error(msg, ...args);
-                    }
-
-                    // 如果不是在初始化，且遇到了连接问题，尝试触发快速恢复
-                    if (!isClientInitializing && !isReconnecting && (isTimeout || isNotConnected)) {
-                        const errorType = isTimeout ? TelegramErrorClassifier.ERROR_TYPES.TIMEOUT : TelegramErrorClassifier.ERROR_TYPES.NOT_CONNECTED;
-                        log.info(`🔄 在日志中检测到 ${errorType}，正在安排立即恢复检查...`);
-                        setImmediate(() => {
-                            handleConnectionIssue(true, errorType).catch(err => {
-                                log.error("❌ Background reconnection trigger failed:", err);
-                            });
-                        });
-                    }
-                },
-                debug: log.debug.bind(log),
-                raw: (level, msg, ...args) => {
-                    if (level === 'error') {
-                        log.error(msg, ...args);
-                    } else if (level === 'warn') {
-                        log.warn(msg, ...args);
-                    } else {
-                        log.info(msg, ...args);
-                    }
-                }
-            },
-            ...proxyOptions
-        };
+        const clientConfig = buildClientConfig(config, proxyOptions);
 
         enableTelegramConsoleProxy();
-        
-        // 使用错误类型感知的电路断路器
-        // 注意：TelegramClient 构造函数本身不会抛出 FloodWaitError，
-        // FloodWaitError 通常在 connect() 或 start() 时发生
-        telegramClient = await telegramCircuitBreaker.execute(async () => {
-            if (!config.apiId || !config.apiHash) {
-                throw new Error("Your API ID or Hash cannot be empty or undefined");
-            }
-            
-            const session = new StringSession(sessionString);
-            
-            // 根据配置决定是否使用 testServers
-            if (dcConfig.mode === "test-default") {
-                // 使用 testServers 参数
-                clientConfig.testServers = true;
-                log.info(`📡 使用测试服务器模式 (testServers: true)`);
-            } else if (dcConfig.mode === "custom") {
-                clientConfig.testServers = true;
-                log.info(`📡 尝试使用测试服务器模式 (testServers: true)，保留自定义 DC 设置: DC ${dcConfig.dcId} @ ${dcConfig.serverIp}:${dcConfig.serverPort}`);
-            }
-            
-            const client = new TelegramClient(
-                session,
-                config.apiId,
-                config.apiHash,
-                clientConfig
-            );
-            
-            // 强制设置 DC 配置
-            if (dcConfig.mode !== "default") {
-                client.session.setDC(dcConfig.dcId, dcConfig.serverIp, dcConfig.serverPort);
-            }
-            
-            return client;
-        }, TelegramErrorClassifier.ERROR_TYPES.UNKNOWN);
-        
+
+        telegramClient = await createTelegramClientInstance(config, dcConfig, clientConfig, sessionString);
+
         setupEventListeners(telegramClient);
-        
+
         return telegramClient;
     } finally {
         isClientInitializing = false;
@@ -564,65 +567,55 @@ async function initTelegramClient() {
 /**
  * 设置事件监听器（增强版）
  */
-function setupEventListeners(client) {
-    client.on("connected", () => {
-        log.info("🔗 Telegram 客户端连接已建立");
-        lastUpdateTimestamp = Date.now(); // 重置更新时间戳，防止误报
-        if (connectionStatusCallback) {
-            connectionStatusCallback(true);
-        }
-    });
+/**
+ * 处理 Telegram 客户端错误
+ */
+function handleTelegramError(err) {
+    const errorType = TelegramErrorClassifier.classify(err);
+    lastErrorType = errorType;
 
-    client.on("disconnected", () => {
-        log.info("🔌 Telegram 客户端连接已断开");
-        if (connectionStatusCallback) {
-            connectionStatusCallback(false);
-        }
-    });
+    // 记录错误类型统计
+    errorTypeFailures[errorType] = (errorTypeFailures[errorType] || 0) + 1;
 
-    // 增强错误处理：使用错误分类器
-    client.on("error", (err) => {
-        const errorType = TelegramErrorClassifier.classify(err);
-        lastErrorType = errorType;
-        
-        // 记录错误类型统计
-        errorTypeFailures[errorType] = (errorTypeFailures[errorType] || 0) + 1;
+    // 特殊处理 FLOOD
+    if (errorType === TelegramErrorClassifier.ERROR_TYPES.FLOOD) {
+         const waitSeconds = err.seconds || 60;
+         log.error(`🚨 检测到 Telegram Flood Wait: 需要等待 ${waitSeconds} 秒。`, { service: 'telegram', waitSeconds });
+    } else {
+         log.error(`⚠️ Telegram 错误 [${errorType}]: ${err.message}`, { service: 'telegram' });
+    }
 
-        // 特殊处理 FLOOD
-        if (errorType === TelegramErrorClassifier.ERROR_TYPES.FLOOD) {
-             const waitSeconds = err.seconds || 60;
-             log.error(`🚨 检测到 Telegram Flood Wait: 需要等待 ${waitSeconds} 秒。`, { service: 'telegram', waitSeconds });
-        } else {
-             log.error(`⚠️ Telegram 错误 [${errorType}]: ${err.message}`, { service: 'telegram' });
-        }
+    // 检查是否需要触发电路断路器
+    if (TelegramErrorClassifier.shouldTripCircuitBreaker(errorType, errorTypeFailures[errorType])) {
+        telegramCircuitBreaker.onFailure(errorType, err);
+    }
 
-        // 检查是否需要触发电路断路器
-        if (TelegramErrorClassifier.shouldTripCircuitBreaker(errorType, errorTypeFailures[errorType])) {
-            telegramCircuitBreaker.onFailure(errorType, err);
-        }
+    // 检查是否需要跳过重连
+    if (TelegramErrorClassifier.shouldSkipReconnect(errorType)) {
+        log.warn(`⚠️ 错误类型 ${errorType} 需要特殊处理，跳过普通重连`);
+        return;
+    }
 
-        // 检查是否需要跳过重连
-        if (TelegramErrorClassifier.shouldSkipReconnect(errorType)) {
-            log.warn(`⚠️ 错误类型 ${errorType} 需要特殊处理，跳过普通重连`);
-            return;
-        }
+    // 获取推荐的重连策略
+    const strategy = TelegramErrorClassifier.getReconnectStrategy(errorType, errorTypeFailures[errorType], err);
 
-        // 获取推荐的重连策略
-        const strategy = TelegramErrorClassifier.getReconnectStrategy(errorType, errorTypeFailures[errorType], err);
+    if (!strategy.shouldRetry) {
+        log.warn(`⚠️ 错误类型 ${errorType} 已超过最大重试次数，停止重连尝试`);
+        return;
+    }
 
-        if (!strategy.shouldRetry) {
-            log.warn(`⚠️ 错误类型 ${errorType} 已超过最大重试次数，停止重连尝试`);
-            return;
-        }
+    // 执行重连
+    if (reconnectTimeout) clearTimeout(reconnectTimeout);
+    reconnectTimeout = setTimeout(() => {
+        const shouldFullReset = TelegramErrorClassifier.shouldResetSession(errorType, errorTypeFailures[errorType]);
+        handleConnectionIssue(!shouldFullReset, errorType);
+    }, strategy.delay);
+}
 
-        // 执行重连
-        if (reconnectTimeout) clearTimeout(reconnectTimeout);
-        reconnectTimeout = setTimeout(() => {
-            const shouldFullReset = TelegramErrorClassifier.shouldResetSession(errorType, errorTypeFailures[errorType]);
-            handleConnectionIssue(!shouldFullReset, errorType);
-        }, strategy.delay);
-    });
-
+/**
+ * 设置健康监控，检测更新循环是否卡死
+ */
+function setupHealthMonitor(client) {
     // 更新循环健康监控
     let consecutiveUpdateTimeouts = 0;
     client.addEventHandler((update) => {
@@ -641,11 +634,11 @@ function setupEventListeners(client) {
 
     client.on("connected", () => {
         if (updateHealthMonitor) clearInterval(updateHealthMonitor);
-        
+
         updateHealthMonitor = setInterval(async () => {
             try {
                 const timeSinceLastUpdate = Date.now() - lastUpdateTimestamp;
-                
+
                 if (timeSinceLastUpdate > 60000 && timeSinceLastUpdate <= 120000) {
                     log.warn(`⚠️ 更新循环缓慢 (已持续 ${Math.floor(timeSinceLastUpdate / 1000)} 秒无更新)`);
                     consecutiveUpdateTimeouts++;
@@ -657,13 +650,13 @@ function setupEventListeners(client) {
                     log.error(`🚨 更新循环卡死 (${Math.floor(timeSinceLastUpdate / 1000)} 秒)，触发完整重置`, { service: 'telegram', duration: timeSinceLastUpdate });
                     telegramCircuitBreaker.onFailure(TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
                     consecutiveUpdateTimeouts++;
-                    
+
                     if (consecutiveUpdateTimeouts > 2) {
                         await resetClientSession();
                         await handleConnectionIssue(false, TelegramErrorClassifier.ERROR_TYPES.TIMEOUT);
                         consecutiveUpdateTimeouts = 0;
                     }
-                    
+
                     lastUpdateTimestamp = Date.now();
                 }
             } catch (error) {
@@ -678,6 +671,29 @@ function setupEventListeners(client) {
             updateHealthMonitor = null;
         }
     });
+}
+
+function setupEventListeners(client) {
+    client.on("connected", () => {
+        log.info("🔗 Telegram 客户端连接已建立");
+        lastUpdateTimestamp = Date.now(); // 重置更新时间戳，防止误报
+        if (connectionStatusCallback) {
+            connectionStatusCallback(true);
+        }
+    });
+
+    client.on("disconnected", () => {
+        log.info("🔌 Telegram 客户端连接已断开");
+        if (connectionStatusCallback) {
+            connectionStatusCallback(false);
+        }
+    });
+
+    // 增强错误处理：使用错误分类器
+    client.on("error", handleTelegramError);
+
+    // 设置健康监控
+    setupHealthMonitor(client);
 }
 
 /**
@@ -888,6 +904,83 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
     }
 }
 
+
+/**
+ * 处理 AUTH_KEY_DUPLICATED 错误
+ */
+const handleAuthKeyDuplicated = async () => {
+    log.error("🚨 检测到 AUTH_KEY_DUPLICATED，会话已在别处激活");
+    lastHeartbeat = 0;
+
+    try {
+        // 1. 强制清理 telegramClient，避免使用 getClient() 导致重新初始化或副作用
+        // 修复: 避免调用 resetClientSession() 再次触发 disconnect 导致 crash
+        if (telegramClient) {
+            try {
+                // 尝试断开底层连接，忽略错误
+                if (telegramClient._sender) {
+                     telegramClient._sender.disconnect().catch(() => {});
+                }
+                telegramClient.disconnect().catch(() => {});
+            } catch (err) {
+                // ignore
+            }
+            telegramClient = null;
+        }
+
+        // 2. 清除会话持久化
+        try {
+            await SettingsRepository.set("tg_bot_session", "");
+            log.info("🗑️ 已清除全局 Session (AUTH_KEY_DUPLICATED)");
+        } catch (err) {
+            log.error("❌ 清除 Session 失败:", err);
+        }
+
+        // 3. 重置状态
+        isClientInitializing = false;
+        isReconnecting = false;
+        telegramDcConfig = null;
+        telegramDcConfigLogged = false;
+    } finally {
+        // 4. 确保锁一定会被释放，即使上面任何步骤抛出异常
+        try {
+            await instanceCoordinator.releaseLock("telegram_client");
+        } catch (lockErr) {
+            log.error("❌ 释放锁失败:", lockErr);
+        }
+    }
+
+    log.info("♻️ 系统状态已重置，等待看门狗下一次周期尝试重新登录");
+};
+
+/**
+ * 处理看门狗失败阈值达到重连的逻辑
+ */
+const handleWatchdogFailureThreshold = async (errorType, diff) => {
+    log.error(`🚨 Heartbeat threshold exceeded, triggering reconnection... (diff=${diff}, failures=${consecutiveFailures})`);
+
+
+    // 增强重连逻辑：先检查锁状态，如果锁缺失且本实例是 Leader，尝试重新获取
+    try {
+        const hasLock = await instanceCoordinator.hasLock("telegram_client");
+        if (!hasLock) {
+            const lockData = await cache.get(`lock:telegram_client`, "json", { skipCache: true });
+            if (!lockData && instanceCoordinator.isLeader) {
+                log.warn("🔒 看门狗检测到锁缺失，Leader 尝试重新获取锁...");
+                const acquired = await instanceCoordinator.acquireLock("telegram_client", 300);
+                if (acquired) {
+                    log.info("✅ 看门狗重新获取锁成功");
+                }
+            }
+        }
+    } catch (lockCheckError) {
+        log.warn(`⚠️ 看门狗锁检查失败: ${lockCheckError.message}`);
+    }
+
+
+    handleConnectionIssue(true, errorType);
+};
+
 /**
  * 启动看门狗定时器（增强版）
  */
@@ -946,48 +1039,7 @@ export const startWatchdog = () => {
 
             // 特殊处理 AUTH_KEY_DUPLICATED
             if (e.code === 406 && e.errorMessage?.includes("AUTH_KEY_DUPLICATED")) {
-                log.error("🚨 检测到 AUTH_KEY_DUPLICATED，会话已在别处激活");
-                lastHeartbeat = 0;
-
-                try {
-                    // 1. 强制清理 telegramClient，避免使用 getClient() 导致重新初始化或副作用
-                    // 修复: 避免调用 resetClientSession() 再次触发 disconnect 导致 crash
-                    if (telegramClient) {
-                        try {
-                            // 尝试断开底层连接，忽略错误
-                            if (telegramClient._sender) {
-                                 telegramClient._sender.disconnect().catch(() => {});
-                            }
-                            telegramClient.disconnect().catch(() => {});
-                        } catch (err) {
-                            // ignore
-                        }
-                        telegramClient = null;
-                    }
-
-                    // 2. 清除会话持久化
-                    try {
-                        await SettingsRepository.set("tg_bot_session", "");
-                        log.info("🗑️ 已清除全局 Session (AUTH_KEY_DUPLICATED)");
-                    } catch (err) {
-                        log.error("❌ 清除 Session 失败:", err);
-                    }
-
-                    // 3. 重置状态
-                    isClientInitializing = false;
-                    isReconnecting = false;
-                    telegramDcConfig = null;
-                    telegramDcConfigLogged = false;
-                } finally {
-                    // 4. 确保锁一定会被释放，即使上面任何步骤抛出异常
-                    try {
-                        await instanceCoordinator.releaseLock("telegram_client");
-                    } catch (lockErr) {
-                        log.error("❌ 释放锁失败:", lockErr);
-                    }
-                }
-
-                log.info("♻️ 系统状态已重置，等待看门狗下一次周期尝试重新登录");
+                await handleAuthKeyDuplicated();
                 return;
             }
 
@@ -998,26 +1050,7 @@ export const startWatchdog = () => {
             const diff = currentNow - lastHeartbeat;
 
             if (diff >= 5 * 60 * 1000 || consecutiveFailures >= 3) {
-                log.error(`🚨 Heartbeat threshold exceeded, triggering reconnection... (diff=${diff}, failures=${consecutiveFailures})`);
-                
-                // 增强重连逻辑：先检查锁状态，如果锁缺失且本实例是 Leader，尝试重新获取
-                try {
-                    const hasLock = await instanceCoordinator.hasLock("telegram_client");
-                    if (!hasLock) {
-                        const lockData = await cache.get(`lock:telegram_client`, "json", { skipCache: true });
-                        if (!lockData && instanceCoordinator.isLeader) {
-                            log.warn("🔒 看门狗检测到锁缺失，Leader 尝试重新获取锁...");
-                            const acquired = await instanceCoordinator.acquireLock("telegram_client", 300);
-                            if (acquired) {
-                                log.info("✅ 看门狗重新获取锁成功");
-                            }
-                        }
-                    }
-                } catch (lockCheckError) {
-                    log.warn(`⚠️ 看门狗锁检查失败: ${lockCheckError.message}`);
-                }
-                
-                handleConnectionIssue(true, errorType);
+                await handleWatchdogFailureThreshold(errorType, diff);
             }
         }
     }, 60 * 1000);
