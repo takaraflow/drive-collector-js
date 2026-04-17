@@ -904,6 +904,81 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
     }
 }
 
+
+/**
+ * 处理 AUTH_KEY_DUPLICATED 错误
+ */
+const handleAuthKeyDuplicated = async () => {
+    log.error("🚨 检测到 AUTH_KEY_DUPLICATED，会话已在别处激活");
+    lastHeartbeat = 0;
+
+    try {
+        // 1. 强制清理 telegramClient，避免使用 getClient() 导致重新初始化或副作用
+        // 修复: 避免调用 resetClientSession() 再次触发 disconnect 导致 crash
+        if (telegramClient) {
+            try {
+                // 尝试断开底层连接，忽略错误
+                if (telegramClient._sender) {
+                     telegramClient._sender.disconnect().catch(() => {});
+                }
+                telegramClient.disconnect().catch(() => {});
+            } catch (err) {
+                // ignore
+            }
+            telegramClient = null;
+        }
+
+        // 2. 清除会话持久化
+        try {
+            await SettingsRepository.set("tg_bot_session", "");
+            log.info("🗑️ 已清除全局 Session (AUTH_KEY_DUPLICATED)");
+        } catch (err) {
+            log.error("❌ 清除 Session 失败:", err);
+        }
+
+        // 3. 重置状态
+        isClientInitializing = false;
+        isReconnecting = false;
+        telegramDcConfig = null;
+        telegramDcConfigLogged = false;
+    } finally {
+        // 4. 确保锁一定会被释放，即使上面任何步骤抛出异常
+        try {
+            await instanceCoordinator.releaseLock("telegram_client");
+        } catch (lockErr) {
+            log.error("❌ 释放锁失败:", lockErr);
+        }
+    }
+
+    log.info("♻️ 系统状态已重置，等待看门狗下一次周期尝试重新登录");
+};
+
+/**
+ * 处理看门狗失败阈值达到重连的逻辑
+ */
+const handleWatchdogFailureThreshold = async (errorType, diff) => {
+    log.error(`🚨 Heartbeat threshold exceeded, triggering reconnection... (diff=${diff}, failures=${consecutiveFailures})`);
+
+    // 增强重连逻辑：先检查锁状态，如果锁缺失且本实例是 Leader，尝试重新获取
+    try {
+        const hasLock = await instanceCoordinator.hasLock("telegram_client");
+        if (!hasLock) {
+            const lockData = await cache.get(`lock:telegram_client`, "json", { skipCache: true });
+            if (!lockData && instanceCoordinator.isLeader) {
+                log.warn("🔒 看门狗检测到锁缺失，Leader 尝试重新获取锁...");
+                const acquired = await instanceCoordinator.acquireLock("telegram_client", 300);
+                if (acquired) {
+                    log.info("✅ 看门狗重新获取锁成功");
+                }
+            }
+        }
+    } catch (lockCheckError) {
+        log.warn(`⚠️ 看门狗锁检查失败: ${lockCheckError.message}`);
+    }
+
+    handleConnectionIssue(true, errorType);
+};
+
 /**
  * 启动看门狗定时器（增强版）
  */
@@ -962,48 +1037,7 @@ export const startWatchdog = () => {
 
             // 特殊处理 AUTH_KEY_DUPLICATED
             if (e.code === 406 && e.errorMessage?.includes("AUTH_KEY_DUPLICATED")) {
-                log.error("🚨 检测到 AUTH_KEY_DUPLICATED，会话已在别处激活");
-                lastHeartbeat = 0;
-
-                try {
-                    // 1. 强制清理 telegramClient，避免使用 getClient() 导致重新初始化或副作用
-                    // 修复: 避免调用 resetClientSession() 再次触发 disconnect 导致 crash
-                    if (telegramClient) {
-                        try {
-                            // 尝试断开底层连接，忽略错误
-                            if (telegramClient._sender) {
-                                 telegramClient._sender.disconnect().catch(() => {});
-                            }
-                            telegramClient.disconnect().catch(() => {});
-                        } catch (err) {
-                            // ignore
-                        }
-                        telegramClient = null;
-                    }
-
-                    // 2. 清除会话持久化
-                    try {
-                        await SettingsRepository.set("tg_bot_session", "");
-                        log.info("🗑️ 已清除全局 Session (AUTH_KEY_DUPLICATED)");
-                    } catch (err) {
-                        log.error("❌ 清除 Session 失败:", err);
-                    }
-
-                    // 3. 重置状态
-                    isClientInitializing = false;
-                    isReconnecting = false;
-                    telegramDcConfig = null;
-                    telegramDcConfigLogged = false;
-                } finally {
-                    // 4. 确保锁一定会被释放，即使上面任何步骤抛出异常
-                    try {
-                        await instanceCoordinator.releaseLock("telegram_client");
-                    } catch (lockErr) {
-                        log.error("❌ 释放锁失败:", lockErr);
-                    }
-                }
-
-                log.info("♻️ 系统状态已重置，等待看门狗下一次周期尝试重新登录");
+                await handleAuthKeyDuplicated();
                 return;
             }
 
@@ -1014,26 +1048,7 @@ export const startWatchdog = () => {
             const diff = currentNow - lastHeartbeat;
 
             if (diff >= 5 * 60 * 1000 || consecutiveFailures >= 3) {
-                log.error(`🚨 Heartbeat threshold exceeded, triggering reconnection... (diff=${diff}, failures=${consecutiveFailures})`);
-                
-                // 增强重连逻辑：先检查锁状态，如果锁缺失且本实例是 Leader，尝试重新获取
-                try {
-                    const hasLock = await instanceCoordinator.hasLock("telegram_client");
-                    if (!hasLock) {
-                        const lockData = await cache.get(`lock:telegram_client`, "json", { skipCache: true });
-                        if (!lockData && instanceCoordinator.isLeader) {
-                            log.warn("🔒 看门狗检测到锁缺失，Leader 尝试重新获取锁...");
-                            const acquired = await instanceCoordinator.acquireLock("telegram_client", 300);
-                            if (acquired) {
-                                log.info("✅ 看门狗重新获取锁成功");
-                            }
-                        }
-                    }
-                } catch (lockCheckError) {
-                    log.warn(`⚠️ 看门狗锁检查失败: ${lockCheckError.message}`);
-                }
-                
-                handleConnectionIssue(true, errorType);
+                await handleWatchdogFailureThreshold(errorType, diff);
             }
         }
     }, 60 * 1000);
