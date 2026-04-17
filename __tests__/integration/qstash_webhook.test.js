@@ -130,6 +130,12 @@ describe("QStash Webhook Integration", () => {
 
         vi.mock("../../src/services/logger/index.js", () => ({
             logger: {
+                withModule: vi.fn(() => ({
+                    info: vi.fn(),
+                    error: vi.fn(),
+                    warn: vi.fn(),
+                    debug: vi.fn()
+                })),
                 info: vi.fn(),
                 error: vi.fn(),
                 warn: vi.fn(),

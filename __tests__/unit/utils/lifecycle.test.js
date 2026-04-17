@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { setHttpServer, getHttpServer, registerShutdownHooks, buildWebhookServer } from '../../../src/utils/lifecycle.js';
 import { gracefulShutdown } from '../../../src/services/GracefulShutdown.js';
+import * as loggerModule from '../../../src/services/logger/index.js';
 
 vi.mock('../../../src/services/GracefulShutdown.js', () => ({
     gracefulShutdown: {
@@ -40,9 +41,20 @@ vi.mock('../../../src/processor/TaskManager.js', () => ({
     }
 }));
 
-vi.mock('../../../src/services/logger/index.js', () => ({
-    flushLogBuffer: vi.fn(),
-}));
+vi.mock('../../../src/services/logger/index.js', () => {
+    const mockError = vi.fn();
+    return {
+        logger: {
+            withModule: vi.fn(() => ({
+                info: vi.fn(),
+                error: mockError,
+                warn: vi.fn(),
+                debug: vi.fn(),
+            })),
+        },
+        flushLogBuffer: vi.fn(),
+    };
+});
 
 vi.mock('../../../src/services/MediaGroupBuffer.js', () => ({
     default: {
@@ -247,11 +259,7 @@ describe('lifecycle utilities', () => {
             await promise;
         });
 
-        it('should handle mediaGroupBuffer persist error gracefully', async () => {
-            // Need to mock mediaGroupBuffer to throw error just for this test
-            const originalConsoleError = console.error;
-            console.error = vi.fn();
-
+it('should handle mediaGroupBuffer persist error gracefully', async () => {
             await registerShutdownHooks();
             const hooks = gracefulShutdown.register.mock.calls;
             const mediaGroupBufferPersistHook = hooks.find(call => call[2] === 'media-group-buffer-persist');
@@ -261,8 +269,8 @@ describe('lifecycle utilities', () => {
 
             await mediaGroupBufferPersistHook[0]();
 
-            expect(console.error).toHaveBeenCalledWith('❌ MediaGroupBuffer 持久化失败:', expect.any(Error));
-            console.error = originalConsoleError;
+            const mockLogger = loggerModule.logger.withModule('Lifecycle');
+            expect(mockLogger.error).toHaveBeenCalledWith('❌ MediaGroupBuffer 持久化失败:', expect.any(Error));
         });
 
         it('should handle telegram client disconnect gracefully when client is not connected or null', async () => {
