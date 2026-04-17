@@ -303,41 +303,54 @@ export class Dispatcher {
     /**
      * [私有] 处理普通消息
      */
-    static async _handleMessage(event, { userId, target }) {
-        const message = event.message;
-        const text = message.message;
+    /**
+     * [私有] 处理 /start 命令的快速路径
+     * @returns {Promise<boolean>} 是否已处理
+     */
+    static async _handleStartCommandFastPath(target, userId, text) {
+        if (text !== "/start") return false;
 
-        // 🚀 性能优化：为 /start 命令添加快速路径，只检查维护模式，避免查询用户角色
-        if (text === "/start") {
-            const [mode, canBypass] = await Promise.all([
-                SettingsRepository.get("access_mode", "public"),
-                AuthGuard.can(userId, "maintenance:bypass")
-            ]);
-            const isOwner = userId === config.ownerId?.toString();
+        const [mode, canBypass] = await Promise.all([
+            SettingsRepository.get("access_mode", "public"),
+            AuthGuard.can(userId, "maintenance:bypass")
+        ]);
+        const isOwner = userId === config.ownerId?.toString();
 
-            if (!isOwner && mode !== 'public' && !canBypass) {
-                return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                    message: STRINGS.system.maintenance_mode,
-                    parseMode: "html"
-                }), userId, {}, false, 3);
-            }
-
-            return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                message: STRINGS.system.welcome,
+        if (!isOwner && mode !== 'public' && !canBypass) {
+            await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.system.maintenance_mode,
                 parseMode: "html"
             }), userId, {}, false, 3);
+            return true;
         }
 
-        // 1. 会话拦截 (密码输入等)
+        await runBotTaskWithRetry(() => client.sendMessage(target, {
+            message: STRINGS.system.welcome,
+            parseMode: "html"
+        }), userId, {}, false, 3);
+        return true;
+    }
+
+    /**
+     * [私有] 处理活跃会话拦截
+     * @returns {Promise<boolean>} 是否已处理
+     */
+    static async _handleActiveSession(event, userId) {
         const session = await SessionManager.get(userId);
         if (session) {
             const handled = await DriveConfigFlow.handleInput(event, userId, session);
-            if (handled) return;
+            if (handled) return true;
             // 处理 remote_folder 会话输入
             const remoteFolderHandled = await this._handleRemoteFolderInput(event, userId, session);
-            if (remoteFolderHandled) return;
+            if (remoteFolderHandled) return true;
         }
+        return false;
+    }
 
+    /**
+     * [私有] 获取用户默认或回退的驱动器
+     */
+    static async _getDefaultDrive(userId) {
         const [defaultDriveId, drives] = await Promise.all([
             SettingsRepository.get(`default_drive_${userId}`, null),
             DriveRepository.findByUserId(userId)
@@ -354,83 +367,156 @@ export class Dispatcher {
                 finalSelectedDrive = fallbackDrives[0];
             }
         }
+        return finalSelectedDrive;
+    }
+
+    /**
+     * [私有] 处理文本命令路由
+     * @returns {Promise<boolean>} 是否已处理
+     */
+    static async _routeTextCommand(target, userId, text, message, finalSelectedDrive) {
+        if (!text || message.media) return false;
+
+        const command = text.split(' ')[0]; // 只匹配第一段，如 /drive
+
+        // 🛡️ 统一权限拦截 (RBAC Middleware)
+        const requiredPerm = COMMAND_PERMISSIONS[command];
+        if (requiredPerm) {
+            // Owner 永远有权限，跳过检查 (虽然 AuthGuard.can 也会放行 owner，但这里显式一点)
+            const isOwner = userId === config.ownerId?.toString();
+            if (!isOwner && !(await AuthGuard.can(userId, requiredPerm))) {
+                await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: STRINGS.status.no_permission || "❌ 您没有权限执行此操作。",
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+                return true;
+            }
+        }
+
+        switch (command) {
+            case "/drive":
+                await DriveConfigFlow.sendDriveManager(target, userId); return true;
+            case "/logout":
+            case "/unbind":
+                await DriveConfigFlow.handleUnbind(target, userId); return true;
+            case "/files":
+                await this._handleFilesCommand(target, userId); return true;
+            case "/status":
+                await this._handleStatusCommand(target, userId, text); return true;
+            case "/help":
+                await this._handleHelpCommand(target, userId); return true;
+            case "/mcp":
+                await this._handleMcpCommand(target, userId); return true;
+            case "/mcp_token":
+                await this._handleMcpTokenCommand(target, userId); return true;
+            case "/diagnosis":
+                await this._handleDiagnosisCommand(target, userId); return true;
+            case "/open_service":
+                await this._handleModeSwitchCommand(target, userId, 'public'); return true;
+            case "/close_service":
+                await this._handleModeSwitchCommand(target, userId, 'private'); return true;
+            case "/status_public":
+                await this._handleModeSwitchCommand(target, userId, 'public'); return true;
+            case "/status_private":
+                await this._handleModeSwitchCommand(target, userId, 'private'); return true;
+            case "/pro_admin":
+                await this._handleAdminPromotion(target, userId, text, true); return true;
+            case "/de_admin":
+                await this._handleAdminPromotion(target, userId, text, false); return true;
+            case "/ban":
+                await this._handleBanCommand(target, userId, text, true); return true;
+            case "/unban":
+                await this._handleBanCommand(target, userId, text, false); return true;
+            case "/remote_folder":
+                await this._handleRemoteFolderCommand(target, userId); return true;
+            case "/set_remote_folder":
+                await this._handleSetRemoteFolderCommand(target, userId, text); return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * [私有] 处理链接解析
+     * @returns {Promise<boolean>} 是否已处理
+     */
+    static async _handleLinks(target, userId, text, finalSelectedDrive) {
+        if (!text) return false;
+
+        try {
+            const toProcess = await LinkParser.parse(text, userId);
+            if (toProcess && toProcess.length > 0) {
+                if (!finalSelectedDrive) {
+                    await this._sendBindHint(target, userId);
+                    return true;
+                }
+
+                if (toProcess.length > 10) await runBotTaskWithRetry(() => client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` }), userId, {}, false, 3);
+                for (const msg of toProcess.slice(0, 10)) await TaskManager.addTask(target, msg, userId, "链接");
+                return true;
+            }
+        } catch (e) {
+            await runBotTaskWithRetry(() => client.sendMessage(target, { message: `❌ ${escapeHTML(e.message)}`, parseMode: "html" }), userId, {}, false, 3);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * [私有] 处理媒体消息
+     * @returns {Promise<boolean>} 是否已处理
+     */
+    static async _handleMediaMessage(target, userId, message, finalSelectedDrive) {
+        if (!message.media) return false;
+
+        if (!finalSelectedDrive) {
+            await this._sendBindHint(target, userId);
+            return true;
+        }
+
+        // 🚀 核心逻辑：如果是媒体组消息
+        if (message.groupedId) {
+            // 使用新的 MediaGroupBuffer 服务
+            try {
+                const result = await mediaGroupBuffer.add(message, target, userId);
+                if (!result.added && result.reason !== 'duplicate') {
+                    log.warn(`Failed to add message to buffer: ${result.reason}`);
+                }
+            } catch (error) {
+                log.error('MediaGroupBuffer.add failed, falling back to single task', { error: error?.message });
+                await TaskManager.addTask(target, message, userId, "媒体组(降级)");
+            }
+            return true;
+        }
+
+        // 零散文件逻辑保持不动
+        await TaskManager.addTask(target, message, userId, "文件");
+        return true;
+    }
+
+    /**
+     * [私有] 处理普通消息
+     */
+    static async _handleMessage(event, { userId, target }) {
+        const message = event.message;
+        const text = message.message;
+
+        // 🚀 性能优化：为 /start 命令添加快速路径
+        if (await this._handleStartCommandFastPath(target, userId, text)) return;
+
+        // 1. 会话拦截 (密码输入等)
+        if (await this._handleActiveSession(event, userId)) return;
+
+        const finalSelectedDrive = await this._getDefaultDrive(userId);
 
         // 2. 文本命令路由
         if (text && !message.media) {
-            const command = text.split(' ')[0]; // 只匹配第一段，如 /drive
-            
-            // 🛡️ 统一权限拦截 (RBAC Middleware)
-            const requiredPerm = COMMAND_PERMISSIONS[command];
-            if (requiredPerm) {
-                // Owner 永远有权限，跳过检查 (虽然 AuthGuard.can 也会放行 owner，但这里显式一点)
-                const isOwner = userId === config.ownerId?.toString();
-                if (!isOwner && !(await AuthGuard.can(userId, requiredPerm))) {
-                    return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                        message: STRINGS.status.no_permission || "❌ 您没有权限执行此操作。",
-                        parseMode: "html"
-                    }), userId, {}, false, 3);
-                }
-            }
-
-            switch (command) { 
-                case "/drive":
-                    return await DriveConfigFlow.sendDriveManager(target, userId);
-                case "/logout":
-                case "/unbind":
-                    return await DriveConfigFlow.handleUnbind(target, userId);
-                case "/files":
-                    // /files 本身是基础权限，AuthGuard 默认 ACL 允许 user/trusted/admin，
-                    // 但如果你想对 guest 限制，可以在 COMMAND_PERMISSIONS 加 "/files": "file:view"
-                    return await this._handleFilesCommand(target, userId);
-                case "/status":
-                    return await this._handleStatusCommand(target, userId, text);
-                case "/help":
-                    return await this._handleHelpCommand(target, userId);
-                case "/mcp":
-                    return await this._handleMcpCommand(target, userId);
-                case "/mcp_token":
-                    return await this._handleMcpTokenCommand(target, userId);
-                case "/diagnosis":
-                    return await this._handleDiagnosisCommand(target, userId);
-                case "/open_service":
-                    return await this._handleModeSwitchCommand(target, userId, 'public');
-                case "/close_service":
-                    return await this._handleModeSwitchCommand(target, userId, 'private');
-                case "/status_public":
-                    return await this._handleModeSwitchCommand(target, userId, 'public');
-                case "/status_private":
-                    return await this._handleModeSwitchCommand(target, userId, 'private');
-                case "/pro_admin":
-                    return await this._handleAdminPromotion(target, userId, text, true);
-                case "/de_admin":
-                    return await this._handleAdminPromotion(target, userId, text, false);
-                case "/ban":
-                    return await this._handleBanCommand(target, userId, text, true);
-                case "/unban":
-                    return await this._handleBanCommand(target, userId, text, false);
-                case "/remote_folder":
-                    return await this._handleRemoteFolderCommand(target, userId);
-                case "/set_remote_folder":
-                    return await this._handleSetRemoteFolderCommand(target, userId, text);
-                // 更多命令可在此添加...
-            }
+            if (await this._routeTextCommand(target, userId, text, message, finalSelectedDrive)) return;
 
             // 3. 尝试解析链接
-            try {
-                const toProcess = await LinkParser.parse(text, userId);
-                if (toProcess && toProcess.length > 0) {
-                    if (!finalSelectedDrive) return await this._sendBindHint(target, userId);
+            if (await this._handleLinks(target, userId, text, finalSelectedDrive)) return;
 
-                    if (toProcess.length > 10) await runBotTaskWithRetry(() => client.sendMessage(target, { message: `⚠️ 仅处理前 10 个媒体。` }), userId, {}, false, 3);
-                    for (const msg of toProcess.slice(0, 10)) await TaskManager.addTask(target, msg, userId, "链接");
-                    return;
-                }
-            } catch (e) {
-                return await runBotTaskWithRetry(() => client.sendMessage(target, { message: `❌ ${escapeHTML(e.message)}`, parseMode: "html" }), userId, {}, false, 3);
-            }
-
-            // 4. 通用兜底回复：
-            // 如果是纯文本消息（包括未匹配的命令），且未被上述逻辑处理，则发送欢迎语。
+            // 4. 通用兜底回复：纯文本消息（包括未匹配的命令）
             return await runBotTaskWithRetry(() => client.sendMessage(target, { 
                 message: STRINGS.system.welcome,
                 parseMode: "html"
@@ -438,28 +524,7 @@ export class Dispatcher {
         }
 
         // 5. 处理带媒体的消息 (文件/视频/图片)
-        if (message.media) {
-            if (!finalSelectedDrive) return await this._sendBindHint(target, userId);
-
-            // 🚀 核心逻辑：如果是媒体组消息
-            if (message.groupedId) {
-                // 使用新的 MediaGroupBuffer 服务
-                try {
-                    const result = await mediaGroupBuffer.add(message, target, userId);
-                    if (!result.added && result.reason !== 'duplicate') {
-                        log.warn(`Failed to add message to buffer: ${result.reason}`);
-                    }
-                } catch (error) {
-                    log.error('MediaGroupBuffer.add failed, falling back to single task', { error: error?.message });
-                    await TaskManager.addTask(target, message, userId, "媒体组(降级)");
-                }
-                return;
-            }
-
-            // 零散文件逻辑保持不动
-            await TaskManager.addTask(target, message, userId, "文件");
-            return;
-        }
+        if (await this._handleMediaMessage(target, userId, message, finalSelectedDrive)) return;
     }
 
     /**
