@@ -76,58 +76,34 @@ export class DistributedLock {
         // 尝试获取锁（带重试）
         for (let attempt = 0; attempt < effectiveMaxRetries; attempt++) {
             try {
-                // 尝试原子获取锁
-                const acquired = await this.cache.compareAndSet(lockKey, lockValue, {
-                    ifNotExists: true,
-                    metadata: { 
-                        ttl: effectiveTtlSeconds,
-                        taskId,
-                        instanceId
-                    }
-                });
+                const result = await this._tryAcquireSingleAttempt(lockKey, lockValue, effectiveTtlSeconds, taskId, instanceId);
 
-                if (acquired) {
-                    // 成功获取锁，启动心跳
+                if (result.success) {
                     this.startHeartbeat(taskId, instanceId, effectiveTtlSeconds, version);
                     
-                    this.logger.info(`Lock acquired for task ${taskId} by ${instanceId}`, {
-                        version,
-                        expiresAt: this._safeToISOString(expiresAt) || 'unknown'
-                    });
+                    if (result.action === 'acquired') {
+                        this.logger.info(`Lock acquired for task ${taskId} by ${instanceId}`, {
+                            version,
+                            expiresAt: this._safeToISOString(expiresAt) || 'unknown'
+                        });
+                    } else if (result.action === 'stolen') {
+                        this.logger.warn(`Lock stolen for task ${taskId} from ${result.existing.instanceId}`, {
+                            oldVersion: result.existing.version,
+                            newVersion: version
+                        });
+                    }
                     
                     return { 
                         success: true, 
-                        stolen: false,
+                        stolen: result.action === 'stolen',
+                        stolenFrom: result.action === 'stolen' ? result.existing.instanceId : undefined,
                         version
                     };
                 }
 
-                // 锁已被占用，检查是否过期
-                const existing = await this.cache.get(lockKey, 'json');
-                if (existing && this.isExpired(existing)) {
-                    // 尝试偷取过期锁
-                    const stolen = await this.attemptLockSteal(lockKey, lockValue, existing, effectiveTtlSeconds);
-                    
-                    if (stolen.success) {
-                        this.startHeartbeat(taskId, instanceId, effectiveTtlSeconds, version);
-                        
-                        this.logger.warn(`Lock stolen for task ${taskId} from ${existing.instanceId}`, {
-                            oldVersion: existing.version,
-                            newVersion: version
-                        });
-                        
-                        return { 
-                            success: true, 
-                            stolen: true,
-                            stolenFrom: existing.instanceId,
-                            version
-                        };
-                    }
-                    
-                    if (stolen.reason === 'race_condition') {
-                        // 竞争条件，重试
-                        continue;
-                    }
+                if (result.action === 'race_condition') {
+                    // 竞争条件，重试
+                    continue;
                 }
 
                 // 锁被其他实例持有
@@ -135,8 +111,8 @@ export class DistributedLock {
                     return { 
                         success: false, 
                         reason: 'lock_held',
-                        currentOwner: existing?.instanceId,
-                        expiresAt: existing?.expiresAt
+                        currentOwner: result.existing?.instanceId,
+                        expiresAt: result.existing?.expiresAt
                     };
                 }
 
@@ -146,7 +122,7 @@ export class DistributedLock {
             } catch (error) {
                 this.logger.error(`Lock acquisition attempt ${attempt + 1} failed for task ${taskId}`, error);
                 
-                if (attempt === maxRetries - 1) {
+                if (attempt === effectiveMaxRetries - 1) {
                     return { 
                         success: false, 
                         reason: 'error',
@@ -157,6 +133,43 @@ export class DistributedLock {
         }
 
         return { success: false, reason: 'max_retries' };
+    }
+
+    /**
+     * 尝试单次获取锁（内部方法）
+     * @private
+     */
+    async _tryAcquireSingleAttempt(lockKey, lockValue, effectiveTtlSeconds, taskId, instanceId) {
+        // 尝试原子获取锁
+        const acquired = await this.cache.compareAndSet(lockKey, lockValue, {
+            ifNotExists: true,
+            metadata: {
+                ttl: effectiveTtlSeconds,
+                taskId,
+                instanceId
+            }
+        });
+
+        if (acquired) {
+            return { success: true, action: 'acquired' };
+        }
+
+        // 锁已被占用，检查是否过期
+        const existing = await this.cache.get(lockKey, 'json');
+        if (existing && this.isExpired(existing)) {
+            // 尝试偷取过期锁
+            const stolen = await this.attemptLockSteal(lockKey, lockValue, existing, effectiveTtlSeconds);
+
+            if (stolen.success) {
+                return { success: true, action: 'stolen', existing };
+            }
+
+            if (stolen.reason === 'race_condition') {
+                return { success: false, action: 'race_condition' };
+            }
+        }
+
+        return { success: false, action: 'held', existing };
     }
 
     /**
