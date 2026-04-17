@@ -2,7 +2,7 @@
   "manifest_version": "1.1",
   "id": "drive-collector-js",
   "name": "Drive Collector Bot",
-  "version": "4.32.2",
+  "version": "4.32.3",
   "description": "基于 JSON Schema 契约中心的分布式转存项目，支持 Telegram 媒体转存至 Rclone/S3。",
   "type": "worker",
   "capabilities": [
@@ -989,7 +989,15 @@
         "type": "string",
         "required": false,
         "description": "New Relic 应用名称"
-      }
+      },
+      "MCP_PORT": "Optional placeholder",
+      "NF_REDIS_TLS_ENABLED": "Optional placeholder",
+      "NF_REDIS_URL": "Optional placeholder",
+      "REDIS_TLS_ENABLED": "Optional placeholder",
+      "REDIS_TOKEN": "Optional placeholder",
+      "REDIS_URL": "Optional placeholder",
+      "UPSTASH_REDIS_REST_TOKEN": "Optional placeholder",
+      "UPSTASH_REDIS_REST_URL": "Optional placeholder"
     }
   },
   "endpoints": {

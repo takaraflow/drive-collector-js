@@ -500,15 +500,17 @@ export class TaskManagerCore {
             }
 
             await TaskRepository.createBatch(tasksData);
-            // 立即推送到 QStash 队列
-            for (const data of tasksData) {
+            // 立即推送到 QStash 队列，使用 Promise.all 并行处理
+            const enqueuePromises = tasksData.map(data => {
                 const message = validMessages.find(m => m.id === data.sourceMsgId);
                 if (message) {
                     const task = this._createTaskObject(data.id, data.userId, data.chatId, data.msgId, message);
                     task.isGroup = true;
-                    await this._enqueueTask(task);
+                    return this._enqueueTask(task);
                 }
-            }
+                return Promise.resolve();
+            });
+            await Promise.all(enqueuePromises);
             log.info("Batch tasks created and enqueued", { count: validMessages.length, status: 'enqueued' });
         } catch (e) {
             log.error("Batch task creation failed", e);
