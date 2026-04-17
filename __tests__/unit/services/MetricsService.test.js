@@ -1,11 +1,24 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MetricsService, metrics } from '../../../src/services/MetricsService.js';
+import { MetricsService } from '../../../src/services/MetricsService.js';
 
 describe('MetricsService', () => {
     let metricsService;
 
     beforeEach(() => {
         metricsService = new MetricsService();
+    });
+
+    describe('Initialization', () => {
+        it('should initialize counters, gauges, and timings as empty Maps', () => {
+            expect(metricsService.counters).toBeInstanceOf(Map);
+            expect(metricsService.counters.size).toBe(0);
+
+            expect(metricsService.gauges).toBeInstanceOf(Map);
+            expect(metricsService.gauges.size).toBe(0);
+
+            expect(metricsService.timings).toBeInstanceOf(Map);
+            expect(metricsService.timings.size).toBe(0);
+        });
     });
 
     describe('Counters', () => {
@@ -55,9 +68,8 @@ describe('MetricsService', () => {
             metricsService.timing('test_timing', 200);
             metricsService.timing('test_timing', 300);
 
-            // Can verify through getMetrics since there's no direct getter for timings array
-            const currentMetrics = metricsService.getMetrics();
-            expect(currentMetrics.timings.test_timing.count).toBe(3);
+            // Check internal map to ensure values are appended properly
+            expect(metricsService.timings.get('test_timing')).toEqual([100, 200, 300]);
         });
     });
 
@@ -119,6 +131,10 @@ describe('MetricsService', () => {
             metricsService.timing('test_timing', 100);
 
             metricsService.reset();
+
+            expect(metricsService.counters.size).toBe(0);
+            expect(metricsService.gauges.size).toBe(0);
+            expect(metricsService.timings.size).toBe(0);
 
             const currentMetrics = metricsService.getMetrics();
             expect(currentMetrics.counters).toEqual({});
