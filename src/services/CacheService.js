@@ -181,8 +181,8 @@ class CacheService {
             // 2. Sort by priority (ascending, 1 is highest)
             this.providerList.sort((a, b) => (a.config.priority || 99) - (b.config.priority || 99));
 
-            // 3. Connect to the first available provider
-            for (const providerEntry of this.providerList) {
+            // 3. Connect to the first available provider concurrently but respect priority
+            const connectionPromises = this.providerList.map(async (providerEntry) => {
                 try {
                     // Try connect() first, then initialize() as fallback
                     if (typeof providerEntry.instance.connect === 'function') {
@@ -190,6 +190,16 @@ class CacheService {
                     } else if (typeof providerEntry.instance.initialize === 'function') {
                         await providerEntry.instance.initialize();
                     }
+                    return { success: true, providerEntry };
+                } catch (error) {
+                    return { success: false, providerEntry, error };
+                }
+            });
+
+            for (let i = 0; i < this.providerList.length; i++) {
+                const result = await connectionPromises[i];
+                if (result.success) {
+                    const providerEntry = result.providerEntry;
                     this.primaryProvider = providerEntry.instance;
                     this.currentProviderName = providerEntry.instance.getProviderName();
                     this.isFailoverMode = false;
@@ -199,10 +209,22 @@ class CacheService {
                     // Check and warn about atomic capabilities
                     this._checkAtomicCapabilities(this.currentProviderName);
                     
+                    // Disconnect the remaining successful ones that are lower priority
+                    for (let j = i + 1; j < this.providerList.length; j++) {
+                        connectionPromises[j].then(res => {
+                            if (res.success) {
+                                if (typeof res.providerEntry.instance.disconnect === 'function') {
+                                    res.providerEntry.instance.disconnect().catch(() => {});
+                                } else if (typeof res.providerEntry.instance.destroy === 'function') {
+                                    res.providerEntry.instance.destroy().catch(() => {});
+                                }
+                            }
+                        });
+                    }
+
                     break; // Stop on first successful connection
-                } catch (error) {
-                    log.error(`Failed to connect to ${providerEntry.config.name}: ${error.message}`);
-                    // Continue to next provider
+                } else {
+                    log.error(`Failed to connect to ${result.providerEntry.config.name}: ${result.error.message}`);
                 }
             }
 
@@ -815,6 +837,7 @@ class CacheService {
     _matchPattern(key, pattern) {
         // Convert pattern to regex
         const regexPattern = pattern
+            .replace(/[.+^${}()|[\]\\]/g, '\\$&')
             .replace(/\*/g, '.*')
             .replace(/\?/g, '.');
         
