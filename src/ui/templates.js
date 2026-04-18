@@ -193,7 +193,7 @@ export class UIHelper {
 
             // 将第二个━━━━━━━━━━━━━━替换为ASCII进度条（如果有焦点任务进度）
             if (total > 0 && (focusStatus === 'downloading' || focusStatus === 'uploading')) {
-                const progressBar = this.generateProgressBar(downloaded, total);
+                const progressBar = `<code>${this.generateProgressBar(downloaded, total)}</code> (${formatBytes(downloaded)}/${formatBytes(total)})`;
                 text = text.replace(/━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件/g, `${progressBar}\n💡 进度条仅显示当前正在处理的文件`);
             }
         }
