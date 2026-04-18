@@ -315,12 +315,17 @@ class SmartFailover {
             });
         } else {
             // 串行执行
-            for (let i = 0; i < requestFns.length; i++) {
-                const result = await this.executeRequest(requestFns[i], {
-                    ...options,
-                    requestId: i
-                });
-                results.push({ index: i, result });
+            // Pre-allocate array to avoid dynamic resizing overhead
+            const len = requestFns.length;
+            results.length = len;
+            for (let i = 0; i < len; i++) {
+                // To avoid the performance penalty of spreading options in every loop iteration,
+                // we create an empty object with the original options as its prototype.
+                // This preserves object safety while providing a fast path for property lookup.
+                const reqOptions = Object.create(options);
+                reqOptions.requestId = i;
+                const result = await this.executeRequest(requestFns[i], reqOptions);
+                results[i] = { index: i, result };
             }
         }
 
