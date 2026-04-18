@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 /**
  * DistributedLock - 分布式锁服务
  * 解决锁泄漏与死锁问题
@@ -62,7 +64,7 @@ export class DistributedLock {
         const lockKey = `lock:task:${taskId}`;
         const now = Date.now();
         const expiresAt = now + effectiveTtlSeconds * 1000;
-        const version = Math.random().toString(36).substr(2, 9);
+        const version = crypto.randomUUID();
 
         const lockValue = {
             instanceId,
