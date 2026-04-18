@@ -10,6 +10,8 @@
  * 5. 锁状态监控
  */
 
+import crypto from 'crypto';
+
 export class DistributedLock {
     /**
      * @param {Object} cache - 缓存服务实例
@@ -62,7 +64,7 @@ export class DistributedLock {
         const lockKey = `lock:task:${taskId}`;
         const now = Date.now();
         const expiresAt = now + effectiveTtlSeconds * 1000;
-        const version = Math.random().toString(36).substr(2, 9);
+        const version = crypto.randomBytes(8).toString('hex');
 
         const lockValue = {
             instanceId,
