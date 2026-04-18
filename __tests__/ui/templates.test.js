@@ -1,7 +1,11 @@
 // Mock utils/common
-vi.mock("../../src/utils/common.js", () => ({
-    escapeHTML: vi.fn(str => str)
-}));
+vi.mock("../../src/utils/common.js", async (importOriginal) => {
+    const actual = await importOriginal();
+    return {
+        ...actual,
+        escapeHTML: vi.fn(str => str)
+    };
+});
 
 // Mock config
 vi.mock("../../src/config/index.js", () => ({
@@ -78,7 +82,7 @@ describe("UIHelper", () => {
             expect(result).toContain("test.mp4");
             expect(result).toContain("50.0%");
             expect(result).toContain("[██████████░░░░░░░░░░]");
-            expect(result).toContain("50.0/100.0 MB");
+            expect(result).toContain("50 MB/100 MB");
         });
 
         test("should handle zero values", () => {
@@ -94,7 +98,7 @@ describe("UIHelper", () => {
             const result = UIHelper.renderProgress(1073741824, 2147483648, "Downloading", "large.mp4"); // 1GB of 2GB
 
             expect(result).toContain("50.0%");
-            expect(result).toContain("1024.0/2048.0 MB");
+            expect(result).toContain("1 GB/2 GB");
         });
     });
 
