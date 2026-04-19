@@ -111,6 +111,8 @@ describe('WebhookRouter', () => {
 
     afterEach(() => {
         vi.clearAllMocks();
+        delete global.fetch;
+        delete global.appInitializer;
     });
 
     describe('handleHealthChecks', () => {
@@ -250,6 +252,34 @@ describe('WebhookRouter', () => {
         });
     });
 
+
+        it('should handle config refresh failure', async () => {
+            req.url = '/api/v2/config/refresh';
+            req.method = 'POST';
+
+            const { refreshConfiguration } = await import('../../../src/config/index.js');
+            refreshConfiguration.mockResolvedValue({ success: false });
+
+            await handleWebhook(req, res);
+
+            expect(refreshConfiguration).toHaveBeenCalled();
+            expect(res.writeHead).toHaveBeenCalledWith(500, { 'Content-Type': 'application/json' });
+            expect(res.end).toHaveBeenCalledWith(JSON.stringify({ success: false }));
+        });
+
+        it('should handle stream forwarding failure', async () => {
+            req.url = '/api/v2/stream/123';
+            req.method = 'POST';
+            const { streamTransferService } = await import('../../../src/services/StreamTransferService.js');
+            streamTransferService.handleIncomingChunk.mockResolvedValue({ success: false, statusCode: 500, message: 'Stream Error' });
+
+            await handleWebhook(req, res);
+
+            expect(streamTransferService.handleIncomingChunk).toHaveBeenCalledWith('123', req);
+            expect(res.writeHead).toHaveBeenCalledWith(500);
+            expect(res.end).toHaveBeenCalledWith('Stream Error');
+        });
+
     describe('processWebhookData and general flows', () => {
         it('should return 401 if signature is missing', async () => {
             req.headers['upstash-signature'] = undefined;
@@ -360,6 +390,41 @@ describe('WebhookRouter', () => {
             expect(res.end).toHaveBeenCalledWith('OK');
         });
 
+
+        it('should not forward webhook to leader if already forwarded to prevent loop', async () => {
+            req.url = '/webhook/download';
+            req.headers['x-forwarded-by-instance'] = 'some-instance';
+            req[Symbol.asyncIterator] = async function* () {
+                yield Buffer.from(JSON.stringify({ taskId: 'task-5' }));
+            };
+
+            const { TaskManager } = await import('../../../src/processor/TaskManager.js');
+            TaskManager.handleDownloadWebhook.mockResolvedValue({ success: false, statusCode: 503, message: 'Not Leader' });
+
+            await handleWebhook(req, res);
+
+            expect(res.writeHead).toHaveBeenCalledWith(503);
+            expect(res.end).toHaveBeenCalledWith('Not Leader');
+        });
+
+        it('should handle webhook forwarding when leader url cannot be resolved', async () => {
+            req.url = '/webhook/download';
+            req[Symbol.asyncIterator] = async function* () {
+                yield Buffer.from(JSON.stringify({ taskId: 'task-6' }));
+            };
+
+            const { TaskManager } = await import('../../../src/processor/TaskManager.js');
+            TaskManager.handleDownloadWebhook.mockResolvedValue({ success: false, statusCode: 503, message: 'Not Leader' });
+
+            const { cache } = await import('../../../src/services/CacheService.js');
+            cache.get.mockResolvedValue(null); // No leader found
+
+            await handleWebhook(req, res);
+
+            expect(res.writeHead).toHaveBeenCalledWith(503);
+            expect(res.end).toHaveBeenCalledWith('Not Leader');
+        });
+
         it('should handle 500 error from forwarding to leader', async () => {
             req.url = '/webhook/download';
             req[Symbol.asyncIterator] = async function* () {
@@ -381,6 +446,30 @@ describe('WebhookRouter', () => {
 
             expect(res.writeHead).toHaveBeenCalledWith(500);
             expect(res.end).toHaveBeenCalledWith('Upstream Error');
+        });
+
+
+        it('should handle webhook forwarding when targetBaseUrl resolves to null', async () => {
+            req.url = '/webhook/download';
+            req[Symbol.asyncIterator] = async function* () {
+                yield Buffer.from(JSON.stringify({ taskId: 'task-7' }));
+            };
+
+            const { TaskManager } = await import('../../../src/processor/TaskManager.js');
+            TaskManager.handleDownloadWebhook.mockResolvedValue({ success: false, statusCode: 503, message: 'Not Leader' });
+
+            const { cache } = await import('../../../src/services/CacheService.js');
+            // Make leaderInstanceId valid but no instances matching
+            cache.get.mockResolvedValue({ instanceId: 'leader-instance' });
+
+            const { instanceCoordinator } = await import('../../../src/services/InstanceCoordinator.js');
+            instanceCoordinator.getActiveInstances.mockResolvedValue([]); // returns empty array, so no url
+
+            await handleWebhook(req, res);
+
+            // Expected to fall through to the default response from processWebhookData
+            expect(res.writeHead).toHaveBeenCalledWith(503);
+            expect(res.end).toHaveBeenCalledWith('Not Leader');
         });
 
         it('should handle AppReady state not ready within general handleWebhook flow', async () => {
