@@ -320,6 +320,19 @@ describe('分布式系统集成测试', () => {
   let batchProcessor;
   let gracefulShutdown;
 
+  let originalMaxListeners;
+
+  beforeAll(() => {
+    // Increase MaxListeners to avoid warning when GracefulShutdown registers multiple process listeners
+    originalMaxListeners = process.getMaxListeners();
+    process.setMaxListeners(20);
+  });
+
+  afterAll(() => {
+    // Restore original MaxListeners
+    process.setMaxListeners(originalMaxListeners);
+  });
+
   beforeEach(() => {
     mockConsistentCacheStore.clear();
     // 初始化所有组件

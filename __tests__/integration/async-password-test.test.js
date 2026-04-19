@@ -191,7 +191,8 @@ describe('异步密码处理集成测试 (Integration Test)', () => {
 
             // 检测是否是未 resolved 的 Promise
             if (isPromise(processed) && typeof processed !== 'string') {
-                console.log('Warning: password is still a Promise, need to await');
+                // Intentionally detecting unresolved Promise - no need to log warning here
+                expect(isPromise(processed)).toBe(true);
             }
 
             // 使用 await

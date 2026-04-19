@@ -5,6 +5,72 @@ global.fetch = mockFetch;
 // Store original process.env
 const originalEnv = process.env;
 
+// Mock CacheService to avoid actual Cloudflare API calls (must be at top level for vitest hoisting)
+vi.mock("../../src/services/CacheService.js", () => {
+  const mockCache = {
+    set: vi.fn().mockResolvedValue(true),
+    get: vi.fn().mockResolvedValue(null),
+    delete: vi.fn().mockResolvedValue(true),
+    listKeys: vi.fn().mockResolvedValue([]),
+    getCurrentProvider: vi.fn().mockReturnValue('mock'),
+    initialize: vi.fn().mockResolvedValue(undefined)
+  };
+  return {
+    cache: mockCache,
+    default: mockCache
+  };
+});
+
+// Mock InstanceRepository
+vi.mock("../../src/repositories/InstanceRepository.js", () => ({
+  InstanceRepository: {
+    upsert: vi.fn().mockResolvedValue(true),
+    findById: vi.fn().mockResolvedValue(null),
+    findAllActive: vi.fn().mockResolvedValue([]),
+    findAll: vi.fn().mockResolvedValue([]),
+    markOffline: vi.fn().mockResolvedValue(true),
+    deleteExpired: vi.fn().mockResolvedValue(0)
+  }
+}));
+
+// Mock QueueService
+vi.mock("../../src/services/QueueService.js", () => ({
+  queueService: {
+    broadcastSystemEvent: vi.fn().mockResolvedValue(true)
+  }
+}));
+
+// Mock logger
+vi.mock("../../src/services/logger/index.js", () => ({
+  default: {
+    withModule: vi.fn().mockReturnValue({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+      withContext: vi.fn().mockReturnValue({
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn()
+      })
+    })
+  },
+  setInstanceIdProvider: vi.fn()
+}));
+
+// Mock AxiomLogger
+vi.mock("../../src/services/logger/AxiomLogger.js", () => ({
+  setInstanceIdProvider: vi.fn()
+}));
+
+// Mock TunnelService
+vi.mock("../../src/services/TunnelService.js", () => ({
+  tunnelService: {
+    getPublicUrl: vi.fn().mockResolvedValue(null)
+  }
+}));
+
 let instanceCoordinator;
 
 describe("Multi-Instance Integration", () => {
@@ -20,72 +86,6 @@ describe("Multi-Instance Integration", () => {
       INSTANCE_ID: "integration_test_instance",
     };
     vi.resetModules();
-
-    // Mock CacheService to avoid actual Cloudflare API calls
-    vi.mock("../../src/services/CacheService.js", () => {
-      const mockCache = {
-        set: vi.fn().mockResolvedValue(true),
-        get: vi.fn().mockResolvedValue(null),
-        delete: vi.fn().mockResolvedValue(true),
-        listKeys: vi.fn().mockResolvedValue([]),
-        getCurrentProvider: vi.fn().mockReturnValue('mock'),
-        initialize: vi.fn().mockResolvedValue(undefined)
-      };
-      return {
-        cache: mockCache,
-        default: mockCache
-      };
-    });
-
-    // Mock InstanceRepository
-    vi.mock("../../src/repositories/InstanceRepository.js", () => ({
-      InstanceRepository: {
-        upsert: vi.fn().mockResolvedValue(true),
-        findById: vi.fn().mockResolvedValue(null),
-        findAllActive: vi.fn().mockResolvedValue([]),
-        findAll: vi.fn().mockResolvedValue([]),
-        markOffline: vi.fn().mockResolvedValue(true),
-        deleteExpired: vi.fn().mockResolvedValue(0)
-      }
-    }));
-
-    // Mock QueueService
-    vi.mock("../../src/services/QueueService.js", () => ({
-      queueService: {
-        broadcastSystemEvent: vi.fn().mockResolvedValue(true)
-      }
-    }));
-
-    // Mock logger
-    vi.mock("../../src/services/logger/index.js", () => ({
-      default: {
-        withModule: vi.fn().mockReturnValue({
-          info: vi.fn(),
-          warn: vi.fn(),
-          error: vi.fn(),
-          debug: vi.fn(),
-          withContext: vi.fn().mockReturnValue({
-            info: vi.fn(),
-            warn: vi.fn(),
-            error: vi.fn(),
-            debug: vi.fn()
-          })
-        })
-      },
-      setInstanceIdProvider: vi.fn()
-    }));
-
-    // Mock AxiomLogger
-    vi.mock("../../src/services/logger/AxiomLogger.js", () => ({
-      setInstanceIdProvider: vi.fn()
-    }));
-
-    // Mock TunnelService
-    vi.mock("../../src/services/TunnelService.js", () => ({
-      tunnelService: {
-        getPublicUrl: vi.fn().mockResolvedValue(null)
-      }
-    }));
 
     // Create mock instance coordinator instead of dynamic import
     instanceCoordinator = {

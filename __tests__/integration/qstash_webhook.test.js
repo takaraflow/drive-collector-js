@@ -41,7 +41,9 @@ const mockTaskManager = {
 // Mock telegram client to avoid initialization
 const mockClient = {};
 vi.mock("../../src/services/telegram.js", () => ({
-    client: mockClient
+    client: mockClient,
+    stopWatchdog: vi.fn(),
+    startWatchdog: vi.fn()
 }));
 
 // Mock modules
@@ -64,6 +66,81 @@ vi.mock("../../src/services/InstanceCoordinator.js", () => ({
     }
 }));
 
+vi.mock("../../src/repositories/SettingsRepository.js", () => ({
+    SettingsRepository: {
+        get: vi.fn().mockResolvedValue("0"),
+        set: vi.fn().mockResolvedValue(undefined)
+    }
+}));
+
+vi.mock("../../src/services/d1.js", () => ({
+    d1: {
+        batch: vi.fn().mockResolvedValue(undefined)
+    }
+}));
+
+vi.mock("../../src/dispatcher/bootstrap.js", () => ({
+    startDispatcher: vi.fn()
+}));
+
+vi.mock("../../src/processor/bootstrap.js", () => ({
+    startProcessor: vi.fn(),
+    stopProcessor: vi.fn()
+}));
+
+vi.mock("../../src/repositories/DriveRepository.js", () => ({
+    DriveRepository: {
+        findAll: vi.fn().mockResolvedValue([])
+    }
+}));
+
+vi.mock("../../src/services/rclone.js", () => ({
+    CloudTool: {
+        listRemoteFiles: vi.fn().mockResolvedValue([])
+    }
+}));
+
+vi.mock("../../src/services/logger/index.js", () => ({
+    logger: {
+        withModule: vi.fn(() => ({
+            info: vi.fn(),
+            error: vi.fn(),
+            warn: vi.fn(),
+            debug: vi.fn()
+        })),
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn()
+    }
+}));
+
+// Mock initConfig before importing index.js
+vi.mock("../../src/config/index.js", () => ({
+    config: {
+        qstash: {
+            token: "mock-token",
+            url: "https://qstash.upstash.io",
+            webhookUrl: "https://example.com/webhook"
+        },
+        telegram: {
+            proxy: {}
+        }
+    },
+    initConfig: vi.fn().mockResolvedValue({}),
+    validateConfig: vi.fn().mockReturnValue(true),
+    getConfig: vi.fn().mockReturnValue({
+        qstash: {
+            token: "mock-token",
+            url: "https://qstash.upstash.io",
+            webhookUrl: "https://example.com/webhook"
+        },
+        telegram: {
+            proxy: {}
+        }
+    })
+}));
+
 describe("QStash Webhook Integration", () => {
     let handleWebhook;
     let setAppReadyState;
@@ -74,100 +151,6 @@ describe("QStash Webhook Integration", () => {
         // Mock process methods to prevent exit
         const originalExit = process.exit;
         process.exit = vi.fn();
-
-        // Import the handler function and mock all dependencies
-        vi.mock("../../src/services/telegram.js", () => ({
-            client: mockClient,
-            stopWatchdog: vi.fn(),
-            startWatchdog: vi.fn()
-        }));
-
-        vi.mock("../../src/services/QueueService.js", () => ({
-            queueService: mockQueueService
-        }));
-
-        vi.mock("../../src/processor/TaskManager.js", () => ({
-            TaskManager: {
-                handleDownloadWebhook: mockHandleDownloadWebhook,
-                handleUploadWebhook: mockHandleUploadWebhook,
-                handleMediaBatchWebhook: mockHandleMediaBatchWebhook
-            }
-        }));
-
-        vi.mock("../../src/repositories/SettingsRepository.js", () => ({
-            SettingsRepository: {
-                get: vi.fn().mockResolvedValue("0"),
-                set: vi.fn().mockResolvedValue(undefined)
-            }
-        }));
-
-        vi.mock("../../src/services/d1.js", () => ({
-            d1: {
-                batch: vi.fn().mockResolvedValue(undefined)
-            }
-        }));
-
-        vi.mock("../../src/dispatcher/bootstrap.js", () => ({
-            startDispatcher: vi.fn()
-        }));
-
-        vi.mock("../../src/processor/bootstrap.js", () => ({
-            startProcessor: vi.fn(),
-            stopProcessor: vi.fn()
-        }));
-
-        vi.mock("../../src/repositories/DriveRepository.js", () => ({
-            DriveRepository: {
-                findAll: vi.fn().mockResolvedValue([])
-            }
-        }));
-
-        vi.mock("../../src/services/rclone.js", () => ({
-            CloudTool: {
-                listRemoteFiles: vi.fn().mockResolvedValue([])
-            }
-        }));
-
-        vi.mock("../../src/services/logger/index.js", () => ({
-            logger: {
-                withModule: vi.fn(() => ({
-                    info: vi.fn(),
-                    error: vi.fn(),
-                    warn: vi.fn(),
-                    debug: vi.fn()
-                })),
-                info: vi.fn(),
-                error: vi.fn(),
-                warn: vi.fn(),
-                debug: vi.fn()
-            }
-        }));
-
-        // Mock initConfig before importing index.js
-        vi.mock("../../src/config/index.js", () => ({
-            config: {
-                qstash: {
-                    token: "mock-token",
-                    url: "https://qstash.upstash.io",
-                    webhookUrl: "https://example.com/webhook"
-                },
-                telegram: {
-                    proxy: {}
-                }
-            },
-            initConfig: vi.fn().mockResolvedValue({}),
-            validateConfig: vi.fn().mockReturnValue(true),
-            getConfig: vi.fn().mockReturnValue({
-                qstash: {
-                    token: "mock-token",
-                    url: "https://qstash.upstash.io",
-                    webhookUrl: "https://example.com/webhook"
-                },
-                telegram: {
-                    proxy: {}
-                }
-            })
-        }));
 
         // Now import index.js
         const { handleWebhook: webhookHandler, setAppReadyState: readySetter } = await import("../../index.js");
@@ -385,11 +368,6 @@ describe("QStash Webhook Integration", () => {
         expect(res.writeHead).toHaveBeenCalledWith(503);
         expect(res.end).toHaveBeenCalled(); // HEAD 请求也应该调用 end
     });
-
-
-
-
-
 
     test("health 端点在就绪后返回 200", async () => {
         setAppReadyState(true);

@@ -5,25 +5,22 @@
  * - 创建记录 → 读取记录 → 更新记录 → 删除记录
  */
 
+// Mock D1服务以避免真实的数据库连接 (must be at top level for vitest hoisting)
+const mockD1Service = {
+  fetchOne: vi.fn(),
+  fetchAll: vi.fn(),
+  execute: vi.fn()
+};
+
+vi.mock('../src/services/d1.js', () => ({
+  D1Service: class {
+    constructor() {
+      return mockD1Service;
+    }
+  }
+}), { virtual: true });
+
 describe('数据库集成测试', () => {
-  let mockD1Service;
-
-  beforeAll(() => {
-    // Mock D1服务以避免真实的数据库连接
-    mockD1Service = {
-      fetchOne: vi.fn(),
-      fetchAll: vi.fn(),
-      execute: vi.fn()
-    };
-
-    vi.mock('../src/services/d1.js', () => ({
-      D1Service: class {
-        constructor() {
-          return mockD1Service;
-        }
-      }
-    }), { virtual: true });
-  });
 
   describe('任务存储集成测试', () => {
     it('应该支持完整的CRUD操作链', async () => {
