@@ -1,0 +1,282 @@
+diff --git a/src/processor/TaskManager/TaskManager.upload.js b/src/processor/TaskManager/TaskManager.upload.js
+index 9cd0add..a0d41e1 100644
+--- a/src/processor/TaskManager/TaskManager.upload.js
++++ b/src/processor/TaskManager/TaskManager.upload.js
+@@ -75,111 +75,16 @@ export async function uploadTask(task) {
+             heartbeat('uploading')
+         ]);
+
+-        let uploadResult;
+-        const isR2Drive = config.remoteName === 'r2' && config.oss?.r2?.bucket;
+-        let lastUpdate = Date.now();
+-
+-        try {
+-            if (isR2Drive) {
+-                // Use OSS service for dual-track upload
+-                log.info(`📤 Using OSS service to upload to R2: ${fileName}`);
+-                uploadResult = await ossService.upload(localPath, fileName, (progress) => {
+-                    const now = Date.now();
+-                    if (now - lastUpdate > 3000) {
+-                        lastUpdate = now;
+-                        void heartbeat('uploading', 0, 0, progress).catch((err) => {
+-                            if (err?.message === "CANCELLED") return;
+-                            log.warn("Upload heartbeat failed", { taskId: task.id, error: err?.message || String(err) });
+-                        });
+-                    }
+-                }, task.userId);
+-                // Convert OSS result to expected format
+-                uploadResult = uploadResult.success ? { success: true } : { success: false, error: uploadResult.error };
+-            } else {
+-                // Use rclone to upload single file directly
+-                log.info(`📤 Using rclone to upload directly: ${fileName}`);
+-                uploadResult = await CloudTool.uploadFile(localPath, task, (progress) => {
+-                    const now = Date.now();
+-                    if (now - lastUpdate > 3000) {
+-                        lastUpdate = now;
+-                        void heartbeat('uploading', 0, 0, progress).catch((err) => {
+-                            if (err?.message === "CANCELLED") return;
+-                            log.warn("Upload heartbeat failed", { taskId: task.id, error: err?.message || String(err) });
+-                        });
+-                    }
+-                });
+-            }
+-        } catch (uploadError) {
+-            log.error(`Upload failed for task ${task.id}:`, uploadError);
+-            throw new Error(`Upload failed: ${uploadError.message}`);
+-        }
++        const uploadResult = await performUploadPhase(task, localPath, fileName, config, ossService, CloudTool, heartbeat, log);
+
+         // Result processing
+         if (uploadResult.success) {
+             if (!task.isGroup) await updateStatus(task, STRINGS.task.verifying);
+
+-            // Add delay before validation to handle cloud storage API eventual consistency delay
+-            await new Promise(resolve => setTimeout(resolve, 3000));
+-
+-            // Extract correct file name from actual local file path
+             const actualFileName = path.basename(localPath);
+-
+-            // More robust file validation logic
+-            let finalRemote = null;
+-            let validationAttempts = 0;
+-            const maxValidationAttempts = 5;
+-
+-            while (validationAttempts < maxValidationAttempts) {
+-                finalRemote = await CloudTool.getRemoteFileInfo(actualFileName, task.userId, 2); // Reduce internal retry count for each validation
+-                if (finalRemote) break;
+-
+-                validationAttempts++;
+-                if (validationAttempts < maxValidationAttempts) {
+-                    // If this is the last attempt, force refresh file list cache
+-                    if (validationAttempts === maxValidationAttempts - 1) {
+-                        log.info(`Final attempt for ${actualFileName}, forcing cache refresh...`);
+-                        try {
+-                            await CloudTool.listRemoteFiles(task.userId, true); // Force refresh cache
+-                            // Try again
+-                            finalRemote = await CloudTool.getRemoteFileInfo(actualFileName, task.userId, 1);
+-                            if (finalRemote) break;
+-                        } catch (e) {
+-                            log.warn(`Cache refresh failed:`, e);
+-                        }
+-                    }
+-
+-                    log.info(`Attempt ${validationAttempts} failed for ${actualFileName}, retrying in ${validationAttempts * 5}s...`);
+-                    await new Promise(resolve => setTimeout(resolve, validationAttempts * 5000)); // Increasing delay: 5s, 10s, 15s, 20s
+-                }
+-            }
+-
+-            const localSize = fs.statSync(localPath).size;
+-            const isOk = finalRemote && this._isSizeMatch(finalRemote.Size, localSize);
+-
+-            if (!isOk) {
+-                log.error(`Validation Failed - Task: ${task.id}, File: ${actualFileName}`);
+-                log.error(`- Local Size: ${localSize}`);
+-                log.error(`- Remote Size: ${finalRemote ? finalRemote.Size : 'N/A'}`);
+-                log.error(`- Remote Info: ${JSON.stringify(finalRemote)}`);
+-                log.error(`- Validation attempts: ${validationAttempts}`);
+-            }
+-
+-            const finalStatus = isOk ? 'completed' : 'failed';
+-            const errorMsg = isOk ? null : `Validation failed: local(${localSize}) vs remote(${finalRemote ? finalRemote.Size : 'not found'})`;
+-            await TaskRepository.updateStatus(task.id, finalStatus, errorMsg);
+-
+-            if (task.isGroup) {
+-                await this._refreshGroupMonitor(task, finalStatus, 0, 0, errorMsg);
+-            } else {
+-                const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
+-                const fileNameHtml = `<a href="${fileLink}">${escapeHTML(info.name)}</a>`;
+-                const baseText = isOk
+-                    ? format(STRINGS.task.success, { name: fileNameHtml, folder: config.remoteFolder })
+-                    : format(STRINGS.task.failed_validation, { name: fileNameHtml });
+-
+-                const finalMsg = isOk ? baseText : `${baseText}\n<code>${escapeHTML(errorMsg)}</code>`;
+-                await updateStatus(task, finalMsg, true);
+-            }
++            const validationResult = await validateRemoteFile(this, task, actualFileName, localPath, CloudTool, log);
++
++            await finalizeUploadStatus(this, task, validationResult, info, config, TaskRepository, updateStatus, STRINGS, format);
+         } else {
+             await handleUploadFailure(task, this, updateStatus, uploadResult);
+         }
+@@ -187,28 +92,141 @@ export async function uploadTask(task) {
+         const isCancel = e.message === "CANCELLED";
+         await handleTaskFailure(task, this, updateStatus, e.message, isCancel);
+     } finally {
+-        // Clean up local file asynchronously after upload
+-        if (localPath) {
+-            try {
+-                if (fs.promises && fs.promises.unlink) {
+-                    await fs.promises.unlink(localPath);
+-                } else {
+-                    fs.unlinkSync(localPath);
++        await cleanupUploadTask(this, task, localPath, didActivate, instanceCoordinator, log);
++    }
++}
++
++async function performUploadPhase(task, localPath, fileName, config, ossService, CloudTool, heartbeat, log) {
++    let uploadResult;
++    const isR2Drive = config.remoteName === 'r2' && config.oss?.r2?.bucket;
++    let lastUpdate = Date.now();
++
++    try {
++        if (isR2Drive) {
++            // Use OSS service for dual-track upload
++            log.info(`📤 Using OSS service to upload to R2: ${fileName}`);
++            uploadResult = await ossService.upload(localPath, fileName, (progress) => {
++                const now = Date.now();
++                if (now - lastUpdate > 3000) {
++                    lastUpdate = now;
++                    void heartbeat('uploading', 0, 0, progress).catch((err) => {
++                        if (err?.message === "CANCELLED") return;
++                        log.warn("Upload heartbeat failed", { taskId: task.id, error: err?.message || String(err) });
++                    });
++                }
++            }, task.userId);
++            // Convert OSS result to expected format
++            uploadResult = uploadResult.success ? { success: true } : { success: false, error: uploadResult.error };
++        } else {
++            // Use rclone to upload single file directly
++            log.info(`📤 Using rclone to upload directly: ${fileName}`);
++            uploadResult = await CloudTool.uploadFile(localPath, task, (progress) => {
++                const now = Date.now();
++                if (now - lastUpdate > 3000) {
++                    lastUpdate = now;
++                    void heartbeat('uploading', 0, 0, progress).catch((err) => {
++                        if (err?.message === "CANCELLED") return;
++                        log.warn("Upload heartbeat failed", { taskId: task.id, error: err?.message || String(err) });
++                    });
++                }
++            });
++        }
++        return uploadResult;
++    } catch (uploadError) {
++        log.error(`Upload failed for task ${task.id}:`, uploadError);
++        throw new Error(`Upload failed: ${uploadError.message}`);
++    }
++}
++
++async function validateRemoteFile(context, task, actualFileName, localPath, CloudTool, log) {
++    // Add delay before validation to handle cloud storage API eventual consistency delay
++    await new Promise(resolve => setTimeout(resolve, 3000));
++
++    // More robust file validation logic
++    let finalRemote = null;
++    let validationAttempts = 0;
++    const maxValidationAttempts = 5;
++
++    while (validationAttempts < maxValidationAttempts) {
++        finalRemote = await CloudTool.getRemoteFileInfo(actualFileName, task.userId, 2); // Reduce internal retry count for each validation
++        if (finalRemote) break;
++
++        validationAttempts++;
++        if (validationAttempts < maxValidationAttempts) {
++            // If this is the last attempt, force refresh file list cache
++            if (validationAttempts === maxValidationAttempts - 1) {
++                log.info(`Final attempt for ${actualFileName}, forcing cache refresh...`);
++                try {
++                    await CloudTool.listRemoteFiles(task.userId, true); // Force refresh cache
++                    // Try again
++                    finalRemote = await CloudTool.getRemoteFileInfo(actualFileName, task.userId, 1);
++                    if (finalRemote) break;
++                } catch (e) {
++                    log.warn(`Cache refresh failed:`, e);
+                 }
+-            } catch (e) {
+-                log.warn(`Failed to cleanup local file ${localPath}:`, e);
+             }
++
++            log.info(`Attempt ${validationAttempts} failed for ${actualFileName}, retrying in ${validationAttempts * 5}s...`);
++            await new Promise(resolve => setTimeout(resolve, validationAttempts * 5000)); // Increasing delay: 5s, 10s, 15s, 20s
+         }
++    }
++
++    const localSize = fs.statSync(localPath).size;
++    const isOk = finalRemote && context._isSizeMatch(finalRemote.Size, localSize);
++
++    if (!isOk) {
++        log.error(`Validation Failed - Task: ${task.id}, File: ${actualFileName}`);
++        log.error(`- Local Size: ${localSize}`);
++        log.error(`- Remote Size: ${finalRemote ? finalRemote.Size : 'N/A'}`);
++        log.error(`- Remote Info: ${JSON.stringify(finalRemote)}`);
++        log.error(`- Validation attempts: ${validationAttempts}`);
++    }
++
++    const errorMsg = isOk ? null : `Validation failed: local(${localSize}) vs remote(${finalRemote ? finalRemote.Size : 'not found'})`;
++
++    return { isOk, localSize, finalRemote, errorMsg };
++}
++
++async function finalizeUploadStatus(context, task, validationResult, info, config, TaskRepository, updateStatus, STRINGS, format) {
++    const finalStatus = validationResult.isOk ? 'completed' : 'failed';
++    await TaskRepository.updateStatus(task.id, finalStatus, validationResult.errorMsg);
++
++    if (task.isGroup) {
++        await context._refreshGroupMonitor(task, finalStatus, 0, 0, validationResult.errorMsg);
++    } else {
++        const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
++        const fileNameHtml = `<a href="${fileLink}">${escapeHTML(info.name)}</a>`;
++        const baseText = validationResult.isOk
++            ? format(STRINGS.task.success, { name: fileNameHtml, folder: config.remoteFolder })
++            : format(STRINGS.task.failed_validation, { name: fileNameHtml });
+
+-        // Ensure activeProcessors is cleaned up
+-        this.activeProcessors.delete(id);
+-
+-        // Ensure inFlightTasks is cleaned up
+-        if (didActivate) {
+-            this.inFlightTasks.delete(id);
++        const finalMsg = validationResult.isOk ? baseText : `${baseText}\n<code>${escapeHTML(validationResult.errorMsg)}</code>`;
++        await updateStatus(task, finalMsg, true);
++    }
++}
++
++async function cleanupUploadTask(context, task, localPath, didActivate, instanceCoordinator, log) {
++    // Clean up local file asynchronously after upload
++    if (localPath) {
++        try {
++            if (fs.promises && fs.promises.unlink) {
++                await fs.promises.unlink(localPath);
++            } else {
++                fs.unlinkSync(localPath);
++            }
++        } catch (e) {
++            log.warn(`Failed to cleanup local file ${localPath}:`, e);
+         }
+-
+-        // Ensure distributed lock is released
+-        await instanceCoordinator.releaseTaskLock(id);
+     }
+-}
+\ No newline at end of file
++
++    // Ensure activeProcessors is cleaned up
++    context.activeProcessors.delete(task.id);
++
++    // Ensure inFlightTasks is cleaned up
++    if (didActivate) {
++        context.inFlightTasks.delete(task.id);
++    }
++
++    // Ensure distributed lock is released
++    await instanceCoordinator.releaseTaskLock(task.id);
++}
