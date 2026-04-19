@@ -3,7 +3,6 @@ import { queueService } from "./QueueService.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
 import { cache } from "./CacheService.js";
 import { localCache } from "../utils/LocalCache.js";
-import PQueue from "p-queue";
 
 const log = logger.withModule('BatchProcessor');
 
@@ -173,20 +172,28 @@ export class BatchProcessor {
     async processItems(items, processor, options = {}) {
         const { concurrency = 5 } = options;
 
-        const queue = new PQueue({ concurrency });
+        // ⚡ Bolt Optimization: Use native async worker pool instead of array mapping + PQueue
+        // This avoids memory regressions from upfront closures when dealing with large item arrays
+        const results = new Array(items.length);
+        let currentIndex = 0;
 
-        const promises = items.map((item, index) => {
-            return queue.add(async () => {
+        const worker = async () => {
+            while (currentIndex < items.length) {
+                const index = currentIndex++;
+                const item = items[index];
                 try {
                     const result = await processor(item, index);
-                    return { success: true, item, result };
+                    results[index] = { success: true, item, result };
                 } catch (error) {
-                    return { success: false, item, error: error.message };
+                    results[index] = { success: false, item, error: error.message };
                 }
-            });
-        });
+            }
+        };
 
-        return await Promise.all(promises);
+        const workers = Array.from({ length: Math.min(concurrency, items.length) }, worker);
+        await Promise.all(workers);
+
+        return results;
     }
 
     /**
@@ -310,21 +317,30 @@ export class BatchProcessor {
      * @private
      */
     async _processItemsInChunks(batch, processor) {
-        // Use PQueue instead of chunks to maximize concurrency without bursts.
-        const queue = new PQueue({ concurrency: 10 });
+        // ⚡ Bolt Optimization: Native async worker pool
+        // Avoid mapping entire arrays which causes upfront closure allocation
+        const concurrency = 10;
+        const items = batch.items;
+        const results = new Array(items.length);
+        let currentIndex = 0;
 
-        const promises = batch.items.map((item, index) => {
-            return queue.add(async () => {
+        const worker = async () => {
+            while (currentIndex < items.length) {
+                const index = currentIndex++;
+                const item = items[index];
                 try {
                     const result = await processor(item, batch);
-                    return { success: true, item, result, index };
+                    results[index] = { success: true, item, result, index };
                 } catch (error) {
-                    return { success: false, item, error: error.message, index };
+                    results[index] = { success: false, item, error: error.message, index };
                 }
-            });
-        });
+            }
+        };
 
-        return await Promise.all(promises);
+        const workers = Array.from({ length: Math.min(concurrency, items.length) }, worker);
+        await Promise.all(workers);
+
+        return results;
     }
 
     /**
