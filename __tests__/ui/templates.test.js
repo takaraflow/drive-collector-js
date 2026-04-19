@@ -262,7 +262,7 @@ describe("UIHelper", () => {
             const result = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 52428800, 104857600); // 50MB of 100MB
 
             expect(result.text).toContain("🔄 file2.mp4 [50%]");
-            expect(result.text).toContain("[██████████░░░░░░░░░░] 50%");
+            expect(result.text).toContain("<code>[██████████░░░░░░░░░░] 50%</code>");
             expect(result.text).toContain("💡 进度条仅显示当前正在处理的文件");
             expect(result.text).not.toContain("━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件");
         });
@@ -277,7 +277,7 @@ describe("UIHelper", () => {
             const result = UIHelper.renderBatchMonitor(tasks, currentTask, "uploading", 26214400, 52428800); // 25MB of 50MB
 
             expect(result.text).toContain("🔄 file2.mp4 [50%]");
-            expect(result.text).toContain("[██████████░░░░░░░░░░] 50%");
+            expect(result.text).toContain("<code>[██████████░░░░░░░░░░] 50%</code>");
         });
 
         test("should not show progress bar when no progress data", () => {
@@ -330,15 +330,15 @@ describe("UIHelper", () => {
 
             // Test 25%
             const result25 = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 26214400, 104857600);
-            expect(result25.text).toContain("[█████░░░░░░░░░░░░░░░] 25%");
+            expect(result25.text).toContain("<code>[█████░░░░░░░░░░░░░░░] 25%</code> (25 MB/100 MB)");
 
             // Test 75%
             const result75 = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 78643200, 104857600);
-            expect(result75.text).toContain("[███████████████░░░░░] 75%");
+            expect(result75.text).toContain("<code>[███████████████░░░░░] 75%</code> (75 MB/100 MB)");
 
             // Test 100%
             const result100 = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 104857600, 104857600);
-            expect(result100.text).toContain("[████████████████████] 100%");
+            expect(result100.text).toContain("<code>[████████████████████] 100%</code> (100 MB/100 MB)");
         });
     });
 
