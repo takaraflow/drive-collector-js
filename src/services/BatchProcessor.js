@@ -170,31 +170,28 @@ export class BatchProcessor {
      * @returns {Promise<Array>} 处理结果
      */
     async processItems(items, processor, options = {}) {
-        const { concurrency = 5, batchSize = 20 } = options;
+        const { concurrency = 5 } = options;
 
-        const results = [];
-        const batches = this._chunkArray(items, batchSize);
+        // ⚡ Bolt Optimization: Use native async worker pool instead of array mapping + PQueue
+        // This avoids memory regressions from upfront closures when dealing with large item arrays
+        const results = new Array(items.length);
+        let currentIndex = 0;
 
-        for (const batch of batches) {
-            // 并行处理批次内的项
-            const batchResults = await Promise.all(
-                batch.map(async (item, index) => {
-                    try {
-                        const result = await processor(item, index);
-                        return { success: true, item, result };
-                    } catch (error) {
-                        return { success: false, item, error: error.message };
-                    }
-                })
-            );
-
-            results.push(...batchResults);
-
-            // 控制整体并发
-            if (batches.length > 1) {
-                await new Promise(resolve => setTimeout(resolve, 100));
+        const worker = async () => {
+            while (currentIndex < items.length) {
+                const index = currentIndex++;
+                const item = items[index];
+                try {
+                    const result = await processor(item, index);
+                    results[index] = { success: true, item, result };
+                } catch (error) {
+                    results[index] = { success: false, item, error: error.message };
+                }
             }
-        }
+        };
+
+        const workers = Array.from({ length: Math.min(concurrency, items.length) }, worker);
+        await Promise.all(workers);
 
         return results;
     }
@@ -320,31 +317,30 @@ export class BatchProcessor {
      * @private
      */
     async _processItemsInChunks(batch, processor) {
-        const chunkSize = 10;
-        const chunks = this._chunkArray(batch.items, chunkSize);
-        const allResults = [];
+        // ⚡ Bolt Optimization: Native async worker pool
+        // Avoid mapping entire arrays which causes upfront closure allocation
+        const concurrency = 10;
+        const items = batch.items;
+        const results = new Array(items.length);
+        let currentIndex = 0;
 
-        for (const chunk of chunks) {
-            const chunkResults = await Promise.all(
-                chunk.map(async (item, index) => {
-                    try {
-                        const result = await processor(item, batch);
-                        return { success: true, item, result, index };
-                    } catch (error) {
-                        return { success: false, item, error: error.message, index };
-                    }
-                })
-            );
-
-            allResults.push(...chunkResults);
-
-            // 小延迟避免过载
-            if (chunks.length > 1) {
-                await new Promise(resolve => setTimeout(resolve, 50));
+        const worker = async () => {
+            while (currentIndex < items.length) {
+                const index = currentIndex++;
+                const item = items[index];
+                try {
+                    const result = await processor(item, batch);
+                    results[index] = { success: true, item, result, index };
+                } catch (error) {
+                    results[index] = { success: false, item, error: error.message, index };
+                }
             }
-        }
+        };
 
-        return allResults;
+        const workers = Array.from({ length: Math.min(concurrency, items.length) }, worker);
+        await Promise.all(workers);
+
+        return results;
     }
 
     /**

@@ -2,7 +2,7 @@ import { Button } from "telegram/tl/custom/button.js";
 import path from "path";
 import { config } from "../config/index.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
-import { escapeHTML } from "../utils/common.js";
+import { escapeHTML, formatBytes } from "../utils/common.js";
 import { CloudTool } from "../services/rclone.js";
 
 /**
@@ -22,7 +22,7 @@ export class UIHelper {
         const displayName = fileName ? escapeHTML(this._shortenFileName(fileName, 25)) : '';
         const fileInfo = fileName ? `\n📄 ${displayName}` : '';
         
-        return `⏳ <b>${actionName}...</b>${fileInfo}\n\n` + `<code>[${bar}]</code> ${percentage}% (${(current / 1048576).toFixed(1)}/${(total / 1048576).toFixed(1)} MB)`;
+        return `⏳ <b>${actionName}...</b>${fileInfo}\n\n` + `<code>[${bar}]</code> ${percentage}% (${formatBytes(current)}/${formatBytes(total)})`;
     }
 
     /**
@@ -47,7 +47,7 @@ export class UIHelper {
             pagedFiles.forEach(f => {
                 const ext = path.extname(f.Name).toLowerCase();
                 const emoji = [".mp4", ".mkv", ".avi"].includes(ext) ? "🎞️" : [".jpg", ".png", ".webp"].includes(ext) ? "🖼️" : [".zip", ".rar", ".7z"].includes(ext) ? "📦" : [".pdf", ".epub"].includes(ext) ? "📝" : "📄";
-                const size = (f.Size / 1048576).toFixed(2) + " MB";
+                const size = formatBytes(f.Size, 2);
                 const time = f.ModTime.replace("T", " ").substring(0, 16);
                 text += `${emoji} <b>${escapeHTML(f.Name)}</b>\n    <code>${size}</code> | <code>${time}</code>\n\n`;
             });
@@ -193,7 +193,7 @@ export class UIHelper {
 
             // 将第二个━━━━━━━━━━━━━━替换为ASCII进度条（如果有焦点任务进度）
             if (total > 0 && (focusStatus === 'downloading' || focusStatus === 'uploading')) {
-                const progressBar = this.generateProgressBar(downloaded, total);
+                const progressBar = `<code>${this.generateProgressBar(downloaded, total)}</code> (${formatBytes(downloaded)}/${formatBytes(total)})`;
                 text = text.replace(/━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件/g, `${progressBar}\n💡 进度条仅显示当前正在处理的文件`);
             }
         }

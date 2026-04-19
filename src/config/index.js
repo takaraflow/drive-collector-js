@@ -231,181 +231,170 @@ async function validateCriticalServices() {
     }
 }
 
-export async function initConfig() {
-    if (isInitialized) return config;
 
-    console.log(`🚀 正在初始化配置...`);
+// 环境验证机制
+function validateEnvironmentConsistency() {
+    const nodeEnv = process.env.NODE_ENV || 'dev';
+    const infisicalEnv = process.env.INFISICAL_ENV;
+    const expectedInfisicalEnv = mapNodeEnvToInfisicalEnv(nodeEnv);
 
-    // 环境验证机制
-    function validateEnvironmentConsistency() {
-        const nodeEnv = process.env.NODE_ENV || 'dev';
-        const infisicalEnv = process.env.INFISICAL_ENV;
-        const expectedInfisicalEnv = mapNodeEnvToInfisicalEnv(nodeEnv);
+    // 检查INFISICAL_ENV与NODE_ENV是否匹配
+    if (infisicalEnv && infisicalEnv !== expectedInfisicalEnv) {
+        console.warn(`⚠️ 环境不一致警告:`);
+        console.warn(`   NODE_ENV: ${nodeEnv} (期望 Infisical: ${expectedInfisicalEnv})`);
+        console.warn(`   INFISICAL_ENV: ${infisicalEnv}`);
+        console.warn(`   建议统一设置环境变量以避免配置错误`);
 
-        // 检查INFISICAL_ENV与NODE_ENV是否匹配
-        if (infisicalEnv && infisicalEnv !== expectedInfisicalEnv) {
-            console.warn(`⚠️ 环境不一致警告:`);
-            console.warn(`   NODE_ENV: ${nodeEnv} (期望 Infisical: ${expectedInfisicalEnv})`);
-            console.warn(`   INFISICAL_ENV: ${infisicalEnv}`);
-            console.warn(`   建议统一设置环境变量以避免配置错误`);
-
-            // prod环境严格检查
-            if (nodeEnv === 'prod') {
-                const error = new Error('Environment mismatch in production');
-                error.isProductionMismatch = true; // 标记为生产环境不匹配错误
-                console.error(`❌ 生产环境环境变量不一致，为安全起见停止启动`);
-                console.error(`   请设置 INFISICAL_ENV=prod 或移除 INFISICAL_ENV`);
-                throw error;
-            }
-        }
-
-        // 验证环境变量合法性
-        const validEnvs = ['dev', 'pre', 'prod', 'test'];
-        if (!validEnvs.includes(nodeEnv)) {
-            console.warn(`⚠️ 无效的 NODE_ENV: ${nodeEnv}，将使用默认值 'dev'`);
-            process.env.NODE_ENV = 'dev';
-        }
-    }
-
-    // 执行环境验证
-    try {
-        validateEnvironmentConsistency();
-    } catch (error) {
-        // 检查是否为生产环境不匹配错误（使用错误标记而非字符串比较）
-        if (error.isProductionMismatch || (error.message && error.message.includes('production'))) {
-            console.error(`❌ 严重错误: ${error.message}`);
+        // prod环境严格检查
+        if (nodeEnv === 'prod') {
+            const error = new Error('Environment mismatch in production');
+            error.isProductionMismatch = true; // 标记为生产环境不匹配错误
+            console.error(`❌ 生产环境环境变量不一致，为安全起见停止启动`);
+            console.error(`   请设置 INFISICAL_ENV=prod 或移除 INFISICAL_ENV`);
             throw error;
         }
-        console.warn(`⚠️ 环境验证失败: ${error.message}`);
     }
 
-    const clientId = process.env.INFISICAL_CLIENT_ID;
-    const clientSecret = process.env.INFISICAL_CLIENT_SECRET;
-    const projectId = process.env.INFISICAL_PROJECT_ID;
+    // 验证环境变量合法性
+    const validEnvs = ['dev', 'pre', 'prod', 'test'];
+    if (!validEnvs.includes(nodeEnv)) {
+        console.warn(`⚠️ 无效的 NODE_ENV: ${nodeEnv}，将使用默认值 'dev'`);
+        process.env.NODE_ENV = 'dev';
+    }
+}
 
-    // 只有当 Infisical 配置存在时才尝试动态拉取
-    if (((clientId && clientSecret) || process.env.INFISICAL_TOKEN) && projectId) {
-        if (process.env.SKIP_INFISICAL_RUNTIME === 'true') {
-            console.log(`ℹ️ 跳过 Infisical 运行时获取 (SKIP_INFISICAL_RUNTIME=true)`);
-        } else if (process.env.NODE_ENV === 'test') {
-            console.log(`ℹ️ 测试环境下跳过 Infisical 获取`);
-        } else {
-            try {
-                const infisicalEnvName = mapNodeEnvToInfisicalEnv(process.env.NODE_ENV || 'dev');
-                console.log(`ℹ️ 尝试获取 Infisical Secrets，环境: ${infisicalEnvName} (映射自 NODE_ENV: ${process.env.NODE_ENV || 'dev'})`);
-                
-                // 使用新的 InfisicalSecretsProvider
-                provider = new InfisicalSecretsProvider({
-                    token: process.env.INFISICAL_TOKEN,
-                    clientId: clientId,
-                    clientSecret: clientSecret,
-                    projectId: projectId,
-                    envName: infisicalEnvName
-                });
-                
-                // 首次拉取
-                const secrets = await provider.fetchSecrets();
-                
-                if (secrets) {
-                    // 初始化 provider 的 currentSecrets，避免首次轮询误报所有配置为新增
-                    if (provider) {
-                        provider.currentSecrets = { ...secrets };
-                    }
 
-                    warnUnknownInfisicalKeys(secrets);
-                    for (const key in secrets) {
-                        const cleanValue = sanitizeValue(secrets[key]);
-                        process.env[key] = cleanValue;
-                    }
+function setupInfisicalPolling() {
+    const pollInterval = parseInt(process.env.INFISICAL_POLLING_INTERVAL) || 300000;
+
+    // 监听配置变更
+    provider.on('configChanged', async (changes) => {
+        // 确保ServiceConfigManager已初始化
+        serviceConfigManager.initialize();
+
+        // 1. 分析变更，确定受影响的服务
+        const affectedServices = serviceConfigManager.getAffectedServices(changes);
+
+        // 2. 显示醒目的配置更新日志
+        logConfigurationUpdate(changes, affectedServices);
+
+        // 3. 更新环境变量
+        changes.forEach(change => {
+            if (change.newValue !== undefined) {
+                const cleanValue = sanitizeValue(change.newValue);
+                process.env[change.key] = cleanValue;
+            } else {
+                delete process.env[change.key];
+            }
+        });
+
+        // 4. 重新初始化受影响的服务
+        if (affectedServices.length > 0) {
+            console.log('\n🔄 开始重新初始化受影响的服务...');
+
+            const reinitializer = new ManifestBasedServiceReinitializer();
+            await reinitializer.initializeServices();
+
+            // 并行重新初始化所有受影响的服务
+            const reinitPromises = Array.from(affectedServices).map(async serviceName => {
+                try {
+                    await reinitializer.reinitializeService(serviceName);
+                    return { service: serviceName, success: true };
+                } catch (error) {
+                    console.error(`重新初始化 ${serviceName} 失败:`, error);
+                    return { service: serviceName, success: false, error };
                 }
-                console.log(`✅ 成功获取 Infisical Secrets。`);
-                
-                // 启动轮询（可配置）
-                const pollingEnabled = process.env.INFISICAL_POLLING_ENABLED === 'true';
-                if (pollingEnabled) {
-                    const pollInterval = parseInt(process.env.INFISICAL_POLLING_INTERVAL) || 300000;
-                    
-                    // 监听配置变更
-                    provider.on('configChanged', async (changes) => {
-                        // 确保ServiceConfigManager已初始化
-                        serviceConfigManager.initialize();
-                        
-                        // 1. 分析变更，确定受影响的服务
-                        const affectedServices = serviceConfigManager.getAffectedServices(changes);
-                        
-                        // 2. 显示醒目的配置更新日志
-                        logConfigurationUpdate(changes, affectedServices);
-                        
-                        // 3. 更新环境变量
-                        changes.forEach(change => {
-                            if (change.newValue !== undefined) {
-                                const cleanValue = sanitizeValue(change.newValue);
-                                process.env[change.key] = cleanValue;
-                            } else {
-                                delete process.env[change.key];
-                            }
-                        });
-                        
-                        // 4. 重新初始化受影响的服务
-                        if (affectedServices.length > 0) {
-                            console.log('\n🔄 开始重新初始化受影响的服务...');
-                            
-                            const reinitializer = new ManifestBasedServiceReinitializer();
-                            await reinitializer.initializeServices();
-                            
-                            // 并行重新初始化所有受影响的服务
-                            const reinitPromises = Array.from(affectedServices).map(async serviceName => {
-                                try {
-                                    await reinitializer.reinitializeService(serviceName);
-                                    return { service: serviceName, success: true };
-                                } catch (error) {
-                                    console.error(`重新初始化 ${serviceName} 失败:`, error);
-                                    return { service: serviceName, success: false, error };
-                                }
-                            });
-                            
-                            const reinitResults = await Promise.allSettled(reinitPromises);
-                            
-                            // 5. 显示重新初始化结果摘要
-                            console.log('\n📋 服务重新初始化结果:');
-                            reinitResults.forEach((result, index) => {
-                                if (result.status === 'fulfilled') {
-                                    const { service, success, error } = result.value;
-                                    const status = success ? '✅' : '❌';
-                                    console.log(`   ${status} ${service}`);
-                                } else {
-                                    console.log(`   ❌ 未知服务: ${result.reason?.message || '未知错误'}`);
-                                }
-                            });
-                            
-                            // 6. 验证关键服务健康状态
-                            console.log('\n🔍 验证关键服务健康状态...');
-                            await validateCriticalServices();
-                            
-                            console.log('\n' + '🔮'.repeat(25) + '\n');
-                        }
-                    });
-                    
-                    // 启动轮询 - 添加回调以便在更新时记录日志
-                    provider.startPolling(pollInterval, {
-                        onUpdate: (secrets) => {
-                            console.log(`🔄 Infisical 配置已更新 (${Object.keys(secrets).length} 个密钥)`);
-                        },
-                        onError: (error) => {
-                            console.warn(`⚠️ Infisical 轮询错误: ${error.message}`);
-                        }
-                    });
-                    console.log(`🚀 Infisical 轮询已启动 (间隔: ${pollInterval}ms)`);
+            });
+
+            const reinitResults = await Promise.allSettled(reinitPromises);
+
+            // 5. 显示重新初始化结果摘要
+            console.log('\n📋 服务重新初始化结果:');
+            reinitResults.forEach((result, index) => {
+                if (result.status === 'fulfilled') {
+                    const { service, success, error } = result.value;
+                    const status = success ? '✅' : '❌';
+                    console.log(`   ${status} ${service}`);
+                } else {
+                    console.log(`   ❌ 未知服务: ${result.reason?.message || '未知错误'}`);
                 }
-            } catch (error) {
-                console.warn(`⚠️ Infisical 获取失败，回退到 .env 或系统环境变量: ${error.message}`);
+            });
+
+            // 6. 验证关键服务健康状态
+            console.log('\n🔍 验证关键服务健康状态...');
+            await validateCriticalServices();
+
+            console.log('\n' + '🔮'.repeat(25) + '\n');
+        }
+    });
+
+    // 启动轮询 - 添加回调以便在更新时记录日志
+    provider.startPolling(pollInterval, {
+        onUpdate: (secrets) => {
+            console.log(`🔄 Infisical 配置已更新 (${Object.keys(secrets).length} 个密钥)`);
+        },
+        onError: (error) => {
+            console.warn(`⚠️ Infisical 轮询错误: ${error.message}`);
+        }
+    });
+    console.log(`🚀 Infisical 轮询已启动 (间隔: ${pollInterval}ms)`);
+}
+
+
+async function initializeInfisicalSecrets(clientId, clientSecret, projectId) {
+    if (process.env.SKIP_INFISICAL_RUNTIME === 'true') {
+        console.log(`ℹ️ 跳过 Infisical 运行时获取 (SKIP_INFISICAL_RUNTIME=true)`);
+        return;
+    }
+
+    if (process.env.NODE_ENV === 'test') {
+        console.log(`ℹ️ 测试环境下跳过 Infisical 获取`);
+        return;
+    }
+
+    try {
+        const infisicalEnvName = mapNodeEnvToInfisicalEnv(process.env.NODE_ENV || 'dev');
+        console.log(`ℹ️ 尝试获取 Infisical Secrets，环境: ${infisicalEnvName} (映射自 NODE_ENV: ${process.env.NODE_ENV || 'dev'})`);
+
+        // 使用新的 InfisicalSecretsProvider
+        provider = new InfisicalSecretsProvider({
+            token: process.env.INFISICAL_TOKEN,
+            clientId: clientId,
+            clientSecret: clientSecret,
+            projectId: projectId,
+            envName: infisicalEnvName
+        });
+
+        // 首次拉取
+        const secrets = await provider.fetchSecrets();
+
+        if (secrets) {
+            // 初始化 provider 的 currentSecrets，避免首次轮询误报所有配置为新增
+            if (provider) {
+                provider.currentSecrets = { ...secrets };
+            }
+
+            warnUnknownInfisicalKeys(secrets);
+            for (const key in secrets) {
+                const cleanValue = sanitizeValue(secrets[key]);
+                process.env[key] = cleanValue;
             }
         }
+        console.log(`✅ 成功获取 Infisical Secrets。`);
+
+        // 启动轮询（可配置）
+        const pollingEnabled = process.env.INFISICAL_POLLING_ENABLED === 'true';
+        if (pollingEnabled) {
+            setupInfisicalPolling();
+        }
+    } catch (error) {
+        console.warn(`⚠️ Infisical 获取失败，回退到 .env 或系统环境变量: ${error.message}`);
     }
+}
 
-    const env = process.env;
 
-    config = {
+function buildConfigObject(env) {
+    return {
         downloadDir: path.resolve(env.DOWNLOAD_DIR || path.join(os.tmpdir(), 'downloads')),
         apiId: parseInt(env.API_ID) || null,
         apiHash: env.API_HASH || null,
@@ -490,6 +479,38 @@ export async function initConfig() {
             lbUrl: env.LB_WEBHOOK_URL || env.APP_EXTERNAL_URL || null
         }
     };
+}
+
+
+export async function initConfig() {
+    if (isInitialized) return config;
+
+    console.log(`🚀 正在初始化配置...`);
+
+    // 执行环境验证
+    try {
+        validateEnvironmentConsistency();
+    } catch (error) {
+        // 检查是否为生产环境不匹配错误（使用错误标记而非字符串比较）
+        if (error.isProductionMismatch || (error.message && error.message.includes('production'))) {
+            console.error(`❌ 严重错误: ${error.message}`);
+            throw error;
+        }
+        console.warn(`⚠️ 环境验证失败: ${error.message}`);
+    }
+
+    const clientId = process.env.INFISICAL_CLIENT_ID;
+    const clientSecret = process.env.INFISICAL_CLIENT_SECRET;
+    const projectId = process.env.INFISICAL_PROJECT_ID;
+
+    // 只有当 Infisical 配置存在时才尝试动态拉取
+    if (((clientId && clientSecret) || process.env.INFISICAL_TOKEN) && projectId) {
+        await initializeInfisicalSecrets(clientId, clientSecret, projectId);
+    }
+
+    const env = process.env;
+
+    config = buildConfigObject(env);
 
     isInitialized = true;
     

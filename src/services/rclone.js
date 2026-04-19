@@ -349,7 +349,6 @@ export class CloudTool {
             };
             
             try {
-
                 // 假设所有任务属于同一用户且目标一致（由调用者确保）
                 const firstTask = tasks[0];
                 const conf = await this._getUserConfig(firstTask.userId);
@@ -359,28 +358,25 @@ export class CloudTool {
                 const userUploadPath = await this._getUploadPath(firstTask.userId);
                 const remotePath = `${connectionString}${userUploadPath}`;
 
-                // 准备 --files-from 数据 (使用 stdin 传递以支持大量文件且避免路径转义问题)
-                // 注意：rclone copy 的 source 应该是这些文件共同的父目录
-                // 使用 path.resolve 确保获取绝对路径，避免由于相对路径处理不当导致的上传失败
-                // 【修复 3】过滤无效路径，防止解析到根目录
+                // 准备 --files-from 数据
                 const commonSourceDir = path.resolve(config.downloadDir || "/tmp/downloads");
                 const fileList = tasks
-                    .filter(t => t.localPath) // 确保路径存在
+                    .filter(t => t.localPath)
                     .map(t => path.relative(commonSourceDir, path.resolve(t.localPath)))
                     .join('\n');
 
                 const args = [
                     "--config", "/dev/null",
                     "copy", commonSourceDir, remotePath,
-                    "--files-from-raw", "-",         // 从 stdin 读取文件列表
+                    "--files-from-raw", "-",
                     "--progress",
-                    "--use-json-log",               // 使用 JSON 日志以便精确解析进度
-                    "--transfers", "4",             // 限制同时上传的文件数
+                    "--use-json-log",
+                    "--transfers", "4",
                     "--checkers", "8",
-                    "--retries", "3",               // 增加重试
+                    "--retries", "3",
                     "--low-level-retries", "10",
                     "--stats", "1s",
-                    "--buffer-size", "32M"          // 增加缓冲区提升速度
+                    "--buffer-size", "32M"
                 ];
 
                 const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
@@ -388,104 +384,114 @@ export class CloudTool {
                 // 将进程关联到所有相关任务，以便统一取消
                 tasks.forEach(t => t.proc = proc);
 
-                let cancelled = false;
-                const isAnyTaskCancelled = () => tasks.some(t => t?.isCancelled);
-                const markCancelledAndKill = () => {
-                    if (cancelled) return;
-                    cancelled = true;
-                    try {
-                        if (typeof proc.kill === 'function') proc.kill("SIGTERM");
-                    } catch (e) {
-                        log.warn("Failed to kill rclone process", { error: e.message });
-                    }
-                };
-
-                // 处理“先取消后启动上传”的竞态：如果任务已被取消，立即终止进程
-                if (isAnyTaskCancelled()) {
-                    markCancelledAndKill();
-                }
-
-                // 【修复 1】添加缓冲区变量，处理流数据分片
-                let stderrBuffer = "";
-                let errorLog = "";
-
-                proc.stderr.on("data", (data) => {
-                    if (!cancelled && isAnyTaskCancelled()) {
-                        markCancelledAndKill();
-                        return;
-                    }
-                    // 拼接到缓冲区
-                    stderrBuffer += data.toString();
-
-                    // 按换行符分割
-                    const lines = stderrBuffer.split('\n');
-
-                    // 【关键】取出最后一个可能不完整的片段，放回缓冲区等待下一次数据
-                    stderrBuffer = lines.pop();
-
-                    for (const line of lines) {
-                        if (!line.trim()) continue;
-                        try {
-                            const log = JSON.parse(line);
-                            // 解析 rclone JSON 日志中的进度信息
-                            if (log.msg === "Status update" || (log.stats && log.msg.includes("progress"))) {
-                                const stats = log.stats || {};
-                                if (onProgress && stats.transferring) {
-                                    // 匹配每个正在传输的文件到对应的任务
-                                    stats.transferring.forEach(transfer => {
-                                        // 注意：这里建议加个容错，防止 localPath 为空
-                                        const task = tasks.find(t => t.localPath && t.localPath.endsWith(transfer.name));
-                                        if (task) {
-                                            onProgress(task.id, {
-                                                percentage: transfer.percentage,
-                                                speed: transfer.speed,
-                                                eta: transfer.eta,
-                                                bytes: transfer.bytes,
-                                                size: transfer.size
-                                            });
-                                        }
-                                    });
-                                }
-                            }
-                        } catch (e) {
-                            // 解析失败的行通常是 Rclone 的普通文本错误日志，收集起来
-                            errorLog += line + "\n";
-                        }
-                    }
-                });
-
-                proc.on("close", (code) => {
-                    if (cancelled || isAnyTaskCancelled()) {
-                        return safeResolve({ success: false, error: "CANCELLED" });
-                    }
-                    if (code === 0) {
-                        // Even with exit code 0, check for errors in the log
-                        const hasErrors = errorLog.includes('ERROR') || errorLog.includes('Failed') || errorLog.includes('failed');
-                        if (hasErrors) {
-                            log.error(`Rclone Batch completed with exit code 0 but contains errors:`, errorLog.slice(-500));
-                            safeResolve({ success: false, error: `Upload completed but with errors: ${errorLog.slice(-200).trim()}` });
-                        } else {
-                            safeResolve({ success: true });
-                        }
-                    } else {
-                        const finalError = errorLog.slice(-500) || `Rclone exited with code ${code}`;
-                        log.error(`Rclone Batch Error:`, finalError);
-                        safeResolve({ success: false, error: finalError.trim() });
-                    }
-                });
-
-                proc.on("error", (err) => {
-                    safeResolve({ success: false, error: err.message });
-                });
-
-                // 写入文件列表到 stdin 并关闭
-                proc.stdin.write(fileList);
-                proc.stdin.end();
+                // Setup the handlers via our extracted helper
+                this._setupUploadProcessHandlers(proc, tasks, safeResolve, onProgress, fileList);
 
             } catch (e) {
                 safeResolve({ success: false, error: e.message });
             }
         });
+    }
+
+
+    static _processRcloneLog(line, tasks, onProgress, errorLogRef) {
+        try {
+            const log = JSON.parse(line);
+            // 解析 rclone JSON 日志中的进度信息
+            if (log.msg === "Status update" || (log.stats && log.msg.includes("progress"))) {
+                const stats = log.stats || {};
+                if (onProgress && stats.transferring) {
+                    // 匹配每个正在传输的文件到对应的任务
+                    stats.transferring.forEach(transfer => {
+                        // 注意：这里建议加个容错，防止 localPath 为空
+                        const task = tasks.find(t => t.localPath && t.localPath.endsWith(transfer.name));
+                        if (task) {
+                            onProgress(task.id, {
+                                percentage: transfer.percentage,
+                                speed: transfer.speed,
+                                eta: transfer.eta,
+                                bytes: transfer.bytes,
+                                size: transfer.size
+                            });
+                        }
+                    });
+                }
+            }
+        } catch (e) {
+            // 解析失败的行通常是 Rclone 的普通文本错误日志，收集起来
+            errorLogRef.content += line + "\n";
+        }
+    }
+
+    static _setupUploadProcessHandlers(proc, tasks, safeResolve, onProgress, fileList) {
+        let cancelled = false;
+        const isAnyTaskCancelled = () => tasks.some(t => t?.isCancelled);
+        const markCancelledAndKill = () => {
+            if (cancelled) return;
+            cancelled = true;
+            try {
+                if (typeof proc.kill === 'function') proc.kill("SIGTERM");
+            } catch (e) {
+                log.warn("Failed to kill rclone process", { error: e.message });
+            }
+        };
+
+        // 处理“先取消后启动上传”的竞态：如果任务已被取消，立即终止进程
+        if (isAnyTaskCancelled()) {
+            markCancelledAndKill();
+        }
+
+        // 【修复 1】添加缓冲区变量，处理流数据分片
+        let stderrBuffer = "";
+        let errorLogRef = { content: "" };
+
+        proc.stderr.on("data", (data) => {
+            if (!cancelled && isAnyTaskCancelled()) {
+                markCancelledAndKill();
+                return;
+            }
+            // 拼接到缓冲区
+            stderrBuffer += data.toString();
+
+            // 按换行符分割
+            const lines = stderrBuffer.split('\n');
+
+            // 【关键】取出最后一个可能不完整的片段，放回缓冲区等待下一次数据
+            stderrBuffer = lines.pop();
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                this._processRcloneLog(line, tasks, onProgress, errorLogRef);
+            }
+        });
+
+        proc.on("close", (code) => {
+            if (cancelled || isAnyTaskCancelled()) {
+                return safeResolve({ success: false, error: "CANCELLED" });
+            }
+            if (code === 0) {
+                // Even with exit code 0, check for errors in the log
+                const hasErrors = errorLogRef.content.includes('ERROR') || errorLogRef.content.includes('Failed') || errorLogRef.content.includes('failed');
+                if (hasErrors) {
+                    log.error(`Rclone Batch completed with exit code 0 but contains errors:`, errorLogRef.content.slice(-500));
+                    safeResolve({ success: false, error: `Upload completed but with errors: ${errorLogRef.content.slice(-200).trim()}` });
+                } else {
+                    safeResolve({ success: true });
+                }
+            } else {
+                const finalError = errorLogRef.content.slice(-500) || `Rclone exited with code ${code}`;
+                log.error(`Rclone Batch Error:`, finalError);
+                safeResolve({ success: false, error: finalError.trim() });
+            }
+        });
+
+        proc.on("error", (err) => {
+            safeResolve({ success: false, error: err.message });
+        });
+
+        // 写入文件列表到 stdin 并关闭
+        proc.stdin.write(fileList);
+        proc.stdin.end();
     }
 
     /**
