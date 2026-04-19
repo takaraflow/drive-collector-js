@@ -762,23 +762,10 @@ export const ensureConnected = async () => {
 };
 
 /**
- * 处理连接异常情况（增强版）
- * @param {boolean} lightweight - 是否轻量重连
- * @param {string} errorType - 错误类型
+ * 检查重连锁状态
+ * @returns {Promise<boolean>} 是否允许继续重连
  */
-async function handleConnectionIssue(lightweight = false, errorType = TelegramErrorClassifier.ERROR_TYPES.UNKNOWN) {
-    if (isReconnecting) {
-        log.debug("🔄 Reconnection already in progress, skipping duplicate");
-        return;
-    }
-    
-    // 检查电路断路器状态
-    if (telegramCircuitBreaker.state === 'OPEN') {
-        log.warn("🚨 Circuit breaker is OPEN, blocking reconnection attempts");
-        return;
-    }
-    
-    // 检查锁所有权 - 增强逻辑：允许在锁缺失时尝试重新获取
+async function checkReconnectionLock() {
     try {
         const hasLock = await instanceCoordinator.hasLock("telegram_client");
         if (!hasLock) {
@@ -792,24 +779,112 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
                     const acquired = await instanceCoordinator.acquireLock("telegram_client", 300);
                     if (acquired) {
                         log.info("✅ 重新获取锁成功，继续重连");
+                        return true;
                     } else {
                         log.warn("⚠️ 重新获取锁失败，取消重连");
-                        return;
+                        return false;
                     }
                 } else {
                     log.warn("🚨 锁已缺失但本实例不是 Leader，取消重连");
-                    return;
+                    return false;
                 }
             } else if (lockData.instanceId !== instanceCoordinator.getInstanceId()) {
                 // 锁被其他实例持有
                 log.warn(`🚨 锁被其他实例持有 (${lockData.instanceId})，取消重连`);
-                return;
+                return false;
             }
         }
+        return true;
     } catch (e) {
         log.warn(`⚠️ Lock check failed: ${e.message},暂缓重连`);
+        return false;
+    }
+}
+
+/**
+ * 安全断开客户端和发送器连接
+ * @param {Object} client Telegram 客户端实例
+ */
+async function disconnectClientSafely(client) {
+    // 增强断开连接
+    try {
+        if (client.connected) {
+            await Promise.race([
+                client.disconnect(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error("Disconnect Timeout")), 8000))
+            ]);
+            log.info("✅ 客户端已优雅断开连接");
+        }
+    } catch (de) {
+        log.warn("⚠️ 断开连接超时或出错:", de.message);
+    }
+
+    // 清理发送器
+    if (client._sender) {
+        try {
+            await Promise.race([
+                client._sender.disconnect(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error("Sender disconnect timeout")), 5000))
+            ]);
+            client._sender = undefined;
+            log.info("✅ Sender 状态已清理");
+        } catch (e) {
+            log.warn("⚠️ Sender 清理失败:", e.message);
+            client._sender = undefined;
+        }
+    }
+}
+
+/**
+ * 执行客户端重连操作
+ * @param {Object} client Telegram 客户端实例
+ * @param {Object} config 配置对象
+ * @param {string} errorType 错误类型
+ */
+async function executeClientReconnection(client, config, errorType) {
+    await telegramCircuitBreaker.execute(async () => {
+        await client.connect();
+        await client.start({ botAuthToken: config.botToken });
+        await saveSession();
+
+        log.info("✅ 重连成功");
+        lastHeartbeat = Date.now();
+        consecutiveFailures = 0;
+
+        // 验证连接健康
+        const healthCheck = await client.getMe().catch(e => {
+            log.error("❌ 重连后健康检查失败:", e);
+            throw e;
+        });
+
+        if (healthCheck) {
+            log.info("✅ 连接健康状态已验证");
+            // 重置错误统计
+            errorTypeFailures[errorType] = 0;
+        }
+    }, errorType);
+}
+
+/**
+ * 处理连接异常情况（增强版）
+ * @param {boolean} lightweight - 是否轻量重连
+ * @param {string} errorType - 错误类型
+ */
+async function handleConnectionIssue(lightweight = false, errorType = TelegramErrorClassifier.ERROR_TYPES.UNKNOWN) {
+    if (isReconnecting) {
+        log.debug("🔄 Reconnection already in progress, skipping duplicate");
         return;
     }
+
+    // 检查电路断路器状态
+    if (telegramCircuitBreaker.state === 'OPEN') {
+        log.warn("🚨 Circuit breaker is OPEN, blocking reconnection attempts");
+        return;
+    }
+
+    // 检查锁所有权 - 增强逻辑：允许在锁缺失时尝试重新获取
+    const canReconnect = await checkReconnectionLock();
+    if (!canReconnect) return;
 
     // 检查是否应该跳过重连
     if (TelegramErrorClassifier.shouldSkipReconnect(errorType)) {
@@ -826,33 +901,8 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
 
         log.info(`🔄 开始重连 [类型=${errorType}, lightweight=${lightweight}, 延迟=${strategy.delay}ms]`);
 
-        // 增强断开连接
-        try {
-            if (client.connected) {
-                await Promise.race([
-                    client.disconnect(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error("Disconnect Timeout")), 8000))
-                ]);
-                log.info("✅ 客户端已优雅断开连接");
-            }
-        } catch (de) {
-            log.warn("⚠️ 断开连接超时或出错:", de.message);
-        }
-
-        // 清理发送器
-        if (client._sender) {
-            try {
-                await Promise.race([
-                    client._sender.disconnect(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error("Sender disconnect timeout")), 5000))
-                ]);
-                client._sender = undefined;
-                log.info("✅ Sender 状态已清理");
-            } catch (e) {
-                log.warn("⚠️ Sender 清理失败:", e.message);
-                client._sender = undefined;
-            }
-        }
+        // 安全断开客户端和发送器连接
+        await disconnectClientSafely(client);
 
         // Session 管理
         const shouldReset = TelegramErrorClassifier.shouldResetSession(errorType, errorTypeFailures[errorType] || 0);
@@ -868,27 +918,7 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
         await new Promise(r => setTimeout(r, strategy.delay));
 
         // 使用电路断路器保护重连
-        await telegramCircuitBreaker.execute(async () => {
-            await client.connect();
-            await client.start({ botAuthToken: config.botToken });
-            await saveSession();
-
-            log.info("✅ 重连成功");
-            lastHeartbeat = Date.now();
-            consecutiveFailures = 0;
-
-            // 验证连接健康
-            const healthCheck = await client.getMe().catch(e => {
-                log.error("❌ 重连后健康检查失败:", e);
-                throw e;
-            });
-
-            if (healthCheck) {
-                log.info("✅ 连接健康状态已验证");
-                // 重置错误统计
-                errorTypeFailures[errorType] = 0;
-            }
-        }, errorType);
+        await executeClientReconnection(client, config, errorType);
 
     } catch (e) {
         log.error("❌ 重连失败:", e);
