@@ -110,8 +110,7 @@ describe('WebhookRouter', () => {
     });
 
     afterEach(() => {
-        vi.clearAllMocks();
-        delete global.fetch;
+        vi.restoreAllMocks();
         delete global.appInitializer;
     });
 
@@ -192,6 +191,19 @@ describe('WebhookRouter', () => {
             expect(res.end).toHaveBeenCalledWith('OK');
         });
 
+        it('should handle /api/v2/stream/:taskId failure', async () => {
+            req.url = '/api/v2/stream/123';
+            req.method = 'POST';
+            const { streamTransferService } = await import('../../../src/services/StreamTransferService.js');
+            streamTransferService.handleIncomingChunk.mockResolvedValue({ success: false, statusCode: 500, message: 'Stream error' });
+
+            await handleWebhook(req, res);
+
+            expect(streamTransferService.handleIncomingChunk).toHaveBeenCalledWith('123', req);
+            expect(res.writeHead).toHaveBeenCalledWith(500);
+            expect(res.end).toHaveBeenCalledWith('Stream error');
+        });
+
         it('should handle /api/v2/tasks/:taskId/status', async () => {
             req.url = '/api/v2/tasks/123/status';
             req.method = 'POST';
@@ -249,6 +261,20 @@ describe('WebhookRouter', () => {
             expect(refreshConfiguration).toHaveBeenCalled();
             expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
             expect(res.end).toHaveBeenCalledWith(JSON.stringify({ success: true }));
+        });
+
+        it('should return 500 when /api/v2/config/refresh fails', async () => {
+            req.url = '/api/v2/config/refresh';
+            req.method = 'POST';
+
+            const { refreshConfiguration } = await import('../../../src/config/index.js');
+            refreshConfiguration.mockResolvedValue({ success: false });
+
+            await handleWebhook(req, res);
+
+            expect(refreshConfiguration).toHaveBeenCalled();
+            expect(res.writeHead).toHaveBeenCalledWith(500, { 'Content-Type': 'application/json' });
+            expect(res.end).toHaveBeenCalledWith(JSON.stringify({ success: false }));
         });
     });
 
@@ -373,7 +399,7 @@ describe('WebhookRouter', () => {
             const { instanceCoordinator } = await import('../../../src/services/InstanceCoordinator.js');
             instanceCoordinator.getActiveInstances.mockResolvedValue([{ id: 'leader-instance', url: 'http://leader.local' }]);
 
-            global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+            vi.spyOn(global, 'fetch').mockResolvedValue({ ok: true, status: 200 });
 
             await handleWebhook(req, res);
 
@@ -440,7 +466,7 @@ describe('WebhookRouter', () => {
             const { instanceCoordinator } = await import('../../../src/services/InstanceCoordinator.js');
             instanceCoordinator.getActiveInstances.mockResolvedValue([{ id: 'leader-instance', url: 'http://leader.local' }]);
 
-            global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500, text: () => Promise.resolve('Upstream Error') });
+            vi.spyOn(global, 'fetch').mockResolvedValue({ ok: false, status: 500, text: () => Promise.resolve('Upstream Error') });
 
             await handleWebhook(req, res);
 
@@ -478,6 +504,44 @@ describe('WebhookRouter', () => {
             await handleWebhook(req, res);
             expect(res.writeHead).toHaveBeenCalledWith(503);
             expect(res.end).toHaveBeenCalledWith('Not Ready');
+        });
+
+        it('should not forward webhook if x-forwarded-by-instance header is present', async () => {
+            req.url = '/webhook/download';
+            req.headers['x-forwarded-by-instance'] = 'another-instance';
+            req[Symbol.asyncIterator] = async function* () {
+                yield Buffer.from(JSON.stringify({ taskId: 'task-loop' }));
+            };
+
+            const { TaskManager } = await import('../../../src/processor/TaskManager.js');
+            TaskManager.handleDownloadWebhook.mockResolvedValue({ success: false, statusCode: 503, message: 'Not Leader' });
+
+            // No forwarding infrastructure should be consulted
+            vi.spyOn(global, 'fetch');
+
+            await handleWebhook(req, res);
+
+            expect(global.fetch).not.toHaveBeenCalled();
+            expect(res.writeHead).toHaveBeenCalledWith(503);
+            expect(res.end).toHaveBeenCalledWith('Not Leader');
+        });
+
+        it('should not forward webhook if leader resolution fails', async () => {
+            req.url = '/webhook/download';
+            req[Symbol.asyncIterator] = async function* () {
+                yield Buffer.from(JSON.stringify({ taskId: 'task-no-leader' }));
+            };
+
+            const { TaskManager } = await import('../../../src/processor/TaskManager.js');
+            TaskManager.handleDownloadWebhook.mockResolvedValue({ success: false, statusCode: 503, message: 'Not Leader' });
+
+            const { cache } = await import('../../../src/services/CacheService.js');
+            cache.get.mockResolvedValue(null);
+
+            await handleWebhook(req, res);
+
+            expect(res.writeHead).toHaveBeenCalledWith(503);
+            expect(res.end).toHaveBeenCalledWith('Not Leader');
         });
     });
 });
