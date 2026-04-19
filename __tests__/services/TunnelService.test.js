@@ -3,8 +3,12 @@ import { tunnelService } from '../../src/services/TunnelService.js';
 import { getConfig } from '../../src/config/index.js';
 import { CloudflareTunnel } from '../../src/services/tunnel/CloudflareTunnel.js';
 
-vi.mock('../../src/config/index.js');
-vi.mock('../../src/services/tunnel/CloudflareTunnel.js');
+vi.mock('../../src/config/index.js', () => ({
+    getConfig: vi.fn(function() {})
+}));
+vi.mock('../../src/services/tunnel/CloudflareTunnel.js', () => ({
+    CloudflareTunnel: vi.fn(function() {})
+}));
 
 describe('TunnelService', () => {
     beforeEach(() => {
@@ -57,9 +61,11 @@ describe('TunnelService', () => {
         getConfig.mockReturnValue(config);
         
         // Mock CloudflareTunnel to throw an error
-        CloudflareTunnel.mockImplementation(() => ({
-            initialize: vi.fn().mockRejectedValue(new Error('Tunnel failed'))
-        }));
+        CloudflareTunnel.mockImplementation(function() {
+            return {
+                initialize: vi.fn().mockRejectedValue(new Error('Tunnel failed'))
+            };
+        });
 
         await tunnelService.initialize();
         
