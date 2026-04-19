@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.32.4](https://github.com/takaraflow/drive-collector-js/compare/v4.32.2...v4.32.4) (2026-04-19)
+
+
+### 🔧 其他任务
+
+* use logger instead of console.log in lifecycle.js ([#34](https://github.com/takaraflow/drive-collector-js/issues/34)) ([b2d4a79](https://github.com/takaraflow/drive-collector-js/commit/b2d4a79f3514db6903e9d90d7ce99b0774cc820b))
+
+
+### 🚀 性能优化
+
+* **cache:** optimize provider initialization by using concurrent connections ([#55](https://github.com/takaraflow/drive-collector-js/issues/55)) ([80bc865](https://github.com/takaraflow/drive-collector-js/commit/80bc86562e31e2dfe9a6020dcf98333d4f8d61d3))
+* **graceful-shutdown:** run _recordInitialResourceStates concurrently using Promise.allSettled ([#57](https://github.com/takaraflow/drive-collector-js/issues/57)) ([2d7ba99](https://github.com/takaraflow/drive-collector-js/commit/2d7ba994604e24a2eafe9c18fdda0beed4fba69b))
+
+
+### ✅ 测试相关
+
+* add error handling coverage for batchUpdateStatus in TaskManager.core.js ([#65](https://github.com/takaraflow/drive-collector-js/issues/65)) ([5a66976](https://github.com/takaraflow/drive-collector-js/commit/5a66976db6ae0b3f45c3d04804e418ff09f336ff))
+* add unit tests for RateLimiter utility ([#33](https://github.com/takaraflow/drive-collector-js/issues/33)) ([33a56dd](https://github.com/takaraflow/drive-collector-js/commit/33a56ddc8db100c92c9d5c5e7df3fb936a2eecf9))
+
+
+### ✨ 新特性
+
+* **ux:** format bytes into human readable sizes ([#76](https://github.com/takaraflow/drive-collector-js/issues/76)) ([b5762a6](https://github.com/takaraflow/drive-collector-js/commit/b5762a6097d5d0890e8efeb69db9132ee757a104))
+
+
+### 🐛 问题修复
+
+* **deps:** add Linux ARM64 rollup support ([19e3fab](https://github.com/takaraflow/drive-collector-js/commit/19e3fab2bfe8f2be129b9156fd543ecf56ee8f32))
+* **deps:** add Windows rollup support for cross-platform compatibility ([f9407eb](https://github.com/takaraflow/drive-collector-js/commit/f9407eb49472e909b79aeaff0d5a551cbacbf294))
+* process.exit mock cleanup in MCPServer tests ([f872b47](https://github.com/takaraflow/drive-collector-js/commit/f872b47b2c847376716794a9969f190f479c7813))
+* test by adding timer cleanup and proper async handling ([16b458a](https://github.com/takaraflow/drive-collector-js/commit/16b458ac4655f2e94f56adde359e4f757c73bd2a))
+* **tests:** fix logger mock exports for withModule support ([4a885a4](https://github.com/takaraflow/drive-collector-js/commit/4a885a422fdfb3cac31b086c496e348e9bc9d7f4))
+* **tests:** move vi.mock calls to top level and fix test warnings ([c881f40](https://github.com/takaraflow/drive-collector-js/commit/c881f40d922f48c14ed23dad5d05daa8e0a982d9))
+* **tests:** replace arrow function with function keyword in TunnelService mockImplementation ([397fef7](https://github.com/takaraflow/drive-collector-js/commit/397fef7a169d30cf2ea2c6ebbaaad05cc2f7d5b2))
+
 ### 4.32.3 (2026-04-17)
 
 ### [4.32.2](https://github.com/YoungSx/drive-collector-js/compare/v4.32.1...v4.32.2) (2026-03-25)
