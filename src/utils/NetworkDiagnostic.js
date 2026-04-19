@@ -238,6 +238,88 @@ export class NetworkDiagnostic {
         return issues;
     }
 
+    static _getNorthflankEnvVars() {
+        const envVars = {};
+        const northflankVars = ['NF_SERVICE_ID', 'NF_PROJECT_ID', 'NF_REGION', 'NF_IMAGE', 'NF_DEPLOYMENT_ID'];
+        northflankVars.forEach(varName => {
+            if (process.env[varName]) {
+                envVars[varName] = process.env[varName];
+            }
+        });
+        return envVars;
+    }
+
+    static async _testRedisDnsResolution(host) {
+        if (!host || net.isIP(host)) return null;
+        try {
+            const dnsStart = Date.now();
+            await new Promise((resolve, reject) => {
+                dns.lookup(host, { family: 4 }, (err, address, family) => {
+                    if (err) reject(err);
+                    else resolve({ address, family });
+                });
+            });
+            return Date.now() - dnsStart;
+        } catch (dnsError) {
+            return `failed: ${dnsError.code || dnsError.message}`;
+        }
+    }
+
+    static async _testRedisPortReachability(host, port) {
+        try {
+            const portTestStart = Date.now();
+            await new Promise((resolve, reject) => {
+                const socket = net.createConnection({ host, port, timeout: 5000 });
+                socket.on('connect', () => {
+                    socket.end();
+                    resolve();
+                });
+                socket.on('error', reject);
+                socket.on('timeout', () => {
+                    socket.destroy();
+                    reject(new Error('Connection timeout'));
+                });
+            });
+            return Date.now() - portTestStart;
+        } catch (portError) {
+            return `unreachable: ${portError.message}`;
+        }
+    }
+
+    static async _testRedisPingLatency() {
+        const result = { connectionTime: 0, pingLatency: [] };
+        const pingStart = Date.now();
+        await cache.redisClient.ping();
+        result.connectionTime = Date.now() - pingStart;
+
+        for (let i = 0; i < 3; i++) {
+            const pingTime = Date.now();
+            await cache.redisClient.ping();
+            result.pingLatency.push(Date.now() - pingTime);
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        return result;
+    }
+
+    static async _testRedisOperationsLatency() {
+        const operationsLatency = {};
+        const testKey = `__redis_diag_${Date.now()}__`;
+
+        const setStart = Date.now();
+        await cache.redisClient.set(testKey, 'diagnostic_test');
+        operationsLatency.set = Date.now() - setStart;
+
+        const getStart = Date.now();
+        await cache.redisClient.get(testKey);
+        operationsLatency.get = Date.now() - getStart;
+
+        const delStart = Date.now();
+        await cache.redisClient.del(testKey);
+        operationsLatency.del = Date.now() - delStart;
+
+        return operationsLatency;
+    }
+
     /**
      * 专门检查 Redis 连接质量和延迟
      */
@@ -265,89 +347,24 @@ export class NetworkDiagnostic {
                 };
             }
 
-            // Northflank 环境变量检测
-            const northflankVars = ['NF_SERVICE_ID', 'NF_PROJECT_ID', 'NF_REGION', 'NF_IMAGE', 'NF_DEPLOYMENT_ID'];
-            northflankVars.forEach(varName => {
-                if (process.env[varName]) {
-                    diagnostics.northflankEnv[varName] = process.env[varName];
-                }
-            });
+            diagnostics.northflankEnv = this._getNorthflankEnvVars();
 
             const connectionInfo = cache.redisClient.options || {};
             const host = connectionInfo.host;
             const port = connectionInfo.port || 6379;
 
-            // DNS 解析耗时检测
-            if (host && !net.isIP(host)) {
-                try {
-                    const dnsStart = Date.now();
-                    await new Promise((resolve, reject) => {
-                        dns.lookup(host, { family: 4 }, (err, address, family) => {
-                            if (err) reject(err);
-                            else resolve({ address, family });
-                        });
-                    });
-                    diagnostics.dnsResolutionTime = Date.now() - dnsStart;
-                } catch (dnsError) {
-                    diagnostics.dnsResolutionTime = `failed: ${dnsError.code || dnsError.message}`;
-                }
-            }
+            diagnostics.dnsResolutionTime = await this._testRedisDnsResolution(host);
+            diagnostics.portReachability = await this._testRedisPortReachability(host, port);
 
-            // Redis 节点可达性测试 (TCP 连接测试)
-            try {
-                const portTestStart = Date.now();
-                await new Promise((resolve, reject) => {
-                    const socket = net.createConnection({ host, port, timeout: 5000 });
-                    socket.on('connect', () => {
-                        socket.end();
-                        resolve();
-                    });
-                    socket.on('error', reject);
-                    socket.on('timeout', () => {
-                        socket.destroy();
-                        reject(new Error('Connection timeout'));
-                    });
-                });
-                diagnostics.portReachability = Date.now() - portTestStart;
-            } catch (portError) {
-                diagnostics.portReachability = `unreachable: ${portError.message}`;
-            }
+            const pingResults = await this._testRedisPingLatency();
+            diagnostics.connectionTime = pingResults.connectionTime;
+            diagnostics.pingLatency = pingResults.pingLatency;
 
-            // 1. 测试基础连接延迟
-            const pingStart = Date.now();
-            await cache.redisClient.ping();
-            diagnostics.connectionTime = Date.now() - pingStart;
-
-            // 2. 多次 ping 测试以获得平均延迟
-            for (let i = 0; i < 3; i++) {
-                const pingTime = Date.now();
-                await cache.redisClient.ping();
-                diagnostics.pingLatency.push(Date.now() - pingTime);
-                await new Promise(resolve => setTimeout(resolve, 100)); // 小延迟避免拥塞
-            }
-
-            // 3. 测试基本操作延迟
-            const testKey = `__redis_diag_${Date.now()}__`;
-
-            // SET 操作
-            const setStart = Date.now();
-            await cache.redisClient.set(testKey, 'diagnostic_test');
-            diagnostics.operationsLatency.set = Date.now() - setStart;
-
-            // GET 操作
-            const getStart = Date.now();
-            await cache.redisClient.get(testKey);
-            diagnostics.operationsLatency.get = Date.now() - getStart;
-
-            // DEL 操作
-            const delStart = Date.now();
-            await cache.redisClient.del(testKey);
-            diagnostics.operationsLatency.del = Date.now() - delStart;
+            diagnostics.operationsLatency = await this._testRedisOperationsLatency();
 
             const totalTime = Date.now() - startTime;
             const avgPing = diagnostics.pingLatency.reduce((a, b) => a + b, 0) / diagnostics.pingLatency.length;
 
-            // 分析结果
             let status = 'ok';
             let performance = 'good';
             let warnings = [];
