@@ -34,7 +34,7 @@ export const enableTelegramConsoleProxy = () => {
     consoleProxyEnabled = true;
 
     console.error = (...args) => {
-        const msg = args[0]?.toString() || '';
+        const msg = String(args[0] || '').substring(0, 2000);
         const msgLower = msg.toLowerCase();
 
         const isTimeoutPattern =
@@ -63,7 +63,7 @@ export const enableTelegramConsoleProxy = () => {
     };
 
     console.warn = (...args) => {
-        const msg = args[0]?.toString() || '';
+        const msg = String(args[0] || '').substring(0, 2000);
 
         if (msg.includes('TIMEOUT') || msg.includes('timeout')) {
             const wrapper = LoggerService.getInstance();
@@ -77,7 +77,7 @@ export const enableTelegramConsoleProxy = () => {
     };
 
     console.log = (...args) => {
-        const msg = args[0]?.toString() || '';
+        const msg = String(args[0] || '').substring(0, 2000);
 
         if (msg.includes('connected') || msg.includes('disconnected') || msg.includes('connection')) {
             const wrapper = LoggerService.getInstance();
@@ -252,7 +252,8 @@ class LoggerService {
         let emoji = moduleEmojis[mod] || levelEmojis[level] || '';
 
         // 智能语义追加：根据消息内容增强图标
-        const msgStr = String(message);
+        const msgStr = String(message).substring(0, 2000);
+
         if (msgStr.includes('启动') || msgStr.includes('Start')) emoji += '🚀';
         if (msgStr.includes('完成') || msgStr.includes('成功') || msgStr.includes('success') || msgStr.includes('✅')) {
             if (!emoji.includes('✅')) emoji += '✅';

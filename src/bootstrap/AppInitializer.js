@@ -3,6 +3,7 @@ import { initConfig, validateConfig, getConfig } from '../config/index.js';
 import { summarizeStartupConfig } from '../utils/startupConfig.js';
 import { registerShutdownHooks } from '../utils/lifecycle.js';
 import { tunnelService } from '../services/TunnelService.js';
+import { startMemoryMonitor } from '../utils/memoryMonitor.js';
 
 /**
  * 应用初始化器
@@ -205,6 +206,9 @@ export class AppInitializer {
 
         // 注册全局退出钩子
         await registerShutdownHooks();
+
+        // 启动内存监控（仅在容器环境中生效）
+        startMemoryMonitor();
 
         this.isInitialized = true;
     }

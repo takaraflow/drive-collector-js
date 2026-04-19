@@ -19,7 +19,8 @@ export class TelegramErrorClassifier {
     static classify(error) {
         if (!error) return this.ERROR_TYPES.UNKNOWN;
 
-        const msg = error.message || '';
+        // 截断超长错误消息，防止 toLowerCase() 在小内存容器中 OOM
+        const msg = (error.message || '').substring(0, 2000);
         const msgLower = msg.toLowerCase();
         const code = error.code;
         const seconds = error.seconds;

@@ -1,5 +1,6 @@
 import { gracefulShutdown } from "../services/GracefulShutdown.js";
 import { logger } from "../services/logger/index.js";
+import { stopMemoryMonitor } from "../utils/memoryMonitor.js";
 
 const log = logger.withModule('Lifecycle');
 
@@ -45,6 +46,11 @@ export async function registerShutdownHooks() {
     gracefulShutdown.registerTaskCounter(() => {
         return TaskManager.getProcessingCount() + TaskManager.getWaitingCount();
     });
+
+    // -1. 停止内存监控 (priority: 1)
+    gracefulShutdown.register(async () => {
+        stopMemoryMonitor();
+    }, 1, 'memory-monitor');
 
     // 0. 在关闭开始前先刷新一次日志，确保关闭前的错误日志被保存 (priority: 5)
     gracefulShutdown.register(async () => {

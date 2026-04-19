@@ -33,5 +33,7 @@ if [ "$#" -gt 0 ]; then
 fi
 
 echo "[entrypoint] Starting Node.js application (fallback)..."
+# 设置 Node.js 堆内存上限：容器仅 256MB，限制到 200MB 给 OS/rclone/cloudflared 留空间
+NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=200 --max-semi-space-size=16 --expose-gc"
 exec node index.js
 

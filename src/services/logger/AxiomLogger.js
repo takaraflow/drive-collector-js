@@ -20,7 +20,9 @@ class AxiomLogger extends BaseLogger {
         this.logBuffer = [];
         this.batchFlushTimer = null;
         this.isBatchFlushing = false;
-        this.BATCH_MAX_SIZE = 500;
+        this.BATCH_MAX_SIZE = 100; // 降低批量大小，256MB容器内存有限
+        this.LOG_BUFFER_MEMORY_LIMIT = 4 * 1024 * 1024; // 4MB 缓冲区内存上限
+        this._estimatedBufferBytes = 0; // 增量追踪缓冲区内存占用
         this.BATCH_FLUSH_INTERVAL_MS = process.env.NODE_ENV === 'test' ? 10 : 3000;
         this.version = 'unknown';
     }
@@ -80,7 +82,8 @@ class AxiomLogger extends BaseLogger {
 
     _handleError(error) {
         if (!error) return;
-        const message = String(error.message || '').toLowerCase();
+        // 截断超长错误消息，防止 toLowerCase() OOM
+        const message = String(error.message || '').substring(0, 2000).toLowerCase();
         if (message.includes('unavailable')) {
             this.axiomSuspendedUntil = Date.now() + AXIOM_UNAVAILABLE_BACKOFF_MS;
             this.client = null;
@@ -104,7 +107,8 @@ class AxiomLogger extends BaseLogger {
             }
             return true;
         } catch (error) {
-            const lowerErrorMessage = String(error.message || '').toLowerCase();
+            // 截断超长错误消息，防止 toLowerCase() OOM
+            const lowerErrorMessage = String(error.message || '').substring(0, 2000).toLowerCase();
             if (lowerErrorMessage.includes('unavailable')) {
                 this.axiomSuspendedUntil = Date.now() + AXIOM_UNAVAILABLE_BACKOFF_MS;
                 this.client = null;
@@ -183,7 +187,11 @@ class AxiomLogger extends BaseLogger {
         const payload = this._buildPayload(level, message, data, context, instanceId);
         this.logBuffer.push(payload);
 
-        if (this.logBuffer.length >= this.BATCH_MAX_SIZE) {
+        // 增量估算 payload 内存占用（固定估算，避免 JSON.stringify 开销）
+        this._estimatedBufferBytes += 2048;
+
+        // 检查缓冲区内存是否超限，超限则立即刷新
+        if (this.logBuffer.length >= this.BATCH_MAX_SIZE || this._estimatedBufferBytes >= this.LOG_BUFFER_MEMORY_LIMIT) {
             await this._flushLogsBatch();
         } else {
             this._scheduleBatchFlush();
@@ -216,6 +224,7 @@ class AxiomLogger extends BaseLogger {
         this.isBatchFlushing = true;
         const batchToSend = this.logBuffer;
         this.logBuffer = [];
+        this._estimatedBufferBytes = 0; // 重置内存追踪
 
         try {
             await this._retryWithDelay(async () => {

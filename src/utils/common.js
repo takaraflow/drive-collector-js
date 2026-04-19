@@ -121,6 +121,19 @@ export const sanitizeHeaders = (headers) => {
 };
 
 /**
+ * 安全的 toLowerCase()，先截断超长字符串再转小写
+ * 防止 StringToLowerCaseIntl 在小内存容器中 OOM
+ * @param {*} value - 要转换的值
+ * @param {number} [maxLen=2000] - 最大长度
+ * @returns {string}
+ */
+export const safeToLowerCase = (value, maxLen = 2000) => {
+    const str = typeof value === 'string' ? value : String(value || '');
+    const truncated = str.length > maxLen ? str.substring(0, maxLen) : str;
+    return truncated.toLowerCase();
+};
+
+/**
  * 格式化字节大小为人类可读的字符串 (如 KB, MB, GB)
  * @param {number} bytes - 字节数
  * @param {number} [decimals=2] - 小数位数
