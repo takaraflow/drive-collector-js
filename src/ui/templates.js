@@ -181,7 +181,7 @@ export class UIHelper {
             text = format(STRINGS.task.batch_monitor, {
                 current: completedCount,
                 total: totalCount,
-                statusText: STRINGS.files.dir_empty_or_loading
+                statusText: STRINGS.task.no_batch_tasks
             });
             text = text.replace(/━━━━━━━━━━━━━━\n/g, '').replace(/💡 进度条仅显示当前正在处理的文件/g, '');
         } else {
