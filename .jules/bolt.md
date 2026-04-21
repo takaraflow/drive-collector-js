@@ -4,3 +4,7 @@
 ## 2024-05-18 - [Batch Processor Memory Footprint]
 **Learning:** Using `array.map` with `PQueue` for batch processing creates an upfront closure for every item in the array. In Node.js, this causes an excessive memory footprint and triggers aggressive garbage collection when processing thousands of tasks, acting as a massive hidden performance bottleneck.
 **Action:** For performance-critical code iterating over arrays with promises, replace `array.map` with a native async worker pool using a pre-allocated fixed-size results array (`new Array(length)`) and a `while` loop iterating via a shared cursor.
+
+## 2024-05-23 - SmartFailover Batch Execution Memory Optimization
+**Learning:** In `SmartFailover.executeBatch()`, the parallel path used `Array.prototype.map` combined with `Promise.allSettled`, spreading `options` on every iteration (`{ ...options }`). For large batches, this created an excessive number of short-lived objects (closures, spread objects, and wrapper objects from `Promise.allSettled`), leading to high GC pressure.
+**Action:** Replaced `.map()` with a pre-allocated array (`new Array(len)`) and a `for` loop. Substituted the object spread with `Object.assign({}, options)` which limits GC while preserving "own" property definitions (unlike Object.create which hides them from `Object.keys`). Since errors are handled internally inside the `.catch()` block, we switched from `Promise.allSettled()` back to `Promise.all()` to reduce wrapper overhead, while returning identical results.
