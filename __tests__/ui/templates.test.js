@@ -27,6 +27,14 @@ vi.mock("../../src/services/rclone.js", () => ({
 // Mock locales
 vi.mock("../../src/locales/zh-CN.js", () => ({
     STRINGS: {
+        task: {
+            batch_monitor: "📊 <b>媒体组转存看板 ({{current}}/{{total}})</b>\n━━━━━━━━━━━━━━\n{{statusText}}\n━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件",
+            downloading: "正在下载",
+            empty_tasks: "暂无任务数据\n💡 提示: 发送文件即可开始转存"
+        },
+        files: {
+            dir_empty_or_loading: "目录为空或尚未加载"
+        },
         diagnosis: {
             title: "🔍 <b>系统诊断报告</b>",
             multi_instance_title: "🏗️ <b>多实例状态</b>",
@@ -48,7 +56,8 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
         },
         task: {
             downloading: "Downloading",
-            batch_monitor: "📊 <b>媒体组转存看板 ({{current}}/{{total}})</b>\n━━━━━━━━━━━━━━\n{{statusText}}\n━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件"
+            batch_monitor: "📊 <b>媒体组转存看板 ({{current}}/{{total}})</b>\n━━━━━━━━━━━━━━\n{{statusText}}\n━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件",
+            empty_tasks: "暂无任务数据\n💡 提示: 发送文件即可开始转存"
         },
         files: {
             directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
@@ -59,7 +68,7 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
         let res = s || "";
         if (args) {
             for (const key in args) {
-                res = res.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), args[key]);
+                res = res.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), args[key] !== undefined && args[key] !== null ? args[key] : `{{${key}}}`);
             }
         }
         return res;
@@ -148,7 +157,7 @@ describe("UIHelper", () => {
             const result = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 0, 0);
 
             expect(result.text).toContain("媒体组转存看板 (0/0)");
-            expect(result.text).toContain("目录为空或尚未加载");
+            expect(result.text).toContain("暂无任务数据\n💡 提示: 发送文件即可开始转存");
         });
 
         test("should limit output length for large task lists", () => {

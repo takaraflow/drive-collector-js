@@ -77,6 +77,7 @@ export const STRINGS = {
         focus_waiting: "🕒 <b>等待处理</b>: <code>{{name}}</code>",
         focus_completed: "✅ <b>已完成</b>: <code>{{name}}</code>",
         focus_failed: "❌ <b>处理失败</b>: <code>{{name}}</code>",
+        empty_tasks: "暂无任务数据\n💡 提示: 发送文件即可开始转存",
     },
 
     // --- 网盘管理 ---
@@ -128,7 +129,7 @@ export const STRINGS = {
         refresh_success: "刷新成功",
         // 🆕 新增
         directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
-        dir_empty_or_loading: "ℹ️ 目录为空或尚未加载。",
+        dir_empty_or_loading: "ℹ️ 目录为空或尚未加载。\n\n💡 提示: 您可以直接向我发送文件或链接进行转存。",
         page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 个文件</i>",
         btn_home: "⏮️",
         btn_prev: "⬅️",
@@ -145,7 +146,7 @@ export const STRINGS = {
         current_task: "🔄 当前正在处理: {{count}}",
         current_file: "📄 当前任务: <code>{{name}}</code>",
         user_history: "👤 您的任务历史",
-        no_tasks: "尚无任务记录。",
+        no_tasks: "尚无任务记录。\n\n💡 提示: 发送文件或链接即可开始转存！",
         task_item: "{{index}}. {{status}} <code>{{name}}</code> ({{statusText}})",
         drive_status: "🔑 网盘绑定: {{status}}",
         system_info: "💻 系统信息",
