@@ -3,7 +3,8 @@
  * Extends RedisHTTPCache with Upstash-specific configuration, atomic locks, and pipeline support
  */
 
-import { RedisHTTPCache } from './RedisHTTPCache.js';
+import { RedisHTTPCache } from "./RedisHTTPCache.js";
+import crypto from "crypto";
 import { logger } from '../logger/index.js';
 
 class UpstashRHCache extends RedisHTTPCache {
@@ -155,7 +156,7 @@ class UpstashRHCache extends RedisHTTPCache {
                     return 0
                 end
             `;
-            const lockToken = `lock:${Date.now()}:${Math.random()}`;
+            const lockToken = `lock:${Date.now()}:${crypto.randomUUID()}`;
             const ttlMs = ttl * 1000;
             
             const result = await this._sendCommand(['EVAL', lockScript, '1', key, lockToken, ttlMs]);
