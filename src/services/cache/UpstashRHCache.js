@@ -5,6 +5,7 @@
 
 import { RedisHTTPCache } from './RedisHTTPCache.js';
 import { logger } from '../logger/index.js';
+import crypto from 'crypto';
 
 class UpstashRHCache extends RedisHTTPCache {
     static detectConfig(env = process.env) {
@@ -155,7 +156,7 @@ class UpstashRHCache extends RedisHTTPCache {
                     return 0
                 end
             `;
-            const lockToken = `lock:${Date.now()}:${Math.random()}`;
+            const lockToken = `lock:${Date.now()}:${crypto.randomUUID()}`;
             const ttlMs = ttl * 1000;
             
             const result = await this._sendCommand(['EVAL', lockScript, '1', key, lockToken, ttlMs]);
