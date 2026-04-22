@@ -298,20 +298,16 @@ class SmartFailover {
             const promises = requestFns.map((fn, index) => 
                 this.executeRequest(fn, { ...options, requestId: index })
                     .then(result => ({ index, result }))
-                    .catch(error => ({ index, error }))
+                    .catch(error => ({ index, error: error?.message || 'Unknown error' }))
             );
 
-            const allResults = await Promise.allSettled(promises);
+            // The inner promises handle their own errors and map to objects,
+            // guaranteeing resolution, so we can avoid the memory overhead
+            // of the Promise.allSettled wrapper objects.
+            const allResults = await Promise.all(promises);
             
-            allResults.forEach((item, index) => {
-                if (item.status === 'fulfilled') {
-                    results.push(item.value);
-                } else {
-                    results.push({
-                        index,
-                        error: item.reason?.message || 'Unknown error'
-                    });
-                }
+            allResults.forEach((item) => {
+                results.push(item);
             });
         } else {
             // 串行执行
