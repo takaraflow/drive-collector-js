@@ -35,7 +35,11 @@ class DispatcherManager {
             if (this.connectionRetries < this.MAX_CONNECTION_RETRIES) {
                 this.connectionRetries++;
                 log.info(`🔄 尝试重新连接 (${this.connectionRetries}/${this.MAX_CONNECTION_RETRIES})...`);
-                setTimeout(() => this.startTelegramClient(), 3000);
+                if (process.env.NODE_ENV !== 'test') {
+                    setTimeout(() => this.startTelegramClient(), 3000);
+                } else {
+                    this.startTelegramClient();
+                }
             } else {
                 log.error("🚨 达到最大重连次数，请检查网络连接");
             }
