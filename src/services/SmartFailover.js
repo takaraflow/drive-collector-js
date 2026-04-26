@@ -320,9 +320,8 @@ class SmartFailover {
             results.length = len;
             for (let i = 0; i < len; i++) {
                 // To avoid the performance penalty of spreading options in every loop iteration,
-                // we create an empty object with the original options as its prototype.
-                // This preserves object safety while providing a fast path for property lookup.
-                const reqOptions = Object.create(options);
+                // we use Object.assign instead of Object.create if the object will be spread later.
+                const reqOptions = Object.assign({}, options);
                 reqOptions.requestId = i;
                 const result = await this.executeRequest(requestFns[i], reqOptions);
                 results[i] = { index: i, result };
