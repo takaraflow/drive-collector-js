@@ -32,7 +32,7 @@ vi.mock('../../src/services/InstanceCoordinator.js', () => ({
 
 vi.mock('../../src/config/index.js', () => ({
   config: {
-    botToken: 'test-bot-token'
+    botToken: 'mock_token'
   }
 }));
 
