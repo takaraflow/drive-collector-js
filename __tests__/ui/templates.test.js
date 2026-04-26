@@ -48,7 +48,8 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
         },
         task: {
             downloading: "Downloading",
-            batch_monitor: "📊 <b>媒体组转存看板 ({{current}}/{{total}})</b>\n━━━━━━━━━━━━━━\n{{statusText}}\n━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件"
+            batch_monitor: "📊 <b>媒体组转存看板 ({{current}}/{{total}})</b>\n━━━━━━━━━━━━━━\n{{statusText}}\n━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件",
+            batch_empty: "ℹ️ 暂无批量任务数据。\n\n💡 <b>提示:</b> 您可以一次性发送多个文件或链接给我来创建批量转存任务。"
         },
         files: {
             directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
@@ -148,7 +149,7 @@ describe("UIHelper", () => {
             const result = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 0, 0);
 
             expect(result.text).toContain("媒体组转存看板 (0/0)");
-            expect(result.text).toContain("目录为空或尚未加载");
+            expect(result.text).toContain("暂无批量任务数据");
         });
 
         test("should limit output length for large task lists", () => {
