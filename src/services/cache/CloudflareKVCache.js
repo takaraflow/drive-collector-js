@@ -1,4 +1,5 @@
 import { BaseCache } from './BaseCache.js';
+import crypto from 'crypto';
 
 /**
  * CloudflareKVCache - Cloudflare KV storage provider
@@ -203,7 +204,7 @@ class CloudflareKVCache extends BaseCache {
             const safeTtl = Math.max(60, ttl);
             
             // Use a unique value to prevent race conditions
-            const lockValue = `lock:${Date.now()}:${Math.random()}`;
+            const lockValue = `lock:${Date.now()}:${crypto.randomUUID()}`;
             const success = await this.set(key, lockValue, safeTtl);
             if (!success) return false;
             

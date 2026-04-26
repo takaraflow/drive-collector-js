@@ -30,11 +30,6 @@ vi.mock('../../src/services/InstanceCoordinator.js', () => ({
   }
 }));
 
-vi.mock('../../src/config/index.js', () => ({
-  config: {
-    botToken: 'test-bot-token'
-  }
-}));
 
 const mockLogger = {
   info: vi.fn(),
