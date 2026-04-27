@@ -52,7 +52,7 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
         },
         files: {
             directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
-            dir_empty_or_loading: "ℹ️ 目录为空或尚未加载。"
+            dir_empty_or_loading: "ℹ️ 目录为空或尚未加载。\n\n💡 <b>提示</b>: 请直接向我发送文件或支持的链接，我会自动转存到该目录。"
         }
     },
     format: (s, args) => {
