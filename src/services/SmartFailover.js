@@ -289,41 +289,59 @@ class SmartFailover {
      * 批量执行请求
      */
     async executeBatch(requestFns, options = {}) {
-        const { parallel = true } = options;
+        const { parallel = true, concurrency = 10 } = options;
 
-        const results = [];
+        const len = requestFns.length;
+        const results = new Array(len);
 
         if (parallel) {
             // 并行执行
-            const promises = requestFns.map((fn, index) => 
-                this.executeRequest(fn, { ...options, requestId: index })
-                    .then(result => ({ index, result }))
-                    .catch(error => ({ index, error }))
-            );
+            // ⚡ Bolt Optimization: Native async worker pool
+            // Avoid mapping entire arrays which causes upfront closure allocation
+            let currentIndex = 0;
 
-            const allResults = await Promise.allSettled(promises);
-            
-            allResults.forEach((item, index) => {
-                if (item.status === 'fulfilled') {
-                    results.push(item.value);
-                } else {
-                    results.push({
-                        index,
-                        error: item.reason?.message || 'Unknown error'
-                    });
+            const worker = async () => {
+                while (currentIndex < len) {
+                    const index = currentIndex++;
+                    const fn = requestFns[index];
+
+                    const reqOptions = Object.assign({}, options);
+                    reqOptions.requestId = index;
+
+                    try {
+                        const result = await this.executeRequest(fn, reqOptions);
+                        results[index] = { index, result };
+                    } catch (error) {
+                        results[index] = { index, error };
+                    }
                 }
+            };
+
+            const workers = Array.from({ length: Math.min(concurrency, len) }, worker);
+            await Promise.all(workers);
+            
+            // map array to match old expected returned shape
+            return results.map(item => {
+                if (item.error) {
+                    return {
+                        index: item.index,
+                        error: item.error.message || 'Unknown error'
+                    };
+                }
+                return item;
             });
         } else {
             // 串行执行
             // Pre-allocate array to avoid dynamic resizing overhead
-            const len = requestFns.length;
-            results.length = len;
             for (let i = 0; i < len; i++) {
                 // To avoid the performance penalty of spreading options in every loop iteration,
-                // we create an empty object with the original options as its prototype.
+                // we use Object.assign to avoid prototype chain lookup regression.
                 // This preserves object safety while providing a fast path for property lookup.
-                const reqOptions = Object.create(options);
+                const reqOptions = Object.assign({}, options);
                 reqOptions.requestId = i;
+
+                // Original serial code didn't wrap this in try/catch and let it bubble up,
+                // preserving the original serial exception bubbling semantics.
                 const result = await this.executeRequest(requestFns[i], reqOptions);
                 results[i] = { index: i, result };
             }
