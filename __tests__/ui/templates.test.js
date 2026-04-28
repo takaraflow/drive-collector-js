@@ -52,7 +52,8 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
         },
         files: {
             directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
-            dir_empty_or_loading: "ℹ️ 目录为空或尚未加载。"
+            dir_empty: "ℹ️ 目录为空。您可以直接发送文件给我，将其转存到此目录。",
+            batch_empty: "ℹ️ 尚无文件排队或加载中。"
         }
     },
     format: (s, args) => {
@@ -148,7 +149,7 @@ describe("UIHelper", () => {
             const result = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 0, 0);
 
             expect(result.text).toContain("媒体组转存看板 (0/0)");
-            expect(result.text).toContain("目录为空或尚未加载");
+            expect(result.text).toContain("尚无文件排队或加载中");
         });
 
         test("should limit output length for large task lists", () => {
