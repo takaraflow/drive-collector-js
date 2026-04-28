@@ -128,7 +128,8 @@ export const STRINGS = {
         refresh_success: "刷新成功",
         // 🆕 新增
         directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
-        dir_empty_or_loading: "ℹ️ 目录为空或尚未加载。",
+        dir_empty: "ℹ️ 目录为空。您可以直接发送文件给我，将其转存到此目录。",
+        batch_empty: "ℹ️ 尚无文件排队或加载中。",
         page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 个文件</i>",
         btn_home: "⏮️",
         btn_prev: "⬅️",
@@ -145,7 +146,7 @@ export const STRINGS = {
         current_task: "🔄 当前正在处理: {{count}}",
         current_file: "📄 当前任务: <code>{{name}}</code>",
         user_history: "👤 您的任务历史",
-        no_tasks: "尚无任务记录。",
+        no_tasks: "尚无任务记录。请直接向我发送文件、图片或链接来开始转存。",
         task_item: "{{index}}. {{status}} <code>{{name}}</code> ({{statusText}})",
         drive_status: "🔑 网盘绑定: {{status}}",
         system_info: "💻 系统信息",
