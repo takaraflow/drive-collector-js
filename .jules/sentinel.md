@@ -1,4 +1,4 @@
-## 2025-04-18 - Prevent Predictability in Distributed Lock Versioning
-**Vulnerability:** Used insecure `Math.random()` to generate the version identifier for distributed locks.
-**Learning:** `Math.random()` is not cryptographically secure, meaning generated identifiers are predictable. This predictability can lead to lock predictability, allowing potential attackers to guess lock version tokens, bypass validations, and hijack or steal task locks in distributed and concurrent environments.
-**Prevention:** Always use cryptographically secure PRNGs (Pseudo-Random Number Generators) such as `crypto.randomUUID()` or `crypto.randomBytes(N).toString('hex')` to generate versioning or security-sensitive identifiers.
+## 2026-04-30 - Replace insecure Math.random() with Web Crypto API for Drive ID Generation
+**Vulnerability:** Weak PRNG (`Math.random()`) used for generating security identifiers (`driveId`).
+**Learning:** In Cloudflare/Edge environments, importing Node.js `crypto` via bare imports (e.g., `import crypto from "crypto";`) breaks builds and tests. The `crypto` module is not natively available like in Node.
+**Prevention:** Use the globally available Web Crypto API (`crypto.randomUUID()`) for generating secure pseudo-random IDs without requiring imports, ensuring compatibility across Node and Edge execution contexts.
