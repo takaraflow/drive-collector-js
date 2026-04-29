@@ -301,17 +301,14 @@ class SmartFailover {
                     .catch(error => ({ index, error }))
             );
 
-            const allResults = await Promise.allSettled(promises);
+            // ⚡ Bolt Optimization: Use Promise.all instead of Promise.allSettled
+            // Since the internal promises already handle their own errors and resolve to objects,
+            // Promise.all is perfectly safe and avoids creating unnecessary wrapper objects,
+            // significantly reducing memory allocation overhead during batch operations.
+            const allResults = await Promise.all(promises);
             
-            allResults.forEach((item, index) => {
-                if (item.status === 'fulfilled') {
-                    results.push(item.value);
-                } else {
-                    results.push({
-                        index,
-                        error: item.reason?.message || 'Unknown error'
-                    });
-                }
+            allResults.forEach((item) => {
+                results.push(item);
             });
         } else {
             // 串行执行
