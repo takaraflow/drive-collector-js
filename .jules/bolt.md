@@ -4,3 +4,6 @@
 ## 2024-05-18 - [Batch Processor Memory Footprint]
 **Learning:** Using `array.map` with `PQueue` for batch processing creates an upfront closure for every item in the array. In Node.js, this causes an excessive memory footprint and triggers aggressive garbage collection when processing thousands of tasks, acting as a massive hidden performance bottleneck.
 **Action:** For performance-critical code iterating over arrays with promises, replace `array.map` with a native async worker pool using a pre-allocated fixed-size results array (`new Array(length)`) and a `while` loop iterating via a shared cursor.
+## 2026-05-01 - [CacheService Batch Operations Concurrency Optimization]
+**Learning:** Using `array.map` combined with `Promise.all` for asynchronous batch operations creates an upfront closure for every item in the array. This leads to unbounded concurrency and an excessive memory footprint in Node.js, causing potential garbage collection issues, connection exhaustion, and out-of-memory errors for large datasets.
+**Action:** Replace `array.map` with a native async worker pool by using a fixed-size pre-allocated array (`new Array(length)`), limiting the concurrent workers with `Array.from` (using a default concurrency like 5), and iterating over the dataset with a `while` loop sharing a cursor. This resolves memory bloat while preventing N+1 I/O wait times.
