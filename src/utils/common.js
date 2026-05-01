@@ -3,6 +3,7 @@ import { runBotTask, runBotTaskWithRetry } from "./limiter.js";
 import { STRINGS } from "../locales/zh-CN.js";
 import { logger } from "../services/logger/index.js";
 import crypto from "crypto";
+import path from "path";
 
 const log = logger.withModule ? logger.withModule('CommonUtils') : logger;
 
@@ -70,7 +71,10 @@ export const getMediaInfo = (input) => {
     const obj = media.document || media.video || media.photo;
     if (!obj) return null;
     let name = obj.attributes?.find(a => a.fileName)?.fileName;
-    if (!name) {
+    if (name) {
+        // Sanitize the filename to prevent Path Traversal vulnerabilities
+        name = path.basename(name);
+    } else {
         // 使用时间戳 + UUID 确保文件名唯一，特别是在处理媒体组时
         const uuid = crypto.randomUUID().substring(0, 8);
         const timestamp = Date.now();
