@@ -1274,32 +1274,44 @@ class CacheService {
     /**
      * 批量操作 - 支持故障转移的批量 get/set
      */
-    async batchOperation(operations) {
+    async batchOperation(operations, concurrency = 5) {
         await this._ensureInitialized();
         
-        // ⚡ Bolt Optimization: Run batch operations concurrently instead of sequentially
-        // This eliminates N+1 I/O waits and significantly improves batch processing performance
-        const promises = operations.map(async (op) => {
-            try {
-                if (op.type === 'get') {
-                    // Fix: Use op.dataType instead of op.type for format ('json', 'string')
-                    const value = await this.get(op.key, op.dataType || 'json', op.options || {});
-                    return { success: true, key: op.key, value };
-                } else if (op.type === 'set') {
-                    const success = await this.set(op.key, op.value, op.ttl || 3600, op.options || {});
-                    return { success, key: op.key };
-                } else if (op.type === 'delete') {
-                    const success = await this.delete(op.key, op.options || {});
-                    return { success, key: op.key };
+        // ⚡ Bolt Optimization: Use a native async worker pool instead of array.map with Promise.all
+        // This prevents massive upfront closure creation and limits concurrency,
+        // avoiding out-of-memory errors and connection exhaustion on large batches.
+        const results = new Array(operations.length);
+        let index = 0;
+
+        const worker = async () => {
+            while (index < operations.length) {
+                const currentIndex = index++;
+                const op = operations[currentIndex];
+                try {
+                    if (op.type === 'get') {
+                        // Fix: Use op.dataType instead of op.type for format ('json', 'string')
+                        const value = await this.get(op.key, op.dataType || 'json', op.options || {});
+                        results[currentIndex] = { success: true, key: op.key, value };
+                    } else if (op.type === 'set') {
+                        const success = await this.set(op.key, op.value, op.ttl || 3600, op.options || {});
+                        results[currentIndex] = { success, key: op.key };
+                    } else if (op.type === 'delete') {
+                        const success = await this.delete(op.key, op.options || {});
+                        results[currentIndex] = { success, key: op.key };
+                    } else {
+                        results[currentIndex] = { success: false, key: op.key, error: `Unknown operation type: ${op.type}` };
+                    }
+                } catch (error) {
+                    log.error(`Batch operation failed for ${op.key}:`, error.message);
+                    results[currentIndex] = { success: false, key: op.key, error: error.message };
                 }
-                return { success: false, key: op.key, error: `Unknown operation type: ${op.type}` };
-            } catch (error) {
-                log.error(`Batch operation failed for ${op.key}:`, error.message);
-                return { success: false, key: op.key, error: error.message };
             }
-        });
+        };
+
+        const workers = Array.from({ length: Math.min(concurrency, operations.length) }, worker);
+        await Promise.all(workers);
         
-        return await Promise.all(promises);
+        return results;
     }
 
     /**
@@ -1425,7 +1437,7 @@ export const enhancedFailover = () => _instance.enhancedFailover();
 export const getHealthStatus = () => _instance.getHealthStatus();
 export const switchToProvider = (name) => _instance.switchToProvider(name);
 export const resetFailureCount = () => _instance.resetFailureCount();
-export const batchOperation = (operations) => _instance.batchOperation(operations);
+export const batchOperation = (operations, concurrency) => _instance.batchOperation(operations, concurrency);
 export const getProviderList = () => _instance.getProviderList();
 
 export default cache;
