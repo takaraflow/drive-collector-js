@@ -53,7 +53,7 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
         files: {
             directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
             dir_empty: "ℹ️ 目录为空。您可以直接发送文件给我，将其转存到此目录。",
-            batch_empty: "ℹ️ 尚无文件排队或加载中。"
+            batch_empty: "ℹ️ 尚无文件排队或加载中。您可以直接向我发送文件或链接来开始转存任务。"
         }
     },
     format: (s, args) => {
