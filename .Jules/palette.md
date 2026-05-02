@@ -5,3 +5,6 @@
 ## 2026-04-28 - Improve Empty State UX with Actionable CTAs
 **Learning:** Conversational bot UI empty states (like 'no tasks' or 'empty directory') must include clear, context-specific call-to-actions (CTAs) instead of reusing generalized strings, guiding the user on what to do next.
 **Action:** Always provide specific, actionable instructions in empty states rather than just stating there is no data, avoiding the reuse of generic messages across different contexts.
+## 2024-05-24 - Actionable Empty States
+**Learning:** Empty states in Telegram bots that just say "no items" create dead ends for users. Providing a direct action ("send me files or links") dramatically improves task continuation.
+**Action:** When updating or creating empty state strings in `src/locales/zh-CN.js`, always include a contextual CTA instructing the user on the next possible action.
