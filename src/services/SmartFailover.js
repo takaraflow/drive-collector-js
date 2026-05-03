@@ -291,33 +291,35 @@ class SmartFailover {
     async executeBatch(requestFns, options = {}) {
         const { parallel = true } = options;
 
-        const results = [];
+        const len = requestFns.length;
+        const results = new Array(len);
 
         if (parallel) {
             // 并行执行
-            const promises = requestFns.map((fn, index) => 
-                this.executeRequest(fn, { ...options, requestId: index })
-                    .then(result => ({ index, result }))
-                    .catch(error => ({ index, error }))
-            );
+            // ⚡ Bolt Optimization: Use native async worker pool instead of array mapping + Promise.allSettled
+            // This avoids upfront closure allocation memory spikes and reduces object wrapper overhead
+            const concurrencyLimit = options.concurrency || len;
+            let currentIndex = 0;
 
-            const allResults = await Promise.allSettled(promises);
-            
-            allResults.forEach((item, index) => {
-                if (item.status === 'fulfilled') {
-                    results.push(item.value);
-                } else {
-                    results.push({
-                        index,
-                        error: item.reason?.message || 'Unknown error'
-                    });
+            const worker = async () => {
+                while (currentIndex < len) {
+                    const index = currentIndex++;
+                    const fn = requestFns[index];
+                    try {
+                        const reqOptions = { ...options, requestId: index };
+                        const result = await this.executeRequest(fn, reqOptions);
+                        results[index] = { index, result };
+                    } catch (error) {
+                        results[index] = { index, error };
+                    }
                 }
-            });
+            };
+
+            const workers = Array.from({ length: Math.min(concurrencyLimit, len) }, worker);
+            await Promise.all(workers);
         } else {
             // 串行执行
             // Pre-allocate array to avoid dynamic resizing overhead
-            const len = requestFns.length;
-            results.length = len;
             for (let i = 0; i < len; i++) {
                 // To avoid the performance penalty of spreading options in every loop iteration,
                 // we create an empty object with the original options as its prototype.
