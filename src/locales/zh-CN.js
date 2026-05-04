@@ -66,7 +66,7 @@ export const STRINGS = {
         parse_failed: "❌ 无法解析该媒体文件信息。",
         link_limit: "⚠️ 仅处理前 10 个媒体。",
         cmd_sent: "指令已下达",
-        task_not_found: "任务已不存在或无权操作",
+        task_not_found: "任务已不存在或无权操作。请发送 /status 查看当前有效任务。",
         cancel_transfer_btn: "🚫 取消转存", 
         cancel_task_btn: "🚫 取消任务",
         error_prefix: "⚠️ 处理异常: ",
@@ -90,10 +90,10 @@ export const STRINGS = {
         btn_bind_mega: "➕ 绑定 Mega 网盘",
         cancel_prompt: "发送 /cancel 或输入 取消 可随时退出绑定流程。",
         cancelled: "绑定流程已取消，输入 /drive 可重新开始。",
-        not_found: "🚫 未找到对应网盘",
+        not_found: "🚫 未找到对应网盘。您可以发送 /drive 重新绑定。",
         unbind_confirm: "⚠️ <b>确定要解绑该网盘吗？</b>\n\n解绑后将无法进行转存，且再次使用需重新输入密码。",
         unbind_success: "✅ <b>解绑成功</b>\n\n您的账号信息已从本系统中移除。",
-        no_drive_unbind: "⚠️ 您当前未绑定任何网盘，无需解绑。",
+        no_drive_unbind: "⚠️ 您当前未绑定任何网盘，无需解绑。您可以发送 /drive 绑定新网盘。",
         no_drive_found: "🚫 <b>未检测到绑定的网盘</b>\n\n请先发送 /drive 绑定网盘，然后再发送文件/链接。",
         
         // 绑定流程
@@ -129,7 +129,7 @@ export const STRINGS = {
         // 🆕 新增
         directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
         dir_empty: "ℹ️ 目录为空。您可以直接发送文件给我，将其转存到此目录。",
-        batch_empty: "ℹ️ 尚无文件排队或加载中。",
+        batch_empty: "ℹ️ 尚无文件排队或加载中。请直接发送包含多个文件的媒体组来添加批量任务。",
         page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 个文件</i>",
         btn_home: "⏮️",
         btn_prev: "⬅️",
@@ -203,7 +203,7 @@ export const STRINGS = {
                       "路径应以 / 开头，且不包含特殊字符。\n" +
                       "示例: /Movies/2024",
         no_permission: "❌ <b>无权限</b>\n\n" +
-                       "此功能需要先绑定网盘才能使用。",
+                       "此功能需要先绑定网盘才能使用。请发送 /drive 进行绑定。",
         error_saving: "❌ <b>保存失败</b>\n\n" +
                       "无法保存路径设置，请稍后重试。",
         error_reading: "❌ <b>读取失败</b>\n\n" +
