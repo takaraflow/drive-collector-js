@@ -1,4 +1,7 @@
-## 2025-04-18 - Prevent Predictability in Distributed Lock Versioning
-**Vulnerability:** Used insecure `Math.random()` to generate the version identifier for distributed locks.
-**Learning:** `Math.random()` is not cryptographically secure, meaning generated identifiers are predictable. This predictability can lead to lock predictability, allowing potential attackers to guess lock version tokens, bypass validations, and hijack or steal task locks in distributed and concurrent environments.
-**Prevention:** Always use cryptographically secure PRNGs (Pseudo-Random Number Generators) such as `crypto.randomUUID()` or `crypto.randomBytes(N).toString('hex')` to generate versioning or security-sensitive identifiers.
+## 2024-05-05 - Path Traversal in TaskManager
+
+**Vulnerability:** Discovered a path traversal vulnerability in `src/processor/TaskManager.js`, `src/processor/TaskManager/TaskManager.core.js`, and `src/processor/TaskManager/TaskManager.download.js`. External inputs (`row.file_name`, `dbTask.file_name`, `task.fileName`, `info.name`) were concatenated with `config.downloadDir` using `path.join()` without sanitization.
+
+**Learning:** This pattern existed because the application implicitly trusted database records and message metadata when recreating local file paths during task resumption or uploading. It assumed that files saved locally by the bot would always have clean names, ignoring that the initial file names could originate from untrusted Telegram messages.
+
+**Prevention:** Always wrap external or untrusted file names in `path.basename()` before combining them with root directories using `path.join()`. This ensures that any directory traversal attempts (e.g., `../../../`) are stripped, locking the file reference purely to the intended directory.

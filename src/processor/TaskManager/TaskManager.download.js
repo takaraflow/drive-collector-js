@@ -50,7 +50,7 @@ export async function downloadTask(task) {
             }
 
             // Use existing file name from task (for consistency), or use info.name if not exist
-            const fileName = task.fileName || info.name;
+            const fileName = path.basename(task.fileName || info.name);
             const localPath = path.join(config.downloadDir, fileName);
             task.localPath = localPath;
 
