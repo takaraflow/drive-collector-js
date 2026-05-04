@@ -7,3 +7,7 @@
 ## 2024-05-18 - [Native Async Worker Pool Optimization in CacheService]
 **Learning:** For batch operations in \`CacheService.js\`, using unbounded \`Promise.all(operations.map(...))\` causes excessive memory allocation from upfront closures and can exhaust connection pools for large inputs.
 **Action:** Replace \`operations.map\` with a native async worker pool using a pre-allocated array and a concurrency limit (e.g., 5) to balance throughput with resource constraints.
+
+## 2026-05-04 - [Strict Error Wrapping in Async Worker Pools]
+**Learning:** When refactoring functions that map over arrays (like `Promise.allSettled(array.map(...))`) into an async `while` loop worker pool for performance optimizations, if the original inline `.catch()` wraps errors inside a resolved promise (e.g. `.catch(error => ({ index, error }))`), replacing it with a standard stringified error assignment will break downstream API contracts expecting the actual Error object.
+**Action:** Always strictly preserve the exact object wrapping structure and data types of the original `.then()` and `.catch()` blocks in the assigned array indices to prevent critical regressions in return signatures.
