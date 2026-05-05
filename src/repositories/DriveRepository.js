@@ -1,5 +1,6 @@
 import { cache } from "../services/CacheService.js";
 import { localCache } from "../utils/LocalCache.js";
+import crypto from "node:crypto";
 import { d1 } from "../services/d1.js";
 import { logger } from "../services/logger/index.js";
 
@@ -78,7 +79,8 @@ export class DriveRepository {
         }
 
         try {
-            const driveId = `drive_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            // Security: Use cryptographically secure UUID instead of predictable Math.random()
+            const driveId = `drive_${Date.now()}_${crypto.randomUUID().replace(/-/g, '').substring(0, 9)}`;
             const now = Date.now();
             const driveData = {
                 id: driveId,
