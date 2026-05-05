@@ -295,23 +295,18 @@ class SmartFailover {
 
         if (parallel) {
             // 并行执行
+            // OPTIMIZATION: Internal promises catch their own errors, guaranteeing resolution.
+            // Using Promise.all instead of Promise.allSettled reduces memory allocation overhead.
             const promises = requestFns.map((fn, index) => 
-                this.executeRequest(fn, { ...options, requestId: index })
+                this.executeRequest(fn, Object.assign({}, options, { requestId: index }))
                     .then(result => ({ index, result }))
-                    .catch(error => ({ index, error }))
+                    .catch(error => ({ index, error: error?.message || error || 'Unknown error' }))
             );
 
-            const allResults = await Promise.allSettled(promises);
+            const allResults = await Promise.all(promises);
             
-            allResults.forEach((item, index) => {
-                if (item.status === 'fulfilled') {
-                    results.push(item.value);
-                } else {
-                    results.push({
-                        index,
-                        error: item.reason?.message || 'Unknown error'
-                    });
-                }
+            allResults.forEach(item => {
+                results.push(item);
             });
         } else {
             // 串行执行
@@ -320,9 +315,9 @@ class SmartFailover {
             results.length = len;
             for (let i = 0; i < len; i++) {
                 // To avoid the performance penalty of spreading options in every loop iteration,
-                // we create an empty object with the original options as its prototype.
-                // This preserves object safety while providing a fast path for property lookup.
-                const reqOptions = Object.create(options);
+                // we use Object.assign. Object.create places properties on the prototype chain,
+                // which can cause subtle regressions if downstream logic relies on own properties.
+                const reqOptions = Object.assign({}, options);
                 reqOptions.requestId = i;
                 const result = await this.executeRequest(requestFns[i], reqOptions);
                 results[i] = { index: i, result };
