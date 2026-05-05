@@ -293,7 +293,7 @@ export class TaskManagerCore {
                 // 根据任务状态决定恢复到哪个队列
                 if (row.status === 'downloaded') {
                     // 恢复到上传队列
-                    const localPath = path.join(config.downloadDir, row.file_name);
+                    const localPath = path.join(config.downloadDir, path.basename(row.file_name));
                     if (fs.existsSync(localPath)) {
                         task.localPath = localPath;
                         tasksToUpload.push(task);
@@ -796,7 +796,7 @@ export class TaskManagerCore {
      * @returns {Promise<{localPath: string, error: {success: boolean, statusCode: number, message?: string} | null}>}
      */
     static _validateLocalFile(fileName) {
-        const localPath = path.join(config.downloadDir, fileName);
+        const localPath = path.join(config.downloadDir, path.basename(fileName));
         if (!fs.existsSync(localPath)) {
             return { localPath: null, error: { success: false, statusCode: 404, message: "Local file not found" } };
         }
