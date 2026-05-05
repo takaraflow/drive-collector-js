@@ -129,7 +129,7 @@ export const STRINGS = {
         // 🆕 新增
         directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
         dir_empty: "ℹ️ 目录为空。您可以直接发送文件给我，将其转存到此目录。",
-        batch_empty: "ℹ️ 尚无文件排队或加载中。",
+        batch_empty: "ℹ️ 尚无文件排队或加载中。请直接发送多个文件或媒体组给我，以开始批量转存。",
         page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 个文件</i>",
         btn_home: "⏮️",
         btn_prev: "⬅️",
