@@ -52,8 +52,8 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
         },
         files: {
             directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
-            dir_empty: "ℹ️ 目录为空。您可以直接发送文件给我，将其转存到此目录。",
-            batch_empty: "ℹ️ 尚无文件排队或加载中。"
+            dir_empty: "ℹ️ 目录为空。请直接发送文件、图片或视频给我，我将把它们转存到此目录。",
+            batch_empty: "ℹ️ 尚无文件排队或加载中。请发送多个文件或图片，系统会自动为您批量排队处理。"
         }
     },
     format: (s, args) => {
