@@ -303,7 +303,7 @@ export class TaskManager {
                 // 根据任务状态决定恢复到哪个队列
                 if (row.status === 'downloaded') {
                     // 恢复到上传队列
-                    const localPath = path.join(config.downloadDir, row.file_name);
+                    const localPath = path.join(config.downloadDir, path.basename(row.file_name));
                     if (fs.existsSync(localPath)) {
                         task.localPath = localPath;
                         tasksToUpload.push(task);
@@ -740,7 +740,7 @@ export class TaskManager {
             }
 
             // 验证本地文件存在
-            const localPath = path.join(config.downloadDir, dbTask.file_name);
+            const localPath = path.join(config.downloadDir, path.basename(dbTask.file_name));
             if (!fs.existsSync(localPath)) {
                 await TaskRepository.updateStatus(taskId, 'failed', 'Local file not found');
                 return { success: false, statusCode: 404, message: "Local file not found" };
@@ -878,7 +878,7 @@ export class TaskManager {
         const log = getLog();
         try {
             // 1. 检查本地文件是否存在
-            const localPath = path.join(config.downloadDir, dbTask.file_name);
+            const localPath = path.join(config.downloadDir, path.basename(dbTask.file_name));
             if (!fs.existsSync(localPath)) {
                 // 如果文件不存在，回退到重新下载
                 return await this._retryDownload(taskId, dbTask);
