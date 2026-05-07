@@ -72,10 +72,29 @@ vi.mock('../../src/config/index.js', () => ({
 const { startDispatcher } = await import('../../src/dispatcher/bootstrap.js');
 
 describe('Dispatcher Bootstrap', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     vi.spyOn(global, 'setTimeout').mockImplementation((fn) => fn());
     vi.spyOn(global, 'setInterval').mockImplementation(() => {});
+
+    // Restore mock implementations that may be cleared by global restoreMocks
+    const mockTelegram = await import('../../src/services/telegram.js');
+    mockTelegram.getClient.mockResolvedValue(mockTelegram.client);
+    mockTelegram.saveSession.mockResolvedValue();
+    mockTelegram.clearSession.mockResolvedValue();
+    mockTelegram.resetClientSession.mockResolvedValue();
+    mockTelegram.client.start.mockResolvedValue();
+
+    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
+    mockInstanceCoordinator.hasLock.mockResolvedValue(true);
+
+    const mockConfig = await import('../../src/config/index.js');
+    mockConfig.getConfig.mockReturnValue({
+      botToken: 'mock_token',
+      ownerId: 'owner_id',
+      redis: { url: 'redis://localhost:6379' }
+    });
   });
 
   it('should start successfully when lock acquired', async () => {
