@@ -5,3 +5,6 @@
 ## 2026-04-28 - Improve Empty State UX with Actionable CTAs
 **Learning:** Conversational bot UI empty states (like 'no tasks' or 'empty directory') must include clear, context-specific call-to-actions (CTAs) instead of reusing generalized strings, guiding the user on what to do next.
 **Action:** Always provide specific, actionable instructions in empty states rather than just stating there is no data, avoiding the reuse of generic messages across different contexts.
+## 2026-05-09 - Improve Empty State UX in Batch Monitor
+**Learning:** The "batch empty" state originally just informed the user that there were no tasks queued, which leaves the user wondering what to do. Providing actionable instructions within empty state prompts makes the UX conversational and engaging.
+**Action:** When updating generalized empty states, always append a clear call-to-action (e.g. instructing users to send files or URLs) directly within the translated message. Make sure to update corresponding test mocks as well.
