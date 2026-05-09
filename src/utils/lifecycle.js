@@ -47,6 +47,14 @@ export async function registerShutdownHooks() {
         return TaskManager.getProcessingCount() + TaskManager.getWaitingCount();
     });
 
+    // -2. 关闭 OTel SDK，刷出待处理的 traces/metrics (priority: 0)
+    gracefulShutdown.register(async () => {
+        const { shutdownOTel, isOTelEnabled } = await import("../telemetry/tracing.js");
+        if (isOTelEnabled) {
+            await shutdownOTel();
+        }
+    }, 0, 'otel-shutdown');
+
     // -1. 停止内存监控 (priority: 1)
     gracefulShutdown.register(async () => {
         stopMemoryMonitor();
