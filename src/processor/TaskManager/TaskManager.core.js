@@ -854,31 +854,19 @@ export class TaskManagerCore {
     /**
      * 手动重试任务 - 用于处理卡住/失败的任务
      * @param {string} taskId - 任务ID
-     * @param {string} type - 重试类型: 'download', 'upload', 'auto' (默认)
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
-    static async retryTask(taskId, type = 'auto') {
-        // 输入验证
+    static async retryTask(taskId) {
         if (!taskId) {
-            log.error("retryTask: taskId is required");
             return { success: false, statusCode: 400, message: "Task ID is required" };
-        }
-        
-        // 验证 type 参数
-        const validTypes = ['auto', 'download', 'upload'];
-        if (!validTypes.includes(type)) {
-            log.error(`retryTask: invalid type ${type}, must be one of ${validTypes.join(', ')}`);
-            return { success: false, statusCode: 400, message: `Invalid type. Must be one of: ${validTypes.join(', ')}` };
         }
 
         try {
-            // 1. 获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
             if (!dbTask) {
                 return { success: false, statusCode: 404, message: "Task not found" };
             }
 
-            // 2. 检查任务状态
             if (dbTask.status === 'completed') {
                 return { success: false, statusCode: 400, message: "Task already completed" };
             }
@@ -887,93 +875,22 @@ export class TaskManagerCore {
                 return { success: false, statusCode: 400, message: "Task is cancelled" };
             }
 
-            // 3. 根据类型决定重试逻辑
-            if (type === 'auto') {
-                // 自动判断：如果任务状态是 'downloaded'，则重试上传；否则重试下载
-                if (dbTask.status === 'downloaded') {
-                    return await this._retryUpload(taskId, dbTask);
-                } else {
-                    return await this._retryDownload(taskId, dbTask);
+            await instanceCoordinator.releaseTaskLock(taskId);
+
+            await queueService.enqueueDownloadTask(taskId, {
+                _meta: {
+                    triggerSource: 'manual-retry',
+                    instanceId: process.env.INSTANCE_ID || 'unknown',
+                    timestamp: Date.now()
                 }
-            } else if (type === 'upload') {
-                return await this._retryUpload(taskId, dbTask);
-            } else if (type === 'download') {
-                return await this._retryDownload(taskId, dbTask);
-            }
+            });
 
-        } catch (error) {
-            log.error(`Failed to retry task ${taskId}:`, error);
-            return { success: false, statusCode: 500, message: error.message };
-        }
-    }
-
-    /**
-     * 重试下载任务
-     * @param {string} taskId - 任务ID
-     * @param {Object} dbTask - 数据库任务对象
-     * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
-     */
-    static async _retryDownload(taskId, dbTask) {
-        try {
-            // 1. 获取原始消息
-            const { message, error: messageError } = await this._getOriginalMessage(dbTask);
-            if (messageError) {
-                await TaskRepository.updateStatus(taskId, 'failed', messageError.message);
-                return messageError;
-            }
-
-            // 2. 创建任务对象
-            const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
-            task.fileName = dbTask.file_name;
-
-            // 3. 重新入队
-            await this._enqueueTask(task);
-
-            // 4. 更新状态
             await TaskRepository.updateStatus(taskId, 'queued');
 
-            return { success: true, statusCode: 200, message: "Task re-enqueued for download" };
+            log.info(`Task ${taskId} re-enqueued for retry`);
+            return { success: true, statusCode: 200, message: "Task re-enqueued" };
         } catch (error) {
-            log.error(`Failed to retry download for task ${taskId}:`, error);
-            return { success: false, statusCode: 500, message: error.message };
-        }
-    }
-
-    /**
-     * 重试上传任务
-     * @param {string} taskId - 任务ID
-     * @param {Object} dbTask - 数据库任务对象
-     * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
-     */
-    static async _retryUpload(taskId, dbTask) {
-        try {
-            // 1. 检查本地文件是否存在
-            const { localPath, error: fileError } = this._validateLocalFile(dbTask.file_name);
-            if (fileError) {
-                // 如果文件不存在，回退到重新下载
-                return await this._retryDownload(taskId, dbTask);
-            }
-
-            // 2. 获取原始消息
-            const { message, error: messageError } = await this._getOriginalMessage(dbTask);
-            if (messageError) {
-                return messageError;
-            }
-
-            // 3. 创建任务对象
-            const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
-            task.localPath = localPath;
-            task.fileName = dbTask.file_name;
-
-            // 4. 重新入队上传
-            await this._enqueueUploadTask(task);
-
-            // 5. 更新状态
-            await TaskRepository.updateStatus(taskId, 'downloaded');
-
-            return { success: true, statusCode: 200, message: "Task re-enqueued for upload" };
-        } catch (error) {
-            log.error(`Failed to retry upload for task ${taskId}:`, error);
+            log.error(`Failed to retry task ${taskId}:`, error);
             return { success: false, statusCode: 500, message: error.message };
         }
     }
