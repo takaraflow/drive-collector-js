@@ -42,7 +42,7 @@ export class UIHelper {
         }
         
         if (files.length === 0 && !isLoading) {
-            text += STRINGS.files.dir_empty_or_loading;
+            text += STRINGS.files.dir_empty;
         } else {
             pagedFiles.forEach(f => {
                 const ext = path.extname(f.Name).toLowerCase();
@@ -181,7 +181,7 @@ export class UIHelper {
             text = format(STRINGS.task.batch_monitor, {
                 current: completedCount,
                 total: totalCount,
-                statusText: STRINGS.files.dir_empty_or_loading
+                statusText: STRINGS.files.batch_empty
             });
             text = text.replace(/━━━━━━━━━━━━━━\n/g, '').replace(/💡 进度条仅显示当前正在处理的文件/g, '');
         } else {

@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { cache } from "./CacheService.js";
 import { queueService } from "./QueueService.js";
 import { InstanceRepository } from "../repositories/InstanceRepository.js";
@@ -25,7 +26,7 @@ export class InstanceCoordinator {
         // 如果是多进程环境，使用 PID + 时间戳 + 随机数
         const pid = process.pid || 'unknown';
         const timestamp = Date.now();
-        const random = Math.random().toString(36).substr(2, 9);
+        const random = crypto.randomUUID().substring(0, 8);
         const hostname = process.env.HOSTNAME || 'unknown';
         
         this.instanceId = process.env.INSTANCE_ID || `instance_${hostname}_${pid}_${timestamp}_${random}`;
