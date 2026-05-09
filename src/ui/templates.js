@@ -304,7 +304,7 @@ export class UIHelper {
      /**
       * 渲染全局任务队列概览
       * @param {Object} data - { statusCounts, activeTasks, userCounts }
-      * @returns {string} HTML格式的队列报告
+      * @returns {{text: string, buttons: Array}} HTML格式的队列报告和按钮
       */
      static renderTaskQueue(data) {
          const TQ = STRINGS.task_queue;
@@ -364,7 +364,89 @@ export class UIHelper {
          }
 
          html += '━━━━━━━━━━━━━━━━━━━';
-         return html;
+
+         // 状态筛选按钮（两行）
+         const activeStatuses = ['queued', 'downloading', 'uploading'];
+         const otherStatuses = ['completed', 'failed', 'cancelled'];
+         const btnRow1 = activeStatuses.map(s => {
+             const count = data.statusCounts[s] || 0;
+             const label = (statusLabels[s] || s).split(' ').pop();
+             return Button.inline(`${label}(${count})`, Buffer.from(`tq_${s}_0`));
+         });
+         const btnRow2 = otherStatuses.map(s => {
+             const count = data.statusCounts[s] || 0;
+             const label = (statusLabels[s] || s).split(' ').pop();
+             return Button.inline(`${label}(${count})`, Buffer.from(`tq_${s}_0`));
+         });
+         const buttons = [btnRow1, btnRow2];
+
+         return { text: html, buttons };
+     }
+
+     /**
+      * 渲染指定状态的任务详情列表
+      * @param {string} status - 任务状态
+      * @param {Object} data - { tasks, total, page, pageSize, totalPages }
+      * @returns {{text: string, buttons: Array}}
+      */
+     static renderTaskQueueDetail(status, data) {
+         const TQ = STRINGS.task_queue;
+         const statusLabels = TQ.status_labels;
+         const statusLabel = statusLabels[status] || status;
+         const statusIcon = statusLabel.split(' ')[0];
+
+         let html = format(TQ.detail_title, { status: statusLabel, total: data.total }) + '\n';
+         html += '━━━━━━━━━━━━━━━━━━━\n';
+
+         if (data.tasks.length === 0) {
+             html += TQ.no_tasks_in_status + '\n';
+         } else {
+             for (let i = 0; i < data.tasks.length; i++) {
+                 const t = data.tasks[i];
+                 const name = this._shortenFileName(t.file_name || '-', 25);
+                 const time = t.updated_at ? this._formatRelativeTime(t.updated_at) : '-';
+                 html += format(TQ.task_detail_row, {
+                     index: data.page * data.pageSize + i + 1,
+                     statusIcon,
+                     name: escapeHTML(name),
+                     user: escapeHTML(String(t.user_id)),
+                     time
+                 }) + '\n';
+                 // 失败任务显示错误原因
+                 if (status === 'failed' && t.error_msg) {
+                     const shortError = t.error_msg.length > 50 ? t.error_msg.substring(0, 50) + '...' : t.error_msg;
+                     html += format(TQ.task_error_row, { error: escapeHTML(shortError) }) + '\n';
+                 }
+                 // 显示文件大小
+                 if (t.file_size) {
+                     html += format(TQ.task_size_row, { size: formatBytes(t.file_size) }) + '\n';
+                 }
+             }
+         }
+
+         html += '━━━━━━━━━━━━━━━━━━━\n';
+         html += format(TQ.detail_page_info, {
+             current: data.page + 1,
+             total: data.totalPages || 1,
+             count: data.total
+         });
+
+         // 翻页按钮
+         const page = data.page;
+         const totalPages = data.totalPages;
+         const navRow = [
+             Button.inline(page <= 0 ? ' ' : '⏮️', Buffer.from(page <= 0 ? 'noop' : `tq_${status}_0`)),
+             Button.inline(page <= 0 ? ' ' : '⬅️', Buffer.from(page <= 0 ? 'noop' : `tq_${status}_${page - 1}`)),
+             Button.inline(TQ.btn_refresh, Buffer.from(`tq_refresh_${status}_${page}`)),
+             Button.inline(page >= totalPages - 1 ? ' ' : '➡️', Buffer.from(page >= totalPages - 1 ? 'noop' : `tq_${status}_${page + 1}`)),
+             Button.inline(page >= totalPages - 1 ? ' ' : '⏭️', Buffer.from(page >= totalPages - 1 ? 'noop' : `tq_${status}_${totalPages - 1}`))
+         ];
+         const backRow = [
+             Button.inline(TQ.btn_back, Buffer.from('tq_back'))
+         ];
+         const buttons = [backRow, navRow];
+
+         return { text: html, buttons };
      }
 
      /**

@@ -1,15 +1,18 @@
 // --- Mocks ---
 const mockClient = {
     sendMessage: vi.fn().mockResolvedValue({ id: 123 }),
+    invoke: vi.fn().mockResolvedValue({}),
 };
 const mockTaskRepository = {
-    getQueueOverview: vi.fn()
+    getQueueOverview: vi.fn(),
+    getTasksByStatus: vi.fn()
 };
 const mockAuthGuard = {
     can: vi.fn()
 };
 const mockUIHelper = {
-    renderTaskQueue: vi.fn().mockReturnValue('rendered queue report')
+    renderTaskQueue: vi.fn().mockReturnValue({ text: 'rendered queue report', buttons: [] }),
+    renderTaskQueueDetail: vi.fn().mockReturnValue({ text: 'rendered detail', buttons: [] })
 };
 const mockSafeEdit = vi.fn();
 
@@ -30,7 +33,8 @@ vi.mock('../../src/utils/common.js', () => ({
     safeEdit: mockSafeEdit,
     escapeHTML: (t) => t,
     getMediaInfo: vi.fn(),
-    updateStatus: vi.fn()
+    updateStatus: vi.fn(),
+    formatBytes: (b) => `${b}B`
 }));
 vi.mock('../../src/config/index.js', () => ({
     getConfig: vi.fn().mockReturnValue({ ownerId: '999' }),
@@ -74,7 +78,7 @@ describe('Dispatcher /task_queue command', () => {
         vi.clearAllMocks();
     });
 
-    it('should send placeholder and render queue overview', async () => {
+    it('should send placeholder and render queue overview with buttons', async () => {
         const mockData = {
             statusCounts: { queued: 5, downloading: 2, completed: 100 },
             activeTasks: [
@@ -98,6 +102,10 @@ describe('Dispatcher /task_queue command', () => {
         expect(mockTaskRepository.getQueueOverview).toHaveBeenCalledWith(10);
         // Should render via UIHelper
         expect(mockUIHelper.renderTaskQueue).toHaveBeenCalledWith(mockData);
+        // Should safeEdit with text and buttons
+        expect(mockSafeEdit).toHaveBeenCalledWith(
+            'chat123', 123, 'rendered queue report', [], '123'
+        );
     });
 
     it('should handle database errors gracefully', async () => {
@@ -126,5 +134,77 @@ describe('Dispatcher /task_queue command', () => {
         await new Promise(r => setTimeout(r, 50));
 
         expect(mockTaskRepository.getQueueOverview).toHaveBeenCalledWith(10);
+    });
+});
+
+describe('Dispatcher /task_queue callback', () => {
+    const createCallbackEvent = (data) => ({
+        data: Buffer.from(data),
+        userId: '123',
+        msgId: 456,
+        peer: 'chat123',
+        queryId: 'query789'
+    });
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it('should handle tq_back callback to return to overview', async () => {
+        const overviewData = { statusCounts: {}, activeTasks: [], userCounts: [] };
+        mockTaskRepository.getQueueOverview.mockResolvedValue(overviewData);
+
+        await Dispatcher._handleTaskQueueCallback(
+            createCallbackEvent('tq_back'), 'tq_back', '123', vi.fn()
+        );
+
+        await new Promise(r => setTimeout(r, 50));
+
+        expect(mockTaskRepository.getQueueOverview).toHaveBeenCalledWith(10);
+        expect(mockUIHelper.renderTaskQueue).toHaveBeenCalledWith(overviewData);
+        expect(mockSafeEdit).toHaveBeenCalled();
+    });
+
+    it('should handle tq_failed_0 callback to show failed tasks', async () => {
+        const detailData = {
+            tasks: [{ id: 't1', user_id: 'u1', file_name: 'a.mp4', error_msg: 'timeout', status: 'failed' }],
+            total: 1, page: 0, pageSize: 10, totalPages: 1
+        };
+        mockTaskRepository.getTasksByStatus.mockResolvedValue(detailData);
+
+        await Dispatcher._handleTaskQueueCallback(
+            createCallbackEvent('tq_failed_0'), 'tq_failed_0', '123', vi.fn()
+        );
+
+        await new Promise(r => setTimeout(r, 50));
+
+        expect(mockTaskRepository.getTasksByStatus).toHaveBeenCalledWith('failed', 0, 10);
+        expect(mockUIHelper.renderTaskQueueDetail).toHaveBeenCalledWith('failed', detailData);
+    });
+
+    it('should handle tq_refresh_completed_1 callback', async () => {
+        const detailData = { tasks: [], total: 0, page: 1, pageSize: 10, totalPages: 0 };
+        mockTaskRepository.getTasksByStatus.mockResolvedValue(detailData);
+
+        await Dispatcher._handleTaskQueueCallback(
+            createCallbackEvent('tq_refresh_completed_1'), 'tq_refresh_completed_1', '123', vi.fn()
+        );
+
+        await new Promise(r => setTimeout(r, 50));
+
+        expect(mockTaskRepository.getTasksByStatus).toHaveBeenCalledWith('completed', 1, 10);
+    });
+
+    it('should handle callback errors gracefully', async () => {
+        mockTaskRepository.getTasksByStatus.mockRejectedValue(new Error('DB error'));
+        const answerMock = vi.fn();
+
+        await Dispatcher._handleTaskQueueCallback(
+            createCallbackEvent('tq_queued_0'), 'tq_queued_0', '123', answerMock
+        );
+
+        await new Promise(r => setTimeout(r, 50));
+
+        expect(answerMock).toHaveBeenCalledWith(expect.stringContaining('DB error'));
     });
 });

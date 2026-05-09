@@ -75,7 +75,15 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
                 completed: "✅ 已完成",
                 failed: "❌ 失败",
                 cancelled: "🚫 已取消"
-            }
+            },
+            detail_title: "📊 任务队列 — {{status}} (共 {{total}} 条)",
+            detail_page_info: "第 {{current}}/{{total}} 页 | 共 {{count}} 条",
+            task_detail_row: "<code>{{index}}.</code> {{statusIcon}} <code>{{name}}</code> | 👤 <code>{{user}}</code> | {{time}}",
+            task_error_row: "   ⚠️ {{error}}",
+            task_size_row: "   📦 {{size}}",
+            btn_back: "🔙 返回",
+            btn_refresh: "🔄",
+            no_tasks_in_status: "📭 该状态下暂无任务",
         }
     },
     format: (s, args) => {
@@ -564,7 +572,7 @@ describe("UIHelper", () => {
     });
 
     describe("renderTaskQueue", () => {
-        test("should render full report with all sections", () => {
+        test("should render full report with all sections and status buttons", () => {
             const now = Date.now();
             const data = {
                 statusCounts: { queued: 3, downloading: 2, uploading: 1, completed: 50, failed: 5, cancelled: 1 },
@@ -580,22 +588,26 @@ describe("UIHelper", () => {
 
             const result = UIHelper.renderTaskQueue(data);
 
-            expect(result).toContain("📊 <b>全局任务队列</b>");
-            expect(result).toContain("📈 <b>状态分布</b>");
-            expect(result).toContain("排队中");
-            expect(result).toContain("下载中");
-            expect(result).toContain("上传中");
-            expect(result).toContain("已完成");
-            expect(result).toContain("失败");
-            expect(result).toContain("已取消");
-            expect(result).toContain("⚡ <b>活跃任务</b>");
-            expect(result).toContain("movie.mp4");
-            expect(result).toContain("photo.jpg");
-            expect(result).toContain("2分钟前");
-            expect(result).toContain("5分钟前");
-            expect(result).toContain("👥 <b>用户活跃分布</b>");
-            expect(result).toContain("u1");
-            expect(result).toContain("u2");
+            expect(result.text).toContain("📊 <b>全局任务队列</b>");
+            expect(result.text).toContain("📈 <b>状态分布</b>");
+            expect(result.text).toContain("排队中");
+            expect(result.text).toContain("下载中");
+            expect(result.text).toContain("上传中");
+            expect(result.text).toContain("已完成");
+            expect(result.text).toContain("失败");
+            expect(result.text).toContain("已取消");
+            expect(result.text).toContain("⚡ <b>活跃任务</b>");
+            expect(result.text).toContain("movie.mp4");
+            expect(result.text).toContain("photo.jpg");
+            expect(result.text).toContain("2分钟前");
+            expect(result.text).toContain("5分钟前");
+            expect(result.text).toContain("👥 <b>用户活跃分布</b>");
+            expect(result.text).toContain("u1");
+            expect(result.text).toContain("u2");
+            // Should return status buttons
+            expect(result.buttons.length).toBe(2);
+            expect(result.buttons[0].length).toBe(3); // active statuses
+            expect(result.buttons[1].length).toBe(3); // other statuses
         });
 
         test("should render empty data without crashing", () => {
@@ -607,10 +619,10 @@ describe("UIHelper", () => {
 
             const result = UIHelper.renderTaskQueue(data);
 
-            expect(result).toContain("📊 <b>全局任务队列</b>");
-            expect(result).toContain("📈 <b>状态分布</b>");
-            expect(result).toContain("✅ 当前无活跃任务");
-            expect(result).not.toContain("👥");
+            expect(result.text).toContain("📊 <b>全局任务队列</b>");
+            expect(result.text).toContain("📈 <b>状态分布</b>");
+            expect(result.text).toContain("✅ 当前无活跃任务");
+            expect(result.text).not.toContain("👥");
         });
 
         test("should handle null file_name in active tasks", () => {
@@ -623,7 +635,7 @@ describe("UIHelper", () => {
             };
 
             const result = UIHelper.renderTaskQueue(data);
-            expect(result).toContain("-");
+            expect(result.text).toContain("-");
         });
 
         test("should handle undefined file_name in active tasks", () => {
@@ -636,7 +648,7 @@ describe("UIHelper", () => {
             };
 
             const result = UIHelper.renderTaskQueue(data);
-            expect(result).toContain("-");
+            expect(result.text).toContain("-");
         });
 
         test("should handle null updated_at in active tasks", () => {
@@ -649,7 +661,7 @@ describe("UIHelper", () => {
             };
 
             const result = UIHelper.renderTaskQueue(data);
-            expect(result).toContain("a.mp4");
+            expect(result.text).toContain("a.mp4");
         });
 
         test("should handle unknown status values", () => {
@@ -662,7 +674,7 @@ describe("UIHelper", () => {
             };
 
             const result = UIHelper.renderTaskQueue(data);
-            expect(result).toContain("unknown_status");
+            expect(result.text).toContain("unknown_status");
         });
 
         test("should render reasonable output for typical task list (10 tasks)", () => {
@@ -681,9 +693,9 @@ describe("UIHelper", () => {
             };
 
             const result = UIHelper.renderTaskQueue(data);
-            expect(result.length).toBeLessThan(4096);
-            expect(result).toContain("file_0.mp4");
-            expect(result).toContain("file_9.mp4");
+            expect(result.text.length).toBeLessThan(4096);
+            expect(result.text).toContain("file_0.mp4");
+            expect(result.text).toContain("file_9.mp4");
         });
 
         test("should omit user distribution when userCounts is empty", () => {
@@ -694,7 +706,7 @@ describe("UIHelper", () => {
             };
 
             const result = UIHelper.renderTaskQueue(data);
-            expect(result).not.toContain("👥 <b>用户活跃分布</b>");
+            expect(result.text).not.toContain("👥 <b>用户活跃分布</b>");
         });
 
         test("should show queued/downloading/uploading even when count is 0", () => {
@@ -705,9 +717,87 @@ describe("UIHelper", () => {
             };
 
             const result = UIHelper.renderTaskQueue(data);
-            expect(result).toContain("排队中");
-            expect(result).toContain("下载中");
-            expect(result).toContain("上传中");
+            expect(result.text).toContain("排队中");
+            expect(result.text).toContain("下载中");
+            expect(result.text).toContain("上传中");
+        });
+    });
+
+    describe("renderTaskQueueDetail", () => {
+        test("should render task list with details", () => {
+            const data = {
+                tasks: [
+                    { id: 't1', user_id: 'u1', file_name: 'a.mp4', status: 'failed', error_msg: 'DB timeout', file_size: 1048576, updated_at: Date.now() - 3600000 },
+                    { id: 't2', user_id: 'u2', file_name: 'b.mp4', status: 'failed', error_msg: 'Upload failed', file_size: 2097152, updated_at: Date.now() - 7200000 }
+                ],
+                total: 2, page: 0, pageSize: 10, totalPages: 1
+            };
+
+            const result = UIHelper.renderTaskQueueDetail('failed', data);
+
+            expect(result.text).toContain("任务队列 — ❌ 失败 (共 2 条)");
+            expect(result.text).toContain("a.mp4");
+            expect(result.text).toContain("b.mp4");
+            expect(result.text).toContain("⚠️ DB timeout");
+            expect(result.text).toContain("⚠️ Upload failed");
+            expect(result.text).toContain("📦");
+            expect(result.text).toContain("第 1/1 页");
+            // Should have back button and nav buttons
+            expect(result.buttons.length).toBe(2);
+        });
+
+        test("should render empty status", () => {
+            const data = {
+                tasks: [], total: 0, page: 0, pageSize: 10, totalPages: 0
+            };
+
+            const result = UIHelper.renderTaskQueueDetail('completed', data);
+
+            expect(result.text).toContain("该状态下暂无任务");
+            expect(result.text).toContain("任务队列 — ✅ 已完成 (共 0 条)");
+        });
+
+        test("should show pagination buttons for multi-page results", () => {
+            const data = {
+                tasks: Array.from({ length: 10 }, (_, i) => ({
+                    id: `t${i}`, user_id: 'u1', file_name: `f${i}.mp4`, status: 'completed', updated_at: Date.now()
+                })),
+                total: 25, page: 1, pageSize: 10, totalPages: 3
+            };
+
+            const result = UIHelper.renderTaskQueueDetail('completed', data);
+
+            expect(result.text).toContain("第 2/3 页");
+            // Nav row should have active prev/next buttons
+            const navRow = result.buttons[1];
+            expect(navRow.length).toBe(5); // home, prev, refresh, next, end
+        });
+
+        test("should disable prev buttons on first page", () => {
+            const data = {
+                tasks: [{ id: 't1', user_id: 'u1', file_name: 'a.mp4', status: 'queued', updated_at: Date.now() }],
+                total: 1, page: 0, pageSize: 10, totalPages: 1
+            };
+
+            const result = UIHelper.renderTaskQueueDetail('queued', data);
+
+            const navRow = result.buttons[1];
+            // Home and prev should be noop (disabled)
+            expect(navRow[0].data.toString()).toBe('noop');
+            expect(navRow[1].data.toString()).toBe('noop');
+        });
+
+        test("should truncate long error messages", () => {
+            const longError = 'A'.repeat(100);
+            const data = {
+                tasks: [{ id: 't1', user_id: 'u1', file_name: 'a.mp4', status: 'failed', error_msg: longError, updated_at: Date.now() }],
+                total: 1, page: 0, pageSize: 10, totalPages: 1
+            };
+
+            const result = UIHelper.renderTaskQueueDetail('failed', data);
+
+            expect(result.text).toContain('...');
+            expect(result.text).not.toContain('A'.repeat(51));
         });
     });
 

@@ -200,7 +200,15 @@ export const STRINGS = {
             completed: "✅ 已完成",
             failed: "❌ 失败",
             cancelled: "🚫 已取消"
-        }
+        },
+        detail_title: "📊 任务队列 — {{status}} (共 {{total}} 条)",
+        detail_page_info: "第 {{current}}/{{total}} 页 | 共 {{count}} 条",
+        task_detail_row: "<code>{{index}}.</code> {{statusIcon}} <code>{{name}}</code> | 👤 <code>{{user}}</code> | {{time}}",
+        task_error_row: "   ⚠️ {{error}}",
+        task_size_row: "   📦 {{size}}",
+        btn_back: "🔙 返回",
+        btn_refresh: "🔄",
+        no_tasks_in_status: "📭 该状态下暂无任务",
     },
 
     // --- 上传路径设置 ---

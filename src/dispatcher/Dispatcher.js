@@ -258,6 +258,9 @@ export class Dispatcher {
         } else if (data.startsWith("files_")) {
             await this._handleFilesCallback(event, data, userId, answer);
 
+        } else if (data.startsWith("tq_")) {
+            await this._handleTaskQueueCallback(event, data, userId, answer);
+
         } else if (data.startsWith("remote_folder_")) {
             await this._handleRemoteFolderCallback(event, userId, answer);
 
@@ -827,13 +830,43 @@ export class Dispatcher {
             try {
                 const { TaskRepository } = await import("../repositories/TaskRepository.js");
                 const data = await TaskRepository.getQueueOverview(10);
-                const message = UIHelper.renderTaskQueue(data);
-                await safeEdit(target, placeholder.id, message, null, userId);
+                const { text, buttons } = UIHelper.renderTaskQueue(data);
+                await safeEdit(target, placeholder.id, text, buttons, userId);
             } catch (error) {
                 log.error("Task queue error:", error);
                 await safeEdit(target, placeholder.id, format(STRINGS.task_queue.error, { error: escapeHTML(error.message) }), null, userId);
             }
         })();
+    }
+
+    /**
+     * [私有] 任务队列翻页回调
+     */
+    static async _handleTaskQueueCallback(event, data, userId, answerCallback) {
+        try {
+            const { TaskRepository } = await import("../repositories/TaskRepository.js");
+
+            if (data === "tq_back") {
+                const overviewData = await TaskRepository.getQueueOverview(10);
+                const { text, buttons } = UIHelper.renderTaskQueue(overviewData);
+                await safeEdit(event.userId, event.msgId, text, buttons, userId);
+                return await answerCallback();
+            }
+
+            // 解析 tq_{status}_{page} 或 tq_refresh_{status}_{page}
+            const cleanData = data.replace("tq_refresh_", "tq_");
+            const parts = cleanData.split("_");
+            const status = parts[1];
+            const page = parseInt(parts[2]) || 0;
+
+            const detailData = await TaskRepository.getTasksByStatus(status, page, 10);
+            const { text, buttons } = UIHelper.renderTaskQueueDetail(status, detailData);
+            await safeEdit(event.userId, event.msgId, text, buttons, userId);
+            await answerCallback();
+        } catch (error) {
+            log.error("Task queue callback error:", error);
+            await answerCallback(STRINGS.task_queue.error.replace('{{error}}', error.message));
+        }
     }
 
     /**

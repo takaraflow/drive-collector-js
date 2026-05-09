@@ -682,4 +682,73 @@ describe('TaskRepository', () => {
             );
         });
     });
+
+    describe('getTasksByStatus', () => {
+        it('should return paginated tasks for a given status', async () => {
+            const mockTasks = [
+                { id: 't1', user_id: 'u1', file_name: 'a.mp4', status: 'failed', error_msg: 'timeout' },
+                { id: 't2', user_id: 'u2', file_name: 'b.mp4', status: 'failed', error_msg: 'crash' }
+            ];
+            mockD1.fetchAll.mockResolvedValueOnce(mockTasks);
+            mockD1.fetchOne.mockResolvedValueOnce({ total: 15 });
+
+            const result = await TaskRepository.getTasksByStatus('failed', 0, 10);
+
+            expect(result.tasks).toEqual(mockTasks);
+            expect(result.total).toBe(15);
+            expect(result.page).toBe(0);
+            expect(result.pageSize).toBe(10);
+            expect(result.totalPages).toBe(2);
+        });
+
+        it('should handle empty results', async () => {
+            mockD1.fetchAll.mockResolvedValueOnce([]);
+            mockD1.fetchOne.mockResolvedValueOnce({ total: 0 });
+
+            const result = await TaskRepository.getTasksByStatus('completed', 0, 10);
+
+            expect(result.tasks).toEqual([]);
+            expect(result.total).toBe(0);
+            expect(result.totalPages).toBe(0);
+        });
+
+        it('should handle null returns from D1', async () => {
+            mockD1.fetchAll.mockResolvedValueOnce(null);
+            mockD1.fetchOne.mockResolvedValueOnce(null);
+
+            const result = await TaskRepository.getTasksByStatus('queued', 0, 10);
+
+            expect(result.tasks).toEqual([]);
+            expect(result.total).toBe(0);
+            expect(result.totalPages).toBe(0);
+        });
+
+        it('should calculate correct offset for page 2', async () => {
+            mockD1.fetchAll.mockResolvedValueOnce([]);
+            mockD1.fetchOne.mockResolvedValueOnce({ total: 25 });
+
+            await TaskRepository.getTasksByStatus('failed', 2, 10);
+
+            expect(mockD1.fetchAll).toHaveBeenCalledWith(
+                expect.stringContaining('LIMIT ? OFFSET ?'),
+                ['failed', 10, 20]
+            );
+        });
+
+        it('should verify SQL query structure', async () => {
+            mockD1.fetchAll.mockResolvedValueOnce([]);
+            mockD1.fetchOne.mockResolvedValueOnce({ total: 0 });
+
+            await TaskRepository.getTasksByStatus('completed', 0, 10);
+
+            expect(mockD1.fetchAll).toHaveBeenCalledWith(
+                expect.stringContaining('WHERE status = ?'),
+                ['completed', 10, 0]
+            );
+            expect(mockD1.fetchOne).toHaveBeenCalledWith(
+                expect.stringContaining('COUNT(*)'),
+                ['completed']
+            );
+        });
+    });
 });

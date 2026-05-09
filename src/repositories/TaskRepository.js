@@ -1031,4 +1031,32 @@ export class TaskRepository {
             userCounts: userCounts || []
         };
     }
+
+    /**
+     * 按状态分页查询任务
+     * @param {string} status - 任务状态
+     * @param {number} page - 页码（从 0 开始）
+     * @param {number} pageSize - 每页条数，默认 10
+     * @returns {Promise<{tasks: Array, total: number, page: number, pageSize: number, totalPages: number}>}
+     */
+    static async getTasksByStatus(status, page = 0, pageSize = 10) {
+        const offset = page * pageSize;
+        const [tasks, countRow] = await Promise.all([
+            d1.fetchAll(
+                "SELECT id, user_id, file_name, file_size, status, error_msg, created_at, updated_at FROM tasks WHERE status = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                [status, pageSize, offset]
+            ),
+            d1.fetchOne(
+                "SELECT COUNT(*) as total FROM tasks WHERE status = ?",
+                [status]
+            )
+        ]);
+        return {
+            tasks: tasks || [],
+            total: countRow?.total || 0,
+            page,
+            pageSize,
+            totalPages: Math.ceil((countRow?.total || 0) / pageSize)
+        };
+    }
 }
