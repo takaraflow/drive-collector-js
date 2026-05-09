@@ -11,7 +11,8 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
         validateConfig: vi.fn().mockReturnValue(true),
         getConfig: vi.fn().mockReturnValue({
              port: 0, // 0 for random port
-             http2: { enabled: false }
+             http2: { enabled: false },
+             streamForwarding: { secret: 'test-secret' }
         })
     };
 });
@@ -97,7 +98,8 @@ describe('Webhook Configuration Refresh Integration', () => {
 
     test('should trigger config refresh on POST /api/v2/config/refresh', async () => {
         const response = await fetch(`${baseUrl}/api/v2/config/refresh`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'x-instance-secret': 'test-secret' }
         });
 
         const body = await response.json();
@@ -118,7 +120,8 @@ describe('Webhook Configuration Refresh Integration', () => {
         });
 
         const response = await fetch(`${baseUrl}/api/v2/config/refresh`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'x-instance-secret': 'test-secret' }
         });
 
         const body = await response.json();

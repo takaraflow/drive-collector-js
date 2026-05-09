@@ -1,9 +1,9 @@
 #!/bin/sh
 echo "[s6-app] === RUN SCRIPT EXECUTED ==="
 # 使用原生环境变量赋值，避免依赖 devDependencies 中的 cross-env
-# 设置 Node.js 堆内存上限：容器仅 256MB，Node 默认堆约 256MB 会吃光内存
-# 限制到 200MB 给 OS/rclone/cloudflared 留空间，并启用高效 GC
-NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=200 --max-semi-space-size=16 --expose-gc"
+# 堆内存上限可通过 MAX_HEAP 环境变量配置，默认 512MB
+MAX_HEAP="${MAX_HEAP:-512}"
+NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=${MAX_HEAP} --max-semi-space-size=16 --expose-gc"
 
 # 条件加载 OpenTelemetry SDK（仅在配置了 New Relic License Key 时）
 # --import 必须在业务模块加载前执行，以拦截 http/ioredis/undici 模块

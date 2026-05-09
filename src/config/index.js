@@ -1,4 +1,5 @@
 import { loadDotenv } from './dotenv.js';
+import crypto from 'crypto';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
@@ -472,12 +473,18 @@ function buildConfigObject(env) {
             metricsPort: parseInt(env.TUNNEL_METRICS_PORT) || 2000,
             metricsHost: env.TUNNEL_METRICS_HOST || '127.0.0.1'
         },
-        streamForwarding: {
-            enabled: env.STREAM_FORWARDING_ENABLED === 'true',
-            secret: env.INSTANCE_SECRET || 'default_secret',
-            externalUrl: env.APP_EXTERNAL_URL || null,
-            lbUrl: env.LB_WEBHOOK_URL || env.APP_EXTERNAL_URL || null
-        }
+        streamForwarding: (() => {
+            const secret = env.INSTANCE_SECRET || (env.STREAM_FORWARDING_ENABLED === 'true'
+                ? (console.warn('⚠️ INSTANCE_SECRET 未配置，已生成随机密钥（重启后失效，跨实例通信不可用）'),
+                   crypto.randomBytes(32).toString('hex'))
+                : '');
+            return {
+                enabled: env.STREAM_FORWARDING_ENABLED === 'true',
+                secret,
+                externalUrl: env.APP_EXTERNAL_URL || null,
+                lbUrl: env.LB_WEBHOOK_URL || env.APP_EXTERNAL_URL || null
+            };
+        })()
     };
 }
 

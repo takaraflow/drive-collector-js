@@ -187,14 +187,14 @@ class StreamTransferService {
 
             if (metadata.isLast) {
                 log.info(`🏁 任务数据接收完成: ${taskId}`);
-                streamContext.stdin.end();
+                try { streamContext.stdin.end(); } catch {}
             }
 
             return { success: true, statusCode: 200 };
         } catch (error) {
             log.error(`Error handling incoming chunk for ${taskId}:`, error);
             if (streamContext) {
-                streamContext.stdin.end();
+                try { streamContext.stdin.end(); } catch {}
                 this.activeStreams.delete(taskId);
             }
             return { success: false, statusCode: 500, message: error.message };
@@ -401,8 +401,8 @@ class StreamTransferService {
             // 清理活动流
             const context = this.activeStreams.get(taskId);
             if (context) {
-                context.stdin.end();
-                context.proc.kill();
+                try { context.stdin.end(); } catch {}
+                try { context.proc.kill(); } catch {}
                 this.activeStreams.delete(taskId);
             }
 
@@ -578,8 +578,8 @@ class StreamTransferService {
         for (const [taskId, context] of this.activeStreams.entries()) {
             if (now - context.lastSeen > timeout) {
                 log.warn(`清理过期流任务: ${taskId}`);
-                context.stdin.end();
-                context.proc.kill();
+                try { context.stdin.end(); } catch {}
+                try { context.proc.kill(); } catch {}
                 this.activeStreams.delete(taskId);
             }
         }

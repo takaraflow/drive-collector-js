@@ -33,8 +33,9 @@ if [ "$#" -gt 0 ]; then
 fi
 
 echo "[entrypoint] Starting Node.js application (fallback)..."
-# 设置 Node.js 堆内存上限：容器仅 256MB，限制到 200MB 给 OS/rclone/cloudflared 留空间
-NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=200 --max-semi-space-size=16 --expose-gc"
+# 堆内存上限可通过 MAX_HEAP 环境变量配置，默认 512MB
+MAX_HEAP="${MAX_HEAP:-512}"
+NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=${MAX_HEAP} --max-semi-space-size=16 --expose-gc"
 
 # 条件加载 OpenTelemetry SDK（仅在配置了 New Relic License Key 时）
 # 默认采样率 10%，避免 256MB 容器在高负载下 span 队列溢出及 NR ingest 成本过高

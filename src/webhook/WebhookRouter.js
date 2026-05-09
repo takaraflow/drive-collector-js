@@ -78,12 +78,19 @@ async function handleStreamForwarding(req, res) {
     if (path.startsWith('/api/v2/tasks/') && path.endsWith('/status') && req.method === 'POST') {
         const parts = path.split('/');
         const taskId = parts[parts.length - 2];
-        
+
         let body = '';
+        let bodySize = 0;
         for await (const chunk of req) {
+            bodySize += chunk.length;
+            if (bodySize > 1024 * 1024) {
+                res.writeHead(413);
+                res.end('Payload Too Large');
+                return true;
+            }
             body += chunk;
         }
-        
+
         const { streamTransferService } = await import("../services/StreamTransferService.js");
         const result = await streamTransferService.handleStatusUpdate(taskId, JSON.parse(body), req.headers);
         res.writeHead(result.statusCode || 200);
@@ -95,9 +102,16 @@ async function handleStreamForwarding(req, res) {
     if (path.startsWith('/api/v2/tasks/') && path.endsWith('/retry') && req.method === 'POST') {
         const parts = path.split('/');
         const taskId = parts[parts.length - 2];
-        
+
         let body = '';
+        let bodySize = 0;
         for await (const chunk of req) {
+            bodySize += chunk.length;
+            if (bodySize > 1024 * 1024) {
+                res.writeHead(413);
+                res.end('Payload Too Large');
+                return true;
+            }
             body += chunk;
         }
         
@@ -121,6 +135,14 @@ async function handleStreamForwarding(req, res) {
 
     // 4. 触发配置刷新 (Webhook)
     if (path === '/api/v2/config/refresh' && req.method === 'POST') {
+        const secret = req.headers['x-instance-secret'];
+        const { getConfig } = await import("../config/index.js");
+        const cfg = getConfig();
+        if (secret !== cfg.streamForwarding.secret) {
+            res.writeHead(401);
+            res.end('Unauthorized');
+            return true;
+        }
         const { refreshConfiguration } = await import("../config/index.js");
         const result = await refreshConfiguration();
         res.writeHead(result.success ? 200 : 500, { 'Content-Type': 'application/json' });
@@ -298,7 +320,14 @@ export async function handleWebhook(req, res) {
     }
 
     // 处理流式转发API
-    if (await handleStreamForwarding(req, res)) return;
+    try {
+        if (await handleStreamForwarding(req, res)) return;
+    } catch (streamError) {
+        console.error("❌ Stream forwarding error:", streamError);
+        res.writeHead(500);
+        res.end('Internal Server Error');
+        return;
+    }
 
     // 验证签名
     const signature = req.headers['upstash-signature'];

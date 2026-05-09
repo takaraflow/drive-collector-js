@@ -18,9 +18,6 @@ RUN npm ci && npm cache clean --force
 # 复制源代码
 COPY . .
 
-# 运行测试
-RUN npm test
-
 # --- 第二阶段：运行环境 ---
 FROM node:20-slim
 

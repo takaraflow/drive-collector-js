@@ -252,8 +252,10 @@ describe('WebhookRouter', () => {
         it('should handle /api/v2/config/refresh', async () => {
             req.url = '/api/v2/config/refresh';
             req.method = 'POST';
+            req.headers['x-instance-secret'] = 'test-secret';
 
-            const { refreshConfiguration } = await import('../../../src/config/index.js');
+            const { getConfig, refreshConfiguration } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
             refreshConfiguration.mockResolvedValue({ success: true });
 
             await handleWebhook(req, res);
@@ -266,24 +268,10 @@ describe('WebhookRouter', () => {
         it('should return 500 when /api/v2/config/refresh fails', async () => {
             req.url = '/api/v2/config/refresh';
             req.method = 'POST';
+            req.headers['x-instance-secret'] = 'test-secret';
 
-            const { refreshConfiguration } = await import('../../../src/config/index.js');
-            refreshConfiguration.mockResolvedValue({ success: false });
-
-            await handleWebhook(req, res);
-
-            expect(refreshConfiguration).toHaveBeenCalled();
-            expect(res.writeHead).toHaveBeenCalledWith(500, { 'Content-Type': 'application/json' });
-            expect(res.end).toHaveBeenCalledWith(JSON.stringify({ success: false }));
-        });
-    });
-
-
-        it('should handle config refresh failure', async () => {
-            req.url = '/api/v2/config/refresh';
-            req.method = 'POST';
-
-            const { refreshConfiguration } = await import('../../../src/config/index.js');
+            const { getConfig, refreshConfiguration } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
             refreshConfiguration.mockResolvedValue({ success: false });
 
             await handleWebhook(req, res);
@@ -305,6 +293,7 @@ describe('WebhookRouter', () => {
             expect(res.writeHead).toHaveBeenCalledWith(500);
             expect(res.end).toHaveBeenCalledWith('Stream Error');
         });
+    });
 
     describe('processWebhookData and general flows', () => {
         it('should return 401 if signature is missing', async () => {

@@ -344,19 +344,24 @@ export class MediaGroupBuffer {
         } catch (error) {
             log.error(`Error flushing buffer for group ${gid}:`, error);
 
-            const { meta } = await this._getBuffer(gid);
-            if (meta) {
-                meta.errorCount = (meta.errorCount || 0) + 1;
-                await cache.set(this._bufferKey(gid), { ...meta, messages: meta.messages || [] }, this.options.staleThreshold / 1000);
+            try {
+                const { meta } = await this._getBuffer(gid);
+                if (meta) {
+                    meta.errorCount = (meta.errorCount || 0) + 1;
+                    await cache.set(this._bufferKey(gid), { ...meta, messages: meta.messages || [] }, this.options.staleThreshold / 1000);
 
-                if (meta.errorCount < 3) {
-                    setTimeout(() => {
-                        this._attemptFlush(gid).catch((err) => log.error(`Retry flush failed for group ${gid}:`, err));
-                    }, this.options.bufferTimeout * meta.errorCount);
-                } else {
-                    log.error(`Media group ${gid} failed after ${meta.errorCount} attempts`);
-                    await this._cleanupBuffer(gid);
+                    if (meta.errorCount < 3) {
+                        setTimeout(() => {
+                            this._attemptFlush(gid).catch((err) => log.error(`Retry flush failed for group ${gid}:`, err));
+                        }, this.options.bufferTimeout * meta.errorCount);
+                    } else {
+                        log.error(`Media group ${gid} failed after ${meta.errorCount} attempts`);
+                        await this._cleanupBuffer(gid);
+                    }
                 }
+            } catch (retryError) {
+                log.error(`Failed to schedule retry for group ${gid}:`, retryError);
+                await this._cleanupBuffer(gid).catch(() => {});
             }
         } finally {
             this._clearLocalFlushTimer(gid);
