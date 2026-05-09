@@ -7,3 +7,8 @@
 **Vulnerability:** Unsanitized file names from untrusted sources (e.g., database fields like `row.file_name` or Telegram attributes) were directly concatenated with `config.downloadDir` using `path.join()`.
 **Learning:** This pattern creates a critical path traversal vulnerability. If an attacker controls the file name and inputs something like `../../etc/passwd`, the application could read, write, or delete arbitrary files outside the intended directory.
 **Prevention:** Always sanitize file names from external or untrusted sources using `path.basename()` before combining them with base directories to ensure they are restricted to a single directory level.
+
+## 2024-05-09 - Replace Math.random with cryptographically secure PRNG
+**Vulnerability:** Predictable IDs generated using Math.random().
+**Learning:** Math.random() is predictable and shouldn't be used for IDs.
+**Prevention:** Always use crypto.randomUUID() or other cryptographically secure PRNGs.
