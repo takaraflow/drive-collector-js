@@ -15,6 +15,7 @@ export const STRINGS = {
               "<b>管理员命令：</b>\n" +
               "/open_service - 🔓 开启服务 (公开模式)\n" +
                "/close_service - 🔒 关闭服务 (维护模式)\n" +
+               "/task_queue - 📊 查看任务队列\n" +
                "/diagnosis - 🩺 系统诊断\n" +
                "/ban - 🚫 封禁用户 (UID)\n" +
                "/unban - ✅ 解封用户 (UID)\n" +
