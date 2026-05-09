@@ -34,6 +34,7 @@ export const getBeijingTimestamp = () => {
 export const getBeijingISOString = () => {
     const now = new Date();
     const offset = 8 * 60; // UTC+8 in minutes
-    const localTime = new Date(now.getTime() + (offset + now.getTimezoneOffset()) * 60000);
+    // Add 8 hours in milliseconds to get UTC+8 time, independent of local timezone offset
+    const localTime = new Date(now.getTime() + offset * 60000);
     return localTime.toISOString().replace('Z', '+08:00');
 };
