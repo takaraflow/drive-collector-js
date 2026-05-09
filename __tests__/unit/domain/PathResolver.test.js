@@ -34,6 +34,33 @@ describe('PathResolver', () => {
                 '/home/user/project/lib/utils.js'
             ]);
         });
+
+        it('should handle empty inputs array', () => {
+            const baseDir = '/home/user/project';
+            const inputs = [];
+
+            const result = resolvePaths(baseDir, inputs);
+
+            expect(result).toEqual([]);
+        });
+
+        it('should handle inputs that are exactly "./"', () => {
+            const baseDir = '/home/user/project';
+            const inputs = ['./'];
+
+            const result = resolvePaths(baseDir, inputs);
+
+            expect(result).toEqual(['/home/user/project/']);
+        });
+
+        it('should handle baseDir with trailing slash', () => {
+            const baseDir = '/home/user/project/';
+            const inputs = ['src/index.js'];
+
+            const result = resolvePaths(baseDir, inputs);
+
+            expect(result).toEqual(['/home/user/project//src/index.js']);
+        });
     });
 
     describe('shouldIgnore', () => {
