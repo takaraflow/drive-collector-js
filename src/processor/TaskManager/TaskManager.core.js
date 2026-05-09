@@ -854,9 +854,10 @@ export class TaskManagerCore {
     /**
      * 手动重试任务 - 用于处理卡住/失败的任务
      * @param {string} taskId - 任务ID
+     * @param {string|number} [userId] - 调用者ID（WebhookRouter 等内部调用可省略）
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
-    static async retryTask(taskId) {
+    static async retryTask(taskId, userId) {
         if (!taskId) {
             return { success: false, statusCode: 400, message: "Task ID is required" };
         }
@@ -865,6 +866,14 @@ export class TaskManagerCore {
             const dbTask = await TaskRepository.findById(taskId);
             if (!dbTask) {
                 return { success: false, statusCode: 404, message: "Task not found" };
+            }
+
+            if (userId) {
+                const isOwner = dbTask.user_id === userId.toString();
+                const canRetryAny = await AuthGuard.can(userId, "task:cancel:any");
+                if (!isOwner && !canRetryAny) {
+                    return { success: false, statusCode: 403, message: "Permission denied" };
+                }
             }
 
             if (dbTask.status === 'completed') {

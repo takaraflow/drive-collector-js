@@ -787,10 +787,11 @@ export class TaskManager {
     /**
      * 手动重试任务 - 实例无关，通过 QStash 重新派发
      * @param {string} taskId - 任务ID
+     * @param {string|number} [userId] - 调用者ID（WebhookRouter 等内部调用可省略）
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
-    static async retryTask(taskId) {
-        const { TaskRepository, instanceCoordinator, queueService } = getDeps();
+    static async retryTask(taskId, userId) {
+        const { TaskRepository, AuthGuard, instanceCoordinator, queueService } = getDeps();
         const log = getLog();
 
         if (!taskId) {
@@ -801,6 +802,15 @@ export class TaskManager {
             const dbTask = await TaskRepository.findById(taskId);
             if (!dbTask) {
                 return { success: false, statusCode: 404, message: "Task not found" };
+            }
+
+            // 权限校验：与 cancelTask 保持一致
+            if (userId) {
+                const isOwner = dbTask.user_id === userId.toString();
+                const canRetryAny = await AuthGuard.can(userId, "task:cancel:any");
+                if (!isOwner && !canRetryAny) {
+                    return { success: false, statusCode: 403, message: "Permission denied" };
+                }
             }
 
             if (dbTask.status === 'completed') {

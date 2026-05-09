@@ -248,8 +248,8 @@ export class Dispatcher {
             await answer(ok ? STRINGS.task.cmd_sent : STRINGS.task.task_not_found);
 
         } else if (data.startsWith("retry_")) {
-            const taskId = data.split("_")[1];
-            const result = await TaskManager.retryTask(taskId);
+            const taskId = data.slice(6);
+            const result = await TaskManager.retryTask(taskId, userId);
             await answer(result.success ? STRINGS.task.cmd_sent : (result.message || STRINGS.task.task_not_found));
 
         } else if (data.startsWith("drive_")) { 

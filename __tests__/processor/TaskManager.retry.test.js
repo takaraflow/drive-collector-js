@@ -56,6 +56,10 @@ vi.mock('../../src/services/QueueService.js', () => ({
     }
 }));
 
+vi.mock('../../src/modules/AuthGuard.js', () => ({
+    AuthGuard: { can: vi.fn().mockResolvedValue(false) }
+}));
+
 vi.mock('../../src/utils/limiter.js', () => ({
     runBotTask: vi.fn((fn) => fn()),
     runMtprotoTask: vi.fn((fn) => fn()),
@@ -169,5 +173,35 @@ describe('TaskManager - Retry', () => {
 
         const result = await TaskManager.retryTask('task-123');
         expect(result).toEqual({ success: false, statusCode: 500, message: "DB connection failed" });
+    });
+
+    it('should reject when user is not owner and lacks permission', async () => {
+        const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+        TaskRepository.findById.mockResolvedValue({
+            id: 'task-123', user_id: 'owner-1', status: 'failed'
+        });
+
+        const result = await TaskManager.retryTask('task-123', 'other-user');
+        expect(result).toEqual({ success: false, statusCode: 403, message: "Permission denied" });
+    });
+
+    it('should allow retry when user is owner', async () => {
+        const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+        TaskRepository.findById.mockResolvedValue({
+            id: 'task-123', user_id: 'owner-1', status: 'failed'
+        });
+
+        const result = await TaskManager.retryTask('task-123', 'owner-1');
+        expect(result.success).toBe(true);
+    });
+
+    it('should allow retry for already queued tasks (stuck recovery)', async () => {
+        const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+        TaskRepository.findById.mockResolvedValue({
+            id: 'task-123', user_id: 'u1', status: 'queued'
+        });
+
+        const result = await TaskManager.retryTask('task-123');
+        expect(result).toEqual({ success: true, statusCode: 200, message: "Task re-enqueued" });
     });
 });

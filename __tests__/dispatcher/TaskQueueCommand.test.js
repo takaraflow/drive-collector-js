@@ -235,7 +235,7 @@ describe('Dispatcher retry_ callback', () => {
 
         await Dispatcher._handleCallback(event, { userId: '123' });
 
-        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('task-123');
+        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('task-123', '123');
     });
 
     it('should invoke callback answer on retry success', async () => {
@@ -265,7 +265,23 @@ describe('Dispatcher retry_ callback', () => {
 
         await Dispatcher._handleCallback(event, { userId: '123' });
 
-        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('task-456');
+        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('task-456', '123');
+        expect(mockClient.invoke).toHaveBeenCalled();
+    });
+
+    it('should show permission denied on unauthorized retry', async () => {
+        mockTaskManager.retryTask.mockResolvedValue({ success: false, statusCode: 403, message: "Permission denied" });
+
+        const event = {
+            data: Buffer.from('retry_task-789'),
+            userId: '456',
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '456' });
+
+        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('task-789', '456');
         expect(mockClient.invoke).toHaveBeenCalled();
     });
 });
