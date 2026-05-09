@@ -34,6 +34,36 @@ describe('PathResolver', () => {
                 '/home/user/project/lib/utils.js'
             ]);
         });
+
+        it('should handle empty inputs array', () => {
+            const result = resolvePaths('/base', []);
+            expect(result).toEqual([]);
+        });
+
+        it('should handle baseDir with trailing slash', () => {
+            const result = resolvePaths('/base/', ['path.txt']);
+            expect(result).toEqual(['/base//path.txt']);
+        });
+
+        it('should only remove leading ./ and preserve internal ones', () => {
+            const result = resolvePaths('/base', ['./some/./path.txt']);
+            expect(result).toEqual(['/base/some/./path.txt']);
+        });
+
+        it('should handle empty inputs array', () => {
+            const result = resolvePaths('/base', []);
+            expect(result).toEqual([]);
+        });
+
+        it('should handle baseDir with trailing slash', () => {
+            const result = resolvePaths('/base/', ['path.txt']);
+            expect(result).toEqual(['/base//path.txt']);
+        });
+
+        it('should only remove leading ./ and preserve internal ones', () => {
+            const result = resolvePaths('/base', ['./some/./path.txt']);
+            expect(result).toEqual(['/base/some/./path.txt']);
+        });
     });
 
     describe('shouldIgnore', () => {
