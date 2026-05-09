@@ -230,7 +230,7 @@ describe('WebhookRouter', () => {
 
             await handleWebhook(req, res);
 
-            expect(TaskManager.retryTask).toHaveBeenCalledWith('123', 'auto');
+            expect(TaskManager.retryTask).toHaveBeenCalledWith('123');
             expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
             expect(res.end).toHaveBeenCalledWith(JSON.stringify({ success: true, statusCode: 200 }));
         });

@@ -742,8 +742,8 @@ describe("UIHelper", () => {
             expect(result.text).toContain("⚠️ Upload failed");
             expect(result.text).toContain("📦");
             expect(result.text).toContain("第 1/1 页");
-            // Should have back button and nav buttons
-            expect(result.buttons.length).toBe(2);
+            // Should have back button, retry buttons, and nav buttons
+            expect(result.buttons.length).toBe(3);
         });
 
         test("should render empty status", () => {
