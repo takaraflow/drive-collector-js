@@ -70,6 +70,15 @@ vi.mock('../../src/services/logger/index.js', () => ({
     LoggerService: vi.fn()
 }));
 
+const mockTaskManager = {
+    retryTask: vi.fn(),
+    cancelTask: vi.fn(),
+    cancelTasksByMsgId: vi.fn(),
+};
+vi.mock('../../src/processor/TaskManager.js', () => ({
+    TaskManager: mockTaskManager
+}));
+
 // --- Import under test ---
 const { Dispatcher } = await import('../../src/dispatcher/Dispatcher.js');
 
@@ -206,5 +215,57 @@ describe('Dispatcher /task_queue callback', () => {
         await new Promise(r => setTimeout(r, 50));
 
         expect(answerMock).toHaveBeenCalledWith(expect.stringContaining('DB error'));
+    });
+});
+
+describe('Dispatcher retry_ callback', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it('should call TaskManager.retryTask on retry_ callback', async () => {
+        mockTaskManager.retryTask.mockResolvedValue({ success: true, statusCode: 200, message: "Task re-enqueued" });
+
+        const event = {
+            data: Buffer.from('retry_task-123'),
+            userId: '123',
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('task-123');
+    });
+
+    it('should invoke callback answer on retry success', async () => {
+        mockTaskManager.retryTask.mockResolvedValue({ success: true, statusCode: 200, message: "Task re-enqueued" });
+
+        const event = {
+            data: Buffer.from('retry_task-456'),
+            userId: '123',
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockClient.invoke).toHaveBeenCalled();
+    });
+
+    it('should invoke callback answer on retry failure', async () => {
+        mockTaskManager.retryTask.mockResolvedValue({ success: false, message: "Task already completed" });
+
+        const event = {
+            data: Buffer.from('retry_task-456'),
+            userId: '123',
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('task-456');
+        expect(mockClient.invoke).toHaveBeenCalled();
     });
 });
