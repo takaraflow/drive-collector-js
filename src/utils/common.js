@@ -83,10 +83,14 @@ export const getMediaInfo = (input) => {
 };
 
 // 统一更新任务状态 (带取消按钮)
-export const updateStatus = async (task, text, isFinal = false, priority = null) => {
-    const cancelText = task.proc ? STRINGS.task.cancel_transfer_btn : STRINGS.task.cancel_task_btn;
-    const buttons = isFinal ? null : [Button.inline(cancelText, Buffer.from(`cancel_${task.id}`))];
-    // 增强 HTML 检测：包含常见标签即视为 HTML 模式
+export const updateStatus = async (task, text, isFinal = false, priority = null, showRetry = false) => {
+    let buttons = null;
+    if (!isFinal) {
+        const cancelText = task.proc ? STRINGS.task.cancel_transfer_btn : STRINGS.task.cancel_task_btn;
+        buttons = [Button.inline(cancelText, Buffer.from(`cancel_${task.id}`))];
+    } else if (showRetry) {
+        buttons = [Button.inline(STRINGS.task.retry_btn, Buffer.from(`retry_${task.id}`))];
+    }
     const isHtml = /<\/?(b|i|code|pre|a)(\s|>)/i.test(text);
     const options = priority ? { priority } : {};
     await safeEdit(task.chatId, task.msgId, text, buttons, task.userId, isHtml ? 'html' : 'markdown', options);
