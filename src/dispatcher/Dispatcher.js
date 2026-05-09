@@ -864,7 +864,7 @@ export class Dispatcher {
             const status = parts[1];
             const page = parseInt(parts[2]) || 0;
 
-            const detailData = await TaskRepository.getTasksByStatus(status, page, 10);
+            const detailData = await TaskRepository.getTasksByStatus(status, page, 8);
             const { text, buttons } = UIHelper.renderTaskQueueDetail(status, detailData);
             await safeEdit(event.userId, event.msgId, text, buttons, userId);
             await answerCallback();

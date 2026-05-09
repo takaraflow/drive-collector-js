@@ -187,7 +187,7 @@ describe('Dispatcher /task_queue callback', () => {
 
         await new Promise(r => setTimeout(r, 50));
 
-        expect(mockTaskRepository.getTasksByStatus).toHaveBeenCalledWith('failed', 0, 10);
+        expect(mockTaskRepository.getTasksByStatus).toHaveBeenCalledWith('failed', 0, 8);
         expect(mockUIHelper.renderTaskQueueDetail).toHaveBeenCalledWith('failed', detailData);
     });
 
@@ -201,7 +201,7 @@ describe('Dispatcher /task_queue callback', () => {
 
         await new Promise(r => setTimeout(r, 50));
 
-        expect(mockTaskRepository.getTasksByStatus).toHaveBeenCalledWith('completed', 1, 10);
+        expect(mockTaskRepository.getTasksByStatus).toHaveBeenCalledWith('completed', 1, 8);
     });
 
     it('should handle callback errors gracefully', async () => {

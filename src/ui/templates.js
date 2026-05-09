@@ -448,7 +448,7 @@ export class UIHelper {
          // 失败任务每条加重试按钮
          const retryRow = [];
          if (status === 'failed') {
-             for (const t of data.tasks.slice(0, 8)) {
+             for (const t of data.tasks) {
                  const name = this._shortenFileName(t.file_name || '-', 12);
                  retryRow.push(Button.inline(`🔄 ${name}`, Buffer.from(`retry_${t.id}`)));
              }
