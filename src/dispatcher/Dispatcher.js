@@ -246,7 +246,12 @@ export class Dispatcher {
             const taskId = data.split("_")[1];
             const ok = await TaskManager.cancelTask(taskId, userId);
             await answer(ok ? STRINGS.task.cmd_sent : STRINGS.task.task_not_found);
-        
+
+        } else if (data.startsWith("retry_")) {
+            const taskId = data.split("_")[1];
+            const result = await TaskManager.retryTask(taskId);
+            await answer(result.success ? STRINGS.task.cmd_sent : (result.message || STRINGS.task.task_not_found));
+
         } else if (data.startsWith("drive_")) { 
             const toast = await DriveConfigFlow.handleCallback(event, userId);
             await answer(toast || "");
