@@ -24,9 +24,7 @@ class ServiceConfigManager {
             this.loadManifest();
             this.buildConfigMapping();
             this.initialized = true;
-            console.log(`✅ ServiceConfigManager 初始化完成，加载了 ${Object.keys(this.manifest.serviceMappings).length} 个服务`);
         } catch (error) {
-            console.warn('⚠️ ServiceConfigManager 初始化失败，使用默认配置:', error.message);
             this.createDefaultManifest();
             this.initialized = true;
         }
