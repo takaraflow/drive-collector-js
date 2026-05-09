@@ -86,7 +86,7 @@ export async function handleTaskFailure(task, context, updateStatus, errorMessag
         await context._refreshGroupMonitor(task, status);
     } else {
         const text = isCancelled ? STRINGS.task.cancelled : `${STRINGS.task.error_prefix}<code>${escapeHTML(errorMessage)}</code>`;
-        await updateStatus(task, text, true);
+        await updateStatus(task, text, true, null, !isCancelled);
     }
 }
 
@@ -111,7 +111,7 @@ export async function handleUploadFailure(task, context, updateStatus, uploadRes
     } else {
         await updateStatus(task, format(STRINGS.task.failed_upload, {
             reason: task.isCancelled ? "User cancelled manually" : escapeHTML(errorMessage)
-        }), true);
+        }), true, null, true);
     }
 }
 
