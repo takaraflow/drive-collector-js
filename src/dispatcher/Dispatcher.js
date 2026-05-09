@@ -48,7 +48,8 @@ const COMMAND_PERMISSIONS = {
     "/close_service":     "system:admin",
     "/status_public":     "system:admin",
     "/status_private":    "system:admin",
-    
+    "/task_queue":        "system:admin",
+
     // 用户管理
     "/pro_admin":         "user:manage",
     "/de_admin":          "user:manage",
@@ -411,6 +412,8 @@ export class Dispatcher {
                 await this._handleMcpTokenCommand(target, userId); return true;
             case "/diagnosis":
                 await this._handleDiagnosisCommand(target, userId); return true;
+            case "/task_queue":
+                await this._handleTaskQueueCommand(target, userId); return true;
             case "/open_service":
                 await this._handleModeSwitchCommand(target, userId, 'public'); return true;
             case "/close_service":
@@ -808,6 +811,27 @@ export class Dispatcher {
             } catch (error) {
                 log.error("Diagnosis error:", error);
                 await safeEdit(target, placeholder.id, `❌ 诊断过程中发生错误: ${escapeHTML(error.message)}`, null, userId);
+            }
+        })();
+    }
+
+    /**
+     * [私有] 全局任务队列查看（管理员）
+     */
+    static async _handleTaskQueueCommand(target, userId) {
+        const placeholder = await runBotTaskWithRetry(() => client.sendMessage(target, {
+            message: STRINGS.task_queue.loading
+        }), userId, {}, false, 3);
+
+        (async () => {
+            try {
+                const { TaskRepository } = await import("../repositories/TaskRepository.js");
+                const data = await TaskRepository.getQueueOverview(10);
+                const message = UIHelper.renderTaskQueue(data);
+                await safeEdit(target, placeholder.id, message, null, userId);
+            } catch (error) {
+                log.error("Task queue error:", error);
+                await safeEdit(target, placeholder.id, format(STRINGS.task_queue.error, { error: escapeHTML(error.message) }), null, userId);
             }
         })();
     }

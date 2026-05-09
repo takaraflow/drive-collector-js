@@ -300,4 +300,82 @@ export class UIHelper {
  
          return html;
      }
+
+     /**
+      * 渲染全局任务队列概览
+      * @param {Object} data - { statusCounts, activeTasks, userCounts }
+      * @returns {string} HTML格式的队列报告
+      */
+     static renderTaskQueue(data) {
+         const TQ = STRINGS.task_queue;
+         const statusLabels = TQ.status_labels;
+         let html = TQ.title + '\n━━━━━━━━━━━━━━━━━━━\n';
+
+         // 状态分布
+         html += TQ.status_dist + '\n';
+         const orderedStatuses = ['queued', 'downloading', 'uploading', 'completed', 'failed', 'cancelled'];
+         let totalActive = 0;
+         for (const s of orderedStatuses) {
+             const count = data.statusCounts[s] || 0;
+             if (count > 0 || ['queued', 'downloading', 'uploading'].includes(s)) {
+                 const label = statusLabels[s] || s;
+                 html += format(TQ.status_row, { status: label, count }) + '\n';
+             }
+             if (['queued', 'downloading', 'uploading'].includes(s)) {
+                 totalActive += count;
+             }
+         }
+
+         html += '\n';
+
+         // 活跃任务
+         if (data.activeTasks.length > 0) {
+             html += format(TQ.active_tasks, { limit: data.activeTasks.length }) + '\n';
+             for (let i = 0; i < data.activeTasks.length; i++) {
+                 const t = data.activeTasks[i];
+                 const name = this._shortenFileName(t.file_name || '-', 25);
+                 const statusIcon = (statusLabels[t.status] || t.status).split(' ')[0];
+                 const time = t.updated_at ? this._formatRelativeTime(t.updated_at) : '-';
+                 html += format(TQ.task_row, {
+                     index: i + 1,
+                     statusIcon,
+                     name: escapeHTML(name),
+                     user: escapeHTML(String(t.user_id)),
+                     time
+                 }) + '\n';
+             }
+         } else {
+             html += TQ.no_active + '\n';
+         }
+
+         html += '\n';
+
+         // 用户分布
+         if (data.userCounts.length > 0) {
+             html += TQ.user_dist + '\n';
+             for (let i = 0; i < data.userCounts.length; i++) {
+                 const u = data.userCounts[i];
+                 html += format(TQ.user_row, {
+                     index: i + 1,
+                     userId: escapeHTML(String(u.user_id)),
+                     count: u.count
+                 }) + '\n';
+             }
+         }
+
+         html += '━━━━━━━━━━━━━━━━━━━';
+         return html;
+     }
+
+     /**
+      * 格式化相对时间
+      */
+     static _formatRelativeTime(timestamp) {
+         const diff = Date.now() - timestamp;
+         if (diff < 0) return '刚刚';
+         if (diff < 60000) return '刚刚';
+         if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
+         if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
+         return `${Math.floor(diff / 86400000)}天前`;
+     }
  }

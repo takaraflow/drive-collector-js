@@ -1002,4 +1002,33 @@ export class TaskRepository {
             log.warn(`TaskRepository cleanupTaskCacheBatch failed:`, e.message);
         }
     }
+
+    /**
+     * 获取全局队列概览（管理员用）
+     * @param {number} limit - 活跃任务列表最大条数，默认 10
+     * @returns {Promise<{statusCounts: Object, activeTasks: Array, userCounts: Array}>}
+     */
+    static async getQueueOverview(limit = 10) {
+        const [statusCounts, activeTasks, userCounts] = await Promise.all([
+            d1.fetchAll("SELECT status, COUNT(*) as count FROM tasks GROUP BY status"),
+            d1.fetchAll(
+                "SELECT id, user_id, file_name, file_size, status, created_at, updated_at FROM tasks WHERE status IN ('queued','downloading','uploading') ORDER BY updated_at DESC LIMIT ?",
+                [limit]
+            ),
+            d1.fetchAll(
+                "SELECT user_id, COUNT(*) as count FROM tasks WHERE status IN ('queued','downloading','uploading') GROUP BY user_id ORDER BY count DESC LIMIT 5"
+            )
+        ]);
+
+        const statusMap = {};
+        for (const row of (statusCounts || [])) {
+            statusMap[row.status] = row.count;
+        }
+
+        return {
+            statusCounts: statusMap,
+            activeTasks: activeTasks || [],
+            userCounts: userCounts || []
+        };
+    }
 }

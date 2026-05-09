@@ -54,6 +54,28 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
             directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
             dir_empty: "ℹ️ 目录为空。您可以直接发送文件给我，将其转存到此目录。",
             batch_empty: "ℹ️ 尚无文件排队或加载中。"
+        },
+        task_queue: {
+            title: "📊 <b>全局任务队列</b>",
+            loading: "🔍 正在查询任务队列...",
+            status_dist: "📈 <b>状态分布</b>",
+            status_row: "<code>{{status}}: {{count}}</code>",
+            active_tasks: "⚡ <b>活跃任务</b> (最近 {{limit}} 条)",
+            task_row: "<code>{{index}}.</code> {{statusIcon}} <code>{{name}}</code> | 👤 <code>{{user}}</code> | {{time}}",
+            user_dist: "👥 <b>用户活跃分布</b> (Top 5)",
+            user_row: "<code>{{index}}.</code> 👤 <code>{{userId}}</code> — {{count}} 个任务",
+            no_active: "✅ 当前无活跃任务",
+            no_data: "📭 暂无任务记录",
+            error: "❌ 查询任务队列失败: {{error}}",
+            status_labels: {
+                queued: "🕒 排队中",
+                downloading: "⬇️ 下载中",
+                downloaded: "📦 已下载",
+                uploading: "⬆️ 上传中",
+                completed: "✅ 已完成",
+                failed: "❌ 失败",
+                cancelled: "🚫 已取消"
+            }
         }
     },
     format: (s, args) => {
@@ -538,6 +560,181 @@ describe("UIHelper", () => {
 
             expect(result.text).toContain("/Movies/2024");
             expect(CloudTool._getUploadPath).toHaveBeenCalledWith("user123");
+        });
+    });
+
+    describe("renderTaskQueue", () => {
+        test("should render full report with all sections", () => {
+            const now = Date.now();
+            const data = {
+                statusCounts: { queued: 3, downloading: 2, uploading: 1, completed: 50, failed: 5, cancelled: 1 },
+                activeTasks: [
+                    { id: 't1', user_id: 'u1', file_name: 'movie.mp4', status: 'downloading', updated_at: now - 120000 },
+                    { id: 't2', user_id: 'u2', file_name: 'photo.jpg', status: 'queued', updated_at: now - 300000 }
+                ],
+                userCounts: [
+                    { user_id: 'u1', count: 5 },
+                    { user_id: 'u2', count: 2 }
+                ]
+            };
+
+            const result = UIHelper.renderTaskQueue(data);
+
+            expect(result).toContain("📊 <b>全局任务队列</b>");
+            expect(result).toContain("📈 <b>状态分布</b>");
+            expect(result).toContain("排队中");
+            expect(result).toContain("下载中");
+            expect(result).toContain("上传中");
+            expect(result).toContain("已完成");
+            expect(result).toContain("失败");
+            expect(result).toContain("已取消");
+            expect(result).toContain("⚡ <b>活跃任务</b>");
+            expect(result).toContain("movie.mp4");
+            expect(result).toContain("photo.jpg");
+            expect(result).toContain("2分钟前");
+            expect(result).toContain("5分钟前");
+            expect(result).toContain("👥 <b>用户活跃分布</b>");
+            expect(result).toContain("u1");
+            expect(result).toContain("u2");
+        });
+
+        test("should render empty data without crashing", () => {
+            const data = {
+                statusCounts: {},
+                activeTasks: [],
+                userCounts: []
+            };
+
+            const result = UIHelper.renderTaskQueue(data);
+
+            expect(result).toContain("📊 <b>全局任务队列</b>");
+            expect(result).toContain("📈 <b>状态分布</b>");
+            expect(result).toContain("✅ 当前无活跃任务");
+            expect(result).not.toContain("👥");
+        });
+
+        test("should handle null file_name in active tasks", () => {
+            const data = {
+                statusCounts: { queued: 1 },
+                activeTasks: [
+                    { id: 't1', user_id: 'u1', file_name: null, status: 'queued', updated_at: Date.now() }
+                ],
+                userCounts: []
+            };
+
+            const result = UIHelper.renderTaskQueue(data);
+            expect(result).toContain("-");
+        });
+
+        test("should handle undefined file_name in active tasks", () => {
+            const data = {
+                statusCounts: { queued: 1 },
+                activeTasks: [
+                    { id: 't1', user_id: 'u1', status: 'queued', updated_at: Date.now() }
+                ],
+                userCounts: []
+            };
+
+            const result = UIHelper.renderTaskQueue(data);
+            expect(result).toContain("-");
+        });
+
+        test("should handle null updated_at in active tasks", () => {
+            const data = {
+                statusCounts: { queued: 1 },
+                activeTasks: [
+                    { id: 't1', user_id: 'u1', file_name: 'a.mp4', status: 'queued', updated_at: null }
+                ],
+                userCounts: []
+            };
+
+            const result = UIHelper.renderTaskQueue(data);
+            expect(result).toContain("a.mp4");
+        });
+
+        test("should handle unknown status values", () => {
+            const data = {
+                statusCounts: { unknown_status: 3 },
+                activeTasks: [
+                    { id: 't1', user_id: 'u1', file_name: 'a.mp4', status: 'unknown_status', updated_at: Date.now() }
+                ],
+                userCounts: []
+            };
+
+            const result = UIHelper.renderTaskQueue(data);
+            expect(result).toContain("unknown_status");
+        });
+
+        test("should render reasonable output for typical task list (10 tasks)", () => {
+            const activeTasks = Array.from({ length: 10 }, (_, i) => ({
+                id: `t${i}`,
+                user_id: `u${i % 3}`,
+                file_name: `file_${i}.mp4`,
+                status: i % 2 === 0 ? 'downloading' : 'queued',
+                updated_at: Date.now() - i * 60000
+            }));
+
+            const data = {
+                statusCounts: { queued: 5, downloading: 5, completed: 100 },
+                activeTasks,
+                userCounts: Array.from({ length: 3 }, (_, i) => ({ user_id: `u${i}`, count: 3 }))
+            };
+
+            const result = UIHelper.renderTaskQueue(data);
+            expect(result.length).toBeLessThan(4096);
+            expect(result).toContain("file_0.mp4");
+            expect(result).toContain("file_9.mp4");
+        });
+
+        test("should omit user distribution when userCounts is empty", () => {
+            const data = {
+                statusCounts: { queued: 1 },
+                activeTasks: [],
+                userCounts: []
+            };
+
+            const result = UIHelper.renderTaskQueue(data);
+            expect(result).not.toContain("👥 <b>用户活跃分布</b>");
+        });
+
+        test("should show queued/downloading/uploading even when count is 0", () => {
+            const data = {
+                statusCounts: { completed: 100 },
+                activeTasks: [],
+                userCounts: []
+            };
+
+            const result = UIHelper.renderTaskQueue(data);
+            expect(result).toContain("排队中");
+            expect(result).toContain("下载中");
+            expect(result).toContain("上传中");
+        });
+    });
+
+    describe("_formatRelativeTime", () => {
+        test("should return '刚刚' for timestamps less than 60 seconds ago", () => {
+            const result = UIHelper._formatRelativeTime(Date.now() - 30000);
+            expect(result).toBe('刚刚');
+        });
+
+        test("should return minutes for timestamps 1-59 minutes ago", () => {
+            expect(UIHelper._formatRelativeTime(Date.now() - 120000)).toBe('2分钟前');
+            expect(UIHelper._formatRelativeTime(Date.now() - 1800000)).toBe('30分钟前');
+        });
+
+        test("should return hours for timestamps 1-23 hours ago", () => {
+            expect(UIHelper._formatRelativeTime(Date.now() - 3600000)).toBe('1小时前');
+            expect(UIHelper._formatRelativeTime(Date.now() - 7200000)).toBe('2小时前');
+        });
+
+        test("should return days for timestamps 1+ days ago", () => {
+            expect(UIHelper._formatRelativeTime(Date.now() - 86400000)).toBe('1天前');
+            expect(UIHelper._formatRelativeTime(Date.now() - 259200000)).toBe('3天前');
+        });
+
+        test("should return '刚刚' for future timestamps", () => {
+            expect(UIHelper._formatRelativeTime(Date.now() + 300000)).toBe('刚刚');
+            expect(UIHelper._formatRelativeTime(Date.now() + 86400000)).toBe('刚刚');
         });
     });
 });

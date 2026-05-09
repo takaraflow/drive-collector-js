@@ -582,11 +582,104 @@ describe('TaskRepository', () => {
             const result1 = await TaskRepository.findCompletedByFile(null, 'file.mp4', 1024);
             const result2 = await TaskRepository.findCompletedByFile('user123', null, 1024);
             const result3 = await TaskRepository.findCompletedByFile('user123', 'file.mp4', null);
-            
+
             expect(result1).toBeNull();
             expect(result2).toBeNull();
             expect(result3).toBeNull();
             expect(mockD1.fetchOne).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('getQueueOverview', () => {
+        it('should return status counts, active tasks, and user counts', async () => {
+            const mockStatusCounts = [
+                { status: 'queued', count: 5 },
+                { status: 'downloading', count: 2 },
+                { status: 'completed', count: 100 }
+            ];
+            const mockActiveTasks = [
+                { id: 't1', user_id: 'u1', file_name: 'a.mp4', status: 'downloading', updated_at: Date.now() },
+                { id: 't2', user_id: 'u2', file_name: 'b.mp4', status: 'queued', updated_at: Date.now() }
+            ];
+            const mockUserCounts = [
+                { user_id: 'u1', count: 3 },
+                { user_id: 'u2', count: 1 }
+            ];
+
+            mockD1.fetchAll
+                .mockResolvedValueOnce(mockStatusCounts)
+                .mockResolvedValueOnce(mockActiveTasks)
+                .mockResolvedValueOnce(mockUserCounts);
+
+            const result = await TaskRepository.getQueueOverview(10);
+
+            expect(result.statusCounts).toEqual({ queued: 5, downloading: 2, completed: 100 });
+            expect(result.activeTasks).toEqual(mockActiveTasks);
+            expect(result.userCounts).toEqual(mockUserCounts);
+            expect(mockD1.fetchAll).toHaveBeenCalledTimes(3);
+        });
+
+        it('should handle empty results', async () => {
+            mockD1.fetchAll
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([]);
+
+            const result = await TaskRepository.getQueueOverview();
+
+            expect(result.statusCounts).toEqual({});
+            expect(result.activeTasks).toEqual([]);
+            expect(result.userCounts).toEqual([]);
+        });
+
+        it('should handle null returns from D1 (partial failure)', async () => {
+            mockD1.fetchAll
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce(null);
+
+            const result = await TaskRepository.getQueueOverview();
+
+            expect(result.statusCounts).toEqual({});
+            expect(result.activeTasks).toEqual([]);
+            expect(result.userCounts).toEqual([]);
+        });
+
+        it('should verify SQL query structure and parameters', async () => {
+            mockD1.fetchAll
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([]);
+
+            await TaskRepository.getQueueOverview(15);
+
+            // First query: status GROUP BY
+            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(1,
+                expect.stringContaining('GROUP BY status')
+            );
+            // Second query: active tasks with limit parameter
+            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(2,
+                expect.stringContaining('LIMIT ?'),
+                [15]
+            );
+            // Third query: user distribution with hardcoded LIMIT 5
+            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(3,
+                expect.stringContaining('LIMIT 5')
+            );
+        });
+
+        it('should use default limit of 10 when not specified', async () => {
+            mockD1.fetchAll
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([]);
+
+            await TaskRepository.getQueueOverview();
+
+            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(2,
+                expect.stringContaining('LIMIT ?'),
+                [10]
+            );
         });
     });
 });

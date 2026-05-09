@@ -179,6 +179,30 @@ export const STRINGS = {
         no_active_instances: "无活跃实例",
     },
 
+    // --- 全局任务队列 ---
+    task_queue: {
+        title: "📊 <b>全局任务队列</b>",
+        loading: "🔍 正在查询任务队列...",
+        status_dist: "📈 <b>状态分布</b>",
+        status_row: "<code>{{status}}: {{count}}</code>",
+        active_tasks: "⚡ <b>活跃任务</b> (最近 {{limit}} 条)",
+        task_row: "<code>{{index}}.</code> {{statusIcon}} <code>{{name}}</code> | 👤 <code>{{user}}</code> | {{time}}",
+        user_dist: "👥 <b>用户活跃分布</b> (Top 5)",
+        user_row: "<code>{{index}}.</code> 👤 <code>{{userId}}</code> — {{count}} 个任务",
+        no_active: "✅ 当前无活跃任务",
+        no_data: "📭 暂无任务记录",
+        error: "❌ 查询任务队列失败: {{error}}",
+        status_labels: {
+            queued: "🕒 排队中",
+            downloading: "⬇️ 下载中",
+            downloaded: "📦 已下载",
+            uploading: "⬆️ 上传中",
+            completed: "✅ 已完成",
+            failed: "❌ 失败",
+            cancelled: "🚫 已取消"
+        }
+    },
+
     // --- 上传路径设置 ---
     remote_folder: {
         help: "📁 <b>自定义上传路径设置</b>\n\n" +
