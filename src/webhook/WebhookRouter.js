@@ -125,8 +125,7 @@ async function handleStreamForwarding(req, res) {
             return true;
         }
         
-        const { type = 'auto' } = JSON.parse(body || '{}');
-        const result = await TaskManager.retryTask(taskId, type);
+        const result = await TaskManager.retryTask(taskId);
         
         res.writeHead(result.statusCode || 200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));

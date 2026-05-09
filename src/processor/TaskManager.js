@@ -790,9 +790,7 @@ export class TaskManager {
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
     static async retryTask(taskId) {
-        const { TaskRepository } = getDeps();
-        const { instanceCoordinator } = await import("../../services/InstanceCoordinator.js");
-        const { queueService } = await import("../../services/QueueService.js");
+        const { TaskRepository, instanceCoordinator, queueService } = getDeps();
         const log = getLog();
 
         if (!taskId) {
@@ -816,9 +814,6 @@ export class TaskManager {
             // 清理旧的任务锁，避免与 stalled recovery 冲突
             await instanceCoordinator.releaseTaskLock(taskId);
 
-            // 重置状态为 queued
-            await TaskRepository.updateStatus(taskId, 'queued');
-
             // 通过 QStash 重新派发，leader 的 handleDownloadWebhook 会处理完整流程
             await queueService.enqueueDownloadTask(taskId, {
                 _meta: {
@@ -827,6 +822,9 @@ export class TaskManager {
                     timestamp: Date.now()
                 }
             });
+
+            // 重置状态为 queued（在 enqueue 之后，确保 QStash 派发成功才更新状态）
+            await TaskRepository.updateStatus(taskId, 'queued');
 
             log.info(`Task ${taskId} re-enqueued for retry`);
             return { success: true, statusCode: 200, message: "Task re-enqueued" };
