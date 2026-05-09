@@ -1277,29 +1277,47 @@ class CacheService {
     async batchOperation(operations) {
         await this._ensureInitialized();
         
-        // ⚡ Bolt Optimization: Run batch operations concurrently instead of sequentially
-        // This eliminates N+1 I/O waits and significantly improves batch processing performance
-        const promises = operations.map(async (op) => {
-            try {
-                if (op.type === 'get') {
-                    // Fix: Use op.dataType instead of op.type for format ('json', 'string')
-                    const value = await this.get(op.key, op.dataType || 'json', op.options || {});
-                    return { success: true, key: op.key, value };
-                } else if (op.type === 'set') {
-                    const success = await this.set(op.key, op.value, op.ttl || 3600, op.options || {});
-                    return { success, key: op.key };
-                } else if (op.type === 'delete') {
-                    const success = await this.delete(op.key, op.options || {});
-                    return { success, key: op.key };
+        // ⚡ Bolt Optimization: Use a native async worker pool to run batch operations concurrently
+        // This prevents the excessive memory footprint and aggressive garbage collection
+        // caused by mapping the entire array to closures and using Promise.all(), while
+        // still avoiding N+1 I/O waits.
+        const len = operations.length;
+        const results = new Array(len);
+        let currentIndex = 0;
+
+        // Use a reasonable concurrency limit (e.g., 10) to avoid overwhelming the system
+        const concurrency = Math.min(10, len);
+
+        const worker = async () => {
+            while (currentIndex < len) {
+                const index = currentIndex++;
+                const op = operations[index];
+
+                try {
+                    if (op.type === 'get') {
+                        // Fix: Use op.dataType instead of op.type for format ('json', 'string')
+                        const value = await this.get(op.key, op.dataType || 'json', op.options || {});
+                        results[index] = { success: true, key: op.key, value };
+                    } else if (op.type === 'set') {
+                        const success = await this.set(op.key, op.value, op.ttl || 3600, op.options || {});
+                        results[index] = { success, key: op.key };
+                    } else if (op.type === 'delete') {
+                        const success = await this.delete(op.key, op.options || {});
+                        results[index] = { success, key: op.key };
+                    } else {
+                        results[index] = { success: false, key: op.key, error: `Unknown operation type: ${op.type}` };
+                    }
+                } catch (error) {
+                    log.error(`Batch operation failed for ${op.key}:`, error.message);
+                    results[index] = { success: false, key: op.key, error: error.message };
                 }
-                return { success: false, key: op.key, error: `Unknown operation type: ${op.type}` };
-            } catch (error) {
-                log.error(`Batch operation failed for ${op.key}:`, error.message);
-                return { success: false, key: op.key, error: error.message };
             }
-        });
+        };
+
+        const workers = Array.from({ length: concurrency }, () => worker());
+        await Promise.all(workers);
         
-        return await Promise.all(promises);
+        return results;
     }
 
     /**
