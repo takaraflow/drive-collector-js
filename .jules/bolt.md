@@ -7,3 +7,7 @@
 ## 2024-05-18 - [Native Async Worker Pool Optimization in CacheService]
 **Learning:** For batch operations in \`CacheService.js\`, using unbounded \`Promise.all(operations.map(...))\` causes excessive memory allocation from upfront closures and can exhaust connection pools for large inputs.
 **Action:** Replace \`operations.map\` with a native async worker pool using a pre-allocated array and a concurrency limit (e.g., 5) to balance throughput with resource constraints.
+
+## 2024-05-13 - Optimize executeBatch memory footprint and concurrency
+**Learning:** In highly concurrent utility methods like `SmartFailover.executeBatch`, using `Promise.allSettled(array.map(...))` coupled with `{...options}` inside the `.map()` iterates the object's properties creating unnecessary heap allocation pressure per execution. Furthermore, fallback serial processing using `Object.create(options)` created objects with properties attached to the prototype chain which can cause tricky regressions downstream in loops relying on "own properties".
+**Action:** Replace `array.map()` and `Promise.allSettled()` with a native async worker pool using a pre-allocated array (`results.length = len`). Ensure concurrency behavior is preserved by defaulting the async worker length to the length of the batch if concurrency isn't specified explicitly. Use `Object.assign({}, options)` instead of object spread inside hot loops for lower allocation overhead while safely producing objects with "own properties".
