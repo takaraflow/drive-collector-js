@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { cache } from "../services/CacheService.js";
 import { localCache } from "../utils/LocalCache.js";
 import { d1 } from "../services/d1.js";
@@ -78,7 +79,7 @@ export class DriveRepository {
         }
 
         try {
-            const driveId = `drive_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const driveId = `drive_${Date.now()}_${crypto.randomUUID().substring(0, 8)}`;
             const now = Date.now();
             const driveData = {
                 id: driveId,
