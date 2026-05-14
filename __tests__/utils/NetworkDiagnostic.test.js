@@ -42,7 +42,6 @@ const mockConfig = {
     }
 };
 vi.mock("../../src/config/index.js", () => ({
-    config: mockConfig,
     getConfig: () => mockConfig,
     validateConfig: () => true
 }));
@@ -59,7 +58,6 @@ const { NetworkDiagnostic } = await import("../../src/utils/NetworkDiagnostic.js
 const { client } = await import("../../src/services/telegram.js");
 const { d1 } = await import("../../src/services/d1.js");
 const { cache } = await import("../../src/services/CacheService.js");
-const { config } = await import("../../src/config/index.js");
 const { spawnSync } = await import("child_process");
 const fs = await import("fs");
 
@@ -149,7 +147,7 @@ describe("NetworkDiagnostic", () => {
 
     describe("_checkTelegramBot", () => {
         it("should return warning when bot token is not configured", async () => {
-            config.botToken = null;
+            mockConfig.botToken = null;
 
             const result = await NetworkDiagnostic._checkTelegramBot();
 
@@ -158,7 +156,7 @@ describe("NetworkDiagnostic", () => {
         });
 
         it("should return success when bot API responds ok", async () => {
-            config.botToken = "mock_token";
+            mockConfig.botToken = "mock_token";
             const result = await NetworkDiagnostic._checkTelegramBot();
 
             expect(result.status).toBe("ok");
@@ -166,7 +164,7 @@ describe("NetworkDiagnostic", () => {
         });
 
         it("should return error when bot API fails", async () => {
-            config.botToken = "mock_token";
+            mockConfig.botToken = "mock_token";
             global.fetch.mockRejectedValueOnce(new Error("Network error"));
 
             const result = await NetworkDiagnostic._checkTelegramBot();

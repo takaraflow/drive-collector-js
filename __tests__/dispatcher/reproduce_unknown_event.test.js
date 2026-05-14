@@ -2,7 +2,10 @@
 await vi.doMock('../../src/config/index.js', () => ({
     config: {
         ownerId: '12345'
-    }
+    },
+    getConfig: () => ({
+        ownerId: '12345'
+    })
 }));
 
 // Mock telegram.js

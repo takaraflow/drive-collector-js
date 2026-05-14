@@ -1,4 +1,4 @@
-import { config } from "../config/index.js";
+import { getConfig } from "../config/index.js";
 import { client } from "./telegram.js";
 import { CloudTool } from "./rclone.js";
 import { ossService } from "./oss.js";
@@ -20,7 +20,7 @@ export class DependencyContainer {
         this.dependencies = {
             // config 使用 getter 确保获取的是最新的 live binding 值
             get config() {
-                return config;
+                return getConfig();
             },
             client,
             CloudTool,

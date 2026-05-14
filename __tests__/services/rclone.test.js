@@ -88,9 +88,9 @@ vi.mock('child_process', () => ({
 }));
 
 vi.mock('../../src/config/index.js', () => ({
-    config: {
+    getConfig: () => ({
         remoteFolder: 'test-folder'
-    }
+    })
 }));
 
 const mockKv = {

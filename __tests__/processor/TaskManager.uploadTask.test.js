@@ -4,6 +4,17 @@ import { TaskRepository } from '../../src/repositories/TaskRepository.js';
 import { CloudTool } from '../../src/services/rclone.js';
 import fs from 'fs';
 
+vi.mock('../../src/config/index.js', () => ({
+  config: {
+    downloadDir: '/tmp/downloads',
+    remoteFolder: 'test-folder'
+  },
+  getConfig: () => ({
+    downloadDir: '/tmp/downloads',
+    remoteFolder: 'test-folder'
+  })
+}));
+
 // Mock dependencies
 vi.mock('../../src/services/InstanceCoordinator.js', () => ({
   instanceCoordinator: {
@@ -23,6 +34,13 @@ vi.mock('../../src/services/rclone.js', () => ({
     getRemoteFileInfo: vi.fn(),
     uploadFile: vi.fn()
   }
+}));
+
+vi.mock('../../src/utils/common.js', () => ({
+  getMediaInfo: vi.fn(() => ({ name: 'test.txt', size: 1024 })),
+  updateStatus: vi.fn().mockResolvedValue(undefined),
+  escapeHTML: (value) => value,
+  safeEdit: vi.fn()
 }));
 
 vi.mock('fs', () => ({
@@ -51,8 +69,10 @@ describe('TaskManager uploadTask', () => {
     fs.existsSync.mockReturnValue(true);
     // 模拟文件状态
     fs.statSync.mockReturnValue({ size: 1024 });
-    // 模拟远程文件不存在
-    CloudTool.getRemoteFileInfo.mockResolvedValue(null);
+    // 首次去重检查不存在，上传后校验时存在且大小匹配
+    CloudTool.getRemoteFileInfo
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ Size: 1024 });
     // 模拟上传成功
     CloudTool.uploadFile.mockResolvedValue({ success: true });
   });

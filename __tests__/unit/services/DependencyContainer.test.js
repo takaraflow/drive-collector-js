@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock all external dependencies
-vi.mock('../../../src/config/index.js', () => ({ config: { testConfig: true } }));
+vi.mock('../../../src/config/index.js', () => ({ getConfig: () => ({ testConfig: true }) }));
 vi.mock('../../../src/services/telegram.js', () => ({ client: {} }));
 vi.mock('../../../src/services/rclone.js', () => ({ CloudTool: class {} }));
 vi.mock('../../../src/services/oss.js', () => ({ ossService: {} }));
@@ -32,7 +32,6 @@ vi.mock('../../../src/services/StreamTransferService.js', () => ({ streamTransfe
 
 // Import the module under test
 import { DependencyContainer, dependencyContainer } from '../../../src/services/DependencyContainer.js';
-import { config } from '../../../src/config/index.js';
 
 describe('DependencyContainer', () => {
     let container;

@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "child_process";
 import path from "path";
 import fs from "fs";
-import { config } from "../config/index.js";
+import { getConfig } from "../config/index.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { STRINGS } from "../locales/zh-CN.js";
@@ -16,6 +16,8 @@ const buildRcloneEnv = () => ({
     LC_ALL: "C",
     LANG: "C"
 });
+
+const getRuntimeConfig = () => getConfig();
 
 // 确定 rclone 二进制路径 (兼容 Zeabur 和 本地)
 const rcloneBinary = fs.existsSync("/app/rclone/rclone") 
@@ -164,11 +166,11 @@ export class CloudTool {
             }
             
             // 兜底：使用系统默认路径
-            return this._normalizePath(config.remoteFolder);
+            return this._normalizePath(getRuntimeConfig().remoteFolder);
         } catch (error) {
             log.error(`Failed to get upload path for user ${userId}:`, error);
             // 出错时使用默认路径
-            return this._normalizePath(config.remoteFolder);
+            return this._normalizePath(getRuntimeConfig().remoteFolder);
         }
     }
 
@@ -359,7 +361,7 @@ export class CloudTool {
                 const remotePath = `${connectionString}${userUploadPath}`;
 
                 // 准备 --files-from 数据
-                const commonSourceDir = path.resolve(config.downloadDir || "/tmp/downloads");
+                const commonSourceDir = path.resolve(getRuntimeConfig().downloadDir || "/tmp/downloads");
                 const fileList = tasks
                     .filter(t => t.localPath)
                     .map(t => path.relative(commonSourceDir, path.resolve(t.localPath)))

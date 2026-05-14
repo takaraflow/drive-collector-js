@@ -5,7 +5,10 @@
 await vi.doMock('../../src/config/index.js', () => ({
     config: {
         ownerId: null  // 默认无 owner，确保测试可预测
-    }
+    },
+    getConfig: () => ({
+        ownerId: null
+    })
 }));
 
 // Mock telegram.js 避免副作用

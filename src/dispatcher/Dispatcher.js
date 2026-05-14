@@ -1,6 +1,6 @@
 import { Api } from "telegram";
 import { Button } from "telegram/tl/custom/button.js";
-import { config } from "../config/index.js";
+import { getConfig } from "../config/index.js";
 import { client, isClientActive } from "../services/telegram.js";
 import { AuthGuard } from "../modules/AuthGuard.js";
 import { SessionManager } from "../modules/SessionManager.js";
@@ -28,6 +28,8 @@ import path from "path";
 const log = logger.withModule('Dispatcher');
 const packageJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
 const appVersion = packageJson.version || 'unknown';
+const getOwnerId = () => getConfig().ownerId?.toString();
+const getDefaultRemoteFolder = () => getConfig().remoteFolder;
 
 // 创建带 perf 上下文的 logger 用于性能日志
 const logPerf = () => log.withContext({ perf: true });
@@ -181,7 +183,7 @@ export class Dispatcher {
             SettingsRepository.get("access_mode", "public")
         ]);
 
-        const isOwner = userId === config.ownerId?.toString();
+        const isOwner = userId === getOwnerId();
 
         // 1. 黑名单拦截 (最高优先级，连 Owner 也不能例外，防止账号被盗后的紧急风控，虽然 owner 很难被 setRole 修改)
         if (role === 'banned') {
@@ -323,7 +325,7 @@ export class Dispatcher {
             SettingsRepository.get("access_mode", "public"),
             AuthGuard.can(userId, "maintenance:bypass")
         ]);
-        const isOwner = userId === config.ownerId?.toString();
+        const isOwner = userId === getOwnerId();
 
         if (!isOwner && mode !== 'public' && !canBypass) {
             await runBotTaskWithRetry(() => client.sendMessage(target, {
@@ -392,7 +394,7 @@ export class Dispatcher {
         const requiredPerm = COMMAND_PERMISSIONS[command];
         if (requiredPerm) {
             // Owner 永远有权限，跳过检查 (虽然 AuthGuard.can 也会放行 owner，但这里显式一点)
-            const isOwner = userId === config.ownerId?.toString();
+            const isOwner = userId === getOwnerId();
             if (!isOwner && !(await AuthGuard.can(userId, requiredPerm))) {
                 await runBotTaskWithRetry(() => client.sendMessage(target, {
                     message: STRINGS.status.no_permission || "❌ 您没有权限执行此操作。",
@@ -737,7 +739,7 @@ export class Dispatcher {
      */
     static async _handleHelpCommand(target, userId) {
         const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
-        const isOwner = userId === config.ownerId?.toString();
+        const isOwner = userId === getOwnerId();
         const version = appVersion;
 
         let message = format(STRINGS.system.help, { version });
@@ -928,7 +930,7 @@ export class Dispatcher {
      * [私有] 处理管理员设置命令 (/pro_admin, /de_admin)
      */
     static async _handleAdminPromotion(target, userId, fullText, isPromotion) {
-        const isOwner = userId === config.ownerId?.toString();
+        const isOwner = userId === getOwnerId();
         if (!isOwner) {
             return await runBotTaskWithRetry(() => client.sendMessage(target, {
                 message: STRINGS.status.no_permission,
@@ -991,7 +993,7 @@ export class Dispatcher {
                     parseMode: "html"
                 }), userId, {}, false, 3);
             }
-            if (targetUid === config.ownerId?.toString()) {
+            if (targetUid === getOwnerId()) {
                 return await runBotTaskWithRetry(() => client.sendMessage(target, {
                     message: "❌ 不能封禁 Owner。",
                     parseMode: "html"
@@ -1047,7 +1049,7 @@ export class Dispatcher {
 
         // 获取当前路径
         const currentPath = await this._getUserUploadPathFromD1(userId);
-        const displayPath = currentPath || config.remoteFolder;
+        const displayPath = currentPath || getDefaultRemoteFolder();
         const isCustomPath = !!currentPath;
 
         let message = format(STRINGS.remote_folder.menu_title, {});
@@ -1103,7 +1105,7 @@ export class Dispatcher {
             if (pathArg === 'reset' || pathArg === 'default') {
                 await this._setUserUploadPathInD1(userId, null);
                 
-                const defaultPath = config.remoteFolder;
+                const defaultPath = getDefaultRemoteFolder();
                 return await runBotTaskWithRetry(() => client.sendMessage(target, {
                     message: format(STRINGS.remote_folder.reset_success, { 
                         path: defaultPath,
@@ -1261,7 +1263,7 @@ export class Dispatcher {
             await answerCallback("");
         } else if (data === "remote_folder_reset") {
             await this._setUserUploadPathInD1(userId, null);
-            await safeEdit(event.userId, event.msgId, format(STRINGS.remote_folder.reset_success, { path: config.remoteFolder }), null, userId);
+            await safeEdit(event.userId, event.msgId, format(STRINGS.remote_folder.reset_success, { path: getDefaultRemoteFolder() }), null, userId);
             await answerCallback("");
         } else {
             await answerCallback("");

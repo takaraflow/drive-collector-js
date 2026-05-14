@@ -20,7 +20,11 @@ vi.mock('../../src/config/index.js', () => ({
     config: {
         downloadDir: '/tmp/downloads',
         remoteFolder: 'test-remote'
-    }
+    },
+    getConfig: () => ({
+        downloadDir: '/tmp/downloads',
+        remoteFolder: 'test-remote'
+    })
 }));
 
 const { CloudTool } = await import('../../src/services/rclone.js');

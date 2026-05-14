@@ -1,7 +1,7 @@
 import { client, getUpdateHealth } from "../services/telegram.js";
 import { d1 } from "../services/d1.js";
 import { cache } from "../services/CacheService.js";
-import { config } from "../config/index.js";
+import { getConfig } from "../config/index.js";
 import { tunnelService } from "../services/TunnelService.js";
 import { spawnSync } from "child_process";
 import * as fs from "fs";
@@ -76,6 +76,7 @@ export class NetworkDiagnostic {
     static async _checkTelegramBot() {
         const startTime = Date.now();
         try {
+            const config = getConfig();
             if (!config.botToken) {
                 return {
                     status: 'warning',
@@ -466,7 +467,7 @@ export class NetworkDiagnostic {
     static async _checkTunnel() {
         const startTime = Date.now();
         try {
-            const tunnelConfig = config?.tunnel;
+            const tunnelConfig = getConfig()?.tunnel;
             
             if (!tunnelConfig || !tunnelConfig.enabled) {
                 return {

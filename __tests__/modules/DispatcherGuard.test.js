@@ -18,7 +18,8 @@ vi.mock('../../src/services/logger/index.js', () => ({
 // Mock Config
 const mockConfig = { ownerId: '1001' };
 vi.mock('../../src/config/index.js', () => ({
-    config: mockConfig
+    config: mockConfig,
+    getConfig: () => mockConfig
 }));
 
 // Mock Telegram Client

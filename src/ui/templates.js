@@ -1,6 +1,6 @@
 import { Button } from "telegram/tl/custom/button.js";
 import path from "path";
-import { config } from "../config/index.js";
+import { getConfig } from "../config/index.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 import { escapeHTML, formatBytes } from "../utils/common.js";
 import { CloudTool } from "../services/rclone.js";
@@ -38,7 +38,7 @@ export class UIHelper {
             const userPath = await CloudTool._getUploadPath(userId);
             text = format(STRINGS.files.directory_prefix, { folder: userPath });
         } else {
-            text = format(STRINGS.files.directory_prefix, { folder: config.remoteFolder });
+            text = format(STRINGS.files.directory_prefix, { folder: getConfig().remoteFolder });
         }
         
         if (files.length === 0 && !isLoading) {

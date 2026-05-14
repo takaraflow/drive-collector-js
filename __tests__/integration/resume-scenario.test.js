@@ -1,10 +1,9 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest'
 import { streamTransferService } from '../../src/services/StreamTransferService.js'
-import { config } from '../../src/config/index.js'
 import { CacheService } from '../../src/services/CacheService.js'
 
 vi.mock('../../src/config/index.js', () => ({
-  config: {
+  getConfig: () => ({
     streamForwarding: {
       secret: 'test-secret',
       lbUrl: 'https://lb.example.com',
@@ -12,7 +11,7 @@ vi.mock('../../src/config/index.js', () => ({
     },
     downloadDir: '/tmp/downloads',
     remoteFolder: '/remote'
-  }
+  })
 }))
 
 vi.mock('../../src/services/CacheService.js', () => ({
