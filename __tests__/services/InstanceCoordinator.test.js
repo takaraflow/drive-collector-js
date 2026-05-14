@@ -96,15 +96,25 @@ describe("Core InstanceCoordinator Tests", () => {
 
     test("should register instance", async () => {
         instanceCoordinator.instanceId = 'test-instance';
+        process.env.INSTANCE_PUBLIC_URL = 'https://worker.example.com/';
+        process.env.APP_EXTERNAL_URL = 'https://lb.example.com/';
 
         await instanceCoordinator.registerInstance();
 
         expect(InstanceRepository.upsert).toHaveBeenCalledWith(
             expect.objectContaining({
                 id: "test-instance",
-                status: "active"
+                status: "active",
+                url: "https://worker.example.com"
             })
         );
+    });
+
+    test("should throw when instance registration fails", async () => {
+        instanceCoordinator.instanceId = 'broken-instance';
+        vi.mocked(InstanceRepository.upsert).mockRejectedValueOnce(new Error('cache unavailable'));
+
+        await expect(instanceCoordinator.registerInstance()).rejects.toThrow('cache unavailable');
     });
 
     test("should refresh heartbeat data", async () => {

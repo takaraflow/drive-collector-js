@@ -12,6 +12,7 @@ class RateLimiter {
         this.tokens = maxRequests;
         this.lastRefill = Date.now();
         this.queue = [];
+        this._drainTimer = null;
         
         // Dynamic configuration
         this.minRequests = options.minRequests || Math.floor(maxRequests * 0.5);
@@ -33,34 +34,21 @@ class RateLimiter {
     }
 
     async acquire() {
-        const now = Date.now();
-        const timePassed = now - this.lastRefill;
-        
-        // Refill tokens
-        if (timePassed >= this.windowMs) {
-            this.tokens = this.maxRequests;
-            this.lastRefill = now;
-        }
+        this._refillTokens();
 
-        if (this.tokens > 0) {
+        if (this.tokens > 0 && this.queue.length === 0) {
             this.tokens--;
             this.stats.totalRequests++;
             this.successCount++;
             return true;
         }
 
-        // Record throttling
         this.stats.throttledRequests++;
-        this.failureCount++;
 
-        // Wait until tokens are available
-        const waitTime = this.windowMs - timePassed;
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-        this.tokens = this.maxRequests - 1;
-        this.lastRefill = Date.now();
-        
-        this.stats.totalRequests++;
-        return true;
+        return await new Promise((resolve) => {
+            this.queue.push(resolve);
+            this._scheduleDrain();
+        });
     }
 
     async execute(fn) {
@@ -132,6 +120,7 @@ class RateLimiter {
         this.windowMs = windowMs;
         this.tokens = maxRequests;
         this.lastRefill = Date.now();
+        this._scheduleDrain();
     }
 
     /**
@@ -159,6 +148,53 @@ class RateLimiter {
         };
         this.successCount = 0;
         this.failureCount = 0;
+    }
+
+    _refillTokens() {
+        const now = Date.now();
+        const timePassed = now - this.lastRefill;
+
+        if (timePassed < this.windowMs) {
+            return;
+        }
+
+        const windowsPassed = Math.max(1, Math.floor(timePassed / this.windowMs));
+        this.tokens = this.maxRequests;
+        this.lastRefill += windowsPassed * this.windowMs;
+    }
+
+    _scheduleDrain() {
+        if (this._drainTimer || this.queue.length === 0) {
+            return;
+        }
+
+        this._refillTokens();
+        if (this.tokens > 0) {
+            queueMicrotask(() => this._drainQueue());
+            return;
+        }
+
+        const waitTime = Math.max(0, this.windowMs - (Date.now() - this.lastRefill));
+        this._drainTimer = setTimeout(() => {
+            this._drainTimer = null;
+            this._drainQueue();
+        }, waitTime);
+    }
+
+    _drainQueue() {
+        this._refillTokens();
+
+        while (this.tokens > 0 && this.queue.length > 0) {
+            this.tokens--;
+            this.stats.totalRequests++;
+            this.successCount++;
+            const resolve = this.queue.shift();
+            resolve(true);
+        }
+
+        if (this.queue.length > 0) {
+            this._scheduleDrain();
+        }
     }
 }
 

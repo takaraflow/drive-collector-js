@@ -42,6 +42,7 @@ export default class CloudQueueBase extends BaseQueue {
         
         // 并发发布防重
         this.inFlightPublishes = new Map();
+        this._flushInProgress = null;
     }
 
     /**
@@ -54,13 +55,13 @@ export default class CloudQueueBase extends BaseQueue {
         
         // 立即刷新如果达到批量大小
         if (this.buffer.length >= this.batchSize) {
-            return this._flushBuffer();
+            return this.flush();
         }
 
         // 设置定时刷新
         if (!this.flushTimer) {
             this.flushTimer = setTimeout(() => {
-                this._flushBuffer();
+                void this.flush();
             }, this.batchTimeout);
         }
 
@@ -198,8 +199,7 @@ export default class CloudQueueBase extends BaseQueue {
      */
     async flush() {
         if (this.buffer.length > 0) {
-            // 需要子类提供 batchPublishFn
-            throw new Error('flush() requires batchPublishFn to be implemented in subclass');
+            throw new Error('flush() must be implemented by subclass when buffering is enabled');
         }
     }
 

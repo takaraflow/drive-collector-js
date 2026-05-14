@@ -18,11 +18,14 @@ export class InstanceRepository {
     static async upsert(instanceData) {
         const timeoutMs = instanceData.timeoutMs || this.DEFAULT_TIMEOUT;
         try {
-            await cache.set(`${this.PREFIX}${instanceData.id}`, instanceData, timeoutMs / 1000);
+            const result = await cache.set(`${this.PREFIX}${instanceData.id}`, instanceData, timeoutMs / 1000);
+            if (result === false) {
+                throw new Error(`Cache set returned false for ${instanceData.id}`);
+            }
             return true;
         } catch (e) {
             log.error(`InstanceRepository.upsert failed for ${instanceData.id}:`, e);
-            return false;
+            throw e;
         }
     }
 
@@ -99,11 +102,14 @@ export class InstanceRepository {
      */
     static async markOffline(instanceId) {
         try {
-            await cache.delete(`${this.PREFIX}${instanceId}`);
+            const result = await cache.delete(`${this.PREFIX}${instanceId}`);
+            if (result === false) {
+                throw new Error(`Cache delete returned false for ${instanceId}`);
+            }
             return true;
         } catch (e) {
             log.error(`InstanceRepository.markOffline failed for ${instanceId}:`, e);
-            return false;
+            throw e;
         }
     }
 

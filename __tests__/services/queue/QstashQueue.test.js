@@ -203,6 +203,25 @@ describe("QstashQueue - publish", () => {
         vi.useRealTimers();
     });
 
+    test("should settle pending publishes when flush fails after dequeue", async () => {
+        const batchingQueue = new QstashQueue({ batchSize: 5, batchTimeout: 1000 });
+        await batchingQueue.initialize();
+
+        const buffered = batchingQueue._publish('test-topic', { data: 'test' });
+        expect(batchingQueue.buffer.length).toBe(1);
+
+        batchingQueue.bufferMutex.runExclusive.mockImplementationOnce(async () => {
+            const batch = [...batchingQueue.buffer];
+            batchingQueue.buffer = [];
+            batch.forEach(task => task.reject(new Error('flush failed after dequeue')));
+            throw new Error('flush failed after dequeue');
+        });
+
+        const flushPromise = batchingQueue.flush().catch(error => error);
+        await expect(buffered).rejects.toThrow('flush failed after dequeue');
+        await expect(flushPromise).resolves.toBeInstanceOf(Error);
+    });
+
     test("should return mock message in mock mode", async () => {
         const { getConfig } = await import("../../../src/config/index.js");
         getConfig.mockReturnValueOnce({
@@ -249,6 +268,15 @@ describe("QstashQueue - flush", () => {
 
         // Buffer should be cleared
         expect(queue.buffer.length).toBe(0);
+    });
+
+    test("should prevent clearing buffer while flush is in progress", async () => {
+        queue.buffer.push({ topic: 'test-1', message: { id: 1 } });
+        queue._flushInProgress = Promise.resolve();
+
+        expect(() => queue.clearBuffer()).toThrow('Cannot clear buffer while flush is in progress');
+
+        queue._flushInProgress = null;
     });
 });
 

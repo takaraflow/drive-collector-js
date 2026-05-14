@@ -237,10 +237,13 @@ export class QstashQueue extends CloudQueueBase {
      * 刷新缓冲区 - 发送批量任务（重写父类方法）
      */
     async _flushBuffer() {
+        if (this._flushInProgress) {
+            return this._flushInProgress;
+        }
         if (this.buffer.length === 0) return;
 
         // 使用互斥锁确保线程安全
-        return await this.bufferMutex.runExclusive(async () => {
+        const flushPromise = this.bufferMutex.runExclusive(async () => {
             // 清除定时器
             if (this.flushTimer) {
                 clearTimeout(this.flushTimer);
@@ -287,20 +290,19 @@ export class QstashQueue extends CloudQueueBase {
 
             return results;
         }).catch((error) => {
-            // 兜底：确保批次内所有 promise 都能结束，避免调用方永远等待
-            const pending = [...this.buffer];
-            this.buffer = [];
-            pending.forEach(task => {
-                if (typeof task.reject === 'function') task.reject(error);
-                else if (typeof task.resolve === 'function') {
-                    task.resolve({ messageId: "fallback-message-id", fallback: true, error: error.message });
-                }
-            });
             throw error;
+        }).finally(() => {
+            this._flushInProgress = null;
         });
+
+        this._flushInProgress = flushPromise;
+        return await flushPromise;
     }
 
     clearBuffer() {
+        if (this._flushInProgress) {
+            throw new Error('Cannot clear buffer while flush is in progress');
+        }
         if (this.flushTimer) {
             clearTimeout(this.flushTimer);
             this.flushTimer = null;
@@ -506,6 +508,10 @@ export class QstashQueue extends CloudQueueBase {
             log.error(`Failed to retry DLQ message: ${dlqId}`, error);
             throw error;
         }
+    }
+
+    async flush() {
+        return await this._flushBuffer();
     }
 
     /**

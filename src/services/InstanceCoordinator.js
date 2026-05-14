@@ -52,6 +52,25 @@ export class InstanceCoordinator {
         
         // 延迟调整定时器（启动后 30 秒再检查实例数量并调整）
         this.heartbeatAdjustTimer = null;
+        this.instanceWatchTimer = null;
+    }
+
+    _normalizePublicUrl(url) {
+        if (!url || typeof url !== 'string') return null;
+        const trimmed = url.trim();
+        if (!trimmed) return null;
+        try {
+            const parsed = new URL(trimmed);
+            return parsed.toString().replace(/\/$/, '');
+        } catch {
+            return null;
+        }
+    }
+
+    _getPreferredPublicUrl() {
+        return this._normalizePublicUrl(process.env.INSTANCE_PUBLIC_URL)
+            || this._normalizePublicUrl(process.env.APP_EXTERNAL_URL)
+            || this._normalizePublicUrl(process.env.LB_WEBHOOK_URL);
     }
 
     /**
@@ -106,6 +125,10 @@ export class InstanceCoordinator {
             clearInterval(this.heartbeatAdjustTimer);
             this.heartbeatAdjustTimer = null;
         }
+        if (this.instanceWatchTimer) {
+            clearInterval(this.instanceWatchTimer);
+            this.instanceWatchTimer = null;
+        }
 
         await this.unregisterInstance();
     }
@@ -132,7 +155,7 @@ export class InstanceCoordinator {
 
         const instanceData = {
             id: this.instanceId,
-            url: process.env.APP_EXTERNAL_URL, // 新增：外部可访问的 URL，用于 LB 转发
+            url: this._getPreferredPublicUrl(),
             tunnelUrl: tunnelUrl, // 新增：CF Tunnel 访问地址
             hostname: process.env.HOSTNAME || 'unknown',
             region: process.env.INSTANCE_REGION || 'unknown',
@@ -226,6 +249,7 @@ export class InstanceCoordinator {
 
                     const instanceData = {
                         ...existing,
+                        url: this._getPreferredPublicUrl() || existing.url || null,
                         tunnelUrl: currentTunnelUrl, // 补全或保持地址
                         lastHeartbeat: Date.now(),
                         activeTaskCount: this.getLocalActiveTaskCount(),
@@ -339,8 +363,11 @@ export class InstanceCoordinator {
      * 监听实例变化
      */
     async watchInstances() {
+        if (this.instanceWatchTimer) {
+            clearInterval(this.instanceWatchTimer);
+        }
         // 定期检查实例变化
-        setInterval(async () => {
+        this.instanceWatchTimer = setInterval(async () => {
             const activeInstances = await this.getActiveInstances();
             const instanceCount = activeInstances.length;
 
@@ -468,6 +495,10 @@ export class InstanceCoordinator {
         if (this.heartbeatAdjustTimer) {
             clearInterval(this.heartbeatAdjustTimer);
             this.heartbeatAdjustTimer = null;
+        }
+        if (this.instanceWatchTimer) {
+            clearInterval(this.instanceWatchTimer);
+            this.instanceWatchTimer = null;
         }
     }
 

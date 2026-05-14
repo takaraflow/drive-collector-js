@@ -64,13 +64,11 @@ describe("InstanceRepository (Cache Based)", () => {
             );
         });
 
-        it("should return false on cache error", async () => {
+        it("should throw on cache error", async () => {
             cache.set.mockRejectedValue(new Error("Cache Error"));
 
             const instanceData = { id: "instance1" };
-            const result = await InstanceRepository.upsert(instanceData);
-
-            expect(result).toBe(false);
+            await expect(InstanceRepository.upsert(instanceData)).rejects.toThrow("Cache Error");
             expect(logger.error).toHaveBeenCalledWith(
                 "InstanceRepository.upsert failed for instance1:",
                 expect.any(Error)

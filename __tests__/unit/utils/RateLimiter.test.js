@@ -81,6 +81,27 @@ describe('RateLimiter', () => {
             await limiter.acquire();
             expect(limiter.tokens).toBe(0);
         });
+
+        it('should release queued waiters without exceeding maxRequests per window', async () => {
+            const limiter = new RateLimiter(1, 1000);
+            await limiter.acquire();
+
+            const second = limiter.acquire();
+            const third = limiter.acquire();
+
+            await vi.advanceTimersByTimeAsync(1000);
+            await expect(second).resolves.toBe(true);
+
+            let thirdResolved = false;
+            void third.then(() => {
+                thirdResolved = true;
+            });
+            await vi.runAllTicks();
+            expect(thirdResolved).toBe(false);
+
+            await vi.advanceTimersByTimeAsync(1000);
+            await expect(third).resolves.toBe(true);
+        });
     });
 
     describe('execute', () => {

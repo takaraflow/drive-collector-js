@@ -131,7 +131,7 @@ describe("CloudQueueBase - Buffer Management", () => {
 
     test("should add items to buffer", async () => {
         const item = { topic: 'test', data: { id: 1 } };
-        queue._addToBuffer(item);
+        void queue._addToBuffer(item).catch(() => {});
         
         expect(queue.buffer.length).toBe(1);
         expect(queue.buffer[0]).toEqual(item);
@@ -150,8 +150,8 @@ describe("CloudQueueBase - Buffer Management", () => {
     });
 
     test("should clear buffer", () => {
-        queue._addToBuffer({ topic: 'test', data: { id: 1 } });
-        queue._addToBuffer({ topic: 'test', data: { id: 2 } });
+        void queue._addToBuffer({ topic: 'test', data: { id: 1 } }).catch(() => {});
+        void queue._addToBuffer({ topic: 'test', data: { id: 2 } }).catch(() => {});
         
         const cleared = queue.clearBuffer();
         expect(cleared).toBe(2);
