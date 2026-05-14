@@ -157,8 +157,9 @@ describe('集成测试示例', () => {
 
   describe('配置和本地化集成测试', () => {
     it('应该正确集成配置和本地化', async () => {
-      const { config } = await import('../../src/config/index.js');
+      const { getConfig } = await import('../../src/config/index.js');
       const { STRINGS, format } = await import('../../src/locales/zh-CN.js');
+      const config = getConfig();
 
       expect(config).toBeDefined();
       expect(typeof config.apiId).toBe('number');

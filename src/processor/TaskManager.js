@@ -213,9 +213,9 @@ export class TaskManager {
                 ),
 
                 // 预加载配置文件缓存
-                import("../config/index.js").then(({ config }) => {
+                import("../config/index.js").then(({ getConfig }) => {
                     // 预热配置访问，避免首次访问时的延迟
-                    return Promise.resolve(config);
+                    return Promise.resolve(getConfig());
                 }),
 
                 // 预加载本地化字符串缓存

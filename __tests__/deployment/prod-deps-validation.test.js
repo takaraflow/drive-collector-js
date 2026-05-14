@@ -203,7 +203,7 @@ describe('Edge Cases - Production Dependencies', () => {
 
     test('should handle relative imports correctly', () => {
         const testContent = `
-            import { config } from '../config/index.js';
+            import { getConfig } from '../config/index.js';
             import { localCache } from '../../utils/LocalCache.js';
             import('./local-module.js');
             import('ioredis');

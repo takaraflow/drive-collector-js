@@ -605,5 +605,3 @@ export function __resetConfigForTests() {
     config = null;
     isInitialized = false;
 }
-
-export { config };
