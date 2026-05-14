@@ -289,6 +289,8 @@ function setupInfisicalPolling() {
             }
         });
 
+        rebuildConfigFromEnv();
+
         // 4. 重新初始化受影响的服务
         if (affectedServices.length > 0) {
             console.log('\n🔄 开始重新初始化受影响的服务...');
@@ -486,6 +488,11 @@ function buildConfigObject(env) {
             };
         })()
     };
+}
+
+function rebuildConfigFromEnv() {
+    config = buildConfigObject(process.env);
+    return config;
 }
 
 

@@ -12,7 +12,7 @@ vi.mock('../../src/services/d1.js', () => ({
 
 const mockConfig = { ownerId: null };
 vi.mock('../../src/config/index.js', () => ({
-    config: mockConfig
+    getConfig: () => mockConfig
 }));
 
 // Mock logger

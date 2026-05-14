@@ -4,6 +4,7 @@ import { queueService } from "./QueueService.js";
 import { InstanceRepository } from "../repositories/InstanceRepository.js";
 import logger, { setInstanceIdProvider } from "./logger/index.js";
 import { setInstanceIdProvider as setAxiomInstanceIdProvider } from "./logger/AxiomLogger.js";
+import { normalizePublicUrl } from "../utils/instanceUrl.js";
 
 const log = logger.withModule('InstanceCoordinator');
 
@@ -55,22 +56,10 @@ export class InstanceCoordinator {
         this.instanceWatchTimer = null;
     }
 
-    _normalizePublicUrl(url) {
-        if (!url || typeof url !== 'string') return null;
-        const trimmed = url.trim();
-        if (!trimmed) return null;
-        try {
-            const parsed = new URL(trimmed);
-            return parsed.toString().replace(/\/$/, '');
-        } catch {
-            return null;
-        }
-    }
-
     _getPreferredPublicUrl() {
-        return this._normalizePublicUrl(process.env.INSTANCE_PUBLIC_URL)
-            || this._normalizePublicUrl(process.env.APP_EXTERNAL_URL)
-            || this._normalizePublicUrl(process.env.LB_WEBHOOK_URL);
+        return normalizePublicUrl(process.env.INSTANCE_PUBLIC_URL)
+            || normalizePublicUrl(process.env.APP_EXTERNAL_URL)
+            || normalizePublicUrl(process.env.LB_WEBHOOK_URL);
     }
 
     /**

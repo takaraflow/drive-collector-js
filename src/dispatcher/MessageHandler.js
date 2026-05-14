@@ -2,10 +2,11 @@ import { Api } from "telegram";
 import { Dispatcher } from "./Dispatcher.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { logger } from "../services/logger/index.js";
-import { config } from "../config/index.js";
+import { getConfig } from "../config/index.js";
 import { streamTransferService } from "../services/StreamTransferService.js";
 
 const log = logger.withModule('MessageHandler');
+const getStreamConfig = () => getConfig().streamForwarding;
 
 // 创建带 perf 上下文的 logger 用于性能日志
 const logPerf = () => log.withContext({ perf: true });
@@ -123,7 +124,7 @@ export class MessageHandler {
 
             // 校验 Secret
             const secret = request.headers.get('x-instance-secret');
-            if (secret !== config.streamForwarding.secret) {
+            if (secret !== getStreamConfig().secret) {
                 return new Response('Unauthorized', { status: 401 });
             }
 
@@ -215,6 +216,7 @@ export class MessageHandler {
                 }));
 
                 // 2. 为管理员设置专属菜单（包含普通命令 + 管理员指令，排在下方）
+                const config = getConfig();
                 if (config.ownerId) {
                     try {
                         // 尝试解析 ownerId 为 InputPeer，确保 BotCommandScopePeer 接收到有效的 peer 对象

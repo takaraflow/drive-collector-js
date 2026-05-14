@@ -1,4 +1,4 @@
-import { config } from "../config/index.js";
+import { getConfig } from "../config/index.js";
 import { d1 } from "../services/d1.js";
 import { logger } from "../services/logger/index.js";
 
@@ -72,6 +72,7 @@ export const AuthGuard = {
     async getRole(userId) {
         if (!userId) return DEFAULT_ROLE;
         const idStr = userId.toString();
+        const config = getConfig();
         if (config.ownerId && idStr === config.ownerId.toString()) return "owner";
 
         const cached = this.roleCache.get(idStr);
@@ -125,4 +126,3 @@ export const AuthGuard = {
         }
     }
 };
-

@@ -1,4 +1,4 @@
-import { config } from "../config/index.js";
+import { getConfig } from "../config/index.js";
 import { logger } from "../services/logger/index.js";
 
 const log = logger.withModule('TelegramBotApi');
@@ -12,6 +12,7 @@ export class TelegramBotApi {
      * 调用 Bot API 方法
      */
     static async call(method, params = {}) {
+        const config = getConfig();
         const token = config.botToken;
         if (!token) throw new Error("BOT_TOKEN not configured");
 

@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { initConfig, __resetConfigForTests } from '../../src/config/index.js';
+import { initConfig, __resetConfigForTests, getConfig } from '../../src/config/index.js';
 
 // Mock 服务模块
 vi.mock('../../src/services/CacheService.js', () => ({
@@ -50,9 +50,11 @@ vi.mock('../../src/services/InstanceCoordinator.js', () => ({
 
 vi.mock('../../src/services/secrets/InfisicalSecretsProvider.js', () => ({
     default: class MockInfisicalSecretsProvider {
+        static instances = [];
         constructor(config) {
             this.config = config;
             this.listeners = new Map();
+            MockInfisicalSecretsProvider.instances.push(this);
         }
         
         async fetchSecrets() {
@@ -93,11 +95,13 @@ describe('配置更新和服务重新初始化', () => {
         
         // 清除之前的配置
         __resetConfigForTests();
+        vi.resetModules();
         
         // 清除控制台输出
         vi.spyOn(console, 'log').mockImplementation(() => {});
         vi.spyOn(console, 'warn').mockImplementation(() => {});
         vi.spyOn(console, 'error').mockImplementation(() => {});
+
     });
     
     afterEach(() => {
@@ -123,6 +127,17 @@ describe('配置更新和服务重新初始化', () => {
         // 获取创建的 provider（这需要一些技巧来访问）
         // 在真实场景中，provider是局部变量，但我们可以通过其他方式测试
         expect(config).toBeDefined();
+    });
+
+    test('配置变更后应该重建内存中的 config 对象', async () => {
+        await initConfig();
+        expect(getConfig().redis.url).toBe('redis://localhost:6379');
+
+        process.env.REDIS_URL = 'redis://updated:6379';
+        __resetConfigForTests();
+        await initConfig();
+
+        expect(getConfig().redis.url).toBe('redis://updated:6379');
     });
     
     test('应该正确识别受影响的服务', async () => {

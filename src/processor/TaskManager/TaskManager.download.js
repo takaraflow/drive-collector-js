@@ -2,27 +2,10 @@ import path from "path";
 import fs from "fs";
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { createHeartbeat, handleTaskCompletion, handleTaskFailure, escapeHTML } from "./TaskManager.utils.js";
+import { resolveInstanceBaseUrl } from "../../utils/instanceUrl.js";
 
 // 获取模块日志记录器
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager');
-
-function normalizeUrl(url) {
-    if (!url || typeof url !== 'string') return null;
-    const trimmed = url.trim();
-    if (!trimmed) return null;
-    try {
-        return new URL(trimmed).toString().replace(/\/$/, '');
-    } catch {
-        return null;
-    }
-}
-
-function resolveWorkerTargetUrl(instance) {
-    if (!instance || typeof instance !== 'object') return null;
-    return normalizeUrl(instance.directUrl)
-        || normalizeUrl(instance.tunnelUrl)
-        || normalizeUrl(instance.url);
-}
 
 /**
  * Download Task - Responsible for MTProto download phase
@@ -213,7 +196,7 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
         let targetUrl = config.streamForwarding.lbUrl;
         if (!targetUrl) {
             const bestWorker = otherInstances.sort((a, b) => (a.activeTaskCount || 0) - (b.activeTaskCount || 0))[0];
-            if (bestWorker) targetUrl = resolveWorkerTargetUrl(bestWorker);
+            if (bestWorker) targetUrl = resolveInstanceBaseUrl(bestWorker);
         }
 
         if (targetUrl) {

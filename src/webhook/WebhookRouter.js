@@ -1,6 +1,7 @@
 import { queueService } from '../services/QueueService.js';
 import { TaskManager } from '../processor/TaskManager.js';
 import { logger } from '../services/logger/index.js';
+import { resolveInstanceBaseUrl } from '../utils/instanceUrl.js';
 
 const log = logger.withModule ? logger.withModule('WebhookRouter') : logger;
 
@@ -235,7 +236,7 @@ async function handleWebhookForwarding(req, res, result, data, path, body) {
 
                 const activeInstances = (await instanceCoordinator.getActiveInstances?.()) || [];
                 const leaderInstance = activeInstances.find(i => i.id === leaderInstanceId);
-                const baseUrl = leaderInstance?.tunnelUrl || leaderInstance?.url;
+                const baseUrl = resolveInstanceBaseUrl(leaderInstance);
                 if (!baseUrl) return null;
                 return String(baseUrl).replace(/\/$/, '');
             } catch (error) {

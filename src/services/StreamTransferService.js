@@ -1,4 +1,4 @@
-import { config } from "../config/index.js";
+import { getConfig } from "../config/index.js";
 import { logger } from "./logger/index.js";
 import { CloudTool } from "./rclone.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
@@ -6,8 +6,10 @@ import { updateStatus, escapeHTML, sanitizeHeaders } from "../utils/common.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
 import { TelegramBotApi } from "../utils/telegramBotApi.js";
 import { CacheService } from "./CacheService.js";
+import { resolveInstanceBaseUrl } from "../utils/instanceUrl.js";
 
 const log = logger.withModule('StreamTransferService');
+const getStreamConfig = () => getConfig().streamForwarding;
 
 /**
  * 实时流式转发服务 (StreamTransferService)
@@ -28,7 +30,7 @@ class StreamTransferService {
      */
     async forwardChunk(taskId, chunk, metadata) {
         const { fileName, userId, isLast, chunkIndex, totalSize, leaderUrl, chatId, msgId, sourceMsgId } = metadata;
-        const lbUrl = config.streamForwarding.lbUrl;
+        const lbUrl = getStreamConfig().lbUrl;
         
         if (!lbUrl) {
             throw new Error("STREAM_LB_URL (LB_WEBHOOK_URL) not configured");
@@ -62,7 +64,7 @@ class StreamTransferService {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/octet-stream',
-                    'x-instance-secret': config.streamForwarding.secret,
+                    'x-instance-secret': getStreamConfig().secret,
                     'x-file-name': encodeURIComponent(fileName),
                     'x-user-id': userId,
                     'x-is-last': isLast ? 'true' : 'false',
@@ -120,7 +122,7 @@ class StreamTransferService {
         const response = await fetch(url, {
             method: 'GET',
             headers: {
-                'x-instance-secret': config.streamForwarding.secret
+                'x-instance-secret': getStreamConfig().secret
             }
         });
         
@@ -145,7 +147,7 @@ class StreamTransferService {
     async handleIncomingChunk(taskId, req) {
         // 校验秘钥
         const secret = req.headers['x-instance-secret'];
-        if (secret !== config.streamForwarding.secret) {
+        if (secret !== getStreamConfig().secret) {
             return { success: false, statusCode: 401, message: "Unauthorized" };
         }
 
@@ -224,7 +226,7 @@ class StreamTransferService {
                 const instances = await instanceCoordinator.getAllInstances();
                 const leader = instances.find(inst => inst.id === sourceInstanceId);
                 if (leader) {
-                    return leader.tunnelUrl || leader.url;
+                    return resolveInstanceBaseUrl(leader);
                 }
             } catch (e) {
                 log.warn(`Failed to lookup leader URL from cache: ${e.message}`);
@@ -331,7 +333,7 @@ class StreamTransferService {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-instance-secret': config.streamForwarding.secret
+                    'x-instance-secret': getStreamConfig().secret
                 },
                 body: JSON.stringify({
                     uploadedBytes: context.uploadedBytes,
@@ -349,7 +351,7 @@ class StreamTransferService {
      */
     async handleStatusUpdate(taskId, reqBody, headers) {
         const secret = headers['x-instance-secret'];
-        if (secret !== config.streamForwarding.secret) {
+        if (secret !== getStreamConfig().secret) {
             return { success: false, statusCode: 401, message: "Unauthorized" };
         }
 
