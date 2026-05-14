@@ -19,6 +19,8 @@ export class CloudflareTunnel extends S6ManagedTunnel {
         this.metricsUrl = `http://${host}:${port}/metrics`;
         this.pollInterval = config.pollInterval || 5000;
         this._timer = null;
+        this._process = null;
+        this._startedStandalone = false;
     }
 
     /**
@@ -37,7 +39,10 @@ export class CloudflareTunnel extends S6ManagedTunnel {
 
         // 在 s6 环境中，cloudflared 由 s6 管理，但需要 Node.js 在加载完 Infisical 凭证后手动启动
         // 因为 cloudflared 服务有 'down' 文件，不会自动启动
-        await this._controlS6Service('-u');
+        const startedByS6 = await this._controlS6Service('-u');
+        if (!startedByS6) {
+            await this._startStandaloneProcess();
+        }
 
         this._startPolling();
     }
@@ -54,6 +59,14 @@ export class CloudflareTunnel extends S6ManagedTunnel {
             const { promisify } = await import('util');
             const execFileAsync = promisify(execFile);
             const fs = await import('fs/promises');
+            const s6SvcPath = '/command/s6-svc';
+
+            try {
+                await fs.access(s6SvcPath);
+            } catch {
+                log.warn(`s6-svc not available at ${s6SvcPath}, falling back to standalone cloudflared`);
+                return false;
+            }
 
             const servicePath = this.servicePath || '/run/service/cloudflared';
             
@@ -70,20 +83,19 @@ export class CloudflareTunnel extends S6ManagedTunnel {
                     attempts++;
                     if (attempts >= maxAttempts) {
                         log.error(`Timeout waiting for service directory: ${servicePath}`);
-                        return;
+                        return false;
                     }
                     log.debug(`Service directory not ready yet, waiting... (${attempts}/${maxAttempts})`);
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 }
             }
             
-            // s6-svc in s6-overlay is typically at /command/s6-svc
-            const s6SvcPath = '/command/s6-svc';
             log.info(`Executing: ${s6SvcPath} ${action} ${servicePath}`);
             const { stdout, stderr } = await execFileAsync(s6SvcPath, [action, servicePath]);
             if (stdout) log.debug(`s6-svc stdout: ${stdout}`);
             if (stderr) log.warn(`s6-svc stderr: ${stderr}`);
             log.info(`Successfully sent s6-svc ${action} signal to ${servicePath}`);
+            return true;
         } catch (error) {
             // 记录错误但不抛出，避免阻塞应用启动
             // 在 s6 环境中，这是错误；在非 s6 环境（如 Windows 开发环境），这是预期的
@@ -92,7 +104,84 @@ export class CloudflareTunnel extends S6ManagedTunnel {
             } else {
                 log.debug(`s6-svc not available (expected on Windows): ${error.message}`);
             }
+            return false;
         }
+    }
+
+    /**
+     * Start a standalone cloudflared process when s6-overlay is unavailable.
+     * This supports constrained platforms that do not allow /init to run as PID 1.
+     * @returns {Promise<void>}
+     * @private
+     */
+    async _startStandaloneProcess() {
+        if (this._process) {
+            return;
+        }
+
+        const { spawn } = await import('child_process');
+        const appPort = process.env.PORT || '7860';
+        const metricsAddress = `${this.config.metricsHost || '127.0.0.1'}:${this.config.metricsPort || 2000}`;
+        const args = [
+            'tunnel',
+            '--url',
+            `http://127.0.0.1:${appPort}`,
+            '--metrics',
+            metricsAddress,
+            '--no-autoupdate'
+        ];
+
+        log.info(`Starting standalone cloudflared process for ${args[2]} with metrics on ${metricsAddress}`);
+
+        const proc = spawn('cloudflared', args, {
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+
+        this._process = proc;
+        this._startedStandalone = true;
+
+        const captureUrl = async (chunk) => {
+            const text = chunk.toString();
+            const match = text.match(/https:\/\/[a-zA-Z0-9.-]+\.trycloudflare\.com/);
+            if (match) {
+                const url = match[0];
+                if (this.currentUrl !== url) {
+                    log.info(`🚇 Tunnel URL captured from cloudflared output: ${url}`);
+                }
+                this.currentUrl = url;
+                this.isReady = true;
+
+                try {
+                    const fs = await import('fs/promises');
+                    await fs.writeFile('/tmp/cloudflared.url', `${url}\n`, 'utf8');
+                } catch (error) {
+                    log.debug(`Failed to persist tunnel URL to /tmp/cloudflared.url: ${error.message}`);
+                }
+            }
+
+            const trimmed = text.trim();
+            if (trimmed) {
+                log.debug(`[cloudflared] ${trimmed}`);
+            }
+        };
+
+        proc.stdout?.on('data', (chunk) => {
+            void captureUrl(chunk);
+        });
+        proc.stderr?.on('data', (chunk) => {
+            void captureUrl(chunk);
+        });
+        proc.on('error', (error) => {
+            log.error(`Standalone cloudflared process failed to start: ${error.message}`);
+            this._process = null;
+        });
+        proc.on('exit', (code, signal) => {
+            log.warn(`Standalone cloudflared exited with code=${code ?? 'null'} signal=${signal ?? 'null'}`);
+            this._process = null;
+            if (!this.currentUrl) {
+                this.isReady = false;
+            }
+        });
     }
 
     /**
@@ -137,6 +226,10 @@ export class CloudflareTunnel extends S6ManagedTunnel {
                 log.debug(`Captured URL from metrics (fallback): ${match2[1]}`);
                 return `https://${match2[1]}`;
             }
+        }
+
+        if (this._startedStandalone && this.currentUrl) {
+            return this.currentUrl;
         }
 
         // 2. Fallback to temporary file (for Quick Tunnels)
@@ -209,6 +302,10 @@ export class CloudflareTunnel extends S6ManagedTunnel {
         if (this._timer) {
             clearTimeout(this._timer);
             this._timer = null;
+        }
+        if (this._process) {
+            this._process.kill('SIGTERM');
+            this._process = null;
         }
     }
 }
