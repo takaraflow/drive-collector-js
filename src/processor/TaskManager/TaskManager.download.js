@@ -206,7 +206,16 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
 
                 const { tunnelService } = await import("../../services/TunnelService.js");
                 const tunnelUrl = await tunnelService.getPublicUrl();
-                const leaderUrl = tunnelUrl || config.streamForwarding.externalUrl || `http://localhost:${config.port}`;
+                let leaderUrl = tunnelUrl || config.streamForwarding.externalUrl;
+                if (!leaderUrl) {
+                    const activeInstances = (await instanceCoordinator.getActiveInstances?.()) || [];
+                    const self = activeInstances.find(inst => inst.id === instanceCoordinator.instanceId);
+                    leaderUrl = self ? resolveInstanceBaseUrl(self) : null;
+                }
+                if (!leaderUrl) {
+                    log.warn(`⚠️ leaderUrl fallback to localhost — workers will not be able to report status back`);
+                    leaderUrl = `http://localhost:${config.port}`;
+                }
 
                 // Resume transfer: Check if can resume
                 let chunkIndex = 0;

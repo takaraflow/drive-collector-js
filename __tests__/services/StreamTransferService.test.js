@@ -6,12 +6,13 @@ import { CacheService } from '../../src/services/CacheService.js'
 const log = logger.withModule('StreamTransferServiceTest')
 
 vi.mock('../../src/config/index.js', () => ({
-  getConfig: () => ({
+  getConfig: vi.fn(() => ({
     streamForwarding: {
       secret: 'test-secret',
       lbUrl: 'https://lb.example.com'
-    }
-  })
+    },
+    remoteFolder: '/drive/uploads'
+  }))
 }))
 
 vi.mock('../../src/services/CacheService.js', () => ({
@@ -19,6 +20,18 @@ vi.mock('../../src/services/CacheService.js', () => ({
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn()
+  }
+}))
+
+vi.mock('../../src/repositories/TaskRepository.js', () => ({
+  TaskRepository: {
+    updateStatus: vi.fn().mockResolvedValue(true)
+  }
+}))
+
+vi.mock('../../src/utils/telegramBotApi.js', () => ({
+  TelegramBotApi: {
+    editMessageText: vi.fn().mockResolvedValue(true)
   }
 }))
 
@@ -250,7 +263,7 @@ describe('StreamTransferService', () => {
       const taskId = 'task-retry-test'
       const chunkIndex = 5
       const retryKey = `${taskId}:${chunkIndex}`
-      
+
       // 设置已达到最大重试次数
       streamTransferService.chunkRetryAttempts.set(retryKey, 3)
 
@@ -267,6 +280,98 @@ describe('StreamTransferService', () => {
 
       expect(result).toBe(false)
       expect(log.error).toHaveBeenCalledWith(expect.stringContaining('Max retry attempts reached'))
+    })
+
+    test('forwardChunk 应优先使用 targetUrl 而非 lbUrl', async () => {
+      vi.spyOn(streamTransferService, 'getRemoteProgress').mockResolvedValue(-1)
+      fetch.mockResolvedValueOnce({ ok: true })
+
+      const taskId = 'task-target-url'
+      const metadata = {
+        fileName: 'test.txt',
+        userId: 'user-123',
+        isLast: false,
+        chunkIndex: 0,
+        totalSize: 1024,
+        leaderUrl: 'https://leader.example.com',
+        targetUrl: 'https://specific-worker.example.com'
+      }
+
+      await streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
+
+      // 进度查询和 chunk 发送都应使用 targetUrl
+      expect(streamTransferService.getRemoteProgress).toHaveBeenCalledWith('https://specific-worker.example.com', taskId)
+      expect(fetch).toHaveBeenCalledWith(
+        'https://specific-worker.example.com/api/v2/stream/task-target-url',
+        expect.any(Object)
+      )
+    })
+
+    test('forwardChunk 无 targetUrl 时回退到 lbUrl', async () => {
+      vi.spyOn(streamTransferService, 'getRemoteProgress').mockResolvedValue(-1)
+      fetch.mockResolvedValueOnce({ ok: true })
+
+      const taskId = 'task-fallback-lb'
+      const metadata = {
+        fileName: 'test.txt',
+        userId: 'user-123',
+        isLast: false,
+        chunkIndex: 0,
+        totalSize: 1024,
+        leaderUrl: 'https://leader.example.com'
+        // 无 targetUrl
+      }
+
+      await streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
+
+      expect(streamTransferService.getRemoteProgress).toHaveBeenCalledWith('https://lb.example.com', taskId)
+      expect(fetch).toHaveBeenCalledWith(
+        'https://lb.example.com/api/v2/stream/task-fallback-lb',
+        expect.any(Object)
+      )
+    })
+
+    test('forwardChunk targetUrl 和 lbUrl 都缺失时应抛错', async () => {
+      // 临时覆盖 config 让 lbUrl 为空
+      const { getConfig } = await import('../../src/config/index.js')
+      getConfig.mockReturnValueOnce({ streamForwarding: { secret: 'test-secret' } })
+
+      const metadata = {
+        fileName: 'test.txt',
+        userId: 'user-123',
+        isLast: false,
+        chunkIndex: 0,
+        totalSize: 1024,
+        leaderUrl: 'https://leader.example.com'
+        // 无 targetUrl, lbUrl 也是 undefined
+      }
+
+      await expect(
+        streamTransferService.forwardChunk('task-no-url', Buffer.from('test'), metadata)
+      ).rejects.toThrow('No target URL available')
+    })
+
+    test('finishTask 应使用 getConfig().remoteFolder 而非未定义的 config', async () => {
+      const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
+      const { TelegramBotApi } = await import('../../src/utils/telegramBotApi.js')
+
+      const context = {
+        fileName: 'finish-test.txt',
+        userId: 'user-123',
+        chatId: 'chat-123',
+        msgId: '456',
+        sourceMsgId: '789',
+        leaderUrl: null
+      }
+
+      await streamTransferService.finishTask('task-finish', context)
+
+      expect(TaskRepository.updateStatus).toHaveBeenCalledWith('task-finish', 'completed')
+      expect(TelegramBotApi.editMessageText).toHaveBeenCalledWith(
+        'chat-123',
+        456,
+        expect.stringContaining('/drive/uploads')
+      )
     })
   })
 })

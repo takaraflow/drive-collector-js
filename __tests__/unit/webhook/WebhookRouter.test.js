@@ -42,7 +42,11 @@ vi.mock('../../../src/services/StreamTransferService.js', () => {
     return {
         streamTransferService: {
             handleIncomingChunk: vi.fn(),
-            handleStatusUpdate: vi.fn()
+            handleStatusUpdate: vi.fn(),
+            getTaskProgress: vi.fn(),
+            getTaskFullProgress: vi.fn(),
+            resumeTask: vi.fn(),
+            resetTask: vi.fn()
         }
     };
 });
@@ -292,6 +296,120 @@ describe('WebhookRouter', () => {
             expect(streamTransferService.handleIncomingChunk).toHaveBeenCalledWith('123', req);
             expect(res.writeHead).toHaveBeenCalledWith(500);
             expect(res.end).toHaveBeenCalledWith('Stream Error');
+        });
+
+        it('should handle GET /api/v2/stream/:taskId/progress with valid secret', async () => {
+            req.url = '/api/v2/stream/task-1/progress';
+            req.method = 'GET';
+            req.headers['x-instance-secret'] = 'test-secret';
+
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
+
+            const { streamTransferService } = await import('../../../src/services/StreamTransferService.js');
+            streamTransferService.getTaskProgress.mockReturnValue(5);
+
+            await handleWebhook(req, res);
+
+            expect(streamTransferService.getTaskProgress).toHaveBeenCalledWith('task-1');
+            expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
+            expect(res.end).toHaveBeenCalledWith(JSON.stringify({ lastChunkIndex: 5 }));
+        });
+
+        it('should reject stream control routes with invalid secret', async () => {
+            req.url = '/api/v2/stream/task-1/progress';
+            req.method = 'GET';
+            req.headers['x-instance-secret'] = 'wrong-secret';
+
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
+
+            await handleWebhook(req, res);
+
+            expect(res.writeHead).toHaveBeenCalledWith(401);
+            expect(res.end).toHaveBeenCalledWith('Unauthorized');
+        });
+
+        it('should reject stream control routes when secret header is missing', async () => {
+            req.url = '/api/v2/stream/task-1/full-progress';
+            req.method = 'GET';
+            delete req.headers['x-instance-secret'];
+
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
+
+            await handleWebhook(req, res);
+
+            expect(res.writeHead).toHaveBeenCalledWith(401);
+            expect(res.end).toHaveBeenCalledWith('Unauthorized');
+        });
+
+        it('should return 500 when handleIncomingChunk throws', async () => {
+            req.url = '/api/v2/stream/task-1';
+            req.method = 'POST';
+            const { streamTransferService } = await import('../../../src/services/StreamTransferService.js');
+            streamTransferService.handleIncomingChunk.mockRejectedValue(new Error('Unexpected failure'));
+
+            await handleWebhook(req, res);
+
+            expect(res.writeHead).toHaveBeenCalledWith(500);
+            expect(res.end).toHaveBeenCalledWith('Internal Server Error');
+        });
+
+        it('should handle GET /api/v2/stream/:taskId/full-progress', async () => {
+            req.url = '/api/v2/stream/task-1/full-progress';
+            req.method = 'GET';
+            req.headers['x-instance-secret'] = 'test-secret';
+
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
+
+            const { streamTransferService } = await import('../../../src/services/StreamTransferService.js');
+            const fullProgress = { isActive: true, lastChunkIndex: 10, uploadedBytes: 5000, totalSize: 10000 };
+            streamTransferService.getTaskFullProgress.mockResolvedValue(fullProgress);
+
+            await handleWebhook(req, res);
+
+            expect(streamTransferService.getTaskFullProgress).toHaveBeenCalledWith('task-1');
+            expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
+            expect(res.end).toHaveBeenCalledWith(JSON.stringify(fullProgress));
+        });
+
+        it('should handle POST /api/v2/stream/:taskId/resume', async () => {
+            req.url = '/api/v2/stream/task-1/resume';
+            req.method = 'POST';
+            req.headers['x-instance-secret'] = 'test-secret';
+
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
+
+            const { streamTransferService } = await import('../../../src/services/StreamTransferService.js');
+            const resumeResult = { success: true, lastChunkIndex: 10, canResume: true };
+            streamTransferService.resumeTask.mockResolvedValue(resumeResult);
+
+            await handleWebhook(req, res);
+
+            expect(streamTransferService.resumeTask).toHaveBeenCalledWith('task-1', {});
+            expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
+            expect(res.end).toHaveBeenCalledWith(JSON.stringify(resumeResult));
+        });
+
+        it('should handle DELETE /api/v2/stream/:taskId/reset', async () => {
+            req.url = '/api/v2/stream/task-1/reset';
+            req.method = 'DELETE';
+            req.headers['x-instance-secret'] = 'test-secret';
+
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
+
+            const { streamTransferService } = await import('../../../src/services/StreamTransferService.js');
+            streamTransferService.resetTask.mockResolvedValue({ success: true });
+
+            await handleWebhook(req, res);
+
+            expect(streamTransferService.resetTask).toHaveBeenCalledWith('task-1');
+            expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
+            expect(res.end).toHaveBeenCalledWith(JSON.stringify({ success: true }));
         });
     });
 

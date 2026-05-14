@@ -29,11 +29,12 @@ class StreamTransferService {
      * Sender (Leader): 转发一个 chunk 到 LB/Worker (支持断点续传)
      */
     async forwardChunk(taskId, chunk, metadata) {
-        const { fileName, userId, isLast, chunkIndex, totalSize, leaderUrl, chatId, msgId, sourceMsgId } = metadata;
+        const { fileName, userId, isLast, chunkIndex, totalSize, leaderUrl, chatId, msgId, sourceMsgId, targetUrl } = metadata;
         const lbUrl = getStreamConfig().lbUrl;
-        
-        if (!lbUrl) {
-            throw new Error("STREAM_LB_URL (LB_WEBHOOK_URL) not configured");
+        const workerUrl = targetUrl || lbUrl;
+
+        if (!workerUrl) {
+            throw new Error("No target URL available (neither targetUrl nor STREAM_LB_URL configured)");
         }
 
         // 检查重试次数
@@ -46,7 +47,7 @@ class StreamTransferService {
 
         // 先检查远程进度，避免不必要的传输
         try {
-            const remoteProgress = await this.getRemoteProgress(lbUrl, taskId);
+            const remoteProgress = await this.getRemoteProgress(workerUrl, taskId);
             if (remoteProgress >= chunkIndex) {
                 log.info(`Chunk ${chunkIndex} already received by worker (progress: ${remoteProgress}), skipping.`);
                 // 清除重试计数
@@ -57,7 +58,7 @@ class StreamTransferService {
             log.debug(`Failed to query remote progress before sending: ${queryError.message}`);
         }
 
-        const url = `${lbUrl.replace(/\/$/, '')}/api/v2/stream/${taskId}`;
+        const url = `${workerUrl.replace(/\/$/, '')}/api/v2/stream/${taskId}`;
         
         try {
             const response = await fetch(url, {
@@ -98,7 +99,7 @@ class StreamTransferService {
             // 如果是网络超时，再次查询进度
             if (error.name === 'AbortError' || error.message.includes('timeout')) {
                 try {
-                    const remoteProgress = await this.getRemoteProgress(lbUrl, taskId);
+                    const remoteProgress = await this.getRemoteProgress(workerUrl, taskId);
                     if (remoteProgress >= chunkIndex) {
                         log.info(`Chunk ${chunkIndex} was received despite timeout (progress: ${remoteProgress}), skipping retry.`);
                         this.chunkRetryAttempts.delete(retryKey);
@@ -438,7 +439,7 @@ class StreamTransferService {
             const originalMsgId = context.sourceMsgId || context.msgId;
             const fileLink = `tg://openmessage?chat_id=${context.chatId}&message_id=${originalMsgId}`;
             const fileNameHtml = `<a href="${fileLink}">${escapeHTML(context.fileName)}</a>`;
-            const text = format(STRINGS.task.success, { name: fileNameHtml, folder: config.remoteFolder });
+            const text = format(STRINGS.task.success, { name: fileNameHtml, folder: getConfig().remoteFolder });
             await TelegramBotApi.editMessageText(context.chatId, parseInt(context.msgId), text);
         } catch (error) {
             log.warn('Failed to update Telegram message after task completion', {

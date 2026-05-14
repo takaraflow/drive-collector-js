@@ -65,14 +65,72 @@ async function handleStreamForwarding(req, res) {
     const url = new URL(req.url, `http://${hostHeader}`);
     const path = url.pathname;
 
-    // 1. 处理文件流 (Worker 端)
-    if (path.startsWith('/api/v2/stream/') && req.method === 'POST') {
-        const taskId = path.split('/').pop();
-        const { streamTransferService } = await import("../services/StreamTransferService.js");
-        const result = await streamTransferService.handleIncomingChunk(taskId, req);
-        res.writeHead(result.statusCode || 200);
-        res.end(result.success ? 'OK' : (result.message || 'Error'));
-        return true;
+    // Stream control routes (require x-instance-secret auth)
+    if (path.startsWith('/api/v2/stream/')) {
+        const { getConfig } = await import("../config/index.js");
+        const cfg = getConfig();
+        const secret = req.headers['x-instance-secret'];
+
+        // Check for specific action routes first (progress, full-progress, resume, reset)
+        const streamPathMatch = path.match(/^\/api\/v2\/stream\/([^\/]+)\/(progress|full-progress|resume|reset)$/);
+        if (streamPathMatch) {
+            // All sub-routes require secret auth
+            if (secret !== cfg.streamForwarding.secret) {
+                res.writeHead(401);
+                res.end('Unauthorized');
+                return true;
+            }
+
+            const taskId = streamPathMatch[1];
+            const action = streamPathMatch[2];
+            const { streamTransferService } = await import("../services/StreamTransferService.js");
+
+            // GET /api/v2/stream/:taskId/progress
+            if (action === 'progress' && req.method === 'GET') {
+                const progress = streamTransferService.getTaskProgress(taskId);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ lastChunkIndex: progress }));
+                return true;
+            }
+
+            // GET /api/v2/stream/:taskId/full-progress
+            if (action === 'full-progress' && req.method === 'GET') {
+                const fullProgress = await streamTransferService.getTaskFullProgress(taskId);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(fullProgress));
+                return true;
+            }
+
+            // POST /api/v2/stream/:taskId/resume
+            if (action === 'resume' && req.method === 'POST') {
+                let body = '';
+                for await (const chunk of req) { body += chunk; }
+                let parsed = {};
+                try { parsed = JSON.parse(body); } catch {}
+                const result = await streamTransferService.resumeTask(taskId, parsed);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(result));
+                return true;
+            }
+
+            // DELETE /api/v2/stream/:taskId/reset
+            if (action === 'reset' && req.method === 'DELETE') {
+                const result = await streamTransferService.resetTask(taskId);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(result));
+                return true;
+            }
+        }
+
+        // POST /api/v2/stream/:taskId — incoming chunk (secret check inside handleIncomingChunk)
+        if (req.method === 'POST') {
+            const taskId = path.split('/').pop();
+            const { streamTransferService } = await import("../services/StreamTransferService.js");
+            const result = await streamTransferService.handleIncomingChunk(taskId, req);
+            res.writeHead(result.statusCode || 200);
+            res.end(result.success ? 'OK' : (result.message || 'Error'));
+            return true;
+        }
     }
 
     // 2. 处理状态更新 (Leader 端)
