@@ -131,7 +131,7 @@ export const STRINGS = {
         // 🆕 新增
         directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
         dir_empty: "ℹ️ 目录为空。您可以直接发送文件给我，将其转存到此目录。",
-        batch_empty: "ℹ️ 尚无文件排队或加载中。",
+        batch_empty: "ℹ️ 尚无文件排队或加载中。请向我发送多个文件或相册以创建批量任务。",
         page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 个文件</i>",
         btn_home: "⏮️",
         btn_prev: "⬅️",
@@ -191,8 +191,8 @@ export const STRINGS = {
         task_row: "<code>{{index}}.</code> {{statusIcon}} <code>{{name}}</code> | 👤 <code>{{user}}</code> | {{time}}",
         user_dist: "👥 <b>用户活跃分布</b> (Top 5)",
         user_row: "<code>{{index}}.</code> 👤 <code>{{userId}}</code> — {{count}} 个任务",
-        no_active: "✅ 当前无活跃任务",
-        no_data: "📭 暂无任务记录",
+        no_active: "✅ 当前无活跃任务。请直接向我发送文件或链接来创建任务。",
+        no_data: "📭 暂无任务记录。您可以向我发送文件、图片或链接来开始转存。",
         error: "❌ 查询任务队列失败: {{error}}",
         status_labels: {
             queued: "🕒 排队中",
@@ -210,7 +210,7 @@ export const STRINGS = {
         task_size_row: "   📦 {{size}}",
         btn_back: "🔙 返回",
         btn_refresh: "🔄",
-        no_tasks_in_status: "📭 该状态下暂无任务",
+        no_tasks_in_status: "📭 该状态下暂无任务。您可以查看其他状态，或发送文件创建新任务。",
     },
 
     // --- 上传路径设置 ---
