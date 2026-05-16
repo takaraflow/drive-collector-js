@@ -2,7 +2,7 @@ import { Button } from "telegram/tl/custom/button.js";
 import { SessionManager } from "./SessionManager.js";
 import { client } from "../services/telegram.js";
 import { CloudTool } from "../services/rclone.js";
-import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, PRIORITY } from "../utils/limiter.js";
+import { runBotTask, runMtprotoTask, runBotTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 import { escapeHTML } from "../utils/common.js";
