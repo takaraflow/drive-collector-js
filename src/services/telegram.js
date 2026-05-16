@@ -6,6 +6,7 @@ import { instanceCoordinator } from "./InstanceCoordinator.js";
 import { cache } from "./CacheService.js";
 import logger, { enableTelegramConsoleProxy } from "./logger/index.js";
 import { TelegramErrorClassifier } from "./telegram-error-classifier.js";
+import { CACHE_KEYS } from "../domain/cache-keys.js";
 
 const log = logger.withModule ? logger.withModule('TelegramService') : logger;
 
@@ -783,7 +784,7 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
         const hasLock = await instanceCoordinator.hasLock("telegram_client");
         if (!hasLock) {
             // 检查锁是否被其他实例持有
-            const lockData = await cache.get(`lock:telegram_client`, "json", { skipCache: true });
+            const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), "json", { skipCache: true });
             
             if (!lockData) {
                 // 锁不存在（已过期或从未获取），且当前实例是 Leader，允许尝试重新获取
@@ -963,7 +964,7 @@ const handleWatchdogFailureThreshold = async (errorType, diff) => {
     try {
         const hasLock = await instanceCoordinator.hasLock("telegram_client");
         if (!hasLock) {
-            const lockData = await cache.get(`lock:telegram_client`, "json", { skipCache: true });
+            const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), "json", { skipCache: true });
             if (!lockData && instanceCoordinator.isLeader) {
                 log.warn("🔒 看门狗检测到锁缺失，Leader 尝试重新获取锁...");
                 const acquired = await instanceCoordinator.acquireLock("telegram_client", 300);

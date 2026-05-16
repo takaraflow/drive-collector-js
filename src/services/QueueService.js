@@ -3,6 +3,12 @@ import { logger } from "./logger/index.js";
 import { QstashQueue } from "./queue/QstashQueue.js";
 import { Mutex } from "async-mutex";
 import Joi from 'joi';
+import {
+    buildDownloadQueueMessage,
+    buildTaskQueueMeta,
+    buildUploadQueueMessage,
+    TASK_QUEUE_TRIGGER_SOURCES
+} from "../domain/task-queue-contract.js";
 
 const log = logger.withModule?.('QueueService') || logger;
 
@@ -10,7 +16,7 @@ let warnedMissingWebhookUrl = false;
 let warnedQstashDebug = false;
 
 function isQstashDebugEnabled() {
-    const value = (process.env.QSTASH_DEBUG || '').toLowerCase();
+    const value = (getConfig().qstash?.debug || 'false').toLowerCase();
     return value === 'true' || value === '1' || value === 'yes';
 }
 
@@ -34,17 +40,16 @@ export class QueueService {
     }
 
     _addMetadata(message) {
-        const CALLER_TRACKING_MODE = process.env.CALLER_TRACKING_MODE || 'none';
+        const runtimeConfig = getConfig();
         const existingMeta = (message && typeof message === 'object' && message._meta && typeof message._meta === 'object')
             ? message._meta
             : null;
-        const baseMeta = {
-            triggerSource: 'qstash-v2',
-            instanceId: process.env.INSTANCE_ID?.slice(0, 8) || 'unknown',
-            timestamp: Date.now()
-        };
+        const baseMeta = buildTaskQueueMeta({}, {
+            triggerSource: TASK_QUEUE_TRIGGER_SOURCES.QSTASH,
+            instanceId: runtimeConfig.instance?.id?.slice(0, 8) || 'unknown'
+        });
 
-        if (CALLER_TRACKING_MODE === 'production') {
+        if (runtimeConfig.callerTrackingMode === 'production') {
             baseMeta.callerContext = new Error().stack
                 .split('\n')
                 .slice(2, 4)
@@ -61,7 +66,7 @@ export class QueueService {
         const enhancedMessage = this._addMetadata(message);
         const config = getConfig();
         const webhookUrl = config.qstash?.webhookUrl || 'https://example.com';
-        if (!config.qstash?.webhookUrl && !warnedMissingWebhookUrl && process.env.NODE_ENV !== 'test') {
+        if (!config.qstash?.webhookUrl && !warnedMissingWebhookUrl && (config.nodeEnv || 'dev') !== 'test') {
             warnedMissingWebhookUrl = true;
             log.warn('LB_WEBHOOK_URL 未配置，QStash 将发布到占位地址，回调不会到达你的 LB', {
                 placeholder: webhookUrl
@@ -71,7 +76,7 @@ export class QueueService {
         const urlPath = template.replace('${topic}', encodeURIComponent(topic.toLowerCase()));
         const fullUrl = `${webhookUrl}${urlPath}`;
 
-        if (isQstashDebugEnabled() && !warnedQstashDebug && process.env.NODE_ENV !== 'test') {
+        if (isQstashDebugEnabled() && !warnedQstashDebug && (config.nodeEnv || 'dev') !== 'test') {
             warnedQstashDebug = true;
             log.info('QStash debug enabled (QSTASH_DEBUG=true)');
         }
@@ -132,11 +137,11 @@ export class QueueService {
     }
 
     async enqueueDownloadTask(taskId, taskData = {}) {
-        return this.publish(this.topics.downloadTasks, { taskId, type: 'download', ...taskData });
+        return this.publish(this.topics.downloadTasks, buildDownloadQueueMessage(taskId, taskData));
     }
 
     async enqueueUploadTask(taskId, taskData = {}) {
-        return this.publish(this.topics.uploadTasks, { taskId, type: 'upload', ...taskData });
+        return this.publish(this.topics.uploadTasks, buildUploadQueueMessage(taskId, taskData));
     }
 
     async broadcastSystemEvent(event, data = {}) {

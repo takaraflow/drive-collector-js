@@ -4,12 +4,17 @@ import { client } from "../services/telegram.js";
 import { CloudTool } from "../services/rclone.js";
 import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
-import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 import { escapeHTML } from "../utils/common.js";
 import { DriveProviderFactory } from "../services/drives/index.js";
 import { BindingService } from "../services/drives/BindingService.js";
 import { logger } from "../services/logger/index.js";
+import { isDefaultDrive } from "../domain/drive.js";
+import {
+    decodeDriveSessionStep,
+    encodeDriveSessionStep,
+    parseDriveSessionData
+} from "../domain/drive-session-step.js";
 
 const log = logger.withModule ? logger.withModule('DriveConfigFlow') : logger;
 
@@ -43,7 +48,8 @@ export class DriveConfigFlow {
      */
     static async sendDriveManager(chatId, userId) {
         const drives = await DriveRepository.findByUserId(userId);
-        const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
+        const defaultDrive = drives?.find(isDefaultDrive) || drives?.[0] || null;
+        const defaultDriveId = defaultDrive?.id || null;
         
         let message = STRINGS.drive.menu_title;
         const buttons = [];
@@ -177,39 +183,9 @@ export class DriveConfigFlow {
 
         if (!step) return false;
 
-        // 解析步骤：格式为 "DRIVETYPE:STEP"
-        const stepParts = step.split(":");
-        if (stepParts.length < 2) {
-            // 尝试兼容旧格式 (DRIVETYPE_STEP)
-            const parts = step.split("_");
-            if (parts.length < 2) return false;
-
-            // 这种兼容逻辑很脆弱，因为 driveType 和 step 都可能有下划线
-            // 我们可以尝试通过匹配已注册的 Provider 来识别
-            const supportedTypes = DriveProviderFactory.getSupportedTypes();
-            let matchedType = null;
-            let matchedStep = null;
-
-            for (const type of supportedTypes) {
-                if (step.toUpperCase().startsWith(type.toUpperCase() + "_")) {
-                    matchedType = type;
-                    matchedStep = step.slice(type.length + 1);
-                    break;
-                }
-            }
-
-            if (!matchedType) return false;
-
-            const driveType = matchedType.toLowerCase();
-            const stepName = matchedStep;
-
-            return await this._processInput(event, userId, session, driveType, stepName);
-        }
-
-        const driveType = stepParts[0].toLowerCase();
-        const stepName = stepParts.slice(1).join(":");
-
-        return await this._processInput(event, userId, session, driveType, stepName);
+        const parsedStep = decodeDriveSessionStep(step, DriveProviderFactory.getSupportedTypes());
+        if (!parsedStep) return false;
+        return await this._processInput(event, userId, session, parsedStep.driveType, parsedStep.step);
     }
 
     /**
@@ -224,7 +200,7 @@ export class DriveConfigFlow {
             return false;
         }
 
-        const sessionData = session.temp_data ? JSON.parse(session.temp_data) : {};
+        const sessionData = parseDriveSessionData(session);
         const providerSession = { ...session, data: sessionData };
 
         const provider = DriveProviderFactory.create(driveType);
@@ -275,7 +251,7 @@ export class DriveConfigFlow {
             }
 
             if (result.nextStep) {
-                await SessionManager.update(userId, `${driveType.toUpperCase()}:${result.nextStep}`, result.data);
+                await SessionManager.update(userId, encodeDriveSessionStep(driveType, result.nextStep), result.data);
 
                 const prompt = driveStrings[result.message] || result.message;
                 const message = this._appendCancelHint(prompt, driveStrings);
@@ -316,7 +292,6 @@ export class DriveConfigFlow {
 
         // 使用 Repository 删除所有网盘
         await DriveRepository.deleteByUserId(userId);
-        await SettingsRepository.set(`default_drive_${userId}`, null);
         await SessionManager.clear(userId);
 
         await runBotTask(() => client.sendMessage(chatId, { 

@@ -30,11 +30,11 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package
 const appVersion = packageJson.version || 'unknown';
 const getOwnerId = () => getConfig().ownerId?.toString();
 const getDefaultRemoteFolder = () => getConfig().remoteFolder;
+const getNodeEnv = () => getConfig().nodeEnv;
+const getFilesRefreshDelayMs = () => getNodeEnv() === 'test' ? 0 : 50;
 
 // 创建带 perf 上下文的 logger 用于性能日志
 const logPerf = () => log.withContext({ perf: true });
-const FILES_REFRESH_DELAY_MS = process.env.NODE_ENV === 'test' ? 0 : 50;
-
 // 命令权限映射表 (RBAC)
 const COMMAND_PERMISSIONS = {
     // 网盘管理 (高危)
@@ -307,8 +307,9 @@ export class Dispatcher {
      * [私有] 在刷新线程中加入延迟以防抖（测试环境下会跳过）
      */
     static async _waitForFilesRefreshDelay() {
-        if (FILES_REFRESH_DELAY_MS <= 0) return;
-        await new Promise((resolve) => setTimeout(resolve, FILES_REFRESH_DELAY_MS));
+        const delayMs = getFilesRefreshDelayMs();
+        if (delayMs <= 0) return;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
 
     /**
@@ -362,15 +363,7 @@ export class Dispatcher {
      * [私有] 获取用户默认或回退的驱动器
      */
     static async _getDefaultDrive(userId) {
-        const [defaultDriveId, drives] = await Promise.all([
-            SettingsRepository.get(`default_drive_${userId}`, null),
-            DriveRepository.findByUserId(userId)
-        ]);
-
-        let finalSelectedDrive = null;
-        if (drives && drives.length > 0) {
-            finalSelectedDrive = drives.find(d => d.id === defaultDriveId) || drives[0];
-        }
+        let finalSelectedDrive = await DriveRepository.getDefaultDrive(userId);
         
         if (!finalSelectedDrive) {
             const fallbackDrives = await DriveRepository.findByUserId(userId, true);
@@ -666,9 +659,7 @@ export class Dispatcher {
      * [私有] 获取通用状态
      */
     static async _getGeneralStatus(userId) {
-        const drives = await DriveRepository.findByUserId(userId);
-        const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
-        const activeDrive = drives.length > 0 ? (drives.find(d => d.id === defaultDriveId) || drives[0]) : null;
+        const activeDrive = await DriveRepository.getDefaultDrive(userId);
 
         const waitingCount = TaskManager.getWaitingCount();
         const processingCount = TaskManager.getProcessingCount();
@@ -1208,9 +1199,7 @@ export class Dispatcher {
      */
     static async _getUserUploadPathFromD1(userId) {
         try {
-            const drives = await DriveRepository.findByUserId(userId);
-            const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
-            const activeDrive = drives.length > 0 ? (drives.find(d => d.id === defaultDriveId) || drives[0]) : null;
+            const activeDrive = await DriveRepository.getDefaultDrive(userId);
             
             if (activeDrive && activeDrive.remote_folder) {
                 return activeDrive.remote_folder;
@@ -1231,9 +1220,7 @@ export class Dispatcher {
      */
     static async _setUserUploadPathInD1(userId, path) {
         try {
-            const drives = await DriveRepository.findByUserId(userId);
-            const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
-            const activeDrive = drives.length > 0 ? (drives.find(d => d.id === defaultDriveId) || drives[0]) : null;
+            const activeDrive = await DriveRepository.getDefaultDrive(userId);
             
             if (!activeDrive) {
                 throw new Error('Drive not found');

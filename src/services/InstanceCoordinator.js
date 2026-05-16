@@ -5,6 +5,7 @@ import { InstanceRepository } from "../repositories/InstanceRepository.js";
 import logger, { setInstanceIdProvider } from "./logger/index.js";
 import { setInstanceIdProvider as setAxiomInstanceIdProvider } from "./logger/AxiomLogger.js";
 import { normalizePublicUrl } from "../utils/instanceUrl.js";
+import { CACHE_KEYS } from "../domain/cache-keys.js";
 
 const log = logger.withModule('InstanceCoordinator');
 
@@ -192,10 +193,10 @@ export class InstanceCoordinator {
                     const hasLock = await this.hasLock("telegram_client");
                     if (hasLock) {
                         // 续租锁
-                        const lockData = await cache.get(`lock:telegram_client`, "json", { skipCache: true });
+                        const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), "json", { skipCache: true });
                         if (lockData && lockData.instanceId === this.instanceId) {
                             // 更新锁的 TTL
-                            await cache.set(`lock:telegram_client`, {
+                            await cache.set(CACHE_KEYS.telegramClientLock(), {
                                 ...lockData,
                                 acquiredAt: Date.now() // 更新获取时间，相当于续租
                             }, 300, { skipCache: true });
@@ -311,7 +312,7 @@ export class InstanceCoordinator {
      */
     async hasLock(lockKey) {
         try {
-            const existing = await cache.get(`lock:${lockKey}`, "json", { skipCache: true });
+            const existing = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
             const isOwner = existing && existing.instanceId === this.instanceId;
             if (existing && !isOwner) {
                 // 明确被其他实例持有
@@ -517,7 +518,7 @@ export class InstanceCoordinator {
         try {
             // 尝试原子性地设置锁，如果键不存在则成功
             // 锁的读取不使用 L1 缓存，确保实时性
-            const existing = await cache.get(`lock:${lockKey}`, "json", { skipCache: true });
+            const existing = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
 
             if (existing) {
                 // 检查锁是否仍然有效
@@ -544,10 +545,10 @@ export class InstanceCoordinator {
             // 设置锁
             // 注意：移除 version 字段以解决 Cloudflare KV 最终一致性导致的 verify 失败问题
             // 在续租场景下，即使读到旧值，只要 instanceId 匹配即认为成功
-            await cache.set(`lock:${lockKey}`, lockValue, ttl, { skipCache: true });
+            await cache.set(CACHE_KEYS.lock(lockKey), lockValue, ttl, { skipCache: true });
             
             // 双重校验：写入后验证是否确实是自己的锁
-            const verified = await cache.get(`lock:${lockKey}`, "json", { skipCache: true });
+            const verified = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
             
             // 记录详细日志便于排查 KV 延迟问题
             logWithProvider().debug(`[Lock verify] key=${lockKey}, existing=${existing?.instanceId}, verified=${verified?.instanceId}, self=${this.instanceId}`);
@@ -570,9 +571,9 @@ export class InstanceCoordinator {
      */
     async releaseLock(lockKey) {
         try {
-            const existing = await cache.get(`lock:${lockKey}`, "json", { skipCache: true });
+            const existing = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
             if (existing && existing.instanceId === this.instanceId) {
-                await cache.delete(`lock:${lockKey}`);
+                await cache.delete(CACHE_KEYS.lock(lockKey));
             }
         } catch (e) {
             logWithProvider().error(`释放锁失败 ${lockKey}:`, e?.message || String(e));
@@ -634,7 +635,7 @@ export class InstanceCoordinator {
             const acquired = await this._tryAcquire(lockKey, lockTtl);
             if (!acquired) {
                 // 检查锁是否属于自己
-                const lockData = await cache.get(`lock:${lockKey}`, "json", { skipCache: true });
+                const lockData = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
                 if (lockData && lockData.instanceId === this.instanceId) {
                     // 锁属于自己，执行操作
                     try {

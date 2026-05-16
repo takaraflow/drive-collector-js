@@ -50,11 +50,15 @@ function createTables(db) {
     CREATE TABLE IF NOT EXISTS drives (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
-      provider TEXT NOT NULL,
-      config TEXT NOT NULL,
+      name TEXT,
+      type TEXT NOT NULL,
+      config_data TEXT NOT NULL,
+      remote_folder TEXT,
+      status TEXT DEFAULT 'active' CHECK (status IN ('active', 'deleted')),
+      is_default INTEGER DEFAULT 0 CHECK (is_default IN (0, 1)),
       created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
       updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
-      UNIQUE(user_id, provider)
+      UNIQUE(user_id, type)
     )
   `);
 
@@ -78,6 +82,31 @@ function createTables(db) {
       expires_at INTEGER
     )
   `);
+
+  // api_keys表 - MCP API Key 持久化
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS api_keys (
+      user_id TEXT PRIMARY KEY,
+      token TEXT UNIQUE NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
+  // schema_migrations表 - 数据库版本契约
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      checksum TEXT NOT NULL,
+      applied_at INTEGER NOT NULL,
+      execution_time_ms INTEGER DEFAULT 0
+    )
+  `);
+
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_api_keys_token ON api_keys(token)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_drives_user_default ON drives(user_id, is_default)`);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_drives_one_default_per_user ON drives(user_id) WHERE is_default = 1 AND status = 'active'`);
 }
 
 /**
@@ -197,6 +226,15 @@ export function createMockD1Service(db) {
         }
       }
       return results;
+    },
+
+    raw: async (sql, params = []) => {
+      try {
+        trackTableUsage(sql);
+        return db.exec(sql, params);
+      } catch (error) {
+        throw error;
+      }
     }
   };
 }

@@ -3,7 +3,6 @@ import path from "path";
 import fs from "fs";
 import { getConfig } from "../config/index.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
-import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { STRINGS } from "../locales/zh-CN.js";
 import { localCache } from "../utils/LocalCache.js";
 import { cache } from "./CacheService.js";
@@ -30,16 +29,11 @@ export class CloudTool {
     static async _getUserConfig(userId) {
         if (!userId) throw new Error(STRINGS.drive.user_id_required);
 
-        // 1. 使用 Repo
-        const drives = await DriveRepository.findByUserId(userId);
-        
-        if (!drives || drives.length === 0) {
+        const activeDrive = await DriveRepository.getDefaultDrive(userId);
+
+        if (!activeDrive) {
             throw new Error(STRINGS.drive.no_drive_found);
         }
-
-        // 2. 查找默认网盘，如果没有则使用第一个
-        const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
-        const activeDrive = drives.find(d => d.id === defaultDriveId) || drives[0];
         
         const driveConfig = JSON.parse(activeDrive.config_data);
         
@@ -181,9 +175,7 @@ export class CloudTool {
      */
     static async _getUserUploadPathFromD1(userId) {
         try {
-            const drives = await DriveRepository.findByUserId(userId);
-            const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
-            const activeDrive = drives.length > 0 ? (drives.find(d => d.id === defaultDriveId) || drives[0]) : null;
+            const activeDrive = await DriveRepository.getDefaultDrive(userId);
             
             if (activeDrive && activeDrive.remote_folder) {
                 return activeDrive.remote_folder;

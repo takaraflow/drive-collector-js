@@ -2,24 +2,42 @@ import { cache } from "../services/CacheService.js";
 import { localCache } from "../utils/LocalCache.js";
 import { d1 } from "../services/d1.js";
 import { logger } from "../services/logger/index.js";
+import { CACHE_KEYS } from "../domain/cache-keys.js";
+import { DRIVE_COLUMNS, DRIVE_STATUSES, isDefaultDrive } from "../domain/drive.js";
 
 const log = logger.withModule ? logger.withModule('DriveRepository') : logger;
 
 /**
  * 网盘配置仓储层
- * 使用 Cache 存储作为主存储，符合低频关键数据规则
+ * D1 是绑定关系与默认盘的事实源；Cache/LocalCache 只做派生读缓存。
  */
 export class DriveRepository {
     static getDriveKey(userId) {
-        return `drive:${userId}`;
+        return CACHE_KEYS.driveByUser(userId);
     }
 
     static getDriveIdKey(driveId) {
-        return `drive_id:${driveId}`;
+        return CACHE_KEYS.driveById(driveId);
     }
 
     static getAllDrivesKey() {
-        return "drives:active";
+        return CACHE_KEYS.activeDrives();
+    }
+
+    static getLocalDriveKey(userId) {
+        return CACHE_KEYS.localDriveByUser(userId);
+    }
+
+    static async clearUserDriveCache(userId, driveIds = []) {
+        if (!userId) return;
+        const uniqueDriveIds = [...new Set((driveIds || []).filter(Boolean))];
+        await Promise.allSettled([
+            cache.delete(this.getDriveKey(userId)),
+            cache.delete(this.getAllDrivesKey()),
+            ...uniqueDriveIds.map(driveId => cache.delete(this.getDriveIdKey(driveId)))
+        ]);
+        localCache.del(this.getLocalDriveKey(userId));
+        localCache.del(this.getAllDrivesKey());
     }
 
     /**
@@ -30,7 +48,7 @@ export class DriveRepository {
      */
     static async findByUserId(userId, skipCache = false) {
         if (!userId) return [];
-        const cacheKey = `drive_${userId}`;
+        const cacheKey = this.getLocalDriveKey(userId);
 
         if (skipCache) {
             return await this._findDriveInD1(userId);
@@ -80,43 +98,30 @@ export class DriveRepository {
         try {
             const driveId = `drive_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             const now = Date.now();
+            const serializedConfigData = JSON.stringify(configData);
             const driveData = {
                 id: driveId,
                 user_id: userId.toString(),
                 name,
                 type,
-                config_data: configData,
-                status: 'active',
+                config_data: serializedConfigData,
+                status: DRIVE_STATUSES.ACTIVE,
+                is_default: 0,
                 created_at: now
             };
 
             // Write-Through: 先写入 D1
             await d1.run(
-                "INSERT INTO drives (id, user_id, name, type, config_data, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                [driveId, userId.toString(), name, type, JSON.stringify(configData), 'active', now, now]
+                "INSERT INTO drives (id, user_id, name, type, config_data, status, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [driveId, userId.toString(), name, type, serializedConfigData, DRIVE_STATUSES.ACTIVE, 0, now, now]
             );
 
-            // 更新 Cache (追加到列表)
-            const cacheKey = this.getDriveKey(userId);
-            let existingDrives = [];
-            try {
-                existingDrives = await cache.get(cacheKey, "json");
-                if (!Array.isArray(existingDrives)) {
-                    existingDrives = [];
-                }
-            } catch (e) {
-                log.warn(`Failed to get existing drives from cache for ${userId}:`, e);
-            }
-
-            const updatedDrives = [...existingDrives, driveData];
-            await cache.set(cacheKey, updatedDrives);
             await cache.set(this.getDriveIdKey(driveId), driveData);
+            await this.clearUserDriveCache(userId);
 
             // 更新活跃网盘列表
             await this._updateActiveDrivesList();
 
-            localCache.del(`drive_${userId}`);
-            localCache.del(this.getAllDrivesKey());
             return true;
         } catch (e) {
             log.error(`DriveRepository.create failed for ${userId}:`, e);
@@ -132,20 +137,21 @@ export class DriveRepository {
     static async deleteByUserId(userId) {
         if (!userId) return;
         try {
-            const drives = await this.findByUserId(userId);
+            const drives = await this._findDriveInD1(userId);
             
             if (drives && drives.length > 0) {
                 const now = Date.now();
                 for (const drive of drives) {
-                    await d1.run("UPDATE drives SET status = 'deleted', updated_at = ? WHERE id = ?", [now, drive.id]);
+                    await d1.run(
+                        "UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id = ?",
+                        [DRIVE_STATUSES.DELETED, now, drive.id]
+                    );
                     await cache.delete(this.getDriveIdKey(drive.id));
                 }
                 await this._updateActiveDrivesList();
             }
 
-            await cache.delete(this.getDriveKey(userId));
-            localCache.del(`drive_${userId}`);
-            localCache.del(this.getAllDrivesKey());
+            await this.clearUserDriveCache(userId, drives.map(drive => drive.id));
         } catch (e) {
             log.error(`DriveRepository.deleteByUserId failed for ${userId}:`, e);
             throw e;
@@ -163,23 +169,12 @@ export class DriveRepository {
             const drive = await this.findById(driveId);
             if (drive) {
                 // Write-Through: 先删除 D1
-                await d1.run("UPDATE drives SET status = 'deleted', updated_at = ? WHERE id = ?", [Date.now(), driveId]);
+                await d1.run(
+                    "UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id = ?",
+                    [DRIVE_STATUSES.DELETED, Date.now(), driveId]
+                );
 
-                // 更新用户网盘列表缓存
-                const cacheKey = this.getDriveKey(drive.user_id);
-                let drives = [];
-                try {
-                    drives = await cache.get(cacheKey, "json");
-                    if (Array.isArray(drives)) {
-                        const updatedDrives = drives.filter(d => d.id !== driveId);
-                        await cache.set(cacheKey, updatedDrives);
-                    }
-                } catch (e) {
-                    log.warn(`Failed to update user drives cache for ${drive.user_id}:`, e);
-                }
-
-                // 删除单个网盘缓存
-                await cache.delete(this.getDriveIdKey(driveId));
+                await this.clearUserDriveCache(drive.user_id, [driveId]);
                 await this._updateActiveDrivesList();
             }
             localCache.del(this.getAllDrivesKey());
@@ -203,8 +198,8 @@ export class DriveRepository {
 
             // Cache miss，从 D1 回源
             drive = await d1.fetchOne(
-                "SELECT id, user_id, name, type, config_data, remote_folder, status, created_at FROM drives WHERE id = ? AND status = 'active'",
-                [driveId]
+                `SELECT ${DRIVE_COLUMNS} FROM drives WHERE id = ? AND status = ?`,
+                [driveId, DRIVE_STATUSES.ACTIVE]
             );
 
             // 如果找到，写入 Cache
@@ -230,7 +225,8 @@ export class DriveRepository {
             if (activeIds.length === 0) {
                 // Cache 为空，从 D1 获取所有活跃 drives
                 const drives = await d1.fetchAll(
-                    "SELECT id FROM drives WHERE status = 'active' ORDER BY created_at DESC"
+                    "SELECT id FROM drives WHERE status = ? ORDER BY created_at DESC",
+                    [DRIVE_STATUSES.ACTIVE]
                 );
                 activeIds = drives.map(d => d.id);
 
@@ -267,8 +263,8 @@ export class DriveRepository {
 
         try {
             const result = await d1.fetchAll(
-                "SELECT id, user_id, name, type, config_data, remote_folder, status, created_at FROM drives WHERE user_id = ? AND status = 'active' ORDER BY created_at DESC",
-                [safeUserId]
+                `SELECT ${DRIVE_COLUMNS} FROM drives WHERE user_id = ? AND status = ? ORDER BY is_default DESC, created_at DESC`,
+                [safeUserId, DRIVE_STATUSES.ACTIVE]
             );
             return result || [];
         } catch (e) {
@@ -301,14 +297,14 @@ export class DriveRepository {
                 // 清理网盘配置相关缓存
                 await cache.delete(this.getDriveKey(userId));
                 await cache.delete(this.getDriveIdKey(driveId));
-                localCache.del(`drive_${userId}`);
+                localCache.del(this.getLocalDriveKey(userId));
                 
                 // 清理文件列表缓存，因为路径变更会影响文件列表
-                await cache.delete(`files_${userId}`);
-                localCache.del(`files_${userId}`);
+                await cache.delete(CACHE_KEYS.filesByUser(userId));
+                localCache.del(CACHE_KEYS.filesByUser(userId));
                 
                 // 清理可能的路径缓存
-                localCache.del(`upload_path_${userId}`);
+                localCache.del(CACHE_KEYS.uploadPathByUser(userId));
                 
                 log.info(`Cleared all related caches for user ${userId} after path update`);
             }
@@ -326,24 +322,54 @@ export class DriveRepository {
      */
     static async _updateActiveDrivesList() {
         try {
-            // 使用 listKeys 发现所有驱动（前缀 drive: 但排除 drive_id:）
-            const keys = await cache.listKeys('drive:');
-            const activeIds = [];
-
-            for (const key of keys) {
-                if (key.startsWith('drive_id:')) {
-                    continue;
-                }
-                const drive = await cache.get(key, "json");
-                if (drive && drive.id) {
-                    activeIds.push(drive.id);
-                }
-            }
-
+            const drives = await d1.fetchAll(
+                "SELECT id FROM drives WHERE status = ? ORDER BY created_at DESC",
+                [DRIVE_STATUSES.ACTIVE]
+            );
+            const activeIds = (drives || []).map(drive => drive.id).filter(Boolean);
             await cache.set(this.getAllDrivesKey(), activeIds);
             log.info(`📝 已更新活跃网盘列表，共 ${activeIds.length} 个`);
         } catch (e) {
             log.error("Failed to update active drives list:", e);
         }
+    }
+
+    static async getDefaultDrive(userId) {
+        const drives = await this.findByUserId(userId);
+        if (!drives || drives.length === 0) return null;
+        return drives.find(isDefaultDrive) || drives[0];
+    }
+
+    static async setDefaultDrive(userId, driveId) {
+        if (!userId || !driveId) {
+            throw new Error("DriveRepository.setDefaultDrive: Missing required parameters.");
+        }
+
+        const drive = await d1.fetchOne(
+            `SELECT ${DRIVE_COLUMNS} FROM drives WHERE id = ? AND user_id = ? AND status = ?`,
+            [driveId, String(userId), DRIVE_STATUSES.ACTIVE]
+        );
+        if (!drive || String(drive.user_id) !== String(userId)) {
+            throw new Error("DriveRepository.setDefaultDrive: Drive not found for user.");
+        }
+
+        const userDriveIds = (await this._findDriveInD1(userId)).map(item => item.id);
+        await d1.run(
+            "UPDATE drives SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END, updated_at = ? WHERE user_id = ? AND status = ?",
+            [driveId, Date.now(), String(userId), DRIVE_STATUSES.ACTIVE]
+        );
+        await this.clearUserDriveCache(userId, userDriveIds);
+        await this._updateActiveDrivesList();
+        return true;
+    }
+
+    static async clearDefaultDrive(userId) {
+        if (!userId) return;
+        const userDriveIds = (await this._findDriveInD1(userId)).map(item => item.id);
+        await d1.run(
+            "UPDATE drives SET is_default = 0, updated_at = ? WHERE user_id = ? AND status = ?",
+            [Date.now(), String(userId), DRIVE_STATUSES.ACTIVE]
+        );
+        await this.clearUserDriveCache(userId, userDriveIds);
     }
 }

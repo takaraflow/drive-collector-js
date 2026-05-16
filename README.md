@@ -104,6 +104,15 @@ For development with auto-restart:
 npm run dev
 ```
 
+Before deploying code that changes D1 schema, run:
+
+```bash
+npm run db:migrate
+npm run db:check
+```
+
+Application startup validates the recorded schema version and fails fast if migrations are missing. Set `DB_AUTO_MIGRATE=true` only when the deployment step is expected to run pending migrations automatically.
+
 ## Testing
 
 Run the test suite:

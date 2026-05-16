@@ -191,6 +191,25 @@ class D1Service {
         }
     }
 
+    async raw(sql, params = []) {
+        await this._validateConfig();
+        const rawUrl = this.apiUrl.replace(/\/query$/, "/raw");
+        const response = await fetch(rawUrl, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${this.token}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ sql, params }),
+        });
+
+        if (!response.ok) {
+            await this._handleHttpError(response, 0, 1, 0);
+        }
+
+        return await this._parseResponse(response);
+    }
+
     async fetchAll(sql, params = []) {
         const result = await this._execute(sql, params);
         // Return results array from result.result[0].results
@@ -200,6 +219,11 @@ class D1Service {
     async fetchOne(sql, params = []) {
         const results = await this.fetchAll(sql, params);
         return results[0] || null;
+    }
+
+    async healthCheck() {
+        const row = await this.fetchOne("SELECT 1 as ok");
+        return row?.ok === 1 || row?.ok === true;
     }
 
     async run(sql, params = []) {

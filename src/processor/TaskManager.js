@@ -5,6 +5,9 @@ import fs from "fs";
 import { Button } from "telegram/tl/custom/button.js";
 import { dependencyContainer } from "../services/DependencyContainer.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
+import {
+    TASK_QUEUE_TRIGGER_SOURCES
+} from "../domain/task-queue-contract.js";
 
 // 导入模块化的方法
 import { downloadTask } from "./TaskManager/TaskManager.download.js";
@@ -507,15 +510,12 @@ export class TaskManager {
         const { queueService } = getDeps();
         const log = getLog();
         try {
-            // 添加触发源信息
             const taskPayload = {
                 userId: task.userId,
                 chatId: task.chatId,
                 msgId: task.msgId,
                 _meta: {
-                    triggerSource: 'direct-qstash', // 标识是直接通过 QStash 发送
-                    instanceId: process.env.INSTANCE_ID || 'unknown',
-                    timestamp: Date.now(),
+                    triggerSource: TASK_QUEUE_TRIGGER_SOURCES.DIRECT_QSTASH,
                     source: 'TaskManager._enqueueTask'
                 }
             };
@@ -524,7 +524,7 @@ export class TaskManager {
             log.info("Task enqueued for download", { 
                 taskId: task.id, 
                 service: 'qstash',
-                triggerSource: 'direct-qstash'
+                triggerSource: TASK_QUEUE_TRIGGER_SOURCES.DIRECT_QSTASH
             });
         } catch (error) {
             log.error("Failed to enqueue download task", { taskId: task.id, error });
@@ -658,13 +658,8 @@ export class TaskManager {
         try {
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
-            const triggerSource = dbTask?.source_data?._meta?.triggerSource || 'unknown';
-            const instanceId = dbTask?.source_data?._meta?.instanceId || 'unknown';
-            
             log.info(`QStash Received download webhook for Task: ${taskId}`, {
-                triggerSource, // 'direct-qstash' 或 'unknown'
-                instanceId,
-                isFromQStash: triggerSource === 'direct-qstash'
+                taskId
             });
             if (!dbTask) {
                 log.error(`❌ Task ${taskId} not found in database`);
@@ -678,7 +673,7 @@ export class TaskManager {
             }
 
             const claim = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.START_DOWNLOAD, null, {
-                claimedBy: instanceCoordinator.getInstanceId?.() || process.env.INSTANCE_ID || 'unknown',
+                claimedBy: instanceCoordinator.getInstanceId?.() || 'unknown',
                 returnResult: true,
                 allowNoop: true,
                 source: 'handleDownloadWebhook'
@@ -746,13 +741,8 @@ export class TaskManager {
         try {
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
-            const triggerSource = dbTask?.source_data?._meta?.triggerSource || 'unknown';
-            const instanceId = dbTask?.source_data?._meta?.instanceId || 'unknown';
-            
             log.info(`QStash Received upload webhook for Task: ${taskId}`, {
-                triggerSource, // 'direct-qstash' 或 'unknown'
-                instanceId,
-                isFromQStash: triggerSource === 'direct-qstash'
+                taskId
             });
             
             if (!dbTask) {
@@ -767,7 +757,7 @@ export class TaskManager {
             }
 
             const uploadStart = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.START_UPLOAD, null, {
-                claimedBy: instanceCoordinator.getInstanceId?.() || process.env.INSTANCE_ID || 'unknown',
+                claimedBy: instanceCoordinator.getInstanceId?.() || 'unknown',
                 returnResult: true,
                 allowNoop: true,
                 source: 'handleUploadWebhook'
@@ -883,9 +873,7 @@ export class TaskManager {
             // 通过 QStash 重新派发，leader 的 handleDownloadWebhook 会处理完整流程
             await queueService.enqueueDownloadTask(taskId, {
                 _meta: {
-                    triggerSource: 'manual-retry',
-                    instanceId: process.env.INSTANCE_ID || 'unknown',
-                    timestamp: Date.now()
+                    triggerSource: TASK_QUEUE_TRIGGER_SOURCES.MANUAL_RETRY
                 }
             });
 

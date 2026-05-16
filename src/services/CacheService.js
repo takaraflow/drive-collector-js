@@ -14,6 +14,7 @@ import { getConfig } from "../config/index.js";
 import { localCache } from "../utils/LocalCache.js";
 import { logger } from "./logger/index.js";
 import { parseCacheConfig } from "../utils/configParser.js";
+import { CACHE_KEYS } from "../domain/cache-keys.js";
 
 // --- Import Providers ---
 // Concrete Providers
@@ -497,11 +498,11 @@ class CacheService {
         }
 
         // Determine strategy based on key pattern
-        if (key.startsWith('task_status:') || key.startsWith('task:')) {
+        if (key.startsWith(CACHE_KEYS.prefixes.taskStatus) || key.startsWith(CACHE_KEYS.prefixes.taskDetails)) {
             return this.cacheStrategies.taskStatus;
-        } else if (key.startsWith('instance:')) {
+        } else if (key.startsWith(CACHE_KEYS.prefixes.instance)) {
             return this.cacheStrategies.instanceStatus;
-        } else if (key.startsWith('drive:') || key.startsWith('config:')) {
+        } else if (key.startsWith(CACHE_KEYS.prefixes.drive) || key.startsWith(CACHE_KEYS.prefixes.config)) {
             return this.cacheStrategies.driveConfig;
         } else {
             return {

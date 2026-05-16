@@ -11,6 +11,7 @@ import {
     TASK_TERMINAL_STATUSES,
     TaskStateMachine
 } from "../domain/task-state-machine.js";
+import { CACHE_KEYS } from "../domain/cache-keys.js";
 
 const log = logger.withModule ? logger.withModule('TaskRepository') : logger;
 
@@ -32,8 +33,8 @@ export class TaskRepository {
     // 状态分类来自领域状态机；D1 是权威状态源，缓存只保留派生视图。
     static IMPORTANT_STATUSES = [TASK_STATUSES.DOWNLOADING, TASK_STATUSES.UPLOADING];
     static ACTIVE_STATUS_SQL = TASK_ACTIVE_STATUSES.map(() => '?').join(',');
-    static ACTIVE_TASK_PREFIXES = ['task_status:', 'consistent:task:'];
-    static INSTANCE_PREFIX = 'instance:';
+    static ACTIVE_TASK_PREFIXES = [CACHE_KEYS.prefixes.taskStatus, CACHE_KEYS.prefixes.consistentTask];
+    static INSTANCE_PREFIX = CACHE_KEYS.prefixes.instance;
     static INSTANCE_STALE_MS = 2 * 60 * 1000;
 
     static _getChanges(result) {
@@ -60,13 +61,13 @@ export class TaskRepository {
 
         if (TASK_TERMINAL_STATUSES.includes(status)) {
             operations.push(
-                cache.delete(`task_status:${taskId}`),
+                cache.delete(CACHE_KEYS.taskStatus(taskId)),
                 taskConsistentCache?.delete?.(`task:${taskId}`),
                 taskStateSynchronizer?.clearTaskState?.(taskId)
             );
         } else {
             operations.push(
-                cache.set(`task_status:${taskId}`, payload, 300),
+                cache.set(CACHE_KEYS.taskStatus(taskId), payload, 300),
                 taskConsistentCache?.set?.(`task:${taskId}`, payload, { ttl: 300 }),
                 taskStateSynchronizer?.updateTaskState?.(taskId, payload)
             );
@@ -866,7 +867,7 @@ export class TaskRepository {
             await Promise.allSettled([
                 taskConsistentCache?.delete?.(`task:${taskId}`),
                 taskStateSynchronizer?.clearTaskState?.(taskId),
-                cache.delete(`task_status:${taskId}`),
+                cache.delete(CACHE_KEYS.taskStatus(taskId)),
                 cache.delete(`task:${taskId}:details`)
             ]);
             this.pendingUpdates.delete(taskId);
@@ -890,7 +891,7 @@ export class TaskRepository {
             await Promise.allSettled(taskIds.map(id => taskStateSynchronizer?.clearTaskState?.(id)));
 
             // 批量清理 Redis
-            const redisKeys = taskIds.map(id => `task_status:${id}`);
+            const redisKeys = taskIds.map(id => CACHE_KEYS.taskStatus(id));
             await BatchProcessor.processBatch('redis-delete', redisKeys);
 
             // 清理内存

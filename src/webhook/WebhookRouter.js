@@ -2,6 +2,8 @@ import { queueService } from '../services/QueueService.js';
 import { TaskManager } from '../processor/TaskManager.js';
 import { logger } from '../services/logger/index.js';
 import { resolveInstanceBaseUrl } from '../utils/instanceUrl.js';
+import { parseTaskQueuePayload, TASK_QUEUE_TRIGGER_SOURCES } from '../domain/task-queue-contract.js';
+import { CACHE_KEYS } from '../domain/cache-keys.js';
 
 const log = logger.withModule ? logger.withModule('WebhookRouter') : logger;
 
@@ -230,31 +232,27 @@ async function processWebhookData(req, res, signature, body) {
         return { result: { success: false, statusCode: 400 }, data: null, path };
     }
 
-    // 详细 metadata 记录和触发源校验
-    const _meta = data._meta || {};
-    const triggerSource = _meta.triggerSource || 'unknown';
-    const instanceId = _meta.instanceId || 'unknown';
-    const groupId = data.groupId || _meta.groupId || 'unknown';
-    const timestamp = _meta.timestamp || Date.now();
+    const payload = parseTaskQueuePayload(data);
+    const groupId = payload.groupId || 'unknown';
 
-    log.info(`📩 收到 Webhook: ${path}`, { 
-        taskId: data.taskId, 
+    log.info(`📩 收到 Webhook: ${path}`, {
+        taskId: payload.taskId,
         groupId,
-        triggerSource, 
-        instanceId,
-        timestamp,
-        isFromQStash: triggerSource === 'direct-qstash',
-        metadata: _meta
+        triggerSource: payload.meta.triggerSource,
+        instanceId: payload.meta.instanceId,
+        timestamp: payload.meta.timestamp,
+        isFromQStash: payload.meta.triggerSource === TASK_QUEUE_TRIGGER_SOURCES.DIRECT_QSTASH,
+        metadata: payload.meta
     });
 
     let result = { success: true, statusCode: 200 };
 
     if (path.endsWith('/download')) {
-        result = await TaskManager.handleDownloadWebhook(data.taskId);
+        result = await TaskManager.handleDownloadWebhook(payload.taskId);
     } else if (path.endsWith('/upload')) {
-        result = await TaskManager.handleUploadWebhook(data.taskId);
+        result = await TaskManager.handleUploadWebhook(payload.taskId);
     } else if (path.endsWith('/batch')) {
-        result = await TaskManager.handleMediaBatchWebhook(data.groupId, data.taskIds);
+        result = await TaskManager.handleMediaBatchWebhook(payload.groupId, data.taskIds);
     } else if (path.endsWith('/system-events')) {
         if (data.event === 'media_group_flush' && data.gid) {
             const mediaGroupBufferModule = await import("../services/MediaGroupBuffer.js");
@@ -288,7 +286,7 @@ async function handleWebhookForwarding(req, res, result, data, path, body) {
                     import("../services/InstanceCoordinator.js")
                 ]);
 
-                const lockData = await cache.get('lock:telegram_client', 'json', { skipL1: true });
+                const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), 'json', { skipL1: true });
                 const leaderInstanceId = lockData?.instanceId;
                 if (!leaderInstanceId) return null;
 
