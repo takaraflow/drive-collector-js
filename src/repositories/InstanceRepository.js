@@ -52,8 +52,12 @@ export class InstanceRepository {
         try {
             const keys = await cache.listKeys(this.PREFIX);
             const instances = [];
-            for (const key of keys) {
-                const data = await cache.get(key, "json", { cacheTtl: 30000 });
+
+            const results = await Promise.all(
+                keys.map(key => cache.get(key, "json", { cacheTtl: 30000 }))
+            );
+
+            for (const data of results) {
                 if (data) {
                     instances.push(data);
                 }
