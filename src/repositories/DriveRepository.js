@@ -240,20 +240,30 @@ export class DriveRepository {
                 }
             }
 
-            // ⚡ Bolt Optimization: Replace sequential await loop with Promise.all to fetch concurrently.
-            // Eliminates N+1 query latency when hydrating a list of drives.
-            const results = await Promise.all(
-                activeIds.map(async (id) => {
+            // ⚡ Bolt Optimization: Use a bounded native async worker pool to fetch drives concurrently.
+            // Eliminates N+1 query latency while protecting against uncontrolled fan-out memory use.
+            const len = activeIds.length;
+            const concurrencyLimit = 5;
+            const results = new Array(len);
+            let currentIndex = 0;
+
+            const worker = async () => {
+                while (currentIndex < len) {
+                    const index = currentIndex++;
+                    const id = activeIds[index];
                     try {
-                        return await this.findById(id);
+                        results[index] = await this.findById(id);
                     } catch (e) {
-                        return null;
+                        results[index] = null;
                     }
-                })
-            );
+                }
+            };
+
+            const workers = Array.from({ length: Math.min(concurrencyLimit, len) }, worker);
+            await Promise.all(workers);
 
             const drives = [];
-            for (let i = 0; i < results.length; i++) {
+            for (let i = 0; i < len; i++) {
                 if (results[i]) drives.push(results[i]);
             }
             return drives;
