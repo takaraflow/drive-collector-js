@@ -50,6 +50,7 @@ vi.mock("../../src/services/cache/MemoryCache.js", () => ({
 }));
 
 // Import after mocking
+import { getConfig } from "../../src/config/index.js";
 import { CacheService } from "../../src/services/CacheService.js";
 import { localCache } from "../../src/utils/LocalCache.js";
 
@@ -386,6 +387,7 @@ describe("CacheService Failover and Recovery Tests", () => {
             // The test environment has Cloudflare env vars that affect getConfig()
             // This is a known limitation and doesn't affect production behavior
             // TODO: Mock getConfig() to return empty config for this test
+            getConfig.mockReturnValueOnce({});
             service = new CacheService({ env: {} });
             await service.initialize();
 
