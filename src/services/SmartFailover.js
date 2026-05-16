@@ -290,39 +290,39 @@ class SmartFailover {
      */
     async executeBatch(requestFns, options = {}) {
         const { parallel = true } = options;
+        const len = requestFns.length;
 
-        const results = [];
+        // ⚡ Bolt Optimization: Pre-allocate array to avoid dynamic resizing overhead
+        const results = new Array(len);
 
         if (parallel) {
-            // 并行执行
-            const promises = requestFns.map((fn, index) => 
-                this.executeRequest(fn, { ...options, requestId: index })
-                    .then(result => ({ index, result }))
-                    .catch(error => ({ index, error }))
-            );
-
-            const allResults = await Promise.allSettled(promises);
-            
-            allResults.forEach((item, index) => {
-                if (item.status === 'fulfilled') {
-                    results.push(item.value);
-                } else {
-                    results.push({
-                        index,
-                        error: item.reason?.message || 'Unknown error'
-                    });
+            // ⚡ Bolt Optimization: Use an async worker pool instead of array.map() and Promise.allSettled()
+            // This avoids upfront closure creation and memory allocation overhead from mapping.
+            let currentIndex = 0;
+            const worker = async () => {
+                while (currentIndex < len) {
+                    const index = currentIndex++;
+                    // Use Object.assign instead of object spread {...options} or Object.create
+                    // to avoid prototype chain lookup issues and spread iterator allocation.
+                    const reqOptions = Object.assign({}, options);
+                    reqOptions.requestId = index;
+                    try {
+                        const result = await this.executeRequest(requestFns[index], reqOptions);
+                        results[index] = { index, result };
+                    } catch (error) {
+                        results[index] = { index, error };
+                    }
                 }
-            });
+            };
+
+            // Default to unbounded fallback using the array length if no concurrency limit is specified
+            const workerCount = Math.min(options.concurrency || len, len);
+            const workers = Array.from({ length: workerCount }, worker);
+            await Promise.all(workers);
         } else {
             // 串行执行
-            // Pre-allocate array to avoid dynamic resizing overhead
-            const len = requestFns.length;
-            results.length = len;
             for (let i = 0; i < len; i++) {
-                // To avoid the performance penalty of spreading options in every loop iteration,
-                // we create an empty object with the original options as its prototype.
-                // This preserves object safety while providing a fast path for property lookup.
-                const reqOptions = Object.create(options);
+                const reqOptions = Object.assign({}, options);
                 reqOptions.requestId = i;
                 const result = await this.executeRequest(requestFns[i], reqOptions);
                 results[i] = { index: i, result };
