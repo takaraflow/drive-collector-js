@@ -406,6 +406,19 @@ function buildConfigObject(env) {
         remoteName: env.RCLONE_REMOTE || null,
         remoteFolder: env.REMOTE_FOLDER || null,
         port: env.PORT || "3000",
+        nodeEnv: env.NODE_ENV || "dev",
+        callerTrackingMode: env.CALLER_TRACKING_MODE || "none",
+        database: {
+            schemaCheck: env.DB_SCHEMA_CHECK !== 'false',
+            autoMigrate: env.DB_AUTO_MIGRATE === 'true',
+            migrationLockTtlMs: parseInt(env.DB_MIGRATION_LOCK_TTL_MS, 10) || 120000,
+            migrationLockWaitMs: parseInt(env.DB_MIGRATION_LOCK_WAIT_MS, 10) || 30000
+        },
+        instance: {
+            id: env.INSTANCE_ID || null,
+            publicUrl: env.INSTANCE_PUBLIC_URL || env.APP_EXTERNAL_URL || env.LB_WEBHOOK_URL || null,
+            region: env.INSTANCE_REGION || null
+        },
         http2: {
             enabled: env.HTTP2_ENABLED === 'true',
             plain: env.HTTP2_PLAIN === 'true',
@@ -433,6 +446,8 @@ function buildConfigObject(env) {
             currentSigningKey: env.QSTASH_CURRENT_SIGNING_KEY || null,
             nextSigningKey: env.QSTASH_NEXT_SIGNING_KEY || null,
             webhookUrl: env.LB_WEBHOOK_URL || null,
+            pathTemplate: env.QSTASH_PATH_TEMPLATE || '/api/v2/tasks/${topic}',
+            debug: env.QSTASH_DEBUG || 'false'
         },
         oss: {
             endpoint: env.R2_ENDPOINT || null,

@@ -174,16 +174,30 @@ describe("Config Module", () => {
     process.env.CLOUDFLARE_D1_ACCOUNT_ID = "acc_d1";
     process.env.CLOUDFLARE_D1_DATABASE_ID = "db_d1";
     process.env.CLOUDFLARE_D1_TOKEN = "tok_d1";
+    process.env.DB_AUTO_MIGRATE = "true";
+    process.env.DB_SCHEMA_CHECK = "true";
+    process.env.DB_MIGRATION_LOCK_TTL_MS = "45000";
+    process.env.DB_MIGRATION_LOCK_WAIT_MS = "9000";
 
     __resetConfigForTests();
     const config = await initConfig();
     expect(config.d1.accountId).toBe("acc_d1");
     expect(config.d1.databaseId).toBe("db_d1");
     expect(config.d1.token).toBe("tok_d1");
+    expect(config.database).toMatchObject({
+      schemaCheck: true,
+      autoMigrate: true,
+      migrationLockTtlMs: 45000,
+      migrationLockWaitMs: 9000
+    });
 
     delete process.env.CLOUDFLARE_D1_ACCOUNT_ID;
     delete process.env.CLOUDFLARE_D1_DATABASE_ID;
     delete process.env.CLOUDFLARE_D1_TOKEN;
+    delete process.env.DB_AUTO_MIGRATE;
+    delete process.env.DB_SCHEMA_CHECK;
+    delete process.env.DB_MIGRATION_LOCK_TTL_MS;
+    delete process.env.DB_MIGRATION_LOCK_WAIT_MS;
   });
 
   test("should accept QSTASH_AUTH_TOKEN as fallback for QStash token", async () => {

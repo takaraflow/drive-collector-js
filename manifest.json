@@ -412,6 +412,11 @@
         "required": false,
         "description": "Application mode (bot/dev/etc.)"
       },
+      "NODE_OPTIONS": {
+        "type": "string",
+        "required": false,
+        "description": "Node.js runtime options"
+      },
       "APP_VERSION": {
         "type": "string",
         "required": false,
@@ -432,6 +437,11 @@
         "required": false,
         "description": "External URL for load balancer routing"
       },
+      "INSTANCE_PUBLIC_URL": {
+        "type": "string",
+        "required": false,
+        "description": "Public URL for this instance, used for routing and diagnostics"
+      },
       "DOWNLOAD_DIR": {
         "type": "string",
         "required": false,
@@ -441,6 +451,11 @@
         "type": "string",
         "required": false,
         "description": "Set to true/1/yes to enable verbose QStash publish debug logs"
+      },
+      "QSTASH_PATH_TEMPLATE": {
+        "type": "string",
+        "required": false,
+        "description": "QStash publish path template. Use ${topic} as topic placeholder."
       },
       "QSTASH_FORCE_DIRECT": {
         "type": "string",
@@ -750,6 +765,26 @@
         "type": "string",
         "required": false,
         "description": "Cloudflare D1 API token"
+      },
+      "DB_SCHEMA_CHECK": {
+        "type": "boolean",
+        "required": false,
+        "description": "Enable database schema version validation at startup"
+      },
+      "DB_AUTO_MIGRATE": {
+        "type": "boolean",
+        "required": false,
+        "description": "Explicitly allow pending database migrations during startup"
+      },
+      "DB_MIGRATION_LOCK_TTL_MS": {
+        "type": "number",
+        "required": false,
+        "description": "Database migration lock TTL in milliseconds"
+      },
+      "DB_MIGRATION_LOCK_WAIT_MS": {
+        "type": "number",
+        "required": false,
+        "description": "Database migration lock wait timeout in milliseconds"
       },
       "CLOUDFLARE_ACCOUNT_ID": {
         "type": "string",

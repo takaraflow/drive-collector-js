@@ -148,7 +148,11 @@
         "CLOUDFLARE_D1_DATABASE_ID",
         "CLOUDFLARE_D1_ACCOUNT_ID",
         "CLOUDFLARE_D1_TOKEN",
-        "CLOUDFLARE_ACCOUNT_ID"
+        "CLOUDFLARE_ACCOUNT_ID",
+        "DB_SCHEMA_CHECK",
+        "DB_AUTO_MIGRATE",
+        "DB_MIGRATION_LOCK_TTL_MS",
+        "DB_MIGRATION_LOCK_WAIT_MS"
       ],
       "reinitializationStrategy": {
         "type": "reconnect",

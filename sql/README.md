@@ -7,9 +7,11 @@
 ### 主要 SQL 文件
 
 - **`init.sql`** - 完整的数据库初始化脚本，包含所有表的创建语句
+- **`schema-migrations.sql`** - schema 版本和迁移锁表（由 `db:migrate` 维护）
 - **`instances.sql`** - 实例表（用于管理多实例运行状态）
 - **`tasks.sql`** - 任务表（用于存储文件传输任务）
-- **`migrate-tasks-status-ssot.sql`** - 既有 tasks 表状态约束收口迁移（手动执行）
+- **`migrate-tasks-status-ssot.sql`** - 既有 tasks 表状态约束收口迁移（已纳入 `db:migrate`）
+- **`migrate-drives-default-ssot.sql`** - 既有 drives 表默认盘 SSOT 迁移（已纳入 `db:migrate`）
 - **`drives.sql`** - 网盘配置表（用于存储用户绑定的网盘信息）
 - **`settings.sql`** - 系统设置表（仅作为备份或特殊场景使用）
 - **`sessions.sql`** - 会话表（仅作为备份或特殊场景使用）
@@ -27,6 +29,23 @@
 # 仅创建需要的表
 # 例如：仅创建 instances 和 tasks 表
 ```
+
+#### 方式三：数据库版本校验与自动迁移
+```bash
+# 查看当前 schema 版本和缺失项
+npm run db:status
+
+# 只校验，不改库；应用启动默认也会做这个校验
+npm run db:check
+
+# 自动执行尚未应用的迁移，并写入 schema_migrations
+npm run db:migrate
+
+# 演练待执行项，不改库
+npm run db:migrate:dry
+```
+
+应用启动默认只做 schema 版本校验，发现缺失迁移会 fail-fast 并提示先执行 `npm run db:migrate`。如需在启动阶段显式自动迁移，设置 `DB_AUTO_MIGRATE=true`；这适合受控部署步骤，不建议作为排查问题时的隐式兜底。`DB_SCHEMA_CHECK=false` 只用于紧急诊断，正常环境不要关闭。
 
 ## 表结构说明
 
@@ -97,6 +116,17 @@
 | created_at | INTEGER | 创建时间 |
 | expires_at | INTEGER | 过期时间 |
 
+### schema_migrations 表
+用于记录已应用的数据库 schema 迁移版本。应用启动依赖此表判断数据库结构是否满足当前代码。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| version | INTEGER | 迁移版本（主键） |
+| name | TEXT | 迁移名称 |
+| checksum | TEXT | 迁移内容摘要 |
+| applied_at | INTEGER | 应用时间 |
+| execution_time_ms | INTEGER | 执行耗时 |
+
 ## 注意事项
 
 1. **主存储策略**：`settings` 和 `sessions` 表在生产环境中主要使用 Cache 作为主存储，D1 仅作为备份或特殊场景使用
@@ -106,7 +136,8 @@
 
 ## 首次部署步骤
 
-1. 执行 `init.sql` 创建所有表
-2. 配置环境变量（CF_D1_ACCOUNT_ID, CF_D1_DATABASE_ID, CF_D1_TOKEN）
-3. 启动应用，系统会自动初始化 Cache 服务
-4. 如需迁移现有数据，运行 `scripts/migrate-drive-data.js`
+1. 配置环境变量（`CLOUDFLARE_D1_ACCOUNT_ID`, `CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_D1_TOKEN`）
+2. 执行 `npm run db:migrate` 初始化或迁移数据库
+3. 执行 `npm run db:check` 确认 schema 版本已达最新
+4. 启动应用，系统会自动初始化 Cache 服务并再次校验 schema 版本
+5. 如需迁移旧 Cache 网盘数据，运行 `scripts/migrate-drive-data.js`

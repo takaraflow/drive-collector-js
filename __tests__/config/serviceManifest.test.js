@@ -38,6 +38,7 @@ describe('ServiceConfigManager 测试', () => {
         expect(serviceConfigManager.getServiceName('API_ID')).toBe('telegram');
         expect(serviceConfigManager.getServiceName('QSTASH_TOKEN')).toBe('queue');
         expect(serviceConfigManager.getServiceName('AXIOM_TOKEN')).toBe('logger');
+        expect(serviceConfigManager.getServiceName('DB_AUTO_MIGRATE')).toBe('d1');
         expect(serviceConfigManager.getServiceName('UNKNOWN_KEY')).toBeUndefined();
     });
 

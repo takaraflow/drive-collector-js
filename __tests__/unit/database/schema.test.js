@@ -1,0 +1,301 @@
+import Database from "better-sqlite3";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import {
+    LATEST_SCHEMA_VERSION,
+    assertDatabaseSchemaCurrent,
+    ensureDatabaseSchemaReady,
+    getDatabaseSchemaStatus,
+    migrateDatabaseSchema
+} from "../../../src/database/schema.js";
+
+function createD1(db) {
+    return {
+        fetchAll: async (sql, params = []) => db.prepare(sql).all(params),
+        fetchOne: async (sql, params = []) => db.prepare(sql).get(params) || null,
+        run: async (sql, params = []) => db.prepare(sql).run(params),
+        raw: async (sql) => db.exec(sql)
+    };
+}
+
+function createD1RestCompatible(db) {
+    const forbiddenPatterns = /\b(BEGIN|COMMIT|SAVEPOINT|ROLLBACK)\b|PRAGMA\s+foreign_keys/i;
+    return {
+        fetchAll: async (sql, params = []) => {
+            if (forbiddenPatterns.test(sql)) {
+                throw new Error(`D1 REST rejected SQL: ${sql}`);
+            }
+            return db.prepare(sql).all(params);
+        },
+        fetchOne: async (sql, params = []) => {
+            if (forbiddenPatterns.test(sql)) {
+                throw new Error(`D1 REST rejected SQL: ${sql}`);
+            }
+            return db.prepare(sql).get(params) || null;
+        },
+        run: async (sql, params = []) => {
+            if (forbiddenPatterns.test(sql)) {
+                throw new Error(`D1 REST rejected SQL: ${sql}`);
+            }
+            return db.prepare(sql).run(params);
+        },
+        raw: async (sql) => {
+            if (forbiddenPatterns.test(sql)) {
+                throw new Error(`D1 REST rejected SQL: ${sql}`);
+            }
+            return db.exec(sql);
+        }
+    };
+}
+
+function createLegacyDatabase() {
+    const db = new Database(":memory:");
+    db.exec(`
+        CREATE TABLE tasks (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            chat_id TEXT,
+            msg_id INTEGER,
+            source_msg_id INTEGER,
+            file_name TEXT,
+            file_size INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'queued',
+            error_msg TEXT,
+            claimed_by TEXT,
+            created_at INTEGER,
+            updated_at INTEGER
+        );
+
+        CREATE TABLE drives (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            name TEXT,
+            type TEXT NOT NULL,
+            config_data TEXT NOT NULL,
+            remote_folder TEXT,
+            status TEXT DEFAULT 'active',
+            created_at INTEGER,
+            updated_at INTEGER,
+            UNIQUE(user_id, type)
+        );
+    `);
+    return db;
+}
+
+function createProductionLegacyDatabase() {
+    const db = new Database(":memory:");
+    db.exec(`
+        CREATE TABLE tasks (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            drive_id INTEGER,
+            chat_id TEXT NOT NULL,
+            msg_id INTEGER NOT NULL,
+            source_msg_id INTEGER NOT NULL,
+            file_name TEXT NOT NULL,
+            file_size INTEGER DEFAULT 0,
+            status TEXT NOT NULL,
+            error_msg TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE drives (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            config_data TEXT NOT NULL,
+            status TEXT DEFAULT 'active',
+            created_at INTEGER NOT NULL,
+            remote_folder TEXT,
+            updated_at INTEGER
+        );
+
+        CREATE TABLE settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE sessions (
+            user_id TEXT PRIMARY KEY,
+            current_step TEXT NOT NULL,
+            temp_data TEXT,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE api_keys (
+            user_id TEXT PRIMARY KEY,
+            token TEXT UNIQUE NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX idx_tasks_user_status ON tasks(user_id, status);
+        CREATE INDEX idx_drives_user ON drives(user_id);
+        CREATE INDEX idx_api_keys_token ON api_keys(token);
+
+        INSERT INTO tasks (
+            id, user_id, drive_id, chat_id, msg_id, source_msg_id, file_name, file_size,
+            status, error_msg, created_at, updated_at
+        ) VALUES (
+            'task-prod-1', 'user-prod', 1, 'chat-prod', 100, 99, 'queued.mp4', 42,
+            'queued', NULL, 1000, 1000
+        );
+
+        INSERT INTO drives (
+            id, user_id, name, type, config_data, status, created_at, remote_folder, updated_at
+        ) VALUES (
+            1, 'user-prod', 'Mega', 'mega', '{"user":"u"}', 'active', 900, '/remote', 950
+        );
+
+        INSERT INTO settings (key, value, updated_at) VALUES ('default_drive', '1', 800);
+    `);
+    return db;
+}
+
+describe("database schema migrations", () => {
+    let db;
+
+    afterEach(() => {
+        db?.close();
+        db = null;
+        vi.restoreAllMocks();
+    });
+
+    test("should migrate a legacy database and record schema version", async () => {
+        db = createLegacyDatabase();
+        const d1 = createD1(db);
+
+        const result = await migrateDatabaseSchema({
+            d1,
+            useLock: false,
+            log: { info: vi.fn(), warn: vi.fn() }
+        });
+
+        expect(result.status.isCurrent).toBe(true);
+        expect(result.status.currentVersion).toBe(LATEST_SCHEMA_VERSION);
+        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied"]);
+
+        const driveColumns = db.prepare("PRAGMA table_info(drives)").all().map(column => column.name);
+        expect(driveColumns).toContain("is_default");
+
+        const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(row => row.name);
+        expect(indexes).toContain("idx_drives_one_default_per_user");
+
+        const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3]);
+    });
+
+    test("should fail schema assertion before migrations are applied", async () => {
+        db = createLegacyDatabase();
+        const d1 = createD1(db);
+
+        await expect(assertDatabaseSchemaCurrent({ d1 })).rejects.toThrow("Database schema is not current");
+    });
+
+    test("should auto-migrate only when explicitly configured", async () => {
+        db = createLegacyDatabase();
+        const d1 = createD1(db);
+        const log = { info: vi.fn(), warn: vi.fn() };
+
+        await expect(ensureDatabaseSchemaReady({
+            d1,
+            config: {
+                nodeEnv: "prod",
+                d1: { accountId: "a", databaseId: "d", token: "t" },
+                database: { schemaCheck: true, autoMigrate: false }
+            },
+            log
+        })).rejects.toThrow("Database schema is not current");
+
+        const ready = await ensureDatabaseSchemaReady({
+            d1,
+            config: {
+                nodeEnv: "prod",
+                d1: { accountId: "a", databaseId: "d", token: "t" },
+                database: { schemaCheck: true, autoMigrate: true }
+            },
+            log
+        });
+
+        expect(ready.status.isCurrent).toBe(true);
+    });
+
+    test("should report current status after migrations", async () => {
+        db = createLegacyDatabase();
+        const d1 = createD1(db);
+
+        await migrateDatabaseSchema({ d1, useLock: false, log: { info: vi.fn(), warn: vi.fn() } });
+        const status = await getDatabaseSchemaStatus({ d1 });
+
+        expect(status).toMatchObject({
+            currentVersion: LATEST_SCHEMA_VERSION,
+            latestVersion: LATEST_SCHEMA_VERSION,
+            isCurrent: true
+        });
+        expect(status.issues).toEqual([]);
+        expect(status.missingMigrations).toEqual([]);
+    });
+
+    test("should migrate production legacy schema with missing SSOT columns", async () => {
+        db = createProductionLegacyDatabase();
+        const d1 = createD1RestCompatible(db);
+
+        const result = await migrateDatabaseSchema({
+            d1,
+            useLock: false,
+            log: { info: vi.fn(), warn: vi.fn() }
+        });
+
+        expect(result.status.isCurrent).toBe(true);
+        expect(result.status.issues).toEqual([]);
+
+        const taskColumns = db.prepare("PRAGMA table_info(tasks)").all().map(column => column.name);
+        expect(taskColumns).toContain("claimed_by");
+        expect(taskColumns).not.toContain("drive_id");
+
+        const migratedTask = db.prepare("SELECT * FROM tasks WHERE id = ?").get("task-prod-1");
+        expect(migratedTask).toMatchObject({
+            user_id: "user-prod",
+            chat_id: "chat-prod",
+            msg_id: 100,
+            source_msg_id: 99,
+            file_name: "queued.mp4",
+            file_size: 42,
+            status: "queued",
+            claimed_by: null,
+            created_at: 1000,
+            updated_at: 1000
+        });
+
+        const driveColumns = db.prepare("PRAGMA table_info(drives)").all().map(column => column.name);
+        expect(driveColumns).toContain("is_default");
+
+        const migratedDrive = db.prepare("SELECT * FROM drives WHERE id = ?").get("1");
+        expect(migratedDrive).toMatchObject({
+            user_id: "user-prod",
+            name: "Mega",
+            type: "mega",
+            config_data: '{"user":"u"}',
+            remote_folder: "/remote",
+            status: "active",
+            is_default: 0,
+            created_at: 900,
+            updated_at: 950
+        });
+
+        const settingsColumns = db.prepare("PRAGMA table_info(settings)").all().map(column => column.name);
+        expect(settingsColumns).toContain("created_at");
+
+        const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all().map(column => column.name);
+        expect(sessionColumns).toEqual(["id", "user_id", "data", "created_at", "expires_at"]);
+
+        const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(row => row.name);
+        expect(indexes).toContain("idx_tasks_status_updated");
+        expect(indexes).toContain("idx_drives_one_default_per_user");
+
+        const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3]);
+    });
+});
