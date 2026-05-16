@@ -21,7 +21,12 @@ vi.mock('../../../src/utils/limiter.js', () => ({
     PRIORITY: {}
 }));
 vi.mock('../../../src/modules/AuthGuard.js', () => ({ AuthGuard: class {} }));
-vi.mock('../../../src/repositories/TaskRepository.js', () => ({ TaskRepository: class {} }));
+vi.mock('../../../src/repositories/TaskRepository.js', () => ({
+    TaskRepository: class {
+        static transitionStatus = vi.fn();
+        static updateStatus = vi.fn();
+    }
+}));
 vi.mock('../../../src/services/d1.js', () => ({ d1: {} }));
 vi.mock('../../../src/services/CacheService.js', () => ({ cache: {} }));
 vi.mock('../../../src/services/InstanceCoordinator.js', () => ({ instanceCoordinator: {} }));

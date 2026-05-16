@@ -6,6 +6,7 @@ import { instanceCoordinator } from "./InstanceCoordinator.js";
 import { cache } from "./CacheService.js";
 import logger, { enableTelegramConsoleProxy } from "./logger/index.js";
 import { TelegramErrorClassifier } from "./telegram-error-classifier.js";
+import { CACHE_KEYS } from "../domain/cache-keys.js";
 
 const log = logger.withModule ? logger.withModule('TelegramService') : logger;
 
@@ -406,6 +407,14 @@ function buildProxyOptions(config) {
     } : {};
 }
 
+function resolveTelegramLogLevel() {
+    if (typeof log.canSend !== 'function') return 'info';
+    for (const level of ['debug', 'info', 'warn', 'error']) {
+        if (log.canSend(level)) return level;
+    }
+    return 'error';
+}
+
 function buildClientConfig(config, proxyOptions) {
     return {
         connectionRetries: 3,
@@ -432,7 +441,7 @@ function buildClientConfig(config, proxyOptions) {
         useIPv6: false,
         baseLogger: {
             levels: ["error", "warn", "info", "debug"],
-            _logLevel: "info",
+            _logLevel: resolveTelegramLogLevel(),
             canSend: function(level) {
                 return this._logLevel
                     ? this.levels.indexOf(this._logLevel) >= this.levels.indexOf(level)
@@ -477,6 +486,8 @@ function buildClientConfig(config, proxyOptions) {
                     log.error(msg, ...args);
                 } else if (level === 'warn') {
                     log.warn(msg, ...args);
+                } else if (level === 'debug') {
+                    log.debug(msg, ...args);
                 } else {
                     log.info(msg, ...args);
                 }
@@ -783,7 +794,7 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
         const hasLock = await instanceCoordinator.hasLock("telegram_client");
         if (!hasLock) {
             // 检查锁是否被其他实例持有
-            const lockData = await cache.get(`lock:telegram_client`, "json", { skipCache: true });
+            const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), "json", { skipCache: true });
             
             if (!lockData) {
                 // 锁不存在（已过期或从未获取），且当前实例是 Leader，允许尝试重新获取
@@ -963,7 +974,7 @@ const handleWatchdogFailureThreshold = async (errorType, diff) => {
     try {
         const hasLock = await instanceCoordinator.hasLock("telegram_client");
         if (!hasLock) {
-            const lockData = await cache.get(`lock:telegram_client`, "json", { skipCache: true });
+            const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), "json", { skipCache: true });
             if (!lockData && instanceCoordinator.isLeader) {
                 log.warn("🔒 看门狗检测到锁缺失，Leader 尝试重新获取锁...");
                 const acquired = await instanceCoordinator.acquireLock("telegram_client", 300);

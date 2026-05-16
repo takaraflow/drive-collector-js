@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TaskManagerCore } from '../../../../src/processor/TaskManager/TaskManager.core.js';
-import { d1 } from '../../../../src/services/d1.js';
 import { TaskRepository } from '../../../../src/repositories/TaskRepository.js';
 
 vi.mock('../../../../src/services/d1.js', () => ({
@@ -11,7 +10,7 @@ vi.mock('../../../../src/services/d1.js', () => ({
 
 vi.mock('../../../../src/repositories/TaskRepository.js', () => ({
     TaskRepository: {
-        updateStatus: vi.fn()
+        transitionStatus: vi.fn()
     }
 }));
 
@@ -43,12 +42,12 @@ describe('TaskManagerCore', () => {
     describe('batchUpdateStatus', () => {
         it('should return early if updates array is empty', async () => {
             await TaskManagerCore.batchUpdateStatus([]);
-            expect(d1.batch).not.toHaveBeenCalled();
+            expect(TaskRepository.transitionStatus).not.toHaveBeenCalled();
         });
 
         it('should return early if updates is null', async () => {
             await TaskManagerCore.batchUpdateStatus(null);
-            expect(d1.batch).not.toHaveBeenCalled();
+            expect(TaskRepository.transitionStatus).not.toHaveBeenCalled();
         });
 
         it('should successfully batch update tasks', async () => {
@@ -57,22 +56,13 @@ describe('TaskManagerCore', () => {
                 { id: '2', status: 'failed', error: 'some error' }
             ];
 
-            d1.batch.mockResolvedValueOnce([{}]);
+            TaskRepository.transitionStatus.mockResolvedValue({ changed: true });
 
             await TaskManagerCore.batchUpdateStatus(updates);
 
-            expect(d1.batch).toHaveBeenCalledTimes(1);
-            expect(d1.batch).toHaveBeenCalledWith([
-                {
-                    sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = datetime('now') WHERE id = ?",
-                    params: ['completed', null, '1']
-                },
-                {
-                    sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = datetime('now') WHERE id = ?",
-                    params: ['failed', 'some error', '2']
-                }
-            ]);
-            expect(TaskRepository.updateStatus).not.toHaveBeenCalled();
+            expect(TaskRepository.transitionStatus).toHaveBeenCalledTimes(2);
+            expect(TaskRepository.transitionStatus).toHaveBeenNthCalledWith(1, '1', 'completed', undefined, expect.objectContaining({ source: 'TaskManager.batchUpdateStatus' }));
+            expect(TaskRepository.transitionStatus).toHaveBeenNthCalledWith(2, '2', 'failed', 'some error', expect.objectContaining({ source: 'TaskManager.batchUpdateStatus' }));
         });
 
         it('should fallback to individual updates if d1.batch fails', async () => {
@@ -81,15 +71,16 @@ describe('TaskManagerCore', () => {
                 { id: '2', status: 'failed', error: 'some error' }
             ];
 
-            d1.batch.mockRejectedValueOnce(new Error('Database batch failed'));
-            TaskRepository.updateStatus.mockResolvedValue();
+            TaskRepository.transitionStatus
+                .mockRejectedValueOnce(new Error('Database batch failed'))
+                .mockResolvedValueOnce({ changed: true })
+                .mockResolvedValueOnce({ changed: true });
 
             await TaskManagerCore.batchUpdateStatus(updates);
 
-            expect(d1.batch).toHaveBeenCalledTimes(1);
-            expect(TaskRepository.updateStatus).toHaveBeenCalledTimes(2);
-            expect(TaskRepository.updateStatus).toHaveBeenNthCalledWith(1, '1', 'completed', undefined);
-            expect(TaskRepository.updateStatus).toHaveBeenNthCalledWith(2, '2', 'failed', 'some error');
+            expect(TaskRepository.transitionStatus).toHaveBeenCalledTimes(4);
+            expect(TaskRepository.transitionStatus).toHaveBeenNthCalledWith(3, '1', 'completed', undefined, expect.objectContaining({ source: 'TaskManager.batchUpdateStatus.fallback' }));
+            expect(TaskRepository.transitionStatus).toHaveBeenNthCalledWith(4, '2', 'failed', 'some error', expect.objectContaining({ source: 'TaskManager.batchUpdateStatus.fallback' }));
         });
 
         it('should continue individual updates even if one individual update fails during fallback', async () => {
@@ -98,18 +89,17 @@ describe('TaskManagerCore', () => {
                 { id: '2', status: 'failed', error: 'some error' }
             ];
 
-            d1.batch.mockRejectedValueOnce(new Error('Database batch failed'));
-
-            // First update fails, second succeeds
-            TaskRepository.updateStatus.mockRejectedValueOnce(new Error('Individual update failed'))
-                                     .mockResolvedValueOnce();
+            TaskRepository.transitionStatus
+                .mockRejectedValueOnce(new Error('Database batch failed'))
+                .mockRejectedValueOnce(new Error('Individual update failed'))
+                .mockResolvedValueOnce()
+                .mockResolvedValueOnce();
 
             await TaskManagerCore.batchUpdateStatus(updates);
 
-            expect(d1.batch).toHaveBeenCalledTimes(1);
-            expect(TaskRepository.updateStatus).toHaveBeenCalledTimes(2);
-            expect(TaskRepository.updateStatus).toHaveBeenNthCalledWith(1, '1', 'completed', undefined);
-            expect(TaskRepository.updateStatus).toHaveBeenNthCalledWith(2, '2', 'failed', 'some error');
+            expect(TaskRepository.transitionStatus).toHaveBeenCalledTimes(4);
+            expect(TaskRepository.transitionStatus).toHaveBeenNthCalledWith(3, '1', 'completed', undefined, expect.any(Object));
+            expect(TaskRepository.transitionStatus).toHaveBeenNthCalledWith(4, '2', 'failed', 'some error', expect.any(Object));
         });
     });
 });

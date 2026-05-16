@@ -1,0 +1,31 @@
+export const CACHE_KEYS = Object.freeze({
+    prefixes: Object.freeze({
+        taskStatus: 'task_status:',
+        taskDetails: 'task:',
+        consistentTask: 'consistent:task:',
+        taskLock: 'lock:task:',
+        instance: 'instance:',
+        drive: 'drive:',
+        config: 'config:'
+    }),
+
+    setting: key => `setting:${key}`,
+    session: userId => `session:${userId}`,
+
+    driveByUser: userId => `drive:${userId}`,
+    driveById: driveId => `drive_id:${driveId}`,
+    activeDrives: () => "drives:active",
+    localDriveByUser: userId => `drive_${userId}`,
+    filesByUser: userId => `files_${userId}`,
+    uploadPathByUser: userId => `upload_path_${userId}`,
+
+    lock: lockKey => `lock:${lockKey}`,
+    telegramClientLock: () => "lock:telegram_client",
+    taskLock: taskId => `lock:task:${taskId}`,
+
+    taskStatus: taskId => `task_status:${taskId}`,
+    consistentTask: taskId => `consistent:task:${taskId}`,
+    taskSync: taskId => `sync:${taskId}`,
+    taskStatusPattern: () => 'task_status:*',
+    taskLockPattern: () => 'lock:task:*'
+});

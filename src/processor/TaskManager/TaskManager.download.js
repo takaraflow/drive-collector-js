@@ -3,6 +3,8 @@ import fs from "fs";
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { createHeartbeat, handleTaskCompletion, handleTaskFailure, escapeHTML } from "./TaskManager.utils.js";
 import { resolveInstanceBaseUrl } from "../../utils/instanceUrl.js";
+import { TASK_EVENTS } from "../../domain/task-state-machine.js";
+import { TASK_QUEUE_TRIGGER_SOURCES } from "../../domain/task-queue-contract.js";
 
 // 获取模块日志记录器
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager');
@@ -69,7 +71,7 @@ export async function downloadTask(task) {
                 if (await _handleInstantTransfer(this, deps, task, info, fileName, initialHeartbeat)) return;
 
                 // 2. Local file check
-                if (await _handleLocalFile(this, deps, task, info, fileName, localPath)) return;
+                if (await _handleLocalFile(this, deps, task, info, fileName, localPath, initialHeartbeat)) return;
 
                 const isLargeFile = info.size > 100 * 1024 * 1024;
 
@@ -123,7 +125,7 @@ async function _handleInstantTransfer(context, deps, task, info, fileName, initi
     return false;
 }
 
-async function _handleLocalFile(context, deps, task, info, fileName, localPath) {
+async function _handleLocalFile(context, deps, task, info, fileName, localPath, initialHeartbeat) {
     const { TaskRepository, updateStatus, format, STRINGS, queueService } = deps;
     const log = dependencyContainer.get('logger').withModule('TaskManager');
 
@@ -142,7 +144,13 @@ async function _handleLocalFile(context, deps, task, info, fileName, localPath) 
     // If local file exists and is complete, skip download and directly enter upload process
     if (localFileExists && context._isSizeMatch(localFileSize, info.size)) {
         // Local file is intact, directly trigger upload webhook
-        await TaskRepository.updateStatus(task.id, 'downloaded');
+        await initialHeartbeat;
+        const transition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.FINISH_DOWNLOAD, null, {
+            returnResult: true,
+            allowNoop: true,
+            source: 'local_file_ready'
+        });
+        if (transition.blocked) return true;
         if (!task.isGroup) {
             await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
         }
@@ -151,7 +159,8 @@ async function _handleLocalFile(context, deps, task, info, fileName, localPath) 
             userId: task.userId,
             chatId: task.chatId,
             msgId: task.msgId,
-            localPath: task.localPath
+            localPath: task.localPath,
+            _meta: { triggerSource: TASK_QUEUE_TRIGGER_SOURCES.LOCAL_FILE_READY }
         });
         log.info("Local file exists, triggered upload webhook", { taskId: task.id });
         return true;
@@ -323,7 +332,12 @@ async function _handleMTProtoDownload(context, deps, task, info, fileName, local
     }
 
     // Download complete, push to upload queue
-    await TaskRepository.updateStatus(task.id, 'downloaded');
+    const transition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.FINISH_DOWNLOAD, null, {
+        returnResult: true,
+        allowNoop: true,
+        source: 'download_complete'
+    });
+    if (transition.blocked) return true;
     if (!task.isGroup) {
         await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
     }
@@ -334,7 +348,8 @@ async function _handleMTProtoDownload(context, deps, task, info, fileName, local
         userId: task.userId,
         chatId: task.chatId,
         msgId: task.msgId,
-        localPath: task.localPath
+        localPath: task.localPath,
+        _meta: { triggerSource: TASK_QUEUE_TRIGGER_SOURCES.DOWNLOAD_COMPLETE }
     });
     log.info("Download complete, triggered upload webhook", { taskId: task.id });
     return true;

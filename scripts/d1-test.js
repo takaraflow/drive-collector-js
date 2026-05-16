@@ -7,6 +7,7 @@ async function main() {
   
   // 1. 检查配置
   console.log('1. 检查配置...');
+  await d1.initialize();
   if (!d1.accountId || !d1.databaseId || !d1.token) {
     console.error('❌ 配置缺失');
     console.error(`   Account ID: ${d1.accountId ? 'OK' : 'MISSING'}`);

@@ -27,6 +27,7 @@ vi.mock('../../src/services/CacheService.js', () => ({
 vi.mock('../../src/repositories/TaskRepository.js', () => ({
     TaskRepository: {
         updateStatus: vi.fn(),
+        transitionStatus: vi.fn(),
         findById: vi.fn(),
         findByMsgId: vi.fn().mockResolvedValue([]),
     }
@@ -108,6 +109,7 @@ describe('TaskManager - Retry', () => {
         const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
         const { queueService } = await import('../../src/services/QueueService.js');
         const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+        TaskRepository.transitionStatus.mockResolvedValue({ changed: true, blocked: false, toStatus: 'queued' });
 
         TaskRepository.findById.mockResolvedValue({
             id: 'task-123', user_id: 'u1', chat_id: 'c1', msg_id: 'm1',
@@ -120,13 +122,19 @@ describe('TaskManager - Retry', () => {
         expect(queueService.enqueueDownloadTask).toHaveBeenCalledWith('task-123', expect.objectContaining({
             _meta: expect.objectContaining({ triggerSource: 'manual-retry' })
         }));
-        expect(TaskRepository.updateStatus).toHaveBeenCalledWith('task-123', 'queued');
+        expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+            'task-123',
+            'retry',
+            null,
+            expect.objectContaining({ source: 'retryTask' })
+        );
         expect(result).toEqual({ success: true, statusCode: 200, message: "Task re-enqueued" });
     });
 
     it('should not fetch Telegram message or check local files', async () => {
         const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
         const { client } = await import('../../src/services/telegram.js');
+        TaskRepository.transitionStatus.mockResolvedValue({ changed: true, blocked: false, toStatus: 'queued' });
 
         TaskRepository.findById.mockResolvedValue({
             id: 'task-123', user_id: 'u1', chat_id: 'c1', msg_id: 'm1',
@@ -187,6 +195,7 @@ describe('TaskManager - Retry', () => {
 
     it('should allow retry when user is owner', async () => {
         const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+        TaskRepository.transitionStatus.mockResolvedValue({ changed: true, blocked: false, toStatus: 'queued' });
         TaskRepository.findById.mockResolvedValue({
             id: 'task-123', user_id: 'owner-1', status: 'failed'
         });
@@ -197,6 +206,7 @@ describe('TaskManager - Retry', () => {
 
     it('should allow retry for already queued tasks (stuck recovery)', async () => {
         const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+        TaskRepository.transitionStatus.mockResolvedValue({ changed: true, blocked: false, toStatus: 'queued' });
         TaskRepository.findById.mockResolvedValue({
             id: 'task-123', user_id: 'u1', status: 'queued'
         });

@@ -25,7 +25,8 @@ vi.mock('../../src/services/CacheService.js', () => ({
 
 vi.mock('../../src/repositories/TaskRepository.js', () => ({
   TaskRepository: {
-    updateStatus: vi.fn().mockResolvedValue(true)
+    updateStatus: vi.fn().mockResolvedValue(true),
+    transitionStatus: vi.fn().mockResolvedValue({ changed: true, blocked: false })
   }
 }))
 
@@ -366,7 +367,12 @@ describe('StreamTransferService', () => {
 
       await streamTransferService.finishTask('task-finish', context)
 
-      expect(TaskRepository.updateStatus).toHaveBeenCalledWith('task-finish', 'completed')
+      expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+        'task-finish',
+        'complete',
+        null,
+        expect.objectContaining({ source: 'stream_finish_task' })
+      )
       expect(TelegramBotApi.editMessageText).toHaveBeenCalledWith(
         'chat-123',
         456,

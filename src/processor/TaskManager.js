@@ -4,6 +4,10 @@ import path from "path";
 import fs from "fs";
 import { Button } from "telegram/tl/custom/button.js";
 import { dependencyContainer } from "../services/DependencyContainer.js";
+import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
+import {
+    TASK_QUEUE_TRIGGER_SOURCES
+} from "../domain/task-queue-contract.js";
 
 // 导入模块化的方法
 import { downloadTask } from "./TaskManager/TaskManager.download.js";
@@ -32,22 +36,31 @@ export class TaskManager {
      */
     static async batchUpdateStatus(updates) {
         if (!updates || updates.length === 0) return;
-        const { d1, TaskRepository } = getDeps();
+        const { TaskRepository } = getDeps();
         const log = getLog();
 
-        const statements = updates.map(({id, status, error}) => ({
-            sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = datetime('now') WHERE id = ?",
-            params: [status, error || null, id]
-        }));
-
         try {
-            await d1.batch(statements);
+            const results = await Promise.allSettled(updates.map(update =>
+                TaskRepository.transitionStatus(update.id, update.event || update.status, update.error, {
+                    returnResult: true,
+                    allowNoop: true,
+                    source: 'TaskManager.batchUpdateStatus'
+                })
+            ));
+
+            const failed = results.filter(result => result.status === 'rejected');
+            if (failed.length > 0) {
+                throw failed[0].reason;
+            }
         } catch (e) {
             log.error("batchUpdateStatus failed", e);
             // 降级到单个更新
             for (const update of updates) {
                 try {
-                    await TaskRepository.updateStatus(update.id, update.status, update.error);
+                    await TaskRepository.transitionStatus(update.id, update.event || update.status, update.error, {
+                        allowNoop: true,
+                        source: 'TaskManager.batchUpdateStatus.fallback'
+                    });
                 } catch (err) {
                     log.error("Failed to update task", { taskId: update.id, error: err });
                 }
@@ -290,7 +303,7 @@ export class TaskManager {
                 const message = messageMap.get(row.source_msg_id);
                 if (!message || !message.media) {
                     log.warn(`⚠️ 无法找到原始消息 (ID: ${row.source_msg_id})`);
-                    failedUpdates.push({ id: row.id, status: 'failed', error: 'Source msg missing' });
+                    failedUpdates.push({ id: row.id, event: TASK_EVENTS.FAIL, error: 'Source msg missing' });
                     continue;
                 }
 
@@ -301,7 +314,7 @@ export class TaskManager {
                 validTasks.push(task);
 
                 // 根据任务状态决定恢复到哪个队列
-                if (row.status === 'downloaded') {
+                if (row.status === TASK_STATUSES.DOWNLOADED) {
                     // 恢复到上传队列
                     const localPath = path.join(config.downloadDir, path.basename(row.file_name));
                     if (fs.existsSync(localPath)) {
@@ -497,15 +510,12 @@ export class TaskManager {
         const { queueService } = getDeps();
         const log = getLog();
         try {
-            // 添加触发源信息
             const taskPayload = {
                 userId: task.userId,
                 chatId: task.chatId,
                 msgId: task.msgId,
                 _meta: {
-                    triggerSource: 'direct-qstash', // 标识是直接通过 QStash 发送
-                    instanceId: process.env.INSTANCE_ID || 'unknown',
-                    timestamp: Date.now(),
+                    triggerSource: TASK_QUEUE_TRIGGER_SOURCES.DIRECT_QSTASH,
                     source: 'TaskManager._enqueueTask'
                 }
             };
@@ -514,7 +524,7 @@ export class TaskManager {
             log.info("Task enqueued for download", { 
                 taskId: task.id, 
                 service: 'qstash',
-                triggerSource: 'direct-qstash'
+                triggerSource: TASK_QUEUE_TRIGGER_SOURCES.DIRECT_QSTASH
             });
         } catch (error) {
             log.error("Failed to enqueue download task", { taskId: task.id, error });
@@ -648,13 +658,8 @@ export class TaskManager {
         try {
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
-            const triggerSource = dbTask?.source_data?._meta?.triggerSource || 'unknown';
-            const instanceId = dbTask?.source_data?._meta?.instanceId || 'unknown';
-            
-            log.info(`QStash Received download webhook for Task: ${taskId}`, {
-                triggerSource, // 'direct-qstash' 或 'unknown'
-                instanceId,
-                isFromQStash: triggerSource === 'direct-qstash'
+            log.debug(`QStash Received download webhook for Task: ${taskId}`, {
+                taskId
             });
             if (!dbTask) {
                 log.error(`❌ Task ${taskId} not found in database`);
@@ -662,9 +667,20 @@ export class TaskManager {
             }
 
             // 用户已取消：直接 ACK（防止 QStash 重试/继续处理）
-            if (dbTask.status === 'cancelled') {
+            if (dbTask.status === TASK_STATUSES.CANCELLED) {
                 log.info("Task cancelled, skipping download webhook", { taskId });
                 return { success: true, statusCode: 200 };
+            }
+
+            const claim = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.START_DOWNLOAD, null, {
+                claimedBy: instanceCoordinator.getInstanceId?.() || 'unknown',
+                returnResult: true,
+                allowNoop: true,
+                source: 'handleDownloadWebhook'
+            });
+            if (claim.blocked) {
+                log.info("Download webhook ignored by state machine", { taskId, reason: claim.reason, status: claim.fromStatus || claim.latestStatus });
+                return { success: true, statusCode: 200, message: "Ignored by task state machine" };
             }
 
             // 获取原始消息
@@ -674,7 +690,10 @@ export class TaskManager {
             );
             const message = messages[0];
             if (!message || !message.media) {
-                await TaskRepository.updateStatus(taskId, 'failed', 'Source msg missing');
+                await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, 'Source msg missing', {
+                    allowNoop: true,
+                    source: 'handleDownloadWebhook.source_missing'
+                });
                 return { success: false, statusCode: 404, message: "Source message missing" };
             }
 
@@ -699,7 +718,10 @@ export class TaskManager {
         } catch (error) {
             log.error("Download webhook failed", { taskId, error });
             const code = this._classifyError(error);
-            await TaskRepository.updateStatus(taskId, 'failed', error.message);
+            await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
+                allowNoop: true,
+                source: 'handleDownloadWebhook.error'
+            });
             return { success: false, statusCode: code, message: error.message };
         }
     }
@@ -719,13 +741,8 @@ export class TaskManager {
         try {
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
-            const triggerSource = dbTask?.source_data?._meta?.triggerSource || 'unknown';
-            const instanceId = dbTask?.source_data?._meta?.instanceId || 'unknown';
-            
-            log.info(`QStash Received upload webhook for Task: ${taskId}`, {
-                triggerSource, // 'direct-qstash' 或 'unknown'
-                instanceId,
-                isFromQStash: triggerSource === 'direct-qstash'
+            log.debug(`QStash Received upload webhook for Task: ${taskId}`, {
+                taskId
             });
             
             if (!dbTask) {
@@ -734,15 +751,29 @@ export class TaskManager {
             }
 
             // 用户已取消：直接 ACK（防止 QStash 重试/继续处理）
-            if (dbTask.status === 'cancelled') {
+            if (dbTask.status === TASK_STATUSES.CANCELLED) {
                 log.info("Task cancelled, skipping upload webhook", { taskId });
                 return { success: true, statusCode: 200 };
+            }
+
+            const uploadStart = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.START_UPLOAD, null, {
+                claimedBy: instanceCoordinator.getInstanceId?.() || 'unknown',
+                returnResult: true,
+                allowNoop: true,
+                source: 'handleUploadWebhook'
+            });
+            if (uploadStart.blocked) {
+                log.info("Upload webhook ignored by state machine", { taskId, reason: uploadStart.reason, status: uploadStart.fromStatus || uploadStart.latestStatus });
+                return { success: true, statusCode: 200, message: "Ignored by task state machine" };
             }
 
             // 验证本地文件存在
             const localPath = path.join(config.downloadDir, path.basename(dbTask.file_name));
             if (!fs.existsSync(localPath)) {
-                await TaskRepository.updateStatus(taskId, 'failed', 'Local file not found');
+                await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, 'Local file not found', {
+                    allowNoop: true,
+                    source: 'handleUploadWebhook.local_missing'
+                });
                 return { success: false, statusCode: 404, message: "Local file not found" };
             }
 
@@ -753,7 +784,10 @@ export class TaskManager {
             );
             const message = messages[0];
             if (!message || !message.media) {
-                await TaskRepository.updateStatus(taskId, 'failed', 'Source msg missing');
+                await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, 'Source msg missing', {
+                    allowNoop: true,
+                    source: 'handleUploadWebhook.source_missing'
+                });
                 return { success: false, statusCode: 404, message: "Source message missing" };
             }
 
@@ -779,7 +813,10 @@ export class TaskManager {
         } catch (error) {
             log.error("Upload webhook failed", { taskId, error });
             const code = this._classifyError(error);
-            await TaskRepository.updateStatus(taskId, 'failed', error.message);
+            await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
+                allowNoop: true,
+                source: 'handleUploadWebhook.error'
+            });
             return { success: false, statusCode: code, message: error.message };
         }
     }
@@ -813,28 +850,32 @@ export class TaskManager {
                 }
             }
 
-            if (dbTask.status === 'completed') {
+            if (dbTask.status === TASK_STATUSES.COMPLETED) {
                 return { success: false, statusCode: 400, message: "Task already completed" };
             }
 
-            if (dbTask.status === 'cancelled') {
+            if (dbTask.status === TASK_STATUSES.CANCELLED) {
                 return { success: false, statusCode: 400, message: "Task is cancelled" };
             }
 
             // 清理旧的任务锁，避免与 stalled recovery 冲突
             await instanceCoordinator.releaseTaskLock(taskId);
 
+            const retryTransition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.RETRY, null, {
+                returnResult: true,
+                allowNoop: true,
+                source: 'retryTask'
+            });
+            if (retryTransition.blocked) {
+                return { success: false, statusCode: 409, message: retryTransition.reason || "Task cannot be retried" };
+            }
+
             // 通过 QStash 重新派发，leader 的 handleDownloadWebhook 会处理完整流程
             await queueService.enqueueDownloadTask(taskId, {
                 _meta: {
-                    triggerSource: 'manual-retry',
-                    instanceId: process.env.INSTANCE_ID || 'unknown',
-                    timestamp: Date.now()
+                    triggerSource: TASK_QUEUE_TRIGGER_SOURCES.MANUAL_RETRY
                 }
             });
-
-            // 重置状态为 queued（在 enqueue 之后，确保 QStash 派发成功才更新状态）
-            await TaskRepository.updateStatus(taskId, 'queued');
 
             log.info(`Task ${taskId} re-enqueued for retry`);
             return { success: true, statusCode: 200, message: "Task re-enqueued" };
@@ -851,7 +892,7 @@ export class TaskManager {
     static async handleMediaBatchWebhook(groupId, taskIds) {
         const log = getLog();
         try {
-            log.info(`QStash Received media-batch webhook for Group: ${groupId}, TaskCount: ${taskIds.length}`);
+            log.debug(`QStash Received media-batch webhook for Group: ${groupId}, TaskCount: ${taskIds.length}`);
 
             // 这里可以实现批处理逻辑，目前先逐个处理
             for (const taskId of taskIds) {
@@ -925,7 +966,10 @@ export class TaskManager {
             if (inFlight.proc) inFlight.proc.kill("SIGTERM");
         }
 
-        await TaskRepository.updateStatus(taskId, 'cancelled', '用户手动取消');
+        await TaskRepository.transitionStatus(taskId, TASK_EVENTS.CANCEL, '用户手动取消', {
+            allowNoop: true,
+            source: 'cancelTask'
+        });
 
         // 立即更新 UI（防止用户感觉“没反应”）
         try {
@@ -953,9 +997,9 @@ export class TaskManager {
         const ownsAll = tasks.every(t => t.user_id === userId.toString());
         if (!ownsAll && !canCancelAny) return false;
 
-        const updates = tasks.map(t => ({ id: t.id, status: 'cancelled', error: '用户手动取消' }));
+        const updates = tasks.map(t => ({ id: t.id, event: TASK_EVENTS.CANCEL, error: '用户手动取消' }));
         await this.batchUpdateStatus(updates);
-        tasks.forEach(t => { t.status = 'cancelled'; });
+        tasks.forEach(t => { t.status = TASK_STATUSES.CANCELLED; });
 
         for (const t of tasks) {
             this.cancelledTaskIds.add(t.id);
@@ -972,7 +1016,7 @@ export class TaskManager {
             let peer = meta.chat_id;
             if (typeof peer === 'string' && /^-?\d+$/.test(peer)) peer = BigInt(peer);
             const focusTask = { id: meta.id };
-            const { text } = UIHelper.renderBatchMonitor(tasks, focusTask, 'cancelled');
+            const { text } = UIHelper.renderBatchMonitor(tasks, focusTask, TASK_STATUSES.CANCELLED);
             await safeEdit(peer, parseInt(meta.msg_id), text, null, userId, "html");
         } catch (e) {
             // safeEdit 内部已兜底
@@ -1036,7 +1080,7 @@ export class TaskManager {
         const msgId = task.msgId;
         const lastUpdate = this.monitorLocks.get(msgId) || 0;
         const now = Date.now();
-        const isFinal = status === 'completed' || status === 'failed' || status === 'cancelled';
+        const isFinal = [TASK_STATUSES.COMPLETED, TASK_STATUSES.FAILED, TASK_STATUSES.CANCELLED].includes(status);
 
         if (now - lastUpdate < 2000 && !isFinal) return;
         this.monitorLocks.set(msgId, now);

@@ -91,8 +91,8 @@ describe('Reproduce Unknown Event Logging', () => {
 
         await MessageHandler.handleEvent(event, mockClient);
 
-        // Verify PERF log shows [UpdateUserStatus]
-        expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('消息 [UpdateUserStatus] 分发完成'));
+        // Verify PERF log shows [UpdateUserStatus] (normal dispatch completion is debug-level)
+        expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('消息 [UpdateUserStatus] 分发完成'));
         
         // Should NOT trigger unknown debug log
         const debugCalls = logger.debug.mock.calls.filter(call => call[0] === "收到未知类型事件，详细内容:");

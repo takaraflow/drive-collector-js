@@ -1,5 +1,5 @@
 import { Button } from "telegram/tl/custom/button.js";
-import { runBotTask, runBotTaskWithRetry } from "./limiter.js";
+import { runBotTaskWithRetry } from "./limiter.js";
 import { STRINGS } from "../locales/zh-CN.js";
 import { logger } from "../services/logger/index.js";
 import crypto from "crypto";

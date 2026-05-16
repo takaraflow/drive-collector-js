@@ -25,7 +25,8 @@ vi.mock('../../src/services/InstanceCoordinator.js', () => ({
 
 vi.mock('../../src/repositories/TaskRepository.js', () => ({
   TaskRepository: {
-    updateStatus: vi.fn()
+    updateStatus: vi.fn(),
+    transitionStatus: vi.fn().mockResolvedValue({ changed: true, blocked: false })
   }
 }));
 
@@ -75,6 +76,7 @@ describe('TaskManager uploadTask', () => {
       .mockResolvedValue({ Size: 1024 });
     // 模拟上传成功
     CloudTool.uploadFile.mockResolvedValue({ success: true });
+    TaskRepository.transitionStatus.mockResolvedValue({ changed: true, blocked: false, toStatus: 'completed' });
   });
 
   test('should properly release task lock in finally block', async () => {

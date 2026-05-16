@@ -62,6 +62,7 @@ vi.mock("../../src/services/rclone.js", () => ({
 const mockDriveRepository = {
     findByUserId: vi.fn(),
     findById: vi.fn(),
+    getDefaultDrive: vi.fn(),
     create: vi.fn(),
     delete: vi.fn(),
     deleteByUserId: vi.fn(),
@@ -141,6 +142,7 @@ describe("DriveConfigFlow", () => {
         mockCloudTool.validateConfig.mockResolvedValue({ success: true });
         mockDriveRepository.findByUserId.mockResolvedValue([]);
         mockDriveRepository.findById.mockResolvedValue(null);
+        mockDriveRepository.getDefaultDrive.mockResolvedValue(null);
         mockDriveRepository.create.mockResolvedValue();
         mockDriveRepository.delete.mockResolvedValue();
         mockDriveRepository.deleteByUserId.mockResolvedValue();
@@ -174,11 +176,10 @@ describe("DriveConfigFlow", () => {
 
         test("should send manager panel with multiple drives bound", async () => {
             const mockDrives = [
-                { id: "drive1", type: "mega", name: "Mega-user1@example.com" },
+                { id: "drive1", type: "mega", name: "Mega-user1@example.com", is_default: 1 },
                 { id: "drive2", type: "mega", name: "Mega-user2@example.com" }
             ];
             mockDriveRepository.findByUserId.mockResolvedValue(mockDrives);
-            mockSettingsRepository.get.mockResolvedValue("drive1"); // drive1 is default
 
             await DriveConfigFlow.sendDriveManager("chat123", "user456");
 
@@ -380,7 +381,7 @@ describe("DriveConfigFlow", () => {
             await DriveConfigFlow.handleUnbind("chat123", "user456");
 
             expect(mockDriveRepository.deleteByUserId).toHaveBeenCalledWith("user456");
-            expect(mockSettingsRepository.set).toHaveBeenCalledWith("default_drive_user456", null);
+            expect(mockSettingsRepository.set).not.toHaveBeenCalledWith("default_drive_user456", null);
             expect(mockSessionManager.clear).toHaveBeenCalledWith("user456");
             expect(mockClient.sendMessage).toHaveBeenCalledWith("chat123", expect.objectContaining({
                 parseMode: "html"

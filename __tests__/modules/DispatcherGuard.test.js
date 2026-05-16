@@ -56,6 +56,7 @@ vi.mock('../../src/repositories/SettingsRepository.js', () => ({
 // Mock DriveRepository
 const mockDriveRepository = {
     findByUserId: vi.fn().mockResolvedValue(null),
+    getDefaultDrive: vi.fn().mockResolvedValue(null),
     findById: vi.fn().mockResolvedValue(null)
 };
 vi.mock('../../src/repositories/DriveRepository.js', () => ({
@@ -110,6 +111,7 @@ describe('Dispatcher Permission Guard', () => {
         mockAuthGuard.getRole.mockResolvedValue('user');
         mockAuthGuard.can.mockResolvedValue(true); // Default allow
         mockSettingsRepo.get.mockResolvedValue('public');
+        mockDriveRepository.getDefaultDrive.mockResolvedValue(null);
     });
 
     // Helper to create message event

@@ -1,8 +1,12 @@
 import { DriveProviderFactory } from "./DriveProviderFactory.js";
 import { DriveRepository } from "../../repositories/DriveRepository.js";
-import { SettingsRepository } from "../../repositories/SettingsRepository.js";
 import { SessionManager } from "../../modules/SessionManager.js";
 import { logger } from "../logger/index.js";
+import {
+    decodeDriveSessionStep,
+    encodeDriveSessionStep,
+    parseDriveSessionData
+} from "../../domain/drive-session-step.js";
 
 const log = logger.withModule ? logger.withModule('BindingService') : logger;
 
@@ -15,7 +19,7 @@ export class BindingService {
      * Set a drive as default for a user
      */
     static async setDefaultDrive(userId, driveId) {
-        await SettingsRepository.set(`default_drive_${userId}`, driveId);
+        await DriveRepository.setDefaultDrive(userId, driveId);
         return { success: true };
     }
 
@@ -24,11 +28,6 @@ export class BindingService {
      */
     static async unbindDrive(userId, driveId) {
         await DriveRepository.delete(driveId);
-        // If it was default, clear it
-        const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
-        if (defaultDriveId === driveId) {
-            await SettingsRepository.set(`default_drive_${userId}`, null);
-        }
         return { success: true };
     }
 
@@ -48,9 +47,7 @@ export class BindingService {
         }
 
         const firstStep = steps[0];
-        // Use colon separator for new sessions
-        const sessionStep = `${driveType.toUpperCase()}:${firstStep.step}`;
-        await SessionManager.start(userId, sessionStep);
+        await SessionManager.start(userId, encodeDriveSessionStep(driveType, firstStep.step));
 
         return {
             success: true,
@@ -67,33 +64,15 @@ export class BindingService {
         const step = session.current_step;
         if (!step) return { success: false, error: 'no_active_session' };
 
-        let driveType, stepName;
-
-        // Parse step: format is "DRIVETYPE:STEP" or legacy "DRIVETYPE_STEP"
-        if (step.includes(':')) {
-            const parts = step.split(':');
-            driveType = parts[0].toLowerCase();
-            stepName = parts.slice(1).join(':');
-        } else {
-            // Legacy format support
-            const supportedTypes = DriveProviderFactory.getSupportedTypes();
-            let matchedType = null;
-            for (const type of supportedTypes) {
-                if (step.toUpperCase().startsWith(type.toUpperCase() + "_")) {
-                    matchedType = type;
-                    stepName = step.slice(type.length + 1);
-                    break;
-                }
-            }
-            if (!matchedType) return { success: false, error: 'invalid_session_format' };
-            driveType = matchedType.toLowerCase();
-        }
+        const parsedStep = decodeDriveSessionStep(step, DriveProviderFactory.getSupportedTypes());
+        if (!parsedStep) return { success: false, error: 'invalid_session_format' };
+        const { driveType, step: stepName } = parsedStep;
 
         if (!DriveProviderFactory.isSupported(driveType)) {
             return { success: false, error: 'unsupported_type' };
         }
 
-        const sessionData = session.temp_data ? JSON.parse(session.temp_data) : {};
+        const sessionData = parseDriveSessionData(session);
         const providerSession = { ...session, data: sessionData };
 
         const provider = DriveProviderFactory.create(driveType);
@@ -111,8 +90,7 @@ export class BindingService {
             }
 
             if (result.nextStep) {
-                // Keep using colon separator for next steps
-                await SessionManager.update(userId, `${driveType.toUpperCase()}:${result.nextStep}`, result.data);
+                await SessionManager.update(userId, encodeDriveSessionStep(driveType, result.nextStep), result.data);
                 return { ...result, driveType, isFinalStep: false };
             }
 

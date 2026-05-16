@@ -59,6 +59,10 @@ export class AppInitializer {
                 d1.initialize()
             ]);
 
+            const config = getConfig();
+            const { ensureDatabaseSchemaReady } = await import("../database/schema.js");
+            await ensureDatabaseSchemaReady({ d1, config, log });
+
             // TunnelService 单独初始化，不阻塞主流程
             try {
                 await tunnelService.initialize();

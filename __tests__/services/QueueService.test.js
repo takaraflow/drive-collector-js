@@ -1,28 +1,19 @@
-vi.mock("../../src/config/index.js", () => ({
-    getConfig: vi.fn(() => ({
-        qstash: {
-            token: 'test-token',
-            webhookUrl: 'https://example.com',
-            currentSigningKey: 'key1',
-            nextSigningKey: 'key2'
-        }
-    })),
-    initConfig: vi.fn(async () => ({
-        qstash: {
-            token: 'test-token',
-            webhookUrl: 'https://example.com',
-            currentSigningKey: 'key1',
-            nextSigningKey: 'key2'
-        }
-    })),
-    config: {
-        qstash: {
-            token: 'test-token',
-            webhookUrl: 'https://example.com',
-            currentSigningKey: 'key1',
-            nextSigningKey: 'key2'
-        }
+var mockRuntimeConfig = {
+    nodeEnv: 'test',
+    callerTrackingMode: 'none',
+    instance: { id: 'test-instance' },
+    qstash: {
+        token: 'test-token',
+        webhookUrl: 'https://example.com',
+        currentSigningKey: 'key1',
+        nextSigningKey: 'key2'
     }
+};
+
+vi.mock("../../src/config/index.js", () => ({
+    getConfig: vi.fn(() => mockRuntimeConfig),
+    initConfig: vi.fn(async () => mockRuntimeConfig),
+    config: mockRuntimeConfig
 }));
 
 vi.mock("../../src/services/logger/index.js", () => ({
@@ -53,6 +44,11 @@ describe("QueueService - Unit Tests", () => {
     beforeEach(() => {
         vi.useFakeTimers({ timerLimit: 10000, advanceTimers: true });
         vi.spyOn(global.Math, 'random').mockReturnValue(0.5);
+        mockRuntimeConfig.nodeEnv = 'test';
+        mockRuntimeConfig.callerTrackingMode = 'none';
+        mockRuntimeConfig.instance = { id: 'test-instance' };
+        mockRuntimeConfig.qstash.pathTemplate = undefined;
+        mockRuntimeConfig.qstash.debug = 'false';
         vi.clearAllMocks();
     });
 
@@ -156,8 +152,8 @@ describe("QueueService - Unit Tests", () => {
     });
 
     test("should add caller context in production mode", async () => {
-        process.env.CALLER_TRACKING_MODE = 'production';
-        process.env.INSTANCE_ID = 'test-instance-123';
+        mockRuntimeConfig.callerTrackingMode = 'production';
+        mockRuntimeConfig.instance = { id: 'test-instance-123' };
 
         mockProvider = {
             initialize: vi.fn(),
@@ -177,9 +173,6 @@ describe("QueueService - Unit Tests", () => {
         const callArgs = mockProvider.publish.mock.calls[0][1];
         expect(callArgs._meta.callerContext).toBeDefined();
         expect(Array.isArray(callArgs._meta.callerContext)).toBe(true);
-        
-        delete process.env.CALLER_TRACKING_MODE;
-        delete process.env.INSTANCE_ID;
     });
 
     test("should use default template when pathTemplate not configured", async () => {

@@ -20,13 +20,8 @@ vi.mock("../../../src/modules/SessionManager.js", () => ({
 vi.mock("../../../src/repositories/DriveRepository.js", () => ({
     DriveRepository: {
         create: vi.fn(),
-    },
-}));
-
-vi.mock("../../../src/repositories/SettingsRepository.js", () => ({
-    SettingsRepository: {
-        set: vi.fn(),
-        get: vi.fn(),
+        delete: vi.fn(),
+        setDefaultDrive: vi.fn(),
     },
 }));
 
@@ -45,7 +40,6 @@ import { DriveProviderFactory } from "../../../src/services/drives/DriveProvider
 import { SessionManager } from "../../../src/modules/SessionManager.js";
 import { DriveRepository } from "../../../src/repositories/DriveRepository.js";
 import { BindingService } from "../../../src/services/drives/BindingService.js";
-import { Mocked } from "vitest";
 
 const mockFactory = DriveProviderFactory;
 const mockSession = SessionManager;
@@ -77,6 +71,20 @@ describe("BindingService", () => {
 
             expect(result.success).toBe(true);
             expect(mockSession.start).toHaveBeenCalledWith("user1", "GOOGLE_DRIVE:STEP1");
+        });
+    });
+
+    describe("default drive ownership", () => {
+        it("应该通过 DriveRepository 设置默认盘", async () => {
+            await BindingService.setDefaultDrive("user1", "drive1");
+
+            expect(mockDriveRepo.setDefaultDrive).toHaveBeenCalledWith("user1", "drive1");
+        });
+
+        it("解绑只删除 Drive，不再写 default_drive settings", async () => {
+            await BindingService.unbindDrive("user1", "drive1");
+
+            expect(mockDriveRepo.delete).toHaveBeenCalledWith("drive1");
         });
     });
 

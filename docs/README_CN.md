@@ -102,6 +102,15 @@ npm start
 npm run dev
 ```
 
+部署包含 D1 schema 变更的代码前，先执行：
+
+```bash
+npm run db:migrate
+npm run db:check
+```
+
+应用启动会校验已记录的 schema 版本，缺失迁移会直接停止启动。只有在部署流程明确需要启动前自动迁移时，才设置 `DB_AUTO_MIGRATE=true`。
+
 ## 测试
 
 运行测试套件：

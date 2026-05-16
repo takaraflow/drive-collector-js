@@ -1,4 +1,8 @@
 import crypto from 'crypto';
+import { CACHE_KEYS } from "../domain/cache-keys.js";
+
+const TASK_LOCK_PREFIX = CACHE_KEYS.prefixes.taskLock;
+const TASK_LOCK_PATTERN = CACHE_KEYS.taskLockPattern();
 
 /**
  * DistributedLock - 分布式锁服务
@@ -61,7 +65,7 @@ export class DistributedLock {
         const effectiveTtlSeconds = this._normalizePositiveNumber(ttlSeconds, this.options.ttlSeconds);
         const effectiveMaxRetries = this._normalizePositiveNumber(maxRetries, this.options.maxRetries);
 
-        const lockKey = `lock:task:${taskId}`;
+        const lockKey = CACHE_KEYS.taskLock(taskId);
         const now = Date.now();
         const expiresAt = now + effectiveTtlSeconds * 1000;
         const version = crypto.randomUUID();
@@ -84,7 +88,7 @@ export class DistributedLock {
                     this.startHeartbeat(taskId, instanceId, effectiveTtlSeconds, version);
                     
                     if (result.action === 'acquired') {
-                        this.logger.info(`Lock acquired for task ${taskId} by ${instanceId}`, {
+                        this.logger.debug(`Lock acquired for task ${taskId} by ${instanceId}`, {
                             version,
                             expiresAt: this._safeToISOString(expiresAt) || 'unknown'
                         });
@@ -213,7 +217,7 @@ export class DistributedLock {
         const initialExpiresAt = Date.now() + effectiveTtlSeconds * 1000;
         const heartbeat = setInterval(async () => {
             try {
-                const lockKey = `lock:task:${taskId}`;
+                const lockKey = CACHE_KEYS.taskLock(taskId);
                 const current = await this.cache.get(lockKey, 'json');
                 
                 // 检查锁是否还属于当前实例
@@ -286,7 +290,7 @@ export class DistributedLock {
      * @returns {Promise<boolean>} - 是否成功释放
      */
     async release(taskId, instanceId) {
-        const lockKey = `lock:task:${taskId}`;
+        const lockKey = CACHE_KEYS.taskLock(taskId);
         
         try {
             // 获取当前锁信息
@@ -315,7 +319,7 @@ export class DistributedLock {
             // 删除锁
             await this.cache.delete(lockKey);
             
-            this.logger.info(`Lock released for task ${taskId} by ${instanceId}`);
+            this.logger.debug(`Lock released for task ${taskId} by ${instanceId}`);
             return true;
 
         } catch (error) {
@@ -331,7 +335,7 @@ export class DistributedLock {
      * @param {string} adminInstanceId - 管理实例ID
      */
     async forceRelease(taskId, adminInstanceId) {
-        const lockKey = `lock:task:${taskId}`;
+        const lockKey = CACHE_KEYS.taskLock(taskId);
         
         try {
             const current = await this.cache.get(lockKey, 'json');
@@ -399,7 +403,7 @@ export class DistributedLock {
      * @returns {Promise<Object>} - 锁状态
      */
     async getLockStatus(taskId) {
-        const lockKey = `lock:task:${taskId}`;
+        const lockKey = CACHE_KEYS.taskLock(taskId);
         const lock = await this.cache.get(lockKey, 'json');
         
         if (!lock) {
@@ -442,7 +446,7 @@ export class DistributedLock {
      * 清理过期锁（定时任务）
      */
     async cleanupExpiredLocks() {
-        const pattern = 'lock:task:*';
+        const pattern = TASK_LOCK_PATTERN;
         
         try {
             const keys = await this.cache.listKeys(pattern);
@@ -451,7 +455,7 @@ export class DistributedLock {
                 const lock = await this.cache.get(key, 'json');
                 if (lock && this.isExpired(lock)) {
                     // 检查本地是否还有心跳
-                    const taskId = key.replace('lock:task:', '');
+                    const taskId = key.replace(TASK_LOCK_PREFIX, '');
                     const localLock = this.locks.get(taskId);
                     
                     if (localLock && localLock.owner === lock.instanceId) {
@@ -523,7 +527,7 @@ export class DistributedLock {
      * 获取锁统计信息
      */
     async getStats() {
-        const pattern = 'lock:task:*';
+        const pattern = TASK_LOCK_PATTERN;
         const keys = await this.cache.listKeys(pattern);
         
         let held = 0;

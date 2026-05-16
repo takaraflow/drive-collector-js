@@ -113,8 +113,8 @@ describe("DriveRepository", () => {
             expect(mockLocalCache.get).toHaveBeenCalledWith("drive_user1");
             expect(mockCache.get).toHaveBeenCalledWith("drive:user1", "json");
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
-                "SELECT id, user_id, name, type, config_data, remote_folder, status, created_at FROM drives WHERE user_id = ? AND status = 'active' ORDER BY created_at DESC",
-                ["user1"]
+                "SELECT id, user_id, name, type, config_data, remote_folder, status, is_default, created_at FROM drives WHERE user_id = ? AND status = ? ORDER BY is_default DESC, created_at DESC",
+                ["user1", "active"]
             );
             expect(mockCache.set).toHaveBeenCalledWith("drive:user1", mockDrives);
             expect(mockLocalCache.set).toHaveBeenCalledWith("drive_user1", mockDrives, 60 * 1000);
@@ -153,8 +153,8 @@ describe("DriveRepository", () => {
             expect(mockLocalCache.get).not.toHaveBeenCalled();
             expect(mockCache.get).not.toHaveBeenCalled();
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
-                "SELECT id, user_id, name, type, config_data, remote_folder, status, created_at FROM drives WHERE user_id = ? AND status = 'active' ORDER BY created_at DESC",
-                ["user1"]
+                "SELECT id, user_id, name, type, config_data, remote_folder, status, is_default, created_at FROM drives WHERE user_id = ? AND status = ? ORDER BY is_default DESC, created_at DESC",
+                ["user1", "active"]
             );
             expect(result).toEqual(mockDrives);
         });
@@ -167,7 +167,7 @@ describe("DriveRepository", () => {
             
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
                 expect.any(String),
-                ["complex-user-id"] // toString() called
+                ["complex-user-id", "active"]
             );
         });
 
@@ -190,7 +190,7 @@ describe("DriveRepository", () => {
             mockD1.run.mockResolvedValue({ changes: 1 });
             mockCache.set.mockResolvedValue(true);
             mockCache.get.mockResolvedValue([]); // Assume empty initial list
-            mockCache.listKeys.mockResolvedValue([]);
+            mockD1.fetchAll.mockResolvedValue([]);
         });
 
         it("should throw error for missing required parameters", async () => {
@@ -199,47 +199,28 @@ describe("DriveRepository", () => {
             await expect(DriveRepository.create("user1", "name", "mega", null)).rejects.toThrow("DriveRepository.create: Missing required parameters.");
         });
 
-        it("should create drive successfully with Write-Through and append to list", async () => {
+        it("should create drive successfully with Write-Through and invalidate derived list cache", async () => {
             const configData = { user: "test@example.com", pass: "password" };
-            
-            // Mock getting existing drives (empty)
-            mockCache.get.mockResolvedValue([]);
 
             const result = await DriveRepository.create("user1", "Mega-test@example.com", "mega", configData);
 
             // Verify D1 write
             expect(mockD1.run).toHaveBeenCalledWith(
-                "INSERT INTO drives (id, user_id, name, type, config_data, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                expect.arrayContaining(["user1", "Mega-test@example.com", "mega", JSON.stringify(configData), "active"])
+                "INSERT INTO drives (id, user_id, name, type, config_data, status, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                expect.arrayContaining(["user1", "Mega-test@example.com", "mega", JSON.stringify(configData), "active", 0])
             );
 
-            // Verify Cache writes (expecting array append)
-            expect(mockCache.set).toHaveBeenCalledWith("drive:user1", expect.arrayContaining([
-                expect.objectContaining({ user_id: "user1", name: "Mega-test@example.com" })
-            ]));
-            
             // Verify drive_id cache write
             expect(mockCache.set).toHaveBeenCalledWith(expect.stringMatching(/^drive_id:.+/), expect.objectContaining({
-                user_id: "user1"
+                user_id: "user1",
+                config_data: JSON.stringify(configData)
             }));
 
+            expect(mockCache.delete).toHaveBeenCalledWith("drive:user1");
+            expect(mockCache.delete).toHaveBeenCalledWith("drives:active");
             expect(mockLocalCache.del).toHaveBeenCalledWith("drive_user1");
             expect(mockLocalCache.del).toHaveBeenCalledWith("drives:active");
             expect(result).toBe(true);
-        });
-
-        it("should append to existing drive list", async () => {
-            const configData = { user: "test2@example.com", pass: "password" };
-            const existingDrives = [{ id: "drive1", user_id: "user1", name: "Mega-test1@example.com", type: "mega", config_data: {}, status: "active", created_at: 1000 }];
-            mockCache.get.mockResolvedValue(existingDrives);
-
-            await DriveRepository.create("user1", "Mega-test2@example.com", "mega", configData);
-
-            // Verify that cache.set is called with the UPDATED array
-            expect(mockCache.set).toHaveBeenCalledWith("drive:user1", expect.arrayContaining([
-                expect.objectContaining({ id: "drive1" }),
-                expect.objectContaining({ name: "Mega-test2@example.com" })
-            ]));
         });
 
         it("should throw error on D1 failure", async () => {
@@ -268,7 +249,7 @@ describe("DriveRepository", () => {
                 { id: "drive1", user_id: "user1" },
                 { id: "drive2", user_id: "user1" }
             ];
-            mockLocalCache.get.mockReturnValue(mockDrives);
+            mockD1.fetchAll.mockResolvedValue(mockDrives);
 
             await DriveRepository.deleteByUserId("user1");
 
@@ -297,7 +278,7 @@ describe("DriveRepository", () => {
 
         it("should handle errors in deleteByUserId", async () => {
             const mockDrives = [{ id: "drive1", user_id: "user1" }];
-            mockLocalCache.get.mockReturnValue(mockDrives);
+            mockD1.fetchAll.mockResolvedValue(mockDrives);
             mockD1.run.mockRejectedValue(new Error("D1 Error"));
 
             await expect(DriveRepository.deleteByUserId("user1")).rejects.toThrow("D1 Error");
@@ -324,28 +305,25 @@ describe("DriveRepository", () => {
                 { id: "drive123", user_id: "user1" },
                 { id: "drive456", user_id: "user1" }
             ];
-            // Mock findById (drive_id:drive123)
             mockCache.get.mockImplementation((key) => {
                 if (key === "drive_id:drive123") return Promise.resolve({ id: "drive123", user_id: "user1" });
-                if (key === "drive:user1") return Promise.resolve(initialList);
                 return Promise.resolve(null);
             });
 
             await DriveRepository.delete("drive123");
 
             // Verify D1 update
-            expect(mockD1.run).toHaveBeenCalledWith("UPDATE drives SET status = 'deleted', updated_at = ? WHERE id = ?", [expect.any(Number), "drive123"]);
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id = ?",
+                ["deleted", expect.any(Number), "drive123"]
+            );
 
             // Verify Cache operations
             expect(mockCache.get).toHaveBeenCalledWith("drive_id:drive123", "json");
-            expect(mockCache.get).toHaveBeenCalledWith("drive:user1", "json");
-            
-            // Verify list was updated (drive123 removed)
-            expect(mockCache.set).toHaveBeenCalledWith("drive:user1", [
-                { id: "drive456", user_id: "user1" }
-            ]);
-
+            expect(mockCache.delete).toHaveBeenCalledWith("drive:user1");
+            expect(mockCache.delete).toHaveBeenCalledWith("drives:active");
             expect(mockCache.delete).toHaveBeenCalledWith("drive_id:drive123");
+            expect(mockLocalCache.del).toHaveBeenCalledWith("drive_user1");
             expect(mockLocalCache.del).toHaveBeenCalledWith("drives:active"); // Note: key is "drives:active"
         });
 
@@ -415,6 +393,51 @@ describe("DriveRepository", () => {
             expect(result).toHaveLength(2);
             expect(result[0].name).toBe("Drive 1");
             expect(result[1].name).toBe("Drive 2");
+        });
+    });
+
+    describe("default drive SSOT", () => {
+        beforeEach(() => {
+            vi.clearAllMocks();
+            mockLocalCache.get.mockReturnValue(null);
+            mockCache.get.mockResolvedValue(null);
+            mockCache.delete.mockResolvedValue(true);
+            mockCache.listKeys.mockResolvedValue([]);
+            mockD1.run.mockResolvedValue({ changes: 1 });
+            mockD1.fetchOne.mockResolvedValue(null);
+        });
+
+        it("should resolve the D1 default drive and fallback to first drive", async () => {
+            const drives = [
+                { id: "drive-default", user_id: "user1", is_default: 1 },
+                { id: "drive-other", user_id: "user1", is_default: 0 }
+            ];
+            mockD1.fetchAll.mockResolvedValue(drives);
+
+            await expect(DriveRepository.getDefaultDrive("user1")).resolves.toEqual(drives[0]);
+        });
+
+        it("should set exactly one active default drive for the user", async () => {
+            mockD1.fetchOne.mockResolvedValue({ id: "drive1", user_id: "user1", status: "active" });
+            mockD1.fetchAll.mockResolvedValue([
+                { id: "drive1", user_id: "user1", is_default: 0 },
+                { id: "drive2", user_id: "user1", is_default: 1 }
+            ]);
+
+            await DriveRepository.setDefaultDrive("user1", "drive1");
+
+            expect(mockD1.fetchOne).toHaveBeenCalledWith(
+                "SELECT id, user_id, name, type, config_data, remote_folder, status, is_default, created_at FROM drives WHERE id = ? AND user_id = ? AND status = ?",
+                ["drive1", "user1", "active"]
+            );
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE drives SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END, updated_at = ? WHERE user_id = ? AND status = ?",
+                ["drive1", expect.any(Number), "user1", "active"]
+            );
+            expect(mockCache.delete).toHaveBeenCalledWith("drive:user1");
+            expect(mockCache.delete).toHaveBeenCalledWith("drive_id:drive1");
+            expect(mockCache.delete).toHaveBeenCalledWith("drive_id:drive2");
+            expect(mockLocalCache.del).toHaveBeenCalledWith("drive_user1");
         });
     });
 

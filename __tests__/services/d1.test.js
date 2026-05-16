@@ -64,6 +64,8 @@ describe("D1 Service", () => {
     expect(typeof d1._execute).toBe("function");
     expect(typeof d1.fetchAll).toBe("function");
     expect(typeof d1.fetchOne).toBe("function");
+    expect(typeof d1.healthCheck).toBe("function");
+    expect(typeof d1.raw).toBe("function");
     expect(typeof d1.run).toBe("function");
     expect(typeof d1.batch).toBe("function");
   });

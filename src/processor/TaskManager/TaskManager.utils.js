@@ -1,4 +1,5 @@
 import { dependencyContainer } from "../../services/DependencyContainer.js";
+import { TASK_EVENTS, TASK_STATUSES } from "../../domain/task-state-machine.js";
 
 // 获取依赖项的辅助函数
 const getDeps = () => dependencyContainer.getAll();
@@ -23,8 +24,13 @@ export function createHeartbeat(task, context, updateStatus, fileName = null) {
             throw new Error("CANCELLED");
         }
         
-        // Update task status in database
-        await TaskRepository.updateStatus(task.id, status);
+        const event = status === 'uploading' ? TASK_EVENTS.START_UPLOAD : TASK_EVENTS.START_DOWNLOAD;
+        const transition = await TaskRepository.transitionStatus(task.id, event, null, {
+            returnResult: true,
+            allowNoop: true,
+            source: 'heartbeat'
+        });
+        if (transition.blocked) return;
 
         if (task.isGroup) {
             // Update group monitor for group tasks
@@ -59,10 +65,15 @@ export function createHeartbeat(task, context, updateStatus, fileName = null) {
  */
 export async function handleTaskCompletion(task, context, updateStatus, fileName, actualUploadPath, fileLink) {
     const { TaskRepository, STRINGS, format } = getDeps();
-    await TaskRepository.updateStatus(task.id, 'completed');
+    const transition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.COMPLETE, null, {
+        returnResult: true,
+        allowNoop: true,
+        source: 'handleTaskCompletion'
+    });
+    if (transition.blocked) return;
     
     if (task.isGroup) {
-        await context._refreshGroupMonitor(task, 'completed');
+        await context._refreshGroupMonitor(task, TASK_STATUSES.COMPLETED);
     } else {
         const fileNameHtml = `<a href="${fileLink}">${escapeHTML(fileName)}</a>`;
         await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: fileNameHtml, folder: actualUploadPath }), true);
@@ -79,8 +90,14 @@ export async function handleTaskCompletion(task, context, updateStatus, fileName
  */
 export async function handleTaskFailure(task, context, updateStatus, errorMessage, isCancelled = false) {
     const { TaskRepository, STRINGS } = getDeps();
-    const status = isCancelled ? 'cancelled' : 'failed';
-    await TaskRepository.updateStatus(task.id, status, errorMessage);
+    const event = isCancelled ? TASK_EVENTS.CANCEL : TASK_EVENTS.FAIL;
+    const transition = await TaskRepository.transitionStatus(task.id, event, errorMessage, {
+        returnResult: true,
+        allowNoop: true,
+        source: 'handleTaskFailure'
+    });
+    if (transition.blocked) return;
+    const status = transition.toStatus;
     
     if (task.isGroup) {
         await context._refreshGroupMonitor(task, status);
@@ -104,10 +121,15 @@ export async function handleUploadFailure(task, context, updateStatus, uploadRes
     }
 
     const errorMessage = uploadResult.error || "Upload failed";
-    await TaskRepository.updateStatus(task.id, 'failed', errorMessage);
+    const transition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.FAIL, errorMessage, {
+        returnResult: true,
+        allowNoop: true,
+        source: 'handleUploadFailure'
+    });
+    if (transition.blocked) return;
     
     if (task.isGroup) {
-        await context._refreshGroupMonitor(task, 'failed', 0, 0, errorMessage);
+        await context._refreshGroupMonitor(task, TASK_STATUSES.FAILED, 0, 0, errorMessage);
     } else {
         await updateStatus(task, format(STRINGS.task.failed_upload, {
             reason: task.isCancelled ? "User cancelled manually" : escapeHTML(errorMessage)

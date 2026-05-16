@@ -10,6 +10,7 @@
  */
 
 import { logger } from "./logger/index.js";
+import { CACHE_KEYS } from "../domain/cache-keys.js";
 
 const log = logger.withModule ? logger.withModule('GracefulShutdown') : logger;
 
@@ -464,7 +465,7 @@ export class GracefulShutdown {
 
             // 检查 Redis (通过 CacheService)
             if (global.cache) {
-                const redisKeys = await global.cache.listKeys('task_status:*');
+                const redisKeys = await global.cache.listKeys(CACHE_KEYS.taskStatusPattern());
                 if (redisKeys.length > 0) {
                     log.info(`Redis layer: ${redisKeys.length} task entries found`);
                 }
@@ -493,7 +494,7 @@ export class GracefulShutdown {
 
             // Check Redis
             if (global.cache) {
-                checks.push(global.cache.listKeys('task_status:*').then(keys => keys.length === 0));
+                checks.push(global.cache.listKeys(CACHE_KEYS.taskStatusPattern()).then(keys => keys.length === 0));
             }
 
             const results = await Promise.all(checks);
@@ -536,7 +537,7 @@ export class GracefulShutdown {
 
             // 3. 清理 Redis
             if (global.cache) {
-                const redisKeys = await global.cache.listKeys('task_status:*');
+                const redisKeys = await global.cache.listKeys(CACHE_KEYS.taskStatusPattern());
                 if (redisKeys.length > 0) {
                     log.info(`Force cleaning ${redisKeys.length} Redis entries...`);
                     await Promise.allSettled(

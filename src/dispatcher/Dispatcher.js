@@ -30,11 +30,11 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package
 const appVersion = packageJson.version || 'unknown';
 const getOwnerId = () => getConfig().ownerId?.toString();
 const getDefaultRemoteFolder = () => getConfig().remoteFolder;
+const getNodeEnv = () => getConfig().nodeEnv;
+const getFilesRefreshDelayMs = () => getNodeEnv() === 'test' ? 0 : 50;
 
 // 创建带 perf 上下文的 logger 用于性能日志
 const logPerf = () => log.withContext({ perf: true });
-const FILES_REFRESH_DELAY_MS = process.env.NODE_ENV === 'test' ? 0 : 50;
-
 // 命令权限映射表 (RBAC)
 const COMMAND_PERMISSIONS = {
     // 网盘管理 (高危)
@@ -105,12 +105,12 @@ export class Dispatcher {
         const eventId = event.id || event.message?.id || event.queryId || 'unknown';
         const version = appVersion;
         
-        log.info(`🔍 [MSG_DEDUP] 消息处理开始 - EventID: ${eventId}, UserID: ${ctx.userId}, Instance: ${instanceCoordinator.getInstanceId()}, Version: ${version}`);
+        log.debug(`🔍 [MSG_DEDUP] 消息处理开始 - EventID: ${eventId}, UserID: ${ctx.userId}, Instance: ${instanceCoordinator.getInstanceId()}, Version: ${version}`);
         
         // 🔍 诊断日志：检查锁状态
         try {
             const hasLock = await instanceCoordinator.hasLock('telegram_client');
-            log.info(`🔍 [MSG_DEDUP] 锁状态检查 - EventID: ${eventId}, HasLock: ${hasLock}, Instance: ${instanceCoordinator.getInstanceId()}`);
+            log.debug(`🔍 [MSG_DEDUP] 锁状态检查 - EventID: ${eventId}, HasLock: ${hasLock}, Instance: ${instanceCoordinator.getInstanceId()}`);
         } catch (e) {
             log.warn(`🔍 [MSG_DEDUP] 锁状态检查失败 - EventID: ${eventId}, Error: ${e.message}`);
         }
@@ -120,21 +120,21 @@ export class Dispatcher {
         const passed = await this._globalGuard(event, ctx);
         const guardTime = Date.now() - guardStart;
         if (!passed) {
-            logPerf().info(`消息被全局守卫拦截 (User: ${ctx.userId}, guard: ${guardTime}ms, total: ${Date.now() - start}ms)`);
+            logPerf().debug(`消息被全局守卫拦截 (User: ${ctx.userId}, guard: ${guardTime}ms, total: ${Date.now() - start}ms)`);
             return;
         }
 
         // 3. 路由分发
         // 使用 className 检查替代 instanceof，提高鲁棒性并方便测试
         if (event.className === 'UpdateBotCallbackQuery') {
-            logPerf().info(`回调处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
+            logPerf().debug(`回调处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
             await this._handleCallback(event, ctx);
         } else if (event.className === 'UpdateNewMessage' && event.message) {
-            logPerf().info(`消息处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
+            logPerf().debug(`消息处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
             await this._handleMessage(event, ctx);
         }
         
-        logPerf().info(`总耗时 ${Date.now() - start}ms`);
+        logPerf().debug(`总耗时 ${Date.now() - start}ms`);
     }
 
     /**
@@ -187,7 +187,7 @@ export class Dispatcher {
 
         // 1. 黑名单拦截 (最高优先级，连 Owner 也不能例外，防止账号被盗后的紧急风控，虽然 owner 很难被 setRole 修改)
         if (role === 'banned') {
-            logPerf().info(`消息被黑名单拦截 (User: ${userId})`);
+            logPerf().warn(`消息被黑名单拦截 (User: ${userId})`);
             return false; 
         }
 
@@ -307,8 +307,9 @@ export class Dispatcher {
      * [私有] 在刷新线程中加入延迟以防抖（测试环境下会跳过）
      */
     static async _waitForFilesRefreshDelay() {
-        if (FILES_REFRESH_DELAY_MS <= 0) return;
-        await new Promise((resolve) => setTimeout(resolve, FILES_REFRESH_DELAY_MS));
+        const delayMs = getFilesRefreshDelayMs();
+        if (delayMs <= 0) return;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
 
     /**
@@ -362,15 +363,7 @@ export class Dispatcher {
      * [私有] 获取用户默认或回退的驱动器
      */
     static async _getDefaultDrive(userId) {
-        const [defaultDriveId, drives] = await Promise.all([
-            SettingsRepository.get(`default_drive_${userId}`, null),
-            DriveRepository.findByUserId(userId)
-        ]);
-
-        let finalSelectedDrive = null;
-        if (drives && drives.length > 0) {
-            finalSelectedDrive = drives.find(d => d.id === defaultDriveId) || drives[0];
-        }
+        let finalSelectedDrive = await DriveRepository.getDefaultDrive(userId);
         
         if (!finalSelectedDrive) {
             const fallbackDrives = await DriveRepository.findByUserId(userId, true);
@@ -666,9 +659,7 @@ export class Dispatcher {
      * [私有] 获取通用状态
      */
     static async _getGeneralStatus(userId) {
-        const drives = await DriveRepository.findByUserId(userId);
-        const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
-        const activeDrive = drives.length > 0 ? (drives.find(d => d.id === defaultDriveId) || drives[0]) : null;
+        const activeDrive = await DriveRepository.getDefaultDrive(userId);
 
         const waitingCount = TaskManager.getWaitingCount();
         const processingCount = TaskManager.getProcessingCount();
@@ -1208,9 +1199,7 @@ export class Dispatcher {
      */
     static async _getUserUploadPathFromD1(userId) {
         try {
-            const drives = await DriveRepository.findByUserId(userId);
-            const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
-            const activeDrive = drives.length > 0 ? (drives.find(d => d.id === defaultDriveId) || drives[0]) : null;
+            const activeDrive = await DriveRepository.getDefaultDrive(userId);
             
             if (activeDrive && activeDrive.remote_folder) {
                 return activeDrive.remote_folder;
@@ -1231,9 +1220,7 @@ export class Dispatcher {
      */
     static async _setUserUploadPathInD1(userId, path) {
         try {
-            const drives = await DriveRepository.findByUserId(userId);
-            const defaultDriveId = await SettingsRepository.get(`default_drive_${userId}`, null);
-            const activeDrive = drives.length > 0 ? (drives.find(d => d.id === defaultDriveId) || drives[0]) : null;
+            const activeDrive = await DriveRepository.getDefaultDrive(userId);
             
             if (!activeDrive) {
                 throw new Error('Drive not found');

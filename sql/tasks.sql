@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     source_msg_id INTEGER,
     file_name TEXT,
     file_size INTEGER DEFAULT 0,
-    status TEXT DEFAULT 'queued',
+    status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled')),
     error_msg TEXT,
     claimed_by TEXT,
     created_at INTEGER,

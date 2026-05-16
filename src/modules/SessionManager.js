@@ -1,8 +1,10 @@
 import { cache } from "../services/CacheService.js";
+import { CACHE_KEYS } from "../domain/cache-keys.js";
+import { serializeDriveSessionData } from "../domain/drive-session-step.js";
 
 export class SessionManager {
     static getSessionKey(userId) {
-        return `session:${userId}`;
+        return CACHE_KEYS.session(userId);
     }
 
     // 获取用户当前状态
@@ -16,7 +18,7 @@ export class SessionManager {
         const session = {
             user_id: userId,
             current_step: step,
-            temp_data: JSON.stringify(data),
+            temp_data: serializeDriveSessionData(data),
             updated_at: Date.now()
         };
         // 会话默认保留 24 小时 (86400 秒)
@@ -29,11 +31,14 @@ export class SessionManager {
         const current = await this.get(userId);
         if (!current) return;
         
-        const mergedData = { ...JSON.parse(current.temp_data || '{}'), ...newData };
+        const currentData = typeof current.temp_data === "object"
+            ? current.temp_data
+            : JSON.parse(current.temp_data || '{}');
+        const mergedData = { ...currentData, ...newData };
         const updatedSession = {
             ...current,
             current_step: step,
-            temp_data: JSON.stringify(mergedData),
+            temp_data: serializeDriveSessionData(mergedData),
             updated_at: Date.now()
         };
         

@@ -27,7 +27,7 @@ const mockConsistentCache = {
     delete: vi.fn().mockResolvedValue(true)
 };
 vi.mock('../../src/services/ConsistentCache.js', () => ({
-    ConsistentCache: mockConsistentCache
+    consistentCache: mockConsistentCache
 }));
 
 // Mock services/StateSynchronizer.js
@@ -37,7 +37,7 @@ const mockStateSynchronizer = {
     updateTaskState: vi.fn().mockResolvedValue(true)
 };
 vi.mock('../../src/services/StateSynchronizer.js', () => ({
-    StateSynchronizer: mockStateSynchronizer
+    stateSynchronizer: mockStateSynchronizer
 }));
 
 // Import after mocking
@@ -45,8 +45,7 @@ const { TaskRepository } = await import('../../src/repositories/TaskRepository.j
 const { d1 } = await import('../../src/services/d1.js');
 const { cache } = await import('../../src/services/CacheService.js');
 const { localCache } = await import('../../src/utils/LocalCache.js');
-const { ConsistentCache } = await import('../../src/services/ConsistentCache.js');
-const { StateSynchronizer } = await import('../../src/services/StateSynchronizer.js');
+const { TASK_ACTIVE_STATUSES, TASK_STATUSES } = await import('../../src/domain/task-state-machine.js');
 
 describe('TaskRepository', () => {
     beforeEach(() => {
@@ -91,7 +90,7 @@ describe('TaskRepository', () => {
             expect(result).toBe(true);
             expect(mockD1.run).toHaveBeenCalledWith(
                 expect.stringContaining('INSERT INTO tasks'),
-                ['task123', 'user456', 123456, 789, 101112, 'test.mp4', 1048576, expect.any(Number), expect.any(Number)]
+                ['task123', 'user456', 123456, 789, 101112, 'test.mp4', 1048576, TASK_STATUSES.QUEUED, expect.any(Number), expect.any(Number)]
             );
         });
 
@@ -107,7 +106,7 @@ describe('TaskRepository', () => {
             expect(result).toBe(true);
             expect(mockD1.run).toHaveBeenCalledWith(
                 expect.stringContaining('INSERT INTO tasks'),
-                ['task123', 'user456', undefined, undefined, undefined, 'unknown', 0, expect.any(Number), expect.any(Number)]
+                ['task123', 'user456', undefined, undefined, undefined, 'unknown', 0, TASK_STATUSES.QUEUED, expect.any(Number), expect.any(Number)]
             );
         });
 
@@ -144,11 +143,11 @@ describe('TaskRepository', () => {
             expect(result).toEqual(mockTasks);
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
                 expect.stringContaining('SELECT * FROM tasks'),
-                [expect.any(Number), TaskRepository.STALLED_TASKS_DEFAULT_LIMIT]
+                [...TASK_ACTIVE_STATUSES, expect.any(Number), TaskRepository.STALLED_TASKS_DEFAULT_LIMIT]
             );
         });
 
-        it('should merge tasks from D1 and Redis', async () => {
+        it('should not merge cache-only task states into stalled recovery', async () => {
             const d1Tasks = [{ id: 'task1', status: 'downloading' }];
             
             mockD1.fetchAll.mockResolvedValue(d1Tasks);
@@ -157,8 +156,8 @@ describe('TaskRepository', () => {
 
             const result = await TaskRepository.findStalledTasks(3600000);
 
-            expect(result).toHaveLength(2);
-            expect(mockCache.listKeys).toHaveBeenCalledWith('task_status:*');
+            expect(result).toEqual(d1Tasks);
+            expect(mockCache.listKeys).not.toHaveBeenCalledWith('task_status:*');
         });
 
         it('should handle Redis errors gracefully', async () => {
@@ -178,7 +177,7 @@ describe('TaskRepository', () => {
 
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
                 expect.stringContaining('SELECT * FROM tasks'),
-                [expect.any(Number), TaskRepository.STALLED_TASKS_DEFAULT_LIMIT]
+                [...TASK_ACTIVE_STATUSES, expect.any(Number), TaskRepository.STALLED_TASKS_DEFAULT_LIMIT]
             );
         });
 
@@ -188,14 +187,14 @@ describe('TaskRepository', () => {
             await TaskRepository.findStalledTasks(3600000, { maxResults: 10 });
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
                 expect.stringContaining('SELECT * FROM tasks'),
-                [expect.any(Number), TaskRepository.STALLED_TASKS_MIN_LIMIT]
+                [...TASK_ACTIVE_STATUSES, expect.any(Number), TaskRepository.STALLED_TASKS_MIN_LIMIT]
             );
 
             mockD1.fetchAll.mockClear();
             await TaskRepository.findStalledTasks(3600000, { maxResults: 5000 });
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
                 expect.stringContaining('SELECT * FROM tasks'),
-                [expect.any(Number), TaskRepository.STALLED_TASKS_MAX_LIMIT]
+                [...TASK_ACTIVE_STATUSES, expect.any(Number), TaskRepository.STALLED_TASKS_MAX_LIMIT]
             );
         });
 
@@ -249,18 +248,20 @@ describe('TaskRepository', () => {
 
     describe('claimTask', () => {
         it('should claim task successfully', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({ id: 'task123', status: 'queued' });
             mockD1.run.mockResolvedValue({ changes: 1 });
 
             const result = await TaskRepository.claimTask('task123', 'instance1');
             
             expect(result).toBe(true);
             expect(mockD1.run).toHaveBeenCalledWith(
-                "UPDATE tasks SET status = 'downloading', claimed_by = ?, updated_at = ? WHERE id = ? AND status = 'queued'",
-                ['instance1', expect.any(Number), 'task123']
+                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = ? WHERE id = ? AND status = ?",
+                ['downloading', null, expect.any(Number), 'instance1', 'task123', 'queued']
             );
         });
 
         it('should return false if task not available', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({ id: 'task123', status: 'completed' });
             mockD1.run.mockResolvedValue({ changes: 0 });
 
             const result = await TaskRepository.claimTask('task123', 'instance1');
@@ -273,6 +274,7 @@ describe('TaskRepository', () => {
         });
 
         it('should handle database errors', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({ id: 'task123', status: 'queued' });
             mockD1.run.mockRejectedValue(new Error('DB Error'));
 
             const result = await TaskRepository.claimTask('task123', 'instance1');
@@ -282,14 +284,20 @@ describe('TaskRepository', () => {
 
     describe('resetStalledTasks', () => {
         it('should reset stalled tasks successfully', async () => {
+            mockD1.fetchOne
+                .mockResolvedValueOnce({ id: 'task1', status: 'downloading' })
+                .mockResolvedValueOnce({ id: 'task2', status: 'downloaded' })
+                .mockResolvedValueOnce({ id: 'task3', status: 'uploading' });
             mockD1.run.mockResolvedValue({ changes: 3 });
 
             const result = await TaskRepository.resetStalledTasks(['task1', 'task2', 'task3']);
             
             expect(result).toBe(3);
-            expect(mockD1.run).toHaveBeenCalledWith(
-                expect.stringContaining('UPDATE tasks SET status = \'queued\', claimed_by = NULL'),
-                [expect.any(Number), 'task1', 'task2', 'task3']
+            expect(mockD1.run).toHaveBeenCalledTimes(3);
+            expect(mockD1.run).toHaveBeenNthCalledWith(
+                1,
+                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = NULL WHERE id = ? AND status = ?",
+                ['queued', null, expect.any(Number), 'task1', 'downloading']
             );
         });
 
@@ -300,7 +308,7 @@ describe('TaskRepository', () => {
         });
 
         it('should handle database errors', async () => {
-            mockD1.run.mockRejectedValue(new Error('DB Error'));
+            mockD1.fetchOne.mockRejectedValue(new Error('DB Error'));
 
             const result = await TaskRepository.resetStalledTasks(['task1']);
             expect(result).toBe(0);
@@ -339,22 +347,40 @@ describe('TaskRepository', () => {
         });
     });
 
-    describe('updateStatus', () => {
-        it('should handle critical status updates immediately', async () => {
+    describe('transitionStatus', () => {
+        it('should complete an uploading task with an atomic state check', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({ id: 'task1', status: 'uploading' });
             mockD1.run.mockResolvedValue({ changes: 1 });
 
-            await TaskRepository.updateStatus('task1', 'completed', 'All good');
+            const result = await TaskRepository.transitionStatus('task1', 'completed', 'All good', { returnResult: true });
 
+            expect(result.changed).toBe(true);
             expect(mockD1.run).toHaveBeenCalledWith(
-                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
-                ['completed', 'All good', expect.any(Number), 'task1']
+                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = NULL WHERE id = ? AND status = ?",
+                ['completed', 'All good', expect.any(Number), 'task1', 'uploading']
             );
             expect(mockCache.delete).toHaveBeenCalledWith('task_status:task1');
         });
 
-        it('should use Redis for important status updates', async () => {
+        it('should keep terminal states from being overwritten by stale work', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({ id: 'task1', status: 'completed' });
+
+            const result = await TaskRepository.transitionStatus('task1', 'downloading', null, { returnResult: true });
+
+            expect(result.blocked).toBe(true);
+            expect(mockD1.run).not.toHaveBeenCalled();
+        });
+
+        it('should write active states to D1 and sync cache as a derived view', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({ id: 'task1', status: 'queued' });
+            mockD1.run.mockResolvedValue({ changes: 1 });
+
             await TaskRepository.updateStatus('task1', 'downloading');
 
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ? AND status = ?",
+                ['downloading', null, expect.any(Number), 'task1', 'queued']
+            );
             expect(mockCache.set).toHaveBeenCalledWith(
                 'task_status:task1',
                 expect.objectContaining({ status: 'downloading' }),
@@ -362,20 +388,26 @@ describe('TaskRepository', () => {
             );
         });
 
-        it('should fallback to memory buffer on Redis failure for important status', async () => {
-            mockCache.set.mockRejectedValueOnce(new Error('Redis error'));
+        it('should allow retry from failed to queued', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({ id: 'task1', status: 'failed' });
+            mockD1.run.mockResolvedValue({ changes: 1 });
 
-            await TaskRepository.updateStatus('task1', 'downloading');
+            const result = await TaskRepository.transitionStatus('task1', 'queued', null, { returnResult: true });
 
-            expect(TaskRepository.pendingUpdates.has('task1')).toBe(true);
+            expect(result.changed).toBe(true);
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = NULL WHERE id = ? AND status = ?",
+                ['queued', null, expect.any(Number), 'task1', 'failed']
+            );
         });
 
-        it('should buffer non-important status updates', async () => {
-            await TaskRepository.updateStatus('task1', 'queued');
+        it('should not allow a stale completion event to overwrite failed', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({ id: 'task1', status: 'failed' });
 
-            expect(TaskRepository.pendingUpdates.has('task1')).toBe(true);
+            const result = await TaskRepository.transitionStatus('task1', 'completed', null, { returnResult: true });
+
+            expect(result.blocked).toBe(true);
             expect(mockD1.run).not.toHaveBeenCalled();
-            expect(mockCache.set).not.toHaveBeenCalled();
         });
     });
 
@@ -432,24 +464,14 @@ describe('TaskRepository', () => {
         it('should flush pending updates to database', async () => {
             TaskRepository.pendingUpdates.set('task1', { taskId: 'task1', status: 'queued', errorMsg: null });
             TaskRepository.pendingUpdates.set('task2', { taskId: 'task2', status: 'queued', errorMsg: null });
-            
-            mockD1.batch.mockResolvedValue([
-                { success: true },
-                { success: true }
-            ]);
+            mockD1.fetchOne
+                .mockResolvedValueOnce({ id: 'task1', status: 'failed' })
+                .mockResolvedValueOnce({ id: 'task2', status: 'failed' });
+            mockD1.run.mockResolvedValue({ changes: 1 });
 
             await TaskRepository.flushUpdates();
 
-            expect(mockD1.batch).toHaveBeenCalledWith([
-                {
-                    sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
-                    params: ['queued', null, expect.any(Number), 'task1']
-                },
-                {
-                    sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
-                    params: ['queued', null, expect.any(Number), 'task2']
-                }
-            ]);
+            expect(mockD1.run).toHaveBeenCalledTimes(2);
             expect(TaskRepository.pendingUpdates.size).toBe(0);
         });
 
@@ -463,21 +485,19 @@ describe('TaskRepository', () => {
             for (let i = 1; i <= 5; i++) {
                 TaskRepository.pendingUpdates.set(`task${i}`, { taskId: `task${i}`, status: 'queued', errorMsg: null });
             }
-            
-            mockD1.batch.mockResolvedValue(new Array(5).fill({ success: true }));
+            mockD1.fetchOne.mockResolvedValue({ id: 'task', status: 'failed' });
+            mockD1.run.mockResolvedValue({ changes: 1 });
 
             await TaskRepository.flushUpdates();
 
-            expect(mockD1.batch).toHaveBeenCalledTimes(1);
+            expect(mockD1.run).toHaveBeenCalledTimes(5);
             expect(TaskRepository.pendingUpdates.size).toBe(0); // All processed
         });
 
         it('should handle batch failures', async () => {
             TaskRepository.pendingUpdates.set('task1', { taskId: 'task1', status: 'queued', errorMsg: null });
-            
-            mockD1.batch.mockResolvedValue([
-                { success: false, error: 'Database error' }
-            ]);
+            mockD1.fetchOne.mockResolvedValue({ id: 'task1', status: 'failed' });
+            mockD1.run.mockResolvedValue({ changes: 0 });
 
             await TaskRepository.flushUpdates();
 
@@ -486,12 +506,11 @@ describe('TaskRepository', () => {
 
         it('should handle batch exceptions', async () => {
             TaskRepository.pendingUpdates.set('task1', { taskId: 'task1', status: 'queued', errorMsg: null });
-            
-            mockD1.batch.mockRejectedValue(new Error('Database connection error'));
+            mockD1.fetchOne.mockRejectedValue(new Error('Database connection error'));
 
             await TaskRepository.flushUpdates();
 
-            expect(TaskRepository.pendingUpdates.size).toBe(1); // Still in pending due to error
+            expect(TaskRepository.pendingUpdates.size).toBe(0); // Removed to avoid poison-pill loops
         });
     });
 
@@ -545,17 +564,19 @@ describe('TaskRepository', () => {
 
     describe('markCancelled', () => {
         it('should mark task as cancelled', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({ id: 'task123', status: 'queued' });
             mockD1.run.mockResolvedValue({ changes: 1 });
 
             await TaskRepository.markCancelled('task123');
             
             expect(mockD1.run).toHaveBeenCalledWith(
-                "UPDATE tasks SET status = 'cancelled' WHERE id = ?",
-                ['task123']
+                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = NULL WHERE id = ? AND status = ?",
+                ['cancelled', null, expect.any(Number), 'task123', 'queued']
             );
         });
 
         it('should handle database errors', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({ id: 'task123', status: 'queued' });
             mockD1.run.mockRejectedValue(new Error('DB Error'));
 
             await TaskRepository.markCancelled('task123');
@@ -574,7 +595,7 @@ describe('TaskRepository', () => {
             expect(result).toEqual(mockTask);
             expect(mockD1.fetchOne).toHaveBeenCalledWith(
                 expect.stringContaining('SELECT id, status FROM tasks WHERE user_id = ? AND file_name = ? AND file_size = ?'),
-                ['user123', 'file.mp4', 1024]
+                ['user123', 'file.mp4', 1024, TASK_STATUSES.COMPLETED]
             );
         });
 
@@ -660,11 +681,12 @@ describe('TaskRepository', () => {
             // Second query: active tasks with limit parameter
             expect(mockD1.fetchAll).toHaveBeenNthCalledWith(2,
                 expect.stringContaining('LIMIT ?'),
-                [15]
+                [...TASK_ACTIVE_STATUSES, 15]
             );
             // Third query: user distribution with hardcoded LIMIT 5
             expect(mockD1.fetchAll).toHaveBeenNthCalledWith(3,
-                expect.stringContaining('LIMIT 5')
+                expect.stringContaining('LIMIT 5'),
+                [...TASK_ACTIVE_STATUSES]
             );
         });
 
@@ -678,7 +700,7 @@ describe('TaskRepository', () => {
 
             expect(mockD1.fetchAll).toHaveBeenNthCalledWith(2,
                 expect.stringContaining('LIMIT ?'),
-                [10]
+                [...TASK_ACTIVE_STATUSES, 10]
             );
         });
     });

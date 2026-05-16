@@ -1,9 +1,26 @@
 import { AxiomLogger } from './AxiomLogger.js';
 import { NewrelicLogger } from './NewrelicLogger.js';
 import { ConsoleLogger } from './ConsoleLogger.js';
+import {
+    defaultLogLevelForEnv,
+    getConfiguredLogLevel,
+    LOG_LEVEL_PRIORITY,
+    LOG_LEVELS,
+    normalizeLogLevel,
+    shouldSendLogLevel
+} from './log-level.js';
 
 let getInstanceIdFunc = () => 'unknown';
 const localFallbackId = `boot_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+export {
+    defaultLogLevelForEnv,
+    getConfiguredLogLevel,
+    LOG_LEVEL_PRIORITY,
+    LOG_LEVELS,
+    normalizeLogLevel,
+    shouldSendLogLevel
+};
 
 export const setInstanceIdProvider = (provider) => {
     getInstanceIdFunc = provider;
@@ -230,6 +247,8 @@ class LoggerService {
     }
 
     async _log(level, message, data, context) {
+        if (!this.canSend(level)) return;
+
         const loggers = this._getLoggers();
         if (!loggers || loggers.length === 0) return;
 
@@ -319,7 +338,7 @@ class LoggerService {
     }
 
     canSend(level) {
-        return true;
+        return shouldSendLogLevel(level);
     }
 
     async flush(timeoutMs = 10000) {

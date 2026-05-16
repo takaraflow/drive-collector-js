@@ -5,6 +5,9 @@
 
 import fs from 'fs/promises';
 import path from 'path';
+import { logger } from '../logger/index.js';
+
+const log = logger.withModule?.('LocalBufferQueue') || logger;
 
 class LocalBufferQueue {
   constructor(options = {}) {
@@ -45,24 +48,24 @@ class LocalBufferQueue {
         if (Array.isArray(recovered)) {
           this.buffer = recovered;
           this.metrics.currentSize = recovered.length;
-          console.log(`[LocalBufferQueue] 恢复了 ${recovered.length} 条消息`);
+          log.debug(`[LocalBufferQueue] 恢复了 ${recovered.length} 条消息`);
         }
       } catch (err) {
         // 文件不存在或损坏，忽略
         if (err.code !== 'ENOENT') {
-          console.warn('[LocalBufferQueue] 恢复数据失败:', err.message);
+          log.warn('[LocalBufferQueue] 恢复数据失败:', err.message);
         }
       }
       
       // 启动自动刷新定时器
       this.flushTimer = setInterval(() => {
         this.autoFlush().catch(err => {
-          console.error('[LocalBufferQueue] 自动刷新失败:', err);
+          log.error('[LocalBufferQueue] 自动刷新失败:', err);
         });
       }, this.options.flushInterval);
       
     } catch (err) {
-      console.error('[LocalBufferQueue] 初始化失败:', err);
+      log.error('[LocalBufferQueue] 初始化失败:', err);
       throw err;
     }
   }
@@ -117,11 +120,11 @@ class LocalBufferQueue {
         'utf8'
       );
       
-      console.log(`[LocalBufferQueue] 持久化了 ${this.buffer.length} 条消息`);
+      log.debug(`[LocalBufferQueue] 持久化了 ${this.buffer.length} 条消息`);
       return true;
       
     } catch (err) {
-      console.error('[LocalBufferQueue] 持久化失败:', err);
+      log.error('[LocalBufferQueue] 持久化失败:', err);
       this.metrics.totalFailed++;
       return false;
     } finally {
@@ -163,7 +166,7 @@ class LocalBufferQueue {
     try {
       await fs.writeFile(this.options.persistencePath, '[]', 'utf8');
     } catch (err) {
-      console.warn('[LocalBufferQueue] 清空持久化文件失败:', err.message);
+      log.warn('[LocalBufferQueue] 清空持久化文件失败:', err.message);
     }
     
     return batch;
@@ -207,7 +210,7 @@ class LocalBufferQueue {
       await this.flush();
     }
     
-    console.log('[LocalBufferQueue] 队列已关闭');
+    log.debug('[LocalBufferQueue] 队列已关闭');
   }
 
   /**

@@ -2,6 +2,7 @@ import path from "path";
 import fs from "fs";
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { createHeartbeat, handleTaskCompletion, handleTaskFailure, handleUploadFailure, escapeHTML } from "./TaskManager.utils.js";
+import { TASK_EVENTS, TASK_STATUSES } from "../../domain/task-state-machine.js";
 
 // 获取模块日志记录器
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager.upload');
@@ -46,7 +47,10 @@ export async function uploadTask(task) {
 
         localPath = task.localPath;
         if (!fs.existsSync(localPath)) {
-            await TaskRepository.updateStatus(task.id, 'failed', 'Local file not found');
+            await TaskRepository.transitionStatus(task.id, TASK_EVENTS.FAIL, 'Local file not found', {
+                allowNoop: true,
+                source: 'upload_local_file_missing'
+            });
             const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
             const fileNameHtml = `<a href="${fileLink}">${escapeHTML(info.name)}</a>`;
             await updateStatus(task, format(STRINGS.task.failed_validation, { name: fileNameHtml }), true);
@@ -164,9 +168,15 @@ export async function uploadTask(task) {
                 log.error(`- Validation attempts: ${validationAttempts}`);
             }
 
-            const finalStatus = isOk ? 'completed' : 'failed';
+            const finalEvent = isOk ? TASK_EVENTS.COMPLETE : TASK_EVENTS.FAIL;
+            const finalStatus = isOk ? TASK_STATUSES.COMPLETED : TASK_STATUSES.FAILED;
             const errorMsg = isOk ? null : `Validation failed: local(${localSize}) vs remote(${finalRemote ? finalRemote.Size : 'not found'})`;
-            await TaskRepository.updateStatus(task.id, finalStatus, errorMsg);
+            const transition = await TaskRepository.transitionStatus(task.id, finalEvent, errorMsg, {
+                returnResult: true,
+                allowNoop: true,
+                source: 'upload_validation'
+            });
+            if (transition.blocked) return;
 
             if (task.isGroup) {
                 await this._refreshGroupMonitor(task, finalStatus, 0, 0, errorMsg);

@@ -1,6 +1,8 @@
 import { BaseLogger } from './BaseLogger.js';
 import { serializeError, serializeToString, limitFields } from '../../utils/serializer.js';
 import { getBeijingISOString } from '../../utils/timeUtils.js';
+import { shouldSendLogLevel } from './log-level.js';
+import { trace } from '@opentelemetry/api';
 
 let getInstanceIdFunc = () => 'unknown';
 
@@ -117,8 +119,9 @@ class NewrelicLogger extends BaseLogger {
                 }
                 throw new Error(`New Relic API error: ${response.status}`);
             } else {
-                // 确认发送成功
-                console.log(`✨ [NewrelicLogger] 📦 Log batch sent! Count: ${batch.length} | Status: ${response.status}`);
+                if (shouldSendLogLevel('debug')) {
+                    console.debug(`✨ [NewrelicLogger] 📦 Log batch sent! Count: ${batch.length} | Status: ${response.status}`);
+                }
             }
         } catch (error) {
             process.stderr.write(`❌ [NewrelicLogger] Log batch failed\n`);
@@ -135,6 +138,7 @@ class NewrelicLogger extends BaseLogger {
         }
 
         const messageStr = message instanceof Error ? message.message : String(message);
+        const activeSpanContext = trace.getActiveSpan()?.spanContext?.();
 
         const payload = {
             // 移除 timestamp，使用 New Relic 服务器接收时间
@@ -149,6 +153,11 @@ class NewrelicLogger extends BaseLogger {
                 details: serializeToString(finalData)
             }
         };
+
+        if (activeSpanContext?.traceId && activeSpanContext?.spanId) {
+            payload['trace.id'] = activeSpanContext.traceId;
+            payload['span.id'] = activeSpanContext.spanId;
+        }
 
         if (finalData instanceof Error || (finalData && finalData.error instanceof Error)) {
             const errObj = finalData instanceof Error ? finalData : finalData.error;

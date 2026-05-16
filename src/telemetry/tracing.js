@@ -1,9 +1,9 @@
 /**
  * OpenTelemetry Early Bootstrap Module
  *
- * MUST be loaded via `--import` BEFORE the application entry point
- * so that instrumentation hooks are registered before any instrumented
- * modules (http, ioredis, undici/fetch) are imported.
+ * MUST be loaded before the application entry point so that instrumentation
+ * hooks are registered before any instrumented modules (http, ioredis,
+ * undici/fetch) are imported.
  *
  * Activation: set NEW_RELIC_LICENSE_KEY env var.
  * If not set, this module is a no-op with zero overhead — OTel packages
@@ -15,8 +15,12 @@
  *   - shutdownOTel: function to gracefully shut down the SDK
  */
 
+import { hydrateEarlyRuntimeEnv } from '../bootstrap/runtime-env.js';
+
 /** @type {import('@opentelemetry/sdk-node').NodeSDK | null} */
 let sdk = null;
+
+await hydrateEarlyRuntimeEnv({ requiredKeys: ['NEW_RELIC_LICENSE_KEY'] });
 
 /**
  * Gracefully shut down the OTel SDK, flushing pending spans and metrics.
@@ -49,7 +53,7 @@ if (!LICENSE_KEY) {
         { OTLPMetricExporter },
         { PeriodicExportingMetricReader },
         { BatchSpanProcessor },
-        { Resource },
+        { resourceFromAttributes },
         { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION },
         { HttpInstrumentation },
         { IORedisInstrumentation },
@@ -86,6 +90,20 @@ if (!LICENSE_KEY) {
 
     const SERVICE_NAME = process.env.NEW_RELIC_APP_NAME || 'drive-collector';
     const SERVICE_VERSION = process.env.APP_VERSION || 'unknown';
+    const DEPLOYMENT_ENV = process.env.NODE_ENV || 'unknown';
+    const INSTANCE_ID = process.env.INSTANCE_ID || process.env.HOSTNAME || 'unknown';
+
+    process.env.OTEL_SERVICE_NAME ||= SERVICE_NAME;
+    process.env.OTEL_TRACES_SAMPLER ||= 'parentbased_traceidratio';
+    process.env.OTEL_TRACES_SAMPLER_ARG ||= '0.1';
+    process.env.OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE ||= 'delta';
+    process.env.OTEL_RESOURCE_ATTRIBUTES = [
+        process.env.OTEL_RESOURCE_ATTRIBUTES,
+        `service.name=${SERVICE_NAME}`,
+        `service.version=${SERVICE_VERSION}`,
+        `deployment.environment=${DEPLOYMENT_ENV}`,
+        `service.instance.id=${INSTANCE_ID}`,
+    ].filter(Boolean).join(',');
 
     const traceExporter = new OTLPTraceExporter({
         url: `${OTLP_BASE}/v1/traces`,
@@ -102,9 +120,11 @@ if (!LICENSE_KEY) {
     });
 
     sdk = new NodeSDK({
-        resource: new Resource({
+        resource: resourceFromAttributes({
             [ATTR_SERVICE_NAME]: SERVICE_NAME,
             [ATTR_SERVICE_VERSION]: SERVICE_VERSION,
+            'deployment.environment': DEPLOYMENT_ENV,
+            'service.instance.id': INSTANCE_ID,
         }),
         // BatchSpanProcessor with constrained queue for 256MB containers
         spanProcessor: new BatchSpanProcessor(traceExporter, {

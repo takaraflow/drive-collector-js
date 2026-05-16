@@ -2,11 +2,12 @@ import { getConfig } from "../config/index.js";
 import { logger } from "./logger/index.js";
 import { CloudTool } from "./rclone.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
-import { updateStatus, escapeHTML, sanitizeHeaders } from "../utils/common.js";
+import { escapeHTML } from "../utils/common.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
 import { TelegramBotApi } from "../utils/telegramBotApi.js";
 import { CacheService } from "./CacheService.js";
 import { resolveInstanceBaseUrl } from "../utils/instanceUrl.js";
+import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
 
 const log = logger.withModule('StreamTransferService');
 const getStreamConfig = () => getConfig().streamForwarding;
@@ -254,7 +255,7 @@ class StreamTransferService {
             msgId: metadata.msgId,
             sourceMsgId: metadata.sourceMsgId,
             uploadedBytes: cachedProgress?.uploadedBytes || 0,
-            status: 'uploading',
+            status: TASK_STATUSES.UPLOADING,
             lastChunkIndex: cachedProgress?.lastChunkIndex || -1, // 记录最近处理的 Chunk Index
             resumeMode: !!cachedProgress
         };
@@ -358,8 +359,12 @@ class StreamTransferService {
 
         const { status, error } = reqBody;
         
-        if (status === 'completed' || status === 'failed') {
-            await TaskRepository.updateStatus(taskId, status, error);
+        if (status === TASK_STATUSES.COMPLETED || status === TASK_STATUSES.FAILED) {
+            const event = status === TASK_STATUSES.COMPLETED ? TASK_EVENTS.COMPLETE : TASK_EVENTS.FAIL;
+            await TaskRepository.transitionStatus(taskId, event, error, {
+                allowNoop: true,
+                source: 'stream_status_update'
+            });
         }
 
         return { success: true, statusCode: 200 };
@@ -432,7 +437,12 @@ class StreamTransferService {
      */
     async finishTask(taskId, context) {
         log.info(`✅ 任务上传完成: ${taskId}`);
-        await TaskRepository.updateStatus(taskId, 'completed');
+        const transition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.COMPLETE, null, {
+            returnResult: true,
+            allowNoop: true,
+            source: 'stream_finish_task'
+        });
+        if (transition.blocked) return;
         
         try {
             const { STRINGS, format } = await import("../locales/zh-CN.js");
@@ -451,13 +461,18 @@ class StreamTransferService {
         }
 
         if (context.leaderUrl) {
-            await this.reportProgressToLeader(taskId, { ...context, status: 'completed' });
+            await this.reportProgressToLeader(taskId, { ...context, status: TASK_STATUSES.COMPLETED });
         }
     }
 
     async reportError(taskId, context, errorMsg) {
         log.error(`❌ 任务上传失败: ${taskId} - ${errorMsg}`);
-        await TaskRepository.updateStatus(taskId, 'failed', errorMsg);
+        const transition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, errorMsg, {
+            returnResult: true,
+            allowNoop: true,
+            source: 'stream_report_error'
+        });
+        if (transition.blocked) return;
         
         try {
             const text = `❌ 上传失败: ${errorMsg}`;
@@ -472,7 +487,7 @@ class StreamTransferService {
         }
 
         if (context.leaderUrl) {
-            await this.reportProgressToLeader(taskId, { ...context, status: 'failed', error: errorMsg });
+            await this.reportProgressToLeader(taskId, { ...context, status: TASK_STATUSES.FAILED, error: errorMsg });
         }
     }
 

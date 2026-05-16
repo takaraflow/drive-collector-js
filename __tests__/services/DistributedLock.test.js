@@ -58,7 +58,7 @@ describe('DistributedLock - core behaviors', () => {
         const result = await lock.acquire(taskId, instanceId, { ttlSeconds: 'not-a-number' });
 
         expect(result.success).toBe(true);
-        expect(mockLogger.info).toHaveBeenCalledWith(
+        expect(mockLogger.debug).toHaveBeenCalledWith(
             expect.stringContaining(`Lock acquired for task ${taskId}`),
             expect.objectContaining({
                 expiresAt: expect.stringMatching(/Z$/)

@@ -88,7 +88,7 @@ export default class CloudQueueBase extends BaseQueue {
         const batch = [...this.buffer];
         this.buffer = [];
 
-        console.log(`${loggerPrefix} Flushing batch: ${batch.length} tasks`);
+        log.debug(`${loggerPrefix} Flushing batch: ${batch.length} tasks`);
 
         try {
             const results = await batchPublishFn(batch);

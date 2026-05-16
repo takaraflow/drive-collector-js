@@ -2,6 +2,7 @@ import { logger } from "./logger/index.js";
 import { cache } from "./CacheService.js";
 import { DistributedLock } from "./DistributedLock.js";
 import { TaskManager } from "../processor/TaskManager.js";
+import { getRuntimeInstanceId, isRuntimeTestEnv } from "../config/runtime.js";
 
 const log = logger.withModule("MediaGroupBuffer");
 
@@ -61,13 +62,13 @@ export class MediaGroupBuffer {
             maxBatchSize: options.maxBatchSize || 10,
             cleanupInterval: options.cleanupInterval || 30000,
             staleThreshold: options.staleThreshold || 60000,
-            instanceId: options.instanceId || process.env.INSTANCE_ID || "default",
+            instanceId: options.instanceId || getRuntimeInstanceId() || "default",
             persistKeyPrefix: options.persistKeyPrefix || "media_group_buffer",
             lockTtl: options.lockTtl || 30,
             maxMessageIds: options.maxMessageIds || 1000,
             messageIdsMaxAge: options.messageIdsMaxAge || 3600000,
-            useLocalTimers: options.useLocalTimers ?? process.env.NODE_ENV !== "test",
-            remoteFlushEnabled: options.remoteFlushEnabled ?? process.env.NODE_ENV !== "test",
+            useLocalTimers: options.useLocalTimers ?? !isRuntimeTestEnv(),
+            remoteFlushEnabled: options.remoteFlushEnabled ?? !isRuntimeTestEnv(),
             ...options
         };
 

@@ -73,12 +73,14 @@ vi.mock('../../src/services/telegram.js', () => ({
 
 // Create mock functions for DriveRepository
 const mockFindByUserId = vi.fn();
+const mockGetDefaultDrive = vi.fn();
 const mockFindById = vi.fn().mockResolvedValue({ id: 'drive1', type: 'mega', remote_folder: null });
 const mockUpdateRemoteFolder = vi.fn();
 
 vi.mock('../../src/repositories/DriveRepository.js', () => ({
     DriveRepository: {
         findByUserId: mockFindByUserId,
+        getDefaultDrive: mockGetDefaultDrive,
         findById: mockFindById,
         updateRemoteFolder: mockUpdateRemoteFolder
     }
@@ -157,6 +159,7 @@ describe('Remote Folder Integration Tests', () => {
         
         SettingsRepository.get.mockResolvedValue('public');
         DriveRepository.findByUserId.mockResolvedValue([{ id: 'drive1', type: 'mega', remote_folder: null }]);
+        DriveRepository.getDefaultDrive.mockResolvedValue({ id: 'drive1', type: 'mega', remote_folder: null });
     });
 
     describe('/remote_folder command', () => {
@@ -180,6 +183,7 @@ describe('Remote Folder Integration Tests', () => {
 
         it('should show error if no drive bound', async () => {
             mockFindByUserId.mockResolvedValue(null);
+            mockGetDefaultDrive.mockResolvedValue(null);
             const event = {
                 className: 'UpdateNewMessage',
                 message: {
