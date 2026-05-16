@@ -148,29 +148,6 @@ function logConfigurationUpdate(changes, affectedServices) {
     console.log(separator);
 }
 
-/**
- * 显示服务重新初始化的醒目日志
- */
-function logServiceReinitialization(serviceName, success, error = null) {
-    const icons = {
-        cache: '💾',
-        telegram: '📱', 
-        queue: '📬',
-        logger: '📝',
-        oss: '☁️',
-        d1: '🗄️',
-        instanceCoordinator: '🏗️'
-    };
-    
-    const icon = icons[serviceName] || '⚙️';
-    
-    if (success) {
-        console.log(`✨ ${icon} ${serviceName} 服务重新初始化成功！`);
-    } else {
-        console.log(`❌ ${icon} ${serviceName} 服务重新初始化失败: ${error?.message || '未知错误'}`);
-    }
-}
-
 
 
 /**
