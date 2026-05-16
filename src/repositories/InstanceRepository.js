@@ -53,8 +53,12 @@ export class InstanceRepository {
             const keys = await cache.listKeys(this.PREFIX);
             const instances = [];
 
+            // Fetch with bounded cardinality to prevent unbounded fan-out over cache keys
+            const maxCardinality = 500;
+            const boundedKeys = keys.slice(0, maxCardinality);
+
             const results = await Promise.all(
-                keys.map(key => cache.get(key, "json", { cacheTtl: 30000 }))
+                boundedKeys.map(key => cache.get(key, "json", { cacheTtl: 30000 }))
             );
 
             for (const data of results) {
