@@ -14,7 +14,8 @@ vi.mock('../../src/services/InstanceCoordinator.js', () => ({
 
 vi.mock('../../src/repositories/TaskRepository.js', () => ({
   TaskRepository: {
-    updateStatus: vi.fn()
+    updateStatus: vi.fn(),
+    transitionStatus: vi.fn().mockResolvedValue({ changed: true, blocked: false })
   }
 }));
 
@@ -75,6 +76,7 @@ describe('TaskManager error handling', () => {
     CloudTool.listRemoteFiles.mockResolvedValue([]);
     // 模拟文件删除成功
     fs.promises.unlink.mockResolvedValue();
+    TaskRepository.transitionStatus.mockResolvedValue({ changed: true, blocked: false, toStatus: 'failed' });
   });
 
   afterEach(() => {
@@ -106,10 +108,11 @@ describe('TaskManager error handling', () => {
     await TaskManager.uploadTask(task);
 
     // 验证任务状态被更新为失败
-    expect(TaskRepository.updateStatus).toHaveBeenCalledWith(
+    expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
       'test-task-1',
-      'failed',
-      'Upload failed: Network error'
+      'fail',
+      'Upload failed: Network error',
+      expect.objectContaining({ source: 'handleTaskFailure' })
     );
   });
 
@@ -134,10 +137,11 @@ describe('TaskManager error handling', () => {
     await TaskManager.uploadTask(task);
 
     // 验证任务状态被更新为失败
-    expect(TaskRepository.updateStatus).toHaveBeenCalledWith(
+    expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
       'test-task-2',
-      'failed',
-      'Local file not found'
+      'fail',
+      'Local file not found',
+      expect.objectContaining({ source: 'upload_local_file_missing' })
     );
   });
 
@@ -162,10 +166,11 @@ describe('TaskManager error handling', () => {
     await TaskManager.uploadTask(task);
 
     // 验证任务状态被更新为取消
-    expect(TaskRepository.updateStatus).toHaveBeenCalledWith(
+    expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
       'test-task-3',
-      'cancelled',
-      'CANCELLED'
+      'cancel',
+      'CANCELLED',
+      expect.objectContaining({ source: 'handleTaskFailure' })
     );
   });
 
@@ -190,10 +195,11 @@ describe('TaskManager error handling', () => {
     await TaskManager.uploadTask(task);
 
     // 验证任务状态被更新为失败
-    expect(TaskRepository.updateStatus).toHaveBeenCalledWith(
+    expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
       'test-task-4',
-      'failed',
-      'Upload failed'
+      'fail',
+      'Upload failed',
+      expect.objectContaining({ source: 'handleUploadFailure' })
     );
   });
 
@@ -224,10 +230,11 @@ describe('TaskManager error handling', () => {
     await uploadPromise;
 
     // 验证任务状态被更新为失败
-    expect(TaskRepository.updateStatus).toHaveBeenCalledWith(
+    expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
       'test-task-5',
-      'failed',
-      expect.stringContaining('Validation failed')
+      'fail',
+      expect.stringContaining('Validation failed'),
+      expect.objectContaining({ source: 'upload_validation' })
     );
   });
 });

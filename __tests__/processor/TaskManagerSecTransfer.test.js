@@ -40,6 +40,7 @@ vi.mock("../../src/services/rclone.js", () => ({
 
 const mockTaskRepository = {
     updateStatus: vi.fn(),
+    transitionStatus: vi.fn().mockResolvedValue({ changed: true, blocked: false }),
     findByMsgId: vi.fn().mockResolvedValue([]),
     create: vi.fn(),
     findCompletedByFile: vi.fn(),
@@ -133,6 +134,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         vi.clearAllMocks();
         TaskManager.activeProcessors.clear();
         TaskManager.waitingTasks = [];
+        mockTaskRepository.transitionStatus.mockResolvedValue({ changed: true, blocked: false });
 
         task = {
             id: "task_1",
@@ -153,7 +155,12 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
 
         // Assertions
         expect(mockCloudTool.getRemoteFileInfo).toHaveBeenCalledWith("test_file.mp4", "user_1", 1, true);
-        expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "completed");
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "complete",
+            null,
+            expect.objectContaining({ source: "handleTaskCompletion" })
+        );
         expect(mockClient.downloadMedia).not.toHaveBeenCalled(); // Skipped download
         // Should NOT enqueue upload task
         expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
@@ -173,7 +180,12 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         expect(mockClient.downloadMedia).not.toHaveBeenCalled(); // Skipped download
 
         // Should update status to 'downloaded'
-        expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "downloaded");
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "finish_download",
+            null,
+            expect.objectContaining({ source: "local_file_ready" })
+        );
 
         // Should enqueue upload task via QStash
         expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith("task_1", expect.objectContaining({
@@ -199,7 +211,12 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         expect(mockClient.downloadMedia).toHaveBeenCalled(); // Performed download
 
         // Should update status to 'downloaded'
-        expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "downloaded");
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "finish_download",
+            null,
+            expect.objectContaining({ source: "download_complete" })
+        );
 
         // Should enqueue upload task via QStash
         expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith("task_1", expect.objectContaining({
@@ -217,7 +234,12 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
 
         await TaskManager.downloadTask(task);
 
-        expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_1", "completed");
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "complete",
+            null,
+            expect.objectContaining({ source: "handleTaskCompletion" })
+        );
         expect(mockClient.downloadMedia).not.toHaveBeenCalled();
     });
 
@@ -276,7 +298,12 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
 
         await TaskManager.downloadTask(smallTask);
 
-        expect(mockTaskRepository.updateStatus).toHaveBeenCalledWith("task_small", "completed");
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_small",
+            "complete",
+            null,
+            expect.objectContaining({ source: "handleTaskCompletion" })
+        );
     });
 
     test("Scenario 8: Edge Case - Small File Mismatch", async () => {

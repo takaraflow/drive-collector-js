@@ -511,18 +511,19 @@ describe('分布式系统集成测试', () => {
 
       expect(syncResults).toHaveLength(3);
 
-      // 2. 使用 BatchProcessor 批量写入 D1
-      const d1Operations = tasks.map(task => ({
-        sql: 'UPDATE tasks SET status = ? WHERE id = ?',
-        params: [task.status, task.id]
-      }));
+      // 2. 使用仓储状态机作为 D1 状态写入入口
+      const transitionSpy = vi.spyOn(TaskRepository, 'transitionStatus')
+        .mockResolvedValue({ changed: true, blocked: false });
 
-      const mockD1Batch = vi.spyOn(TaskRepository, 'createBatch');
-      mockD1Batch.mockResolvedValue(true);
-
-      const d1Results = await batchProcessor.processBatch('d1-batch', d1Operations);
+      const d1Results = await Promise.all(
+        tasks.map(task => TaskRepository.transitionStatus(task.id, task.status, null, {
+          returnResult: true,
+          source: 'distributed_sync_test'
+        }))
+      );
       expect(d1Results).toHaveLength(3);
-      expect(d1Results.every(r => r.success)).toBe(true);
+      expect(d1Results.every(r => r.changed)).toBe(true);
+      expect(transitionSpy).toHaveBeenCalledTimes(3);
 
       // 3. 验证一致性缓存
       const cacheChecks = await Promise.all(

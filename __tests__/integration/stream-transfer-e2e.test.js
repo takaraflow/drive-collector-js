@@ -39,7 +39,8 @@ vi.mock('../../src/services/CacheService.js', () => {
 
 vi.mock('../../src/repositories/TaskRepository.js', () => ({
   TaskRepository: {
-    updateStatus: vi.fn().mockResolvedValue(true)
+    updateStatus: vi.fn().mockResolvedValue(true),
+    transitionStatus: vi.fn().mockResolvedValue({ changed: true, blocked: false })
   }
 }))
 

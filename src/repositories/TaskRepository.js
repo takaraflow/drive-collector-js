@@ -1,9 +1,16 @@
 import { d1 } from "../services/d1.js";
 import { cache } from "../services/CacheService.js";
 import { logger } from "../services/logger/index.js";
-import { ConsistentCache } from "../services/ConsistentCache.js";
-import { StateSynchronizer } from "../services/StateSynchronizer.js";
+import { consistentCache as taskConsistentCache } from "../services/ConsistentCache.js";
+import { stateSynchronizer as taskStateSynchronizer } from "../services/StateSynchronizer.js";
 import { BatchProcessor } from "../services/BatchProcessor.js";
+import {
+    TASK_ACTIVE_STATUSES,
+    TASK_EVENTS,
+    TASK_STATUSES,
+    TASK_TERMINAL_STATUSES,
+    TaskStateMachine
+} from "../domain/task-state-machine.js";
 
 const log = logger.withModule ? logger.withModule('TaskRepository') : logger;
 
@@ -22,11 +29,57 @@ export class TaskRepository {
     static STALLED_TASKS_MAX_LIMIT = 1000;
     static MAX_PENDING_UPDATES = 1000; // Max size limit for pendingUpdates Map
     
-    // 重要的中间状态（需要 Redis 中转，避免实例崩溃时丢失）
-    static IMPORTANT_STATUSES = ['downloading', 'uploading'];
+    // 状态分类来自领域状态机；D1 是权威状态源，缓存只保留派生视图。
+    static IMPORTANT_STATUSES = [TASK_STATUSES.DOWNLOADING, TASK_STATUSES.UPLOADING];
+    static ACTIVE_STATUS_SQL = TASK_ACTIVE_STATUSES.map(() => '?').join(',');
     static ACTIVE_TASK_PREFIXES = ['task_status:', 'consistent:task:'];
     static INSTANCE_PREFIX = 'instance:';
     static INSTANCE_STALE_MS = 2 * 60 * 1000;
+
+    static _getChanges(result) {
+        if (!result) return 0;
+        if (Number.isFinite(result.changes)) return result.changes;
+        if (Number.isFinite(result.meta?.changes)) return result.meta.changes;
+        return result.success === true ? 1 : 0;
+    }
+
+    static _placeholders(values) {
+        return values.map(() => '?').join(',');
+    }
+
+    static async _getCurrentStatus(taskId) {
+        const row = await d1.fetchOne("SELECT id, status FROM tasks WHERE id = ?", [taskId]);
+        return row?.status || null;
+    }
+
+    static async _syncDerivedTaskState(taskId, status, errorMsg = null) {
+        const payload = { status, errorMsg, updatedAt: Date.now() };
+        const operations = [
+            cache.delete(`task:${taskId}:details`)
+        ];
+
+        if (TASK_TERMINAL_STATUSES.includes(status)) {
+            operations.push(
+                cache.delete(`task_status:${taskId}`),
+                taskConsistentCache?.delete?.(`task:${taskId}`),
+                taskStateSynchronizer?.clearTaskState?.(taskId)
+            );
+        } else {
+            operations.push(
+                cache.set(`task_status:${taskId}`, payload, 300),
+                taskConsistentCache?.set?.(`task:${taskId}`, payload, { ttl: 300 }),
+                taskStateSynchronizer?.updateTaskState?.(taskId, payload)
+            );
+        }
+
+        const results = await Promise.allSettled(operations.filter(Boolean));
+        const failures = results.filter(result => result.status === 'rejected');
+        if (failures.length > 0) {
+            log.warn(`TaskRepository derived state sync partially failed for ${taskId}`, {
+                failures: failures.map(result => result.reason?.message || String(result.reason))
+            });
+        }
+    }
 
     /**
      * 启动定时刷新任务
@@ -84,30 +137,24 @@ export class TaskRepository {
         // 限制每次只处理前 50 条 (流量控制)
         const updatesToFlush = allUpdates.slice(0, 50);
 
-        const now = Date.now();
-        const statements = updatesToFlush.map(u => ({
-            sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
-            params: [u.status, u.errorMsg, now, u.taskId]
-        }));
-
         try {
-            // 使用新版 batch，返回结果数组
-            const results = await d1.batch(statements);
+            const results = await Promise.allSettled(
+                updatesToFlush.map(update =>
+                    this.transitionStatus(update.taskId, update.event || update.status, update.errorMsg, {
+                        allowNoop: true,
+                        source: update.source || 'memory_buffer_flush'
+                    })
+                )
+            );
 
-            // 遍历结果，只清除已处理的任务
-            results.forEach((res, index) => {
+            results.forEach((result, index) => {
                 const update = updatesToFlush[index];
-
-                if (!res.success) {
-                    log.error(`Task flush failed for ${update.taskId}:`, res.error);
+                if (result.status === 'rejected') {
+                    log.error(`Task flush failed for ${update.taskId}:`, result.reason);
                 }
 
-                // 无论成功还是失败，都从队列中移除，防止毒丸(poison pill)效应导致无限循环
-                // 注意：需检查引用是否一致，防止清除期间产生的新更新被误删
                 const current = this.pendingUpdates.get(update.taskId);
-                if (current === update) {
-                    this.pendingUpdates.delete(update.taskId);
-                }
+                if (current === update) this.pendingUpdates.delete(update.taskId);
             });
 
             // 如果还有剩余任务，立即安排下一次刷新，而不是等待 10s
@@ -116,7 +163,6 @@ export class TaskRepository {
             }
 
         } catch (error) {
-            // 如果 batch 本身抛出异常（极少见，因为我们用了 Promise.allSettled）
             log.error("TaskRepository.flushUpdates critical error:", error);
         }
     }
@@ -243,7 +289,7 @@ export class TaskRepository {
         try {
             await d1.run(`
                 INSERT INTO tasks (id, user_id, chat_id, msg_id, source_msg_id, file_name, file_size, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
                 taskData.id,
                 taskData.userId,
@@ -252,6 +298,7 @@ export class TaskRepository {
                 taskData.sourceMsgId,
                 taskData.fileName || 'unknown',
                 taskData.fileSize || 0,
+                TASK_STATUSES.QUEUED,
                 Date.now(),
                 Date.now()
             ]);
@@ -272,40 +319,14 @@ export class TaskRepository {
         const limit = Math.min(this.STALLED_TASKS_MAX_LIMIT, Math.max(this.STALLED_TASKS_MIN_LIMIT, requestedLimit));
 
         try {
-            // 1. 从 D1 获取僵尸任务
-            const d1Tasks = await d1.fetchAll(
+            return await d1.fetchAll(
                 `SELECT * FROM tasks
-                WHERE status IN ('queued', 'downloading', 'downloaded', 'uploading')
+                WHERE status IN (${this.ACTIVE_STATUS_SQL})
                 AND (updated_at IS NULL OR updated_at < ?)
                 ORDER BY created_at ASC
                 LIMIT ?`,
-                [deadLine, limit]
+                [...TASK_ACTIVE_STATUSES, deadLine, limit]
             );
-            
-            // 2. 从 Redis 获取重要的中间状态任务
-            const redisTasks = [];
-            try {
-                const keys = await cache.listKeys('task_status:*');
-                for (const key of keys) {
-                    const data = await cache.get(key, 'json');
-                    if (data && data.updatedAt && data.updatedAt < deadLine) {
-                        redisTasks.push({
-                            id: key.replace('task_status:', ''),
-                            status: data.status,
-                            updated_at: data.updatedAt,
-                            source: 'redis'
-                        });
-                    }
-                }
-            } catch (e) {
-                log.warn('TaskRepository.findStalledTasks Redis check failed:', e.message);
-            }
-            
-            // 合并结果（去重）
-            const d1TaskIds = new Set(d1Tasks.map(t => t.id));
-            const uniqueRedisTasks = redisTasks.filter(t => !d1TaskIds.has(t.id));
-            
-            return [...d1Tasks, ...uniqueRedisTasks];
         } catch (e) {
             log.error("TaskRepository.findStalledTasks error:", e);
             return [];
@@ -324,11 +345,14 @@ export class TaskRepository {
         }
 
         try {
-            const result = await d1.run(
-                "UPDATE tasks SET status = 'downloading', claimed_by = ?, updated_at = ? WHERE id = ? AND status = 'queued'",
-                [instanceId, Date.now(), taskId]
-            );
-            return result.changes > 0; // 如果更新了行，则认领成功
+            const result = await this.transitionStatus(taskId, TASK_EVENTS.START_DOWNLOAD, null, {
+                claimedBy: instanceId,
+                returnResult: true,
+                allowNoop: true,
+                source: 'claimTask'
+            });
+
+            return result.changed || result.idempotent;
         } catch (e) {
             log.error(`TaskRepository.claimTask failed for ${taskId}:`, e);
             return false;
@@ -344,12 +368,23 @@ export class TaskRepository {
         if (!taskIds || taskIds.length === 0) return 0;
 
         try {
-            const placeholders = taskIds.map(() => '?').join(',');
-            const result = await d1.run(
-                `UPDATE tasks SET status = 'queued', claimed_by = NULL, updated_at = ? WHERE id IN (${placeholders}) AND status IN ('downloading', 'uploading')`,
-                [Date.now(), ...taskIds]
+            const results = await Promise.allSettled(
+                taskIds.map(taskId => this.transitionStatus(taskId, TASK_EVENTS.RESET_STALLED, null, {
+                    returnResult: true,
+                    allowNoop: true,
+                    source: 'resetStalledTasks'
+                }))
             );
-            return result.changes;
+
+            return results.reduce((count, result, index) => {
+                if (result.status !== 'fulfilled') {
+                    log.warn(`TaskRepository.resetStalledTasks failed for ${taskIds[index]}`, {
+                        error: result.reason?.message || String(result.reason)
+                    });
+                    return count;
+                }
+                return count + (result.value?.changed ? 1 : 0);
+            }, 0);
         } catch (e) {
             log.error("TaskRepository.resetStalledTasks failed:", e);
             return 0;
@@ -390,77 +425,113 @@ export class TaskRepository {
         }
     }
 
+    static _buildTransitionSql(targetStatus, options = {}) {
+        const assignments = ["status = ?", "error_msg = ?", "updated_at = ?"];
+        const params = [targetStatus, options.errorMsg ?? null, options.now];
+
+        if (Object.prototype.hasOwnProperty.call(options, 'claimedBy') && options.claimedBy !== undefined) {
+            assignments.push("claimed_by = ?");
+            params.push(options.claimedBy);
+        } else if (targetStatus === TASK_STATUSES.QUEUED || TASK_TERMINAL_STATUSES.includes(targetStatus)) {
+            assignments.push("claimed_by = NULL");
+        }
+
+        return { assignments, params };
+    }
+
+    static _transitionResult(result, options = {}) {
+        if (options.strict && result.blocked) {
+            throw new Error(result.reason || "Task transition blocked");
+        }
+        return options.returnResult ? result : result.changed;
+    }
+
     /**
-     * 更新任务状态（内存缓冲版 + Redis 中转）
-     * Critical: completed/failed/cancelled → 立即写入 D1
-     * Important: downloading/uploading → Redis 中转（实时可见）
-     * Minor: 其他 → 内存缓冲
+     * Canonical task state transition.
+     * D1 is the authoritative state source; Redis/consistent caches are derived views.
      */
-    static async updateStatus(taskId, status, errorMsg = null) {
-        const isCritical = ['completed', 'failed', 'cancelled'].includes(status);
-        const isImportant = this.IMPORTANT_STATUSES.includes(status);
-        
-        // 清除任务详情缓存
-        try {
-            await cache.delete(`task:${taskId}:details`);
-        } catch (e) {
-            // 忽略缓存删除错误
+    static async transitionStatus(taskId, eventOrStatus, errorMsg = null, options = {}) {
+        if (!taskId) {
+            throw new Error("TaskRepository.transitionStatus: Missing taskId.");
         }
-        
-        // Critical: 立即写入 D1，从缓冲和 Redis 中清除
-        if (isCritical) {
-            this.pendingUpdates.delete(taskId);
-            try {
-                await d1.run(
-                    "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
-                    [status, errorMsg, Date.now(), taskId]
-                );
-            } catch (e) {
-                log.error(`TaskRepository.updateStatus (critical) failed for ${taskId}:`, e);
-            }
-            // 也从 Redis 中清除
-            try {
-                await cache.delete(`task_status:${taskId}`);
-            } catch (e) {
-                // Ignore Redis errors
-            }
-            return;
+
+        const event = TaskStateMachine.getTransition(eventOrStatus)
+            ? eventOrStatus
+            : TaskStateMachine.getEventForTargetStatus(eventOrStatus);
+        const targetStatus = TaskStateMachine.targetStatusForEvent(event);
+        const currentStatus = await this._getCurrentStatus(taskId);
+
+        if (!currentStatus) {
+            return this._transitionResult({
+                changed: false,
+                blocked: true,
+                reason: "Task not found",
+                taskId,
+                event,
+                toStatus: targetStatus
+            }, options);
         }
-        
-        // Important: 使用 Redis 中转（实时可见 + 持久化）
-        if (isImportant) {
-            try {
-                await cache.set(
-                    `task_status:${taskId}`,
-                    { status, errorMsg, updatedAt: Date.now() },
-                    300  // 5分钟过期
-                );
-            } catch (e) {
-                log.warn(`TaskRepository Redis update failed for ${taskId}:`, e.message);
-                // Fallback to memory buffer
-                this.pendingUpdates.set(taskId, {
-                    taskId,
-                    status,
-                    errorMsg,
-                    timestamp: Date.now(),
-                    updatedAt: Date.now(),
-                    source: 'redis_fallback'
-                });
-                this.startFlushing();
-            }
-            return;
+
+        const resolution = TaskStateMachine.resolveTransition(currentStatus, event);
+        if (!resolution.allowed) {
+            log.warn("Blocked invalid task transition", { taskId, ...resolution });
+            return this._transitionResult({
+                changed: false,
+                blocked: true,
+                taskId,
+                ...resolution
+            }, options);
         }
-        
-        // Minor: 继续缓冲
-        this.pendingUpdates.set(taskId, {
-            taskId,
-            status,
+
+        const now = Date.now();
+        const { assignments, params } = this._buildTransitionSql(targetStatus, {
+            now,
             errorMsg,
-            timestamp: Date.now(),
-            updatedAt: Date.now(),
-            source: 'memory_buffer'
+            claimedBy: options.claimedBy
         });
-        this.startFlushing();
+
+        const result = await d1.run(
+            `UPDATE tasks SET ${assignments.join(', ')} WHERE id = ? AND status = ?`,
+            [...params, taskId, currentStatus]
+        );
+
+        const changed = this._getChanges(result) > 0;
+        if (!changed) {
+            const latestStatus = await this._getCurrentStatus(taskId);
+            const racedToTarget = latestStatus === targetStatus;
+            return this._transitionResult({
+                changed: false,
+                blocked: !racedToTarget,
+                conflict: !racedToTarget,
+                taskId,
+                event,
+                fromStatus: currentStatus,
+                latestStatus,
+                toStatus: targetStatus,
+                idempotent: racedToTarget,
+                reason: racedToTarget ? null : `Task status changed concurrently from ${currentStatus} to ${latestStatus}`
+            }, options);
+        }
+
+        this.pendingUpdates.delete(taskId);
+        await this._syncDerivedTaskState(taskId, targetStatus, errorMsg);
+
+        return this._transitionResult({
+            changed: true,
+            blocked: false,
+            taskId,
+            event,
+            fromStatus: currentStatus,
+            toStatus: targetStatus,
+            idempotent: resolution.idempotent
+        }, options);
+    }
+
+    /**
+     * Backward-compatible facade. New code should prefer transitionStatus(event).
+     */
+    static async updateStatus(taskId, status, errorMsg = null, options = {}) {
+        return this.transitionStatus(taskId, status, errorMsg, options);
     }
 
     /**
@@ -468,7 +539,10 @@ export class TaskRepository {
      */
     static async markCancelled(taskId) {
         try {
-            await d1.run("UPDATE tasks SET status = 'cancelled' WHERE id = ?", [taskId]);
+            await this.transitionStatus(taskId, TASK_EVENTS.CANCEL, null, {
+                allowNoop: true,
+                source: 'markCancelled'
+            });
         } catch (e) {
             log.error(`TaskRepository.markCancelled failed for ${taskId}:`, e);
         }
@@ -555,8 +629,8 @@ export class TaskRepository {
         if (!userId) return [];
         try {
             return await d1.fetchAll(
-                "SELECT id, file_name, file_size, status FROM tasks WHERE user_id = ? AND status = 'completed' ORDER BY created_at DESC",
-                [userId]
+                "SELECT id, file_name, file_size, status FROM tasks WHERE user_id = ? AND status = ? ORDER BY created_at DESC",
+                [userId, TASK_STATUSES.COMPLETED]
             );
         } catch (e) {
             log.error(`TaskRepository.findAllCompletedByUser error for ${userId}:`, e);
@@ -583,8 +657,8 @@ export class TaskRepository {
         
         try {
             const task = await d1.fetchOne(
-                "SELECT id, status FROM tasks WHERE user_id = ? AND file_name = ? AND file_size = ? AND status = 'completed' ORDER BY created_at DESC LIMIT 1",
-                [userId, fileName, fileSize]
+                "SELECT id, status FROM tasks WHERE user_id = ? AND file_name = ? AND file_size = ? AND status = ? ORDER BY created_at DESC LIMIT 1",
+                [userId, fileName, fileSize, TASK_STATUSES.COMPLETED]
             );
             
             // 缓存已完成文件任务，过期时间 10 分钟
@@ -611,7 +685,7 @@ export class TaskRepository {
         const statements = tasksData.map(taskData => ({
             sql: `
                 INSERT INTO tasks (id, user_id, chat_id, msg_id, source_msg_id, file_name, file_size, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
             params: [
                 taskData.id,
@@ -621,6 +695,7 @@ export class TaskRepository {
                 taskData.sourceMsgId,
                 taskData.fileName || 'unknown',
                 taskData.fileSize || 0,
+                TASK_STATUSES.QUEUED,
                 now,
                 now
             ]
@@ -640,63 +715,7 @@ export class TaskRepository {
      * 确保多实例间状态同步，避免重复处理
      */
     static async updateStatusWithConsistency(taskId, status, errorMsg = null) {
-        const isCritical = ['completed', 'failed', 'cancelled'].includes(status);
-        const isImportant = this.IMPORTANT_STATUSES.includes(status);
-        
-        // Critical: 立即写入 D1 + 清除缓存
-        if (isCritical) {
-            this.pendingUpdates.delete(taskId);
-            try {
-                await d1.run(
-                    "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
-                    [status, errorMsg, Date.now(), taskId]
-                );
-            } catch (e) {
-                log.error(`TaskRepository.updateStatusWithConsistency (critical) failed for ${taskId}:`, e);
-            }
-            // 清除 ConsistentCache
-            try {
-                await ConsistentCache.delete(`task:${taskId}`);
-            } catch (e) {
-                // Ignore
-            }
-            return;
-        }
-        
-        // Important: 使用 ConsistentCache（带 TTL）
-        if (isImportant) {
-            try {
-                await ConsistentCache.set(
-                    `task:${taskId}`,
-                    { status, errorMsg, updatedAt: Date.now() },
-                    300  // 5分钟过期
-                );
-            } catch (e) {
-                log.warn(`TaskRepository ConsistentCache update failed for ${taskId}:`, e.message);
-                // Fallback to memory buffer
-                this.pendingUpdates.set(taskId, {
-                    taskId,
-                    status,
-                    errorMsg,
-                    timestamp: Date.now(),
-                    updatedAt: Date.now(),
-                    source: 'consistent_fallback'
-                });
-                this.startFlushing();
-            }
-            return;
-        }
-        
-        // Minor: 继续缓冲
-        this.pendingUpdates.set(taskId, {
-            taskId,
-            status,
-            errorMsg,
-            timestamp: Date.now(),
-            updatedAt: Date.now(),
-            source: 'memory_buffer'
-        });
-        this.startFlushing();
+        return this.transitionStatus(taskId, status, errorMsg, { source: 'updateStatusWithConsistency' });
     }
 
     /**
@@ -704,63 +723,7 @@ export class TaskRepository {
      * 确保状态变更的原子性和一致性
      */
     static async updateStatusSynchronized(taskId, status, errorMsg = null) {
-        const isCritical = ['completed', 'failed', 'cancelled'].includes(status);
-        const isImportant = this.IMPORTANT_STATUSES.includes(status);
-        
-        // Critical: 立即写入 D1
-        if (isCritical) {
-            this.pendingUpdates.delete(taskId);
-            try {
-                await d1.run(
-                    "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
-                    [status, errorMsg, Date.now(), taskId]
-                );
-            } catch (e) {
-                log.error(`TaskRepository.updateStatusSynchronized (critical) failed for ${taskId}:`, e);
-            }
-            // 清除同步状态
-            try {
-                await StateSynchronizer.clearTaskState(taskId);
-            } catch (e) {
-                // Ignore
-            }
-            return;
-        }
-        
-        // Important: 使用 StateSynchronizer
-        if (isImportant) {
-            try {
-                await StateSynchronizer.updateTaskState(taskId, {
-                    status,
-                    errorMsg,
-                    updatedAt: Date.now()
-                });
-            } catch (e) {
-                log.warn(`TaskRepository StateSynchronizer update failed for ${taskId}:`, e.message);
-                // Fallback to memory buffer
-                this.pendingUpdates.set(taskId, {
-                    taskId,
-                    status,
-                    errorMsg,
-                    timestamp: Date.now(),
-                    updatedAt: Date.now(),
-                    source: 'synchronizer_fallback'
-                });
-                this.startFlushing();
-            }
-            return;
-        }
-        
-        // Minor: 继续缓冲
-        this.pendingUpdates.set(taskId, {
-            taskId,
-            status,
-            errorMsg,
-            timestamp: Date.now(),
-            updatedAt: Date.now(),
-            source: 'memory_buffer'
-        });
-        this.startFlushing();
+        return this.transitionStatus(taskId, status, errorMsg, { source: 'updateStatusSynchronized' });
     }
 
     /**
@@ -769,78 +732,12 @@ export class TaskRepository {
      */
     static async updateStatusBatch(updates) {
         if (!updates || updates.length === 0) return;
-
-        // 分类处理
-        const criticalUpdates = updates.filter(u => ['completed', 'failed', 'cancelled'].includes(u.status));
-        const importantUpdates = updates.filter(u => this.IMPORTANT_STATUSES.includes(u.status));
-        const minorUpdates = updates.filter(u => !criticalUpdates.includes(u) && !importantUpdates.includes(u));
-
-        // Critical: 立即写入 D1
-        if (criticalUpdates.length > 0) {
-            const statements = criticalUpdates.map(u => ({
-                sql: "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?",
-                params: [u.status, u.errorMsg, Date.now(), u.taskId]
-            }));
-
-            try {
-                await d1.batch(statements);
-                // 清除缓存
-                for (const u of criticalUpdates) {
-                    this.pendingUpdates.delete(u.taskId);
-                    try {
-                        await ConsistentCache.delete(`task:${u.taskId}`);
-                        await StateSynchronizer.clearTaskState(u.taskId);
-                    } catch (e) {
-                        // Ignore
-                    }
-                }
-            } catch (e) {
-                log.error("TaskRepository.updateStatusBatch critical updates failed:", e);
-            }
-        }
-
-        // Important: 使用 BatchProcessor + ConsistentCache
-        if (importantUpdates.length > 0) {
-            try {
-                // 使用 BatchProcessor 进行批量操作
-                const batchOps = importantUpdates.map(u => ({
-                    type: 'set',
-                    key: `task:${u.taskId}`,
-                    value: { status: u.status, errorMsg: u.errorMsg, updatedAt: Date.now() },
-                    ttl: 300
-                }));
-                await BatchProcessor.processBatch('consistent-cache', batchOps);
-            } catch (e) {
-                log.warn(`TaskRepository updateStatusBatch important updates failed:`, e.message);
-                // Fallback to memory buffer
-                for (const u of importantUpdates) {
-                    this.pendingUpdates.set(u.taskId, {
-                        taskId: u.taskId,
-                        status: u.status,
-                        errorMsg: u.errorMsg,
-                        timestamp: Date.now(),
-                        updatedAt: Date.now(),
-                        source: 'batch_fallback'
-                    });
-                }
-                this.startFlushing();
-            }
-        }
-
-        // Minor: 使用 BatchProcessor 内存缓冲
-        if (minorUpdates.length > 0) {
-            for (const u of minorUpdates) {
-                this.pendingUpdates.set(u.taskId, {
-                    taskId: u.taskId,
-                    status: u.status,
-                    errorMsg: u.errorMsg,
-                    timestamp: Date.now(),
-                    updatedAt: Date.now(),
-                    source: 'batch_memory'
-                });
-            }
-            this.startFlushing();
-        }
+        await Promise.all(updates.map(u =>
+            this.transitionStatus(u.taskId, u.event || u.status, u.errorMsg, {
+                source: 'updateStatusBatch',
+                allowNoop: true
+            })
+        ));
     }
 
     /**
@@ -849,7 +746,7 @@ export class TaskRepository {
      */
     static async getTaskStatusFromCache(taskId) {
         try {
-            return await ConsistentCache.get(`task:${taskId}`);
+            return await taskConsistentCache?.get?.(`task:${taskId}`);
         } catch (e) {
             log.warn(`TaskRepository getTaskStatusFromCache failed for ${taskId}:`, e.message);
             return null;
@@ -862,7 +759,7 @@ export class TaskRepository {
      */
     static async getTaskStatusSynchronized(taskId) {
         try {
-            return await StateSynchronizer.getTaskState(taskId);
+            return await taskStateSynchronizer?.getTaskState?.(taskId);
         } catch (e) {
             log.warn(`TaskRepository getTaskStatusSynchronized failed for ${taskId}:`, e.message);
             return null;
@@ -967,8 +864,8 @@ export class TaskRepository {
     static async cleanupTaskCache(taskId) {
         try {
             await Promise.allSettled([
-                ConsistentCache.delete(`task:${taskId}`),
-                StateSynchronizer.clearTaskState(taskId),
+                taskConsistentCache?.delete?.(`task:${taskId}`),
+                taskStateSynchronizer?.clearTaskState?.(taskId),
                 cache.delete(`task_status:${taskId}`),
                 cache.delete(`task:${taskId}:details`)
             ]);
@@ -990,7 +887,7 @@ export class TaskRepository {
             await BatchProcessor.processBatch('consistent-cache', cacheOps);
 
             // 批量清理 StateSynchronizer
-            await Promise.allSettled(taskIds.map(id => StateSynchronizer.clearTaskState(id)));
+            await Promise.allSettled(taskIds.map(id => taskStateSynchronizer?.clearTaskState?.(id)));
 
             // 批量清理 Redis
             const redisKeys = taskIds.map(id => `task_status:${id}`);
@@ -1012,11 +909,12 @@ export class TaskRepository {
         const [statusCounts, activeTasks, userCounts] = await Promise.all([
             d1.fetchAll("SELECT status, COUNT(*) as count FROM tasks GROUP BY status"),
             d1.fetchAll(
-                "SELECT id, user_id, file_name, file_size, status, created_at, updated_at FROM tasks WHERE status IN ('queued','downloading','uploading') ORDER BY updated_at DESC LIMIT ?",
-                [limit]
+                `SELECT id, user_id, file_name, file_size, status, created_at, updated_at FROM tasks WHERE status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`,
+                [...TASK_ACTIVE_STATUSES, limit]
             ),
             d1.fetchAll(
-                "SELECT user_id, COUNT(*) as count FROM tasks WHERE status IN ('queued','downloading','uploading') GROUP BY user_id ORDER BY count DESC LIMIT 5"
+                `SELECT user_id, COUNT(*) as count FROM tasks WHERE status IN (${this.ACTIVE_STATUS_SQL}) GROUP BY user_id ORDER BY count DESC LIMIT 5`,
+                [...TASK_ACTIVE_STATUSES]
             )
         ]);
 
