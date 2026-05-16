@@ -10,7 +10,6 @@
  * 4. Recovery: Monitors failed providers and attempts to reconnect.
  */
 
-import { getConfig } from "../config/index.js";
 import { localCache } from "../utils/LocalCache.js";
 import { logger } from "./logger/index.js";
 import { parseCacheConfig } from "../utils/configParser.js";
