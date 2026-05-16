@@ -161,21 +161,35 @@ export default class CloudQueueBase extends BaseQueue {
      * @returns {Promise<Array>} - 执行结果
      */
     async _executeBatch(tasks, concurrency = 5, singleTaskFn, loggerPrefix = '[CloudQueue]') {
-        const results = [];
+        // ⚡ Bolt Optimization: Pre-allocate results array and use native async worker pool
+        // This avoids N+1 closure allocations from array.map when processing large batches
+        const len = tasks.length;
+        const results = new Array(len);
         
-        for (let i = 0; i < tasks.length; i += concurrency) {
-            const batch = tasks.slice(i, i + concurrency);
-            const batchResults = await Promise.allSettled(
-                batch.map(async (task) => {
-                    return this._executeWithRetry(async () => {
-                        return await singleTaskFn(task);
-                    }, 3, loggerPrefix);
-                })
-            );
-            results.push(...batchResults);
+        for (let i = 0; i < len; i += concurrency) {
+            const chunkLimit = Math.min(i + concurrency, len);
+            let currentIndex = i;
+
+            const worker = async () => {
+                while (currentIndex < chunkLimit) {
+                    const index = currentIndex++;
+                    const task = tasks[index];
+                    try {
+                        const value = await this._executeWithRetry(async () => {
+                            return await singleTaskFn(task);
+                        }, 3, loggerPrefix);
+                        results[index] = { status: 'fulfilled', value };
+                    } catch (reason) {
+                        results[index] = { status: 'rejected', reason };
+                    }
+                }
+            };
+
+            const poolSize = chunkLimit - i;
+            await Promise.all(Array.from({ length: poolSize }, worker));
             
             // 批次间添加小延迟，避免突发流量
-            if (i + concurrency < tasks.length) {
+            if (i + concurrency < len) {
                 await new Promise(resolve => setTimeout(resolve, 10));
             }
         }
