@@ -4,8 +4,13 @@ import { checkMemoryPressure, startMemoryMonitor, stopMemoryMonitor } from '../.
 describe('MemoryMonitor', () => {
     let warnSpy;
     let memoryUsageSpy;
+    let originalNodeOptions;
+    let originalGc;
 
     beforeEach(() => {
+        originalNodeOptions = process.env.NODE_OPTIONS;
+        originalGc = global.gc;
+
         warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         memoryUsageSpy = vi.spyOn(process, 'memoryUsage').mockReturnValue({
             heapUsed: 100 * 1024 * 1024,
@@ -18,9 +23,20 @@ describe('MemoryMonitor', () => {
     });
 
     afterEach(() => {
-        vi.restoreAllMocks();
         stopMemoryMonitor();
-        delete process.env.NODE_OPTIONS;
+        vi.restoreAllMocks();
+
+        if (originalNodeOptions === undefined) {
+            delete process.env.NODE_OPTIONS;
+        } else {
+            process.env.NODE_OPTIONS = originalNodeOptions;
+        }
+
+        if (originalGc === undefined) {
+            delete global.gc;
+        } else {
+            global.gc = originalGc;
+        }
     });
 
     describe('checkMemoryPressure', () => {
@@ -39,15 +55,12 @@ describe('MemoryMonitor', () => {
 
         it('should warn and suggest --expose-gc when critical without global.gc', () => {
             memoryUsageSpy.mockReturnValueOnce({ heapUsed: 190 * 1024 * 1024 }); // 95%
-            const originalGc = global.gc;
             delete global.gc;
 
             checkMemoryPressure();
 
             expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('🚨 Memory critical'));
             expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Add --expose-gc'));
-
-            global.gc = originalGc;
         });
 
         it('should call global.gc and warn when critical with global.gc available', () => {
@@ -64,8 +77,6 @@ describe('MemoryMonitor', () => {
             expect(mockGc).toHaveBeenCalled();
             expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('🚨 内存紧急'));
             expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('GC后 100.0MB'));
-
-            delete global.gc;
         });
     });
 
