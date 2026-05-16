@@ -216,7 +216,13 @@ class NewrelicLogger extends BaseLogger {
             await this._sendBatch(batch);
         } catch (error) {
             // 打印错误信息，避免静默失败
-            console.error('[NewrelicLogger] Failed to send log batch');
+            let sanitizedError = error;
+            if (error && error.message && this.licenseKey) {
+                const sanitizedMessage = error.message.split(this.licenseKey).join('***');
+                sanitizedError = new Error(sanitizedMessage);
+                sanitizedError.stack = error.stack ? error.stack.split(this.licenseKey).join('***') : undefined;
+            }
+            console.error('[NewrelicLogger] Failed to send log batch', { error: sanitizedError });
             console.error('[NewrelicLogger] Region:', this.region);
             console.error('[NewrelicLogger] Endpoint:', this._getLogUrl());
             console.error('[NewrelicLogger] Batch size:', batch.length);

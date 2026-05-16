@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { trace } from '@opentelemetry/api';
+import util from 'util';
 import { NewrelicLogger } from '../../src/services/logger/NewrelicLogger.js';
 
 describe('NewrelicLogger Security Vulnerability Reproduction', () => {
@@ -47,7 +48,7 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
         }
 
         // Check if console.error was called with the license key
-        const consoleErrorCalls = console.error.mock.calls.map(call => call.join(' '));
+        const consoleErrorCalls = console.error.mock.calls.map(call => util.format(...call));
         const licenseKeyLogged = consoleErrorCalls.some(msg => msg.includes(licenseKey.substring(0, 10)));
 
         // This expectation will fail before the fix
@@ -68,7 +69,7 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
             // ignore
         }
 
-        const consoleErrorCalls = console.error.mock.calls.map(call => call.join(' '));
+        const consoleErrorCalls = console.error.mock.calls.map(call => util.format(...call));
         const sensitiveInfoLogged = consoleErrorCalls.some(msg => msg.includes(licenseKey));
 
         expect(sensitiveInfoLogged).toBe(false);
@@ -85,7 +86,7 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
             // ignore
         }
 
-        const stderrCalls = process.stderr.write.mock.calls.map(call => call[0]);
+        const stderrCalls = process.stderr.write.mock.calls.map(call => util.format(...call));
         const sensitiveInfoLogged = stderrCalls.some(msg => msg.includes(licenseKey));
 
         expect(sensitiveInfoLogged).toBe(false);
