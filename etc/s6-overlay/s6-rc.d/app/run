@@ -5,12 +5,9 @@ echo "[s6-app] === RUN SCRIPT EXECUTED ==="
 MAX_HEAP="${MAX_HEAP:-512}"
 NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=${MAX_HEAP} --max-semi-space-size=16 --expose-gc"
 
-# --import 必须在业务模块加载前执行，以拦截 http/ioredis/undici 模块。
-# bootstrap 会轻量读取运行时配置；没有 NEW_RELIC_LICENSE_KEY 时保持 no-op。
-NODE_OPTIONS="$NODE_OPTIONS --import=${APP_DIR:-/app}/src/telemetry/tracing.js"
 OTEL_TRACES_SAMPLER="${OTEL_TRACES_SAMPLER:-parentbased_traceidratio}"
 OTEL_TRACES_SAMPLER_ARG="${OTEL_TRACES_SAMPLER_ARG:-0.1}"
 OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE="${OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE:-delta}"
 export OTEL_TRACES_SAMPLER OTEL_TRACES_SAMPLER_ARG OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
 
-NODE_MODE=all exec node index.js
+NODE_MODE=all exec node src/bootstrap/start.js

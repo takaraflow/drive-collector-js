@@ -74,4 +74,17 @@ describe("SSOT architecture boundaries", () => {
         expect(read("package.json")).toContain('"db:migrate"');
         expect(read("package.json")).toContain('"db:check"');
     });
+
+    test("runtime entrypoints should converge on telemetry-aware bootstrap", () => {
+        const packageJson = JSON.parse(read("package.json"));
+        const manifest = JSON.parse(read("manifest.json"));
+
+        expect(read("src/bootstrap/start.js")).toContain("telemetry/tracing.js");
+        expect(manifest.entrypoint).toBe("src/bootstrap/start.js");
+        expect(packageJson.scripts.start).toContain("node src/bootstrap/start.js");
+        expect(packageJson.scripts["start:prod"]).toContain("node src/bootstrap/start.js");
+        expect(packageJson.scripts["dev:debug"]).toContain("src/bootstrap/start.js");
+        expect(read("entrypoint.sh")).toContain("node src/bootstrap/start.js");
+        expect(read("etc/s6-overlay/s6-rc.d/app/run")).toContain("node src/bootstrap/start.js");
+    });
 });

@@ -367,7 +367,7 @@
       "failoverStrategy": "immediate-reacquire-on-timeout"
     }
   },
-  "entrypoint": "index.js",
+  "entrypoint": "src/bootstrap/start.js",
   "runtime": {
     "type": "nodejs",
     "version": "nodejs20"

@@ -1,9 +1,9 @@
 /**
  * OpenTelemetry Early Bootstrap Module
  *
- * MUST be loaded via `--import` BEFORE the application entry point
- * so that instrumentation hooks are registered before any instrumented
- * modules (http, ioredis, undici/fetch) are imported.
+ * MUST be loaded before the application entry point so that instrumentation
+ * hooks are registered before any instrumented modules (http, ioredis,
+ * undici/fetch) are imported.
  *
  * Activation: set NEW_RELIC_LICENSE_KEY env var.
  * If not set, this module is a no-op with zero overhead — OTel packages
@@ -15,85 +15,12 @@
  *   - shutdownOTel: function to gracefully shut down the SDK
  */
 
-import fs from 'fs';
-import { InfisicalSDK } from '@infisical/sdk';
-import { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } from '../utils/envMapper.js';
+import { hydrateEarlyRuntimeEnv } from '../bootstrap/runtime-env.js';
 
 /** @type {import('@opentelemetry/sdk-node').NodeSDK | null} */
 let sdk = null;
 
-function sanitizeValue(value) {
-    if (typeof value !== 'string') return value;
-    const trimmed = value.trim();
-    const markdownLink = trimmed.match(/^\[.*\]\((.+)\)$/);
-    return markdownLink?.[1] || trimmed.replace(/^['"]|['"]$/g, '');
-}
-
-function parseDotenvLine(line) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) return null;
-    const separatorIndex = trimmed.indexOf('=');
-    if (separatorIndex <= 0) return null;
-    const key = trimmed.slice(0, separatorIndex).trim();
-    const value = trimmed.slice(separatorIndex + 1);
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return null;
-    return [key, sanitizeValue(value)];
-}
-
-function loadLocalRuntimeEnv() {
-    const nodeEnv = normalizeNodeEnv(process.env.NODE_ENV);
-    process.env.NODE_ENV = nodeEnv;
-    const envFile = nodeEnv === 'dev' ? '.env' : `.env.${nodeEnv}`;
-    if (!fs.existsSync(envFile)) return;
-
-    const lines = fs.readFileSync(envFile, 'utf8').split(/\r?\n/);
-    for (const line of lines) {
-        const parsed = parseDotenvLine(line);
-        if (!parsed) continue;
-        const [key, value] = parsed;
-        if (process.env[key] === undefined) {
-            process.env[key] = value;
-        }
-    }
-}
-
-async function loadInfisicalRuntimeEnv() {
-    if (process.env.SKIP_INFISICAL_RUNTIME === 'true' || process.env.NODE_ENV === 'test') return;
-    if (process.env.NEW_RELIC_LICENSE_KEY) return;
-
-    const token = process.env.INFISICAL_TOKEN;
-    const clientId = process.env.INFISICAL_CLIENT_ID;
-    const clientSecret = process.env.INFISICAL_CLIENT_SECRET;
-    const projectId = process.env.INFISICAL_PROJECT_ID;
-    if ((!token && (!clientId || !clientSecret)) || !projectId) return;
-
-    try {
-        const infisical = new InfisicalSDK({ siteUrl: process.env.INFISICAL_SITE_URL || 'https://app.infisical.com' });
-        if (token) {
-            infisical.auth().accessToken(token);
-        } else {
-            await infisical.auth().universalAuth.login({ clientId, clientSecret });
-        }
-
-        const response = await infisical.secrets().listSecrets({
-            environment: mapNodeEnvToInfisicalEnv(process.env.NODE_ENV || 'dev'),
-            projectId,
-            secretPath: process.env.INFISICAL_SECRET_PATH || '/',
-            includeImports: true
-        });
-
-        for (const secret of response?.secrets || []) {
-            if (process.env[secret.secretKey] === undefined) {
-                process.env[secret.secretKey] = sanitizeValue(secret.secretValue);
-            }
-        }
-    } catch (error) {
-        console.warn(`[OTel] Infisical runtime env load skipped: ${error?.message || error}`);
-    }
-}
-
-loadLocalRuntimeEnv();
-await loadInfisicalRuntimeEnv();
+await hydrateEarlyRuntimeEnv({ requiredKeys: ['NEW_RELIC_LICENSE_KEY'] });
 
 /**
  * Gracefully shut down the OTel SDK, flushing pending spans and metrics.
