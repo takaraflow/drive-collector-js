@@ -15,8 +15,85 @@
  *   - shutdownOTel: function to gracefully shut down the SDK
  */
 
+import fs from 'fs';
+import { InfisicalSDK } from '@infisical/sdk';
+import { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } from '../utils/envMapper.js';
+
 /** @type {import('@opentelemetry/sdk-node').NodeSDK | null} */
 let sdk = null;
+
+function sanitizeValue(value) {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    const markdownLink = trimmed.match(/^\[.*\]\((.+)\)$/);
+    return markdownLink?.[1] || trimmed.replace(/^['"]|['"]$/g, '');
+}
+
+function parseDotenvLine(line) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return null;
+    const separatorIndex = trimmed.indexOf('=');
+    if (separatorIndex <= 0) return null;
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const value = trimmed.slice(separatorIndex + 1);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return null;
+    return [key, sanitizeValue(value)];
+}
+
+function loadLocalRuntimeEnv() {
+    const nodeEnv = normalizeNodeEnv(process.env.NODE_ENV);
+    process.env.NODE_ENV = nodeEnv;
+    const envFile = nodeEnv === 'dev' ? '.env' : `.env.${nodeEnv}`;
+    if (!fs.existsSync(envFile)) return;
+
+    const lines = fs.readFileSync(envFile, 'utf8').split(/\r?\n/);
+    for (const line of lines) {
+        const parsed = parseDotenvLine(line);
+        if (!parsed) continue;
+        const [key, value] = parsed;
+        if (process.env[key] === undefined) {
+            process.env[key] = value;
+        }
+    }
+}
+
+async function loadInfisicalRuntimeEnv() {
+    if (process.env.SKIP_INFISICAL_RUNTIME === 'true' || process.env.NODE_ENV === 'test') return;
+    if (process.env.NEW_RELIC_LICENSE_KEY) return;
+
+    const token = process.env.INFISICAL_TOKEN;
+    const clientId = process.env.INFISICAL_CLIENT_ID;
+    const clientSecret = process.env.INFISICAL_CLIENT_SECRET;
+    const projectId = process.env.INFISICAL_PROJECT_ID;
+    if ((!token && (!clientId || !clientSecret)) || !projectId) return;
+
+    try {
+        const infisical = new InfisicalSDK({ siteUrl: process.env.INFISICAL_SITE_URL || 'https://app.infisical.com' });
+        if (token) {
+            infisical.auth().accessToken(token);
+        } else {
+            await infisical.auth().universalAuth.login({ clientId, clientSecret });
+        }
+
+        const response = await infisical.secrets().listSecrets({
+            environment: mapNodeEnvToInfisicalEnv(process.env.NODE_ENV || 'dev'),
+            projectId,
+            secretPath: process.env.INFISICAL_SECRET_PATH || '/',
+            includeImports: true
+        });
+
+        for (const secret of response?.secrets || []) {
+            if (process.env[secret.secretKey] === undefined) {
+                process.env[secret.secretKey] = sanitizeValue(secret.secretValue);
+            }
+        }
+    } catch (error) {
+        console.warn(`[OTel] Infisical runtime env load skipped: ${error?.message || error}`);
+    }
+}
+
+loadLocalRuntimeEnv();
+await loadInfisicalRuntimeEnv();
 
 /**
  * Gracefully shut down the OTel SDK, flushing pending spans and metrics.
@@ -49,7 +126,7 @@ if (!LICENSE_KEY) {
         { OTLPMetricExporter },
         { PeriodicExportingMetricReader },
         { BatchSpanProcessor },
-        { Resource },
+        { resourceFromAttributes },
         { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION },
         { HttpInstrumentation },
         { IORedisInstrumentation },
@@ -86,6 +163,20 @@ if (!LICENSE_KEY) {
 
     const SERVICE_NAME = process.env.NEW_RELIC_APP_NAME || 'drive-collector';
     const SERVICE_VERSION = process.env.APP_VERSION || 'unknown';
+    const DEPLOYMENT_ENV = process.env.NODE_ENV || 'unknown';
+    const INSTANCE_ID = process.env.INSTANCE_ID || process.env.HOSTNAME || 'unknown';
+
+    process.env.OTEL_SERVICE_NAME ||= SERVICE_NAME;
+    process.env.OTEL_TRACES_SAMPLER ||= 'parentbased_traceidratio';
+    process.env.OTEL_TRACES_SAMPLER_ARG ||= '0.1';
+    process.env.OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE ||= 'delta';
+    process.env.OTEL_RESOURCE_ATTRIBUTES = [
+        process.env.OTEL_RESOURCE_ATTRIBUTES,
+        `service.name=${SERVICE_NAME}`,
+        `service.version=${SERVICE_VERSION}`,
+        `deployment.environment=${DEPLOYMENT_ENV}`,
+        `service.instance.id=${INSTANCE_ID}`,
+    ].filter(Boolean).join(',');
 
     const traceExporter = new OTLPTraceExporter({
         url: `${OTLP_BASE}/v1/traces`,
@@ -102,9 +193,11 @@ if (!LICENSE_KEY) {
     });
 
     sdk = new NodeSDK({
-        resource: new Resource({
+        resource: resourceFromAttributes({
             [ATTR_SERVICE_NAME]: SERVICE_NAME,
             [ATTR_SERVICE_VERSION]: SERVICE_VERSION,
+            'deployment.environment': DEPLOYMENT_ENV,
+            'service.instance.id': INSTANCE_ID,
         }),
         // BatchSpanProcessor with constrained queue for 256MB containers
         spanProcessor: new BatchSpanProcessor(traceExporter, {

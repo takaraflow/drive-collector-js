@@ -37,14 +37,12 @@ echo "[entrypoint] Starting Node.js application (fallback)..."
 MAX_HEAP="${MAX_HEAP:-512}"
 NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=${MAX_HEAP} --max-semi-space-size=16 --expose-gc"
 
-# 条件加载 OpenTelemetry SDK（仅在配置了 New Relic License Key 时）
-# 默认采样率 10%，避免 256MB 容器在高负载下 span 队列溢出及 NR ingest 成本过高
-if [ -n "${NEW_RELIC_LICENSE_KEY:-}" ]; then
-  NODE_OPTIONS="$NODE_OPTIONS --import=${APP_DIR:-/app}/src/telemetry/tracing.js"
-  OTEL_TRACES_SAMPLER="${OTEL_TRACES_SAMPLER:-parentbased_traceidratio}"
-  OTEL_TRACES_SAMPLER_ARG="${OTEL_TRACES_SAMPLER_ARG:-0.1}"
-  export OTEL_TRACES_SAMPLER OTEL_TRACES_SAMPLER_ARG
-fi
+# 始终早期加载 OpenTelemetry bootstrap。bootstrap 会轻量读取运行时配置；
+# 没有 NEW_RELIC_LICENSE_KEY 时保持 no-op，避免 Infisical/.env 在应用启动后才加载导致 OTel 永远不启用。
+NODE_OPTIONS="$NODE_OPTIONS --import=${APP_DIR:-/app}/src/telemetry/tracing.js"
+OTEL_TRACES_SAMPLER="${OTEL_TRACES_SAMPLER:-parentbased_traceidratio}"
+OTEL_TRACES_SAMPLER_ARG="${OTEL_TRACES_SAMPLER_ARG:-0.1}"
+OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE="${OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE:-delta}"
+export OTEL_TRACES_SAMPLER OTEL_TRACES_SAMPLER_ARG OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
 
 exec node index.js
-

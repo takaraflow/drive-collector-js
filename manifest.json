@@ -1045,6 +1045,33 @@
         "required": false,
         "description": "OTel trace sampler argument (0.0-1.0). Default: 0.1 (10% sampling, set by shell scripts to reduce NR ingest cost in 256MB containers)",
         "default": "0.1"
+      },
+      "OTEL_SERVICE_NAME": {
+        "type": "string",
+        "required": false,
+        "description": "OTel service.name override. Defaults to NEW_RELIC_APP_NAME or drive-collector."
+      },
+      "OTEL_RESOURCE_ATTRIBUTES": {
+        "type": "string",
+        "required": false,
+        "description": "Additional OpenTelemetry resource attributes."
+      },
+      "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE": {
+        "type": "string",
+        "required": false,
+        "enum": [
+          "delta",
+          "cumulative",
+          "lowmemory"
+        ],
+        "default": "delta",
+        "description": "OTLP metrics temporality preference. New Relic recommends delta for reduced memory and ingest pressure."
+      },
+      "INFISICAL_SITE_URL": {
+        "type": "string",
+        "required": false,
+        "default": "https://app.infisical.com",
+        "description": "Infisical API base URL used by early OTel bootstrap and runtime config loading."
       }
     }
   },

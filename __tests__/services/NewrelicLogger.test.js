@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { trace } from '@opentelemetry/api';
 import { NewrelicLogger } from '../../src/services/logger/NewrelicLogger.js';
 
 describe('NewrelicLogger Security Vulnerability Reproduction', () => {
@@ -80,5 +81,19 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
         const sensitiveInfoLogged = stderrCalls.some(msg => msg.includes(licenseKey));
 
         expect(sensitiveInfoLogged).toBe(false);
+    });
+
+    it('should include active OpenTelemetry trace correlation fields', async () => {
+        vi.spyOn(trace, 'getActiveSpan').mockReturnValue({
+            spanContext: () => ({
+                traceId: '1234567890abcdef1234567890abcdef',
+                spanId: '1234567890abcdef'
+            })
+        });
+
+        const payload = logger._buildPayload('info', 'correlated message', {}, {}, 'instance-1');
+
+        expect(payload['trace.id']).toBe('1234567890abcdef1234567890abcdef');
+        expect(payload['span.id']).toBe('1234567890abcdef');
     });
 });
