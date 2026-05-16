@@ -141,13 +141,21 @@ export class DriveRepository {
             
             if (drives && drives.length > 0) {
                 const now = Date.now();
-                for (const drive of drives) {
-                    await d1.run(
-                        "UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id = ?",
-                        [DRIVE_STATUSES.DELETED, now, drive.id]
-                    );
-                    await cache.delete(this.getDriveIdKey(drive.id));
-                }
+                const driveIds = drives.map(drive => drive.id);
+
+                // Batch update D1 status using IN clause to avoid N+1 queries
+                const placeholders = driveIds.map(() => '?').join(', ');
+                await d1.run(
+                    `UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id IN (${placeholders})`,
+                    [DRIVE_STATUSES.DELETED, now, ...driveIds]
+                );
+
+                // Batch delete cache keys
+                const cacheOps = driveIds.map(id => ({
+                    type: 'delete',
+                    key: this.getDriveIdKey(id)
+                }));
+                await cache.batchOperation(cacheOps);
                 await this._updateActiveDrivesList();
             }
 

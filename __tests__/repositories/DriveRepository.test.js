@@ -237,6 +237,7 @@ describe("DriveRepository", () => {
             mockD1.run.mockResolvedValue({ changes: 1 });
             mockD1.fetchAll.mockResolvedValue([]);
             mockCache.delete.mockResolvedValue(true);
+            mockCache.batchOperation = vi.fn().mockResolvedValue([]);
         });
 
         it("should return early for invalid userId", async () => {
@@ -253,12 +254,18 @@ describe("DriveRepository", () => {
 
             await DriveRepository.deleteByUserId("user1");
 
-            // Verify D1 updates for EACH drive
-            expect(mockD1.run).toHaveBeenCalledTimes(2);
+            // Verify D1 updates for ALL drives in a single query using IN clause
+            expect(mockD1.run).toHaveBeenCalledTimes(1);
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id IN (?, ?)",
+                ["deleted", expect.any(Number), "drive1", "drive2"]
+            );
             
-            // Verify Cache deletes (drive_id keys)
-            expect(mockCache.delete).toHaveBeenCalledWith("drive_id:drive1");
-            expect(mockCache.delete).toHaveBeenCalledWith("drive_id:drive2");
+            // Verify Cache deletes use batchOperation
+            expect(mockCache.batchOperation).toHaveBeenCalledWith([
+                { type: 'delete', key: 'drive_id:drive1' },
+                { type: 'delete', key: 'drive_id:drive2' }
+            ]);
             
             // Verify user key deleted
             expect(mockCache.delete).toHaveBeenCalledWith("drive:user1");
