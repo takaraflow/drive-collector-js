@@ -1,15 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { handleWebhook, setAppReadyState } from '../../../src/webhook/WebhookRouter.js';
 
+const webhookLog = vi.hoisted(() => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn()
+}));
+
 vi.mock('../../../src/services/logger/index.js', () => {
     return {
         logger: {
-            withModule: vi.fn().mockReturnValue({
-                info: vi.fn(),
-                warn: vi.fn(),
-                error: vi.fn(),
-                debug: vi.fn()
-            }),
+            withModule: vi.fn().mockReturnValue(webhookLog),
             info: vi.fn(),
             warn: vi.fn(),
             error: vi.fn(),
@@ -111,6 +113,10 @@ describe('WebhookRouter', () => {
         // Default mocks
         const { queueService } = await import('../../../src/services/QueueService.js');
         queueService.verifyWebhookSignature.mockResolvedValue(true);
+        webhookLog.info.mockClear();
+        webhookLog.warn.mockClear();
+        webhookLog.error.mockClear();
+        webhookLog.debug.mockClear();
     });
 
     afterEach(() => {
@@ -185,6 +191,9 @@ describe('WebhookRouter', () => {
         it('should handle /api/v2/stream/:taskId', async () => {
             req.url = '/api/v2/stream/123';
             req.method = 'POST';
+            req.headers['x-instance-secret'] = 'test-secret';
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
             const { streamTransferService } = await import('../../../src/services/StreamTransferService.js');
             streamTransferService.handleIncomingChunk.mockResolvedValue({ success: true, statusCode: 200 });
 
@@ -198,6 +207,9 @@ describe('WebhookRouter', () => {
         it('should handle /api/v2/stream/:taskId failure', async () => {
             req.url = '/api/v2/stream/123';
             req.method = 'POST';
+            req.headers['x-instance-secret'] = 'test-secret';
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
             const { streamTransferService } = await import('../../../src/services/StreamTransferService.js');
             streamTransferService.handleIncomingChunk.mockResolvedValue({ success: false, statusCode: 500, message: 'Stream error' });
 
@@ -211,6 +223,9 @@ describe('WebhookRouter', () => {
         it('should handle /api/v2/tasks/:taskId/status', async () => {
             req.url = '/api/v2/tasks/123/status';
             req.method = 'POST';
+            req.headers['x-instance-secret'] = 'test-secret';
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
             const { streamTransferService } = await import('../../../src/services/StreamTransferService.js');
             streamTransferService.handleStatusUpdate.mockResolvedValue({ success: true, statusCode: 200 });
 
@@ -288,6 +303,9 @@ describe('WebhookRouter', () => {
         it('should handle stream forwarding failure', async () => {
             req.url = '/api/v2/stream/123';
             req.method = 'POST';
+            req.headers['x-instance-secret'] = 'test-secret';
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
             const { streamTransferService } = await import('../../../src/services/StreamTransferService.js');
             streamTransferService.handleIncomingChunk.mockResolvedValue({ success: false, statusCode: 500, message: 'Stream Error' });
 
@@ -344,9 +362,41 @@ describe('WebhookRouter', () => {
             expect(res.end).toHaveBeenCalledWith('Unauthorized');
         });
 
+        it('should reject stream control routes when configured secret is empty', async () => {
+            req.url = '/api/v2/stream/task-1/progress';
+            req.method = 'GET';
+            req.headers['x-instance-secret'] = '';
+
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: '' } });
+
+            await handleWebhook(req, res);
+
+            expect(res.writeHead).toHaveBeenCalledWith(401);
+            expect(res.end).toHaveBeenCalledWith('Unauthorized');
+        });
+
+        it('should reject config refresh when configured secret is empty even if header is empty', async () => {
+            req.url = '/api/v2/config/refresh';
+            req.method = 'POST';
+            req.headers['x-instance-secret'] = '';
+
+            const { getConfig, refreshConfiguration } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: '' } });
+
+            await handleWebhook(req, res);
+
+            expect(refreshConfiguration).not.toHaveBeenCalled();
+            expect(res.writeHead).toHaveBeenCalledWith(401);
+            expect(res.end).toHaveBeenCalledWith('Unauthorized');
+        });
+
         it('should return 500 when handleIncomingChunk throws', async () => {
             req.url = '/api/v2/stream/task-1';
             req.method = 'POST';
+            req.headers['x-instance-secret'] = 'test-secret';
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
             const { streamTransferService } = await import('../../../src/services/StreamTransferService.js');
             streamTransferService.handleIncomingChunk.mockRejectedValue(new Error('Unexpected failure'));
 
@@ -354,6 +404,40 @@ describe('WebhookRouter', () => {
 
             expect(res.writeHead).toHaveBeenCalledWith(500);
             expect(res.end).toHaveBeenCalledWith('Internal Server Error');
+        });
+
+        it('should reject stream chunk POST when configured secret is empty', async () => {
+            req.url = '/api/v2/stream/task-1';
+            req.method = 'POST';
+            req.headers['x-instance-secret'] = '';
+
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: '' } });
+
+            const { streamTransferService } = await import('../../../src/services/StreamTransferService.js');
+
+            await handleWebhook(req, res);
+
+            expect(streamTransferService.handleIncomingChunk).not.toHaveBeenCalled();
+            expect(res.writeHead).toHaveBeenCalledWith(401);
+            expect(res.end).toHaveBeenCalledWith('Unauthorized');
+        });
+
+        it('should reject stream status update when configured secret is empty', async () => {
+            req.url = '/api/v2/tasks/task-1/status';
+            req.method = 'POST';
+            req.headers['x-instance-secret'] = '';
+
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: '' } });
+
+            const { streamTransferService } = await import('../../../src/services/StreamTransferService.js');
+
+            await handleWebhook(req, res);
+
+            expect(streamTransferService.handleStatusUpdate).not.toHaveBeenCalled();
+            expect(res.writeHead).toHaveBeenCalledWith(401);
+            expect(res.end).toHaveBeenCalledWith('Unauthorized');
         });
 
         it('should handle GET /api/v2/stream/:taskId/full-progress', async () => {
@@ -424,18 +508,37 @@ describe('WebhookRouter', () => {
         it('should return 401 if signature verification fails', async () => {
             const { queueService } = await import('../../../src/services/QueueService.js');
             queueService.verifyWebhookSignature.mockResolvedValue(false);
+            req[Symbol.asyncIterator] = async function* () {
+                yield Buffer.from(JSON.stringify({ token: 'secret-token-body' }));
+            };
+
             await handleWebhook(req, res);
+
             expect(res.writeHead).toHaveBeenCalledWith(401);
             expect(res.end).toHaveBeenCalledWith('Unauthorized');
+            expect(webhookLog.warn).toHaveBeenCalledWith(
+                expect.stringContaining('QStash 签名验证失败'),
+                expect.not.objectContaining({ bodyPreview: expect.any(String) })
+            );
+            expect(JSON.stringify(webhookLog.warn.mock.calls)).not.toContain('secret-token-body');
         });
 
         it('should return 400 for invalid JSON body', async () => {
             req[Symbol.asyncIterator] = async function* () {
-                yield Buffer.from('invalid-json');
+                yield Buffer.from('invalid-json-secret-token');
             };
             await handleWebhook(req, res);
             expect(res.writeHead).toHaveBeenCalledWith(400);
             expect(res.end).toHaveBeenCalledWith('Invalid JSON');
+            expect(webhookLog.warn).toHaveBeenCalledWith(
+                expect.stringContaining('无效的JSON格式'),
+                expect.objectContaining({ bodyBytes: 'invalid-json-secret-token'.length })
+            );
+            expect(webhookLog.warn).toHaveBeenCalledWith(
+                expect.stringContaining('无效的JSON格式'),
+                expect.not.objectContaining({ body: expect.any(String) })
+            );
+            expect(JSON.stringify(webhookLog.warn.mock.calls)).not.toContain('invalid-json-secret-token');
         });
 
         it('should handle /download webhook', async () => {

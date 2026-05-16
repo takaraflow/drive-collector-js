@@ -201,6 +201,7 @@ describe("DriveRepository", () => {
 
         it("should create drive successfully with Write-Through and invalidate derived list cache", async () => {
             const configData = { user: "test@example.com", pass: "password" };
+            mockD1.fetchOne.mockResolvedValue(null);
 
             const result = await DriveRepository.create("user1", "Mega-test@example.com", "mega", configData);
 
@@ -221,6 +222,52 @@ describe("DriveRepository", () => {
             expect(mockLocalCache.del).toHaveBeenCalledWith("drive_user1");
             expect(mockLocalCache.del).toHaveBeenCalledWith("drives:active");
             expect(result).toBe(true);
+        });
+
+        it("should reject creating a duplicate active drive of the same type", async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({
+                id: "drive-active",
+                user_id: "user1",
+                type: "mega",
+                status: "active"
+            });
+
+            await expect(DriveRepository.create("user1", "Mega-duplicate", "mega", { user: "dup@example.com" }))
+                .rejects.toThrow("Active drive already exists");
+
+            expect(mockD1.run).not.toHaveBeenCalled();
+            expect(mockCache.set).not.toHaveBeenCalled();
+        });
+
+        it("should reactivate a soft-deleted drive of the same type", async () => {
+            const deletedDrive = {
+                id: "drive-deleted",
+                user_id: "user1",
+                type: "mega",
+                status: "deleted",
+                created_at: 1000
+            };
+            mockD1.fetchOne
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce(deletedDrive);
+            mockD1.run.mockResolvedValue({ changes: 1 });
+
+            const result = await DriveRepository.create("user1", "Mega-new", "mega", { user: "new@example.com" });
+
+            expect(result).toBe(true);
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE drives SET name = ?, config_data = ?, remote_folder = NULL, status = ?, is_default = 0, updated_at = ? WHERE id = ? AND user_id = ? AND type = ? AND status = ?",
+                ["Mega-new", JSON.stringify({ user: "new@example.com" }), "active", expect.any(Number), "drive-deleted", "user1", "mega", "deleted"]
+            );
+            expect(mockD1.run).not.toHaveBeenCalledWith(
+                expect.stringContaining("INSERT INTO drives"),
+                expect.any(Array)
+            );
+            expect(mockCache.set).toHaveBeenCalledWith("drive_id:drive-deleted", expect.objectContaining({
+                id: "drive-deleted",
+                status: "active",
+                is_default: 0
+            }));
         });
 
         it("should throw error on D1 failure", async () => {

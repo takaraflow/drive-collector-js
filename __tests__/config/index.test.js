@@ -210,4 +210,32 @@ describe("Config Module", () => {
 
     delete process.env.QSTASH_AUTH_TOKEN;
   });
+
+  test("should fail closed when stream forwarding is enabled without INSTANCE_SECRET", async () => {
+    process.env.STREAM_FORWARDING_ENABLED = "true";
+    delete process.env.INSTANCE_SECRET;
+
+    __resetConfigForTests();
+    const config = await initConfig();
+
+    expect(config.streamForwarding).toMatchObject({
+      enabled: true,
+      secret: ""
+    });
+
+    delete process.env.STREAM_FORWARDING_ENABLED;
+  });
+
+  test("should trim configured INSTANCE_SECRET", async () => {
+    process.env.STREAM_FORWARDING_ENABLED = "true";
+    process.env.INSTANCE_SECRET = "  shared-secret  ";
+
+    __resetConfigForTests();
+    const config = await initConfig();
+
+    expect(config.streamForwarding.secret).toBe("shared-secret");
+
+    delete process.env.STREAM_FORWARDING_ENABLED;
+    delete process.env.INSTANCE_SECRET;
+  });
 });

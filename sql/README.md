@@ -92,8 +92,11 @@ npm run db:migrate:dry
 | type | TEXT | 网盘类型 |
 | config_data | TEXT | 配置数据（JSON） |
 | status | TEXT | 状态（active/deleted） |
+| is_default | INTEGER | 是否默认盘（0/1） |
 | created_at | INTEGER | 创建时间 |
 | updated_at | INTEGER | 更新时间 |
+
+同一用户同一 `type` 只允许一个 active 绑定；deleted 历史记录不阻止重新绑定。默认盘唯一约束也只作用于 active 绑定。
 
 ### settings 表
 用于存储系统配置项（注意：主存储在 Cache 中）
@@ -126,6 +129,16 @@ npm run db:migrate:dry
 | checksum | TEXT | 迁移内容摘要 |
 | applied_at | INTEGER | 应用时间 |
 | execution_time_ms | INTEGER | 执行耗时 |
+
+### user_roles 表
+用于存储用户权限角色。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| user_id | TEXT | 用户ID（主键） |
+| role | TEXT | 角色（banned/user/trusted/admin） |
+| created_at | INTEGER | 创建时间 |
+| updated_at | INTEGER | 更新时间 |
 
 ## 注意事项
 

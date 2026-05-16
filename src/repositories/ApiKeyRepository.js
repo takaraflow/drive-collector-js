@@ -21,7 +21,7 @@ export class ApiKeyRepository {
         if (token) return token;
 
         // 2. Try D1
-        const record = await d1.fetchOne(
+        let record = await d1.fetchOne(
             "SELECT token FROM api_keys WHERE user_id = ?",
             [userId.toString()]
         );
@@ -29,13 +29,23 @@ export class ApiKeyRepository {
         if (record) {
             token = record.token;
         } else {
-            // 3. Generate New
+            // 3. Generate New. INSERT OR IGNORE makes concurrent callers race-safe:
+            // exactly one insert wins, all callers read the durable row afterwards.
             token = this._generateSecureToken(userId);
             const now = Date.now();
             await d1.run(
-                "INSERT INTO api_keys (user_id, token, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO api_keys (user_id, token, created_at, updated_at) VALUES (?, ?, ?, ?)",
                 [userId.toString(), token, now, now]
             );
+
+            record = await d1.fetchOne(
+                "SELECT token FROM api_keys WHERE user_id = ?",
+                [userId.toString()]
+            );
+            if (!record?.token) {
+                throw new Error(`ApiKeyRepository.getOrCreateToken: failed to create token for user ${userId}`);
+            }
+            token = record.token;
             log.info(`Generated new API key for user ${userId}`);
         }
 

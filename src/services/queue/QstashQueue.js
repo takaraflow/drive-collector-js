@@ -346,8 +346,9 @@ export class QstashQueue extends CloudQueueBase {
      * 4. 消息幂等性处理 - 带幂等性检查的发布
      */
     async _publishWithIdempotency(topic, message, options = {}) {
-        // 生成消息ID（基于 topic + message 内容）
-        const messageId = this._generateMessageId(topic, message);
+        // 生成消息ID：任务队列使用显式稳定 key，避免 _meta.timestamp 破坏幂等。
+        const { idempotencyKey, ...publishOptions } = options;
+        const messageId = idempotencyKey || this._generateMessageId(topic, message);
 
         if (isQstashDebugEnabled()) {
             log.debug('QStash publish begin', {
@@ -387,7 +388,7 @@ export class QstashQueue extends CloudQueueBase {
                     return await this.client.publishJSON({
                         url: topic,
                         body: message,
-                        ...options
+                        ...publishOptions
                     });
                 }, 3, '[QstashQueue]'));
 

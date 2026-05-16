@@ -1,10 +1,12 @@
 import crypto from "crypto";
 
-export const LATEST_SCHEMA_VERSION = 3;
+export const LATEST_SCHEMA_VERSION = 5;
 
 const MIGRATION_LOCK_ID = "database-schema";
 const CANONICAL_TASK_STATUS_CHECK = "CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled'))";
 const CANONICAL_DRIVE_STATUS_CHECK = "CHECK (status IN ('active', 'deleted'))";
+const CANONICAL_DRIVE_DEFAULT_CHECK = "CHECK (is_default IN (0, 1))";
+const CANONICAL_USER_ROLE_CHECK = "CHECK (role IN ('banned', 'user', 'trusted', 'admin'))";
 const CANONICAL_TASK_STATUSES = ["queued", "downloading", "downloaded", "uploading", "completed", "failed", "cancelled"];
 
 const TASK_INDEX_STATEMENTS = [
@@ -23,7 +25,8 @@ const DRIVE_INDEX_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_drives_type ON drives(type)",
     "CREATE INDEX IF NOT EXISTS idx_drives_user_status ON drives(user_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_drives_user_default ON drives(user_id, is_default)",
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_drives_one_default_per_user ON drives(user_id) WHERE is_default = 1 AND status = 'active'"
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_drives_one_default_per_user ON drives(user_id) WHERE is_default = 1 AND status = 'active'",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_drives_one_active_type_per_user ON drives(user_id, type) WHERE status = 'active'"
 ];
 
 const SESSION_INDEX_STATEMENTS = [
@@ -31,7 +34,85 @@ const SESSION_INDEX_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)"
 ];
 
+const USER_ROLE_INDEX_STATEMENTS = [
+    "CREATE INDEX IF NOT EXISTS idx_user_roles_role ON user_roles(role)"
+];
+
 const INITIAL_SCHEMA_STATEMENTS = [
+    `CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        chat_id TEXT,
+        msg_id INTEGER,
+        source_msg_id INTEGER,
+        file_name TEXT,
+        file_size INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled')),
+        error_msg TEXT,
+        claimed_by TEXT,
+        created_at INTEGER,
+        updated_at INTEGER
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_msg_id ON tasks(msg_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_claimed_by ON tasks(claimed_by)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_status_updated ON tasks(status, updated_at)",
+
+    `CREATE TABLE IF NOT EXISTS drives (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        name TEXT,
+        type TEXT NOT NULL,
+        config_data TEXT NOT NULL,
+        remote_folder TEXT,
+        status TEXT DEFAULT 'active' CHECK (status IN ('active', 'deleted')),
+        is_default INTEGER DEFAULT 0 CHECK (is_default IN (0, 1)),
+        created_at INTEGER,
+        updated_at INTEGER
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_drives_user_id ON drives(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_drives_status ON drives(status)",
+    "CREATE INDEX IF NOT EXISTS idx_drives_type ON drives(type)",
+    "CREATE INDEX IF NOT EXISTS idx_drives_user_status ON drives(user_id, status)",
+
+    `CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        data TEXT NOT NULL,
+        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+        expires_at INTEGER
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)",
+
+    `CREATE TABLE IF NOT EXISTS api_keys (
+        user_id TEXT PRIMARY KEY,
+        token TEXT UNIQUE NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_api_keys_token ON api_keys(token)",
+
+    `CREATE TABLE IF NOT EXISTS user_roles (
+        user_id TEXT PRIMARY KEY,
+        role TEXT NOT NULL CHECK (role IN ('banned', 'user', 'trusted', 'admin')),
+        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+    )`,
+    "CREATE INDEX IF NOT EXISTS idx_user_roles_role ON user_roles(role)"
+];
+
+const INITIAL_SCHEMA_MIGRATION_SQL = [
     `CREATE TABLE IF NOT EXISTS tasks (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -96,7 +177,7 @@ const INITIAL_SCHEMA_STATEMENTS = [
         updated_at INTEGER NOT NULL
     )`,
     "CREATE INDEX IF NOT EXISTS idx_api_keys_token ON api_keys(token)"
-];
+].join(";\n") + ";";
 
 const SCHEMA_MIGRATIONS_SQL = `CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
@@ -120,14 +201,17 @@ const REQUIRED_TABLE_COLUMNS = {
     drives: ["id", "user_id", "name", "type", "config_data", "remote_folder", "status", "is_default", "created_at", "updated_at"],
     settings: ["key", "value", "created_at", "updated_at"],
     sessions: ["id", "user_id", "data", "created_at", "expires_at"],
-    api_keys: ["user_id", "token", "created_at", "updated_at"]
+    api_keys: ["user_id", "token", "created_at", "updated_at"],
+    user_roles: ["user_id", "role", "created_at", "updated_at"]
 };
 
 const REQUIRED_INDEXES = [
     "idx_tasks_status_updated",
     "idx_drives_user_default",
     "idx_drives_one_default_per_user",
-    "idx_api_keys_token"
+    "idx_drives_one_active_type_per_user",
+    "idx_api_keys_token",
+    "idx_user_roles_role"
 ];
 
 function normalizeSql(sql = "") {
@@ -168,6 +252,14 @@ async function indexExists(d1, indexName) {
         [indexName]
     );
     return Boolean(row);
+}
+
+async function getIndexSql(d1, indexName) {
+    const row = await d1.fetchOne(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+        [indexName]
+    );
+    return row?.sql || "";
 }
 
 async function getTableSql(d1, tableName) {
@@ -305,6 +397,8 @@ async function ensureTaskBaseSchema(d1) {
 async function ensureDriveBaseSchema(d1) {
     if (!(await tableExists(d1, "drives"))) {
         await d1.run(getCreateTableStatement("drives"));
+        await runStatements(d1, DRIVE_INDEX_STATEMENTS);
+        return;
     } else {
         await addMissingColumns(d1, "drives", {
             user_id: "TEXT",
@@ -319,6 +413,7 @@ async function ensureDriveBaseSchema(d1) {
         });
     }
 
+    await normalizeDuplicateActiveDrives(d1);
     await runStatements(d1, DRIVE_INDEX_STATEMENTS);
 }
 
@@ -402,12 +497,58 @@ async function ensureApiKeysSchema(d1) {
     await d1.run("CREATE INDEX IF NOT EXISTS idx_api_keys_token ON api_keys(token)");
 }
 
+async function ensureUserRolesSchema(d1) {
+    if (!(await tableExists(d1, "user_roles"))) {
+        await d1.run(getCreateTableStatement("user_roles"));
+        await runStatements(d1, USER_ROLE_INDEX_STATEMENTS);
+        return;
+    }
+
+    const columns = await getTableColumns(d1, "user_roles");
+    const tableSql = await getTableSql(d1, "user_roles");
+    const roleCheckMissing = tableSql !== "" && !normalizeSql(tableSql).includes(normalizeSql(CANONICAL_USER_ROLE_CHECK));
+    const missingRequiredColumns = REQUIRED_TABLE_COLUMNS.user_roles
+        .filter(column => !columns.includes(column));
+
+    if (roleCheckMissing || missingRequiredColumns.length > 0) {
+        const now = Date.now();
+        const roleExpr = columns.includes("role")
+            ? `CASE WHEN role IN ('banned', 'user', 'trusted', 'admin') THEN role ELSE 'user' END`
+            : "'user'";
+
+        await rebuildTableForD1(d1, {
+            tableName: "user_roles",
+            temporaryTableName: "user_roles_ssot_new",
+            backupTableName: "user_roles_ssot_backup",
+            createTemporaryTableSql: `CREATE TABLE user_roles_ssot_new (
+                user_id TEXT PRIMARY KEY,
+                role TEXT NOT NULL CHECK (role IN ('banned', 'user', 'trusted', 'admin')),
+                created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+            )`,
+            insertTemporaryTableSql: `INSERT INTO user_roles_ssot_new (user_id, role, created_at, updated_at)
+            SELECT
+                CAST(${columnExpression(columns, "user_id", literal("unknown"))} AS TEXT),
+                ${roleExpr},
+                ${coalescedColumnExpression(columns, "created_at", String(now))},
+                ${coalescedColumnExpression(columns, "updated_at",
+                    coalescedColumnExpression(columns, "created_at", String(now)))}
+            FROM user_roles`,
+            indexStatements: USER_ROLE_INDEX_STATEMENTS
+        });
+        return;
+    }
+
+    await runStatements(d1, USER_ROLE_INDEX_STATEMENTS);
+}
+
 async function applyInitialSchema({ d1 }) {
     await ensureTaskBaseSchema(d1);
     await ensureDriveBaseSchema(d1);
     await ensureSettingsSchema(d1);
     await ensureSessionsSchema(d1);
     await ensureApiKeysSchema(d1);
+    await ensureUserRolesSchema(d1);
 }
 
 async function applyTaskStatusSsot({ d1 }) {
@@ -469,13 +610,64 @@ async function applyTaskStatusSsot({ d1 }) {
     });
 }
 
-async function applyDriveDefaultSsot({ d1 }) {
+async function driveHasNoLegacyTypeTableUnique(d1) {
+    const indexes = await d1.fetchAll("PRAGMA index_list(drives)");
+    for (const index of indexes || []) {
+        if (index.origin !== "u") continue;
+        const columns = await d1.fetchAll(`PRAGMA index_info(${quoteIdentifier(index.name)})`);
+        const columnNames = (columns || []).map(column => column.name);
+        if (columnNames.length === 2 && columnNames[0] === "user_id" && columnNames[1] === "type") {
+            return false;
+        }
+    }
+    return true;
+}
+
+async function normalizeDuplicateActiveDrives(d1) {
+    if (!(await tableExists(d1, "drives"))) return;
+    const columns = await getTableColumns(d1, "drives");
+    const hasRequiredColumns = ["id", "user_id", "type", "status", "is_default", "created_at", "updated_at"].every(column => columns.includes(column));
+    if (!hasRequiredColumns) return;
+
+    const now = Date.now();
+    await d1.run(
+        `UPDATE drives
+         SET status = 'deleted',
+             is_default = 0,
+             updated_at = ?
+         WHERE status = 'active'
+           AND EXISTS (
+             SELECT 1
+             FROM drives keeper
+             WHERE keeper.user_id = drives.user_id
+               AND keeper.type = drives.type
+               AND keeper.status = 'active'
+               AND (
+                 COALESCE(keeper.is_default, 0) > COALESCE(drives.is_default, 0)
+                 OR (
+                   COALESCE(keeper.is_default, 0) = COALESCE(drives.is_default, 0)
+                   AND COALESCE(keeper.updated_at, keeper.created_at, 0) > COALESCE(drives.updated_at, drives.created_at, 0)
+                 )
+                 OR (
+                   COALESCE(keeper.is_default, 0) = COALESCE(drives.is_default, 0)
+                   AND COALESCE(keeper.updated_at, keeper.created_at, 0) = COALESCE(drives.updated_at, drives.created_at, 0)
+                   AND keeper.id > drives.id
+                 )
+               )
+           )`,
+        [now]
+    );
+}
+
+async function applyDriveSsot({ d1 }) {
     const drivesSql = await getTableSql(d1, "drives");
     const columns = await getTableColumns(d1, "drives");
     const defaultColumnExists = await columnExists(d1, "drives", "is_default");
     const statusCheckMissing = drivesSql !== "" && !normalizeSql(drivesSql).includes(normalizeSql(CANONICAL_DRIVE_STATUS_CHECK));
+    const defaultCheckMissing = drivesSql !== "" && defaultColumnExists && !normalizeSql(drivesSql).includes(normalizeSql(CANONICAL_DRIVE_DEFAULT_CHECK));
+    const hasNoLegacyTypeTableUnique = await driveHasNoLegacyTypeTableUnique(d1);
 
-    if (statusCheckMissing) {
+    if (statusCheckMissing || defaultCheckMissing || !hasNoLegacyTypeTableUnique) {
         const defaultSelect = defaultColumnExists
             ? "CASE WHEN is_default = 1 THEN 1 ELSE 0 END"
             : "0";
@@ -498,8 +690,7 @@ async function applyDriveDefaultSsot({ d1 }) {
                 status TEXT DEFAULT 'active' CHECK (status IN ('active', 'deleted')),
                 is_default INTEGER DEFAULT 0 CHECK (is_default IN (0, 1)),
                 created_at INTEGER,
-                updated_at INTEGER,
-                UNIQUE(user_id, type)
+                updated_at INTEGER
             )`,
             insertTemporaryTableSql: `INSERT INTO drives_ssot_new (
                 id, user_id, name, type, config_data, remote_folder,
@@ -518,16 +709,20 @@ async function applyDriveDefaultSsot({ d1 }) {
                 ${coalescedColumnExpression(columns, "updated_at",
                     coalescedColumnExpression(columns, "created_at", String(now)))}
             FROM drives`,
-            indexStatements: DRIVE_INDEX_STATEMENTS
+            indexStatements: []
         });
-        return;
     }
 
     if (!(await columnExists(d1, "drives", "is_default"))) {
         await d1.run("ALTER TABLE drives ADD COLUMN is_default INTEGER DEFAULT 0 CHECK (is_default IN (0, 1))");
     }
 
+    await normalizeDuplicateActiveDrives(d1);
     await runStatements(d1, DRIVE_INDEX_STATEMENTS);
+}
+
+async function applyUserRolesSsot({ d1 }) {
+    await ensureUserRolesSchema(d1);
 }
 
 function getMigrations() {
@@ -535,7 +730,7 @@ function getMigrations() {
         {
             version: 1,
             name: "initial_schema",
-            sql: INITIAL_SCHEMA_STATEMENTS.join(";\n") + ";",
+            sql: INITIAL_SCHEMA_MIGRATION_SQL,
             shouldRun: async () => true,
             apply: applyInitialSchema
         },
@@ -560,7 +755,31 @@ function getMigrations() {
                     !(await indexExists(d1, "idx_drives_user_default")) ||
                     !(await indexExists(d1, "idx_drives_one_default_per_user"));
             },
-            apply: applyDriveDefaultSsot
+            apply: applyDriveSsot
+        },
+        {
+            version: 4,
+            name: "user_roles_ssot",
+            sql: "create user_roles table with canonical role CHECK constraint and index",
+            shouldRun: async ({ d1 }) => {
+                const userRolesSql = await getTableSql(d1, "user_roles");
+                return userRolesSql === "" ||
+                    !normalizeSql(userRolesSql).includes(normalizeSql(CANONICAL_USER_ROLE_CHECK)) ||
+                    !(await indexExists(d1, "idx_user_roles_role"));
+            },
+            apply: applyUserRolesSsot
+        },
+        {
+            version: 5,
+            name: "drives_active_type_unique_ssot",
+            sql: "replace drives table-level user/type uniqueness with active-only unique index",
+            shouldRun: async ({ d1 }) => {
+                const drivesSql = await getTableSql(d1, "drives");
+                return drivesSql === "" ||
+                    !(await driveHasNoLegacyTypeTableUnique(d1)) ||
+                    !(await indexExists(d1, "idx_drives_one_active_type_per_user"));
+            },
+            apply: applyDriveSsot
         }
     ];
 }
@@ -568,6 +787,31 @@ function getMigrations() {
 async function getAppliedMigrationRows(d1) {
     if (!(await tableExists(d1, "schema_migrations"))) return [];
     return await d1.fetchAll("SELECT version, name, checksum, applied_at FROM schema_migrations ORDER BY version ASC");
+}
+
+function validateAppliedMigrationRows(appliedRows, migrations) {
+    const issues = [];
+    const migrationsByVersion = new Map(migrations.map(migration => [migration.version, migration]));
+
+    for (const row of appliedRows) {
+        const version = Number(row.version);
+        const migration = migrationsByVersion.get(version);
+        if (!migration) {
+            issues.push(`unknown applied migration: ${version}:${row.name}`);
+            continue;
+        }
+
+        if (row.name !== migration.name) {
+            issues.push(`migration ${version} name drift: expected ${migration.name}, found ${row.name}`);
+        }
+
+        const expectedChecksum = checksum(migration.sql);
+        if (row.checksum !== expectedChecksum) {
+            issues.push(`migration ${version}:${migration.name} checksum drift`);
+        }
+    }
+
+    return issues;
 }
 
 async function recordMigration(d1, migration, executionTimeMs) {
@@ -604,10 +848,74 @@ async function validateDatabaseStructure(d1) {
     if (tasksSql && !normalizeSql(tasksSql).includes(normalizeSql(CANONICAL_TASK_STATUS_CHECK))) {
         issues.push("tasks.status does not enforce canonical task states");
     }
+    if (tasksSql) {
+        const taskColumns = await d1.fetchAll("PRAGMA table_info(tasks)");
+        const idColumn = taskColumns.find(column => column.name === "id");
+        const userIdColumn = taskColumns.find(column => column.name === "user_id");
+        if (!idColumn || Number(idColumn.pk) !== 1) {
+            issues.push("tasks.id is not the primary key");
+        }
+        if (!userIdColumn || Number(userIdColumn.notnull) !== 1) {
+            issues.push("tasks.user_id is nullable");
+        }
+    }
 
     const drivesSql = await getTableSql(d1, "drives");
     if (drivesSql && !normalizeSql(drivesSql).includes(normalizeSql(CANONICAL_DRIVE_STATUS_CHECK))) {
         issues.push("drives.status does not enforce active/deleted states");
+    }
+    if (drivesSql) {
+        if (!normalizeSql(drivesSql).includes(normalizeSql(CANONICAL_DRIVE_DEFAULT_CHECK))) {
+            issues.push("drives.is_default does not enforce boolean states");
+        }
+
+        const driveColumns = await d1.fetchAll("PRAGMA table_info(drives)");
+        const idColumn = driveColumns.find(column => column.name === "id");
+        const userIdColumn = driveColumns.find(column => column.name === "user_id");
+        const typeColumn = driveColumns.find(column => column.name === "type");
+        const configColumn = driveColumns.find(column => column.name === "config_data");
+        if (!idColumn || Number(idColumn.pk) !== 1) {
+            issues.push("drives.id is not the primary key");
+        }
+        if (!userIdColumn || Number(userIdColumn.notnull) !== 1) {
+            issues.push("drives.user_id is nullable");
+        }
+        if (!typeColumn || Number(typeColumn.notnull) !== 1) {
+            issues.push("drives.type is nullable");
+        }
+        if (!configColumn || Number(configColumn.notnull) !== 1) {
+            issues.push("drives.config_data is nullable");
+        }
+        if (!(await driveHasNoLegacyTypeTableUnique(d1))) {
+            issues.push("drives still has table-level user/type uniqueness");
+        }
+
+        const defaultIndexSql = normalizeSql(await getIndexSql(d1, "idx_drives_one_default_per_user"));
+        if (!defaultIndexSql.includes("UNIQUE") || !defaultIndexSql.includes("WHERE is_default = 1 AND status = 'active'")) {
+            issues.push("drives default uniqueness is not active-only");
+        }
+
+        const typeIndexSql = normalizeSql(await getIndexSql(d1, "idx_drives_one_active_type_per_user"));
+        if (!typeIndexSql.includes("UNIQUE") || !typeIndexSql.includes("WHERE status = 'active'")) {
+            issues.push("drives user/type uniqueness is not active-only");
+        }
+    }
+
+    const userRolesSql = await getTableSql(d1, "user_roles");
+    if (userRolesSql) {
+        if (!normalizeSql(userRolesSql).includes(normalizeSql(CANONICAL_USER_ROLE_CHECK))) {
+            issues.push("user_roles.role does not enforce canonical roles");
+        }
+
+        const roleColumns = await d1.fetchAll("PRAGMA table_info(user_roles)");
+        const userIdColumn = roleColumns.find(column => column.name === "user_id");
+        const roleColumn = roleColumns.find(column => column.name === "role");
+        if (!userIdColumn || Number(userIdColumn.pk) !== 1) {
+            issues.push("user_roles.user_id is not the primary key");
+        }
+        if (!roleColumn || Number(roleColumn.notnull) !== 1) {
+            issues.push("user_roles.role is nullable");
+        }
     }
 
     return issues;
@@ -662,7 +970,10 @@ export async function getDatabaseSchemaStatus({ d1 } = {}) {
         .map(migration => ({ version: migration.version, name: migration.name }));
 
     const currentVersion = appliedRows.reduce((max, row) => Math.max(max, Number(row.version) || 0), 0);
-    const issues = await validateDatabaseStructure(d1);
+    const issues = [
+        ...validateAppliedMigrationRows(appliedRows, migrations),
+        ...(await validateDatabaseStructure(d1))
+    ];
 
     return {
         currentVersion,
@@ -719,6 +1030,10 @@ export async function migrateDatabaseSchema({
             await ensureMigrationStorage(d1);
         }
         const appliedRows = await getAppliedMigrationRows(d1);
+        const appliedIssues = validateAppliedMigrationRows(appliedRows, getMigrations());
+        if (appliedIssues.length > 0) {
+            throw new Error(`Applied database migrations do not match code SSOT: ${appliedIssues.join("; ")}`);
+        }
         const appliedVersions = new Set(appliedRows.map(row => Number(row.version)));
 
         for (const migration of getMigrations()) {

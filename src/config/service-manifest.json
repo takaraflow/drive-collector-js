@@ -114,6 +114,14 @@
         "AXIOM_ORG_ID",
         "AXIOM_DATASET",
         "DATADOG_API_KEY",
+        "NEW_RELIC_LICENSE_KEY",
+        "NEW_RELIC_REGION",
+        "NEW_RELIC_APP_NAME",
+        "OTEL_TRACES_SAMPLER",
+        "OTEL_TRACES_SAMPLER_ARG",
+        "OTEL_SERVICE_NAME",
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
         "LOG_LEVEL"
       ],
       "reinitializationStrategy": {

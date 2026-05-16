@@ -42,6 +42,13 @@ describe('OTel Tracing Bootstrap (no-op path)', () => {
         await expect(tracingModule.shutdownOTel()).resolves.toBeUndefined();
     });
 
+    it('should sanitize Telegram bot token URLs without disabling tracing module', () => {
+        expect(tracingModule.sanitizeTelegramBotUrl('https://api.telegram.org/bot123456:ABC/sendMessage?chat_id=1'))
+            .toBe('https://api.telegram.org/bot[REDACTED]/sendMessage?chat_id=1');
+        expect(tracingModule.sanitizeTelegramBotUrl('https://example.com/no-token'))
+            .toBe('https://example.com/no-token');
+    });
+
     it('should not load any OTel packages when no license key is set', () => {
         // If OTel packages were loaded, sdk would be non-null
         // This indirectly verifies the dynamic import guard works

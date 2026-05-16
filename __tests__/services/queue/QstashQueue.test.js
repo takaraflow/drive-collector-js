@@ -168,6 +168,49 @@ describe("QstashQueue - publish", () => {
         });
     });
 
+    test("should use explicit idempotency key without forwarding it to QStash", async () => {
+        queue.batchSize = 1;
+        mockPublishJSON.mockResolvedValue({ messageId: 'msg-1' });
+
+        const first = await queue._publish('test-topic', {
+            taskId: 'task-1',
+            type: 'download',
+            _meta: { timestamp: 1000 }
+        }, { idempotencyKey: 'download:download:task-1:initial' });
+        const second = await queue._publish('test-topic', {
+            taskId: 'task-1',
+            type: 'download',
+            _meta: { timestamp: 2000 }
+        }, { idempotencyKey: 'download:download:task-1:initial' });
+
+        expect(first).toEqual({ messageId: 'msg-1' });
+        expect(second).toEqual({ messageId: 'download:download:task-1:initial', duplicate: true });
+        expect(mockPublishJSON).toHaveBeenCalledTimes(1);
+        expect(mockPublishJSON.mock.calls[0][0]).not.toHaveProperty('idempotencyKey');
+    });
+
+    test("should publish again when retry uses a new queue attempt", async () => {
+        queue.batchSize = 1;
+        mockPublishJSON
+            .mockResolvedValueOnce({ messageId: 'msg-1' })
+            .mockResolvedValueOnce({ messageId: 'msg-2' });
+
+        const first = await queue._publish('test-topic', {
+            taskId: 'task-1',
+            type: 'download',
+            _meta: { queueAttempt: 'initial' }
+        }, { idempotencyKey: 'download:download:task-1:initial' });
+        const second = await queue._publish('test-topic', {
+            taskId: 'task-1',
+            type: 'download',
+            _meta: { queueAttempt: 'queued:1700000000000' }
+        }, { idempotencyKey: 'download:download:task-1:queued:1700000000000' });
+
+        expect(first).toEqual({ messageId: 'msg-1' });
+        expect(second).toEqual({ messageId: 'msg-2' });
+        expect(mockPublishJSON).toHaveBeenCalledTimes(2);
+    });
+
     test("should add to buffer when batching is enabled", async () => {
         const batchingQueue = new QstashQueue({ batchSize: 5, batchTimeout: 1000 });
         await batchingQueue.initialize();

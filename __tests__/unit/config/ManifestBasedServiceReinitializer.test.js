@@ -18,7 +18,8 @@ vi.mock('../../../src/config/index.js', () => ({
 // Mock dynamic imports
 vi.mock('../../../src/services/CacheService.js', () => ({ cache: { name: 'cache' } }));
 vi.mock('../../../src/services/QueueService.js', () => ({ queueService: { name: 'queue' } }));
-vi.mock('../../../src/services/logger/LoggerService.js', () => ({ logger: { name: 'logger' } }));
+const loggerSingletonMock = vi.hoisted(() => ({ name: 'logger', reload: vi.fn(), configure: vi.fn() }));
+vi.mock('../../../src/services/logger/index.js', () => ({ logger: loggerSingletonMock }));
 vi.mock('../../../src/services/telegram.js', () => ({ default: { name: 'telegram' } }));
 vi.mock('../../../src/services/oss.js', () => ({ oss: { name: 'oss' } }));
 vi.mock('../../../src/services/d1.js', () => ({ d1: { name: 'd1' } }));
@@ -45,6 +46,7 @@ describe('ManifestBasedServiceReinitializer', () => {
             expect(reinitializer.services.get('cache')).toBeDefined();
             expect(reinitializer.services.get('queue')).toBeDefined();
             expect(reinitializer.services.get('logger')).toBeDefined();
+            expect(reinitializer.services.get('logger')).toBe(loggerSingletonMock);
             expect(reinitializer.services.get('telegram')).toBeDefined();
             expect(reinitializer.services.get('oss')).toBeDefined();
             expect(reinitializer.services.get('d1')).toBeDefined();
@@ -129,6 +131,14 @@ describe('ManifestBasedServiceReinitializer', () => {
             await reinitializer.performReinitialization('logger', service, 'reconfigure');
             expect(getConfig).toHaveBeenCalled();
             expect(service.configure).toHaveBeenCalledWith({ test: 'config' });
+        });
+
+        it('should prefer reload for logger reconfiguration', async () => {
+            const service = { reload: vi.fn(), configure: vi.fn() };
+            getConfig.mockReturnValue({ test: 'config' });
+            await reinitializer.performReinitialization('logger', service, 'reconfigure');
+            expect(service.reload).toHaveBeenCalledWith({ test: 'config' });
+            expect(service.configure).not.toHaveBeenCalled();
         });
 
         it('should call reconfigure for generic service', async () => {

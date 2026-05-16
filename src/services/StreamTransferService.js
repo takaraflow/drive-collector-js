@@ -12,6 +12,16 @@ import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
 const log = logger.withModule('StreamTransferService');
 const getStreamConfig = () => getConfig().streamForwarding;
 
+function hasValidInstanceSecret(headerSecret, configuredSecret) {
+    if (typeof headerSecret !== 'string' || typeof configuredSecret !== 'string') {
+        return false;
+    }
+
+    const header = headerSecret.trim();
+    const secret = configuredSecret.trim();
+    return header !== '' && secret !== '' && header === secret;
+}
+
 /**
  * 实时流式转发服务 (StreamTransferService)
  * 负责在多实例环境下，由 Leader 转发 Telegram 下载流给 Worker 实例进行上传
@@ -148,8 +158,7 @@ class StreamTransferService {
      */
     async handleIncomingChunk(taskId, req) {
         // 校验秘钥
-        const secret = req.headers['x-instance-secret'];
-        if (secret !== getStreamConfig().secret) {
+        if (!hasValidInstanceSecret(req.headers['x-instance-secret'], getStreamConfig().secret)) {
             return { success: false, statusCode: 401, message: "Unauthorized" };
         }
 
@@ -352,8 +361,7 @@ class StreamTransferService {
      * Leader 接收进度上报并更新任务状态
      */
     async handleStatusUpdate(taskId, reqBody, headers) {
-        const secret = headers['x-instance-secret'];
-        if (secret !== getStreamConfig().secret) {
+        if (!hasValidInstanceSecret(headers['x-instance-secret'], getStreamConfig().secret)) {
             return { success: false, statusCode: 401, message: "Unauthorized" };
         }
 

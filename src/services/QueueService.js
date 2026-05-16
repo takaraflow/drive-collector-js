@@ -5,8 +5,10 @@ import { Mutex } from "async-mutex";
 import Joi from 'joi';
 import {
     buildDownloadQueueMessage,
+    buildTaskQueueIdempotencyKey,
     buildTaskQueueMeta,
     buildUploadQueueMessage,
+    normalizeTaskQueueAttempt,
     TASK_QUEUE_TRIGGER_SOURCES
 } from "../domain/task-queue-contract.js";
 
@@ -137,11 +139,17 @@ export class QueueService {
     }
 
     async enqueueDownloadTask(taskId, taskData = {}) {
-        return this.publish(this.topics.downloadTasks, buildDownloadQueueMessage(taskId, taskData));
+        const queueAttempt = normalizeTaskQueueAttempt(taskData?._meta?.queueAttempt);
+        return this.publish(this.topics.downloadTasks, buildDownloadQueueMessage(taskId, taskData), {
+            idempotencyKey: this._buildTaskIdempotencyKey(this.topics.downloadTasks, "download", taskId, queueAttempt)
+        });
     }
 
     async enqueueUploadTask(taskId, taskData = {}) {
-        return this.publish(this.topics.uploadTasks, buildUploadQueueMessage(taskId, taskData));
+        const queueAttempt = normalizeTaskQueueAttempt(taskData?._meta?.queueAttempt);
+        return this.publish(this.topics.uploadTasks, buildUploadQueueMessage(taskId, taskData), {
+            idempotencyKey: this._buildTaskIdempotencyKey(this.topics.uploadTasks, "upload", taskId, queueAttempt)
+        });
     }
 
     async broadcastSystemEvent(event, data = {}) {
@@ -181,6 +189,10 @@ export class QueueService {
                 errorCode: error.code || 'UNKNOWN_ERROR'
             };
         }
+    }
+
+    _buildTaskIdempotencyKey(topic, type, taskId, queueAttempt) {
+        return buildTaskQueueIdempotencyKey(topic, type, taskId, queueAttempt);
     }
 }
 

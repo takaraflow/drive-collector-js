@@ -57,8 +57,7 @@ function createTables(db) {
       status TEXT DEFAULT 'active' CHECK (status IN ('active', 'deleted')),
       is_default INTEGER DEFAULT 0 CHECK (is_default IN (0, 1)),
       created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
-      updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
-      UNIQUE(user_id, type)
+      updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
     )
   `);
 
@@ -107,6 +106,16 @@ function createTables(db) {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_api_keys_token ON api_keys(token)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_drives_user_default ON drives(user_id, is_default)`);
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_drives_one_default_per_user ON drives(user_id) WHERE is_default = 1 AND status = 'active'`);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_drives_one_active_type_per_user ON drives(user_id, type) WHERE status = 'active'`);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_roles (
+      user_id TEXT PRIMARY KEY,
+      role TEXT NOT NULL CHECK (role IN ('banned', 'user', 'trusted', 'admin')),
+      created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+      updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+    )
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_user_roles_role ON user_roles(role)`);
 }
 
 /**

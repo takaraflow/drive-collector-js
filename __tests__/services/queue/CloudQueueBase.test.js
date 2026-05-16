@@ -159,6 +159,27 @@ describe("CloudQueueBase - Buffer Management", () => {
     });
 });
 
+describe("CloudQueueBase - Idempotency Keys", () => {
+    test("should ignore queue metadata timestamps for task messages", () => {
+        const queue = new TestCloudQueue();
+
+        const first = queue._generateMessageId('download', {
+            taskId: 'task-1',
+            type: 'download',
+            userId: 'u1',
+            _meta: { timestamp: 1000 }
+        });
+        const second = queue._generateMessageId('download', {
+            taskId: 'task-1',
+            type: 'download',
+            userId: 'u1',
+            _meta: { timestamp: 2000 }
+        });
+
+        expect(first).toBe(second);
+    });
+});
+
 describe("CloudQueueBase - Retry Logic", () => {
     let queue;
 

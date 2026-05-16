@@ -28,6 +28,12 @@ describe('TaskStateMachine', () => {
         expect(TaskStateMachine.resolveTransition(TASK_STATUSES.CANCELLED, TASK_EVENTS.RETRY).allowed).toBe(false);
     });
 
+    it('should reset uploading work back to the uploadable state', () => {
+        expect(TaskStateMachine.resolveTransition(TASK_STATUSES.UPLOADING, TASK_EVENTS.RESET_UPLOAD).toStatus).toBe(TASK_STATUSES.DOWNLOADED);
+        expect(TaskStateMachine.resolveTransition(TASK_STATUSES.DOWNLOADED, TASK_EVENTS.RESET_UPLOAD).allowed).toBe(true);
+        expect(TaskStateMachine.resolveTransition(TASK_STATUSES.DOWNLOADING, TASK_EVENTS.RESET_UPLOAD).allowed).toBe(false);
+    });
+
     it('should reject unknown statuses', () => {
         expect(() => TaskStateMachine.assertTransition('mystery', TASK_EVENTS.COMPLETE)).toThrow(TaskStateTransitionError);
     });

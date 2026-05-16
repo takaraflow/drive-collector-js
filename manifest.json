@@ -1022,7 +1022,8 @@
       "INSTANCE_SECRET": {
         "type": "string",
         "required": false,
-        "description": "实例间通信安全秘钥"
+        "description": "实例间通信安全秘钥",
+        "sensitive": true
       },
       "NEW_RELIC_LICENSE_KEY": {
         "type": "string",

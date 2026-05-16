@@ -33,4 +33,4 @@ runs:
       run: |
         echo "Docker version: $(docker --version)"
         echo "Buildx version: $(docker buildx version)"
-        ✅ Docker environment ready
+        echo "Docker environment ready"

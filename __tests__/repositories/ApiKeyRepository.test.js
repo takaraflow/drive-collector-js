@@ -59,15 +59,35 @@ describe("ApiKeyRepository", () => {
 
         it("新用户应生成令牌并存入 D1 和缓存", async () => {
             mockCache.get.mockResolvedValue(null);
-            mockD1.fetchOne.mockResolvedValue(null);
+            mockD1.fetchOne
+                .mockResolvedValueOnce(null)
+                .mockImplementationOnce(async () => ({ token: mockD1.run.mock.calls[0][1][1] }));
 
             const token = await ApiKeyRepository.getOrCreateToken("user456");
 
             expect(token).toContain("dc_user_user456_");
             expect(mockD1.run).toHaveBeenCalledWith(
-                expect.stringContaining("INSERT INTO api_keys"),
+                expect.stringContaining("INSERT OR IGNORE INTO api_keys"),
                 ["user456", token, expect.any(Number), expect.any(Number)]
             );
+        });
+
+        it("并发创建冲突时应在 INSERT OR IGNORE 后读取已存在令牌", async () => {
+            mockCache.get.mockResolvedValue(null);
+            mockD1.fetchOne
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce({ token: "winner_token" });
+            mockD1.run.mockResolvedValue({ changes: 0 });
+
+            const token = await ApiKeyRepository.getOrCreateToken("user456");
+
+            expect(token).toBe("winner_token");
+            expect(mockD1.run).toHaveBeenCalledWith(
+                expect.stringContaining("INSERT OR IGNORE INTO api_keys"),
+                expect.arrayContaining(["user456"])
+            );
+            expect(mockD1.fetchOne).toHaveBeenCalledTimes(2);
+            expect(mockCache.set).toHaveBeenCalledWith("api_key:user456", "winner_token", expect.any(Number));
         });
     });
 

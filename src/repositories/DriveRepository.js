@@ -111,13 +111,35 @@ export class DriveRepository {
                 created_at: now
             };
 
-            // Write-Through: 先写入 D1
-            await d1.run(
-                "INSERT INTO drives (id, user_id, name, type, config_data, status, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [driveId, userId.toString(), name, type, serializedConfigData, DRIVE_STATUSES.ACTIVE, 0, now, now]
+            const existingActive = await d1.fetchOne(
+                `SELECT ${DRIVE_COLUMNS} FROM drives WHERE user_id = ? AND type = ? AND status = ? LIMIT 1`,
+                [userId.toString(), type, DRIVE_STATUSES.ACTIVE]
+            );
+            if (existingActive) {
+                throw new Error(`DriveRepository.create: Active drive already exists for user ${userId} and type ${type}.`);
+            }
+
+            const existingDeleted = await d1.fetchOne(
+                `SELECT ${DRIVE_COLUMNS} FROM drives WHERE user_id = ? AND type = ? AND status = ? ORDER BY updated_at DESC, created_at DESC LIMIT 1`,
+                [userId.toString(), type, DRIVE_STATUSES.DELETED]
             );
 
-            await cache.set(this.getDriveIdKey(driveId), driveData);
+            if (existingDeleted) {
+                driveData.id = existingDeleted.id;
+                driveData.created_at = existingDeleted.created_at || now;
+                await d1.run(
+                    "UPDATE drives SET name = ?, config_data = ?, remote_folder = NULL, status = ?, is_default = 0, updated_at = ? WHERE id = ? AND user_id = ? AND type = ? AND status = ?",
+                    [name, serializedConfigData, DRIVE_STATUSES.ACTIVE, now, existingDeleted.id, userId.toString(), type, DRIVE_STATUSES.DELETED]
+                );
+            } else {
+                // Write-Through: 先写入 D1
+                await d1.run(
+                    "INSERT INTO drives (id, user_id, name, type, config_data, status, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [driveId, userId.toString(), name, type, serializedConfigData, DRIVE_STATUSES.ACTIVE, 0, now, now]
+                );
+            }
+
+            await cache.set(this.getDriveIdKey(driveData.id), driveData);
             await this.clearUserDriveCache(userId);
 
             // 更新活跃网盘列表

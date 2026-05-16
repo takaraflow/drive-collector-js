@@ -208,6 +208,7 @@ describe("D1 Service", () => {
 
     test("should log param types but not values for 400 error", async () => {
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
         
         const errorBody = { success: false, errors: [{code: 7000, message: "Type error"}] };
         mockFetch.mockResolvedValue({
@@ -218,9 +219,18 @@ describe("D1 Service", () => {
             json: () => Promise.resolve(errorBody)
         });
 
+        const secretParam = "plain-secret-token";
         const params = [1, "test", { a: 1 }, null, undefined];
-        await expect(d1._execute("SELECT ?", params)).rejects.toThrow("D1 HTTP 400 [7000]: Type error");
+        await expect(d1._execute("SELECT ?", [...params, secretParam])).rejects.toThrow("D1 HTTP 400 [7000]: Type error");
+
+        const logs = [
+          ...consoleSpy.mock.calls,
+          ...consoleLogSpy.mock.calls
+        ].flat().join(" ");
+        expect(logs).not.toContain(secretParam);
+        expect(logs).not.toContain('"test"');
         
+        consoleLogSpy.mockRestore();
         consoleSpy.mockRestore();
     });
   });
@@ -286,15 +296,17 @@ describe("D1 Service", () => {
   });
 
   describe("batch", () => {
-    test("should execute a batch of statements concurrently and return settled results", async () => {
-      const mockResult1 = { result: [{ results: [{ id: 1 }] }] };
-      const mockError = new Error("Some error");
-      
-      // Spy on the prototype to intercept all calls
-      const D1Service = d1.constructor;
-      vi.spyOn(D1Service.prototype, "_execute")
-          .mockResolvedValueOnce(mockResult1)
-          .mockRejectedValueOnce(mockError);
+    test("should send D1 batch as one ordered request and expose statement failures", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          result: [
+            { success: true, meta: { changes: 1 } },
+            { success: false, error: { message: "Some error" } }
+          ]
+        })
+      });
 
       const statements = [
         { sql: "UPDATE users SET status = ?", params: ["active"] },
@@ -303,11 +315,51 @@ describe("D1 Service", () => {
       
       const results = await d1.batch(statements);
 
-      expect(D1Service.prototype._execute).toHaveBeenCalledTimes(2);
+      expect(mockFetch).toHaveBeenCalledWith(
+        d1.apiUrl,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify(statements)
+        })
+      );
       expect(results).toHaveLength(2);
-      expect(results[0]).toEqual({ success: true, result: mockResult1 });
-      expect(results[1]).toEqual({ success: false, error: mockError });
+      expect(results[0]).toEqual(expect.objectContaining({ success: true, changes: 1, index: 0 }));
+      expect(results[1]).toEqual(expect.objectContaining({ success: false, index: 1 }));
       expect(results[1].error.message).toBe("Some error");
+    });
+
+    test("should retry transient D1 failures for batch requests", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          statusText: "Internal Server Error",
+          text: () => Promise.resolve(JSON.stringify({ success: false, errors: [{ message: "temporary" }] }))
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({
+            success: true,
+            result: [{ success: true, meta: { changes: 1 } }]
+          })
+        });
+
+      const statements = [{ sql: "INSERT INTO tasks (id) VALUES (?)", params: ["task-1"] }];
+
+      const results = await d1.batch(statements);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        d1.apiUrl,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify(statements)
+        })
+      );
+      expect(results).toEqual([
+        expect.objectContaining({ success: true, changes: 1, index: 0 })
+      ]);
     });
   });
 });

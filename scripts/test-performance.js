@@ -50,7 +50,11 @@ class TestPerformanceMonitor {
 
                 // 解析输出获取详细信息
                 this.analyzeResults(output, duration, code);
-                resolve();
+                if (code === 0) {
+                    resolve();
+                } else {
+                    reject(new Error(`Test command failed with exit code ${code}`));
+                }
             });
 
             testProcess.on('error', (err) => {
@@ -245,4 +249,7 @@ async function main() {
     await monitor.runTests();
 }
 
-main().catch(console.error);
+main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+});

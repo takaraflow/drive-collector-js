@@ -11,6 +11,51 @@ import { readFileSync, existsSync } from 'fs';
 import https from 'https';
 import crypto from 'crypto';
 
+const VALID_COMMANDS = new Set(['full', 'pipeline', 'validate', 'sync', 'quick', 'lint', 'test', 'build']);
+
+const MODE_PLANS = {
+  full: ['validate', 'install', 'lint', 'test', 'docker'],
+  'lint-only': ['validate', 'install', 'lint'],
+  'test-only': ['validate', 'install', 'test'],
+  'build-only': ['validate', 'install', 'docker'],
+  sync: ['validate', 'static'],
+  quick: ['validate', 'static']
+};
+
+function normalizeCommand(command = 'full') {
+  if (!VALID_COMMANDS.has(command)) {
+    throw new Error(`未知 CI 命令: ${command}`);
+  }
+  return command === 'pipeline' ? 'full' : command;
+}
+
+function resolveCiMode(command, env = process.env) {
+  const normalizedCommand = normalizeCommand(command);
+  const commandModeMap = {
+    full: env.CI_MODE || 'full',
+    lint: 'lint-only',
+    test: 'test-only',
+    build: 'build-only',
+    sync: 'sync',
+    quick: 'quick',
+    validate: 'validate'
+  };
+
+  const mode = commandModeMap[normalizedCommand];
+  if (!mode) {
+    throw new Error(`无法解析 CI 命令: ${command}`);
+  }
+  if (mode !== 'validate' && !MODE_PLANS[mode]) {
+    throw new Error(`未知 CI_MODE: ${mode}`);
+  }
+  return mode;
+}
+
+function getCiPlan(command, env = process.env) {
+  const mode = resolveCiMode(command, env);
+  return mode === 'validate' ? ['validate'] : MODE_PLANS[mode];
+}
+
 /**
  * GitHub App 认证管理器
  * 负责生成 JWT 并获取 Installation Access Token
@@ -219,6 +264,31 @@ class DockerManager {
       console.error(`[DEBUG] error:`, error);
       throw error;
     }
+  }
+
+  buildSmoke(targetEnv) {
+    const tag = `drive-collector-bot:ci-${targetEnv.id}`;
+    const buildArgs = [
+      'build',
+      '.',
+      '--file',
+      'Dockerfile',
+      '--build-arg',
+      `NODE_ENV=${targetEnv.id}`,
+      '--tag',
+      tag
+    ];
+
+    if (process.env.CI_DOCKER_PLATFORM) {
+      buildArgs.splice(4, 0, '--platform', process.env.CI_DOCKER_PLATFORM);
+    }
+
+    console.log(`🐳 Docker: 构建镜像 smoke test (${tag})...`);
+    const result = spawnSync('docker', buildArgs, { stdio: 'inherit', encoding: 'utf8' });
+    if (result.status !== 0) {
+      throw new Error(`Docker smoke build failed with status ${result.status}`);
+    }
+    console.log('✅ Docker smoke build 成功');
   }
 
   async login() {
@@ -438,46 +508,87 @@ class UnifiedCIScript {
     }
   }
 
+  shouldRun(plan, step) {
+    return plan.includes(step);
+  }
+
+  installDependencies() {
+    this.executeStep('Install Dependencies', 'npm ci');
+  }
+
+  runStaticQualityChecks() {
+    this.executeStep('Manifest Duplicate Check', 'npm run check:manifest:duplicates');
+    this.executeStep('Environment Manifest Check', 'npm run check:env');
+    this.executeStep('JavaScript Syntax Check', "git ls-files '*.js' ':!:coverage/**' ':!:node_modules/**' | xargs -n 1 node --check");
+  }
+
+  runLintChecks() {
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+    if (pkg.scripts && pkg.scripts.lint) {
+      this.executeStep('Linting', 'npm run lint');
+      return;
+    }
+    this.runStaticQualityChecks();
+  }
+
+  runTests() {
+    this.executeStep('Tests with Coverage Gate', 'npm run test:coverage');
+  }
+
+  async runDockerBuildGate({ publish = false } = {}) {
+    console.log('\n🔹 [Step] Docker Build Gate...');
+    const dockerStart = Date.now();
+
+    if (publish) {
+      await this.dockerManager.login();
+      await this.dockerManager.buildAndPush(this.targetEnv);
+    } else {
+      this.dockerManager.buildSmoke(this.targetEnv);
+    }
+
+    this.recordMetric('Docker', (Date.now() - dockerStart) / 1000);
+  }
+
+  shouldPublishDocker() {
+    return process.env.CI_DOCKER_PUSH === 'true' ||
+      (
+        !this.envManager.context.isLocal &&
+        this.envManager.context.eventName !== 'pull_request' &&
+        (this.envManager.context.ref === 'refs/heads/main' || this.envManager.context.ref.startsWith('refs/tags/'))
+      );
+  }
+
   async runFullPipeline() {
     console.log(`🚀 启动流水线 | 环境: ${this.targetEnv.name} (${this.targetEnv.id}) | 模式: ${this.envManager.context.isLocal ? 'Local' : 'CI'}`);
-    
+    const command = process.env.CI_COMMAND || 'full';
+    const plan = getCiPlan(command, process.env);
+    console.log(`📋 执行计划: ${plan.join(' -> ')}`);
+
     let success = true;
 
     try {
-        // 1. Validate
-        this.executeStep('Manifest Validation', 'node scripts/ci-unified.js validate');
-
-        // 2. Install
-        const installCmd = this.envManager.context.isLocal ? 'npm install' : 'npm ci';
-        this.executeStep('Install Dependencies', installCmd);
-
-        // 3. Lint
-        // 检查是否有 lint 脚本
-        const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
-        if (pkg.scripts && pkg.scripts.lint) {
-            this.executeStep('Linting', 'npm run lint');
+        if (this.shouldRun(plan, 'validate')) {
+          this.executeStep('Manifest Validation', 'node scripts/ci-unified.js validate');
         }
 
-        // 4. Test
-        this.executeStep('Tests', 'npm run test:coverage');
+        if (this.shouldRun(plan, 'install')) {
+          this.installDependencies();
+        }
 
-        // 5. Docker Build & Publish (仅在 push 到主分支或 Tag 时，或者强制开启)
-        // 简单的逻辑：CI环境且是非PR触发，或者本地环境（默认构建但不推送）
-        const shouldBuildDocker = process.env.CI_BUILD_DOCKER === 'true' ||
-            this.envManager.context.isLocal ||
-            (
-                !this.envManager.context.isLocal &&
-                this.envManager.context.eventName !== 'pull_request'
-            );
+        if (this.shouldRun(plan, 'static')) {
+          this.runStaticQualityChecks();
+        }
 
-        if (shouldBuildDocker) {
-            console.log('\n🔹 [Step] Docker Pipeline...');
-            const dockerStart = Date.now();
-            await this.dockerManager.login();
-            await this.dockerManager.buildAndPush(this.targetEnv);
-            this.recordMetric('Docker', (Date.now() - dockerStart) / 1000);
-        } else {
-            console.log('\nℹ️ 跳过 Docker 构建 (条件不满足)');
+        if (this.shouldRun(plan, 'lint')) {
+          this.runLintChecks();
+        }
+
+        if (this.shouldRun(plan, 'test')) {
+          this.runTests();
+        }
+
+        if (this.shouldRun(plan, 'docker')) {
+          await this.runDockerBuildGate({ publish: command === 'full' && this.shouldPublishDocker() });
         }
 
     } catch (error) {
@@ -509,26 +620,42 @@ class UnifiedCIScript {
         process.exit(1);
     }
   }
+
+  async runCommand(command) {
+    const normalizedCommand = normalizeCommand(command);
+
+    if (normalizedCommand === 'validate') {
+      this.validateManifest();
+      return;
+    }
+
+    process.env.CI_COMMAND = normalizedCommand;
+    await this.runFullPipeline();
+  }
 }
 
 // Entry Point
-const script = new UnifiedCIScript();
-const args = process.argv.slice(2);
-const command = args[0];
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const script = new UnifiedCIScript();
+  const args = process.argv.slice(2);
+  const command = args[0] || 'full';
 
-if (command === 'validate') {
-    script.validateManifest();
-} else if (command === 'pipeline' || command === 'full') {
-    script.runFullPipeline();
-} else {
-    // 默认行为或帮助
+  script.runCommand(command).catch((error) => {
+    console.error(`❌ ${error.message}`);
     console.log(`
 Usage: node scripts/ci-unified.js [command]
 
 Commands:
-  pipeline    运行完整流水线 (Install -> Lint -> Test -> Docker -> Notify)
-  validate    仅运行元数据验证
+  full        运行完整流水线
+  lint        运行静态质量门禁
+  test        运行测试和覆盖率门禁
+  build       运行 Docker build smoke
+  sync        运行 manifest 同步前置门禁
+  quick       运行快速静态门禁
+  validate    仅运行 manifest 版本验证
 `);
-    // 如果没有参数，也什么都不做，防止报错，但在 CI 中通常会明确调用
-    if (!command) process.exit(1);
+    process.exit(1);
+  });
 }
+
+export { getCiPlan, normalizeCommand, resolveCiMode };

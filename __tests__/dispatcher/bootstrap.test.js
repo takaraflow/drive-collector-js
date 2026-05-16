@@ -1,281 +1,264 @@
-vi.mock('../../src/services/telegram.js', () => {
+const originalNodeEnv = process.env.NODE_ENV;
+
+function createMocks() {
   const mockClient = {
     start: vi.fn(),
     disconnect: vi.fn(),
-    addEventHandler: vi.fn(),
+    addEventHandler: vi.fn()
   };
-  
+
   return {
-    client: mockClient,
-    getClient: vi.fn().mockResolvedValue(mockClient),
-    saveSession: vi.fn(),
-    clearSession: vi.fn(),
-    resetClientSession: vi.fn(),
-    setConnectionStatusCallback: vi.fn(),
-    startTelegramWatchdog: vi.fn(),
+    telegram: {
+      client: mockClient,
+      getClient: vi.fn().mockResolvedValue(mockClient),
+      saveSession: vi.fn(),
+      clearSession: vi.fn(),
+      resetClientSession: vi.fn(),
+      setConnectionStatusCallback: vi.fn(),
+      startTelegramWatchdog: vi.fn()
+    },
+    messageHandler: {
+      MessageHandler: {
+        handleEvent: vi.fn(),
+        init: vi.fn()
+      }
+    },
+    instanceCoordinator: {
+      instanceCoordinator: {
+        acquireLock: vi.fn(),
+        hasLock: vi.fn()
+      }
+    },
+    config: {
+      config: {
+        botToken: 'mock_token',
+        ownerId: 'owner_id',
+        redis: { url: 'redis://localhost:6379' }
+      },
+      getConfig: vi.fn().mockReturnValue({
+        botToken: 'mock_token',
+        ownerId: 'owner_id',
+        redis: { url: 'redis://localhost:6379' }
+      }),
+      initConfig: vi.fn().mockResolvedValue({})
+    },
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+      withModule: vi.fn().mockReturnThis(),
+      withContext: vi.fn().mockReturnThis()
+    }
   };
-});
+}
 
-vi.mock('../../src/dispatcher/MessageHandler.js', () => ({
-  MessageHandler: {
-    handleEvent: vi.fn(),
-    init: vi.fn(),
-  }
-}));
+async function loadBootstrap() {
+  const mocks = createMocks();
 
-vi.mock('../../src/services/InstanceCoordinator.js', () => ({
-  instanceCoordinator: {
-    acquireLock: vi.fn(),
-    hasLock: vi.fn(),
-  }
-}));
+  vi.doMock('../../src/services/telegram.js', () => mocks.telegram);
+  vi.doMock('../../src/dispatcher/MessageHandler.js', () => mocks.messageHandler);
+  vi.doMock('../../src/services/InstanceCoordinator.js', () => mocks.instanceCoordinator);
+  vi.doMock('../../src/config/index.js', () => mocks.config);
+  vi.doMock('../../src/services/logger/index.js', () => ({
+    default: mocks.logger,
+    logger: mocks.logger,
+    setInstanceIdProvider: vi.fn()
+  }));
 
-vi.mock('../../src/config/index.js', () => ({
-  config: {
-    botToken: 'test-bot-token'
-  }
-}));
-
-const mockLogger = {
-  info: vi.fn(),
-  warn: vi.fn(),
-  error: vi.fn(),
-  debug: vi.fn(),
-  withModule: vi.fn().mockReturnThis(),
-  withContext: vi.fn().mockReturnThis()
-};
-
-vi.mock('../../src/services/logger/index.js', () => ({
-   default: mockLogger,
-   logger: mockLogger
-}));
-
-// Mock config/index.js explicitly
-vi.mock('../../src/config/index.js', () => ({
-  config: {
-    botToken: 'mock_token',
-    ownerId: 'owner_id',
-    redis: {
-      url: 'redis://localhost:6379'
-    }
-  },
-  getConfig: vi.fn().mockReturnValue({
-    botToken: 'mock_token',
-    ownerId: 'owner_id',
-    redis: {
-      url: 'redis://localhost:6379'
-    }
-  }),
-  initConfig: vi.fn().mockResolvedValue({})
-}));
-
-const { startDispatcher } = await import('../../src/dispatcher/bootstrap.js');
+  const { startDispatcher } = await import('../../src/dispatcher/bootstrap.js');
+  return { startDispatcher, ...mocks };
+}
 
 describe('Dispatcher Bootstrap', () => {
+  let originalUncaughtExceptionListeners = [];
+
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
-    vi.spyOn(global, 'setTimeout').mockImplementation((fn) => fn());
-    vi.spyOn(global, 'setInterval').mockImplementation(() => {});
+    vi.useFakeTimers();
+    process.env.NODE_ENV = 'test';
+    originalUncaughtExceptionListeners = process.listeners('uncaughtException');
   });
 
-  it('should start successfully when lock acquired', async () => {
-    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-    mockInstanceCoordinator.hasLock.mockResolvedValue(false);
-    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
+  afterEach(() => {
+    for (const listener of process.listeners('uncaughtException')) {
+      if (!originalUncaughtExceptionListeners.includes(listener)) {
+        process.off('uncaughtException', listener);
+      }
+    }
+    vi.doUnmock('../../src/services/telegram.js');
+    vi.doUnmock('../../src/dispatcher/MessageHandler.js');
+    vi.doUnmock('../../src/services/InstanceCoordinator.js');
+    vi.doUnmock('../../src/config/index.js');
+    vi.doUnmock('../../src/services/logger/index.js');
+    vi.useRealTimers();
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
 
-    const mockTelegram = await import('../../src/services/telegram.js');
-    mockTelegram.client.start.mockResolvedValue();
-    mockTelegram.saveSession.mockResolvedValue();
+  async function finishStartupTimers() {
+    await vi.runOnlyPendingTimersAsync();
+  }
 
-    const mockMessageHandler = await import('../../src/dispatcher/MessageHandler.js');
+  test('should start successfully when lock acquired', async () => {
+    const { startDispatcher, telegram, instanceCoordinator, messageHandler } = await loadBootstrap();
+    instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(false);
+    instanceCoordinator.instanceCoordinator.acquireLock.mockResolvedValue(true);
+    telegram.client.start.mockResolvedValue();
+    telegram.saveSession.mockResolvedValue();
 
     await startDispatcher();
+    await finishStartupTimers();
 
-    expect(mockInstanceCoordinator.acquireLock).toHaveBeenCalledWith('telegram_client', 90, expect.objectContaining({ maxAttempts: 5 }));
-    expect(mockTelegram.client.start).toHaveBeenCalledWith({ botAuthToken: 'mock_token' });
-    expect(mockTelegram.saveSession).toHaveBeenCalled();
-    expect(mockTelegram.client.addEventHandler).toHaveBeenCalled();
-    expect(mockMessageHandler.MessageHandler.init).toHaveBeenCalled();
+    expect(instanceCoordinator.instanceCoordinator.acquireLock).toHaveBeenCalledWith(
+      'telegram_client',
+      90,
+      expect.objectContaining({ maxAttempts: 5 })
+    );
+    expect(telegram.client.start).toHaveBeenCalledWith({ botAuthToken: 'mock_token' });
+    expect(telegram.saveSession).toHaveBeenCalled();
+    expect(telegram.client.addEventHandler).toHaveBeenCalled();
+    expect(messageHandler.MessageHandler.init).toHaveBeenCalled();
   });
 
-  it('should not start client when lock not acquired', async () => {
-    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-    mockInstanceCoordinator.hasLock.mockResolvedValue(false);
-    mockInstanceCoordinator.acquireLock.mockResolvedValue(false);
-
-    const mockTelegram = await import('../../src/services/telegram.js');
+  test('should not start client when lock not acquired', async () => {
+    const { startDispatcher, telegram, instanceCoordinator } = await loadBootstrap();
+    instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(false);
+    instanceCoordinator.instanceCoordinator.acquireLock.mockResolvedValue(false);
 
     await startDispatcher();
+    await finishStartupTimers();
 
-    expect(mockTelegram.client.start).not.toHaveBeenCalled();
+    expect(telegram.client.start).not.toHaveBeenCalled();
   });
 
-  it('should handle AUTH_KEY_DUPLICATED error by clearing session and retry', async () => {
-    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
-    mockInstanceCoordinator.hasLock.mockResolvedValue(true);
-
-    const mockTelegram = await import('../../src/services/telegram.js');
-    mockTelegram.client.start
-      .mockRejectedValueOnce({
-        code: 406,
-        errorMessage: 'AUTH_KEY_DUPLICATED'
-      })
+  test('should handle AUTH_KEY_DUPLICATED error by resetting local session and retrying', async () => {
+    const { startDispatcher, telegram, instanceCoordinator } = await loadBootstrap();
+    instanceCoordinator.instanceCoordinator.acquireLock.mockResolvedValue(true);
+    instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(true);
+    telegram.client.start
+      .mockRejectedValueOnce({ code: 406, errorMessage: 'AUTH_KEY_DUPLICATED' })
       .mockResolvedValueOnce();
-
-    mockTelegram.clearSession.mockResolvedValue();
-    mockTelegram.resetClientSession.mockResolvedValue();
-
-    await startDispatcher();
-
-    expect(mockInstanceCoordinator.hasLock).toHaveBeenCalledWith("telegram_client");
-    // resetClientSession 应该被调用（本地重置）
-    expect(mockTelegram.resetClientSession).toHaveBeenCalled();
-    // clearSession 在第一次重试成功时不应该被调用
-    expect(mockTelegram.clearSession).not.toHaveBeenCalled();
-    expect(mockTelegram.client.start).toHaveBeenCalledTimes(2);
-  });
-
-  it('should stop retry if lock is lost during AUTH_KEY_DUPLICATED handling', async () => {
-    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
-    // 在检查锁时立即失去锁
-    mockInstanceCoordinator.hasLock.mockResolvedValue(false);
-
-    const mockTelegram = await import('../../src/services/telegram.js');
-    mockTelegram.client.start
-      .mockRejectedValueOnce({
-        code: 406,
-        errorMessage: 'AUTH_KEY_DUPLICATED'
-      });
-
-    mockTelegram.clearSession.mockResolvedValue();
-    mockTelegram.resetClientSession.mockResolvedValue();
+    telegram.clearSession.mockResolvedValue();
+    telegram.resetClientSession.mockResolvedValue();
 
     await startDispatcher();
+    await finishStartupTimers();
 
-    expect(mockInstanceCoordinator.hasLock).toHaveBeenCalledWith("telegram_client");
-    // 在检查锁时就失败了，不应该调用 resetClientSession
-    expect(mockTelegram.resetClientSession).not.toHaveBeenCalled();
-    expect(mockTelegram.clearSession).not.toHaveBeenCalled();
-    // 应该只调用一次 start
-    expect(mockTelegram.client.start).toHaveBeenCalledTimes(1);
+    expect(instanceCoordinator.instanceCoordinator.hasLock).toHaveBeenCalledWith('telegram_client');
+    expect(telegram.resetClientSession).toHaveBeenCalled();
+    expect(telegram.clearSession).not.toHaveBeenCalled();
+    expect(telegram.client.start).toHaveBeenCalledTimes(2);
   });
 
-  it('should clear global session after multiple AUTH_KEY_DUPLICATED failures', async () => {
-    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
-    mockInstanceCoordinator.hasLock.mockResolvedValue(true);
-
-    const mockTelegram = await import('../../src/services/telegram.js');
-    // 模拟三次失败
-    mockTelegram.client.start
-      .mockRejectedValueOnce({
-        code: 406,
-        errorMessage: 'AUTH_KEY_DUPLICATED'
-      })
-      .mockRejectedValueOnce({
-        code: 406,
-        errorMessage: 'AUTH_KEY_DUPLICATED'
-      })
-      .mockRejectedValueOnce({
-        code: 406,
-        errorMessage: 'AUTH_KEY_DUPLICATED'
-      });
-
-    mockTelegram.clearSession.mockResolvedValue();
-    mockTelegram.resetClientSession.mockResolvedValue();
+  test('should stop retry if lock is lost during AUTH_KEY_DUPLICATED handling', async () => {
+    const { startDispatcher, telegram, instanceCoordinator } = await loadBootstrap();
+    instanceCoordinator.instanceCoordinator.acquireLock.mockResolvedValue(true);
+    instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(false);
+    telegram.client.start.mockRejectedValueOnce({ code: 406, errorMessage: 'AUTH_KEY_DUPLICATED' });
+    telegram.clearSession.mockResolvedValue();
+    telegram.resetClientSession.mockResolvedValue();
 
     await startDispatcher();
+    await finishStartupTimers();
 
-    expect(mockInstanceCoordinator.hasLock).toHaveBeenCalledWith("telegram_client");
-    // resetClientSession 应该被调用三次（每次失败都调用）
-    expect(mockTelegram.resetClientSession).toHaveBeenCalledTimes(3);
-    // clearSession 应该在第三次重试失败后被调用（retryCount = 3，达到 maxRetries）
-    expect(mockTelegram.clearSession).toHaveBeenCalled();
-    // 三次失败后，retryCount = 3，不满足 retryCount < maxRetries，循环退出
-    expect(mockTelegram.client.start).toHaveBeenCalledTimes(3);
+    expect(instanceCoordinator.instanceCoordinator.hasLock).toHaveBeenCalledWith('telegram_client');
+    expect(telegram.resetClientSession).not.toHaveBeenCalled();
+    expect(telegram.clearSession).not.toHaveBeenCalled();
+    expect(telegram.client.start).toHaveBeenCalledTimes(1);
   });
 
-  it('should handle connection disconnection and retry', async () => {
-    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-    mockInstanceCoordinator.hasLock.mockResolvedValue(false);
-    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
+  test('should clear global session after repeated AUTH_KEY_DUPLICATED failures', async () => {
+    const { startDispatcher, telegram, instanceCoordinator } = await loadBootstrap();
+    instanceCoordinator.instanceCoordinator.acquireLock.mockResolvedValue(true);
+    instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(true);
+    telegram.client.start
+      .mockRejectedValueOnce({ code: 406, errorMessage: 'AUTH_KEY_DUPLICATED' })
+      .mockRejectedValueOnce({ code: 406, errorMessage: 'AUTH_KEY_DUPLICATED' })
+      .mockRejectedValueOnce({ code: 406, errorMessage: 'AUTH_KEY_DUPLICATED' });
+    telegram.clearSession.mockResolvedValue();
+    telegram.resetClientSession.mockResolvedValue();
 
-    const mockTelegram = await import('../../src/services/telegram.js');
-    mockTelegram.client.start.mockResolvedValue();
-    mockTelegram.saveSession.mockResolvedValue();
+    await startDispatcher();
+    await finishStartupTimers();
 
-    // 获取 setConnectionStatusCallback 的回调函数
+    expect(telegram.resetClientSession).toHaveBeenCalledTimes(3);
+    expect(telegram.clearSession).toHaveBeenCalled();
+    expect(telegram.client.start).toHaveBeenCalledTimes(3);
+  });
+
+  test('should reconnect after connection loss while client is active', async () => {
+    const { startDispatcher, telegram, instanceCoordinator } = await loadBootstrap();
+    instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(false);
+    instanceCoordinator.instanceCoordinator.acquireLock.mockResolvedValue(true);
+    telegram.client.start.mockResolvedValue();
+    telegram.saveSession.mockResolvedValue();
+
     let connectionCallback;
-    mockTelegram.setConnectionStatusCallback.mockImplementation((callback) => {
+    telegram.setConnectionStatusCallback.mockImplementation((callback) => {
       connectionCallback = callback;
     });
 
     await startDispatcher();
-
-    // 模拟连接断开
+    await finishStartupTimers();
     connectionCallback(false);
+    await vi.advanceTimersByTimeAsync(3000);
 
-    // 验证重试逻辑被触发（通过 setTimeout）
-    expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 3000);
+    expect(instanceCoordinator.instanceCoordinator.acquireLock).toHaveBeenCalledTimes(2);
   });
 
-  it('should stop retrying after max connection retries', async () => {
-    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-    mockInstanceCoordinator.hasLock.mockResolvedValue(false);
-    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
-
-    const mockTelegram = await import('../../src/services/telegram.js');
-    mockTelegram.client.start.mockResolvedValue();
-    mockTelegram.saveSession.mockResolvedValue();
+  test('should stop reconnecting after max connection retries', async () => {
+    const { startDispatcher, telegram, instanceCoordinator } = await loadBootstrap();
+    instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(false);
+    instanceCoordinator.instanceCoordinator.acquireLock.mockResolvedValue(true);
+    telegram.client.start.mockResolvedValue();
+    telegram.saveSession.mockResolvedValue();
 
     let connectionCallback;
-    mockTelegram.setConnectionStatusCallback.mockImplementation((callback) => {
+    telegram.setConnectionStatusCallback.mockImplementation((callback) => {
       connectionCallback = callback;
     });
 
     await startDispatcher();
+    await finishStartupTimers();
 
-    // 模拟连接断开，验证重试逻辑被触发
-    connectionCallback(false);
+    for (let i = 0; i < 6; i++) {
+      connectionCallback(false);
+      await vi.advanceTimersByTimeAsync(3000);
+    }
 
-    // 验证 setTimeout 被调用（重试逻辑）
-    expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 3000);
+    expect(instanceCoordinator.instanceCoordinator.acquireLock).toHaveBeenCalledTimes(6);
   });
 
-  it('should handle "Not connected" uncaught exception', async () => {
-    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-    mockInstanceCoordinator.hasLock.mockResolvedValue(false);
-    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
-
-    const mockTelegram = await import('../../src/services/telegram.js');
-    mockTelegram.client.start.mockResolvedValue();
-    mockTelegram.saveSession.mockResolvedValue();
+  test('should handle "Not connected" uncaught exception', async () => {
+    const { startDispatcher, telegram, instanceCoordinator, logger } = await loadBootstrap();
+    instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(false);
+    instanceCoordinator.instanceCoordinator.acquireLock.mockResolvedValue(true);
+    telegram.client.start.mockResolvedValue();
+    telegram.saveSession.mockResolvedValue();
 
     await startDispatcher();
+    await finishStartupTimers();
+    process.emit('uncaughtException', new Error('Not connected'));
 
-    // 模拟 "Not connected" 错误
-    const error = new Error('Not connected');
-    process.emit('uncaughtException', error);
-
-    // 验证警告日志被调用
-    expect(mockLogger.warn).toHaveBeenCalledWith('⚠️ 捕获到 \'Not connected\' 错误，正在重置客户端状态');
+    expect(logger.warn).toHaveBeenCalledWith("⚠️ 捕获到 'Not connected' 错误，正在重置客户端状态");
   });
 
-  it('should start Telegram watchdog', async () => {
-    const { instanceCoordinator: mockInstanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-    mockInstanceCoordinator.hasLock.mockResolvedValue(false);
-    mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
-
-    const mockTelegram = await import('../../src/services/telegram.js');
-    mockTelegram.client.start.mockResolvedValue();
-    mockTelegram.saveSession.mockResolvedValue();
+  test('should start Telegram watchdog', async () => {
+    const { startDispatcher, telegram, instanceCoordinator, logger } = await loadBootstrap();
+    instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(false);
+    instanceCoordinator.instanceCoordinator.acquireLock.mockResolvedValue(true);
+    telegram.client.start.mockResolvedValue();
+    telegram.saveSession.mockResolvedValue();
 
     await startDispatcher();
+    await finishStartupTimers();
 
-    // 验证看门狗被启动
-    expect(mockTelegram.startTelegramWatchdog).toHaveBeenCalled();
-    expect(mockLogger.info).toHaveBeenCalledWith('🐶 Telegram 看门狗已启动');
+    expect(telegram.startTelegramWatchdog).toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith('🐶 Telegram 看门狗已启动');
   });
 });

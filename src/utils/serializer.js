@@ -3,6 +3,20 @@
  * 用于将任意数据安全地转换为字符串，防止循环引用、超长数据等问题
  */
 
+export const REDACTED_VALUE = '[REDACTED]';
+
+const SENSITIVE_KEY_PATTERN = /(token|password|passwd|pwd|secret|key|auth|authorization|cookie|configdata|credential|private|license)/i;
+
+export const isSensitiveKey = (key) => {
+  if (key === undefined || key === null) return false;
+  const normalizedKey = String(key).replace(/[_\-.]/g, '');
+  return SENSITIVE_KEY_PATTERN.test(normalizedKey);
+};
+
+export const redactValueForKey = (key, value) => {
+  return isSensitiveKey(key) && value !== undefined && value !== null ? REDACTED_VALUE : value;
+};
+
 /**
  * 限制对象字段数量
  * @param {Object} obj - 要限制的对象
@@ -45,7 +59,7 @@ export const serializeError = (err) => {
   // Add any additional enumerable properties
   for (const key in err) {
     if (err.hasOwnProperty(key) && !(key in serialized)) {
-      serialized[key] = err[key];
+      serialized[key] = redactValueForKey(key, err[key]);
     }
   }
   return serialized;
@@ -60,7 +74,11 @@ export const serializeError = (err) => {
  * @param {WeakSet} seen - 循环引用追踪
  * @returns {any} - 裁剪后的对象
  */
-export const pruneData = (obj, maxDepth = 2, maxKeys = 5, currentDepth = 0, seen = new WeakSet()) => {
+export const pruneData = (obj, maxDepth = 2, maxKeys = 5, currentDepth = 0, seen = new WeakSet(), currentKey = '') => {
+  if (isSensitiveKey(currentKey)) {
+      return obj === undefined || obj === null ? obj : REDACTED_VALUE;
+  }
+
   if (currentDepth >= maxDepth) {
       if (typeof obj === 'object' && obj !== null) {
           return '[Truncated: Max Depth]';
@@ -78,7 +96,7 @@ export const pruneData = (obj, maxDepth = 2, maxKeys = 5, currentDepth = 0, seen
   
   if (Array.isArray(obj)) {
       // 更严格的数组处理：最多保留 5 项，每项深度递减
-      const prunedArray = obj.slice(0, maxKeys).map(item => pruneData(item, maxDepth, maxKeys, currentDepth + 1, seen));
+      const prunedArray = obj.slice(0, maxKeys).map(item => pruneData(item, maxDepth, maxKeys, currentDepth + 1, seen, currentKey));
       if (obj.length > maxKeys) {
           prunedArray.push(`[Truncated: ${obj.length - maxKeys} items]`);
       }
@@ -88,7 +106,7 @@ export const pruneData = (obj, maxDepth = 2, maxKeys = 5, currentDepth = 0, seen
   // Error 对象特殊处理
   if (obj instanceof Error) {
       const serialized = serializeError(obj);
-      return pruneData(serialized, maxDepth, maxKeys, currentDepth, seen);
+      return pruneData(serialized, maxDepth, maxKeys, currentDepth, seen, currentKey);
   }
 
   const newObj = {};
@@ -100,7 +118,7 @@ export const pruneData = (obj, maxDepth = 2, maxKeys = 5, currentDepth = 0, seen
               newObj['_truncated'] = `... ${Object.keys(obj).length - maxKeys} more keys`;
               break;
           }
-          newObj[key] = pruneData(obj[key], maxDepth, maxKeys, currentDepth + 1, seen);
+          newObj[key] = pruneData(obj[key], maxDepth, maxKeys, currentDepth + 1, seen, key);
           keyCount++;
       }
   }

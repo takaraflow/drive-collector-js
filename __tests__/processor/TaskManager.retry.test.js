@@ -109,7 +109,12 @@ describe('TaskManager - Retry', () => {
         const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
         const { queueService } = await import('../../src/services/QueueService.js');
         const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
-        TaskRepository.transitionStatus.mockResolvedValue({ changed: true, blocked: false, toStatus: 'queued' });
+        TaskRepository.transitionStatus.mockResolvedValue({
+            changed: true,
+            blocked: false,
+            toStatus: 'queued',
+            queueAttempt: 'queued:1700000000000'
+        });
 
         TaskRepository.findById.mockResolvedValue({
             id: 'task-123', user_id: 'u1', chat_id: 'c1', msg_id: 'm1',
@@ -120,7 +125,10 @@ describe('TaskManager - Retry', () => {
 
         expect(instanceCoordinator.releaseTaskLock).toHaveBeenCalledWith('task-123');
         expect(queueService.enqueueDownloadTask).toHaveBeenCalledWith('task-123', expect.objectContaining({
-            _meta: expect.objectContaining({ triggerSource: 'manual-retry' })
+            _meta: expect.objectContaining({
+                triggerSource: 'manual-retry',
+                queueAttempt: 'queued:1700000000000'
+            })
         }));
         expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
             'task-123',
@@ -206,12 +214,21 @@ describe('TaskManager - Retry', () => {
 
     it('should allow retry for already queued tasks (stuck recovery)', async () => {
         const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
-        TaskRepository.transitionStatus.mockResolvedValue({ changed: true, blocked: false, toStatus: 'queued' });
+        TaskRepository.transitionStatus.mockResolvedValue({
+            changed: true,
+            blocked: false,
+            toStatus: 'queued',
+            queueAttempt: 'queued:1700000000001'
+        });
         TaskRepository.findById.mockResolvedValue({
             id: 'task-123', user_id: 'u1', status: 'queued'
         });
 
         const result = await TaskManager.retryTask('task-123');
         expect(result).toEqual({ success: true, statusCode: 200, message: "Task re-enqueued" });
+        const { queueService } = await import('../../src/services/QueueService.js');
+        expect(queueService.enqueueDownloadTask).toHaveBeenCalledWith('task-123', expect.objectContaining({
+            _meta: expect.objectContaining({ queueAttempt: 'queued:1700000000001' })
+        }));
     });
 });

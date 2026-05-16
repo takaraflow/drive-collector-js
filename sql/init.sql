@@ -54,8 +54,7 @@ CREATE TABLE IF NOT EXISTS drives (
     status TEXT DEFAULT 'active' CHECK (status IN ('active', 'deleted')),
     is_default INTEGER DEFAULT 0 CHECK (is_default IN (0, 1)),
     created_at INTEGER,
-    updated_at INTEGER,
-    UNIQUE(user_id, type)
+    updated_at INTEGER
 );
 
 -- 网盘配置表索引
@@ -65,6 +64,7 @@ CREATE INDEX IF NOT EXISTS idx_drives_type ON drives(type);
 CREATE INDEX IF NOT EXISTS idx_drives_user_status ON drives(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_drives_user_default ON drives(user_id, is_default);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_drives_one_default_per_user ON drives(user_id) WHERE is_default = 1 AND status = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_drives_one_active_type_per_user ON drives(user_id, type) WHERE status = 'active';
 
 -- 4. 系统设置表：用于存储系统配置项和用户自定义设置
 -- 注意：SettingsRepository 使用 Cache 作为主存储，此表仅作为备份或特殊场景使用
@@ -98,3 +98,13 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 
 CREATE INDEX IF NOT EXISTS idx_api_keys_token ON api_keys(token);
+
+-- 7. 用户角色表：用于权限控制
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id TEXT PRIMARY KEY,
+    role TEXT NOT NULL CHECK (role IN ('banned', 'user', 'trusted', 'admin')),
+    created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+    updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_roles_role ON user_roles(role);

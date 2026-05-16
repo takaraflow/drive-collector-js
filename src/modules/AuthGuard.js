@@ -29,6 +29,7 @@ const ACL = {
 };
 
 const roleRank = (role) => ROLE_ORDER.indexOf(role);
+const PERSISTED_ROLES = new Set(["banned", "user", "trusted", "admin"]);
 
 const isRoleAllowed = (role, allowedRoles) => {
     if (!allowedRoles || allowedRoles.length === 0) return true;
@@ -79,21 +80,16 @@ export const AuthGuard = {
         const now = Date.now();
         if (cached && now - cached.ts < CACHE_MS) return cached.role;
 
-        try {
-            const row = await d1.fetchOne("SELECT role FROM user_roles WHERE user_id = ?", [idStr]);
-            const role = row?.role || DEFAULT_ROLE;
-            this.roleCache.set(idStr, { role, ts: now });
-            
-            // Cleanup if cache is getting large
-            if (this.roleCache.size > MAX_ROLE_CACHE_SIZE) {
-                cleanupRoleCache(this.roleCache);
-            }
-            
-            return role;
-        } catch (error) {
-            log.error("Failed to fetch user role from DB:", error);
-            return DEFAULT_ROLE;
+        const row = await d1.fetchOne("SELECT role FROM user_roles WHERE user_id = ?", [idStr]);
+        const role = row?.role || DEFAULT_ROLE;
+        this.roleCache.set(idStr, { role, ts: now });
+
+        // Cleanup if cache is getting large
+        if (this.roleCache.size > MAX_ROLE_CACHE_SIZE) {
+            cleanupRoleCache(this.roleCache);
         }
+
+        return role;
     },
 
     async can(userId, action) {
@@ -104,8 +100,17 @@ export const AuthGuard = {
 
     async setRole(userId, role) {
         if (!userId) return false;
+        if (!PERSISTED_ROLES.has(role)) {
+            throw new Error(`Invalid role: ${role}`);
+        }
         try {
-            await d1.run("INSERT OR REPLACE INTO user_roles (user_id, role) VALUES (?, ?)", [userId.toString(), role]);
+            const now = Date.now();
+            await d1.run(
+                `INSERT INTO user_roles (user_id, role, created_at, updated_at)
+                 VALUES (?, ?, ?, ?)
+                 ON CONFLICT(user_id) DO UPDATE SET role = excluded.role, updated_at = excluded.updated_at`,
+                [userId.toString(), role, now, now]
+            );
             this.roleCache.delete(userId.toString());
             return true;
         } catch (error) {

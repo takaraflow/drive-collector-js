@@ -11,6 +11,32 @@ export const TASK_QUEUE_TRIGGER_SOURCES = Object.freeze({
     LOCAL_FILE_READY: "local-file-ready"
 });
 
+export const TASK_QUEUE_DEFAULT_ATTEMPT = "initial";
+
+export function normalizeTaskQueueAttempt(queueAttempt) {
+    if (queueAttempt === null || queueAttempt === undefined) return TASK_QUEUE_DEFAULT_ATTEMPT;
+    const normalized = String(queueAttempt).trim();
+    return normalized || TASK_QUEUE_DEFAULT_ATTEMPT;
+}
+
+export function buildTaskQueueIdempotencyKey(topic, type, taskId, queueAttempt = TASK_QUEUE_DEFAULT_ATTEMPT) {
+    return `${topic}:${type}:${taskId}:${normalizeTaskQueueAttempt(queueAttempt)}`;
+}
+
+export class TaskProcessingLockBusyError extends Error {
+    constructor(taskId, phase) {
+        super(`Task processing lock busy for ${phase} task ${taskId}`);
+        this.name = "TaskProcessingLockBusyError";
+        this.code = "TASK_PROCESSING_LOCK_BUSY";
+        this.taskId = taskId;
+        this.phase = phase;
+    }
+}
+
+export function isTaskProcessingLockBusyError(error) {
+    return error?.code === "TASK_PROCESSING_LOCK_BUSY" || error?.name === "TaskProcessingLockBusyError";
+}
+
 export function buildTaskQueueMeta(meta = {}, runtime = {}) {
     const existingMeta = meta && typeof meta === "object" ? meta : {};
     return {

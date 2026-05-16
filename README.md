@@ -142,7 +142,8 @@ Use [`act`](https://github.com/nektos/act) to run the CI and manifest-sync workf
 2. The small payloads inside `gha-events/` set the branch that the workflow sees (dev uses `refs/heads/feature/act-sim-dev`, pre uses `develop`, prod uses `main`; `sync-manifest` also fakes an edit to `manifest.json`). Edit them if you need to test another branch or event shape.
 3. Run `npm run gha:list` to see the jobs that `act` exposes.
 4. Use the provided npm helpers:
-   - `npm run gha:ci:dev`, `npm run gha:ci:pre`, `npm run gha:ci:prod` run the CI `build` job with the corresponding branch context.
+   - `npm run gha:dev`, `npm run gha:pre`, `npm run gha:prod` run the CI workflow (`lint`, `test`, and `docker-build`) with the corresponding branch context.
+   - `npm run ci:local:lint`, `npm run ci:local:test`, and `npm run ci:local:docker:build` run individual CI jobs when you want a narrower local check.
    - `npm run gha:sync-manifest` runs the `update-registry` job from the sync workflow (requires the GitHub App secrets mentioned above).
 
 Each helper passes `--secret-file .act.secrets`, the matching payload from `gha-events/`, and `--platform ubuntu-latest=catthehacker/ubuntu:act-latest`.

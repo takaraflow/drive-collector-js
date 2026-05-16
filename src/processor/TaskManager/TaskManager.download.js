@@ -4,7 +4,7 @@ import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { createHeartbeat, handleTaskCompletion, handleTaskFailure, escapeHTML } from "./TaskManager.utils.js";
 import { resolveInstanceBaseUrl } from "../../utils/instanceUrl.js";
 import { TASK_EVENTS } from "../../domain/task-state-machine.js";
-import { TASK_QUEUE_TRIGGER_SOURCES } from "../../domain/task-queue-contract.js";
+import { TASK_QUEUE_TRIGGER_SOURCES, TaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
 
 // 获取模块日志记录器
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager');
@@ -28,7 +28,7 @@ export async function downloadTask(task) {
         const lockAcquired = await instanceCoordinator.acquireTaskLock(id);
         if (!lockAcquired) {
             log.info("Task lock exists, skipping download", { taskId: id, instance: 'current' });
-            return;
+            throw new TaskProcessingLockBusyError(id, 'download');
         }
 
         let didActivate = false;
@@ -37,7 +37,7 @@ export async function downloadTask(task) {
             // Anti-reentrancy: Check if task is already being processed
             if (this.activeProcessors.has(id)) {
                 log.warn("Task already processing, skipping download", { taskId: id });
-                return;
+                throw new TaskProcessingLockBusyError(id, 'download');
             }
             this.activeProcessors.add(id);
             this.inFlightTasks.set(id, task);
@@ -160,7 +160,10 @@ async function _handleLocalFile(context, deps, task, info, fileName, localPath, 
             chatId: task.chatId,
             msgId: task.msgId,
             localPath: task.localPath,
-            _meta: { triggerSource: TASK_QUEUE_TRIGGER_SOURCES.LOCAL_FILE_READY }
+            _meta: {
+                triggerSource: TASK_QUEUE_TRIGGER_SOURCES.LOCAL_FILE_READY,
+                queueAttempt: transition.queueAttempt
+            }
         });
         log.info("Local file exists, triggered upload webhook", { taskId: task.id });
         return true;
@@ -349,7 +352,10 @@ async function _handleMTProtoDownload(context, deps, task, info, fileName, local
         chatId: task.chatId,
         msgId: task.msgId,
         localPath: task.localPath,
-        _meta: { triggerSource: TASK_QUEUE_TRIGGER_SOURCES.DOWNLOAD_COMPLETE }
+        _meta: {
+            triggerSource: TASK_QUEUE_TRIGGER_SOURCES.DOWNLOAD_COMPLETE,
+            queueAttempt: transition.queueAttempt
+        }
     });
     log.info("Download complete, triggered upload webhook", { taskId: task.id });
     return true;

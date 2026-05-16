@@ -254,9 +254,23 @@ export default class CloudQueueBase extends BaseQueue {
      * @returns {string} - 消息ID
      */
     _generateMessageId(topic, message) {
-        const content = typeof message === 'string' ? message : JSON.stringify(message);
+        const normalized = this._normalizeIdempotencyMessage(message);
+        const content = typeof normalized === 'string' ? normalized : JSON.stringify(normalized);
         const hash = crypto.createHash('md5').update(`${topic}:${content}`).digest('hex');
         return `msg_${hash}`;
+    }
+
+    _normalizeIdempotencyMessage(message) {
+        if (!message || typeof message !== 'object') return message;
+
+        const taskId = message.taskId;
+        const type = message.type;
+        if (taskId && type) {
+            return { taskId, type };
+        }
+
+        const { _meta, ...rest } = message;
+        return rest;
     }
 
     /**

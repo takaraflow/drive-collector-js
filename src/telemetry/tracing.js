@@ -22,6 +22,83 @@ let sdk = null;
 
 await hydrateEarlyRuntimeEnv({ requiredKeys: ['NEW_RELIC_LICENSE_KEY'] });
 
+const REDACTED_URL = '[REDACTED_TELEGRAM_BOT_URL]';
+const TELEGRAM_BOT_PATH_PATTERN = /\/bot[^/?#]+/i;
+const URL_ATTRIBUTE_KEYS = [
+    'http.url',
+    'url.full',
+    'url.path',
+    'url.query',
+    'http.target',
+    'http.route',
+    'http.request.method_original'
+];
+
+export function sanitizeTelegramBotUrl(value) {
+    if (typeof value !== 'string') return value;
+    if (!TELEGRAM_BOT_PATH_PATTERN.test(value)) return value;
+    return value.replace(TELEGRAM_BOT_PATH_PATTERN, '/bot[REDACTED]');
+}
+
+function sanitizeSpanUrlAttributes(span) {
+    if (!span || typeof span.setAttribute !== 'function') return;
+    URL_ATTRIBUTE_KEYS.forEach(key => {
+        span.setAttribute(key, REDACTED_URL);
+    });
+}
+
+function requestLooksLikeTelegramBot(value) {
+    return typeof value === 'string' && TELEGRAM_BOT_PATH_PATTERN.test(value);
+}
+
+function sanitizeHttpSpan(span, request) {
+    const requestUrl = [
+        request?.path,
+        request?.pathname,
+        request?.href,
+        request?.url,
+        request?.options?.path
+    ].find(requestLooksLikeTelegramBot);
+
+    if (requestUrl) {
+        sanitizeSpanUrlAttributes(span);
+    }
+}
+
+function sanitizeHttpStartSpan(request) {
+    const requestUrl = [
+        request?.path,
+        request?.pathname,
+        request?.href,
+        request?.url,
+        request?.options?.path
+    ].find(requestLooksLikeTelegramBot);
+
+    return requestUrl ? {
+        'http.url': REDACTED_URL,
+        'url.full': REDACTED_URL,
+        'url.path': REDACTED_URL,
+        'url.query': REDACTED_URL,
+        'http.target': REDACTED_URL
+    } : {};
+}
+
+function sanitizeUndiciSpan(span, request) {
+    const url = `${request?.origin || ''}${request?.path || ''}`;
+    if (requestLooksLikeTelegramBot(url)) {
+        sanitizeSpanUrlAttributes(span);
+    }
+}
+
+function sanitizeUndiciStartSpan(request) {
+    const url = `${request?.origin || ''}${request?.path || ''}`;
+    return requestLooksLikeTelegramBot(url) ? {
+        'url.full': REDACTED_URL,
+        'url.path': REDACTED_URL,
+        'url.query': REDACTED_URL
+    } : {};
+}
+
 /**
  * Gracefully shut down the OTel SDK, flushing pending spans and metrics.
  * @returns {Promise<void>}
@@ -137,9 +214,24 @@ if (!LICENSE_KEY) {
             new HttpInstrumentation({
                 // Ignore health check endpoints — they produce noise, not signal
                 ignoreIncomingPaths: ['/health', '/healthz', '/ready'],
+                startOutgoingSpanHook: sanitizeHttpStartSpan,
+                requestHook: sanitizeHttpSpan,
+                applyCustomAttributesOnSpan: sanitizeHttpSpan,
+                redactedQueryParams: [
+                    'token',
+                    'access_token',
+                    'auth',
+                    'authorization',
+                    'password',
+                    'secret',
+                    'key'
+                ],
             }),
             new IORedisInstrumentation(),
-            new UndiciInstrumentation(),
+            new UndiciInstrumentation({
+                startSpanHook: sanitizeUndiciStartSpan,
+                requestHook: sanitizeUndiciSpan,
+            }),
         ],
     });
 

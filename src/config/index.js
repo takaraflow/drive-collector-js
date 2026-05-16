@@ -1,5 +1,4 @@
 import { loadDotenv } from './dotenv.js';
-import crypto from 'crypto';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
@@ -7,6 +6,7 @@ import InfisicalSecretsProvider from '../services/secrets/InfisicalSecretsProvid
 import { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } from '../utils/envMapper.js';
 import { serviceConfigManager } from './ServiceConfigManager.js';
 import { ManifestBasedServiceReinitializer } from './ManifestBasedServiceReinitializer.js';
+import { redactValueForKey } from '../utils/serializer.js';
 
 // 保护重要环境变量不被 .env 覆盖
 const PROTECTED_ENV_VARS = ['NODE_ENV', 'INFISICAL_ENV', 'INFISICAL_TOKEN', 'INFISICAL_PROJECT_ID'];
@@ -52,6 +52,12 @@ function sanitizeValue(val) {
         return match[1];
     }
     return val.trim();
+}
+
+function sanitizeConfigChangeValue(key, value) {
+    if (value === undefined) return '(已删除)';
+    if (value === null || value === '') return '(空)';
+    return redactValueForKey(key, value);
 }
 
 function parseOptionalInt(value) {
@@ -121,11 +127,7 @@ function logConfigurationUpdate(changes, affectedServices) {
                       change.oldValue === undefined ? '新增' : '修改';
         
         console.log(`   ${index + 1}. ${icon} ${change.key} (${action})`);
-        if (change.newValue !== undefined) {
-            console.log(`      ${change.oldValue || '(空)'} → ${change.newValue}`);
-        } else {
-            console.log(`      ${change.oldValue} → (已删除)`);
-        }
+        console.log(`      ${sanitizeConfigChangeValue(change.key, change.oldValue)} → ${sanitizeConfigChangeValue(change.key, change.newValue)}`);
     });
     
     // 影响的服务
@@ -365,7 +367,8 @@ async function initializeInfisicalSecrets(clientId, clientSecret, projectId) {
             clientId: clientId,
             clientSecret: clientSecret,
             projectId: projectId,
-            envName: infisicalEnvName
+            envName: infisicalEnvName,
+            secretPath: process.env.INFISICAL_SECRET_PATH || '/'
         });
 
         // 首次拉取
@@ -491,12 +494,13 @@ function buildConfigObject(env) {
             metricsHost: env.TUNNEL_METRICS_HOST || '127.0.0.1'
         },
         streamForwarding: (() => {
-            const secret = env.INSTANCE_SECRET || (env.STREAM_FORWARDING_ENABLED === 'true'
-                ? (console.warn('⚠️ INSTANCE_SECRET 未配置，已生成随机密钥（重启后失效，跨实例通信不可用）'),
-                   crypto.randomBytes(32).toString('hex'))
-                : '');
+            const enabled = env.STREAM_FORWARDING_ENABLED === 'true';
+            const secret = typeof env.INSTANCE_SECRET === 'string' ? env.INSTANCE_SECRET.trim() : '';
+            if (enabled && !secret) {
+                console.warn('⚠️ STREAM_FORWARDING_ENABLED=true 但 INSTANCE_SECRET 未配置，内部控制接口将拒绝请求');
+            }
             return {
-                enabled: env.STREAM_FORWARDING_ENABLED === 'true',
+                enabled,
                 secret,
                 externalUrl: env.APP_EXTERNAL_URL || null,
                 lbUrl: env.LB_WEBHOOK_URL || env.APP_EXTERNAL_URL || null

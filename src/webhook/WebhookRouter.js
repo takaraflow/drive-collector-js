@@ -13,6 +13,20 @@ export function setAppReadyState(value) {
     appReady = Boolean(value);
 }
 
+function hasValidInstanceSecret(headerSecret, configuredSecret) {
+    if (typeof headerSecret !== 'string' || typeof configuredSecret !== 'string') {
+        return false;
+    }
+
+    const header = headerSecret.trim();
+    const secret = configuredSecret.trim();
+    return header !== '' && secret !== '' && header === secret;
+}
+
+function isInstanceSecretAuthorized(req, cfg) {
+    return hasValidInstanceSecret(req.headers?.['x-instance-secret'], cfg?.streamForwarding?.secret);
+}
+
 /**
  * 处理健康检查请求
  */
@@ -71,13 +85,12 @@ async function handleStreamForwarding(req, res) {
     if (path.startsWith('/api/v2/stream/')) {
         const { getConfig } = await import("../config/index.js");
         const cfg = getConfig();
-        const secret = req.headers['x-instance-secret'];
 
         // Check for specific action routes first (progress, full-progress, resume, reset)
         const streamPathMatch = path.match(/^\/api\/v2\/stream\/([^\/]+)\/(progress|full-progress|resume|reset)$/);
         if (streamPathMatch) {
             // All sub-routes require secret auth
-            if (secret !== cfg.streamForwarding.secret) {
+            if (!isInstanceSecretAuthorized(req, cfg)) {
                 res.writeHead(401);
                 res.end('Unauthorized');
                 return true;
@@ -126,6 +139,12 @@ async function handleStreamForwarding(req, res) {
 
         // POST /api/v2/stream/:taskId — incoming chunk (secret check inside handleIncomingChunk)
         if (req.method === 'POST') {
+            if (!isInstanceSecretAuthorized(req, cfg)) {
+                res.writeHead(401);
+                res.end('Unauthorized');
+                return true;
+            }
+
             const taskId = path.split('/').pop();
             const { streamTransferService } = await import("../services/StreamTransferService.js");
             const result = await streamTransferService.handleIncomingChunk(taskId, req);
@@ -139,6 +158,13 @@ async function handleStreamForwarding(req, res) {
     if (path.startsWith('/api/v2/tasks/') && path.endsWith('/status') && req.method === 'POST') {
         const parts = path.split('/');
         const taskId = parts[parts.length - 2];
+        const { getConfig } = await import("../config/index.js");
+        const config = getConfig();
+        if (!isInstanceSecretAuthorized(req, config)) {
+            res.writeHead(401);
+            res.end('Unauthorized');
+            return true;
+        }
 
         let body = '';
         let bodySize = 0;
@@ -177,10 +203,9 @@ async function handleStreamForwarding(req, res) {
         }
         
         // 认证检查
-        const secret = req.headers['x-instance-secret'];
         const { getConfig } = await import("../config/index.js");
         const config = getConfig();
-        if (secret !== config.streamForwarding.secret) {
+        if (!isInstanceSecretAuthorized(req, config)) {
             res.writeHead(401);
             res.end('Unauthorized');
             return true;
@@ -195,10 +220,9 @@ async function handleStreamForwarding(req, res) {
 
     // 4. 触发配置刷新 (Webhook)
     if (path === '/api/v2/config/refresh' && req.method === 'POST') {
-        const secret = req.headers['x-instance-secret'];
         const { getConfig } = await import("../config/index.js");
         const cfg = getConfig();
-        if (secret !== cfg.streamForwarding.secret) {
+        if (!isInstanceSecretAuthorized(req, cfg)) {
             res.writeHead(401);
             res.end('Unauthorized');
             return true;
@@ -226,10 +250,15 @@ async function processWebhookData(req, res, signature, body) {
     try {
         data = JSON.parse(body);
     } catch (error) {
-        log.warn("❌ 无效的JSON格式", { body: body?.substring?.(0, 200) || 'empty', error: error.message });
-        res.writeHead(400);
-        res.end('Invalid JSON');
-        return { result: { success: false, statusCode: 400 }, data: null, path };
+        log.warn("❌ 无效的JSON格式", {
+            bodyBytes: Buffer.byteLength(body || ''),
+            error: error.message
+        });
+        return {
+            result: { success: false, statusCode: 400, message: 'Invalid JSON' },
+            data: null,
+            path
+        };
     }
 
     const payload = parseTaskQueuePayload(data);
@@ -351,7 +380,7 @@ async function handleWebhookForwarding(req, res, result, data, path, body) {
                 path,
                 upstreamStatus,
                 targetBaseUrl,
-                upstreamBodyPreview: upstreamBody?.substring?.(0, 200) || ''
+                upstreamBodyBytes: Buffer.byteLength(upstreamBody || '')
             });
             res.writeHead(upstreamStatus || 503);
             res.end(upstreamBody || 'Error');
@@ -402,10 +431,9 @@ export async function handleWebhook(req, res) {
     // 验证签名
     const isValid = await queueService.verifyWebhookSignature(signature, body);
     if (!isValid) {
-        const bodyPreview = body ? body.substring(0, 200) : 'empty';
         log.warn("⚠️ QStash 签名验证失败", {
-            signature: signature || 'missing',
-            bodyPreview: bodyPreview,
+            signaturePresent: Boolean(signature),
+            bodyBytes: Buffer.byteLength(body || ''),
             url: req.url,
             method: req.method
         });

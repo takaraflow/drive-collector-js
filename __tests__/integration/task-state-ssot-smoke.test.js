@@ -40,9 +40,9 @@ function seedTask() {
 
 const d1Mock = {
   fetchOne: vi.fn(async (sql, params = []) => {
-    if (sql.includes('SELECT id, status FROM tasks WHERE id = ?')) {
+    if (sql.includes('SELECT id, status') && sql.includes('FROM tasks WHERE id = ?')) {
       const row = tasks.get(params[0]);
-      return row ? { id: row.id, status: row.status } : null;
+      return row ? { id: row.id, status: row.status, updated_at: row.updated_at } : null;
     }
 
     if (sql.includes('SELECT * FROM tasks WHERE id = ?')) {

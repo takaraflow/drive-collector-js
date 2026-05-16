@@ -2,7 +2,8 @@ const {
     limitFields, 
     serializeError, 
     pruneData, 
-    serializeToString 
+    serializeToString,
+    isSensitiveKey
 } = await import('../../../src/utils/serializer.js');
 
 describe('Serializer Utils', () => {
@@ -68,6 +69,7 @@ describe('Serializer Utils', () => {
             const error = new Error('test error');
             error.code = 'ERR_CODE';
             error.status = 500;
+            error.apiKey = 'secret-key';
             
             const result = serializeError(error);
             
@@ -75,7 +77,8 @@ describe('Serializer Utils', () => {
                 name: 'Error',
                 message: 'test error',
                 code: 'ERR_CODE',
-                status: 500
+                status: 500,
+                apiKey: '[REDACTED]'
             });
         });
 
@@ -190,6 +193,57 @@ describe('Serializer Utils', () => {
             
             const parsed = JSON.parse(result);
             expect(parsed).toEqual({ name: 'test', value: 123 });
+        });
+
+        test('should redact sensitive fields by key during serialization', () => {
+            const obj = {
+                token: 'plain-token',
+                password: 'plain-password',
+                apiKey: 'plain-key',
+                authHeader: 'Bearer secret',
+                publicValue: 'visible'
+            };
+
+            const result = serializeToString(obj, 4, 5000);
+            const parsed = JSON.parse(result);
+
+            expect(parsed).toMatchObject({
+                token: '[REDACTED]',
+                password: '[REDACTED]',
+                apiKey: '[REDACTED]',
+                authHeader: '[REDACTED]',
+                publicValue: 'visible'
+            });
+            expect(result).not.toContain('plain-token');
+            expect(result).not.toContain('plain-password');
+            expect(result).not.toContain('plain-key');
+            expect(result).not.toContain('Bearer secret');
+        });
+
+        test('should redact nested and config_data fields by key', () => {
+            const result = serializeToString({
+                config_data: { user: 'u', pass: 'p' },
+                nested: {
+                    workerSecret: 'plain-secret',
+                    publicValue: 'visible'
+                }
+            }, 4, 5000);
+            const parsed = JSON.parse(result);
+
+            expect(parsed.config_data).toBe('[REDACTED]');
+            expect(parsed.nested).toEqual({
+                workerSecret: '[REDACTED]',
+                publicValue: 'visible'
+            });
+            expect(result).not.toContain('plain-secret');
+            expect(result).not.toContain('"pass":"p"');
+        });
+
+        test('should detect sensitive keys', () => {
+            expect(isSensitiveKey('BOT_TOKEN')).toBe(true);
+            expect(isSensitiveKey('config_data')).toBe(true);
+            expect(isSensitiveKey('x-instance-secret')).toBe(true);
+            expect(isSensitiveKey('publicUrl')).toBe(false);
         });
 
         test('should handle BigInt', () => {

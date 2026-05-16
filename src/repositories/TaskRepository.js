@@ -48,8 +48,12 @@ export class TaskRepository {
         return values.map(() => '?').join(',');
     }
 
+    static async _getCurrentTaskState(taskId) {
+        return await d1.fetchOne("SELECT id, status, updated_at FROM tasks WHERE id = ?", [taskId]);
+    }
+
     static async _getCurrentStatus(taskId) {
-        const row = await d1.fetchOne("SELECT id, status FROM tasks WHERE id = ?", [taskId]);
+        const row = await this._getCurrentTaskState(taskId);
         return row?.status || null;
     }
 
@@ -460,7 +464,8 @@ export class TaskRepository {
             ? eventOrStatus
             : TaskStateMachine.getEventForTargetStatus(eventOrStatus);
         const targetStatus = TaskStateMachine.targetStatusForEvent(event);
-        const currentStatus = await this._getCurrentStatus(taskId);
+        const currentTaskState = await this._getCurrentTaskState(taskId);
+        const currentStatus = currentTaskState?.status || null;
 
         if (!currentStatus) {
             return this._transitionResult({
@@ -469,7 +474,8 @@ export class TaskRepository {
                 reason: "Task not found",
                 taskId,
                 event,
-                toStatus: targetStatus
+                toStatus: targetStatus,
+                queueAttempt: null
             }, options);
         }
 
@@ -498,7 +504,8 @@ export class TaskRepository {
 
         const changed = this._getChanges(result) > 0;
         if (!changed) {
-            const latestStatus = await this._getCurrentStatus(taskId);
+            const latestState = await this._getCurrentTaskState(taskId);
+            const latestStatus = latestState?.status || null;
             const racedToTarget = latestStatus === targetStatus;
             return this._transitionResult({
                 changed: false,
@@ -510,6 +517,9 @@ export class TaskRepository {
                 latestStatus,
                 toStatus: targetStatus,
                 idempotent: racedToTarget,
+                queueAttempt: racedToTarget
+                    ? `${targetStatus}:${latestState?.updated_at || now}`
+                    : `${currentStatus}:${currentTaskState.updated_at || now}`,
                 reason: racedToTarget ? null : `Task status changed concurrently from ${currentStatus} to ${latestStatus}`
             }, options);
         }
@@ -524,7 +534,8 @@ export class TaskRepository {
             event,
             fromStatus: currentStatus,
             toStatus: targetStatus,
-            idempotent: resolution.idempotent
+            idempotent: resolution.idempotent,
+            queueAttempt: `${targetStatus}:${now}`
         }, options);
     }
 
@@ -703,7 +714,20 @@ export class TaskRepository {
         }));
 
         try {
-            await d1.batch(statements);
+            const results = await d1.batch(statements);
+            const failed = (results || []).find((result, index) => {
+                if (!result) return true;
+                if (result.success === false) return true;
+                if (result.error) return true;
+                return index >= statements.length;
+            });
+
+            if (!Array.isArray(results) || results.length !== statements.length || failed) {
+                const failedIndex = Array.isArray(results) ? results.indexOf(failed) : -1;
+                const detail = failed?.error?.message || failed?.result?.error || "unknown batch failure";
+                throw new Error(`TaskRepository.createBatch failed at statement ${failedIndex >= 0 ? failedIndex : "unknown"}: ${detail}`);
+            }
+
             return true;
         } catch (e) {
             log.error("TaskRepository.createBatch failed:", e);

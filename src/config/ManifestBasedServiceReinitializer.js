@@ -14,7 +14,7 @@ export class ManifestBasedServiceReinitializer {
         try {
             const { cache } = await import('../services/CacheService.js');
             const { queueService } = await import('../services/QueueService.js');
-            const { logger } = await import('../services/logger/LoggerService.js');
+            const { logger } = await import('../services/logger/index.js');
             const telegramModule = await import('../services/telegram.js');
             const { oss } = await import('../services/oss.js');
             const { d1 } = await import('../services/d1.js');
@@ -106,7 +106,9 @@ export class ManifestBasedServiceReinitializer {
     async reinitializeReconfigure(service, serviceName) {
         if (serviceName === 'logger') {
             const currentConfig = getConfig();
-            if (service.configure) {
+            if (service.reload) {
+                await service.reload(currentConfig);
+            } else if (service.configure) {
                 await service.configure(currentConfig);
             }
         } else if (service.configure) {

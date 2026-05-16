@@ -16,6 +16,7 @@ export const TASK_EVENTS = Object.freeze({
     FAIL: 'fail',
     CANCEL: 'cancel',
     RETRY: 'retry',
+    RESET_UPLOAD: 'reset_upload',
     RESET_STALLED: 'reset_stalled'
 });
 
@@ -87,6 +88,13 @@ export const TASK_TRANSITIONS = Object.freeze({
             TASK_STATUSES.DOWNLOADED,
             TASK_STATUSES.UPLOADING,
             TASK_STATUSES.FAILED
+        ])
+    }),
+    [TASK_EVENTS.RESET_UPLOAD]: Object.freeze({
+        to: TASK_STATUSES.DOWNLOADED,
+        from: Object.freeze([
+            TASK_STATUSES.DOWNLOADED,
+            TASK_STATUSES.UPLOADING
         ])
     }),
     [TASK_EVENTS.RESET_STALLED]: Object.freeze({

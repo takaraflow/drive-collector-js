@@ -105,10 +105,9 @@ describe('AuthGuard Core Logic', () => {
             expect(mockD1.fetchOne).toHaveBeenCalledTimes(1); // Call count remains 1
         });
 
-        it('should return "user" on DB error', async () => {
+        it('should not silently downgrade on DB error', async () => {
             mockD1.fetchOne.mockRejectedValue(new Error('DB Error'));
-            const role = await AuthGuard.getRole('999');
-            expect(role).toBe('user');
+            await expect(AuthGuard.getRole('999')).rejects.toThrow('DB Error');
         });
     });
 
@@ -121,11 +120,16 @@ describe('AuthGuard Core Logic', () => {
             await AuthGuard.setRole('123', 'admin');
 
             expect(mockD1.run).toHaveBeenCalledWith(
-                expect.stringContaining('INSERT OR REPLACE'),
-                ['123', 'admin']
+                expect.stringContaining('ON CONFLICT(user_id) DO UPDATE'),
+                ['123', 'admin', expect.any(Number), expect.any(Number)]
             );
             // Cache should be cleared
             expect(AuthGuard.roleCache.has('123')).toBe(false);
+        });
+
+        it('should reject roles outside the persisted schema contract', async () => {
+            await expect(AuthGuard.setRole('123', 'owner')).rejects.toThrow('Invalid role: owner');
+            expect(mockD1.run).not.toHaveBeenCalled();
         });
     });
 });

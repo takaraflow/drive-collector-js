@@ -81,6 +81,39 @@ function createLegacyDatabase() {
     return db;
 }
 
+function createLegacyDatabaseWithoutDriveUnique() {
+    const db = new Database(":memory:");
+    db.exec(`
+        CREATE TABLE tasks (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            chat_id TEXT,
+            msg_id INTEGER,
+            source_msg_id INTEGER,
+            file_name TEXT,
+            file_size INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'queued',
+            error_msg TEXT,
+            claimed_by TEXT,
+            created_at INTEGER,
+            updated_at INTEGER
+        );
+
+        CREATE TABLE drives (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            name TEXT,
+            type TEXT NOT NULL,
+            config_data TEXT NOT NULL,
+            remote_folder TEXT,
+            status TEXT DEFAULT 'active',
+            created_at INTEGER,
+            updated_at INTEGER
+        );
+    `);
+    return db;
+}
+
 function createProductionLegacyDatabase() {
     const db = new Database(":memory:");
     db.exec(`
@@ -175,16 +208,98 @@ describe("database schema migrations", () => {
 
         expect(result.status.isCurrent).toBe(true);
         expect(result.status.currentVersion).toBe(LATEST_SCHEMA_VERSION);
-        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied"]);
+        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied", "recorded", "recorded"]);
 
         const driveColumns = db.prepare("PRAGMA table_info(drives)").all().map(column => column.name);
         expect(driveColumns).toContain("is_default");
 
         const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(row => row.name);
         expect(indexes).toContain("idx_drives_one_default_per_user");
+        expect(indexes).toContain("idx_drives_one_active_type_per_user");
+        expect(indexes).toContain("idx_user_roles_role");
 
         const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
-        expect(migrations.map(row => row.version)).toEqual([1, 2, 3]);
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5]);
+    });
+
+    test("should create current schema with user_roles and active-only drive type uniqueness", async () => {
+        db = new Database(":memory:");
+        const d1 = createD1(db);
+
+        await migrateDatabaseSchema({
+            d1,
+            useLock: false,
+            log: { info: vi.fn(), warn: vi.fn() }
+        });
+
+        const userRolesSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'user_roles'").get().sql;
+        expect(userRolesSql).toContain("role TEXT NOT NULL CHECK");
+
+        const drivesSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'drives'").get().sql;
+        expect(drivesSql).not.toContain("UNIQUE(user_id, type)");
+
+        db.prepare(
+            "INSERT INTO drives (id, user_id, name, type, config_data, status, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run("drive-1", "user-1", "Mega", "mega", "{}", "active", 0, 1, 1);
+        expect(() => db.prepare(
+            "INSERT INTO drives (id, user_id, name, type, config_data, status, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run("drive-2", "user-1", "Mega2", "mega", "{}", "active", 0, 2, 2)).toThrow();
+
+        db.prepare("UPDATE drives SET status = 'deleted', is_default = 0 WHERE id = ?").run("drive-1");
+        db.prepare(
+            "INSERT INTO drives (id, user_id, name, type, config_data, status, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run("drive-3", "user-1", "Mega3", "mega", "{}", "active", 0, 3, 3);
+
+        const status = await getDatabaseSchemaStatus({ d1 });
+        expect(status.isCurrent).toBe(true);
+        expect(status.issues).toEqual([]);
+    });
+
+    test("should normalize duplicate active drives before creating active-only type uniqueness", async () => {
+        db = createLegacyDatabaseWithoutDriveUnique();
+        db.prepare(
+            "INSERT INTO drives (id, user_id, name, type, config_data, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run("drive-old", "user-dup", "Old", "mega", "{}", "active", 1000, 1000);
+        db.prepare(
+            "INSERT INTO drives (id, user_id, name, type, config_data, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run("drive-new", "user-dup", "New", "mega", "{}", "active", 2000, 2000);
+        const d1 = createD1(db);
+
+        const result = await migrateDatabaseSchema({
+            d1,
+            useLock: false,
+            log: { info: vi.fn(), warn: vi.fn() }
+        });
+
+        expect(result.status.isCurrent).toBe(true);
+        const rows = db.prepare(
+            "SELECT id, status FROM drives WHERE user_id = ? AND type = ? ORDER BY id"
+        ).all("user-dup", "mega");
+        expect(rows).toEqual([
+            { id: "drive-new", status: "active" },
+            { id: "drive-old", status: "deleted" }
+        ]);
+
+        expect(() => db.prepare(
+            "INSERT INTO drives (id, user_id, name, type, config_data, status, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run("drive-third", "user-dup", "Third", "mega", "{}", "active", 0, 3000, 3000)).toThrow();
+    });
+
+    test("should fail when an applied migration checksum drifts", async () => {
+        db = createLegacyDatabase();
+        const d1 = createD1(db);
+
+        await migrateDatabaseSchema({
+            d1,
+            useLock: false,
+            log: { info: vi.fn(), warn: vi.fn() }
+        });
+        db.prepare("UPDATE schema_migrations SET checksum = ? WHERE version = ?").run("bad-checksum", 2);
+
+        const status = await getDatabaseSchemaStatus({ d1 });
+        expect(status.isCurrent).toBe(false);
+        expect(status.issues).toContain("migration 2:tasks_status_ssot checksum drift");
+        await expect(assertDatabaseSchemaCurrent({ d1 })).rejects.toThrow("checksum drift");
     });
 
     test("should fail schema assertion before migrations are applied", async () => {
@@ -296,6 +411,6 @@ describe("database schema migrations", () => {
         expect(indexes).toContain("idx_drives_one_default_per_user");
 
         const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
-        expect(migrations.map(row => row.version)).toEqual([1, 2, 3]);
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5]);
     });
 });

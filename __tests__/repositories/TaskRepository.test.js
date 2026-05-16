@@ -436,6 +436,19 @@ describe('TaskRepository', () => {
 
             await expect(TaskRepository.createBatch(tasks)).rejects.toThrow('Batch error');
         });
+
+        it('should reject partial D1 batch failures', async () => {
+            const tasks = [
+                { id: 'task1', userId: 'user1' },
+                { id: 'task2', userId: 'user1' }
+            ];
+            mockD1.batch.mockResolvedValue([
+                { success: true },
+                { success: false, error: new Error('constraint failed') }
+            ]);
+
+            await expect(TaskRepository.createBatch(tasks)).rejects.toThrow('constraint failed');
+        });
     });
 
     describe('cleanupExpiredUpdates', () => {

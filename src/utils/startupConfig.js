@@ -1,9 +1,11 @@
+import { isSensitiveKey } from './serializer.js';
+
 let manifestMetadataCache = null;
 let manifestSensitiveConfigKeys = new Set();
 
 function shouldRedactKey(key) {
     if (!key) return false;
-    return manifestSensitiveConfigKeys.has(key);
+    return manifestSensitiveConfigKeys.has(key) || isSensitiveKey(key);
 }
 
 function maskUrl(value) {

@@ -6,6 +6,7 @@ import { Button } from "telegram/tl/custom/button.js";
 import { dependencyContainer } from "../services/DependencyContainer.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
 import {
+    isTaskProcessingLockBusyError,
     TASK_QUEUE_TRIGGER_SOURCES
 } from "../domain/task-queue-contract.js";
 
@@ -279,7 +280,7 @@ export class TaskManager {
      * [私有] 批量恢复同一个会话下的任务
      */
     static async _restoreBatchTasks(chatId, rows) {
-        const { client, runMtprotoTaskWithRetry, PRIORITY, config } = getDeps();
+        const { client, runMtprotoTaskWithRetry, PRIORITY, config, updateStatus, TaskRepository } = getDeps();
         const log = getLog();
         try {
             const sourceMsgIds = rows.map(r => r.source_msg_id);
@@ -314,21 +315,57 @@ export class TaskManager {
                 validTasks.push(task);
 
                 // 根据任务状态决定恢复到哪个队列
-                if (row.status === TASK_STATUSES.DOWNLOADED) {
+                if (row.status === TASK_STATUSES.DOWNLOADED || row.status === TASK_STATUSES.UPLOADING) {
                     // 恢复到上传队列
                     const localPath = path.join(config.downloadDir, path.basename(row.file_name));
                     if (fs.existsSync(localPath)) {
+                        const reset = await TaskRepository.transitionStatus(row.id, TASK_EVENTS.RESET_UPLOAD, null, {
+                            returnResult: true,
+                            allowNoop: true,
+                            source: 'restore_uploadable_task'
+                        });
+                        if (reset.blocked) {
+                            log.warn("上传恢复状态机阻止任务", { taskId: row.id, reason: reset.reason });
+                            continue;
+                        }
+                        task.queueAttempt = reset.queueAttempt;
                         task.localPath = localPath;
                         tasksToUpload.push(task);
-                        log.info(`📤 恢复下载完成的任务 ${row.id} 到上传队列`);
+                        log.info(`📤 恢复可上传任务 ${row.id} 到上传队列`);
                     } else {
                         // 本地文件不存在，重新下载
+                        const reset = await TaskRepository.transitionStatus(row.id, TASK_EVENTS.RETRY, 'Local file missing during recovery', {
+                            returnResult: true,
+                            allowNoop: true,
+                            source: 'restore_uploading_missing_file'
+                        });
+                        if (reset.blocked) {
+                            log.warn("缺失本地文件的上传任务无法复位下载", { taskId: row.id, reason: reset.reason });
+                            continue;
+                        }
+                        task.queueAttempt = reset.queueAttempt;
                         log.warn(`⚠️ 本地文件不存在，重新下载任务 ${row.id}`);
                         tasksToEnqueue.push(task);
                     }
-                } else {
+                } else if (row.status === TASK_STATUSES.QUEUED || row.status === TASK_STATUSES.DOWNLOADING) {
+                    let queueAttempt = null;
+                    if (row.status === TASK_STATUSES.DOWNLOADING) {
+                        const reset = await TaskRepository.transitionStatus(row.id, TASK_EVENTS.RETRY, 'Downloading interrupted during recovery', {
+                            returnResult: true,
+                            allowNoop: true,
+                            source: 'restore_downloading_task'
+                        });
+                        if (reset.blocked) {
+                            log.warn("下载中任务无法复位下载", { taskId: row.id, reason: reset.reason });
+                            continue;
+                        }
+                        queueAttempt = reset.queueAttempt;
+                    }
                     // 其他状态（queued, downloading）恢复到下载队列
+                    task.queueAttempt = queueAttempt || `recovery:${row.status}:${Date.now()}`;
                     tasksToEnqueue.push(task);
+                } else {
+                    log.warn("跳过不支持恢复的任务状态", { taskId: row.id, status: row.status });
                 }
             }
 
@@ -353,14 +390,28 @@ export class TaskManager {
                 }
             }
 
-            // 批量入队下载任务
-            tasksToEnqueue.forEach(task => this._enqueueTask(task));
-
-            // 批量入队上传任务
-            tasksToUpload.forEach(task => this._enqueueUploadTask(task));
+            const enqueueWork = [
+                ...tasksToEnqueue.map(task => ({ task, type: 'download', run: () => this._enqueueTask(task) })),
+                ...tasksToUpload.map(task => ({ task, type: 'upload', run: () => this._enqueueUploadTask(task) }))
+            ];
+            const enqueueResults = await Promise.allSettled(enqueueWork.map(work => work.run()));
+            const failed = enqueueResults
+                .map((result, index) => ({ result, work: enqueueWork[index] }))
+                .filter(item => item.result.status === 'rejected');
+            if (failed.length > 0) {
+                await Promise.allSettled(failed.map(({ result, work }) =>
+                    this._markTaskFailed(
+                        work.task.id,
+                        `Recovery enqueue failed: ${result.reason?.message || String(result.reason)}`,
+                        `restore_${work.type}_enqueue_failed`
+                    )
+                ));
+                throw new Error(`Recovery enqueue failed for ${failed.length} task(s): ${failed[0].result.reason?.message || String(failed[0].result.reason)}`);
+            }
 
         } catch (e) {
             log.error(`批量恢复会话 ${chatId} 的任务失败:`, e);
+            throw e;
         }
     }
 
@@ -387,6 +438,7 @@ export class TaskManager {
 
         const info = getMediaInfo(mediaMessage);
 
+        let taskCreated = false;
         try {
             await TaskRepository.create({
                 id: taskId,
@@ -397,6 +449,7 @@ export class TaskManager {
                 fileName: info?.name,
                 fileSize: info?.size
             });
+            taskCreated = true;
 
             // 立即推送到 QStash 队列
             const task = this._createTaskObject(taskId, userId, chatIdStr, statusMsg.id, mediaMessage);
@@ -405,6 +458,9 @@ export class TaskManager {
 
         } catch (e) {
             log.error("Task creation failed", e);
+            if (taskCreated) {
+                await this._markTaskFailed(taskId, `Queue enqueue failed: ${e.message}`, 'addTask.enqueue_failed');
+            }
             // 尝试更新状态消息，如果失败则记录但不抛出异常
             try {
                 await client.editMessage(target, {
@@ -414,6 +470,7 @@ export class TaskManager {
             } catch (editError) {
                 log.warn("Failed to update error message", { error: editError.message });
             }
+            throw e;
         }
     }
 
@@ -472,15 +529,35 @@ export class TaskManager {
             });
         }
 
-        await TaskRepository.createBatch(tasksData);
-        // 立即推送到 QStash 队列
-        for (const data of tasksData) {
-            const message = messages.find(m => m.id === data.sourceMsgId);
-            if (message) {
-                const task = this._createTaskObject(data.id, data.userId, data.chatId, data.msgId, message);
-                task.isGroup = true;
-                await this._enqueueTask(task);
+        let createdBatch = false;
+        try {
+            await TaskRepository.createBatch(tasksData);
+            createdBatch = true;
+            // 立即推送到 QStash 队列
+            for (const data of tasksData) {
+                const message = messages.find(m => m.id === data.sourceMsgId);
+                if (message) {
+                    const task = this._createTaskObject(data.id, data.userId, data.chatId, data.msgId, message);
+                    task.isGroup = true;
+                    await this._enqueueTask(task);
+                }
             }
+        } catch (e) {
+            log.error("Batch task creation/enqueue failed", e);
+            if (createdBatch) {
+                await Promise.allSettled(tasksData.map(data =>
+                    this._markTaskFailed(data.id, `Queue enqueue failed: ${e.message}`, 'addBatchTasks.enqueue_failed')
+                ));
+            }
+            try {
+                await client.editMessage(target, {
+                    message: statusMsg.id,
+                    text: STRINGS.task.create_failed
+                });
+            } catch (editError) {
+                log.warn("Failed to update batch error message", { error: editError.message });
+            }
+            throw e;
         }
         log.info("Batch tasks created and enqueued", { count: messages.length, status: 'enqueued' });
     }
@@ -509,26 +586,25 @@ export class TaskManager {
     static async _enqueueTask(task) {
         const { queueService } = getDeps();
         const log = getLog();
-        try {
-            const taskPayload = {
-                userId: task.userId,
-                chatId: task.chatId,
-                msgId: task.msgId,
-                _meta: {
-                    triggerSource: TASK_QUEUE_TRIGGER_SOURCES.DIRECT_QSTASH,
-                    source: 'TaskManager._enqueueTask'
-                }
-            };
+        const taskPayload = {
+            userId: task.userId,
+            chatId: task.chatId,
+            msgId: task.msgId,
+            _meta: {
+                triggerSource: TASK_QUEUE_TRIGGER_SOURCES.DIRECT_QSTASH,
+                source: 'TaskManager._enqueueTask',
+                queueAttempt: task.queueAttempt
+            }
+        };
 
-            await queueService.enqueueDownloadTask(task.id, taskPayload);
-            log.info("Task enqueued for download", { 
-                taskId: task.id, 
-                service: 'qstash',
-                triggerSource: TASK_QUEUE_TRIGGER_SOURCES.DIRECT_QSTASH
-            });
-        } catch (error) {
-            log.error("Failed to enqueue download task", { taskId: task.id, error });
-        }
+        const result = await queueService.enqueueDownloadTask(task.id, taskPayload);
+        this._assertQueuePublishResult(result, task.id, 'download');
+        log.info("Task enqueued for download", {
+            taskId: task.id,
+            service: 'qstash',
+            triggerSource: TASK_QUEUE_TRIGGER_SOURCES.DIRECT_QSTASH
+        });
+        return result;
     }
 
     /**
@@ -537,17 +613,32 @@ export class TaskManager {
     static async _enqueueUploadTask(task) {
         const { queueService } = getDeps();
         const log = getLog();
-        try {
-            await queueService.enqueueUploadTask(task.id, {
-                userId: task.userId,
-                chatId: task.chatId,
-                msgId: task.msgId,
-                localPath: task.localPath
-            });
-            log.info("Task enqueued for upload", { taskId: task.id, service: 'qstash' });
-        } catch (error) {
-            log.error("Failed to enqueue upload task", { taskId: task.id, error });
+        const result = await queueService.enqueueUploadTask(task.id, {
+            userId: task.userId,
+            chatId: task.chatId,
+            msgId: task.msgId,
+            localPath: task.localPath,
+            _meta: {
+                queueAttempt: task.queueAttempt
+            }
+        });
+        this._assertQueuePublishResult(result, task.id, 'upload');
+        log.info("Task enqueued for upload", { taskId: task.id, service: 'qstash' });
+        return result;
+    }
+
+    static _assertQueuePublishResult(result, taskId, type) {
+        if (result?.fallback || result?.error) {
+            throw new Error(`Queue enqueue failed for ${type} task ${taskId}: ${result.error || 'fallback result'}`);
         }
+    }
+
+    static async _markTaskFailed(taskId, errorMessage, source) {
+        const { TaskRepository } = getDeps();
+        await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, errorMessage, {
+            allowNoop: true,
+            source
+        });
     }
 
     /**
@@ -624,6 +715,7 @@ export class TaskManager {
         
         // Cache/锁相关 -> 503
         if (msg.includes('lock') || msg.includes('Lock') || 
+            code === 'TASK_PROCESSING_LOCK_BUSY' ||
             msg.includes('cache') || msg.includes('Cache') || 
             msg.includes('kv') || msg.includes('KV') ||
             msg.includes('upstash') || msg.includes('Upstash') ||
@@ -717,6 +809,10 @@ export class TaskManager {
 
         } catch (error) {
             log.error("Download webhook failed", { taskId, error });
+            if (isTaskProcessingLockBusyError(error)) {
+                await this._resetAfterProcessingLockBusy(taskId, TASK_EVENTS.RETRY, 'handleDownloadWebhook.lock_busy');
+                return { success: false, statusCode: 503, message: error.message };
+            }
             const code = this._classifyError(error);
             await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
                 allowNoop: true,
@@ -812,6 +908,10 @@ export class TaskManager {
 
         } catch (error) {
             log.error("Upload webhook failed", { taskId, error });
+            if (isTaskProcessingLockBusyError(error)) {
+                await this._resetAfterProcessingLockBusy(taskId, TASK_EVENTS.RESET_UPLOAD, 'handleUploadWebhook.lock_busy');
+                return { success: false, statusCode: 503, message: error.message };
+            }
             const code = this._classifyError(error);
             await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
                 allowNoop: true,
@@ -873,7 +973,8 @@ export class TaskManager {
             // 通过 QStash 重新派发，leader 的 handleDownloadWebhook 会处理完整流程
             await queueService.enqueueDownloadTask(taskId, {
                 _meta: {
-                    triggerSource: TASK_QUEUE_TRIGGER_SOURCES.MANUAL_RETRY
+                    triggerSource: TASK_QUEUE_TRIGGER_SOURCES.MANUAL_RETRY,
+                    queueAttempt: retryTransition.queueAttempt
                 }
             });
 
@@ -883,6 +984,25 @@ export class TaskManager {
             log.error(`Failed to retry task ${taskId}:`, error);
             return { success: false, statusCode: 500, message: error.message };
         }
+    }
+
+    static async _resetAfterProcessingLockBusy(taskId, event, source) {
+        const { TaskRepository } = getDeps();
+        const log = getLog();
+        const result = await TaskRepository.transitionStatus(taskId, event, 'Task processing lock busy', {
+            returnResult: true,
+            allowNoop: true,
+            source
+        });
+        if (result.blocked) {
+            log.warn("Unable to reset task after processing lock busy", {
+                taskId,
+                event,
+                reason: result.reason,
+                status: result.fromStatus || result.latestStatus
+            });
+        }
+        return result;
     }
 
     /**
@@ -966,10 +1086,15 @@ export class TaskManager {
             if (inFlight.proc) inFlight.proc.kill("SIGTERM");
         }
 
-        await TaskRepository.transitionStatus(taskId, TASK_EVENTS.CANCEL, '用户手动取消', {
+        const transition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.CANCEL, '用户手动取消', {
+            returnResult: true,
             allowNoop: true,
             source: 'cancelTask'
         });
+        if (transition.blocked) {
+            this.cancelledTaskIds.delete(taskId);
+            return false;
+        }
 
         // 立即更新 UI（防止用户感觉“没反应”）
         try {
@@ -997,11 +1122,24 @@ export class TaskManager {
         const ownsAll = tasks.every(t => t.user_id === userId.toString());
         if (!ownsAll && !canCancelAny) return false;
 
-        const updates = tasks.map(t => ({ id: t.id, event: TASK_EVENTS.CANCEL, error: '用户手动取消' }));
-        await this.batchUpdateStatus(updates);
-        tasks.forEach(t => { t.status = TASK_STATUSES.CANCELLED; });
+        const results = await Promise.allSettled(tasks.map(t =>
+            TaskRepository.transitionStatus(t.id, TASK_EVENTS.CANCEL, '用户手动取消', {
+                returnResult: true,
+                allowNoop: true,
+                source: 'cancelTasksByMsgId'
+            })
+        ));
+        const cancelledTaskIds = new Set();
+        results.forEach((result, index) => {
+            if (result.status !== 'fulfilled') return;
+            if (!result.value?.blocked) {
+                tasks[index].status = TASK_STATUSES.CANCELLED;
+                cancelledTaskIds.add(tasks[index].id);
+            }
+        });
+        if (cancelledTaskIds.size === 0) return false;
 
-        for (const t of tasks) {
+        for (const t of tasks.filter(task => cancelledTaskIds.has(task.id))) {
             this.cancelledTaskIds.add(t.id);
             const inFlight = this.inFlightTasks.get(t.id);
             if (inFlight) {

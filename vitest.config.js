@@ -25,7 +25,13 @@ export default defineConfig({
         '**/*.test.js',
         '**/*.spec.js'
       ],
-      include: ['src/**/*.js']
+      include: ['src/**/*.js'],
+      thresholds: {
+        statements: 58,
+        branches: 53,
+        functions: 63,
+        lines: 60
+      }
     }
   },
   poolOptions: {

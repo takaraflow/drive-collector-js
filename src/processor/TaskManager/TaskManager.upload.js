@@ -3,6 +3,7 @@ import fs from "fs";
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { createHeartbeat, handleTaskCompletion, handleTaskFailure, handleUploadFailure, escapeHTML } from "./TaskManager.utils.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../../domain/task-state-machine.js";
+import { TaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
 
 // 获取模块日志记录器
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager.upload');
@@ -23,7 +24,7 @@ export async function uploadTask(task) {
     const lockAcquired = await instanceCoordinator.acquireTaskLock(id);
     if (!lockAcquired) {
         log.info("Task lock exists, skipping upload", { taskId: id, instance: 'current' });
-        return;
+        throw new TaskProcessingLockBusyError(id, 'upload');
     }
 
     let didActivate = false;
@@ -34,7 +35,7 @@ export async function uploadTask(task) {
         // Anti-reentrancy: Add check for upload Task as well
         if (this.activeProcessors.has(id)) {
             log.warn("Task already processing, skipping upload", { taskId: id });
-            return;
+            throw new TaskProcessingLockBusyError(id, 'upload');
         }
         this.activeProcessors.add(id);
         this.inFlightTasks.set(id, task);

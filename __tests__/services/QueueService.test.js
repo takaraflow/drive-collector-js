@@ -241,7 +241,40 @@ describe("QueueService - Unit Tests", () => {
                 type: "download",
                 url: "https://example.com/file.mp4"
             }),
-            {}
+            { idempotencyKey: "download:download:task-123:initial" }
+        );
+    });
+
+    test("should include queue attempt in download idempotency key for re-enqueue", async () => {
+        mockProvider = {
+            initialize: vi.fn(),
+            publish: vi.fn().mockResolvedValue({ messageId: 'msg-123' }),
+            batchPublish: vi.fn().mockResolvedValue([]),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
+        };
+
+        service = new QueueService(mockProvider);
+        await service.initialize();
+
+        await service.enqueueDownloadTask("task-123", {
+            _meta: {
+                triggerSource: "manual-retry",
+                queueAttempt: "queued:1700000000000"
+            }
+        });
+
+        expect(mockProvider.publish).toHaveBeenCalledWith(
+            "https://example.com/api/v2/tasks/download",
+            expect.objectContaining({
+                taskId: "task-123",
+                type: "download",
+                _meta: expect.objectContaining({
+                    queueAttempt: "queued:1700000000000"
+                })
+            }),
+            { idempotencyKey: "download:download:task-123:queued:1700000000000" }
         );
     });
 
@@ -267,7 +300,7 @@ describe("QueueService - Unit Tests", () => {
                 type: "upload",
                 fileId: "file-789"
             }),
-            {}
+            { idempotencyKey: "upload:upload:task-456:initial" }
         );
     });
 

@@ -2,6 +2,18 @@ import { logger } from "./logger/index.js";
 
 const log = logger.withModule ? logger.withModule('D1') : logger;
 
+function summarizeSqlParams(params = []) {
+    return params.map((param) => {
+        if (param === null) return { type: 'null' };
+        if (param === undefined) return { type: 'undefined' };
+        if (Buffer.isBuffer(param)) return { type: 'buffer', bytes: param.length };
+        if (Array.isArray(param)) return { type: 'array', length: param.length };
+        if (typeof param === 'string') return { type: 'string', length: param.length };
+        if (typeof param === 'object') return { type: 'object', keys: Object.keys(param).length };
+        return { type: typeof param };
+    });
+}
+
 /**
  * --- D1 数据库服务层 ---
  */
@@ -40,11 +52,22 @@ class D1Service {
         }
     }
 
-    async _doFetch(sql, params, attempts, maxAttempts) {
+    async _doFetchPayload(payload, attempts, maxAttempts, context = {}) {
         // 📊 诊断日志：请求开始
         log.debug(`🔍 D1 Request [Attempt ${attempts + 1}/${maxAttempts}] - URL: ${this.apiUrl}`);
-        log.debug(`🔍 D1 SQL: ${sql.substring(0, 100)}${sql.length > 100 ? '...' : ''}`);
-        log.debug(`🔍 D1 Params: ${JSON.stringify(params)}`);
+        if (context.statements) {
+            log.debug(`🔍 D1 Batch Statements: ${context.statements.length}`);
+            log.debug(`🔍 D1 Batch SQL: ${context.statements.map(statement => {
+                const sql = statement.sql || '';
+                return `${sql.substring(0, 80)}${sql.length > 80 ? '...' : ''}`;
+            }).join(' | ')}`);
+            log.debug(`🔍 D1 Batch Params: ${JSON.stringify(context.statements.map(statement => summarizeSqlParams(statement.params || [])))}`);
+        } else {
+            const sql = context.sql || '';
+            const params = context.params || [];
+            log.debug(`🔍 D1 SQL: ${sql.substring(0, 100)}${sql.length > 100 ? '...' : ''}`);
+            log.debug(`🔍 D1 Params: ${JSON.stringify(summarizeSqlParams(params))}`);
+        }
 
         return await fetch(this.apiUrl, {
             method: "POST",
@@ -52,8 +75,12 @@ class D1Service {
                 "Authorization": `Bearer ${this.token}`,
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({ sql, params }),
+            body: JSON.stringify(payload),
         });
+    }
+
+    async _doFetch(sql, params, attempts, maxAttempts) {
+        return this._doFetchPayload({ sql, params }, attempts, maxAttempts, { sql, params });
     }
 
     async _handleHttpError(response, attempts, maxAttempts, duration) {
@@ -156,16 +183,15 @@ class D1Service {
         throw error;
     }
 
-    async _execute(sql, params = []) {
+    async _executePayload(payload, context = {}, maxAttempts = 3) {
         await this._validateConfig();
 
         let attempts = 0;
-        const maxAttempts = 3;
         const startTime = Date.now();
 
         while (attempts < maxAttempts) {
             try {
-                const response = await this._doFetch(sql, params, attempts, maxAttempts);
+                const response = await this._doFetchPayload(payload, attempts, maxAttempts, context);
                 const duration = Date.now() - startTime;
 
                 log.debug(`🔍 D1 Response [Attempt ${attempts + 1}] - Status: ${response.status}, Duration: ${duration}ms`);
@@ -189,6 +215,10 @@ class D1Service {
                 }
             }
         }
+    }
+
+    async _execute(sql, params = []) {
+        return this._executePayload({ sql, params }, { sql, params }, 3);
     }
 
     async raw(sql, params = []) {
@@ -228,14 +258,7 @@ class D1Service {
 
     async run(sql, params = []) {
         const result = await this._execute(sql, params);
-        // Return the first item from result.result[0].results[0] or result.result[0] or the whole result
-        if (result.result && result.result[0]) {
-            if (result.result[0].results && result.result[0].results[0]) {
-                return result.result[0].results[0];
-            }
-            return result.result[0];
-        }
-        return result;
+        return this._parseMutationResult(result);
     }
 
     _handleTransientFailure() {
@@ -254,19 +277,46 @@ class D1Service {
         this.apiUrl = null;
     }
 
+    _parseMutationResult(result) {
+        if (result?.result && result.result[0]) {
+            if (result.result[0].results && result.result[0].results[0]) {
+                return result.result[0].results[0];
+            }
+            return result.result[0];
+        }
+        return result;
+    }
+
     /**
-     * 批量执行 SQL 语句 (并发执行并返回所有结果)
+     * 批量执行 SQL 语句。
+     * Cloudflare D1 /query supports an array of parameterized statements as one
+     * batch call. This preserves D1's ordered batch semantics and lets callers
+     * inspect each statement result instead of hiding partial failures.
      * @param {Array<{sql: string, params: Array}>} statements
      */
     async batch(statements) {
         if (!statements || statements.length === 0) return [];
-        
-        // 采用并行执行模式，返回 Promise.allSettled 的包装结果以兼容测试
-        return await Promise.all(statements.map(s =>
-            this._execute(s.sql, s.params)
-                .then(result => ({ success: true, result }))
-                .catch(error => ({ success: false, error }))
-        ));
+
+        const payload = statements.map(statement => ({
+            sql: statement.sql,
+            params: statement.params || []
+        }));
+
+        const responsePayload = await this._executePayload(payload, { statements: payload }, 3);
+        const results = responsePayload.result || [];
+        return results.map((result, index) => {
+            const errors = result.error
+                ? [result.error]
+                : result.errors || [];
+            return {
+                success: result.success !== false && errors.length === 0,
+                result,
+                meta: result.meta,
+                changes: result.meta?.changes,
+                error: errors[0] ? new Error(errors[0].message || String(errors[0])) : undefined,
+                index
+            };
+        });
     }
 }
 

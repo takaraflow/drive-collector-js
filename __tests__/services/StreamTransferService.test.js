@@ -2,6 +2,7 @@ import { describe, test, expect, vi, beforeEach } from 'vitest'
 import { streamTransferService } from '../../src/services/StreamTransferService.js'
 import { logger } from '../../src/services/logger/index.js'
 import { CacheService } from '../../src/services/CacheService.js'
+import { getConfig } from '../../src/config/index.js'
 
 const log = logger.withModule('StreamTransferServiceTest')
 
@@ -77,6 +78,44 @@ describe('StreamTransferService', () => {
     await expect(
       streamTransferService.getRemoteProgress('https://lb.example.com', 'task-123')
     ).rejects.toThrow('Worker returned 404')
+  })
+
+  test('handleIncomingChunk rejects when both configured secret and header are empty', async () => {
+    getConfig.mockReturnValueOnce({
+      streamForwarding: {
+        secret: '',
+        lbUrl: 'https://lb.example.com'
+      },
+      remoteFolder: '/drive/uploads'
+    })
+    const req = {
+      headers: { 'x-instance-secret': '' },
+      [Symbol.asyncIterator]: async function* () {
+        yield Buffer.from('data')
+      }
+    }
+
+    const result = await streamTransferService.handleIncomingChunk('task-empty-secret', req)
+
+    expect(result).toEqual({ success: false, statusCode: 401, message: 'Unauthorized' })
+  })
+
+  test('handleStatusUpdate rejects when both configured secret and header are empty', async () => {
+    getConfig.mockReturnValueOnce({
+      streamForwarding: {
+        secret: '',
+        lbUrl: 'https://lb.example.com'
+      },
+      remoteFolder: '/drive/uploads'
+    })
+
+    const result = await streamTransferService.handleStatusUpdate(
+      'task-empty-secret',
+      { status: 'completed' },
+      { 'x-instance-secret': '' }
+    )
+
+    expect(result).toEqual({ success: false, statusCode: 401, message: 'Unauthorized' })
   })
 
   test('forward chunk with retry and skip when already received', async () => {

@@ -276,6 +276,39 @@ describe('InfisicalSecretsProvider', () => {
     });
   });
 
+  describe('secret path', () => {
+    const originalSecretPath = process.env.INFISICAL_SECRET_PATH;
+
+    afterEach(() => {
+      if (originalSecretPath === undefined) {
+        delete process.env.INFISICAL_SECRET_PATH;
+      } else {
+        process.env.INFISICAL_SECRET_PATH = originalSecretPath;
+      }
+    });
+
+    it('should prefer configured secretPath option', () => {
+      process.env.INFISICAL_SECRET_PATH = '/from-env';
+      const provider = new InfisicalSecretsProvider({ secretPath: '/from-options' });
+
+      expect(provider.getSecretPath()).toBe('/from-options');
+    });
+
+    it('should use INFISICAL_SECRET_PATH from env', () => {
+      process.env.INFISICAL_SECRET_PATH = '/runtime';
+      const provider = new InfisicalSecretsProvider({});
+
+      expect(provider.getSecretPath()).toBe('/runtime');
+    });
+
+    it('should fallback to root secret path', () => {
+      delete process.env.INFISICAL_SECRET_PATH;
+      const provider = new InfisicalSecretsProvider({});
+
+      expect(provider.getSecretPath()).toBe('/');
+    });
+  });
+
   describe('validateResponse', () => {
     it('should validate correct response with secrets array', () => {
       const provider = new InfisicalSecretsProvider({});

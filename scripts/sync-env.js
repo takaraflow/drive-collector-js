@@ -22,6 +22,8 @@ const manifestPath = path.join(rootDir, 'manifest.json');
 
 // 获取配置
 const STRICT_SYNC = process.env.STRICT_SYNC === '1' || process.env.STRICT_SYNC === 'true';
+const WRITE_ENV_FILE = process.env.SYNC_ENV_WRITE_FILE === '1' || process.env.SYNC_ENV_WRITE_FILE === 'true';
+const SECRET_PATH = process.env.INFISICAL_SECRET_PATH || '/';
 
 // 1. 从 manifest.json 读取必需变量
 function getRequiredKeys() {
@@ -62,7 +64,7 @@ function validateVariables(variables, sourceName) {
 }
 
 export async function syncEnv() {
-    console.log(`🚀 开始同步 Infisical 环境变量... (模式: ${STRICT_SYNC ? '严格' : '非严格'})`);
+    console.log(`🚀 开始同步 Infisical 环境变量... (模式: ${STRICT_SYNC ? '严格' : '非严格'}, 写入文件: ${WRITE_ENV_FILE ? '启用' : '禁用'})`);
 
     const token = process.env.INFISICAL_TOKEN;
     const projectId = process.env.INFISICAL_PROJECT_ID;
@@ -90,7 +92,7 @@ export async function syncEnv() {
             const response = await sdk.secrets().listSecrets({
                 environment: infisicalEnv,
                 projectId: projectId,
-                secretPath: '/',
+                secretPath: SECRET_PATH,
                 includeImports: true
             });
  
@@ -100,20 +102,29 @@ export async function syncEnv() {
 
                 // 转换 secrets 为键值对对象用于验证
                 const secretsMap = {};
-                let envContent = '';
+                const envLines = [];
                 
                 // 排序并构建内容
                 const sortedSecrets = secrets.sort((a, b) => a.secretKey.localeCompare(b.secretKey));
                 for (const secret of sortedSecrets) {
                     secretsMap[secret.secretKey] = secret.secretValue;
-                    envContent += `${secret.secretKey}=${secret.secretValue}\n`;
+                    if (WRITE_ENV_FILE) {
+                        envLines.push(`${secret.secretKey}=${secret.secretValue}`);
+                    }
                 }
 
                 // 验证
                 if (validateVariables(secretsMap, 'Infisical')) {
-                    fs.writeFileSync(envPath, envContent);
+                    for (const [key, value] of Object.entries(secretsMap)) {
+                        process.env[key] = value;
+                    }
+                    if (WRITE_ENV_FILE) {
+                        fs.writeFileSync(envPath, `${envLines.join('\n')}\n`, { mode: 0o600 });
+                        console.log(`✅ 已更新 .env 文件`);
+                    } else {
+                        console.log('✅ 已加载 Infisical 变量到当前进程，未写入 .env 文件');
+                    }
                     infisicalSynced = true;
-                    console.log(`✅ 已更新 .env 文件`);
                 } else {
                     if (STRICT_SYNC) process.exit(1);
                 }

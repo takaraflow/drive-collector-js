@@ -17,6 +17,12 @@ export default class InfisicalSecretsProvider extends CloudSecretsProvider {
         this.authType = null;
     }
 
+    getSecretPath() {
+        const configuredPath = this.options.secretPath || process.env.INFISICAL_SECRET_PATH || '/';
+        const path = String(configuredPath).trim();
+        return path || '/';
+    }
+
     /**
      * 身份验证
      */
@@ -62,7 +68,7 @@ export default class InfisicalSecretsProvider extends CloudSecretsProvider {
             const response = await this.sdk.secrets().listSecrets({
                 environment: envName,
                 projectId: projectId,
-                secretPath: '/',
+                secretPath: this.getSecretPath(),
                 includeImports: true
             });
 

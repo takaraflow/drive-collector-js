@@ -8,6 +8,7 @@
 
 import { cache } from "../src/services/CacheService.js";
 import { d1 } from "../src/services/d1.js";
+import { assertDatabaseSchemaCurrent } from "../src/database/schema.js";
 import { InstanceCoordinator } from "../src/services/InstanceCoordinator.js";
 import { logger } from "../src/services/logger/index.js";
 
@@ -17,6 +18,7 @@ async function migrateDriveData() {
 
     try {
         logger.info("🔄 开始网盘数据迁移...");
+        await assertDatabaseSchemaCurrent({ d1 });
 
         // 获取锁，确保单实例执行
         const hasLock = await InstanceCoordinator.acquireLock(lockKey, lockTTL);
@@ -84,26 +86,6 @@ async function migrateDriveData() {
             }
         }
 
-        // 确保 drives 表存在（如果不存在）
-        try {
-            await d1.run(`
-                CREATE TABLE IF NOT EXISTS drives (
-                    id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    name TEXT,
-                    type TEXT NOT NULL,
-                    config_data TEXT NOT NULL,
-                    status TEXT DEFAULT 'active',
-                    created_at INTEGER,
-                    updated_at INTEGER,
-                    UNIQUE(user_id, type)
-                )
-            `);
-            logger.info("📋 确保 drives 表存在");
-        } catch (error) {
-            logger.warn("⚠️ 创建 drives 表失败，可能已存在:", error.message);
-        }
-
         logger.info(`📈 迁移完成: ${migratedCount} 成功, ${skippedCount} 跳过, ${errorCount} 失败`);
 
         // 释放锁
@@ -113,6 +95,9 @@ async function migrateDriveData() {
 
     } catch (error) {
         logger.error("💥 迁移过程中发生严重错误:", error);
+        if (String(error?.message || "").includes("Database schema is not current")) {
+            logger.error('请先执行 "npm run db:migrate" 和 "npm run db:check"，再运行 scripts/migrate-drive-data.js');
+        }
         // 尝试释放锁
         try {
             await InstanceCoordinator.releaseLock(lockKey);
