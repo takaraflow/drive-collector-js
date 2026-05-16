@@ -29,6 +29,10 @@ vi.mock('../../src/services/telegram.js', () => ({
 vi.mock('../../src/services/rclone.js', () => ({ CloudTool: mockCloudTool }));
 vi.mock('../../src/repositories/DriveRepository.js', () => ({ DriveRepository: mockDriveRepository }));
 vi.mock('../../src/ui/templates.js', () => ({ UIHelper: mockUIHelper }));
+vi.mock('../../src/config/index.js', () => ({
+    getConfig: vi.fn().mockReturnValue({ nodeEnv: 'test' }),
+    config: { nodeEnv: 'test' }
+}));
 vi.mock('../../src/utils/common.js', () => ({
     safeEdit: mockSafeEdit,
     escapeHTML: (t) => t,
@@ -52,6 +56,9 @@ const { Dispatcher } = await import('../../src/dispatcher/Dispatcher.js');
 describe('Dispatcher /files command', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        mockDriveRepository.findByUserId.mockResolvedValue([{ id: 1, type: 'mega' }]);
+        mockCloudTool.isLoading.mockReturnValue(false);
+        Dispatcher.filesRefreshTimes.clear();
     });
 
     it('should show loading immediately and then update with file list', async () => {
@@ -85,7 +92,10 @@ describe('Dispatcher /files command', () => {
 
         await new Promise(resolve => setImmediate(resolve));
 
-        expect(mockSafeEdit).toHaveBeenCalledWith(target, 123, expect.stringContaining("无法获取"), null, userId);
+        expect(mockSafeEdit).toHaveBeenCalledWith(target, 123, expect.stringContaining("无法获取"), expect.any(Array), userId);
+        const buttons = mockSafeEdit.mock.calls[0][3];
+        expect(buttons[0][0].text).toContain("重新加载");
+        expect(buttons[0][0].data.toString()).toBe("files_refresh_0");
     });
 
     it('should send bind hint when no drive found', async () => {
@@ -99,7 +109,48 @@ describe('Dispatcher /files command', () => {
         await new Promise(resolve => setImmediate(resolve));
 
         expect(mockClient.sendMessage).toHaveBeenCalledTimes(1);
-        expect(mockSafeEdit).toHaveBeenCalledWith(target, 123, expect.stringContaining("网盘"), null, userId);
+        expect(mockSafeEdit).toHaveBeenCalledWith(target, 123, expect.stringContaining("网盘"), expect.any(Array), userId);
+        const buttons = mockSafeEdit.mock.calls[0][3];
+        expect(buttons[0][0].text).toContain("绑定网盘");
+        expect(buttons[0][0].data.toString()).toBe("drive_select_type");
         expect(mockCloudTool.listRemoteFiles).not.toHaveBeenCalled();
+    });
+
+    it('should refresh a file page and keep rate limiting scoped by user and message', async () => {
+        const target = "chat123";
+        const userId = "user456";
+        const answer = vi.fn();
+        mockCloudTool.listRemoteFiles.mockResolvedValue([{ Name: 'movie.mp4', Size: 1, ModTime: '2024-01-01T00:00:00Z' }]);
+
+        await Dispatcher._handleFilesCallback(
+            { userId: target, msgId: 321 },
+            'files_refresh_1',
+            userId,
+            answer
+        );
+
+        expect(mockCloudTool.listRemoteFiles).toHaveBeenCalledWith(userId, true);
+        expect(mockUIHelper.renderFilesPage).toHaveBeenCalledWith(expect.any(Array), 1, 6, false, userId);
+        expect(mockSafeEdit).toHaveBeenLastCalledWith(target, 321, 'file list', [], userId);
+        expect(answer).toHaveBeenLastCalledWith('刷新成功');
+
+        await Dispatcher._handleFilesCallback(
+            { userId: target, msgId: 321 },
+            'files_refresh_1',
+            userId,
+            answer
+        );
+
+        expect(mockCloudTool.listRemoteFiles).toHaveBeenCalledTimes(1);
+        expect(answer).toHaveBeenLastCalledWith(expect.stringContaining('刷新太快'));
+
+        await Dispatcher._handleFilesCallback(
+            { userId: target, msgId: 322 },
+            'files_refresh_1',
+            userId,
+            answer
+        );
+
+        expect(mockCloudTool.listRemoteFiles).toHaveBeenCalledTimes(2);
     });
 });

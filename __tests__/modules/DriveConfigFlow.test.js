@@ -237,9 +237,13 @@ describe("DriveConfigFlow", () => {
 
             expect(mockClient.editMessage).toHaveBeenCalledWith("user123", expect.objectContaining({
                 message: "msg100",
-                text: expect.stringContaining("确定要解绑该网盘吗"),
+                text: expect.stringContaining("确认解绑这个网盘"),
                 parseMode: "html"
             }));
+            const buttons = mockClient.editMessage.mock.calls[0][1].buttons;
+            expect(buttons).toHaveLength(2);
+            expect(buttons[0][0].text).toBe("保留网盘");
+            expect(buttons[1][0].text).toBe("确认解绑");
             expect(result).toBe("请确认操作");
         });
 
@@ -250,6 +254,18 @@ describe("DriveConfigFlow", () => {
 
             expect(mockBindingService.unbindDrive).toHaveBeenCalledWith("user456", "drive1");
             expect(mockClient.sendMessage).toHaveBeenCalled(); // sendDriveManager refresh
+            expect(result).toBe("已成功解绑");
+        });
+
+        test("should execute all-drive unbind only after confirmation callback", async () => {
+            mockDriveRepository.findByUserId.mockResolvedValue([]);
+            const event = { userId: "user123", msgId: "msg100", data: Buffer.from("drive_unbind_all_execute") };
+
+            const result = await DriveConfigFlow.handleCallback(event, "user456");
+
+            expect(mockDriveRepository.deleteByUserId).toHaveBeenCalledWith("user456");
+            expect(mockSessionManager.clear).toHaveBeenCalledWith("user456");
+            expect(mockClient.sendMessage).toHaveBeenCalled();
             expect(result).toBe("已成功解绑");
         });
 
@@ -375,15 +391,17 @@ describe("DriveConfigFlow", () => {
     });
 
     describe("handleUnbind", () => {
-        test("should handle unbind when drives exist (delete all)", async () => {
+        test("should ask for confirmation before unbinding all drives", async () => {
             mockDriveRepository.findByUserId.mockResolvedValue([{ id: "drive1" }]);
 
             await DriveConfigFlow.handleUnbind("chat123", "user456");
 
-            expect(mockDriveRepository.deleteByUserId).toHaveBeenCalledWith("user456");
+            expect(mockDriveRepository.deleteByUserId).not.toHaveBeenCalled();
             expect(mockSettingsRepository.set).not.toHaveBeenCalledWith("default_drive_user456", null);
-            expect(mockSessionManager.clear).toHaveBeenCalledWith("user456");
+            expect(mockSessionManager.clear).not.toHaveBeenCalledWith("user456");
             expect(mockClient.sendMessage).toHaveBeenCalledWith("chat123", expect.objectContaining({
+                message: expect.stringContaining("确认解绑所有网盘"),
+                buttons: expect.any(Array),
                 parseMode: "html"
             }));
         });

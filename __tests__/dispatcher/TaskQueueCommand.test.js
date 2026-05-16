@@ -85,6 +85,7 @@ const { Dispatcher } = await import('../../src/dispatcher/Dispatcher.js');
 describe('Dispatcher /task_queue command', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        mockAuthGuard.can.mockResolvedValue(true);
     });
 
     it('should send placeholder and render queue overview with buttons', async () => {
@@ -144,6 +145,18 @@ describe('Dispatcher /task_queue command', () => {
 
         expect(mockTaskRepository.getQueueOverview).toHaveBeenCalledWith(10);
     });
+
+    it('should reject non-admin users even when opened through a callback', async () => {
+        mockAuthGuard.can.mockResolvedValue(false);
+
+        await Dispatcher._handleTaskQueueCommand('chat123', '123');
+
+        expect(mockTaskRepository.getQueueOverview).not.toHaveBeenCalled();
+        expect(mockClient.sendMessage).toHaveBeenCalledWith(
+            'chat123',
+            expect.objectContaining({ message: expect.stringContaining('无权限') })
+        );
+    });
 });
 
 describe('Dispatcher /task_queue callback', () => {
@@ -157,6 +170,19 @@ describe('Dispatcher /task_queue callback', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        mockAuthGuard.can.mockResolvedValue(true);
+    });
+
+    it('should reject non-admin task queue pagination callbacks', async () => {
+        mockAuthGuard.can.mockResolvedValue(false);
+        const answerMock = vi.fn();
+
+        await Dispatcher._handleTaskQueueCallback(
+            createCallbackEvent('tq_failed_0'), 'tq_failed_0', '123', answerMock
+        );
+
+        expect(mockTaskRepository.getTasksByStatus).not.toHaveBeenCalled();
+        expect(answerMock).toHaveBeenCalledWith(expect.stringContaining('无权限'));
     });
 
     it('should handle tq_back callback to return to overview', async () => {

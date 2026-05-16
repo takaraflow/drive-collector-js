@@ -10,7 +10,9 @@ describe("zh-CN Locale", () => {
     expect(STRINGS.system).toBeDefined();
     expect(typeof STRINGS.system).toBe("object");
     expect(STRINGS.system.node_service_active).toBeDefined();
-    expect(STRINGS.system.help).toContain("/diagnosis");
+    expect(STRINGS.system.help).toContain("常用操作");
+    expect(STRINGS.system.help).not.toContain("/diagnosis");
+    expect(STRINGS.system.help_admin).toContain("/diagnosis");
   });
 
   test("should have task strings", () => {

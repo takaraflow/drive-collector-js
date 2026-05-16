@@ -60,17 +60,35 @@ export class UIHelper {
         });
         if (isLoading) text += `\n🔄 <i>${STRINGS.files.syncing}</i>`;
         
-        // 生成分页导航按钮
         const buttons = [
-            [
-                Button.inline(page <= 0 ? " " : STRINGS.files.btn_home, Buffer.from(page <= 0 ? "noop" : `files_page_0`)),
-                Button.inline(page <= 0 ? " " : STRINGS.files.btn_prev, Buffer.from(page <= 0 ? "noop" : `files_page_${page - 1}`)),
-                Button.inline(STRINGS.files.btn_refresh, Buffer.from(`files_refresh_${page}`)),
-                Button.inline(page >= totalPages - 1 ? " " : STRINGS.files.btn_next, Buffer.from(page >= totalPages - 1 ? "noop" : `files_page_${page + 1}`)),
-                Button.inline(page >= totalPages - 1 ? " " : STRINGS.files.btn_end, Buffer.from(page >= totalPages - 1 ? "noop" : `files_page_${totalPages - 1}`))
-            ]
+            this._buildPaginationRow({
+                page,
+                totalPages,
+                refreshData: `files_refresh_${page}`,
+                pageData: (targetPage) => `files_page_${targetPage}`,
+                labels: STRINGS.files
+            })
         ];
         return { text, buttons };
+    }
+
+    static _buildPaginationRow({ page, totalPages, refreshData, pageData, labels = {} }) {
+        const lastPage = Math.max(0, (totalPages || 1) - 1);
+        const row = [];
+
+        if (page > 0) {
+            row.push(Button.inline(labels.btn_home || "⏮️", Buffer.from(pageData(0))));
+            row.push(Button.inline(labels.btn_prev || "⬅️", Buffer.from(pageData(page - 1))));
+        }
+
+        row.push(Button.inline(labels.btn_refresh || "🔄", Buffer.from(refreshData)));
+
+        if (page < lastPage) {
+            row.push(Button.inline(labels.btn_next || "➡️", Buffer.from(pageData(page + 1))));
+            row.push(Button.inline(labels.btn_end || "⏭️", Buffer.from(pageData(lastPage))));
+        }
+
+        return row;
     }
 
     /**
@@ -434,28 +452,30 @@ export class UIHelper {
          // 翻页按钮
          const page = data.page;
          const totalPages = data.totalPages;
-         const navRow = [
-             Button.inline(page <= 0 ? ' ' : '⏮️', Buffer.from(page <= 0 ? 'noop' : `tq_${status}_0`)),
-             Button.inline(page <= 0 ? ' ' : '⬅️', Buffer.from(page <= 0 ? 'noop' : `tq_${status}_${page - 1}`)),
-             Button.inline(TQ.btn_refresh, Buffer.from(`tq_refresh_${status}_${page}`)),
-             Button.inline(page >= totalPages - 1 ? ' ' : '➡️', Buffer.from(page >= totalPages - 1 ? 'noop' : `tq_${status}_${page + 1}`)),
-             Button.inline(page >= totalPages - 1 ? ' ' : '⏭️', Buffer.from(page >= totalPages - 1 ? 'noop' : `tq_${status}_${totalPages - 1}`))
-         ];
+         const navRow = this._buildPaginationRow({
+             page,
+             totalPages,
+             refreshData: `tq_refresh_${status}_${page}`,
+             pageData: (targetPage) => `tq_${status}_${targetPage}`,
+             labels: TQ
+         });
          const backRow = [
              Button.inline(TQ.btn_back, Buffer.from('tq_back'))
          ];
 
          // 失败任务每条加重试按钮
-         const retryRow = [];
+         const retryRows = [];
          if (status === 'failed') {
-             for (const t of data.tasks) {
-                 const name = this._shortenFileName(t.file_name || '-', 12);
-                 retryRow.push(Button.inline(`🔄 ${name}`, Buffer.from(`retry_${t.id}`)));
+             for (let i = 0; i < data.tasks.length; i++) {
+                 const t = data.tasks[i];
+                 retryRows.push([
+                     Button.inline(`🔄 重试第 ${data.page * data.pageSize + i + 1} 项`, Buffer.from(`retry_${t.id}`))
+                 ]);
              }
          }
 
-         const buttons = retryRow.length > 0
-             ? [backRow, retryRow, navRow]
+         const buttons = retryRows.length > 0
+             ? [backRow, ...retryRows, navRow]
              : [backRow, navRow];
 
          return { text: html, buttons };

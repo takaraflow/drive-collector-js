@@ -2,32 +2,29 @@ export const STRINGS = {
     // --- 系统/全局 ---
     system: {
         startup: "🚀 Telegram 客户端已连接",
-        help: "📖 <b>云转存助手 使用帮助</b> (v{{version}})\n\n" +
-              "您可以直接向我发送<b>文件、视频、图片</b>或支持的<b>链接</b>，我会自动帮您转存到绑定的网盘中。\n\n" +
-              "<b>常用命令：</b>\n" +
-              "/drive - 🔑 绑定或管理您的网盘\n" +
-              "/files - 📁 浏览已转存的文件\n" +
-              "/status - 📊 查看系统状态与任务历史\n" +
-              "/remote_folder - 📁 上传路径设置\n" +
-              "/set_remote_folder - 📁 设置自定义上传目录\n" +
-              "/help - 📖 显示此帮助菜单\n" +
-              "/logout - ❌ 解绑当前网盘\n\n" +
-              "<b>管理员命令：</b>\n" +
-              "/open_service - 🔓 开启服务 (公开模式)\n" +
-               "/close_service - 🔒 关闭服务 (维护模式)\n" +
-               "/task_queue - 📊 查看任务队列\n" +
-               "/diagnosis - 🩺 系统诊断\n" +
-               "/ban - 🚫 封禁用户 (UID)\n" +
-               "/unban - ✅ 解封用户 (UID)\n" +
-               "/pro_admin - 👑 设置管理员 (UID)\n" +
-               "/de_admin - 🗑️ 取消管理员 (UID)\n\n" +
-               "<b>支持的链接类型：</b>\n" +
-              "• Telegram 消息链接\n" +
-              "• 直链 (部分支持)\n\n" +
-              "如有疑问或建议，请联系管理员。",
+        help: "📖 <b>可以做什么</b> (v{{version}})\n\n" +
+              "直接发送文件、图片、视频或支持的链接，我会转存到你的网盘。\n\n" +
+              "<b>常用操作</b>\n" +
+              "• 绑定或管理网盘\n" +
+              "• 查看已转存文件\n" +
+              "• 查看我的任务进度\n" +
+              "• 设置保存目录\n\n" +
+              "遇到问题请联系管理员。",
+        help_admin: "\n\n<b>管理员工具</b>\n" +
+                    "/task_queue - 查看全局任务队列\n" +
+                    "/diagnosis - 系统诊断\n" +
+                    "/open_service - 开启公开访问\n" +
+                    "/close_service - 进入维护模式\n" +
+                    "/ban - 封禁用户\n" +
+                    "/unban - 解封用户",
+        help_owner: "\n" +
+                    "/pro_admin - 设置管理员\n" +
+                    "/de_admin - 取消管理员",
         maintenance_mode: "🚧 <b>系统维护中</b>\n\n当前 Bot 仅限管理员使用，请稍后访问。",
         maintenance_alert: "🚧 系统维护中",
-        welcome: "👋 <b>欢迎使用云转存助手</b>\n\n可以直接发送文件或链接给我，我会帮您转存。\n\n/drive - 🔑 绑定网盘\n/files - 📁 浏览文件\n/status - 📊 查看系统状态",
+        welcome: "👋 <b>欢迎使用云转存助手</b>\n\n直接发送文件、图片、视频或支持的链接，我会转存到你的网盘。",
+        btn_bind_drive: "绑定网盘",
+        btn_help: "帮助",
         unknown_error: "❌ 发生未知错误，请稍后重试。",
         // 🆕 新增
         node_service_active: "Node Service Active",
@@ -35,16 +32,13 @@ export const STRINGS = {
         init_history_complete: "✅ 历史任务初始化扫描完成",
         init_error: "❌ 任务初始化过程中发生错误:",
         critical_error: "Critical: Unhandled Dispatcher Error:",
-        mcp_help: "🤖 <b>MCP (Model Context Protocol) 接入指南</b>\n\n" +
-                  "您可以将本服务接入 Claude Desktop 或 Cursor，让 AI 直接管理您的网盘。\n\n" +
-                  "<b>接入方式：</b>\n" +
-                  "• <b>远程模式 (推荐)</b>: <code>SSE http://your-domain/sse</code>\n" +
-                  "详细配置请查阅项目 <code>docs/MCP_USER_GUIDE.md</code> 文件。\n\n" +
-                  "请发送 /mcp_token 获取您的专属 Access Token。",
+        mcp_help: "🤖 <b>高级接入</b>\n\n" +
+                  "可把本服务连接到支持 MCP 的 AI 客户端。\n\n" +
+                  "配置地址请向管理员确认。需要令牌时发送 /mcp_token。",
         mcp_token: "🔑 <b>您的专属 AI 接入令牌</b>\n\n" +
                    "<code>{{token}}</code>\n\n" +
-                   "⚠️ <b>安全提示</b>：该令牌允许 AI 访问您的所有网盘。请勿泄露！\n" +
-                   "如需重置，请再次发送 /mcp_token 并确认。",
+                   "此令牌可代表你访问已绑定网盘。只在你信任的客户端中使用，不要转发给他人。\n" +
+                   "如需停用或更换令牌，请联系管理员。",
     },
 
     // --- 任务相关 ---
@@ -53,7 +47,7 @@ export const STRINGS = {
         queued: "🕒 <b>任务排队中...</b>\n\n当前顺位: <code>第 {{rank}} 位</code>",
         cancelled: "🚫 任务已取消。",
         cancel_btn: "🚫 取消排队",
-        create_failed: "❌ <b>任务创建失败</b>\n\n数据库连接异常，请稍后重试。",
+        create_failed: "❌ <b>暂时无法创建任务</b>\n\n请稍后重试；如果连续失败，请联系管理员。",
         restore: "🔄 <b>系统重启，检测到任务中断，已自动恢复...</b>",
         downloading: "📥 正在下载资源...",
         downloaded_waiting_upload: "📥 <b>下载完成，等待转存...</b>",
@@ -63,8 +57,9 @@ export const STRINGS = {
         success: "✅ <b>文件转存成功</b>\n\n📄 名称: {{name}}\n📂 目录: <code>{{folder}}</code>",
         duplicate: "⚠️ <b>文件已存在</b>\n\n📄 名称: {{name}}\n📂 目录: <code>{{folder}}</code>\n\n该文件之前已成功转存，无需重复处理。",
         failed_validation: "⚠️ <b>校验异常</b>: {{name}}",
-        failed_upload: "❌ <b>同步终止</b>\n原因: <code>{{reason}}</code>",
+        failed_upload: "❌ <b>转存失败</b>\n\n原因: <code>{{reason}}</code>\n你可以重试，或重新发送文件。",
         parse_failed: "❌ 无法解析该媒体文件信息。",
+        link_parse_failed: "❌ <b>无法解析这个链接</b>\n\n请确认链接可访问，或重新发送文件本身。",
         link_limit: "⚠️ 仅处理前 10 个媒体。",
         cmd_sent: "指令已下达",
         task_not_found: "任务已不存在或无权操作",
@@ -93,30 +88,34 @@ export const STRINGS = {
         cancel_prompt: "发送 /cancel 或输入 取消 可随时退出绑定流程。",
         cancelled: "绑定流程已取消，输入 /drive 可重新开始。",
         not_found: "🚫 未找到对应网盘",
-        unbind_confirm: "⚠️ <b>确定要解绑该网盘吗？</b>\n\n解绑后将无法进行转存，且再次使用需重新输入密码。",
+        unbind_confirm: "⚠️ <b>确认解绑这个网盘？</b>\n\n网盘：<code>{{type}}</code>\n账号：<code>{{account}}</code>\n\n解绑后不能继续转存到这个网盘，已转存文件不会从云端删除。",
+        unbind_all_confirm: "⚠️ <b>确认解绑所有网盘？</b>\n\n解绑后需要重新绑定网盘才能继续转存，已转存文件不会从云端删除。",
         unbind_success: "✅ <b>解绑成功</b>\n\n您的账号信息已从本系统中移除。",
         no_drive_unbind: "⚠️ 您当前未绑定任何网盘，无需解绑。",
-        no_drive_found: "🚫 <b>未检测到绑定的网盘</b>\n\n请先发送 /drive 绑定网盘，然后再发送文件/链接。",
+        no_drive_found: "🚫 <b>还没有绑定网盘</b>\n\n请先绑定网盘，然后再发送文件或链接。",
         
         // 绑定流程
         mega_input_email: "📧 <b>请输入您的 Mega 登录邮箱</b>：",
-        mega_input_pass: "🔑 <b>请输入密码</b>\n(输入后消息会被立即删除以保护隐私)",
+        mega_input_pass: "🔑 <b>请输入密码</b>\n\n为减少暴露，我会在提交后尝试删除这条消息。请确认当前聊天环境可信。",
         mega_verifying: "⏳ 正在验证账号，请稍候...",
         mega_success: "✅ <b>绑定成功！</b>\n\n账号: <code>{{email}}</code>",
-        mega_fail_2fa: "⚠️ <b>检测到您的账号开启了两步验证 (2FA)</b>。\n请先关闭 2FA 后重试。",
-        mega_fail_login: "⚠️ <b>登录失败</b>\n账号/密码错误或开启了 2FA。",
+        mega_fail_2fa: "⚠️ <b>暂不支持开启两步验证的账号</b>\n\n请使用支持应用密码或 Token 的方式绑定，或换用其他网盘。不建议长期关闭两步验证。",
+        mega_fail_login: "⚠️ <b>登录失败</b>\n\n请检查账号和密码，或换用支持的登录方式。",
         email_invalid: "❌ 邮箱格式看似不正确，请重新输入：",
         // 🆕 新增
         bind_failed: "❌ <b>绑定失败</b>",
+        bind_error: "❌ <b>绑定过程中出现问题</b>\n\n请重新尝试；如果仍失败，请联系管理员。",
         please_confirm: "请确认操作",
         success_unbind: "已成功解绑",
         returned: "已返回",
         check_input: "请查看输入提示",
-        btn_confirm_unbind: "✅ 确定解绑",
-        btn_cancel: "🔙 取消",
+        btn_confirm_unbind: "确认解绑",
+        btn_confirm_unbind_all: "确认全部解绑",
+        btn_keep_drive: "保留网盘",
+        btn_cancel: "返回",
         user_id_required: "User ID is required",
         // 默认网盘
-        btn_set_default: "设为默认网盘",
+        btn_set_default: "设为默认",
         is_default: "(默认)",
         set_default_success: "✅ 默认网盘设置成功！",
         btn_bind_other: "绑定其他网盘",
@@ -124,7 +123,8 @@ export const STRINGS = {
 
     // --- 文件浏览 ---
     files: {
-        fetching: "⏳ 正在拉取云端文件列表...",
+        fetching: "⏳ 正在加载文件列表...",
+        load_failed: "❌ <b>无法获取文件列表</b>\n\n请重新加载；如果连续失败，请联系管理员。",
         syncing: "🔄 正在同步最新数据...",
         refresh_limit: "🕒 刷新太快了，请 {{seconds}} 秒后再试",
         refresh_success: "刷新成功",
@@ -136,13 +136,16 @@ export const STRINGS = {
         btn_home: "⏮️",
         btn_prev: "⬅️",
         btn_refresh: "🔄",
+        btn_retry_load: "重新加载文件列表",
         btn_next: "➡️",
         btn_end: "⏭️",
     },
 
     // --- 状态相关 ---
     status: {
-        header: "📊 <b>系统状态</b>",
+        header: "📊 <b>我的状态</b>",
+        user_header: "📊 <b>我的状态</b>",
+        admin_header: "📊 <b>系统状态</b>",
         queue_title: "📦 您的任务队列",
         waiting_tasks: "🕒 排队中: {{count}}",
         current_task: "🔄 处理中: {{count}}",
@@ -153,12 +156,14 @@ export const STRINGS = {
         no_active_tasks: "✅ 当前没有排队或处理中任务。",
         task_item: "{{index}}. {{status}} <code>{{name}}</code> ({{statusText}})",
         drive_status: "🔑 网盘绑定: {{status}}",
-        system_info: "💻 系统信息",
+        system_info: "💻 管理员诊断信息",
         uptime: "⏱️ 运行时间: {{uptime}}",
         service_status: "📡 服务状态: {{status}}",
         mode_changed: "✅ <b>访问模式已切换</b>\n\n当前模式: <code>{{mode}}</code>",
         no_permission: "❌ <b>无权限</b>\n\n此操作仅限管理员执行。",
         btn_diagnosis: "🩺 系统诊断",
+        btn_my_status: "我的状态",
+        btn_task_queue: "全局队列",
     },
 
     // --- 系统诊断 ---
@@ -215,47 +220,38 @@ export const STRINGS = {
         no_tasks_in_status: "📭 该状态下暂无任务。您可以发送文件或链接来创建新任务。",
     },
 
-    // --- 上传路径设置 ---
+    // --- 保存目录设置 ---
     remote_folder: {
-        help: "📁 <b>自定义上传路径设置</b>\n\n" +
-              "使用此命令可为您的文件设置自定义上传目录。\n\n" +
-              "<b>命令格式：</b>\n" +
-              "/set_remote_folder [路径] - 设置自定义上传路径\n" +
-              "/set_remote_folder reset - 重置为默认路径\n" +
-              "/set_remote_folder - 查看当前设置\n\n" +
-              "<b>示例：</b>\n" +
-              "/set_remote_folder /Movies/2024\n" +
-              "/set_remote_folder /Documents/Books",
-        set_success: "✅ <b>上传路径已设置</b>\n\n" +
-                     "新路径: <code>{{path}}</code>\n" +
-                     "后续文件将上传到此目录。",
+        help: "📁 <b>保存目录</b>\n\n" +
+              "后续文件会转存到这里。\n" +
+              "请选择操作，或直接发送新目录，例如 <code>/Movies/2024</code>。",
+        menu_hint: "后续文件会转存到这里。\n请选择操作，或直接发送新目录，例如 <code>/Movies/2024</code>。",
+        set_success: "✅ <b>保存目录已设置</b>\n\n" +
+                     "新目录: <code>{{path}}</code>\n" +
+                     "后续文件会转存到此目录。",
         reset_success: "✅ <b>已重置为默认路径</b>\n\n" +
-                        "文件将上传到默认目录: <code>{{path}}</code>\n" +
-                        "{{#description}}<i>提示: {{description}}</i>{{/description}}",
-        show_current: "ℹ️ <b>当前上传路径设置</b>\n\n" +
-                      "当前路径: <code>{{path}}</code>\n" +
-                      "如需修改，请使用 /set_remote_folder [路径]",
+                        "文件会转存到默认目录: <code>{{path}}</code>",
+        reset_confirm: "⚠️ <b>确认重置保存目录？</b>\n\n后续文件会转存到默认目录: <code>{{path}}</code>",
+        show_current: "当前目录: <code>{{path}}</code>",
         invalid_path: "⚠️ <b>路径格式无效</b>\n\n" +
                       "路径应以 / 开头，且不包含特殊字符。\n" +
                       "示例: /Movies/2024",
-        no_permission: "❌ <b>无权限</b>\n\n" +
-                       "此功能需要先绑定网盘才能使用。",
+        no_permission: "🚫 <b>还不能设置保存目录</b>\n\n请先绑定网盘，然后再设置保存目录。",
         error_saving: "❌ <b>保存失败</b>\n\n" +
                       "无法保存路径设置，请稍后重试。",
         error_reading: "❌ <b>读取失败</b>\n\n" +
                        "无法读取当前路径设置，请稍后重试。",
         // 交互式设置相关
-        menu_title: "📁 <b>上传路径设置</b>\n\n",
-        btn_set_path: "🔧 设置路径",
-        btn_reset_path: "🔄 重置路径",
-        btn_cancel: "🔙 返回",
-        input_prompt: "📝 <b>请输入上传路径</b>\n\n" +
-                      "路径格式说明：\n" +
-                      "• 必须以 / 开头\n" +
-                      "• 可包含多级目录\n" +
-                      "• 示例: /Movies/2024\n\n" +
-                      "请直接回复您的路径：",
-        input_cancelled: "已取消路径设置",
+        menu_title: "📁 <b>保存目录</b>\n\n",
+        btn_set_path: "设置保存目录",
+        btn_reset_path: "重置为默认",
+        btn_confirm_reset: "确认重置",
+        btn_cancel: "返回",
+        input_prompt: "📝 <b>请输入保存目录</b>\n\n" +
+                      "必须以 / 开头，可包含多级目录。\n" +
+                      "示例: <code>/Movies/2024</code>\n\n" +
+                      "发送 /cancel 可取消。",
+        input_cancelled: "已取消保存目录设置。",
         waiting_for_input: "等待输入..."
     }
 };

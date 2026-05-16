@@ -176,7 +176,7 @@ describe('Remote Folder Integration Tests', () => {
             await Dispatcher.handle(event);
 
             expect(mockSendMessage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-                message: expect.stringContaining('上传路径设置'),
+                message: expect.stringContaining('保存目录'),
                 buttons: expect.any(Array)
             }));
         });
@@ -196,7 +196,8 @@ describe('Remote Folder Integration Tests', () => {
             await Dispatcher.handle(event);
 
             expect(mockSendMessage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-                message: expect.stringContaining('需要先绑定网盘')
+                message: expect.stringContaining('绑定网盘'),
+                buttons: expect.any(Array)
             }));
         });
     });
@@ -216,7 +217,8 @@ describe('Remote Folder Integration Tests', () => {
 
             expect(mockSessionStart).toHaveBeenCalledWith(userId, 'REMOTE_FOLDER_WAIT_PATH');
             expect(mockSendMessage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-                message: expect.stringContaining('请输入上传路径')
+                message: expect.stringContaining('请输入保存目录'),
+                buttons: expect.any(Array)
             }));
         });
 
@@ -234,7 +236,8 @@ describe('Remote Folder Integration Tests', () => {
 
             expect(mockUpdateRemoteFolder).toHaveBeenCalledWith('drive1', '/Movies/2024', userId);
             expect(mockSendMessage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-                message: expect.stringContaining('上传路径已设置')
+                message: expect.stringContaining('保存目录已设置'),
+                buttons: expect.any(Array)
             }));
         });
 
@@ -292,7 +295,8 @@ describe('Remote Folder Integration Tests', () => {
             expect(mockUpdateRemoteFolder).toHaveBeenCalledWith('drive1', '/Movies/2024', userId);
             expect(mockSessionClear).toHaveBeenCalledWith(userId);
             expect(mockSendMessage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-                message: expect.stringContaining('上传路径已设置')
+                message: expect.stringContaining('保存目录已设置'),
+                buttons: expect.any(Array)
             }));
         });
 
@@ -314,6 +318,27 @@ describe('Remote Folder Integration Tests', () => {
                 message: expect.stringContaining('路径格式无效')
             }));
             expect(mockUpdateRemoteFolder).not.toHaveBeenCalled();
+        });
+
+        it('should cancel remote folder input and not treat cancel as a path', async () => {
+            mockSessionGet.mockResolvedValue({ current_step: 'REMOTE_FOLDER_WAIT_PATH' });
+
+            const event = {
+                className: 'UpdateNewMessage',
+                message: {
+                    message: '/cancel',
+                    peerId: target,
+                    fromId: { userId: BigInt(userId) }
+                }
+            };
+
+            await Dispatcher.handle(event);
+
+            expect(mockSessionClear).toHaveBeenCalledWith(userId);
+            expect(mockUpdateRemoteFolder).not.toHaveBeenCalled();
+            expect(mockSendMessage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+                message: expect.stringContaining('已取消保存目录设置')
+            }));
         });
     });
 });

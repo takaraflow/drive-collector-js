@@ -72,8 +72,81 @@ export class Dispatcher {
     // 媒体组缓存：用于聚合短时间内具有相同 groupedId 的消息
     static groupBuffers = new Map();
 
-    // 防止刷新按钮被疯狂点击
-    static lastRefreshTime = 0;
+    // 防止同一用户/消息的刷新按钮被疯狂点击
+    static filesRefreshTimes = new Map();
+
+    static _getWelcomeButtons() {
+        return [
+            [
+                Button.inline(STRINGS.system.btn_bind_drive, Buffer.from("drive_select_type")),
+                Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))
+            ],
+            [
+                Button.inline(STRINGS.status.btn_my_status, Buffer.from("status_general")),
+                Button.inline(STRINGS.system.btn_help, Buffer.from("help_main"))
+            ]
+        ];
+    }
+
+    static _getNoDriveButtons() {
+        return [
+            [Button.inline(STRINGS.system.btn_bind_drive, Buffer.from("drive_select_type"))],
+            [Button.inline(STRINGS.system.btn_help, Buffer.from("help_main"))]
+        ];
+    }
+
+    static _getHelpButtons(isAdmin = false) {
+        const buttons = [
+            [
+                Button.inline(STRINGS.system.btn_bind_drive, Buffer.from("drive_select_type")),
+                Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))
+            ],
+            [
+                Button.inline(STRINGS.status.btn_my_status, Buffer.from("status_general")),
+                Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_menu"))
+            ]
+        ];
+
+        if (isAdmin) {
+            buttons.push([
+                Button.inline(STRINGS.status.btn_task_queue, Buffer.from("task_queue_open")),
+                Button.inline(STRINGS.status.btn_diagnosis, Buffer.from("diagnosis_run"))
+            ]);
+        }
+
+        return buttons;
+    }
+
+    static _getStatusButtons(isAdmin = false) {
+        const buttons = [
+            [
+                Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0")),
+                Button.inline(STRINGS.system.btn_help, Buffer.from("help_main"))
+            ]
+        ];
+
+        if (isAdmin) {
+            buttons.unshift([
+                Button.inline(STRINGS.status.btn_task_queue, Buffer.from("task_queue_open")),
+                Button.inline(STRINGS.status.btn_diagnosis, Buffer.from("diagnosis_run"))
+            ]);
+        }
+
+        return buttons;
+    }
+
+    static _getFilesRecoveryButtons(page = 0) {
+        return [
+            [Button.inline(STRINGS.files.btn_retry_load, Buffer.from(`files_refresh_${page}`))],
+            [Button.inline(STRINGS.system.btn_help, Buffer.from("help_main"))]
+        ];
+    }
+
+    static _getRemoteFolderInputButtons() {
+        return [
+            [Button.inline(STRINGS.remote_folder.btn_cancel, Buffer.from("remote_folder_cancel"))]
+        ];
+    }
 
     /**
      * 初始化 Dispatcher
@@ -235,47 +308,76 @@ export class Dispatcher {
             });
         }), userId, {}, false, 3);
 
-        if (data === "noop") return await answer();
+        try {
+            if (data === "noop") return await answer();
 
-        if (data.startsWith("cancel_msg_")) {
-            const msgId = data.split("_")[2];
-            const ok = await TaskManager.cancelTasksByMsgId(msgId, userId);
-            await answer(ok ? STRINGS.task.cmd_sent : STRINGS.task.task_not_found);
+            if (data === "help_main") {
+                await this._handleHelpCommand(event.peer, userId);
+                return await answer();
+            }
 
-        } else if (data.startsWith("cancel_batch_")) {
-            // 兼容历史按钮：旧版使用 groupedId，无法从 DB 反查任务（会导致“点了没反应”）
-            await answer(STRINGS.task.task_not_found);
+            if (data === "status_general") {
+                await this._handleStatusCommand(event.peer, userId, "/status");
+                return await answer();
+            }
 
-        } else if (data.startsWith("cancel_")) {
-            const taskId = data.split("_")[1];
-            const ok = await TaskManager.cancelTask(taskId, userId);
-            await answer(ok ? STRINGS.task.cmd_sent : STRINGS.task.task_not_found);
+            if (data === "task_queue_open") {
+                await this._handleTaskQueueCommand(event.peer, userId);
+                return await answer();
+            }
 
-        } else if (data.startsWith("retry_")) {
-            const taskId = data.slice(6);
-            const result = await TaskManager.retryTask(taskId, userId);
-            await answer(result.success ? STRINGS.task.cmd_sent : (result.message || STRINGS.task.task_not_found));
+            if (data === "remote_folder_menu") {
+                await this._handleRemoteFolderCommand(event.peer, userId);
+                return await answer();
+            }
 
-        } else if (data.startsWith("drive_")) { 
-            const toast = await DriveConfigFlow.handleCallback(event, userId);
-            await answer(toast || "");
-        
-        } else if (data === "diagnosis_run") {
-            await this._handleDiagnosisCommand(event.peer, userId);
-            return await answer();
+            if (data.startsWith("cancel_msg_")) {
+                const msgId = data.split("_")[2];
+                const ok = await TaskManager.cancelTasksByMsgId(msgId, userId);
+                await answer(ok ? STRINGS.task.cmd_sent : STRINGS.task.task_not_found);
 
-        } else if (data.startsWith("files_")) {
-            await this._handleFilesCallback(event, data, userId, answer);
+            } else if (data.startsWith("cancel_batch_")) {
+                // 兼容历史按钮：旧版使用 groupedId，无法从 DB 反查任务（会导致“点了没反应”）
+                await answer(STRINGS.task.task_not_found);
 
-        } else if (data.startsWith("tq_")) {
-            await this._handleTaskQueueCallback(event, data, userId, answer);
+            } else if (data.startsWith("cancel_")) {
+                const taskId = data.split("_")[1];
+                const ok = await TaskManager.cancelTask(taskId, userId);
+                await answer(ok ? STRINGS.task.cmd_sent : STRINGS.task.task_not_found);
 
-        } else if (data.startsWith("remote_folder_")) {
-            await this._handleRemoteFolderCallback(event, userId, answer);
+            } else if (data.startsWith("retry_")) {
+                const taskId = data.slice(6);
+                const result = await TaskManager.retryTask(taskId, userId);
+                await answer(result.success ? STRINGS.task.cmd_sent : (result.message || STRINGS.task.task_not_found));
 
-        } else {
-            log.warn(`未知回调数据: ${data}`, { userId, eventId: event.id?.toString() });
-            await answer();
+            } else if (data.startsWith("drive_")) {
+                const toast = await DriveConfigFlow.handleCallback(event, userId);
+                await answer(toast || "");
+
+            } else if (data === "diagnosis_run") {
+                await this._handleDiagnosisCommand(event.peer, userId);
+                return await answer();
+
+            } else if (data.startsWith("files_")) {
+                await this._handleFilesCallback(event, data, userId, answer);
+
+            } else if (data.startsWith("tq_")) {
+                await this._handleTaskQueueCallback(event, data, userId, answer);
+
+            } else if (data.startsWith("remote_folder_")) {
+                await this._handleRemoteFolderCallback(event, userId, answer);
+
+            } else {
+                log.warn(`未知回调数据: ${data}`, { userId, eventId: event.id?.toString() });
+                await answer();
+            }
+        } catch (error) {
+            log.error("Callback handling failed", {
+                userId,
+                data,
+                error: error?.message
+            });
+            await answer(STRINGS.system.unknown_error);
         }
     }
 
@@ -288,19 +390,39 @@ export class Dispatcher {
 
         if (isRefresh) {
             const now = Date.now();
-            if (now - this.lastRefreshTime < 10000) return await answerCallback(format(STRINGS.files.refresh_limit, { 
-                seconds: Math.ceil((10000 - (now - this.lastRefreshTime)) / 1000) 
+            const refreshKey = `${userId}:${event.msgId || "files"}`;
+            const lastRefreshTime = this.filesRefreshTimes.get(refreshKey) || 0;
+            if (now - lastRefreshTime < 10000) return await answerCallback(format(STRINGS.files.refresh_limit, {
+                seconds: Math.ceil((10000 - (now - lastRefreshTime)) / 1000)
             }));
-            this.lastRefreshTime = now;
+            this.filesRefreshTimes.set(refreshKey, now);
         }
 
         if (!isNaN(page)) {
-        if (isRefresh) await safeEdit(event.userId, event.msgId, STRINGS.files.syncing, null, userId);
+            if (isRefresh) await safeEdit(event.userId, event.msgId, STRINGS.files.syncing, null, userId);
             await this._waitForFilesRefreshDelay();
-            
-            const files = await CloudTool.listRemoteFiles(userId, isRefresh);
-            const { text, buttons } = await UIHelper.renderFilesPage(files, page, 6, CloudTool.isLoading(), userId);
-            await safeEdit(event.userId, event.msgId, text, buttons, userId);
+
+            try {
+                let drives = await DriveRepository.findByUserId(userId);
+                if (!drives || drives.length === 0) {
+                    drives = await DriveRepository.findByUserId(userId, true);
+                }
+                if (!drives || drives.length === 0) {
+                    await safeEdit(event.userId, event.msgId, STRINGS.drive.no_drive_found, this._getNoDriveButtons(), userId);
+                    return await answerCallback();
+                }
+
+                const files = await CloudTool.listRemoteFiles(userId, isRefresh);
+                const { text, buttons } = await UIHelper.renderFilesPage(files, page, 6, CloudTool.isLoading(), userId);
+                await safeEdit(event.userId, event.msgId, text, buttons, userId);
+            } catch (error) {
+                log.error("Files callback error:", {
+                    userId,
+                    error: error?.message
+                });
+                await safeEdit(event.userId, event.msgId, STRINGS.files.load_failed, this._getFilesRecoveryButtons(page), userId);
+                return await answerCallback();
+            }
         }
         await answerCallback(isRefresh ? STRINGS.files.refresh_success : "");
     }
@@ -340,6 +462,7 @@ export class Dispatcher {
 
         await runBotTaskWithRetry(() => client.sendMessage(target, {
             message: STRINGS.system.welcome,
+            buttons: this._getWelcomeButtons(),
             parseMode: "html"
         }), userId, {}, false, 3);
         return true;
@@ -464,7 +587,15 @@ export class Dispatcher {
                 return true;
             }
         } catch (e) {
-            await runBotTaskWithRetry(() => client.sendMessage(target, { message: `❌ ${escapeHTML(e.message)}`, parseMode: "html" }), userId, {}, false, 3);
+            log.warn("Link parsing failed", {
+                userId,
+                error: e?.message
+            });
+            await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.task.link_parse_failed,
+                buttons: this._getHelpButtons(false),
+                parseMode: "html"
+            }), userId, {}, false, 3);
             return true;
         }
         return false;
@@ -527,6 +658,7 @@ export class Dispatcher {
             // 4. 通用兜底回复：纯文本消息（包括未匹配的命令）
             return await runBotTaskWithRetry(() => client.sendMessage(target, { 
                 message: STRINGS.system.welcome,
+                buttons: this._getWelcomeButtons(),
                 parseMode: "html"
             }), userId, {}, false, 3);
         }
@@ -552,10 +684,9 @@ export class Dispatcher {
                     drives = await DriveRepository.findByUserId(userId, true);
                 }
                 if (!drives || drives.length === 0) {
-                    await safeEdit(target, placeholder.id, STRINGS.drive.no_drive_found, null, userId);
+                    await safeEdit(target, placeholder.id, STRINGS.drive.no_drive_found, this._getNoDriveButtons(), userId);
                     return;
                 }
-                const drive = drives[0];
 
                 // 如果 listRemoteFiles 命中了 Redis 或内存缓存，这里会非常快
                 const files = await CloudTool.listRemoteFiles(userId);
@@ -565,7 +696,7 @@ export class Dispatcher {
                 // 如果发现数据是加载中的（例如缓存过期正在后台刷新），可以考虑在这里逻辑
             } catch (e) {
                 log.error("Files command async error:", e);
-                await safeEdit(target, placeholder.id, "❌ 无法获取文件列表，请稍后重试。", null, userId);
+                await safeEdit(target, placeholder.id, STRINGS.files.load_failed, this._getFilesRecoveryButtons(0), userId);
             }
         })();
     }
@@ -576,6 +707,7 @@ export class Dispatcher {
     static async _handleStatusCommand(target, userId, fullText) {
         const parts = fullText.split(' ');
         const subCommand = parts.length > 1 ? parts[1].toLowerCase() : 'general';
+        const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
 
         let message = '';
         let buttons = null;
@@ -589,13 +721,8 @@ export class Dispatcher {
                 break;
             case 'general':
             default:
-                message = await this._getGeneralStatus(userId);
-                const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
-                if (isAdmin) {
-                    buttons = [
-                        [Button.inline(STRINGS.status.btn_diagnosis, Buffer.from("diagnosis_run"))]
-                    ];
-                }
+                message = await this._getGeneralStatus(userId, { includeSystemInfo: isAdmin });
+                buttons = this._getStatusButtons(isAdmin);
         }
 
         return await runBotTaskWithRetry(() => client.sendMessage(target, {
@@ -611,7 +738,7 @@ export class Dispatcher {
     static async _getQueueStatus(userId) {
         const queueOverview = await TaskRepository.getUserQueueOverview(userId, 10);
 
-        let status = format(STRINGS.status.header, {}) + '\n\n';
+        let status = format(STRINGS.status.user_header, {}) + '\n\n';
         status += this._renderUserQueueSummary(queueOverview);
 
         return status;
@@ -623,7 +750,7 @@ export class Dispatcher {
     static async _getUserStatus(userId) {
         const queueOverview = await TaskRepository.getUserQueueOverview(userId, 10);
 
-        let status = format(STRINGS.status.header, {}) + '\n\n';
+        let status = format(STRINGS.status.user_header, {}) + '\n\n';
         status += this._renderUserQueueSummary(queueOverview) + '\n';
         status += '\n' + format(STRINGS.status.user_history, {}) + '\n\n';
 
@@ -643,11 +770,11 @@ export class Dispatcher {
     /**
      * [私有] 获取通用状态
      */
-    static async _getGeneralStatus(userId) {
+    static async _getGeneralStatus(userId, { includeSystemInfo = false } = {}) {
         const activeDrive = await DriveRepository.getDefaultDrive(userId);
         const queueOverview = await TaskRepository.getUserQueueOverview(userId, 10);
         
-        let status = format(STRINGS.status.header, {}) + '\n\n';
+        let status = format(includeSystemInfo ? STRINGS.status.admin_header : STRINGS.status.user_header, {}) + '\n\n';
         
         // 网盘状态
         const driveType = activeDrive?.type ? activeDrive.type.toUpperCase() : '未知';
@@ -658,10 +785,11 @@ export class Dispatcher {
         // 队列状态
         status += this._renderUserQueueSummary(queueOverview) + '\n';
         
-        // 系统信息
-        status += '\n' + format(STRINGS.status.system_info, {}) + '\n';
-        status += format(STRINGS.status.uptime, { uptime: this._getUptime() }) + '\n';
-        status += format(STRINGS.status.service_status, { status: '✅ 正常' });
+        if (includeSystemInfo) {
+            status += '\n' + format(STRINGS.status.system_info, {}) + '\n';
+            status += format(STRINGS.status.uptime, { uptime: this._getUptime() }) + '\n';
+            status += format(STRINGS.status.service_status, { status: '✅ 正常' });
+        }
         
         return status;
     }
@@ -790,21 +918,16 @@ export class Dispatcher {
         const version = appVersion;
 
         let message = format(STRINGS.system.help, { version });
-
-        if (!isAdmin) {
-            // 移除管理员命令部分
-            const parts = message.split("<b>管理员命令：</b>");
-            if (parts.length > 1) {
-                message = parts[0] + "如有疑问或建议，请联系管理员。";
+        if (isAdmin) {
+            message += STRINGS.system.help_admin;
+            if (isOwner) {
+                message += STRINGS.system.help_owner;
             }
-        } else if (!isOwner) {
-            // 如果是普通管理员，移除只有 Owner 才能用的命令
-            message = message.replace("/pro_admin - 👑 设置管理员 (UID)\n", "");
-            message = message.replace("/de_admin - 🗑️ 取消管理员 (UID)\n", "");
         }
 
         return await runBotTaskWithRetry(() => client.sendMessage(target, {
             message: message,
+            buttons: this._getHelpButtons(isAdmin),
             parseMode: "html"
         }), userId, {}, false, 3);
     }
@@ -815,6 +938,7 @@ export class Dispatcher {
     static async _sendBindHint(target, userId) {
         return await runBotTaskWithRetry(() => client.sendMessage(target, {
             message: STRINGS.drive.no_drive_found,
+            buttons: this._getNoDriveButtons(),
             parseMode: "html"
         }), userId, {}, false, 3);
     }
@@ -876,6 +1000,14 @@ export class Dispatcher {
      * [私有] 全局任务队列查看（管理员）
      */
     static async _handleTaskQueueCommand(target, userId) {
+        const isAdmin = await AuthGuard.can(userId, "system:admin");
+        if (!isAdmin) {
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.status.no_permission,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        }
+
         const placeholder = await runBotTaskWithRetry(() => client.sendMessage(target, {
             message: STRINGS.task_queue.loading
         }), userId, {}, false, 3);
@@ -898,6 +1030,11 @@ export class Dispatcher {
      */
     static async _handleTaskQueueCallback(event, data, userId, answerCallback) {
         try {
+            const isAdmin = await AuthGuard.can(userId, "system:admin");
+            if (!isAdmin) {
+                return await answerCallback(STRINGS.status.no_permission);
+            }
+
             const { TaskRepository } = await import("../repositories/TaskRepository.js");
 
             if (data === "tq_back") {
@@ -1090,6 +1227,7 @@ export class Dispatcher {
         if (!drives || drives.length === 0) {
             return await runBotTaskWithRetry(() => client.sendMessage(target, {
                 message: STRINGS.remote_folder.no_permission,
+                buttons: this._getNoDriveButtons(),
                 parseMode: "html"
             }), userId, {}, false, 3);
         }
@@ -1101,11 +1239,13 @@ export class Dispatcher {
 
         let message = format(STRINGS.remote_folder.menu_title, {});
         const pathInfo = displayPath + (isCustomPath ? " (自定义)" : " (默认)");
-        message += format(STRINGS.remote_folder.show_current, { path: pathInfo });
+        message += format(STRINGS.remote_folder.show_current, { path: pathInfo }) + '\n\n';
+        message += STRINGS.remote_folder.menu_hint;
 
         const buttons = [
             [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))],
-            [Button.inline(STRINGS.remote_folder.btn_reset_path, Buffer.from("remote_folder_reset"))]
+            [Button.inline(STRINGS.remote_folder.btn_reset_path, Buffer.from("remote_folder_reset_confirm"))],
+            [Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))]
         ];
 
         return await runBotTaskWithRetry(() => client.sendMessage(target, {
@@ -1130,6 +1270,7 @@ export class Dispatcher {
         if (!drives || drives.length === 0) {
             return await runBotTaskWithRetry(() => client.sendMessage(target, {
                 message: STRINGS.remote_folder.no_permission,
+                buttons: this._getNoDriveButtons(),
                 parseMode: "html"
             }), userId, {}, false, 3);
         }
@@ -1144,6 +1285,7 @@ export class Dispatcher {
                 await SessionManager.start(userId, "REMOTE_FOLDER_WAIT_PATH");
                 return await runBotTaskWithRetry(() => client.sendMessage(target, {
                     message: STRINGS.remote_folder.input_prompt,
+                    buttons: this._getRemoteFolderInputButtons(),
                     parseMode: "html"
                 }), userId, {}, false, 3);
             }
@@ -1155,9 +1297,11 @@ export class Dispatcher {
                 const defaultPath = getDefaultRemoteFolder();
                 return await runBotTaskWithRetry(() => client.sendMessage(target, {
                     message: format(STRINGS.remote_folder.reset_success, { 
-                        path: defaultPath,
-                        description: "系统默认路径"
+                        path: defaultPath
                     }),
+                    buttons: [
+                        [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))]
+                    ],
                     parseMode: "html"
                 }), userId, {}, false, 3);
             }
@@ -1166,6 +1310,7 @@ export class Dispatcher {
             if (!CloudTool._validatePath(pathArg)) {
                 return await runBotTaskWithRetry(() => client.sendMessage(target, {
                     message: STRINGS.remote_folder.invalid_path,
+                    buttons: this._getRemoteFolderInputButtons(),
                     parseMode: "html"
                 }), userId, {}, false, 3);
             }
@@ -1183,6 +1328,10 @@ export class Dispatcher {
 
             return await runBotTaskWithRetry(() => client.sendMessage(target, {
                 message: format(STRINGS.remote_folder.set_success, { path: pathArg }),
+                buttons: [
+                    [Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))],
+                    [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))]
+                ],
                 parseMode: "html"
             }), userId, {}, false, 3);
 
@@ -1208,10 +1357,37 @@ export class Dispatcher {
         const peerId = event.message.peerId;
 
         if (session.current_step === "REMOTE_FOLDER_WAIT_PATH") {
+            const normalizedText = text.toLowerCase();
+            if (["/cancel", "cancel", "/取消", "取消"].includes(normalizedText)) {
+                await SessionManager.clear(userId);
+                await runBotTaskWithRetry(() => client.sendMessage(peerId, {
+                    message: STRINGS.remote_folder.input_cancelled,
+                    buttons: [
+                        [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))]
+                    ],
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+                return true;
+            }
+
+            const routeEscapes = new Set([
+                "/start",
+                "/help",
+                "/drive",
+                "/files",
+                "/status",
+                "/remote_folder"
+            ]);
+            if (routeEscapes.has(normalizedText.split(" ")[0])) {
+                await SessionManager.clear(userId);
+                return false;
+            }
+
             // 验证路径格式
             if (!CloudTool._validatePath(text)) {
                 await runBotTaskWithRetry(() => client.sendMessage(peerId, {
                     message: STRINGS.remote_folder.invalid_path,
+                    buttons: this._getRemoteFolderInputButtons(),
                     parseMode: "html"
                 }), userId, {}, false, 3);
                 return true;
@@ -1232,6 +1408,10 @@ export class Dispatcher {
                 await SessionManager.clear(userId);
                 await runBotTaskWithRetry(() => client.sendMessage(peerId, {
                     message: format(STRINGS.remote_folder.set_success, { path: text }),
+                    buttons: [
+                        [Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))],
+                        [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))]
+                    ],
                     parseMode: "html"
                 }), userId, {}, false, 3);
             } catch (error) {
@@ -1302,11 +1482,29 @@ export class Dispatcher {
 
         if (data === "remote_folder_set") {
             await SessionManager.start(userId, "REMOTE_FOLDER_WAIT_PATH");
-            await safeEdit(event.userId, event.msgId, STRINGS.remote_folder.input_prompt, null, userId);
+            await safeEdit(event.userId, event.msgId, STRINGS.remote_folder.input_prompt, this._getRemoteFolderInputButtons(), userId);
+            await answerCallback("");
+        } else if (data === "remote_folder_reset_confirm") {
+            await safeEdit(event.userId, event.msgId, format(STRINGS.remote_folder.reset_confirm, { path: getDefaultRemoteFolder() }), [
+                [Button.inline(STRINGS.remote_folder.btn_cancel, Buffer.from("remote_folder_menu"))],
+                [Button.inline(STRINGS.remote_folder.btn_confirm_reset, Buffer.from("remote_folder_reset"))]
+            ], userId);
             await answerCallback("");
         } else if (data === "remote_folder_reset") {
             await this._setUserUploadPathInD1(userId, null);
-            await safeEdit(event.userId, event.msgId, format(STRINGS.remote_folder.reset_success, { path: getDefaultRemoteFolder() }), null, userId);
+            await safeEdit(event.userId, event.msgId, format(STRINGS.remote_folder.reset_success, { path: getDefaultRemoteFolder() }), [
+                [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))],
+                [Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))]
+            ], userId);
+            await answerCallback("");
+        } else if (data === "remote_folder_cancel") {
+            await SessionManager.clear(userId);
+            await safeEdit(event.userId, event.msgId, STRINGS.remote_folder.input_cancelled, [
+                [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))]
+            ], userId);
+            await answerCallback("");
+        } else if (data === "remote_folder_menu") {
+            await this._handleRemoteFolderCommand(event.peer || event.userId, userId);
             await answerCallback("");
         } else {
             await answerCallback("");

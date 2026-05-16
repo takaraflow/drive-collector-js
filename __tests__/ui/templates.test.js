@@ -53,7 +53,13 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
         files: {
             directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
             dir_empty: "ℹ️ 目录为空。您可以直接发送文件给我，将其转存到此目录。",
-            batch_empty: "ℹ️ 尚无文件排队或加载中。您可以直接向我发送文件或链接来开始转存。"
+            batch_empty: "ℹ️ 尚无文件排队或加载中。您可以直接向我发送文件或链接来开始转存。",
+            page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 个文件</i>",
+            btn_home: "⏮️",
+            btn_prev: "⬅️",
+            btn_refresh: "🔄",
+            btn_next: "➡️",
+            btn_end: "⏭️"
         },
         task_queue: {
             title: "📊 <b>全局任务队列</b>",
@@ -742,8 +748,10 @@ describe("UIHelper", () => {
             expect(result.text).toContain("⚠️ Upload failed");
             expect(result.text).toContain("📦");
             expect(result.text).toContain("第 1/1 页");
-            // Should have back button, retry buttons, and nav buttons
-            expect(result.buttons.length).toBe(3);
+            // Should have back button, one retry row per failed task, and nav buttons.
+            expect(result.buttons.length).toBe(4);
+            expect(result.buttons[1][0].text).toBe("🔄 重试第 1 项");
+            expect(result.buttons[2][0].text).toBe("🔄 重试第 2 项");
         });
 
         test("should render empty status", () => {
@@ -773,7 +781,7 @@ describe("UIHelper", () => {
             expect(navRow.length).toBe(5); // home, prev, refresh, next, end
         });
 
-        test("should disable prev buttons on first page", () => {
+        test("should omit disabled pagination buttons on first page", () => {
             const data = {
                 tasks: [{ id: 't1', user_id: 'u1', file_name: 'a.mp4', status: 'queued', updated_at: Date.now() }],
                 total: 1, page: 0, pageSize: 10, totalPages: 1
@@ -782,9 +790,9 @@ describe("UIHelper", () => {
             const result = UIHelper.renderTaskQueueDetail('queued', data);
 
             const navRow = result.buttons[1];
-            // Home and prev should be noop (disabled)
-            expect(navRow[0].data.toString()).toBe('noop');
-            expect(navRow[1].data.toString()).toBe('noop');
+            expect(navRow.map(button => button.text)).not.toContain(' ');
+            expect(navRow.map(button => button.data.toString())).not.toContain('noop');
+            expect(navRow[0].data.toString()).toBe('tq_refresh_queued_0');
         });
 
         test("should truncate long error messages", () => {

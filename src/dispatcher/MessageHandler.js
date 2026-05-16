@@ -115,8 +115,8 @@ export class MessageHandler {
                     new Api.BotCommand({ command: 'start', description: '🚀 启动机器人' }),
                     new Api.BotCommand({ command: 'drive', description: '🔑 绑定或管理网盘' }),
                     new Api.BotCommand({ command: 'files', description: '📁 浏览已转存文件' }),
-                    new Api.BotCommand({ command: 'status', description: '📊 查看系统状态' }),
-                    new Api.BotCommand({ command: 'remote_folder', description: '📂 上传路径设置' }),
+                    new Api.BotCommand({ command: 'status', description: '📊 查看我的任务' }),
+                    new Api.BotCommand({ command: 'remote_folder', description: '📂 保存目录设置' }),
                     new Api.BotCommand({ command: 'help', description: '📖 显示帮助菜单' }),
                 ];
 
@@ -141,9 +141,14 @@ export class MessageHandler {
                             langCode: '',
                             commands: [
                                 ...commonCommands,
+                                new Api.BotCommand({ command: 'task_queue', description: '📊 全局任务队列' }),
                                 new Api.BotCommand({ command: 'diagnosis', description: '🩺 系统诊断' }),
                                 new Api.BotCommand({ command: 'open_service', description: '🔓 开启服务' }),
                                 new Api.BotCommand({ command: 'close_service', description: '🔒 关闭服务' }),
+                                new Api.BotCommand({ command: 'ban', description: '🚫 封禁用户' }),
+                                new Api.BotCommand({ command: 'unban', description: '✅ 解封用户' }),
+                                new Api.BotCommand({ command: 'pro_admin', description: '👑 设置管理员' }),
+                                new Api.BotCommand({ command: 'de_admin', description: '🗑️ 取消管理员' }),
                             ]
                         }));
                     } catch (e) {

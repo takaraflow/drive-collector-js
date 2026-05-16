@@ -55,7 +55,7 @@ export class DriveConfigFlow {
 
         if (drives && drives.length > 0) {
             message += `\n${STRINGS.drive.bound_list_title}\n`;
-            drives.forEach(drive => {
+            drives.forEach((drive, index) => {
                 // 安全获取drive.name，避免undefined显示
                 const driveName = drive.name || '未知账号';
                 const email = driveName.split('-').slice(1).join('-') || driveName;
@@ -63,19 +63,19 @@ export class DriveConfigFlow {
                 const statusIcon = isDefault ? '⭐️' : '📁';
                 // 安全获取drive.type，避免undefined显示
                 const driveType = drive.type || '未知类型';
-                message += `\n${statusIcon} <b>${driveType.toUpperCase()}</b> - ${escapeHTML(email)}`;
+                message += `\n${index + 1}. ${statusIcon} <b>${driveType.toUpperCase()}</b> - ${escapeHTML(email)}`;
                 if (isDefault) {
                     message += ` (${STRINGS.drive.is_default})`;
                 }
             });
             message += '\n';
 
-            drives.forEach(drive => {
+            drives.forEach((drive, index) => {
                 const driveButtons = [];
                 if (drive.id !== defaultDriveId) {
-                    driveButtons.push(Button.inline(STRINGS.drive.btn_set_default, Buffer.from(`drive_set_default_${drive.id}`)));
+                    driveButtons.push(Button.inline(`${index + 1} ${STRINGS.drive.btn_set_default}`, Buffer.from(`drive_set_default_${drive.id}`)));
                 }
-                driveButtons.push(Button.inline(STRINGS.drive.btn_unbind, Buffer.from(`drive_unbind_confirm_${drive.id}`)));
+                driveButtons.push(Button.inline(`${index + 1} ${STRINGS.drive.btn_unbind}`, Buffer.from(`drive_unbind_confirm_${drive.id}`)));
                 buttons.push(driveButtons);
             });
             
@@ -125,10 +125,8 @@ export class DriveConfigFlow {
                     text: format(STRINGS.drive.unbind_confirm, { type: driveType.toUpperCase(), account: escapeHTML(email) }),
                     parseMode: "html",
                     buttons: [
-                        [
-                            Button.inline(STRINGS.drive.btn_confirm_unbind, Buffer.from(`drive_unbind_execute_${driveId}`)),
-                            Button.inline(STRINGS.drive.btn_cancel, Buffer.from("drive_manager_back"))
-                        ]
+                        [Button.inline(STRINGS.drive.btn_keep_drive, Buffer.from("drive_manager_back"))],
+                        [Button.inline(STRINGS.drive.btn_confirm_unbind, Buffer.from(`drive_unbind_execute_${driveId}`))]
                     ]
                 }), userId, {}, false, 3);
             return STRINGS.drive.please_confirm;
@@ -137,6 +135,13 @@ export class DriveConfigFlow {
         if (data.startsWith("drive_unbind_execute_")) {
             const driveId = data.split("_")[3];
             await BindingService.unbindDrive(userId, driveId);
+            await this.sendDriveManager(event.userId, userId);
+            return STRINGS.drive.success_unbind;
+        }
+
+        if (data === "drive_unbind_all_execute") {
+            await DriveRepository.deleteByUserId(userId);
+            await SessionManager.clear(userId);
             await this.sendDriveManager(event.userId, userId);
             return STRINGS.drive.success_unbind;
         }
@@ -274,7 +279,11 @@ export class DriveConfigFlow {
             return true;
         } catch (error) {
             log.error(`Error handling drive input for ${driveType}:`, error);
-            await runBotTask(() => client.sendMessage(peerId, { message: `❌ 处理错误: ${error.message}` }), userId, { priority: PRIORITY.HIGH });
+            await SessionManager.clear(userId);
+            await runBotTask(() => client.sendMessage(peerId, {
+                message: STRINGS.drive.bind_error,
+                parseMode: "html"
+            }), userId, { priority: PRIORITY.HIGH });
             return true;
         }
     }
@@ -289,12 +298,12 @@ export class DriveConfigFlow {
             return await runBotTask(() => client.sendMessage(chatId, { message: STRINGS.drive.no_drive_unbind, parseMode: "html" }), userId);
         }
 
-        // 使用 Repository 删除所有网盘
-        await DriveRepository.deleteByUserId(userId);
-        await SessionManager.clear(userId);
-
         await runBotTask(() => client.sendMessage(chatId, { 
-                message: STRINGS.drive.unbind_success,
+                message: STRINGS.drive.unbind_all_confirm,
+                buttons: [
+                    [Button.inline(STRINGS.drive.btn_keep_drive, Buffer.from("drive_manager_back"))],
+                    [Button.inline(STRINGS.drive.btn_confirm_unbind_all, Buffer.from("drive_unbind_all_execute"))]
+                ],
                 parseMode: "html"
             }), userId
         );

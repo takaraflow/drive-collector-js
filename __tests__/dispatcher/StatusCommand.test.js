@@ -116,6 +116,24 @@ describe('Dispatcher /status command', () => {
         expect(sent).not.toContain('99');
         expect(sent).not.toContain('88');
         expect(sent).not.toContain('wrong-memory-task.mp4');
+        expect(sent).toContain('📊 <b>我的状态</b>');
+        expect(sent).not.toContain('运行时间');
+        const buttons = mockClient.sendMessage.mock.calls[0][1].buttons;
+        expect(buttons.flat().map(button => button.data.toString())).not.toContain('diagnosis_run');
+    });
+
+    it('should show admin-only system diagnostics and shortcuts in general status', async () => {
+        mockAuthGuard.can.mockResolvedValue(true);
+
+        await Dispatcher._handleStatusCommand('chat-1', 'admin-1', '/status');
+
+        const sent = mockClient.sendMessage.mock.calls[0][1];
+        expect(sent.message).toContain('📊 <b>系统状态</b>');
+        expect(sent.message).toContain('管理员诊断信息');
+        expect(sent.message).toContain('运行时间');
+        const callbackData = sent.buttons.flat().map(button => button.data.toString());
+        expect(callbackData).toContain('task_queue_open');
+        expect(callbackData).toContain('diagnosis_run');
     });
 
     it('should render /status queue as a personal queue view', async () => {
