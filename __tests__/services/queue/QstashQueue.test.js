@@ -30,20 +30,15 @@ vi.mock("@upstash/qstash", () => ({
 
 // Mock async-mutex - fix the constructor issue
 vi.mock("async-mutex", () => {
-    return {
-        Mutex: class MockMutex {
-            constructor() {
-                this.acquire = vi.fn().mockResolvedValue(() => {});
-                this.release = vi.fn();
-                this.isLocked = vi.fn().mockReturnValue(false);
-                this.runExclusive = vi.fn(async (fn) => {
-                    return await fn();
-                });
-                this.waitForUnlock = vi.fn().mockResolvedValue(undefined);
-                this.cancel = vi.fn();
-            }
-        }
-    };
+    const MockMutex = vi.fn(function() {
+        this.acquire = vi.fn().mockResolvedValue(() => {});
+        this.release = vi.fn();
+        this.isLocked = vi.fn().mockReturnValue(false);
+        this.runExclusive = vi.fn(async (fn) => await fn());
+        this.waitForUnlock = vi.fn().mockResolvedValue(undefined);
+        this.cancel = vi.fn();
+    });
+    return { Mutex: MockMutex };
 });
 
 vi.mock("../../../src/config/index.js", () => ({
