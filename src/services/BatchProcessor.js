@@ -2,7 +2,6 @@ import { logger } from "./logger/index.js";
 import { queueService } from "./QueueService.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
 import { cache } from "./CacheService.js";
-import { localCache } from "../utils/LocalCache.js";
 
 const log = logger.withModule('BatchProcessor');
 
