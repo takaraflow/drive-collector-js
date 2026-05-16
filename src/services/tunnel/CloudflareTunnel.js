@@ -90,6 +90,14 @@ export class CloudflareTunnel extends S6ManagedTunnel {
                 }
             }
             
+            if (typeof action !== 'string' || !/^-[a-zA-Z]$/.test(action)) {
+                throw new Error('Invalid action flag');
+            }
+
+            if (typeof servicePath !== 'string' || !servicePath.startsWith('/') || servicePath.includes('..')) {
+                throw new Error('Invalid service path');
+            }
+
             log.info(`Executing: ${s6SvcPath} ${action} ${servicePath}`);
             const { stdout, stderr } = await execFileAsync(s6SvcPath, [action, servicePath]);
             if (stdout) log.debug(`s6-svc stdout: ${stdout}`);
