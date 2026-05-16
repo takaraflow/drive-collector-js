@@ -113,7 +113,8 @@
         "AXIOM_TOKEN",
         "AXIOM_ORG_ID",
         "AXIOM_DATASET",
-        "DATADOG_API_KEY"
+        "DATADOG_API_KEY",
+        "LOG_LEVEL"
       ],
       "reinitializationStrategy": {
         "type": "reconfigure",

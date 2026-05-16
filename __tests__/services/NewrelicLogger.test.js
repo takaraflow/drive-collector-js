@@ -6,12 +6,15 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
     let logger;
     const licenseKey = 'secure-license-key-1234567890';
     const region = 'US';
+    const originalLogLevel = process.env.LOG_LEVEL;
 
     beforeEach(() => {
         vi.stubGlobal('fetch', vi.fn());
         vi.spyOn(console, 'error').mockImplementation(() => {});
         vi.spyOn(console, 'log').mockImplementation(() => {});
+        vi.spyOn(console, 'debug').mockImplementation(() => {});
         vi.spyOn(process.stderr, 'write').mockImplementation(() => {});
+        delete process.env.LOG_LEVEL;
 
         logger = new NewrelicLogger({
             licenseKey,
@@ -22,6 +25,11 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
 
     afterEach(() => {
         vi.restoreAllMocks();
+        if (originalLogLevel === undefined) {
+            delete process.env.LOG_LEVEL;
+        } else {
+            process.env.LOG_LEVEL = originalLogLevel;
+        }
     });
 
     it('should NOT log the license key substring when batch flush fails', async () => {
@@ -95,5 +103,19 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
 
         expect(payload['trace.id']).toBe('1234567890abcdef1234567890abcdef');
         expect(payload['span.id']).toBe('1234567890abcdef');
+    });
+
+    it('should only print New Relic batch success in debug log level', async () => {
+        fetch.mockResolvedValue({ ok: true, status: 202 });
+
+        process.env.LOG_LEVEL = 'info';
+        await logger.info('test message');
+        await logger._flushLogsBatch();
+        expect(console.debug).not.toHaveBeenCalled();
+
+        process.env.LOG_LEVEL = 'debug';
+        await logger.info('debug-visible message');
+        await logger._flushLogsBatch();
+        expect(console.debug).toHaveBeenCalledWith(expect.stringContaining('Log batch sent'));
     });
 });

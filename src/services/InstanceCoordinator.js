@@ -3,7 +3,6 @@ import { cache } from "./CacheService.js";
 import { queueService } from "./QueueService.js";
 import { InstanceRepository } from "../repositories/InstanceRepository.js";
 import logger, { setInstanceIdProvider } from "./logger/index.js";
-import { setInstanceIdProvider as setAxiomInstanceIdProvider } from "./logger/AxiomLogger.js";
 import { normalizePublicUrl } from "../utils/instanceUrl.js";
 import { CACHE_KEYS } from "../domain/cache-keys.js";
 
@@ -35,8 +34,6 @@ export class InstanceCoordinator {
         
         // Register this instance as the ID provider for logger
         setInstanceIdProvider(() => this.instanceId);
-        // Also register for AxiomLogger
-        setAxiomInstanceIdProvider(() => this.instanceId);
         this.nodeType = process.env.NODE_MODE || 'bot';
         
         // 动态调整心跳：根据实例数量优化 KV 写入频率
@@ -76,7 +73,7 @@ export class InstanceCoordinator {
         // 自检：枚举实例键，确认外部缓存可用
         try {
             const keys = await cache.listKeys('instance:');
-            logWithProvider().info(`实例键自检: ${keys.length} 个`);
+            logWithProvider().debug(`实例键自检: ${keys.length} 个`);
         } catch (error) {
             logWithProvider().warn(`实例键自检失败: ${error.message}`);
         }
@@ -134,7 +131,7 @@ export class InstanceCoordinator {
         try {
             const { tunnelService } = await import("./TunnelService.js");
             tunnelUrl = await tunnelService.getPublicUrl();
-            logWithProvider().info(`Fetched tunnel URL for registration: ${tunnelUrl || 'null'}`);
+            logWithProvider().debug(`Fetched tunnel URL for registration: ${tunnelUrl || 'null'}`);
         } catch (error) {
             logWithProvider().warn('Failed to get Tunnel URL', {
                 error: error.message,

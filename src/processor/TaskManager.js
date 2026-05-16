@@ -658,7 +658,7 @@ export class TaskManager {
         try {
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
-            log.info(`QStash Received download webhook for Task: ${taskId}`, {
+            log.debug(`QStash Received download webhook for Task: ${taskId}`, {
                 taskId
             });
             if (!dbTask) {
@@ -741,7 +741,7 @@ export class TaskManager {
         try {
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
-            log.info(`QStash Received upload webhook for Task: ${taskId}`, {
+            log.debug(`QStash Received upload webhook for Task: ${taskId}`, {
                 taskId
             });
             
@@ -892,7 +892,7 @@ export class TaskManager {
     static async handleMediaBatchWebhook(groupId, taskIds) {
         const log = getLog();
         try {
-            log.info(`QStash Received media-batch webhook for Group: ${groupId}, TaskCount: ${taskIds.length}`);
+            log.debug(`QStash Received media-batch webhook for Group: ${groupId}, TaskCount: ${taskIds.length}`);
 
             // 这里可以实现批处理逻辑，目前先逐个处理
             for (const taskId of taskIds) {

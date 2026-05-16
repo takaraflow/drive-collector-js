@@ -218,11 +218,11 @@ export class MessageHandler {
             const lockTime = Date.now() - lockStart;
             
             if (!hasLock) {
-                logPerf().info(`消息 ${msgId} 锁竞争失败 (lock: ${lockTime}ms)`);
+                logPerf().debug(`消息 ${msgId} 锁竞争失败 (lock: ${lockTime}ms)`);
                 processedMessages.set(msgId, now);
                 return false;
             }
-            logPerf().info(`消息 ${msgId} 获取锁耗时 ${lockTime}ms`);
+            logPerf().debug(`消息 ${msgId} 获取锁耗时 ${lockTime}ms`);
         } catch (lockError) {
             log.error(`⚠️ 获取消息锁时发生异常, 降级处理继续执行`, lockError);
         }
@@ -295,7 +295,7 @@ export class MessageHandler {
         } else if (isUpdateConnectionState) {
             logPerf().debug(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
         } else {
-            logPerf().info(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
+            logPerf().debug(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
         }
 
         if (totalTime > 500) {

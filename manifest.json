@@ -751,6 +751,17 @@
         "description": "Datadog API key for log shipping",
         "sensitive": true
       },
+      "LOG_LEVEL": {
+        "type": "string",
+        "required": false,
+        "enum": [
+          "error",
+          "warn",
+          "info",
+          "debug"
+        ],
+        "description": "Global application log level. Defaults to info in prod/production and debug otherwise."
+      },
       "CLOUDFLARE_D1_ACCOUNT_ID": {
         "type": "string",
         "required": false,

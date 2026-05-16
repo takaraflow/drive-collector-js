@@ -38,6 +38,7 @@ describe('ServiceConfigManager 测试', () => {
         expect(serviceConfigManager.getServiceName('API_ID')).toBe('telegram');
         expect(serviceConfigManager.getServiceName('QSTASH_TOKEN')).toBe('queue');
         expect(serviceConfigManager.getServiceName('AXIOM_TOKEN')).toBe('logger');
+        expect(serviceConfigManager.getServiceName('LOG_LEVEL')).toBe('logger');
         expect(serviceConfigManager.getServiceName('DB_AUTO_MIGRATE')).toBe('d1');
         expect(serviceConfigManager.getServiceName('UNKNOWN_KEY')).toBeUndefined();
     });
@@ -49,6 +50,7 @@ describe('ServiceConfigManager 测试', () => {
             { key: 'REDIS_URL', oldValue: 'old', newValue: 'new' },
             { key: 'API_ID', oldValue: '123', newValue: '456' },
             { key: 'QSTASH_TOKEN', oldValue: undefined, newValue: 'token' },
+            { key: 'LOG_LEVEL', oldValue: 'info', newValue: 'warn' },
             { key: 'UNKNOWN_KEY', oldValue: 'old', newValue: 'new' }
         ];
         
@@ -57,7 +59,8 @@ describe('ServiceConfigManager 测试', () => {
         expect(affectedServices).toContain('cache');
         expect(affectedServices).toContain('telegram');
         expect(affectedServices).toContain('queue');
-        expect(affectedServices).toHaveLength(3);
+        expect(affectedServices).toContain('logger');
+        expect(affectedServices).toHaveLength(4);
     });
 
     test('应该正确获取服务配置', () => {

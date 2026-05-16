@@ -88,7 +88,7 @@ export class DistributedLock {
                     this.startHeartbeat(taskId, instanceId, effectiveTtlSeconds, version);
                     
                     if (result.action === 'acquired') {
-                        this.logger.info(`Lock acquired for task ${taskId} by ${instanceId}`, {
+                        this.logger.debug(`Lock acquired for task ${taskId} by ${instanceId}`, {
                             version,
                             expiresAt: this._safeToISOString(expiresAt) || 'unknown'
                         });
@@ -319,7 +319,7 @@ export class DistributedLock {
             // 删除锁
             await this.cache.delete(lockKey);
             
-            this.logger.info(`Lock released for task ${taskId} by ${instanceId}`);
+            this.logger.debug(`Lock released for task ${taskId} by ${instanceId}`);
             return true;
 
         } catch (error) {

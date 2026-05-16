@@ -4,9 +4,40 @@ export { ConsoleLogger } from './ConsoleLogger.js';
 export { DatadogLogger } from './DatadogLogger.js';
 export { NewrelicLogger } from './NewrelicLogger.js';
 
-import { LoggerService, createLogger, setInstanceIdProvider, enableTelegramConsoleProxy, disableTelegramConsoleProxy, flushLogBuffer } from './LoggerService.js';
+import {
+    LoggerService,
+    createLogger,
+    setInstanceIdProvider as setLoggerServiceInstanceIdProvider,
+    enableTelegramConsoleProxy,
+    disableTelegramConsoleProxy,
+    flushLogBuffer,
+    defaultLogLevelForEnv,
+    getConfiguredLogLevel,
+    normalizeLogLevel,
+    shouldSendLogLevel
+} from './LoggerService.js';
+import { setInstanceIdProvider as setAxiomInstanceIdProvider } from './AxiomLogger.js';
+import { setInstanceIdProvider as setNewrelicInstanceIdProvider } from './NewrelicLogger.js';
 
-export { LoggerService, setInstanceIdProvider, enableTelegramConsoleProxy, disableTelegramConsoleProxy, flushLogBuffer, createLogger };
+export {
+    LoggerService,
+    enableTelegramConsoleProxy,
+    disableTelegramConsoleProxy,
+    flushLogBuffer,
+    createLogger,
+    defaultLogLevelForEnv,
+    getConfiguredLogLevel,
+    normalizeLogLevel,
+    shouldSendLogLevel
+};
+
+export const setInstanceIdProvider = (provider) => {
+    setLoggerServiceInstanceIdProvider(provider);
+    setAxiomInstanceIdProvider(provider);
+    setNewrelicInstanceIdProvider(provider);
+};
+
+export const setLoggerInstanceIdProvider = setInstanceIdProvider;
 
 let _loggerInstance;
 try {

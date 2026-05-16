@@ -51,8 +51,10 @@ vi.mock('../../src/services/logger/index.js', () => ({
 
 // ================== Mock 3: Telegram Library (External - 使用标准 vi.mock) ==================
 // 对于外部库，vi.mock 在 ESM 环境下更可靠
+let mockTelegramClientConfigs = [];
 vi.mock("telegram", () => ({
-    TelegramClient: vi.fn().mockImplementation(function() {
+    TelegramClient: vi.fn().mockImplementation(function(session, apiId, apiHash, clientConfig) {
+        mockTelegramClientConfigs.push(clientConfig);
         // 构造函数返回实例
         this.connect = vi.fn().mockImplementation(function () {
             this.connected = true;
@@ -138,6 +140,8 @@ describe("Telegram Service", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        mockTelegramClientConfigs = [];
+        mockLoggerDebug.mockClear();
     });
 
     afterEach(async () => {
@@ -159,6 +163,28 @@ describe("Telegram Service", () => {
         expect(clientInstance.connect).toBeDefined();
         expect(clientInstance.start).toBeDefined();
         expect(clientInstance.getMe).toBeDefined();
+    });
+
+    test("should pass global logger level into Telegram baseLogger", async () => {
+        const canSend = vi.fn(level => level === 'warn' || level === 'error');
+        const loggerModule = await import('../../src/services/logger/index.js');
+        loggerModule.default.canSend = canSend;
+        loggerModule.logger.canSend = canSend;
+        if (module.resetTelegramDcConfig) {
+            module.resetTelegramDcConfig();
+        }
+
+        await module.getClient();
+
+        const config = mockTelegramClientConfigs.at(-1);
+        expect(config.baseLogger._logLevel).toBe('warn');
+        config.baseLogger.raw('debug', 'debug detail');
+        config.baseLogger.raw('warn', 'warn detail');
+        expect(mockLoggerDebug).toHaveBeenCalledWith('debug detail');
+        expect(mockLoggerWarn).toHaveBeenCalledWith('warn detail');
+
+        loggerModule.default.canSend = vi.fn(() => true);
+        loggerModule.logger.canSend = vi.fn(() => true);
     });
 
     test("should handle _updateLoop TIMEOUT recovery", async () => {

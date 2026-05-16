@@ -235,7 +235,7 @@ async function processWebhookData(req, res, signature, body) {
     const payload = parseTaskQueuePayload(data);
     const groupId = payload.groupId || 'unknown';
 
-    log.info(`📩 收到 Webhook: ${path}`, {
+    log.debug(`📩 收到 Webhook: ${path}`, {
         taskId: payload.taskId,
         groupId,
         triggerSource: payload.meta.triggerSource,
@@ -322,7 +322,7 @@ async function handleWebhookForwarding(req, res, result, data, path, body) {
         const url = new URL(req.url, `http://${hostHeader}`);
         const targetBaseUrl = await resolveWebhookLeaderUrl();
         if (targetBaseUrl) {
-            log.info('➡️ Forwarding webhook to leader', {
+            log.debug('➡️ Forwarding webhook to leader', {
                 path,
                 targetBaseUrl,
                 taskId: data.taskId,
@@ -340,7 +340,7 @@ async function handleWebhookForwarding(req, res, result, data, path, body) {
 
             const upstreamStatus = forwardedResponse.status;
             if (forwardedResponse.ok) {
-                log.info('✅ Webhook forwarded to leader', { path, upstreamStatus, targetBaseUrl });
+                log.debug('✅ Webhook forwarded to leader', { path, upstreamStatus, targetBaseUrl });
                 res.writeHead(200);
                 res.end('OK');
                 return true;

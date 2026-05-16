@@ -1,6 +1,7 @@
 import { BaseLogger } from './BaseLogger.js';
 import { serializeError, serializeToString, limitFields } from '../../utils/serializer.js';
 import { getBeijingISOString } from '../../utils/timeUtils.js';
+import { shouldSendLogLevel } from './log-level.js';
 import { trace } from '@opentelemetry/api';
 
 let getInstanceIdFunc = () => 'unknown';
@@ -118,8 +119,9 @@ class NewrelicLogger extends BaseLogger {
                 }
                 throw new Error(`New Relic API error: ${response.status}`);
             } else {
-                // 确认发送成功
-                console.log(`✨ [NewrelicLogger] 📦 Log batch sent! Count: ${batch.length} | Status: ${response.status}`);
+                if (shouldSendLogLevel('debug')) {
+                    console.debug(`✨ [NewrelicLogger] 📦 Log batch sent! Count: ${batch.length} | Status: ${response.status}`);
+                }
             }
         } catch (error) {
             process.stderr.write(`❌ [NewrelicLogger] Log batch failed\n`);

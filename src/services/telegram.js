@@ -407,6 +407,14 @@ function buildProxyOptions(config) {
     } : {};
 }
 
+function resolveTelegramLogLevel() {
+    if (typeof log.canSend !== 'function') return 'info';
+    for (const level of ['debug', 'info', 'warn', 'error']) {
+        if (log.canSend(level)) return level;
+    }
+    return 'error';
+}
+
 function buildClientConfig(config, proxyOptions) {
     return {
         connectionRetries: 3,
@@ -433,7 +441,7 @@ function buildClientConfig(config, proxyOptions) {
         useIPv6: false,
         baseLogger: {
             levels: ["error", "warn", "info", "debug"],
-            _logLevel: "info",
+            _logLevel: resolveTelegramLogLevel(),
             canSend: function(level) {
                 return this._logLevel
                     ? this.levels.indexOf(this._logLevel) >= this.levels.indexOf(level)
@@ -478,6 +486,8 @@ function buildClientConfig(config, proxyOptions) {
                     log.error(msg, ...args);
                 } else if (level === 'warn') {
                     log.warn(msg, ...args);
+                } else if (level === 'debug') {
+                    log.debug(msg, ...args);
                 } else {
                     log.info(msg, ...args);
                 }

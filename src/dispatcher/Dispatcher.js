@@ -105,12 +105,12 @@ export class Dispatcher {
         const eventId = event.id || event.message?.id || event.queryId || 'unknown';
         const version = appVersion;
         
-        log.info(`🔍 [MSG_DEDUP] 消息处理开始 - EventID: ${eventId}, UserID: ${ctx.userId}, Instance: ${instanceCoordinator.getInstanceId()}, Version: ${version}`);
+        log.debug(`🔍 [MSG_DEDUP] 消息处理开始 - EventID: ${eventId}, UserID: ${ctx.userId}, Instance: ${instanceCoordinator.getInstanceId()}, Version: ${version}`);
         
         // 🔍 诊断日志：检查锁状态
         try {
             const hasLock = await instanceCoordinator.hasLock('telegram_client');
-            log.info(`🔍 [MSG_DEDUP] 锁状态检查 - EventID: ${eventId}, HasLock: ${hasLock}, Instance: ${instanceCoordinator.getInstanceId()}`);
+            log.debug(`🔍 [MSG_DEDUP] 锁状态检查 - EventID: ${eventId}, HasLock: ${hasLock}, Instance: ${instanceCoordinator.getInstanceId()}`);
         } catch (e) {
             log.warn(`🔍 [MSG_DEDUP] 锁状态检查失败 - EventID: ${eventId}, Error: ${e.message}`);
         }
@@ -120,21 +120,21 @@ export class Dispatcher {
         const passed = await this._globalGuard(event, ctx);
         const guardTime = Date.now() - guardStart;
         if (!passed) {
-            logPerf().info(`消息被全局守卫拦截 (User: ${ctx.userId}, guard: ${guardTime}ms, total: ${Date.now() - start}ms)`);
+            logPerf().debug(`消息被全局守卫拦截 (User: ${ctx.userId}, guard: ${guardTime}ms, total: ${Date.now() - start}ms)`);
             return;
         }
 
         // 3. 路由分发
         // 使用 className 检查替代 instanceof，提高鲁棒性并方便测试
         if (event.className === 'UpdateBotCallbackQuery') {
-            logPerf().info(`回调处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
+            logPerf().debug(`回调处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
             await this._handleCallback(event, ctx);
         } else if (event.className === 'UpdateNewMessage' && event.message) {
-            logPerf().info(`消息处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
+            logPerf().debug(`消息处理开始 (User: ${ctx.userId}, ctx: ${ctxTime}ms, guard: ${guardTime}ms)`);
             await this._handleMessage(event, ctx);
         }
         
-        logPerf().info(`总耗时 ${Date.now() - start}ms`);
+        logPerf().debug(`总耗时 ${Date.now() - start}ms`);
     }
 
     /**
@@ -187,7 +187,7 @@ export class Dispatcher {
 
         // 1. 黑名单拦截 (最高优先级，连 Owner 也不能例外，防止账号被盗后的紧急风控，虽然 owner 很难被 setRole 修改)
         if (role === 'banned') {
-            logPerf().info(`消息被黑名单拦截 (User: ${userId})`);
+            logPerf().warn(`消息被黑名单拦截 (User: ${userId})`);
             return false; 
         }
 
