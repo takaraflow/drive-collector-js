@@ -718,6 +718,82 @@ describe('TaskRepository', () => {
         });
     });
 
+    describe('getUserQueueOverview', () => {
+        it('should return status counts, active tasks, and recent tasks for one user', async () => {
+            const mockStatusCounts = [
+                { status: 'queued', count: 2 },
+                { status: 'uploading', count: 1 },
+                { status: 'completed', count: 5 }
+            ];
+            const mockActiveTasks = [
+                { id: 't1', file_name: 'a.mp4', status: 'queued', updated_at: Date.now() },
+                { id: 't2', file_name: 'b.mp4', status: 'uploading', updated_at: Date.now() }
+            ];
+            const mockRecentTasks = [
+                { id: 't3', file_name: 'done.mp4', status: 'completed', created_at: Date.now() }
+            ];
+
+            mockD1.fetchAll
+                .mockResolvedValueOnce(mockStatusCounts)
+                .mockResolvedValueOnce(mockActiveTasks)
+                .mockResolvedValueOnce(mockRecentTasks);
+
+            const result = await TaskRepository.getUserQueueOverview('user123', 5);
+
+            expect(result.statusCounts).toEqual({ queued: 2, uploading: 1, completed: 5 });
+            expect(result.activeTasks).toEqual(mockActiveTasks);
+            expect(result.recentTasks).toEqual(mockRecentTasks);
+            expect(mockD1.fetchAll).toHaveBeenCalledTimes(3);
+        });
+
+        it('should filter every query by user id and active statuses', async () => {
+            mockD1.fetchAll
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([]);
+
+            await TaskRepository.getUserQueueOverview('user123', 7);
+
+            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(1,
+                expect.stringContaining('WHERE user_id = ?'),
+                ['user123']
+            );
+            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(2,
+                expect.stringContaining('WHERE user_id = ? AND status IN'),
+                ['user123', ...TASK_ACTIVE_STATUSES, 7]
+            );
+            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(3,
+                expect.stringContaining('WHERE user_id = ?'),
+                ['user123', 7]
+            );
+        });
+
+        it('should return empty data without querying D1 when user id is missing', async () => {
+            const result = await TaskRepository.getUserQueueOverview(null);
+
+            expect(result).toEqual({ statusCounts: {}, activeTasks: [], recentTasks: [] });
+            expect(mockD1.fetchAll).not.toHaveBeenCalled();
+        });
+
+        it('should use default limit for invalid limit values', async () => {
+            mockD1.fetchAll
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([]);
+
+            await TaskRepository.getUserQueueOverview('user123', 0);
+
+            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(2,
+                expect.stringContaining('LIMIT ?'),
+                ['user123', ...TASK_ACTIVE_STATUSES, 10]
+            );
+            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(3,
+                expect.stringContaining('LIMIT ?'),
+                ['user123', 10]
+            );
+        });
+    });
+
     describe('getTasksByStatus', () => {
         it('should return paginated tasks for a given status', async () => {
             const mockTasks = [

@@ -143,12 +143,14 @@ export const STRINGS = {
     // --- 状态相关 ---
     status: {
         header: "📊 <b>系统状态</b>",
-        queue_title: "📦 任务队列",
-        waiting_tasks: "🕒 等待中的任务: {{count}}",
-        current_task: "🔄 当前正在处理: {{count}}",
+        queue_title: "📦 您的任务队列",
+        waiting_tasks: "🕒 排队中: {{count}}",
+        current_task: "🔄 处理中: {{count}}",
         current_file: "📄 当前任务: <code>{{name}}</code>",
+        active_tasks: "⚡ 活跃任务",
         user_history: "👤 您的任务历史",
         no_tasks: "尚无任务记录。请直接向我发送文件、图片或链接来开始转存。",
+        no_active_tasks: "✅ 当前没有排队或处理中任务。",
         task_item: "{{index}}. {{status}} <code>{{name}}</code> ({{statusText}})",
         drive_status: "🔑 网盘绑定: {{status}}",
         system_info: "💻 系统信息",

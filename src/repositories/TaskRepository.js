@@ -598,6 +598,45 @@ export class TaskRepository {
     }
 
     /**
+     * 获取单个用户的队列概览。D1 tasks 表是队列状态的权威来源。
+     * @param {string} userId - 用户 ID
+     * @param {number} limit - 活跃/最近任务列表最大条数
+     * @returns {Promise<{statusCounts: Object, activeTasks: Array, recentTasks: Array}>}
+     */
+    static async getUserQueueOverview(userId, limit = 10) {
+        if (!userId) {
+            return { statusCounts: {}, activeTasks: [], recentTasks: [] };
+        }
+
+        const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : 10;
+        const [statusCounts, activeTasks, recentTasks] = await Promise.all([
+            d1.fetchAll(
+                "SELECT status, COUNT(*) as count FROM tasks WHERE user_id = ? GROUP BY status",
+                [userId]
+            ),
+            d1.fetchAll(
+                `SELECT id, file_name, file_size, status, created_at, updated_at FROM tasks WHERE user_id = ? AND status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`,
+                [userId, ...TASK_ACTIVE_STATUSES, safeLimit]
+            ),
+            d1.fetchAll(
+                "SELECT id, file_name, status, error_msg, created_at, updated_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                [userId, safeLimit]
+            )
+        ]);
+
+        const statusMap = {};
+        for (const row of (statusCounts || [])) {
+            statusMap[row.status] = row.count;
+        }
+
+        return {
+            statusCounts: statusMap,
+            activeTasks: activeTasks || [],
+            recentTasks: recentTasks || []
+        };
+    }
+
+    /**
      * 根据 msg_id 获取该消息组下的所有任务状态（用于看板）
      */
     static async findByMsgId(msgId) {

@@ -11,6 +11,7 @@ import { UIHelper } from "../ui/templates.js";
 import { CloudTool } from "../services/rclone.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
+import { TaskRepository } from "../repositories/TaskRepository.js";
 import { ApiKeyRepository } from "../repositories/ApiKeyRepository.js";
 import { safeEdit, escapeHTML } from "../utils/common.js";
 import { runBotTask, runBotTaskWithRetry, PRIORITY } from "../utils/limiter.js";
@@ -22,6 +23,7 @@ import { queueService } from "../services/QueueService.js";
 import { logger } from "../services/logger/index.js";
 import { localCache } from "../utils/LocalCache.js";
 import mediaGroupBuffer from "../services/MediaGroupBuffer.js";
+import { TASK_STATUSES } from "../domain/task-state-machine.js";
 import fs from "fs";
 import path from "path";
 
@@ -580,7 +582,7 @@ export class Dispatcher {
 
         switch (subCommand) {
             case 'queue':
-                message = this._getQueueStatus();
+                message = await this._getQueueStatus(userId);
                 break;
             case 'user':
                 message = await this._getUserStatus(userId);
@@ -606,20 +608,12 @@ export class Dispatcher {
     /**
      * [私有] 获取队列状态
      */
-    static _getQueueStatus() {
-        const waitingCount = TaskManager.getWaitingCount();
-        const processingCount = TaskManager.getProcessingCount();
-        const currentTask = TaskManager.currentTask;
-        
+    static async _getQueueStatus(userId) {
+        const queueOverview = await TaskRepository.getUserQueueOverview(userId, 10);
+
         let status = format(STRINGS.status.header, {}) + '\n\n';
-        status += format(STRINGS.status.queue_title, {}) + '\n';
-        status += format(STRINGS.status.waiting_tasks, { count: waitingCount }) + '\n';
-        status += format(STRINGS.status.current_task, { count: processingCount }) + '\n';
-        
-        if (currentTask) {
-            status += '\n' + format(STRINGS.status.current_file, { name: escapeHTML(currentTask.fileName) }) + '\n';
-        }
-        
+        status += this._renderUserQueueSummary(queueOverview);
+
         return status;
     }
 
@@ -627,29 +621,20 @@ export class Dispatcher {
      * [私有] 获取用户状态
      */
     static async _getUserStatus(userId) {
-        // 获取用户的任务历史
-        const tasks = await TaskRepository.findByUserId(userId, 10); // 获取最近10个任务
-        
-        let status = format(STRINGS.status.user_history, {}) + '\n\n';
-        
+        const queueOverview = await TaskRepository.getUserQueueOverview(userId, 10);
+
+        let status = format(STRINGS.status.header, {}) + '\n\n';
+        status += this._renderUserQueueSummary(queueOverview) + '\n';
+        status += '\n' + format(STRINGS.status.user_history, {}) + '\n\n';
+
+        const tasks = queueOverview.recentTasks;
         if (!tasks || tasks.length === 0) {
             status += STRINGS.status.no_tasks;
             return status;
         }
         
         tasks.forEach((task, index) => {
-            const taskStatus = task.status === 'completed' ? '✅' : 
-                              task.status === 'failed' ? '❌' : 
-                              task.status === 'cancelled' ? '🚫' : '🔄';
-            const statusText = task.status === 'completed' ? '完成' : 
-                              task.status === 'failed' ? '失败' : 
-                              task.status === 'cancelled' ? '已取消' : '处理中';
-            status += format(STRINGS.status.task_item, {
-                index: index + 1,
-                status: taskStatus,
-                name: escapeHTML(task.file_name || '未知文件'),
-                statusText: statusText
-            }) + '\n';
+            status += this._renderStatusTaskItem(task, index) + '\n';
         });
         
         return status;
@@ -660,9 +645,7 @@ export class Dispatcher {
      */
     static async _getGeneralStatus(userId) {
         const activeDrive = await DriveRepository.getDefaultDrive(userId);
-
-        const waitingCount = TaskManager.getWaitingCount();
-        const processingCount = TaskManager.getProcessingCount();
+        const queueOverview = await TaskRepository.getUserQueueOverview(userId, 10);
         
         let status = format(STRINGS.status.header, {}) + '\n\n';
         
@@ -673,9 +656,7 @@ export class Dispatcher {
         }) + '\n\n';
         
         // 队列状态
-        status += format(STRINGS.status.queue_title, {}) + '\n';
-        status += format(STRINGS.status.waiting_tasks, { count: waitingCount }) + '\n';
-        status += format(STRINGS.status.current_task, { count: processingCount }) + '\n';
+        status += this._renderUserQueueSummary(queueOverview) + '\n';
         
         // 系统信息
         status += '\n' + format(STRINGS.status.system_info, {}) + '\n';
@@ -683,6 +664,81 @@ export class Dispatcher {
         status += format(STRINGS.status.service_status, { status: '✅ 正常' });
         
         return status;
+    }
+
+    static _renderUserQueueSummary(queueOverview) {
+        const queuedCount = queueOverview.statusCounts[TASK_STATUSES.QUEUED] || 0;
+        const processingCount = [
+            TASK_STATUSES.DOWNLOADING,
+            TASK_STATUSES.DOWNLOADED,
+            TASK_STATUSES.UPLOADING
+        ]
+            .reduce((count, status) => count + (queueOverview.statusCounts[status] || 0), 0);
+
+        let status = format(STRINGS.status.queue_title, {}) + '\n';
+        status += format(STRINGS.status.waiting_tasks, { count: queuedCount }) + '\n';
+        status += format(STRINGS.status.current_task, { count: processingCount }) + '\n';
+
+        if (queueOverview.activeTasks.length === 0) {
+            status += STRINGS.status.no_active_tasks + '\n';
+            return status;
+        }
+
+        status += '\n' + format(STRINGS.status.active_tasks, {}) + '\n';
+        queueOverview.activeTasks.forEach((task, index) => {
+            status += this._renderStatusTaskItem(task, index) + '\n';
+        });
+
+        return status;
+    }
+
+    static _renderStatusTaskItem(task, index) {
+        return format(STRINGS.status.task_item, {
+            index: index + 1,
+            status: this._getTaskStatusIcon(task.status),
+            name: escapeHTML(task.file_name || '未知文件'),
+            statusText: this._getTaskStatusText(task.status)
+        });
+    }
+
+    static _getTaskStatusIcon(status) {
+        switch (status) {
+            case TASK_STATUSES.COMPLETED:
+                return '✅';
+            case TASK_STATUSES.FAILED:
+                return '❌';
+            case TASK_STATUSES.CANCELLED:
+                return '🚫';
+            case TASK_STATUSES.QUEUED:
+                return '🕒';
+            case TASK_STATUSES.DOWNLOADING:
+            case TASK_STATUSES.DOWNLOADED:
+            case TASK_STATUSES.UPLOADING:
+                return '🔄';
+            default:
+                return '•';
+        }
+    }
+
+    static _getTaskStatusText(status) {
+        switch (status) {
+            case TASK_STATUSES.COMPLETED:
+                return '完成';
+            case TASK_STATUSES.FAILED:
+                return '失败';
+            case TASK_STATUSES.CANCELLED:
+                return '已取消';
+            case TASK_STATUSES.QUEUED:
+                return '排队中';
+            case TASK_STATUSES.DOWNLOADING:
+                return '下载中';
+            case TASK_STATUSES.DOWNLOADED:
+                return '等待转存';
+            case TASK_STATUSES.UPLOADING:
+                return '上传中';
+            default:
+                return '未知';
+        }
     }
 
     /**
