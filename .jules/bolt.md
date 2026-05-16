@@ -7,7 +7,3 @@
 ## 2024-05-18 - [Native Async Worker Pool Optimization in CacheService]
 **Learning:** For batch operations in \`CacheService.js\`, using unbounded \`Promise.all(operations.map(...))\` causes excessive memory allocation from upfront closures and can exhaust connection pools for large inputs.
 **Action:** Replace \`operations.map\` with a native async worker pool using a pre-allocated array and a concurrency limit (e.g., 5) to balance throughput with resource constraints.
-
-## 2026-05-11 - SmartFailover Batch Promise Optimization
-**Learning:** In `SmartFailover.js`, using unbounded `Promise.allSettled(array.map(...))` creates `3 * N` closures instantly, blowing up memory. Using a `while` loop worker pool avoids this. However, `Object.assign({}, options)` provides object isolation without the prototype manipulation overhead of `Object.create(options)`, making it safer when the options object is spread down the line. Also, be exceptionally careful to mirror the original `Promise.allSettled` output schema exactly (i.e. `{index, result}` or `{index, error}`) and not mask error structures into strings (`error.message`).
-**Action:** When migrating unbounded parallel loops to `while` worker pools, explicitly capture the array length (`len`), default concurrency to `len` if undefined to preserve legacy behavior, and strictly copy the return signatures of both the `.then()` and `.catch()` blocks inside the `try/catch`. Use `Object.assign` instead of `Object.create` inside hot loops if `Object.keys` or spread syntax may be used downstream.
