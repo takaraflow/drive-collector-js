@@ -82,7 +82,7 @@ export class CloudflareTunnel extends S6ManagedTunnel {
                 } catch {
                     attempts++;
                     if (attempts >= maxAttempts) {
-                        log.error(`Timeout waiting for service directory: ${servicePath}`);
+                        log.warn(`s6 service directory did not become ready: ${servicePath}; falling back to standalone cloudflared`);
                         return false;
                     }
                     log.debug(`Service directory not ready yet, waiting... (${attempts}/${maxAttempts})`);

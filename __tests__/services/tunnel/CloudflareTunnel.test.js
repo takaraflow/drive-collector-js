@@ -6,6 +6,12 @@ import fs from 'fs/promises';
 vi.mock('fs/promises');
 const execFileAsyncMock = vi.fn();
 const spawnMock = vi.fn();
+const tunnelLog = vi.hoisted(() => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+}));
 vi.mock('child_process', () => ({
     execFile: (...args) => execFileAsyncMock(...args),
     spawn: (...args) => spawnMock(...args)
@@ -16,12 +22,7 @@ vi.mock('../../../src/services/logger/index.js', () => ({
         warn: vi.fn(),
         error: vi.fn(),
         debug: vi.fn(),
-        withModule: () => ({
-            info: vi.fn(),
-            warn: vi.fn(),
-            error: vi.fn(),
-            debug: vi.fn(),
-        })
+        withModule: () => tunnelLog
     }
 }));
 
@@ -122,5 +123,31 @@ cloudflared_tunnel_user_hostname{user_hostname="tender-sand-123.trycloudflare.co
 
         expect(tunnel.currentUrl).toBe('https://demo.trycloudflare.com');
         expect(tunnel.isReady).toBe(true);
+    });
+
+    test('should treat missing s6 service directory as fallback instead of fatal error', async () => {
+        vi.useFakeTimers();
+        fs.access.mockImplementation(async (targetPath) => {
+            if (targetPath === '/command/s6-svc') return undefined;
+            throw Object.assign(new Error('service missing'), { code: 'ENOENT' });
+        });
+
+        const stdout = new EventEmitter();
+        const stderr = new EventEmitter();
+        const proc = new EventEmitter();
+        proc.stdout = stdout;
+        proc.stderr = stderr;
+        proc.kill = vi.fn();
+        spawnMock.mockReturnValueOnce(proc);
+
+        const initializePromise = tunnel.initialize();
+        await vi.advanceTimersByTimeAsync(30_000);
+        await initializePromise;
+
+        expect(tunnelLog.warn).toHaveBeenCalledWith(expect.stringContaining('falling back to standalone cloudflared'));
+        expect(tunnelLog.error).not.toHaveBeenCalledWith(expect.stringContaining('Timeout waiting for service directory'));
+        expect(spawnMock).toHaveBeenCalledWith('cloudflared', expect.any(Array), expect.any(Object));
+
+        vi.useRealTimers();
     });
 });
