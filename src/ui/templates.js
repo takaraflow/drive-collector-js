@@ -46,7 +46,7 @@ export class UIHelper {
         } else {
             pagedFiles.forEach(f => {
                 const ext = path.extname(f.Name).toLowerCase();
-                const emoji = [".mp4", ".mkv", ".avi"].includes(ext) ? "🎞️" : [".jpg", ".png", ".webp"].includes(ext) ? "🖼️" : [".zip", ".rar", ".7z"].includes(ext) ? "📦" : [".pdf", ".epub"].includes(ext) ? "📝" : "📄";
+                const emoji = [".mp4", ".mkv", ".avi", ".mov", ".flv", ".webm"].includes(ext) ? "🎞️" : [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"].includes(ext) ? "🖼️" : [".mp3", ".wav", ".flac", ".m4a", ".ogg"].includes(ext) ? "🎵" : [".zip", ".rar", ".7z", ".tar", ".gz"].includes(ext) ? "📦" : [".pdf", ".epub", ".txt", ".md", ".docx", ".xlsx", ".pptx"].includes(ext) ? "📝" : "📄";
                 const size = formatBytes(f.Size, 2);
                 const time = f.ModTime.replace("T", " ").substring(0, 16);
                 const displayName = escapeHTML(this._shortenFileName(f.Name, 36));
