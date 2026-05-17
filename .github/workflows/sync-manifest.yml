@@ -57,6 +57,7 @@ jobs:
       - name: Generate Token
         id: generate_token
         if: ${{ steps.sync_config.outputs.enabled == 'true' }}
+        continue-on-error: true
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.APP_ID }}
@@ -64,25 +65,30 @@ jobs:
           owner: ${{ steps.contract_repo.outputs.owner }}
           repositories: ${{ steps.contract_repo.outputs.repo }}
 
+      - name: Report Token Generation Failure
+        if: ${{ steps.sync_config.outputs.enabled == 'true' && steps.generate_token.outcome != 'success' }}
+        run: |
+          echo "::warning title=Manifest sync skipped::GitHub App token could not be created for ${CONTRACT_REPO}. Install the app on that repository or update CONTRACT_REPO/APP_ID/APP_PRIVATE_KEY."
+
       # 2. 检出当前子仓库代码
       - name: Checkout Sub-Repo
-        if: ${{ steps.sync_config.outputs.enabled == 'true' }}
+        if: ${{ steps.sync_config.outputs.enabled == 'true' && steps.generate_token.outcome == 'success' }}
         uses: actions/checkout@v6
 
       - name: Use Node.js 20.x
-        if: ${{ steps.sync_config.outputs.enabled == 'true' }}
+        if: ${{ steps.sync_config.outputs.enabled == 'true' && steps.generate_token.outcome == 'success' }}
         uses: actions/setup-node@v6
         with:
           node-version: 20.x
           cache: 'npm'
 
       - name: Run CI validation
-        if: ${{ steps.sync_config.outputs.enabled == 'true' }}
+        if: ${{ steps.sync_config.outputs.enabled == 'true' && steps.generate_token.outcome == 'success' }}
         run: npm run ci:sync
 
       # 3. 检出契约中心仓库
       - name: Checkout Contract Center
-        if: ${{ steps.sync_config.outputs.enabled == 'true' }}
+        if: ${{ steps.sync_config.outputs.enabled == 'true' && steps.generate_token.outcome == 'success' }}
         uses: actions/checkout@v6
         with:
           repository: ${{ env.CONTRACT_REPO }}
@@ -91,7 +97,7 @@ jobs:
 
       # 4. 同步文件并提交
       - name: Sync and Commit
-        if: ${{ steps.sync_config.outputs.enabled == 'true' }}
+        if: ${{ steps.sync_config.outputs.enabled == 'true' && steps.generate_token.outcome == 'success' }}
         run: |
           # 获取当前仓库名称，作为注册表里的文件名
           SELF_REPO_NAME=$(basename ${{ github.repository }})
