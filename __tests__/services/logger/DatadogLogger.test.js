@@ -1,18 +1,29 @@
 import { describe, expect, test, vi, beforeEach, afterEach } from 'vitest';
-import { DatadogLogger } from '../../../src/services/logger/DatadogLogger.js';
+
+const ORIGINAL_CONSOLE_SYMBOL = Symbol.for('driveCollector.logger.originalConsole');
+
+const loadDatadogLogger = async () => {
+    const module = await import('../../../src/services/logger/DatadogLogger.js');
+    return module.DatadogLogger;
+};
 
 describe('DatadogLogger', () => {
     let originalEnv;
+    let DatadogLogger;
 
-    beforeEach(() => {
+    beforeEach(async () => {
         originalEnv = process.env;
         process.env = { ...originalEnv };
         vi.stubGlobal('fetch', vi.fn());
+        vi.resetModules();
+        delete globalThis[ORIGINAL_CONSOLE_SYMBOL];
+        DatadogLogger = await loadDatadogLogger();
     });
 
     afterEach(() => {
         process.env = originalEnv;
         vi.unstubAllGlobals();
+        delete globalThis[ORIGINAL_CONSOLE_SYMBOL];
     });
 
     describe('constructor', () => {
@@ -60,6 +71,9 @@ describe('DatadogLogger', () => {
 
         test('should warn if apiKey is not configured', async () => {
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            vi.resetModules();
+            delete globalThis[ORIGINAL_CONSOLE_SYMBOL];
+            DatadogLogger = await loadDatadogLogger();
             const logger = new DatadogLogger();
 
             await logger.initialize();
@@ -148,6 +162,10 @@ describe('DatadogLogger', () => {
             const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 });
             vi.stubGlobal('fetch', fetchMock);
             const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            vi.resetModules();
+            delete globalThis[ORIGINAL_CONSOLE_SYMBOL];
+            DatadogLogger = await loadDatadogLogger();
+            logger = new DatadogLogger({ apiKey: 'test-key', site: 'test-site.com' });
 
             await expect(logger._sendToDatadog('info', 'test message', {}, {}))
                 .rejects
@@ -173,6 +191,10 @@ describe('DatadogLogger', () => {
             const fetchMock = vi.fn().mockRejectedValue(fetchError);
             vi.stubGlobal('fetch', fetchMock);
             const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            vi.resetModules();
+            delete globalThis[ORIGINAL_CONSOLE_SYMBOL];
+            DatadogLogger = await loadDatadogLogger();
+            logger = new DatadogLogger({ apiKey: 'test-key', site: 'test-site.com' });
 
             await expect(logger._sendToDatadog('info', 'test message', {}, {}))
                 .rejects

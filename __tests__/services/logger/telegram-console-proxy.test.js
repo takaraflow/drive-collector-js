@@ -1,0 +1,129 @@
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+
+const ORIGINAL_CONSOLE_SYMBOL = Symbol.for('driveCollector.logger.originalConsole');
+
+let loggerModule;
+let originalEnv;
+
+const waitForAsyncConsoleLog = async () => {
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+};
+
+const importFreshLoggerWithConsoleSpies = async () => {
+    vi.resetModules();
+    delete globalThis[ORIGINAL_CONSOLE_SYMBOL];
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    loggerModule = await import('../../../src/services/logger/LoggerService.js');
+    return { ...loggerModule, errorSpy, warnSpy, logSpy };
+};
+
+describe('Telegram console proxy', () => {
+    beforeEach(() => {
+        originalEnv = {
+            LOG_LEVEL: process.env.LOG_LEVEL,
+            NODE_ENV: process.env.NODE_ENV,
+            AXIOM_TOKEN: process.env.AXIOM_TOKEN,
+            AXIOM_ORG_ID: process.env.AXIOM_ORG_ID,
+            NEW_RELIC_LICENSE_KEY: process.env.NEW_RELIC_LICENSE_KEY
+        };
+
+        process.env.NODE_ENV = 'test';
+        process.env.LOG_LEVEL = 'debug';
+        delete process.env.AXIOM_TOKEN;
+        delete process.env.AXIOM_ORG_ID;
+        delete process.env.NEW_RELIC_LICENSE_KEY;
+    });
+
+    afterEach(() => {
+        if (loggerModule?.disableTelegramConsoleProxy) {
+            loggerModule.disableTelegramConsoleProxy();
+        }
+        delete globalThis[ORIGINAL_CONSOLE_SYMBOL];
+
+        for (const [key, value] of Object.entries(originalEnv)) {
+            if (value === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = value;
+            }
+        }
+
+        vi.restoreAllMocks();
+    });
+
+    test('does not recurse when the proxy is enabled before the console logger is initialized', async () => {
+        const { LoggerService, enableTelegramConsoleProxy, errorSpy } = await importFreshLoggerWithConsoleSpies();
+
+        enableTelegramConsoleProxy();
+        await LoggerService.getInstance().initialize();
+
+        console.error(new Error('TIMEOUT'));
+        await waitForAsyncConsoleLog();
+
+        const renderedCalls = errorSpy.mock.calls.map(call => call.map(String).join(' '));
+        const capturedCalls = renderedCalls.filter(line => line.includes('Telegram library TIMEOUT captured'));
+
+        expect(capturedCalls).toHaveLength(1);
+        expect(renderedCalls).toHaveLength(2);
+        expect(Math.max(...renderedCalls.map(line => line.length))).toBeLessThan(2000);
+    });
+
+    test('ignores already captured logger messages', async () => {
+        const { LoggerService, enableTelegramConsoleProxy, errorSpy } = await importFreshLoggerWithConsoleSpies();
+
+        enableTelegramConsoleProxy();
+        await LoggerService.getInstance().initialize();
+
+        console.error('Telegram library TIMEOUT captured: Error: TIMEOUT');
+        await waitForAsyncConsoleLog();
+
+        const renderedCalls = errorSpy.mock.calls.map(call => call.map(String).join(' '));
+
+        expect(renderedCalls).toHaveLength(1);
+        expect(renderedCalls[0]).toContain('Telegram library TIMEOUT captured: Error: TIMEOUT');
+    });
+
+    test('deduplicates repeated timeout noise and truncates captured messages', async () => {
+        const { LoggerService, enableTelegramConsoleProxy, errorSpy } = await importFreshLoggerWithConsoleSpies();
+
+        enableTelegramConsoleProxy();
+        await LoggerService.getInstance().initialize();
+
+        const longTimeout = `TIMEOUT ${'x'.repeat(5000)}`;
+        console.error(longTimeout);
+        console.error(longTimeout);
+        await waitForAsyncConsoleLog();
+
+        const renderedCalls = errorSpy.mock.calls.map(call => call.map(String).join(' '));
+        const capturedCalls = renderedCalls.filter(line => line.includes('Telegram library TIMEOUT captured'));
+
+        expect(capturedCalls).toHaveLength(1);
+        expect(renderedCalls).toHaveLength(3);
+        expect(capturedCalls[0].length).toBeLessThan(2000);
+        expect(capturedCalls[0]).not.toContain('x'.repeat(1000));
+    });
+
+    test('captures warn and connection events without feeding its own output back into the proxy', async () => {
+        const { LoggerService, enableTelegramConsoleProxy, warnSpy, logSpy } = await importFreshLoggerWithConsoleSpies();
+
+        enableTelegramConsoleProxy();
+        await LoggerService.getInstance().initialize();
+
+        console.warn('Error: TIMEOUT');
+        console.log('Connection to 149.154.167.91:80/TCPFull complete!');
+        await waitForAsyncConsoleLog();
+
+        const warnCalls = warnSpy.mock.calls.map(call => call.map(String).join(' '));
+        const logCalls = logSpy.mock.calls.map(call => call.map(String).join(' '));
+
+        expect(warnCalls.filter(line => line.includes('Telegram timeout warning captured'))).toHaveLength(1);
+        expect(logCalls.filter(line => line.includes('Telegram connection event captured'))).toHaveLength(1);
+        expect(warnCalls).toHaveLength(2);
+        expect(logCalls).toHaveLength(2);
+    });
+});

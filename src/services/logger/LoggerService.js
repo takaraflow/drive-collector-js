@@ -2,6 +2,10 @@ import { AxiomLogger } from './AxiomLogger.js';
 import { NewrelicLogger } from './NewrelicLogger.js';
 import { ConsoleLogger } from './ConsoleLogger.js';
 import {
+    restoreOriginalConsole,
+    writeOriginalConsole
+} from './console-channel.js';
+import {
     defaultLogLevelForEnv,
     getConfiguredLogLevel,
     LOG_LEVEL_PRIORITY,
@@ -38,12 +42,109 @@ const getSafeInstanceId = () => {
     }
 };
 
-const originalConsoleError = console.error;
-const originalConsoleWarn = console.warn;
-const originalConsoleLog = console.log;
-
 let consoleProxyEnabled = false;
-let isLoggingInternal = false;
+const CAPTURED_MESSAGE_PATTERNS = [
+    'Telegram library TIMEOUT captured',
+    'Telegram timeout warning captured',
+    'Telegram connection event captured'
+];
+const CAPTURED_CONSOLE_MESSAGE_MAX_LENGTH = 500;
+const TELEGRAM_CONSOLE_DEDUP_WINDOW_MS = 60_000;
+const TELEGRAM_CONSOLE_DEDUP_MAX_KEYS = 100;
+const telegramConsoleDedup = new Map();
+
+const safeStringifyConsoleArg = (arg) => {
+    if (arg instanceof Error) {
+        return `${arg.name || 'Error'}: ${arg.message || ''}`;
+    }
+    if (typeof arg === 'string') return arg;
+    if (arg === undefined) return 'undefined';
+    if (arg === null) return 'null';
+
+    try {
+        return String(arg);
+    } catch (error) {
+        return '[Unstringifiable console argument]';
+    }
+};
+
+const truncateCapturedConsoleMessage = (message) => {
+    const text = String(message || '');
+    if (text.length <= CAPTURED_CONSOLE_MESSAGE_MAX_LENGTH) return text;
+    return `${text.substring(0, CAPTURED_CONSOLE_MESSAGE_MAX_LENGTH)}...`;
+};
+
+const buildCapturedConsoleMessage = (args) => {
+    return truncateCapturedConsoleMessage(args.slice(0, 3).map(safeStringifyConsoleArg).join(' '));
+};
+
+const isCapturedLoggerMessage = (message) => {
+    return CAPTURED_MESSAGE_PATTERNS.some(pattern => message.includes(pattern));
+};
+
+const isTimeoutPattern = (message) => {
+    const msgLower = message.toLowerCase();
+    return (
+        msgLower.includes('timeout') ||
+        message.includes('ETIMEDOUT') ||
+        message.includes('ECONNRESET') ||
+        msgLower.includes('timed out')
+    );
+};
+
+const isTelegramConnectionPattern = (message) => {
+    return /gramjs|tcpfull|149\.154\.|connection to .*complete|using layer|signed in successfully|disconnecting|connection closed/i.test(message);
+};
+
+const normalizeFingerprint = (kind, message) => {
+    return `${kind}:${String(message)
+        .toLowerCase()
+        .replace(/\d{10,}/g, '#')
+        .replace(/\s+/g, ' ')
+        .substring(0, 200)}`;
+};
+
+const shouldCaptureConsoleEvent = (kind, message, now = Date.now()) => {
+    const fingerprint = normalizeFingerprint(kind, message);
+    const lastCapturedAt = telegramConsoleDedup.get(fingerprint);
+    if (lastCapturedAt && now - lastCapturedAt < TELEGRAM_CONSOLE_DEDUP_WINDOW_MS) {
+        return false;
+    }
+
+    telegramConsoleDedup.set(fingerprint, now);
+    if (telegramConsoleDedup.size > TELEGRAM_CONSOLE_DEDUP_MAX_KEYS) {
+        const oldestKey = telegramConsoleDedup.keys().next().value;
+        telegramConsoleDedup.delete(oldestKey);
+    }
+
+    return true;
+};
+
+const captureTelegramConsoleEvent = (level, logMethod, message, args) => {
+    if (isCapturedLoggerMessage(message)) return;
+    if (!shouldCaptureConsoleEvent(logMethod, message)) return;
+
+    const wrapper = LoggerService.getInstance();
+    const data = {
+        service: 'telegram',
+        source: 'console_proxy',
+        message,
+        argumentCount: args.length,
+        timestamp: Date.now()
+    };
+    const context = { module: 'TelegramService' };
+
+    try {
+        const logPromise = wrapper[logMethod](level, data, context);
+        if (logPromise && typeof logPromise.catch === 'function') {
+            logPromise.catch(error => {
+                writeOriginalConsole('error', 'Telegram console capture failed:', error?.message || error);
+            });
+        }
+    } catch (error) {
+        writeOriginalConsole('error', 'Telegram console capture failed:', error?.message || error);
+    }
+};
 
 export const enableTelegramConsoleProxy = () => {
     if (consoleProxyEnabled) return;
@@ -51,69 +152,41 @@ export const enableTelegramConsoleProxy = () => {
     consoleProxyEnabled = true;
 
     console.error = (...args) => {
-        const msg = String(args[0] || '').substring(0, 2000);
-        const msgLower = msg.toLowerCase();
+        const msg = buildCapturedConsoleMessage(args);
 
-        const isTimeoutPattern =
-            msgLower.includes('timeout') ||
-            msg.includes('ETIMEDOUT') ||
-            msg.includes('ECONNRESET') ||
-            msg.includes('timed out') ||
-            msg.includes('TIMEOUT');
-
-        if (isTimeoutPattern && !isLoggingInternal) {
-            isLoggingInternal = true;
-            try {
-                const wrapper = LoggerService.getInstance();
-                wrapper.error(`Telegram library TIMEOUT captured: ${msg}`, {
-                    service: 'telegram',
-                    source: 'console_proxy',
-                    args: args.length > 1 ? args.slice(1) : undefined,
-                    timestamp: Date.now()
-                });
-            } finally {
-                isLoggingInternal = false;
-            }
+        if (isTimeoutPattern(msg)) {
+            captureTelegramConsoleEvent('Telegram library TIMEOUT captured', 'error', msg, args);
         }
 
-        originalConsoleError.call(console, ...args);
+        writeOriginalConsole('error', ...args);
     };
 
     console.warn = (...args) => {
-        const msg = String(args[0] || '').substring(0, 2000);
+        const msg = buildCapturedConsoleMessage(args);
 
-        if (msg.includes('TIMEOUT') || msg.includes('timeout')) {
-            const wrapper = LoggerService.getInstance();
-            wrapper.warn('Telegram timeout warning captured', {
-                message: msg,
-                source: 'console_proxy'
-            });
+        if (isTimeoutPattern(msg)) {
+            captureTelegramConsoleEvent('Telegram timeout warning captured', 'warn', msg, args);
         }
 
-        originalConsoleWarn.call(console, ...args);
+        writeOriginalConsole('warn', ...args);
     };
 
     console.log = (...args) => {
-        const msg = String(args[0] || '').substring(0, 2000);
+        const msg = buildCapturedConsoleMessage(args);
 
-        if (msg.includes('connected') || msg.includes('disconnected') || msg.includes('connection')) {
-            const wrapper = LoggerService.getInstance();
-            wrapper.info('Telegram connection event captured', {
-                message: msg,
-                source: 'console_proxy'
-            });
+        if (isTelegramConnectionPattern(msg)) {
+            captureTelegramConsoleEvent('Telegram connection event captured', 'info', msg, args);
         }
 
-        originalConsoleLog.call(console, ...args);
+        writeOriginalConsole('log', ...args);
     };
 };
 
 export const disableTelegramConsoleProxy = () => {
     if (!consoleProxyEnabled) return;
 
-    console.error = originalConsoleError;
-    console.warn = originalConsoleWarn;
-    console.log = originalConsoleLog;
+    restoreOriginalConsole();
+    telegramConsoleDedup.clear();
     consoleProxyEnabled = false;
 };
 
@@ -260,7 +333,7 @@ class LoggerService {
      * 重新加载 Logger 配置（通常在配置初始化完成后调用）
      */
     async reload() {
-        console.log('[LoggerService] Reloading loggers with new configuration...');
+        writeOriginalConsole('log', '[LoggerService] Reloading loggers with new configuration...');
         // 关闭旧的 loggers
         for (const logger of this.activeLoggers) {
             if (logger && typeof logger.disconnect === 'function') {
@@ -270,13 +343,13 @@ class LoggerService {
 
         // 重新初始化
         await this._initLoggers();
-        console.log(`[LoggerService] Reloaded. Active providers: ${this.currentProviderName}`);
+        writeOriginalConsole('log', `[LoggerService] Reloaded. Active providers: ${this.currentProviderName}`);
     }
 
     _ensureInitialized() {
         if (!this.isInitialized) {
             this.initialize().catch(err => {
-                console.error('LoggerService auto-initialization failed:', err.message);
+                writeOriginalConsole('error', 'LoggerService auto-initialization failed:', err.message);
             });
         }
     }
@@ -358,7 +431,7 @@ class LoggerService {
         const promises = loggers.map(logger => {
             if (logger && typeof logger[level] === 'function') {
                 return logger[level](formattedMessage, data, fullContext).catch(error => {
-                    console.error(`Logger ${logger.getProviderName()} ${level} failed:`, error.message);
+                    writeOriginalConsole('error', `Logger ${logger.getProviderName()} ${level} failed:`, error.message);
                 });
             }
             return Promise.resolve();
@@ -413,7 +486,7 @@ class LoggerService {
             const promises = loggers.map(logger => {
                 if (logger && typeof logger.flush === 'function') {
                     return logger.flush(timeoutMs).catch(err => {
-                        console.error(`Logger ${logger.getProviderName()} flush failed:`, err.message);
+                        writeOriginalConsole('error', `Logger ${logger.getProviderName()} flush failed:`, err.message);
                     });
                 }
                 return Promise.resolve();
@@ -452,4 +525,4 @@ export { LoggerService };
 
 export const createLogger = () => new LoggerService();
 
-export default new LoggerService();
+export default LoggerService.getInstance();

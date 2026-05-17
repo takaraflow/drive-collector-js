@@ -1,13 +1,14 @@
 import { BaseLogger } from './BaseLogger.js';
+import { getOriginalConsoleMethod } from './console-channel.js';
 import { serializeToString } from '../../utils/serializer.js';
 import { getBeijingTimestamp } from '../../utils/timeUtils.js';
 
 class ConsoleLogger extends BaseLogger {
     constructor(options = {}) {
         super(options);
-        this.originalConsoleError = console.error;
-        this.originalConsoleWarn = console.warn;
-        this.originalConsoleLog = console.log;
+        this.originalConsoleError = getOriginalConsoleMethod('error');
+        this.originalConsoleWarn = getOriginalConsoleMethod('warn');
+        this.originalConsoleLog = getOriginalConsoleMethod('log');
         this.version = 'unknown';
         // 智能过滤模式：当启用外部日志平台时，控制台仅输出关键信息
         this.smartFilter = options.smartFilter || false;

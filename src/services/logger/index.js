@@ -16,6 +16,7 @@ import {
     normalizeLogLevel,
     shouldSendLogLevel
 } from './LoggerService.js';
+import { writeOriginalConsole } from './console-channel.js';
 import { setInstanceIdProvider as setAxiomInstanceIdProvider } from './AxiomLogger.js';
 import { setInstanceIdProvider as setNewrelicInstanceIdProvider } from './NewrelicLogger.js';
 
@@ -41,13 +42,13 @@ export const setLoggerInstanceIdProvider = setInstanceIdProvider;
 
 let _loggerInstance;
 try {
-    _loggerInstance = new LoggerService();
+    _loggerInstance = LoggerService.getInstance();
 } catch (e) {
     _loggerInstance = {
-        info: (...args) => console.info('[LOG]', ...args),
-        warn: (...args) => console.warn('[LOG]', ...args),
-        error: (...args) => console.error('[LOG]', ...args),
-        debug: (...args) => console.debug('[LOG]', ...args),
+        info: (...args) => writeOriginalConsole('log', '[LOG]', ...args),
+        warn: (...args) => writeOriginalConsole('warn', '[LOG]', ...args),
+        error: (...args) => writeOriginalConsole('error', '[LOG]', ...args),
+        debug: (...args) => writeOriginalConsole('debug', '[LOG]', ...args),
         withModule: () => _loggerInstance,
         withContext: () => _loggerInstance,
         configure: () => {},

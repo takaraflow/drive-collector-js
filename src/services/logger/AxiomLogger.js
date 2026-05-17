@@ -1,5 +1,6 @@
 import { Axiom } from '@axiomhq/js';
 import { BaseLogger } from './BaseLogger.js';
+import { writeOriginalConsole } from './console-channel.js';
 import { limitFields, serializeError, serializeToString } from '../../utils/serializer.js';
 import { getBeijingISOString } from '../../utils/timeUtils.js';
 
@@ -88,7 +89,7 @@ class AxiomLogger extends BaseLogger {
             this.axiomSuspendedUntil = Date.now() + AXIOM_UNAVAILABLE_BACKOFF_MS;
             this.client = null;
         }
-        console.error('Axiom ingest error:', message);
+        writeOriginalConsole('error', 'Axiom ingest error:', message);
     }
 
     isSuspended() {
@@ -236,7 +237,7 @@ class AxiomLogger extends BaseLogger {
                 }
             });
         } catch (error) {
-            console.error('Axiom batch ingest failed:', error.message);
+            writeOriginalConsole('error', 'Axiom batch ingest failed:', error.message);
         } finally {
             this.isBatchFlushing = false;
             if (this.logBuffer.length) {
@@ -293,7 +294,7 @@ class AxiomLogger extends BaseLogger {
                 await Promise.race([this._flushLogsBatch(), timeoutPromise]);
             }
         } catch (error) {
-            console.error('Log flush failed:', error.message);
+            writeOriginalConsole('error', 'Log flush failed:', error.message);
         }
     }
 

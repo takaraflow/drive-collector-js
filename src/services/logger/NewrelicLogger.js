@@ -1,4 +1,5 @@
 import { BaseLogger } from './BaseLogger.js';
+import { writeOriginalConsole } from './console-channel.js';
 import { serializeError, serializeToString, limitFields } from '../../utils/serializer.js';
 import { getBeijingISOString } from '../../utils/timeUtils.js';
 import { shouldSendLogLevel } from './log-level.js';
@@ -119,9 +120,9 @@ class NewrelicLogger extends BaseLogger {
 
             if (!response.ok) {
                 // 增加错误日志，不包含可能含有敏感信息的 response text
-                console.error(`🚨 [NewrelicLogger] API Error: ${response.status}`);
+                writeOriginalConsole('error', `🚨 [NewrelicLogger] API Error: ${response.status}`);
                 if (response.status === 403) {
-                     console.error('🚫 [NewrelicLogger] 403 Forbidden: 请检查 License Key 是否正确，以及是否配置了正确的 NEW_RELIC_REGION (EU/US)');
+                     writeOriginalConsole('error', '🚫 [NewrelicLogger] 403 Forbidden: 请检查 License Key 是否正确，以及是否配置了正确的 NEW_RELIC_REGION (EU/US)');
                 }
                 throw new Error(`New Relic API error: ${response.status}`);
             } else {
@@ -230,10 +231,10 @@ class NewrelicLogger extends BaseLogger {
                 sanitizedError = new Error(sanitizedMessage);
                 sanitizedError.stack = error.stack ? error.stack.split(this.licenseKey).join('***') : undefined;
             }
-            console.error('[NewrelicLogger] Failed to send log batch', { error: sanitizedError });
-            console.error('[NewrelicLogger] Region:', this.region);
-            console.error('[NewrelicLogger] Endpoint:', this._getLogUrl());
-            console.error('[NewrelicLogger] Batch size:', batch.length);
+            writeOriginalConsole('error', '[NewrelicLogger] Failed to send log batch', { error: sanitizedError });
+            writeOriginalConsole('error', '[NewrelicLogger] Region:', this.region);
+            writeOriginalConsole('error', '[NewrelicLogger] Endpoint:', this._getLogUrl());
+            writeOriginalConsole('error', '[NewrelicLogger] Batch size:', batch.length);
             // On failure, logs are currently lost to avoid memory leaks
             // In a more robust system, we might retry or persist them
         } finally {

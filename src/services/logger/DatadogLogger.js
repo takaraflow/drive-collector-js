@@ -1,4 +1,5 @@
 import { BaseLogger } from './BaseLogger.js';
+import { writeOriginalConsole } from './console-channel.js';
 
 class DatadogLogger extends BaseLogger {
     constructor(options = {}) {
@@ -12,7 +13,7 @@ class DatadogLogger extends BaseLogger {
     async initialize() {
         if (this.isInitialized) return;
         if (!this.apiKey) {
-            console.warn('Datadog API key not configured');
+            writeOriginalConsole('warn', 'Datadog API key not configured');
         }
         this.isInitialized = true;
     }
@@ -53,7 +54,7 @@ class DatadogLogger extends BaseLogger {
                 throw new Error(`Datadog API error: ${response.status}`);
             }
         } catch (error) {
-            console.error('Datadog log failed:', error.message);
+            writeOriginalConsole('error', 'Datadog log failed:', error.message);
             throw error;
         }
     }
