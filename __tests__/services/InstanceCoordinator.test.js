@@ -388,6 +388,17 @@ describe("Core InstanceCoordinator Tests", () => {
         expect(instanceCoordinator.activeInstances.size).toBe(2);
     });
 
+    test("should pass strong consistency option to active instance lookups", async () => {
+        vi.mocked(InstanceRepository.findAllActive).mockResolvedValue([]);
+
+        await instanceCoordinator.getActiveInstances({ strong: true });
+
+        expect(InstanceRepository.findAllActive).toHaveBeenCalledWith(
+            instanceCoordinator.instanceTimeout,
+            { strong: true }
+        );
+    });
+
     test("should unregister instance", async () => {
         instanceCoordinator.instanceId = 'cleanup-instance';
 

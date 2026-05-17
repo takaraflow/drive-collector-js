@@ -704,6 +704,7 @@ describe('WebhookRouter', () => {
                     })
                 })
             );
+            expect(instanceCoordinator.getActiveInstances).toHaveBeenCalledWith({ strong: true });
             expect(res.writeHead).toHaveBeenCalledWith(200);
             expect(res.end).toHaveBeenCalledWith('OK');
         });

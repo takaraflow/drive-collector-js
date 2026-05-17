@@ -11,6 +11,12 @@ export class InstanceRepository {
     static PREFIX = 'instance:';
     static DEFAULT_TIMEOUT = 120000; // 120秒
 
+    static _readOptions(options = {}) {
+        return options.strong === true || options.skipCache === true || options.skipL1 === true
+            ? { skipCache: true }
+            : {};
+    }
+
     /**
      * 注册或更新实例信息
      * 使用 Cache 存储，设置 TTL 自动过期
@@ -32,9 +38,9 @@ export class InstanceRepository {
     /**
      * 获取所有活跃实例
      */
-    static async findAllActive(timeoutMs = this.DEFAULT_TIMEOUT) {
+    static async findAllActive(timeoutMs = this.DEFAULT_TIMEOUT, options = {}) {
         try {
-            const instances = await this.findAll();
+            const instances = await this.findAll(options);
             const now = Date.now();
             return instances.filter(inst => 
                 inst.lastHeartbeat && (now - inst.lastHeartbeat) < timeoutMs
@@ -48,12 +54,13 @@ export class InstanceRepository {
     /**
      * 获取所有实例
      */
-    static async findAll() {
+    static async findAll(options = {}) {
         try {
             const keys = await cache.listKeys(this.PREFIX);
             const instances = [];
+            const readOptions = this._readOptions(options);
             for (const key of keys) {
-                const data = await cache.get(key, "json", { cacheTtl: 30000 });
+                const data = await cache.get(key, "json", readOptions);
                 if (data) {
                     instances.push(data);
                 }
@@ -68,9 +75,9 @@ export class InstanceRepository {
     /**
      * 根据ID查找实例
      */
-    static async findById(instanceId) {
+    static async findById(instanceId, options = {}) {
         try {
-            return await cache.get(`${this.PREFIX}${instanceId}`, "json");
+            return await cache.get(`${this.PREFIX}${instanceId}`, "json", this._readOptions(options));
         } catch (e) {
             log.error(`InstanceRepository.findById failed for ${instanceId}:`, e);
             return null;
@@ -82,7 +89,7 @@ export class InstanceRepository {
      */
     static async updateHeartbeat(instanceId, heartbeatTime = Date.now(), timeoutMs = this.DEFAULT_TIMEOUT) {
         try {
-            const existing = await this.findById(instanceId);
+            const existing = await this.findById(instanceId, { strong: true });
             if (!existing) return false;
 
             const updated = {
@@ -119,7 +126,7 @@ export class InstanceRepository {
     static async deleteExpired(timeoutMs = 300000) {
         const now = Date.now();
         try {
-            const all = await this.findAll();
+            const all = await this.findAll({ strong: true });
             let count = 0;
             for (const inst of all) {
                 if ((now - inst.lastHeartbeat) > timeoutMs) {

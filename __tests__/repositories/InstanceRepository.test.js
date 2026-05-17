@@ -96,6 +96,17 @@ describe("InstanceRepository (Cache Based)", () => {
             expect(result).toHaveLength(1);
             expect(result[0].id).toBe("active1");
         });
+
+        it("should use authoritative cache reads when strong consistency is requested", async () => {
+            const now = Date.now();
+            cache.listKeys.mockResolvedValue(["instance:active1"]);
+            cache.get.mockResolvedValue({ id: "active1", lastHeartbeat: now - 1000 });
+
+            const result = await InstanceRepository.findAllActive(120000, { strong: true });
+
+            expect(result).toHaveLength(1);
+            expect(cache.get).toHaveBeenCalledWith("instance:active1", "json", { skipCache: true });
+        });
     });
 
     describe("findById", () => {
@@ -106,7 +117,17 @@ describe("InstanceRepository (Cache Based)", () => {
             const result = await InstanceRepository.findById("instance1");
 
             expect(result).toEqual(mockInstance);
-            expect(cache.get).toHaveBeenCalledWith("instance:instance1", "json");
+            expect(cache.get).toHaveBeenCalledWith("instance:instance1", "json", {});
+        });
+
+        it("should bypass L1 cache for strong reads", async () => {
+            const mockInstance = { id: "instance1", hostname: "host1" };
+            cache.get.mockResolvedValue(mockInstance);
+
+            const result = await InstanceRepository.findById("instance1", { strong: true });
+
+            expect(result).toEqual(mockInstance);
+            expect(cache.get).toHaveBeenCalledWith("instance:instance1", "json", { skipCache: true });
         });
     });
 

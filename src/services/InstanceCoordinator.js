@@ -296,9 +296,9 @@ export class InstanceCoordinator {
     /**
      * 获取活跃实例列表
      */
-    async getActiveInstances() {
+    async getActiveInstances(options = {}) {
         try {
-            const activeInstances = await InstanceRepository.findAllActive(this.instanceTimeout);
+            const activeInstances = await InstanceRepository.findAllActive(this.instanceTimeout, options);
             this.activeInstances = new Set(activeInstances.map(inst => inst.id));
             return activeInstances;
         } catch (e) {
@@ -385,9 +385,9 @@ export class InstanceCoordinator {
     /**
      * 获取所有实例（主动发现所有 instance: 前缀的键）
      */
-    async getAllInstances() {
+    async getAllInstances(options = {}) {
         try {
-            const instances = await InstanceRepository.findAll();
+            const instances = await InstanceRepository.findAll(options);
             this.activeInstances = new Set(instances.map(inst => inst.id));
             return instances;
         } catch (e) {

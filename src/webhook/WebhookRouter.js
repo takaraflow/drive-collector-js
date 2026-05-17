@@ -331,7 +331,7 @@ async function handleWebhookForwarding(req, res, result, data, path, body) {
                 const leaderInstanceId = lockData?.instanceId;
                 if (!leaderInstanceId) return null;
 
-                const activeInstances = (await instanceCoordinator.getActiveInstances?.()) || [];
+                const activeInstances = (await instanceCoordinator.getActiveInstances?.({ strong: true })) || [];
                 const leaderInstance = activeInstances.find(i => i.id === leaderInstanceId);
                 const baseUrl = resolveInstanceBaseUrl(leaderInstance);
                 if (!baseUrl) return null;
