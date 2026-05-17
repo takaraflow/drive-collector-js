@@ -127,7 +127,6 @@ const INITIAL_SCHEMA_MIGRATION_SQL = [
         status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled')),
         error_msg TEXT,
         claimed_by TEXT,
-        claim_lease_id TEXT,
         created_at INTEGER,
         updated_at INTEGER
     )`,
@@ -136,7 +135,6 @@ const INITIAL_SCHEMA_MIGRATION_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_tasks_msg_id ON tasks(msg_id)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_claimed_by ON tasks(claimed_by)",
-    "CREATE INDEX IF NOT EXISTS idx_tasks_claim_lease ON tasks(claimed_by, claim_lease_id)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_status_updated ON tasks(status, updated_at)",
 

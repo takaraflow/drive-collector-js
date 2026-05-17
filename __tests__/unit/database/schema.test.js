@@ -187,6 +187,101 @@ function createProductionLegacyDatabase() {
     return db;
 }
 
+function createDatabaseAppliedThroughVersionFive() {
+    const db = new Database(":memory:");
+    db.exec(`
+        CREATE TABLE tasks (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            chat_id TEXT,
+            msg_id INTEGER,
+            source_msg_id INTEGER,
+            file_name TEXT,
+            file_size INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled')),
+            error_msg TEXT,
+            claimed_by TEXT,
+            created_at INTEGER,
+            updated_at INTEGER
+        );
+        CREATE INDEX idx_tasks_user_id ON tasks(user_id);
+        CREATE INDEX idx_tasks_status ON tasks(status);
+        CREATE INDEX idx_tasks_msg_id ON tasks(msg_id);
+        CREATE INDEX idx_tasks_created_at ON tasks(created_at);
+        CREATE INDEX idx_tasks_claimed_by ON tasks(claimed_by);
+        CREATE INDEX idx_tasks_user_status ON tasks(user_id, status);
+        CREATE INDEX idx_tasks_status_updated ON tasks(status, updated_at);
+
+        CREATE TABLE drives (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            name TEXT,
+            type TEXT NOT NULL,
+            config_data TEXT NOT NULL,
+            remote_folder TEXT,
+            status TEXT DEFAULT 'active' CHECK (status IN ('active', 'deleted')),
+            is_default INTEGER DEFAULT 0 CHECK (is_default IN (0, 1)),
+            created_at INTEGER,
+            updated_at INTEGER
+        );
+        CREATE INDEX idx_drives_user_id ON drives(user_id);
+        CREATE INDEX idx_drives_status ON drives(status);
+        CREATE INDEX idx_drives_type ON drives(type);
+        CREATE INDEX idx_drives_user_status ON drives(user_id, status);
+        CREATE INDEX idx_drives_user_default ON drives(user_id, is_default);
+        CREATE UNIQUE INDEX idx_drives_one_default_per_user ON drives(user_id) WHERE is_default = 1 AND status = 'active';
+        CREATE UNIQUE INDEX idx_drives_one_active_type_per_user ON drives(user_id, type) WHERE status = 'active';
+
+        CREATE TABLE settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+        );
+
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            data TEXT NOT NULL,
+            created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+            expires_at INTEGER
+        );
+        CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+        CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
+
+        CREATE TABLE api_keys (
+            user_id TEXT PRIMARY KEY,
+            token TEXT UNIQUE NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_api_keys_token ON api_keys(token);
+
+        CREATE TABLE user_roles (
+            user_id TEXT PRIMARY KEY,
+            role TEXT NOT NULL CHECK (role IN ('banned', 'user', 'trusted', 'admin')),
+            created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+        );
+        CREATE INDEX idx_user_roles_role ON user_roles(role);
+
+        CREATE TABLE schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            checksum TEXT NOT NULL,
+            applied_at INTEGER NOT NULL,
+            execution_time_ms INTEGER DEFAULT 0
+        );
+        INSERT INTO schema_migrations (version, name, checksum, applied_at, execution_time_ms) VALUES
+            (1, 'initial_schema', '1c71fee80eb09f16419d0143c236c9e7e1d2261f80e8dde4b1c591e5539e5ce9', 1778936675151, 17117),
+            (2, 'tasks_status_ssot', '1a9b512a4fdc8988ab3e205278c9d41beb4964583b92a8e9af8b35a60d6937f7', 1778936683357, 7454),
+            (3, 'drives_default_ssot', '5114937fdba3263de5eda29a075ac29262d7d819b59476b7544e4161a0aace9b', 1778936692390, 8058),
+            (4, 'user_roles_ssot', '957c8724b63b7583df88c9944d822169f9ade6a11be8a02d0ba51b7342fc7e66', 1778999743954, 3580),
+            (5, 'drives_active_type_unique_ssot', '521fe2516142976cc218f0e21d87304c2d8726962768c13bb202330597047e99', 1778999752948, 8126);
+    `);
+    return db;
+}
+
 describe("database schema migrations", () => {
     let db;
 
@@ -301,6 +396,41 @@ describe("database schema migrations", () => {
         expect(status.isCurrent).toBe(false);
         expect(status.issues).toContain("migration 2:tasks_status_ssot checksum drift");
         await expect(assertDatabaseSchemaCurrent({ d1 })).rejects.toThrow("checksum drift");
+    });
+
+    test("should keep historical migration checksums immutable while applying later migrations", async () => {
+        db = createDatabaseAppliedThroughVersionFive();
+        const d1 = createD1RestCompatible(db);
+
+        const outdatedStatus = await getDatabaseSchemaStatus({ d1 });
+        expect(outdatedStatus.isCurrent).toBe(false);
+        expect(outdatedStatus.issues).not.toContain("migration 1:initial_schema checksum drift");
+        expect(outdatedStatus.missingMigrations).toEqual([
+            { version: 6, name: "task_claim_lease_fencing" }
+        ]);
+
+        const result = await migrateDatabaseSchema({
+            d1,
+            useLock: false,
+            log: { info: vi.fn(), warn: vi.fn() }
+        });
+
+        expect(result.results).toContainEqual({
+            version: 6,
+            name: "task_claim_lease_fencing",
+            action: "applied",
+            executionTimeMs: expect.any(Number)
+        });
+        expect(result.status.isCurrent).toBe(true);
+
+        const taskColumns = db.prepare("PRAGMA table_info(tasks)").all().map(column => column.name);
+        expect(taskColumns).toContain("claim_lease_id");
+
+        const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(row => row.name);
+        expect(indexes).toContain("idx_tasks_claim_lease");
+
+        const migrationOne = db.prepare("SELECT checksum FROM schema_migrations WHERE version = 1").get();
+        expect(migrationOne.checksum).toBe("1c71fee80eb09f16419d0143c236c9e7e1d2261f80e8dde4b1c591e5539e5ce9");
     });
 
     test("should fail schema assertion before migrations are applied", async () => {
