@@ -573,7 +573,10 @@ describe('WebhookRouter', () => {
 
             await handleWebhook(req, res);
 
-            expect(streamTransferService.resetTask).toHaveBeenCalledWith('task-1');
+            expect(streamTransferService.resetTask).toHaveBeenCalledWith('task-1', null, {
+                ownerInstanceId: null,
+                requireOwnerHeader: true
+            });
             expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
             expect(res.end).toHaveBeenCalledWith(JSON.stringify({ success: true }));
         });
