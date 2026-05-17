@@ -15,6 +15,11 @@ const mockUIHelper = {
     renderTaskQueueDetail: vi.fn().mockReturnValue({ text: 'rendered detail', buttons: [] })
 };
 const mockSafeEdit = vi.fn();
+const mockSessionManager = {
+    start: vi.fn(),
+    get: vi.fn(),
+    clear: vi.fn()
+};
 
 vi.mock('../../src/services/telegram.js', () => ({
     client: mockClient,
@@ -25,6 +30,9 @@ vi.mock('../../src/repositories/TaskRepository.js', () => ({
 }));
 vi.mock('../../src/modules/AuthGuard.js', () => ({
     AuthGuard: mockAuthGuard
+}));
+vi.mock('../../src/modules/SessionManager.js', () => ({
+    SessionManager: mockSessionManager
 }));
 vi.mock('../../src/ui/templates.js', () => ({
     UIHelper: mockUIHelper
@@ -324,7 +332,70 @@ describe('Dispatcher retry_ callback', () => {
         expect(mockClient.invoke).toHaveBeenCalled();
     });
 
-    it('should ask for confirmation before retrying a page of failed tasks', async () => {
+    it('should ask for confirmation before retrying a page of failed tasks with short callback data', async () => {
+        mockAuthGuard.can.mockResolvedValue(true);
+        const failedTasks = [
+            { id: '550e8400-e29b-41d4-a716-446655440000' },
+            { id: '550e8400-e29b-41d4-a716-446655440001' }
+        ];
+        mockTaskRepository.getTasksByStatus.mockResolvedValue({
+            tasks: failedTasks,
+            total: 2,
+            page: 2,
+            pageSize: 8,
+            totalPages: 3
+        });
+        const event = {
+            data: Buffer.from('retry_failed_page_2'),
+            userId: '123',
+            msgId: 456,
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockTaskManager.retryTask).not.toHaveBeenCalled();
+        expect(mockTaskRepository.getTasksByStatus).toHaveBeenCalledWith('failed', 2, 8);
+        expect(mockSessionManager.start).toHaveBeenCalledWith('123', 'FAILED_PAGE_RETRY_CONFIRM', {
+            nonce: expect.stringMatching(/^[a-f0-9]{12}$/),
+            taskIds: [
+                '550e8400-e29b-41d4-a716-446655440000',
+                '550e8400-e29b-41d4-a716-446655440001'
+            ]
+        });
+        expect(mockSafeEdit).toHaveBeenCalledWith(
+            '123',
+            456,
+            expect.stringContaining('确认重试'),
+            expect.any(Array),
+            '123'
+        );
+        const confirmButtons = mockSafeEdit.mock.calls[0][3].flat();
+        expect(confirmButtons.map(button => button.data.toString())).toEqual([
+            expect.stringMatching(/^retry_failed_page_cancel_[a-f0-9]{12}$/),
+            expect.stringMatching(/^retry_failed_page_execute_[a-f0-9]{12}$/)
+        ]);
+    });
+
+    it('should deny failed page retry confirmation to non-admin users', async () => {
+        mockAuthGuard.can.mockResolvedValue(false);
+        const event = {
+            data: Buffer.from('retry_failed_page_2'),
+            userId: '123',
+            msgId: 456,
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockTaskRepository.getTasksByStatus).not.toHaveBeenCalled();
+        expect(mockSessionManager.start).not.toHaveBeenCalled();
+        expect(mockSafeEdit).not.toHaveBeenCalled();
+    });
+
+    it('should keep legacy retry_confirm_many callbacks as confirmation-only when callback data stays valid', async () => {
         const event = {
             data: Buffer.from('retry_confirm_many_t1,t2'),
             userId: '123',
@@ -343,12 +414,13 @@ describe('Dispatcher retry_ callback', () => {
             expect.any(Array),
             '123'
         );
+        const confirmButtons = mockSafeEdit.mock.calls[0][3].flat();
+        expect(confirmButtons.map(button => button.data.toString())).toContain('retry_execute_many_t1,t2');
     });
 
-    it('should retry each selected failed task only after page retry confirmation', async () => {
-        mockTaskManager.retryTask.mockResolvedValue({ success: true });
+    it('should reject oversized legacy retry_confirm_many callbacks instead of rendering invalid buttons', async () => {
         const event = {
-            data: Buffer.from('retry_execute_many_t1,t2'),
+            data: Buffer.from(`retry_confirm_many_${'x'.repeat(80)}`),
             userId: '123',
             msgId: 456,
             peer: 'chat123',
@@ -357,9 +429,108 @@ describe('Dispatcher retry_ callback', () => {
 
         await Dispatcher._handleCallback(event, { userId: '123' });
 
-        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('t1', '123');
-        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('t2', '123');
+        expect(mockTaskManager.retryTask).not.toHaveBeenCalled();
+        expect(mockSafeEdit).not.toHaveBeenCalled();
+        expect(mockClient.invoke).toHaveBeenCalled();
+    });
+
+    it('should retry failed page task snapshot after confirmation', async () => {
+        mockAuthGuard.can.mockResolvedValue(true);
+        mockSessionManager.get.mockResolvedValue({
+            current_step: 'FAILED_PAGE_RETRY_CONFIRM',
+            temp_data: JSON.stringify({
+                nonce: 'nonce123',
+                taskIds: [
+                    '550e8400-e29b-41d4-a716-446655440000',
+                    '550e8400-e29b-41d4-a716-446655440001'
+                ]
+            })
+        });
+        mockTaskManager.retryTask.mockResolvedValue({ success: true });
+        const event = {
+            data: Buffer.from('retry_failed_page_execute_nonce123'),
+            userId: '123',
+            msgId: 456,
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockTaskRepository.getTasksByStatus).not.toHaveBeenCalled();
+        expect(mockSessionManager.clear).toHaveBeenCalledWith('123');
+        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('550e8400-e29b-41d4-a716-446655440000', '123');
+        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('550e8400-e29b-41d4-a716-446655440001', '123');
         expect(mockTaskManager.retryTask).toHaveBeenCalledTimes(2);
+    });
+
+    it('should deny failed page retry execution to non-admin users', async () => {
+        mockAuthGuard.can.mockResolvedValue(false);
+        mockSessionManager.get.mockResolvedValue({
+            current_step: 'FAILED_PAGE_RETRY_CONFIRM',
+            temp_data: JSON.stringify({
+                nonce: 'nonce123',
+                taskIds: ['550e8400-e29b-41d4-a716-446655440000']
+            })
+        });
+        const event = {
+            data: Buffer.from('retry_failed_page_execute_nonce123'),
+            userId: '123',
+            msgId: 456,
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockSessionManager.clear).not.toHaveBeenCalled();
+        expect(mockTaskManager.retryTask).not.toHaveBeenCalled();
+    });
+
+    it('should reject stale failed page retry confirmations with mismatched nonce', async () => {
+        mockAuthGuard.can.mockResolvedValue(true);
+        mockSessionManager.get.mockResolvedValue({
+            current_step: 'FAILED_PAGE_RETRY_CONFIRM',
+            temp_data: JSON.stringify({
+                nonce: 'newer456',
+                taskIds: ['550e8400-e29b-41d4-a716-446655440000']
+            })
+        });
+        const event = {
+            data: Buffer.from('retry_failed_page_execute_older123'),
+            userId: '123',
+            msgId: 456,
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockSessionManager.clear).not.toHaveBeenCalled();
+        expect(mockTaskManager.retryTask).not.toHaveBeenCalled();
+    });
+
+    it('should clear failed page retry confirmation only from the matching cancel callback', async () => {
+        mockAuthGuard.can.mockResolvedValue(true);
+        mockSessionManager.get.mockResolvedValue({
+            current_step: 'FAILED_PAGE_RETRY_CONFIRM',
+            temp_data: JSON.stringify({
+                nonce: 'nonce123',
+                taskIds: ['550e8400-e29b-41d4-a716-446655440000']
+            })
+        });
+        const event = {
+            data: Buffer.from('retry_failed_page_cancel_nonce123'),
+            userId: '123',
+            msgId: 456,
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockSessionManager.clear).toHaveBeenCalledWith('123');
+        expect(mockTaskManager.retryTask).not.toHaveBeenCalled();
     });
 });
 
@@ -417,5 +588,26 @@ describe('Dispatcher cancel callbacks', () => {
         await Dispatcher._handleCallback(event, { userId: '123' });
 
         expect(mockTaskManager.cancelTasksByMsgId).toHaveBeenCalledWith('789', '123');
+    });
+
+    it('should remove the current task confirmation buttons when keeping a task', async () => {
+        const event = {
+            data: Buffer.from('task_action_back'),
+            userId: '123',
+            msgId: 456,
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockSafeEdit).toHaveBeenCalledWith(
+            '123',
+            456,
+            expect.stringContaining('已取消'),
+            expect.any(Array),
+            '123'
+        );
+        expect(mockTaskManager.cancelTask).not.toHaveBeenCalled();
     });
 });

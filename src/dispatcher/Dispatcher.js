@@ -27,6 +27,7 @@ import mediaGroupBuffer from "../services/MediaGroupBuffer.js";
 import { TASK_STATUSES } from "../domain/task-state-machine.js";
 import fs from "fs";
 import path from "path";
+import { randomUUID } from "crypto";
 
 const log = logger.withModule('Dispatcher');
 const packageJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
@@ -159,23 +160,35 @@ export class Dispatcher {
         ];
     }
 
-    static _getAdminActionConfirmButtons(confirmData) {
+    static _getAdminActionConfirmButtons(nonce) {
         return [
-            [Button.inline(STRINGS.status.btn_cancel_action, Buffer.from("admin_action_cancel"))],
-            [Button.inline(STRINGS.status.btn_confirm_action, Buffer.from(confirmData))]
+            [Button.inline(STRINGS.status.btn_cancel_action, Buffer.from(`admin_action_cancel_${nonce}`))],
+            [Button.inline(STRINGS.status.btn_confirm_action, Buffer.from(`admin_action_execute_${nonce}`))]
         ];
     }
 
     static async _askAdminActionConfirmation(target, userId, action) {
-        await SessionManager.start(userId, "ADMIN_ACTION_CONFIRM", action);
+        const nonce = this._createCallbackNonce();
+        await SessionManager.start(userId, "ADMIN_ACTION_CONFIRM", { ...action, nonce });
         return await runBotTaskWithRetry(() => client.sendMessage(target, {
             message: format(STRINGS.status.action_confirm, {
                 action: action.label,
                 target: action.target || "服务状态"
             }),
-            buttons: this._getAdminActionConfirmButtons("admin_action_execute"),
+            buttons: this._getAdminActionConfirmButtons(nonce),
             parseMode: "html"
         }), userId, {}, false, 3);
+    }
+
+    static _getFailedPageRetryConfirmButtons(nonce) {
+        return [
+            [Button.inline(STRINGS.task.btn_keep_task, Buffer.from(`retry_failed_page_cancel_${nonce}`))],
+            [Button.inline(STRINGS.task.btn_confirm_retry, Buffer.from(`retry_failed_page_execute_${nonce}`))]
+        ];
+    }
+
+    static _createCallbackNonce() {
+        return randomUUID().replace(/-/g, "").slice(0, 12);
     }
 
     static _getCommandArg(fullText) {
@@ -453,20 +466,30 @@ export class Dispatcher {
         try {
             if (data === "noop") return await answer();
 
-            if (data === "admin_action_cancel") {
+            if (data.startsWith("admin_action_cancel_")) {
+                const nonce = data.slice("admin_action_cancel_".length);
+                const session = await SessionManager.get(userId);
+                const action = session?.current_step === "ADMIN_ACTION_CONFIRM"
+                    ? parseDriveSessionData(session)
+                    : null;
+                if (!action?.nonce || action.nonce !== nonce) {
+                    return await answer(STRINGS.task.task_not_found);
+                }
                 await SessionManager.clear(userId);
                 const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
                 await safeEdit(event.userId, event.msgId, STRINGS.task.action_cancelled, this._getStatusButtons(isAdmin), userId);
                 return await answer(STRINGS.task.action_cancelled);
             }
 
-            if (data === "admin_action_execute") {
+            if (data.startsWith("admin_action_execute_")) {
+                const nonce = data.slice("admin_action_execute_".length);
                 const session = await SessionManager.get(userId);
                 const action = session?.current_step === "ADMIN_ACTION_CONFIRM"
                     ? parseDriveSessionData(session)
                     : null;
-                await SessionManager.clear(userId);
                 if (!action?.type) return await answer(STRINGS.task.task_not_found);
+                if (action.nonce !== nonce) return await answer(STRINGS.task.task_not_found);
+                await SessionManager.clear(userId);
                 const message = await this._executeAdminAction(userId, action);
                 const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
                 await safeEdit(event.userId, event.msgId, message, this._getStatusButtons(isAdmin), userId);
@@ -525,10 +548,68 @@ export class Dispatcher {
                 await safeEdit(event.userId, event.msgId, STRINGS.task.cancel_confirm, this._getTaskActionConfirmButtons(`cancel_execute_${taskId}`), userId);
                 await answer();
 
+            } else if (data.startsWith("retry_failed_page_cancel_")) {
+                const isAdmin = await AuthGuard.can(userId, "system:admin");
+                if (!isAdmin) return await answer(STRINGS.status.no_permission);
+
+                const nonce = data.slice("retry_failed_page_cancel_".length);
+                const session = await SessionManager.get(userId);
+                const action = session?.current_step === "FAILED_PAGE_RETRY_CONFIRM"
+                    ? parseDriveSessionData(session)
+                    : null;
+                if (action?.nonce === nonce) {
+                    await SessionManager.clear(userId);
+                }
+                await answer(STRINGS.task.action_cancelled);
+
+            } else if (data.startsWith("retry_failed_page_execute_")) {
+                const isAdmin = await AuthGuard.can(userId, "system:admin");
+                if (!isAdmin) return await answer(STRINGS.status.no_permission);
+
+                const nonce = data.slice("retry_failed_page_execute_".length);
+                const session = await SessionManager.get(userId);
+                const action = session?.current_step === "FAILED_PAGE_RETRY_CONFIRM"
+                    ? parseDriveSessionData(session)
+                    : null;
+                const taskIds = Array.isArray(action?.taskIds) ? action.taskIds.filter(Boolean) : [];
+                if (action?.nonce !== nonce || taskIds.length === 0) return await answer(STRINGS.task.task_not_found);
+
+                await SessionManager.clear(userId);
+                const results = await Promise.all(taskIds.map(taskId => TaskManager.retryTask(taskId, userId)));
+                const ok = results.some(result => result.success);
+                await answer(ok ? STRINGS.task.cmd_sent : STRINGS.task.task_not_found);
+
+            } else if (data.startsWith("retry_failed_page_")) {
+                const isAdmin = await AuthGuard.can(userId, "system:admin");
+                if (!isAdmin) return await answer(STRINGS.status.no_permission);
+
+                const page = Number.parseInt(data.slice("retry_failed_page_".length), 10);
+                if (!Number.isInteger(page) || page < 0) {
+                    await answer(STRINGS.task.task_not_found);
+                } else {
+                    const { TaskRepository } = await import("../repositories/TaskRepository.js");
+                    const detailData = await TaskRepository.getTasksByStatus("failed", page, 8);
+                    const taskIds = detailData.tasks.map(task => task.id).filter(Boolean);
+                    if (taskIds.length === 0) {
+                        await answer(STRINGS.task.task_not_found);
+                    } else {
+                        const nonce = this._createCallbackNonce();
+                        await SessionManager.start(userId, "FAILED_PAGE_RETRY_CONFIRM", { nonce, taskIds });
+                        await safeEdit(event.userId, event.msgId, STRINGS.task.retry_confirm, this._getFailedPageRetryConfirmButtons(nonce), userId);
+                        await answer();
+                    }
+                }
+
             } else if (data.startsWith("retry_confirm_many_")) {
+                // Legacy callback kept for already-rendered short buttons; new page retry uses page-scoped callbacks.
                 const taskIds = data.slice("retry_confirm_many_".length);
-                await safeEdit(event.userId, event.msgId, STRINGS.task.retry_confirm, this._getTaskActionConfirmButtons(`retry_execute_many_${taskIds}`), userId);
-                await answer();
+                const confirmData = `retry_execute_many_${taskIds}`;
+                if (Buffer.byteLength(confirmData) > 64) {
+                    await answer(STRINGS.task.task_not_found);
+                } else {
+                    await safeEdit(event.userId, event.msgId, STRINGS.task.retry_confirm, this._getTaskActionConfirmButtons(confirmData), userId);
+                    await answer();
+                }
 
             } else if (data.startsWith("retry_execute_many_")) {
                 const taskIds = data.slice("retry_execute_many_".length).split(",").filter(Boolean);

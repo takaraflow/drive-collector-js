@@ -465,10 +465,9 @@ export class UIHelper {
 
          const retryRows = [];
          if (status === 'failed') {
-             const retryIds = data.tasks.map(task => task.id).filter(Boolean);
-             if (retryIds.length > 0) {
+             if (data.tasks.some(task => task.id)) {
                  retryRows.push([
-                     Button.inline(TQ.btn_retry_failed_page, Buffer.from(`retry_confirm_many_${retryIds.join(',')}`))
+                     Button.inline(TQ.btn_retry_failed_page, Buffer.from(`retry_failed_page_${data.page}`))
                  ]);
              }
          }

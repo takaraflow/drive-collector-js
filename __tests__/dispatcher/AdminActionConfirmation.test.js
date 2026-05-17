@@ -117,7 +117,7 @@ const { Dispatcher } = await import('../../src/dispatcher/Dispatcher.js');
 
 describe('Dispatcher admin action confirmation', () => {
     const callbackEvent = {
-        data: Buffer.from('admin_action_execute'),
+        data: Buffer.from('admin_action_execute_nonce123'),
         userId: 'chat-1',
         msgId: 456,
         peer: 'chat-1',
@@ -140,8 +140,14 @@ describe('Dispatcher admin action confirmation', () => {
             type: 'access_mode',
             mode: 'private',
             label: '进入维护模式',
-            target: '服务访问模式'
+            target: '服务访问模式',
+            nonce: expect.stringMatching(/^[a-f0-9]{12}$/)
         });
+        const buttons = mockClient.sendMessage.mock.calls[0][1].buttons.flat();
+        expect(buttons.map(button => button.data.toString())).toEqual([
+            expect.stringMatching(/^admin_action_cancel_[a-f0-9]{12}$/),
+            expect.stringMatching(/^admin_action_execute_[a-f0-9]{12}$/)
+        ]);
         expect(mockClient.sendMessage).toHaveBeenCalledWith(
             'chat-1',
             expect.objectContaining({
@@ -155,7 +161,7 @@ describe('Dispatcher admin action confirmation', () => {
     it('should change access mode only from admin_action_execute session', async () => {
         mockSessionManager.get.mockResolvedValue({
             current_step: 'ADMIN_ACTION_CONFIRM',
-            temp_data: JSON.stringify({ type: 'access_mode', mode: 'private' })
+            temp_data: JSON.stringify({ type: 'access_mode', mode: 'private', nonce: 'nonce123' })
         });
 
         await Dispatcher._handleCallback(callbackEvent, { userId: 'admin-1' });
@@ -180,8 +186,42 @@ describe('Dispatcher admin action confirmation', () => {
             operation: 'grant',
             targetUid: '2002',
             label: '设置管理员',
-            target: '用户 2002'
+            target: '用户 2002',
+            nonce: expect.stringMatching(/^[a-f0-9]{12}$/)
         });
+    });
+
+    it('should reject stale admin confirmation panels with mismatched nonce', async () => {
+        mockSessionManager.get.mockResolvedValue({
+            current_step: 'ADMIN_ACTION_CONFIRM',
+            temp_data: JSON.stringify({ type: 'access_mode', mode: 'private', nonce: 'newer456' })
+        });
+        const staleEvent = {
+            ...callbackEvent,
+            data: Buffer.from('admin_action_execute_older123')
+        };
+
+        await Dispatcher._handleCallback(staleEvent, { userId: 'admin-1' });
+
+        expect(mockSettingsRepository.set).not.toHaveBeenCalled();
+        expect(mockSessionManager.clear).not.toHaveBeenCalled();
+        expect(mockSafeEdit).not.toHaveBeenCalled();
+    });
+
+    it('should reject stale admin cancellation panels with mismatched nonce', async () => {
+        mockSessionManager.get.mockResolvedValue({
+            current_step: 'ADMIN_ACTION_CONFIRM',
+            temp_data: JSON.stringify({ type: 'access_mode', mode: 'private', nonce: 'newer456' })
+        });
+        const staleEvent = {
+            ...callbackEvent,
+            data: Buffer.from('admin_action_cancel_older123')
+        };
+
+        await Dispatcher._handleCallback(staleEvent, { userId: 'admin-1' });
+
+        expect(mockSessionManager.clear).not.toHaveBeenCalled();
+        expect(mockSafeEdit).not.toHaveBeenCalled();
     });
 
     it('should grant admin role only when owner confirms', async () => {
@@ -215,7 +255,8 @@ describe('Dispatcher admin action confirmation', () => {
             operation: 'ban',
             targetUid: '2002',
             label: '封禁用户',
-            target: '用户 2002'
+            target: '用户 2002',
+            nonce: expect.stringMatching(/^[a-f0-9]{12}$/)
         });
     });
 

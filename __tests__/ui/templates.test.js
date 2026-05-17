@@ -734,8 +734,8 @@ describe("UIHelper", () => {
         test("should render task list with details", () => {
             const data = {
                 tasks: [
-                    { id: 't1', user_id: 'u1', file_name: 'a.mp4', status: 'failed', error_msg: 'DB timeout', file_size: 1048576, updated_at: Date.now() - 3600000 },
-                    { id: 't2', user_id: 'u2', file_name: 'b.mp4', status: 'failed', error_msg: 'Upload failed', file_size: 2097152, updated_at: Date.now() - 7200000 }
+                    { id: '550e8400-e29b-41d4-a716-446655440000', user_id: 'u1', file_name: 'a.mp4', status: 'failed', error_msg: 'DB timeout', file_size: 1048576, updated_at: Date.now() - 3600000 },
+                    { id: '550e8400-e29b-41d4-a716-446655440001', user_id: 'u2', file_name: 'b.mp4', status: 'failed', error_msg: 'Upload failed', file_size: 2097152, updated_at: Date.now() - 7200000 }
                 ],
                 total: 2, page: 0, pageSize: 10, totalPages: 1
             };
@@ -752,7 +752,8 @@ describe("UIHelper", () => {
             // Should have back button, one retry row for the page, and nav buttons.
             expect(result.buttons.length).toBe(3);
             expect(result.buttons[1][0].text).toBe("重试本页失败任务");
-            expect(result.buttons[1][0].data.toString()).toBe("retry_confirm_many_t1,t2");
+            expect(result.buttons[1][0].data.toString()).toBe("retry_failed_page_0");
+            expect(result.buttons[1][0].data.length).toBeLessThanOrEqual(64);
         });
 
         test("should render empty status", () => {
