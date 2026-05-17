@@ -1,5 +1,6 @@
 export { BaseCache } from './BaseCache.js';
 export { CloudflareKVCache } from './CloudflareKVCache.js';
+export { FileCache } from './FileCache.js';
 export { MemoryCache } from './MemoryCache.js';
 export { RedisCache } from './RedisCache.js';
 export { RedisTLSCache } from './RedisTLSCache.js';

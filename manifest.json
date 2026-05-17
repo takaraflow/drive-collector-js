@@ -477,6 +477,11 @@
         "required": false,
         "description": "Set to true to enable persistent L3 cache layer"
       },
+      "CACHE_L3_DIR": {
+        "type": "string",
+        "required": false,
+        "description": "Directory used by the optional persistent L3 file cache. Defaults to ./data/cache/l3."
+      },
       "CACHE_BLOOM_FILTER": {
         "type": "string",
         "required": false,

@@ -76,6 +76,20 @@ describe("CacheService L1/L2 Interaction Tests", () => {
     });
 
     describe("L1/L2 Interaction", () => {
+        test("injected empty env should isolate optional cache features from global env", async () => {
+            process.env.CACHE_L3_ENABLED = 'true';
+            process.env.CACHE_BLOOM_FILTER = 'true';
+
+            service = new CacheService({ env: {} });
+            await service.initialize();
+
+            expect(service.currentProviderName).toBe('MemoryCache');
+            expect(service.l3Enabled).toBe(false);
+            expect(service.l3Cache).toBeNull();
+            expect(service.bloomFilterEnabled).toBe(false);
+            expect(service.bloomFilter).toBeNull();
+        });
+
         test("L1 miss should trigger L2 read and populate L1", async () => {
             // Create a mock provider
             const mockProvider = {
@@ -214,14 +228,14 @@ describe("CacheService L1/L2 Interaction Tests", () => {
             service.currentProviderName = 'mock-provider';
             service.bloomFilterEnabled = true;
             service.bloomFilter = {
-                mightContain: vi.fn(() => false),
+                has: vi.fn(() => false),
                 add: vi.fn()
             };
 
             const result = await service.get("lock:telegram_client", "json", { skipCache: true });
 
             expect(result).toEqual({ instanceId: "fresh" });
-            expect(service.bloomFilter.mightContain).not.toHaveBeenCalled();
+            expect(service.bloomFilter.has).not.toHaveBeenCalled();
             expect(mockProvider.get).toHaveBeenCalledWith("lock:telegram_client", "json");
         });
 

@@ -117,7 +117,7 @@ class CacheService {
         
         // L3 Cache Config (Persistent Layer)
         this.l3Cache = null;
-        this.l3Enabled = process.env.CACHE_L3_ENABLED === 'true';
+        this.l3Enabled = this.env.CACHE_L3_ENABLED === 'true';
         
         // 缓存策略配置
         this.cacheStrategies = {
@@ -157,7 +157,7 @@ class CacheService {
         
         // Bloom Filter for cache penetration protection - opt-in via environment variable
         this.bloomFilter = null;
-        this.bloomFilterEnabled = process.env.CACHE_BLOOM_FILTER === 'true';
+        this.bloomFilterEnabled = this.env.CACHE_BLOOM_FILTER === 'true';
     }
 
     /**
@@ -239,11 +239,8 @@ class CacheService {
                 log.warn('No external cache provider connected. Using MemoryCache (L1 only).');
             }
 
-            // Initialize L3 and Bloom Filter in parallel
-            await Promise.all([
-                this._initializeL3Cache(),
-                this._initializeBloomFilter()
-            ]);
+            await this._initializeL3Cache();
+            await this._initializeBloomFilter();
 
             this.isInitialized = true;
         } catch (error) {
@@ -412,16 +409,7 @@ class CacheService {
         // Update stats
         this.stats.totalRequests++;
 
-        // 1. Bloom Filter Check (Penetration Protection)
-        if (!skipL1 && this.bloomFilterEnabled && this.bloomFilter) {
-            if (!this.bloomFilter.mightContain(key)) {
-                // Definitely not in cache, skip all checks
-                this.stats.misses++;
-                return null;
-            }
-        }
-
-        // 2. L1 Cache Check (LocalCache)
+        // 1. L1 Cache Check (LocalCache)
         if (!skipL1) {
             const l1Value = localCache.get(key);
             if (l1Value !== null && l1Value !== undefined) {
@@ -430,14 +418,10 @@ class CacheService {
             }
         }
 
-        // 3. L2 Cache Check (Provider)
-        if (!this.primaryProvider && this.currentProviderName === 'MemoryCache') {
-            this.stats.misses++;
-            return null;
-        }
-
         try {
-            const value = await this.primaryProvider.get(key, type);
+            const value = this.primaryProvider
+                ? await this.primaryProvider.get(key, type)
+                : null;
             
             if (value !== null && value !== undefined) {
                 // Populate L1
@@ -446,12 +430,13 @@ class CacheService {
                     const ttl = options.l1Ttl || strategy.l1Ttl;
                     localCache.set(key, value, ttl);
                 }
+                this._rememberBloomKey(key);
                 this.stats.hits.l2++;
                 return value;
             }
             
             // 4. L3 Cache Check (Persistent Layer)
-            if (this.l3Enabled && this.l3Cache) {
+            if (this._shouldReadL3(key, skipL1)) {
                 const l3Value = await this.l3Cache.get(key, type);
                 if (l3Value !== null && l3Value !== undefined) {
                     // Promote to L2 and L1
@@ -463,17 +448,13 @@ class CacheService {
                         const strategy = this._getCacheStrategy(key, options.strategy);
                         localCache.set(key, l3Value, strategy.l1Ttl);
                     }
+                    this._rememberBloomKey(key);
                     this.stats.hits.l3++;
                     return l3Value;
                 }
             }
 
             this.stats.misses++;
-            
-            // Add to bloom filter if enabled
-            if (!skipL1 && this.bloomFilterEnabled && this.bloomFilter) {
-                this.bloomFilter.add(key);
-            }
             
             return null;
         } catch (error) {
@@ -549,9 +530,11 @@ class CacheService {
             const l1Ttl = options.l1Ttl || strategy.l1Ttl;
             localCache.set(key, value, l1Ttl);
         }
+        this._rememberBloomKey(key);
 
         // 2. Update L2 (Provider)
         if (!this.primaryProvider && this.currentProviderName === 'MemoryCache') {
+            await this._writeL3(key, value, strategy, options);
             return true; // Memory only
         }
 
@@ -566,17 +549,7 @@ class CacheService {
             
             if (!result) throw new Error('Provider returned false');
 
-            // 3. Update L3 (Persistent Layer) if enabled
-            if (this.l3Enabled && this.l3Cache && !options.skipL3) {
-                try {
-                    // L3 gets longer TTL based on strategy
-                    const l3Ttl = options.l3Ttl || strategy.l3Ttl;
-                    await this.l3Cache.set(key, value, l3Ttl);
-                } catch (l3Error) {
-                    log.warn(`L3 cache write failed: ${l3Error.message}`);
-                    // Don't fail the operation if L3 fails
-                }
-            }
+            await this._writeL3(key, value, strategy, options);
 
             return true;
         } catch (error) {
@@ -594,6 +567,31 @@ class CacheService {
             }
             
             return false;
+        }
+    }
+
+    _shouldReadL3(key, skipL1) {
+        if (!this.l3Enabled || !this.l3Cache) return false;
+        if (!skipL1 && this.bloomFilterEnabled && this.bloomFilter && !this.bloomFilter.has(key)) {
+            return false;
+        }
+        return true;
+    }
+
+    _rememberBloomKey(key) {
+        if (this.bloomFilterEnabled && this.bloomFilter) {
+            this.bloomFilter.add(key);
+        }
+    }
+
+    async _writeL3(key, value, strategy, options = {}) {
+        if (!this.l3Enabled || !this.l3Cache || options.skipL3) return;
+
+        try {
+            const l3Ttl = options.l3Ttl || strategy.l3Ttl;
+            await this.l3Cache.set(key, value, l3Ttl);
+        } catch (l3Error) {
+            log.warn(`L3 cache write failed: ${l3Error.message}`);
         }
     }
 
@@ -1050,7 +1048,7 @@ class CacheService {
             // This could be replaced with a proper persistent store
             const { FileCache } = await import('./cache/FileCache.js');
             this.l3Cache = new FileCache({
-                basePath: './data/cache/l3',
+                basePath: this.env.CACHE_L3_DIR || './data/cache/l3',
                 ttl: 3600 * 24 // 24 hours default
             });
             await this.l3Cache.connect();
@@ -1068,11 +1066,15 @@ class CacheService {
         if (!this.bloomFilterEnabled) return;
 
         try {
-            // Simple bloom filter implementation
-            // In production, use a proper library like 'bloom-filters'
             const { BloomFilter } = await import('bloom-filters');
-            // Use optimal parameters: 1000 expected items with 1% false positive rate
-            this.bloomFilter = new BloomFilter(1000, 0.01);
+            const bloomFilter = BloomFilter.create(1000, 0.01);
+
+            if (this.l3Enabled && this.l3Cache && typeof this.l3Cache.listKeys === 'function') {
+                const keys = await this.l3Cache.listKeys('');
+                keys.forEach(key => bloomFilter.add(key));
+            }
+
+            this.bloomFilter = bloomFilter;
             log.info('Bloom filter initialized');
         } catch (error) {
             log.warn(`Bloom filter initialization failed: ${error.message}`);

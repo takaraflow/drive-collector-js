@@ -382,15 +382,10 @@ describe("CacheService Failover and Recovery Tests", () => {
 
     describe("Recovery Check Lifecycle", () => {
         test("should not start recovery timer in MemoryCache mode", async () => {
-            // Skip this test due to global config pollution from process.env
-            // The test environment has Cloudflare env vars that affect getConfig()
-            // This is a known limitation and doesn't affect production behavior
-            // TODO: Mock getConfig() to return empty config for this test
             service = new CacheService({ env: {} });
             await service.initialize();
 
-            // In a clean environment, this would be MemoryCache
-            // But due to env vars, it connects to Cloudflare
+            expect(service.currentProviderName).toBe('MemoryCache');
             expect(service.recoveryTimer).toBeNull();
         });
 

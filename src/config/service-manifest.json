@@ -8,6 +8,7 @@
         "CACHE_PROVIDERS",
         "PRIMARY_CACHE_PROVIDER", 
         "CACHE_L3_ENABLED",
+        "CACHE_L3_DIR",
         "CACHE_BLOOM_FILTER",
         "REDIS_URL",
         "NF_REDIS_URL",
