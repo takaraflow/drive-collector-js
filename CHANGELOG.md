@@ -2,6 +2,103 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [4.33.0](https://github.com/takaraflow/drive-collector-js/compare/v4.32.4...v4.33.0) (2026-05-17)
+
+
+### ✨ 新特性
+
+* add per-task retry buttons in /task_queue detail view ([9a1a7a5](https://github.com/takaraflow/drive-collector-js/commit/9a1a7a5241022b3f7830f2864d35fa26300ba2c4))
+* add retry button support to updateStatus ([0055005](https://github.com/takaraflow/drive-collector-js/commit/0055005b4df816df8f5f16bcde0e74c30d8bba94))
+* add retry_ callback routing in Dispatcher ([fa2a48f](https://github.com/takaraflow/drive-collector-js/commit/fa2a48f8020d71d3e1af70ea112d62e674c43278))
+* show retry button when tasks fail ([dc39341](https://github.com/takaraflow/drive-collector-js/commit/dc39341227374abe8b0f0f80c5df67e4f84df54a))
+* **telemetry:** add OpenTelemetry tracing with New Relic OTLP ([16ad0a7](https://github.com/takaraflow/drive-collector-js/commit/16ad0a74635c9aca6afbe545114aed2054579c3f))
+
+
+### 📝 文档更新
+
+* add /task_queue to admin help section ([b21169a](https://github.com/takaraflow/drive-collector-js/commit/b21169a07b32ddbcb19cc8ab2cbc0dd4c3ffa90f))
+
+
+### ♻️ 代码重构
+
+* close remaining SSOT boundaries ([c25ccdf](https://github.com/takaraflow/drive-collector-js/commit/c25ccdfc3b692557611c15bb00f69f4bbe352a86))
+* **config:** remove legacy config export ([faa8788](https://github.com/takaraflow/drive-collector-js/commit/faa8788aad17b2cc67130543b5d7d3bb9043c808))
+* simplify retryTask to be instance-agnostic via QStash ([8f01496](https://github.com/takaraflow/drive-collector-js/commit/8f01496725e1ee4e0c75c402d2b0581d42f69167))
+* **ssot:** finish config access unification ([9595e6e](https://github.com/takaraflow/drive-collector-js/commit/9595e6ec5be063995b6bf7ac7316b14e9e9eceef))
+* **ssot:** unify config and instance url sources ([9c88b74](https://github.com/takaraflow/drive-collector-js/commit/9c88b74240f8e3550d4234e4dc095a487daf74b2))
+* sync retryTask simplification to TaskManager.core.js ([54ed5d8](https://github.com/takaraflow/drive-collector-js/commit/54ed5d84ba9946c0a5d70d2d9500240169592b37))
+
+
+### 🚀 性能优化
+
+* **failover:** use worker pool for batch execution ([ba43c02](https://github.com/takaraflow/drive-collector-js/commit/ba43c025bee9e6aa0c419e73ccd19893ef08d21c))
+* optimize CacheService batch operations via async worker pool ([69d3c31](https://github.com/takaraflow/drive-collector-js/commit/69d3c319f7c13911cdadf87629acbf687d611d04))
+
+
+### 🔧 其他任务
+
+* **code-health:** remove unused CacheService import ([f54f7d2](https://github.com/takaraflow/drive-collector-js/commit/f54f7d2de1719a69f662cd2dcd65f41397bf56e0))
+* **code-health:** remove unused ConsistentCache import ([cf6ed41](https://github.com/takaraflow/drive-collector-js/commit/cf6ed4186190e74a817cdd9f1464f2a8825f0340))
+* **code-health:** remove unused DriveConfigFlow import ([c15aa63](https://github.com/takaraflow/drive-collector-js/commit/c15aa6305565344fc7a9e995ec07438e558e1096))
+* **code-health:** remove unused limiter import ([6e17ef1](https://github.com/takaraflow/drive-collector-js/commit/6e17ef103b7b747a1f9aecbfaded3ef1d5ce2a47))
+* **code-health:** remove unused spawnSync import ([613f822](https://github.com/takaraflow/drive-collector-js/commit/613f822f2d9274ec0ddfdb63bf3b608a9fdebae6))
+* **code-health:** remove unused stream transfer imports ([568ec43](https://github.com/takaraflow/drive-collector-js/commit/568ec43378659c0e5fd8f4c8b6cd0c887fe64cc9))
+* **deps:** patch vulnerable transitive packages ([468be36](https://github.com/takaraflow/drive-collector-js/commit/468be367d218b0db8ab30eedbb00ac39e8b731b3))
+
+
+### ✅ 测试相关
+
+* add retry callback routing tests ([b246e03](https://github.com/takaraflow/drive-collector-js/commit/b246e03165bd1dbd960bbb7681ba9fb19926a232))
+* **integration:** add stream transfer end-to-end integration tests ([c1ed5a2](https://github.com/takaraflow/drive-collector-js/commit/c1ed5a290769a8a320478b82ee6b9bf7913af84a))
+* **locale:** cover format edge cases ([0663eba](https://github.com/takaraflow/drive-collector-js/commit/0663eba63f798ce4e370321933650a73abc721df))
+* rewrite retry tests for simplified instance-agnostic retryTask ([7c35b32](https://github.com/takaraflow/drive-collector-js/commit/7c35b32718fc309498914ecd5fd6650a9aa717a9))
+
+
+### 🐛 问题修复
+
+* add ownership check, safe taskId extraction, edge case tests ([f9b23b0](https://github.com/takaraflow/drive-collector-js/commit/f9b23b0a8749bbb245c1a6527ab9e6c59bc8a043))
+* bind telegram task confirmations to session context ([4fa0818](https://github.com/takaraflow/drive-collector-js/commit/4fa081816687579b4437c87d928805460fa52c83))
+* close dispatcher telegram lifecycle gaps ([20499d2](https://github.com/takaraflow/drive-collector-js/commit/20499d222de14fc076e64c9312a0cc381e52a1dd))
+* close drive callback ownership gaps ([156641d](https://github.com/takaraflow/drive-collector-js/commit/156641d465baaf7977110f2c99a94370297f18ff))
+* close ssot lifecycle gaps ([db5ac31](https://github.com/takaraflow/drive-collector-js/commit/db5ac3174bc3449f7aa9184300662e403f9ce341))
+* **core:** harden instance coordination and queue flushing ([0a98100](https://github.com/takaraflow/drive-collector-js/commit/0a981001380d15a00f767907858165bf22e6be74))
+* correct timezone calculation in getBeijingISOString and add timeUtils tests ([1a18c66](https://github.com/takaraflow/drive-collector-js/commit/1a18c66209c46d1287f96e6daac14497cb75e574))
+* **db:** close D1 schema SSOT migrations ([e246926](https://github.com/takaraflow/drive-collector-js/commit/e246926d4a1c8f6f1e20cb8856a5221fe0774ab3))
+* downgrade cloudflared fallback noise ([ff0a58b](https://github.com/takaraflow/drive-collector-js/commit/ff0a58b115b0a71b580d6cb55923c58f85be48cf))
+* edit telegram callback panels in place ([76862d7](https://github.com/takaraflow/drive-collector-js/commit/76862d789eb4a2ef33d68265fdf37d8cf33e9f49))
+* enforce atomic telegram leadership lock ([335cd85](https://github.com/takaraflow/drive-collector-js/commit/335cd856c4e1a272529124903711926717b6494a))
+* guard manifest sync configuration ([2740c9d](https://github.com/takaraflow/drive-collector-js/commit/2740c9d391ed960ac4be4df26c7ba461a2b02ad7))
+* handle state sync and quiet standby locks ([66830f8](https://github.com/takaraflow/drive-collector-js/commit/66830f88d825c85898a14af52661b36ef47d11aa))
+* harden manifest sync workflow ([37858fa](https://github.com/takaraflow/drive-collector-js/commit/37858faf7b80cd1ccdb7e7b23a2460a3c6fb8391))
+* harden telegram lock lifecycle ([7111417](https://github.com/takaraflow/drive-collector-js/commit/7111417a8c9cc2547d50a05c31322038d34bf33f))
+* harden telegram ux action flows ([d53470e](https://github.com/takaraflow/drive-collector-js/commit/d53470e09dd5662b39d234ce59f099d3d6a54337))
+* isolate logger context and quiet standby telegram ([e4ddd77](https://github.com/takaraflow/drive-collector-js/commit/e4ddd771aebb0e67785cad21863208e069044bdd))
+* keep transient infra errors retryable ([cf967a3](https://github.com/takaraflow/drive-collector-js/commit/cf967a3174c1503b06905503e354808c555899e3))
+* **logging:** centralize log level gating ([1994aa6](https://github.com/takaraflow/drive-collector-js/commit/1994aa669d19657a880a4b21faa7fbde3ba05d74))
+* **logging:** sanitize New Relic fallback errors ([57e9894](https://github.com/takaraflow/drive-collector-js/commit/57e9894ab01a31454cfce7a4c07192c2a45355ce))
+* **observability:** converge runtime entrypoint for otel ([eb54766](https://github.com/takaraflow/drive-collector-js/commit/eb5476618da3580a8acae2fff8b2585142f5b98c))
+* **observability:** enable New Relic OTel bootstrap ([e0ba37c](https://github.com/takaraflow/drive-collector-js/commit/e0ba37c392f5639e4618194e60b0c812757b63ba))
+* **oom:** prevent OOM crash in 256MB container ([8a211e8](https://github.com/takaraflow/drive-collector-js/commit/8a211e8c8fbf1ff36c053f3928cfec71ed4fe27d))
+* reduce task detail page size to 8 to match retry button limit ([e2f02ed](https://github.com/takaraflow/drive-collector-js/commit/e2f02ed3e0bec15bb37f84cb03c7ab079f85b7a2))
+* route cache sync and quiet lock renewal ([63bcf65](https://github.com/takaraflow/drive-collector-js/commit/63bcf656c855ea7644eac87023ea5e650403433f))
+* scope drive unbind confirmation ([81a890d](https://github.com/takaraflow/drive-collector-js/commit/81a890d9271c14826e0592eaeaf743920558a196))
+* **security:** avoid D1 token exposure in logs ([ff4490d](https://github.com/takaraflow/drive-collector-js/commit/ff4490dfe25c78520fb3d7794debea60ac9a55be))
+* **security:** use crypto random drive id suffix ([8c46dda](https://github.com/takaraflow/drive-collector-js/commit/8c46ddac38946bad43473e72fa678e70b881dadd))
+* **security:** validate s6 service control inputs ([de4a1c8](https://github.com/takaraflow/drive-collector-js/commit/de4a1c8e05d71effc0b53430e7bb8fea19ccdb0d))
+* shorten telegram leadership handoff ([d48bb63](https://github.com/takaraflow/drive-collector-js/commit/d48bb631a853b06fe5cc191f6bdedd6cb457fffb))
+* show personal queue in status command ([fec7a74](https://github.com/takaraflow/drive-collector-js/commit/fec7a74219a0e77276dff8d6960603a199168abb))
+* **stream:** expose stream control routes and fix worker affinity ([0471fd7](https://github.com/takaraflow/drive-collector-js/commit/0471fd7f204e956e695a4d6400bb5468e8692a2d))
+* **tests:** address PR [#86](https://github.com/takaraflow/drive-collector-js/issues/86) review issues - mock leaks and missing coverage ([c76a977](https://github.com/takaraflow/drive-collector-js/commit/c76a9776f9842c90d2011d236e998f543a24066b))
+* tighten telegram ux flows ([a2fad0e](https://github.com/takaraflow/drive-collector-js/commit/a2fad0ec9c5216e20031f62d322b7becadc7acf4))
+* tolerate unavailable contract sync token ([a75f56c](https://github.com/takaraflow/drive-collector-js/commit/a75f56cd58f4eb92d34d1a84b9d5c4696c1a4a0b))
+* tune message slow response threshold ([0aa93ce](https://github.com/takaraflow/drive-collector-js/commit/0aa93ce5d6725535df61d17e540a85349f6e4f51))
+* **tunnel:** fallback to standalone cloudflared outside s6 ([494b2ba](https://github.com/takaraflow/drive-collector-js/commit/494b2ba872d17c659cdd69bd1f07ecaba8e5d4bf))
+* **ui:** add actionable empty state copy ([dd3dee6](https://github.com/takaraflow/drive-collector-js/commit/dd3dee65c7d2f5531aaebaf09354da200e6009d5))
+* update tests for retry button changes ([7a11617](https://github.com/takaraflow/drive-collector-js/commit/7a1161728ac45e5808154ae91841a7757b55404d))
+* use getDeps() pattern, fix enqueue ordering, remove dead type param ([f3bdaaa](https://github.com/takaraflow/drive-collector-js/commit/f3bdaaa4051e80cf2afaa9e503769079558e0bb1))
+* use github app token input names ([e011d7b](https://github.com/takaraflow/drive-collector-js/commit/e011d7bd7f98398d9b7eaca78043c45376f2f065))
+* verify manifest sync workflow changes ([1cf9d90](https://github.com/takaraflow/drive-collector-js/commit/1cf9d90a65baa4dc2708adf9cf19a5c69a9b4131))
+
 ### [4.32.4](https://github.com/takaraflow/drive-collector-js/compare/v4.32.2...v4.32.4) (2026-04-19)
 
 
