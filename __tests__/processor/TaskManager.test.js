@@ -129,6 +129,8 @@ vi.mock('../../src/services/InstanceCoordinator.js', () => ({
         acquireLock: vi.fn().mockResolvedValue(true),
         releaseLock: vi.fn().mockResolvedValue(true),
         hasLock: vi.fn().mockResolvedValue(true),
+        getLockLease: vi.fn().mockResolvedValue({ instanceId: 'test-instance', leaseId: 'lease-test' }),
+        isLockLeaseCurrent: vi.fn().mockResolvedValue(true),
         acquireTaskLock: vi.fn().mockResolvedValue(true),
         releaseTaskLock: vi.fn().mockResolvedValue(true),
     },
@@ -138,6 +140,8 @@ vi.mock('../../src/services/InstanceCoordinator.js', () => ({
         acquireLock: vi.fn().mockResolvedValue(true),
         releaseLock: vi.fn().mockResolvedValue(true),
         hasLock: vi.fn().mockResolvedValue(true),
+        getLockLease: vi.fn().mockResolvedValue({ instanceId: 'test-instance', leaseId: 'lease-test' }),
+        isLockLeaseCurrent: vi.fn().mockResolvedValue(true),
         acquireTaskLock: vi.fn().mockResolvedValue(true),
         releaseTaskLock: vi.fn().mockResolvedValue(true),
     }

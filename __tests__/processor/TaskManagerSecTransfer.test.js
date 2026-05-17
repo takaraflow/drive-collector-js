@@ -55,6 +55,7 @@ vi.mock("../../src/repositories/TaskRepository.js", () => ({
 const mockInstanceCoordinator = {
     acquireTaskLock: vi.fn().mockResolvedValue(true),
     releaseTaskLock: vi.fn().mockResolvedValue(),
+    isLockLeaseCurrent: vi.fn().mockResolvedValue(true),
     getActiveInstances: vi.fn().mockResolvedValue([]),
     instanceId: "current-instance"
 };

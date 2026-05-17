@@ -14,10 +14,14 @@ const mockClient = {
 const mockAcquireTaskLock = vi.fn();
 const mockReleaseTaskLock = vi.fn();
 const mockHasLock = vi.fn();
+const mockGetLockLease = vi.fn();
+const mockIsLockLeaseCurrent = vi.fn();
 const mockInstanceCoordinator = {
     acquireTaskLock: mockAcquireTaskLock,
     releaseTaskLock: mockReleaseTaskLock,
-    hasLock: mockHasLock
+    hasLock: mockHasLock,
+    getLockLease: mockGetLockLease,
+    isLockLeaseCurrent: mockIsLockLeaseCurrent
 };
 
 const mockEnqueueDownloadTask = vi.fn();
@@ -231,6 +235,8 @@ describe("TaskManager QStash Integration - New Error Handling", () => {
         vi.clearAllMocks();
         mockAcquireTaskLock.mockResolvedValue(true);
         mockHasLock.mockResolvedValue(true);
+        mockGetLockLease.mockResolvedValue({ instanceId: 'test-instance', leaseId: 'lease-test' });
+        mockIsLockLeaseCurrent.mockResolvedValue(true);
         mockGetMessages.mockResolvedValue([{ media: { type: 'document' } }]);
         mockExistsSync.mockReturnValue(true);
         mockStatSync.mockReturnValue({ size: 1024 });

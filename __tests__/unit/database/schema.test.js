@@ -208,18 +208,19 @@ describe("database schema migrations", () => {
 
         expect(result.status.isCurrent).toBe(true);
         expect(result.status.currentVersion).toBe(LATEST_SCHEMA_VERSION);
-        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied", "recorded", "recorded"]);
+        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied", "recorded", "recorded", "recorded"]);
 
         const driveColumns = db.prepare("PRAGMA table_info(drives)").all().map(column => column.name);
         expect(driveColumns).toContain("is_default");
 
         const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(row => row.name);
+        expect(indexes).toContain("idx_tasks_claim_lease");
         expect(indexes).toContain("idx_drives_one_default_per_user");
         expect(indexes).toContain("idx_drives_one_active_type_per_user");
         expect(indexes).toContain("idx_user_roles_role");
 
         const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
-        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5]);
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6]);
     });
 
     test("should create current schema with user_roles and active-only drive type uniqueness", async () => {
@@ -368,6 +369,7 @@ describe("database schema migrations", () => {
 
         const taskColumns = db.prepare("PRAGMA table_info(tasks)").all().map(column => column.name);
         expect(taskColumns).toContain("claimed_by");
+        expect(taskColumns).toContain("claim_lease_id");
         expect(taskColumns).not.toContain("drive_id");
 
         const migratedTask = db.prepare("SELECT * FROM tasks WHERE id = ?").get("task-prod-1");
@@ -380,6 +382,7 @@ describe("database schema migrations", () => {
             file_size: 42,
             status: "queued",
             claimed_by: null,
+            claim_lease_id: null,
             created_at: 1000,
             updated_at: 1000
         });
@@ -408,9 +411,10 @@ describe("database schema migrations", () => {
 
         const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(row => row.name);
         expect(indexes).toContain("idx_tasks_status_updated");
+        expect(indexes).toContain("idx_tasks_claim_lease");
         expect(indexes).toContain("idx_drives_one_default_per_user");
 
         const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
-        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5]);
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6]);
     });
 });

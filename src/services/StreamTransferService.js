@@ -70,8 +70,21 @@ class StreamTransferService {
         }
     }
 
-    async _markStreamUploadStarted(taskId, source) {
+    _getClaimFenceOptions(context = {}) {
+        if (!context.claimedBy || !context.claimLeaseId) {
+            return {};
+        }
+
+        return {
+            requireClaim: true,
+            claimedBy: context.claimedBy,
+            claimLeaseId: context.claimLeaseId
+        };
+    }
+
+    async _markStreamUploadStarted(taskId, source, claimContext = {}) {
         const transition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.START_STREAM_UPLOAD, null, {
+            ...this._getClaimFenceOptions(claimContext),
             returnResult: true,
             allowNoop: true,
             source
@@ -216,6 +229,8 @@ class StreamTransferService {
             chatId: metadata.chatId,
             msgId: metadata.msgId,
             sourceMsgId: metadata.sourceMsgId,
+            claimedBy: metadata.claimedBy,
+            claimLeaseId: metadata.claimLeaseId,
             uploadedBytes: progress.uploadedBytes,
             status: TASK_STATUSES.UPLOADING,
             lastChunkIndex: progress.lastChunkIndex,
@@ -429,7 +444,9 @@ class StreamTransferService {
                     'x-source-msg-id': sourceMsgId || '',
                     'x-resume-enabled': metadata.resumeEnabled ? 'true' : 'false',
                     'x-stream-mode': metadata.streamMode || 'live',
-                    'x-chunk-size': String(metadata.chunkSize || DEFAULT_STREAM_CHUNK_SIZE)
+                    'x-chunk-size': String(metadata.chunkSize || DEFAULT_STREAM_CHUNK_SIZE),
+                    'x-task-claimed-by': metadata.claimedBy || '',
+                    'x-task-claim-lease-id': metadata.claimLeaseId || ''
                 },
                 body: chunk,
                 signal: AbortSignal.timeout(30000)
@@ -602,7 +619,9 @@ class StreamTransferService {
             sourceMsgId: headers['x-source-msg-id'],
             isResumeEnabled: headers['x-resume-enabled'] === 'true',
             streamMode: headers['x-stream-mode'] || 'live',
-            chunkSize: parseInt(headers['x-chunk-size']) || DEFAULT_STREAM_CHUNK_SIZE
+            chunkSize: parseInt(headers['x-chunk-size']) || DEFAULT_STREAM_CHUNK_SIZE,
+            claimedBy: headers['x-task-claimed-by'] || null,
+            claimLeaseId: headers['x-task-claim-lease-id'] || null
         };
     }
 
@@ -625,7 +644,7 @@ class StreamTransferService {
         const cachedProgress = await this.loadProgressFromCache(taskId);
 
         log.info(`📦 接收到新流式任务: ${taskId} (${metadata.fileName})${cachedProgress ? ` (ignored stale live-stream progress ${cachedProgress.lastChunkIndex})` : ''}`);
-        await this._markStreamUploadStarted(taskId, 'stream_context_initialized');
+        await this._markStreamUploadStarted(taskId, 'stream_context_initialized', metadata);
         const { stdin, proc, fileName: remoteFileName } = await CloudTool.createRcatStream(metadata.fileName, metadata.userId);
 
         const streamContext = {
@@ -646,6 +665,8 @@ class StreamTransferService {
             stderrLog: '',
             errorReported: false
         };
+        streamContext.claimedBy = metadata.claimedBy;
+        streamContext.claimLeaseId = metadata.claimLeaseId;
         this.activeStreams.set(taskId, streamContext);
 
         // 监听 rclone 错误
@@ -764,7 +785,7 @@ class StreamTransferService {
 
     async _initializeResumableContext(taskId, metadata) {
         const progress = await this._getResumableProgress(taskId, metadata);
-        await this._markStreamUploadStarted(taskId, 'stream_resumable_context_initialized');
+        await this._markStreamUploadStarted(taskId, 'stream_resumable_context_initialized', metadata);
         const writeStream = this._isResumableDataComplete(progress)
             ? null
             : fs.createWriteStream(progress.localPath, { flags: 'a' });
@@ -942,7 +963,9 @@ class StreamTransferService {
                 body: JSON.stringify({
                     uploadedBytes: context.uploadedBytes,
                     totalSize: context.totalSize,
-                    status: context.status
+                    status: context.status,
+                    claimedBy: context.claimedBy,
+                    claimLeaseId: context.claimLeaseId
                 })
             });
         } catch (error) {
@@ -958,11 +981,12 @@ class StreamTransferService {
             return { success: false, statusCode: 401, message: "Unauthorized" };
         }
 
-        const { status, error } = reqBody;
+        const { status, error, claimedBy, claimLeaseId } = reqBody;
         
         if (status === TASK_STATUSES.COMPLETED || status === TASK_STATUSES.FAILED) {
             const event = status === TASK_STATUSES.COMPLETED ? TASK_EVENTS.COMPLETE : TASK_EVENTS.FAIL;
             await TaskRepository.transitionStatus(taskId, event, error, {
+                ...this._getClaimFenceOptions({ claimedBy, claimLeaseId }),
                 allowNoop: true,
                 source: 'stream_status_update'
             });
@@ -1020,7 +1044,7 @@ class StreamTransferService {
                         }
 
                         if (this._isResumableDataComplete(progress)) {
-                            await this._markStreamUploadStarted(taskId, 'stream_resumable_resume_complete_staging');
+                            await this._markStreamUploadStarted(taskId, 'stream_resumable_resume_complete_staging', metadata);
                             context = this._buildResumableContext(taskId, metadata, progress, null);
                             this.activeStreams.set(taskId, context);
                             await this.saveProgressToCache(taskId, context);
@@ -1169,6 +1193,7 @@ class StreamTransferService {
         }
 
         const transition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.COMPLETE, null, {
+            ...this._getClaimFenceOptions(context),
             returnResult: true,
             allowNoop: true,
             source: 'stream_finish_task'
@@ -1241,6 +1266,7 @@ class StreamTransferService {
     async reportError(taskId, context, errorMsg) {
         log.error(`❌ 任务上传失败: ${taskId} - ${errorMsg}`);
         const transition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, errorMsg, {
+            ...this._getClaimFenceOptions(context),
             returnResult: true,
             allowNoop: true,
             source: 'stream_report_error'

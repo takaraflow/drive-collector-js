@@ -49,7 +49,7 @@ export class TaskRepository {
     }
 
     static async _getCurrentTaskState(taskId) {
-        return await d1.fetchOne("SELECT id, status, updated_at FROM tasks WHERE id = ?", [taskId]);
+        return await d1.fetchOne("SELECT id, status, updated_at, claimed_by, claim_lease_id FROM tasks WHERE id = ?", [taskId]);
     }
 
     static async _getCurrentStatus(taskId) {
@@ -344,14 +344,15 @@ export class TaskRepository {
      * @param {string} instanceId - 实例ID
      * @returns {boolean} 是否认领成功
      */
-    static async claimTask(taskId, instanceId) {
-        if (!taskId || !instanceId) {
-            throw new Error("TaskRepository.claimTask: Missing required fields (taskId or instanceId).");
+    static async claimTask(taskId, instanceId, claimLeaseId = null) {
+        if (!taskId || !instanceId || !claimLeaseId) {
+            throw new Error("TaskRepository.claimTask: Missing required fields (taskId, instanceId, or claimLeaseId).");
         }
 
         try {
             const result = await this.transitionStatus(taskId, TASK_EVENTS.START_DOWNLOAD, null, {
                 claimedBy: instanceId,
+                claimLeaseId,
                 returnResult: true,
                 allowNoop: true,
                 source: 'claimTask'
@@ -437,11 +438,33 @@ export class TaskRepository {
         if (Object.prototype.hasOwnProperty.call(options, 'claimedBy') && options.claimedBy !== undefined) {
             assignments.push("claimed_by = ?");
             params.push(options.claimedBy);
+            assignments.push("claim_lease_id = ?");
+            params.push(options.claimLeaseId ?? null);
         } else if (targetStatus === TASK_STATUSES.QUEUED || TASK_TERMINAL_STATUSES.includes(targetStatus)) {
             assignments.push("claimed_by = NULL");
+            assignments.push("claim_lease_id = NULL");
         }
 
         return { assignments, params };
+    }
+
+    static _requiresClaimFence(options = {}) {
+        return options.requireClaim === true;
+    }
+
+    static _buildClaimFenceWhere(options = {}) {
+        if (!this._requiresClaimFence(options)) {
+            return { clauses: [], params: [] };
+        }
+
+        if (!options.claimedBy || !options.claimLeaseId) {
+            throw new Error("TaskRepository.transitionStatus: claimedBy and claimLeaseId are required when requireClaim is true.");
+        }
+
+        return {
+            clauses: ["claimed_by = ?", "claim_lease_id = ?"],
+            params: [options.claimedBy, options.claimLeaseId]
+        };
     }
 
     static _transitionResult(result, options = {}) {
@@ -494,12 +517,15 @@ export class TaskRepository {
         const { assignments, params } = this._buildTransitionSql(targetStatus, {
             now,
             errorMsg,
-            claimedBy: options.claimedBy
+            claimedBy: options.requireClaim === true ? undefined : options.claimedBy,
+            claimLeaseId: options.requireClaim === true ? undefined : options.claimLeaseId
         });
+        const fence = this._buildClaimFenceWhere(options);
+        const whereClauses = ["id = ?", "status = ?", ...fence.clauses];
 
         const result = await d1.run(
-            `UPDATE tasks SET ${assignments.join(', ')} WHERE id = ? AND status = ?`,
-            [...params, taskId, currentStatus]
+            `UPDATE tasks SET ${assignments.join(', ')} WHERE ${whereClauses.join(' AND ')}`,
+            [...params, taskId, currentStatus, ...fence.params]
         );
 
         const changed = this._getChanges(result) > 0;
@@ -520,7 +546,13 @@ export class TaskRepository {
                 queueAttempt: racedToTarget
                     ? `${targetStatus}:${latestState?.updated_at || now}`
                     : `${currentStatus}:${currentTaskState.updated_at || now}`,
-                reason: racedToTarget ? null : `Task status changed concurrently from ${currentStatus} to ${latestStatus}`
+                reason: racedToTarget ? null : (
+                    fence.clauses.length > 0 &&
+                    latestStatus === currentStatus &&
+                    (latestState?.claimed_by !== options.claimedBy || latestState?.claim_lease_id !== options.claimLeaseId)
+                        ? "Task claim lease no longer matches current worker"
+                        : `Task status changed concurrently from ${currentStatus} to ${latestStatus}`
+                )
             }, options);
         }
 

@@ -1,6 +1,6 @@
 import crypto from "crypto";
 
-export const LATEST_SCHEMA_VERSION = 5;
+export const LATEST_SCHEMA_VERSION = 6;
 
 const MIGRATION_LOCK_ID = "database-schema";
 const CANONICAL_TASK_STATUS_CHECK = "CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled'))";
@@ -15,6 +15,7 @@ const TASK_INDEX_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_tasks_msg_id ON tasks(msg_id)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_claimed_by ON tasks(claimed_by)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_claim_lease ON tasks(claimed_by, claim_lease_id)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_status_updated ON tasks(status, updated_at)"
 ];
@@ -50,6 +51,7 @@ const INITIAL_SCHEMA_STATEMENTS = [
         status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled')),
         error_msg TEXT,
         claimed_by TEXT,
+        claim_lease_id TEXT,
         created_at INTEGER,
         updated_at INTEGER
     )`,
@@ -58,6 +60,7 @@ const INITIAL_SCHEMA_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_tasks_msg_id ON tasks(msg_id)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_claimed_by ON tasks(claimed_by)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_claim_lease ON tasks(claimed_by, claim_lease_id)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_status_updated ON tasks(status, updated_at)",
 
@@ -124,6 +127,7 @@ const INITIAL_SCHEMA_MIGRATION_SQL = [
         status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled')),
         error_msg TEXT,
         claimed_by TEXT,
+        claim_lease_id TEXT,
         created_at INTEGER,
         updated_at INTEGER
     )`,
@@ -132,6 +136,7 @@ const INITIAL_SCHEMA_MIGRATION_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_tasks_msg_id ON tasks(msg_id)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_claimed_by ON tasks(claimed_by)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_claim_lease ON tasks(claimed_by, claim_lease_id)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_status_updated ON tasks(status, updated_at)",
 
@@ -197,7 +202,7 @@ const SCHEMA_MIGRATION_LOCK_SQL = `CREATE TABLE IF NOT EXISTS schema_migration_l
 
 const REQUIRED_TABLE_COLUMNS = {
     schema_migrations: ["version", "name", "checksum", "applied_at"],
-    tasks: ["id", "user_id", "chat_id", "msg_id", "source_msg_id", "file_name", "file_size", "status", "error_msg", "claimed_by", "created_at", "updated_at"],
+    tasks: ["id", "user_id", "chat_id", "msg_id", "source_msg_id", "file_name", "file_size", "status", "error_msg", "claimed_by", "claim_lease_id", "created_at", "updated_at"],
     drives: ["id", "user_id", "name", "type", "config_data", "remote_folder", "status", "is_default", "created_at", "updated_at"],
     settings: ["key", "value", "created_at", "updated_at"],
     sessions: ["id", "user_id", "data", "created_at", "expires_at"],
@@ -207,6 +212,7 @@ const REQUIRED_TABLE_COLUMNS = {
 
 const REQUIRED_INDEXES = [
     "idx_tasks_status_updated",
+    "idx_tasks_claim_lease",
     "idx_drives_user_default",
     "idx_drives_one_default_per_user",
     "idx_drives_one_active_type_per_user",
@@ -386,6 +392,7 @@ async function ensureTaskBaseSchema(d1) {
             status: "TEXT DEFAULT 'queued'",
             error_msg: "TEXT",
             claimed_by: "TEXT",
+            claim_lease_id: "TEXT",
             created_at: "INTEGER",
             updated_at: "INTEGER"
         });
@@ -585,12 +592,13 @@ async function applyTaskStatusSsot({ d1 }) {
             status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled')),
             error_msg TEXT,
             claimed_by TEXT,
+            claim_lease_id TEXT,
             created_at INTEGER,
             updated_at INTEGER
         )`,
         insertTemporaryTableSql: `INSERT INTO tasks_ssot_new (
             id, user_id, chat_id, msg_id, source_msg_id, file_name, file_size,
-            status, error_msg, claimed_by, created_at, updated_at
+            status, error_msg, claimed_by, claim_lease_id, created_at, updated_at
         )
         SELECT
             CAST(${columnExpression(columns, "id", "lower(hex(randomblob(16)))")} AS TEXT),
@@ -603,11 +611,16 @@ async function applyTaskStatusSsot({ d1 }) {
             ${statusExpr},
             ${columnExpression(columns, "error_msg", "NULL")},
             ${columnExpression(columns, "claimed_by", "NULL")},
+            ${columnExpression(columns, "claim_lease_id", "NULL")},
             ${coalescedColumnExpression(columns, "created_at", String(now))},
             ${coalescedColumnExpression(columns, "updated_at", String(now))}
         FROM tasks`,
         indexStatements: TASK_INDEX_STATEMENTS
     });
+}
+
+async function applyTaskClaimLeaseFencing({ d1 }) {
+    await ensureTaskBaseSchema(d1);
 }
 
 async function driveHasNoLegacyTypeTableUnique(d1) {
@@ -780,6 +793,16 @@ function getMigrations() {
                     !(await indexExists(d1, "idx_drives_one_active_type_per_user"));
             },
             apply: applyDriveSsot
+        },
+        {
+            version: 6,
+            name: "task_claim_lease_fencing",
+            sql: "add tasks.claim_lease_id and claim owner/lease index for fenced task transitions",
+            shouldRun: async ({ d1 }) => {
+                return !(await columnExists(d1, "tasks", "claim_lease_id")) ||
+                    !(await indexExists(d1, "idx_tasks_claim_lease"));
+            },
+            apply: applyTaskClaimLeaseFencing
         }
     ];
 }

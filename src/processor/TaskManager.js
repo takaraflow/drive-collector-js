@@ -17,6 +17,7 @@ import { uploadTask } from "./TaskManager/TaskManager.upload.js";
 // 获取依赖项的辅助函数
 const getDeps = () => dependencyContainer.getAll();
 const getLog = () => getDeps().logger.withModule('TaskManager');
+const TELEGRAM_CLIENT_LOCK_KEY = "telegram_client";
 
 /**
  * --- 任务管理调度中心 (TaskManager) ---
@@ -580,6 +581,37 @@ export class TaskManager {
         };
     }
 
+    static async _getTelegramClientLease(instanceCoordinator) {
+        if (typeof instanceCoordinator.getLockLease === 'function') {
+            const lease = await instanceCoordinator.getLockLease(TELEGRAM_CLIENT_LOCK_KEY);
+            if (lease) return lease;
+        } else if (await instanceCoordinator.hasLock(TELEGRAM_CLIENT_LOCK_KEY, { logContention: false })) {
+            const instanceId = instanceCoordinator.getInstanceId?.() || instanceCoordinator.instanceId || 'unknown';
+            return { instanceId, leaseId: instanceId };
+        }
+
+        return null;
+    }
+
+    static _attachClaimLease(task, lease) {
+        if (!task || !lease) return task;
+        task.claimedBy = lease.instanceId;
+        task.claimLeaseId = lease.leaseId;
+        return task;
+    }
+
+    static _getClaimFenceOptionsFromLease(lease) {
+        if (!lease?.instanceId || !lease?.leaseId) {
+            return {};
+        }
+
+        return {
+            requireClaim: true,
+            claimedBy: lease.instanceId,
+            claimLeaseId: lease.leaseId
+        };
+    }
+
     /**
      * [私 evasion] 发布任务到 QStash 下载队列
      */
@@ -751,8 +783,10 @@ export class TaskManager {
     static async handleDownloadWebhook(taskId) {
         const { instanceCoordinator, TaskRepository, client, runMtprotoTaskWithRetry, PRIORITY } = getDeps();
         const log = getLog();
+        let didClaim = false;
         // Leader 状态校验：只有持有 telegram_client 锁的实例才能处理任务
-        if (!(await instanceCoordinator.hasLock("telegram_client", { logContention: false }))) {
+        const leaderLease = await this._getTelegramClientLease(instanceCoordinator);
+        if (!leaderLease) {
             return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
         }
 
@@ -774,7 +808,8 @@ export class TaskManager {
             }
 
             const claim = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.START_DOWNLOAD, null, {
-                claimedBy: instanceCoordinator.getInstanceId?.() || 'unknown',
+                claimedBy: leaderLease.instanceId,
+                claimLeaseId: leaderLease.leaseId,
                 returnResult: true,
                 allowNoop: true,
                 source: 'handleDownloadWebhook'
@@ -783,6 +818,7 @@ export class TaskManager {
                 log.info("Download webhook ignored by state machine", { taskId, reason: claim.reason, status: claim.fromStatus || claim.latestStatus });
                 return { success: true, statusCode: 200, message: "Ignored by task state machine" };
             }
+            didClaim = true;
 
             // 获取原始消息
             const messages = await runMtprotoTaskWithRetry(
@@ -792,6 +828,7 @@ export class TaskManager {
             const message = messages[0];
             if (!message || !message.media) {
                 await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, 'Source msg missing', {
+                    ...this._getClaimFenceOptionsFromLease(leaderLease),
                     allowNoop: true,
                     source: 'handleDownloadWebhook.source_missing'
                 });
@@ -801,6 +838,7 @@ export class TaskManager {
             // 创建任务对象
             const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
             task.fileName = dbTask.file_name;
+            this._attachClaimLease(task, leaderLease);
 
             // 检查是否属于组任务（通过 msgId 查询同组任务数量）
             try {
@@ -828,6 +866,7 @@ export class TaskManager {
                 return { success: false, statusCode: code, message: error.message };
             }
             await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
+                ...(didClaim ? this._getClaimFenceOptionsFromLease(leaderLease) : {}),
                 allowNoop: true,
                 source: 'handleDownloadWebhook.error'
             });
@@ -842,8 +881,10 @@ export class TaskManager {
      static async handleUploadWebhook(taskId) {
         const { instanceCoordinator, TaskRepository, client, runMtprotoTaskWithRetry, PRIORITY, config } = getDeps();
         const log = getLog();
+        let didClaim = false;
         // Leader 状态校验：只有持有 telegram_client 锁 del 实例才能处理任务
-        if (!(await instanceCoordinator.hasLock("telegram_client", { logContention: false }))) {
+        const leaderLease = await this._getTelegramClientLease(instanceCoordinator);
+        if (!leaderLease) {
             return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
         }
 
@@ -866,7 +907,8 @@ export class TaskManager {
             }
 
             const uploadStart = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.START_UPLOAD, null, {
-                claimedBy: instanceCoordinator.getInstanceId?.() || 'unknown',
+                claimedBy: leaderLease.instanceId,
+                claimLeaseId: leaderLease.leaseId,
                 returnResult: true,
                 allowNoop: true,
                 source: 'handleUploadWebhook'
@@ -875,11 +917,13 @@ export class TaskManager {
                 log.info("Upload webhook ignored by state machine", { taskId, reason: uploadStart.reason, status: uploadStart.fromStatus || uploadStart.latestStatus });
                 return { success: true, statusCode: 200, message: "Ignored by task state machine" };
             }
+            didClaim = true;
 
             // 验证本地文件存在
             const localPath = path.join(config.downloadDir, path.basename(dbTask.file_name));
             if (!fs.existsSync(localPath)) {
                 await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, 'Local file not found', {
+                    ...this._getClaimFenceOptionsFromLease(leaderLease),
                     allowNoop: true,
                     source: 'handleUploadWebhook.local_missing'
                 });
@@ -894,6 +938,7 @@ export class TaskManager {
             const message = messages[0];
             if (!message || !message.media) {
                 await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, 'Source msg missing', {
+                    ...this._getClaimFenceOptionsFromLease(leaderLease),
                     allowNoop: true,
                     source: 'handleUploadWebhook.source_missing'
                 });
@@ -904,6 +949,7 @@ export class TaskManager {
             const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
             task.localPath = localPath;
             task.fileName = dbTask.file_name;
+            this._attachClaimLease(task, leaderLease);
 
             // 检查是否属于组任务（通过 msgId 查询同组任务数量）
             try {
@@ -931,6 +977,7 @@ export class TaskManager {
                 return { success: false, statusCode: code, message: error.message };
             }
             await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
+                ...(didClaim ? this._getClaimFenceOptionsFromLease(leaderLease) : {}),
                 allowNoop: true,
                 source: 'handleUploadWebhook.error'
             });

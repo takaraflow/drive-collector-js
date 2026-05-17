@@ -40,6 +40,7 @@ function createTables(db) {
       status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled')),
       error_msg TEXT,
       claimed_by TEXT,
+      claim_lease_id TEXT,
       created_at INTEGER,
       updated_at INTEGER
     )

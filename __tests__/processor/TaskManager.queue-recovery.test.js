@@ -20,6 +20,8 @@ const mockQueueService = {
 const mockInstanceCoordinator = {
     hasLock: vi.fn(),
     getInstanceId: vi.fn(() => 'instance-1'),
+    getLockLease: vi.fn(),
+    isLockLeaseCurrent: vi.fn(),
     releaseTaskLock: vi.fn()
 };
 
@@ -195,6 +197,8 @@ describe('TaskManager queue/recovery closure', () => {
         mockClient.editMessage.mockResolvedValue({ id: 99 });
         mockClient.getMessages.mockResolvedValue([{ id: 10, media: { document: {} }, fileName: 'test.mp4' }]);
         mockInstanceCoordinator.hasLock.mockResolvedValue(true);
+        mockInstanceCoordinator.getLockLease.mockResolvedValue({ instanceId: 'instance-1', leaseId: 'lease-1' });
+        mockInstanceCoordinator.isLockLeaseCurrent.mockResolvedValue(true);
         mockFs.existsSync.mockReturnValue(true);
     });
 

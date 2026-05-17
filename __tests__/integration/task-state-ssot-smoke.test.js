@@ -33,6 +33,7 @@ function seedTask() {
     status: 'queued',
     error_msg: null,
     claimed_by: null,
+    claim_lease_id: null,
     created_at: Date.now(),
     updated_at: Date.now()
   });
@@ -42,7 +43,13 @@ const d1Mock = {
   fetchOne: vi.fn(async (sql, params = []) => {
     if (sql.includes('SELECT id, status') && sql.includes('FROM tasks WHERE id = ?')) {
       const row = tasks.get(params[0]);
-      return row ? { id: row.id, status: row.status, updated_at: row.updated_at } : null;
+      return row ? {
+        id: row.id,
+        status: row.status,
+        updated_at: row.updated_at,
+        claimed_by: row.claimed_by,
+        claim_lease_id: row.claim_lease_id
+      } : null;
     }
 
     if (sql.includes('SELECT * FROM tasks WHERE id = ?')) {
@@ -66,12 +73,20 @@ const d1Mock = {
     const targetStatus = params[0];
     const errorMsg = params[1];
     const updatedAt = params[2];
-    const taskId = params[params.length - 2];
-    const expectedStatus = params[params.length - 1];
+    const taskIdIndex = params.findIndex(value => tasks.has(value));
+    const taskId = params[taskIdIndex];
+    const expectedStatus = params[taskIdIndex + 1];
     const row = tasks.get(taskId);
 
     if (!row || row.status !== expectedStatus) {
       return { changes: 0 };
+    }
+    if (sql.includes('claimed_by = ?') && sql.includes('claim_lease_id = ?') && sql.includes('AND claimed_by = ?')) {
+      const fenceOwner = params[taskIdIndex + 2];
+      const fenceLease = params[taskIdIndex + 3];
+      if (row.claimed_by !== fenceOwner || row.claim_lease_id !== fenceLease) {
+        return { changes: 0 };
+      }
     }
 
     const fromStatus = row.status;
@@ -79,10 +94,12 @@ const d1Mock = {
     row.error_msg = errorMsg;
     row.updated_at = updatedAt;
 
-    if (sql.includes('claimed_by = ?')) {
+    if (sql.includes('claimed_by = ?') && !sql.includes('AND claimed_by = ?')) {
       row.claimed_by = params[3];
+      row.claim_lease_id = params[4] ?? null;
     } else if (sql.includes('claimed_by = NULL')) {
       row.claimed_by = null;
+      row.claim_lease_id = null;
     }
 
     transitionLog.push({ taskId, fromStatus, toStatus: targetStatus });
@@ -172,6 +189,8 @@ vi.mock('../../src/services/InstanceCoordinator.js', () => ({
     instanceId: 'smoke-instance',
     getInstanceId: vi.fn(() => 'smoke-instance'),
     hasLock: vi.fn(async () => true),
+    getLockLease: vi.fn(async () => ({ instanceId: 'smoke-instance', leaseId: 'smoke-lease' })),
+    isLockLeaseCurrent: vi.fn(async () => true),
     acquireTaskLock: vi.fn(async () => true),
     releaseTaskLock: vi.fn(async () => true),
     getActiveInstances: vi.fn(async () => [])

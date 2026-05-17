@@ -8,7 +8,8 @@ import fs from 'fs';
 vi.mock('../../src/services/InstanceCoordinator.js', () => ({
   instanceCoordinator: {
     acquireTaskLock: vi.fn(),
-    releaseTaskLock: vi.fn()
+    releaseTaskLock: vi.fn(),
+    isLockLeaseCurrent: vi.fn()
   }
 }));
 
@@ -66,6 +67,7 @@ describe('TaskManager error handling', () => {
     TaskManager.cancelledTaskIds.clear();
     // 模拟分布式锁获取成功
     instanceCoordinator.acquireTaskLock.mockResolvedValue(true);
+    instanceCoordinator.isLockLeaseCurrent.mockResolvedValue(true);
     // 模拟文件存在
     fs.existsSync.mockReturnValue(true);
     // 模拟文件状态

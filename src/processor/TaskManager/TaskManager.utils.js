@@ -1,5 +1,6 @@
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../../domain/task-state-machine.js";
+import { getClaimFenceOptions } from "./claim-fence.js";
 
 // 获取依赖项的辅助函数
 const getDeps = () => dependencyContainer.getAll();
@@ -26,6 +27,7 @@ export function createHeartbeat(task, context, updateStatus, fileName = null) {
         
         const event = status === 'uploading' ? TASK_EVENTS.START_UPLOAD : TASK_EVENTS.START_DOWNLOAD;
         const transition = await TaskRepository.transitionStatus(task.id, event, null, {
+            ...getClaimFenceOptions(task),
             returnResult: true,
             allowNoop: true,
             source: 'heartbeat'
@@ -66,6 +68,7 @@ export function createHeartbeat(task, context, updateStatus, fileName = null) {
 export async function handleTaskCompletion(task, context, updateStatus, fileName, actualUploadPath, fileLink) {
     const { TaskRepository, STRINGS, format } = getDeps();
     const transition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.COMPLETE, null, {
+        ...getClaimFenceOptions(task),
         returnResult: true,
         allowNoop: true,
         source: 'handleTaskCompletion'
@@ -92,6 +95,7 @@ export async function handleTaskFailure(task, context, updateStatus, errorMessag
     const { TaskRepository, STRINGS } = getDeps();
     const event = isCancelled ? TASK_EVENTS.CANCEL : TASK_EVENTS.FAIL;
     const transition = await TaskRepository.transitionStatus(task.id, event, errorMessage, {
+        ...getClaimFenceOptions(task),
         returnResult: true,
         allowNoop: true,
         source: 'handleTaskFailure'
@@ -122,6 +126,7 @@ export async function handleUploadFailure(task, context, updateStatus, uploadRes
 
     const errorMessage = uploadResult.error || "Upload failed";
     const transition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.FAIL, errorMessage, {
+        ...getClaimFenceOptions(task),
         returnResult: true,
         allowNoop: true,
         source: 'handleUploadFailure'

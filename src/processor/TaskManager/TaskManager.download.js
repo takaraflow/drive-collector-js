@@ -3,6 +3,7 @@ import fs from "fs";
 import bigInt from "big-integer";
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { createHeartbeat, handleTaskCompletion, handleTaskFailure, escapeHTML } from "./TaskManager.utils.js";
+import { assertClaimFenceCurrent, getClaimFenceOptions } from "./claim-fence.js";
 import { resolveInstanceBaseUrl } from "../../utils/instanceUrl.js";
 import { TASK_EVENTS } from "../../domain/task-state-machine.js";
 import { TASK_QUEUE_TRIGGER_SOURCES, TaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
@@ -106,7 +107,7 @@ export async function downloadTask(task) {
 // Helper Functions for Download Phases
 
 async function _handleInstantTransfer(context, deps, task, info, fileName, initialHeartbeat) {
-    const { CloudTool, updateStatus } = deps;
+    const { CloudTool, updateStatus, instanceCoordinator } = deps;
 
     // 2. Priority check for remote instant transfer (using fast check mode: no retry, skip fallback)
     const remoteFile = await CloudTool.getRemoteFileInfo(fileName, task.userId, 1, true);
@@ -117,6 +118,7 @@ async function _handleInstantTransfer(context, deps, task, info, fileName, initi
 
         const actualUploadPath = await CloudTool._getUploadPath(task.userId);
         const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
+        await assertClaimFenceCurrent(task, instanceCoordinator);
         await handleTaskCompletion(task, context, updateStatus, fileName, actualUploadPath, fileLink);
 
         context.activeProcessors.delete(task.id);
@@ -127,7 +129,7 @@ async function _handleInstantTransfer(context, deps, task, info, fileName, initi
 }
 
 async function _handleLocalFile(context, deps, task, info, fileName, localPath, initialHeartbeat) {
-    const { TaskRepository, updateStatus, format, STRINGS, queueService } = deps;
+    const { TaskRepository, updateStatus, format, STRINGS, queueService, instanceCoordinator } = deps;
     const log = dependencyContainer.get('logger').withModule('TaskManager');
 
     // 2. Local file check (resume or use local cache)
@@ -146,7 +148,9 @@ async function _handleLocalFile(context, deps, task, info, fileName, localPath, 
     if (localFileExists && context._isSizeMatch(localFileSize, info.size)) {
         // Local file is intact, directly trigger upload webhook
         await initialHeartbeat;
+        await assertClaimFenceCurrent(task, instanceCoordinator);
         const transition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.FINISH_DOWNLOAD, null, {
+            ...getClaimFenceOptions(task),
             returnResult: true,
             allowNoop: true,
             source: 'local_file_ready'
@@ -220,7 +224,9 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
                     viaLoadBalancer: !bestWorker?.url && Boolean(config.streamForwarding?.lbUrl)
                 });
                 await updateStatus(task, "🚀 **Uploading via stream forwarding...**");
+                await assertClaimFenceCurrent(task, instanceCoordinator);
                 const streamStartTransition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.START_STREAM_UPLOAD, null, {
+                    ...getClaimFenceOptions(task),
                     returnResult: true,
                     allowNoop: true,
                     source: 'stream_forwarding_started'
@@ -255,7 +261,9 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
                         leaderUrl,
                         chatId: task.chatId,
                         msgId: task.msgId,
-                        sourceMsgId: task.message.id
+                        sourceMsgId: task.message.id,
+                        claimedBy: task.claimedBy,
+                        claimLeaseId: task.claimLeaseId
                     }, targetUrl);
                 } catch (resumeError) {
                     log.warn(`Stream resume negotiation failed, starting from scratch: ${resumeError.message}`);
@@ -327,7 +335,9 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
                         sourceMsgId: task.message.id, targetUrl,
                         resumeEnabled: true,
                         streamMode: 'resumable',
-                        chunkSize
+                        chunkSize,
+                        claimedBy: task.claimedBy,
+                        claimLeaseId: task.claimLeaseId
                     });
 
                     if (chunkIndex % 20 === 0 || isLast) {
@@ -349,6 +359,7 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
                     log.warn(`Stream worker reset failed after transfer error: ${resetError.message}`);
                 });
                 const fallbackTransition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.RESET_STREAM_DOWNLOAD, null, {
+                    ...getClaimFenceOptions(task),
                     returnResult: true,
                     allowNoop: true,
                     source: 'stream_forwarding_fallback'
@@ -398,7 +409,9 @@ async function _handleMTProtoDownload(context, deps, task, info, fileName, local
     }
 
     // Download complete, push to upload queue
+    await assertClaimFenceCurrent(task, deps.instanceCoordinator);
     const transition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.FINISH_DOWNLOAD, null, {
+        ...getClaimFenceOptions(task),
         returnResult: true,
         allowNoop: true,
         source: 'download_complete'

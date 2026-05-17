@@ -195,11 +195,12 @@ export class InstanceCoordinator {
                         // 续租锁
                         const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), "json", { skipCache: true });
                         if (lockData && lockData.instanceId === this.instanceId) {
-                            const renewed = await this._setLockIfEquals("telegram_client", {
-                                ...lockData,
-                                acquiredAt: Date.now(), // 更新获取时间，相当于续租
-                                ttl: TELEGRAM_CLIENT_LOCK_TTL_SECONDS
-                            }, lockData, TELEGRAM_CLIENT_LOCK_TTL_SECONDS);
+                            const renewedValue = this._createLockValue(
+                                "telegram_client",
+                                TELEGRAM_CLIENT_LOCK_TTL_SECONDS,
+                                lockData
+                            );
+                            const renewed = await this._setLockIfEquals("telegram_client", renewedValue, lockData, TELEGRAM_CLIENT_LOCK_TTL_SECONDS);
                             if (!renewed) logWithProvider().debug("🔒 Telegram 锁续租 CAS 未命中");
                             // logWithProvider().debug(`🔒 锁续租成功`);
                         }
@@ -334,6 +335,50 @@ export class InstanceCoordinator {
                 throw e; 
             }
             return false;
+        }
+    }
+
+    _createLockValue(lockKey, ttl, previous = null) {
+        const reusableLease = previous?.instanceId === this.instanceId && previous?.leaseId;
+        return {
+            instanceId: this.instanceId,
+            acquiredAt: Date.now(),
+            ttl,
+            leaseId: reusableLease || `${this.instanceId}:${Date.now()}:${crypto.randomUUID()}`
+        };
+    }
+
+    async getLockLease(lockKey) {
+        try {
+            const lockData = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
+            if (!lockData || lockData.instanceId !== this.instanceId || !lockData.leaseId) {
+                return null;
+            }
+
+            return {
+                instanceId: lockData.instanceId,
+                leaseId: lockData.leaseId,
+                acquiredAt: lockData.acquiredAt,
+                ttl: lockData.ttl
+            };
+        } catch (e) {
+            logWithProvider().warn(`⚠️ 获取锁租约失败 ${lockKey}: ${e.message}`);
+            throw e;
+        }
+    }
+
+    async isLockLeaseCurrent(lockKey, lease) {
+        if (!lease?.instanceId || !lease?.leaseId) return false;
+        try {
+            const lockData = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
+            return Boolean(
+                lockData &&
+                lockData.instanceId === lease.instanceId &&
+                lockData.leaseId === lease.leaseId
+            );
+        } catch (e) {
+            logWithProvider().warn(`⚠️ 校验锁租约失败 ${lockKey}: ${e.message}`);
+            throw e;
         }
     }
 
@@ -516,12 +561,6 @@ export class InstanceCoordinator {
      * @returns {boolean} 是否获取成功
      */
     async _tryAcquire(lockKey, ttl) {
-        const lockValue = {
-            instanceId: this.instanceId,
-            acquiredAt: Date.now(),
-            ttl: ttl
-        };
-
         try {
             if (!this._supportsAtomicLockCas()) {
                 if (this._requiresAtomicLock(lockKey)) {
@@ -529,7 +568,7 @@ export class InstanceCoordinator {
                     return false;
                 }
 
-                return await this._tryAcquireBestEffort(lockKey, ttl, lockValue);
+                return await this._tryAcquireBestEffort(lockKey, ttl);
             }
 
             // 尝试原子性地设置锁，如果键不存在则成功
@@ -537,6 +576,7 @@ export class InstanceCoordinator {
             const existing = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
 
             if (!existing) {
+                const lockValue = this._createLockValue(lockKey, ttl);
                 const acquired = await this._setLockIfNotExists(lockKey, lockValue, ttl);
                 return acquired;
             }
@@ -566,6 +606,7 @@ export class InstanceCoordinator {
                 // 如果锁过期、被当前实例持有、或持有者已下线，允许重新获取
             }
 
+            const lockValue = this._createLockValue(lockKey, ttl, existing);
             const acquired = await this._setLockIfEquals(lockKey, lockValue, existing, ttl);
             return acquired;
         } catch (e) {
@@ -574,7 +615,7 @@ export class InstanceCoordinator {
         }
     }
 
-    async _tryAcquireBestEffort(lockKey, ttl, lockValue) {
+    async _tryAcquireBestEffort(lockKey, ttl) {
         const existing = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
 
         if (existing) {
@@ -592,6 +633,7 @@ export class InstanceCoordinator {
             }
         }
 
+        const lockValue = this._createLockValue(lockKey, ttl, existing);
         await cache.set(CACHE_KEYS.lock(lockKey), lockValue, ttl, { skipCache: true });
         const verified = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
         logWithProvider().debug(`[Lock verify] key=${lockKey}, existing=${existing?.instanceId}, verified=${verified?.instanceId}, self=${this.instanceId}`);

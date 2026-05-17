@@ -157,9 +157,65 @@ describe("Core InstanceCoordinator Tests", () => {
         expect(result).toBe(true);
         expect(mockCacheCompareAndSet).toHaveBeenCalledWith(
             `lock:${lockKey}`,
-            expect.objectContaining({ instanceId: instanceCoordinator.instanceId }),
+            expect.objectContaining({
+                instanceId: instanceCoordinator.instanceId,
+                leaseId: expect.stringContaining(`${instanceCoordinator.instanceId}:`)
+            }),
             expect.objectContaining({ ifNotExists: true, ttl: 60 })
         );
+    });
+
+    test("should expose the current lock lease only to the lock owner", async () => {
+        instanceCoordinator.instanceId = 'owner-instance';
+        mockCacheGet.mockResolvedValue({
+            instanceId: 'owner-instance',
+            leaseId: 'owner-instance:lease-1',
+            acquiredAt: fixedTime,
+            ttl: 60
+        });
+
+        await expect(instanceCoordinator.getLockLease('telegram_client')).resolves.toEqual({
+            instanceId: 'owner-instance',
+            leaseId: 'owner-instance:lease-1',
+            acquiredAt: fixedTime,
+            ttl: 60
+        });
+    });
+
+    test("should preserve lease id while renewing a lock owned by this instance", async () => {
+        instanceCoordinator.instanceId = 'owner-instance';
+
+        const renewed = instanceCoordinator._createLockValue('telegram_client', 90, {
+            instanceId: 'owner-instance',
+            leaseId: 'owner-instance:lease-1',
+            acquiredAt: fixedTime - 1000,
+            ttl: 90
+        });
+
+        expect(renewed).toMatchObject({
+            instanceId: 'owner-instance',
+            leaseId: 'owner-instance:lease-1',
+            acquiredAt: fixedTime,
+            ttl: 90
+        });
+    });
+
+    test("should mint a new lease id when taking over another owner lock", async () => {
+        instanceCoordinator.instanceId = 'owner-instance';
+
+        const lockValue = instanceCoordinator._createLockValue('telegram_client', 90, {
+            instanceId: 'other-instance',
+            leaseId: 'other-instance:old-lease',
+            acquiredAt: fixedTime - 100000,
+            ttl: 90
+        });
+
+        expect(lockValue).toMatchObject({
+            instanceId: 'owner-instance',
+            ttl: 90
+        });
+        expect(lockValue.leaseId).toContain('owner-instance:');
+        expect(lockValue.leaseId).not.toBe('other-instance:old-lease');
     });
 
     test("should fail closed when current provider cannot guarantee atomic CAS", async () => {

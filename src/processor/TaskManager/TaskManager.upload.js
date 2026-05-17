@@ -2,6 +2,7 @@ import path from "path";
 import fs from "fs";
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { createHeartbeat, handleTaskCompletion, handleTaskFailure, handleUploadFailure, escapeHTML } from "./TaskManager.utils.js";
+import { assertClaimFenceCurrent, getClaimFenceOptions } from "./claim-fence.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../../domain/task-state-machine.js";
 import { TaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
 
@@ -49,6 +50,7 @@ export async function uploadTask(task) {
         localPath = task.localPath;
         if (!fs.existsSync(localPath)) {
             await TaskRepository.transitionStatus(task.id, TASK_EVENTS.FAIL, 'Local file not found', {
+                ...getClaimFenceOptions(task),
                 allowNoop: true,
                 source: 'upload_local_file_missing'
             });
@@ -172,7 +174,9 @@ export async function uploadTask(task) {
             const finalEvent = isOk ? TASK_EVENTS.COMPLETE : TASK_EVENTS.FAIL;
             const finalStatus = isOk ? TASK_STATUSES.COMPLETED : TASK_STATUSES.FAILED;
             const errorMsg = isOk ? null : `Validation failed: local(${localSize}) vs remote(${finalRemote ? finalRemote.Size : 'not found'})`;
+            await assertClaimFenceCurrent(task, instanceCoordinator);
             const transition = await TaskRepository.transitionStatus(task.id, finalEvent, errorMsg, {
+                ...getClaimFenceOptions(task),
                 returnResult: true,
                 allowNoop: true,
                 source: 'upload_validation'

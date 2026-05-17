@@ -45,6 +45,8 @@ vi.mock('../../src/services/logger/index.js', () => ({
 vi.mock('../../src/services/InstanceCoordinator.js', () => ({
     instanceCoordinator: {
         hasLock: vi.fn().mockResolvedValue(true),
+        getLockLease: vi.fn().mockResolvedValue({ instanceId: 'test-instance', leaseId: 'lease-test' }),
+        isLockLeaseCurrent: vi.fn().mockResolvedValue(true),
         releaseTaskLock: vi.fn().mockResolvedValue(true),
         acquireTaskLock: vi.fn().mockResolvedValue(true),
     }

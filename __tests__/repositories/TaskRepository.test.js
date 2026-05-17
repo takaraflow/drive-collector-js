@@ -251,12 +251,12 @@ describe('TaskRepository', () => {
             mockD1.fetchOne.mockResolvedValueOnce({ id: 'task123', status: 'queued' });
             mockD1.run.mockResolvedValue({ changes: 1 });
 
-            const result = await TaskRepository.claimTask('task123', 'instance1');
+            const result = await TaskRepository.claimTask('task123', 'instance1', 'lease1');
             
             expect(result).toBe(true);
             expect(mockD1.run).toHaveBeenCalledWith(
-                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = ? WHERE id = ? AND status = ?",
-                ['downloading', null, expect.any(Number), 'instance1', 'task123', 'queued']
+                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = ?, claim_lease_id = ? WHERE id = ? AND status = ?",
+                ['downloading', null, expect.any(Number), 'instance1', 'lease1', 'task123', 'queued']
             );
         });
 
@@ -264,20 +264,21 @@ describe('TaskRepository', () => {
             mockD1.fetchOne.mockResolvedValueOnce({ id: 'task123', status: 'completed' });
             mockD1.run.mockResolvedValue({ changes: 0 });
 
-            const result = await TaskRepository.claimTask('task123', 'instance1');
+            const result = await TaskRepository.claimTask('task123', 'instance1', 'lease1');
             
             expect(result).toBe(false);
         });
 
         it('should throw error for missing fields', async () => {
-            await expect(TaskRepository.claimTask('task123', null)).rejects.toThrow('TaskRepository.claimTask: Missing required fields (taskId or instanceId).');
+            await expect(TaskRepository.claimTask('task123', null, 'lease1')).rejects.toThrow('TaskRepository.claimTask: Missing required fields (taskId, instanceId, or claimLeaseId).');
+            await expect(TaskRepository.claimTask('task123', 'instance1', null)).rejects.toThrow('TaskRepository.claimTask: Missing required fields (taskId, instanceId, or claimLeaseId).');
         });
 
         it('should handle database errors', async () => {
             mockD1.fetchOne.mockResolvedValueOnce({ id: 'task123', status: 'queued' });
             mockD1.run.mockRejectedValue(new Error('DB Error'));
 
-            const result = await TaskRepository.claimTask('task123', 'instance1');
+            const result = await TaskRepository.claimTask('task123', 'instance1', 'lease1');
             expect(result).toBe(false);
         });
     });
@@ -296,7 +297,7 @@ describe('TaskRepository', () => {
             expect(mockD1.run).toHaveBeenCalledTimes(3);
             expect(mockD1.run).toHaveBeenNthCalledWith(
                 1,
-                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = NULL WHERE id = ? AND status = ?",
+                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = NULL, claim_lease_id = NULL WHERE id = ? AND status = ?",
                 ['queued', null, expect.any(Number), 'task1', 'downloading']
             );
         });
@@ -355,7 +356,7 @@ describe('TaskRepository', () => {
 
             expect(result.changed).toBe(true);
             expect(mockD1.run).toHaveBeenCalledWith(
-                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = NULL WHERE id = ? AND status = ?",
+                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = NULL, claim_lease_id = NULL WHERE id = ? AND status = ?",
                 ['completed', 'All good', expect.any(Number), 'task1', 'uploading']
             );
             expect(mockCache.delete).toHaveBeenCalledWith('task_status:task1');
@@ -395,9 +396,61 @@ describe('TaskRepository', () => {
 
             expect(result.changed).toBe(true);
             expect(mockD1.run).toHaveBeenCalledWith(
-                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = NULL WHERE id = ? AND status = ?",
+                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = NULL, claim_lease_id = NULL WHERE id = ? AND status = ?",
                 ['queued', null, expect.any(Number), 'task1', 'failed']
             );
+        });
+
+        it('should fence claimed task transitions by owner and lease', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({
+                id: 'task1',
+                status: 'downloading',
+                claimed_by: 'instance1',
+                claim_lease_id: 'lease1'
+            });
+            mockD1.run.mockResolvedValue({ changes: 1 });
+
+            const result = await TaskRepository.transitionStatus('task1', 'downloaded', null, {
+                requireClaim: true,
+                claimedBy: 'instance1',
+                claimLeaseId: 'lease1',
+                returnResult: true
+            });
+
+            expect(result.changed).toBe(true);
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ? WHERE id = ? AND status = ? AND claimed_by = ? AND claim_lease_id = ?",
+                ['downloaded', null, expect.any(Number), 'task1', 'downloading', 'instance1', 'lease1']
+            );
+        });
+
+        it('should block stale claimed task transitions when the lease changed', async () => {
+            mockD1.fetchOne
+                .mockResolvedValueOnce({
+                    id: 'task1',
+                    status: 'downloading',
+                    updated_at: 100,
+                    claimed_by: 'instance1',
+                    claim_lease_id: 'lease1'
+                })
+                .mockResolvedValueOnce({
+                    id: 'task1',
+                    status: 'downloading',
+                    updated_at: 100,
+                    claimed_by: 'instance2',
+                    claim_lease_id: 'lease2'
+                });
+            mockD1.run.mockResolvedValue({ changes: 0 });
+
+            const result = await TaskRepository.transitionStatus('task1', 'downloaded', null, {
+                requireClaim: true,
+                claimedBy: 'instance1',
+                claimLeaseId: 'lease1',
+                returnResult: true
+            });
+
+            expect(result.blocked).toBe(true);
+            expect(result.reason).toBe('Task claim lease no longer matches current worker');
         });
 
         it('should not allow a stale completion event to overwrite failed', async () => {
@@ -582,7 +635,7 @@ describe('TaskRepository', () => {
             await TaskRepository.markCancelled('task123');
             
             expect(mockD1.run).toHaveBeenCalledWith(
-                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = NULL WHERE id = ? AND status = ?",
+                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = NULL, claim_lease_id = NULL WHERE id = ? AND status = ?",
                 ['cancelled', null, expect.any(Number), 'task123', 'queued']
             );
         });
