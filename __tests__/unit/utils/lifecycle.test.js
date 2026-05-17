@@ -27,6 +27,10 @@ vi.mock('../../../src/services/telegram.js', () => ({
     stopTelegramClientRuntime: vi.fn(),
 }));
 
+vi.mock('../../../src/dispatcher/bootstrap.js', () => ({
+    stopDispatcher: vi.fn(),
+}));
+
 vi.mock('../../../src/repositories/TaskRepository.js', () => ({
     TaskRepository: {
         flushUpdates: vi.fn(),
@@ -110,6 +114,9 @@ vi.mock('http', () => ({
 }));
 
 vi.mock('fs', () => ({
+    default: {
+        readFileSync: vi.fn((path) => `mock content of ${path}`)
+    },
     readFileSync: vi.fn((path) => `mock content of ${path}`)
 }));
 
@@ -170,6 +177,7 @@ describe('lifecycle utilities', () => {
             const expectedHooks = [
                 ['logger-flush-before', 5],
                 ['http-server', 10],
+                ['dispatcher', 18],
                 ['telegram-client', 20],
                 ['instance-coordinator', 30],
                 ['media-group-buffer-persist', 35],
@@ -191,21 +199,26 @@ describe('lifecycle utilities', () => {
         it('should stop Telegram before the instance coordinator to keep the lock lease covering disconnect', async () => {
             await registerShutdownHooks();
             const hooks = gracefulShutdown.register.mock.calls;
+            const dispatcherHook = hooks.find(call => call[2] === 'dispatcher');
             const telegramHook = hooks.find(call => call[2] === 'telegram-client');
             const instanceHook = hooks.find(call => call[2] === 'instance-coordinator');
 
+            expect(dispatcherHook[1]).toBeLessThan(telegramHook[1]);
             expect(telegramHook[1]).toBeLessThan(instanceHook[1]);
 
+            const { stopDispatcher } = await import('../../../src/dispatcher/bootstrap.js');
             const { stopTelegramClientRuntime } = await import('../../../src/services/telegram.js');
             const { instanceCoordinator } = await import('../../../src/services/InstanceCoordinator.js');
             const calls = [];
+            stopDispatcher.mockImplementation(() => calls.push('dispatcher'));
             stopTelegramClientRuntime.mockImplementation(async () => calls.push('telegram'));
             instanceCoordinator.stop.mockImplementation(async () => calls.push('coordinator'));
 
+            await dispatcherHook[0]();
             await telegramHook[0]();
             await instanceHook[0]();
 
-            expect(calls).toEqual(['telegram', 'coordinator']);
+            expect(calls).toEqual(['dispatcher', 'telegram', 'coordinator']);
         });
 
         it('should correctly evaluate the task counter', async () => {
@@ -242,6 +255,9 @@ describe('lifecycle utilities', () => {
 
             const telegramClientHook = hooks.find(call => call[2] === 'telegram-client');
             await telegramClientHook[0]();
+
+            const dispatcherHook = hooks.find(call => call[2] === 'dispatcher');
+            await dispatcherHook[0]();
 
             const mediaGroupBufferPersistHook = hooks.find(call => call[2] === 'media-group-buffer-persist');
             await mediaGroupBufferPersistHook[0]();

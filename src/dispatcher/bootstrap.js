@@ -17,6 +17,7 @@ const log = logger.withModule ? logger.withModule('DispatcherBootstrap') : logge
 
 class DispatcherManager {
     constructor() {
+        this.stopped = false;
         this.isClientActive = false;
         this.isClientStarting = false;
         this.connectionRetries = 0;
@@ -25,9 +26,15 @@ class DispatcherManager {
         this.maxRetries = 3;
         this.runtimeClient = null;
         this.startupRetryTimer = null;
+        this.connectionRetryTimer = null;
+        this.intervalTimer = null;
+        this.messageHandlerInitTimer = null;
+        this.watchdogStartTimer = null;
+        this.uncaughtExceptionRegistered = false;
     }
 
     handleConnectionStatusChange = (isConnected) => {
+        if (this.stopped) return;
         log.debug(`🔌 Telegram 连接状态变化: ${isConnected ? '已连接' : '已断开'}`);
         if (!isConnected && this.isClientActive) {
             log.info("🔌 Telegram 连接已断开，重置客户端状态");
@@ -37,7 +44,12 @@ class DispatcherManager {
             if (this.connectionRetries < this.MAX_CONNECTION_RETRIES) {
                 this.connectionRetries++;
                 log.info(`🔄 尝试重新连接 (${this.connectionRetries}/${this.MAX_CONNECTION_RETRIES})...`);
-                setTimeout(() => this.startTelegramClient(), 3000);
+                this.clearConnectionRetryTimer();
+                this.connectionRetryTimer = setTimeout(async () => {
+                    this.connectionRetryTimer = null;
+                    if (this.stopped) return;
+                    await this.startTelegramClient();
+                }, 3000);
             } else {
                 log.error("🚨 达到最大重连次数，请检查网络连接");
             }
@@ -106,10 +118,11 @@ class DispatcherManager {
 
     async tryConnectClient() {
         let retryCount = 0;
-        while (!this.isClientActive && retryCount < this.maxRetries) {
+        while (!this.stopped && !this.isClientActive && retryCount < this.maxRetries) {
             try {
                 const config = getConfig();
                 const client = await getClient();
+                if (this.stopped) return false;
                 try {
                     await client.start({ botAuthToken: config.botToken });
                     await saveSession();
@@ -143,6 +156,10 @@ class DispatcherManager {
     }
 
     startTelegramClient = async () => {
+        if (this.stopped) {
+            return false;
+        }
+
         const currentLoop = ++this.loopCount;
         log.debug(`[Loop ${currentLoop}] 🔄 开始执行 startTelegramClient...`);
         
@@ -197,12 +214,13 @@ class DispatcherManager {
     };
 
     scheduleStartupRetry = (remainingAttempts = 6) => {
-        if (process.env.NODE_ENV === 'test' || remainingAttempts <= 0 || this.startupRetryTimer) {
+        if (this.stopped || process.env.NODE_ENV === 'test' || remainingAttempts <= 0 || this.startupRetryTimer) {
             return;
         }
 
         this.startupRetryTimer = setTimeout(async () => {
             this.startupRetryTimer = null;
+            if (this.stopped) return;
             try {
                 const started = await this.startTelegramClient();
                 if (started) {
@@ -218,10 +236,13 @@ class DispatcherManager {
     };
 
     startIntervalWithJitter = () => {
+        if (this.stopped) return;
         const jitter = Math.random() * 20000 - 10000;
         const interval = 60000 + jitter;
         
-        setTimeout(async () => {
+        this.intervalTimer = setTimeout(async () => {
+            this.intervalTimer = null;
+            if (this.stopped) return;
             try {
                 const started = await this.startTelegramClient();
                 if (started) {
@@ -230,13 +251,17 @@ class DispatcherManager {
             } catch (error) {
                 log.error(`🛡️ 后台循环错误已捕获，继续执行: ${error.message}`);
             } finally {
-                this.startIntervalWithJitter();
+                if (!this.stopped) {
+                    this.startIntervalWithJitter();
+                }
             }
         }, interval);
     };
 
     async ensureTelegramRuntimeStarted() {
+        if (this.stopped) return null;
         const client = await getClient();
+        if (this.stopped) return null;
 
         if (this.runtimeClient === client) {
             return client;
@@ -250,11 +275,21 @@ class DispatcherManager {
             }
         });
 
-        setTimeout(() => MessageHandler.init(client), 5000);
+        this.clearMessageHandlerInitTimer();
+        this.messageHandlerInitTimer = setTimeout(() => {
+            this.messageHandlerInitTimer = null;
+            if (!this.stopped) {
+                MessageHandler.init(client);
+            }
+        }, 5000);
 
-        setTimeout(() => {
-            startTelegramWatchdog();
-            log.info("🐶 Telegram 看门狗已启动");
+        this.clearWatchdogStartTimer();
+        this.watchdogStartTimer = setTimeout(() => {
+            this.watchdogStartTimer = null;
+            if (!this.stopped) {
+                startTelegramWatchdog();
+                log.info("🐶 Telegram 看门狗已启动");
+            }
         }, 1000);
 
         this.runtimeClient = client;
@@ -262,10 +297,12 @@ class DispatcherManager {
     }
 
     async start() {
+        this.stopped = false;
         setConnectionStatusCallback(this.handleConnectionStatusChange);
 
-        if (typeof process !== 'undefined' && process.on) {
+        if (typeof process !== 'undefined' && process.on && !this.uncaughtExceptionRegistered) {
             process.on('uncaughtException', this.handleUncaughtException);
+            this.uncaughtExceptionRegistered = true;
         }
 
         const clientStarted = await this.startTelegramClient();
@@ -282,7 +319,61 @@ class DispatcherManager {
 
         return await this.ensureTelegramRuntimeStarted();
     }
+
+    clearStartupRetryTimer() {
+        if (this.startupRetryTimer) {
+            clearTimeout(this.startupRetryTimer);
+            this.startupRetryTimer = null;
+        }
+    }
+
+    clearConnectionRetryTimer() {
+        if (this.connectionRetryTimer) {
+            clearTimeout(this.connectionRetryTimer);
+            this.connectionRetryTimer = null;
+        }
+    }
+
+    clearIntervalTimer() {
+        if (this.intervalTimer) {
+            clearTimeout(this.intervalTimer);
+            this.intervalTimer = null;
+        }
+    }
+
+    clearMessageHandlerInitTimer() {
+        if (this.messageHandlerInitTimer) {
+            clearTimeout(this.messageHandlerInitTimer);
+            this.messageHandlerInitTimer = null;
+        }
+    }
+
+    clearWatchdogStartTimer() {
+        if (this.watchdogStartTimer) {
+            clearTimeout(this.watchdogStartTimer);
+            this.watchdogStartTimer = null;
+        }
+    }
+
+    stop() {
+        this.stopped = true;
+        this.clearStartupRetryTimer();
+        this.clearConnectionRetryTimer();
+        this.clearIntervalTimer();
+        this.clearMessageHandlerInitTimer();
+        this.clearWatchdogStartTimer();
+        setConnectionStatusCallback(null);
+        if (this.uncaughtExceptionRegistered && typeof process !== 'undefined' && process.off) {
+            process.off('uncaughtException', this.handleUncaughtException);
+            this.uncaughtExceptionRegistered = false;
+        }
+        this.isClientActive = false;
+        this.isClientStarting = false;
+        this.runtimeClient = null;
+    }
 }
+
+let dispatcherManager = null;
 
 /**
  * 启动 Dispatcher 组件
@@ -290,6 +381,15 @@ class DispatcherManager {
  */
 export async function startDispatcher() {
     log.info("🔄 正在启动 Dispatcher 组件...");
-    const manager = new DispatcherManager();
-    return await manager.start();
+    if (dispatcherManager) {
+        dispatcherManager.stop();
+    }
+    dispatcherManager = new DispatcherManager();
+    return await dispatcherManager.start();
+}
+
+export function stopDispatcher() {
+    if (!dispatcherManager) return;
+    dispatcherManager.stop();
+    dispatcherManager = null;
 }

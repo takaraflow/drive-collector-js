@@ -16,6 +16,7 @@ const mockAuthGuard = {
 const mockNetworkDiagnostic = {
     diagnoseAll: vi.fn()
 };
+const mockIsClientActive = vi.fn(() => true);
 const mockSafeEdit = vi.fn();
 const mockUIHelper = {
     renderDiagnosisReport: vi.fn(),
@@ -34,7 +35,10 @@ const mockTaskManager = {
 
 vi.mock('../../src/services/telegram.js', () => ({
     client: mockClient,
-    isClientActive: vi.fn(() => true)
+    getClient: vi.fn(() => {
+        throw new Error('status should not initialize telegram client');
+    }),
+    isClientActive: mockIsClientActive
 }));
 vi.mock('../../src/repositories/TaskRepository.js', () => ({
     TaskRepository: mockTaskRepository
@@ -103,6 +107,7 @@ describe('Dispatcher /status command', () => {
         mockNetworkDiagnostic.diagnoseAll.mockResolvedValue({ services: {} });
         mockUIHelper.renderDiagnosisReport.mockReturnValue('diagnosis report');
         mockUIHelper.renderTaskQueue.mockReturnValue({ text: 'global queue report', buttons: [] });
+        mockIsClientActive.mockReturnValue(true);
     });
 
     it('should render the current user queue from D1 instead of TaskManager memory counts', async () => {
@@ -256,6 +261,21 @@ describe('Dispatcher /status command', () => {
         expect(mockClient.sendMessage).not.toHaveBeenCalled();
         expect(mockSafeEdit).toHaveBeenCalledWith('chat-1', 456, expect.stringContaining('正在查询'), null, 'admin-1');
         expect(mockSafeEdit).toHaveBeenCalledWith('chat-1', 456, 'global queue report', [], 'admin-1');
+    });
+
+    it('should read telegram status from side-effect-free local state', async () => {
+        mockIsClientActive.mockReturnValue(false);
+        const telegramModule = await import('../../src/services/telegram.js');
+
+        const info = await Dispatcher._getInstanceInfo();
+
+        expect(mockIsClientActive).toHaveBeenCalled();
+        expect(telegramModule.getClient).not.toHaveBeenCalled();
+        expect(info).toEqual(expect.objectContaining({
+            tgActive: false,
+            isTgLeader: true,
+            currentInstanceId: 'test-instance'
+        }));
     });
 
     it('should edit the current message for diagnosis_run callback', async () => {

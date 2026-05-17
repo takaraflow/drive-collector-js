@@ -786,9 +786,8 @@ export const client = new Proxy({}, {
     }
 });
 
-export const isClientActive = async () => {
-    const client = await getClient();
-    return client.connected;
+export const isClientActive = () => {
+    return Boolean(telegramClient?.connected);
 };
 
 export const ensureConnected = async () => {
@@ -1210,7 +1209,7 @@ export const reconnectBot = async (lightweight = true) => {
  * @param {Function} callback - 回调函数，接收一个布尔值参数表示连接状态
  */
 export const setConnectionStatusCallback = (callback) => {
-    connectionStatusCallback = callback;
+    connectionStatusCallback = typeof callback === 'function' ? callback : null;
 };
 
 // 导出启动函数（不在模块加载时自动启动，由应用显式调用）

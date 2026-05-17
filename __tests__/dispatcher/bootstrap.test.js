@@ -66,8 +66,8 @@ async function loadBootstrap() {
     setInstanceIdProvider: vi.fn()
   }));
 
-  const { startDispatcher } = await import('../../src/dispatcher/bootstrap.js');
-  return { startDispatcher, ...mocks };
+  const { startDispatcher, stopDispatcher } = await import('../../src/dispatcher/bootstrap.js');
+  return { startDispatcher, stopDispatcher, ...mocks };
 }
 
 describe('Dispatcher Bootstrap', () => {
@@ -290,5 +290,56 @@ describe('Dispatcher Bootstrap', () => {
 
     expect(telegram.startTelegramWatchdog).toHaveBeenCalled();
     expect(logger.info).toHaveBeenCalledWith('🐶 Telegram 看门狗已启动');
+  });
+
+  test('should cancel startup handoff retry when dispatcher stops', async () => {
+    process.env.NODE_ENV = 'production';
+    const { startDispatcher, stopDispatcher, telegram, instanceCoordinator } = await loadBootstrap();
+    instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(false);
+    instanceCoordinator.instanceCoordinator.acquireLock
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    telegram.client.start.mockResolvedValue();
+
+    await startDispatcher();
+    stopDispatcher();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(instanceCoordinator.instanceCoordinator.acquireLock).toHaveBeenCalledTimes(1);
+    expect(telegram.getClient).not.toHaveBeenCalled();
+    expect(telegram.client.start).not.toHaveBeenCalled();
+  });
+
+  test('should cancel background lock loop when dispatcher stops', async () => {
+    process.env.NODE_ENV = 'production';
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const { startDispatcher, stopDispatcher, telegram, instanceCoordinator } = await loadBootstrap();
+    instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(false);
+    instanceCoordinator.instanceCoordinator.acquireLock
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    telegram.client.start.mockResolvedValue();
+
+    await startDispatcher();
+    stopDispatcher();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(instanceCoordinator.instanceCoordinator.acquireLock).toHaveBeenCalledTimes(1);
+    expect(telegram.client.start).not.toHaveBeenCalled();
+  });
+
+  test('should clear connection callback and uncaught exception listener when dispatcher stops', async () => {
+    const { startDispatcher, stopDispatcher, telegram, instanceCoordinator, logger } = await loadBootstrap();
+    instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(false);
+    instanceCoordinator.instanceCoordinator.acquireLock.mockResolvedValue(true);
+    telegram.client.start.mockResolvedValue();
+    telegram.saveSession.mockResolvedValue();
+
+    await startDispatcher();
+    stopDispatcher();
+
+    expect(telegram.setConnectionStatusCallback).toHaveBeenLastCalledWith(null);
+    expect(process.listeners('uncaughtException')).toEqual(originalUncaughtExceptionListeners);
+    expect(logger.warn).not.toHaveBeenCalledWith("⚠️ 捕获到 'Not connected' 错误，正在重置客户端状态");
   });
 });

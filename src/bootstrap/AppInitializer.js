@@ -152,8 +152,14 @@ export class AppInitializer {
         log.info("🛑 正在停止业务模块...");
         try {
             const { instanceCoordinator } = await import("../services/InstanceCoordinator.js");
+            const { stopDispatcher } = await import("../dispatcher/bootstrap.js");
             const { stopTelegramClientRuntime } = await import("../services/telegram.js");
             
+            // 停止 Dispatcher 的后台重试/续租调度，避免停机期间重新拉起 Telegram 客户端
+            if (typeof stopDispatcher === 'function') {
+                stopDispatcher();
+            }
+
             // 停止 Telegram 服务
             if (typeof stopTelegramClientRuntime === 'function') {
                 await stopTelegramClientRuntime('business module stop');

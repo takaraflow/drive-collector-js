@@ -1398,7 +1398,7 @@ export class Dispatcher {
             instanceInfo.cacheFailover = !!cache.isFailoverMode;
 
             // Telegram 状态
-            instanceInfo.tgActive = isClientActive();
+            instanceInfo.tgActive = Boolean(isClientActive());
             instanceInfo.isTgLeader = await instanceCoordinator.hasLock('telegram_client', { logContention: false });
 
             // 活跃实例信息
