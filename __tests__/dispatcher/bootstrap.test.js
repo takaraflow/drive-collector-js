@@ -140,6 +140,26 @@ describe('Dispatcher Bootstrap', () => {
     expect(telegram.startTelegramWatchdog).not.toHaveBeenCalled();
   });
 
+  test('should schedule bounded startup handoff retries outside tests', async () => {
+    process.env.NODE_ENV = 'production';
+    const { startDispatcher, telegram, instanceCoordinator, messageHandler } = await loadBootstrap();
+    instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(false);
+    instanceCoordinator.instanceCoordinator.acquireLock
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    telegram.client.start.mockResolvedValue();
+    telegram.saveSession.mockResolvedValue();
+
+    const result = await startDispatcher();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(result).toBeNull();
+    expect(instanceCoordinator.instanceCoordinator.acquireLock).toHaveBeenCalledTimes(2);
+    expect(telegram.client.start).toHaveBeenCalledWith({ botAuthToken: 'mock_token' });
+    expect(messageHandler.MessageHandler.init).toHaveBeenCalled();
+  });
+
   test('should handle AUTH_KEY_DUPLICATED error by resetting local session and retrying', async () => {
     const { startDispatcher, telegram, instanceCoordinator } = await loadBootstrap();
     instanceCoordinator.instanceCoordinator.acquireLock.mockResolvedValue(true);

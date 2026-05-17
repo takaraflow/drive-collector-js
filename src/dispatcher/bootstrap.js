@@ -24,6 +24,7 @@ class DispatcherManager {
         this.loopCount = 0;
         this.maxRetries = 3;
         this.runtimeClient = null;
+        this.startupRetryTimer = null;
     }
 
     handleConnectionStatusChange = (isConnected) => {
@@ -195,6 +196,27 @@ class DispatcherManager {
         }
     };
 
+    scheduleStartupRetry = (remainingAttempts = 6) => {
+        if (process.env.NODE_ENV === 'test' || remainingAttempts <= 0 || this.startupRetryTimer) {
+            return;
+        }
+
+        this.startupRetryTimer = setTimeout(async () => {
+            this.startupRetryTimer = null;
+            try {
+                const started = await this.startTelegramClient();
+                if (started) {
+                    await this.ensureTelegramRuntimeStarted();
+                    return;
+                }
+            } catch (error) {
+                log.error(`🛡️ 启动接棒重试失败: ${error.message}`);
+            }
+
+            this.scheduleStartupRetry(remainingAttempts - 1);
+        }, 10_000);
+    };
+
     startIntervalWithJitter = () => {
         const jitter = Math.random() * 20000 - 10000;
         const interval = 60000 + jitter;
@@ -254,6 +276,7 @@ class DispatcherManager {
 
         if (!clientStarted) {
             log.info("🔒 Telegram 客户端未在当前实例启动：未持有 telegram_client 锁");
+            this.scheduleStartupRetry();
             return null;
         }
 

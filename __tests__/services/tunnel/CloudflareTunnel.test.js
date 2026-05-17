@@ -144,7 +144,7 @@ cloudflared_tunnel_user_hostname{user_hostname="tender-sand-123.trycloudflare.co
         await vi.advanceTimersByTimeAsync(30_000);
         await initializePromise;
 
-        expect(tunnelLog.warn).toHaveBeenCalledWith(expect.stringContaining('falling back to standalone cloudflared'));
+        expect(tunnelLog.info).toHaveBeenCalledWith(expect.stringContaining('falling back to standalone cloudflared'));
         expect(tunnelLog.error).not.toHaveBeenCalledWith(expect.stringContaining('Timeout waiting for service directory'));
         expect(spawnMock).toHaveBeenCalledWith('cloudflared', expect.any(Array), expect.any(Object));
 

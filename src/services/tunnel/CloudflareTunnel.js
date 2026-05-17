@@ -64,7 +64,7 @@ export class CloudflareTunnel extends S6ManagedTunnel {
             try {
                 await fs.access(s6SvcPath);
             } catch {
-                log.warn(`s6-svc not available at ${s6SvcPath}, falling back to standalone cloudflared`);
+                log.info(`s6-svc not available at ${s6SvcPath}, falling back to standalone cloudflared`);
                 return false;
             }
 
@@ -82,7 +82,7 @@ export class CloudflareTunnel extends S6ManagedTunnel {
                 } catch {
                     attempts++;
                     if (attempts >= maxAttempts) {
-                        log.warn(`s6 service directory did not become ready: ${servicePath}; falling back to standalone cloudflared`);
+                        log.info(`s6 service directory did not become ready: ${servicePath}; falling back to standalone cloudflared`);
                         return false;
                     }
                     log.debug(`Service directory not ready yet, waiting... (${attempts}/${maxAttempts})`);
