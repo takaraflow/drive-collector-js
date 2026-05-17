@@ -68,6 +68,14 @@ vi.mock('../../../src/services/MediaGroupBuffer.js', () => {
     };
 });
 
+vi.mock('../../../src/services/StateSynchronizer.js', () => {
+    return {
+        stateSynchronizer: {
+            handleSyncEvent: vi.fn()
+        }
+    };
+});
+
 vi.mock('../../../src/services/CacheService.js', () => {
     return {
         cache: {
@@ -282,6 +290,32 @@ describe('WebhookRouter', () => {
             expect(refreshConfiguration).toHaveBeenCalled();
             expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
             expect(res.end).toHaveBeenCalledWith(JSON.stringify({ success: true }));
+        });
+
+        it('should handle state_sync queue webhooks without warning as unknown', async () => {
+            req.url = '/api/v2/tasks/state_sync';
+            req.method = 'POST';
+            req[Symbol.asyncIterator] = async function* () {
+                yield Buffer.from(JSON.stringify({
+                    type: 'state_change',
+                    source: 'peer-instance',
+                    userId: 'user-1',
+                    stateType: 'tasks',
+                    state: { active: 1 }
+                }));
+            };
+
+            const { stateSynchronizer } = await import('../../../src/services/StateSynchronizer.js');
+
+            await handleWebhook(req, res);
+
+            expect(stateSynchronizer.handleSyncEvent).toHaveBeenCalledWith(expect.objectContaining({
+                type: 'state_change',
+                userId: 'user-1',
+                stateType: 'tasks'
+            }));
+            expect(webhookLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('未知的 Webhook 路径'));
+            expect(res.writeHead).toHaveBeenCalledWith(200);
         });
 
         it('should return 500 when /api/v2/config/refresh fails', async () => {

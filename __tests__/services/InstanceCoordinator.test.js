@@ -196,6 +196,17 @@ describe("Core InstanceCoordinator Tests", () => {
         expect(result).toBe(true);
     });
 
+    test("should support quiet lock ownership probes for normal standby checks", async () => {
+        instanceCoordinator.instanceId = 'standby-instance';
+        const lockKey = 'owner-lock';
+
+        mockCacheGet.mockResolvedValue({ instanceId: 'leader-instance' });
+        const result = await instanceCoordinator.hasLock(lockKey, { logContention: false });
+
+        expect(result).toBe(false);
+        expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('[Lock]'));
+    });
+
     test("should list active instances", async () => {
         const instances = [
             { id: 'inst1', lastHeartbeat: fixedTime - 1000 },

@@ -221,7 +221,10 @@ describe("Telegram Service", () => {
         module.startWatchdog();
         await vi.advanceTimersByTimeAsync(60 * 1000);
 
-        expect(instanceCoordinator.hasLock).toHaveBeenCalledWith('telegram_client');
+        expect(instanceCoordinator.hasLock).toHaveBeenCalledWith(
+            'telegram_client',
+            expect.objectContaining({ logContention: false })
+        );
         expect(mockTelegramClientConfigs).toHaveLength(0);
         expect(instanceCoordinator.acquireLock).not.toHaveBeenCalled();
         expect(mockLoggerWarn.mock.calls.some(call => String(call[0]).includes('Client disconnected'))).toBe(false);

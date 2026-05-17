@@ -307,14 +307,15 @@ export class InstanceCoordinator {
      * @param {string} lockKey - 锁的键
      * @returns {boolean}
      */
-    async hasLock(lockKey) {
+    async hasLock(lockKey, options = {}) {
+        const logContention = options.logContention !== false;
         try {
             const existing = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
             const isOwner = existing && existing.instanceId === this.instanceId;
-            if (existing && !isOwner) {
+            if (logContention && existing && !isOwner) {
                 // 明确被其他实例持有
                 log.warn(`[Lock] ${lockKey} is held by ${existing.instanceId} (self: ${this.instanceId})`);
-            } else if (!existing) {
+            } else if (logContention && !existing) {
                 log.warn(`[Lock] ${lockKey} is NOT held by anyone (expired or never acquired)`);
             }
             return isOwner;
@@ -399,6 +400,7 @@ export class InstanceCoordinator {
       */
     async acquireLock(lockKey, ttl = 300, options = {}) {
         const maxAttempts = options.maxAttempts || 3;
+        const logContention = options.logContention !== false;
         const backoffDelays = [100, 500, 1000, 2000, 5000]; // 指数退避延迟
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -416,7 +418,11 @@ export class InstanceCoordinator {
             }
         }
 
-        logWithProvider().warn(`🔒 锁获取失败，已达到最大重试次数: ${lockKey}`);
+        if (logContention) {
+            logWithProvider().warn(`🔒 锁获取失败，已达到最大重试次数: ${lockKey}`);
+        } else {
+            logWithProvider().debug(`🔒 锁获取未成功: ${lockKey}`);
+        }
         return false;
     }
 

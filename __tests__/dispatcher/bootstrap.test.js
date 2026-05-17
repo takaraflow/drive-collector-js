@@ -153,7 +153,10 @@ describe('Dispatcher Bootstrap', () => {
     await startDispatcher();
     await finishStartupTimers();
 
-    expect(instanceCoordinator.instanceCoordinator.hasLock).toHaveBeenCalledWith('telegram_client');
+    expect(instanceCoordinator.instanceCoordinator.hasLock).toHaveBeenCalledWith(
+      'telegram_client',
+      expect.objectContaining({ logContention: false })
+    );
     expect(telegram.resetClientSession).toHaveBeenCalled();
     expect(telegram.clearSession).not.toHaveBeenCalled();
     expect(telegram.client.start).toHaveBeenCalledTimes(2);
@@ -170,7 +173,10 @@ describe('Dispatcher Bootstrap', () => {
     await startDispatcher();
     await finishStartupTimers();
 
-    expect(instanceCoordinator.instanceCoordinator.hasLock).toHaveBeenCalledWith('telegram_client');
+    expect(instanceCoordinator.instanceCoordinator.hasLock).toHaveBeenCalledWith(
+      'telegram_client',
+      expect.objectContaining({ logContention: false })
+    );
     expect(telegram.resetClientSession).not.toHaveBeenCalled();
     expect(telegram.clearSession).not.toHaveBeenCalled();
     expect(telegram.client.start).toHaveBeenCalledTimes(1);

@@ -434,7 +434,9 @@ const stopLocalClientIfPresent = async (reason) => {
     isClientInitializing = false;
 };
 
-export const hasTelegramClientLock = async () => instanceCoordinator.hasLock(TELEGRAM_CLIENT_LOCK);
+export const hasTelegramClientLock = async (options = {}) => {
+    return instanceCoordinator.hasLock(TELEGRAM_CLIENT_LOCK, options);
+};
 
 function resolveTelegramLogLevel() {
     if (typeof log.canSend !== 'function') return 'info';
@@ -820,7 +822,7 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
     
     // 检查锁所有权 - 增强逻辑：允许在锁缺失时尝试重新获取
     try {
-        const hasLock = await hasTelegramClientLock();
+        const hasLock = await hasTelegramClientLock({ logContention: false });
         if (!hasLock) {
             // 检查锁是否被其他实例持有
             const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), "json", { skipCache: true });
@@ -1001,7 +1003,7 @@ const handleWatchdogFailureThreshold = async (errorType, diff) => {
 
     // 增强重连逻辑：先检查锁状态，如果锁缺失且本实例是 Leader，尝试重新获取
     try {
-        const hasLock = await hasTelegramClientLock();
+        const hasLock = await hasTelegramClientLock({ logContention: false });
         if (!hasLock) {
             const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), "json", { skipCache: true });
             if (!lockData && instanceCoordinator.isLeader) {
@@ -1043,7 +1045,7 @@ export const startWatchdog = () => {
         }
 
         try {
-            const ownsTelegramClient = await hasTelegramClientLock();
+            const ownsTelegramClient = await hasTelegramClientLock({ logContention: false });
             if (!ownsTelegramClient) {
                 await stopLocalClientIfPresent('watchdog skipped because this instance does not own telegram_client lock');
                 resetWatchdogFailureState();

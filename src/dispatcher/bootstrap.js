@@ -77,7 +77,7 @@ class DispatcherManager {
     async handleAuthKeyDuplicated(retryCount) {
         log.warn(`⚠️ 检测到 AUTH_KEY_DUPLICATED 错误 (尝试 ${retryCount}/${this.maxRetries})`);
 
-        const stillHasLock = await instanceCoordinator.hasLock("telegram_client");
+        const stillHasLock = await instanceCoordinator.hasLock("telegram_client", { logContention: false });
         if (!stillHasLock) {
             log.warn("🚨 在处理 AUTH_KEY_DUPLICATED 时失去锁，停止重试");
             this.isClientActive = false;
@@ -152,13 +152,16 @@ class DispatcherManager {
 
         let alreadyHasLock = false;
         try {
-            alreadyHasLock = await instanceCoordinator.hasLock("telegram_client");
+            alreadyHasLock = await instanceCoordinator.hasLock("telegram_client", { logContention: false });
         } catch (error) {
             log.error(`[Loop ${currentLoop}] 🔒 锁检查失败: ${error.message}`);
             return false;
         }
         
-        const hasLock = await instanceCoordinator.acquireLock("telegram_client", 90, { maxAttempts: 5 });
+        const hasLock = await instanceCoordinator.acquireLock("telegram_client", 90, {
+            maxAttempts: 5,
+            logContention: false
+        });
         
         if (!hasLock) {
             if (this.isClientActive) {

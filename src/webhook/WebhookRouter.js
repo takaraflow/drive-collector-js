@@ -289,6 +289,10 @@ async function processWebhookData(req, res, signature, body) {
             await mediaGroupBuffer.handleFlushEvent(data);
         }
         result = { success: true, statusCode: 200 };
+    } else if (path.endsWith('/state_sync')) {
+        const { stateSynchronizer } = await import("../services/StateSynchronizer.js");
+        await stateSynchronizer.handleSyncEvent(data);
+        result = { success: true, statusCode: 200 };
     } else {
         log.warn(`❓ 未知的 Webhook 路径: ${path}`);
     }

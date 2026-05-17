@@ -339,7 +339,7 @@ export class Dispatcher {
         
         // 🔍 诊断日志：检查锁状态
         try {
-            const hasLock = await instanceCoordinator.hasLock('telegram_client');
+            const hasLock = await instanceCoordinator.hasLock('telegram_client', { logContention: false });
             log.debug(`🔍 [MSG_DEDUP] 锁状态检查 - EventID: ${eventId}, HasLock: ${hasLock}, Instance: ${instanceCoordinator.getInstanceId()}`);
         } catch (e) {
             log.warn(`🔍 [MSG_DEDUP] 锁状态检查失败 - EventID: ${eventId}, Error: ${e.message}`);
@@ -1399,7 +1399,7 @@ export class Dispatcher {
 
             // Telegram 状态
             instanceInfo.tgActive = isClientActive();
-            instanceInfo.isTgLeader = await instanceCoordinator.hasLock('telegram_client');
+            instanceInfo.isTgLeader = await instanceCoordinator.hasLock('telegram_client', { logContention: false });
 
             // 活跃实例信息
             instanceInfo.activeInstances = await instanceCoordinator.getActiveInstances();

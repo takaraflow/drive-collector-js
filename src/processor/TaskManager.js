@@ -752,7 +752,7 @@ export class TaskManager {
         const { instanceCoordinator, TaskRepository, client, runMtprotoTaskWithRetry, PRIORITY } = getDeps();
         const log = getLog();
         // Leader 状态校验：只有持有 telegram_client 锁的实例才能处理任务
-        if (!(await instanceCoordinator.hasLock("telegram_client"))) {
+        if (!(await instanceCoordinator.hasLock("telegram_client", { logContention: false }))) {
             return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
         }
 
@@ -843,7 +843,7 @@ export class TaskManager {
         const { instanceCoordinator, TaskRepository, client, runMtprotoTaskWithRetry, PRIORITY, config } = getDeps();
         const log = getLog();
         // Leader 状态校验：只有持有 telegram_client 锁 del 实例才能处理任务
-        if (!(await instanceCoordinator.hasLock("telegram_client"))) {
+        if (!(await instanceCoordinator.hasLock("telegram_client", { logContention: false }))) {
             return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
         }
 
