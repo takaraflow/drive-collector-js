@@ -16,26 +16,42 @@ permissions:
 jobs:
   update-registry:
     runs-on: ubuntu-latest
+    if: ${{ secrets.CONTRACT_REPO != '' && secrets.APP_ID != '' && secrets.APP_PRIVATE_KEY != '' }}
     env:
       # 将仓库地址和名称设为变量，方便后续脚本引用
       CONTRACT_REPO: ${{ secrets.CONTRACT_REPO }}
       REPO_DIR: "contract-repo"
       REGISTRY_PATH: "registry"
     steps:
+      - name: Resolve Contract Repository
+        id: contract_repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          IFS='/' read -r owner repo <<< "${CONTRACT_REPO}"
+          if [[ -z "${owner:-}" || -z "${repo:-}" ]]; then
+            echo "CONTRACT_REPO must be in owner/repo format" >&2
+            exit 1
+          fi
+          echo "owner=${owner}" >> "$GITHUB_OUTPUT"
+          echo "repo=${repo}" >> "$GITHUB_OUTPUT"
+
       # 1. 获取临时访问令牌 (使用之前创建的 GitHub App)
       - name: Generate Token
         id: generate_token
-        uses: tibdex/github-app-token@v2
+        uses: actions/create-github-app-token@v2
         with:
           app_id: ${{ secrets.APP_ID }}
           private_key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ steps.contract_repo.outputs.owner }}
+          repositories: ${{ steps.contract_repo.outputs.repo }}
 
       # 2. 检出当前子仓库代码
       - name: Checkout Sub-Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Use Node.js 20.x
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20.x
           cache: 'npm'
@@ -45,7 +61,7 @@ jobs:
 
       # 3. 检出契约中心仓库
       - name: Checkout Contract Center
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.CONTRACT_REPO }}
           token: ${{ steps.generate_token.outputs.token }}
