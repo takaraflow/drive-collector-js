@@ -630,9 +630,11 @@ curl -X GET "https://api.axiom.co/v1/datasets/<dataset>/query?apiKey=<token>"
 
 | Topic | 端点 | 处理函数 |
 |-------|------|---------|
-| `download` | `/api/tasks/download` | `TaskManager.handleDownloadWebhook()` |
-| `upload` | `/api/tasks/upload` | `TaskManager.handleUploadWebhook()` |
-| `system-events` | `/api/tasks/system-events` | 记录日志 |
+| `download` | `/api/v2/tasks/download` | `TaskManager.handleDownloadWebhook()` |
+| `upload` | `/api/v2/tasks/upload` | `TaskManager.handleUploadWebhook()` |
+| `system-events` | `/api/v2/tasks/system-events` | `MediaGroupBuffer.handleFlushEvent()` |
+| `state_sync` | `/api/v2/tasks/state_sync` | `StateSynchronizer.handleSyncEvent()` |
+| `cache_sync` | `/api/v2/tasks/cache_sync` | `ConsistentCache.handleSyncEvent()` |
 
 **注意**: `batch` 不是独立 topic，而是通过 `download` topic 的 batch publish 触发。
 

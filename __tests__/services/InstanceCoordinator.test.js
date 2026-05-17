@@ -207,6 +207,23 @@ describe("Core InstanceCoordinator Tests", () => {
         expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('[Lock]'));
     });
 
+    test("should renew telegram client lock without warning from standby instances", async () => {
+        instanceCoordinator.instanceId = 'standby-instance';
+        mockCacheGet.mockResolvedValue({ instanceId: 'leader-instance' });
+
+        await instanceCoordinator.startHeartbeat();
+        await vi.runOnlyPendingTimersAsync();
+
+        expect(mockCacheGet).toHaveBeenCalledWith("lock:telegram_client", "json", { skipCache: true });
+        expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('[Lock] telegram_client is held by'));
+        expect(mockCacheSet).not.toHaveBeenCalledWith(
+            "lock:telegram_client",
+            expect.anything(),
+            300,
+            expect.objectContaining({ skipCache: true })
+        );
+    });
+
     test("should list active instances", async () => {
         const instances = [
             { id: 'inst1', lastHeartbeat: fixedTime - 1000 },

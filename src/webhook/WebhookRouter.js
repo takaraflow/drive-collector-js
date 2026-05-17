@@ -293,6 +293,10 @@ async function processWebhookData(req, res, signature, body) {
         const { stateSynchronizer } = await import("../services/StateSynchronizer.js");
         await stateSynchronizer.handleSyncEvent(data);
         result = { success: true, statusCode: 200 };
+    } else if (path.endsWith('/cache_sync')) {
+        const { consistentCache } = await import("../services/ConsistentCache.js");
+        await consistentCache.handleSyncEvent(data);
+        result = { success: true, statusCode: 200 };
     } else {
         log.warn(`❓ 未知的 Webhook 路径: ${path}`);
     }

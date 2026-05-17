@@ -187,7 +187,7 @@ export class InstanceCoordinator {
             const renew = async () => {
                 try {
                     // 检查当前是否持有锁
-                    const hasLock = await this.hasLock("telegram_client");
+                    const hasLock = await this.hasLock("telegram_client", { logContention: false });
                     if (hasLock) {
                         // 续租锁
                         const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), "json", { skipCache: true });
