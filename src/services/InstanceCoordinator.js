@@ -7,6 +7,7 @@ import { normalizePublicUrl } from "../utils/instanceUrl.js";
 import { CACHE_KEYS } from "../domain/cache-keys.js";
 
 const log = logger.withModule('InstanceCoordinator');
+export const TELEGRAM_CLIENT_LOCK_TTL_SECONDS = 90;
 
 // 创建带 cache_provider 上下文的 logger 用于动态 provider 信息
 const logWithProvider = () => {
@@ -196,8 +197,9 @@ export class InstanceCoordinator {
                         if (lockData && lockData.instanceId === this.instanceId) {
                             const renewed = await this._setLockIfEquals("telegram_client", {
                                 ...lockData,
-                                acquiredAt: Date.now() // 更新获取时间，相当于续租
-                            }, lockData, 300);
+                                acquiredAt: Date.now(), // 更新获取时间，相当于续租
+                                ttl: TELEGRAM_CLIENT_LOCK_TTL_SECONDS
+                            }, lockData, TELEGRAM_CLIENT_LOCK_TTL_SECONDS);
                             if (!renewed) logWithProvider().debug("🔒 Telegram 锁续租 CAS 未命中");
                             // logWithProvider().debug(`🔒 锁续租成功`);
                         }
@@ -544,7 +546,10 @@ export class InstanceCoordinator {
                 const now = Date.now();
                 if (existing.instanceId !== this.instanceId &&
                     (now - existing.acquiredAt) < (existing.ttl * 1000)) {
-                    
+                    if (this._requiresAtomicLock(lockKey)) {
+                        return false;
+                    }
+
                     // 检查锁持有者是否真的活跃（抢占逻辑）
                     const ownerKey = `instance:${existing.instanceId}`;
                     const ownerData = await cache.get(ownerKey, "json", { skipCache: true });
@@ -631,10 +636,24 @@ export class InstanceCoordinator {
         try {
             const existing = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
             if (existing && existing.instanceId === this.instanceId) {
+                if (typeof cache.deleteIfEquals === 'function') {
+                    return await cache.deleteIfEquals(CACHE_KEYS.lock(lockKey), existing, {
+                        requireAtomic: this._requiresAtomicLock(lockKey)
+                    });
+                }
+
+                if (this._requiresAtomicLock(lockKey)) {
+                    logWithProvider().warn(`🔒 当前缓存 provider 不支持原子条件删除，拒绝释放关键锁: ${lockKey}`);
+                    return false;
+                }
+
                 await cache.delete(CACHE_KEYS.lock(lockKey));
+                return true;
             }
+            return false;
         } catch (e) {
             logWithProvider().error(`释放锁失败 ${lockKey}:`, e?.message || String(e));
+            return false;
         }
     }
 

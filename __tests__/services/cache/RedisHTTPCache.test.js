@@ -61,4 +61,18 @@ describe("RedisHTTPCache", () => {
 
     expect(result).toBe(false);
   });
+
+  test("should deleteIfEquals through EVAL", async () => {
+    mockFetchResult(1);
+    const cache = new RedisHTTPCache({ url: "https://redis.example.com", token: "token" });
+
+    const result = await cache.deleteIfEquals("lock:telegram_client", { instanceId: "one" });
+
+    expect(result).toBe(true);
+    const body = JSON.parse(global.fetch.mock.calls[0][1].body);
+    expect(body[0]).toBe("EVAL");
+    expect(body[2]).toBe("1");
+    expect(body[3]).toBe("lock:telegram_client");
+    expect(body[4]).toBe('{"instanceId":"one"}');
+  });
 });

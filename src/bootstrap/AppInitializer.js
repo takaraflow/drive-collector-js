@@ -152,16 +152,16 @@ export class AppInitializer {
         log.info("🛑 正在停止业务模块...");
         try {
             const { instanceCoordinator } = await import("../services/InstanceCoordinator.js");
-            const { telegramService } = await import("../services/telegram.js");
+            const { stopTelegramClientRuntime } = await import("../services/telegram.js");
             
+            // 停止 Telegram 服务
+            if (typeof stopTelegramClientRuntime === 'function') {
+                await stopTelegramClientRuntime('business module stop');
+            }
+
             // 停止协调器
             if (instanceCoordinator && typeof instanceCoordinator.stop === 'function') {
                 await instanceCoordinator.stop();
-            }
-            
-            // 停止 Telegram 服务
-            if (telegramService && typeof telegramService.stop === 'function') {
-                await telegramService.stop();
             }
 
             this.businessModulesRunning = false;

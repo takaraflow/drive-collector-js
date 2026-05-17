@@ -20,13 +20,13 @@ vi.mock("../../src/repositories/InstanceRepository.js", () => ({
 const fixedTime = 1700000000000;
 
 describe("Core InstanceCoordinator Tests", () => {
-    let mockCacheGet, mockCacheSet, mockCacheDelete, mockCacheListKeys, mockCacheCompareAndSet, mockSupportsAtomicCompareAndSet;
+    let mockCacheGet, mockCacheSet, mockCacheDelete, mockCacheListKeys, mockCacheCompareAndSet, mockSupportsAtomicCompareAndSet, mockCacheDeleteIfEquals;
     let originalCacheMethods = {};
     let originalLoggerMethods = {};
 
     beforeAll(() => {
         // Save original methods
-        ['get', 'set', 'delete', 'listKeys', 'getCurrentProvider', 'compareAndSet', 'supportsAtomicCompareAndSet'].forEach(m => {
+        ['get', 'set', 'delete', 'listKeys', 'getCurrentProvider', 'compareAndSet', 'supportsAtomicCompareAndSet', 'deleteIfEquals'].forEach(m => {
             originalCacheMethods[m] = cache[m];
         });
         ['info', 'error', 'warn', 'debug', 'withModule', 'withContext'].forEach(m => {
@@ -55,6 +55,7 @@ describe("Core InstanceCoordinator Tests", () => {
         mockCacheListKeys = vi.fn().mockResolvedValue([]);
         mockCacheCompareAndSet = vi.fn().mockResolvedValue(true);
         mockSupportsAtomicCompareAndSet = vi.fn().mockReturnValue(true);
+        mockCacheDeleteIfEquals = vi.fn().mockResolvedValue(true);
         
         cache.get = mockCacheGet;
         cache.set = mockCacheSet;
@@ -63,6 +64,7 @@ describe("Core InstanceCoordinator Tests", () => {
         cache.getCurrentProvider = vi.fn().mockReturnValue("cloudflare");
         cache.compareAndSet = mockCacheCompareAndSet;
         cache.supportsAtomicCompareAndSet = mockSupportsAtomicCompareAndSet;
+        cache.deleteIfEquals = mockCacheDeleteIfEquals;
 
         // Mock logger methods
         logger.info = vi.fn();
@@ -212,11 +214,28 @@ describe("Core InstanceCoordinator Tests", () => {
     test("should release lock", async () => {
         instanceCoordinator.instanceId = 'lock-instance';
         const lockKey = 'test-lock';
+        const lockValue = { instanceId: 'lock-instance' };
 
-        mockCacheGet.mockResolvedValue({ instanceId: 'lock-instance' });
+        mockCacheGet.mockResolvedValue(lockValue);
         await instanceCoordinator.releaseLock(lockKey);
 
-        expect(mockCacheDelete).toHaveBeenCalledWith(`lock:${lockKey}`);
+        expect(mockCacheDeleteIfEquals).toHaveBeenCalledWith(
+            `lock:${lockKey}`,
+            lockValue,
+            expect.objectContaining({ requireAtomic: false })
+        );
+        expect(mockCacheDelete).not.toHaveBeenCalled();
+    });
+
+    test("should not release telegram lock without atomic conditional delete", async () => {
+        instanceCoordinator.instanceId = 'lock-instance';
+        cache.deleteIfEquals = undefined;
+        mockCacheGet.mockResolvedValue({ instanceId: 'lock-instance' });
+
+        const released = await instanceCoordinator.releaseLock('telegram_client');
+
+        expect(released).toBe(false);
+        expect(mockCacheDelete).not.toHaveBeenCalled();
     });
 
     test("should verify lock ownership", async () => {
@@ -277,7 +296,25 @@ describe("Core InstanceCoordinator Tests", () => {
                 instanceId: 'leader-instance',
                 acquiredAt: fixedTime
             }),
-            expect.objectContaining({ ifEquals: currentLock, ttl: 300 })
+            expect.objectContaining({ ifEquals: currentLock, ttl: 90 })
+        );
+    });
+
+    test("should not preempt a live telegram lock just because owner heartbeat is missing", async () => {
+        instanceCoordinator.instanceId = 'standby-instance';
+        mockCacheGet.mockResolvedValue({
+            instanceId: 'leader-instance',
+            acquiredAt: fixedTime,
+            ttl: 90
+        });
+
+        const acquired = await instanceCoordinator.acquireLock('telegram_client', 90, { maxAttempts: 1 });
+
+        expect(acquired).toBe(false);
+        expect(mockCacheCompareAndSet).not.toHaveBeenCalledWith(
+            'lock:telegram_client',
+            expect.objectContaining({ instanceId: 'standby-instance' }),
+            expect.objectContaining({ ifEquals: expect.anything() })
         );
     });
 

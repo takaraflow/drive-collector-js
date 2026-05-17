@@ -407,12 +407,13 @@ class CacheService {
      */
     async get(key, type = "json", options = {}) {
         await this._ensureInitialized();
+        const skipL1 = options.skipL1 || options.skipCache;
 
         // Update stats
         this.stats.totalRequests++;
 
         // 1. Bloom Filter Check (Penetration Protection)
-        if (this.bloomFilterEnabled && this.bloomFilter) {
+        if (!skipL1 && this.bloomFilterEnabled && this.bloomFilter) {
             if (!this.bloomFilter.mightContain(key)) {
                 // Definitely not in cache, skip all checks
                 this.stats.misses++;
@@ -421,7 +422,7 @@ class CacheService {
         }
 
         // 2. L1 Cache Check (LocalCache)
-        if (!options.skipL1) {
+        if (!skipL1) {
             const l1Value = localCache.get(key);
             if (l1Value !== null && l1Value !== undefined) {
                 this.stats.hits.l1++;
@@ -440,9 +441,11 @@ class CacheService {
             
             if (value !== null && value !== undefined) {
                 // Populate L1
-                const strategy = this._getCacheStrategy(key, options.strategy);
-                const ttl = options.l1Ttl || strategy.l1Ttl;
-                localCache.set(key, value, ttl);
+                if (!skipL1) {
+                    const strategy = this._getCacheStrategy(key, options.strategy);
+                    const ttl = options.l1Ttl || strategy.l1Ttl;
+                    localCache.set(key, value, ttl);
+                }
                 this.stats.hits.l2++;
                 return value;
             }
@@ -456,8 +459,10 @@ class CacheService {
                         const strategy = this._getCacheStrategy(key, options.strategy);
                         await this.primaryProvider.set(key, l3Value, strategy.l2Ttl);
                     }
-                    const strategy = this._getCacheStrategy(key, options.strategy);
-                    localCache.set(key, l3Value, strategy.l1Ttl);
+                    if (!skipL1) {
+                        const strategy = this._getCacheStrategy(key, options.strategy);
+                        localCache.set(key, l3Value, strategy.l1Ttl);
+                    }
                     this.stats.hits.l3++;
                     return l3Value;
                 }
@@ -466,7 +471,7 @@ class CacheService {
             this.stats.misses++;
             
             // Add to bloom filter if enabled
-            if (this.bloomFilterEnabled && this.bloomFilter) {
+            if (!skipL1 && this.bloomFilterEnabled && this.bloomFilter) {
                 this.bloomFilter.add(key);
             }
             
@@ -523,6 +528,7 @@ class CacheService {
      */
     async set(key, value, ttl = null, options = {}) {
         await this._ensureInitialized();
+        const skipL1 = options.skipL1 || options.skipCache;
 
         // Get cache strategy
         const strategy = this._getCacheStrategy(key, options.strategy);
@@ -539,7 +545,7 @@ class CacheService {
 
         // 1. Update L1 (LocalCache)
         // Convert seconds to ms for LocalCache
-        if (!options.skipL1) {
+        if (!skipL1) {
             const l1Ttl = options.l1Ttl || strategy.l1Ttl;
             localCache.set(key, value, l1Ttl);
         }
@@ -648,7 +654,7 @@ class CacheService {
         // For distributed systems, we need to use provider's atomic operations
         if (!this.primaryProvider || this.currentProviderName === 'MemoryCache') {
             // Fallback to non-atomic operation for memory-only mode
-            const current = await this.get(key, 'json');
+            const current = await this.get(key, 'json', { skipL1: true });
             
             if (ifNotExists && current !== null) {
                 return false;
@@ -658,14 +664,19 @@ class CacheService {
                 return false;
             }
             
-            await this.set(key, value, options.ttl || 3600, { skipL1: false });
+            await this.set(key, value, options.ttl || 3600, { skipL1: true, skipTtlRandomization: true });
+            localCache.del(key);
             return true;
         }
 
         try {
             // Check if provider supports atomic operations
             if (typeof this.primaryProvider.compareAndSet === 'function') {
-                return await this.primaryProvider.compareAndSet(key, value, options);
+                const success = await this.primaryProvider.compareAndSet(key, value, options);
+                if (success) {
+                    localCache.del(key);
+                }
+                return success;
             }
 
             // ⚠️ WARNING: Non-atomic fallback - potential race condition
@@ -691,13 +702,63 @@ class CacheService {
             const success = await this.primaryProvider.set(key, value, options.ttl || 3600);
             
             if (success) {
-                // Update L1
-                localCache.set(key, value, this.l1Ttl);
+                localCache.del(key);
             }
             
             return success;
         } catch (error) {
             log.error(`CompareAndSet error: ${error.message}`);
+            await this._handleProviderFailure(error);
+            return false;
+        }
+    }
+
+    /**
+     * Atomically delete a key only when its current value matches the expected value.
+     * Used for distributed lock release paths where get-then-delete can remove a new owner.
+     * @param {string} key - Cache key
+     * @param {*} expectedValue - Value that must currently be stored for delete to succeed
+     * @returns {Promise<boolean>} - True when the key was deleted
+     */
+    async deleteIfEquals(key, expectedValue, options = {}) {
+        await this._ensureInitialized();
+        localCache.del(key);
+        const requireAtomic = options.requireAtomic === true;
+
+        if (!this.primaryProvider || this.currentProviderName === 'MemoryCache') {
+            if (requireAtomic) {
+                this._warnAboutAtomicity('deleteIfEquals');
+                return false;
+            }
+            const current = await this.get(key, 'json', { skipL1: true });
+            if (JSON.stringify(current) !== JSON.stringify(expectedValue)) {
+                return false;
+            }
+            await this.delete(key);
+            return true;
+        }
+
+        try {
+            if (typeof this.primaryProvider.deleteIfEquals === 'function') {
+                const deleted = await this.primaryProvider.deleteIfEquals(key, expectedValue);
+                localCache.del(key);
+                return deleted;
+            }
+
+            this._warnAboutAtomicity('deleteIfEquals');
+            if (requireAtomic) {
+                return false;
+            }
+
+            const current = await this.primaryProvider.get(key, 'json');
+            if (JSON.stringify(current) !== JSON.stringify(expectedValue)) {
+                return false;
+            }
+            const deleted = await this.primaryProvider.delete(key);
+            localCache.del(key);
+            return deleted;
+        } catch (error) {
+            log.error(`DeleteIfEquals error: ${error.message}`);
             await this._handleProviderFailure(error);
             return false;
         }

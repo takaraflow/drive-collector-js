@@ -347,4 +347,19 @@ describe("RedisCache", () => {
     const evalCall = globalMocks.redisClient.eval.mock.calls[0];
     expect(evalCall[4]).toBe(7200); // custom ttl
   });
+
+  test("should deleteIfEquals through EVAL", async () => {
+    globalMocks.redisClient.eval.mockResolvedValueOnce(1);
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    const result = await cache.deleteIfEquals("lock:telegram_client", { instanceId: "one" });
+
+    expect(result).toBe(true);
+    const evalCall = globalMocks.redisClient.eval.mock.calls[0];
+    expect(evalCall[1]).toBe(1);
+    expect(evalCall[2]).toBe("lock:telegram_client");
+    expect(evalCall[3]).toBe('{"instanceId":"one"}');
+  });
 });

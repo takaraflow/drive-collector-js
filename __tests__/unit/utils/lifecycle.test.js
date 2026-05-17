@@ -24,8 +24,7 @@ vi.mock('../../../src/services/CacheService.js', () => ({
 }));
 
 vi.mock('../../../src/services/telegram.js', () => ({
-    stopWatchdog: vi.fn(),
-    client: { connected: true, disconnect: vi.fn() },
+    stopTelegramClientRuntime: vi.fn(),
 }));
 
 vi.mock('../../../src/repositories/TaskRepository.js', () => ({
@@ -171,8 +170,8 @@ describe('lifecycle utilities', () => {
             const expectedHooks = [
                 ['logger-flush-before', 5],
                 ['http-server', 10],
-                ['instance-coordinator', 20],
-                ['telegram-client', 30],
+                ['telegram-client', 20],
+                ['instance-coordinator', 30],
                 ['media-group-buffer-persist', 35],
                 ['task-repository', 40],
                 ['distributed-lock', 45],
@@ -187,6 +186,26 @@ describe('lifecycle utilities', () => {
                 expect(hook).toBeDefined();
                 expect(hook[1]).toBe(priority);
             }
+        });
+
+        it('should stop Telegram before the instance coordinator to keep the lock lease covering disconnect', async () => {
+            await registerShutdownHooks();
+            const hooks = gracefulShutdown.register.mock.calls;
+            const telegramHook = hooks.find(call => call[2] === 'telegram-client');
+            const instanceHook = hooks.find(call => call[2] === 'instance-coordinator');
+
+            expect(telegramHook[1]).toBeLessThan(instanceHook[1]);
+
+            const { stopTelegramClientRuntime } = await import('../../../src/services/telegram.js');
+            const { instanceCoordinator } = await import('../../../src/services/InstanceCoordinator.js');
+            const calls = [];
+            stopTelegramClientRuntime.mockImplementation(async () => calls.push('telegram'));
+            instanceCoordinator.stop.mockImplementation(async () => calls.push('coordinator'));
+
+            await telegramHook[0]();
+            await instanceHook[0]();
+
+            expect(calls).toEqual(['telegram', 'coordinator']);
         });
 
         it('should correctly evaluate the task counter', async () => {
@@ -273,25 +292,15 @@ it('should handle mediaGroupBuffer persist error gracefully', async () => {
             expect(mockLogger.error).toHaveBeenCalledWith('❌ MediaGroupBuffer 持久化失败:', expect.any(Error));
         });
 
-        it('should handle telegram client disconnect gracefully when client is not connected or null', async () => {
+        it('should stop telegram runtime through the centralized shutdown API', async () => {
             const telegramModule = await import("../../../src/services/telegram.js");
-            // First case: client is null
-            telegramModule.client = null;
-
             await registerShutdownHooks();
             const hooks = gracefulShutdown.register.mock.calls;
             const telegramClientHook = hooks.find(call => call[2] === 'telegram-client');
 
             await telegramClientHook[0]();
-            // Should not throw
 
-            // Second case: client is not connected
-            telegramModule.client = { connected: false, disconnect: vi.fn() };
-            await telegramClientHook[0]();
-            expect(telegramModule.client.disconnect).not.toHaveBeenCalled();
-
-            // Restore
-            telegramModule.client = { connected: true, disconnect: vi.fn() };
+            expect(telegramModule.stopTelegramClientRuntime).toHaveBeenCalledWith('graceful shutdown');
         });
 
         it('should handle distributedLock shutdown gracefully when null', async () => {

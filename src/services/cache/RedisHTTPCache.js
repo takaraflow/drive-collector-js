@@ -296,6 +296,29 @@ class RedisHTTPCache extends BaseCache {
     }
 
     /**
+     * Atomically delete a key only when the stored value equals the expected value.
+     * @param {string} key - The cache key
+     * @param {*} expectedValue - Expected current value
+     * @returns {Promise<boolean>} - True when deleted
+     */
+    async deleteIfEquals(key, expectedValue) {
+        try {
+            const expected = typeof expectedValue === 'string' ? expectedValue : JSON.stringify(expectedValue);
+            const luaScript = `
+                if redis.call('get', KEYS[1]) == ARGV[1] then
+                    return redis.call('del', KEYS[1])
+                end
+                return 0
+            `;
+
+            const result = await this._sendCommand(['EVAL', luaScript, '1', key, expected]);
+            return result === 1;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    /**
      * List keys with optional prefix filter
      * @param {string} prefix - Key prefix filter
      * @returns {Promise<string[]>} - Array of keys

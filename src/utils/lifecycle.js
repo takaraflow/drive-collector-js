@@ -27,7 +27,7 @@ async function closeHttpServer() {
 export async function registerShutdownHooks() {
     const { instanceCoordinator } = await import("../services/InstanceCoordinator.js");
     const { cache } = await import("../services/CacheService.js");
-    const { stopWatchdog, client } = await import("../services/telegram.js");
+    const { stopTelegramClientRuntime } = await import("../services/telegram.js");
     const { TaskRepository } = await import("../repositories/TaskRepository.js");
     const { TaskManager } = await import("../processor/TaskManager.js");
     const { flushLogBuffer } = await import("../services/logger/index.js");
@@ -72,20 +72,17 @@ export async function registerShutdownHooks() {
         await closeHttpServer();
     }, 10, 'http-server');
 
-    // 2. 停止实例协调器 (priority: 20)
+    // 2. 停止 Telegram 看门狗和客户端；锁必须覆盖客户端仍在线的整个窗口
+    gracefulShutdown.register(async () => {
+        await stopTelegramClientRuntime('graceful shutdown');
+        log.info('✅ Telegram 客户端已断开');
+    }, 20, 'telegram-client');
+
+    // 3. 停止实例协调器 (priority: 30)
     gracefulShutdown.register(async () => {
         await instanceCoordinator.stop();
         log.info('✅ InstanceCoordinator 已停止');
-    }, 20, 'instance-coordinator');
-
-    // 3. 停止 Telegram 看门狗和客户端 (priority: 30)
-    gracefulShutdown.register(async () => {
-        stopWatchdog();
-        if (client && client.connected) {
-            await client.disconnect();
-            log.info('✅ Telegram 客户端已断开');
-        }
-    }, 30, 'telegram-client');
+    }, 30, 'instance-coordinator');
 
     // 4. 持久化 MediaGroupBuffer (priority: 35)
     gracefulShutdown.register(async () => {

@@ -172,6 +172,142 @@ describe("CacheService L1/L2 Interaction Tests", () => {
             expect(result).toEqual({ data: "l2-value" });
         });
 
+        test("skipCache option bypasses L1 and does not repopulate it", async () => {
+            localCache.set("lock:telegram_client", { instanceId: "stale" }, 10000);
+
+            const mockProvider = {
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'mock-provider'),
+                get: vi.fn().mockResolvedValue({ instanceId: "fresh" }),
+                set: vi.fn(),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'mock-provider' }))
+            };
+
+            service = new CacheService({ env: {} });
+            await service.initialize();
+            service.primaryProvider = mockProvider;
+            service.currentProviderName = 'mock-provider';
+
+            const result = await service.get("lock:telegram_client", "json", { skipCache: true });
+
+            expect(result).toEqual({ instanceId: "fresh" });
+            expect(mockProvider.get).toHaveBeenCalledWith("lock:telegram_client", "json");
+            expect(localCache.get("lock:telegram_client")).toEqual({ instanceId: "stale" });
+        });
+
+        test("skipCache option bypasses bloom filter misses for authoritative lock reads", async () => {
+            const mockProvider = {
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'mock-provider'),
+                get: vi.fn().mockResolvedValue({ instanceId: "fresh" }),
+                set: vi.fn(),
+                delete: vi.fn(),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'mock-provider' }))
+            };
+
+            service = new CacheService({ env: {} });
+            await service.initialize();
+            service.primaryProvider = mockProvider;
+            service.currentProviderName = 'mock-provider';
+            service.bloomFilterEnabled = true;
+            service.bloomFilter = {
+                mightContain: vi.fn(() => false),
+                add: vi.fn()
+            };
+
+            const result = await service.get("lock:telegram_client", "json", { skipCache: true });
+
+            expect(result).toEqual({ instanceId: "fresh" });
+            expect(service.bloomFilter.mightContain).not.toHaveBeenCalled();
+            expect(mockProvider.get).toHaveBeenCalledWith("lock:telegram_client", "json");
+        });
+
+        test("compareAndSet invalidates L1 after native CAS succeeds", async () => {
+            localCache.set("lock:telegram_client", { instanceId: "stale" }, 10000);
+
+            const mockProvider = {
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'mock-provider'),
+                get: vi.fn(),
+                set: vi.fn(),
+                delete: vi.fn(),
+                compareAndSet: vi.fn().mockResolvedValue(true),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'mock-provider' }))
+            };
+
+            service = new CacheService({ env: {} });
+            await service.initialize();
+            service.primaryProvider = mockProvider;
+            service.currentProviderName = 'mock-provider';
+
+            const result = await service.compareAndSet(
+                "lock:telegram_client",
+                { instanceId: "fresh" },
+                { ifNotExists: true, ttl: 90 }
+            );
+
+            expect(result).toBe(true);
+            expect(localCache.get("lock:telegram_client")).toBeNull();
+        });
+
+        test("deleteIfEquals delegates atomic provider delete and clears L1", async () => {
+            localCache.set("lock:telegram_client", { instanceId: "stale" }, 10000);
+
+            const mockProvider = {
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'mock-provider'),
+                get: vi.fn(),
+                set: vi.fn(),
+                delete: vi.fn(),
+                deleteIfEquals: vi.fn().mockResolvedValue(true),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'mock-provider' }))
+            };
+
+            service = new CacheService({ env: {} });
+            await service.initialize();
+            service.primaryProvider = mockProvider;
+            service.currentProviderName = 'mock-provider';
+
+            const expected = { instanceId: "leader" };
+            const deleted = await service.deleteIfEquals("lock:telegram_client", expected);
+
+            expect(deleted).toBe(true);
+            expect(mockProvider.deleteIfEquals).toHaveBeenCalledWith("lock:telegram_client", expected);
+            expect(localCache.get("lock:telegram_client")).toBeNull();
+        });
+
+        test("deleteIfEquals returns false when atomic delete is required but provider lacks it", async () => {
+            const mockProvider = {
+                initialize: vi.fn(),
+                getProviderName: vi.fn(() => 'mock-provider'),
+                get: vi.fn().mockResolvedValue({ instanceId: "leader" }),
+                set: vi.fn(),
+                delete: vi.fn().mockResolvedValue(true),
+                disconnect: vi.fn(),
+                getConnectionInfo: vi.fn(() => ({ provider: 'mock-provider' }))
+            };
+
+            service = new CacheService({ env: {} });
+            await service.initialize();
+            service.primaryProvider = mockProvider;
+            service.currentProviderName = 'mock-provider';
+
+            const deleted = await service.deleteIfEquals(
+                "lock:telegram_client",
+                { instanceId: "leader" },
+                { requireAtomic: true }
+            );
+
+            expect(deleted).toBe(false);
+            expect(mockProvider.get).not.toHaveBeenCalled();
+            expect(mockProvider.delete).not.toHaveBeenCalled();
+        });
+
         test("L2 write should also update L1 (write-through to L1)", async () => {
             // Create a mock provider
             const mockProvider = {

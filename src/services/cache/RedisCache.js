@@ -428,6 +428,30 @@ class RedisCache extends BaseCache {
     }
 
     /**
+     * Atomically delete a key only when the stored value equals the expected value.
+     * @param {string} key - The cache key
+     * @param {*} expectedValue - Expected current value
+     * @returns {Promise<boolean>} - True when deleted
+     */
+    async deleteIfEquals(key, expectedValue) {
+        try {
+            const expected = typeof expectedValue === 'object' ? JSON.stringify(expectedValue) : String(expectedValue);
+            const luaScript = `
+                if redis.call('get', KEYS[1]) == ARGV[1] then
+                    return redis.call('del', KEYS[1])
+                end
+                return 0
+            `;
+
+            const result = await this.client.eval(luaScript, 1, key, expected);
+            return result === 1;
+        } catch (error) {
+            this.log.error(`DeleteIfEquals error: ${error.message}`);
+            throw error;
+        }
+    }
+
+    /**
      * Cleanup resources
      * @returns {Promise<void>}
      */
