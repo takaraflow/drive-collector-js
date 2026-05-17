@@ -56,6 +56,26 @@ describe("Config Module", () => {
     expect(CACHE_TTL).toBe(10 * 60 * 1000);
   });
 
+  test("should default message slow response warning threshold to 2000ms", async () => {
+    delete process.env.MESSAGE_SLOW_WARN_THRESHOLD_MS;
+
+    __resetConfigForTests();
+    const config = await initConfig();
+
+    expect(config.performance.messageSlowWarnThresholdMs).toBe(2000);
+  });
+
+  test("should allow message slow response warning threshold override", async () => {
+    process.env.MESSAGE_SLOW_WARN_THRESHOLD_MS = "3500";
+
+    __resetConfigForTests();
+    const config = await initConfig();
+
+    expect(config.performance.messageSlowWarnThresholdMs).toBe(3500);
+
+    delete process.env.MESSAGE_SLOW_WARN_THRESHOLD_MS;
+  });
+
   test("should respect REDIS_TLS_ENABLED=false to override rediss://", async () => {
     // Test case 1: rediss:// URL with TLS disabled
     process.env.NF_REDIS_URL = "rediss://user:pass@redis.example.com:6379";

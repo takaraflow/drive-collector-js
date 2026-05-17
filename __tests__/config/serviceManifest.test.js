@@ -41,6 +41,7 @@ describe('ServiceConfigManager 测试', () => {
         expect(serviceConfigManager.getServiceName('NEW_RELIC_LICENSE_KEY')).toBe('logger');
         expect(serviceConfigManager.getServiceName('OTEL_TRACES_SAMPLER')).toBe('logger');
         expect(serviceConfigManager.getServiceName('LOG_LEVEL')).toBe('logger');
+        expect(serviceConfigManager.getServiceName('MESSAGE_SLOW_WARN_THRESHOLD_MS')).toBe('logger');
         expect(serviceConfigManager.getServiceName('DB_AUTO_MIGRATE')).toBe('d1');
         expect(serviceConfigManager.getServiceName('UNKNOWN_KEY')).toBeUndefined();
     });
@@ -53,6 +54,7 @@ describe('ServiceConfigManager 测试', () => {
             { key: 'API_ID', oldValue: '123', newValue: '456' },
             { key: 'QSTASH_TOKEN', oldValue: undefined, newValue: 'token' },
             { key: 'LOG_LEVEL', oldValue: 'info', newValue: 'warn' },
+            { key: 'MESSAGE_SLOW_WARN_THRESHOLD_MS', oldValue: '2000', newValue: '3500' },
             { key: 'UNKNOWN_KEY', oldValue: 'old', newValue: 'new' }
         ];
         

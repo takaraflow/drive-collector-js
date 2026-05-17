@@ -8,6 +8,15 @@ const log = logger.withModule('MessageHandler');
 
 // 创建带 perf 上下文的 logger 用于性能日志
 const logPerf = () => log.withContext({ perf: true });
+const DEFAULT_SLOW_WARN_THRESHOLD_MS = 2000;
+
+function getMessageSlowWarnThresholdMs() {
+    try {
+        return getConfig().performance?.messageSlowWarnThresholdMs || DEFAULT_SLOW_WARN_THRESHOLD_MS;
+    } catch {
+        return DEFAULT_SLOW_WARN_THRESHOLD_MS;
+    }
+}
 
 // LRU 缓存实现 - 带容量限制和 TTL
 class LRUCache {
@@ -303,8 +312,14 @@ export class MessageHandler {
             logPerf().debug(`消息 ${msgIdentifier} 分发完成，总耗时 ${totalTime}ms (dispatch: ${dispatchTime}ms)`);
         }
 
-        if (totalTime > 500) {
-            logPerf().warn(`慢响应警告: 消息处理耗时 ${totalTime}ms，超过阈值 500ms`);
+        const slowWarnThresholdMs = getMessageSlowWarnThresholdMs();
+        if (totalTime > slowWarnThresholdMs) {
+            logPerf().warn(`慢响应警告: 消息处理耗时 ${totalTime}ms，超过阈值 ${slowWarnThresholdMs}ms`, {
+                msgId: msgIdentifier,
+                totalTimeMs: totalTime,
+                dispatchTimeMs: dispatchTime,
+                thresholdMs: slowWarnThresholdMs
+            });
         }
     }
 

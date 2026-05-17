@@ -122,7 +122,8 @@
         "OTEL_SERVICE_NAME",
         "OTEL_RESOURCE_ATTRIBUTES",
         "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
-        "LOG_LEVEL"
+        "LOG_LEVEL",
+        "MESSAGE_SLOW_WARN_THRESHOLD_MS"
       ],
       "reinitializationStrategy": {
         "type": "reconfigure",

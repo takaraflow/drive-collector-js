@@ -7,7 +7,10 @@ await vi.doMock('../../src/config/index.js', () => ({
         ownerId: null  // 默认无 owner，确保测试可预测
     },
     getConfig: () => ({
-        ownerId: null
+        ownerId: null,
+        performance: {
+            messageSlowWarnThresholdMs: Number(process.env.MESSAGE_SLOW_WARN_THRESHOLD_MS || 2000)
+        }
     })
 }));
 
@@ -66,6 +69,7 @@ describe('MessageHandler Integration Tests', () => {
         vi.clearAllMocks();
         // 重置静态属性
         MessageHandler.botId = null;
+        delete process.env.MESSAGE_SLOW_WARN_THRESHOLD_MS;
 
         mockClient = {
             session: { save: () => 'mock_session' },
@@ -293,6 +297,72 @@ describe('MessageHandler Integration Tests', () => {
             expect(logger.debug).toHaveBeenCalledWith(
                 expect.stringContaining('[UpdateConnectionState:stateNum_999]')
             );
+        });
+    });
+
+    describe('Slow Response Logging', () => {
+        it('should not warn for normal Telegram latency under the default threshold', async () => {
+            instanceCoordinator.acquireLock.mockResolvedValue(true);
+            const nowSpy = vi.spyOn(Date, 'now')
+                .mockReturnValueOnce(1_000)
+                .mockReturnValueOnce(1_000)
+                .mockReturnValueOnce(1_000)
+                .mockReturnValueOnce(1_020)
+                .mockReturnValueOnce(1_020)
+                .mockReturnValueOnce(1_020)
+                .mockReturnValueOnce(1_040)
+                .mockReturnValue(2_500);
+
+            const event = {
+                className: 'UpdateNewMessage',
+                message: {
+                    id: 501,
+                    out: false,
+                    senderId: 999
+                }
+            };
+
+            await MessageHandler.handleEvent(event, mockClient);
+
+            expect(Dispatcher.handle).toHaveBeenCalledWith(event);
+            expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('慢响应警告'), expect.anything());
+            nowSpy.mockRestore();
+        });
+
+        it('should warn with structured context when message handling exceeds the configured threshold', async () => {
+            process.env.MESSAGE_SLOW_WARN_THRESHOLD_MS = '1000';
+            instanceCoordinator.acquireLock.mockResolvedValue(true);
+            const nowSpy = vi.spyOn(Date, 'now')
+                .mockReturnValueOnce(10_000)
+                .mockReturnValueOnce(10_000)
+                .mockReturnValueOnce(10_000)
+                .mockReturnValueOnce(10_020)
+                .mockReturnValueOnce(10_020)
+                .mockReturnValueOnce(10_020)
+                .mockReturnValueOnce(10_040)
+                .mockReturnValue(11_500);
+
+            const event = {
+                className: 'UpdateNewMessage',
+                message: {
+                    id: 502,
+                    out: false,
+                    senderId: 999
+                }
+            };
+
+            await MessageHandler.handleEvent(event, mockClient);
+
+            expect(logger.warn).toHaveBeenCalledWith(
+                expect.stringContaining('超过阈值 1000ms'),
+                expect.objectContaining({
+                    msgId: 502,
+                    totalTimeMs: 1500,
+                    dispatchTimeMs: 20,
+                    thresholdMs: 1000
+                })
+            );
+            nowSpy.mockRestore();
         });
     });
 });

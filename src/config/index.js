@@ -68,6 +68,11 @@ function parseOptionalInt(value) {
     return Number.isNaN(parsed) ? null : parsed;
 }
 
+function parsePositiveInt(value, fallback) {
+    const parsed = parseOptionalInt(value);
+    return parsed && parsed > 0 ? parsed : fallback;
+}
+
 export const CACHE_TTL = 10 * 60 * 1000;
 
 function loadManifestEnvKeys() {
@@ -411,6 +416,9 @@ function buildConfigObject(env) {
         port: env.PORT || "3000",
         nodeEnv: env.NODE_ENV || "dev",
         callerTrackingMode: env.CALLER_TRACKING_MODE || "none",
+        performance: {
+            messageSlowWarnThresholdMs: parsePositiveInt(env.MESSAGE_SLOW_WARN_THRESHOLD_MS, 2000)
+        },
         database: {
             schemaCheck: env.DB_SCHEMA_CHECK !== 'false',
             autoMigrate: env.DB_AUTO_MIGRATE === 'true',

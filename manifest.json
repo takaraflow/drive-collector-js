@@ -762,6 +762,11 @@
         ],
         "description": "Global application log level. Defaults to info in prod/production and debug otherwise."
       },
+      "MESSAGE_SLOW_WARN_THRESHOLD_MS": {
+        "type": "number",
+        "required": false,
+        "description": "Warn threshold in milliseconds for Telegram message handling latency. Defaults to 2000."
+      },
       "CLOUDFLARE_D1_ACCOUNT_ID": {
         "type": "string",
         "required": false,
