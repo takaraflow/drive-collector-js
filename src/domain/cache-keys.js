@@ -7,7 +7,10 @@ export const CACHE_KEYS = Object.freeze({
         instance: 'instance:',
         drive: 'drive:',
         config: 'config:',
-        queueDlq: 'queue:dlq:'
+        queueDlq: 'queue:dlq:',
+        streamOwner: 'stream:owner:',
+        streamProgress: 'stream:progress:',
+        streamFinalization: 'stream:final:'
     }),
 
     setting: key => `setting:${key}`,
@@ -31,5 +34,9 @@ export const CACHE_KEYS = Object.freeze({
     taskLockPattern: () => 'lock:task:*',
 
     queueDlq: dlqId => `queue:dlq:${dlqId}`,
-    queueDlqPrefix: () => 'queue:dlq:'
+    queueDlqPrefix: () => 'queue:dlq:',
+
+    streamOwner: taskId => `stream:owner:${taskId}`,
+    streamProgress: taskId => `stream:progress:${taskId}`,
+    streamFinalization: taskId => `stream:final:${taskId}`
 });

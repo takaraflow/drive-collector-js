@@ -114,6 +114,8 @@ vi.mock("../../src/services/QueueService.js", () => ({
 }));
 
 const mockStreamTransferService = {
+    registerStreamOwner: vi.fn(),
+    clearStreamOwner: vi.fn(),
     resumeTask: vi.fn(),
     resetTask: vi.fn(),
     forwardChunk: vi.fn(),
@@ -161,6 +163,14 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         mockStreamTransferService.resetTask.mockReset();
         mockStreamTransferService.forwardChunk.mockReset();
         mockStreamTransferService.waitForFinalization.mockReset();
+        mockStreamTransferService.registerStreamOwner.mockReset();
+        mockStreamTransferService.clearStreamOwner.mockReset();
+        mockStreamTransferService.registerStreamOwner.mockResolvedValue({
+            taskId: "task_1",
+            instanceId: "worker-1",
+            url: "https://worker.example.com"
+        });
+        mockStreamTransferService.clearStreamOwner.mockResolvedValue();
         mockTunnelService.getPublicUrl.mockResolvedValue("https://leader.example.com");
         mockInstanceCoordinator.getActiveInstances.mockResolvedValue([]);
 
@@ -424,14 +434,32 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
             expect.any(Buffer),
             expect.objectContaining({
                 targetUrl: "https://worker.example.com",
+                ownerInstanceId: "worker-1",
                 streamMode: "resumable",
                 isLast: true
             })
+        );
+        expect(mockStreamTransferService.registerStreamOwner).toHaveBeenCalledWith(
+            "task_1",
+            expect.objectContaining({
+                instanceId: "worker-1",
+                url: "https://worker.example.com",
+                registeredBy: "current-instance"
+            })
+        );
+        expect(mockStreamTransferService.resumeTask).toHaveBeenCalledWith(
+            "task_1",
+            expect.objectContaining({
+                ownerInstanceId: "worker-1"
+            }),
+            "https://worker.example.com"
         );
         expect(mockStreamTransferService.waitForFinalization).toHaveBeenCalledWith(
             "task_1",
             { targetUrl: "https://worker.example.com" }
         );
+        expect(mockStreamTransferService.clearStreamOwner).toHaveBeenCalledWith("task_1");
+        expect(mockStreamTransferService.resetTask).not.toHaveBeenCalled();
         expect(mockClient.downloadMedia).not.toHaveBeenCalled();
         expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
 
@@ -473,7 +501,11 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
 
         await TaskManager.downloadTask(task);
 
-        expect(mockStreamTransferService.resetTask).toHaveBeenCalledWith("task_1", "https://worker.example.com");
+        expect(mockStreamTransferService.resetTask).toHaveBeenCalledWith(
+            "task_1",
+            "https://worker.example.com",
+            { ownerInstanceId: "worker-1" }
+        );
         expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
             "task_1",
             "reset_stream_download",

@@ -5,9 +5,10 @@ import { instanceCoordinator } from "./InstanceCoordinator.js";
 import { escapeHTML } from "../utils/common.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
 import { TelegramBotApi } from "../utils/telegramBotApi.js";
-import { CacheService } from "./CacheService.js";
+import { cache } from "./CacheService.js";
 import { resolveInstanceBaseUrl } from "../utils/instanceUrl.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
+import { CACHE_KEYS } from "../domain/cache-keys.js";
 import { once } from "events";
 import fs from "fs";
 import os from "os";
@@ -18,6 +19,7 @@ const getStreamConfig = () => getConfig().streamForwarding;
 const DEFAULT_STREAM_CHUNK_SIZE = 512 * 1024;
 const DEFAULT_FINALIZATION_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_FINALIZATION_POLL_MS = 3000;
+const DEFAULT_STREAM_OWNER_TTL_SECONDS = 6 * 60 * 60;
 
 function hasValidInstanceSecret(headerSecret, configuredSecret) {
     if (typeof headerSecret !== 'string' || typeof configuredSecret !== 'string') {
@@ -297,7 +299,7 @@ class StreamTransferService {
 
     async _saveFinalizationStatus(taskId, status) {
         try {
-            await CacheService.set(`stream:final:${taskId}`, {
+            await cache.set(CACHE_KEYS.streamFinalization(taskId), {
                 taskId,
                 ...status,
                 timestamp: Date.now()
@@ -309,7 +311,7 @@ class StreamTransferService {
 
     async _loadFinalizationStatus(taskId) {
         try {
-            return await CacheService.get(`stream:final:${taskId}`);
+            return await cache.get(CACHE_KEYS.streamFinalization(taskId));
         } catch (error) {
             log.warn(`Failed to load finalization status for ${taskId}:`, error.message);
             return null;
@@ -318,7 +320,7 @@ class StreamTransferService {
 
     async _clearFinalizationStatus(taskId) {
         try {
-            await CacheService.delete(`stream:final:${taskId}`);
+            await cache.delete(CACHE_KEYS.streamFinalization(taskId));
         } catch (error) {
             log.warn(`Failed to clear finalization status for ${taskId}:`, error.message);
         }
@@ -415,6 +417,9 @@ class StreamTransferService {
         if (!workerUrl) {
             throw new Error("No target URL available (neither targetUrl nor STREAM_LB_URL configured)");
         }
+        if (!metadata.ownerInstanceId) {
+            throw new Error(`Stream owner instance is required for task ${taskId}`);
+        }
 
         // 检查重试次数
         const retryKey = `${taskId}:${chunkIndex}`;
@@ -446,7 +451,8 @@ class StreamTransferService {
                     'x-stream-mode': metadata.streamMode || 'live',
                     'x-chunk-size': String(metadata.chunkSize || DEFAULT_STREAM_CHUNK_SIZE),
                     'x-task-claimed-by': metadata.claimedBy || '',
-                    'x-task-claim-lease-id': metadata.claimLeaseId || ''
+                    'x-task-claim-lease-id': metadata.claimLeaseId || '',
+                    'x-stream-owner-instance-id': metadata.ownerInstanceId || ''
                 },
                 body: chunk,
                 signal: AbortSignal.timeout(30000)
@@ -525,6 +531,12 @@ class StreamTransferService {
 
         const metadata = this._extractChunkMetadata(req.headers);
         return await this._withTaskLock(taskId, async () => {
+            const ownerCheck = await this._validateLocalStreamOwner(taskId, metadata.ownerInstanceId);
+            if (!ownerCheck.success) {
+                for await (const _ of req) {}
+                return ownerCheck;
+            }
+
             metadata.leaderUrl = await this._resolveLeaderUrl(metadata.leaderUrl, metadata.sourceInstanceId);
 
             if (metadata.streamMode === 'resumable') {
@@ -621,8 +633,101 @@ class StreamTransferService {
             streamMode: headers['x-stream-mode'] || 'live',
             chunkSize: parseInt(headers['x-chunk-size']) || DEFAULT_STREAM_CHUNK_SIZE,
             claimedBy: headers['x-task-claimed-by'] || null,
-            claimLeaseId: headers['x-task-claim-lease-id'] || null
+            claimLeaseId: headers['x-task-claim-lease-id'] || null,
+            ownerInstanceId: headers['x-stream-owner-instance-id'] || null
         };
+    }
+
+    async registerStreamOwner(taskId, owner) {
+        if (!owner?.instanceId) {
+            throw new Error(`Stream owner is required for task ${taskId}`);
+        }
+
+        const ownerRecord = {
+            taskId,
+            instanceId: owner.instanceId,
+            url: owner.url || null,
+            registeredBy: owner.registeredBy || instanceCoordinator.instanceId || null,
+            registeredAt: Date.now()
+        };
+
+        await cache.set(
+            CACHE_KEYS.streamOwner(taskId),
+            ownerRecord,
+            owner.ttlSeconds || DEFAULT_STREAM_OWNER_TTL_SECONDS
+        );
+
+        return ownerRecord;
+    }
+
+    async getStreamOwner(taskId) {
+        return await cache.get(CACHE_KEYS.streamOwner(taskId));
+    }
+
+    async clearStreamOwner(taskId) {
+        try {
+            await cache.delete(CACHE_KEYS.streamOwner(taskId));
+        } catch (error) {
+            log.warn(`Failed to clear stream owner for ${taskId}:`, error.message);
+        }
+    }
+
+    async _validateLocalStreamOwner(taskId, requestedOwnerId = null, options = {}) {
+        const requireRequestedOwner = options.requireRequestedOwner !== false;
+        if (requireRequestedOwner && !requestedOwnerId) {
+            return {
+                success: false,
+                statusCode: 409,
+                message: `Stream owner header is required for task ${taskId}`
+            };
+        }
+
+        const currentInstanceId = instanceCoordinator.instanceId;
+        let owner = null;
+        try {
+            owner = await this.getStreamOwner(taskId);
+        } catch (error) {
+            log.warn(`Failed to load stream owner for ${taskId}:`, error.message);
+            return {
+                success: false,
+                statusCode: 503,
+                message: `Stream owner is unavailable for task ${taskId}`
+            };
+        }
+
+        if (!owner?.instanceId) {
+            return {
+                success: false,
+                statusCode: 409,
+                message: `Stream owner is not registered for task ${taskId}`
+            };
+        }
+
+        if (requestedOwnerId && owner.instanceId !== requestedOwnerId) {
+            return {
+                success: false,
+                statusCode: 409,
+                message: `Stream owner mismatch: expected ${owner.instanceId}, got ${requestedOwnerId}`
+            };
+        }
+
+        if (!currentInstanceId) {
+            return {
+                success: false,
+                statusCode: 503,
+                message: `Current instance id is unavailable for task ${taskId}`
+            };
+        }
+
+        if (owner.instanceId !== currentInstanceId) {
+            return {
+                success: false,
+                statusCode: 409,
+                message: `Wrong stream worker: expected ${owner.instanceId}, got ${currentInstanceId}`
+            };
+        }
+
+        return { success: true };
     }
 
     async _resolveLeaderUrl(leaderUrl, sourceInstanceId) {
@@ -1001,6 +1106,9 @@ class StreamTransferService {
     async resumeTask(taskId, metadata, targetUrl = null) {
         try {
             if (targetUrl) {
+                if (!metadata?.ownerInstanceId) {
+                    throw new Error(`Stream owner instance is required for task ${taskId}`);
+                }
                 const url = `${targetUrl.replace(/\/$/, '')}/api/v2/stream/${taskId}/resume`;
                 const response = await fetch(url, {
                     method: 'POST',
@@ -1016,6 +1124,11 @@ class StreamTransferService {
                     throw new Error(`Worker resume failed with ${response.status}: ${errorText}`);
                 }
                 return await response.json();
+            }
+
+            const ownerCheck = await this._validateLocalStreamOwner(taskId, metadata?.ownerInstanceId);
+            if (!ownerCheck.success) {
+                return { ...ownerCheck, canResume: false };
             }
 
             if (metadata?.streamMode === 'resumable') {
@@ -1113,14 +1226,18 @@ class StreamTransferService {
     /**
      * 断点续传：清除任务的所有状态（强制重新开始）
      */
-    async resetTask(taskId, targetUrl = null) {
+    async resetTask(taskId, targetUrl = null, options = {}) {
         try {
             if (targetUrl) {
+                if (!options.ownerInstanceId) {
+                    throw new Error(`Stream owner instance is required for task ${taskId}`);
+                }
                 const url = `${targetUrl.replace(/\/$/, '')}/api/v2/stream/${taskId}/reset`;
                 const response = await fetch(url, {
                     method: 'DELETE',
                     headers: {
-                        'x-instance-secret': getStreamConfig().secret
+                        'x-instance-secret': getStreamConfig().secret,
+                        'x-stream-owner-instance-id': options.ownerInstanceId
                     },
                     signal: AbortSignal.timeout(10000)
                 });
@@ -1132,6 +1249,13 @@ class StreamTransferService {
             }
 
             return await this._withTaskLock(taskId, async () => {
+                const ownerCheck = await this._validateLocalStreamOwner(taskId, options.ownerInstanceId || null, {
+                    requireRequestedOwner: Boolean(options.requireOwnerHeader)
+                });
+                if (!ownerCheck.success) {
+                    return ownerCheck;
+                }
+
                 // 清理活动流
                 const context = this.activeStreams.get(taskId);
                 if (context) {
@@ -1151,6 +1275,7 @@ class StreamTransferService {
                 // 清理缓存
                 await this.clearProgressFromCache(taskId);
                 await this._clearFinalizationStatus(taskId);
+                await this.clearStreamOwner(taskId);
                 await this._deleteResumableStaging(taskId).catch(error => {
                     log.warn(`Failed to delete resumable staging for ${taskId}: ${error.message}`);
                 });
@@ -1312,8 +1437,8 @@ class StreamTransferService {
                 timestamp: Date.now()
             };
             
-            const cacheKey = `stream:progress:${taskId}`;
-            await CacheService.set(cacheKey, progressData, this.progressCacheTTL);
+            const cacheKey = CACHE_KEYS.streamProgress(taskId);
+            await cache.set(cacheKey, progressData, this.progressCacheTTL);
             log.debug(`Progress saved to cache for task ${taskId}, chunk ${context.lastChunkIndex}`);
         } catch (error) {
             log.warn(`Failed to save progress to cache for ${taskId}:`, error.message);
@@ -1325,8 +1450,8 @@ class StreamTransferService {
      */
     async loadProgressFromCache(taskId) {
         try {
-            const cacheKey = `stream:progress:${taskId}`;
-            const progressData = await CacheService.get(cacheKey);
+            const cacheKey = CACHE_KEYS.streamProgress(taskId);
+            const progressData = await cache.get(cacheKey);
             
             if (progressData) {
                 log.info(`Progress loaded from cache for task ${taskId}, chunk ${progressData.lastChunkIndex}`);
@@ -1343,8 +1468,8 @@ class StreamTransferService {
      */
     async clearProgressFromCache(taskId) {
         try {
-            const cacheKey = `stream:progress:${taskId}`;
-            await CacheService.delete(cacheKey);
+            const cacheKey = CACHE_KEYS.streamProgress(taskId);
+            await cache.delete(cacheKey);
             log.debug(`Progress cleared from cache for task ${taskId}`);
         } catch (error) {
             log.warn(`Failed to clear progress from cache for ${taskId}:`, error.message);

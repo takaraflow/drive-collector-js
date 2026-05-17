@@ -6,7 +6,7 @@ import os from 'os'
 import path from 'path'
 import { streamTransferService } from '../../src/services/StreamTransferService.js'
 import { logger } from '../../src/services/logger/index.js'
-import { CacheService } from '../../src/services/CacheService.js'
+import { cache } from '../../src/services/CacheService.js'
 import { getConfig } from '../../src/config/index.js'
 
 const streamTransferLog = logger.withModule('StreamTransferService')
@@ -49,6 +49,7 @@ const createChunkReq = (headers, body = 'data') => ({
     'x-chat-id': 'chat-123',
     'x-msg-id': '456',
     'x-resume-enabled': 'true',
+    'x-stream-owner-instance-id': 'worker-current',
     ...headers
   },
   [Symbol.asyncIterator]: async function* () {
@@ -57,6 +58,25 @@ const createChunkReq = (headers, body = 'data') => ({
 })
 
 const flushAsyncEvents = () => new Promise(resolve => setImmediate(resolve))
+const ownerRecord = taskId => ({
+  taskId,
+  instanceId: 'worker-current',
+  url: 'https://worker.example.com',
+  registeredBy: 'leader-1',
+  registeredAt: Date.now()
+})
+const mockCacheByKey = overrides => {
+  cache.get.mockImplementation(async key => {
+    if (Object.prototype.hasOwnProperty.call(overrides, key)) {
+      const value = overrides[key]
+      return typeof value === 'function' ? value(key) : value
+    }
+    if (key.startsWith('stream:owner:')) {
+      return ownerRecord(key.slice('stream:owner:'.length))
+    }
+    return null
+  })
+}
 
 vi.mock('../../src/config/index.js', () => ({
   getConfig: vi.fn(() => ({
@@ -69,10 +89,17 @@ vi.mock('../../src/config/index.js', () => ({
 }))
 
 vi.mock('../../src/services/CacheService.js', () => ({
-  CacheService: {
+  cache: {
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn()
+  }
+}))
+
+vi.mock('../../src/services/InstanceCoordinator.js', () => ({
+  instanceCoordinator: {
+    instanceId: 'worker-current',
+    getAllInstances: vi.fn().mockResolvedValue([])
   }
 }))
 
@@ -101,6 +128,12 @@ describe('StreamTransferService', () => {
     streamTransferService.activeStreams.clear()
     streamTransferService.chunkRetryAttempts.clear()
     streamTransferService.taskLocks?.clear()
+    cache.get.mockReset()
+    cache.set.mockReset()
+    cache.delete.mockReset()
+    mockCacheByKey({})
+    cache.set.mockResolvedValue(true)
+    cache.delete.mockResolvedValue(true)
     rcloneMock.streams.length = 0
     rcloneMock.CloudTool.createRcatStream.mockReset()
     rcloneMock.CloudTool.getRemoteFileInfo.mockReset()
@@ -204,7 +237,8 @@ describe('StreamTransferService', () => {
       isLast: false,
       chunkIndex: 2,
       totalSize: 1024,
-      leaderUrl: 'https://leader.example.com'
+      leaderUrl: 'https://leader.example.com',
+      ownerInstanceId: 'worker-current'
     }
 
     const result = await streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
@@ -240,7 +274,8 @@ describe('StreamTransferService', () => {
       isLast: false,
       chunkIndex: 5,
       totalSize: 1024,
-      leaderUrl: 'https://leader.example.com'
+      leaderUrl: 'https://leader.example.com',
+      ownerInstanceId: 'worker-current'
     }
 
     await expect(
@@ -269,7 +304,8 @@ describe('StreamTransferService', () => {
   })
 
   test('handleIncomingChunk starts from chunk 0 even when cached progress exists', async () => {
-    CacheService.get.mockResolvedValueOnce({
+    mockCacheByKey({
+      'stream:progress:task-no-fake-resume': {
       taskId: 'task-no-fake-resume',
       fileName: 'old.txt',
       userId: 'user-123',
@@ -277,6 +313,7 @@ describe('StreamTransferService', () => {
       uploadedBytes: 1024,
       lastChunkIndex: 7,
       timestamp: Date.now()
+      }
     })
 
     const outOfOrderResult = await streamTransferService.handleIncomingChunk(
@@ -306,6 +343,130 @@ describe('StreamTransferService', () => {
     expect(rcloneMock.streams[0].chunks.map(chunk => chunk.toString())).toEqual(['chunk-0'])
   })
 
+  test('handleIncomingChunk rejects wrong worker before creating stream or progress', async () => {
+    mockCacheByKey({
+      'stream:owner:task-wrong-worker': {
+        ...ownerRecord('task-wrong-worker'),
+        instanceId: 'worker-other'
+      }
+    })
+    const result = await streamTransferService.handleIncomingChunk(
+      'task-wrong-worker',
+      createChunkReq({
+        'x-stream-owner-instance-id': 'worker-other',
+        'x-chunk-index': '0'
+      }, 'hello')
+    )
+
+    expect(result).toMatchObject({
+      success: false,
+      statusCode: 409
+    })
+    expect(result.message).toContain('Wrong stream worker')
+    expect(rcloneMock.CloudTool.createRcatStream).not.toHaveBeenCalled()
+    expect(cache.set).not.toHaveBeenCalledWith(
+      'stream:progress:task-wrong-worker',
+      expect.anything(),
+      expect.anything()
+    )
+  })
+
+  test('handleIncomingChunk rejects missing owner header before touching stream state', async () => {
+    const result = await streamTransferService.handleIncomingChunk(
+      'task-missing-owner',
+      createChunkReq({
+        'x-stream-owner-instance-id': undefined,
+        'x-chunk-index': '0'
+      }, 'hello')
+    )
+
+    expect(result).toMatchObject({
+      success: false,
+      statusCode: 409
+    })
+    expect(result.message).toContain('owner header is required')
+    expect(rcloneMock.CloudTool.createRcatStream).not.toHaveBeenCalled()
+  })
+
+  test('handleIncomingChunk fails closed when owner cache is unavailable', async () => {
+    cache.get.mockRejectedValueOnce(new Error('redis unavailable'))
+
+    const result = await streamTransferService.handleIncomingChunk(
+      'task-owner-cache-down',
+      createChunkReq({ 'x-chunk-index': '0' }, 'hello')
+    )
+
+    expect(result).toMatchObject({
+      success: false,
+      statusCode: 503
+    })
+    expect(result.message).toContain('owner is unavailable')
+    expect(rcloneMock.CloudTool.createRcatStream).not.toHaveBeenCalled()
+  })
+
+  test('resumable chunk rejects wrong worker before touching staging file', async () => {
+    mockCacheByKey({
+      'stream:owner:task-wrong-resumable-worker': {
+        ...ownerRecord('task-wrong-resumable-worker'),
+        instanceId: 'worker-other'
+      }
+    })
+    const resumeDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stream-wrong-worker-'))
+    getConfig.mockReturnValue({
+      streamForwarding: {
+        secret: 'test-secret',
+        lbUrl: 'https://lb.example.com',
+        resumeDir
+      },
+      remoteFolder: '/drive/uploads'
+    })
+
+    const result = await streamTransferService.handleIncomingChunk(
+      'task-wrong-resumable-worker',
+      createChunkReq({
+        'x-file-name': encodeURIComponent('wrong.bin'),
+        'x-stream-mode': 'resumable',
+        'x-stream-owner-instance-id': 'worker-other',
+        'x-chunk-index': '0',
+        'x-total-size': '5'
+      }, 'hello')
+    )
+
+    expect(result).toMatchObject({
+      success: false,
+      statusCode: 409
+    })
+    await expect(
+      fs.promises.access(path.join(resumeDir, 'task-wrong-resumable-worker.wrong.bin.part'))
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(cache.set).not.toHaveBeenCalledWith(
+      'stream:progress:task-wrong-resumable-worker',
+      expect.anything(),
+      expect.anything()
+    )
+  })
+
+  test('registerStreamOwner persists a single owner record', async () => {
+    const owner = await streamTransferService.registerStreamOwner('task-owner', {
+      instanceId: 'worker-current',
+      url: 'https://worker.example.com',
+      registeredBy: 'leader-1',
+      ttlSeconds: 123
+    })
+
+    expect(owner).toMatchObject({
+      taskId: 'task-owner',
+      instanceId: 'worker-current',
+      url: 'https://worker.example.com',
+      registeredBy: 'leader-1'
+    })
+    expect(cache.set).toHaveBeenCalledWith(
+      'stream:owner:task-owner',
+      expect.objectContaining({ instanceId: 'worker-current' }),
+      123
+    )
+  })
+
   test('resetTask sends DELETE to targetUrl reset endpoint when provided', async () => {
     fetch.mockResolvedValueOnce({
       ok: true,
@@ -315,7 +476,8 @@ describe('StreamTransferService', () => {
 
     const result = await streamTransferService.resetTask(
       'task-remote-reset',
-      'https://worker.example.com/'
+      'https://worker.example.com/',
+      { ownerInstanceId: 'worker-current' }
     )
 
     expect(result).toEqual({ success: true })
@@ -324,7 +486,8 @@ describe('StreamTransferService', () => {
       expect.objectContaining({
         method: 'DELETE',
         headers: expect.objectContaining({
-          'x-instance-secret': 'test-secret'
+          'x-instance-secret': 'test-secret',
+          'x-stream-owner-instance-id': 'worker-current'
         })
       })
     )
@@ -459,7 +622,8 @@ describe('StreamTransferService', () => {
       fileName: 'resume.bin',
       userId: 'user-123',
       totalSize: 10,
-      chunkSize: 5
+      chunkSize: 5,
+      ownerInstanceId: 'worker-current'
     })
 
     expect(resume).toMatchObject({
@@ -521,7 +685,8 @@ describe('StreamTransferService', () => {
       fileName: 'complete.bin',
       userId: 'user-123',
       totalSize: 10,
-      chunkSize: 5
+      chunkSize: 5,
+      ownerInstanceId: 'worker-current'
     })
 
     expect(result).toMatchObject({
@@ -569,7 +734,8 @@ describe('StreamTransferService', () => {
       fileName: 'final-cache.bin',
       userId: 'user-123',
       totalSize: 5,
-      chunkSize: 5
+      chunkSize: 5,
+      ownerInstanceId: 'worker-current'
     })
 
     await expect(streamTransferService.waitForFinalization('task-final-cache')).resolves.toMatchObject({
@@ -577,11 +743,12 @@ describe('StreamTransferService', () => {
       completed: true
     })
 
-    const finalizationSet = CacheService.set.mock.calls
+    const finalizationSet = cache.set.mock.calls
       .filter(([key]) => key === 'stream:final:task-final-cache')
       .at(-1)
     expect(finalizationSet?.[1]).toMatchObject({ status: 'completed' })
-    CacheService.get.mockImplementation(async (key) => {
+    cache.get.mockImplementation(async (key) => {
+      if (key === 'stream:owner:task-final-cache') return ownerRecord('task-final-cache')
       if (key === 'stream:final:task-final-cache') return finalizationSet[1]
       return null
     })
@@ -592,7 +759,7 @@ describe('StreamTransferService', () => {
       isCached: false,
       finalization: expect.objectContaining({ status: 'completed' })
     })
-    expect(CacheService.delete).not.toHaveBeenCalledWith('stream:final:task-final-cache')
+    expect(cache.delete).not.toHaveBeenCalledWith('stream:final:task-final-cache')
   })
 
   test('resumable chunks for the same task are serialized so duplicate retries do not append twice', async () => {
@@ -728,12 +895,12 @@ describe('StreamTransferService', () => {
         msgId: 'msg-456'
       }
 
-      // Mock CacheService
-      CacheService.set.mockResolvedValue(true)
+      // Mock cache
+      cache.set.mockResolvedValue(true)
 
       await streamTransferService.saveProgressToCache(taskId, mockContext)
 
-      expect(CacheService.set).toHaveBeenCalledWith(
+      expect(cache.set).toHaveBeenCalledWith(
         `stream:progress:${taskId}`,
         expect.objectContaining({
           taskId,
@@ -760,11 +927,13 @@ describe('StreamTransferService', () => {
         timestamp: Date.now()
       }
 
-      CacheService.get.mockResolvedValue(mockProgressData)
+      mockCacheByKey({
+        [`stream:progress:${taskId}`]: mockProgressData
+      })
 
       const result = await streamTransferService.loadProgressFromCache(taskId)
 
-      expect(CacheService.get).toHaveBeenCalledWith(`stream:progress:${taskId}`)
+      expect(cache.get).toHaveBeenCalledWith(`stream:progress:${taskId}`)
       expect(result).toEqual(mockProgressData)
     })
 
@@ -782,11 +951,13 @@ describe('StreamTransferService', () => {
         timestamp: Date.now()
       }
 
-      CacheService.get.mockResolvedValue(mockProgressData)
+      mockCacheByKey({
+        [`stream:progress:${taskId}`]: mockProgressData
+      })
 
       const result = await streamTransferService.getTaskFullProgress(taskId)
 
-      expect(CacheService.get).toHaveBeenCalledWith(`stream:progress:${taskId}`)
+      expect(cache.get).toHaveBeenCalledWith(`stream:progress:${taskId}`)
       expect(result).toEqual({
         isActive: false,
         isCached: true,
@@ -812,9 +983,11 @@ describe('StreamTransferService', () => {
         timestamp: Date.now()
       }
 
-      CacheService.get.mockResolvedValue(mockProgressData)
+      mockCacheByKey({
+        [`stream:progress:${taskId}`]: mockProgressData
+      })
 
-      const result = await streamTransferService.resumeTask(taskId, {})
+      const result = await streamTransferService.resumeTask(taskId, { ownerInstanceId: 'worker-current' })
 
       expect(result).toEqual({
         success: true,
@@ -829,11 +1002,11 @@ describe('StreamTransferService', () => {
       const taskId = 'task-reset-test'
       
       // Mock cache operations
-      CacheService.delete.mockResolvedValue(true)
+      cache.delete.mockResolvedValue(true)
 
       const result = await streamTransferService.resetTask(taskId)
 
-      expect(CacheService.delete).toHaveBeenCalledWith(`stream:progress:${taskId}`)
+      expect(cache.delete).toHaveBeenCalledWith(`stream:progress:${taskId}`)
       expect(result).toEqual({ success: true })
     })
 
@@ -851,7 +1024,8 @@ describe('StreamTransferService', () => {
         isLast: false,
         chunkIndex,
         totalSize: 1024,
-        leaderUrl: 'https://leader.example.com'
+        leaderUrl: 'https://leader.example.com',
+        ownerInstanceId: 'worker-current'
       }
 
       const result = await streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
@@ -871,7 +1045,8 @@ describe('StreamTransferService', () => {
         chunkIndex: 0,
         totalSize: 1024,
         leaderUrl: 'https://leader.example.com',
-        targetUrl: 'https://specific-worker.example.com'
+        targetUrl: 'https://specific-worker.example.com',
+        ownerInstanceId: 'worker-current'
       }
 
       await streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
@@ -892,7 +1067,8 @@ describe('StreamTransferService', () => {
         isLast: false,
         chunkIndex: 0,
         totalSize: 1024,
-        leaderUrl: 'https://leader.example.com'
+        leaderUrl: 'https://leader.example.com',
+        ownerInstanceId: 'worker-current'
         // 无 targetUrl
       }
 

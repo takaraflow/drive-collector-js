@@ -216,6 +216,7 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
         const bestWorker = eligibleWorkers
             .sort((a, b) => (a.instance.activeTaskCount || 0) - (b.instance.activeTaskCount || 0))[0];
         const targetUrl = bestWorker?.url || config.streamForwarding?.lbUrl || null;
+        const ownerInstanceId = bestWorker?.instance?.id || null;
 
         if (targetUrl) {
             try {
@@ -223,6 +224,13 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
                     workerInstanceId: bestWorker?.instance?.id,
                     viaLoadBalancer: !bestWorker?.url && Boolean(config.streamForwarding?.lbUrl)
                 });
+                if (!ownerInstanceId) {
+                    log.warn(`Stream forwarding requires a direct worker owner; falling back to local download`, {
+                        taskId: task.id,
+                        targetUrl
+                    });
+                    return false;
+                }
                 await updateStatus(task, "🚀 **Uploading via stream forwarding...**");
                 await assertClaimFenceCurrent(task, instanceCoordinator);
                 const streamStartTransition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.START_STREAM_UPLOAD, null, {
@@ -235,6 +243,11 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
                     log.warn(`Stream forwarding start blocked for task ${task.id}: ${streamStartTransition.reason || 'invalid state'}`);
                     return false;
                 }
+                await streamTransferService.registerStreamOwner(task.id, {
+                    instanceId: ownerInstanceId,
+                    url: targetUrl,
+                    registeredBy: instanceCoordinator.instanceId
+                });
 
                 const { tunnelService } = await import("../../services/TunnelService.js");
                 const tunnelUrl = await tunnelService.getPublicUrl();
@@ -263,18 +276,19 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
                         msgId: task.msgId,
                         sourceMsgId: task.message.id,
                         claimedBy: task.claimedBy,
-                        claimLeaseId: task.claimLeaseId
+                        claimLeaseId: task.claimLeaseId,
+                        ownerInstanceId
                     }, targetUrl);
                 } catch (resumeError) {
                     log.warn(`Stream resume negotiation failed, starting from scratch: ${resumeError.message}`);
-                    await streamTransferService.resetTask(task.id, targetUrl).catch(error => {
+                    await streamTransferService.resetTask(task.id, targetUrl, { ownerInstanceId }).catch(error => {
                         log.warn(`Stream worker reset failed before fallback non-resumable transfer: ${error.message}`);
                     });
                 }
 
                 if (resumeInfo?.success === false) {
                     log.warn(`Stream worker resume returned failure, resetting worker before retrying from scratch: ${resumeInfo.error || 'unknown error'}`);
-                    await streamTransferService.resetTask(task.id, targetUrl);
+                    await streamTransferService.resetTask(task.id, targetUrl, { ownerInstanceId });
                     resumeInfo = null;
                 }
 
@@ -337,7 +351,8 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
                         streamMode: 'resumable',
                         chunkSize,
                         claimedBy: task.claimedBy,
-                        claimLeaseId: task.claimLeaseId
+                        claimLeaseId: task.claimLeaseId,
+                        ownerInstanceId
                     });
 
                     if (chunkIndex % 20 === 0 || isLast) {
@@ -351,12 +366,18 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
                     throw new Error(finalization?.error || 'Stream finalization failed');
                 }
                 log.info(`✅ Stream forwarding completed: Task ${task.id}`);
+                await streamTransferService.clearStreamOwner(task.id).catch(clearError => {
+                    log.warn(`Failed to clear stream owner after completion: ${clearError.message}`);
+                });
                 context.activeProcessors.delete(task.id);
                 return true;
             } catch (e) {
                 if (e.message === "CANCELLED") throw e;
-                await streamTransferService.resetTask(task.id, targetUrl).catch(resetError => {
+                await streamTransferService.resetTask(task.id, targetUrl, { ownerInstanceId }).catch(resetError => {
                     log.warn(`Stream worker reset failed after transfer error: ${resetError.message}`);
+                });
+                await streamTransferService.clearStreamOwner(task.id).catch(clearError => {
+                    log.warn(`Failed to clear stream owner after transfer error: ${clearError.message}`);
                 });
                 const fallbackTransition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.RESET_STREAM_DOWNLOAD, null, {
                     ...getClaimFenceOptions(task),

@@ -1,6 +1,6 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest'
 import { streamTransferService } from '../../src/services/StreamTransferService.js'
-import { CacheService } from '../../src/services/CacheService.js'
+import { cache } from '../../src/services/CacheService.js'
 
 vi.mock('../../src/config/index.js', () => ({
   getConfig: () => ({
@@ -15,7 +15,7 @@ vi.mock('../../src/config/index.js', () => ({
 }))
 
 vi.mock('../../src/services/CacheService.js', () => ({
-  CacheService: {
+  cache: {
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn()
@@ -27,6 +27,9 @@ describe('流式转发续传协议测试', () => {
     vi.clearAllMocks()
     global.fetch = vi.fn()
     streamTransferService.chunkRetryAttempts.clear()
+    cache.get.mockResolvedValue(null)
+    cache.set.mockResolvedValue(true)
+    cache.delete.mockResolvedValue(true)
   })
 
   test('live stream forwarding posts the chunk directly without probing progress', async () => {
@@ -47,7 +50,8 @@ describe('流式转发续传协议测试', () => {
       totalSize,
       leaderUrl: 'https://leader.example.com',
       chatId: 'chat-123',
-      msgId: 'msg-456'
+      msgId: 'msg-456',
+      ownerInstanceId: 'worker-1'
     }
 
     const result = await streamTransferService.forwardChunk(taskId, Buffer.from('test-chunk'), metadata)
@@ -81,7 +85,8 @@ describe('流式转发续传协议测试', () => {
       isLast: false,
       chunkIndex,
       totalSize: 3 * 1024 * 1024,
-      leaderUrl: 'https://leader.example.com'
+      leaderUrl: 'https://leader.example.com',
+      ownerInstanceId: 'worker-1'
     }
 
     await expect(
@@ -113,7 +118,8 @@ describe('流式转发续传协议测试', () => {
       leaderUrl: 'https://leader.example.com',
       resumeEnabled: true,
       streamMode: 'resumable',
-      chunkSize: 256
+      chunkSize: 256,
+      ownerInstanceId: 'worker-1'
     }
 
     const result = await streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
@@ -148,7 +154,8 @@ describe('流式转发续传协议测试', () => {
       fileName: 'resume.bin',
       userId: 'user-123',
       totalSize: 2048,
-      chunkSize: 512
+      chunkSize: 512,
+      ownerInstanceId: 'worker-1'
     }
 
     const result = await streamTransferService.resumeTask(

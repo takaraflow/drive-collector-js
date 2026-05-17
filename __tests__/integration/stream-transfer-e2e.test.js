@@ -27,13 +27,26 @@ vi.mock('../../src/config/index.js', () => ({
 
 vi.mock('../../src/services/CacheService.js', () => {
   const store = new Map()
+  const cache = {
+    get: vi.fn(async (key) => {
+      if (store.has(key)) return store.get(key)
+      if (key.startsWith('stream:owner:')) {
+        return {
+          taskId: key.slice('stream:owner:'.length),
+          instanceId: 'integration-instance',
+          url: 'https://worker.example.com',
+          registeredBy: 'leader-id',
+          registeredAt: Date.now()
+        }
+      }
+      return null
+    }),
+    set: vi.fn(async (key, value) => { store.set(key, value) }),
+    delete: vi.fn(async (key) => { store.delete(key) }),
+    _store: store
+  }
   return {
-    CacheService: {
-      get: vi.fn(async (key) => store.get(key) || null),
-      set: vi.fn(async (key, value) => { store.set(key, value) }),
-      delete: vi.fn(async (key) => { store.delete(key) }),
-      _store: store
-    }
+    cache
   }
 })
 
@@ -132,7 +145,9 @@ vi.mock('../../src/processor/TaskManager.js', () => ({
 // ─── helpers ───
 
 function createReq({ method = 'GET', url = '/', headers = {}, body } = {}) {
-  const defaultHeaders = { host: 'localhost', ...headers }
+  const isStreamChunkPost = method === 'POST' && /^\/api\/v2\/stream\/[^/]+$/.test(url)
+  const streamHeaders = isStreamChunkPost ? { 'x-stream-owner-instance-id': 'integration-instance' } : {}
+  const defaultHeaders = { host: 'localhost', ...streamHeaders, ...headers }
   const req = {
     method,
     url,
@@ -161,6 +176,16 @@ function createRes() {
 }
 
 const flushAsyncEvents = () => new Promise(resolve => setImmediate(resolve))
+async function seedStreamOwner(taskId, instanceId = 'integration-instance') {
+  const { cache } = await import('../../src/services/CacheService.js')
+  cache._store.set(`stream:owner:${taskId}`, {
+    taskId,
+    instanceId,
+    url: 'https://worker.example.com',
+    registeredBy: 'leader-id',
+    registeredAt: Date.now()
+  })
+}
 
 // ─── 测试 ───
 
@@ -176,8 +201,8 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
     streamTransferService.activeStreams.clear()
     streamTransferService.chunkRetryAttempts.clear()
     streamTransferService.taskLocks?.clear()
-    const { CacheService } = await import('../../src/services/CacheService.js')
-    CacheService._store.clear()
+    const { cache } = await import('../../src/services/CacheService.js')
+    cache._store.clear()
 
     const { CloudTool } = await import('../../src/services/rclone.js')
     CloudTool.createRcatStream.mockReset()
@@ -241,6 +266,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
 
   describe('chunk 接收 (POST /api/v2/stream/:taskId)', () => {
     test('首个 chunk 应创建 rcat 流并写入数据', async () => {
+      await seedStreamOwner('task-chunk-1')
       const req = createReq({
         method: 'POST',
         url: '/api/v2/stream/task-chunk-1',
@@ -271,6 +297,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
     })
 
     test('多个 chunk 应写入同一个 rcat 流', async () => {
+      await seedStreamOwner('task-multi')
       const baseHeaders = {
         'x-instance-secret': 'integration-secret',
         'x-file-name': encodeURIComponent('multi.txt'),
@@ -312,6 +339,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
     })
 
     test('重复 chunk 应被幂等跳过', async () => {
+      await seedStreamOwner('task-idem')
       const baseHeaders = {
         'x-instance-secret': 'integration-secret',
         'x-file-name': encodeURIComponent('idem.txt'),
@@ -348,6 +376,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
     })
 
     test('乱序 chunk 应返回 409 且不写入 rcat', async () => {
+      await seedStreamOwner('task-out-of-order')
       const res = createRes()
       await handleWebhook(createReq({
         method: 'POST',
@@ -374,8 +403,9 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
     })
 
     test('缓存进度不应让新 rcat 流伪 resume', async () => {
-      const { CacheService } = await import('../../src/services/CacheService.js')
-      CacheService.get.mockResolvedValueOnce({
+      const { cache } = await import('../../src/services/CacheService.js')
+      await seedStreamOwner('task-no-fake-resume')
+      cache._store.set('stream:progress:task-no-fake-resume', {
         taskId: 'task-no-fake-resume',
         fileName: 'cached.txt',
         userId: 'user-1',
@@ -421,6 +451,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
     })
 
     test('last chunk 后应结束 stdin 流', async () => {
+      await seedStreamOwner('task-last')
       const req = createReq({
         method: 'POST',
         url: '/api/v2/stream/task-last',
@@ -449,6 +480,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
     })
 
     test('rcat close 0 且远端大小匹配时应完成任务', async () => {
+      await seedStreamOwner('task-validated-close')
       const { CloudTool } = await import('../../src/services/rclone.js')
       const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
       CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'validated.txt', Size: 5 })
@@ -487,6 +519,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
     })
 
     test('rcat close 0 但 stderr 有错误时应失败', async () => {
+      await seedStreamOwner('task-stderr-close')
       const { CloudTool } = await import('../../src/services/rclone.js')
       const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
       CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'stderr.txt', Size: 5 })
@@ -531,6 +564,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
     })
 
     test('last chunk 后远端大小不匹配应失败', async () => {
+      await seedStreamOwner('task-size-mismatch')
       const { CloudTool } = await import('../../src/services/rclone.js')
       const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
       CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'mismatch.txt', Size: 4 })
@@ -578,6 +612,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
 
   describe('进度查询', () => {
     test('GET progress 在收到 chunk 后应返回正确的 lastChunkIndex', async () => {
+      await seedStreamOwner('task-prog')
       const baseHeaders = {
         'x-instance-secret': 'integration-secret',
         'x-file-name': encodeURIComponent('prog.txt'),
@@ -614,6 +649,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
     })
 
     test('GET full-progress 应返回活跃流状态', async () => {
+      await seedStreamOwner('task-fullprog')
       // 先发一个 chunk 建立活跃流
       await handleWebhook(createReq({
         method: 'POST',
@@ -648,8 +684,8 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
     })
 
     test('GET full-progress 无活跃流时应从缓存读取', async () => {
-      const { CacheService } = await import('../../src/services/CacheService.js')
-      CacheService._store.set('stream:progress:task-cached', {
+      const { cache } = await import('../../src/services/CacheService.js')
+      cache._store.set('stream:progress:task-cached', {
         taskId: 'task-cached',
         fileName: 'cached.txt',
         userId: 'user-1',
@@ -690,8 +726,9 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
 
   describe('resume 和 reset', () => {
     test('POST resume 应返回缓存的进度信息', async () => {
-      const { CacheService } = await import('../../src/services/CacheService.js')
-      CacheService._store.set('stream:progress:task-resume', {
+      const { cache } = await import('../../src/services/CacheService.js')
+      await seedStreamOwner('task-resume')
+      cache._store.set('stream:progress:task-resume', {
         taskId: 'task-resume',
         fileName: 'resume.txt',
         userId: 'user-1',
@@ -706,7 +743,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
         method: 'POST',
         url: '/api/v2/stream/task-resume/resume',
         headers: { 'x-instance-secret': 'integration-secret' },
-        body: {}
+        body: { ownerInstanceId: 'integration-instance' }
       }), res)
 
       const body = JSON.parse(res._body)
@@ -716,7 +753,8 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
     })
 
     test('DELETE reset 应清除活跃流和缓存', async () => {
-      const { CacheService } = await import('../../src/services/CacheService.js')
+      const { cache } = await import('../../src/services/CacheService.js')
+      await seedStreamOwner('task-reset')
 
       // 先建立活跃流
       await handleWebhook(createReq({
@@ -747,7 +785,10 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
       await handleWebhook(createReq({
         method: 'DELETE',
         url: '/api/v2/stream/task-reset/reset',
-        headers: { 'x-instance-secret': 'integration-secret' }
+        headers: {
+          'x-instance-secret': 'integration-secret',
+          'x-stream-owner-instance-id': 'integration-instance'
+        }
       }), res)
 
       const body = JSON.parse(res._body)
@@ -757,7 +798,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
       expect(streamTransferService.activeStreams.has('task-reset')).toBe(false)
 
       // 缓存也应被清除
-      expect(CacheService.delete).toHaveBeenCalledWith('stream:progress:task-reset')
+      expect(cache.delete).toHaveBeenCalledWith('stream:progress:task-reset')
     })
   })
 
@@ -765,15 +806,14 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
 
   describe('路由匹配边界', () => {
     test('POST /api/v2/stream/:taskId/resume 应走 resume 路由而非 chunk 路由', async () => {
-      const { CacheService } = await import('../../src/services/CacheService.js')
-      CacheService.get.mockResolvedValueOnce(null)
+      await seedStreamOwner('task-route')
 
       const res = createRes()
       await handleWebhook(createReq({
         method: 'POST',
         url: '/api/v2/stream/task-route/resume',
         headers: { 'x-instance-secret': 'integration-secret' },
-        body: {}
+        body: { ownerInstanceId: 'integration-instance' }
       }), res)
 
       // 应返回 resume 结果（非 chunk 接收结果）
@@ -783,6 +823,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
     })
 
     test('POST /api/v2/stream/:taskId 应走 chunk 路由', async () => {
+      await seedStreamOwner('task-chunk-route')
       const res = createRes()
       await handleWebhook(createReq({
         method: 'POST',

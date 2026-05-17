@@ -134,7 +134,10 @@ async function handleStreamForwarding(req, res) {
 
             // DELETE /api/v2/stream/:taskId/reset
             if (action === 'reset' && req.method === 'DELETE') {
-                const result = await streamTransferService.resetTask(taskId);
+                const result = await streamTransferService.resetTask(taskId, null, {
+                    ownerInstanceId: req.headers?.['x-stream-owner-instance-id'] || null,
+                    requireOwnerHeader: true
+                });
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(result));
                 return true;
