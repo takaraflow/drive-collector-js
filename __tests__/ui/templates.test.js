@@ -152,12 +152,12 @@ describe("UIHelper", () => {
             const result = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 50, 100);
 
             expect(result.text).toContain("媒体组转存看板");
+            expect(result.text).toContain("📌 汇总: ✅1 🔄2 ❌0 🚫0");
             expect(result.text).toContain("file1.mp4");
-            expect(result.text).toContain("file2.mp4");
-            expect(result.text).toContain("file3.mp4");
+            expect(result.text).not.toContain("file2.mp4");
+            expect(result.text).not.toContain("file3.mp4");
             expect(result.text).toContain("🔄 file1.mp4 [50%]");
-            expect(result.text).toContain("🕒 file2.mp4 (等待中)");
-            expect(result.text).toContain("✅ file3.mp4 (完成)");
+            expect(result.text).toContain("… 其余 2 个文件正在队列中");
         });
 
         test("should render different status emojis correctly", () => {
@@ -173,10 +173,10 @@ describe("UIHelper", () => {
             const result = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 0, 0);
 
             expect(result.text).toContain("🔄 file1.mp4 (下载中)");
-            expect(result.text).toContain("🕒 file2.mp4 (上传中)");
-            expect(result.text).toContain("✅ file3.mp4 (完成)");
+            expect(result.text).not.toContain("file2.mp4");
+            expect(result.text).not.toContain("file3.mp4");
             expect(result.text).toContain("❌ file4.mp4 (失败)");
-            expect(result.text).toContain("🚫 file5.mp4 (已取消)");
+            expect(result.text).toContain("… 其余 3 个文件正在队列中");
         });
 
         test("should handle empty task list", () => {
@@ -301,8 +301,7 @@ describe("UIHelper", () => {
 
             expect(result.text).toContain("🔄 file2.mp4 [50%]");
             expect(result.text).toContain("<code>[██████████░░░░░░░░░░] 50%</code>");
-            expect(result.text).toContain("💡 进度条仅显示当前正在处理的文件");
-            expect(result.text).not.toContain("━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件");
+            expect(result.text).not.toContain("💡 进度条仅显示当前正在处理的文件");
         });
 
         test("should show progress bar when uploading with progress", () => {
@@ -328,7 +327,7 @@ describe("UIHelper", () => {
             const result = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 0, 0);
 
             expect(result.text).toContain("🔄 file2.mp4 (下载中)");
-            expect(result.text).toContain("━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件");
+            expect(result.text).not.toContain("💡 进度条仅显示当前正在处理的文件");
             expect(result.text).not.toContain("[");
         });
 
@@ -342,7 +341,7 @@ describe("UIHelper", () => {
             const result = UIHelper.renderBatchMonitor(tasks, currentTask, "downloading", 52428800, 0);
 
             expect(result.text).toContain("🔄 file2.mp4 (下载中)");
-            expect(result.text).toContain("━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件");
+            expect(result.text).not.toContain("💡 进度条仅显示当前正在处理的文件");
             expect(result.text).not.toContain("[");
         });
 
@@ -356,7 +355,7 @@ describe("UIHelper", () => {
             const result = UIHelper.renderBatchMonitor(tasks, currentTask, "waiting", 52428800, 104857600);
 
             expect(result.text).toContain("🕒 file2.mp4 (等待中)");
-            expect(result.text).toContain("━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件");
+            expect(result.text).not.toContain("💡 进度条仅显示当前正在处理的文件");
             expect(result.text).not.toContain("[");
         });
 
@@ -576,6 +575,21 @@ describe("UIHelper", () => {
             expect(result.text).toContain("/Movies/2024");
             expect(CloudTool._getUploadPath).toHaveBeenCalledWith("user123");
         });
+
+        test('should shorten long file names for mobile scanability', async () => {
+            const files = [
+                {
+                    Name: "very-long-video-file-name-that-would-overflow-telegram-mobile-layout.mp4",
+                    Size: 1000000,
+                    ModTime: "2024-01-01T10:00:00Z"
+                }
+            ];
+
+            const result = await UIHelper.renderFilesPage(files, 0, 6, false, null);
+
+            expect(result.text).toContain("...");
+            expect(result.text).not.toContain("very-long-video-file-name-that-would-overflow-telegram-mobile-layout.mp4");
+        });
     });
 
     describe("renderTaskQueue", () => {
@@ -751,7 +765,8 @@ describe("UIHelper", () => {
             expect(result.text).toContain("第 1/1 页");
             // Should have back button, one retry row for the page, and nav buttons.
             expect(result.buttons.length).toBe(3);
-            expect(result.buttons[1][0].text).toBe("重试本页失败任务");
+            expect(result.buttons[1][0].text).toContain("重试本页失败任务");
+            expect(result.buttons[1][0].text).toContain("🔄");
             expect(result.buttons[1][0].data.toString()).toBe("retry_failed_page_0");
             expect(result.buttons[1][0].data.length).toBeLessThanOrEqual(64);
         });

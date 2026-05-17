@@ -118,9 +118,11 @@ vi.mock("../../src/services/drives/index.js", () => ({
         }),
         getSupportedDrives: vi.fn().mockReturnValue([
             { type: "mega", name: "Mega" },
-            { type: "googledrive", name: "Google Drive" }
+            { type: "google_drive", name: "Google Drive" },
+            { type: "webdav", name: "WebDAV" },
+            { type: "oss", name: "S3 / OSS" }
         ]),
-        getSupportedTypes: vi.fn().mockReturnValue(["mega", "googledrive"]),
+        getSupportedTypes: vi.fn().mockReturnValue(["mega", "google_drive", "webdav", "oss"]),
         isSupported: vi.fn().mockReturnValue(true)
     }
 }));
@@ -351,6 +353,52 @@ describe("DriveConfigFlow", () => {
             expect(mockBindingService.startBinding).toHaveBeenCalledWith("user456", "mega");
             expect(mockClient.sendMessage).toHaveBeenCalled();
             expect(result).toBe("请查看输入提示");
+        });
+
+        test("should append credential notice from the flow layer for sensitive binding steps", async () => {
+            mockBindingService.startBinding.mockResolvedValue({
+                success: true,
+                driveType: "google_drive",
+                step: "WAIT_TOKEN",
+                prompt: "input_token"
+            });
+
+            const event = { userId: "user123", msgId: "msg100", data: Buffer.from("drive_bind_google_drive") };
+
+            await DriveConfigFlow.handleCallback(event, "user456");
+
+            const sent = mockClient.sendMessage.mock.calls[0][1].message;
+            expect(sent).toContain("请输入 Google Drive 的 JSON Token");
+            expect(sent).toContain("为减少暴露，我会在提交后尝试删除这条敏感消息");
+            expect(sent).toContain("发送 /cancel");
+        });
+
+        test("should show recommended drive choices first with a more-drives affordance", async () => {
+            const event = { userId: "user123", msgId: "msg100", data: Buffer.from("drive_select_type") };
+
+            const result = await DriveConfigFlow.handleCallback(event, "user456");
+
+            const payload = mockClient.editMessage.mock.calls[0][1];
+            const labels = payload.buttons.flat().map(button => button.text);
+            const callbackData = payload.buttons.flat().map(button => button.data.toString());
+            expect(payload.text).toContain("推荐先选择常用网盘");
+            expect(labels).toEqual(expect.arrayContaining(["🟢 Mega", "🔵 Google Drive", "🌐 WebDAV"]));
+            expect(labels).not.toContain("🗄️ S3 / OSS");
+            expect(callbackData).toContain("drive_select_type_all");
+            expect(result).toBe("请确认操作");
+        });
+
+        test("should reveal advanced drive choices only after choosing more drives", async () => {
+            const event = { userId: "user123", msgId: "msg100", data: Buffer.from("drive_select_type_all") };
+
+            await DriveConfigFlow.handleCallback(event, "user456");
+
+            const payload = mockClient.editMessage.mock.calls[0][1];
+            const labels = payload.buttons.flat().map(button => button.text);
+            const callbackData = payload.buttons.flat().map(button => button.data.toString());
+            expect(payload.text).toContain("JSON Token");
+            expect(labels).toContain("🗄️ S3 / OSS");
+            expect(callbackData).toContain("drive_select_type");
         });
     });
 

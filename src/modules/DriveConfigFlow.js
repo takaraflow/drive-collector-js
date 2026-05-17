@@ -20,6 +20,19 @@ const log = logger.withModule ? logger.withModule('DriveConfigFlow') : logger;
 // 网盘国际化字符串缓存
 const driveStringsCache = new Map();
 const CANCEL_KEYWORDS = new Set(["/cancel", "cancel", "/取消", "取消"]);
+const SENSITIVE_BINDING_STEP = /(^|_)(PASS|PASSWORD|TOKEN|SECRET|SK)(_|$)/i;
+const RECOMMENDED_DRIVE_TYPES = new Set(["mega", "webdav", "google_drive"]);
+const DRIVE_ACTION_LABELS = Object.freeze({
+    mega: "🟢 Mega",
+    webdav: "🌐 WebDAV",
+    google_drive: "🔵 Google Drive",
+    onedrive: "☁️ OneDrive",
+    pikpak: "🟣 PikPak",
+    pcloud: "🔵 pCloud",
+    dropbox: "📦 Dropbox",
+    box: "📁 Box",
+    oss: "🗄️ S3 / OSS"
+});
 
 /**
  * 驱动配置流程模块
@@ -44,6 +57,23 @@ export class DriveConfigFlow {
         return hint ? `${prompt}\n\n${hint}` : prompt;
     }
 
+    static _resolveDrivePrompt(prompt, driveStrings) {
+        return driveStrings?.[prompt] || STRINGS.drive?.[prompt] || prompt;
+    }
+
+    static _appendCredentialNotice(prompt, stepName) {
+        const notice = STRINGS.drive.credential_notice;
+        if (!prompt || !notice || !SENSITIVE_BINDING_STEP.test(stepName || '')) {
+            return prompt;
+        }
+        return prompt.includes(notice) ? prompt : `${prompt}\n\n${notice}`;
+    }
+
+    static _buildBindingPrompt(prompt, driveStrings, stepName) {
+        const promptWithNotice = this._appendCredentialNotice(prompt, stepName);
+        return this._appendCancelHint(promptWithNotice, driveStrings);
+    }
+
     static _getBindingRecoveryButtons() {
         return [
             [Button.inline(STRINGS.drive.btn_bind_other, Buffer.from("drive_select_type"))],
@@ -56,6 +86,10 @@ export class DriveConfigFlow {
             [Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))],
             [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_menu"))]
         ];
+    }
+
+    static _formatDriveButtonLabel(drive) {
+        return DRIVE_ACTION_LABELS[drive.type] || `📁 ${drive.name}`;
     }
 
     static async _buildDriveManagerPayload(userId) {
@@ -187,7 +221,11 @@ export class DriveConfigFlow {
         }
 
         if (data === "drive_select_type") {
-            return await this._handleDriveTypeSelection(event, userId);
+            return await this._handleDriveTypeSelection(event, userId, { showAll: false });
+        }
+
+        if (data === "drive_select_type_all") {
+            return await this._handleDriveTypeSelection(event, userId, { showAll: true });
         }
         
         if (data.startsWith("drive_bind_")) {
@@ -197,8 +235,8 @@ export class DriveConfigFlow {
             if (result.success) {
                 // 获取国际化文本
                 const driveStrings = await this._getDriveStrings(driveType);
-                const prompt = driveStrings[result.prompt] || STRINGS.drive.check_input;
-                const message = this._appendCancelHint(prompt, driveStrings);
+                const prompt = this._resolveDrivePrompt(result.prompt, driveStrings) || STRINGS.drive.check_input;
+                const message = this._buildBindingPrompt(prompt, driveStrings, result.step);
 
                 await runBotTask(() => client.sendMessage(event.userId, { message, parseMode: "html" }), userId, { priority: PRIORITY.HIGH });
                 return STRINGS.drive.check_input;
@@ -298,8 +336,8 @@ export class DriveConfigFlow {
             if (result.nextStep) {
                 await SessionManager.update(userId, encodeDriveSessionStep(driveType, result.nextStep), result.data);
 
-                const prompt = driveStrings[result.message] || result.message;
-                const message = this._appendCancelHint(prompt, driveStrings);
+                const prompt = this._resolveDrivePrompt(result.message, driveStrings);
+                const message = this._buildBindingPrompt(prompt, driveStrings, result.nextStep);
                 await runBotTask(() => client.sendMessage(peerId, { message, parseMode: "html" }), userId, { priority: PRIORITY.HIGH });
                 return true;
             }
@@ -415,17 +453,34 @@ export class DriveConfigFlow {
      * @param {string} userId 
      * @returns {Promise<string|null>}
      */
-    static async _handleDriveTypeSelection(event, userId) {
+    static async _handleDriveTypeSelection(event, userId, { showAll = false } = {}) {
         const supportedDrives = this.getSupportedDrives();
-        
-        const message = `➕ <b>选择要绑定的网盘</b>\n\n请选择您要绑定的网盘类型：`;
-        
+        const visibleDrives = showAll
+            ? supportedDrives
+            : supportedDrives.filter(drive => RECOMMENDED_DRIVE_TYPES.has(drive.type));
+        const fallbackDrives = visibleDrives.length > 0 ? visibleDrives : supportedDrives;
+        const hint = showAll
+            ? STRINGS.drive.select_type_more_hint
+            : STRINGS.drive.select_type_recommended_hint;
+        const message = `${STRINGS.drive.select_type_title}\n\n${hint}`;
+
         const buttons = [];
-        supportedDrives.forEach(drive => {
+        fallbackDrives.forEach(drive => {
             buttons.push([
-                Button.inline(drive.name, Buffer.from(`drive_bind_${drive.type}`))
+                Button.inline(this._formatDriveButtonLabel(drive), Buffer.from(`drive_bind_${drive.type}`))
             ]);
         });
+
+        if (supportedDrives.length > fallbackDrives.length) {
+            buttons.push([
+                Button.inline(`🧰 ${STRINGS.drive.btn_more_drives}`, Buffer.from("drive_select_type_all"))
+            ]);
+        } else if (showAll) {
+            buttons.push([
+                Button.inline(`⭐ ${STRINGS.drive.btn_recommended_drives}`, Buffer.from("drive_select_type"))
+            ]);
+        }
+
         buttons.push([
             Button.inline(STRINGS.drive.btn_cancel, Buffer.from("drive_manager_back"))
         ]);

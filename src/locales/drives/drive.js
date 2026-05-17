@@ -1,8 +1,8 @@
 export const STRINGS = {
     // 绑定流程通用文案
     input_user: "👤 <b>请输入您的登录账号</b>：",
-    input_pass: "🔑 <b>请输入您的登录密码</b>：",
-    input_token: "🔑 <b>请输入鉴权 Token (JSON 格式)</b>：",
+    input_pass: "🔑 <b>请输入您的登录密码</b>",
+    input_token: "🔑 <b>请输入鉴权 Token (JSON 格式)</b>",
     verifying: "⏳ 正在验证配置，请稍候...",
     success: "✅ <b>绑定成功！</b>",
     bind_failed: "❌ <b>绑定失败</b>",

@@ -70,6 +70,8 @@ export const STRINGS = {
         btn_confirm_cancel: "确认取消",
         btn_confirm_retry: "确认重试",
         btn_keep_task: "保留任务",
+        btn_cancel_active: "取消当前任务",
+        btn_retry_failed: "重试失败任务",
         cancel_transfer_btn: "🚫 取消转存",
         cancel_task_btn: "🚫 取消任务",
         retry_btn: "🔄 重试",
@@ -93,6 +95,7 @@ export const STRINGS = {
         btn_unbind: "❌ 解绑网盘",
         btn_bind_mega: "➕ 绑定 Mega 网盘",
         cancel_prompt: "发送 /cancel 或输入 取消 可随时退出绑定流程。",
+        credential_notice: "为减少暴露，我会在提交后尝试删除这条敏感消息。请只在可信聊天中输入。",
         cancelled: "绑定流程已取消，输入 /drive 可重新开始。",
         not_found: "🚫 未找到对应网盘",
         unbind_confirm: "⚠️ <b>确认解绑这个网盘？</b>\n\n网盘：<code>{{type}}</code>\n账号：<code>{{account}}</code>\n\n解绑后不能继续转存到这个网盘，已转存文件不会从云端删除。",
@@ -103,7 +106,7 @@ export const STRINGS = {
         
         // 绑定流程
         mega_input_email: "📧 <b>请输入您的 Mega 登录邮箱</b>：",
-        mega_input_pass: "🔑 <b>请输入密码</b>\n\n为减少暴露，我会在提交后尝试删除这条消息。请确认当前聊天环境可信。",
+        mega_input_pass: "🔑 <b>请输入密码</b>",
         mega_verifying: "⏳ 正在验证账号，请稍候...",
         mega_success: "✅ <b>绑定成功！</b>\n\n账号: <code>{{email}}</code>\n\n现在可以直接发送文件或链接开始转存。",
         mega_fail_2fa: "⚠️ <b>暂不支持开启两步验证的账号</b>\n\n请使用支持应用密码或 Token 的方式绑定，或换用其他网盘。不建议长期关闭两步验证。",
@@ -127,6 +130,11 @@ export const STRINGS = {
         is_default: "(默认)",
         set_default_success: "✅ 默认网盘设置成功！",
         btn_bind_other: "绑定其他网盘",
+        btn_more_drives: "更多网盘",
+        btn_recommended_drives: "推荐网盘",
+        select_type_title: "➕ <b>选择要绑定的网盘</b>",
+        select_type_recommended_hint: "推荐先选择常用网盘；需要 Token 或对象存储时再打开更多网盘。",
+        select_type_more_hint: "这些网盘通常需要 JSON Token、Access Key 或 WebDAV 地址。",
     },
 
     // --- 文件浏览 ---
@@ -163,6 +171,8 @@ export const STRINGS = {
         no_tasks: "尚无任务记录。请直接向我发送文件、图片或链接来开始转存。",
         no_active_tasks: "✅ 当前没有排队或处理中任务。",
         task_item: "{{index}}. {{status}} <code>{{name}}</code> ({{statusText}})",
+        active_action_hint: "可直接取消当前仍在排队或处理的任务。",
+        failed_action_hint: "最近有失败任务，可从这里重新排队。",
         drive_status: "🔑 网盘绑定: {{status}}",
         system_info: "💻 管理员诊断信息",
         uptime: "⏱️ 运行时间: {{uptime}}",
@@ -245,8 +255,8 @@ export const STRINGS = {
     remote_folder: {
         help: "📁 <b>保存目录</b>\n\n" +
               "后续文件会转存到这里。\n" +
-              "请选择操作，或直接发送新目录，例如 <code>/Movies/2024</code>。",
-        menu_hint: "后续文件会转存到这里。\n请选择操作，或直接发送新目录，例如 <code>/Movies/2024</code>。",
+              "点击“设置保存目录”后发送新目录，例如 <code>/Movies/2024</code>。",
+        menu_hint: "后续文件会转存到这里。\n点击“设置保存目录”后发送新目录，例如 <code>/Movies/2024</code>。",
         set_success: "✅ <b>保存目录已设置</b>\n\n" +
                      "新目录: <code>{{path}}</code>\n" +
                      "后续文件会转存到此目录。",

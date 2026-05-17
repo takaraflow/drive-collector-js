@@ -137,6 +137,38 @@ export class Dispatcher {
         return buttons;
     }
 
+    static _getPersonalStatusButtons(queueOverview, isAdmin = false) {
+        const buttons = [];
+        const activeTask = queueOverview?.activeTasks?.find(task => task?.id);
+        const failedTask = queueOverview?.recentTasks?.find(task => task?.id && task.status === TASK_STATUSES.FAILED);
+
+        if (activeTask) {
+            buttons.push([
+                Button.inline(`🚫 ${STRINGS.task.btn_cancel_active}`, Buffer.from(`cancel_confirm_${activeTask.id}`))
+            ]);
+        }
+
+        if (failedTask) {
+            buttons.push([
+                Button.inline(`🔄 ${STRINGS.task.btn_retry_failed}`, Buffer.from(`retry_confirm_${failedTask.id}`))
+            ]);
+        }
+
+        buttons.push([
+            Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0")),
+            Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_menu"))
+        ]);
+
+        if (isAdmin) {
+            buttons.push([
+                Button.inline(STRINGS.status.btn_task_queue, Buffer.from("task_queue_open")),
+                Button.inline(STRINGS.status.btn_diagnosis, Buffer.from("diagnosis_run"))
+            ]);
+        }
+
+        return buttons;
+    }
+
     static _getFilesRecoveryButtons(page = 0) {
         return [
             [Button.inline(STRINGS.files.btn_retry_load, Buffer.from(`files_refresh_${page}`))],
@@ -505,8 +537,8 @@ export class Dispatcher {
 
             if (data === "status_general") {
                 const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
-                const message = await this._getGeneralStatus(userId, { includeSystemInfo: isAdmin });
-                await safeEdit(event.userId, event.msgId, message, this._getStatusButtons(isAdmin), userId);
+                const { message, buttons } = await this._getGeneralStatus(userId, { includeSystemInfo: isAdmin });
+                await safeEdit(event.userId, event.msgId, message, buttons, userId);
                 return await answer();
             }
 
@@ -996,15 +1028,14 @@ export class Dispatcher {
 
         switch (subCommand) {
             case 'queue':
-                message = await this._getQueueStatus(userId);
+                ({ message, buttons } = await this._getQueueStatus(userId, { includeActions: true }));
                 break;
             case 'user':
-                message = await this._getUserStatus(userId);
+                ({ message, buttons } = await this._getUserStatus(userId, { includeActions: true }));
                 break;
             case 'general':
             default:
-                message = await this._getGeneralStatus(userId, { includeSystemInfo: isAdmin });
-                buttons = this._getStatusButtons(isAdmin);
+                ({ message, buttons } = await this._getGeneralStatus(userId, { includeSystemInfo: isAdmin }));
         }
 
         return await runBotTaskWithRetry(() => client.sendMessage(target, {
@@ -1017,19 +1048,22 @@ export class Dispatcher {
     /**
      * [私有] 获取队列状态
      */
-    static async _getQueueStatus(userId) {
+    static async _getQueueStatus(userId, { includeActions = false } = {}) {
         const queueOverview = await TaskRepository.getUserQueueOverview(userId, 10);
 
         let status = format(STRINGS.status.user_header, {}) + '\n\n';
         status += this._renderUserQueueSummary(queueOverview);
 
-        return status;
+        return {
+            message: status,
+            buttons: includeActions ? this._getPersonalStatusButtons(queueOverview, false) : null
+        };
     }
 
     /**
      * [私有] 获取用户状态
      */
-    static async _getUserStatus(userId) {
+    static async _getUserStatus(userId, { includeActions = false } = {}) {
         const queueOverview = await TaskRepository.getUserQueueOverview(userId, 10);
 
         let status = format(STRINGS.status.user_header, {}) + '\n\n';
@@ -1039,14 +1073,20 @@ export class Dispatcher {
         const tasks = queueOverview.recentTasks;
         if (!tasks || tasks.length === 0) {
             status += STRINGS.status.no_tasks;
-            return status;
+            return {
+                message: status,
+                buttons: includeActions ? this._getPersonalStatusButtons(queueOverview, false) : null
+            };
         }
         
         tasks.forEach((task, index) => {
             status += this._renderStatusTaskItem(task, index) + '\n';
         });
         
-        return status;
+        return {
+            message: status,
+            buttons: includeActions ? this._getPersonalStatusButtons(queueOverview, false) : null
+        };
     }
 
     /**
@@ -1073,7 +1113,10 @@ export class Dispatcher {
             status += format(STRINGS.status.service_status, { status: '✅ 正常' });
         }
         
-        return status;
+        return {
+            message: status,
+            buttons: this._getPersonalStatusButtons(queueOverview, includeSystemInfo)
+        };
     }
 
     static _renderUserQueueSummary(queueOverview) {
@@ -1098,6 +1141,8 @@ export class Dispatcher {
         queueOverview.activeTasks.forEach((task, index) => {
             status += this._renderStatusTaskItem(task, index) + '\n';
         });
+
+        status += STRINGS.status.active_action_hint + '\n';
 
         return status;
     }

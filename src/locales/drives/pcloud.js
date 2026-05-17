@@ -1,6 +1,6 @@
 export const STRINGS = {
     input_user: "📧 <b>请输入 pCloud 登录邮箱</b>：",
-    input_pass: "🔑 <b>请输入密码</b>：",
+    input_pass: "🔑 <b>请输入密码</b>",
     success: "✅ <b>绑定成功！</b>\n\npCloud 已连接",
     bind_failed: "❌ <b>绑定失败</b>",
     fail_login: "⚠️ <b>登录失败</b>\n请检查账号或密码。",

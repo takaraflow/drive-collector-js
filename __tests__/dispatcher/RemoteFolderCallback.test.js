@@ -133,6 +133,7 @@ describe('Dispatcher remote folder callbacks', () => {
             'user-1'
         );
         expect(mockSafeEdit.mock.calls[0][2]).toContain('/Movies');
+        expect(mockSafeEdit.mock.calls[0][2]).toContain('点击“设置保存目录”后发送新目录');
         expect(answer).toHaveBeenCalledWith('');
     });
 

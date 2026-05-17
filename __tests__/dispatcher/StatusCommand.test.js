@@ -145,6 +145,7 @@ describe('Dispatcher /status command', () => {
         expect(sent).not.toContain('运行时间');
         const buttons = mockClient.sendMessage.mock.calls[0][1].buttons;
         expect(buttons.flat().map(button => button.data.toString())).not.toContain('diagnosis_run');
+        expect(buttons.flat().map(button => button.data.toString())).toContain('cancel_confirm_t1');
     });
 
     it('should show admin-only system diagnostics and shortcuts in general status', async () => {
@@ -174,6 +175,8 @@ describe('Dispatcher /status command', () => {
         const sent = mockClient.sendMessage.mock.calls[0][1].message;
         expect(sent).toContain('🕒 排队中: 1');
         expect(sent).toContain('only-current-user.txt');
+        const callbackData = mockClient.sendMessage.mock.calls[0][1].buttons.flat().map(button => button.data.toString());
+        expect(callbackData).toContain('cancel_confirm_t1');
     });
 
     it('should show an empty personal queue without falling back to global memory state', async () => {
@@ -202,6 +205,22 @@ describe('Dispatcher /status command', () => {
         expect(sent).toContain('👤 您的任务历史');
         expect(sent).toContain('queued-now.zip</code> (排队中)');
         expect(sent).toContain('done-before.zip</code> (完成)');
+    });
+
+    it('should offer retry action for the latest failed personal task', async () => {
+        mockTaskRepository.getUserQueueOverview.mockResolvedValue({
+            statusCounts: { failed: 1 },
+            activeTasks: [],
+            recentTasks: [
+                { id: 'failed-1', file_name: 'failed.zip', status: 'failed' }
+            ]
+        });
+
+        await Dispatcher._handleStatusCommand('chat-1', 'user-1', '/status user');
+
+        const buttons = mockClient.sendMessage.mock.calls[0][1].buttons.flat();
+        expect(buttons.map(button => button.data.toString())).toContain('retry_confirm_failed-1');
+        expect(buttons.find(button => button.data.toString() === 'retry_confirm_failed-1').text).toContain('重试失败任务');
     });
 
     it('should edit the current message for help_main callback', async () => {

@@ -1,6 +1,6 @@
 export const STRINGS = {
     // 绑定流程
-    input_token: "🔑 <b>请输入 Google Drive 的 JSON Token</b>：\n\n请确保包含 access_token, refresh_token 等字段。",
+    input_token: "🔑 <b>请输入 Google Drive 的 JSON Token</b>\n\n请确保包含 access_token, refresh_token 等字段。",
     verifying: "⏳ 正在验证 Token，请稍候...",
     success: "✅ <b>绑定成功！</b>\n\nGoogle Drive 已连接",
     bind_failed: "❌ <b>绑定失败</b>",

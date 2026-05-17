@@ -49,7 +49,8 @@ export class UIHelper {
                 const emoji = [".mp4", ".mkv", ".avi"].includes(ext) ? "🎞️" : [".jpg", ".png", ".webp"].includes(ext) ? "🖼️" : [".zip", ".rar", ".7z"].includes(ext) ? "📦" : [".pdf", ".epub"].includes(ext) ? "📝" : "📄";
                 const size = formatBytes(f.Size, 2);
                 const time = f.ModTime.replace("T", " ").substring(0, 16);
-                text += `${emoji} <b>${escapeHTML(f.Name)}</b>\n    <code>${size}</code> | <code>${time}</code>\n\n`;
+                const displayName = escapeHTML(this._shortenFileName(f.Name, 36));
+                text += `${emoji} <b>${displayName}</b>\n    <code>${size}</code> | <code>${time}</code>\n\n`;
             });
         }
 
@@ -145,8 +146,12 @@ export class UIHelper {
     static renderBatchMonitor(allTasks, focusTask, focusStatus, downloaded = 0, total = 0, focusErrorMsg = null) {
         const totalCount = allTasks.length;
         const completedCount = allTasks.filter(t => t.status === 'completed').length;
-        
-        let statusLines = [];
+        const failedCount = allTasks.filter(t => t.status === 'failed').length;
+        const cancelledCount = allTasks.filter(t => t.status === 'cancelled').length;
+        const activeCount = Math.max(0, totalCount - completedCount - failedCount - cancelledCount);
+
+        const statusLines = [];
+        const overflowTasks = [];
 
         allTasks.forEach(t => {
             // 使用 ID 进行精确匹配，而非文件名
@@ -165,12 +170,13 @@ export class UIHelper {
                               (isFocus && (displayStatus === 'downloading' || displayStatus === 'uploading') ? '🔄' : '🕒');
             
             // 【重要】无论下载还是上传，只要是焦点任务且有进度，就显示百分比
+            let line;
             if (isFocus && total > 0 && (displayStatus === 'downloading' || displayStatus === 'uploading')) {
                 const progress = Math.round((downloaded / total) * 100);
-                statusLines.push(`${statusIcon} ${displayName} [${progress}%]`);
+                line = `${statusIcon} ${displayName} [${progress}%]`;
             } else if (isFocus && displayStatus === 'uploading' && !total) {
                 // 上传中但尚未获取到具体大小时，显示上传中标识
-                statusLines.push(`${statusIcon} ${displayName} [上传中]`);
+                line = `${statusIcon} ${displayName} [上传中]`;
             } else {
                 // 使用简短的状态文本
                 let statusText = displayStatus === 'completed' ? '完成' :
@@ -189,7 +195,13 @@ export class UIHelper {
                     }
                 }
 
-                statusLines.push(`${statusIcon} ${displayName} (${statusText})`);
+                line = `${statusIcon} ${displayName} (${statusText})`;
+            }
+
+            if (isFocus || displayStatus === 'failed') {
+                statusLines.push(line);
+            } else {
+                overflowTasks.push(line);
             }
         });
 
@@ -203,16 +215,29 @@ export class UIHelper {
             });
             text = text.replace(/━━━━━━━━━━━━━━\n/g, '').replace(/💡 进度条仅显示当前正在处理的文件/g, '');
         } else {
+            const compactLines = statusLines.length > 0
+                ? statusLines
+                : overflowTasks.slice(0, 3);
+            const hiddenCount = Math.max(0, totalCount - compactLines.length);
+            if (hiddenCount > 0) {
+                compactLines.push(`… 其余 ${hiddenCount} 个文件正在队列中`);
+            }
+
             text = format(STRINGS.task.batch_monitor, {
                 current: completedCount,
                 total: totalCount,
-                statusText: statusLines.join('\n')
+                statusText: [
+                    `📌 汇总: ✅${completedCount} 🔄${activeCount} ❌${failedCount} 🚫${cancelledCount}`,
+                    ...compactLines
+                ].join('\n')
             });
 
             // 将第二个━━━━━━━━━━━━━━替换为ASCII进度条（如果有焦点任务进度）
             if (total > 0 && (focusStatus === 'downloading' || focusStatus === 'uploading')) {
                 const progressBar = `<code>${this.generateProgressBar(downloaded, total)}</code> (${formatBytes(downloaded)}/${formatBytes(total)})`;
-                text = text.replace(/━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件/g, `${progressBar}\n💡 进度条仅显示当前正在处理的文件`);
+                text = text.replace(/━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件/g, `${progressBar}`);
+            } else {
+                text = text.replace(/\n━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件/g, '');
             }
         }
 
@@ -383,20 +408,22 @@ export class UIHelper {
 
          html += '━━━━━━━━━━━━━━━━━━━';
 
-         // 状态筛选按钮（两行）
+         // 状态筛选按钮（按信息密度收敛：活跃状态保留，历史状态仅非零显示）
          const activeStatuses = ['queued', 'downloading', 'uploading'];
          const otherStatuses = ['completed', 'failed', 'cancelled'];
          const btnRow1 = activeStatuses.map(s => {
              const count = data.statusCounts[s] || 0;
              const label = (statusLabels[s] || s).split(' ').pop();
-             return Button.inline(`${label}(${count})`, Buffer.from(`tq_${s}_0`));
+             return Button.inline(`${this._statusActionIcon(s)} ${label}(${count})`, Buffer.from(`tq_${s}_0`));
          });
-         const btnRow2 = otherStatuses.map(s => {
-             const count = data.statusCounts[s] || 0;
-             const label = (statusLabels[s] || s).split(' ').pop();
-             return Button.inline(`${label}(${count})`, Buffer.from(`tq_${s}_0`));
-         });
-         const buttons = [btnRow1, btnRow2];
+         const btnRow2 = otherStatuses
+             .filter(s => (data.statusCounts[s] || 0) > 0)
+             .map(s => {
+                 const count = data.statusCounts[s] || 0;
+                 const label = (statusLabels[s] || s).split(' ').pop();
+                 return Button.inline(`${this._statusActionIcon(s)} ${label}(${count})`, Buffer.from(`tq_${s}_0`));
+             });
+         const buttons = btnRow2.length > 0 ? [btnRow1, btnRow2] : [btnRow1];
 
          return { text: html, buttons };
      }
@@ -460,14 +487,14 @@ export class UIHelper {
              labels: TQ
          });
          const backRow = [
-             Button.inline(TQ.btn_back, Buffer.from('tq_back'))
+             Button.inline(this._withLeadingIcon(TQ.btn_back, '↩️'), Buffer.from('tq_back'))
          ];
 
          const retryRows = [];
          if (status === 'failed') {
              if (data.tasks.some(task => task.id)) {
                  retryRows.push([
-                     Button.inline(TQ.btn_retry_failed_page, Buffer.from(`retry_failed_page_${data.page}`))
+                     Button.inline(this._withLeadingIcon(TQ.btn_retry_failed_page, '🔄'), Buffer.from(`retry_failed_page_${data.page}`))
                  ]);
              }
          }
@@ -489,5 +516,30 @@ export class UIHelper {
          if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
          if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
          return `${Math.floor(diff / 86400000)}天前`;
+     }
+
+     static _statusActionIcon(status) {
+         const icons = {
+             queued: '🕒',
+             downloading: '⬇️',
+             downloaded: '📦',
+             uploading: '⬆️',
+             completed: '✅',
+             failed: '❌',
+             cancelled: '🚫'
+         };
+         return icons[status] || '•';
+     }
+
+     static _withLeadingIcon(label, icon) {
+         const value = String(label || '');
+         if (/^[\u2190-\u21FF\u2300-\u23FF\u2600-\u27BF]/u.test(value)) {
+             return value;
+         }
+         const first = value.codePointAt(0);
+         if (first && first > 0xffff) {
+             return value;
+         }
+         return `${icon} ${value}`;
      }
  }
