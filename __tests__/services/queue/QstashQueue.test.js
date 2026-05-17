@@ -187,10 +187,9 @@ describe("QstashQueue - Initialize", () => {
     test("should allow explicit mock mode outside test runtime", async () => {
         const { getConfig } = await import("../../../src/config/index.js");
         process.env.NODE_ENV = 'prod';
-        process.env.QSTASH_MOCK_MODE = 'true';
         getConfig.mockReturnValueOnce({
             nodeEnv: 'prod',
-            qstash: { token: '' }
+            qstash: { token: '', mockMode: true }
         });
 
         const queue = new QstashQueue();
@@ -199,6 +198,40 @@ describe("QstashQueue - Initialize", () => {
         expect(queue.isMockMode).toBe(true);
         expect(queue.client).toBeNull();
         expect(queue.connected).toBe(true);
+    });
+
+    test("should apply QStash runtime options from config during initialize", async () => {
+        const { getConfig } = await import("../../../src/config/index.js");
+        getConfig.mockReturnValueOnce({
+            nodeEnv: 'test',
+            qstash: {
+                token: 'test-token',
+                batchSize: 7,
+                batchTimeout: 700,
+                maxBufferSize: 77,
+                deadLetterQueueSize: 17,
+                deadLetterTtlSeconds: 3600,
+                maxConcurrent: 4,
+                forceDirect: true,
+                mockDelayMs: 25,
+                mockError: 'BOOM'
+            }
+        });
+
+        const queue = new QstashQueue();
+        await queue.initialize();
+
+        expect(queue).toMatchObject({
+            batchSize: 7,
+            batchTimeout: 700,
+            maxBufferSize: 77,
+            maxDeadLetterQueueSize: 17,
+            deadLetterTtlSeconds: 3600,
+            maxConcurrentPublishes: 4,
+            forceDirect: true,
+            mockDelayMs: 25,
+            mockError: 'BOOM'
+        });
     });
 });
 
@@ -346,9 +379,33 @@ describe("QstashQueue - publish", () => {
         );
     });
 
-    test("should read persistent dead letters when requested", async () => {
+    test("should return a local dead letter queue snapshot", async () => {
+        queue.deadLetterQueue.push({
+            id: 'dlq_local',
+            timestamp: 1000,
+            message: { topic: 'local-topic' }
+        });
+
+        const result = await queue.getDeadLetterQueue();
+        result.push({ id: 'mutated' });
+        result[0].message.topic = 'changed-topic';
+
+        expect(queue.deadLetterQueue).toEqual([
+            {
+                id: 'dlq_local',
+                timestamp: 1000,
+                message: { topic: 'local-topic' }
+            }
+        ]);
+    });
+
+    test("should merge local and persistent dead letters when requested", async () => {
+        queue.deadLetterQueue.push(
+            { id: 'dlq_local', timestamp: 1500 },
+            { id: 'dlq_late', timestamp: 2000, message: { source: 'local-copy' } }
+        );
         const persisted = [
-            { id: 'dlq_late', timestamp: 2000 },
+            { id: 'dlq_late', timestamp: 2000, message: { source: 'persistent-copy' } },
             { id: 'dlq_early', timestamp: 1000 }
         ];
         mockCacheListKeys.mockResolvedValue(['queue:dlq:dlq_late', 'queue:dlq:dlq_early']);
@@ -358,8 +415,32 @@ describe("QstashQueue - publish", () => {
 
         await expect(queue.getDeadLetterQueue({ includePersistent: true })).resolves.toEqual([
             persisted[1],
+            { id: 'dlq_local', timestamp: 1500 },
             persisted[0]
         ]);
+    });
+
+    test("should read persistent dead letters directly", async () => {
+        const persisted = [
+            { id: 'dlq_late', timestamp: 2000 },
+            { id: 'dlq_early', timestamp: 1000 }
+        ];
+        mockCacheListKeys.mockResolvedValue(['queue:dlq:dlq_late', 'queue:dlq:dlq_early']);
+        mockCacheGet
+            .mockResolvedValueOnce(persisted[0])
+            .mockResolvedValueOnce(persisted[1]);
+
+        await expect(queue.getPersistentDeadLetterQueue()).resolves.toEqual([
+            persisted[1],
+            persisted[0]
+        ]);
+    });
+
+    test("should fail closed when persistent dead letter read fails", async () => {
+        queue.deadLetterQueue.push({ id: 'dlq_local', timestamp: 1000 });
+        mockCacheListKeys.mockRejectedValue(new Error('cache unavailable'));
+
+        await expect(queue.getDeadLetterQueue({ includePersistent: true })).rejects.toThrow('cache unavailable');
     });
 
     test("should settle pending publishes when flush fails after dequeue", async () => {

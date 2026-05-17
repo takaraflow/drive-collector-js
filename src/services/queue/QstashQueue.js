@@ -11,9 +11,30 @@ import { CACHE_KEYS } from "../../domain/cache-keys.js";
 
 const log = logger.withModule?.('QstashQueue') || logger;
 
-function isQstashDebugEnabled() {
-    const value = (process.env.QSTASH_DEBUG || '').toLowerCase();
-    return value === 'true' || value === '1' || value === 'yes';
+function isTruthy(value) {
+    return ['true', '1', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+function toPositiveInt(value, fallback) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getRuntimeConfig() {
+    try {
+        return getConfig();
+    } catch {
+        return {};
+    }
+}
+
+function getQstashConfig() {
+    return getRuntimeConfig().qstash || {};
+}
+
+function isQstashDebugEnabled(config = getQstashConfig()) {
+    const value = config.debug || 'false';
+    return isTruthy(value);
 }
 
 function summarizeTargetUrl(url) {
@@ -25,12 +46,34 @@ function summarizeTargetUrl(url) {
     }
 }
 
-function isTruthyEnv(value) {
-    return ['true', '1', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+function isTestRuntime(config = {}) {
+    return (config.nodeEnv || 'dev') === 'test';
 }
 
-function isTestRuntime(config = {}) {
-    return (config.nodeEnv || process.env.NODE_ENV || 'dev') === 'test';
+function cloneJsonSafe(value) {
+    if (value === null || value === undefined) return value;
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch {
+        return value;
+    }
+}
+
+function snapshotDeadLetterMessage(message) {
+    return cloneJsonSafe(message);
+}
+
+function snapshotDeadLetterQueue(messages = []) {
+    return messages.map(snapshotDeadLetterMessage);
+}
+
+function mergeDeadLetterQueues(localMessages = [], persistedMessages = []) {
+    const byId = new Map();
+    for (const item of [...localMessages, ...persistedMessages]) {
+        if (!item?.id) continue;
+        byId.set(item.id, snapshotDeadLetterMessage(item));
+    }
+    return [...byId.values()].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 }
 
 /**
@@ -51,16 +94,9 @@ export class QstashQueue extends CloudQueueBase {
             timeout: 10000
         });
 
-        // 覆盖批量配置为 QStash 优化
-        this.batchSize = options.batchSize || parseInt(process.env.QSTASH_BATCH_SIZE) || 10;
-        this.batchTimeout = options.batchTimeout || parseInt(process.env.QSTASH_BATCH_TIMEOUT) || 100;
-
-        // 1. 缓冲区管理优化 - 最大缓冲区大小
-        this.maxBufferSize = parseInt(process.env.QSTASH_MAX_BUFFER_SIZE) || 1000;
-
         // 3. 死信队列 - 存储失败消息
         this.deadLetterQueue = [];
-        this.maxDeadLetterQueueSize = parseInt(process.env.QSTASH_DLQ_SIZE) || 100;
+        this._applyRuntimeOptions({});
 
         // 6. 监控指标 - 性能追踪
         this.metrics = {
@@ -72,13 +108,27 @@ export class QstashQueue extends CloudQueueBase {
         };
     }
 
+    _applyRuntimeOptions(qstashConfig = {}) {
+        // 覆盖批量配置为 QStash 优化。构造参数用于测试/显式调用覆盖，配置对象是运行时 SSOT。
+        this.batchSize = toPositiveInt(this.options.batchSize ?? qstashConfig.batchSize, 10);
+        this.batchTimeout = toPositiveInt(this.options.batchTimeout ?? qstashConfig.batchTimeout, 100);
+        this.maxBufferSize = toPositiveInt(this.options.maxBufferSize ?? qstashConfig.maxBufferSize, 1000);
+        this.maxDeadLetterQueueSize = toPositiveInt(this.options.maxDeadLetterQueueSize ?? qstashConfig.deadLetterQueueSize, 100);
+        this.deadLetterTtlSeconds = toPositiveInt(this.options.deadLetterTtlSeconds ?? qstashConfig.deadLetterTtlSeconds, 604800);
+        this.maxConcurrentPublishes = toPositiveInt(this.options.maxConcurrent ?? qstashConfig.maxConcurrent, 5);
+        this.forceDirect = Boolean(this.options.forceDirect ?? qstashConfig.forceDirect);
+        this.mockDelayMs = toPositiveInt(this.options.mockDelayMs ?? qstashConfig.mockDelayMs, 0);
+        this.mockError = this.options.mockError ?? qstashConfig.mockError ?? null;
+    }
+
     async initialize() {
         const config = getConfig();
         const qstashConfig = config.qstash || {};
-        const explicitMockMode = Boolean(this.options.mockMode) || isTruthyEnv(process.env.QSTASH_MOCK_MODE);
+        this._applyRuntimeOptions(qstashConfig);
+        const explicitMockMode = Boolean(this.options.mockMode) || isTruthy(qstashConfig.mockMode);
         const allowMockMode = explicitMockMode || isTestRuntime(config);
 
-        if (isQstashDebugEnabled()) {
+        if (isQstashDebugEnabled(qstashConfig)) {
             log.info('QStash debug enabled (QSTASH_DEBUG=true)');
         }
 
@@ -124,7 +174,7 @@ export class QstashQueue extends CloudQueueBase {
      * 5. 分布式熔断器 - 初始化 Redis 客户端
      */
     async _initializeRedisClient() {
-        if (process.env.NODE_ENV === 'test') {
+        if (isTestRuntime(getRuntimeConfig())) {
             return;
         }
         try {
@@ -166,7 +216,7 @@ export class QstashQueue extends CloudQueueBase {
     }
 
     async _publish(topic, message, options = {}) {
-        const effectiveOptions = process.env.QSTASH_FORCE_DIRECT === 'true'
+        const effectiveOptions = this.forceDirect
             ? { ...options, forceDirect: true }
             : options;
 
@@ -503,8 +553,7 @@ export class QstashQueue extends CloudQueueBase {
     async _persistDeadLetterMessage(dlqMessage) {
         try {
             const { cache } = await import("../CacheService.js");
-            const ttl = parseInt(process.env.QSTASH_DLQ_TTL_SECONDS || '604800', 10);
-            await cache.set(CACHE_KEYS.queueDlq(dlqMessage.id), dlqMessage, ttl, {
+            await cache.set(CACHE_KEYS.queueDlq(dlqMessage.id), dlqMessage, this.deadLetterTtlSeconds, {
                 skipL1: true,
                 skipTtlRandomization: true
             });
@@ -522,9 +571,14 @@ export class QstashQueue extends CloudQueueBase {
      */
     async getDeadLetterQueue(options = {}) {
         if (!options.includePersistent) {
-            return this.deadLetterQueue;
+            return snapshotDeadLetterQueue(this.deadLetterQueue);
         }
 
+        const persisted = await this.getPersistentDeadLetterQueue();
+        return mergeDeadLetterQueues(this.deadLetterQueue, persisted);
+    }
+
+    async getPersistentDeadLetterQueue() {
         try {
             const { cache } = await import("../CacheService.js");
             const keys = await cache.listKeys(CACHE_KEYS.queueDlqPrefix());
@@ -533,12 +587,12 @@ export class QstashQueue extends CloudQueueBase {
                 const item = await cache.get(key, "json", { skipCache: true });
                 if (item) persisted.push(item);
             }
-            return persisted.sort((a, b) => a.timestamp - b.timestamp);
+            return snapshotDeadLetterQueue(persisted).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
         } catch (error) {
             log.error('Failed to read persistent QStash dead letter queue', {
                 error: error?.message || String(error)
             });
-            return this.deadLetterQueue;
+            throw error;
         }
     }
 
@@ -741,7 +795,7 @@ export class QstashQueue extends CloudQueueBase {
      * 7. Mock模式增强 - 模拟延迟
      */
     async _mockDelay(duration) {
-        if (this.isMockMode && process.env.NODE_ENV === 'test') {
+        if (this.isMockMode && isTestRuntime(getRuntimeConfig())) {
             return new Promise(resolve => setTimeout(resolve, duration));
         }
     }
@@ -750,7 +804,7 @@ export class QstashQueue extends CloudQueueBase {
      * 7. Mock模式增强 - 注入错误
      */
     _mockInjectError(errorType) {
-        if (this.isMockMode && process.env.NODE_ENV === 'test') {
+        if (this.isMockMode && isTestRuntime(getRuntimeConfig())) {
             throw new Error(`MOCK_ERROR_${errorType}`);
         }
     }
@@ -854,13 +908,13 @@ export class QstashQueue extends CloudQueueBase {
     async _batchPublish(messages) {
         if (this.isMockMode) {
             // 模拟延迟（如果配置）
-            if (process.env.QSTASH_MOCK_DELAY) {
-                await this._mockDelay(parseInt(process.env.QSTASH_MOCK_DELAY));
+            if (this.mockDelayMs > 0) {
+                await this._mockDelay(this.mockDelayMs);
             }
             
             // 模拟错误注入
-            if (process.env.QSTASH_MOCK_ERROR) {
-                this._mockInjectError(process.env.QSTASH_MOCK_ERROR);
+            if (this.mockError) {
+                this._mockInjectError(this.mockError);
             }
 
             return messages.map(() => ({ messageId: "mock-message-id" }));
@@ -878,7 +932,7 @@ export class QstashQueue extends CloudQueueBase {
      * 重写父类方法 - 执行批量任务（QStash 特有实现）
      */
     async _executeBatch(messages) {
-        const maxConcurrent = parseInt(process.env.QSTASH_MAX_CONCURRENT) || 5;
+        const maxConcurrent = this.maxConcurrentPublishes;
         
         // 6. 监控指标 - 记录开始时间
         const batchStartTime = Date.now();

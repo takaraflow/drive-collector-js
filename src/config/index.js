@@ -466,7 +466,17 @@ function buildConfigObject(env) {
             nextSigningKey: env.QSTASH_NEXT_SIGNING_KEY || null,
             webhookUrl: env.LB_WEBHOOK_URL || null,
             pathTemplate: env.QSTASH_PATH_TEMPLATE || '/api/v2/tasks/${topic}',
-            debug: env.QSTASH_DEBUG || 'false'
+            debug: env.QSTASH_DEBUG || 'false',
+            forceDirect: env.QSTASH_FORCE_DIRECT === 'true',
+            mockMode: env.QSTASH_MOCK_MODE === 'true',
+            batchSize: parsePositiveInt(env.QSTASH_BATCH_SIZE, 10),
+            batchTimeout: parsePositiveInt(env.QSTASH_BATCH_TIMEOUT, 100),
+            maxBufferSize: parsePositiveInt(env.QSTASH_MAX_BUFFER_SIZE, 1000),
+            deadLetterQueueSize: parsePositiveInt(env.QSTASH_DLQ_SIZE, 100),
+            deadLetterTtlSeconds: parsePositiveInt(env.QSTASH_DLQ_TTL_SECONDS, 604800),
+            maxConcurrent: parsePositiveInt(env.QSTASH_MAX_CONCURRENT, 5),
+            mockDelayMs: parsePositiveInt(env.QSTASH_MOCK_DELAY, 0),
+            mockError: env.QSTASH_MOCK_ERROR || null
         },
         oss: {
             endpoint: env.R2_ENDPOINT || null,
