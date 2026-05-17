@@ -40,16 +40,11 @@ export class DriveConfigFlow {
         return hint ? `${prompt}\n\n${hint}` : prompt;
     }
 
-    /**
-     * 发送网盘管理面板
-     * @param {string} chatId 
-     * @param {string} userId 
-     */
-    static async sendDriveManager(chatId, userId) {
+    static async _buildDriveManagerPayload(userId) {
         const drives = await DriveRepository.findByUserId(userId);
         const defaultDrive = drives?.find(isDefaultDrive) || drives?.[0] || null;
         const defaultDriveId = defaultDrive?.id || null;
-        
+
         let message = STRINGS.drive.menu_title;
         const buttons = [];
 
@@ -86,12 +81,31 @@ export class DriveConfigFlow {
             message += STRINGS.drive.not_bound;
         }
 
-        const supportedDrives = this.getSupportedDrives();
         buttons.push([
             Button.inline(`➕ ${STRINGS.drive.btn_bind_other}`, Buffer.from("drive_select_type"))
         ]);
 
+        return { message, buttons };
+    }
+
+    /**
+     * 发送网盘管理面板
+     * @param {string} chatId
+     * @param {string} userId
+     */
+    static async sendDriveManager(chatId, userId) {
+        const { message, buttons } = await this._buildDriveManagerPayload(userId);
         await runBotTaskWithRetry(() => client.sendMessage(chatId, { message, buttons, parseMode: "html" }), userId, {}, false, 3);
+    }
+
+    static async _editDriveManager(event, userId) {
+        const { message, buttons } = await this._buildDriveManagerPayload(userId);
+        await runBotTaskWithRetry(() => client.editMessage(event.userId, {
+            message: event.msgId,
+            text: message,
+            buttons,
+            parseMode: "html"
+        }), userId, {}, false, 3);
     }
 
     /**
@@ -106,7 +120,7 @@ export class DriveConfigFlow {
         if (data.startsWith("drive_set_default_")) {
             const driveId = data.split("_")[3];
             await BindingService.setDefaultDrive(userId, driveId);
-            await this.sendDriveManager(event.userId, userId); // 刷新界面
+            await this._editDriveManager(event, userId);
             return STRINGS.drive.set_default_success;
         }
 
@@ -135,19 +149,19 @@ export class DriveConfigFlow {
         if (data.startsWith("drive_unbind_execute_")) {
             const driveId = data.split("_")[3];
             await BindingService.unbindDrive(userId, driveId);
-            await this.sendDriveManager(event.userId, userId);
+            await this._editDriveManager(event, userId);
             return STRINGS.drive.success_unbind;
         }
 
         if (data === "drive_unbind_all_execute") {
             await DriveRepository.deleteByUserId(userId);
             await SessionManager.clear(userId);
-            await this.sendDriveManager(event.userId, userId);
+            await this._editDriveManager(event, userId);
             return STRINGS.drive.success_unbind;
         }
 
         if (data === "drive_manager_back") {
-            await this.sendDriveManager(event.userId, userId);
+            await this._editDriveManager(event, userId);
             return STRINGS.drive.returned;
         }
 

@@ -148,6 +148,25 @@ export class Dispatcher {
         ];
     }
 
+    static async _buildRemoteFolderMenu(userId) {
+        const currentPath = await this._getUserUploadPathFromD1(userId);
+        const displayPath = currentPath || getDefaultRemoteFolder();
+        const isCustomPath = !!currentPath;
+
+        let message = format(STRINGS.remote_folder.menu_title, {});
+        const pathInfo = displayPath + (isCustomPath ? " (自定义)" : " (默认)");
+        message += format(STRINGS.remote_folder.show_current, { path: pathInfo }) + '\n\n';
+        message += STRINGS.remote_folder.menu_hint;
+
+        const buttons = [
+            [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))],
+            [Button.inline(STRINGS.remote_folder.btn_reset_path, Buffer.from("remote_folder_reset_confirm"))],
+            [Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))]
+        ];
+
+        return { message, buttons };
+    }
+
     /**
      * 初始化 Dispatcher
      */
@@ -1232,21 +1251,7 @@ export class Dispatcher {
             }), userId, {}, false, 3);
         }
 
-        // 获取当前路径
-        const currentPath = await this._getUserUploadPathFromD1(userId);
-        const displayPath = currentPath || getDefaultRemoteFolder();
-        const isCustomPath = !!currentPath;
-
-        let message = format(STRINGS.remote_folder.menu_title, {});
-        const pathInfo = displayPath + (isCustomPath ? " (自定义)" : " (默认)");
-        message += format(STRINGS.remote_folder.show_current, { path: pathInfo }) + '\n\n';
-        message += STRINGS.remote_folder.menu_hint;
-
-        const buttons = [
-            [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))],
-            [Button.inline(STRINGS.remote_folder.btn_reset_path, Buffer.from("remote_folder_reset_confirm"))],
-            [Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))]
-        ];
+        const { message, buttons } = await this._buildRemoteFolderMenu(userId);
 
         return await runBotTaskWithRetry(() => client.sendMessage(target, {
             message: message,
@@ -1504,7 +1509,8 @@ export class Dispatcher {
             ], userId);
             await answerCallback("");
         } else if (data === "remote_folder_menu") {
-            await this._handleRemoteFolderCommand(event.peer || event.userId, userId);
+            const { message, buttons } = await this._buildRemoteFolderMenu(userId);
+            await safeEdit(event.userId, event.msgId, message, buttons, userId);
             await answerCallback("");
         } else {
             await answerCallback("");

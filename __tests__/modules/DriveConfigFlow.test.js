@@ -223,7 +223,13 @@ describe("DriveConfigFlow", () => {
             const result = await DriveConfigFlow.handleCallback(event, "user456");
 
             expect(mockBindingService.setDefaultDrive).toHaveBeenCalledWith("user456", "drive1");
-            expect(mockClient.sendMessage).toHaveBeenCalled(); // sendDriveManager refresh
+            expect(mockClient.editMessage).toHaveBeenCalledWith("user123", expect.objectContaining({
+                message: "msg100",
+                text: expect.stringContaining("网盘管理中心"),
+                buttons: expect.any(Array),
+                parseMode: "html"
+            }));
+            expect(mockClient.sendMessage).not.toHaveBeenCalled();
             expect(result).toBe("✅ 默认网盘设置成功！");
         });
 
@@ -253,7 +259,13 @@ describe("DriveConfigFlow", () => {
             const result = await DriveConfigFlow.handleCallback(event, "user456");
 
             expect(mockBindingService.unbindDrive).toHaveBeenCalledWith("user456", "drive1");
-            expect(mockClient.sendMessage).toHaveBeenCalled(); // sendDriveManager refresh
+            expect(mockClient.editMessage).toHaveBeenCalledWith("user123", expect.objectContaining({
+                message: "msg100",
+                text: expect.stringContaining("网盘管理中心"),
+                buttons: expect.any(Array),
+                parseMode: "html"
+            }));
+            expect(mockClient.sendMessage).not.toHaveBeenCalled();
             expect(result).toBe("已成功解绑");
         });
 
@@ -265,7 +277,13 @@ describe("DriveConfigFlow", () => {
 
             expect(mockDriveRepository.deleteByUserId).toHaveBeenCalledWith("user456");
             expect(mockSessionManager.clear).toHaveBeenCalledWith("user456");
-            expect(mockClient.sendMessage).toHaveBeenCalled();
+            expect(mockClient.editMessage).toHaveBeenCalledWith("user123", expect.objectContaining({
+                message: "msg100",
+                text: expect.stringContaining("网盘管理中心"),
+                buttons: expect.any(Array),
+                parseMode: "html"
+            }));
+            expect(mockClient.sendMessage).not.toHaveBeenCalled();
             expect(result).toBe("已成功解绑");
         });
 
@@ -276,7 +294,13 @@ describe("DriveConfigFlow", () => {
 
             const result = await DriveConfigFlow.handleCallback(event, "user456");
 
-            expect(mockClient.sendMessage).toHaveBeenCalled(); // sendDriveManager refresh
+            expect(mockClient.editMessage).toHaveBeenCalledWith("user123", expect.objectContaining({
+                message: "msg100",
+                text: expect.stringContaining("网盘管理中心"),
+                buttons: expect.any(Array),
+                parseMode: "html"
+            }));
+            expect(mockClient.sendMessage).not.toHaveBeenCalled();
             expect(result).toBe("已返回");
         });
 
