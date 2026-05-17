@@ -82,9 +82,21 @@ describe("BindingService", () => {
         });
 
         it("解绑只删除当前用户的 Drive，不再写 default_drive settings", async () => {
-            await BindingService.unbindDrive("user1", "drive1");
+            mockDriveRepo.delete.mockResolvedValue(true);
+
+            const result = await BindingService.unbindDrive("user1", "drive1");
 
             expect(mockDriveRepo.delete).toHaveBeenCalledWith("user1", "drive1");
+            expect(result).toEqual({ success: true });
+        });
+
+        it("解绑目标不属于当前用户时返回失败", async () => {
+            mockDriveRepo.delete.mockResolvedValue(false);
+
+            const result = await BindingService.unbindDrive("user1", "drive1");
+
+            expect(mockDriveRepo.delete).toHaveBeenCalledWith("user1", "drive1");
+            expect(result).toEqual({ success: false });
         });
     });
 

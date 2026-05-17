@@ -343,8 +343,8 @@ describe("DriveRepository", () => {
         });
 
         it("should return early for invalid userId or driveId", async () => {
-            await DriveRepository.delete(null, "drive123");
-            await DriveRepository.delete("user1", null);
+            await expect(DriveRepository.delete(null, "drive123")).resolves.toBe(false);
+            await expect(DriveRepository.delete("user1", null)).resolves.toBe(false);
             expect(mockCache.get).not.toHaveBeenCalled();
         });
 
@@ -358,9 +358,10 @@ describe("DriveRepository", () => {
                 return Promise.resolve(null);
             });
 
-            await DriveRepository.delete("user1", "drive123");
+            const result = await DriveRepository.delete("user1", "drive123");
 
             // Verify D1 update
+            expect(result).toBe(true);
             expect(mockD1.run).toHaveBeenCalledWith(
                 "UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id = ? AND user_id = ?",
                 ["deleted", expect.any(Number), "drive123", "user1"]
@@ -375,11 +376,23 @@ describe("DriveRepository", () => {
             expect(mockLocalCache.del).toHaveBeenCalledWith("drives:active"); // Note: key is "drives:active"
         });
 
+        it("should return false when the owner-scoped update affects no rows", async () => {
+            mockCache.get.mockResolvedValue({ id: "drive123", user_id: "user1" });
+            mockD1.run.mockResolvedValue({ changes: 0 });
+
+            const result = await DriveRepository.delete("user1", "drive123");
+
+            expect(result).toBe(false);
+            expect(mockCache.delete).not.toHaveBeenCalledWith("drive:user1");
+            expect(mockCache.delete).not.toHaveBeenCalledWith("drive_id:drive123");
+        });
+
         it("should not delete a drive that belongs to another user", async () => {
             mockCache.get.mockResolvedValue({ id: "drive123", user_id: "other-user" });
 
-            await DriveRepository.delete("user1", "drive123");
+            const result = await DriveRepository.delete("user1", "drive123");
 
+            expect(result).toBe(false);
             expect(mockD1.run).not.toHaveBeenCalled();
             expect(mockCache.delete).not.toHaveBeenCalledWith("drive:user1");
             expect(mockCache.delete).not.toHaveBeenCalledWith("drive_id:drive123");
@@ -389,8 +402,9 @@ describe("DriveRepository", () => {
             mockCache.get.mockResolvedValue(null);
             mockD1.fetchOne.mockResolvedValue(null);
 
-            await DriveRepository.delete("user1", "drive123");
+            const result = await DriveRepository.delete("user1", "drive123");
 
+            expect(result).toBe(false);
             expect(mockD1.run).not.toHaveBeenCalled();
             expect(mockCache.delete).not.toHaveBeenCalled();
         });
@@ -427,6 +441,37 @@ describe("DriveRepository", () => {
 
             expect(mockCache.get).toHaveBeenCalledWith("drive_id:drive123", "json");
             expect(result).toEqual(mockDrive);
+        });
+    });
+
+    describe("findByUserAndId", () => {
+        beforeEach(() => {
+            vi.clearAllMocks();
+            mockCache.get.mockResolvedValue(null);
+            mockD1.fetchOne.mockResolvedValue(null);
+        });
+
+        it("should return null for missing userId or driveId", async () => {
+            await expect(DriveRepository.findByUserAndId(null, "drive123")).resolves.toBeNull();
+            await expect(DriveRepository.findByUserAndId("user1", null)).resolves.toBeNull();
+            expect(mockCache.get).not.toHaveBeenCalled();
+        });
+
+        it("should return drive only when it belongs to the user", async () => {
+            const mockDrive = { id: "drive123", user_id: "user1", status: "active" };
+            mockCache.get.mockResolvedValue(mockDrive);
+
+            const result = await DriveRepository.findByUserAndId("user1", "drive123");
+
+            expect(result).toEqual(mockDrive);
+        });
+
+        it("should return null when drive belongs to another user", async () => {
+            mockCache.get.mockResolvedValue({ id: "drive123", user_id: "other-user", status: "active" });
+
+            const result = await DriveRepository.findByUserAndId("user1", "drive123");
+
+            expect(result).toBeNull();
         });
     });
 

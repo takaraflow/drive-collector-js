@@ -29,6 +29,13 @@ export class DriveRepository {
         return CACHE_KEYS.localDriveByUser(userId);
     }
 
+    static _getChanges(result) {
+        if (!result) return 0;
+        if (Number.isFinite(result.changes)) return result.changes;
+        if (Number.isFinite(result.meta?.changes)) return result.meta.changes;
+        return result.success === true ? 1 : 0;
+    }
+
     static async clearUserDriveCache(userId, driveIds = []) {
         if (!userId) return;
         const uniqueDriveIds = [...new Set((driveIds || []).filter(Boolean))];
@@ -185,23 +192,32 @@ export class DriveRepository {
      * 删除指定用户的网盘绑定 (Write-Through)
      * @param {string} userId
      * @param {string} driveId
-     * @returns {Promise<void>}
+     * @returns {Promise<boolean>}
      */
     static async delete(userId, driveId) {
-        if (!userId || !driveId) return;
+        if (!userId || !driveId) return false;
         try {
-            const drive = await this.findById(driveId);
-            if (drive && String(drive.user_id) === String(userId)) {
-                // Write-Through: 先删除 D1
-                await d1.run(
-                    "UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id = ? AND user_id = ?",
-                    [DRIVE_STATUSES.DELETED, Date.now(), driveId, String(userId)]
-                );
-
-                await this.clearUserDriveCache(userId, [driveId]);
-                await this._updateActiveDrivesList();
+            const drive = await this.findByUserAndId(userId, driveId);
+            if (!drive) {
+                localCache.del(this.getAllDrivesKey());
+                return false;
             }
+
+            // Write-Through: 先删除 D1
+            const result = await d1.run(
+                "UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id = ? AND user_id = ?",
+                [DRIVE_STATUSES.DELETED, Date.now(), driveId, String(userId)]
+            );
+            const deleted = this._getChanges(result) > 0;
+            if (!deleted) {
+                localCache.del(this.getAllDrivesKey());
+                return false;
+            }
+
+            await this.clearUserDriveCache(userId, [driveId]);
+            await this._updateActiveDrivesList();
             localCache.del(this.getAllDrivesKey());
+            return deleted;
         } catch (e) {
             log.error(`DriveRepository.delete failed for ${userId}/${driveId}:`, e);
             throw e;
@@ -236,6 +252,21 @@ export class DriveRepository {
             log.error(`DriveRepository.findById error for ${driveId}:`, e);
             return null;
         }
+    }
+
+    /**
+     * 根据用户和 ID 获取网盘配置 (Read-Through)
+     * @param {string} userId
+     * @param {string} driveId
+     * @returns {Promise<Object|null>}
+     */
+    static async findByUserAndId(userId, driveId) {
+        if (!userId || !driveId) return null;
+        const drive = await this.findById(driveId);
+        if (!drive || String(drive.user_id) !== String(userId)) {
+            return null;
+        }
+        return drive;
     }
 
     /**

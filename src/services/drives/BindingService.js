@@ -27,8 +27,8 @@ export class BindingService {
      * Delete a drive
      */
     static async unbindDrive(userId, driveId) {
-        await DriveRepository.delete(userId, driveId);
-        return { success: true };
+        const deleted = await DriveRepository.delete(userId, driveId);
+        return { success: deleted };
     }
 
     /**

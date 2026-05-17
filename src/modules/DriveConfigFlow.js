@@ -130,7 +130,7 @@ export class DriveConfigFlow {
 
         if (data.startsWith("drive_unbind_confirm_")) {
             const driveId = this._callbackValue(data, "drive_unbind_confirm_");
-            const drive = await DriveRepository.findById(driveId);
+            const drive = await DriveRepository.findByUserAndId(userId, driveId);
             if (!drive) {
                 return STRINGS.drive.not_found;
             }
@@ -152,7 +152,10 @@ export class DriveConfigFlow {
 
         if (data.startsWith("drive_unbind_execute_")) {
             const driveId = this._callbackValue(data, "drive_unbind_execute_");
-            await BindingService.unbindDrive(userId, driveId);
+            const result = await BindingService.unbindDrive(userId, driveId);
+            if (!result.success) {
+                return STRINGS.drive.not_found;
+            }
             await this._editDriveManager(event, userId);
             return STRINGS.drive.success_unbind;
         }

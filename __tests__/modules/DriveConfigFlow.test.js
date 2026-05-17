@@ -62,6 +62,7 @@ vi.mock("../../src/services/rclone.js", () => ({
 const mockDriveRepository = {
     findByUserId: vi.fn(),
     findById: vi.fn(),
+    findByUserAndId: vi.fn(),
     getDefaultDrive: vi.fn(),
     create: vi.fn(),
     delete: vi.fn(),
@@ -142,6 +143,7 @@ describe("DriveConfigFlow", () => {
         mockCloudTool.validateConfig.mockResolvedValue({ success: true });
         mockDriveRepository.findByUserId.mockResolvedValue([]);
         mockDriveRepository.findById.mockResolvedValue(null);
+        mockDriveRepository.findByUserAndId.mockResolvedValue(null);
         mockDriveRepository.getDefaultDrive.mockResolvedValue(null);
         mockDriveRepository.create.mockResolvedValue();
         mockDriveRepository.delete.mockResolvedValue();
@@ -237,13 +239,13 @@ describe("DriveConfigFlow", () => {
         test("should show unbind confirmation for full drive id", async () => {
             const driveId = "drive_1712345678901_abcd1234";
             const mockDrive = { id: driveId, type: "mega", name: "Mega-test@example.com" };
-            mockDriveRepository.findById.mockResolvedValue(mockDrive);
+            mockDriveRepository.findByUserAndId.mockResolvedValue(mockDrive);
 
             const event = { userId: "user123", msgId: "msg100", data: Buffer.from(`drive_unbind_confirm_${driveId}`) };
 
             const result = await DriveConfigFlow.handleCallback(event, "user456");
 
-            expect(mockDriveRepository.findById).toHaveBeenCalledWith(driveId);
+            expect(mockDriveRepository.findByUserAndId).toHaveBeenCalledWith("user456", driveId);
             expect(mockClient.editMessage).toHaveBeenCalledWith("user123", expect.objectContaining({
                 message: "msg100",
                 text: expect.stringContaining("确认解绑这个网盘"),
@@ -256,8 +258,22 @@ describe("DriveConfigFlow", () => {
             expect(result).toBe("请确认操作");
         });
 
+        test("should not show unbind confirmation for a drive outside the current user", async () => {
+            const driveId = "drive_1712345678901_abcd1234";
+            mockDriveRepository.findByUserAndId.mockResolvedValue(null);
+
+            const event = { userId: "user123", msgId: "msg100", data: Buffer.from(`drive_unbind_confirm_${driveId}`) };
+
+            const result = await DriveConfigFlow.handleCallback(event, "user456");
+
+            expect(mockDriveRepository.findByUserAndId).toHaveBeenCalledWith("user456", driveId);
+            expect(mockClient.editMessage).not.toHaveBeenCalled();
+            expect(result).toBe("🚫 未找到对应网盘");
+        });
+
         test("should unbind full drive id for the current user", async () => {
             const driveId = "drive_1712345678901_abcd1234";
+            mockBindingService.unbindDrive.mockResolvedValue({ success: true });
             const event = { userId: "user123", msgId: "msg100", data: Buffer.from(`drive_unbind_execute_${driveId}`) };
 
             const result = await DriveConfigFlow.handleCallback(event, "user456");
@@ -271,6 +287,18 @@ describe("DriveConfigFlow", () => {
             }));
             expect(mockClient.sendMessage).not.toHaveBeenCalled();
             expect(result).toBe("已成功解绑");
+        });
+
+        test("should not report success when unbind target is not owned by current user", async () => {
+            const driveId = "drive_1712345678901_abcd1234";
+            mockBindingService.unbindDrive.mockResolvedValue({ success: false });
+            const event = { userId: "user123", msgId: "msg100", data: Buffer.from(`drive_unbind_execute_${driveId}`) };
+
+            const result = await DriveConfigFlow.handleCallback(event, "user456");
+
+            expect(mockBindingService.unbindDrive).toHaveBeenCalledWith("user456", driveId);
+            expect(mockClient.editMessage).not.toHaveBeenCalled();
+            expect(result).toBe("🚫 未找到对应网盘");
         });
 
         test("should execute all-drive unbind only after confirmation callback", async () => {
