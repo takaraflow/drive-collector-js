@@ -16,15 +16,30 @@ permissions:
 jobs:
   update-registry:
     runs-on: ubuntu-latest
-    if: ${{ secrets.CONTRACT_REPO != '' && secrets.APP_ID != '' && secrets.APP_PRIVATE_KEY != '' }}
     env:
       # 将仓库地址和名称设为变量，方便后续脚本引用
       CONTRACT_REPO: ${{ secrets.CONTRACT_REPO }}
       REPO_DIR: "contract-repo"
       REGISTRY_PATH: "registry"
     steps:
+      - name: Check Sync Configuration
+        id: sync_config
+        shell: bash
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CONTRACT_REPO:-}" || -z "${APP_ID:-}" || -z "${APP_PRIVATE_KEY:-}" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Manifest sync skipped::CONTRACT_REPO/APP_ID/APP_PRIVATE_KEY is not fully configured"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Resolve Contract Repository
         id: contract_repo
+        if: ${{ steps.sync_config.outputs.enabled == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -39,6 +54,7 @@ jobs:
       # 1. 获取临时访问令牌 (使用之前创建的 GitHub App)
       - name: Generate Token
         id: generate_token
+        if: ${{ steps.sync_config.outputs.enabled == 'true' }}
         uses: actions/create-github-app-token@v2
         with:
           app_id: ${{ secrets.APP_ID }}
@@ -48,19 +64,23 @@ jobs:
 
       # 2. 检出当前子仓库代码
       - name: Checkout Sub-Repo
+        if: ${{ steps.sync_config.outputs.enabled == 'true' }}
         uses: actions/checkout@v6
 
       - name: Use Node.js 20.x
+        if: ${{ steps.sync_config.outputs.enabled == 'true' }}
         uses: actions/setup-node@v6
         with:
           node-version: 20.x
           cache: 'npm'
 
       - name: Run CI validation
+        if: ${{ steps.sync_config.outputs.enabled == 'true' }}
         run: npm run ci:sync
 
       # 3. 检出契约中心仓库
       - name: Checkout Contract Center
+        if: ${{ steps.sync_config.outputs.enabled == 'true' }}
         uses: actions/checkout@v6
         with:
           repository: ${{ env.CONTRACT_REPO }}
@@ -69,6 +89,7 @@ jobs:
 
       # 4. 同步文件并提交
       - name: Sync and Commit
+        if: ${{ steps.sync_config.outputs.enabled == 'true' }}
         run: |
           # 获取当前仓库名称，作为注册表里的文件名
           SELF_REPO_NAME=$(basename ${{ github.repository }})
