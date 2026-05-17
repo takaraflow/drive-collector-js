@@ -1,5 +1,7 @@
+import { pathToFileURL } from 'url';
 import { describe, expect, test, vi } from 'vitest';
 import {
+  isCliEntrypoint,
   loadSmokeConfig,
   normalizeSmokeConfig,
   parseArgs,
@@ -56,7 +58,29 @@ describe('drive-support-smoke script', () => {
 
   test('should reject cli options missing values', () => {
     expect(() => parseArgs(['--config-file'])).toThrow('requires a value');
+    expect(() => parseArgs(['--config-file='])).toThrow('requires a value');
+    expect(() => parseArgs(['--config-json='])).toThrow('requires a value');
+    expect(() => parseArgs(['--types='])).toThrow('requires a value');
     expect(() => parseArgs(['--types', '--require-config'])).toThrow('requires a value');
+  });
+
+  test('should fail before loading env config when cli config value is empty', async () => {
+    const stdout = vi.fn();
+    const stderr = vi.fn();
+    const loadFactory = vi.fn();
+
+    const result = await runDriveSupportSmoke({
+      argv: ['--config-file='],
+      env: { DRIVE_SMOKE_CONFIG_JSON: '{"mega":{"user":"u","pass":"p"}}' },
+      stdout,
+      stderr,
+      loadFactory
+    });
+
+    expect(result).toMatchObject({ exitCode: 2, status: 'failed' });
+    expect(stderr.mock.calls.flat().join('\n')).toContain('--config-file requires a value');
+    expect(stdout).not.toHaveBeenCalled();
+    expect(loadFactory).not.toHaveBeenCalled();
   });
 
   test('should skip without config by default', async () => {
@@ -162,6 +186,21 @@ describe('drive-support-smoke script', () => {
   test('should redact common secret shapes', () => {
     expect(redactForLog('token="abc" access_token":"xyz" Authorization: Bearer aaa.bbb'))
       .toBe('token="[REDACTED]" access_token":"[REDACTED]" Authorization: Bearer [REDACTED]');
+  });
+
+  test('should redact escaped token json values as a single secret', () => {
+    const output = redactForLog('token="{\\"access_token\\":\\"secret-access\\",\\"refresh_token\\":\\"secret-refresh\\"}"');
+
+    expect(output).toBe('token="[REDACTED]"');
+    expect(output).not.toContain('secret-access');
+    expect(output).not.toContain('secret-refresh');
+  });
+
+  test('should detect cli entrypoint without crashing when argv entry is absent', () => {
+    const scriptPath = '/tmp/drive-support-smoke.js';
+
+    expect(isCliEntrypoint(pathToFileURL(scriptPath).href, ['node'])).toBe(false);
+    expect(isCliEntrypoint(pathToFileURL(scriptPath).href, ['node', scriptPath])).toBe(true);
   });
 });
 

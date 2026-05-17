@@ -126,15 +126,26 @@ describe('CloudTool Batch Upload', () => {
             expect(mockSpawn).toHaveBeenCalled();
         });
 
-        expect(mockSpawn).toHaveBeenCalledWith('rclone', expect.arrayContaining([
+        const [, args, options] = mockSpawn.mock.calls[0];
+        expect(args).toEqual(expect.arrayContaining([
             '--config', '/dev/null',
             'copy',
-            expect.stringContaining('downloads'),
-            expect.stringContaining(':mega,user="test",pass="pass":test-remote/'),
+            '/tmp/downloads',
+            ':mega,user="test",pass="pass":test-remote',
             '--files-from-raw', '-',
             '--progress',
-            '--use-json-log'
-        ]), expect.any(Object));
+            '--use-json-log',
+            '--transfers', '4',
+            '--checkers', '8',
+            '--retries', '3',
+            '--low-level-retries', '10'
+        ]));
+        expect(options).toEqual(expect.objectContaining({
+            env: expect.objectContaining({
+                LC_ALL: 'C',
+                LANG: 'C'
+            })
+        }));
 
         const result = await promise;
         expect(result.success).toBe(true);

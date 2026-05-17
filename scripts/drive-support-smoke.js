@@ -19,6 +19,12 @@ const SECRET_KEYS = new Set([
   'sk',
   'token'
 ]);
+const SECRET_KEY_PATTERN = [...SECRET_KEYS]
+  .sort((a, b) => b.length - a.length)
+  .map(escapeRegExp)
+  .join('|');
+const QUOTED_VALUE_PATTERN = String.raw`(?:\\.|[^"\\])*`;
+const SINGLE_QUOTED_VALUE_PATTERN = String.raw`(?:\\.|[^'\\])*`;
 
 export function parseArgs(argv = []) {
   const options = {
@@ -34,7 +40,7 @@ export function parseArgs(argv = []) {
     const [name, inlineValue] = arg.includes('=') ? arg.split(/=(.*)/s, 2) : [arg, null];
     const nextValue = () => {
       const value = inlineValue ?? argv[++index];
-      if (value === undefined || value.startsWith('--')) {
+      if (value === undefined || value.startsWith('--') || String(value).trim() === '') {
         throw new Error(`${name} requires a value`);
       }
       return value;
@@ -47,9 +53,14 @@ export function parseArgs(argv = []) {
       case '--config-file':
         options.configFile = nextValue();
         break;
-      case '--types':
-        options.types = parseTypes(nextValue());
+      case '--types': {
+        const types = parseTypes(nextValue());
+        if (types.length === 0) {
+          throw new Error(`${name} requires at least one provider type`);
+        }
+        options.types = types;
         break;
+      }
       case '--require-config':
         options.requireConfig = true;
         break;
@@ -135,8 +146,12 @@ export function redactForLog(value) {
   if (!text) return '';
 
   return text
-    .replace(/((?:access_token|refresh_token|token|pass|password|secret_access_key|access_key_id|client_secret|sk|ak)"\s*:\s*")[^"]*(")/gi, '$1[REDACTED]$2')
-    .replace(/((?:access_token|refresh_token|token|pass|password|secret_access_key|access_key_id|client_secret|sk|ak)=")[^"]*(")/gi, '$1[REDACTED]$2')
+    .replace(new RegExp(`(\\b(?:${SECRET_KEY_PATTERN})\\s*=\\s*")${QUOTED_VALUE_PATTERN}(")`, 'gi'), '$1[REDACTED]$2')
+    .replace(new RegExp(`(\\b(?:${SECRET_KEY_PATTERN})\\s*=\\s*')${SINGLE_QUOTED_VALUE_PATTERN}(')`, 'gi'), '$1[REDACTED]$2')
+    .replace(new RegExp(`("\\b(?:${SECRET_KEY_PATTERN})"\\s*:\\s*")${QUOTED_VALUE_PATTERN}(")`, 'gi'), '$1[REDACTED]$2')
+    .replace(new RegExp(`(\\b(?:${SECRET_KEY_PATTERN})"\\s*:\\s*")${QUOTED_VALUE_PATTERN}(")`, 'gi'), '$1[REDACTED]$2')
+    .replace(new RegExp(`(\\\\"\\b(?:${SECRET_KEY_PATTERN})\\\\"\\s*:\\s*\\\\")${QUOTED_VALUE_PATTERN}(\\\\")`, 'gi'), '$1[REDACTED]$2')
+    .replace(new RegExp(`\\b(${SECRET_KEY_PATTERN})\\s*=\\s*(?!["'])[^\\s,]+`, 'gi'), '$1=[REDACTED]')
     .replace(/(Authorization:\s*Bearer\s+)[^\s]+/gi, '$1[REDACTED]');
 }
 
@@ -308,7 +323,19 @@ function normalizeEntry(entry) {
   };
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function isCliEntrypoint(metaUrl = import.meta.url, argv = process.argv) {
+  const entry = argv?.[1];
+  if (typeof entry !== 'string' || entry.trim() === '') {
+    return false;
+  }
+  return metaUrl === pathToFileURL(entry).href;
+}
+
+if (isCliEntrypoint()) {
   const result = await runDriveSupportSmoke({
     argv: process.argv.slice(2),
     env: process.env,
