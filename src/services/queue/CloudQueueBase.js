@@ -161,9 +161,12 @@ export default class CloudQueueBase extends BaseQueue {
      * @returns {Promise<Array>} - 执行结果
      */
     async _executeBatch(tasks, concurrency = 5, singleTaskFn, loggerPrefix = '[CloudQueue]') {
-        const results = [];
+        // ⚡ Bolt Optimization: Pre-allocate the array to avoid dynamic resizing and call stack overflows from spread operator
+        const len = tasks.length;
+        const results = new Array(len);
+        let resultIndex = 0;
         
-        for (let i = 0; i < tasks.length; i += concurrency) {
+        for (let i = 0; i < len; i += concurrency) {
             const batch = tasks.slice(i, i + concurrency);
             const batchResults = await Promise.allSettled(
                 batch.map(async (task) => {
@@ -172,10 +175,13 @@ export default class CloudQueueBase extends BaseQueue {
                     }, 3, loggerPrefix);
                 })
             );
-            results.push(...batchResults);
+
+            for (let j = 0; j < batchResults.length; j++) {
+                results[resultIndex++] = batchResults[j];
+            }
             
             // 批次间添加小延迟，避免突发流量
-            if (i + concurrency < tasks.length) {
+            if (i + concurrency < len) {
                 await new Promise(resolve => setTimeout(resolve, 10));
             }
         }
