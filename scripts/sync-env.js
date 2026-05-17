@@ -9,21 +9,36 @@ import { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } from '../src/utils/envMapp
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
-
-// 根据 NODE_ENV 加载对应的 .env 文件
-const nodeEnvForFile = normalizeNodeEnv(process.env.NODE_ENV);
-const envFile = nodeEnvForFile === 'dev' ? '.env' : `.env.${nodeEnvForFile}`;
-const envPath = path.join(rootDir, envFile);
-
-// 加载现有 .env (如果存在) 用于降级检查
-dotenv.config({ path: envPath, override: true });
-
 const manifestPath = path.join(rootDir, 'manifest.json');
 
-// 获取配置
-const STRICT_SYNC = process.env.STRICT_SYNC === '1' || process.env.STRICT_SYNC === 'true';
-const WRITE_ENV_FILE = process.env.SYNC_ENV_WRITE_FILE === '1' || process.env.SYNC_ENV_WRITE_FILE === 'true';
-const SECRET_PATH = process.env.INFISICAL_SECRET_PATH || '/';
+function isTruthy(value) {
+    return value === '1' || String(value).toLowerCase() === 'true';
+}
+
+function resolveEnvPath(nodeEnv) {
+    const nodeEnvForFile = normalizeNodeEnv(nodeEnv);
+    const envFile = nodeEnvForFile === 'dev' ? '.env' : `.env.${nodeEnvForFile}`;
+    return path.join(rootDir, envFile);
+}
+
+function resolveSecretFileWritePolicy({ requested, approved, normalizedEnv, normalizedNodeEnv }) {
+    if (!requested) {
+        return { enabled: false };
+    }
+    if (normalizedNodeEnv !== 'dev' || normalizedEnv !== 'dev') {
+        return {
+            enabled: false,
+            error: `SYNC_ENV_WRITE_FILE is only allowed when NODE_ENV and the effective Infisical environment resolve to dev, current: NODE_ENV=${normalizedNodeEnv}, effective=${normalizedEnv}`
+        };
+    }
+    if (!approved) {
+        return {
+            enabled: false,
+            error: 'SYNC_ENV_WRITE_FILE requires ALLOW_SECRET_FILE_WRITE=true'
+        };
+    }
+    return { enabled: true };
+}
 
 // 1. 从 manifest.json 读取必需变量
 function getRequiredKeys() {
@@ -45,12 +60,12 @@ function getRequiredKeys() {
 }
 
 // 2. 检查变量完整性
-function validateVariables(variables, sourceName) {
+function validateVariables(variables, sourceName, strictSync) {
     const requiredKeys = getRequiredKeys();
     const missingKeys = requiredKeys.filter(key => !variables[key] && !process.env[key]); // 检查变量集合和系统环境
 
     if (missingKeys.length > 0) {
-        if (STRICT_SYNC) {
+        if (strictSync) {
             console.error(`❌ [严格模式] ${sourceName} 缺少必需变量:`);
             missingKeys.forEach(key => console.error(`   - ${key}`));
             return false;
@@ -64,7 +79,15 @@ function validateVariables(variables, sourceName) {
 }
 
 export async function syncEnv() {
-    console.log(`🚀 开始同步 Infisical 环境变量... (模式: ${STRICT_SYNC ? '严格' : '非严格'}, 写入文件: ${WRITE_ENV_FILE ? '启用' : '禁用'})`);
+    const envPath = resolveEnvPath(process.env.NODE_ENV);
+
+    // 加载现有 .env (如果存在) 用于降级检查；远程密钥默认只进入当前进程，不写回文件。
+    dotenv.config({ path: envPath, override: true });
+
+    const strictSync = isTruthy(process.env.STRICT_SYNC);
+    const writeEnvFileRequested = isTruthy(process.env.SYNC_ENV_WRITE_FILE);
+    const secretFileWriteApproved = isTruthy(process.env.ALLOW_SECRET_FILE_WRITE);
+    const secretPath = process.env.INFISICAL_SECRET_PATH || '/';
 
     const token = process.env.INFISICAL_TOKEN;
     const projectId = process.env.INFISICAL_PROJECT_ID;
@@ -72,7 +95,21 @@ export async function syncEnv() {
     // 支持动态环境：优先使用 INFISICAL_ENV，其次 NODE_ENV，默认 'dev'
     const nodeEnv = process.env.INFISICAL_ENV || process.env.NODE_ENV || 'dev';
     const normalizedEnv = normalizeNodeEnv(nodeEnv);
+    const normalizedNodeEnv = normalizeNodeEnv(process.env.NODE_ENV);
     const infisicalEnv = mapNodeEnvToInfisicalEnv(normalizedEnv);
+    const writePolicy = resolveSecretFileWritePolicy({
+        requested: writeEnvFileRequested,
+        approved: secretFileWriteApproved,
+        normalizedEnv,
+        normalizedNodeEnv
+    });
+
+    console.log(`🚀 开始同步 Infisical 环境变量... (模式: ${strictSync ? '严格' : '非严格'}, 写入文件: ${writePolicy.enabled ? '启用' : '禁用'})`);
+
+    if (writePolicy.error) {
+        console.error(`❌ ${writePolicy.error}`);
+        process.exit(1);
+    }
 
     console.log(`[Sync-Env] 检测到环境: ${nodeEnv} -> ${normalizedEnv} -> Infisical环境: ${infisicalEnv}`);
 
@@ -92,7 +129,7 @@ export async function syncEnv() {
             const response = await sdk.secrets().listSecrets({
                 environment: infisicalEnv,
                 projectId: projectId,
-                secretPath: SECRET_PATH,
+                secretPath,
                 includeImports: true
             });
  
@@ -108,17 +145,17 @@ export async function syncEnv() {
                 const sortedSecrets = secrets.sort((a, b) => a.secretKey.localeCompare(b.secretKey));
                 for (const secret of sortedSecrets) {
                     secretsMap[secret.secretKey] = secret.secretValue;
-                    if (WRITE_ENV_FILE) {
+                    if (writePolicy.enabled) {
                         envLines.push(`${secret.secretKey}=${secret.secretValue}`);
                     }
                 }
 
                 // 验证
-                if (validateVariables(secretsMap, 'Infisical')) {
+                if (validateVariables(secretsMap, 'Infisical', strictSync)) {
                     for (const [key, value] of Object.entries(secretsMap)) {
                         process.env[key] = value;
                     }
-                    if (WRITE_ENV_FILE) {
+                    if (writePolicy.enabled) {
                         fs.writeFileSync(envPath, `${envLines.join('\n')}\n`, { mode: 0o600 });
                         console.log(`✅ 已更新 .env 文件`);
                     } else {
@@ -126,20 +163,20 @@ export async function syncEnv() {
                     }
                     infisicalSynced = true;
                 } else {
-                    if (STRICT_SYNC) process.exit(1);
+                    if (strictSync) process.exit(1);
                 }
             }
         } catch (error) {
             console.error(`❌ Infisical 同步失败: ${error.message}`);
             // 如果是非严格模式，允许失败继续（进入降级逻辑）
-            if (STRICT_SYNC) {
+            if (strictSync) {
                 console.error('❌ 严格模式下 Infisical 同步失败是致命错误');
                 process.exit(1);
             }
         }
     } else {
         console.warn('⚠️  未设置 INFISICAL_TOKEN 或 INFISICAL_PROJECT_ID，跳过远程同步');
-        if (STRICT_SYNC) {
+        if (strictSync) {
             console.error('❌ 严格模式下必须提供 Infisical 凭证');
             process.exit(1);
         }
@@ -157,7 +194,7 @@ export async function syncEnv() {
     if (fs.existsSync(envPath)) {
         console.log('📄 检查本地 .env 文件...');
         const currentEnv = dotenv.parse(fs.readFileSync(envPath));
-        if (validateVariables(currentEnv, '本地 .env')) {
+        if (validateVariables(currentEnv, '本地 .env', strictSync)) {
             console.log('✅ 使用本地 .env 缓存继续');
             return; // 成功，正常返回，让 node 进程自然退出
         }
@@ -165,7 +202,7 @@ export async function syncEnv() {
 
     // 检查系统环境变量
     console.log('🔍 检查系统环境变量...');
-    if (validateVariables(process.env, '系统环境变量')) {
+    if (validateVariables(process.env, '系统环境变量', strictSync)) {
         console.log('✅ 系统环境变量满足要求');
         return; // 成功，正常返回
     }

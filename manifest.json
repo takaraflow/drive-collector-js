@@ -987,6 +987,18 @@
         "required": false,
         "description": "Infisical sync strict mode"
       },
+      "SYNC_ENV_WRITE_FILE": {
+        "type": "boolean",
+        "required": false,
+        "default": false,
+        "description": "Local development only: request scripts/sync-env.js to write pulled secrets to .env. Requires ALLOW_SECRET_FILE_WRITE=true, NODE_ENV=dev, and an effective dev Infisical environment."
+      },
+      "ALLOW_SECRET_FILE_WRITE": {
+        "type": "boolean",
+        "required": false,
+        "default": false,
+        "description": "Second local development approval required before scripts/sync-env.js may write pulled secrets to .env."
+      },
       "SKIP_INFISICAL_RUNTIME": {
         "type": "boolean",
         "required": false,
