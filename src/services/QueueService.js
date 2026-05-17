@@ -23,7 +23,7 @@ function isQstashDebugEnabled() {
 }
 
 function isTestRuntime(config = {}) {
-    return (config.nodeEnv || process.env.NODE_ENV || 'dev') === 'test';
+    return (config.nodeEnv || 'dev') === 'test';
 }
 
 function isPlaceholderWebhookUrl(webhookUrl) {

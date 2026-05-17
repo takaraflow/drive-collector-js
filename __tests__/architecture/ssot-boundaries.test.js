@@ -75,6 +75,24 @@ describe("SSOT architecture boundaries", () => {
         expect(read("package.json")).toContain('"db:check"');
     });
 
+    test("task status read APIs should not use derived state as canonical fallback", () => {
+        const repository = read("src/repositories/TaskRepository.js");
+        const statusFull = repository.slice(
+            repository.indexOf("static async getTaskStatusFull"),
+            repository.indexOf("static async getTaskStatusBatch")
+        );
+        const statusBatch = repository.slice(
+            repository.indexOf("static async getTaskStatusBatch"),
+            repository.indexOf("static async getTaskInfo")
+        );
+
+        expect(statusFull).not.toContain("getTaskStatusSynchronized");
+        expect(statusFull).not.toContain("getTaskStatusFromCache");
+        expect(statusFull).not.toContain("pendingUpdates.get");
+        expect(statusBatch).not.toContain("consistent-cache-read");
+        expect(statusBatch).not.toContain("pendingUpdates.get");
+    });
+
     test("runtime entrypoints should converge on telemetry-aware bootstrap", () => {
         const packageJson = JSON.parse(read("package.json"));
         const manifest = JSON.parse(read("manifest.json"));

@@ -400,18 +400,21 @@ export class TaskRepository {
     /**
      * 根据 ID 获取任务
      */
-    static async findById(taskId) {
+    static async findById(taskId, options = {}) {
         if (!taskId) return null;
-        
-        // 尝试从缓存获取
+
+        const allowCache = options.allowCache === true && options.strong !== true;
         const cacheKey = `task:${taskId}:details`;
-        try {
-            const cachedTask = await cache.get(cacheKey, 'json');
-            if (cachedTask) {
-                return cachedTask;
+
+        if (allowCache) {
+            try {
+                const cachedTask = await cache.get(cacheKey, 'json');
+                if (cachedTask) {
+                    return cachedTask;
+                }
+            } catch (e) {
+                // 缓存读取失败，继续查询数据库
             }
-        } catch (e) {
-            // 缓存读取失败，继续查询数据库
         }
         
         try {
@@ -862,28 +865,48 @@ export class TaskRepository {
         }
     }
 
+    static async inspectTaskStateViews(taskId) {
+        if (!taskId) {
+            return {
+                canonicalSource: 'd1',
+                canonical: null,
+                derivedViews: {}
+            };
+        }
+
+        const canonical = await this.findById(taskId, { strong: true });
+        const [syncState, cacheState] = await Promise.all([
+            this.getTaskStatusSynchronized(taskId),
+            this.getTaskStatusFromCache(taskId)
+        ]);
+
+        const derivedViews = {};
+        if (syncState) derivedViews.synchronizer = syncState;
+        if (cacheState) derivedViews.consistentCache = cacheState;
+        const memoryState = this.pendingUpdates.get(taskId);
+        if (memoryState) derivedViews.memory = memoryState;
+
+        return {
+            canonicalSource: 'd1',
+            canonical,
+            derivedViews
+        };
+    }
+
     /**
-     * 获取任务的完整状态（多层查询）
-     * 优先级：D1 > StateSynchronizer > ConsistentCache > Memory Buffer
+     * 获取任务的完整状态。
+     * D1 是唯一权威状态源；StateSynchronizer/ConsistentCache/Memory 仅作为诊断视图返回。
      */
     static async getTaskStatusFull(taskId) {
-        // 1. 查询 D1
-        const d1Task = await this.findById(taskId);
-        if (d1Task) return { source: 'd1', data: d1Task };
+        const stateViews = await this.inspectTaskStateViews(taskId);
+        if (!stateViews.canonical) return null;
 
-        // 2. 查询 StateSynchronizer
-        const syncState = await this.getTaskStatusSynchronized(taskId);
-        if (syncState) return { source: 'synchronizer', data: syncState };
-
-        // 3. 查询 ConsistentCache
-        const cacheState = await this.getTaskStatusFromCache(taskId);
-        if (cacheState) return { source: 'consistent_cache', data: cacheState };
-
-        // 4. 查询 Memory Buffer
-        const memoryState = this.pendingUpdates.get(taskId);
-        if (memoryState) return { source: 'memory', data: memoryState };
-
-        return null;
+        return {
+            source: 'd1',
+            data: stateViews.canonical,
+            canonical: stateViews.canonical,
+            derivedViews: stateViews.derivedViews
+        };
     }
 
     /**
@@ -901,36 +924,12 @@ export class TaskRepository {
                 `SELECT id, status, error_msg, updated_at FROM tasks WHERE id IN (${placeholders})`,
                 taskIds
             );
-            d1Tasks.forEach(task => {
+            (d1Tasks || []).forEach(task => {
                 results[task.id] = { source: 'd1', data: task };
             });
         } catch (e) {
             log.error("TaskRepository.getTaskStatusBatch D1 query failed:", e);
-        }
-
-        // 2. 批量查询 ConsistentCache（未在 D1 中找到的）
-        const remainingIds = taskIds.filter(id => !results[id]);
-        if (remainingIds.length > 0) {
-            try {
-                const cacheKeys = remainingIds.map(id => `task:${id}`);
-                const cacheResults = await BatchProcessor.processBatch('consistent-cache-read', cacheKeys);
-                cacheResults.forEach((cacheData, index) => {
-                    if (cacheData) {
-                        results[remainingIds[index]] = { source: 'consistent_cache', data: cacheData };
-                    }
-                });
-            } catch (e) {
-                log.warn("TaskRepository.getTaskStatusBatch cache query failed:", e.message);
-            }
-        }
-
-        // 3. 查询 Memory Buffer（前两层都未找到的）
-        const stillRemaining = taskIds.filter(id => !results[id]);
-        for (const id of stillRemaining) {
-            const memoryState = this.pendingUpdates.get(id);
-            if (memoryState) {
-                results[id] = { source: 'memory', data: memoryState };
-            }
+            throw e;
         }
 
         return results;
@@ -941,16 +940,17 @@ export class TaskRepository {
      * 用于任务详情展示和故障排查
      */
     static async getTaskInfo(taskId) {
-        const baseInfo = await this.findById(taskId);
+        const baseInfo = await this.findById(taskId, { strong: true });
         if (!baseInfo) return null;
 
-        // 获取缓存状态
-        const cacheStatus = await this.getTaskStatusFull(taskId);
+        const stateViews = await this.inspectTaskStateViews(taskId);
 
         return {
             ...baseInfo,
-            cacheStatus: cacheStatus ? cacheStatus.source : 'none',
-            cacheData: cacheStatus ? cacheStatus.data : null
+            canonicalStatusSource: 'd1',
+            cacheStatus: Object.keys(stateViews.derivedViews).length > 0 ? 'derived' : 'none',
+            cacheData: Object.keys(stateViews.derivedViews).length > 0 ? stateViews.derivedViews : null,
+            derivedStateViews: stateViews.derivedViews
         };
     }
 

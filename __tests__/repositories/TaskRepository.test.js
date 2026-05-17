@@ -65,6 +65,8 @@ describe('TaskRepository', () => {
         mockStateSynchronizer.getTaskState.mockResolvedValue(null);
         // Ensure mockCache.get always returns null
         mockCache.get.mockResolvedValue(null);
+        mockD1.fetchOne.mockResolvedValue(null);
+        mockD1.fetchAll.mockResolvedValue([]);
         vi.useFakeTimers();
     });
 
@@ -317,14 +319,35 @@ describe('TaskRepository', () => {
     });
 
     describe('findById', () => {
-        it('should find task by id', async () => {
+        it('should find task by id from D1 by default', async () => {
             const mockTask = { id: 'task123', status: 'completed' };
 
             mockD1.fetchOne.mockResolvedValue(mockTask);
 
             const result = await TaskRepository.findById('task123');
             expect(result).toEqual(mockTask);
+            expect(mockCache.get).not.toHaveBeenCalledWith('task:task123:details', 'json');
             expect(mockD1.fetchOne).toHaveBeenCalledWith("SELECT * FROM tasks WHERE id = ?", ['task123']);
+        });
+
+        it('should not let stale detail cache override the default D1 read', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({ id: 'task123', status: 'completed' });
+
+            const result = await TaskRepository.findById('task123');
+
+            expect(result).toEqual({ id: 'task123', status: 'completed' });
+            expect(mockCache.get).not.toHaveBeenCalledWith('task:task123:details', 'json');
+        });
+
+        it('should use detail cache only when explicitly allowed', async () => {
+            const cachedTask = { id: 'task123', status: 'queued' };
+            mockCache.get.mockResolvedValueOnce(cachedTask);
+
+            const result = await TaskRepository.findById('task123', { allowCache: true });
+
+            expect(result).toEqual(cachedTask);
+            expect(mockCache.get).toHaveBeenCalledWith('task:task123:details', 'json');
+            expect(mockD1.fetchOne).not.toHaveBeenCalled();
         });
 
         it('should return null for non-existent task', async () => {
@@ -344,6 +367,88 @@ describe('TaskRepository', () => {
             mockD1.fetchOne.mockRejectedValue(new Error('DB Error'));
 
             await expect(TaskRepository.findById('task123')).rejects.toThrow('DB Error');
+        });
+    });
+
+    describe('task status SSOT reads', () => {
+        it('should return D1 as canonical and keep derived views diagnostic', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({ id: 'task1', status: 'completed' });
+            mockStateSynchronizer.getTaskState.mockResolvedValueOnce({ status: 'queued' });
+            mockConsistentCache.get.mockResolvedValueOnce({ status: 'downloading' });
+            TaskRepository.pendingUpdates.set('task1', { status: 'uploading' });
+
+            const result = await TaskRepository.getTaskStatusFull('task1');
+
+            expect(result).toMatchObject({
+                source: 'd1',
+                data: { id: 'task1', status: 'completed' },
+                derivedViews: {
+                    synchronizer: { status: 'queued' },
+                    consistentCache: { status: 'downloading' },
+                    memory: { status: 'uploading' }
+                }
+            });
+        });
+
+        it('should not return derived cache as canonical when D1 has no task', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce(null);
+            mockStateSynchronizer.getTaskState.mockResolvedValueOnce({ status: 'downloading' });
+            mockConsistentCache.get.mockResolvedValueOnce({ status: 'uploading' });
+            TaskRepository.pendingUpdates.set('missing-task', { status: 'queued' });
+
+            await expect(TaskRepository.inspectTaskStateViews('missing-task')).resolves.toEqual({
+                canonicalSource: 'd1',
+                canonical: null,
+                derivedViews: {
+                    synchronizer: { status: 'downloading' },
+                    consistentCache: { status: 'uploading' },
+                    memory: { status: 'queued' }
+                }
+            });
+            await expect(TaskRepository.getTaskStatusFull('missing-task')).resolves.toBeNull();
+            expect(mockD1.fetchOne).toHaveBeenCalledTimes(2);
+        });
+
+        it('should batch return only D1 canonical statuses', async () => {
+            mockD1.fetchAll.mockResolvedValueOnce([
+                { id: 'task1', status: 'queued', updated_at: 100 },
+                { id: 'task2', status: 'completed', updated_at: 200 }
+            ]);
+            TaskRepository.pendingUpdates.set('task3', { status: 'uploading' });
+
+            const result = await TaskRepository.getTaskStatusBatch(['task1', 'task2', 'task3']);
+
+            expect(result).toEqual({
+                task1: { source: 'd1', data: { id: 'task1', status: 'queued', updated_at: 100 } },
+                task2: { source: 'd1', data: { id: 'task2', status: 'completed', updated_at: 200 } }
+            });
+            expect(mockConsistentCache.get).not.toHaveBeenCalled();
+        });
+
+        it('should fail closed instead of returning cache statuses when D1 batch read fails', async () => {
+            mockD1.fetchAll.mockRejectedValueOnce(new Error('D1 unavailable'));
+            TaskRepository.pendingUpdates.set('task1', { status: 'uploading' });
+
+            await expect(TaskRepository.getTaskStatusBatch(['task1'])).rejects.toThrow('D1 unavailable');
+        });
+
+        it('should expose derived views on task info without changing canonical task fields', async () => {
+            mockD1.fetchOne
+                .mockResolvedValueOnce({ id: 'task1', status: 'completed' })
+                .mockResolvedValueOnce({ id: 'task1', status: 'completed' });
+            mockConsistentCache.get.mockResolvedValueOnce({ status: 'downloading' });
+
+            const result = await TaskRepository.getTaskInfo('task1');
+
+            expect(result).toMatchObject({
+                id: 'task1',
+                status: 'completed',
+                canonicalStatusSource: 'd1',
+                cacheStatus: 'derived',
+                derivedStateViews: {
+                    consistentCache: { status: 'downloading' }
+                }
+            });
         });
     });
 
