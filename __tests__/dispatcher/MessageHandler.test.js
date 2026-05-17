@@ -172,6 +172,32 @@ describe('MessageHandler Integration Tests', () => {
             expect(Dispatcher.handle).not.toHaveBeenCalled(); // 应该被拦截
         });
 
+        it('should fail closed and not memoize when message lock acquisition throws', async () => {
+            instanceCoordinator.acquireLock.mockRejectedValueOnce(new Error('cache unavailable'));
+
+            const event = {
+                className: 'UpdateNewMessage',
+                message: {
+                    id: 102,
+                    out: false,
+                    senderId: 999
+                }
+            };
+
+            await MessageHandler.handleEvent(event, mockClient);
+
+            expect(instanceCoordinator.acquireLock).toHaveBeenCalledWith('msg_lock:102', 60);
+            expect(Dispatcher.handle).not.toHaveBeenCalled();
+
+            vi.clearAllMocks();
+            instanceCoordinator.acquireLock.mockResolvedValueOnce(true);
+
+            await MessageHandler.handleEvent(event, mockClient);
+
+            expect(instanceCoordinator.acquireLock).toHaveBeenCalledWith('msg_lock:102', 60);
+            expect(Dispatcher.handle).toHaveBeenCalledWith(event);
+        });
+
         it('should use memory cache to avoid repeated KV calls', async () => {
             instanceCoordinator.acquireLock.mockResolvedValue(true);
 

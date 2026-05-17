@@ -229,6 +229,18 @@ describe("Core InstanceCoordinator Tests", () => {
         expect(mockCacheCompareAndSet).not.toHaveBeenCalled();
     });
 
+    test("should fail closed for message dedup locks without atomic CAS", async () => {
+        instanceCoordinator.instanceId = 'lock-instance';
+        mockSupportsAtomicCompareAndSet.mockReturnValue(false);
+
+        const result = await instanceCoordinator.acquireLock('msg_lock:102', 60, { maxAttempts: 1 });
+
+        expect(result).toBe(false);
+        expect(mockCacheGet).not.toHaveBeenCalled();
+        expect(mockCacheSet).not.toHaveBeenCalled();
+        expect(mockCacheCompareAndSet).not.toHaveBeenCalled();
+    });
+
     test("should keep best-effort locking for non-critical locks without atomic CAS", async () => {
         instanceCoordinator.instanceId = 'lock-instance';
         mockSupportsAtomicCompareAndSet.mockReturnValue(false);

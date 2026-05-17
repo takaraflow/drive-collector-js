@@ -641,7 +641,8 @@ export class InstanceCoordinator {
     }
 
     _requiresAtomicLock(lockKey) {
-        return lockKey === "telegram_client";
+        return lockKey === "telegram_client"
+            || (typeof lockKey === "string" && lockKey.startsWith("msg_lock:"));
     }
 
     _warnAtomicLockUnavailable(lockKey) {

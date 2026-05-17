@@ -238,7 +238,11 @@ export class MessageHandler {
             }
             logPerf().debug(`消息 ${msgId} 获取锁耗时 ${lockTime}ms`);
         } catch (lockError) {
-            log.error(`⚠️ 获取消息锁时发生异常, 降级处理继续执行`, lockError);
+            log.error(`获取消息锁失败，拒绝处理入站消息`, {
+                msgId,
+                error: lockError?.message || String(lockError)
+            });
+            return false;
         }
 
         processedMessages.set(msgId, now);
