@@ -21,6 +21,7 @@
     "db:migrate:dry": "node scripts/db-migrate.js --dry-run",
     "db:check": "node scripts/db-migrate.js --check",
     "db:status": "node scripts/db-migrate.js --status",
+    "drive:smoke": "node scripts/drive-support-smoke.js",
     "check:manifest:duplicates": "node scripts/check-json-duplicates.js manifest.json",
     "ci": "bash ci/run.sh full",
     "ci:full": "node scripts/ci-unified.js full",
