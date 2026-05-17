@@ -249,6 +249,51 @@ describe("QueueService - Unit Tests", () => {
         );
     });
 
+    test("should fail closed for durable download publish without real webhook URL outside test runtime", async () => {
+        mockRuntimeConfig.nodeEnv = 'prod';
+        mockRuntimeConfig.qstash.webhookUrl = null;
+        mockProvider = {
+            initialize: vi.fn(),
+            publish: vi.fn().mockResolvedValue({ messageId: 'msg-123' }),
+            batchPublish: vi.fn().mockResolvedValue([]),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
+        };
+
+        service = new QueueService(mockProvider);
+        await service.initialize();
+
+        await expect(
+            service.enqueueDownloadTask("task-123", { url: "https://example.com/file.mp4" })
+        ).rejects.toThrow('LB_WEBHOOK_URL is required');
+        expect(mockProvider.publish).not.toHaveBeenCalled();
+    });
+
+    test("should allow non-durable system event publish without webhook URL", async () => {
+        mockRuntimeConfig.nodeEnv = 'prod';
+        mockRuntimeConfig.qstash.webhookUrl = null;
+        mockProvider = {
+            initialize: vi.fn(),
+            publish: vi.fn().mockResolvedValue({ messageId: 'msg-123' }),
+            batchPublish: vi.fn().mockResolvedValue([]),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
+        };
+
+        service = new QueueService(mockProvider);
+        await service.initialize();
+
+        await service.broadcastSystemEvent("heartbeat", { ok: true });
+
+        expect(mockProvider.publish).toHaveBeenCalledWith(
+            "https://example.com/api/v2/tasks/system-events",
+            expect.objectContaining({ event: "heartbeat" }),
+            {}
+        );
+    });
+
     test("should include queue attempt in download idempotency key for re-enqueue", async () => {
         mockProvider = {
             initialize: vi.fn(),

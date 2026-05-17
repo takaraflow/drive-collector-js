@@ -557,6 +557,11 @@
         "required": false,
         "description": "Mock mode: inject error type for testing"
       },
+      "QSTASH_MOCK_MODE": {
+        "type": "boolean",
+        "required": false,
+        "description": "Explicitly enable QStash mock mode outside test runtime. Do not enable for production task queues."
+      },
       "QSTASH_RATE_LIMIT": {
         "type": "number",
         "required": false,

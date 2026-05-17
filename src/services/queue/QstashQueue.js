@@ -25,6 +25,14 @@ function summarizeTargetUrl(url) {
     }
 }
 
+function isTruthyEnv(value) {
+    return ['true', '1', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+function isTestRuntime(config = {}) {
+    return (config.nodeEnv || process.env.NODE_ENV || 'dev') === 'test';
+}
+
 /**
  * QstashQueue - QStash 消息队列实现
  * 继承 CloudQueueBase 的通用功能，添加 QStash 特有功能
@@ -65,29 +73,50 @@ export class QstashQueue extends CloudQueueBase {
     }
 
     async initialize() {
-        await super.initialize();
         const config = getConfig();
+        const qstashConfig = config.qstash || {};
+        const explicitMockMode = Boolean(this.options.mockMode) || isTruthyEnv(process.env.QSTASH_MOCK_MODE);
+        const allowMockMode = explicitMockMode || isTestRuntime(config);
 
         if (isQstashDebugEnabled()) {
             log.info('QStash debug enabled (QSTASH_DEBUG=true)');
         }
 
-        if (!config.qstash?.token) {
-            log.warn('QStash Token 未找到，使用模拟模式');
+        if (explicitMockMode) {
+            log.warn('QStash mock mode explicitly enabled');
+            this.client = null;
             this.isMockMode = true;
         } else {
-            this.client = new Client({ token: config.qstash.token });
+            if (!qstashConfig.token) {
+                if (!allowMockMode) {
+                    throw new Error('QSTASH_TOKEN is required outside test or explicit QSTASH_MOCK_MODE');
+                }
+                log.warn('QStash Token 未找到，测试环境使用模拟模式');
+                this.client = null;
+                this.isMockMode = true;
+            } else {
+                this.client = new Client({ token: qstashConfig.token });
+                this.isMockMode = false;
+            }
+        }
+
+        if (!this.isMockMode && !this.client) {
+            if (!qstashConfig.token) {
+                throw new Error('QSTASH_TOKEN is required for QStash real mode');
+            }
+            this.client = new Client({ token: qstashConfig.token });
             this.isMockMode = false;
         }
 
         this.receiver = new Receiver({
-            currentSigningKey: config.qstash.currentSigningKey,
-            nextSigningKey: config.qstash.nextSigningKey
+            currentSigningKey: qstashConfig.currentSigningKey,
+            nextSigningKey: qstashConfig.nextSigningKey
         });
 
         // 5. 分布式熔断器 - 尝试初始化 Redis 客户端
         await this._initializeRedisClient();
 
+        await super.initialize();
         await this.connect();
     }
 
@@ -345,7 +374,7 @@ export class QstashQueue extends CloudQueueBase {
         const {
             idempotencyKey,
             forceDirect: _forceDirect,
-            requireDurableAck: _requireDurableAck,
+            requireDurableAck,
             ...publishOptions
         } = options;
         const messageId = idempotencyKey || this._generateMessageId(topic, message);
@@ -376,6 +405,9 @@ export class QstashQueue extends CloudQueueBase {
 
         const publishPromise = (async () => {
             if (this.isMockMode) {
+                if (requireDurableAck) {
+                    throw new Error('Durable queue publish cannot be acknowledged in QStash mock mode');
+                }
                 // Mock 模式：不触发真实发布，但仍返回稳定 messageId 供链路追踪
                 this._addProcessedMessage(messageId);
                 return { messageId, mock: true };

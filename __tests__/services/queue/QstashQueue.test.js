@@ -127,10 +127,22 @@ vi.mock("../../../src/services/CircuitBreaker.js", () => ({
 import { QstashQueue } from "../../../src/services/queue/QstashQueue.js";
 
 describe("QstashQueue - Initialize", () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalMockMode = process.env.QSTASH_MOCK_MODE;
+
     beforeEach(() => {
         vi.clearAllMocks();
         mockPublishJSON.mockReset();
         mockVerify.mockReset();
+        process.env.NODE_ENV = 'test';
+        delete process.env.QSTASH_MOCK_MODE;
+    });
+
+    afterEach(() => {
+        if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = originalNodeEnv;
+        if (originalMockMode === undefined) delete process.env.QSTASH_MOCK_MODE;
+        else process.env.QSTASH_MOCK_MODE = originalMockMode;
     });
 
     test("should initialize successfully with valid config", async () => {
@@ -143,9 +155,10 @@ describe("QstashQueue - Initialize", () => {
         expect(queue.client.token).toBe('test-token');
     });
 
-    test("should use mock mode when token is missing", async () => {
+    test("should use mock mode when token is missing in test runtime", async () => {
         const { getConfig } = await import("../../../src/config/index.js");
         getConfig.mockReturnValueOnce({
+            nodeEnv: 'test',
             qstash: { token: '' }
         });
 
@@ -154,6 +167,38 @@ describe("QstashQueue - Initialize", () => {
         
         expect(queue.isMockMode).toBe(true);
         expect(queue.client).toBeNull();
+    });
+
+    test("should fail closed when token is missing outside test runtime", async () => {
+        const { getConfig } = await import("../../../src/config/index.js");
+        process.env.NODE_ENV = 'prod';
+        getConfig.mockReturnValueOnce({
+            nodeEnv: 'prod',
+            qstash: { token: '' }
+        });
+
+        const queue = new QstashQueue();
+
+        await expect(queue.initialize()).rejects.toThrow('QSTASH_TOKEN is required');
+        expect(queue.isInitialized).toBe(false);
+        expect(queue.connected).toBe(false);
+    });
+
+    test("should allow explicit mock mode outside test runtime", async () => {
+        const { getConfig } = await import("../../../src/config/index.js");
+        process.env.NODE_ENV = 'prod';
+        process.env.QSTASH_MOCK_MODE = 'true';
+        getConfig.mockReturnValueOnce({
+            nodeEnv: 'prod',
+            qstash: { token: '' }
+        });
+
+        const queue = new QstashQueue();
+        await queue.initialize();
+
+        expect(queue.isMockMode).toBe(true);
+        expect(queue.client).toBeNull();
+        expect(queue.connected).toBe(true);
     });
 });
 
@@ -339,6 +384,7 @@ describe("QstashQueue - publish", () => {
     test("should return mock message in mock mode", async () => {
         const { getConfig } = await import("../../../src/config/index.js");
         getConfig.mockReturnValueOnce({
+            nodeEnv: 'test',
             qstash: { token: '' }
         });
 
@@ -351,6 +397,22 @@ describe("QstashQueue - publish", () => {
         expect(result).toBeDefined();
         expect(result.messageId).toBeDefined();
         expect(result.messageId).toMatch(/^msg_/);
+    });
+
+    test("should reject durable ack in mock mode", async () => {
+        const { getConfig } = await import("../../../src/config/index.js");
+        getConfig.mockReturnValueOnce({
+            nodeEnv: 'test',
+            qstash: { token: '' }
+        });
+
+        const mockQueue = new QstashQueue({ batchSize: 1 });
+        await mockQueue.initialize();
+
+        await expect(mockQueue._publish('test-topic', { data: 'test' }, {
+            forceDirect: true,
+            requireDurableAck: true
+        })).rejects.toThrow('Durable queue publish cannot be acknowledged');
     });
 });
 
@@ -422,6 +484,7 @@ describe("QstashQueue - batchPublish", () => {
     test("should return mock messages in mock mode", async () => {
         const { getConfig } = await import("../../../src/config/index.js");
         getConfig.mockReturnValueOnce({
+            nodeEnv: 'test',
             qstash: { token: '' }
         });
 
@@ -469,6 +532,7 @@ describe("QstashQueue - verifyWebhook", () => {
     test("should return true in mock mode", async () => {
         const { getConfig } = await import("../../../src/config/index.js");
         getConfig.mockReturnValueOnce({
+            nodeEnv: 'test',
             qstash: { token: '' }
         });
 

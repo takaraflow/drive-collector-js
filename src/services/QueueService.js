@@ -22,6 +22,20 @@ function isQstashDebugEnabled() {
     return value === 'true' || value === '1' || value === 'yes';
 }
 
+function isTestRuntime(config = {}) {
+    return (config.nodeEnv || process.env.NODE_ENV || 'dev') === 'test';
+}
+
+function isPlaceholderWebhookUrl(webhookUrl) {
+    if (!webhookUrl) return true;
+    try {
+        const parsed = new URL(webhookUrl);
+        return parsed.hostname === 'example.com';
+    } catch {
+        return true;
+    }
+}
+
 export class QueueService {
     constructor(queueProvider = null) {
         this.queueProvider = queueProvider || new QstashQueue();
@@ -68,6 +82,9 @@ export class QueueService {
         const enhancedMessage = this._addMetadata(message);
         const config = getConfig();
         const webhookUrl = config.qstash?.webhookUrl || 'https://example.com';
+        if (options?.requireDurableAck && isPlaceholderWebhookUrl(webhookUrl) && !isTestRuntime(config)) {
+            throw new Error('LB_WEBHOOK_URL is required for durable task queue publish');
+        }
         if (!config.qstash?.webhookUrl && !warnedMissingWebhookUrl && (config.nodeEnv || 'dev') !== 'test') {
             warnedMissingWebhookUrl = true;
             log.warn('LB_WEBHOOK_URL 未配置，QStash 将发布到占位地址，回调不会到达你的 LB', {
