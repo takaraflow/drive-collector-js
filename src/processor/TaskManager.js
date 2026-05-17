@@ -735,6 +735,15 @@ export class TaskManager {
         return 500;
     }
 
+    static _isRetryableInfrastructureError(error) {
+        const msg = error?.message || '';
+        if (this._classifyError(error) === 503) return true;
+        return /D1 HTTP 5\d\d/i.test(msg) ||
+            /D1 HTTP 400 \\[7500\\]/i.test(msg) ||
+            /D1 Error: Network connection lost/i.test(msg) ||
+            /Network connection lost/i.test(msg);
+    }
+
     /**
      * 处理下载 Webhook - QStash 事件驱动
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
@@ -814,6 +823,10 @@ export class TaskManager {
                 return { success: false, statusCode: 503, message: error.message };
             }
             const code = this._classifyError(error);
+            if (this._isRetryableInfrastructureError(error)) {
+                await this._resetAfterRetryableInfrastructureError(taskId, TASK_EVENTS.RETRY, error, 'handleDownloadWebhook.retryable_infra_error');
+                return { success: false, statusCode: code, message: error.message };
+            }
             await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
                 allowNoop: true,
                 source: 'handleDownloadWebhook.error'
@@ -913,6 +926,10 @@ export class TaskManager {
                 return { success: false, statusCode: 503, message: error.message };
             }
             const code = this._classifyError(error);
+            if (this._isRetryableInfrastructureError(error)) {
+                await this._resetAfterRetryableInfrastructureError(taskId, TASK_EVENTS.RESET_UPLOAD, error, 'handleUploadWebhook.retryable_infra_error');
+                return { success: false, statusCode: code, message: error.message };
+            }
             await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
                 allowNoop: true,
                 source: 'handleUploadWebhook.error'
@@ -1003,6 +1020,36 @@ export class TaskManager {
             });
         }
         return result;
+    }
+
+    static async _resetAfterRetryableInfrastructureError(taskId, event, error, source) {
+        const { TaskRepository } = getDeps();
+        const log = getLog();
+        try {
+            const result = await TaskRepository.transitionStatus(taskId, event, error.message, {
+                returnResult: true,
+                allowNoop: true,
+                source
+            });
+            if (result.blocked) {
+                log.warn("Unable to reset task after retryable infrastructure error", {
+                    taskId,
+                    event,
+                    reason: result.reason,
+                    status: result.fromStatus || result.latestStatus,
+                    error: error.message
+                });
+            }
+            return result;
+        } catch (resetError) {
+            log.warn("Retryable infrastructure reset failed; leaving task for webhook retry", {
+                taskId,
+                event,
+                error: error.message,
+                resetError: resetError.message
+            });
+            return { changed: false, blocked: true, reason: resetError.message };
+        }
     }
 
     /**

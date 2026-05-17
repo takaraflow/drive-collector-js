@@ -106,6 +106,14 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
         expect(payload['span.id']).toBe('1234567890abcdef');
     });
 
+    it('should emit standard New Relic severity and service name attributes', async () => {
+        const payload = logger._buildPayload('error', 'failed message', {}, {}, 'instance-1');
+
+        expect(payload.level).toBe('error');
+        expect(payload.severity).toBe('ERROR');
+        expect(payload['service.name']).toBe('test-service');
+    });
+
     it('should only print New Relic batch success in debug log level', async () => {
         fetch.mockResolvedValue({ ok: true, status: 202 });
 

@@ -5,6 +5,12 @@ import { shouldSendLogLevel } from './log-level.js';
 import { trace } from '@opentelemetry/api';
 
 let getInstanceIdFunc = () => 'unknown';
+const NEW_RELIC_SEVERITY = Object.freeze({
+    debug: 'DEBUG',
+    info: 'INFO',
+    warn: 'WARN',
+    error: 'ERROR'
+});
 
 export const setInstanceIdProvider = (provider) => {
     getInstanceIdFunc = provider;
@@ -146,6 +152,8 @@ class NewrelicLogger extends BaseLogger {
             // timestamp: Date.now(),
             message: messageStr,
             level: level,
+            severity: NEW_RELIC_SEVERITY[level] || String(level).toUpperCase(),
+            'service.name': this.service,
             instanceId: instanceId,
             local_time: getBeijingISOString(),
             ...context,

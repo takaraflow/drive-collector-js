@@ -339,11 +339,10 @@ describe('TaskRepository', () => {
             expect(mockD1.fetchOne).not.toHaveBeenCalled();
         });
 
-        it('should handle database errors', async () => {
+        it('should rethrow database errors instead of masking them as missing tasks', async () => {
             mockD1.fetchOne.mockRejectedValue(new Error('DB Error'));
 
-            const result = await TaskRepository.findById('task123');
-            expect(result).toBeNull();
+            await expect(TaskRepository.findById('task123')).rejects.toThrow('DB Error');
         });
     });
 

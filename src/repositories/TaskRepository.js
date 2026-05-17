@@ -426,7 +426,7 @@ export class TaskRepository {
             return task;
         } catch (e) {
             log.error(`TaskRepository.findById error for ${taskId}:`, e);
-            return null;
+            throw e;
         }
     }
 

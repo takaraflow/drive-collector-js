@@ -339,6 +339,99 @@ describe('TaskManager', () => {
             downloadTaskSpy.mockRestore();
         });
 
+        it('should retry download webhook on D1 lookup errors without marking the task failed', async () => {
+            const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+            const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+            instanceCoordinator.hasLock.mockResolvedValue(true);
+            TaskRepository.findById.mockRejectedValue(new Error('D1 Error: Network connection lost (Max retries exceeded)'));
+
+            const result = await TaskManager.handleDownloadWebhook('task-d1');
+
+            expect(result).toMatchObject({
+                success: false,
+                statusCode: 503,
+                message: 'D1 Error: Network connection lost (Max retries exceeded)'
+            });
+            expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+                'task-d1',
+                'retry',
+                'D1 Error: Network connection lost (Max retries exceeded)',
+                expect.objectContaining({ source: 'handleDownloadWebhook.retryable_infra_error' })
+            );
+            expect(TaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+                'task-d1',
+                'fail',
+                expect.anything(),
+                expect.any(Object)
+            );
+        });
+
+        it('should reset download state for retryable infrastructure errors instead of failing the task', async () => {
+            const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+            const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+            const { client } = await import('../../src/services/telegram.js');
+            instanceCoordinator.hasLock.mockResolvedValue(true);
+            TaskRepository.findById.mockResolvedValue({
+                id: 'task-network',
+                user_id: 'user-1',
+                chat_id: 'chat-1',
+                msg_id: 'status-1',
+                file_name: 'test.mp4',
+                source_msg_id: 100,
+                status: 'queued'
+            });
+            client.getMessages.mockResolvedValue([{
+                id: 100,
+                media: { document: { mimeType: 'video/mp4', size: 1000, attributes: [{ className: 'DocumentAttributeFilename', fileName: 'test.mp4' }] } }
+            }]);
+            const downloadTaskSpy = vi.spyOn(TaskManager, 'downloadTask').mockRejectedValue(new Error('fetch failed'));
+
+            const result = await TaskManager.handleDownloadWebhook('task-network');
+
+            expect(result).toMatchObject({ success: false, statusCode: 503, message: 'fetch failed' });
+            expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+                'task-network',
+                'retry',
+                'fetch failed',
+                expect.objectContaining({ source: 'handleDownloadWebhook.retryable_infra_error' })
+            );
+            expect(TaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+                'task-network',
+                'fail',
+                'fetch failed',
+                expect.any(Object)
+            );
+
+            downloadTaskSpy.mockRestore();
+        });
+
+        it('should fail download task for permanent SQL errors', async () => {
+            const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+            const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+            instanceCoordinator.hasLock.mockResolvedValue(true);
+            TaskRepository.findById.mockRejectedValue(new Error('D1 SQL Error [7501]: no such table'));
+
+            const result = await TaskManager.handleDownloadWebhook('task-sql');
+
+            expect(result).toMatchObject({
+                success: false,
+                statusCode: 500,
+                message: 'D1 SQL Error [7501]: no such table'
+            });
+            expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+                'task-sql',
+                'fail',
+                'D1 SQL Error [7501]: no such table',
+                expect.objectContaining({ source: 'handleDownloadWebhook.error' })
+            );
+            expect(TaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+                'task-sql',
+                'retry',
+                expect.anything(),
+                expect.any(Object)
+            );
+        });
+
         it('should handle QStash webhook upload and detect group task', async () => {
             const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
             const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
@@ -386,6 +479,45 @@ describe('TaskManager', () => {
                 isGroup: true
             }));
             
+            uploadTaskSpy.mockRestore();
+        });
+
+        it('should reset upload state for retryable infrastructure errors instead of failing the task', async () => {
+            const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+            const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+            const { client } = await import('../../src/services/telegram.js');
+            instanceCoordinator.hasLock.mockResolvedValue(true);
+            TaskRepository.findById.mockResolvedValue({
+                id: 'task-upload-network',
+                user_id: 'user-1',
+                chat_id: 'chat-1',
+                msg_id: 'status-2',
+                file_name: 'test.mp4',
+                source_msg_id: 200,
+                status: 'downloaded'
+            });
+            client.getMessages.mockResolvedValue([{
+                id: 200,
+                media: { document: { mimeType: 'video/mp4', size: 1000, attributes: [{ className: 'DocumentAttributeFilename', fileName: 'test.mp4' }] } }
+            }]);
+            const uploadTaskSpy = vi.spyOn(TaskManager, 'uploadTask').mockRejectedValue(new Error('ECONNRESET'));
+
+            const result = await TaskManager.handleUploadWebhook('task-upload-network');
+
+            expect(result).toMatchObject({ success: false, statusCode: 503, message: 'ECONNRESET' });
+            expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+                'task-upload-network',
+                'reset_upload',
+                'ECONNRESET',
+                expect.objectContaining({ source: 'handleUploadWebhook.retryable_infra_error' })
+            );
+            expect(TaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+                'task-upload-network',
+                'fail',
+                'ECONNRESET',
+                expect.any(Object)
+            );
+
             uploadTaskSpy.mockRestore();
         });
     });

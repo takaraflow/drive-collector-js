@@ -14,6 +14,11 @@ function summarizeSqlParams(params = []) {
     });
 }
 
+function summarizeSql(sql = '') {
+    const operation = String(sql).trim().split(/\s+/)[0]?.toUpperCase() || 'UNKNOWN';
+    return { operation, length: String(sql).length };
+}
+
 /**
  * --- D1 数据库服务层 ---
  */
@@ -54,19 +59,26 @@ class D1Service {
 
     async _doFetchPayload(payload, attempts, maxAttempts, context = {}) {
         // 📊 诊断日志：请求开始
-        log.debug(`🔍 D1 Request [Attempt ${attempts + 1}/${maxAttempts}] - URL: ${this.apiUrl}`);
+        log.debug("D1 request attempt", {
+            attempt: attempts + 1,
+            maxAttempts,
+            endpoint: 'cloudflare-d1-query'
+        });
         if (context.statements) {
-            log.debug(`🔍 D1 Batch Statements: ${context.statements.length}`);
-            log.debug(`🔍 D1 Batch SQL: ${context.statements.map(statement => {
-                const sql = statement.sql || '';
-                return `${sql.substring(0, 80)}${sql.length > 80 ? '...' : ''}`;
-            }).join(' | ')}`);
-            log.debug(`🔍 D1 Batch Params: ${JSON.stringify(context.statements.map(statement => summarizeSqlParams(statement.params || [])))}`);
+            log.debug("D1 batch statement summary", {
+                statementCount: context.statements.length,
+                statements: context.statements.map(statement => ({
+                    sql: summarizeSql(statement.sql),
+                    params: summarizeSqlParams(statement.params || [])
+                }))
+            });
         } else {
             const sql = context.sql || '';
             const params = context.params || [];
-            log.debug(`🔍 D1 SQL: ${sql.substring(0, 100)}${sql.length > 100 ? '...' : ''}`);
-            log.debug(`🔍 D1 Params: ${JSON.stringify(summarizeSqlParams(params))}`);
+            log.debug("D1 statement summary", {
+                sql: summarizeSql(sql),
+                params: summarizeSqlParams(params)
+            });
         }
 
         return await fetch(this.apiUrl, {
@@ -194,7 +206,11 @@ class D1Service {
                 const response = await this._doFetchPayload(payload, attempts, maxAttempts, context);
                 const duration = Date.now() - startTime;
 
-                log.debug(`🔍 D1 Response [Attempt ${attempts + 1}] - Status: ${response.status}, Duration: ${duration}ms`);
+                log.debug("D1 response", {
+                    attempt: attempts + 1,
+                    status: response.status,
+                    durationMs: duration
+                });
 
                 if (!response.ok) {
                     const shouldRetry = await this._handleHttpError(response, attempts, maxAttempts, duration);
