@@ -102,7 +102,16 @@ vi.mock("../../src/repositories/SettingsRepository.js", () => ({
 vi.mock("../../src/services/InstanceCoordinator.js", () => ({
     instanceCoordinator: {
         hasLock: vi.fn().mockResolvedValue(true),
-        releaseLock: vi.fn().mockResolvedValue(undefined)
+        acquireLock: vi.fn().mockResolvedValue(true),
+        releaseLock: vi.fn().mockResolvedValue(undefined),
+        getInstanceId: vi.fn(() => 'test-instance'),
+        isLeader: false
+    }
+}));
+
+vi.mock("../../src/services/CacheService.js", () => ({
+    cache: {
+        get: vi.fn().mockResolvedValue(null)
     }
 }));
 
@@ -142,6 +151,7 @@ describe("Telegram Service", () => {
         vi.clearAllMocks();
         mockTelegramClientConfigs = [];
         mockLoggerDebug.mockClear();
+        vi.useRealTimers();
     });
 
     afterEach(async () => {
@@ -203,6 +213,25 @@ describe("Telegram Service", () => {
         expect(cbState.failures).toBeDefined();
     });
 
+    test("should keep standby watchdog from creating clients or triggering recovery logs", async () => {
+        const { instanceCoordinator } = await import("../../src/services/InstanceCoordinator.js");
+        vi.useFakeTimers();
+        instanceCoordinator.hasLock.mockResolvedValue(false);
+
+        module.startWatchdog();
+        await vi.advanceTimersByTimeAsync(60 * 1000);
+
+        expect(instanceCoordinator.hasLock).toHaveBeenCalledWith('telegram_client');
+        expect(mockTelegramClientConfigs).toHaveLength(0);
+        expect(instanceCoordinator.acquireLock).not.toHaveBeenCalled();
+        expect(mockLoggerWarn.mock.calls.some(call => String(call[0]).includes('Client disconnected'))).toBe(false);
+        expect(mockLoggerError.mock.calls.some(call => String(call[0]).includes('Reconnection threshold reached'))).toBe(false);
+
+        module.stopWatchdog();
+        vi.useRealTimers();
+        instanceCoordinator.hasLock.mockResolvedValue(true);
+    });
+
     test("should log TIMEOUT errors with service: telegram and handle axiom fallback", async () => {
         // This test verifies the new unified logging behavior
         // We'll simulate the error handler being called
@@ -211,16 +240,12 @@ describe("Telegram Service", () => {
         
         // 【关键修复】检查 'addEventHandler' 是否被调用，而不是 'on'
         // Telegram 库通常使用 addEventHandler 注册监听器
-        const handlerCall = clientInstance.addEventHandler.mock.calls.find(call => {
-            // check[0] 是 callback, check[1] 是 event filter
-            // 我们通过是否有 callback 来判断是否注册了处理器
-            return typeof call[0] === 'function'; 
-        });
+        const handlerCall = clientInstance.on.mock.calls.find(call => call[0] === 'error' && typeof call[1] === 'function');
 
         // 如果源码里使用了 addEventHandler，这里应该能找到
         // 如果还是报错，说明源码可能还没注册监听器，或者使用了其他方式
         if (handlerCall) {
-            const errorHandler = handlerCall[0];
+            const errorHandler = handlerCall[1];
             
             // Simulate error event with TIMEOUT
             const timeoutError = new Error('Request timed out');

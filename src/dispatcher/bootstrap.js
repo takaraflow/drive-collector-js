@@ -23,6 +23,7 @@ class DispatcherManager {
         this.MAX_CONNECTION_RETRIES = 5;
         this.loopCount = 0;
         this.maxRetries = 3;
+        this.runtimeClient = null;
     }
 
     handleConnectionStatusChange = (isConnected) => {
@@ -197,7 +198,10 @@ class DispatcherManager {
         
         setTimeout(async () => {
             try {
-                await this.startTelegramClient();
+                const started = await this.startTelegramClient();
+                if (started) {
+                    await this.ensureTelegramRuntimeStarted();
+                }
             } catch (error) {
                 log.error(`🛡️ 后台循环错误已捕获，继续执行: ${error.message}`);
             } finally {
@@ -206,20 +210,13 @@ class DispatcherManager {
         }, interval);
     };
 
-    async start() {
-        setConnectionStatusCallback(this.handleConnectionStatusChange);
-
-        if (typeof process !== 'undefined' && process.on) {
-            process.on('uncaughtException', this.handleUncaughtException);
-        }
-
-        await this.startTelegramClient();
-
-        if (process.env.NODE_ENV !== 'test') {
-            this.startIntervalWithJitter();
-        }
-
+    async ensureTelegramRuntimeStarted() {
         const client = await getClient();
+
+        if (this.runtimeClient === client) {
+            return client;
+        }
+
         client.addEventHandler(async (event) => {
             try {
                 await MessageHandler.handleEvent(event, client);
@@ -235,7 +232,29 @@ class DispatcherManager {
             log.info("🐶 Telegram 看门狗已启动");
         }, 1000);
 
+        this.runtimeClient = client;
         return client;
+    }
+
+    async start() {
+        setConnectionStatusCallback(this.handleConnectionStatusChange);
+
+        if (typeof process !== 'undefined' && process.on) {
+            process.on('uncaughtException', this.handleUncaughtException);
+        }
+
+        const clientStarted = await this.startTelegramClient();
+
+        if (process.env.NODE_ENV !== 'test') {
+            this.startIntervalWithJitter();
+        }
+
+        if (!clientStarted) {
+            log.info("🔒 Telegram 客户端未在当前实例启动：未持有 telegram_client 锁");
+            return null;
+        }
+
+        return await this.ensureTelegramRuntimeStarted();
     }
 }
 

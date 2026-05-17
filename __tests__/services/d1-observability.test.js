@@ -70,4 +70,18 @@ describe('D1 observability', () => {
         expect(debugMessages).not.toContain('secret error');
         expect(debugPayload).not.toContain('secret error');
     });
+
+    test('should not put raw database identifiers in initialization logs', async () => {
+        expect(mockD1Logger.info).toHaveBeenCalledWith('D1 service initialized', {
+            accountConfigured: true,
+            databaseConfigured: true,
+            endpoint: 'cloudflare-d1-query'
+        });
+
+        const infoMessages = mockD1Logger.info.mock.calls.map(call => String(call[0])).join(' ');
+        const infoPayload = JSON.stringify(mockD1Logger.info.mock.calls.map(call => call[1]));
+
+        expect(infoMessages).not.toContain('mock_database_id');
+        expect(infoPayload).not.toContain('mock_database_id');
+    });
 });

@@ -4,7 +4,7 @@ import { logger } from '../../src/services/logger/index.js'
 import { CacheService } from '../../src/services/CacheService.js'
 import { getConfig } from '../../src/config/index.js'
 
-const log = logger.withModule('StreamTransferServiceTest')
+const streamTransferLog = logger.withModule('StreamTransferService')
 
 vi.mock('../../src/config/index.js', () => ({
   getConfig: vi.fn(() => ({
@@ -42,9 +42,9 @@ describe('StreamTransferService', () => {
     vi.clearAllMocks()
     global.fetch = vi.fn()
     // Mock logger methods
-    vi.spyOn(log, 'info').mockImplementation(() => {})
-    vi.spyOn(log, 'warn').mockImplementation(() => {})
-    vi.spyOn(log, 'error').mockImplementation(() => {})
+    vi.spyOn(streamTransferLog, 'info').mockImplementation(() => {})
+    vi.spyOn(streamTransferLog, 'warn').mockImplementation(() => {})
+    vi.spyOn(streamTransferLog, 'error').mockImplementation(() => {})
   })
 
   test('getRemoteProgress ���ۦ', async () => {
@@ -145,7 +145,7 @@ describe('StreamTransferService', () => {
     
     expect(result).toBe(true)
     expect(mockService.getRemoteProgress).toHaveBeenCalledWith('https://lb.example.com', taskId)
-    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('already received by worker'))
+    expect(streamTransferLog.info).toHaveBeenCalledWith(expect.stringContaining('already received by worker'))
   })
 
   test('forward chunk fails when remote progress query fails', async () => {
@@ -319,7 +319,7 @@ describe('StreamTransferService', () => {
       const result = await streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
 
       expect(result).toBe(false)
-      expect(log.error).toHaveBeenCalledWith(expect.stringContaining('Max retry attempts reached'))
+      expect(streamTransferLog.error).toHaveBeenCalledWith(expect.stringContaining('Max retry attempts reached'))
     })
 
     test('forwardChunk 应优先使用 targetUrl 而非 lbUrl', async () => {

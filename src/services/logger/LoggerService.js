@@ -125,6 +125,68 @@ export const flushLogBuffer = async (timeoutMs = 10000) => {
 let _singletonInstance = null;
 let _singletonTimestamp = Date.now();
 
+class ScopedLogger {
+    constructor(parent, boundContext = {}) {
+        this._parent = parent;
+        this._boundContext = parent._normalizeContext(boundContext);
+    }
+
+    _mergeContext(context = {}) {
+        return {
+            ...this._boundContext,
+            ...this._parent._normalizeContext(context)
+        };
+    }
+
+    async info(message, data = {}, context = {}) {
+        await this._parent._log('info', message, data, this._mergeContext(context));
+    }
+
+    async warn(message, data = {}, context = {}) {
+        await this._parent._log('warn', message, data, this._mergeContext(context));
+    }
+
+    async error(message, data = {}, context = {}) {
+        await this._parent._log('error', message, data, this._mergeContext(context));
+    }
+
+    async debug(message, data = {}, context = {}) {
+        await this._parent._log('debug', message, data, this._mergeContext(context));
+    }
+
+    withContext(extraContext) {
+        return new ScopedLogger(this._parent, this._mergeContext(extraContext));
+    }
+
+    withModule(moduleName) {
+        return this.withContext({ module: moduleName });
+    }
+
+    configure(config) {
+        return this._parent.configure(config);
+    }
+
+    canSend(level) {
+        return this._parent.canSend(level);
+    }
+
+    async flush(timeoutMs = 10000) {
+        await this._parent.flush(timeoutMs);
+    }
+
+    getProviderName() {
+        return this._parent.getProviderName();
+    }
+
+    getConnectionInfo() {
+        return this._parent.getConnectionInfo();
+    }
+
+    async destroy() {
+        await this._parent.destroy();
+    }
+}
+
 class LoggerService {
     constructor(options = {}) {
         this.options = options;
@@ -133,6 +195,7 @@ class LoggerService {
         this.fallbackLogger = null;
         this.currentProviderName = 'ConsoleLogger';
         this._baseContext = {};
+        this._moduleLoggers = new Map();
         this._moduleTimestamp = _singletonTimestamp;
     }
 
@@ -321,13 +384,16 @@ class LoggerService {
     }
 
     withContext(extraContext) {
-        // Return the same instance to ensure mocks on the singleton work globally
-        this._baseContext = { ...this._baseContext, ...this._normalizeContext(extraContext) };
-        return this;
+        return new ScopedLogger(this, extraContext);
     }
 
     withModule(moduleName) {
-        return this.withContext({ module: moduleName });
+        const normalizedContext = this._normalizeContext({ module: moduleName });
+        const cacheKey = normalizedContext.module || '';
+        if (!this._moduleLoggers.has(cacheKey)) {
+            this._moduleLoggers.set(cacheKey, new ScopedLogger(this, normalizedContext));
+        }
+        return this._moduleLoggers.get(cacheKey);
     }
 
     configure(config) {

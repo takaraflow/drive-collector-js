@@ -151,6 +151,8 @@ class EnhancedTelegramCircuitBreaker {
 
 const telegramCircuitBreaker = new EnhancedTelegramCircuitBreaker();
 
+const TELEGRAM_CLIENT_LOCK = "telegram_client";
+
 // 模块级状态变量
 let telegramClient = null;
 let isClientInitializing = false;
@@ -406,6 +408,33 @@ function buildProxyOptions(config) {
         }
     } : {};
 }
+
+const resetWatchdogFailureState = () => {
+    consecutiveFailures = 0;
+    lastHeartbeat = Date.now();
+    isReconnecting = false;
+};
+
+const stopLocalClientIfPresent = async (reason) => {
+    if (!telegramClient) return;
+
+    if (telegramClient.connected) {
+        log.debug(`🔒 ${reason}; disconnecting local Telegram client`);
+        try {
+            if (telegramClient._sender) {
+                await telegramClient._sender.disconnect().catch(() => {});
+            }
+            await telegramClient.disconnect();
+        } catch (error) {
+            log.debug(`🔒 Local Telegram client disconnect skipped: ${error.message || error}`);
+        }
+    }
+
+    telegramClient = null;
+    isClientInitializing = false;
+};
+
+export const hasTelegramClientLock = async () => instanceCoordinator.hasLock(TELEGRAM_CLIENT_LOCK);
 
 function resolveTelegramLogLevel() {
     if (typeof log.canSend !== 'function') return 'info';
@@ -791,7 +820,7 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
     
     // 检查锁所有权 - 增强逻辑：允许在锁缺失时尝试重新获取
     try {
-        const hasLock = await instanceCoordinator.hasLock("telegram_client");
+        const hasLock = await hasTelegramClientLock();
         if (!hasLock) {
             // 检查锁是否被其他实例持有
             const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), "json", { skipCache: true });
@@ -800,7 +829,7 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
                 // 锁不存在（已过期或从未获取），且当前实例是 Leader，允许尝试重新获取
                 if (instanceCoordinator.isLeader) {
                     log.warn("🔒 锁已缺失且本实例是 Leader，尝试重新获取锁...");
-                    const acquired = await instanceCoordinator.acquireLock("telegram_client", 300);
+                    const acquired = await instanceCoordinator.acquireLock(TELEGRAM_CLIENT_LOCK, 300);
                     if (acquired) {
                         log.info("✅ 重新获取锁成功，继续重连");
                     } else {
@@ -955,7 +984,7 @@ const handleAuthKeyDuplicated = async () => {
     } finally {
         // 4. 确保锁一定会被释放，即使上面任何步骤抛出异常
         try {
-            await instanceCoordinator.releaseLock("telegram_client");
+            await instanceCoordinator.releaseLock(TELEGRAM_CLIENT_LOCK);
         } catch (lockErr) {
             log.error("❌ 释放锁失败:", lockErr);
         }
@@ -972,12 +1001,12 @@ const handleWatchdogFailureThreshold = async (errorType, diff) => {
 
     // 增强重连逻辑：先检查锁状态，如果锁缺失且本实例是 Leader，尝试重新获取
     try {
-        const hasLock = await instanceCoordinator.hasLock("telegram_client");
+        const hasLock = await hasTelegramClientLock();
         if (!hasLock) {
             const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), "json", { skipCache: true });
             if (!lockData && instanceCoordinator.isLeader) {
                 log.warn("🔒 看门狗检测到锁缺失，Leader 尝试重新获取锁...");
-                const acquired = await instanceCoordinator.acquireLock("telegram_client", 300);
+                const acquired = await instanceCoordinator.acquireLock(TELEGRAM_CLIENT_LOCK, 300);
                 if (acquired) {
                     log.info("✅ 看门狗重新获取锁成功");
                 }
@@ -1013,15 +1042,23 @@ export const startWatchdog = () => {
             return;
         }
 
-        // 检查电路断路器状态
-        const cbState = telegramCircuitBreaker.getState();
-        if (cbState.state === 'OPEN') {
-            const waitTime = Math.ceil((cbState.timeout - (now - cbState.lastFailure)) / 1000);
-            log.warn(`⏸️ Watchdog paused - circuit breaker OPEN (${waitTime}s remaining)`);
-            return;
-        }
-
         try {
+            const ownsTelegramClient = await hasTelegramClientLock();
+            if (!ownsTelegramClient) {
+                await stopLocalClientIfPresent('watchdog skipped because this instance does not own telegram_client lock');
+                resetWatchdogFailureState();
+                log.debug("🔒 Watchdog standby tick skipped: telegram_client lock is owned elsewhere");
+                return;
+            }
+
+            // 检查电路断路器状态。只有锁持有者才需要报告 Telegram runtime 健康。
+            const cbState = telegramCircuitBreaker.getState();
+            if (cbState.state === 'OPEN') {
+                const waitTime = Math.ceil((cbState.timeout - (now - cbState.lastFailure)) / 1000);
+                log.warn(`⏸️ Watchdog paused - circuit breaker OPEN (${waitTime}s remaining)`);
+                return;
+            }
+
             const client = await getClient();
             if (!client.connected) {
                 consecutiveFailures++;

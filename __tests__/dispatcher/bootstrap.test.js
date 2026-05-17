@@ -130,10 +130,14 @@ describe('Dispatcher Bootstrap', () => {
     instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(false);
     instanceCoordinator.instanceCoordinator.acquireLock.mockResolvedValue(false);
 
-    await startDispatcher();
+    const result = await startDispatcher();
     await finishStartupTimers();
 
+    expect(result).toBeNull();
+    expect(telegram.getClient).not.toHaveBeenCalled();
     expect(telegram.client.start).not.toHaveBeenCalled();
+    expect(telegram.client.addEventHandler).not.toHaveBeenCalled();
+    expect(telegram.startTelegramWatchdog).not.toHaveBeenCalled();
   });
 
   test('should handle AUTH_KEY_DUPLICATED error by resetting local session and retrying', async () => {

@@ -43,7 +43,11 @@ class D1Service {
         } else {
             this.apiUrl = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/d1/database/${this.databaseId}/query`;
             this.isInitialized = true;
-            log.info(`Service initialized: ${this.databaseId}`);
+            log.info("D1 service initialized", {
+                accountConfigured: true,
+                databaseConfigured: true,
+                endpoint: 'cloudflare-d1-query'
+            });
         }
     }
 
@@ -133,7 +137,11 @@ class D1Service {
         log.error(`🚨 D1 HTTP ${response.status} - ${response.statusText}${errorDetails}`);
         log.error(`🚨 D1 Error Details - Code: ${errorCode}, Message: ${errorMessage}`);
         log.error(`🚨 D1 Request Context - Attempt: ${attempts + 1}/${maxAttempts}, Duration: ${duration}ms`);
-        log.error(`🚨 D1 Config - AccountId: ${this.accountId}, DatabaseId: ${this.databaseId}`);
+        log.error("D1 config status", {
+            accountConfigured: Boolean(this.accountId),
+            databaseConfigured: Boolean(this.databaseId),
+            endpoint: 'cloudflare-d1-query'
+        });
 
         // Client errors (4xx) should not retry, except 400 with 7500
         if (response.status >= 400 && response.status < 500 && !isD1NetworkError) {

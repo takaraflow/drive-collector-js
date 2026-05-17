@@ -120,4 +120,97 @@ describe('LoggerService log level gate', () => {
         expect(provider.info).not.toHaveBeenCalled();
         expect(provider.warn).toHaveBeenCalledTimes(1);
     });
+
+    test('keeps module contexts isolated between scoped loggers', async () => {
+        const logger = new LoggerService();
+        const provider = {
+            info: vi.fn().mockResolvedValue(undefined),
+            getProviderName: () => 'test-provider'
+        };
+        logger.activeLoggers = [provider];
+        logger.isInitialized = true;
+
+        const d1Log = logger.withModule('D1');
+        const queueLog = logger.withModule('QueueService');
+
+        await d1Log.info('d1 ready');
+        await queueLog.info('queue ready');
+        await d1Log.info('d1 query');
+
+        expect(provider.info).toHaveBeenNthCalledWith(
+            1,
+            expect.any(String),
+            {},
+            expect.objectContaining({ module: 'D1' })
+        );
+        expect(provider.info).toHaveBeenNthCalledWith(
+            2,
+            expect.any(String),
+            {},
+            expect.objectContaining({ module: 'QueueService' })
+        );
+        expect(provider.info).toHaveBeenNthCalledWith(
+            3,
+            expect.any(String),
+            {},
+            expect.objectContaining({ module: 'D1' })
+        );
+    });
+
+    test('returns a stable scoped logger for the same module name', () => {
+        const logger = new LoggerService();
+
+        expect(logger.withModule('StreamTransferService')).toBe(logger.withModule('StreamTransferService'));
+        expect(logger.withModule('StreamTransferService')).not.toBe(logger.withModule('D1'));
+    });
+
+    test('does not leak scoped context into the base logger', async () => {
+        const logger = new LoggerService();
+        const provider = {
+            info: vi.fn().mockResolvedValue(undefined),
+            getProviderName: () => 'test-provider'
+        };
+        logger.activeLoggers = [provider];
+        logger.isInitialized = true;
+
+        await logger.withContext({ perf: true }).info('timed operation');
+        await logger.info('plain operation');
+
+        expect(provider.info).toHaveBeenNthCalledWith(
+            1,
+            expect.any(String),
+            {},
+            expect.objectContaining({ perf: true })
+        );
+        expect(provider.info.mock.calls[1][2]).not.toHaveProperty('perf');
+        expect(provider.info.mock.calls[1][2]).not.toHaveProperty('module');
+    });
+
+    test('merges chained scoped context and lets per-call context override it', async () => {
+        const logger = new LoggerService();
+        const provider = {
+            info: vi.fn().mockResolvedValue(undefined),
+            getProviderName: () => 'test-provider'
+        };
+        logger.activeLoggers = [provider];
+        logger.isInitialized = true;
+
+        const scopedLog = logger
+            .withModule('Dispatcher')
+            .withContext({ perf: true, requestId: null });
+
+        await scopedLog.info('event', {}, { module: 'MessageHandler', requestId: 'req-1' });
+
+        expect(provider.info).toHaveBeenCalledWith(
+            expect.any(String),
+            {},
+            expect.objectContaining({
+                module: 'MessageHandler',
+                perf: true,
+                requestId: 'req-1',
+                env: 'test',
+                instanceId: expect.any(String)
+            })
+        );
+    });
 });
