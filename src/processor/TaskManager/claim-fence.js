@@ -1,17 +1,41 @@
-export function getClaimFenceOptions(task) {
-    if (!task?.claimedBy || !task?.claimLeaseId) {
+function normalizeClaimFenceSource(source) {
+    if (!source) {
+        return {};
+    }
+
+    return {
+        claimedBy: source.claimedBy || source.instanceId || null,
+        claimLeaseId: source.claimLeaseId || source.leaseId || null
+    };
+}
+
+export function getClaimFenceOptions(source) {
+    const { claimedBy, claimLeaseId } = normalizeClaimFenceSource(source);
+    if (!claimedBy || !claimLeaseId) {
         return {};
     }
 
     return {
         requireClaim: true,
-        claimedBy: task.claimedBy,
-        claimLeaseId: task.claimLeaseId
+        claimedBy,
+        claimLeaseId
     };
 }
 
+export function attachClaimLease(task, lease) {
+    const { claimedBy, claimLeaseId } = normalizeClaimFenceSource(lease);
+    if (!task || !claimedBy || !claimLeaseId) {
+        return task;
+    }
+
+    task.claimedBy = claimedBy;
+    task.claimLeaseId = claimLeaseId;
+    return task;
+}
+
 export async function assertClaimFenceCurrent(task, instanceCoordinator) {
-    if (!task?.claimedBy || !task?.claimLeaseId) {
+    const { claimedBy, claimLeaseId } = normalizeClaimFenceSource(task);
+    if (!claimedBy || !claimLeaseId) {
         return;
     }
 
@@ -20,8 +44,8 @@ export async function assertClaimFenceCurrent(task, instanceCoordinator) {
     }
 
     const isCurrent = await instanceCoordinator.isLockLeaseCurrent("telegram_client", {
-        instanceId: task.claimedBy,
-        leaseId: task.claimLeaseId
+        instanceId: claimedBy,
+        leaseId: claimLeaseId
     });
 
     if (!isCurrent) {

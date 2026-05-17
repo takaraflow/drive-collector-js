@@ -9,6 +9,7 @@ import { cache } from "./CacheService.js";
 import { resolveInstanceBaseUrl } from "../utils/instanceUrl.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
 import { CACHE_KEYS } from "../domain/cache-keys.js";
+import { getClaimFenceOptions } from "../processor/TaskManager/claim-fence.js";
 import { once } from "events";
 import fs from "fs";
 import os from "os";
@@ -72,21 +73,9 @@ class StreamTransferService {
         }
     }
 
-    _getClaimFenceOptions(context = {}) {
-        if (!context.claimedBy || !context.claimLeaseId) {
-            return {};
-        }
-
-        return {
-            requireClaim: true,
-            claimedBy: context.claimedBy,
-            claimLeaseId: context.claimLeaseId
-        };
-    }
-
     async _markStreamUploadStarted(taskId, source, claimContext = {}) {
         const transition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.START_STREAM_UPLOAD, null, {
-            ...this._getClaimFenceOptions(claimContext),
+            ...getClaimFenceOptions(claimContext),
             returnResult: true,
             allowNoop: true,
             source
@@ -1091,7 +1080,7 @@ class StreamTransferService {
         if (status === TASK_STATUSES.COMPLETED || status === TASK_STATUSES.FAILED) {
             const event = status === TASK_STATUSES.COMPLETED ? TASK_EVENTS.COMPLETE : TASK_EVENTS.FAIL;
             await TaskRepository.transitionStatus(taskId, event, error, {
-                ...this._getClaimFenceOptions({ claimedBy, claimLeaseId }),
+                ...getClaimFenceOptions({ claimedBy, claimLeaseId }),
                 allowNoop: true,
                 source: 'stream_status_update'
             });
@@ -1318,7 +1307,7 @@ class StreamTransferService {
         }
 
         const transition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.COMPLETE, null, {
-            ...this._getClaimFenceOptions(context),
+            ...getClaimFenceOptions(context),
             returnResult: true,
             allowNoop: true,
             source: 'stream_finish_task'
@@ -1391,7 +1380,7 @@ class StreamTransferService {
     async reportError(taskId, context, errorMsg) {
         log.error(`❌ 任务上传失败: ${taskId} - ${errorMsg}`);
         const transition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, errorMsg, {
-            ...this._getClaimFenceOptions(context),
+            ...getClaimFenceOptions(context),
             returnResult: true,
             allowNoop: true,
             source: 'stream_report_error'

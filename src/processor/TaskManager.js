@@ -9,6 +9,10 @@ import {
     isTaskProcessingLockBusyError,
     TASK_QUEUE_TRIGGER_SOURCES
 } from "../domain/task-queue-contract.js";
+import {
+    attachClaimLease,
+    getClaimFenceOptions
+} from "./TaskManager/claim-fence.js";
 
 // 导入模块化的方法
 import { downloadTask } from "./TaskManager/TaskManager.download.js";
@@ -593,25 +597,6 @@ export class TaskManager {
         return null;
     }
 
-    static _attachClaimLease(task, lease) {
-        if (!task || !lease) return task;
-        task.claimedBy = lease.instanceId;
-        task.claimLeaseId = lease.leaseId;
-        return task;
-    }
-
-    static _getClaimFenceOptionsFromLease(lease) {
-        if (!lease?.instanceId || !lease?.leaseId) {
-            return {};
-        }
-
-        return {
-            requireClaim: true,
-            claimedBy: lease.instanceId,
-            claimLeaseId: lease.leaseId
-        };
-    }
-
     /**
      * [私 evasion] 发布任务到 QStash 下载队列
      */
@@ -828,7 +813,7 @@ export class TaskManager {
             const message = messages[0];
             if (!message || !message.media) {
                 await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, 'Source msg missing', {
-                    ...this._getClaimFenceOptionsFromLease(leaderLease),
+                    ...getClaimFenceOptions(leaderLease),
                     allowNoop: true,
                     source: 'handleDownloadWebhook.source_missing'
                 });
@@ -838,7 +823,7 @@ export class TaskManager {
             // 创建任务对象
             const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
             task.fileName = dbTask.file_name;
-            this._attachClaimLease(task, leaderLease);
+            attachClaimLease(task, leaderLease);
 
             // 检查是否属于组任务（通过 msgId 查询同组任务数量）
             try {
@@ -857,16 +842,16 @@ export class TaskManager {
         } catch (error) {
             log.error("Download webhook failed", { taskId, error });
             if (isTaskProcessingLockBusyError(error)) {
-                await this._resetAfterProcessingLockBusy(taskId, TASK_EVENTS.RETRY, 'handleDownloadWebhook.lock_busy');
+                await this._resetAfterProcessingLockBusy(taskId, TASK_EVENTS.RETRY, 'handleDownloadWebhook.lock_busy', didClaim ? getClaimFenceOptions(leaderLease) : {});
                 return { success: false, statusCode: 503, message: error.message };
             }
             const code = this._classifyError(error);
             if (this._isRetryableInfrastructureError(error)) {
-                await this._resetAfterRetryableInfrastructureError(taskId, TASK_EVENTS.RETRY, error, 'handleDownloadWebhook.retryable_infra_error');
+                await this._resetAfterRetryableInfrastructureError(taskId, TASK_EVENTS.RETRY, error, 'handleDownloadWebhook.retryable_infra_error', didClaim ? getClaimFenceOptions(leaderLease) : {});
                 return { success: false, statusCode: code, message: error.message };
             }
             await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
-                ...(didClaim ? this._getClaimFenceOptionsFromLease(leaderLease) : {}),
+                ...(didClaim ? getClaimFenceOptions(leaderLease) : {}),
                 allowNoop: true,
                 source: 'handleDownloadWebhook.error'
             });
@@ -923,7 +908,7 @@ export class TaskManager {
             const localPath = path.join(config.downloadDir, path.basename(dbTask.file_name));
             if (!fs.existsSync(localPath)) {
                 await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, 'Local file not found', {
-                    ...this._getClaimFenceOptionsFromLease(leaderLease),
+                    ...getClaimFenceOptions(leaderLease),
                     allowNoop: true,
                     source: 'handleUploadWebhook.local_missing'
                 });
@@ -938,7 +923,7 @@ export class TaskManager {
             const message = messages[0];
             if (!message || !message.media) {
                 await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, 'Source msg missing', {
-                    ...this._getClaimFenceOptionsFromLease(leaderLease),
+                    ...getClaimFenceOptions(leaderLease),
                     allowNoop: true,
                     source: 'handleUploadWebhook.source_missing'
                 });
@@ -949,7 +934,7 @@ export class TaskManager {
             const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
             task.localPath = localPath;
             task.fileName = dbTask.file_name;
-            this._attachClaimLease(task, leaderLease);
+            attachClaimLease(task, leaderLease);
 
             // 检查是否属于组任务（通过 msgId 查询同组任务数量）
             try {
@@ -968,16 +953,16 @@ export class TaskManager {
         } catch (error) {
             log.error("Upload webhook failed", { taskId, error });
             if (isTaskProcessingLockBusyError(error)) {
-                await this._resetAfterProcessingLockBusy(taskId, TASK_EVENTS.RESET_UPLOAD, 'handleUploadWebhook.lock_busy');
+                await this._resetAfterProcessingLockBusy(taskId, TASK_EVENTS.RESET_UPLOAD, 'handleUploadWebhook.lock_busy', didClaim ? getClaimFenceOptions(leaderLease) : {});
                 return { success: false, statusCode: 503, message: error.message };
             }
             const code = this._classifyError(error);
             if (this._isRetryableInfrastructureError(error)) {
-                await this._resetAfterRetryableInfrastructureError(taskId, TASK_EVENTS.RESET_UPLOAD, error, 'handleUploadWebhook.retryable_infra_error');
+                await this._resetAfterRetryableInfrastructureError(taskId, TASK_EVENTS.RESET_UPLOAD, error, 'handleUploadWebhook.retryable_infra_error', didClaim ? getClaimFenceOptions(leaderLease) : {});
                 return { success: false, statusCode: code, message: error.message };
             }
             await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
-                ...(didClaim ? this._getClaimFenceOptionsFromLease(leaderLease) : {}),
+                ...(didClaim ? getClaimFenceOptions(leaderLease) : {}),
                 allowNoop: true,
                 source: 'handleUploadWebhook.error'
             });
@@ -1050,10 +1035,11 @@ export class TaskManager {
         }
     }
 
-    static async _resetAfterProcessingLockBusy(taskId, event, source) {
+    static async _resetAfterProcessingLockBusy(taskId, event, source, claimFenceOptions = {}) {
         const { TaskRepository } = getDeps();
         const log = getLog();
         const result = await TaskRepository.transitionStatus(taskId, event, 'Task processing lock busy', {
+            ...claimFenceOptions,
             returnResult: true,
             allowNoop: true,
             source
@@ -1069,11 +1055,12 @@ export class TaskManager {
         return result;
     }
 
-    static async _resetAfterRetryableInfrastructureError(taskId, event, error, source) {
+    static async _resetAfterRetryableInfrastructureError(taskId, event, error, source, claimFenceOptions = {}) {
         const { TaskRepository } = getDeps();
         const log = getLog();
         try {
             const result = await TaskRepository.transitionStatus(taskId, event, error.message, {
+                ...claimFenceOptions,
                 returnResult: true,
                 allowNoop: true,
                 source

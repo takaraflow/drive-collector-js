@@ -355,7 +355,12 @@ describe('TaskManager queue/recovery closure', () => {
             'task-1',
             TASK_EVENTS.RETRY,
             'Task processing lock busy',
-            expect.objectContaining({ source: 'handleDownloadWebhook.lock_busy' })
+            expect.objectContaining({
+                source: 'handleDownloadWebhook.lock_busy',
+                requireClaim: true,
+                claimedBy: 'instance-1',
+                claimLeaseId: 'lease-1'
+            })
         );
         TaskManager.downloadTask.mockRestore();
     });
@@ -380,7 +385,12 @@ describe('TaskManager queue/recovery closure', () => {
             'task-1',
             TASK_EVENTS.RESET_UPLOAD,
             'Task processing lock busy',
-            expect.objectContaining({ source: 'handleUploadWebhook.lock_busy' })
+            expect.objectContaining({
+                source: 'handleUploadWebhook.lock_busy',
+                requireClaim: true,
+                claimedBy: 'instance-1',
+                claimLeaseId: 'lease-1'
+            })
         );
         TaskManager.uploadTask.mockRestore();
     });
