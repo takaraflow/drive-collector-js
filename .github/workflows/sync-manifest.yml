@@ -1,10 +1,12 @@
 name: Sync Manifest to Contract Center
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main, develop ]
     paths:
       - 'manifest.json'  # 只有当 manifest 文件变动时才上报，节省资源
+      - '.github/workflows/sync-manifest.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
