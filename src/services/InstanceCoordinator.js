@@ -8,6 +8,8 @@ import { CACHE_KEYS } from "../domain/cache-keys.js";
 
 const log = logger.withModule('InstanceCoordinator');
 export const TELEGRAM_CLIENT_LOCK_TTL_SECONDS = 90;
+const ATOMIC_LOCK_KEYS = new Set(["telegram_client"]);
+const ATOMIC_LOCK_PREFIXES = ["msg_lock:", "task:"];
 
 // 创建带 cache_provider 上下文的 logger 用于动态 provider 信息
 const logWithProvider = () => {
@@ -641,8 +643,8 @@ export class InstanceCoordinator {
     }
 
     _requiresAtomicLock(lockKey) {
-        return lockKey === "telegram_client"
-            || (typeof lockKey === "string" && lockKey.startsWith("msg_lock:"));
+        return ATOMIC_LOCK_KEYS.has(lockKey)
+            || (typeof lockKey === "string" && ATOMIC_LOCK_PREFIXES.some(prefix => lockKey.startsWith(prefix)));
     }
 
     _warnAtomicLockUnavailable(lockKey) {

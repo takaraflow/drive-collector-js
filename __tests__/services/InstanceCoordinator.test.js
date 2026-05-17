@@ -241,7 +241,19 @@ describe("Core InstanceCoordinator Tests", () => {
         expect(mockCacheCompareAndSet).not.toHaveBeenCalled();
     });
 
-    test("should keep best-effort locking for non-critical locks without atomic CAS", async () => {
+    test("should fail closed for task processing locks without atomic CAS", async () => {
+        instanceCoordinator.instanceId = 'lock-instance';
+        mockSupportsAtomicCompareAndSet.mockReturnValue(false);
+
+        const result = await instanceCoordinator.acquireLock('task:123', 60, { maxAttempts: 1 });
+
+        expect(result).toBe(false);
+        expect(mockCacheGet).not.toHaveBeenCalled();
+        expect(mockCacheSet).not.toHaveBeenCalled();
+        expect(mockCacheCompareAndSet).not.toHaveBeenCalled();
+    });
+
+    test("should keep best-effort locking for non-critical advisory locks without atomic CAS", async () => {
         instanceCoordinator.instanceId = 'lock-instance';
         mockSupportsAtomicCompareAndSet.mockReturnValue(false);
         mockCacheGet
@@ -252,12 +264,12 @@ describe("Core InstanceCoordinator Tests", () => {
                 ttl: 60
             });
 
-        const result = await instanceCoordinator.acquireLock('task:123', 60, { maxAttempts: 1 });
+        const result = await instanceCoordinator.acquireLock('advisory:maintenance', 60, { maxAttempts: 1 });
 
         expect(result).toBe(true);
         expect(mockCacheCompareAndSet).not.toHaveBeenCalled();
         expect(mockCacheSet).toHaveBeenCalledWith(
-            "lock:task:123",
+            "lock:advisory:maintenance",
             expect.objectContaining({ instanceId: 'lock-instance' }),
             60,
             expect.objectContaining({ skipCache: true })
@@ -301,6 +313,17 @@ describe("Core InstanceCoordinator Tests", () => {
         mockCacheGet.mockResolvedValue({ instanceId: 'lock-instance' });
 
         const released = await instanceCoordinator.releaseLock('telegram_client');
+
+        expect(released).toBe(false);
+        expect(mockCacheDelete).not.toHaveBeenCalled();
+    });
+
+    test("should not release task lock without atomic conditional delete", async () => {
+        instanceCoordinator.instanceId = 'lock-instance';
+        cache.deleteIfEquals = undefined;
+        mockCacheGet.mockResolvedValue({ instanceId: 'lock-instance' });
+
+        const released = await instanceCoordinator.releaseLock('task:123');
 
         expect(released).toBe(false);
         expect(mockCacheDelete).not.toHaveBeenCalled();
