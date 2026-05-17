@@ -259,7 +259,7 @@ describe('MegaProvider - Unit Tests', () => {
             const result = await provider.handleInput('WAIT_PASS', 'wrongpassword', session);
 
             expect(result.success).toBe(false);
-            expect(result.message).toContain('绑定失败');
+            expect(result.message).toContain('登录失败');
         });
 
         test('should handle 2FA error', async () => {
@@ -274,7 +274,7 @@ describe('MegaProvider - Unit Tests', () => {
             const result = await provider.handleInput('WAIT_PASS', 'password123', session);
 
             expect(result.success).toBe(false);
-            expect(result.message).toContain('2FA');
+            expect(result.message).toContain('两步验证');
         });
     });
 

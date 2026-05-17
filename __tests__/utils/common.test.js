@@ -17,7 +17,8 @@ vi.mock('../../src/locales/zh-CN.js', () => ({
     STRINGS: {
         task: {
             cancel_transfer_btn: 'cancel_transfer',
-            cancel_task_btn: 'cancel_task'
+            cancel_task_btn: 'cancel_task',
+            retry_btn: 'retry'
         }
     }
 }));
@@ -262,6 +263,7 @@ describe('common utils', () => {
     describe('updateStatus', () => {
         it('should call safeEdit with cancel button for non-final status', async () => {
             const task = {
+                id: 'task-1',
                 chatId: 123456,
                 msgId: 789,
                 userId: 'user123',
@@ -278,13 +280,14 @@ describe('common utils', () => {
             expect(mockClient.editMessage).toHaveBeenCalledWith(123456, {
                 message: 789,
                 text: 'Downloading...',
-                buttons: [expect.objectContaining({ text: 'cancel_task' })],
+                buttons: [expect.objectContaining({ text: 'cancel_task', data: 'cancel_confirm_task-1' })],
                 parseMode: 'markdown'
             });
         });
 
         it('should call safeEdit with transfer cancel button for processing task', async () => {
             const task = {
+                id: 'task-2',
                 chatId: 123456,
                 msgId: 789,
                 userId: 'user123',
@@ -299,7 +302,28 @@ describe('common utils', () => {
             expect(mockClient.editMessage).toHaveBeenCalledWith(123456, {
                 message: 789,
                 text: 'Uploading...',
-                buttons: [expect.objectContaining({ text: 'cancel_transfer' })],
+                buttons: [expect.objectContaining({ text: 'cancel_transfer', data: 'cancel_confirm_task-2' })],
+                parseMode: 'markdown'
+            });
+        });
+
+        it('should call safeEdit with retry confirmation button for final retryable status', async () => {
+            const task = {
+                id: 'task-3',
+                chatId: 123456,
+                msgId: 789,
+                userId: 'user123'
+            };
+
+            await updateStatus(task, 'Failed!', true, null, true);
+
+            const taskFn = mockRunBotTaskWithRetry.mock.calls[0][0];
+            await taskFn();
+
+            expect(mockClient.editMessage).toHaveBeenCalledWith(123456, {
+                message: 789,
+                text: 'Failed!',
+                buttons: [expect.objectContaining({ text: 'retry', data: 'retry_confirm_task-3' })],
                 parseMode: 'markdown'
             });
         });

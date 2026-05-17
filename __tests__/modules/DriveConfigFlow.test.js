@@ -403,6 +403,10 @@ describe("DriveConfigFlow", () => {
             expect(mockDriveRepository.create).toHaveBeenCalledWith("user456", "Mega-test@example.com", "mega", { user: "test@example.com", pass: "password123" });
             expect(mockSessionManager.clear).toHaveBeenCalledWith("user456");
             expect(mockClient.editMessage).toHaveBeenCalled();
+            const editPayload = mockClient.editMessage.mock.calls[0][1];
+            expect(editPayload.buttons.flat().map(button => button.data.toString())).toEqual(
+                expect.arrayContaining(["files_page_0", "remote_folder_menu"])
+            );
             expect(result).toBe(true);
         });
 
@@ -421,9 +425,16 @@ describe("DriveConfigFlow", () => {
             const result = await DriveConfigFlow.handleInput(event, "user456", session);
 
             expect(mockClient.editMessage).toHaveBeenCalledWith("chat123", expect.objectContaining({
-                text: "Network error",
+                text: expect.stringContaining("绑定失败"),
+                buttons: expect.any(Array),
                 parseMode: "html"
             }));
+            const failurePayload = mockClient.editMessage.mock.calls[0][1];
+            expect(failurePayload.text).toContain("Network error");
+            expect(failurePayload.text).toContain("重新绑定");
+            expect(failurePayload.buttons.flat().map(button => button.data.toString())).toEqual(
+                expect.arrayContaining(["drive_select_type", "drive_manager_back"])
+            );
             expect(result).toBe(true);
         });
 
@@ -490,9 +501,13 @@ describe("DriveConfigFlow", () => {
             const result = await DriveConfigFlow.handleInput(event, "user456", session);
 
             expect(mockClient.editMessage).toHaveBeenCalledWith("chat123", expect.objectContaining({
-                text: "Network error",
+                text: expect.stringContaining("绑定失败"),
+                buttons: expect.any(Array),
                 parseMode: "html"
             }));
+            const failurePayload = mockClient.editMessage.mock.calls[0][1];
+            expect(failurePayload.text).toContain("Network error");
+            expect(failurePayload.text).toContain("换用其他网盘");
             expect(result).toBe(true);
         });
     });

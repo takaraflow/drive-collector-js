@@ -463,13 +463,12 @@ export class UIHelper {
              Button.inline(TQ.btn_back, Buffer.from('tq_back'))
          ];
 
-         // 失败任务每条加重试按钮
          const retryRows = [];
          if (status === 'failed') {
-             for (let i = 0; i < data.tasks.length; i++) {
-                 const t = data.tasks[i];
+             const retryIds = data.tasks.map(task => task.id).filter(Boolean);
+             if (retryIds.length > 0) {
                  retryRows.push([
-                     Button.inline(`🔄 重试第 ${data.page * data.pageSize + i + 1} 项`, Buffer.from(`retry_${t.id}`))
+                     Button.inline(TQ.btn_retry_failed_page, Buffer.from(`retry_confirm_many_${retryIds.join(',')}`))
                  ]);
              }
          }

@@ -89,6 +89,7 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
             task_size_row: "   📦 {{size}}",
             btn_back: "🔙 返回",
             btn_refresh: "🔄",
+            btn_retry_failed_page: "重试本页失败任务",
             no_tasks_in_status: "📭 该状态下暂无任务。您可以发送文件或链接来创建新任务。",
         }
     },
@@ -748,10 +749,10 @@ describe("UIHelper", () => {
             expect(result.text).toContain("⚠️ Upload failed");
             expect(result.text).toContain("📦");
             expect(result.text).toContain("第 1/1 页");
-            // Should have back button, one retry row per failed task, and nav buttons.
-            expect(result.buttons.length).toBe(4);
-            expect(result.buttons[1][0].text).toBe("🔄 重试第 1 项");
-            expect(result.buttons[2][0].text).toBe("🔄 重试第 2 项");
+            // Should have back button, one retry row for the page, and nav buttons.
+            expect(result.buttons.length).toBe(3);
+            expect(result.buttons[1][0].text).toBe("重试本页失败任务");
+            expect(result.buttons[1][0].data.toString()).toBe("retry_confirm_many_t1,t2");
         });
 
         test("should render empty status", () => {

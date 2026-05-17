@@ -147,17 +147,14 @@ export class MegaProvider extends BaseDriveProvider {
      * 格式化错误消息
      */
     _formatErrorMessage(validation) {
-        let errorText = STRINGS.bind_failed;
-        
         if (validation.reason === '2FA') {
-            errorText += `\n\n${this.getErrorMessage('2FA')}`;
-        } else if (validation.details?.includes("couldn't login")) {
-            errorText += `\n\n${this.getErrorMessage('LOGIN_FAILED')}`;
-        } else {
-            const safeDetails = (validation.details || '').slice(-200);
-            errorText += `\n\n${STRINGS.fail_network}: <code>${safeDetails}</code>`;
+            return this.getErrorMessage('2FA');
         }
-        
-        return errorText;
+
+        if (validation.details?.includes("couldn't login")) {
+            return this.getErrorMessage('LOGIN_FAILED');
+        }
+
+        return this.getErrorMessage('NETWORK_ERROR');
     }
 }

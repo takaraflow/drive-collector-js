@@ -1,15 +1,25 @@
 // --- Mocks ---
 const mockClient = {
     sendMessage: vi.fn().mockResolvedValue({ id: 123 }),
+    invoke: vi.fn().mockResolvedValue({}),
 };
 const mockTaskRepository = {
-    getUserQueueOverview: vi.fn()
+    getUserQueueOverview: vi.fn(),
+    getQueueOverview: vi.fn()
 };
 const mockDriveRepository = {
     getDefaultDrive: vi.fn()
 };
 const mockAuthGuard = {
     can: vi.fn()
+};
+const mockNetworkDiagnostic = {
+    diagnoseAll: vi.fn()
+};
+const mockSafeEdit = vi.fn();
+const mockUIHelper = {
+    renderDiagnosisReport: vi.fn(),
+    renderTaskQueue: vi.fn()
 };
 const mockTaskManager = {
     getWaitingCount: vi.fn(() => 99),
@@ -39,7 +49,7 @@ vi.mock('../../src/processor/TaskManager.js', () => ({
     TaskManager: mockTaskManager
 }));
 vi.mock('../../src/utils/common.js', () => ({
-    safeEdit: vi.fn(),
+    safeEdit: mockSafeEdit,
     escapeHTML: (t) => String(t)
 }));
 vi.mock('../../src/utils/limiter.js', () => ({
@@ -54,19 +64,21 @@ vi.mock('../../src/config/index.js', () => ({
 vi.mock('../../src/modules/SessionManager.js', () => ({ SessionManager: {} }));
 vi.mock('../../src/modules/DriveConfigFlow.js', () => ({ DriveConfigFlow: {} }));
 vi.mock('../../src/processor/LinkParser.js', () => ({ LinkParser: {} }));
-vi.mock('../../src/ui/templates.js', () => ({ UIHelper: {} }));
+vi.mock('../../src/ui/templates.js', () => ({ UIHelper: mockUIHelper }));
 vi.mock('../../src/services/rclone.js', () => ({ CloudTool: {} }));
 vi.mock('../../src/repositories/SettingsRepository.js', () => ({ SettingsRepository: {} }));
 vi.mock('../../src/repositories/ApiKeyRepository.js', () => ({ ApiKeyRepository: {} }));
-vi.mock('../../src/utils/NetworkDiagnostic.js', () => ({ NetworkDiagnostic: {} }));
+vi.mock('../../src/utils/NetworkDiagnostic.js', () => ({ NetworkDiagnostic: mockNetworkDiagnostic }));
 vi.mock('../../src/services/InstanceCoordinator.js', () => ({
     instanceCoordinator: {
         getInstanceId: vi.fn(() => 'test-instance'),
+        getActiveInstances: vi.fn().mockResolvedValue([]),
+        getInstanceCount: vi.fn().mockResolvedValue(1),
         hasLock: vi.fn().mockResolvedValue(true),
         isLeader: true
     }
 }));
-vi.mock('../../src/services/CacheService.js', () => ({ cache: {} }));
+vi.mock('../../src/services/CacheService.js', () => ({ cache: { getProviderName: vi.fn(() => 'memory'), isFailoverMode: false } }));
 vi.mock('../../src/services/QueueService.js', () => ({ queueService: {} }));
 vi.mock('../../src/utils/LocalCache.js', () => ({ localCache: {} }));
 vi.mock('../../src/services/MediaGroupBuffer.js', () => ({ default: { restore: vi.fn() } }));
@@ -83,6 +95,14 @@ describe('Dispatcher /status command', () => {
             activeTasks: [],
             recentTasks: []
         });
+        mockTaskRepository.getQueueOverview.mockResolvedValue({
+            statusCounts: {},
+            activeTasks: [],
+            userCounts: []
+        });
+        mockNetworkDiagnostic.diagnoseAll.mockResolvedValue({ services: {} });
+        mockUIHelper.renderDiagnosisReport.mockReturnValue('diagnosis report');
+        mockUIHelper.renderTaskQueue.mockReturnValue({ text: 'global queue report', buttons: [] });
     });
 
     it('should render the current user queue from D1 instead of TaskManager memory counts', async () => {
@@ -177,5 +197,81 @@ describe('Dispatcher /status command', () => {
         expect(sent).toContain('👤 您的任务历史');
         expect(sent).toContain('queued-now.zip</code> (排队中)');
         expect(sent).toContain('done-before.zip</code> (完成)');
+    });
+
+    it('should edit the current message for help_main callback', async () => {
+        const event = {
+            data: Buffer.from('help_main'),
+            userId: 'chat-1',
+            msgId: 456,
+            peer: 'chat-1',
+            queryId: 'query-1'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: 'user-1' });
+
+        expect(mockClient.sendMessage).not.toHaveBeenCalled();
+        expect(mockSafeEdit).toHaveBeenCalledWith(
+            'chat-1',
+            456,
+            expect.stringContaining('可以做什么'),
+            expect.any(Array),
+            'user-1'
+        );
+    });
+
+    it('should edit the current message for status_general callback', async () => {
+        const event = {
+            data: Buffer.from('status_general'),
+            userId: 'chat-1',
+            msgId: 456,
+            peer: 'chat-1',
+            queryId: 'query-1'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: 'user-1' });
+
+        expect(mockClient.sendMessage).not.toHaveBeenCalled();
+        expect(mockSafeEdit).toHaveBeenCalledWith(
+            'chat-1',
+            456,
+            expect.stringContaining('我的状态'),
+            expect.any(Array),
+            'user-1'
+        );
+    });
+
+    it('should edit the current message for task_queue_open callback', async () => {
+        mockAuthGuard.can.mockResolvedValue(true);
+        const event = {
+            data: Buffer.from('task_queue_open'),
+            userId: 'chat-1',
+            msgId: 456,
+            peer: 'chat-1',
+            queryId: 'query-1'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: 'admin-1' });
+
+        expect(mockClient.sendMessage).not.toHaveBeenCalled();
+        expect(mockSafeEdit).toHaveBeenCalledWith('chat-1', 456, expect.stringContaining('正在查询'), null, 'admin-1');
+        expect(mockSafeEdit).toHaveBeenCalledWith('chat-1', 456, 'global queue report', [], 'admin-1');
+    });
+
+    it('should edit the current message for diagnosis_run callback', async () => {
+        mockAuthGuard.can.mockResolvedValue(true);
+        const event = {
+            data: Buffer.from('diagnosis_run'),
+            userId: 'chat-1',
+            msgId: 456,
+            peer: 'chat-1',
+            queryId: 'query-1'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: 'admin-1' });
+
+        expect(mockClient.sendMessage).not.toHaveBeenCalled();
+        expect(mockSafeEdit).toHaveBeenCalledWith('chat-1', 456, expect.stringContaining('正在执行系统诊断'), null, 'admin-1');
+        expect(mockSafeEdit).toHaveBeenCalledWith('chat-1', 456, 'diagnosis report', expect.any(Array), 'admin-1');
     });
 });

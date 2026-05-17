@@ -14,6 +14,7 @@ import { DriveRepository } from "../repositories/DriveRepository.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
 import { ApiKeyRepository } from "../repositories/ApiKeyRepository.js";
 import { safeEdit, escapeHTML } from "../utils/common.js";
+import { parseDriveSessionData } from "../domain/drive-session-step.js";
 import { runBotTask, runBotTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 import { NetworkDiagnostic } from "../utils/NetworkDiagnostic.js";
@@ -146,6 +147,128 @@ export class Dispatcher {
         return [
             [Button.inline(STRINGS.remote_folder.btn_cancel, Buffer.from("remote_folder_cancel"))]
         ];
+    }
+
+    static _getTaskActionConfirmButtons(confirmData) {
+        return [
+            [Button.inline(STRINGS.task.btn_keep_task, Buffer.from("task_action_back"))],
+            [Button.inline(
+                confirmData.startsWith("retry_execute_") ? STRINGS.task.btn_confirm_retry : STRINGS.task.btn_confirm_cancel,
+                Buffer.from(confirmData)
+            )]
+        ];
+    }
+
+    static _getAdminActionConfirmButtons(confirmData) {
+        return [
+            [Button.inline(STRINGS.status.btn_cancel_action, Buffer.from("admin_action_cancel"))],
+            [Button.inline(STRINGS.status.btn_confirm_action, Buffer.from(confirmData))]
+        ];
+    }
+
+    static async _askAdminActionConfirmation(target, userId, action) {
+        await SessionManager.start(userId, "ADMIN_ACTION_CONFIRM", action);
+        return await runBotTaskWithRetry(() => client.sendMessage(target, {
+            message: format(STRINGS.status.action_confirm, {
+                action: action.label,
+                target: action.target || "服务状态"
+            }),
+            buttons: this._getAdminActionConfirmButtons("admin_action_execute"),
+            parseMode: "html"
+        }), userId, {}, false, 3);
+    }
+
+    static _getCommandArg(fullText) {
+        return fullText.split(/\s+/).slice(1).join(" ").trim();
+    }
+
+    static async _sendAdminUsage(target, userId, command) {
+        return await runBotTaskWithRetry(() => client.sendMessage(target, {
+            message: format(STRINGS.status.user_id_required, { command }),
+            parseMode: "html"
+        }), userId, {}, false, 3);
+    }
+
+    static async _sendAdminError(target, userId, message) {
+        return await runBotTaskWithRetry(() => client.sendMessage(target, {
+            message,
+            parseMode: "html"
+        }), userId, {}, false, 3);
+    }
+
+    static async _executeAdminAction(userId, action) {
+        if (!action?.type) {
+            return STRINGS.task.task_not_found;
+        }
+
+        try {
+            if (action.type === "access_mode") {
+                const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
+                if (!isAdmin) return STRINGS.status.no_permission;
+
+                const mode = action.mode === "private" ? "private" : "public";
+                await SettingsRepository.set("access_mode", mode);
+                return format(STRINGS.status.mode_changed, {
+                    mode: mode === "public" ? "公开" : "私有(维护)"
+                });
+            }
+
+            if (action.type === "admin_role") {
+                if (userId !== getOwnerId()) return STRINGS.status.no_permission;
+
+                const targetUid = String(action.targetUid || "").trim();
+                if (!targetUid) return STRINGS.status.invalid_user_id;
+
+                if (action.operation === "grant") {
+                    await AuthGuard.setRole(targetUid, "admin");
+                    return format(STRINGS.status.admin_granted, { userId: targetUid });
+                }
+
+                await AuthGuard.removeRole(targetUid);
+                return format(STRINGS.status.admin_revoked, { userId: targetUid });
+            }
+
+            if (action.type === "user_ban") {
+                const canManage = await AuthGuard.can(userId, "system:admin");
+                if (!canManage) return STRINGS.status.no_permission;
+
+                const targetUid = String(action.targetUid || "").trim();
+                if (!targetUid) return STRINGS.status.invalid_user_id;
+
+                if (action.operation === "ban") {
+                    if (targetUid === userId) return STRINGS.status.cannot_ban_self;
+                    if (targetUid === getOwnerId()) return STRINGS.status.cannot_ban_owner;
+
+                    await AuthGuard.setRole(targetUid, "banned");
+                    await SessionManager.clear(targetUid);
+                    return format(STRINGS.status.user_banned, { userId: targetUid });
+                }
+
+                await AuthGuard.setRole(targetUid, "user");
+                return format(STRINGS.status.user_unbanned, { userId: targetUid });
+            }
+
+            return STRINGS.task.task_not_found;
+        } catch (error) {
+            log.error("Admin action execution failed", {
+                userId,
+                actionType: action.type,
+                error: error?.message
+            });
+            return STRINGS.status.action_failed;
+        }
+    }
+
+    static _buildHelpPayload(isAdmin = false, isOwner = false) {
+        let message = format(STRINGS.system.help, { version: appVersion });
+        if (isAdmin) {
+            message += STRINGS.system.help_admin;
+            if (isOwner) {
+                message += STRINGS.system.help_owner;
+            }
+        }
+
+        return { message, buttons: this._getHelpButtons(isAdmin) };
     }
 
     static async _buildRemoteFolderMenu(userId) {
@@ -330,23 +453,56 @@ export class Dispatcher {
         try {
             if (data === "noop") return await answer();
 
+            if (data === "admin_action_cancel") {
+                await SessionManager.clear(userId);
+                const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
+                await safeEdit(event.userId, event.msgId, STRINGS.task.action_cancelled, this._getStatusButtons(isAdmin), userId);
+                return await answer(STRINGS.task.action_cancelled);
+            }
+
+            if (data === "admin_action_execute") {
+                const session = await SessionManager.get(userId);
+                const action = session?.current_step === "ADMIN_ACTION_CONFIRM"
+                    ? parseDriveSessionData(session)
+                    : null;
+                await SessionManager.clear(userId);
+                if (!action?.type) return await answer(STRINGS.task.task_not_found);
+                const message = await this._executeAdminAction(userId, action);
+                const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
+                await safeEdit(event.userId, event.msgId, message, this._getStatusButtons(isAdmin), userId);
+                return await answer();
+            }
+
             if (data === "help_main") {
-                await this._handleHelpCommand(event.peer, userId);
+                const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
+                const { message, buttons } = this._buildHelpPayload(isAdmin, userId === getOwnerId());
+                await safeEdit(event.userId, event.msgId, message, buttons, userId);
                 return await answer();
             }
 
             if (data === "status_general") {
-                await this._handleStatusCommand(event.peer, userId, "/status");
+                const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
+                const message = await this._getGeneralStatus(userId, { includeSystemInfo: isAdmin });
+                await safeEdit(event.userId, event.msgId, message, this._getStatusButtons(isAdmin), userId);
                 return await answer();
             }
 
             if (data === "task_queue_open") {
-                await this._handleTaskQueueCommand(event.peer, userId);
+                await this._editTaskQueueOverview(event, userId);
                 return await answer();
             }
 
-            if (data.startsWith("cancel_msg_")) {
-                const msgId = data.split("_")[2];
+            if (data === "task_action_back") {
+                await safeEdit(event.userId, event.msgId, STRINGS.task.action_cancelled, this._getStatusButtons(false), userId);
+                await answer(STRINGS.task.action_cancelled);
+
+            } else if (data.startsWith("cancel_msg_confirm_")) {
+                const msgId = data.slice("cancel_msg_confirm_".length);
+                await safeEdit(event.userId, event.msgId, STRINGS.task.cancel_confirm, this._getTaskActionConfirmButtons(`cancel_msg_execute_${msgId}`), userId);
+                await answer();
+
+            } else if (data.startsWith("cancel_msg_execute_")) {
+                const msgId = data.slice("cancel_msg_execute_".length);
                 const ok = await TaskManager.cancelTasksByMsgId(msgId, userId);
                 await answer(ok ? STRINGS.task.cmd_sent : STRINGS.task.task_not_found);
 
@@ -354,22 +510,53 @@ export class Dispatcher {
                 // 兼容历史按钮：旧版使用 groupedId，无法从 DB 反查任务（会导致“点了没反应”）
                 await answer(STRINGS.task.task_not_found);
 
-            } else if (data.startsWith("cancel_")) {
-                const taskId = data.split("_")[1];
+            } else if (data.startsWith("cancel_confirm_")) {
+                const taskId = data.slice("cancel_confirm_".length);
+                await safeEdit(event.userId, event.msgId, STRINGS.task.cancel_confirm, this._getTaskActionConfirmButtons(`cancel_execute_${taskId}`), userId);
+                await answer();
+
+            } else if (data.startsWith("cancel_execute_")) {
+                const taskId = data.slice("cancel_execute_".length);
                 const ok = await TaskManager.cancelTask(taskId, userId);
                 await answer(ok ? STRINGS.task.cmd_sent : STRINGS.task.task_not_found);
 
-            } else if (data.startsWith("retry_")) {
-                const taskId = data.slice(6);
+            } else if (data.startsWith("cancel_")) {
+                const taskId = data.slice("cancel_".length);
+                await safeEdit(event.userId, event.msgId, STRINGS.task.cancel_confirm, this._getTaskActionConfirmButtons(`cancel_execute_${taskId}`), userId);
+                await answer();
+
+            } else if (data.startsWith("retry_confirm_many_")) {
+                const taskIds = data.slice("retry_confirm_many_".length);
+                await safeEdit(event.userId, event.msgId, STRINGS.task.retry_confirm, this._getTaskActionConfirmButtons(`retry_execute_many_${taskIds}`), userId);
+                await answer();
+
+            } else if (data.startsWith("retry_execute_many_")) {
+                const taskIds = data.slice("retry_execute_many_".length).split(",").filter(Boolean);
+                const results = await Promise.all(taskIds.map(taskId => TaskManager.retryTask(taskId, userId)));
+                const ok = results.some(result => result.success);
+                await answer(ok ? STRINGS.task.cmd_sent : STRINGS.task.task_not_found);
+
+            } else if (data.startsWith("retry_confirm_")) {
+                const taskId = data.slice("retry_confirm_".length);
+                await safeEdit(event.userId, event.msgId, STRINGS.task.retry_confirm, this._getTaskActionConfirmButtons(`retry_execute_${taskId}`), userId);
+                await answer();
+
+            } else if (data.startsWith("retry_execute_")) {
+                const taskId = data.slice("retry_execute_".length);
                 const result = await TaskManager.retryTask(taskId, userId);
                 await answer(result.success ? STRINGS.task.cmd_sent : (result.message || STRINGS.task.task_not_found));
+
+            } else if (data.startsWith("retry_")) {
+                const taskId = data.slice("retry_".length);
+                await safeEdit(event.userId, event.msgId, STRINGS.task.retry_confirm, this._getTaskActionConfirmButtons(`retry_execute_${taskId}`), userId);
+                await answer();
 
             } else if (data.startsWith("drive_")) {
                 const toast = await DriveConfigFlow.handleCallback(event, userId);
                 await answer(toast || "");
 
             } else if (data === "diagnosis_run") {
-                await this._handleDiagnosisCommand(event.peer, userId);
+                await this._editDiagnosisReport(event, userId);
                 return await answer();
 
             } else if (data.startsWith("files_")) {
@@ -671,7 +858,7 @@ export class Dispatcher {
 
             // 4. 通用兜底回复：纯文本消息（包括未匹配的命令）
             return await runBotTaskWithRetry(() => client.sendMessage(target, { 
-                message: STRINGS.system.welcome,
+                message: STRINGS.system.unknown_input,
                 buttons: this._getWelcomeButtons(),
                 parseMode: "html"
             }), userId, {}, false, 3);
@@ -899,10 +1086,18 @@ export class Dispatcher {
      * [私有] 处理 /mcp_token 命令
      */
     static async _handleMcpTokenCommand(target, userId) {
+        const canUseIntegration = await AuthGuard.can(userId, "system:admin");
+        if (!canUseIntegration) {
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.status.no_permission,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        }
+
         try {
             const token = await ApiKeyRepository.getOrCreateToken(userId);
             return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                message: format(STRINGS.system.mcp_token, { token }),
+                message: format(STRINGS.system.integration_token, { token }),
                 parseMode: "html"
             }), userId, {}, false, 3);
         } catch (error) {
@@ -917,8 +1112,16 @@ export class Dispatcher {
      * [私有] 处理 /mcp 命令
      */
     static async _handleMcpCommand(target, userId) {
+        const canUseIntegration = await AuthGuard.can(userId, "system:admin");
+        if (!canUseIntegration) {
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.status.no_permission,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        }
+
         return await runBotTaskWithRetry(() => client.sendMessage(target, {
-            message: STRINGS.system.mcp_help,
+            message: STRINGS.system.integration_help,
             parseMode: "html"
         }), userId, {}, false, 3);
     }
@@ -929,19 +1132,11 @@ export class Dispatcher {
     static async _handleHelpCommand(target, userId) {
         const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
         const isOwner = userId === getOwnerId();
-        const version = appVersion;
-
-        let message = format(STRINGS.system.help, { version });
-        if (isAdmin) {
-            message += STRINGS.system.help_admin;
-            if (isOwner) {
-                message += STRINGS.system.help_owner;
-            }
-        }
+        const { message, buttons } = this._buildHelpPayload(isAdmin, isOwner);
 
         return await runBotTaskWithRetry(() => client.sendMessage(target, {
             message: message,
-            buttons: this._getHelpButtons(isAdmin),
+            buttons,
             parseMode: "html"
         }), userId, {}, false, 3);
     }
@@ -961,53 +1156,66 @@ export class Dispatcher {
      * [私有] 处理 /diagnosis 命令 (管理员专用)
      */
     static async _handleDiagnosisCommand(target, userId) {
-        // 检查管理员权限
         const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
         if (!isAdmin) {
             return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                message: "❌ 此命令仅限管理员使用。",
+                message: STRINGS.status.no_permission,
                 parseMode: "html"
             }), userId, {}, false, 3);
         }
 
-        // 发送占位消息
         const placeholder = await runBotTaskWithRetry(() => client.sendMessage(target, {
             message: "🔍 正在执行系统诊断..."
         }), userId, {}, false, 3);
 
-        // 异步执行诊断
         (async () => {
             try {
-                // 并行执行网络诊断和实例状态获取
-                const [networkResults, instanceInfo] = await Promise.all([
-                    NetworkDiagnostic.diagnoseAll(),
-                    this._getInstanceInfo()
-                ]);
-
-                // 获取系统资源信息
-                const memUsage = process.memoryUsage();
-                const rss = Math.round(memUsage.rss / 1024 / 1024);
-                const heapUsed = Math.round(memUsage.heapUsed / 1024 / 1024);
-                const heapTotal = Math.round(memUsage.heapTotal / 1024 / 1024);
-
-                const systemResources = {
-                    memoryMB: `${rss}MB (${heapUsed}MB/${heapTotal}MB)`,
-                    uptime: this._getUptime()
-                };
-
-                // 使用 UIHelper 渲染诊断报告
-                const message = UIHelper.renderDiagnosisReport({
-                    networkResults,
-                    instanceInfo,
-                    systemResources
-                });
-
-                await safeEdit(target, placeholder.id, message, null, userId);
+                const { message, buttons } = await this._buildDiagnosisReport(userId);
+                await safeEdit(target, placeholder.id, message, buttons, userId);
             } catch (error) {
                 log.error("Diagnosis error:", error);
-                await safeEdit(target, placeholder.id, `❌ 诊断过程中发生错误: ${escapeHTML(error.message)}`, null, userId);
+                await safeEdit(target, placeholder.id, "❌ 诊断暂时无法完成，请稍后重试。", this._getStatusButtons(true), userId);
             }
         })();
+    }
+
+    static async _buildDiagnosisReport(userId) {
+        const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
+        if (!isAdmin) {
+            return { message: STRINGS.status.no_permission, buttons: null };
+        }
+
+        const [networkResults, instanceInfo] = await Promise.all([
+            NetworkDiagnostic.diagnoseAll(),
+            this._getInstanceInfo()
+        ]);
+        const memUsage = process.memoryUsage();
+        const rss = Math.round(memUsage.rss / 1024 / 1024);
+        const heapUsed = Math.round(memUsage.heapUsed / 1024 / 1024);
+        const heapTotal = Math.round(memUsage.heapTotal / 1024 / 1024);
+
+        return {
+            message: UIHelper.renderDiagnosisReport({
+                networkResults,
+                instanceInfo,
+                systemResources: {
+                    memoryMB: `${rss}MB (${heapUsed}MB/${heapTotal}MB)`,
+                    uptime: this._getUptime()
+                }
+            }),
+            buttons: this._getStatusButtons(true)
+        };
+    }
+
+    static async _editDiagnosisReport(event, userId) {
+        try {
+            await safeEdit(event.userId, event.msgId, "🔍 正在执行系统诊断...", null, userId);
+            const { message, buttons } = await this._buildDiagnosisReport(userId);
+            await safeEdit(event.userId, event.msgId, message, buttons, userId);
+        } catch (error) {
+            log.error("Diagnosis callback error:", error);
+            await safeEdit(event.userId, event.msgId, "❌ 诊断暂时无法完成，请稍后重试。", this._getStatusButtons(true), userId);
+        }
     }
 
     /**
@@ -1028,15 +1236,35 @@ export class Dispatcher {
 
         (async () => {
             try {
-                const { TaskRepository } = await import("../repositories/TaskRepository.js");
-                const data = await TaskRepository.getQueueOverview(10);
-                const { text, buttons } = UIHelper.renderTaskQueue(data);
+                const { text, buttons } = await this._buildTaskQueueOverview(userId);
                 await safeEdit(target, placeholder.id, text, buttons, userId);
             } catch (error) {
                 log.error("Task queue error:", error);
-                await safeEdit(target, placeholder.id, format(STRINGS.task_queue.error, { error: escapeHTML(error.message) }), null, userId);
+                await safeEdit(target, placeholder.id, STRINGS.task_queue.error, this._getStatusButtons(true), userId);
             }
         })();
+    }
+
+    static async _buildTaskQueueOverview(userId) {
+        const isAdmin = await AuthGuard.can(userId, "system:admin");
+        if (!isAdmin) {
+            return { text: STRINGS.status.no_permission, buttons: null };
+        }
+
+        const { TaskRepository } = await import("../repositories/TaskRepository.js");
+        const data = await TaskRepository.getQueueOverview(10);
+        return UIHelper.renderTaskQueue(data);
+    }
+
+    static async _editTaskQueueOverview(event, userId) {
+        try {
+            await safeEdit(event.userId, event.msgId, STRINGS.task_queue.loading, null, userId);
+            const { text, buttons } = await this._buildTaskQueueOverview(userId);
+            await safeEdit(event.userId, event.msgId, text, buttons, userId);
+        } catch (error) {
+            log.error("Task queue callback overview error:", error);
+            await safeEdit(event.userId, event.msgId, STRINGS.task_queue.error, this._getStatusButtons(true), userId);
+        }
     }
 
     /**
@@ -1070,7 +1298,7 @@ export class Dispatcher {
             await answerCallback();
         } catch (error) {
             log.error("Task queue callback error:", error);
-            await answerCallback(STRINGS.task_queue.error.replace('{{error}}', error.message));
+            await answerCallback("暂时无法查询任务队列");
         }
     }
 
@@ -1116,12 +1344,13 @@ export class Dispatcher {
             }), userId, {}, false, 3);
         }
 
-        await SettingsRepository.set("access_mode", mode);
-
-        return await runBotTaskWithRetry(() => client.sendMessage(target, {
-            message: format(STRINGS.status.mode_changed, { mode: mode === 'public' ? '公开' : '私有(维护)' }),
-            parseMode: "html"
-        }), userId, {}, false, 3);
+        const normalizedMode = mode === "private" ? "private" : "public";
+        return await this._askAdminActionConfirmation(target, userId, {
+            type: "access_mode",
+            mode: normalizedMode,
+            label: normalizedMode === "public" ? "开启公开访问" : "进入维护模式",
+            target: "服务访问模式"
+        });
     }
 
     /**
@@ -1136,95 +1365,53 @@ export class Dispatcher {
             }), userId, {}, false, 3);
         }
 
-        const parts = fullText.split(' ');
-        if (parts.length < 2) {
-            return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                message: `❌ 请提供 UID。用法: <code>${parts[0]} [UID]</code>`,
-                parseMode: "html"
-            }), userId, {}, false, 3);
+        const command = fullText.split(/\s+/)[0];
+        const targetUid = this._getCommandArg(fullText);
+        if (!targetUid) {
+            return await this._sendAdminUsage(target, userId, command);
         }
 
-        const targetUid = parts[1].trim();
-        try {
-            if (isPromotion) {
-                await AuthGuard.setRole(targetUid, 'admin');
-                return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                    message: `✅ 已将用户 <code>${targetUid}</code> 设置为管理员。`,
-                    parseMode: "html"
-                }), userId, {}, false, 3);
-            } else {
-                await AuthGuard.removeRole(targetUid);
-                return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                    message: `✅ 已取消用户 <code>${targetUid}</code> 的管理员权限。`,
-                    parseMode: "html"
-                }), userId, {}, false, 3);
-            }
-        } catch (error) {
-            log.error("Failed to update user role:", error);
-            return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                message: "❌ 数据库操作失败，请检查 UID 是否正确。",
-                parseMode: "html"
-            }), userId, {}, false, 3);
-        }
+        return await this._askAdminActionConfirmation(target, userId, {
+            type: "admin_role",
+            operation: isPromotion ? "grant" : "revoke",
+            targetUid,
+            label: isPromotion ? "设置管理员" : "取消管理员",
+            target: `用户 ${targetUid}`
+        });
     }
 
     /**
      * [私有] 处理管理员封禁/解封命令 (/ban, /unban)
      */
     static async _handleBanCommand(target, userId, fullText, isBan) {
-        // 权限检查已在中间件完成，这里直接执行逻辑
-        const parts = fullText.split(' ');
-        if (parts.length < 2) {
-            return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                message: `❌ 请提供 UID。用法: <code>${parts[0]} [UID]</code>`,
-                parseMode: "html"
-            }), userId, {}, false, 3);
+        const canManage = await AuthGuard.can(userId, "system:admin");
+        if (!canManage) {
+            return await this._sendAdminError(target, userId, STRINGS.status.no_permission);
         }
 
-        const targetUid = parts[1].trim();
+        const command = fullText.split(/\s+/)[0];
+        const targetUid = this._getCommandArg(fullText);
+        if (!targetUid) {
+            return await this._sendAdminUsage(target, userId, command);
+        }
         
         // 防止封禁自己或 Owner
         if (isBan) {
             if (targetUid === userId) {
-                return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                    message: "❌ 不能封禁自己。",
-                    parseMode: "html"
-                }), userId, {}, false, 3);
+                return await this._sendAdminError(target, userId, STRINGS.status.cannot_ban_self);
             }
             if (targetUid === getOwnerId()) {
-                return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                    message: "❌ 不能封禁 Owner。",
-                    parseMode: "html"
-                }), userId, {}, false, 3);
+                return await this._sendAdminError(target, userId, STRINGS.status.cannot_ban_owner);
             }
         }
 
-        try {
-            if (isBan) {
-                await AuthGuard.setRole(targetUid, 'banned');
-                // 立即清理该用户的会话
-                await SessionManager.clear(targetUid);
-                // 可以考虑清理该用户的网盘绑定 (可选，暂时不清理，解封后还能用)
-                
-                return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                    message: `🚫 已封禁用户 <code>${targetUid}</code>。`,
-                    parseMode: "html"
-                }), userId, {}, false, 3);
-            } else {
-                // 解封恢复为默认角色 'user'
-                await AuthGuard.setRole(targetUid, 'user');
-                return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                    message: `✅ 已解封用户 <code>${targetUid}</code> (重置为 user)。`,
-                    parseMode: "html"
-                }), userId, {}, false, 3);
-            }
-        } catch (error) {
-            log.error("Failed to update user ban status:", error);
-            return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                message: "❌ 数据库操作失败，请检查 UID 是否正确。",
-                parseMode: "html"
-            }), userId, {}, false, 3);
-        }
+        return await this._askAdminActionConfirmation(target, userId, {
+            type: "user_ban",
+            operation: isBan ? "ban" : "unban",
+            targetUid,
+            label: isBan ? "封禁用户" : "解封用户",
+            target: `用户 ${targetUid}`
+        });
     }
 
     /**

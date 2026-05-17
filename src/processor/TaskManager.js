@@ -427,7 +427,7 @@ export class TaskManager {
         const statusMsg = await runBotTaskWithRetry(
             () => client.sendMessage(target, {
                 message: format(STRINGS.task.captured, { label: customLabel }),
-                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_${taskId}`))],
+                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_confirm_${taskId}`))],
                 parseMode: "html"
             }),
             userId,
@@ -499,7 +499,7 @@ export class TaskManager {
                 () => client.editMessage(target, {
                     message: statusMsg.id,
                     text: format(STRINGS.task.batch_captured, { count: messages.length }),
-                    buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_msg_${statusMsg.id}`))],
+                    buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_msg_confirm_${statusMsg.id}`))],
                     parseMode: "html"
                 }),
                 userId,

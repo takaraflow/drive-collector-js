@@ -87,9 +87,9 @@ export const updateStatus = async (task, text, isFinal = false, priority = null,
     let buttons = null;
     if (!isFinal) {
         const cancelText = task.proc ? STRINGS.task.cancel_transfer_btn : STRINGS.task.cancel_task_btn;
-        buttons = [Button.inline(cancelText, Buffer.from(`cancel_${task.id}`))];
+        buttons = [Button.inline(cancelText, Buffer.from(`cancel_confirm_${task.id}`))];
     } else if (showRetry) {
-        buttons = [Button.inline(STRINGS.task.retry_btn, Buffer.from(`retry_${task.id}`))];
+        buttons = [Button.inline(STRINGS.task.retry_btn, Buffer.from(`retry_confirm_${task.id}`))];
     }
     const isHtml = /<\/?(b|i|code|pre|a)(\s|>)/i.test(text);
     const options = priority ? { priority } : {};

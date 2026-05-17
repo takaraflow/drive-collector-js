@@ -23,6 +23,7 @@ export const STRINGS = {
         maintenance_mode: "🚧 <b>系统维护中</b>\n\n当前 Bot 仅限管理员使用，请稍后访问。",
         maintenance_alert: "🚧 系统维护中",
         welcome: "👋 <b>欢迎使用云转存助手</b>\n\n直接发送文件、图片、视频或支持的链接，我会转存到你的网盘。",
+        unknown_input: "🤔 <b>没有识别这个操作</b>\n\n你可以直接发送文件或链接，或使用下面的常用操作。",
         btn_bind_drive: "绑定网盘",
         btn_help: "帮助",
         unknown_error: "❌ 发生未知错误，请稍后重试。",
@@ -32,13 +33,13 @@ export const STRINGS = {
         init_history_complete: "✅ 历史任务初始化扫描完成",
         init_error: "❌ 任务初始化过程中发生错误:",
         critical_error: "Critical: Unhandled Dispatcher Error:",
-        mcp_help: "🤖 <b>高级接入</b>\n\n" +
-                  "可把本服务连接到支持 MCP 的 AI 客户端。\n\n" +
-                  "配置地址请向管理员确认。需要令牌时发送 /mcp_token。",
-        mcp_token: "🔑 <b>您的专属 AI 接入令牌</b>\n\n" +
+        integration_help: "🤖 <b>高级接入</b>\n\n" +
+                  "可把本服务连接到受信任的自动化客户端。\n\n" +
+                  "配置地址请向管理员确认。需要访问密钥时发送 /mcp_token。",
+        integration_token: "🔑 <b>您的专属访问密钥</b>\n\n" +
                    "<code>{{token}}</code>\n\n" +
-                   "此令牌可代表你访问已绑定网盘。只在你信任的客户端中使用，不要转发给他人。\n" +
-                   "如需停用或更换令牌，请联系管理员。",
+                   "此密钥可代表你访问已绑定网盘。只在你信任的客户端中使用，不要转发给他人。\n" +
+                   "如需停用或更换密钥，请联系管理员。",
     },
 
     // --- 任务相关 ---
@@ -63,7 +64,13 @@ export const STRINGS = {
         link_limit: "⚠️ 仅处理前 10 个媒体。",
         cmd_sent: "指令已下达",
         task_not_found: "任务已不存在或无权操作",
-        cancel_transfer_btn: "🚫 取消转存", 
+        action_cancelled: "已取消操作",
+        cancel_confirm: "⚠️ <b>确认取消这个任务？</b>\n\n取消后需要重新发送文件或链接才能再次转存。",
+        retry_confirm: "⚠️ <b>确认重试这个任务？</b>\n\n我会重新排队处理该任务。",
+        btn_confirm_cancel: "确认取消",
+        btn_confirm_retry: "确认重试",
+        btn_keep_task: "保留任务",
+        cancel_transfer_btn: "🚫 取消转存",
         cancel_task_btn: "🚫 取消任务",
         retry_btn: "🔄 重试",
         error_prefix: "⚠️ 处理异常: ",
@@ -98,13 +105,14 @@ export const STRINGS = {
         mega_input_email: "📧 <b>请输入您的 Mega 登录邮箱</b>：",
         mega_input_pass: "🔑 <b>请输入密码</b>\n\n为减少暴露，我会在提交后尝试删除这条消息。请确认当前聊天环境可信。",
         mega_verifying: "⏳ 正在验证账号，请稍候...",
-        mega_success: "✅ <b>绑定成功！</b>\n\n账号: <code>{{email}}</code>",
+        mega_success: "✅ <b>绑定成功！</b>\n\n账号: <code>{{email}}</code>\n\n现在可以直接发送文件或链接开始转存。",
         mega_fail_2fa: "⚠️ <b>暂不支持开启两步验证的账号</b>\n\n请使用支持应用密码或 Token 的方式绑定，或换用其他网盘。不建议长期关闭两步验证。",
         mega_fail_login: "⚠️ <b>登录失败</b>\n\n请检查账号和密码，或换用支持的登录方式。",
         email_invalid: "❌ 邮箱格式看似不正确，请重新输入：",
         // 🆕 新增
         bind_failed: "❌ <b>绑定失败</b>",
         bind_error: "❌ <b>绑定过程中出现问题</b>\n\n请重新尝试；如果仍失败，请联系管理员。",
+        bind_failed_help: "❌ <b>绑定失败</b>\n\n{{reason}}\n\n你可以重新绑定，或换用其他网盘。",
         please_confirm: "请确认操作",
         success_unbind: "已成功解绑",
         returned: "已返回",
@@ -133,12 +141,12 @@ export const STRINGS = {
         dir_empty: "ℹ️ 目录为空。您可以直接发送文件给我，将其转存到此目录。",
         batch_empty: "ℹ️ 尚无文件排队或加载中。您可以直接向我发送文件或链接来开始转存。",
         page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 个文件</i>",
-        btn_home: "⏮️",
-        btn_prev: "⬅️",
-        btn_refresh: "🔄",
+        btn_home: "首页",
+        btn_prev: "上一页",
+        btn_refresh: "刷新",
         btn_retry_load: "重新加载文件列表",
-        btn_next: "➡️",
-        btn_end: "⏭️",
+        btn_next: "下一页",
+        btn_end: "末页",
     },
 
     // --- 状态相关 ---
@@ -161,6 +169,18 @@ export const STRINGS = {
         service_status: "📡 服务状态: {{status}}",
         mode_changed: "✅ <b>访问模式已切换</b>\n\n当前模式: <code>{{mode}}</code>",
         no_permission: "❌ <b>无权限</b>\n\n此操作仅限管理员执行。",
+        action_confirm: "⚠️ <b>确认执行此管理操作？</b>\n\n操作: <code>{{action}}</code>\n目标: <code>{{target}}</code>",
+        action_failed: "❌ <b>管理操作未完成</b>\n\n请确认用户 ID 或当前权限后重试。",
+        user_id_required: "❌ <b>请提供用户 ID</b>\n\n用法: <code>{{command}} [用户 ID]</code>",
+        invalid_user_id: "❌ <b>用户 ID 无效</b>\n\n请检查后重试。",
+        admin_granted: "✅ <b>管理员已设置</b>\n\n用户: <code>{{userId}}</code>",
+        admin_revoked: "✅ <b>管理员已取消</b>\n\n用户: <code>{{userId}}</code>",
+        user_banned: "🚫 <b>用户已封禁</b>\n\n用户: <code>{{userId}}</code>",
+        user_unbanned: "✅ <b>用户已解封</b>\n\n用户: <code>{{userId}}</code>",
+        cannot_ban_self: "❌ <b>不能封禁自己</b>",
+        cannot_ban_owner: "❌ <b>不能封禁系统所有者</b>",
+        btn_confirm_action: "确认执行",
+        btn_cancel_action: "取消",
         btn_diagnosis: "🩺 系统诊断",
         btn_my_status: "我的状态",
         btn_task_queue: "全局队列",
@@ -200,7 +220,7 @@ export const STRINGS = {
         user_row: "<code>{{index}}.</code> 👤 <code>{{userId}}</code> — {{count}} 个任务",
         no_active: "✅ 当前无活跃任务。请发送文件或链接来创建新任务。",
         no_data: "📭 暂无任务记录。快发送文件或链接开始您的第一次转存吧！",
-        error: "❌ 查询任务队列失败: {{error}}",
+        error: "❌ <b>暂时无法查询任务队列</b>\n\n请重新加载；如果连续失败，请查看系统诊断。",
         status_labels: {
             queued: "🕒 排队中",
             downloading: "⬇️ 下载中",
@@ -215,8 +235,9 @@ export const STRINGS = {
         task_detail_row: "<code>{{index}}.</code> {{statusIcon}} <code>{{name}}</code> | 👤 <code>{{user}}</code> | {{time}}",
         task_error_row: "   ⚠️ {{error}}",
         task_size_row: "   📦 {{size}}",
-        btn_back: "🔙 返回",
-        btn_refresh: "🔄",
+        btn_back: "返回",
+        btn_refresh: "刷新",
+        btn_retry_failed_page: "重试本页失败任务",
         no_tasks_in_status: "📭 该状态下暂无任务。您可以发送文件或链接来创建新任务。",
     },
 

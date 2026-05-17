@@ -44,6 +44,20 @@ export class DriveConfigFlow {
         return hint ? `${prompt}\n\n${hint}` : prompt;
     }
 
+    static _getBindingRecoveryButtons() {
+        return [
+            [Button.inline(STRINGS.drive.btn_bind_other, Buffer.from("drive_select_type"))],
+            [Button.inline(STRINGS.drive.btn_cancel, Buffer.from("drive_manager_back"))]
+        ];
+    }
+
+    static _getBindingSuccessButtons() {
+        return [
+            [Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))],
+            [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_menu"))]
+        ];
+    }
+
     static async _buildDriveManagerPayload(userId) {
         const drives = await DriveRepository.findByUserId(userId);
         const defaultDrive = drives?.find(isDefaultDrive) || drives?.[0] || null;
@@ -260,7 +274,12 @@ export class DriveConfigFlow {
 
             if (!result.success) {
                 if (!isFinalStep) {
-                    await runBotTask(() => client.sendMessage(peerId, { message: result.message }), userId, { priority: PRIORITY.HIGH });
+                    const message = this._appendCancelHint(result.message || STRINGS.drive.bind_failed, driveStrings);
+                    await runBotTask(() => client.sendMessage(peerId, {
+                        message,
+                        buttons: this._getBindingRecoveryButtons(),
+                        parseMode: "html"
+                    }), userId, { priority: PRIORITY.HIGH });
                     return true;
                 }
 
@@ -270,6 +289,7 @@ export class DriveConfigFlow {
                 await runBotTask(() => client.editMessage(peerId, {
                     message: targetMessageId,
                     text: failureMessage,
+                    buttons: this._getBindingRecoveryButtons(),
                     parseMode: "html"
                 }), userId, { priority: PRIORITY.HIGH });
                 return true;
@@ -295,6 +315,7 @@ export class DriveConfigFlow {
             await runBotTask(() => client.editMessage(peerId, {
                 message: targetMessageId,
                 text: successMessage,
+                buttons: this._getBindingSuccessButtons(),
                 parseMode: "html"
             }), userId, { priority: PRIORITY.HIGH });
             return true;
@@ -303,6 +324,7 @@ export class DriveConfigFlow {
             await SessionManager.clear(userId);
             await runBotTask(() => client.sendMessage(peerId, {
                 message: STRINGS.drive.bind_error,
+                buttons: this._getBindingRecoveryButtons(),
                 parseMode: "html"
             }), userId, { priority: PRIORITY.HIGH });
             return true;
@@ -373,17 +395,18 @@ export class DriveConfigFlow {
      * 构建失败消息 (兼容 legacy zh-CN strings)
      */
     static _buildFailureMessage(driveType, result) {
-        if (driveType !== 'mega' || !result.reason) {
-            return result.message;
-        }
-
         const legacySuffixes = {
             '2FA': STRINGS.drive.mega_fail_2fa,
             'LOGIN_FAILED': STRINGS.drive.mega_fail_login
         };
 
-        const suffix = legacySuffixes[result.reason];
-        return suffix ? `${result.message}${suffix}` : result.message;
+        const reason = driveType === 'mega' && result.reason
+            ? (legacySuffixes[result.reason] || result.message)
+            : result.message;
+
+        return format(STRINGS.drive.bind_failed_help, {
+            reason: reason || STRINGS.drive.bind_failed
+        });
     }
     
     /**

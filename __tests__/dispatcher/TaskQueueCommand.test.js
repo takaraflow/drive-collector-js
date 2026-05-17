@@ -128,9 +128,10 @@ describe('Dispatcher /task_queue command', () => {
 
         expect(mockSafeEdit).toHaveBeenCalledWith(
             'chat123', 123,
-            expect.stringContaining('❌ 查询任务队列失败: DB connection failed'),
-            null, '123'
+            expect.stringContaining('暂时无法查询任务队列'),
+            expect.any(Array), '123'
         );
+        expect(mockSafeEdit.mock.calls.at(-1)[2]).not.toContain('DB connection failed');
     });
 
     it('should use custom limit when provided', async () => {
@@ -240,7 +241,7 @@ describe('Dispatcher /task_queue callback', () => {
 
         await new Promise(r => setTimeout(r, 50));
 
-        expect(answerMock).toHaveBeenCalledWith(expect.stringContaining('DB error'));
+        expect(answerMock).toHaveBeenCalledWith('暂时无法查询任务队列');
     });
 });
 
@@ -249,42 +250,53 @@ describe('Dispatcher retry_ callback', () => {
         vi.clearAllMocks();
     });
 
-    it('should call TaskManager.retryTask on retry_ callback', async () => {
+    it('should ask for confirmation on legacy retry_ callback without retrying immediately', async () => {
         mockTaskManager.retryTask.mockResolvedValue({ success: true, statusCode: 200, message: "Task re-enqueued" });
 
         const event = {
             data: Buffer.from('retry_task-123'),
             userId: '123',
+            msgId: 456,
             peer: 'chat123',
             queryId: 'query789'
         };
 
         await Dispatcher._handleCallback(event, { userId: '123' });
 
-        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('task-123', '123');
+        expect(mockTaskManager.retryTask).not.toHaveBeenCalled();
+        expect(mockSafeEdit).toHaveBeenCalledWith(
+            '123',
+            456,
+            expect.stringContaining('确认重试'),
+            expect.any(Array),
+            '123'
+        );
     });
 
-    it('should invoke callback answer on retry success', async () => {
+    it('should call TaskManager.retryTask on retry_execute_ callback', async () => {
         mockTaskManager.retryTask.mockResolvedValue({ success: true, statusCode: 200, message: "Task re-enqueued" });
 
         const event = {
-            data: Buffer.from('retry_task-456'),
+            data: Buffer.from('retry_execute_task-456'),
             userId: '123',
+            msgId: 456,
             peer: 'chat123',
             queryId: 'query789'
         };
 
         await Dispatcher._handleCallback(event, { userId: '123' });
 
+        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('task-456', '123');
         expect(mockClient.invoke).toHaveBeenCalled();
     });
 
-    it('should invoke callback answer on retry failure', async () => {
+    it('should invoke callback answer on retry failure after confirmation', async () => {
         mockTaskManager.retryTask.mockResolvedValue({ success: false, message: "Task already completed" });
 
         const event = {
-            data: Buffer.from('retry_task-456'),
+            data: Buffer.from('retry_execute_task-456'),
             userId: '123',
+            msgId: 456,
             peer: 'chat123',
             queryId: 'query789'
         };
@@ -299,8 +311,9 @@ describe('Dispatcher retry_ callback', () => {
         mockTaskManager.retryTask.mockResolvedValue({ success: false, statusCode: 403, message: "Permission denied" });
 
         const event = {
-            data: Buffer.from('retry_task-789'),
+            data: Buffer.from('retry_execute_task-789'),
             userId: '456',
+            msgId: 456,
             peer: 'chat123',
             queryId: 'query789'
         };
@@ -309,5 +322,100 @@ describe('Dispatcher retry_ callback', () => {
 
         expect(mockTaskManager.retryTask).toHaveBeenCalledWith('task-789', '456');
         expect(mockClient.invoke).toHaveBeenCalled();
+    });
+
+    it('should ask for confirmation before retrying a page of failed tasks', async () => {
+        const event = {
+            data: Buffer.from('retry_confirm_many_t1,t2'),
+            userId: '123',
+            msgId: 456,
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockTaskManager.retryTask).not.toHaveBeenCalled();
+        expect(mockSafeEdit).toHaveBeenCalledWith(
+            '123',
+            456,
+            expect.stringContaining('确认重试'),
+            expect.any(Array),
+            '123'
+        );
+    });
+
+    it('should retry each selected failed task only after page retry confirmation', async () => {
+        mockTaskManager.retryTask.mockResolvedValue({ success: true });
+        const event = {
+            data: Buffer.from('retry_execute_many_t1,t2'),
+            userId: '123',
+            msgId: 456,
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('t1', '123');
+        expect(mockTaskManager.retryTask).toHaveBeenCalledWith('t2', '123');
+        expect(mockTaskManager.retryTask).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe('Dispatcher cancel callbacks', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it('should ask for confirmation before cancelling a task', async () => {
+        const event = {
+            data: Buffer.from('cancel_confirm_task-123'),
+            userId: '123',
+            msgId: 456,
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockTaskManager.cancelTask).not.toHaveBeenCalled();
+        expect(mockSafeEdit).toHaveBeenCalledWith(
+            '123',
+            456,
+            expect.stringContaining('确认取消'),
+            expect.any(Array),
+            '123'
+        );
+    });
+
+    it('should cancel a task only after confirmation', async () => {
+        mockTaskManager.cancelTask.mockResolvedValue(true);
+        const event = {
+            data: Buffer.from('cancel_execute_task-123'),
+            userId: '123',
+            msgId: 456,
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockTaskManager.cancelTask).toHaveBeenCalledWith('task-123', '123');
+    });
+
+    it('should cancel tasks by status message only after confirmation', async () => {
+        mockTaskManager.cancelTasksByMsgId.mockResolvedValue(true);
+        const event = {
+            data: Buffer.from('cancel_msg_execute_789'),
+            userId: '123',
+            msgId: 456,
+            peer: 'chat123',
+            queryId: 'query789'
+        };
+
+        await Dispatcher._handleCallback(event, { userId: '123' });
+
+        expect(mockTaskManager.cancelTasksByMsgId).toHaveBeenCalledWith('789', '123');
     });
 });
