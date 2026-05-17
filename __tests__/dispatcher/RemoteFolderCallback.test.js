@@ -106,6 +106,7 @@ describe('Dispatcher remote folder callbacks', () => {
         userId: 'chat-1',
         msgId: 456,
         peer: 'chat-1',
+        queryId: 'query-1',
         data: Buffer.from('remote_folder_menu')
     };
 
@@ -133,5 +134,20 @@ describe('Dispatcher remote folder callbacks', () => {
         );
         expect(mockSafeEdit.mock.calls[0][2]).toContain('/Movies');
         expect(answer).toHaveBeenCalledWith('');
+    });
+
+    it('should route remote_folder_menu through the public callback handler without sending a new message', async () => {
+        await Dispatcher._handleCallback(event, { userId: 'user-1' });
+
+        expect(mockClient.sendMessage).not.toHaveBeenCalled();
+        expect(mockSafeEdit).toHaveBeenCalledWith(
+            'chat-1',
+            456,
+            expect.stringContaining('保存目录'),
+            expect.any(Array),
+            'user-1'
+        );
+        expect(mockSafeEdit.mock.calls[0][2]).toContain('/Movies');
+        expect(mockClient.invoke).toHaveBeenCalled();
     });
 });

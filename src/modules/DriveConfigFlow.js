@@ -26,6 +26,10 @@ const CANCEL_KEYWORDS = new Set(["/cancel", "cancel", "/取消", "取消"]);
  * 负责网盘的绑定、解绑以及相关会话交互
  */
 export class DriveConfigFlow {
+    static _callbackValue(data, prefix) {
+        return data.startsWith(prefix) ? data.slice(prefix.length) : "";
+    }
+
     /**
      * 获取支持的网盘列表
      * @returns {Array<{type: string, name: string}>}
@@ -118,14 +122,14 @@ export class DriveConfigFlow {
         const data = event.data.toString();
 
         if (data.startsWith("drive_set_default_")) {
-            const driveId = data.split("_")[3];
+            const driveId = this._callbackValue(data, "drive_set_default_");
             await BindingService.setDefaultDrive(userId, driveId);
             await this._editDriveManager(event, userId);
             return STRINGS.drive.set_default_success;
         }
 
         if (data.startsWith("drive_unbind_confirm_")) {
-            const driveId = data.split("_")[3];
+            const driveId = this._callbackValue(data, "drive_unbind_confirm_");
             const drive = await DriveRepository.findById(driveId);
             if (!drive) {
                 return STRINGS.drive.not_found;
@@ -147,7 +151,7 @@ export class DriveConfigFlow {
         }
 
         if (data.startsWith("drive_unbind_execute_")) {
-            const driveId = data.split("_")[3];
+            const driveId = this._callbackValue(data, "drive_unbind_execute_");
             await BindingService.unbindDrive(userId, driveId);
             await this._editDriveManager(event, userId);
             return STRINGS.drive.success_unbind;

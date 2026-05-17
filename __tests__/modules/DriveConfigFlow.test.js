@@ -217,12 +217,13 @@ describe("DriveConfigFlow", () => {
     });
 
     describe("handleCallback", () => {
-        test("should handle drive_set_default_", async () => {
-            const event = { userId: "user123", msgId: "msg100", data: Buffer.from("drive_set_default_drive1") };
+        test("should pass full drive id when setting default drive", async () => {
+            const driveId = "drive_1712345678901_abcd1234";
+            const event = { userId: "user123", msgId: "msg100", data: Buffer.from(`drive_set_default_${driveId}`) };
 
             const result = await DriveConfigFlow.handleCallback(event, "user456");
 
-            expect(mockBindingService.setDefaultDrive).toHaveBeenCalledWith("user456", "drive1");
+            expect(mockBindingService.setDefaultDrive).toHaveBeenCalledWith("user456", driveId);
             expect(mockClient.editMessage).toHaveBeenCalledWith("user123", expect.objectContaining({
                 message: "msg100",
                 text: expect.stringContaining("网盘管理中心"),
@@ -233,14 +234,16 @@ describe("DriveConfigFlow", () => {
             expect(result).toBe("✅ 默认网盘设置成功！");
         });
 
-        test("should handle drive_unbind_confirm_ with specific drive", async () => {
-            const mockDrive = { id: "drive1", type: "mega", name: "Mega-test@example.com" };
+        test("should show unbind confirmation for full drive id", async () => {
+            const driveId = "drive_1712345678901_abcd1234";
+            const mockDrive = { id: driveId, type: "mega", name: "Mega-test@example.com" };
             mockDriveRepository.findById.mockResolvedValue(mockDrive);
 
-            const event = { userId: "user123", msgId: "msg100", data: Buffer.from("drive_unbind_confirm_drive1") };
+            const event = { userId: "user123", msgId: "msg100", data: Buffer.from(`drive_unbind_confirm_${driveId}`) };
 
             const result = await DriveConfigFlow.handleCallback(event, "user456");
 
+            expect(mockDriveRepository.findById).toHaveBeenCalledWith(driveId);
             expect(mockClient.editMessage).toHaveBeenCalledWith("user123", expect.objectContaining({
                 message: "msg100",
                 text: expect.stringContaining("确认解绑这个网盘"),
@@ -253,12 +256,13 @@ describe("DriveConfigFlow", () => {
             expect(result).toBe("请确认操作");
         });
 
-        test("should handle drive_unbind_execute_ with specific drive", async () => {
-            const event = { userId: "user123", msgId: "msg100", data: Buffer.from("drive_unbind_execute_drive1") };
+        test("should unbind full drive id for the current user", async () => {
+            const driveId = "drive_1712345678901_abcd1234";
+            const event = { userId: "user123", msgId: "msg100", data: Buffer.from(`drive_unbind_execute_${driveId}`) };
 
             const result = await DriveConfigFlow.handleCallback(event, "user456");
 
-            expect(mockBindingService.unbindDrive).toHaveBeenCalledWith("user456", "drive1");
+            expect(mockBindingService.unbindDrive).toHaveBeenCalledWith("user456", driveId);
             expect(mockClient.editMessage).toHaveBeenCalledWith("user123", expect.objectContaining({
                 message: "msg100",
                 text: expect.stringContaining("网盘管理中心"),

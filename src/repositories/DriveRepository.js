@@ -182,27 +182,28 @@ export class DriveRepository {
     }
 
     /**
-     * 删除指定的网盘绑定 (Write-Through)
+     * 删除指定用户的网盘绑定 (Write-Through)
+     * @param {string} userId
      * @param {string} driveId
      * @returns {Promise<void>}
      */
-    static async delete(driveId) {
-        if (!driveId) return;
+    static async delete(userId, driveId) {
+        if (!userId || !driveId) return;
         try {
             const drive = await this.findById(driveId);
-            if (drive) {
+            if (drive && String(drive.user_id) === String(userId)) {
                 // Write-Through: 先删除 D1
                 await d1.run(
-                    "UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id = ?",
-                    [DRIVE_STATUSES.DELETED, Date.now(), driveId]
+                    "UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id = ? AND user_id = ?",
+                    [DRIVE_STATUSES.DELETED, Date.now(), driveId, String(userId)]
                 );
 
-                await this.clearUserDriveCache(drive.user_id, [driveId]);
+                await this.clearUserDriveCache(userId, [driveId]);
                 await this._updateActiveDrivesList();
             }
             localCache.del(this.getAllDrivesKey());
         } catch (e) {
-            log.error(`DriveRepository.delete failed for ${driveId}:`, e);
+            log.error(`DriveRepository.delete failed for ${userId}/${driveId}:`, e);
             throw e;
         }
     }

@@ -345,11 +345,6 @@ export class Dispatcher {
                 return await answer();
             }
 
-            if (data === "remote_folder_menu") {
-                await this._handleRemoteFolderCommand(event.peer, userId);
-                return await answer();
-            }
-
             if (data.startsWith("cancel_msg_")) {
                 const msgId = data.split("_")[2];
                 const ok = await TaskManager.cancelTasksByMsgId(msgId, userId);

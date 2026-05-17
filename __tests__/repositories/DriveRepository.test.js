@@ -342,12 +342,13 @@ describe("DriveRepository", () => {
             mockCache.delete.mockResolvedValue(true);
         });
 
-        it("should return early for invalid driveId", async () => {
-            await DriveRepository.delete(null);
+        it("should return early for invalid userId or driveId", async () => {
+            await DriveRepository.delete(null, "drive123");
+            await DriveRepository.delete("user1", null);
             expect(mockCache.get).not.toHaveBeenCalled();
         });
 
-        it("should delete drive by id and update user list cache", async () => {
+        it("should delete drive owned by user and update user list cache", async () => {
             const initialList = [
                 { id: "drive123", user_id: "user1" },
                 { id: "drive456", user_id: "user1" }
@@ -357,12 +358,12 @@ describe("DriveRepository", () => {
                 return Promise.resolve(null);
             });
 
-            await DriveRepository.delete("drive123");
+            await DriveRepository.delete("user1", "drive123");
 
             // Verify D1 update
             expect(mockD1.run).toHaveBeenCalledWith(
-                "UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id = ?",
-                ["deleted", expect.any(Number), "drive123"]
+                "UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id = ? AND user_id = ?",
+                ["deleted", expect.any(Number), "drive123", "user1"]
             );
 
             // Verify Cache operations
@@ -374,11 +375,21 @@ describe("DriveRepository", () => {
             expect(mockLocalCache.del).toHaveBeenCalledWith("drives:active"); // Note: key is "drives:active"
         });
 
+        it("should not delete a drive that belongs to another user", async () => {
+            mockCache.get.mockResolvedValue({ id: "drive123", user_id: "other-user" });
+
+            await DriveRepository.delete("user1", "drive123");
+
+            expect(mockD1.run).not.toHaveBeenCalled();
+            expect(mockCache.delete).not.toHaveBeenCalledWith("drive:user1");
+            expect(mockCache.delete).not.toHaveBeenCalledWith("drive_id:drive123");
+        });
+
         it("should handle case when drive not found", async () => {
             mockCache.get.mockResolvedValue(null);
             mockD1.fetchOne.mockResolvedValue(null);
 
-            await DriveRepository.delete("drive123");
+            await DriveRepository.delete("user1", "drive123");
 
             expect(mockD1.run).not.toHaveBeenCalled();
             expect(mockCache.delete).not.toHaveBeenCalled();
@@ -386,11 +397,11 @@ describe("DriveRepository", () => {
 
         it("should handle errors in delete", async () => {
             const mockDrive = { id: "drive123", user_id: "user1" };
-            mockCache.get.mockResolvedValue([mockDrive]);
+            mockCache.get.mockResolvedValue(mockDrive);
             mockD1.run.mockRejectedValue(new Error("D1 Error"));
 
-            await expect(DriveRepository.delete("drive123")).rejects.toThrow("D1 Error");
-            expect(logger.error).toHaveBeenCalledWith("DriveRepository.delete failed for drive123:", expect.any(Error));
+            await expect(DriveRepository.delete("user1", "drive123")).rejects.toThrow("D1 Error");
+            expect(logger.error).toHaveBeenCalledWith("DriveRepository.delete failed for user1/drive123:", expect.any(Error));
         });
     });
 

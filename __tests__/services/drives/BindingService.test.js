@@ -81,10 +81,10 @@ describe("BindingService", () => {
             expect(mockDriveRepo.setDefaultDrive).toHaveBeenCalledWith("user1", "drive1");
         });
 
-        it("解绑只删除 Drive，不再写 default_drive settings", async () => {
+        it("解绑只删除当前用户的 Drive，不再写 default_drive settings", async () => {
             await BindingService.unbindDrive("user1", "drive1");
 
-            expect(mockDriveRepo.delete).toHaveBeenCalledWith("drive1");
+            expect(mockDriveRepo.delete).toHaveBeenCalledWith("user1", "drive1");
         });
     });
 
