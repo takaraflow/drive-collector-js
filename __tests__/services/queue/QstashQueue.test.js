@@ -92,6 +92,20 @@ vi.mock("../../../src/services/logger/index.js", () => ({
     }
 }));
 
+const mockCacheSet = vi.fn().mockResolvedValue(true);
+const mockCacheGet = vi.fn();
+const mockCacheDelete = vi.fn().mockResolvedValue(true);
+const mockCacheListKeys = vi.fn();
+
+vi.mock("../../../src/services/CacheService.js", () => ({
+    cache: {
+        set: mockCacheSet,
+        get: mockCacheGet,
+        delete: mockCacheDelete,
+        listKeys: mockCacheListKeys
+    }
+}));
+
 // Mock CircuitBreaker
 vi.mock("../../../src/services/CircuitBreaker.js", () => ({
     CircuitBreakerManager: {
@@ -149,6 +163,10 @@ describe("QstashQueue - publish", () => {
     beforeEach(async () => {
         vi.clearAllMocks();
         mockPublishJSON.mockReset();
+        mockCacheSet.mockClear();
+        mockCacheGet.mockReset();
+        mockCacheDelete.mockClear();
+        mockCacheListKeys.mockReset();
         
         queue = new QstashQueue();
         await queue.initialize();
@@ -242,8 +260,61 @@ describe("QstashQueue - publish", () => {
         await vi.advanceTimersByTimeAsync(20);
         await vi.runAllTimersAsync();
         await assertion;
+        expect(mockCacheSet).toHaveBeenCalledWith(
+            expect.stringMatching(/^queue:dlq:dlq_/),
+            expect.objectContaining({
+                reason: 'publish_failed',
+                error: 'publish failed',
+                message: expect.objectContaining({
+                    topic: 'test-topic',
+                    message: { data: 'test' }
+                })
+            }),
+            604800,
+            expect.objectContaining({ skipL1: true, skipTtlRandomization: true })
+        );
 
         vi.useRealTimers();
+    });
+
+    test("should reject direct publish failures after persisting DLQ", async () => {
+        queue.batchSize = 1;
+        mockPublishJSON.mockRejectedValue(new Error('publish failed'));
+
+        await expect(queue._publish('test-topic', { data: 'test' }, {
+            forceDirect: true,
+            requireDurableAck: true
+        })).rejects.toThrow('publish failed');
+
+        expect(mockPublishJSON).toHaveBeenCalledWith({
+            url: 'test-topic',
+            body: { data: 'test' }
+        });
+        expect(mockCacheSet).toHaveBeenCalledWith(
+            expect.stringMatching(/^queue:dlq:dlq_/),
+            expect.objectContaining({
+                reason: 'publish_failed',
+                error: 'publish failed'
+            }),
+            604800,
+            expect.objectContaining({ skipL1: true, skipTtlRandomization: true })
+        );
+    });
+
+    test("should read persistent dead letters when requested", async () => {
+        const persisted = [
+            { id: 'dlq_late', timestamp: 2000 },
+            { id: 'dlq_early', timestamp: 1000 }
+        ];
+        mockCacheListKeys.mockResolvedValue(['queue:dlq:dlq_late', 'queue:dlq:dlq_early']);
+        mockCacheGet
+            .mockResolvedValueOnce(persisted[0])
+            .mockResolvedValueOnce(persisted[1]);
+
+        await expect(queue.getDeadLetterQueue({ includePersistent: true })).resolves.toEqual([
+            persisted[1],
+            persisted[0]
+        ]);
     });
 
     test("should settle pending publishes when flush fails after dequeue", async () => {

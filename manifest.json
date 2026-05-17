@@ -537,6 +537,11 @@
         "required": false,
         "description": "Max dead-letter queue size"
       },
+      "QSTASH_DLQ_TTL_SECONDS": {
+        "type": "number",
+        "required": false,
+        "description": "TTL in seconds for persisted QStash dead-letter messages (default: 604800 = 7d)"
+      },
       "QSTASH_MAX_CONCURRENT": {
         "type": "number",
         "required": false,

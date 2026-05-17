@@ -26,6 +26,7 @@ async function closeHttpServer() {
 
 export async function registerShutdownHooks() {
     const { instanceCoordinator } = await import("../services/InstanceCoordinator.js");
+    const { queueService } = await import("../services/QueueService.js");
     const { cache } = await import("../services/CacheService.js");
     const { stopTelegramClientRuntime } = await import("../services/telegram.js");
     const { stopDispatcher } = await import("../dispatcher/bootstrap.js");
@@ -122,6 +123,14 @@ export async function registerShutdownHooks() {
             log.info('✅ MediaGroupBuffer 清理任务已停止');
         }
     }, 48, 'media-group-buffer-cleanup');
+
+    // 8. 刷新/关闭队列发布缓冲，必须早于 Cache 断开
+    gracefulShutdown.register(async () => {
+        if (queueService && typeof queueService.close === 'function') {
+            await queueService.close();
+            log.info('✅ QueueService 已刷新并关闭');
+        }
+    }, 49, 'queue-service');
 
     // 8. 断开 Cache 连接 (priority: 50)
     gracefulShutdown.register(async () => {

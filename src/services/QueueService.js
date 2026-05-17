@@ -141,15 +141,27 @@ export class QueueService {
     async enqueueDownloadTask(taskId, taskData = {}) {
         const queueAttempt = normalizeTaskQueueAttempt(taskData?._meta?.queueAttempt);
         return this.publish(this.topics.downloadTasks, buildDownloadQueueMessage(taskId, taskData), {
-            idempotencyKey: this._buildTaskIdempotencyKey(this.topics.downloadTasks, "download", taskId, queueAttempt)
+            idempotencyKey: this._buildTaskIdempotencyKey(this.topics.downloadTasks, "download", taskId, queueAttempt),
+            forceDirect: true,
+            requireDurableAck: true
         });
     }
 
     async enqueueUploadTask(taskId, taskData = {}) {
         const queueAttempt = normalizeTaskQueueAttempt(taskData?._meta?.queueAttempt);
         return this.publish(this.topics.uploadTasks, buildUploadQueueMessage(taskId, taskData), {
-            idempotencyKey: this._buildTaskIdempotencyKey(this.topics.uploadTasks, "upload", taskId, queueAttempt)
+            idempotencyKey: this._buildTaskIdempotencyKey(this.topics.uploadTasks, "upload", taskId, queueAttempt),
+            forceDirect: true,
+            requireDurableAck: true
         });
+    }
+
+    async close() {
+        if (typeof this.queueProvider.close === 'function') {
+            await this.queueProvider.close();
+        } else if (typeof this.queueProvider.flush === 'function') {
+            await this.queueProvider.flush();
+        }
     }
 
     async broadcastSystemEvent(event, data = {}) {

@@ -7,6 +7,7 @@ import CloudQueueBase from "./CloudQueueBase.js";
 import { BaseQueue } from "./BaseQueue.js";
 import { metrics } from "../../services/MetricsService.js";
 import { createEnhancedMock } from "./mock/QstashMockEnhancer.js";
+import { CACHE_KEYS } from "../../domain/cache-keys.js";
 
 const log = logger.withModule?.('QstashQueue') || logger;
 
@@ -172,7 +173,7 @@ export class QstashQueue extends CloudQueueBase {
             // 检查缓冲区溢出
             if (this.buffer.length >= this.maxBufferSize) {
                 // 丢弃最旧的10%消息
-                const dropCount = Math.floor(this.maxBufferSize * 0.1);
+                const dropCount = Math.max(1, Math.floor(this.maxBufferSize * 0.1));
                 const droppedMessages = this.buffer.splice(0, dropCount);
                 
                 // 记录缓冲区溢出指标
@@ -183,15 +184,11 @@ export class QstashQueue extends CloudQueueBase {
                 
                 // 将丢弃的消息移入死信队列
                 for (const droppedMsg of droppedMessages) {
-                    this._addToDeadLetterQueue(droppedMsg, 'buffer_overflow');
+                    await this._addToDeadLetterQueue(droppedMsg, 'buffer_overflow');
                     if (typeof droppedMsg.reject === 'function') {
                         droppedMsg.reject(new Error('Buffer overflow: message dropped'));
                     } else if (typeof droppedMsg.resolve === 'function') {
-                        droppedMsg.resolve({
-                            messageId: 'fallback-message-id',
-                            fallback: true,
-                            error: 'Buffer overflow: message dropped'
-                        });
+                        droppedMsg.resolve(Promise.reject(new Error('Buffer overflow: message dropped')));
                     }
                 }
             }
@@ -265,25 +262,23 @@ export class QstashQueue extends CloudQueueBase {
             const results = await this._batchPublishSequential(batch);
 
             // 处理结果
-            results.forEach((result, index) => {
-                if (batch[index].resolve) {
-                    if (result.status === 'fulfilled') {
-                        batch[index].resolve(result.value);
+            for (let index = 0; index < results.length; index++) {
+                const result = results[index];
+                const task = batch[index];
+                if (!task.resolve) continue;
+
+                if (result.status === 'fulfilled') {
+                    task.resolve(result.value);
+                } else {
+                    // 失败时加入死信队列
+                    await this._addToDeadLetterQueue(task, 'publish_failed', result.reason);
+                    if (typeof task.reject === 'function') {
+                        task.reject(result.reason);
                     } else {
-                        // 失败时加入死信队列
-                        this._addToDeadLetterQueue(batch[index], 'publish_failed', result.reason);
-                        if (typeof batch[index].reject === 'function') {
-                            batch[index].reject(result.reason);
-                        } else {
-                            batch[index].resolve({
-                                messageId: "fallback-message-id",
-                                fallback: true,
-                                error: result.reason?.message
-                            });
-                        }
+                        task.resolve(Promise.reject(result.reason));
                     }
                 }
-            });
+            }
 
             // 更新监控指标
             metrics.gauge('buffer.size', this.buffer.length);
@@ -347,7 +342,12 @@ export class QstashQueue extends CloudQueueBase {
      */
     async _publishWithIdempotency(topic, message, options = {}) {
         // 生成消息ID：任务队列使用显式稳定 key，避免 _meta.timestamp 破坏幂等。
-        const { idempotencyKey, ...publishOptions } = options;
+        const {
+            idempotencyKey,
+            forceDirect: _forceDirect,
+            requireDurableAck: _requireDurableAck,
+            ...publishOptions
+        } = options;
         const messageId = idempotencyKey || this._generateMessageId(topic, message);
 
         if (isQstashDebugEnabled()) {
@@ -416,7 +416,7 @@ export class QstashQueue extends CloudQueueBase {
                 await this._clearIdempotencyKey(messageId);
 
                 // 失败时加入死信队列，避免静默丢消息
-                this._addToDeadLetterQueue({ topic, message, options }, 'publish_failed', error);
+                await this._addToDeadLetterQueue({ topic, message, options }, 'publish_failed', error);
                 if (isQstashDebugEnabled()) {
                     log.error('QStash publish failed', {
                         messageId,
@@ -440,7 +440,7 @@ export class QstashQueue extends CloudQueueBase {
     /**
      * 3. 死信队列实现 - 添加到死信队列
      */
-    _addToDeadLetterQueue(message, reason, error = null) {
+    async _addToDeadLetterQueue(message, reason, error = null) {
         const dlqMessage = {
             message,
             reason,
@@ -450,6 +450,7 @@ export class QstashQueue extends CloudQueueBase {
         };
 
         this.deadLetterQueue.push(dlqMessage);
+        await this._persistDeadLetterMessage(dlqMessage);
         this.metrics.deadLetterCount++;
         metrics.increment('deadletter.queue', 1);
 
@@ -463,21 +464,67 @@ export class QstashQueue extends CloudQueueBase {
             messageId: dlqMessage.id,
             error: error?.message
         });
+
+        return dlqMessage;
+    }
+
+    async _persistDeadLetterMessage(dlqMessage) {
+        try {
+            const { cache } = await import("../CacheService.js");
+            const ttl = parseInt(process.env.QSTASH_DLQ_TTL_SECONDS || '604800', 10);
+            await cache.set(CACHE_KEYS.queueDlq(dlqMessage.id), dlqMessage, ttl, {
+                skipL1: true,
+                skipTtlRandomization: true
+            });
+        } catch (persistError) {
+            log.error('Failed to persist QStash dead letter message', {
+                messageId: dlqMessage.id,
+                error: persistError?.message || String(persistError)
+            });
+            throw persistError;
+        }
     }
 
     /**
      * 3. 死信队列实现 - 获取死信队列
      */
-    getDeadLetterQueue() {
-        return this.deadLetterQueue;
+    async getDeadLetterQueue(options = {}) {
+        if (!options.includePersistent) {
+            return this.deadLetterQueue;
+        }
+
+        try {
+            const { cache } = await import("../CacheService.js");
+            const keys = await cache.listKeys(CACHE_KEYS.queueDlqPrefix());
+            const persisted = [];
+            for (const key of keys) {
+                const item = await cache.get(key, "json", { skipCache: true });
+                if (item) persisted.push(item);
+            }
+            return persisted.sort((a, b) => a.timestamp - b.timestamp);
+        } catch (error) {
+            log.error('Failed to read persistent QStash dead letter queue', {
+                error: error?.message || String(error)
+            });
+            return this.deadLetterQueue;
+        }
     }
 
     /**
      * 3. 死信队列实现 - 清空死信队列
      */
-    clearDeadLetterQueue() {
+    async clearDeadLetterQueue() {
         const count = this.deadLetterQueue.length;
         this.deadLetterQueue = [];
+        try {
+            const { cache } = await import("../CacheService.js");
+            const keys = await cache.listKeys(CACHE_KEYS.queueDlqPrefix());
+            await Promise.allSettled(keys.map(key => cache.delete(key, { skipL1: true })));
+        } catch (error) {
+            log.warn('Failed to clear persistent QStash dead letter queue', {
+                error: error?.message || String(error)
+            });
+        }
         return count;
     }
 
@@ -486,11 +533,13 @@ export class QstashQueue extends CloudQueueBase {
      */
     async retryDeadLetterMessage(dlqId) {
         const index = this.deadLetterQueue.findIndex(msg => msg.id === dlqId);
-        if (index === -1) {
+        const dlqMessage = index === -1
+            ? await this._findPersistentDeadLetterMessage(dlqId)
+            : this.deadLetterQueue[index];
+
+        if (!dlqMessage) {
             throw new Error(`DLQ message ${dlqId} not found`);
         }
-
-        const dlqMessage = this.deadLetterQueue[index];
         
         try {
             // 重新发布消息
@@ -501,13 +550,41 @@ export class QstashQueue extends CloudQueueBase {
             );
 
             // 从死信队列移除
-            this.deadLetterQueue.splice(index, 1);
+            if (index !== -1) {
+                this.deadLetterQueue.splice(index, 1);
+            }
+            await this._deletePersistentDeadLetterMessage(dlqId);
             
             log.info(`Successfully retried DLQ message: ${dlqId}`);
             return result;
         } catch (error) {
             log.error(`Failed to retry DLQ message: ${dlqId}`, error);
             throw error;
+        }
+    }
+
+    async _findPersistentDeadLetterMessage(dlqId) {
+        try {
+            const { cache } = await import("../CacheService.js");
+            return await cache.get(CACHE_KEYS.queueDlq(dlqId), "json", { skipCache: true });
+        } catch (error) {
+            log.warn('Failed to read persistent QStash dead letter message', {
+                messageId: dlqId,
+                error: error?.message || String(error)
+            });
+            return null;
+        }
+    }
+
+    async _deletePersistentDeadLetterMessage(dlqId) {
+        try {
+            const { cache } = await import("../CacheService.js");
+            await cache.delete(CACHE_KEYS.queueDlq(dlqId), { skipL1: true });
+        } catch (error) {
+            log.warn('Failed to delete persistent QStash dead letter message', {
+                messageId: dlqId,
+                error: error?.message || String(error)
+            });
         }
     }
 
@@ -710,12 +787,12 @@ export class QstashQueue extends CloudQueueBase {
             // 检查缓冲区大小限制
             if (this.buffer.length >= this.maxBufferSize) {
                 // 触发溢出处理
-                const dropCount = Math.floor(this.maxBufferSize * 0.1);
+                const dropCount = Math.max(1, Math.floor(this.maxBufferSize * 0.1));
                 const droppedMessages = this.buffer.splice(0, dropCount);
                 this.metrics.bufferOverflowCount += dropCount;
                 
                 for (const droppedMsg of droppedMessages) {
-                    this._addToDeadLetterQueue(droppedMsg, 'buffer_overflow');
+                    await this._addToDeadLetterQueue(droppedMsg, 'buffer_overflow');
                 }
             }
 
@@ -726,12 +803,8 @@ export class QstashQueue extends CloudQueueBase {
                     return result;
                 } catch (error) {
                     // 加入死信队列
-                    this._addToDeadLetterQueue({ topic, message, options }, 'publish_failed', error);
-                    return {
-                        messageId: "fallback-message-id",
-                        fallback: true,
-                        error: error.message
-                    };
+                    await this._addToDeadLetterQueue({ topic, message, options }, 'publish_failed', error);
+                    throw error;
                 }
             } else {
                 // 使用缓冲区
@@ -765,8 +838,7 @@ export class QstashQueue extends CloudQueueBase {
         await this._syncCircuitBreakerState();
 
         return this.publishBreaker.execute(
-            () => this._executeBatch(messages),
-            () => messages.map(() => ({ messageId: "fallback-message-id", fallback: true }))
+            () => this._executeBatch(messages)
         );
     }
 

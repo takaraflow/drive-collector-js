@@ -6,7 +6,8 @@ export const CACHE_KEYS = Object.freeze({
         taskLock: 'lock:task:',
         instance: 'instance:',
         drive: 'drive:',
-        config: 'config:'
+        config: 'config:',
+        queueDlq: 'queue:dlq:'
     }),
 
     setting: key => `setting:${key}`,
@@ -27,5 +28,8 @@ export const CACHE_KEYS = Object.freeze({
     consistentTask: taskId => `consistent:task:${taskId}`,
     taskSync: taskId => `sync:${taskId}`,
     taskStatusPattern: () => 'task_status:*',
-    taskLockPattern: () => 'lock:task:*'
+    taskLockPattern: () => 'lock:task:*',
+
+    queueDlq: dlqId => `queue:dlq:${dlqId}`,
+    queueDlqPrefix: () => 'queue:dlq:'
 });

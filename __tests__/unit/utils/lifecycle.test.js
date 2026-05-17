@@ -23,6 +23,12 @@ vi.mock('../../../src/services/CacheService.js', () => ({
     }
 }));
 
+vi.mock('../../../src/services/QueueService.js', () => ({
+    queueService: {
+        close: vi.fn(),
+    }
+}));
+
 vi.mock('../../../src/services/telegram.js', () => ({
     stopTelegramClientRuntime: vi.fn(),
 }));
@@ -184,6 +190,7 @@ describe('lifecycle utilities', () => {
                 ['task-repository', 40],
                 ['distributed-lock', 45],
                 ['media-group-buffer-cleanup', 48],
+                ['queue-service', 49],
                 ['cache-service', 50],
                 ['tunnel-service', 55],
                 ['logger-flush-after', 60]
@@ -219,6 +226,26 @@ describe('lifecycle utilities', () => {
             await instanceHook[0]();
 
             expect(calls).toEqual(['dispatcher', 'telegram', 'coordinator']);
+        });
+
+        it('should close queue service before cache service', async () => {
+            await registerShutdownHooks();
+            const hooks = gracefulShutdown.register.mock.calls;
+            const queueHook = hooks.find(call => call[2] === 'queue-service');
+            const cacheHook = hooks.find(call => call[2] === 'cache-service');
+
+            expect(queueHook[1]).toBeLessThan(cacheHook[1]);
+
+            const { queueService } = await import('../../../src/services/QueueService.js');
+            const { cache } = await import('../../../src/services/CacheService.js');
+            const calls = [];
+            queueService.close.mockImplementation(async () => calls.push('queue'));
+            cache.destroy.mockImplementation(async () => calls.push('cache'));
+
+            await queueHook[0]();
+            await cacheHook[0]();
+
+            expect(calls).toEqual(['queue', 'cache']);
         });
 
         it('should correctly evaluate the task counter', async () => {
@@ -270,6 +297,9 @@ describe('lifecycle utilities', () => {
 
             const mediaGroupBufferCleanupHook = hooks.find(call => call[2] === 'media-group-buffer-cleanup');
             await mediaGroupBufferCleanupHook[0]();
+
+            const queueServiceHook = hooks.find(call => call[2] === 'queue-service');
+            await queueServiceHook[0]();
 
             const cacheServiceHook = hooks.find(call => call[2] === 'cache-service');
             await cacheServiceHook[0]();
