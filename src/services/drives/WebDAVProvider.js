@@ -7,7 +7,10 @@ const log = logger.withModule ? logger.withModule('WebDAVProvider') : logger;
 
 export class WebDAVProvider extends BaseDriveProvider {
     constructor() {
-        super('webdav', 'WebDAV');
+        super('webdav', 'WebDAV', {
+            supportLevel: 'stable',
+            supportNote: 'Direct URL, username, and password binding with rclone validation.'
+        });
     }
 
     getBindingSteps() {
@@ -46,7 +49,11 @@ export class WebDAVProvider extends BaseDriveProvider {
 
     async validateConfig(configData) {
         try {
-            const result = await CloudTool.validateConfig(this.type, configData);
+            const processedConfig = {
+                ...configData,
+                pass: await this.processPassword(configData.pass)
+            };
+            const result = await CloudTool.validateConfig(this.type, processedConfig);
             if (result.success) return new ValidationResult(true);
             return new ValidationResult(false, result.reason, result.details);
         } catch (error) {

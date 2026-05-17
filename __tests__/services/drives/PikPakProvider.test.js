@@ -30,6 +30,13 @@ describe('PikPakProvider', () => {
         expect(provider.type).toBe('pikpak');
     });
 
+    test('should be marked as advanced because account-password support depends on rclone backend policy', () => {
+        expect(provider.getInfo()).toMatchObject({
+            type: 'pikpak',
+            supportLevel: 'advanced'
+        });
+    });
+
     test('should return correct binding steps', () => {
         const steps = provider.getBindingSteps();
         expect(steps).toHaveLength(2);
@@ -42,6 +49,20 @@ describe('PikPakProvider', () => {
         expect(result.success).toBe(true);
         expect(result.nextStep).toBe('WAIT_PASS');
         expect(result.data.user).toBe('user');
+    });
+
+    test('should obscure password before validating config', async () => {
+        const { CloudTool } = await import('../../../src/services/rclone.js');
+        CloudTool.validateConfig.mockResolvedValue({ success: true });
+
+        const result = await provider.validateConfig({ user: 'u', pass: 'plain' });
+
+        expect(result.success).toBe(true);
+        expect(CloudTool._obscure).toHaveBeenCalledWith('plain');
+        expect(CloudTool.validateConfig).toHaveBeenCalledWith('pikpak', {
+            user: 'u',
+            pass: 'obscured_plain'
+        });
     });
 
     test('should generate connection string', () => {

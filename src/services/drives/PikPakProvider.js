@@ -7,7 +7,10 @@ const log = logger.withModule ? logger.withModule('PikPakProvider') : logger;
 
 export class PikPakProvider extends BaseDriveProvider {
     constructor() {
-        super('pikpak', 'PikPak');
+        super('pikpak', 'PikPak', {
+            supportLevel: 'advanced',
+            supportNote: 'Username/password support depends on the bundled rclone backend and account policy.'
+        });
     }
 
     getBindingSteps() {
@@ -40,7 +43,11 @@ export class PikPakProvider extends BaseDriveProvider {
 
     async validateConfig(configData) {
         try {
-            const result = await CloudTool.validateConfig(this.type, configData);
+            const processedConfig = {
+                ...configData,
+                pass: await this.processPassword(configData.pass)
+            };
+            const result = await CloudTool.validateConfig(this.type, processedConfig);
             if (result.success) return new ValidationResult(true);
             return new ValidationResult(false, result.reason, result.details);
         } catch (error) {

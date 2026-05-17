@@ -21,7 +21,6 @@ const log = logger.withModule ? logger.withModule('DriveConfigFlow') : logger;
 const driveStringsCache = new Map();
 const CANCEL_KEYWORDS = new Set(["/cancel", "cancel", "/取消", "取消"]);
 const SENSITIVE_BINDING_STEP = /(^|_)(PASS|PASSWORD|TOKEN|SECRET|SK)(_|$)/i;
-const RECOMMENDED_DRIVE_TYPES = new Set(["mega", "webdav", "google_drive"]);
 const DRIVE_ACTION_LABELS = Object.freeze({
     mega: "🟢 Mega",
     webdav: "🌐 WebDAV",
@@ -89,7 +88,11 @@ export class DriveConfigFlow {
     }
 
     static _formatDriveButtonLabel(drive) {
-        return DRIVE_ACTION_LABELS[drive.type] || `📁 ${drive.name}`;
+        const baseLabel = DRIVE_ACTION_LABELS[drive.type] || `📁 ${drive.name}`;
+        if (drive.supportLevel && drive.supportLevel !== 'stable') {
+            return `${baseLabel} · ${STRINGS.drive.advanced_config_badge}`;
+        }
+        return baseLabel;
     }
 
     static async _buildDriveManagerPayload(userId) {
@@ -284,6 +287,7 @@ export class DriveConfigFlow {
         const bindingSteps = provider.getBindingSteps();
         const finalStep = bindingSteps?.[bindingSteps.length - 1]?.step;
         const isFinalStep = finalStep === stepName;
+        const isSensitiveStep = SENSITIVE_BINDING_STEP.test(stepName || '');
 
         const driveStrings = await this._getDriveStrings(driveType);
 
@@ -296,13 +300,15 @@ export class DriveConfigFlow {
         }
 
         let verifyingMessage = null;
-        if (isFinalStep) {
+        if (isSensitiveStep) {
             try {
                 await runMtprotoTask(() => client.deleteMessages(peerId, [event.message.id], { revoke: true }), { priority: PRIORITY.HIGH });
             } catch (error) {
                 log.warn(`Failed to delete drive input message for ${userId}:`, error);
             }
+        }
 
+        if (isFinalStep) {
             const validatingText = driveStrings.verifying || STRINGS.drive.mega_verifying || "⏳ 正在验证账号，请稍候...";
             verifyingMessage = await runBotTask(() => client.sendMessage(peerId, { message: validatingText, parseMode: "html" }), userId, { priority: PRIORITY.HIGH });
         }
@@ -343,7 +349,8 @@ export class DriveConfigFlow {
             }
 
             const configData = result.data;
-            const driveName = `${driveType.charAt(0).toUpperCase() + driveType.slice(1)}-${configData.user}`;
+            const displayAccount = provider.getDisplayAccount(configData);
+            const driveName = `${driveType.charAt(0).toUpperCase() + driveType.slice(1)}-${displayAccount}`;
 
             await DriveRepository.create(userId, driveName, driveType, configData);
             await SessionManager.clear(userId);
@@ -457,12 +464,14 @@ export class DriveConfigFlow {
         const supportedDrives = this.getSupportedDrives();
         const visibleDrives = showAll
             ? supportedDrives
-            : supportedDrives.filter(drive => RECOMMENDED_DRIVE_TYPES.has(drive.type));
+            : supportedDrives.filter(drive => !drive.supportLevel || drive.supportLevel === 'stable');
         const fallbackDrives = visibleDrives.length > 0 ? visibleDrives : supportedDrives;
+        const hasAdvancedConfig = fallbackDrives.some(drive => drive.supportLevel && drive.supportLevel !== 'stable');
         const hint = showAll
             ? STRINGS.drive.select_type_more_hint
             : STRINGS.drive.select_type_recommended_hint;
-        const message = `${STRINGS.drive.select_type_title}\n\n${hint}`;
+        const statusHint = hasAdvancedConfig ? `\n\n${STRINGS.drive.advanced_config_hint}` : '';
+        const message = `${STRINGS.drive.select_type_title}\n\n${hint}${statusHint}`;
 
         const buttons = [];
         fallbackDrives.forEach(drive => {

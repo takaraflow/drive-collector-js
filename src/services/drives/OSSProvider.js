@@ -7,12 +7,16 @@ const log = logger.withModule ? logger.withModule('OSSProvider') : logger;
 
 export class OSSProvider extends BaseDriveProvider {
     constructor() {
-        super('oss', 'S3 / OSS');
+        super('oss', 'S3 / OSS', {
+            supportLevel: 'advanced',
+            supportNote: 'Requires endpoint, bucket, access key, and secret key.'
+        });
     }
 
     getBindingSteps() {
         return [
             new BindingStep('WAIT_ENDPOINT', 'input_endpoint'),
+            new BindingStep('WAIT_BUCKET', 'input_bucket'),
             new BindingStep('WAIT_AK', 'input_ak'),
             new BindingStep('WAIT_SK', 'input_sk')
         ];
@@ -20,17 +24,26 @@ export class OSSProvider extends BaseDriveProvider {
 
     async handleInput(step, input, session) {
         switch (step) {
-            case 'WAIT_ENDPOINT':
-                return new ActionResult(true, STRINGS.input_ak, 'WAIT_AK', { endpoint: input.trim() });
+            case 'WAIT_ENDPOINT': {
+                const endpoint = this._normalizeEndpoint(input);
+                if (!endpoint) return new ActionResult(false, STRINGS.endpoint_invalid);
+                return new ActionResult(true, STRINGS.input_bucket, 'WAIT_BUCKET', { endpoint });
+            }
+
+            case 'WAIT_BUCKET': {
+                if (!this._validateBucket(input).valid) return new ActionResult(false, STRINGS.bucket_invalid);
+                return new ActionResult(true, STRINGS.input_ak, 'WAIT_AK', { ...session.data, bucket: input.trim() });
+            }
             
-            case 'WAIT_AK':
+            case 'WAIT_AK': {
                 return new ActionResult(true, STRINGS.input_sk, 'WAIT_SK', { ...session.data, ak: input.trim() });
+            }
                 
-            case 'WAIT_SK':
-                const { endpoint, ak } = session.data || {};
-                if (!endpoint || !ak) return new ActionResult(false, 'Missing endpoint or AK');
+            case 'WAIT_SK': {
+                const { endpoint, bucket, ak } = session.data || {};
+                if (!endpoint || !bucket || !ak) return new ActionResult(false, 'Missing endpoint, bucket or AK');
                 
-                const configData = { endpoint, ak, sk: input.trim() };
+                const configData = { endpoint, bucket, ak, sk: input.trim() };
                 const validation = await this.validateConfig(configData);
                 
                 if (!validation.success) {
@@ -38,6 +51,7 @@ export class OSSProvider extends BaseDriveProvider {
                 }
                 
                 return new ActionResult(true, STRINGS.success, null, configData);
+            }
             default:
                 return new ActionResult(false, 'Unknown step');
         }
@@ -45,9 +59,7 @@ export class OSSProvider extends BaseDriveProvider {
 
     async validateConfig(configData) {
         try {
-            // Use 'lsd' instead of 'about' because S3 root usually doesn't support quota check (about),
-            // but usually supports listing buckets (lsd).
-            const result = await CloudTool.validateConfig(this.type, configData, "lsd");
+            const result = await CloudTool.validateConfig(this.type, configData, "lsf");
             
             if (result.success) return new ValidationResult(true);
             return new ValidationResult(false, result.reason, result.details);
@@ -58,7 +70,7 @@ export class OSSProvider extends BaseDriveProvider {
     }
 
     getValidationCommand() {
-        return 'lsd';
+        return 'lsf';
     }
 
     async processPassword(password) {
@@ -70,10 +82,59 @@ export class OSSProvider extends BaseDriveProvider {
 
     getConnectionString(config) {
         const endpoint = (config.endpoint || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const bucket = (config.bucket || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const ak = (config.ak || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const sk = (config.sk || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
-        // Use generic S3 connection string to support Aliyun, AWS, Cloudflare, etc.
-        return `:s3,endpoint="${endpoint}",access_key_id="${ak}",secret_access_key="${sk}":`;
+        return `:s3,provider="Other",endpoint="${endpoint}",access_key_id="${ak}",secret_access_key="${sk}":${bucket}`;
+    }
+
+    getDisplayAccount(config = {}) {
+        return config.bucket || config.endpoint || 'bucket';
+    }
+
+    _normalizeEndpoint(endpoint) {
+        const value = String(endpoint || '').trim();
+        if (!value || /\s/.test(value)) {
+            return null;
+        }
+
+        if (/^https?:\/\//i.test(value)) {
+            try {
+                const url = new URL(value);
+                if (url.username || url.password || url.search || url.hash) {
+                    return null;
+                }
+                if (url.pathname && url.pathname !== '/') {
+                    return null;
+                }
+                return url.origin;
+            } catch {
+                return null;
+            }
+        }
+
+        if (value.includes('://') || value.includes('/') || value.includes('?') || value.includes('#')) {
+            return null;
+        }
+
+        return value;
+    }
+
+    _validateEndpoint(endpoint) {
+        return this._normalizeEndpoint(endpoint)
+            ? { valid: true }
+            : { valid: false, message: STRINGS.endpoint_invalid };
+    }
+
+    _validateBucket(bucket) {
+        const value = String(bucket || '').trim();
+        if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(value)) {
+            return { valid: false, message: STRINGS.bucket_invalid };
+        }
+        if (value.includes('..') || value.includes('.-') || value.includes('-.')) {
+            return { valid: false, message: STRINGS.bucket_invalid };
+        }
+        return { valid: true };
     }
 }

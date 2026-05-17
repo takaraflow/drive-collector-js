@@ -46,11 +46,13 @@ describe('OneDriveProvider', () => {
         test('should return correct binding steps', () => {
             const steps = provider.getBindingSteps();
 
-            expect(steps).toHaveLength(1);
+            expect(steps).toHaveLength(3);
             expect(steps[0]).toBeInstanceOf(BindingStep);
             expect(steps[0].step).toBe('WAIT_TOKEN');
             expect(steps[0].prompt).toBe('input_token');
             expect(typeof steps[0].validator).toBe('function');
+            expect(steps[1].step).toBe('WAIT_DRIVE_ID');
+            expect(steps[2].step).toBe('WAIT_DRIVE_TYPE');
         });
     });
 
@@ -74,13 +76,17 @@ describe('OneDriveProvider', () => {
 
             expect(result.valid).toBe(false);
         });
+
+        test('should reject token without refresh_token', () => {
+            const token = JSON.stringify({ access_token: "abc" });
+            const result = provider._validateToken(token);
+
+            expect(result.valid).toBe(false);
+        });
     });
 
     describe('Handle Input - Token Step', () => {
         test('should handle valid token input', async () => {
-            const { CloudTool } = await import('../../../src/services/rclone.js');
-            CloudTool.validateConfig.mockResolvedValue({ success: true });
-
             const tokenObj = { access_token: "abc", refresh_token: "def" };
             const tokenStr = JSON.stringify(tokenObj);
             
@@ -88,6 +94,7 @@ describe('OneDriveProvider', () => {
 
             expect(result).toBeInstanceOf(ActionResult);
             expect(result.success).toBe(true);
+            expect(result.nextStep).toBe('WAIT_DRIVE_ID');
             expect(result.data.token).toBe(tokenStr);
         });
 
@@ -97,7 +104,7 @@ describe('OneDriveProvider', () => {
             expect(result.success).toBe(false);
         });
 
-        test('should handle validation failure from CloudTool', async () => {
+        test('should reject incomplete token before rclone validation', async () => {
             const { CloudTool } = await import('../../../src/services/rclone.js');
             CloudTool.validateConfig.mockResolvedValue({
                 success: false,
@@ -109,7 +116,38 @@ describe('OneDriveProvider', () => {
             const result = await provider.handleInput('WAIT_TOKEN', tokenStr, {});
 
             expect(result.success).toBe(false);
-            expect(result.message).toContain('Token 无效');
+            expect(result.message).toContain('Token 格式不正确');
+            expect(CloudTool.validateConfig).not.toHaveBeenCalled();
+        });
+
+        test('should validate only after drive_id and drive_type are collected', async () => {
+            const { CloudTool } = await import('../../../src/services/rclone.js');
+            CloudTool.validateConfig.mockResolvedValue({ success: true });
+
+            const token = JSON.stringify({ access_token: "abc", refresh_token: "def" });
+            const driveIdResult = provider._handleDriveIdInput('drive-123', { data: { token } });
+            expect(driveIdResult.nextStep).toBe('WAIT_DRIVE_TYPE');
+
+            const result = await provider.handleInput('WAIT_DRIVE_TYPE', 'personal', {
+                data: driveIdResult.data
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.data).toMatchObject({
+                token,
+                drive_id: 'drive-123',
+                drive_type: 'personal'
+            });
+            expect(CloudTool.validateConfig).toHaveBeenCalledWith('onedrive', result.data);
+        });
+
+        test('should reject unsupported drive_type', async () => {
+            const result = await provider.handleInput('WAIT_DRIVE_TYPE', 'team', {
+                data: { token: '{}', drive_id: 'drive-123' }
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.message).toContain('drive_type');
         });
     });
 
@@ -117,11 +155,13 @@ describe('OneDriveProvider', () => {
         test('should generate correct connection string with token', () => {
             const token = '{"access_token":"123"}';
             const connStr = provider.getConnectionString({
-                token: token
+                token: token,
+                drive_id: 'drive-123',
+                drive_type: 'personal'
             });
 
             const escapedToken = '{\\"access_token\\":\\"123\\"}';
-            expect(connStr).toBe(`:onedrive,token="${escapedToken}":`);
+            expect(connStr).toBe(`:onedrive,token="${escapedToken}",drive_id="drive-123",drive_type="personal":`);
         });
     });
 });

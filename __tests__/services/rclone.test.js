@@ -724,6 +724,23 @@ describe('CloudTool', () => {
                     expect(CloudTool._normalizePath('/Movies/2024')).toBe('Movies/2024/');
                 });
             });
+
+            describe('_joinRemotePath', () => {
+                it('should preserve colon-root remotes', () => {
+                    expect(CloudTool._joinRemotePath(':drive,token="t":', 'Movies/', 'file.mkv'))
+                        .toBe(':drive,token="t":Movies/file.mkv');
+                });
+
+                it('should insert slash when the connection string already includes a bucket root', () => {
+                    expect(CloudTool._joinRemotePath(':s3,provider="Other":bucket', 'Movies/', 'file.mkv'))
+                        .toBe(':s3,provider="Other":bucket/Movies/file.mkv');
+                });
+
+                it('should handle root upload path without duplicating separators', () => {
+                    expect(CloudTool._joinRemotePath(':s3,provider="Other":bucket', '/', 'file.mkv'))
+                        .toBe(':s3,provider="Other":bucket/file.mkv');
+                });
+            });
     
             describe('_getUploadPath', () => {
                 it('should return custom path if set in D1', async () => {

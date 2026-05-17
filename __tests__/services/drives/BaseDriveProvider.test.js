@@ -24,7 +24,7 @@ describe('BaseDriveProvider', () => {
     beforeEach(() => {
         TestProvider = class extends BaseDriveProvider {
             constructor() {
-                super('test', 'Test Drive');
+                super('test', 'Test Drive', { supportLevel: 'stable' });
             }
 
             getBindingSteps() {
@@ -66,6 +66,49 @@ describe('BaseDriveProvider', () => {
 
         expect(info.type).toBe('test');
         expect(info.name).toBe('Test Drive');
+        expect(info.supportLevel).toBe('stable');
+    });
+
+    test('should default provider support metadata to advanced', () => {
+        const DefaultProvider = class extends BaseDriveProvider {
+            constructor() {
+                super('default', 'Default Drive');
+            }
+        };
+
+        expect(new DefaultProvider().getInfo()).toMatchObject({
+            type: 'default',
+            supportLevel: 'advanced'
+        });
+    });
+
+    test('should allow provider support metadata', () => {
+        const AdvancedProvider = class extends BaseDriveProvider {
+            constructor() {
+                super('advanced', 'Advanced Drive', {
+                    supportLevel: 'advanced',
+                    supportNote: 'Requires exported credentials'
+                });
+            }
+        };
+
+        const provider = new AdvancedProvider();
+
+        expect(provider.getInfo()).toMatchObject({
+            type: 'advanced',
+            supportLevel: 'advanced',
+            supportNote: 'Requires exported credentials'
+        });
+    });
+
+    test('should reject invalid provider support metadata', () => {
+        const InvalidProvider = class extends BaseDriveProvider {
+            constructor() {
+                super('invalid', 'Invalid Drive', { supportLevel: 'partial' });
+            }
+        };
+
+        expect(() => new InvalidProvider()).toThrow('invalid supportLevel');
     });
 
     test('should return binding steps', () => {
@@ -136,6 +179,14 @@ describe('BaseDriveProvider', () => {
         const connStr = provider.getConnectionString({ user: 'test"user', pass: 'pass\\word' });
 
         expect(connStr).toBe(':test,user="test\\"user",pass="pass\\\\word":');
+    });
+
+    test('should derive display account without leaking secret fields', () => {
+        const provider = new TestProvider();
+
+        expect(provider.getDisplayAccount({ user: 'user@example.com', pass: 'secret' })).toBe('user@example.com');
+        expect(provider.getDisplayAccount({ bucket: 'bucket-name' })).toBe('bucket-name');
+        expect(provider.getDisplayAccount({ token: '{"access_token":"secret"}' })).toBe('configured');
     });
 });
 

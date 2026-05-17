@@ -62,6 +62,23 @@ export class CloudTool {
         return config;
     }
 
+    static _joinRemotePath(connectionString, ...segments) {
+        const base = String(connectionString || "");
+        const cleaned = segments
+            .filter(segment => segment !== undefined && segment !== null)
+            .map(segment => String(segment))
+            .filter(segment => segment.length > 0)
+            .map(segment => segment.replace(/^\/+/, '').replace(/\/+$/, ''))
+            .filter(segment => segment.length > 0);
+
+        if (cleaned.length === 0) {
+            return base;
+        }
+
+        const suffix = cleaned.join('/');
+        return `${base}${base.endsWith(':') || base.endsWith('/') ? '' : '/'}${suffix}`;
+    }
+
     /**
      * 【重构】统一的 rclone 进程执行助手
      * 处理 spawn、超时保护、错误缓冲和日志
@@ -359,7 +376,7 @@ export class CloudTool {
                 
                 // 获取用户自定义上传路径
                 const userUploadPath = await this._getUploadPath(firstTask.userId);
-                const remotePath = `${connectionString}${userUploadPath}`;
+                const remotePath = this._joinRemotePath(connectionString, userUploadPath);
 
                 // 准备 --files-from 数据
                 const commonSourceDir = path.resolve(getRuntimeConfig().downloadDir || "/tmp/downloads");
@@ -518,7 +535,7 @@ export class CloudTool {
         const connectionString = this._getConnectionString(conf);
         const userUploadPath = await this._getUploadPath(userId);
         const safeFileName = this.sanitizeRemoteFileName(fileName);
-        const fullRemotePath = `${connectionString}${userUploadPath}${safeFileName}`;
+        const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath, safeFileName);
 
         const args = [
             "--config", "/dev/null",
@@ -575,7 +592,7 @@ export class CloudTool {
                 const connectionString = this._getConnectionString(conf);
                 const userUploadPath = await this._getUploadPath(userId);
                 const safeFileName = this.sanitizeRemoteFileName(fileName);
-                const fullRemotePath = `${connectionString}${userUploadPath}${safeFileName}`;
+                const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath, safeFileName);
 
                 if (resolved) return;
 
@@ -645,7 +662,7 @@ export class CloudTool {
         const connectionString = this._getConnectionString(conf);
         const userUploadPath = await this._getUploadPath(userId);
         const safeFileName = this.sanitizeRemoteFileName(fileName);
-        const fullRemotePath = `${connectionString}${userUploadPath}${safeFileName}`;
+        const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath, safeFileName);
 
         const ret = await this._runRclone(["deletefile", fullRemotePath], 15000);
         const notFound = ret.stderr && (
@@ -698,7 +715,7 @@ export class CloudTool {
 
             // 获取用户自定义上传路径
             const userUploadPath = await this._getUploadPath(userId);
-            const fullRemotePath = `${connectionString}${userUploadPath}`;
+            const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath);
 
             let ret = await this._runRclone(["lsjson", fullRemotePath]);
 
@@ -820,7 +837,7 @@ export class CloudTool {
                 const userUploadPath = await this._getUploadPath(userId);
 
                 // 优先尝试直接查询文件（更高效）
-                const fullRemotePath = `${connectionString}${userUploadPath}${fileName}`;
+                const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath, fileName);
                 let ret = await this._runRclone(["lsjson", fullRemotePath], 10000);
 
                 // 如果明确返回“不存在”类错误，直接退出，不重试，不回退
@@ -840,7 +857,7 @@ export class CloudTool {
                 if (ret.code !== 0 && !skipFallback) {
                     // 仅当非超时错误时尝试 fallback
                     if (ret.stderr !== "TIMEOUT") {
-                        const fullRemoteFolder = `${connectionString}${userUploadPath}`;
+                        const fullRemoteFolder = this._joinRemotePath(connectionString, userUploadPath);
                         ret = await this._runRclone(["lsjson", "--files-only", "--max-depth", "1", fullRemoteFolder], 15000);
 
                         if (ret.code === 0) {

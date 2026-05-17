@@ -40,6 +40,13 @@ describe('GoogleDriveProvider', () => {
             expect(provider.type).toBe('google_drive');
             expect(provider.name).toBe('Google Drive');
         });
+
+        test('should be marked as advanced because it requires exported rclone token', () => {
+            expect(provider.getInfo()).toMatchObject({
+                type: 'google_drive',
+                supportLevel: 'advanced'
+            });
+        });
     });
 
     describe('Binding Steps', () => {
@@ -74,6 +81,13 @@ describe('GoogleDriveProvider', () => {
 
             expect(result.valid).toBe(false);
         });
+
+        test('should reject token without refresh_token', () => {
+            const token = JSON.stringify({ access_token: "abc" });
+            const result = provider._validateToken(token);
+
+            expect(result.valid).toBe(false);
+        });
     });
 
     describe('Handle Input - Token Step', () => {
@@ -97,7 +111,7 @@ describe('GoogleDriveProvider', () => {
             expect(result.success).toBe(false);
         });
 
-        test('should handle validation failure from CloudTool', async () => {
+        test('should reject incomplete token before rclone validation', async () => {
             const { CloudTool } = await import('../../../src/services/rclone.js');
             CloudTool.validateConfig.mockResolvedValue({
                 success: false,
@@ -109,7 +123,8 @@ describe('GoogleDriveProvider', () => {
             const result = await provider.handleInput('WAIT_TOKEN', tokenStr, {});
 
             expect(result.success).toBe(false);
-            expect(result.message).toContain('Token 无效');
+            expect(result.message).toContain('Token 格式不正确');
+            expect(CloudTool.validateConfig).not.toHaveBeenCalled();
         });
     });
 

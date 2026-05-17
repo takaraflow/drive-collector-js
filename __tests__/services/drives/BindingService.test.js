@@ -50,6 +50,7 @@ describe("BindingService", () => {
     let mockProvider = {
         getBindingSteps: vi.fn(),
         handleInput: vi.fn(),
+        getDisplayAccount: vi.fn(),
     };
 
     beforeEach(() => {
@@ -58,6 +59,7 @@ describe("BindingService", () => {
         mockProvider = {
             getBindingSteps: vi.fn(),
             handleInput: vi.fn(),
+            getDisplayAccount: vi.fn((config) => config.user || config.bucket || 'configured'),
         };
     });
 
@@ -125,6 +127,25 @@ describe("BindingService", () => {
             await BindingService.handleInput("user1", session, "input");
 
             expect(mockDriveRepo.create).toHaveBeenCalledWith("user1", expect.any(String), "google_drive", expect.any(Object));
+        });
+
+        it("应该使用 Provider 展示账号生成 Drive 名称，避免 token 类配置出现 undefined", async () => {
+            const session = { current_step: "OSS:STEP1", temp_data: "{}" };
+            mockFactory.getSupportedTypes.mockReturnValue(["oss"]);
+            mockFactory.isSupported.mockReturnValue(true);
+            mockFactory.create.mockReturnValue(mockProvider);
+            mockProvider.getBindingSteps.mockReturnValue([{ step: "STEP1" }]);
+            mockProvider.handleInput.mockResolvedValue({ success: true, data: { bucket: "media-bucket" } });
+            mockProvider.getDisplayAccount.mockReturnValue("media-bucket");
+
+            await BindingService.handleInput("user1", session, "input");
+
+            expect(mockDriveRepo.create).toHaveBeenCalledWith(
+                "user1",
+                "Oss-media-bucket",
+                "oss",
+                { bucket: "media-bucket" }
+            );
         });
     });
 });

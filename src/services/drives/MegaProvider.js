@@ -10,7 +10,10 @@ const log = logger.withModule ? logger.withModule('MegaProvider') : logger;
  */
 export class MegaProvider extends BaseDriveProvider {
     constructor() {
-        super('mega', 'Mega 网盘');
+        super('mega', 'Mega 网盘', {
+            supportLevel: 'stable',
+            supportNote: 'Direct username/password binding with rclone validation.'
+        });
     }
 
     /**

@@ -1,6 +1,7 @@
 import { logger } from "../logger/index.js";
 
 const log = logger.withModule ? logger.withModule('BaseDriveProvider') : logger;
+const VALID_SUPPORT_LEVELS = new Set(['stable', 'advanced']);
 
 /**
  * 网盘 Provider 抽象基类
@@ -10,13 +11,19 @@ export class BaseDriveProvider {
     /**
      * @param {string} type - 网盘类型标识
      * @param {string} name - 网盘显示名称
+     * @param {{supportLevel?: string, supportNote?: string}} options - 支持成熟度信息
      */
-    constructor(type, name) {
+    constructor(type, name, options = {}) {
         if (new.target === BaseDriveProvider) {
             throw new Error('BaseDriveProvider is abstract and cannot be instantiated directly');
         }
         this.type = type;
         this.name = name;
+        this.supportLevel = options.supportLevel || 'advanced';
+        if (!VALID_SUPPORT_LEVELS.has(this.supportLevel)) {
+            throw new Error(`${type}: invalid supportLevel ${this.supportLevel}`);
+        }
+        this.supportNote = options.supportNote || '';
     }
 
     /**
@@ -94,11 +101,25 @@ export class BaseDriveProvider {
     }
 
     /**
+     * 获取用于管理面板展示的账号/目标标识。
+     * @param {Object} config - 配置对象
+     * @returns {string}
+     */
+    getDisplayAccount(config = {}) {
+        return config.user || config.email || config.bucket || config.drive_id || 'configured';
+    }
+
+    /**
      * 获取 Provider 信息
      * @returns {{type: string, name: string}}
      */
     getInfo() {
-        return { type: this.type, name: this.name };
+        return {
+            type: this.type,
+            name: this.name,
+            supportLevel: this.supportLevel,
+            supportNote: this.supportNote
+        };
     }
 }
 

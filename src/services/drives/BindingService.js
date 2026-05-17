@@ -96,7 +96,8 @@ export class BindingService {
 
             // Final success - create the drive
             const configData = result.data;
-            const driveName = `${driveType.charAt(0).toUpperCase() + driveType.slice(1)}-${configData.user}`;
+            const displayAccount = provider.getDisplayAccount(configData);
+            const driveName = `${driveType.charAt(0).toUpperCase() + driveType.slice(1)}-${displayAccount}`;
 
             await DriveRepository.create(userId, driveName, driveType, configData);
             await SessionManager.clear(userId);

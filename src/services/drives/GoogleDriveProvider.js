@@ -7,7 +7,10 @@ const log = logger.withModule ? logger.withModule('GoogleDriveProvider') : logge
 
 export class GoogleDriveProvider extends BaseDriveProvider {
     constructor() {
-        super('google_drive', 'Google Drive');
+        super('google_drive', 'Google Drive', {
+            supportLevel: 'advanced',
+            supportNote: 'Requires a full rclone OAuth token exported from a configured Google Drive remote.'
+        });
     }
 
     getRcloneBackendType() {
@@ -58,10 +61,14 @@ export class GoogleDriveProvider extends BaseDriveProvider {
         return `:${this.getRcloneBackendType()},token="${token}":`;
     }
 
+    getDisplayAccount(config = {}) {
+        return config.email || 'token';
+    }
+
     _validateToken(input) {
         try {
             const json = JSON.parse(input);
-            if (!json.access_token) {
+            if (!json.access_token || !json.refresh_token) {
                 return { valid: false, message: STRINGS.token_invalid };
             }
             return { valid: true };

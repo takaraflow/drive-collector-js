@@ -115,12 +115,13 @@ vi.mock("../../src/services/drives/index.js", () => ({
                 }
                 return Promise.resolve({ success: true, data: { user: "test@example.com", pass: text } });
             }),
+            getDisplayAccount: vi.fn((config) => config.user || config.bucket || "configured"),
         }),
         getSupportedDrives: vi.fn().mockReturnValue([
             { type: "mega", name: "Mega" },
-            { type: "google_drive", name: "Google Drive" },
+            { type: "google_drive", name: "Google Drive", supportLevel: "advanced" },
             { type: "webdav", name: "WebDAV" },
-            { type: "oss", name: "S3 / OSS" }
+            { type: "oss", name: "S3 / OSS", supportLevel: "advanced" }
         ]),
         getSupportedTypes: vi.fn().mockReturnValue(["mega", "google_drive", "webdav", "oss"]),
         isSupported: vi.fn().mockReturnValue(true)
@@ -159,6 +160,16 @@ describe("DriveConfigFlow", () => {
         mockBindingService.setDefaultDrive.mockResolvedValue();
         mockBindingService.startBinding.mockResolvedValue({ success: true, message: "请检查输入" });
         const mockProvider = getMockProvider();
+        mockProvider.getBindingSteps.mockReturnValue([
+            { step: "WAIT_EMAIL", prompt: "mega_input_email" },
+            { step: "WAIT_PASS", prompt: "mega_input_pass" }
+        ]);
+        mockProvider.handleInput.mockImplementation((step, text, session) => {
+            if (step === "WAIT_EMAIL") {
+                return Promise.resolve({ success: true, nextStep: "WAIT_PASS", data: { email: text }, message: "mega_input_pass" });
+            }
+            return Promise.resolve({ success: true, data: { user: "test@example.com", pass: text } });
+        });
     });
 
     describe("sendDriveManager", () => {
@@ -382,7 +393,8 @@ describe("DriveConfigFlow", () => {
             const labels = payload.buttons.flat().map(button => button.text);
             const callbackData = payload.buttons.flat().map(button => button.data.toString());
             expect(payload.text).toContain("推荐先选择常用网盘");
-            expect(labels).toEqual(expect.arrayContaining(["🟢 Mega", "🔵 Google Drive", "🌐 WebDAV"]));
+            expect(labels).toEqual(expect.arrayContaining(["🟢 Mega", "🌐 WebDAV"]));
+            expect(labels).not.toContain("🔵 Google Drive · 需高级配置");
             expect(labels).not.toContain("🗄️ S3 / OSS");
             expect(callbackData).toContain("drive_select_type_all");
             expect(result).toBe("请确认操作");
@@ -397,7 +409,9 @@ describe("DriveConfigFlow", () => {
             const labels = payload.buttons.flat().map(button => button.text);
             const callbackData = payload.buttons.flat().map(button => button.data.toString());
             expect(payload.text).toContain("JSON Token");
-            expect(labels).toContain("🗄️ S3 / OSS");
+            expect(payload.text).toContain("未覆盖所有账号类型");
+            expect(labels).toContain("🔵 Google Drive · 需高级配置");
+            expect(labels).toContain("🗄️ S3 / OSS · 需高级配置");
             expect(callbackData).toContain("drive_select_type");
         });
     });
@@ -455,6 +469,36 @@ describe("DriveConfigFlow", () => {
             expect(editPayload.buttons.flat().map(button => button.data.toString())).toEqual(
                 expect.arrayContaining(["files_page_0", "remote_folder_menu"])
             );
+            expect(result).toBe(true);
+        });
+
+        test("should delete sensitive non-final binding input without sending verifying message", async () => {
+            const event = {
+                message: { message: '{"access_token":"token"}', peerId: "chat123", id: "msg201" }
+            };
+            const session = { current_step: "GOOGLE_DRIVE:WAIT_TOKEN" };
+            const mockProvider = DriveProviderFactory.create();
+            mockProvider.getBindingSteps.mockReturnValue([
+                { step: "WAIT_TOKEN", prompt: "input_token" },
+                { step: "WAIT_EXTRA", prompt: "input_extra" }
+            ]);
+            mockProvider.handleInput.mockResolvedValueOnce({
+                success: true,
+                nextStep: "WAIT_EXTRA",
+                data: { token: '{"access_token":"token"}' },
+                message: "input_extra"
+            });
+
+            const result = await DriveConfigFlow.handleInput(event, "user456", session);
+
+            expect(mockClient.deleteMessages).toHaveBeenCalledWith("chat123", ["msg201"], { revoke: true });
+            expect(mockSessionManager.update).toHaveBeenCalledWith(
+                "user456",
+                "GOOGLE_DRIVE:WAIT_EXTRA",
+                { token: '{"access_token":"token"}' }
+            );
+            expect(mockClient.sendMessage).toHaveBeenCalledTimes(1);
+            expect(mockClient.sendMessage.mock.calls[0][1].message).not.toContain("正在验证");
             expect(result).toBe(true);
         });
 

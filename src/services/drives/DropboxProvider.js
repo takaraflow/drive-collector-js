@@ -7,7 +7,10 @@ const log = logger.withModule ? logger.withModule('DropboxProvider') : logger;
 
 export class DropboxProvider extends BaseDriveProvider {
     constructor() {
-        super('dropbox', 'Dropbox');
+        super('dropbox', 'Dropbox', {
+            supportLevel: 'advanced',
+            supportNote: 'Requires a full rclone OAuth token.'
+        });
     }
 
     getBindingSteps() {
@@ -18,11 +21,11 @@ export class DropboxProvider extends BaseDriveProvider {
 
     async handleInput(step, input, session) {
         switch (step) {
-            case 'WAIT_TOKEN':
+            case 'WAIT_TOKEN': {
                 const validation = this._validateToken(input);
                 if (!validation.valid) return new ActionResult(false, validation.message);
 
-                const token = JSON.stringify(JSON.parse(input));
+                const token = this._normalizeToken(input);
                 const configData = { token };
                 
                 const valResult = await this.validateConfig(configData);
@@ -31,6 +34,7 @@ export class DropboxProvider extends BaseDriveProvider {
                 }
                 
                 return new ActionResult(true, STRINGS.success, null, configData);
+            }
             default:
                 return new ActionResult(false, 'Unknown step');
         }
@@ -52,16 +56,36 @@ export class DropboxProvider extends BaseDriveProvider {
         return `:${this.type},token="${token}":`;
     }
 
+    getDisplayAccount(config = {}) {
+        return config.email || 'token';
+    }
+
     _validateToken(input) {
+        const token = String(input || '').trim();
+        if (!token) {
+            return { valid: false, message: STRINGS.token_invalid };
+        }
+
+        if (!token.startsWith('{')) {
+            return { valid: true };
+        }
+
         try {
-            const json = JSON.parse(input);
+            const json = JSON.parse(token);
             if (!json.access_token && !json.refresh_token) {
-                 // Accept if either exists, though usually full object is best
                 return { valid: false, message: STRINGS.token_invalid };
             }
             return { valid: true };
         } catch (e) {
             return { valid: false, message: STRINGS.token_invalid };
         }
+    }
+
+    _normalizeToken(input) {
+        const token = String(input || '').trim();
+        if (!token.startsWith('{')) {
+            return token;
+        }
+        return JSON.stringify(JSON.parse(token));
     }
 }

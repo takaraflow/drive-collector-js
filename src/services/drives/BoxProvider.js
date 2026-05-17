@@ -7,7 +7,10 @@ const log = logger.withModule ? logger.withModule('BoxProvider') : logger;
 
 export class BoxProvider extends BaseDriveProvider {
     constructor() {
-        super('box', 'Box');
+        super('box', 'Box', {
+            supportLevel: 'advanced',
+            supportNote: 'Requires a full rclone OAuth token.'
+        });
     }
 
     getBindingSteps() {
@@ -38,7 +41,7 @@ export class BoxProvider extends BaseDriveProvider {
 
     async validateConfig(configData) {
         try {
-            const result = await CloudTool.validateConfig(this.type, configData);
+            const result = await CloudTool.validateConfig(this.type, configData, 'lsf');
             if (result.success) return new ValidationResult(true);
             return new ValidationResult(false, result.reason, result.details);
         } catch (error) {
@@ -50,6 +53,10 @@ export class BoxProvider extends BaseDriveProvider {
     getConnectionString(config) {
         const token = (config.token || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         return `:${this.type},token="${token}":`;
+    }
+
+    getDisplayAccount(config = {}) {
+        return config.email || 'token';
     }
 
     _validateToken(input) {

@@ -134,7 +134,9 @@ export const STRINGS = {
         btn_recommended_drives: "推荐网盘",
         select_type_title: "➕ <b>选择要绑定的网盘</b>",
         select_type_recommended_hint: "推荐先选择常用网盘；需要 Token 或对象存储时再打开更多网盘。",
-        select_type_more_hint: "这些网盘通常需要 JSON Token、Access Key 或 WebDAV 地址。",
+        select_type_more_hint: "这些网盘通常需要 JSON Token、Access Key、Bucket 或 WebDAV 地址。",
+        advanced_config_badge: "需高级配置",
+        advanced_config_hint: "标记为“需高级配置”的网盘依赖 rclone 导出的完整凭证，未覆盖所有账号类型。",
     },
 
     // --- 文件浏览 ---

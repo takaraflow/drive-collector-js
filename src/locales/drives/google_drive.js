@@ -11,5 +11,5 @@ export const STRINGS = {
     fail_unknown: "未知错误",
     
     // 验证消息
-    token_invalid: "❌ Token 格式不正确，必须是有效的 JSON 字符串，包含 access_token。"
+    token_invalid: "❌ Token 格式不正确，必须是有效的 JSON 字符串，包含 access_token 和 refresh_token。"
 };
