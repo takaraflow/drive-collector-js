@@ -43,6 +43,10 @@ describe('ServiceConfigManager 测试', () => {
         expect(serviceConfigManager.getServiceName('LOG_LEVEL')).toBe('logger');
         expect(serviceConfigManager.getServiceName('MESSAGE_SLOW_WARN_THRESHOLD_MS')).toBe('logger');
         expect(serviceConfigManager.getServiceName('DB_AUTO_MIGRATE')).toBe('d1');
+        expect(serviceConfigManager.getServiceName('STREAM_FORWARDING_ENABLED')).toBe('streamForwarding');
+        expect(serviceConfigManager.getServiceName('STREAM_RESUME_DIR')).toBe('streamForwarding');
+        expect(serviceConfigManager.getServiceName('STREAM_FINALIZATION_TIMEOUT_MS')).toBe('streamForwarding');
+        expect(serviceConfigManager.getServiceName('STREAM_FINALIZATION_POLL_MS')).toBe('streamForwarding');
         expect(serviceConfigManager.getServiceName('UNKNOWN_KEY')).toBeUndefined();
     });
 

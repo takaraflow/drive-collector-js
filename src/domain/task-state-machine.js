@@ -12,11 +12,13 @@ export const TASK_EVENTS = Object.freeze({
     START_DOWNLOAD: 'start_download',
     FINISH_DOWNLOAD: 'finish_download',
     START_UPLOAD: 'start_upload',
+    START_STREAM_UPLOAD: 'start_stream_upload',
     COMPLETE: 'complete',
     FAIL: 'fail',
     CANCEL: 'cancel',
     RETRY: 'retry',
     RESET_UPLOAD: 'reset_upload',
+    RESET_STREAM_DOWNLOAD: 'reset_stream_download',
     RESET_STALLED: 'reset_stalled'
 });
 
@@ -49,6 +51,10 @@ export const TASK_TRANSITIONS = Object.freeze({
     [TASK_EVENTS.START_UPLOAD]: Object.freeze({
         to: TASK_STATUSES.UPLOADING,
         from: Object.freeze([TASK_STATUSES.DOWNLOADED, TASK_STATUSES.UPLOADING])
+    }),
+    [TASK_EVENTS.START_STREAM_UPLOAD]: Object.freeze({
+        to: TASK_STATUSES.UPLOADING,
+        from: Object.freeze([TASK_STATUSES.DOWNLOADING, TASK_STATUSES.UPLOADING])
     }),
     [TASK_EVENTS.COMPLETE]: Object.freeze({
         to: TASK_STATUSES.COMPLETED,
@@ -95,6 +101,14 @@ export const TASK_TRANSITIONS = Object.freeze({
         from: Object.freeze([
             TASK_STATUSES.DOWNLOADED,
             TASK_STATUSES.UPLOADING
+        ])
+    }),
+    [TASK_EVENTS.RESET_STREAM_DOWNLOAD]: Object.freeze({
+        to: TASK_STATUSES.DOWNLOADING,
+        from: Object.freeze([
+            TASK_STATUSES.DOWNLOADING,
+            TASK_STATUSES.UPLOADING,
+            TASK_STATUSES.FAILED
         ])
     }),
     [TASK_EVENTS.RESET_STALLED]: Object.freeze({

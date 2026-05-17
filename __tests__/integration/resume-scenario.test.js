@@ -22,32 +22,23 @@ vi.mock('../../src/services/CacheService.js', () => ({
   }
 }))
 
-describe('断点续传端到端测试', () => {
+describe('流式转发续传协议测试', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     global.fetch = vi.fn()
+    streamTransferService.chunkRetryAttempts.clear()
   })
 
-  test('完整的断点续传场景：网络中断后恢复传输', async () => {
-    const taskId = 'task-resume-e2e'
+  test('live stream forwarding posts the chunk directly without probing progress', async () => {
+    const taskId = 'task-live-no-fake-resume'
     const fileName = 'large-file.zip'
     const totalSize = 100 * 1024 * 1024 // 100MB
-    
-    // Mock Worker 端进度查询
-    fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        lastChunkIndex: 49
-      })
-    })
-    
-    // Mock forwardChunk 成功
+
     fetch.mockResolvedValue({
       ok: true,
       text: () => Promise.resolve('OK')
     })
-    
-    // 测试断点续传流程
+
     const metadata = {
       fileName,
       userId: 'user-123',
@@ -58,131 +49,129 @@ describe('断点续传端到端测试', () => {
       chatId: 'chat-123',
       msgId: 'msg-456'
     }
-    
-    // 调用 forwardChunk 模拟传输
+
     const result = await streamTransferService.forwardChunk(taskId, Buffer.from('test-chunk'), metadata)
-    
+
     expect(result).toBe(true)
+    expect(fetch).toHaveBeenCalledTimes(1)
     expect(fetch).toHaveBeenCalledWith(
-      'https://lb.example.com/api/v2/stream/task-resume-e2e/progress',
+      'https://lb.example.com/api/v2/stream/task-live-no-fake-resume',
       expect.objectContaining({
-        method: 'GET',
-        headers: {
-          'x-instance-secret': 'test-secret'
-        }
+        method: 'POST',
+        body: Buffer.from('test-chunk'),
+        headers: expect.objectContaining({
+          'x-instance-secret': 'test-secret',
+          'x-stream-mode': 'live',
+          'x-resume-enabled': 'false',
+          'x-chunk-index': '50'
+        })
       })
     )
   })
 
-  test('断点续传失败时降级到从头开始', async () => {
-    const taskId = 'task-resume-fallback'
-    
-    // Mock Worker 端进度查询失败
+  test('live stream forwarding records retry state when the direct post fails', async () => {
+    const taskId = 'task-live-retry-state'
+    const chunkIndex = 3
+
     fetch.mockRejectedValueOnce(new Error('Network error'))
-    
-    // Mock forwardChunk 成功
-    fetch.mockResolvedValue({
-      ok: true,
-      text: () => Promise.resolve('OK')
-    })
-    
-    // 测试从头开始传输
+
     const metadata = {
       fileName: 'fallback-test.txt',
       userId: 'user-123',
       isLast: false,
-      chunkIndex: 0,
+      chunkIndex,
       totalSize: 3 * 1024 * 1024,
       leaderUrl: 'https://leader.example.com'
     }
-    
-    const result = await streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
-    
-    expect(result).toBe(true)
-    
-    // 验证从头开始传输
+
+    await expect(
+      streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
+    ).rejects.toThrow('Network error')
+
+    expect(fetch).toHaveBeenCalledTimes(1)
     expect(fetch).toHaveBeenCalledWith(
-      'https://lb.example.com/api/v2/stream/task-resume-fallback/progress',
-      expect.anything()
+      'https://lb.example.com/api/v2/stream/task-live-retry-state',
+      expect.objectContaining({ method: 'POST' })
     )
+    expect(streamTransferService.chunkRetryAttempts.get(`${taskId}:${chunkIndex}`)).toBe(1)
   })
 
-  test('重复chunk幂等性检查', async () => {
-    const taskId = 'task-idempotency-test'
-    const chunkIndex = 5
-    
-    // Mock Worker 端已接收该chunk
-    fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        lastChunkIndex: 5
-      })
-    })
-    
-    const metadata = {
-      fileName: 'idempotency-test.txt',
-      userId: 'user-123',
-      isLast: false,
-      chunkIndex,
-      totalSize: 1024,
-      leaderUrl: 'https://leader.example.com'
-    }
-    
-    const result = await streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
-    
-    expect(result).toBe(true)
-    expect(fetch).not.toHaveBeenCalledWith(
-      'https://lb.example.com/api/v2/stream/task-idempotency-test',
-      expect.anything()
-    )
-  })
+  test('resumable stream forwarding marks chunks with resumable protocol headers', async () => {
+    const taskId = 'task-resumable-headers'
 
-  test('重试机制验证', async () => {
-    const taskId = 'task-retry-test'
-    const chunkIndex = 3
-    
-    // Mock Worker 端未接收该chunk
-    fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        lastChunkIndex: 2 // 比当前chunk小
-      })
-    })
-    
-    // Mock 第一次发送失败
-    fetch.mockRejectedValueOnce(new Error('Network timeout'))
-    
-    // Mock 第二次发送成功
-    fetch.mockResolvedValueOnce({
+    fetch.mockResolvedValue({
       ok: true,
       text: () => Promise.resolve('OK')
     })
-    
+
     const metadata = {
-      fileName: 'retry-test.txt',
+      fileName: 'resumable-test.txt',
       userId: 'user-123',
       isLast: false,
-      chunkIndex,
+      chunkIndex: 5,
       totalSize: 1024,
-      leaderUrl: 'https://leader.example.com'
+      leaderUrl: 'https://leader.example.com',
+      resumeEnabled: true,
+      streamMode: 'resumable',
+      chunkSize: 256
     }
-    
-    // 使用 try-catch 处理可能的错误
-    let result
-    try {
-      result = await streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
-    } catch (error) {
-      // 如果重试失败，应该抛出错误
-      expect(error.message).toBe('Network timeout')
-      return
-    }
-    
-    // 如果重试成功
+
+    const result = await streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
+
     expect(result).toBe(true)
-    expect(fetch).toHaveBeenCalledTimes(3) // 1次进度查询 + 2次发送
-    
-    // 验证重试计数被清除
-    const retryKey = `${taskId}:${chunkIndex}`
-    expect(streamTransferService.chunkRetryAttempts.get(retryKey)).toBeUndefined()
+    expect(fetch).toHaveBeenCalledWith(
+      'https://lb.example.com/api/v2/stream/task-resumable-headers',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-stream-mode': 'resumable',
+          'x-resume-enabled': 'true',
+          'x-chunk-size': '256'
+        })
+      })
+    )
+  })
+
+  test('resumable resume negotiation uses the worker resume endpoint as the progress SSOT', async () => {
+    fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        success: true,
+        uploadedBytes: 1024,
+        lastChunkIndex: 1,
+        canResume: true
+      })
+    })
+
+    const metadata = {
+      streamMode: 'resumable',
+      fileName: 'resume.bin',
+      userId: 'user-123',
+      totalSize: 2048,
+      chunkSize: 512
+    }
+
+    const result = await streamTransferService.resumeTask(
+      'task-resume-negotiation',
+      metadata,
+      'https://worker.example.com/'
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      uploadedBytes: 1024,
+      canResume: true
+    })
+    expect(fetch).toHaveBeenCalledWith(
+      'https://worker.example.com/api/v2/stream/task-resume-negotiation/resume',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'x-instance-secret': 'test-secret'
+        }),
+        body: JSON.stringify(metadata)
+      })
+    )
   })
 })

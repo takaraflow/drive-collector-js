@@ -336,6 +336,112 @@ describe('CloudTool', () => {
         });
     });
 
+    describe('stream upload helpers', () => {
+        beforeEach(() => {
+            mockGetDefaultDrive.mockResolvedValue({
+                type: 'drive',
+                config_data: JSON.stringify({ user: 'u', pass: 'p' }),
+                remote_folder: '/Stream'
+            });
+        });
+
+        it('should sanitize remote filenames to their basename', () => {
+            expect(CloudTool.sanitizeRemoteFileName('../unsafe/path/movie.mkv')).toBe('movie.mkv');
+            expect(CloudTool.sanitizeRemoteFileName('')).toBe('unnamed.bin');
+        });
+
+        it('should upload a local staging file with copyto under the sanitized remote name', async () => {
+            mockSpawn.mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 0);
+                p.emit('close', 0);
+            }));
+
+            const result = await CloudTool.uploadLocalFileToRemote('/tmp/task.part', '../movie.mkv', 'user123');
+
+            expect(result).toEqual({ success: true, fileName: 'movie.mkv' });
+            expect(mockSpawn).toHaveBeenCalledWith(
+                expect.any(String),
+                expect.arrayContaining(['copyto', '/tmp/task.part', expect.stringContaining('Stream/movie.mkv')]),
+                expect.any(Object)
+            );
+        });
+
+        it('should cancel the copyto process when the abort signal fires', async () => {
+            const controller = new AbortController();
+            const proc = createAutoProcess();
+            mockSpawn.mockReturnValueOnce(proc);
+
+            const uploadPromise = CloudTool.uploadLocalFileToRemote(
+                '/tmp/task.part',
+                'movie.mkv',
+                'user123',
+                undefined,
+                { signal: controller.signal }
+            );
+
+            await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
+            controller.abort();
+
+            await expect(uploadPromise).resolves.toEqual({ success: false, error: 'Upload cancelled' });
+            expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+        });
+
+        it('should delete a sanitized remote stream file', async () => {
+            mockSpawn.mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 0);
+                p.emit('close', 0);
+            }));
+
+            const result = await CloudTool.deleteRemoteFile('../movie.mkv', 'user123');
+
+            expect(result).toEqual({ success: true });
+            expect(mockSpawn).toHaveBeenCalledWith(
+                expect.any(String),
+                expect.arrayContaining(['deletefile', expect.stringContaining('Stream/movie.mkv')]),
+                expect.any(Object)
+            );
+        });
+
+        it('should treat missing remote stream files as already deleted', async () => {
+            mockSpawn.mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                p.stderr.emit('data', Buffer.from('object not found\n'));
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 1);
+                p.emit('close', 1);
+            }));
+
+            await expect(CloudTool.deleteRemoteFile('missing.mkv', 'user123')).resolves.toEqual({ success: true });
+        });
+
+        it('should return failure when remote stream deletion fails for non-idempotent errors', async () => {
+            mockSpawn.mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                p.stderr.emit('data', Buffer.from('permission denied\n'));
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 1);
+                p.emit('close', 1);
+            }));
+
+            const result = await CloudTool.deleteRemoteFile('denied.mkv', 'user123');
+
+            expect(result).toMatchObject({ success: false });
+            expect(result.error).toContain('permission denied');
+        });
+    });
+
     describe('listRemoteFiles', () => {
         beforeEach(() => {
             mockCacheService.get.mockReturnValue(null);

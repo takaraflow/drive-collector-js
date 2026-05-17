@@ -8,9 +8,16 @@ import { TelegramBotApi } from "../utils/telegramBotApi.js";
 import { CacheService } from "./CacheService.js";
 import { resolveInstanceBaseUrl } from "../utils/instanceUrl.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
+import { once } from "events";
+import fs from "fs";
+import os from "os";
+import path from "path";
 
 const log = logger.withModule('StreamTransferService');
 const getStreamConfig = () => getConfig().streamForwarding;
+const DEFAULT_STREAM_CHUNK_SIZE = 512 * 1024;
+const DEFAULT_FINALIZATION_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_FINALIZATION_POLL_MS = 3000;
 
 function hasValidInstanceSecret(headerSecret, configuredSecret) {
     if (typeof headerSecret !== 'string' || typeof configuredSecret !== 'string') {
@@ -20,6 +27,12 @@ function hasValidInstanceSecret(headerSecret, configuredSecret) {
     const header = headerSecret.trim();
     const secret = configuredSecret.trim();
     return header !== '' && secret !== '' && header === secret;
+}
+
+function sanitizeTaskPathSegment(value) {
+    return String(value || '')
+        .replace(/[^a-zA-Z0-9_.-]/g, '_')
+        .slice(0, 160) || 'unknown-task';
 }
 
 /**
@@ -32,8 +45,348 @@ class StreamTransferService {
         this.cleanupInterval = setInterval(() => this.cleanupStaleStreams(), 60000);
         // 断点续传相关
         this.chunkRetryAttempts = new Map(); // taskId -> { chunkIndex: attempts }
+        this.taskLocks = new Map();
         this.maxRetryAttempts = 3;
         this.progressCacheTTL = 3600; // 1小时
+    }
+
+    async _withTaskLock(taskId, operation) {
+        const previous = this.taskLocks.get(taskId) || Promise.resolve();
+        let release;
+        const gate = new Promise(resolve => {
+            release = resolve;
+        });
+        const tail = previous.catch(() => {}).then(() => gate);
+        this.taskLocks.set(taskId, tail);
+
+        await previous.catch(() => {});
+        try {
+            return await operation();
+        } finally {
+            release();
+            if (this.taskLocks.get(taskId) === tail) {
+                this.taskLocks.delete(taskId);
+            }
+        }
+    }
+
+    async _markStreamUploadStarted(taskId, source) {
+        const transition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.START_STREAM_UPLOAD, null, {
+            returnResult: true,
+            allowNoop: true,
+            source
+        });
+
+        if (transition.blocked) {
+            throw new Error(`Stream upload rejected: ${transition.reason || `invalid transition from ${transition.fromStatus || transition.latestStatus || 'unknown'}`}`);
+        }
+
+        return transition;
+    }
+
+    async _writeWithBackpressure(streamContext, chunk) {
+        if (!streamContext.stdin?.writable || streamContext.stdin.destroyed) {
+            throw new Error("rcat stdin is not writable");
+        }
+
+        const canContinue = streamContext.stdin.write(chunk);
+        if (!canContinue) {
+            await Promise.race([
+                once(streamContext.stdin, "drain"),
+                once(streamContext.stdin, "error").then(([error]) => {
+                    throw error;
+                })
+            ]);
+        }
+    }
+
+    _getResumeDir() {
+        const cfg = getConfig();
+        return path.resolve(
+            cfg.streamForwarding?.resumeDir ||
+            path.join(cfg.downloadDir || os.tmpdir(), ".stream-resume")
+        );
+    }
+
+    _getResumablePaths(taskId, fileName) {
+        const remoteFileName = CloudTool.sanitizeRemoteFileName(fileName);
+        const taskSegment = sanitizeTaskPathSegment(taskId);
+        const partFileName = `${taskSegment}.${remoteFileName}.part`;
+        return {
+            resumeDir: this._getResumeDir(),
+            localPath: path.join(this._getResumeDir(), partFileName),
+            fileName: remoteFileName
+        };
+    }
+
+    async _writeFileWithBackpressure(writeStream, chunk) {
+        if (!writeStream?.writable || writeStream.destroyed) {
+            throw new Error("staging file stream is not writable");
+        }
+
+        await new Promise((resolve, reject) => {
+            const onError = (error) => {
+                cleanup();
+                reject(error);
+            };
+            const cleanup = () => {
+                writeStream.off?.("error", onError);
+            };
+
+            writeStream.once("error", onError);
+            writeStream.write(chunk, (error) => {
+                cleanup();
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                resolve();
+            });
+        });
+    }
+
+    async _closeWriteStream(writeStream) {
+        if (!writeStream || writeStream.destroyed || writeStream.closed) return;
+        await new Promise((resolve, reject) => {
+            const onError = (error) => {
+                cleanup();
+                reject(error);
+            };
+            const onFinish = () => {
+                cleanup();
+                resolve();
+            };
+            const cleanup = () => {
+                writeStream.off?.("error", onError);
+                writeStream.off?.("finish", onFinish);
+            };
+
+            writeStream.once("error", onError);
+            writeStream.once("finish", onFinish);
+            writeStream.end();
+        });
+    }
+
+    _normalizeResumableProgress(fileSize, totalSize, chunkSize) {
+        const expectedTotal = Number(totalSize || 0);
+        const safeChunkSize = Number.isFinite(chunkSize) && chunkSize > 0 ? chunkSize : DEFAULT_STREAM_CHUNK_SIZE;
+        let uploadedBytes = Math.max(0, Number(fileSize || 0));
+
+        if (expectedTotal > 0 && uploadedBytes > expectedTotal) {
+            uploadedBytes = expectedTotal;
+        }
+
+        const isComplete = expectedTotal > 0 && uploadedBytes === expectedTotal;
+        if (!isComplete && uploadedBytes > 0) {
+            uploadedBytes = Math.floor(uploadedBytes / safeChunkSize) * safeChunkSize;
+        }
+
+        const lastChunkIndex = uploadedBytes <= 0
+            ? -1
+            : (isComplete ? Math.ceil(uploadedBytes / safeChunkSize) - 1 : Math.floor(uploadedBytes / safeChunkSize) - 1);
+
+        return { uploadedBytes, lastChunkIndex, chunkSize: safeChunkSize };
+    }
+
+    _isResumableDataComplete(contextOrProgress) {
+        const totalSize = Number(contextOrProgress?.totalSize || 0);
+        const uploadedBytes = Number(contextOrProgress?.uploadedBytes || 0);
+        return totalSize > 0 && uploadedBytes === totalSize;
+    }
+
+    _buildResumableContext(taskId, metadata, progress, writeStream = null) {
+        const isComplete = this._isResumableDataComplete(progress);
+        return {
+            mode: 'resumable',
+            phase: isComplete ? 'received' : 'receiving',
+            finalizeState: null,
+            finalizePromise: null,
+            finalizeToken: null,
+            abortController: null,
+            cancelled: false,
+            writeStream,
+            localPath: progress.localPath,
+            resumeDir: progress.resumeDir,
+            fileName: progress.fileName,
+            originalFileName: metadata.fileName,
+            userId: metadata.userId,
+            totalSize: progress.totalSize,
+            chunkSize: progress.chunkSize,
+            leaderUrl: metadata.leaderUrl,
+            chatId: metadata.chatId,
+            msgId: metadata.msgId,
+            sourceMsgId: metadata.sourceMsgId,
+            uploadedBytes: progress.uploadedBytes,
+            status: TASK_STATUSES.UPLOADING,
+            lastChunkIndex: progress.lastChunkIndex,
+            lastSeen: Date.now(),
+            errorReported: false
+        };
+    }
+
+    _validateResumableMetadata(context, metadata) {
+        const expected = {
+            fileName: context.fileName,
+            userId: context.userId,
+            totalSize: Number(context.totalSize || 0),
+            chunkSize: Number(context.chunkSize || DEFAULT_STREAM_CHUNK_SIZE)
+        };
+        const actual = {
+            fileName: CloudTool.sanitizeRemoteFileName(metadata.fileName),
+            userId: metadata.userId,
+            totalSize: Number(metadata.totalSize || 0),
+            chunkSize: Number(metadata.chunkSize || DEFAULT_STREAM_CHUNK_SIZE)
+        };
+
+        if (expected.fileName !== actual.fileName) {
+            return `Resumable metadata mismatch: fileName expected ${expected.fileName}, got ${actual.fileName}`;
+        }
+        if (expected.userId !== actual.userId) {
+            return "Resumable metadata mismatch: userId changed";
+        }
+        if (expected.totalSize !== actual.totalSize) {
+            return `Resumable metadata mismatch: totalSize expected ${expected.totalSize}, got ${actual.totalSize}`;
+        }
+        if (expected.chunkSize !== actual.chunkSize) {
+            return `Resumable metadata mismatch: chunkSize expected ${expected.chunkSize}, got ${actual.chunkSize}`;
+        }
+
+        return null;
+    }
+
+    async _getResumableProgress(taskId, metadata) {
+        const paths = this._getResumablePaths(taskId, metadata.fileName);
+        await fs.promises.mkdir(paths.resumeDir, { recursive: true });
+
+        let fileSize = 0;
+        try {
+            const stat = await fs.promises.stat(paths.localPath);
+            fileSize = stat.size;
+        } catch (error) {
+            if (error.code !== "ENOENT") throw error;
+        }
+
+        const progress = this._normalizeResumableProgress(fileSize, metadata.totalSize, metadata.chunkSize);
+        if (progress.uploadedBytes !== fileSize) {
+            await fs.promises.truncate(paths.localPath, progress.uploadedBytes);
+        }
+
+        return {
+            ...paths,
+            ...progress,
+            isCached: progress.uploadedBytes > 0,
+            isActive: false,
+            totalSize: Number(metadata.totalSize || 0)
+        };
+    }
+
+    async _saveFinalizationStatus(taskId, status) {
+        try {
+            await CacheService.set(`stream:final:${taskId}`, {
+                taskId,
+                ...status,
+                timestamp: Date.now()
+            }, this.progressCacheTTL);
+        } catch (error) {
+            log.warn(`Failed to save finalization status for ${taskId}:`, error.message);
+        }
+    }
+
+    async _loadFinalizationStatus(taskId) {
+        try {
+            return await CacheService.get(`stream:final:${taskId}`);
+        } catch (error) {
+            log.warn(`Failed to load finalization status for ${taskId}:`, error.message);
+            return null;
+        }
+    }
+
+    async _clearFinalizationStatus(taskId) {
+        try {
+            await CacheService.delete(`stream:final:${taskId}`);
+        } catch (error) {
+            log.warn(`Failed to clear finalization status for ${taskId}:`, error.message);
+        }
+    }
+
+    _finalizationResultFromStatus(status) {
+        if (!status) return null;
+        if (status.status === 'completed') {
+            return { success: true, completed: true, status: status.status };
+        }
+        if (status.status === 'failed' || status.status === 'cancelled') {
+            return {
+                success: false,
+                completed: false,
+                status: status.status,
+                error: status.error || `Finalization ${status.status}`
+            };
+        }
+        return null;
+    }
+
+    async _delay(ms) {
+        await new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async _waitForLocalFinalization(taskId, options = {}) {
+        const timeoutMs = options.timeoutMs || getConfig().streamForwarding?.finalizationTimeoutMs || DEFAULT_FINALIZATION_TIMEOUT_MS;
+        const deadline = Date.now() + timeoutMs;
+
+        while (Date.now() <= deadline) {
+            const context = this.activeStreams.get(taskId);
+            if (context?.finalizePromise) {
+                return await context.finalizePromise;
+            }
+
+            const statusResult = this._finalizationResultFromStatus(await this._loadFinalizationStatus(taskId));
+            if (statusResult) {
+                return statusResult;
+            }
+
+            await this._delay(options.pollMs || DEFAULT_FINALIZATION_POLL_MS);
+        }
+
+        return { success: false, completed: false, status: 'timeout', error: 'Stream finalization timed out' };
+    }
+
+    async _waitForRemoteFinalization(targetUrl, taskId, options = {}) {
+        const timeoutMs = options.timeoutMs || getConfig().streamForwarding?.finalizationTimeoutMs || DEFAULT_FINALIZATION_TIMEOUT_MS;
+        const pollMs = options.pollMs || getConfig().streamForwarding?.finalizationPollMs || DEFAULT_FINALIZATION_POLL_MS;
+        const deadline = Date.now() + timeoutMs;
+        const url = `${targetUrl.replace(/\/$/, '')}/api/v2/stream/${taskId}/full-progress`;
+
+        while (Date.now() <= deadline) {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'x-instance-secret': getStreamConfig().secret
+                },
+                signal: AbortSignal.timeout(Math.min(30000, pollMs + 5000))
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => '');
+                throw new Error(`Worker finalization status failed with ${response.status}: ${errorText}`);
+            }
+
+            const progress = await response.json();
+            const statusResult = this._finalizationResultFromStatus(progress.finalization);
+            if (statusResult) {
+                return statusResult;
+            }
+
+            await this._delay(pollMs);
+        }
+
+        return { success: false, completed: false, status: 'timeout', error: 'Stream finalization timed out' };
+    }
+
+    async waitForFinalization(taskId, options = {}) {
+        if (options.targetUrl) {
+            return await this._waitForRemoteFinalization(options.targetUrl, taskId, options);
+        }
+        return await this._waitForLocalFinalization(taskId, options);
     }
 
     /**
@@ -56,19 +409,6 @@ class StreamTransferService {
             return false;
         }
 
-        // 先检查远程进度，避免不必要的传输
-        try {
-            const remoteProgress = await this.getRemoteProgress(workerUrl, taskId);
-            if (remoteProgress >= chunkIndex) {
-                log.info(`Chunk ${chunkIndex} already received by worker (progress: ${remoteProgress}), skipping.`);
-                // 清除重试计数
-                this.chunkRetryAttempts.delete(retryKey);
-                return true;
-            }
-        } catch (queryError) {
-            log.debug(`Failed to query remote progress before sending: ${queryError.message}`);
-        }
-
         const url = `${workerUrl.replace(/\/$/, '')}/api/v2/stream/${taskId}`;
         
         try {
@@ -87,11 +427,11 @@ class StreamTransferService {
                     'x-chat-id': chatId || '',
                     'x-msg-id': msgId || '',
                     'x-source-msg-id': sourceMsgId || '',
-                    // 断点续传标识头
-                    'x-resume-enabled': 'true'
+                    'x-resume-enabled': metadata.resumeEnabled ? 'true' : 'false',
+                    'x-stream-mode': metadata.streamMode || 'live',
+                    'x-chunk-size': String(metadata.chunkSize || DEFAULT_STREAM_CHUNK_SIZE)
                 },
                 body: chunk,
-                // 增加超时时间
                 signal: AbortSignal.timeout(30000)
             });
 
@@ -106,20 +446,6 @@ class StreamTransferService {
         } catch (error) {
             // 记录重试次数
             this.chunkRetryAttempts.set(retryKey, currentAttempts + 1);
-
-            // 如果是网络超时，再次查询进度
-            if (error.name === 'AbortError' || error.message.includes('timeout')) {
-                try {
-                    const remoteProgress = await this.getRemoteProgress(workerUrl, taskId);
-                    if (remoteProgress >= chunkIndex) {
-                        log.info(`Chunk ${chunkIndex} was received despite timeout (progress: ${remoteProgress}), skipping retry.`);
-                        this.chunkRetryAttempts.delete(retryKey);
-                        return true;
-                    }
-                } catch (queryError) {
-                    log.warn(`Failed to query remote progress after timeout: ${queryError.message}`);
-                }
-            }
 
             log.error(`Failed to forward chunk ${chunkIndex} for task ${taskId} (attempt ${currentAttempts + 1}/${this.maxRetryAttempts}):`, error);
             throw error;
@@ -153,6 +479,24 @@ class StreamTransferService {
         return context ? (context.lastChunkIndex ?? -1) : -1;
     }
 
+    _formatProgressSnapshot(context, finalization = null) {
+        const snapshot = {
+            isActive: Boolean(context),
+            lastChunkIndex: context?.lastChunkIndex ?? -1,
+            uploadedBytes: context?.uploadedBytes ?? 0,
+            totalSize: context?.totalSize ?? 0,
+            status: context?.status,
+            mode: context?.mode,
+            phase: context?.phase
+        };
+
+        if (finalization || context?.finalizeState) {
+            snapshot.finalization = finalization || context.finalizeState;
+        }
+
+        return snapshot;
+    }
+
     /**
      * Receiver (Worker): 处理接收到的 chunk (支持断点续传)
      */
@@ -163,55 +507,84 @@ class StreamTransferService {
         }
 
         const metadata = this._extractChunkMetadata(req.headers);
-        metadata.leaderUrl = await this._resolveLeaderUrl(metadata.leaderUrl, metadata.sourceInstanceId);
+        return await this._withTaskLock(taskId, async () => {
+            metadata.leaderUrl = await this._resolveLeaderUrl(metadata.leaderUrl, metadata.sourceInstanceId);
 
-        let streamContext = this.activeStreams.get(taskId);
-
-        try {
-            // 断点续传：从缓存恢复进度信息
-            if (!streamContext) {
-                streamContext = await this._initializeStreamContext(taskId, metadata);
+            if (metadata.streamMode === 'resumable') {
+                return await this._handleIncomingResumableChunk(taskId, req, metadata);
             }
 
-            // 断点续传幂等性检查：如果当前 chunkIndex 已经处理过，直接返回成功
-            if (metadata.chunkIndex <= streamContext.lastChunkIndex) {
-                log.info(`⚠️ 忽略重复的 Chunk ${metadata.chunkIndex} (已处理到: ${streamContext.lastChunkIndex})`);
-                // 必须消费掉请求流，否则可能导致发送端挂起或连接泄漏
-                for await (const _ of req) {} 
-                return { success: true, statusCode: 200, message: "Duplicate chunk ignored" };
-            }
+            let streamContext = this.activeStreams.get(taskId);
 
-            // 断点续传检查：如果当前 chunkIndex 超过预期的下一个 chunk，可能是丢失了中间的 chunk
-            const expectedChunkIndex = streamContext.lastChunkIndex + 1;
-            if (metadata.chunkIndex > expectedChunkIndex && metadata.isResumeEnabled) {
-                log.warn(`⚠️ Chunk 跳跃检测: 期望 ${expectedChunkIndex}, 收到 ${metadata.chunkIndex}, 可能存在丢包`);
-                // 仍然继续处理，但记录警告
-            }
+            try {
+                if (!Number.isInteger(metadata.chunkIndex) || metadata.chunkIndex < 0) {
+                    for await (const _ of req) {}
+                    return {
+                        success: false,
+                        statusCode: 400,
+                        message: "Invalid chunk index"
+                    };
+                }
 
-            // 获取 Body 数据 (Node.js req is a Readable Stream)
-            for await (const chunk of req) {
-                streamContext.stdin.write(chunk);
-                streamContext.uploadedBytes += chunk.length;
-            }
-            streamContext.lastSeen = Date.now();
-            streamContext.lastChunkIndex = metadata.chunkIndex;
+                if (!streamContext && metadata.chunkIndex !== 0) {
+                    log.warn(`⚠️ 首个 Chunk 顺序错误: 期望 0, 收到 ${metadata.chunkIndex}`);
+                    for await (const _ of req) {}
+                    return {
+                        success: false,
+                        statusCode: 409,
+                        message: `Unexpected chunk index: expected 0, got ${metadata.chunkIndex}`
+                    };
+                }
 
-            await this._handlePeriodicTasks(taskId, streamContext, metadata.chunkIndex, metadata.isLast);
+                if (!streamContext) {
+                    streamContext = await this._initializeStreamContext(taskId, metadata);
+                }
 
-            if (metadata.isLast) {
-                log.info(`🏁 任务数据接收完成: ${taskId}`);
-                try { streamContext.stdin.end(); } catch {}
-            }
+                // 断点续传幂等性检查：如果当前 chunkIndex 已经处理过，直接返回成功
+                if (metadata.chunkIndex <= streamContext.lastChunkIndex) {
+                    log.info(`⚠️ 忽略重复的 Chunk ${metadata.chunkIndex} (已处理到: ${streamContext.lastChunkIndex})`);
+                    // 必须消费掉请求流，否则可能导致发送端挂起或连接泄漏
+                    for await (const _ of req) {}
+                    return { success: true, statusCode: 200, message: "Duplicate chunk ignored" };
+                }
 
-            return { success: true, statusCode: 200 };
-        } catch (error) {
-            log.error(`Error handling incoming chunk for ${taskId}:`, error);
-            if (streamContext) {
-                try { streamContext.stdin.end(); } catch {}
-                this.activeStreams.delete(taskId);
+                const expectedChunkIndex = streamContext.lastChunkIndex + 1;
+                if (metadata.chunkIndex !== expectedChunkIndex) {
+                    log.warn(`⚠️ Chunk 顺序错误: 期望 ${expectedChunkIndex}, 收到 ${metadata.chunkIndex}`);
+                    for await (const _ of req) {}
+                    return {
+                        success: false,
+                        statusCode: 409,
+                        message: `Unexpected chunk index: expected ${expectedChunkIndex}, got ${metadata.chunkIndex}`
+                    };
+                }
+
+                // 获取 Body 数据 (Node.js req is a Readable Stream)
+                for await (const chunk of req) {
+                    await this._writeWithBackpressure(streamContext, chunk);
+                    streamContext.uploadedBytes += chunk.length;
+                }
+                streamContext.lastSeen = Date.now();
+                streamContext.lastChunkIndex = metadata.chunkIndex;
+
+                await this._handlePeriodicTasks(taskId, streamContext, metadata.chunkIndex, metadata.isLast);
+
+                if (metadata.isLast) {
+                    log.info(`🏁 任务数据接收完成: ${taskId}`);
+                    try { streamContext.stdin.end(); } catch {}
+                }
+
+                return { success: true, statusCode: 200 };
+            } catch (error) {
+                log.error(`Error handling incoming chunk for ${taskId}:`, error);
+                if (streamContext) {
+                    try { streamContext.stdin.end(); } catch {}
+                    this.activeStreams.delete(taskId);
+                    await this._deletePartialRemoteFile(streamContext);
+                }
+                return { success: false, statusCode: 500, message: error.message };
             }
-            return { success: false, statusCode: 500, message: error.message };
-        }
+        });
     }
 
 
@@ -227,7 +600,9 @@ class StreamTransferService {
             chatId: headers['x-chat-id'],
             msgId: headers['x-msg-id'],
             sourceMsgId: headers['x-source-msg-id'],
-            isResumeEnabled: headers['x-resume-enabled'] === 'true'
+            isResumeEnabled: headers['x-resume-enabled'] === 'true',
+            streamMode: headers['x-stream-mode'] || 'live',
+            chunkSize: parseInt(headers['x-chunk-size']) || DEFAULT_STREAM_CHUNK_SIZE
         };
     }
 
@@ -249,47 +624,265 @@ class StreamTransferService {
     async _initializeStreamContext(taskId, metadata) {
         const cachedProgress = await this.loadProgressFromCache(taskId);
 
-        log.info(`📦 接收到新流式任务: ${taskId} (${metadata.fileName})${cachedProgress ? ` (resume from chunk ${cachedProgress.lastChunkIndex})` : ''}`);
-        const { stdin, proc } = await CloudTool.createRcatStream(metadata.fileName, metadata.userId);
+        log.info(`📦 接收到新流式任务: ${taskId} (${metadata.fileName})${cachedProgress ? ` (ignored stale live-stream progress ${cachedProgress.lastChunkIndex})` : ''}`);
+        await this._markStreamUploadStarted(taskId, 'stream_context_initialized');
+        const { stdin, proc, fileName: remoteFileName } = await CloudTool.createRcatStream(metadata.fileName, metadata.userId);
 
         const streamContext = {
             stdin,
             proc,
             lastSeen: Date.now(),
-            fileName: metadata.fileName,
+            fileName: remoteFileName || CloudTool.sanitizeRemoteFileName(metadata.fileName),
+            originalFileName: metadata.fileName,
             userId: metadata.userId,
             totalSize: metadata.totalSize,
             leaderUrl: metadata.leaderUrl,
             chatId: metadata.chatId,
             msgId: metadata.msgId,
             sourceMsgId: metadata.sourceMsgId,
-            uploadedBytes: cachedProgress?.uploadedBytes || 0,
+            uploadedBytes: 0,
             status: TASK_STATUSES.UPLOADING,
-            lastChunkIndex: cachedProgress?.lastChunkIndex || -1, // 记录最近处理的 Chunk Index
-            resumeMode: !!cachedProgress
+            lastChunkIndex: -1, // 记录最近处理的 Chunk Index
+            stderrLog: '',
+            errorReported: false
         };
         this.activeStreams.set(taskId, streamContext);
 
         // 监听 rclone 错误
         proc.stderr.on('data', (data) => {
             const msg = data.toString();
+            streamContext.stderrLog += msg;
+            if (streamContext.stderrLog.length > 8000) {
+                streamContext.stderrLog = streamContext.stderrLog.slice(-8000);
+            }
             log.error(`rclone rcat error [${taskId}]:`, msg);
         });
+
+        const handleProcessError = async (error) => {
+            if (streamContext.errorReported) return;
+            streamContext.errorReported = true;
+            log.error(`rclone rcat process error [${taskId}]:`, error);
+            this.activeStreams.delete(taskId);
+            await this.clearProgressFromCache(taskId);
+            await this._deletePartialRemoteFile(streamContext);
+            await this.reportError(taskId, streamContext, error.message || String(error));
+        };
+
+        proc.on('error', handleProcessError);
+        stdin.on?.('error', handleProcessError);
 
         proc.on('close', async (code) => {
             log.info(`rclone rcat exited with code ${code} for task ${taskId}`);
             this.activeStreams.delete(taskId);
             // 清理缓存
             await this.clearProgressFromCache(taskId);
+            if (streamContext.errorReported) return;
 
-            if (code === 0) {
+            const hasRcloneErrors = /(^|\b)(ERROR|Failed|failed|error)(\b|:)/.test(streamContext.stderrLog || '');
+            if (code === 0 && !hasRcloneErrors) {
                 await this.finishTask(taskId, streamContext);
             } else {
-                await this.reportError(taskId, streamContext, `rclone exited with code ${code}`);
+                streamContext.errorReported = true;
+                const errorTail = streamContext.stderrLog?.slice(-500).trim();
+                await this._deletePartialRemoteFile(streamContext);
+                await this.reportError(taskId, streamContext, errorTail || `rclone exited with code ${code}`);
             }
         });
 
         return streamContext;
+    }
+
+    async _handleIncomingResumableChunk(taskId, req, metadata) {
+        let context = this.activeStreams.get(taskId);
+
+        try {
+            if (!Number.isInteger(metadata.chunkIndex) || metadata.chunkIndex < 0) {
+                for await (const _ of req) {}
+                return { success: false, statusCode: 400, message: "Invalid chunk index" };
+            }
+
+            if (!context) {
+                context = await this._initializeResumableContext(taskId, metadata);
+            } else {
+                const metadataError = this._validateResumableMetadata(context, metadata);
+                if (metadataError) {
+                    for await (const _ of req) {}
+                    return { success: false, statusCode: 409, message: metadataError };
+                }
+            }
+
+            if (metadata.chunkIndex <= context.lastChunkIndex) {
+                for await (const _ of req) {}
+                return { success: true, statusCode: 200, message: "Duplicate chunk ignored" };
+            }
+
+            const expectedChunkIndex = context.lastChunkIndex + 1;
+            if (metadata.chunkIndex !== expectedChunkIndex) {
+                for await (const _ of req) {}
+                return {
+                    success: false,
+                    statusCode: 409,
+                    message: `Unexpected chunk index: expected ${expectedChunkIndex}, got ${metadata.chunkIndex}`
+                };
+            }
+
+            for await (const chunk of req) {
+                if (context.phase !== 'receiving') {
+                    throw new Error(`Cannot accept chunks while stream is ${context.phase}`);
+                }
+                await this._writeFileWithBackpressure(context.writeStream, chunk);
+                context.uploadedBytes += chunk.length;
+            }
+
+            context.lastSeen = Date.now();
+            context.lastChunkIndex = metadata.chunkIndex;
+            await this._handlePeriodicTasks(taskId, context, metadata.chunkIndex, metadata.isLast);
+
+            if (metadata.isLast) {
+                await this._closeWriteStream(context.writeStream);
+                const expectedSize = Number(context.totalSize || 0);
+                const stat = await fs.promises.stat(context.localPath);
+                if (expectedSize > 0 && stat.size !== expectedSize) {
+                    throw new Error(`Staging validation failed: local(${stat.size}) vs expected(${expectedSize})`);
+                }
+
+                this._startResumableFinalization(taskId, context);
+            }
+
+            return { success: true, statusCode: 200 };
+        } catch (error) {
+            log.error(`Error handling resumable chunk for ${taskId}:`, error);
+            if (context) {
+                await this._closeWriteStream(context.writeStream).catch(() => {});
+                this.activeStreams.delete(taskId);
+                await this.saveProgressToCache(taskId, context);
+                await this.reportError(taskId, context, error.message);
+            }
+            return { success: false, statusCode: 500, message: error.message };
+        }
+    }
+
+    async _initializeResumableContext(taskId, metadata) {
+        const progress = await this._getResumableProgress(taskId, metadata);
+        await this._markStreamUploadStarted(taskId, 'stream_resumable_context_initialized');
+        const writeStream = this._isResumableDataComplete(progress)
+            ? null
+            : fs.createWriteStream(progress.localPath, { flags: 'a' });
+        const context = this._buildResumableContext(taskId, metadata, progress, writeStream);
+
+        this.activeStreams.set(taskId, context);
+
+        await this.saveProgressToCache(taskId, context);
+        if (this._isResumableDataComplete(context)) {
+            this._startResumableFinalization(taskId, context);
+        }
+        return context;
+    }
+
+    _startResumableFinalization(taskId, context) {
+        if (context.finalizePromise) {
+            return context.finalizePromise;
+        }
+
+        const token = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+        context.phase = 'finalizing';
+        context.finalizeToken = token;
+        context.finalizeState = {
+            status: 'uploading',
+            uploadedBytes: context.uploadedBytes,
+            totalSize: context.totalSize,
+            startedAt: Date.now()
+        };
+        context.abortController = new AbortController();
+
+        context.finalizePromise = this._completeResumableUpload(taskId, context, token)
+            .then(async (result) => {
+                context.phase = result.completed ? 'completed' : 'failed';
+                context.finalizeState = {
+                    status: result.completed ? 'completed' : 'failed',
+                    error: result.completed ? null : (result.error || 'Finalization did not complete'),
+                    uploadedBytes: context.uploadedBytes,
+                    totalSize: context.totalSize,
+                    finishedAt: Date.now()
+                };
+                await this._saveFinalizationStatus(taskId, context.finalizeState);
+                return result;
+            })
+            .catch(async (error) => {
+                context.phase = context.cancelled ? 'cancelled' : 'failed';
+                context.finalizeState = {
+                    status: context.cancelled ? 'cancelled' : 'failed',
+                    error: error.message,
+                    uploadedBytes: context.uploadedBytes,
+                    totalSize: context.totalSize,
+                    finishedAt: Date.now()
+                };
+                await this._saveFinalizationStatus(taskId, context.finalizeState);
+                if (!context.cancelled) {
+                    await this.saveProgressToCache(taskId, context);
+                    await this.reportError(taskId, context, error.message);
+                }
+                return { success: false, completed: false, error: error.message };
+            });
+
+        void this._saveFinalizationStatus(taskId, context.finalizeState);
+        return context.finalizePromise;
+    }
+
+    async _completeResumableUpload(taskId, context, token) {
+        await this._closeWriteStream(context.writeStream);
+
+        if (context.cancelled || context.finalizeToken !== token) {
+            throw new Error("Resumable stream finalization cancelled");
+        }
+
+        const expectedSize = Number(context.totalSize || 0);
+        const stat = await fs.promises.stat(context.localPath);
+        if (expectedSize > 0 && stat.size !== expectedSize) {
+            throw new Error(`Staging validation failed: local(${stat.size}) vs expected(${expectedSize})`);
+        }
+
+        const uploadResult = await CloudTool.uploadLocalFileToRemote(
+            context.localPath,
+            context.fileName,
+            context.userId,
+            async (progress) => {
+                await this.updateTelegramUI(taskId, {
+                    ...context,
+                    uploadedBytes: progress?.bytes || context.uploadedBytes,
+                    totalSize: progress?.size || context.totalSize
+                });
+            },
+            { signal: context.abortController?.signal }
+        );
+
+        if (!uploadResult?.success) {
+            throw new Error(uploadResult?.error || "Resumable stream upload failed");
+        }
+
+        if (context.cancelled || context.finalizeToken !== token) {
+            throw new Error("Resumable stream finalization cancelled");
+        }
+
+        await this.clearProgressFromCache(taskId);
+        const completed = await this.finishTask(taskId, context);
+
+        if (completed) {
+            try {
+                await fs.promises.unlink(context.localPath);
+            } catch (error) {
+                if (error.code !== "ENOENT") {
+                    log.warn(`Failed to remove stream staging file for ${taskId}: ${error.message}`);
+                }
+            }
+        }
+
+        if (completed) {
+            this.activeStreams.delete(taskId);
+            return { success: true, completed: true };
+        }
+
+        return { success: false, completed: false, error: "Task completion was blocked or remote validation failed" };
     }
 
     async _handlePeriodicTasks(taskId, streamContext, chunkIndex, isLast) {
@@ -381,8 +974,92 @@ class StreamTransferService {
     /**
      * 断点续传：恢复任务传输
      */
-    async resumeTask(taskId, metadata) {
+    async resumeTask(taskId, metadata, targetUrl = null) {
         try {
+            if (targetUrl) {
+                const url = `${targetUrl.replace(/\/$/, '')}/api/v2/stream/${taskId}/resume`;
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-instance-secret': getStreamConfig().secret
+                    },
+                    body: JSON.stringify(metadata || {}),
+                    signal: AbortSignal.timeout(10000)
+                });
+                if (!response.ok) {
+                    const errorText = await response.text().catch(() => '');
+                    throw new Error(`Worker resume failed with ${response.status}: ${errorText}`);
+                }
+                return await response.json();
+            }
+
+            if (metadata?.streamMode === 'resumable') {
+                return await this._withTaskLock(taskId, async () => {
+                    let context = this.activeStreams.get(taskId);
+                    if (context) {
+                        const metadataError = this._validateResumableMetadata(context, metadata);
+                        if (metadataError) {
+                            return { success: false, error: metadataError, canResume: false };
+                        }
+                    } else {
+                        const progress = await this._getResumableProgress(taskId, metadata);
+                        const finalization = await this._loadFinalizationStatus(taskId);
+                        if (finalization?.status === 'completed') {
+                            return {
+                                success: true,
+                                lastChunkIndex: progress.lastChunkIndex,
+                                uploadedBytes: progress.uploadedBytes,
+                                totalSize: progress.totalSize,
+                                chunkSize: progress.chunkSize,
+                                canResume: false,
+                                complete: true,
+                                finalization,
+                                fileName: progress.fileName
+                            };
+                        }
+
+                        if (this._isResumableDataComplete(progress)) {
+                            await this._markStreamUploadStarted(taskId, 'stream_resumable_resume_complete_staging');
+                            context = this._buildResumableContext(taskId, metadata, progress, null);
+                            this.activeStreams.set(taskId, context);
+                            await this.saveProgressToCache(taskId, context);
+                            this._startResumableFinalization(taskId, context);
+                        } else {
+                            await this.saveProgressToCache(taskId, {
+                                ...metadata,
+                                ...progress,
+                                mode: 'resumable'
+                            });
+
+                            return {
+                                success: true,
+                                lastChunkIndex: progress.lastChunkIndex,
+                                uploadedBytes: progress.uploadedBytes,
+                                totalSize: progress.totalSize,
+                                chunkSize: progress.chunkSize,
+                                canResume: progress.uploadedBytes > 0,
+                                finalizing: false,
+                                fileName: progress.fileName
+                            };
+                        }
+                    }
+
+                    return {
+                        success: true,
+                        lastChunkIndex: context.lastChunkIndex,
+                        uploadedBytes: context.uploadedBytes,
+                        totalSize: context.totalSize,
+                        chunkSize: context.chunkSize,
+                        canResume: !this._isResumableDataComplete(context) && context.uploadedBytes > 0,
+                        finalizing: context.phase === 'finalizing',
+                        complete: context.phase === 'completed',
+                        finalization: context.finalizeState,
+                        fileName: context.fileName
+                    };
+                });
+            }
+
             const fullProgress = await this.getTaskFullProgress(taskId);
             
             if (!fullProgress.isCached && !fullProgress.isActive) {
@@ -412,30 +1089,63 @@ class StreamTransferService {
     /**
      * 断点续传：清除任务的所有状态（强制重新开始）
      */
-    async resetTask(taskId) {
+    async resetTask(taskId, targetUrl = null) {
         try {
-            // 清理活动流
-            const context = this.activeStreams.get(taskId);
-            if (context) {
-                try { context.stdin.end(); } catch {}
-                try { context.proc.kill(); } catch {}
-                this.activeStreams.delete(taskId);
-            }
-
-            // 清理缓存
-            await this.clearProgressFromCache(taskId);
-
-            // 清理重试计数
-            for (const key of this.chunkRetryAttempts.keys()) {
-                if (key.startsWith(`${taskId}:`)) {
-                    this.chunkRetryAttempts.delete(key);
+            if (targetUrl) {
+                const url = `${targetUrl.replace(/\/$/, '')}/api/v2/stream/${taskId}/reset`;
+                const response = await fetch(url, {
+                    method: 'DELETE',
+                    headers: {
+                        'x-instance-secret': getStreamConfig().secret
+                    },
+                    signal: AbortSignal.timeout(10000)
+                });
+                if (!response.ok) {
+                    const errorText = await response.text().catch(() => '');
+                    throw new Error(`Worker reset failed with ${response.status}: ${errorText}`);
                 }
+                return await response.json().catch(() => ({ success: true }));
             }
 
-            log.info(`🗑️ Reset task ${taskId} - all state cleared`);
-            return { success: true };
+            return await this._withTaskLock(taskId, async () => {
+                // 清理活动流
+                const context = this.activeStreams.get(taskId);
+                if (context) {
+                    if (context.mode === 'resumable') {
+                        context.cancelled = true;
+                        context.finalizeToken = null;
+                        try { context.abortController?.abort(); } catch {}
+                        await this._closeWriteStream(context.writeStream).catch(() => {});
+                    } else {
+                        try { context.stdin.end(); } catch {}
+                        try { context.proc.kill(); } catch {}
+                        await this._deletePartialRemoteFile(context);
+                    }
+                    this.activeStreams.delete(taskId);
+                }
+
+                // 清理缓存
+                await this.clearProgressFromCache(taskId);
+                await this._clearFinalizationStatus(taskId);
+                await this._deleteResumableStaging(taskId).catch(error => {
+                    log.warn(`Failed to delete resumable staging for ${taskId}: ${error.message}`);
+                });
+
+                // 清理重试计数
+                for (const key of this.chunkRetryAttempts.keys()) {
+                    if (key.startsWith(`${taskId}:`)) {
+                        this.chunkRetryAttempts.delete(key);
+                    }
+                }
+
+                log.info(`🗑️ Reset task ${taskId} - all state cleared`);
+                return { success: true };
+            });
         } catch (error) {
             log.error(`Failed to reset task ${taskId}:`, error);
+            if (targetUrl) {
+                throw error;
+            }
             return { success: false, error: error.message };
         }
     }
@@ -445,12 +1155,25 @@ class StreamTransferService {
      */
     async finishTask(taskId, context) {
         log.info(`✅ 任务上传完成: ${taskId}`);
+        try {
+            const remoteFile = await CloudTool.getRemoteFileInfo(context.fileName, context.userId, 2, true);
+            const remoteSize = Number(remoteFile?.Size);
+            const expectedSize = Number(context.totalSize || 0);
+            if (!remoteFile || (expectedSize > 0 && remoteSize !== expectedSize)) {
+                await this.reportError(taskId, context, `Validation failed: remote(${Number.isFinite(remoteSize) ? remoteSize : 'not found'}) vs expected(${expectedSize})`);
+                return false;
+            }
+        } catch (error) {
+            await this.reportError(taskId, context, `Validation failed: ${error.message}`);
+            return false;
+        }
+
         const transition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.COMPLETE, null, {
             returnResult: true,
             allowNoop: true,
             source: 'stream_finish_task'
         });
-        if (transition.blocked) return;
+        if (transition.blocked) return false;
         
         try {
             const { STRINGS, format } = await import("../locales/zh-CN.js");
@@ -471,6 +1194,48 @@ class StreamTransferService {
         if (context.leaderUrl) {
             await this.reportProgressToLeader(taskId, { ...context, status: TASK_STATUSES.COMPLETED });
         }
+        return true;
+    }
+
+    async _deletePartialRemoteFile(context) {
+        if (!context?.fileName || !context?.userId || typeof CloudTool.deleteRemoteFile !== 'function') {
+            return;
+        }
+
+        try {
+            const result = await CloudTool.deleteRemoteFile(context.fileName, context.userId);
+            if (result?.success === false) {
+                log.warn('Failed to delete partial stream remote file', {
+                    fileName: context.fileName,
+                    userId: context.userId,
+                    error: result.error
+                });
+            }
+        } catch (error) {
+            log.warn('Failed to delete partial stream remote file', {
+                fileName: context.fileName,
+                userId: context.userId,
+                error: error.message
+            });
+        }
+    }
+
+    async _deleteResumableStaging(taskId) {
+        const resumeDir = this._getResumeDir();
+        let entries = [];
+        try {
+            entries = await fs.promises.readdir(resumeDir);
+        } catch (error) {
+            if (error.code === "ENOENT") return;
+            throw error;
+        }
+
+        const prefix = `${sanitizeTaskPathSegment(taskId)}.`;
+        await Promise.all(entries
+            .filter(entry => entry.startsWith(prefix) && entry.endsWith('.part'))
+            .map(entry => fs.promises.unlink(path.join(resumeDir, entry)).catch(error => {
+                if (error.code !== "ENOENT") throw error;
+            })));
     }
 
     async reportError(taskId, context, errorMsg) {
@@ -515,6 +1280,9 @@ class StreamTransferService {
                 chatId: context.chatId,
                 msgId: context.msgId,
                 sourceMsgId: context.sourceMsgId,
+                localPath: context.localPath,
+                chunkSize: context.chunkSize,
+                mode: context.mode,
                 timestamp: Date.now()
             };
             
@@ -563,14 +1331,11 @@ class StreamTransferService {
     async getTaskFullProgress(taskId) {
         const context = this.activeStreams.get(taskId);
         if (context) {
-            return {
-                isActive: true,
-                lastChunkIndex: context.lastChunkIndex,
-                uploadedBytes: context.uploadedBytes,
-                totalSize: context.totalSize,
-                status: context.status
-            };
+            return this._formatProgressSnapshot(context);
         }
+
+        const loadedFinalization = await this._loadFinalizationStatus(taskId);
+        const finalization = loadedFinalization?.status ? loadedFinalization : null;
 
         // 如果不在内存中，尝试从缓存获取
         const cachedProgress = await this.loadProgressFromCache(taskId);
@@ -581,6 +1346,9 @@ class StreamTransferService {
                 lastChunkIndex: cachedProgress.lastChunkIndex,
                 uploadedBytes: cachedProgress.uploadedBytes,
                 totalSize: cachedProgress.totalSize,
+                mode: cachedProgress.mode,
+                phase: cachedProgress.phase,
+                finalization: finalization || undefined,
                 cachedAt: cachedProgress.timestamp
             };
         }
@@ -590,7 +1358,8 @@ class StreamTransferService {
             isCached: false,
             lastChunkIndex: -1,
             uploadedBytes: 0,
-            totalSize: 0
+            totalSize: 0,
+            finalization: finalization || undefined
         };
     }
 
@@ -604,8 +1373,13 @@ class StreamTransferService {
         for (const [taskId, context] of this.activeStreams.entries()) {
             if (now - context.lastSeen > timeout) {
                 log.warn(`清理过期流任务: ${taskId}`);
-                try { context.stdin.end(); } catch {}
-                try { context.proc.kill(); } catch {}
+                if (context.mode === 'resumable') {
+                    this._closeWriteStream(context.writeStream).catch(() => {});
+                    this.saveProgressToCache(taskId, context).catch(() => {});
+                } else {
+                    try { context.stdin.end(); } catch {}
+                    try { context.proc.kill(); } catch {}
+                }
                 this.activeStreams.delete(taskId);
             }
         }

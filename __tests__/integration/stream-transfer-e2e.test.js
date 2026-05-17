@@ -102,8 +102,11 @@ vi.mock('../../src/services/rclone.js', () => ({
   CloudTool: {
     createRcatStream: vi.fn(() => {
       mockRcat = createMockRcatStream()
-      return { stdin: mockRcat.stdin, proc: mockRcat.proc }
-    })
+      return { stdin: mockRcat.stdin, proc: mockRcat.proc, fileName: 'uploaded.txt' }
+    }),
+    getRemoteFileInfo: vi.fn().mockResolvedValue({ Name: 'uploaded.txt', Size: 0 }),
+    sanitizeRemoteFileName: vi.fn((fileName) => String(fileName || '').split('/').pop() || 'unnamed.bin'),
+    deleteRemoteFile: vi.fn().mockResolvedValue({ success: true })
   }
 }))
 
@@ -157,6 +160,8 @@ function createRes() {
   return res
 }
 
+const flushAsyncEvents = () => new Promise(resolve => setImmediate(resolve))
+
 // ─── 测试 ───
 
 describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)', () => {
@@ -170,6 +175,22 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
     const { streamTransferService } = await import('../../src/services/StreamTransferService.js')
     streamTransferService.activeStreams.clear()
     streamTransferService.chunkRetryAttempts.clear()
+    streamTransferService.taskLocks?.clear()
+    const { CacheService } = await import('../../src/services/CacheService.js')
+    CacheService._store.clear()
+
+    const { CloudTool } = await import('../../src/services/rclone.js')
+    CloudTool.createRcatStream.mockReset()
+    CloudTool.getRemoteFileInfo.mockReset()
+    CloudTool.sanitizeRemoteFileName.mockReset()
+    CloudTool.deleteRemoteFile.mockReset()
+    CloudTool.createRcatStream.mockImplementation(() => {
+      mockRcat = createMockRcatStream()
+      return { stdin: mockRcat.stdin, proc: mockRcat.proc, fileName: 'uploaded.txt' }
+    })
+    CloudTool.getRemoteFileInfo.mockResolvedValue({ Name: 'uploaded.txt', Size: 0 })
+    CloudTool.sanitizeRemoteFileName.mockImplementation((fileName) => String(fileName || '').split('/').pop() || 'unnamed.bin')
+    CloudTool.deleteRemoteFile.mockResolvedValue({ success: true })
   })
 
   afterEach(() => {
@@ -326,6 +347,79 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
       expect(mockRcat.chunks[0].toString()).toBe('first')
     })
 
+    test('乱序 chunk 应返回 409 且不写入 rcat', async () => {
+      const res = createRes()
+      await handleWebhook(createReq({
+        method: 'POST',
+        url: '/api/v2/stream/task-out-of-order',
+        headers: {
+          'x-instance-secret': 'integration-secret',
+          'x-file-name': encodeURIComponent('order.txt'),
+          'x-user-id': 'user-1',
+          'x-is-last': 'false',
+          'x-chunk-index': '1',
+          'x-total-size': '1024',
+          'x-leader-url': '',
+          'x-source-instance-id': '',
+          'x-chat-id': 'chat-1',
+          'x-msg-id': 'msg-1',
+          'x-resume-enabled': 'true'
+        },
+        body: 'chunk-1'
+      }), res)
+
+      expect(res._status).toBe(409)
+      expect(res._body).toContain('expected 0, got 1')
+      expect(mockRcat).toBeNull()
+    })
+
+    test('缓存进度不应让新 rcat 流伪 resume', async () => {
+      const { CacheService } = await import('../../src/services/CacheService.js')
+      CacheService.get.mockResolvedValueOnce({
+        taskId: 'task-no-fake-resume',
+        fileName: 'cached.txt',
+        userId: 'user-1',
+        totalSize: 4096,
+        uploadedBytes: 2048,
+        lastChunkIndex: 7,
+        timestamp: Date.now()
+      })
+      const baseHeaders = {
+        'x-instance-secret': 'integration-secret',
+        'x-file-name': encodeURIComponent('fresh.txt'),
+        'x-user-id': 'user-1',
+        'x-total-size': '4096',
+        'x-leader-url': '',
+        'x-source-instance-id': '',
+        'x-chat-id': 'chat-1',
+        'x-msg-id': 'msg-1',
+        'x-resume-enabled': 'true'
+      }
+
+      const resumeRes = createRes()
+      await handleWebhook(createReq({
+        method: 'POST',
+        url: '/api/v2/stream/task-no-fake-resume',
+        headers: { ...baseHeaders, 'x-chunk-index': '8', 'x-is-last': 'false' },
+        body: 'chunk-8'
+      }), resumeRes)
+
+      expect(resumeRes._status).toBe(409)
+      expect(resumeRes._body).toContain('expected 0, got 8')
+      expect(mockRcat).toBeNull()
+
+      const freshRes = createRes()
+      await handleWebhook(createReq({
+        method: 'POST',
+        url: '/api/v2/stream/task-no-fake-resume',
+        headers: { ...baseHeaders, 'x-chunk-index': '0', 'x-is-last': 'false' },
+        body: 'chunk-0'
+      }), freshRes)
+
+      expect(freshRes._status).toBe(200)
+      expect(mockRcat.chunks.map(chunk => chunk.toString())).toEqual(['chunk-0'])
+    })
+
     test('last chunk 后应结束 stdin 流', async () => {
       const req = createReq({
         method: 'POST',
@@ -352,6 +446,131 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
       expect(res._status).toBe(200)
       // stdin 应该被 end 了
       expect(mockRcat.stdin.writableEnded || mockRcat.stdin.destroyed).toBeTruthy()
+    })
+
+    test('rcat close 0 且远端大小匹配时应完成任务', async () => {
+      const { CloudTool } = await import('../../src/services/rclone.js')
+      const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
+      CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'validated.txt', Size: 5 })
+
+      const res = createRes()
+      await handleWebhook(createReq({
+        method: 'POST',
+        url: '/api/v2/stream/task-validated-close',
+        headers: {
+          'x-instance-secret': 'integration-secret',
+          'x-file-name': encodeURIComponent('validated.txt'),
+          'x-user-id': 'user-1',
+          'x-is-last': 'true',
+          'x-chunk-index': '0',
+          'x-total-size': '5',
+          'x-leader-url': '',
+          'x-source-instance-id': '',
+          'x-chat-id': 'chat-1',
+          'x-msg-id': '1',
+          'x-resume-enabled': 'true'
+        },
+        body: 'final'
+      }), res)
+
+      mockRcat.proc.emit('close', 0)
+
+      expect(res._status).toBe(200)
+      await vi.waitFor(() => {
+        expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+          'task-validated-close',
+          'complete',
+          null,
+          expect.objectContaining({ source: 'stream_finish_task' })
+        )
+      })
+    })
+
+    test('rcat close 0 但 stderr 有错误时应失败', async () => {
+      const { CloudTool } = await import('../../src/services/rclone.js')
+      const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
+      CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'stderr.txt', Size: 5 })
+
+      const res = createRes()
+      await handleWebhook(createReq({
+        method: 'POST',
+        url: '/api/v2/stream/task-stderr-close',
+        headers: {
+          'x-instance-secret': 'integration-secret',
+          'x-file-name': encodeURIComponent('stderr.txt'),
+          'x-user-id': 'user-1',
+          'x-is-last': 'true',
+          'x-chunk-index': '0',
+          'x-total-size': '5',
+          'x-leader-url': '',
+          'x-source-instance-id': '',
+          'x-chat-id': 'chat-1',
+          'x-msg-id': '1',
+          'x-resume-enabled': 'true'
+        },
+        body: 'final'
+      }), res)
+
+      mockRcat.proc.stderr.emit('data', Buffer.from('ERROR : backend rejected stream\n'))
+      mockRcat.proc.emit('close', 0)
+
+      expect(res._status).toBe(200)
+      await vi.waitFor(() => {
+        expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+          'task-stderr-close',
+          'fail',
+          expect.stringContaining('backend rejected stream'),
+          expect.objectContaining({ source: 'stream_report_error' })
+        )
+      })
+      expect(
+        TaskRepository.transitionStatus.mock.calls.some(([taskId, event]) => (
+          taskId === 'task-stderr-close' && event === 'complete'
+        ))
+      ).toBe(false)
+    })
+
+    test('last chunk 后远端大小不匹配应失败', async () => {
+      const { CloudTool } = await import('../../src/services/rclone.js')
+      const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
+      CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'mismatch.txt', Size: 4 })
+
+      const res = createRes()
+      await handleWebhook(createReq({
+        method: 'POST',
+        url: '/api/v2/stream/task-size-mismatch',
+        headers: {
+          'x-instance-secret': 'integration-secret',
+          'x-file-name': encodeURIComponent('mismatch.txt'),
+          'x-user-id': 'user-1',
+          'x-is-last': 'true',
+          'x-chunk-index': '0',
+          'x-total-size': '5',
+          'x-leader-url': '',
+          'x-source-instance-id': '',
+          'x-chat-id': 'chat-1',
+          'x-msg-id': '1',
+          'x-resume-enabled': 'true'
+        },
+        body: 'final'
+      }), res)
+
+      mockRcat.proc.emit('close', 0)
+
+      expect(res._status).toBe(200)
+      await vi.waitFor(() => {
+        expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+          'task-size-mismatch',
+          'fail',
+          expect.stringContaining('Validation failed: remote(4) vs expected(5)'),
+          expect.objectContaining({ source: 'stream_report_error' })
+        )
+      })
+      expect(
+        TaskRepository.transitionStatus.mock.calls.some(([taskId, event]) => (
+          taskId === 'task-size-mismatch' && event === 'complete'
+        ))
+      ).toBe(false)
     })
   })
 
@@ -430,7 +649,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
 
     test('GET full-progress 无活跃流时应从缓存读取', async () => {
       const { CacheService } = await import('../../src/services/CacheService.js')
-      CacheService.get.mockResolvedValueOnce({
+      CacheService._store.set('stream:progress:task-cached', {
         taskId: 'task-cached',
         fileName: 'cached.txt',
         userId: 'user-1',
@@ -472,7 +691,7 @@ describe('Stream Transfer 集成测试 (WebhookRouter → StreamTransferService)
   describe('resume 和 reset', () => {
     test('POST resume 应返回缓存的进度信息', async () => {
       const { CacheService } = await import('../../src/services/CacheService.js')
-      CacheService.get.mockResolvedValueOnce({
+      CacheService._store.set('stream:progress:task-resume', {
         taskId: 'task-resume',
         fileName: 'resume.txt',
         userId: 'user-1',

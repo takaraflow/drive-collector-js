@@ -14,6 +14,11 @@ describe('TaskStateMachine', () => {
         expect(TaskStateMachine.assertTransition(TASK_STATUSES.UPLOADING, TASK_EVENTS.COMPLETE).toStatus).toBe(TASK_STATUSES.COMPLETED);
     });
 
+    it('should allow stream upload to start from an active download', () => {
+        expect(TaskStateMachine.assertTransition(TASK_STATUSES.DOWNLOADING, TASK_EVENTS.START_STREAM_UPLOAD).toStatus).toBe(TASK_STATUSES.UPLOADING);
+        expect(TaskStateMachine.resolveTransition(TASK_STATUSES.DOWNLOADED, TASK_EVENTS.START_STREAM_UPLOAD).allowed).toBe(false);
+    });
+
     it('should block terminal states from being overwritten by stale events', () => {
         expect(TaskStateMachine.resolveTransition(TASK_STATUSES.COMPLETED, TASK_EVENTS.START_DOWNLOAD).allowed).toBe(false);
         expect(TaskStateMachine.resolveTransition(TASK_STATUSES.CANCELLED, TASK_EVENTS.COMPLETE).allowed).toBe(false);
@@ -32,6 +37,13 @@ describe('TaskStateMachine', () => {
         expect(TaskStateMachine.resolveTransition(TASK_STATUSES.UPLOADING, TASK_EVENTS.RESET_UPLOAD).toStatus).toBe(TASK_STATUSES.DOWNLOADED);
         expect(TaskStateMachine.resolveTransition(TASK_STATUSES.DOWNLOADED, TASK_EVENTS.RESET_UPLOAD).allowed).toBe(true);
         expect(TaskStateMachine.resolveTransition(TASK_STATUSES.DOWNLOADING, TASK_EVENTS.RESET_UPLOAD).allowed).toBe(false);
+    });
+
+    it('should allow failed stream forwarding to resume the download path', () => {
+        expect(TaskStateMachine.resolveTransition(TASK_STATUSES.UPLOADING, TASK_EVENTS.RESET_STREAM_DOWNLOAD).toStatus).toBe(TASK_STATUSES.DOWNLOADING);
+        expect(TaskStateMachine.resolveTransition(TASK_STATUSES.DOWNLOADING, TASK_EVENTS.RESET_STREAM_DOWNLOAD).allowed).toBe(true);
+        expect(TaskStateMachine.resolveTransition(TASK_STATUSES.FAILED, TASK_EVENTS.RESET_STREAM_DOWNLOAD).allowed).toBe(true);
+        expect(TaskStateMachine.resolveTransition(TASK_STATUSES.DOWNLOADED, TASK_EVENTS.RESET_STREAM_DOWNLOAD).allowed).toBe(false);
     });
 
     it('should reject unknown statuses', () => {

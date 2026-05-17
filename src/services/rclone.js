@@ -23,8 +23,17 @@ const rcloneBinary = fs.existsSync("/app/rclone/rclone")
     ? "/app/rclone/rclone" 
     : "rclone";
 
+const sanitizeRemoteFileName = (fileName) => {
+    const baseName = path.basename(String(fileName || "").trim());
+    return baseName || "unnamed.bin";
+};
+
 export class CloudTool {
     static loading = false;
+
+    static sanitizeRemoteFileName(fileName) {
+        return sanitizeRemoteFileName(fileName);
+    }
 
     static async _getUserConfig(userId) {
         if (!userId) throw new Error(STRINGS.drive.user_id_required);
@@ -508,7 +517,8 @@ export class CloudTool {
         const conf = await this._getUserConfig(userId);
         const connectionString = this._getConnectionString(conf);
         const userUploadPath = await this._getUploadPath(userId);
-        const fullRemotePath = `${connectionString}${userUploadPath}${fileName}`;
+        const safeFileName = this.sanitizeRemoteFileName(fileName);
+        const fullRemotePath = `${connectionString}${userUploadPath}${safeFileName}`;
 
         const args = [
             "--config", "/dev/null",
@@ -522,7 +532,136 @@ export class CloudTool {
 
         return {
             stdin: proc.stdin,
-            proc: proc
+            proc: proc,
+            fileName: safeFileName,
+            remotePath: fullRemotePath
+        };
+    }
+
+    /**
+     * Upload one local file to the user's upload folder under a controlled remote file name.
+     * Unlike uploadBatch, this does not preserve the local directory layout.
+     */
+    static async uploadLocalFileToRemote(localPath, fileName, userId, onProgress, options = {}) {
+        if (!localPath) return { success: false, error: "Missing localPath" };
+        if (!userId) return { success: false, error: "Missing userId" };
+
+        return new Promise(async (resolve) => {
+            let resolved = false;
+            let proc = null;
+            const safeResolve = (value) => {
+                if (resolved) return;
+                resolved = true;
+                if (options.signal && abortHandler) {
+                    options.signal.removeEventListener('abort', abortHandler);
+                }
+                resolve(value);
+            };
+            const abortHandler = () => {
+                try { proc?.kill('SIGTERM'); } catch {}
+                safeResolve({ success: false, error: "Upload cancelled" });
+            };
+
+            try {
+                if (options.signal?.aborted) {
+                    safeResolve({ success: false, error: "Upload cancelled" });
+                    return;
+                }
+                if (options.signal) {
+                    options.signal.addEventListener('abort', abortHandler, { once: true });
+                }
+
+                const conf = await this._getUserConfig(userId);
+                const connectionString = this._getConnectionString(conf);
+                const userUploadPath = await this._getUploadPath(userId);
+                const safeFileName = this.sanitizeRemoteFileName(fileName);
+                const fullRemotePath = `${connectionString}${userUploadPath}${safeFileName}`;
+
+                if (resolved) return;
+
+                const args = [
+                    "--config", "/dev/null",
+                    "copyto", localPath, fullRemotePath,
+                    "--progress",
+                    "--use-json-log",
+                    "--retries", "3",
+                    "--low-level-retries", "10",
+                    "--stats", "1s",
+                    "--buffer-size", "32M"
+                ];
+
+                proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
+                const task = { id: "stream-upload", userId, localPath };
+                const errorLogRef = { content: "" };
+                let stderrBuffer = "";
+
+                proc.stderr.on("data", (data) => {
+                    stderrBuffer += data.toString();
+                    const lines = stderrBuffer.split('\n');
+                    stderrBuffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (!line.trim()) continue;
+                        this._processRcloneLog(line, [task], (_taskId, progress) => {
+                            if (onProgress) onProgress(progress);
+                        }, errorLogRef);
+                    }
+                });
+
+                proc.on("close", (code) => {
+                    if (stderrBuffer.trim()) {
+                        this._processRcloneLog(stderrBuffer, [task], (_taskId, progress) => {
+                            if (onProgress) onProgress(progress);
+                        }, errorLogRef);
+                    }
+
+                    const hasErrors = /(^|\b)(ERROR|Failed|failed|error)(\b|:)/.test(errorLogRef.content || "");
+                    if (code === 0 && !hasErrors) {
+                        safeResolve({ success: true, fileName: safeFileName });
+                        return;
+                    }
+
+                    const finalError = errorLogRef.content.slice(-500).trim() || `rclone copyto exited with code ${code}`;
+                    safeResolve({ success: false, error: finalError });
+                });
+
+                proc.on("error", (error) => {
+                    safeResolve({ success: false, error: error.message });
+                });
+            } catch (error) {
+                safeResolve({ success: false, error: error.message });
+            }
+        });
+    }
+
+    /**
+     * Delete one remote file from the user's upload folder.
+     * Used by stream forwarding to remove partial rcat outputs after an aborted live stream.
+     */
+    static async deleteRemoteFile(fileName, userId) {
+        if (!userId) return { success: false, error: "Missing userId" };
+
+        const conf = await this._getUserConfig(userId);
+        const connectionString = this._getConnectionString(conf);
+        const userUploadPath = await this._getUploadPath(userId);
+        const safeFileName = this.sanitizeRemoteFileName(fileName);
+        const fullRemotePath = `${connectionString}${userUploadPath}${safeFileName}`;
+
+        const ret = await this._runRclone(["deletefile", fullRemotePath], 15000);
+        const notFound = ret.stderr && (
+            ret.stderr.includes("directory not found") ||
+            ret.stderr.includes("object not found") ||
+            ret.stderr.includes("not found") ||
+            ret.stderr.includes("error listing")
+        );
+
+        if (ret.code === 0 || notFound) {
+            return { success: true };
+        }
+
+        return {
+            success: false,
+            error: ret.stderr || ret.error?.message || `rclone deletefile exited with code ${ret.code}`
         };
     }
 

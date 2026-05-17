@@ -189,6 +189,29 @@
         "DistributedLock 清理过期锁时会容忍非法 expiresAt，并以 unknown 标记日志，防止 toISOString 抛错",
         "新增 _coerceTimestampMs/_safeToISOString 让历史/异常锁仍能正确被判断为过期"
       ]
+    },
+    "streamForwarding": {
+      "name": "流式转发服务",
+      "icon": "🔀",
+      "description": "跨实例流式转发和断点续传上传",
+      "configKeys": [
+        "STREAM_FORWARDING_ENABLED",
+        "INSTANCE_SECRET",
+        "APP_EXTERNAL_URL",
+        "STREAM_RESUME_DIR",
+        "STREAM_FINALIZATION_TIMEOUT_MS",
+        "STREAM_FINALIZATION_POLL_MS"
+      ],
+      "reinitializationStrategy": {
+        "type": "restart",
+        "graceful": true,
+        "timeout": 20000
+      },
+      "behaviorNotes": [
+        "STREAM_FORWARDING_ENABLED=true 时必须配置非空 INSTANCE_SECRET，否则跨实例流式接口会 fail closed",
+        "STREAM_RESUME_DIR 保存断点续传 .part 文件，最终 copyto 成功后由 worker 清理",
+        "STREAM_FINALIZATION_* 控制 leader 等待 worker 最终化的超时和轮询间隔"
+      ]
     }
   },
   "criticalServices": [

@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "fs";
+import bigInt from "big-integer";
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { createHeartbeat, handleTaskCompletion, handleTaskFailure, escapeHTML } from "./TaskManager.utils.js";
 import { resolveInstanceBaseUrl } from "../../utils/instanceUrl.js";
@@ -172,7 +173,7 @@ async function _handleLocalFile(context, deps, task, info, fileName, localPath, 
 }
 
 async function _handleStreamForwarding(context, deps, task, info, fileName, isLargeFile) {
-    const { config, instanceCoordinator, updateStatus, client, streamTransferService } = deps;
+    const { config, instanceCoordinator, TaskRepository, updateStatus, client, streamTransferService } = deps;
     const log = dependencyContainer.get('logger').withModule('TaskManager');
     const { message } = task;
 
@@ -205,16 +206,29 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
     }
 
     if (streamEnabled) {
-        let targetUrl = config.streamForwarding.lbUrl;
-        if (!targetUrl) {
-            const bestWorker = otherInstances.sort((a, b) => (a.activeTaskCount || 0) - (b.activeTaskCount || 0))[0];
-            if (bestWorker) targetUrl = resolveInstanceBaseUrl(bestWorker);
-        }
+        const eligibleWorkers = otherInstances
+            .map(instance => ({ instance, url: resolveInstanceBaseUrl(instance) }))
+            .filter(worker => worker.url);
+        const bestWorker = eligibleWorkers
+            .sort((a, b) => (a.instance.activeTaskCount || 0) - (b.instance.activeTaskCount || 0))[0];
+        const targetUrl = bestWorker?.url || config.streamForwarding?.lbUrl || null;
 
         if (targetUrl) {
             try {
-                log.info(`🚀 Starting stream forwarding mode: Task ${task.id}, Target: ${targetUrl}`);
+                log.info(`🚀 Starting stream forwarding mode: Task ${task.id}, Target: ${targetUrl}`, {
+                    workerInstanceId: bestWorker?.instance?.id,
+                    viaLoadBalancer: !bestWorker?.url && Boolean(config.streamForwarding?.lbUrl)
+                });
                 await updateStatus(task, "🚀 **Uploading via stream forwarding...**");
+                const streamStartTransition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.START_STREAM_UPLOAD, null, {
+                    returnResult: true,
+                    allowNoop: true,
+                    source: 'stream_forwarding_started'
+                });
+                if (streamStartTransition.blocked) {
+                    log.warn(`Stream forwarding start blocked for task ${task.id}: ${streamStartTransition.reason || 'invalid state'}`);
+                    return false;
+                }
 
                 const { tunnelService } = await import("../../services/TunnelService.js");
                 const tunnelUrl = await tunnelService.getPublicUrl();
@@ -229,79 +243,128 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
                     leaderUrl = `http://localhost:${config.port}`;
                 }
 
-                // Resume transfer: Check if can resume
-                let chunkIndex = 0;
+                const chunkSize = isLargeFile ? 512 * 1024 : 128 * 1024;
                 let resumeInfo = null;
-
                 try {
-                    // Query Worker progress
-                    const progressUrl = `${targetUrl.replace(/\/$/, '')}/api/v2/stream/${task.id}/full-progress`;
-                    const progressResponse = await fetch(progressUrl, {
-                        method: 'GET',
-                        headers: {
-                            'x-instance-secret': config.streamForwarding.secret
-                        }
-                    });
-
-                    if (progressResponse.ok) {
-                        const progressData = await progressResponse.json();
-                        if (progressData.isCached || progressData.isActive) {
-                            chunkIndex = progressData.lastChunkIndex + 1;
-                            resumeInfo = progressData;
-                            log.info(`🔄 Resume transfer: Resume task ${task.id} from chunk ${chunkIndex}`);
-                            await updateStatus(task, `🔄 **Resuming transfer... (from ${(progressData.uploadedBytes / 1024 / 1024).toFixed(2)}MB)**`);
-                        }
-                    }
+                    resumeInfo = await streamTransferService.resumeTask(task.id, {
+                        streamMode: 'resumable',
+                        fileName,
+                        userId: task.userId,
+                        totalSize: info.size,
+                        chunkSize,
+                        leaderUrl,
+                        chatId: task.chatId,
+                        msgId: task.msgId,
+                        sourceMsgId: task.message.id
+                    }, targetUrl);
                 } catch (resumeError) {
-                    log.debug(`Resume check failed, will start from beginning: ${resumeError.message}`);
+                    log.warn(`Stream resume negotiation failed, starting from scratch: ${resumeError.message}`);
+                    await streamTransferService.resetTask(task.id, targetUrl).catch(error => {
+                        log.warn(`Stream worker reset failed before fallback non-resumable transfer: ${error.message}`);
+                    });
                 }
+
+                if (resumeInfo?.success === false) {
+                    log.warn(`Stream worker resume returned failure, resetting worker before retrying from scratch: ${resumeInfo.error || 'unknown error'}`);
+                    await streamTransferService.resetTask(task.id, targetUrl);
+                    resumeInfo = null;
+                }
+
+                if (resumeInfo?.finalizing || resumeInfo?.complete) {
+                    const finalization = await streamTransferService.waitForFinalization(task.id, { targetUrl });
+                    if (finalization?.success && finalization.completed) {
+                        log.info(`✅ Stream finalization completed from existing staging: Task ${task.id}`);
+                        context.activeProcessors.delete(task.id);
+                        return true;
+                    }
+                    throw new Error(finalization?.error || 'Stream finalization failed');
+                }
+
+                const resumeOffset = Number(resumeInfo?.uploadedBytes || 0);
+                const startOffset = Number.isFinite(resumeOffset) && resumeOffset > 0 ? resumeOffset : 0;
+                let chunkIndex = startOffset > 0
+                    ? Math.floor(startOffset / chunkSize)
+                    : 0;
 
                 // Create download iterator
-                const downloadIterator = client.iterDownload({
+                const downloadOptions = {
                     file: message.media,
-                    requestSize: isLargeFile ? 512 * 1024 : 128 * 1024
-                });
+                    requestSize: chunkSize,
+                    chunkSize,
+                    stride: chunkSize
+                };
+
+                if (startOffset > 0) {
+                    downloadOptions.offset = bigInt(startOffset);
+                    downloadOptions.fileSize = bigInt(info.size);
+                    const remaining = Math.max(0, info.size - startOffset);
+                    if (remaining === 0) {
+                        log.info(`Stream resume found complete staging file for task ${task.id}, waiting for worker finalization`);
+                        const finalization = await streamTransferService.waitForFinalization(task.id, { targetUrl });
+                        if (finalization?.success && finalization.completed) {
+                            context.activeProcessors.delete(task.id);
+                            return true;
+                        }
+                        throw new Error(finalization?.error || 'Stream finalization failed');
+                    }
+                    downloadOptions.limit = Math.ceil(remaining / chunkSize);
+                    await updateStatus(task, `🔄 **Resuming transfer... (${(startOffset / 1024 / 1024).toFixed(2)}MB)**`);
+                }
+
+                const downloadIterator = client.iterDownload(downloadOptions);
 
                 const { UIHelper } = dependencyContainer.getAll();
-
-                // If resuming, need to skip already transferred chunks
-                if (resumeInfo && chunkIndex > 0) {
-                    log.info(`⏭️ Skipping first ${chunkIndex} chunks (resume)`);
-                    for (let i = 0; i < chunkIndex; i++) {
-                        await downloadIterator.next();
-                        // Update download progress to keep consistent
-                        const downloaded = Math.min((i + 1) * (isLargeFile ? 512 * 1024 : 128 * 1024), info.size);
-                        if (i % 20 === 0) {
-                            await updateStatus(task, UIHelper.renderProgress(downloaded, info.size, "⏭️ Skipping transferred parts...", fileName));
-                        }
-                    }
-                }
 
                 // Continue transferring remaining chunks
                 for await (const chunk of downloadIterator) {
                     if (context.cancelledTaskIds.has(task.id)) throw new Error("CANCELLED");
-                    const isLast = chunkIndex * (isLargeFile ? 512 * 1024 : 128 * 1024) + chunk.length >= info.size;
+                    const downloaded = Math.min(info.size, startOffset + ((chunkIndex - Math.floor(startOffset / chunkSize)) * chunkSize) + chunk.length);
+                    const isLast = downloaded >= info.size;
 
                     await streamTransferService.forwardChunk(task.id, chunk, {
                         fileName, userId: task.userId, chunkIndex, isLast,
                         totalSize: info.size, leaderUrl, chatId: task.chatId, msgId: task.msgId,
-                        sourceMsgId: task.message.id, targetUrl
+                        sourceMsgId: task.message.id, targetUrl,
+                        resumeEnabled: true,
+                        streamMode: 'resumable',
+                        chunkSize
                     });
 
-                    const downloaded = chunkIndex * (isLargeFile ? 512 * 1024 : 128 * 1024) + chunk.length;
                     if (chunkIndex % 20 === 0 || isLast) {
-                        const statusText = resumeInfo ? "🔄 Resuming transfer..." : "📥 Forwarding stream...";
+                        const statusText = startOffset > 0 ? "🔄 Resuming transfer..." : "📥 Forwarding stream...";
                         await updateStatus(task, UIHelper.renderProgress(downloaded, info.size, statusText, fileName));
                     }
                     chunkIndex++;
+                }
+                const finalization = await streamTransferService.waitForFinalization(task.id, { targetUrl });
+                if (!finalization?.success || !finalization.completed) {
+                    throw new Error(finalization?.error || 'Stream finalization failed');
                 }
                 log.info(`✅ Stream forwarding completed: Task ${task.id}`);
                 context.activeProcessors.delete(task.id);
                 return true;
             } catch (e) {
                 if (e.message === "CANCELLED") throw e;
+                await streamTransferService.resetTask(task.id, targetUrl).catch(resetError => {
+                    log.warn(`Stream worker reset failed after transfer error: ${resetError.message}`);
+                });
+                const fallbackTransition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.RESET_STREAM_DOWNLOAD, null, {
+                    returnResult: true,
+                    allowNoop: true,
+                    source: 'stream_forwarding_fallback'
+                }).catch(resetStateError => {
+                    log.warn(`Failed to reset task state for stream fallback: ${resetStateError.message}`);
+                    return { blocked: true, reason: resetStateError.message };
+                });
+                if (fallbackTransition.blocked) {
+                    throw new Error(`Stream fallback rejected: ${fallbackTransition.reason || 'state transition blocked'}`);
+                }
                 log.error(`❌ Stream forwarding failed, falling back to local download mode: ${e.message}`);
             }
+        } else {
+            log.warn(`⚠️ Stream transfer disabled for task ${task.id}: no direct worker URL available`, {
+                otherInstances: otherInstances.map(inst => ({ id: inst.id, url: inst.url, tunnelUrl: inst.tunnelUrl, directUrl: inst.directUrl }))
+            });
         }
     }
     return false;

@@ -48,7 +48,8 @@ vi.mock('../../../src/services/StreamTransferService.js', () => {
             getTaskProgress: vi.fn(),
             getTaskFullProgress: vi.fn(),
             resumeTask: vi.fn(),
-            resetTask: vi.fn()
+            resetTask: vi.fn(),
+            waitForFinalization: vi.fn()
         }
     };
 });

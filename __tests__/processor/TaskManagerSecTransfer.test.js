@@ -22,6 +22,7 @@ vi.mock("../../src/config/index.js", () => ({
 
 const mockClient = {
     downloadMedia: vi.fn(),
+    iterDownload: vi.fn(),
     editMessage: vi.fn().mockResolvedValue(),
     sendMessage: vi.fn().mockResolvedValue({ id: 123 })
 };
@@ -54,6 +55,8 @@ vi.mock("../../src/repositories/TaskRepository.js", () => ({
 const mockInstanceCoordinator = {
     acquireTaskLock: vi.fn().mockResolvedValue(true),
     releaseTaskLock: vi.fn().mockResolvedValue(),
+    getActiveInstances: vi.fn().mockResolvedValue([]),
+    instanceId: "current-instance"
 };
 vi.mock("../../src/services/InstanceCoordinator.js", () => ({
     instanceCoordinator: mockInstanceCoordinator,
@@ -109,6 +112,23 @@ vi.mock("../../src/services/QueueService.js", () => ({
     queueService: mockQueueService
 }));
 
+const mockStreamTransferService = {
+    resumeTask: vi.fn(),
+    resetTask: vi.fn(),
+    forwardChunk: vi.fn(),
+    waitForFinalization: vi.fn()
+};
+vi.mock("../../src/services/StreamTransferService.js", () => ({
+    streamTransferService: mockStreamTransferService
+}));
+
+const mockTunnelService = {
+    getPublicUrl: vi.fn().mockResolvedValue("https://leader.example.com")
+};
+vi.mock("../../src/services/TunnelService.js", () => ({
+    tunnelService: mockTunnelService
+}));
+
 // Mock fs
 const mockFs = {
     existsSync: vi.fn(),
@@ -135,6 +155,13 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         TaskManager.activeProcessors.clear();
         TaskManager.waitingTasks = [];
         mockTaskRepository.transitionStatus.mockResolvedValue({ changed: true, blocked: false });
+        mockClient.iterDownload.mockReset();
+        mockStreamTransferService.resumeTask.mockReset();
+        mockStreamTransferService.resetTask.mockReset();
+        mockStreamTransferService.forwardChunk.mockReset();
+        mockStreamTransferService.waitForFinalization.mockReset();
+        mockTunnelService.getPublicUrl.mockResolvedValue("https://leader.example.com");
+        mockInstanceCoordinator.getActiveInstances.mockResolvedValue([]);
 
         task = {
             id: "task_1",
@@ -349,6 +376,256 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         await expect(TaskManager.downloadTask(task)).rejects.toThrow(/downloadDir/);
 
         expect(TaskManager.activeProcessors.has("task_1")).toBe(false);
+
+        getAllSpy.mockRestore();
+    });
+
+    test("stream forwarding waits for worker finalization before considering the task handled", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockInstanceCoordinator.getActiveInstances.mockResolvedValue([
+            { id: "current-instance" },
+            { id: "worker-1", directUrl: "https://worker.example.com", activeTaskCount: 0 }
+        ]);
+        mockClient.iterDownload.mockReturnValue((async function* () {
+            yield Buffer.alloc(10 * 1024 * 1024);
+        })());
+        mockStreamTransferService.resumeTask.mockResolvedValue({
+            success: true,
+            uploadedBytes: 0,
+            canResume: false
+        });
+        mockStreamTransferService.forwardChunk.mockResolvedValue(true);
+        mockStreamTransferService.waitForFinalization.mockResolvedValue({ success: true, completed: true });
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            UIHelper: {
+                renderProgress: vi.fn(() => "stream progress")
+            },
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                port: 3000,
+                streamForwarding: {
+                    enabled: true,
+                    lbUrl: "https://lb.example.com",
+                    externalUrl: "https://leader.example.com"
+                }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockStreamTransferService.forwardChunk).toHaveBeenCalledWith(
+            "task_1",
+            expect.any(Buffer),
+            expect.objectContaining({
+                targetUrl: "https://worker.example.com",
+                streamMode: "resumable",
+                isLast: true
+            })
+        );
+        expect(mockStreamTransferService.waitForFinalization).toHaveBeenCalledWith(
+            "task_1",
+            { targetUrl: "https://worker.example.com" }
+        );
+        expect(mockClient.downloadMedia).not.toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
+
+        getAllSpy.mockRestore();
+    });
+
+    test("stream forwarding reset state lets fallback local download enqueue upload", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockInstanceCoordinator.getActiveInstances.mockResolvedValue([
+            { id: "current-instance" },
+            { id: "worker-1", directUrl: "https://worker.example.com", activeTaskCount: 0 }
+        ]);
+        mockClient.iterDownload.mockReturnValue((async function* () {
+            yield Buffer.alloc(1024);
+        })());
+        mockStreamTransferService.resumeTask.mockResolvedValue({ success: true, uploadedBytes: 0 });
+        mockStreamTransferService.forwardChunk.mockRejectedValue(new Error("worker unavailable"));
+        mockStreamTransferService.resetTask.mockResolvedValue({ success: true });
+        mockClient.downloadMedia.mockResolvedValue();
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            UIHelper: {
+                renderProgress: vi.fn(() => "stream progress")
+            },
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                port: 3000,
+                streamForwarding: {
+                    enabled: true,
+                    lbUrl: "https://lb.example.com",
+                    externalUrl: "https://leader.example.com"
+                }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockStreamTransferService.resetTask).toHaveBeenCalledWith("task_1", "https://worker.example.com");
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "reset_stream_download",
+            null,
+            expect.objectContaining({ source: "stream_forwarding_fallback" })
+        );
+        expect(mockClient.downloadMedia).toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith(
+            "task_1",
+            expect.objectContaining({ userId: "user_1" })
+        );
+
+        getAllSpy.mockRestore();
+    });
+
+    test("stream forwarding fallback recovers when worker failure already marked the task failed", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockInstanceCoordinator.getActiveInstances.mockResolvedValue([
+            { id: "current-instance" },
+            { id: "worker-1", directUrl: "https://worker.example.com", activeTaskCount: 0 }
+        ]);
+        mockClient.iterDownload.mockReturnValue((async function* () {
+            yield Buffer.alloc(1024);
+        })());
+        mockStreamTransferService.resumeTask.mockResolvedValue({ success: true, uploadedBytes: 0 });
+        mockStreamTransferService.forwardChunk.mockRejectedValue(new Error("worker upload failed"));
+        mockStreamTransferService.resetTask.mockResolvedValue({ success: true });
+        mockClient.downloadMedia.mockResolvedValue();
+        mockTaskRepository.transitionStatus.mockImplementation(async (_taskId, event) => {
+            if (event === "reset_stream_download") {
+                return {
+                    changed: true,
+                    blocked: false,
+                    fromStatus: "failed",
+                    toStatus: "downloading",
+                    queueAttempt: "downloading:1"
+                };
+            }
+            if (event === "finish_download") {
+                return {
+                    changed: true,
+                    blocked: false,
+                    fromStatus: "downloading",
+                    toStatus: "downloaded",
+                    queueAttempt: "downloaded:2"
+                };
+            }
+            return { changed: true, blocked: false };
+        });
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            UIHelper: {
+                renderProgress: vi.fn(() => "stream progress")
+            },
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                port: 3000,
+                streamForwarding: {
+                    enabled: true,
+                    lbUrl: "https://lb.example.com",
+                    externalUrl: "https://leader.example.com"
+                }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "reset_stream_download",
+            null,
+            expect.objectContaining({ source: "stream_forwarding_fallback" })
+        );
+        expect(mockClient.downloadMedia).toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith(
+            "task_1",
+            expect.objectContaining({
+                userId: "user_1",
+                _meta: expect.objectContaining({
+                    triggerSource: "download-complete",
+                    queueAttempt: "downloaded:2"
+                })
+            })
+        );
+
+        getAllSpy.mockRestore();
+    });
+
+    test("stream forwarding start blocked falls back to local download instead of swallowing the task", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockInstanceCoordinator.getActiveInstances.mockResolvedValue([
+            { id: "current-instance" },
+            { id: "worker-1", directUrl: "https://worker.example.com", activeTaskCount: 0 }
+        ]);
+        mockClient.downloadMedia.mockResolvedValue();
+        mockTaskRepository.transitionStatus.mockImplementation(async (_taskId, event) => {
+            if (event === "start_stream_upload") {
+                return {
+                    changed: false,
+                    blocked: true,
+                    reason: "state changed concurrently",
+                    fromStatus: "downloaded",
+                    toStatus: "uploading"
+                };
+            }
+            if (event === "finish_download") {
+                return {
+                    changed: true,
+                    blocked: false,
+                    fromStatus: "downloading",
+                    toStatus: "downloaded",
+                    queueAttempt: "downloaded:blocked-start"
+                };
+            }
+            return { changed: true, blocked: false };
+        });
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            UIHelper: {
+                renderProgress: vi.fn(() => "stream progress")
+            },
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                port: 3000,
+                streamForwarding: {
+                    enabled: true,
+                    lbUrl: "https://lb.example.com",
+                    externalUrl: "https://leader.example.com"
+                }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockStreamTransferService.forwardChunk).not.toHaveBeenCalled();
+        expect(mockClient.downloadMedia).toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith(
+            "task_1",
+            expect.objectContaining({
+                userId: "user_1",
+                _meta: expect.objectContaining({
+                    queueAttempt: "downloaded:blocked-start"
+                })
+            })
+        );
 
         getAllSpy.mockRestore();
     });

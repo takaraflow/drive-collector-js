@@ -1,10 +1,62 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest'
+import { Writable } from 'stream'
+import { EventEmitter } from 'events'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import { streamTransferService } from '../../src/services/StreamTransferService.js'
 import { logger } from '../../src/services/logger/index.js'
 import { CacheService } from '../../src/services/CacheService.js'
 import { getConfig } from '../../src/config/index.js'
 
 const streamTransferLog = logger.withModule('StreamTransferService')
+const rcloneMock = vi.hoisted(() => ({
+  CloudTool: {
+    createRcatStream: vi.fn(),
+    getRemoteFileInfo: vi.fn(),
+    sanitizeRemoteFileName: vi.fn((fileName) => String(fileName || '').split('/').pop() || 'unnamed.bin'),
+    deleteRemoteFile: vi.fn(),
+    uploadLocalFileToRemote: vi.fn()
+  },
+  streams: []
+}))
+
+function createMockRcatStream() {
+  const chunks = []
+  const stdin = new Writable({
+    write(chunk, encoding, callback) {
+      chunks.push(Buffer.from(chunk))
+      callback()
+    }
+  })
+  const proc = new EventEmitter()
+  proc.stderr = new EventEmitter()
+  proc.kill = vi.fn()
+
+  return { stdin, proc, chunks }
+}
+
+const createChunkReq = (headers, body = 'data') => ({
+  headers: {
+    'x-instance-secret': 'test-secret',
+    'x-file-name': encodeURIComponent('stream.txt'),
+    'x-user-id': 'user-123',
+    'x-is-last': 'false',
+    'x-chunk-index': '0',
+    'x-total-size': String(Buffer.byteLength(body)),
+    'x-leader-url': '',
+    'x-source-instance-id': '',
+    'x-chat-id': 'chat-123',
+    'x-msg-id': '456',
+    'x-resume-enabled': 'true',
+    ...headers
+  },
+  [Symbol.asyncIterator]: async function* () {
+    yield Buffer.from(body)
+  }
+})
+
+const flushAsyncEvents = () => new Promise(resolve => setImmediate(resolve))
 
 vi.mock('../../src/config/index.js', () => ({
   getConfig: vi.fn(() => ({
@@ -37,10 +89,33 @@ vi.mock('../../src/utils/telegramBotApi.js', () => ({
   }
 }))
 
+vi.mock('../../src/services/rclone.js', () => ({
+  CloudTool: rcloneMock.CloudTool
+}))
+
 describe('StreamTransferService', () => {
   beforeEach(() => {
+    vi.restoreAllMocks()
     vi.clearAllMocks()
     global.fetch = vi.fn()
+    streamTransferService.activeStreams.clear()
+    streamTransferService.chunkRetryAttempts.clear()
+    streamTransferService.taskLocks?.clear()
+    rcloneMock.streams.length = 0
+    rcloneMock.CloudTool.createRcatStream.mockReset()
+    rcloneMock.CloudTool.getRemoteFileInfo.mockReset()
+    rcloneMock.CloudTool.sanitizeRemoteFileName.mockReset()
+    rcloneMock.CloudTool.deleteRemoteFile.mockReset()
+    rcloneMock.CloudTool.uploadLocalFileToRemote.mockReset()
+    rcloneMock.CloudTool.createRcatStream.mockImplementation(() => {
+      const stream = createMockRcatStream()
+      rcloneMock.streams.push(stream)
+      return { stdin: stream.stdin, proc: stream.proc, fileName: 'stream.txt' }
+    })
+    rcloneMock.CloudTool.getRemoteFileInfo.mockResolvedValue({ Name: 'stream.txt', Size: 0 })
+    rcloneMock.CloudTool.sanitizeRemoteFileName.mockImplementation((fileName) => String(fileName || '').split('/').pop() || 'unnamed.bin')
+    rcloneMock.CloudTool.deleteRemoteFile.mockResolvedValue({ success: true })
+    rcloneMock.CloudTool.uploadLocalFileToRemote.mockResolvedValue({ success: true, fileName: 'stream.txt' })
     // Mock logger methods
     vi.spyOn(streamTransferLog, 'info').mockImplementation(() => {})
     vi.spyOn(streamTransferLog, 'warn').mockImplementation(() => {})
@@ -118,19 +193,10 @@ describe('StreamTransferService', () => {
     expect(result).toEqual({ success: false, statusCode: 401, message: 'Unauthorized' })
   })
 
-  test('forward chunk with retry and skip when already received', async () => {
-    const mockService = {
-      getRemoteProgress: vi.fn().mockResolvedValue(3),
-      updateTelegramUI: vi.fn(),
-      reportProgressToLeader: vi.fn()
-    }
-    vi.spyOn(streamTransferService, 'getRemoteProgress').mockImplementation(mockService.getRemoteProgress)
-    
-    // �l�1%
-    const mockError = new Error('Network error')
-    fetch.mockRejectedValueOnce(mockError)
-    
-    // K�pn
+  test('forwardChunk posts directly and does not skip based on remote progress', async () => {
+    const getRemoteProgressSpy = vi.spyOn(streamTransferService, 'getRemoteProgress')
+    fetch.mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValue('OK') })
+
     const taskId = 'task-456'
     const metadata = {
       fileName: 'test.txt',
@@ -142,10 +208,16 @@ describe('StreamTransferService', () => {
     }
 
     const result = await streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
-    
+
     expect(result).toBe(true)
-    expect(mockService.getRemoteProgress).toHaveBeenCalledWith('https://lb.example.com', taskId)
-    expect(streamTransferLog.info).toHaveBeenCalledWith(expect.stringContaining('already received by worker'))
+    expect(getRemoteProgressSpy).not.toHaveBeenCalled()
+    expect(fetch).toHaveBeenCalledWith(
+      'https://lb.example.com/api/v2/stream/task-456',
+      expect.objectContaining({
+        method: 'POST',
+        body: Buffer.from('test')
+      })
+    )
   })
 
   test('forward chunk fails when remote progress query fails', async () => {
@@ -177,6 +249,469 @@ describe('StreamTransferService', () => {
     
     // 这个测试中，错误不是超时错误，所以不会调用特定的warn日志
     // 移除这个期望，因为实际的日志调用可能不同
+  })
+
+  test('handleIncomingChunk returns 409 and does not append out-of-order chunk', async () => {
+    const result = await streamTransferService.handleIncomingChunk(
+      'task-out-of-order',
+      createChunkReq({
+        'x-chunk-index': '1',
+        'x-total-size': '8'
+      }, 'chunk-1')
+    )
+
+    expect(result).toMatchObject({
+      success: false,
+      statusCode: 409
+    })
+    expect(result.message).toContain('expected 0, got 1')
+    expect(rcloneMock.streams).toHaveLength(0)
+  })
+
+  test('handleIncomingChunk starts from chunk 0 even when cached progress exists', async () => {
+    CacheService.get.mockResolvedValueOnce({
+      taskId: 'task-no-fake-resume',
+      fileName: 'old.txt',
+      userId: 'user-123',
+      totalSize: 2048,
+      uploadedBytes: 1024,
+      lastChunkIndex: 7,
+      timestamp: Date.now()
+    })
+
+    const outOfOrderResult = await streamTransferService.handleIncomingChunk(
+      'task-no-fake-resume',
+      createChunkReq({
+        'x-chunk-index': '8',
+        'x-total-size': '12'
+      }, 'chunk-8')
+    )
+
+    expect(outOfOrderResult).toMatchObject({
+      success: false,
+      statusCode: 409
+    })
+    expect(outOfOrderResult.message).toContain('expected 0, got 8')
+    expect(rcloneMock.streams).toHaveLength(0)
+
+    const firstChunkResult = await streamTransferService.handleIncomingChunk(
+      'task-no-fake-resume',
+      createChunkReq({
+        'x-chunk-index': '0',
+        'x-total-size': '12'
+      }, 'chunk-0')
+    )
+
+    expect(firstChunkResult).toMatchObject({ success: true, statusCode: 200 })
+    expect(rcloneMock.streams[0].chunks.map(chunk => chunk.toString())).toEqual(['chunk-0'])
+  })
+
+  test('resetTask sends DELETE to targetUrl reset endpoint when provided', async () => {
+    fetch.mockResolvedValueOnce({
+      ok: true,
+      text: vi.fn().mockResolvedValue(''),
+      json: vi.fn().mockResolvedValue({ success: true })
+    })
+
+    const result = await streamTransferService.resetTask(
+      'task-remote-reset',
+      'https://worker.example.com/'
+    )
+
+    expect(result).toEqual({ success: true })
+    expect(fetch).toHaveBeenCalledWith(
+      'https://worker.example.com/api/v2/stream/task-remote-reset/reset',
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({
+          'x-instance-secret': 'test-secret'
+        })
+      })
+    )
+  })
+
+  test('finishTask fails when remote size does not match expected size', async () => {
+    const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
+    const { TelegramBotApi } = await import('../../src/utils/telegramBotApi.js')
+    rcloneMock.CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'mismatch.txt', Size: 9 })
+
+    await streamTransferService.finishTask('task-size-mismatch', {
+      fileName: 'mismatch.txt',
+      userId: 'user-123',
+      totalSize: 10,
+      chatId: 'chat-123',
+      msgId: '456',
+      leaderUrl: null
+    })
+
+    expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+      'task-size-mismatch',
+      'fail',
+      expect.stringContaining('Validation failed: remote(9) vs expected(10)'),
+      expect.objectContaining({ source: 'stream_report_error' })
+    )
+    expect(TaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+      'task-size-mismatch',
+      'complete',
+      expect.anything(),
+      expect.anything()
+    )
+    expect(TelegramBotApi.editMessageText).toHaveBeenCalledWith(
+      'chat-123',
+      456,
+      expect.stringContaining('Validation failed')
+    )
+  })
+
+  test('rcat close code 0 still fails when stderr contains an error', async () => {
+    const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
+
+    const result = await streamTransferService.handleIncomingChunk(
+      'task-stderr-error',
+      createChunkReq({
+        'x-file-name': encodeURIComponent('stderr.txt'),
+        'x-is-last': 'true',
+        'x-chunk-index': '0',
+        'x-total-size': '11'
+      }, 'hello world')
+    )
+    const stream = rcloneMock.streams[0]
+
+    stream.proc.stderr.emit('data', Buffer.from('ERROR : upload failed after retries\n'))
+    stream.proc.emit('close', 0)
+    await flushAsyncEvents()
+
+    expect(result).toMatchObject({ success: true, statusCode: 200 })
+    expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+      'task-stderr-error',
+      'fail',
+      expect.stringContaining('upload failed after retries'),
+      expect.objectContaining({ source: 'stream_report_error' })
+    )
+    expect(TaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+      'task-stderr-error',
+      'complete',
+      expect.anything(),
+      expect.anything()
+    )
+  })
+
+  test('finishTask completes when remote validation succeeds', async () => {
+    const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
+    const { TelegramBotApi } = await import('../../src/utils/telegramBotApi.js')
+    rcloneMock.CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'validated.txt', Size: 10 })
+
+    await streamTransferService.finishTask('task-validated', {
+      fileName: 'validated.txt',
+      userId: 'user-123',
+      totalSize: 10,
+      chatId: 'chat-123',
+      msgId: '456',
+      sourceMsgId: '789',
+      leaderUrl: null
+    })
+
+    expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+      'task-validated',
+      'complete',
+      null,
+      expect.objectContaining({ source: 'stream_finish_task' })
+    )
+    expect(TelegramBotApi.editMessageText).toHaveBeenCalledWith(
+      'chat-123',
+      456,
+      expect.stringContaining('/drive/uploads')
+    )
+  })
+
+  test('resumable stream resumes from staging file size and uploads after final chunk', async () => {
+    const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
+    const resumeDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stream-resume-test-'))
+    getConfig.mockReturnValue({
+      streamForwarding: {
+        secret: 'test-secret',
+        lbUrl: 'https://lb.example.com',
+        resumeDir,
+        finalizationPollMs: 1,
+        finalizationTimeoutMs: 100
+      },
+      remoteFolder: '/drive/uploads'
+    })
+    rcloneMock.CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'resume.bin', Size: 10 })
+
+    const first = await streamTransferService.handleIncomingChunk(
+      'task-resumable',
+      createChunkReq({
+        'x-file-name': encodeURIComponent('resume.bin'),
+        'x-stream-mode': 'resumable',
+        'x-resume-enabled': 'true',
+        'x-chunk-size': '5',
+        'x-chunk-index': '0',
+        'x-total-size': '10'
+      }, 'hello')
+    )
+    expect(first).toMatchObject({ success: true, statusCode: 200 })
+
+    streamTransferService.activeStreams.clear()
+
+    const resume = await streamTransferService.resumeTask('task-resumable', {
+      streamMode: 'resumable',
+      fileName: 'resume.bin',
+      userId: 'user-123',
+      totalSize: 10,
+      chunkSize: 5
+    })
+
+    expect(resume).toMatchObject({
+      success: true,
+      uploadedBytes: 5,
+      lastChunkIndex: 0,
+      canResume: true
+    })
+
+    const second = await streamTransferService.handleIncomingChunk(
+      'task-resumable',
+      createChunkReq({
+        'x-file-name': encodeURIComponent('resume.bin'),
+        'x-stream-mode': 'resumable',
+        'x-resume-enabled': 'true',
+        'x-chunk-size': '5',
+        'x-chunk-index': '1',
+        'x-is-last': 'true',
+        'x-total-size': '10'
+      }, 'world')
+    )
+
+    expect(second).toMatchObject({ success: true, statusCode: 200 })
+    await vi.waitFor(() => {
+      expect(rcloneMock.CloudTool.uploadLocalFileToRemote).toHaveBeenCalledWith(
+        expect.stringContaining('task-resumable.resume.bin.part'),
+        'resume.bin',
+        'user-123',
+        expect.any(Function),
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      )
+      expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+        'task-resumable',
+        'complete',
+        null,
+        expect.objectContaining({ source: 'stream_finish_task' })
+      )
+    })
+  })
+
+  test('resumeTask triggers finalization when staging file is already complete', async () => {
+    const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
+    const resumeDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stream-resume-complete-'))
+    getConfig.mockReturnValue({
+      streamForwarding: {
+        secret: 'test-secret',
+        lbUrl: 'https://lb.example.com',
+        resumeDir,
+        finalizationPollMs: 1,
+        finalizationTimeoutMs: 100
+      },
+      remoteFolder: '/drive/uploads'
+    })
+    await fs.promises.writeFile(path.join(resumeDir, 'task-complete.complete.bin.part'), Buffer.from('helloworld'))
+    rcloneMock.CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'complete.bin', Size: 10 })
+
+    const result = await streamTransferService.resumeTask('task-complete', {
+      streamMode: 'resumable',
+      fileName: 'complete.bin',
+      userId: 'user-123',
+      totalSize: 10,
+      chunkSize: 5
+    })
+
+    expect(result).toMatchObject({
+      success: true,
+      uploadedBytes: 10,
+      finalizing: true,
+      canResume: false
+    })
+    await expect(streamTransferService.waitForFinalization('task-complete')).resolves.toMatchObject({
+      success: true,
+      completed: true
+    })
+    expect(rcloneMock.CloudTool.uploadLocalFileToRemote).toHaveBeenCalledWith(
+      expect.stringContaining('task-complete.complete.bin.part'),
+      'complete.bin',
+      'user-123',
+      expect.any(Function),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
+    expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+      'task-complete',
+      'complete',
+      null,
+      expect.objectContaining({ source: 'stream_finish_task' })
+    )
+  })
+
+  test('completed finalization remains visible after active context cleanup', async () => {
+    const resumeDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stream-resume-final-cache-'))
+    getConfig.mockReturnValue({
+      streamForwarding: {
+        secret: 'test-secret',
+        lbUrl: 'https://lb.example.com',
+        resumeDir,
+        finalizationPollMs: 1,
+        finalizationTimeoutMs: 100
+      },
+      remoteFolder: '/drive/uploads'
+    })
+    await fs.promises.writeFile(path.join(resumeDir, 'task-final-cache.final-cache.bin.part'), Buffer.from('hello'))
+    rcloneMock.CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'final-cache.bin', Size: 5 })
+
+    await streamTransferService.resumeTask('task-final-cache', {
+      streamMode: 'resumable',
+      fileName: 'final-cache.bin',
+      userId: 'user-123',
+      totalSize: 5,
+      chunkSize: 5
+    })
+
+    await expect(streamTransferService.waitForFinalization('task-final-cache')).resolves.toMatchObject({
+      success: true,
+      completed: true
+    })
+
+    const finalizationSet = CacheService.set.mock.calls
+      .filter(([key]) => key === 'stream:final:task-final-cache')
+      .at(-1)
+    expect(finalizationSet?.[1]).toMatchObject({ status: 'completed' })
+    CacheService.get.mockImplementation(async (key) => {
+      if (key === 'stream:final:task-final-cache') return finalizationSet[1]
+      return null
+    })
+
+    const progress = await streamTransferService.getTaskFullProgress('task-final-cache')
+    expect(progress).toMatchObject({
+      isActive: false,
+      isCached: false,
+      finalization: expect.objectContaining({ status: 'completed' })
+    })
+    expect(CacheService.delete).not.toHaveBeenCalledWith('stream:final:task-final-cache')
+  })
+
+  test('resumable chunks for the same task are serialized so duplicate retries do not append twice', async () => {
+    const resumeDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stream-resume-serial-'))
+    getConfig.mockReturnValue({
+      streamForwarding: {
+        secret: 'test-secret',
+        lbUrl: 'https://lb.example.com',
+        resumeDir,
+        finalizationPollMs: 1,
+        finalizationTimeoutMs: 100
+      },
+      remoteFolder: '/drive/uploads'
+    })
+    const headers = {
+      'x-file-name': encodeURIComponent('serial.bin'),
+      'x-stream-mode': 'resumable',
+      'x-resume-enabled': 'true',
+      'x-chunk-size': '5',
+      'x-chunk-index': '0',
+      'x-total-size': '10'
+    }
+
+    const [first, duplicate] = await Promise.all([
+      streamTransferService.handleIncomingChunk('task-serial', createChunkReq(headers, 'hello')),
+      streamTransferService.handleIncomingChunk('task-serial', createChunkReq(headers, 'hello'))
+    ])
+
+    expect(first.statusCode).toBe(200)
+    expect(duplicate.statusCode).toBe(200)
+    const staged = await fs.promises.readFile(path.join(resumeDir, 'task-serial.serial.bin.part'), 'utf8')
+    expect(staged).toBe('hello')
+  })
+
+  test('resumable stream rejects metadata drift instead of appending to the wrong staging file', async () => {
+    const resumeDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stream-resume-drift-'))
+    getConfig.mockReturnValue({
+      streamForwarding: {
+        secret: 'test-secret',
+        lbUrl: 'https://lb.example.com',
+        resumeDir,
+        finalizationPollMs: 1,
+        finalizationTimeoutMs: 100
+      },
+      remoteFolder: '/drive/uploads'
+    })
+
+    const first = await streamTransferService.handleIncomingChunk(
+      'task-drift',
+      createChunkReq({
+        'x-file-name': encodeURIComponent('a.bin'),
+        'x-user-id': 'user-123',
+        'x-stream-mode': 'resumable',
+        'x-chunk-size': '5',
+        'x-chunk-index': '0',
+        'x-total-size': '10'
+      }, 'hello')
+    )
+    const second = await streamTransferService.handleIncomingChunk(
+      'task-drift',
+      createChunkReq({
+        'x-file-name': encodeURIComponent('b.bin'),
+        'x-user-id': 'user-456',
+        'x-stream-mode': 'resumable',
+        'x-chunk-size': '5',
+        'x-chunk-index': '1',
+        'x-total-size': '10'
+      }, 'world')
+    )
+
+    expect(first).toMatchObject({ success: true, statusCode: 200 })
+    expect(second).toMatchObject({ success: false, statusCode: 409 })
+    const staged = await fs.promises.readFile(path.join(resumeDir, 'task-drift.a.bin.part'), 'utf8')
+    expect(staged).toBe('hello')
+  })
+
+  test('resetTask aborts in-flight resumable finalization and prevents stale completion', async () => {
+    const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
+    const resumeDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stream-resume-abort-'))
+    getConfig.mockReturnValue({
+      streamForwarding: {
+        secret: 'test-secret',
+        lbUrl: 'https://lb.example.com',
+        resumeDir,
+        finalizationPollMs: 1,
+        finalizationTimeoutMs: 100
+      },
+      remoteFolder: '/drive/uploads'
+    })
+    let uploadSignal
+    rcloneMock.CloudTool.uploadLocalFileToRemote.mockImplementation((_localPath, _fileName, _userId, _onProgress, options) => {
+      uploadSignal = options.signal
+      return new Promise(resolve => {
+        options.signal.addEventListener('abort', () => resolve({ success: false, error: 'Upload cancelled' }), { once: true })
+      })
+    })
+
+    const last = await streamTransferService.handleIncomingChunk(
+      'task-abort',
+      createChunkReq({
+        'x-file-name': encodeURIComponent('abort.bin'),
+        'x-stream-mode': 'resumable',
+        'x-chunk-size': '5',
+        'x-chunk-index': '0',
+        'x-is-last': 'true',
+        'x-total-size': '5'
+      }, 'hello')
+    )
+    expect(last).toMatchObject({ success: true, statusCode: 200 })
+    await vi.waitFor(() => expect(uploadSignal).toBeDefined())
+
+    const reset = await streamTransferService.resetTask('task-abort')
+
+    expect(reset).toEqual({ success: true })
+    expect(uploadSignal.aborted).toBe(true)
+    await flushAsyncEvents()
+    expect(
+      TaskRepository.transitionStatus.mock.calls.some(([taskId, event]) => taskId === 'task-abort' && event === 'complete')
+    ).toBe(false)
   })
 
   describe('断点续传功能', () => {
@@ -258,6 +793,9 @@ describe('StreamTransferService', () => {
         lastChunkIndex: 7,
         uploadedBytes: 1024,
         totalSize: 2048,
+        mode: undefined,
+        phase: undefined,
+        finalization: undefined,
         cachedAt: mockProgressData.timestamp
       })
     })
@@ -323,7 +861,6 @@ describe('StreamTransferService', () => {
     })
 
     test('forwardChunk 应优先使用 targetUrl 而非 lbUrl', async () => {
-      vi.spyOn(streamTransferService, 'getRemoteProgress').mockResolvedValue(-1)
       fetch.mockResolvedValueOnce({ ok: true })
 
       const taskId = 'task-target-url'
@@ -339,8 +876,6 @@ describe('StreamTransferService', () => {
 
       await streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
 
-      // 进度查询和 chunk 发送都应使用 targetUrl
-      expect(streamTransferService.getRemoteProgress).toHaveBeenCalledWith('https://specific-worker.example.com', taskId)
       expect(fetch).toHaveBeenCalledWith(
         'https://specific-worker.example.com/api/v2/stream/task-target-url',
         expect.any(Object)
@@ -348,7 +883,6 @@ describe('StreamTransferService', () => {
     })
 
     test('forwardChunk 无 targetUrl 时回退到 lbUrl', async () => {
-      vi.spyOn(streamTransferService, 'getRemoteProgress').mockResolvedValue(-1)
       fetch.mockResolvedValueOnce({ ok: true })
 
       const taskId = 'task-fallback-lb'
@@ -364,7 +898,6 @@ describe('StreamTransferService', () => {
 
       await streamTransferService.forwardChunk(taskId, Buffer.from('test'), metadata)
 
-      expect(streamTransferService.getRemoteProgress).toHaveBeenCalledWith('https://lb.example.com', taskId)
       expect(fetch).toHaveBeenCalledWith(
         'https://lb.example.com/api/v2/stream/task-fallback-lb',
         expect.any(Object)
@@ -398,11 +931,13 @@ describe('StreamTransferService', () => {
       const context = {
         fileName: 'finish-test.txt',
         userId: 'user-123',
+        totalSize: 0,
         chatId: 'chat-123',
         msgId: '456',
         sourceMsgId: '789',
         leaderUrl: null
       }
+      rcloneMock.CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'finish-test.txt', Size: 0 })
 
       await streamTransferService.finishTask('task-finish', context)
 

@@ -1024,6 +1024,23 @@
         "default": false,
         "description": "是否开启流式转发上传模式"
       },
+      "STREAM_RESUME_DIR": {
+        "type": "string",
+        "required": false,
+        "description": "Directory for resumable stream staging files. Defaults to DOWNLOAD_DIR/.stream-resume."
+      },
+      "STREAM_FINALIZATION_TIMEOUT_MS": {
+        "type": "number",
+        "required": false,
+        "default": 21600000,
+        "description": "Maximum time to wait for worker stream finalization before falling back or failing."
+      },
+      "STREAM_FINALIZATION_POLL_MS": {
+        "type": "number",
+        "required": false,
+        "default": 3000,
+        "description": "Polling interval for worker stream finalization status."
+      },
       "INSTANCE_SECRET": {
         "type": "string",
         "required": false,

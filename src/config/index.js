@@ -73,6 +73,14 @@ function parsePositiveInt(value, fallback) {
     return parsed && parsed > 0 ? parsed : fallback;
 }
 
+function parsePositiveNumber(value, fallback) {
+    if (value === undefined || value === null || value === '') {
+        return fallback;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 export const CACHE_TTL = 10 * 60 * 1000;
 
 function loadManifestEnvKeys() {
@@ -511,7 +519,10 @@ function buildConfigObject(env) {
                 enabled,
                 secret,
                 externalUrl: env.APP_EXTERNAL_URL || null,
-                lbUrl: env.LB_WEBHOOK_URL || env.APP_EXTERNAL_URL || null
+                lbUrl: env.LB_WEBHOOK_URL || env.APP_EXTERNAL_URL || null,
+                resumeDir: env.STREAM_RESUME_DIR || null,
+                finalizationTimeoutMs: parsePositiveNumber(env.STREAM_FINALIZATION_TIMEOUT_MS, 6 * 60 * 60 * 1000),
+                finalizationPollMs: parsePositiveNumber(env.STREAM_FINALIZATION_POLL_MS, 3000)
             };
         })()
     };
