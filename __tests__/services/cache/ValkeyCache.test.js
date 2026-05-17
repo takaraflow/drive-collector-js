@@ -167,6 +167,52 @@ describe("ValkeyCache", () => {
     expect(result).toBe(true);
   });
 
+  test("should compareAndSet with ifNotExists condition", async () => {
+    globalMocks.redisClient.eval.mockResolvedValueOnce(1);
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    const result = await cache.compareAndSet("key", { data: "value" }, { ifNotExists: true, ttl: 90 });
+
+    expect(globalMocks.redisClient.eval).toHaveBeenCalledTimes(1);
+    const evalCall = globalMocks.redisClient.eval.mock.calls[0];
+    expect(evalCall[2]).toBe("key");
+    expect(evalCall[3]).toBe('{"data":"value"}');
+    expect(evalCall[4]).toBe(90);
+    expect(evalCall[5]).toBe("ifNotExists");
+    expect(evalCall[6]).toBe("");
+    expect(result).toBe(true);
+  });
+
+  test("should compareAndSet with ifEquals condition", async () => {
+    globalMocks.redisClient.eval.mockResolvedValueOnce(1);
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    const current = { version: 1 };
+    const next = { version: 2 };
+    const result = await cache.compareAndSet("key", next, { ifEquals: current });
+
+    expect(globalMocks.redisClient.eval).toHaveBeenCalledTimes(1);
+    const evalCall = globalMocks.redisClient.eval.mock.calls[0];
+    expect(evalCall[5]).toBe("ifEquals");
+    expect(evalCall[6]).toBe('{"version":1}');
+    expect(result).toBe(true);
+  });
+
+  test("should return false when compareAndSet condition does not match", async () => {
+    globalMocks.redisClient.eval.mockResolvedValueOnce(0);
+
+    const cache = await buildCache();
+    await cache.connect();
+
+    const result = await cache.compareAndSet("key", "value", { ifNotExists: true });
+
+    expect(result).toBe(false);
+  });
+
   test("should list keys by prefix using scan", async () => {
     globalMocks.redisClient.scan
       .mockResolvedValueOnce(["1", ["instance:one"]])

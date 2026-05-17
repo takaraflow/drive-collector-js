@@ -242,6 +242,60 @@ class RedisHTTPCache extends BaseCache {
     }
 
     /**
+     * Compare and Set (CAS) using Redis EVAL over HTTP.
+     * @param {string} key - The cache key
+     * @param {*} value - New value to set
+     * @param {Object} options - Condition options
+     * @param {boolean} options.ifNotExists - Set only if key does not exist
+     * @param {*} options.ifEquals - Set only when current value matches this value
+     * @param {number} options.ttl - TTL in seconds
+     * @returns {Promise<boolean>} - True when the condition matched and the value was set
+     */
+    async compareAndSet(key, value, options = {}) {
+        const { ifNotExists = false, ifEquals = null, ttl = 3600 } = options;
+
+        try {
+            const serializedValue = typeof value === 'string' ? value : JSON.stringify(value);
+            const luaScript = `
+                local current = redis.call('get', KEYS[1])
+                local condition = ARGV[3]
+                local expected = ARGV[4]
+
+                if condition == 'ifNotExists' then
+                    if current == false or current == nil then
+                        redis.call('set', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
+                        return 1
+                    end
+                    return 0
+                elseif condition == 'ifEquals' then
+                    if current == expected then
+                        redis.call('set', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
+                        return 1
+                    end
+                    return 0
+                else
+                    redis.call('set', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
+                    return 1
+                end
+            `;
+
+            let condition = 'default';
+            let expected = '';
+            if (ifNotExists) {
+                condition = 'ifNotExists';
+            } else if (ifEquals !== null) {
+                condition = 'ifEquals';
+                expected = typeof ifEquals === 'string' ? ifEquals : JSON.stringify(ifEquals);
+            }
+
+            const result = await this._sendCommand(['EVAL', luaScript, '1', key, serializedValue, ttl, condition, expected]);
+            return result === 1;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    /**
      * List keys with optional prefix filter
      * @param {string} prefix - Key prefix filter
      * @returns {Promise<string[]>} - Array of keys

@@ -20,13 +20,13 @@ vi.mock("../../src/repositories/InstanceRepository.js", () => ({
 const fixedTime = 1700000000000;
 
 describe("Core InstanceCoordinator Tests", () => {
-    let mockCacheGet, mockCacheSet, mockCacheDelete, mockCacheListKeys;
+    let mockCacheGet, mockCacheSet, mockCacheDelete, mockCacheListKeys, mockCacheCompareAndSet, mockSupportsAtomicCompareAndSet;
     let originalCacheMethods = {};
     let originalLoggerMethods = {};
 
     beforeAll(() => {
         // Save original methods
-        ['get', 'set', 'delete', 'listKeys', 'getCurrentProvider'].forEach(m => {
+        ['get', 'set', 'delete', 'listKeys', 'getCurrentProvider', 'compareAndSet', 'supportsAtomicCompareAndSet'].forEach(m => {
             originalCacheMethods[m] = cache[m];
         });
         ['info', 'error', 'warn', 'debug', 'withModule', 'withContext'].forEach(m => {
@@ -42,6 +42,7 @@ describe("Core InstanceCoordinator Tests", () => {
         instanceCoordinator.instanceId = 'test-instance';
         instanceCoordinator.activeInstances = new Set();
         instanceCoordinator.isLeader = false;
+        instanceCoordinator.atomicLockWarningsShown = new Set();
         if (instanceCoordinator.heartbeatTimer) {
             clearInterval(instanceCoordinator.heartbeatTimer);
             instanceCoordinator.heartbeatTimer = null;
@@ -52,12 +53,16 @@ describe("Core InstanceCoordinator Tests", () => {
         mockCacheSet = vi.fn().mockResolvedValue(true);
         mockCacheDelete = vi.fn().mockResolvedValue(true);
         mockCacheListKeys = vi.fn().mockResolvedValue([]);
+        mockCacheCompareAndSet = vi.fn().mockResolvedValue(true);
+        mockSupportsAtomicCompareAndSet = vi.fn().mockReturnValue(true);
         
         cache.get = mockCacheGet;
         cache.set = mockCacheSet;
         cache.delete = mockCacheDelete;
         cache.listKeys = mockCacheListKeys;
         cache.getCurrentProvider = vi.fn().mockReturnValue("cloudflare");
+        cache.compareAndSet = mockCacheCompareAndSet;
+        cache.supportsAtomicCompareAndSet = mockSupportsAtomicCompareAndSet;
 
         // Mock logger methods
         logger.info = vi.fn();
@@ -142,20 +147,48 @@ describe("Core InstanceCoordinator Tests", () => {
         instanceCoordinator.instanceId = 'lock-instance';
         const lockKey = 'test-lock';
 
-        mockCacheGet
-            .mockResolvedValueOnce(null) // First check in _tryAcquire
-            .mockResolvedValueOnce({ // Verification check in _tryAcquire
-                instanceId: instanceCoordinator.instanceId,
-                acquiredAt: fixedTime,
-                ttl: 60
-            });
+        mockCacheGet.mockResolvedValueOnce(null);
+        mockCacheCompareAndSet.mockResolvedValueOnce(true);
 
         const result = await instanceCoordinator.acquireLock(lockKey, 60, { maxAttempts: 1 });
 
         expect(result).toBe(true);
-        expect(mockCacheSet).toHaveBeenCalledWith(
+        expect(mockCacheCompareAndSet).toHaveBeenCalledWith(
             `lock:${lockKey}`,
             expect.objectContaining({ instanceId: instanceCoordinator.instanceId }),
+            expect.objectContaining({ ifNotExists: true, ttl: 60 })
+        );
+    });
+
+    test("should fail closed when current provider cannot guarantee atomic CAS", async () => {
+        instanceCoordinator.instanceId = 'lock-instance';
+        mockSupportsAtomicCompareAndSet.mockReturnValue(false);
+
+        const result = await instanceCoordinator.acquireLock('telegram_client', 60, { maxAttempts: 1 });
+
+        expect(result).toBe(false);
+        expect(mockCacheGet).not.toHaveBeenCalled();
+        expect(mockCacheCompareAndSet).not.toHaveBeenCalled();
+    });
+
+    test("should keep best-effort locking for non-critical locks without atomic CAS", async () => {
+        instanceCoordinator.instanceId = 'lock-instance';
+        mockSupportsAtomicCompareAndSet.mockReturnValue(false);
+        mockCacheGet
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({
+                instanceId: 'lock-instance',
+                acquiredAt: fixedTime,
+                ttl: 60
+            });
+
+        const result = await instanceCoordinator.acquireLock('task:123', 60, { maxAttempts: 1 });
+
+        expect(result).toBe(true);
+        expect(mockCacheCompareAndSet).not.toHaveBeenCalled();
+        expect(mockCacheSet).toHaveBeenCalledWith(
+            "lock:task:123",
+            expect.objectContaining({ instanceId: 'lock-instance' }),
             60,
             expect.objectContaining({ skipCache: true })
         );
@@ -221,6 +254,30 @@ describe("Core InstanceCoordinator Tests", () => {
             expect.anything(),
             300,
             expect.objectContaining({ skipCache: true })
+        );
+        expect(mockCacheCompareAndSet).not.toHaveBeenCalled();
+    });
+
+    test("should renew owned telegram client lock through CAS", async () => {
+        instanceCoordinator.instanceId = 'leader-instance';
+        const currentLock = {
+            instanceId: 'leader-instance',
+            acquiredAt: fixedTime - 1000,
+            ttl: 90
+        };
+        mockCacheGet.mockResolvedValue(currentLock);
+        mockCacheCompareAndSet.mockResolvedValue(true);
+
+        await instanceCoordinator.startHeartbeat();
+        await vi.runOnlyPendingTimersAsync();
+
+        expect(mockCacheCompareAndSet).toHaveBeenCalledWith(
+            "lock:telegram_client",
+            expect.objectContaining({
+                instanceId: 'leader-instance',
+                acquiredAt: fixedTime
+            }),
+            expect.objectContaining({ ifEquals: currentLock, ttl: 300 })
         );
     });
 

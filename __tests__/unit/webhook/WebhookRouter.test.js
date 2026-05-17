@@ -174,9 +174,18 @@ describe('WebhookRouter', () => {
             expect(res.end).toHaveBeenCalledWith('Not Ready');
         });
 
-        it('should return 503 when business modules are down', async () => {
+        it('should keep liveness healthy when business modules are down', async () => {
             req.method = 'GET';
             req.url = '/health';
+            global.appInitializer = { businessModulesRunning: false };
+            await handleWebhook(req, res);
+            expect(res.writeHead).toHaveBeenCalledWith(200);
+            expect(res.end).toHaveBeenCalledWith('OK');
+        });
+
+        it('should return 503 for /ready when business modules are down', async () => {
+            req.method = 'GET';
+            req.url = '/ready';
             global.appInitializer = { businessModulesRunning: false };
             await handleWebhook(req, res);
             expect(res.writeHead).toHaveBeenCalledWith(503);

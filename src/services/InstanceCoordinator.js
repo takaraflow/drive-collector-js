@@ -48,6 +48,7 @@ export class InstanceCoordinator {
         // Active task counter (optional, set by lifecycle/TaskManager)
         this.activeTaskCount = 0;
         this.getActiveTaskCountFn = null;
+        this.atomicLockWarningsShown = new Set();
         
         // 延迟调整定时器（启动后 30 秒再检查实例数量并调整）
         this.heartbeatAdjustTimer = null;
@@ -116,6 +117,7 @@ export class InstanceCoordinator {
             clearInterval(this.instanceWatchTimer);
             this.instanceWatchTimer = null;
         }
+        this.atomicLockWarningsShown.clear();
 
         await this.unregisterInstance();
     }
@@ -192,11 +194,11 @@ export class InstanceCoordinator {
                         // 续租锁
                         const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), "json", { skipCache: true });
                         if (lockData && lockData.instanceId === this.instanceId) {
-                            // 更新锁的 TTL
-                            await cache.set(CACHE_KEYS.telegramClientLock(), {
+                            const renewed = await this._setLockIfEquals("telegram_client", {
                                 ...lockData,
                                 acquiredAt: Date.now() // 更新获取时间，相当于续租
-                            }, 300, { skipCache: true });
+                            }, lockData, 300);
+                            if (!renewed) logWithProvider().debug("🔒 Telegram 锁续租 CAS 未命中");
                             // logWithProvider().debug(`🔒 锁续租成功`);
                         }
                     }
@@ -519,9 +521,23 @@ export class InstanceCoordinator {
         };
 
         try {
+            if (!this._supportsAtomicLockCas()) {
+                if (this._requiresAtomicLock(lockKey)) {
+                    this._warnAtomicLockUnavailable(lockKey);
+                    return false;
+                }
+
+                return await this._tryAcquireBestEffort(lockKey, ttl, lockValue);
+            }
+
             // 尝试原子性地设置锁，如果键不存在则成功
             // 锁的读取不使用 L1 缓存，确保实时性
             const existing = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
+
+            if (!existing) {
+                const acquired = await this._setLockIfNotExists(lockKey, lockValue, ttl);
+                return acquired;
+            }
 
             if (existing) {
                 // 检查锁是否仍然有效
@@ -545,27 +561,66 @@ export class InstanceCoordinator {
                 // 如果锁过期、被当前实例持有、或持有者已下线，允许重新获取
             }
 
-            // 设置锁
-            // 注意：移除 version 字段以解决 Cloudflare KV 最终一致性导致的 verify 失败问题
-            // 在续租场景下，即使读到旧值，只要 instanceId 匹配即认为成功
-            await cache.set(CACHE_KEYS.lock(lockKey), lockValue, ttl, { skipCache: true });
-            
-            // 双重校验：写入后验证是否确实是自己的锁
-            const verified = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
-            
-            // 记录详细日志便于排查 KV 延迟问题
-            logWithProvider().debug(`[Lock verify] key=${lockKey}, existing=${existing?.instanceId}, verified=${verified?.instanceId}, self=${this.instanceId}`);
-
-            if (verified && verified.instanceId === this.instanceId) {
-                return true;
-            }
-            
-            // 被其他实例抢先覆盖了
-            return false;
+            const acquired = await this._setLockIfEquals(lockKey, lockValue, existing, ttl);
+            return acquired;
         } catch (e) {
             logWithProvider().error(`获取锁失败 ${lockKey}:`, e?.message || String(e));
             return false;
         }
+    }
+
+    async _tryAcquireBestEffort(lockKey, ttl, lockValue) {
+        const existing = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
+
+        if (existing) {
+            const now = Date.now();
+            if (existing.instanceId !== this.instanceId &&
+                (now - existing.acquiredAt) < (existing.ttl * 1000)) {
+                const ownerKey = `instance:${existing.instanceId}`;
+                const ownerData = await cache.get(ownerKey, "json", { skipCache: true });
+
+                if (ownerData) {
+                    return false;
+                }
+
+                logWithProvider().info(`🔒 发现残留锁 ${lockKey} (持有者 ${existing.instanceId} 已下线)，允许抢占`);
+            }
+        }
+
+        await cache.set(CACHE_KEYS.lock(lockKey), lockValue, ttl, { skipCache: true });
+        const verified = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
+        logWithProvider().debug(`[Lock verify] key=${lockKey}, existing=${existing?.instanceId}, verified=${verified?.instanceId}, self=${this.instanceId}`);
+        return Boolean(verified && verified.instanceId === this.instanceId);
+    }
+
+    _requiresAtomicLock(lockKey) {
+        return lockKey === "telegram_client";
+    }
+
+    _warnAtomicLockUnavailable(lockKey) {
+        if (this.atomicLockWarningsShown.has(lockKey)) return;
+        logWithProvider().warn(`🔒 当前缓存 provider 不支持原子 CAS，拒绝获取关键锁: ${lockKey}`);
+        this.atomicLockWarningsShown.add(lockKey);
+    }
+
+    _supportsAtomicLockCas() {
+        return typeof cache.supportsAtomicCompareAndSet === 'function'
+            ? cache.supportsAtomicCompareAndSet()
+            : false;
+    }
+
+    async _setLockIfNotExists(lockKey, lockValue, ttl) {
+        return await cache.compareAndSet(CACHE_KEYS.lock(lockKey), lockValue, {
+            ifNotExists: true,
+            ttl
+        });
+    }
+
+    async _setLockIfEquals(lockKey, lockValue, expectedValue, ttl) {
+        return await cache.compareAndSet(CACHE_KEYS.lock(lockKey), lockValue, {
+            ifEquals: expectedValue,
+            ttl
+        });
     }
 
     /**

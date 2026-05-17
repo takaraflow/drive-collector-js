@@ -64,6 +64,11 @@ describe("Health & Readiness Endpoints - before ready", () => {
 describe("Health & Readiness Endpoints - after ready", () => {
     beforeEach(() => {
         setAppReadyState(true);
+        global.appInitializer = { businessModulesRunning: true };
+    });
+
+    afterEach(() => {
+        delete global.appInitializer;
     });
 
     test.each(healthPaths)("GET %s should return 200 OK", async (path) => {
@@ -84,5 +89,27 @@ describe("Health & Readiness Endpoints - after ready", () => {
 
         expect(res.writeHead).toHaveBeenCalledWith(200);
         expect(res.end).toHaveBeenCalled();
+    });
+
+    test.each(["/health", "/healthz"])("GET %s should remain 200 when business modules are down", async (path) => {
+        global.appInitializer = { businessModulesRunning: false };
+        const req = createHealthRequest(path, "GET");
+        const res = createMockResponse();
+
+        await handleWebhook(req, res);
+
+        expect(res.writeHead).toHaveBeenCalledWith(200);
+        expect(res.end).toHaveBeenCalledWith("OK");
+    });
+
+    test("GET /ready should return 503 when business modules are down", async () => {
+        global.appInitializer = { businessModulesRunning: false };
+        const req = createHealthRequest("/ready", "GET");
+        const res = createMockResponse();
+
+        await handleWebhook(req, res);
+
+        expect(res.writeHead).toHaveBeenCalledWith(503);
+        expect(res.end).toHaveBeenCalledWith("Service Unavailable: Business Modules Down");
     });
 });

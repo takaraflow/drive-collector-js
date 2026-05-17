@@ -49,20 +49,20 @@ const PROVIDER_ATOMIC_CAPABILITIES = {
     'Valkey': {
         atomic: true,
         lock: true,
-        compareAndSet: false,
-        notes: 'Redis fork with same atomic guarantees'
+        compareAndSet: true,
+        notes: 'Redis fork with native Lua CAS guarantees'
     },
     'ValkeyTLS': {
         atomic: true,
         lock: true,
-        compareAndSet: false,
-        notes: 'Valkey with TLS encryption'
+        compareAndSet: true,
+        notes: 'Valkey with TLS encryption and native Lua CAS guarantees'
     },
     'AivenValkey': {
         atomic: true,
         lock: true,
-        compareAndSet: false,
-        notes: 'Managed Valkey with TLS, atomic operations preserved'
+        compareAndSet: true,
+        notes: 'Managed Valkey with TLS, native Lua CAS guarantees preserved'
     },
     'UpstashRHCache': {
         atomic: true,
@@ -70,11 +70,17 @@ const PROVIDER_ATOMIC_CAPABILITIES = {
         compareAndSet: true, // Has native compareAndSet implementation
         notes: 'HTTP Redis with atomic EVAL scripts and native CAS support'
     },
+    'RedisHTTPCache': {
+        atomic: true,
+        lock: true,
+        compareAndSet: true,
+        notes: 'HTTP Redis with atomic EVAL scripts and native CAS support'
+    },
     'NorthFlankRTCache': {
         atomic: true,
         lock: true,
-        compareAndSet: false,
-        notes: 'Redis with TLS, atomic operations preserved'
+        compareAndSet: true,
+        notes: 'Redis with TLS, native Lua CAS guarantees preserved'
     },
     
     // ❌ Memory Only - No distributed atomic guarantees
@@ -652,7 +658,7 @@ class CacheService {
                 return false;
             }
             
-            await this.set(key, value, 3600, { skipL1: false });
+            await this.set(key, value, options.ttl || 3600, { skipL1: false });
             return true;
         }
 
@@ -682,7 +688,7 @@ class CacheService {
             }
 
             // Perform the set
-            const success = await this.primaryProvider.set(key, value, 3600);
+            const success = await this.primaryProvider.set(key, value, options.ttl || 3600);
             
             if (success) {
                 // Update L1
@@ -695,6 +701,15 @@ class CacheService {
             await this._handleProviderFailure(error);
             return false;
         }
+    }
+
+    /**
+     * Compare-and-set capability for lock paths that cannot accept non-atomic fallback.
+     * @returns {boolean}
+     */
+    supportsAtomicCompareAndSet() {
+        const caps = this.getAtomicCapabilities();
+        return Boolean(caps.atomic && caps.compareAndSet && this.primaryProvider && typeof this.primaryProvider.compareAndSet === 'function');
     }
 
     /**
@@ -765,7 +780,8 @@ class CacheService {
             lock: capabilities?.lock || false,
             compareAndSet: capabilities?.compareAndSet || false,
             notes: capabilities?.notes || 'Unknown provider',
-            safeForDistributedLocks: capabilities?.atomic === true && capabilities?.lock === true
+            safeForDistributedLocks: capabilities?.atomic === true && capabilities?.lock === true,
+            safeForCompareAndSetLocks: capabilities?.atomic === true && capabilities?.compareAndSet === true
         };
     }
 
@@ -793,7 +809,7 @@ class CacheService {
             warnings.push('Provider does not support safe distributed locking');
         }
         
-        if (caps.compareAndSet === false && caps.atomic) {
+        if (!caps.compareAndSet && caps.atomic) {
             warnings.push('Provider uses non-atomic compareAndSet fallback');
         }
 
