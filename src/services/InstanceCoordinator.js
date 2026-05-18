@@ -10,6 +10,7 @@ const log = logger.withModule('InstanceCoordinator');
 export const TELEGRAM_CLIENT_LOCK_TTL_SECONDS = 90;
 export const TASK_LOCK_TTL_SECONDS = 600;
 export const TASK_LOCK_RENEWAL_MAX_INTERVAL_MS = 120 * 1000;
+export const TASK_LOCK_RENEWAL_MAX_CONSECUTIVE_FAILURES = 3;
 const ATOMIC_LOCK_KEYS = new Set(["telegram_client"]);
 const ATOMIC_LOCK_PREFIXES = ["msg_lock:", "task:", "task_recovery:"];
 
@@ -690,22 +691,29 @@ export class InstanceCoordinator {
     }
 
     async renewLock(lockKey, lease, ttl) {
-        if (!lease?.instanceId || !lease?.leaseId) return false;
+        if (!lease?.instanceId || !lease?.leaseId) {
+            return { renewed: false, reason: 'invalid_lease' };
+        }
         try {
             const cacheKey = CACHE_KEYS.lock(lockKey);
             const existing = await cache.get(cacheKey, "json", { skipCache: true });
-            if (!existing ||
-                existing.instanceId !== lease.instanceId ||
+            if (!existing) {
+                return { renewed: false, reason: 'lost_lease' };
+            }
+            if (existing.instanceId !== lease.instanceId ||
                 existing.leaseId !== lease.leaseId ||
                 existing.instanceId !== this.instanceId) {
-                return false;
+                return { renewed: false, reason: 'lost_lease' };
             }
 
             const renewedValue = this._createLockValue(lockKey, ttl, existing);
-            return await this._setLockIfEquals(lockKey, renewedValue, existing, ttl);
+            const renewed = await this._setLockIfEquals(lockKey, renewedValue, existing, ttl);
+            return renewed
+                ? { renewed: true, reason: 'renewed' }
+                : { renewed: false, reason: 'transient_cas_miss' };
         } catch (e) {
             logWithProvider().warn(`🔒 锁续租失败 ${lockKey}: ${e?.message || String(e)}`);
-            return false;
+            return { renewed: false, reason: 'transient_error', error: e };
         }
     }
 
@@ -718,10 +726,24 @@ export class InstanceCoordinator {
             Math.min(TASK_LOCK_RENEWAL_MAX_INTERVAL_MS, Math.floor((ttl * 1000) / 3))
         );
 
+        let consecutiveFailures = 0;
         const renew = async () => {
-            const renewed = await this.renewLock(lockKey, lease, ttl);
-            if (!renewed) {
-                logWithProvider().warn(`🔒 任务锁续租失败，停止续租: ${taskId}`);
+            const result = await this.renewLock(lockKey, lease, ttl);
+            if (result.renewed) {
+                consecutiveFailures = 0;
+                return;
+            }
+
+            if (result.reason === 'lost_lease' || result.reason === 'invalid_lease') {
+                logWithProvider().warn(`🔒 任务锁续租停止: ${taskId} (${result.reason})`);
+                this._stopTaskLockRenewal(taskId);
+                return;
+            }
+
+            consecutiveFailures += 1;
+            logWithProvider().warn(`🔒 任务锁续租暂时失败，将继续重试: ${taskId} (${result.reason}, ${consecutiveFailures}/${TASK_LOCK_RENEWAL_MAX_CONSECUTIVE_FAILURES})`);
+            if (consecutiveFailures >= TASK_LOCK_RENEWAL_MAX_CONSECUTIVE_FAILURES) {
+                logWithProvider().warn(`🔒 任务锁续租连续失败，停止续租: ${taskId}`);
                 this._stopTaskLockRenewal(taskId);
             }
         };

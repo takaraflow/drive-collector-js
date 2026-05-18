@@ -425,9 +425,9 @@ describe("Core InstanceCoordinator Tests", () => {
         mockCacheGet.mockResolvedValue(currentLock);
         mockCacheCompareAndSet.mockResolvedValue(true);
 
-        const renewed = await instanceCoordinator.renewLock('task:task-1', lease, 600);
+        const result = await instanceCoordinator.renewLock('task:task-1', lease, 600);
 
-        expect(renewed).toBe(true);
+        expect(result).toEqual({ renewed: true, reason: 'renewed' });
         expect(mockCacheCompareAndSet).toHaveBeenCalledWith(
             'lock:task:task-1',
             expect.objectContaining({
@@ -438,6 +438,39 @@ describe("Core InstanceCoordinator Tests", () => {
             }),
             expect.objectContaining({ ifEquals: currentLock, ttl: 600 })
         );
+    });
+
+    test("should keep task lock renewal alive after a transient renewal failure", async () => {
+        instanceCoordinator.instanceId = 'lock-instance';
+        const lease = {
+            instanceId: 'lock-instance',
+            leaseId: 'lock-instance:lease-1'
+        };
+        mockCacheGet.mockRejectedValueOnce(new Error('redis timeout'));
+
+        instanceCoordinator._startTaskLockRenewal('task-1', lease, 600);
+        await vi.advanceTimersByTimeAsync(120000);
+
+        expect(instanceCoordinator.taskLockRenewalTimers.has('task-1')).toBe(true);
+        expect(mockCacheGet).toHaveBeenCalledWith('lock:task:task-1', 'json', { skipCache: true });
+    });
+
+    test("should stop task lock renewal after confirmed lease loss", async () => {
+        instanceCoordinator.instanceId = 'lock-instance';
+        const lease = {
+            instanceId: 'lock-instance',
+            leaseId: 'lock-instance:lease-1'
+        };
+        mockCacheGet.mockResolvedValueOnce({
+            instanceId: 'other-instance',
+            leaseId: 'other-instance:lease-2'
+        });
+
+        instanceCoordinator._startTaskLockRenewal('task-1', lease, 600);
+        await vi.advanceTimersByTimeAsync(120000);
+
+        expect(instanceCoordinator.taskLockRenewalTimers.has('task-1')).toBe(false);
+        expect(mockCacheGet).toHaveBeenCalledWith('lock:task:task-1', 'json', { skipCache: true });
     });
 
     test("should stop task lock renewal before release", async () => {
