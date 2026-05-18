@@ -120,13 +120,22 @@ vi.mock('../../src/locales/zh-CN.js', () => ({
     format: vi.fn((template, vars = {}) => Object.entries(vars).reduce((text, [key, value]) => text.replaceAll(`{{${key}}}`, value), template))
 }));
 
+const mockTaskManagerLogger = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    withContext: vi.fn()
+};
+mockTaskManagerLogger.withContext.mockReturnValue(mockTaskManagerLogger);
+
 vi.mock('../../src/services/logger/index.js', () => ({
     logger: {
         info: vi.fn(),
         warn: vi.fn(),
         error: vi.fn(),
         debug: vi.fn(),
-        withModule: vi.fn().mockReturnThis(),
+        withModule: vi.fn(() => mockTaskManagerLogger),
         withContext: vi.fn().mockReturnThis()
     }
 }));
@@ -405,6 +414,11 @@ describe('TaskManager queue/recovery closure', () => {
         const result = await TaskManager.handleDownloadWebhook('task-1');
 
         expect(result.statusCode).toBe(503);
+        expect(result.message).toContain('Task processing lock busy');
+        expect(mockTaskManagerLogger.error).not.toHaveBeenCalledWith(
+            'Download webhook failed',
+            expect.anything()
+        );
         expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalled();
         expect(mockInstanceCoordinator.releaseTaskLock).not.toHaveBeenCalled();
     });
@@ -424,6 +438,11 @@ describe('TaskManager queue/recovery closure', () => {
         const result = await TaskManager.handleUploadWebhook('task-1');
 
         expect(result.statusCode).toBe(503);
+        expect(result.message).toContain('Task processing lock busy');
+        expect(mockTaskManagerLogger.error).not.toHaveBeenCalledWith(
+            'Upload webhook failed',
+            expect.anything()
+        );
         expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalled();
         expect(mockInstanceCoordinator.releaseTaskLock).not.toHaveBeenCalled();
     });

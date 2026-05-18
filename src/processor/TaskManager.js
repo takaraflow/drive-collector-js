@@ -966,6 +966,9 @@ export class TaskManager {
             return { success: true, statusCode: 200 };
 
         } catch (error) {
+            if (isTaskProcessingLockBusyError(error)) {
+                return { success: false, statusCode: 503, message: error.message };
+            }
             log.error("Download webhook failed", { taskId, error });
             if (error?.code === 'TASK_SOURCE_MISSING') {
                 await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
@@ -974,9 +977,6 @@ export class TaskManager {
                     source: 'handleDownloadWebhook.source_missing'
                 });
                 return { success: false, statusCode: 404, message: "Source message missing" };
-            }
-            if (isTaskProcessingLockBusyError(error)) {
-                return { success: false, statusCode: 503, message: error.message };
             }
             const code = this._classifyError(error);
             if (this._isRetryableInfrastructureError(error)) {
@@ -1079,6 +1079,9 @@ export class TaskManager {
             return { success: true, statusCode: 200 };
 
         } catch (error) {
+            if (isTaskProcessingLockBusyError(error)) {
+                return { success: false, statusCode: 503, message: error.message };
+            }
             log.error("Upload webhook failed", { taskId, error });
             if (error?.code === 'TASK_SOURCE_MISSING') {
                 await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
@@ -1087,9 +1090,6 @@ export class TaskManager {
                     source: 'handleUploadWebhook.source_missing'
                 });
                 return { success: false, statusCode: 404, message: "Source message missing" };
-            }
-            if (isTaskProcessingLockBusyError(error)) {
-                return { success: false, statusCode: 503, message: error.message };
             }
             const code = this._classifyError(error);
             if (this._isRetryableInfrastructureError(error)) {
