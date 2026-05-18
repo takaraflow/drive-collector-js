@@ -2,6 +2,7 @@ import { queueService } from '../services/QueueService.js';
 import { TaskManager } from '../processor/TaskManager.js';
 import { logger } from '../services/logger/index.js';
 import { resolveInstanceBaseUrl } from '../utils/instanceUrl.js';
+import { getBuildIdentity } from '../utils/buildIdentity.js';
 import { parseTaskQueuePayload, TASK_QUEUE_TRIGGER_SOURCES } from '../domain/task-queue-contract.js';
 import { CACHE_KEYS } from '../domain/cache-keys.js';
 
@@ -34,13 +35,20 @@ function handleHealthChecks(req, res) {
     const healthPath = '/health';
     const healthzPath = '/healthz';
     const readyPath = '/ready';
+    const versionPath = '/version';
     const hostHeader = req.headers?.host || req.headers?.[':authority'] || 'localhost';
     const url = new URL(req.url, `http://${hostHeader}`);
     const path = url.pathname;
 
     if ((req.method === 'GET' || req.method === 'HEAD') && req.url) {
         try {
-            if ([healthPath, healthzPath, readyPath].includes(path)) {
+            if ([healthPath, healthzPath, readyPath, versionPath].includes(path)) {
+                if (path === versionPath) {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(req.method === 'HEAD' ? '' : JSON.stringify(getBuildIdentity()));
+                    return true;
+                }
+
                 if (path === healthPath || path === healthzPath) {
                     res.writeHead(200);
                     res.end(req.method === 'HEAD' ? '' : 'OK');

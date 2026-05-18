@@ -420,7 +420,67 @@
       "APP_VERSION": {
         "type": "string",
         "required": false,
-        "description": "Application version override for logging"
+        "description": "Application semantic version used in logs and telemetry"
+      },
+      "APP_NAME": {
+        "type": "string",
+        "required": false,
+        "description": "Application service name fallback for logs and telemetry"
+      },
+      "GIT_SHA": {
+        "type": "string",
+        "required": false,
+        "description": "Git commit SHA for the running build, used in logs and telemetry"
+      },
+      "GITHUB_SHA": {
+        "type": "string",
+        "required": false,
+        "description": "GitHub Actions commit SHA fallback for the running build"
+      },
+      "BUILD_SHA": {
+        "type": "string",
+        "required": false,
+        "description": "Alias for GIT_SHA when provided by the deployment platform"
+      },
+      "COMMIT_SHA": {
+        "type": "string",
+        "required": false,
+        "description": "Alias for GIT_SHA when provided by the deployment platform"
+      },
+      "SOURCE_VERSION": {
+        "type": "string",
+        "required": false,
+        "description": "Alias for GIT_SHA when provided by the deployment platform"
+      },
+      "BUILD_TIME": {
+        "type": "string",
+        "required": false,
+        "description": "ISO timestamp for the running image build"
+      },
+      "BUILD_DATE": {
+        "type": "string",
+        "required": false,
+        "description": "Alias for BUILD_TIME when provided by the deployment platform"
+      },
+      "IMAGE_TAG": {
+        "type": "string",
+        "required": false,
+        "description": "Container image tag for the running build"
+      },
+      "CONTAINER_IMAGE": {
+        "type": "string",
+        "required": false,
+        "description": "Alias for IMAGE_TAG when provided by the deployment platform"
+      },
+      "DOCKER_IMAGE_TAG": {
+        "type": "string",
+        "required": false,
+        "description": "Alias for IMAGE_TAG when provided by the deployment platform"
+      },
+      "RELEASE_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Stable release identifier emitted in logs and telemetry"
       },
       "INSTANCE_ID": {
         "type": "string",

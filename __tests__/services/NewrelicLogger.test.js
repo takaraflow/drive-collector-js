@@ -7,9 +7,21 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
     let logger;
     const licenseKey = 'secure-license-key-1234567890';
     const region = 'US';
-    const originalLogLevel = process.env.LOG_LEVEL;
+    const preservedEnv = {};
+    const envKeysToRestore = [
+        'APP_VERSION',
+        'GIT_SHA',
+        'BUILD_TIME',
+        'IMAGE_TAG',
+        'APP_NAME',
+        'NEW_RELIC_APP_NAME',
+        'LOG_LEVEL'
+    ];
 
     beforeEach(() => {
+        envKeysToRestore.forEach(key => {
+            preservedEnv[key] = process.env[key];
+        });
         vi.stubGlobal('fetch', vi.fn());
         vi.spyOn(console, 'error').mockImplementation(() => {});
         vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -26,11 +38,13 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
 
     afterEach(() => {
         vi.restoreAllMocks();
-        if (originalLogLevel === undefined) {
-            delete process.env.LOG_LEVEL;
-        } else {
-            process.env.LOG_LEVEL = originalLogLevel;
-        }
+        envKeysToRestore.forEach(key => {
+            if (preservedEnv[key] === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = preservedEnv[key];
+            }
+        });
     });
 
     it('should NOT log the license key substring when batch flush fails', async () => {
@@ -112,6 +126,43 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
         expect(payload.level).toBe('error');
         expect(payload.severity).toBe('ERROR');
         expect(payload['service.name']).toBe('test-service');
+    });
+
+    it('should attach build identity fields to log payloads', async () => {
+        process.env.APP_VERSION = '9.9.9';
+        process.env.GIT_SHA = 'abcdef1234567890';
+        process.env.BUILD_TIME = '2026-05-18T00:00:00.000Z';
+        process.env.IMAGE_TAG = 'repo/app:sha-abcdef1';
+
+        const buildLogger = new NewrelicLogger({
+            licenseKey,
+            region,
+            service: 'test-service'
+        });
+        await buildLogger.initialize();
+
+        const payload = buildLogger._buildPayload('info', 'release visible', {}, {}, 'instance-1');
+
+        expect(payload.version).toBe('9.9.9');
+        expect(payload.git_sha).toBe('abcdef1234567890');
+        expect(payload.git_short_sha).toBe('abcdef123456');
+        expect(payload.build_time).toBe('2026-05-18T00:00:00.000Z');
+        expect(payload.image_tag).toBe('repo/app:sha-abcdef1');
+        expect(payload.release_id).toBe('9.9.9+abcdef123456');
+    });
+
+    it('should use the build identity service name when logger service is not overridden', async () => {
+        process.env.APP_NAME = 'drive-collector-prod';
+
+        const buildLogger = new NewrelicLogger({
+            licenseKey,
+            region
+        });
+        await buildLogger.initialize();
+
+        const payload = buildLogger._buildPayload('info', 'service visible', {}, {}, 'instance-1');
+
+        expect(payload['service.name']).toBe('drive-collector-prod');
     });
 
     it('should only print New Relic batch success in debug log level', async () => {

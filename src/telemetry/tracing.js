@@ -16,6 +16,7 @@
  */
 
 import { hydrateEarlyRuntimeEnv } from '../bootstrap/runtime-env.js';
+import { getBuildIdentity, getBuildResourceAttributes } from '../utils/buildIdentity.js';
 
 /** @type {import('@opentelemetry/sdk-node').NodeSDK | null} */
 let sdk = null;
@@ -165,8 +166,10 @@ if (!LICENSE_KEY) {
         ? 'https://otlp.eu01.nr-data.net:4318'
         : 'https://otlp.nr-data.net:4318';
 
-    const SERVICE_NAME = process.env.NEW_RELIC_APP_NAME || 'drive-collector';
-    const SERVICE_VERSION = process.env.APP_VERSION || 'unknown';
+    const buildIdentity = getBuildIdentity();
+    const buildResourceAttributes = getBuildResourceAttributes(buildIdentity);
+    const SERVICE_NAME = buildIdentity.serviceName;
+    const SERVICE_VERSION = buildIdentity.version;
     const DEPLOYMENT_ENV = process.env.NODE_ENV || 'unknown';
     const INSTANCE_ID = process.env.INSTANCE_ID || process.env.HOSTNAME || 'unknown';
 
@@ -180,6 +183,9 @@ if (!LICENSE_KEY) {
         `service.version=${SERVICE_VERSION}`,
         `deployment.environment=${DEPLOYMENT_ENV}`,
         `service.instance.id=${INSTANCE_ID}`,
+        ...Object.entries(buildResourceAttributes)
+            .filter(([key]) => key !== 'service.version')
+            .map(([key, value]) => `${key}=${value}`),
     ].filter(Boolean).join(',');
 
     const traceExporter = new OTLPTraceExporter({
@@ -202,6 +208,7 @@ if (!LICENSE_KEY) {
             [ATTR_SERVICE_VERSION]: SERVICE_VERSION,
             'deployment.environment': DEPLOYMENT_ENV,
             'service.instance.id': INSTANCE_ID,
+            ...buildResourceAttributes,
         }),
         // BatchSpanProcessor with constrained queue for 256MB containers
         spanProcessor: new BatchSpanProcessor(traceExporter, {
@@ -236,7 +243,7 @@ if (!LICENSE_KEY) {
     });
 
     sdk.start();
-    console.log(`[OTel] SDK started → ${OTLP_BASE} (service: ${SERVICE_NAME}, region: ${REGION})`);
+    console.log(`[OTel] SDK started → ${OTLP_BASE} (service: ${SERVICE_NAME}, version: ${buildIdentity.releaseId}, region: ${REGION})`);
 
     // Note: The application's GracefulShutdown service handles process exit
     // and will call shutdownOTel() via a registered hook (see lifecycle.js).

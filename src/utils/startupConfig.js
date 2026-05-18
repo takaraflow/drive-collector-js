@@ -1,4 +1,5 @@
 import { isSensitiveKey } from './serializer.js';
+import { getBuildIdentity } from './buildIdentity.js';
 
 let manifestMetadataCache = null;
 let manifestSensitiveConfigKeys = new Set();
@@ -142,7 +143,8 @@ export async function summarizeStartupConfig(config, cache) {
     const runtimeInfo = pruneConfig({
         nodeEnv: process.env.NODE_ENV || "unknown",
         nodeMode: process.env.NODE_MODE || "unknown",
-        telegramTestMode: config.telegram.testMode
+        telegramTestMode: config.telegram.testMode,
+        build: getBuildIdentity()
     });
 
     const manifestMetadata = await loadManifestMetadata();

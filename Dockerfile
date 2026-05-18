@@ -1,64 +1,85 @@
-# --- 第一阶段：构建环境 ---
-FROM node:20-slim AS builder
+# --- 第一阶段：生产依赖构建 ---
+FROM node:20-slim AS prod-deps
 
 WORKDIR /app
 
-# 构建参数：支持多环境构建
-ARG NODE_ENV=production
+ENV NODE_ENV=production
 
-# 环境变量
-ENV NODE_ENV=${NODE_ENV}
-
-# 复制依赖定义
 COPY package*.json ./
 
-# 1. 安装依赖
-RUN npm ci && npm cache clean --force
-
-# 复制源代码
-COPY . .
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+    && npm ci --omit=dev \
+    && npm cache clean --force \
+    && apt-get purge -y --auto-remove python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 # --- 第二阶段：运行环境 ---
 FROM node:20-slim
 
 # 运行时参数：支持多环境部署
 ARG NODE_ENV=production
+ARG TARGETARCH
+ARG APP_VERSION=unknown
+ARG GIT_SHA=unknown
+ARG BUILD_TIME=unknown
+ARG IMAGE_TAG=unknown
+ARG RELEASE_ID=unknown
 
 # 环境变量
 ENV NODE_ENV=${NODE_ENV}
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_TIME=${BUILD_TIME}
+ENV IMAGE_TAG=${IMAGE_TAG}
+ENV RELEASE_ID=${RELEASE_ID}
 
-# 安装 rclone 和基础工具，包括 ping 工具
-RUN apt-get update && apt-get install -y \
+LABEL org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.created="${BUILD_TIME}" \
+      org.opencontainers.image.ref.name="${IMAGE_TAG}"
+
+# 安装 rclone 和基础运行工具，包括 ping 工具
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     unzip \
     ca-certificates \
     iputils-ping \
     xz-utils \
-    && curl https://rclone.org/install.sh | bash \
-    && curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb \
+    && curl -fsSL https://rclone.org/install.sh | bash \
+    && runtime_arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
+    && case "${runtime_arch}" in \
+        amd64) cloudflared_arch="amd64" ;; \
+        arm64) cloudflared_arch="arm64" ;; \
+        *) echo "Unsupported cloudflared architecture: ${runtime_arch}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL --output cloudflared.deb "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cloudflared_arch}.deb" \
     && dpkg -i cloudflared.deb \
     && rm cloudflared.deb \
-    && apt-get purge -y unzip \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get purge -y --auto-remove unzip \
+    && rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Install s6-overlay
 ARG S6_OVERLAY_VERSION=3.1.6.2
-ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz /tmp
-RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz
-ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-x86_64.tar.xz /tmp
-RUN tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz
+RUN runtime_arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
+    && case "${runtime_arch}" in \
+        amd64) s6_arch="x86_64" ;; \
+        arm64) s6_arch="aarch64" ;; \
+        *) echo "Unsupported s6-overlay architecture: ${runtime_arch}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL --output /tmp/s6-overlay-noarch.tar.xz "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz" \
+    && curl -fsSL --output /tmp/s6-overlay-arch.tar.xz "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-${s6_arch}.tar.xz" \
+    && tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz \
+    && tar -C / -Jxpf /tmp/s6-overlay-arch.tar.xz \
+    && rm /tmp/s6-overlay-noarch.tar.xz /tmp/s6-overlay-arch.tar.xz
 
 WORKDIR /app
 
-# --- 强制依赖第一阶段的测试结果 ---
 COPY package*.json ./
+COPY --from=prod-deps /app/node_modules ./node_modules
 
-RUN mkdir -p ./scripts
-COPY scripts ./scripts/
-
-# 安装生产依赖
-RUN npm ci --omit=dev && npm cache clean --force
 COPY etc/ /etc/
 RUN find /etc/s6-overlay/s6-rc.d -name "run" -exec chmod +x {} +
 RUN find /etc/s6-overlay/s6-rc.d -name "finish" -exec chmod +x {} +

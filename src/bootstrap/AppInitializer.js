@@ -4,6 +4,7 @@ import { summarizeStartupConfig } from '../utils/startupConfig.js';
 import { registerShutdownHooks } from '../utils/lifecycle.js';
 import { tunnelService } from '../services/TunnelService.js';
 import { startMemoryMonitor } from '../utils/memoryMonitor.js';
+import { getBuildIdentity, getBuildLogFields } from '../utils/buildIdentity.js';
 
 /**
  * 应用初始化器
@@ -52,6 +53,9 @@ export class AppInitializer {
             } else {
                 await logger.initialize();
             }
+
+            const buildIdentity = getBuildIdentity();
+            log.info("🚀 Build identity resolved", getBuildLogFields(buildIdentity));
 
             await Promise.all([
                 queueService.initialize(),

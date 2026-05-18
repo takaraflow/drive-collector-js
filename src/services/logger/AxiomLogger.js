@@ -3,6 +3,7 @@ import { BaseLogger } from './BaseLogger.js';
 import { writeOriginalConsole } from './console-channel.js';
 import { limitFields, serializeError, serializeToString } from '../../utils/serializer.js';
 import { getBeijingISOString } from '../../utils/timeUtils.js';
+import { getBuildDisplayVersion, getBuildIdentity, getBuildLogFields } from '../../utils/buildIdentity.js';
 
 const AXIOM_UNAVAILABLE_BACKOFF_MS = 3 * 1000;
 
@@ -26,6 +27,7 @@ class AxiomLogger extends BaseLogger {
         this._estimatedBufferBytes = 0; // 增量追踪缓冲区内存占用
         this.BATCH_FLUSH_INTERVAL_MS = process.env.NODE_ENV === 'test' ? 10 : 3000;
         this.version = 'unknown';
+        this.buildIdentity = getBuildIdentity();
     }
 
     _getInstanceId() {
@@ -49,12 +51,8 @@ class AxiomLogger extends BaseLogger {
     async _initVersion() {
         if (this.version !== 'unknown') return;
         try {
-            if (process.env.APP_VERSION) {
-                this.version = process.env.APP_VERSION;
-                return;
-            }
-            const { default: pkg } = await import('../../../package.json', { with: { type: 'json' } });
-            this.version = pkg.version || 'unknown';
+            this.buildIdentity = getBuildIdentity();
+            this.version = getBuildDisplayVersion(this.buildIdentity);
         } catch (error) {
             process.stderr.write(`[AxiomLogger] Failed to send log: ${error?.message || error}\n`);
         }
@@ -132,6 +130,7 @@ class AxiomLogger extends BaseLogger {
         const payload = {
             ...normalizedContext,
             version: this.version,
+            ...getBuildLogFields(this.buildIdentity),
             instanceId,
             level,
             message: messageStr,

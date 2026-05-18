@@ -2,6 +2,7 @@ import { BaseLogger } from './BaseLogger.js';
 import { getOriginalConsoleMethod } from './console-channel.js';
 import { serializeToString } from '../../utils/serializer.js';
 import { getBeijingTimestamp } from '../../utils/timeUtils.js';
+import { getBuildDisplayVersion, getBuildIdentity } from '../../utils/buildIdentity.js';
 
 class ConsoleLogger extends BaseLogger {
     constructor(options = {}) {
@@ -10,6 +11,7 @@ class ConsoleLogger extends BaseLogger {
         this.originalConsoleWarn = getOriginalConsoleMethod('warn');
         this.originalConsoleLog = getOriginalConsoleMethod('log');
         this.version = 'unknown';
+        this.buildIdentity = getBuildIdentity();
         // 智能过滤模式：当启用外部日志平台时，控制台仅输出关键信息
         this.smartFilter = options.smartFilter || false;
     }
@@ -23,18 +25,8 @@ class ConsoleLogger extends BaseLogger {
     async _initVersion() {
         if (this.version !== 'unknown') return;
         try {
-            if (process.env.APP_VERSION) {
-                this.version = process.env.APP_VERSION;
-                return;
-            }
-            // 尝试读取 package.json
-            try {
-                const { default: pkg } = await import('../../../package.json', { with: { type: 'json' } });
-                this.version = pkg.version || 'unknown';
-            } catch (e) {
-                // Fallback for environments where dynamic import might fail or file missing
-                this.version = 'unknown';
-            }
+            this.buildIdentity = getBuildIdentity();
+            this.version = getBuildDisplayVersion(this.buildIdentity);
         } catch (error) {
             // 如果连console都失败了，我们无能为力
             this.version = 'error';

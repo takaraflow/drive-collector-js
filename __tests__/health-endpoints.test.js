@@ -1,6 +1,12 @@
 import { handleWebhook, setAppReadyState } from "../index.js";
 
 const healthPaths = ["/health", "/healthz", "/ready"];
+const originalEnv = {
+    APP_VERSION: process.env.APP_VERSION,
+    GIT_SHA: process.env.GIT_SHA,
+    BUILD_TIME: process.env.BUILD_TIME,
+    IMAGE_TAG: process.env.IMAGE_TAG
+};
 
 const createHealthRequest = (path, method = "GET") => ({
     url: path,
@@ -69,6 +75,13 @@ describe("Health & Readiness Endpoints - after ready", () => {
 
     afterEach(() => {
         delete global.appInitializer;
+        for (const [key, value] of Object.entries(originalEnv)) {
+            if (value === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = value;
+            }
+        }
     });
 
     test.each(healthPaths)("GET %s should return 200 OK", async (path) => {
@@ -111,5 +124,28 @@ describe("Health & Readiness Endpoints - after ready", () => {
 
         expect(res.writeHead).toHaveBeenCalledWith(503);
         expect(res.end).toHaveBeenCalledWith("Service Unavailable: Business Modules Down");
+    });
+
+    test("GET /version should expose build identity without requiring readiness", async () => {
+        process.env.APP_VERSION = "4.33.1";
+        process.env.GIT_SHA = "abcdef1234567890";
+        process.env.BUILD_TIME = "2026-05-18T00:00:00.000Z";
+        process.env.IMAGE_TAG = "repo/app:sha-abcdef1";
+        setAppReadyState(false);
+
+        const req = createHealthRequest("/version", "GET");
+        const res = createMockResponse();
+
+        await handleWebhook(req, res);
+
+        expect(res.writeHead).toHaveBeenCalledWith(200, { "Content-Type": "application/json" });
+        expect(JSON.parse(res.end.mock.calls[0][0])).toEqual(expect.objectContaining({
+            version: "4.33.1",
+            gitSha: "abcdef1234567890",
+            shortGitSha: "abcdef123456",
+            buildTime: "2026-05-18T00:00:00.000Z",
+            imageTag: "repo/app:sha-abcdef1",
+            releaseId: "4.33.1+abcdef123456"
+        }));
     });
 });

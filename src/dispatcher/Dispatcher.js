@@ -31,15 +31,13 @@ import { cache } from "../services/CacheService.js";
 import { queueService } from "../services/QueueService.js";
 import { logger } from "../services/logger/index.js";
 import { localCache } from "../utils/LocalCache.js";
+import { getBuildDisplayVersion, getBuildIdentity } from "../utils/buildIdentity.js";
 import mediaGroupBuffer from "../services/MediaGroupBuffer.js";
 import { TASK_STATUSES } from "../domain/task-state-machine.js";
-import fs from "fs";
-import path from "path";
 import { randomUUID } from "crypto";
 
 const log = logger.withModule('Dispatcher');
-const packageJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
-const appVersion = packageJson.version || 'unknown';
+const appVersion = getBuildDisplayVersion(getBuildIdentity());
 const getOwnerId = () => getConfig().ownerId?.toString();
 const getDefaultRemoteFolder = () => getConfig().remoteFolder;
 const getNodeEnv = () => getConfig().nodeEnv;

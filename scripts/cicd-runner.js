@@ -16,6 +16,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawnSync, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import { getBuildReleaseId } from '../src/utils/buildIdentity.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -258,6 +259,19 @@ function resolveDockerTags(envConfig, context) {
     return [...new Set(resolvedTags)]; // Unique
 }
 
+function enrichBuildIdentityContext(context, tags = []) {
+    const shortSha = context.sha && context.sha !== 'unknown' ? context.sha.substring(0, 7) : '';
+    const imageTag = tags.find(tag => shortSha && tag.includes(`:sha-${shortSha}`)) || tags[0] || 'unknown';
+    const version = context.version || (shortSha || 'unknown');
+
+    return {
+        ...context,
+        build_time: context.build_time || new Date().toISOString(),
+        image_tag: imageTag,
+        release_id: getBuildReleaseId(version, context.sha)
+    };
+}
+
 // ==========================================
 // 2.3 Docker Build Execution
 // ==========================================
@@ -281,6 +295,7 @@ function runDockerBuild(config, context) {
         console.log(`   [Docker] No tags resolved, skipping build.`);
         return;
     }
+    context = enrichBuildIdentityContext(context, tags);
 
     console.log(`\n[DOCKER] Building for ${context.env}`);
     console.log(`   Tags: ${tags.join(', ')}`);

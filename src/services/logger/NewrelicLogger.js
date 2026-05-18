@@ -4,6 +4,7 @@ import { serializeError, serializeToString, limitFields } from '../../utils/seri
 import { getBeijingISOString } from '../../utils/timeUtils.js';
 import { shouldSendLogLevel } from './log-level.js';
 import { trace } from '@opentelemetry/api';
+import { getBuildDisplayVersion, getBuildIdentity, getBuildLogFields } from '../../utils/buildIdentity.js';
 
 let getInstanceIdFunc = () => 'unknown';
 const NEW_RELIC_SEVERITY = Object.freeze({
@@ -29,7 +30,6 @@ class NewrelicLogger extends BaseLogger {
         this.licenseKey = rawKey.trim().replace(/['"]/g, '');
 
         this.region = options.region || process.env.NEW_RELIC_REGION || 'US';
-        this.service = options.service || process.env.NEW_RELIC_APP_NAME || 'drive-collector';
         this.logBuffer = [];
         this.batchFlushTimer = null;
         this.isBatchFlushing = false;
@@ -38,6 +38,8 @@ class NewrelicLogger extends BaseLogger {
         this._estimatedBufferBytes = 0; // 增量追踪缓冲区内存占用
         this.BATCH_FLUSH_INTERVAL_MS = process.env.NODE_ENV === 'test' ? 10 : 5000;
         this.version = 'unknown';
+        this.buildIdentity = getBuildIdentity();
+        this.service = options.service || this.buildIdentity.serviceName;
         this.hasLoggedSample = false; // 用于控制调试日志只打印一次
     }
 
@@ -66,12 +68,8 @@ class NewrelicLogger extends BaseLogger {
     async _initVersion() {
         if (this.version !== 'unknown') return;
         try {
-            if (process.env.APP_VERSION) {
-                this.version = process.env.APP_VERSION;
-                return;
-            }
-            const { default: pkg } = await import('../../../package.json', { with: { type: 'json' } });
-            this.version = pkg.version || 'unknown';
+            this.buildIdentity = getBuildIdentity();
+            this.version = getBuildDisplayVersion(this.buildIdentity);
         } catch (error) {
             // Ignore error
         }
@@ -102,6 +100,7 @@ class NewrelicLogger extends BaseLogger {
                     service: this.service,
                     env: process.env.NODE_ENV || 'unknown',
                     version: this.version,
+                    ...getBuildLogFields(this.buildIdentity),
                     plugin: 'drive-collector-js'
                 }
             },
@@ -155,6 +154,7 @@ class NewrelicLogger extends BaseLogger {
             level: level,
             severity: NEW_RELIC_SEVERITY[level] || String(level).toUpperCase(),
             'service.name': this.service,
+            ...getBuildLogFields(this.buildIdentity),
             instanceId: instanceId,
             local_time: getBeijingISOString(),
             ...context,

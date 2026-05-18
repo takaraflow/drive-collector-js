@@ -8,6 +8,13 @@ const webhookLog = vi.hoisted(() => ({
     debug: vi.fn()
 }));
 
+const originalBuildEnv = {
+    APP_VERSION: process.env.APP_VERSION,
+    GIT_SHA: process.env.GIT_SHA,
+    BUILD_TIME: process.env.BUILD_TIME,
+    IMAGE_TAG: process.env.IMAGE_TAG
+};
+
 vi.mock('../../../src/services/logger/index.js', () => {
     return {
         logger: {
@@ -139,6 +146,13 @@ describe('WebhookRouter', () => {
     afterEach(() => {
         vi.restoreAllMocks();
         delete global.appInitializer;
+        for (const [key, value] of Object.entries(originalBuildEnv)) {
+            if (value === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = value;
+            }
+        }
     });
 
     describe('handleHealthChecks', () => {
@@ -199,6 +213,25 @@ describe('WebhookRouter', () => {
             await handleWebhook(req, res);
             expect(res.writeHead).toHaveBeenCalledWith(200);
             expect(res.end).toHaveBeenCalledWith('');
+        });
+
+        it('should return build identity for /version before app readiness', async () => {
+            process.env.APP_VERSION = '4.33.1';
+            process.env.GIT_SHA = 'abcdef1234567890';
+            process.env.BUILD_TIME = '2026-05-18T00:00:00.000Z';
+            process.env.IMAGE_TAG = 'repo/app:sha-abcdef1';
+            setAppReadyState(false);
+            req.method = 'GET';
+            req.url = '/version';
+
+            await handleWebhook(req, res);
+
+            expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
+            expect(JSON.parse(res.end.mock.calls[0][0])).toEqual(expect.objectContaining({
+                version: '4.33.1',
+                gitSha: 'abcdef1234567890',
+                releaseId: '4.33.1+abcdef123456'
+            }));
         });
 
         it('should catch errors during health check processing', async () => {

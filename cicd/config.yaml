@@ -116,6 +116,11 @@ docker:
     build_args:
       - "NODE_ENV"
       - "NODE_MODE"
+      - "APP_VERSION=${{version}}"
+      - "GIT_SHA=${{sha}}"
+      - "BUILD_TIME=${{build_time}}"
+      - "IMAGE_TAG=${{image_tag}}"
+      - "RELEASE_ID=${{release_id}}"
     platforms:
       - "linux/amd64"
       - "linux/arm64"

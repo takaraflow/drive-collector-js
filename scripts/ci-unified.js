@@ -10,6 +10,7 @@ import { execSync, spawnSync } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
 import https from 'https';
 import crypto from 'crypto';
+import { getBuildReleaseId } from '../src/utils/buildIdentity.js';
 
 const VALID_COMMANDS = new Set(['full', 'pipeline', 'validate', 'sync', 'quick', 'lint', 'test', 'build']);
 
@@ -54,6 +55,18 @@ function resolveCiMode(command, env = process.env) {
 function getCiPlan(command, env = process.env) {
   const mode = resolveCiMode(command, env);
   return mode === 'validate' ? ['validate'] : MODE_PLANS[mode];
+}
+
+function buildDockerIdentityArgs({ nodeEnv, version, sha, shortSha, imageTag, buildTime = new Date().toISOString() }) {
+  const releaseId = getBuildReleaseId(version, sha || shortSha);
+  return [
+    `NODE_ENV=${nodeEnv}`,
+    `APP_VERSION=${version}`,
+    `GIT_SHA=${sha || 'unknown'}`,
+    `BUILD_TIME=${buildTime}`,
+    `IMAGE_TAG=${imageTag || 'unknown'}`,
+    `RELEASE_ID=${releaseId}`
+  ];
 }
 
 /**
@@ -268,13 +281,23 @@ class DockerManager {
 
   buildSmoke(targetEnv) {
     const tag = `drive-collector-bot:ci-${targetEnv.id}`;
+    const { sha, shortSha } = this.envManager.context;
+    const version = this.envManager.getVersion();
+    const buildTime = new Date().toISOString();
+    const identityBuildArgs = buildDockerIdentityArgs({
+      nodeEnv: targetEnv.id,
+      version,
+      sha,
+      shortSha,
+      imageTag: tag,
+      buildTime
+    });
     const buildArgs = [
       'build',
       '.',
       '--file',
       'Dockerfile',
-      '--build-arg',
-      `NODE_ENV=${targetEnv.id}`,
+      ...identityBuildArgs.flatMap(arg => ['--build-arg', arg]),
       '--tag',
       tag
     ];
@@ -367,21 +390,44 @@ class DockerManager {
     return [...new Set(tags)]; // 去重
   }
 
+  getBuildPlatforms() {
+    const configuredPlatforms = process.env.CI_DOCKER_PLATFORM || process.env.DOCKER_BUILD_PLATFORMS;
+    if (!configuredPlatforms) return '';
+
+    return configuredPlatforms
+      .split(',')
+      .map(platform => platform.trim())
+      .filter(Boolean)
+      .join(',');
+  }
+
   async buildAndPush(targetEnv) {
-    const { repository } = this.envManager.context;
+    const { repository, sha, shortSha } = this.envManager.context;
     if (!repository) {
         throw new Error('无法确定镜像仓库名称 (缺少 GITHUB_REPOSITORY)');
     }
 
     const imageName = `${this.registry}/${repository.toLowerCase()}`;
     const tags = this.generateTags(imageName);
+    const version = this.envManager.getVersion();
+    const buildTime = new Date().toISOString();
+    const canonicalImageTag = tags.find(tag => tag.includes(`:sha-${shortSha}`)) || tags[0] || 'unknown';
+    const identityBuildArgs = buildDockerIdentityArgs({
+        nodeEnv: targetEnv.id,
+        version,
+        sha,
+        shortSha,
+        imageTag: canonicalImageTag,
+        buildTime
+    });
     
     console.log(`🏷️ 生成的 Tags: \n${tags.map(t => `  - ${t}`).join('\n')}`);
 
     const tagArgs = tags.map(t => `-t ${t}`).join(' ');
     
     // 构建参数
-    const buildArgs = `--build-arg NODE_ENV=${targetEnv.id}`;
+    const buildArgs = identityBuildArgs.map(arg => `--build-arg ${arg}`).join(' ');
+    const platformArg = this.getBuildPlatforms();
     
     // 缓存策略: 尝试从 registry 拉取缓存
     // 本地使用本地缓存，CI尝试使用 --cache-from
@@ -390,27 +436,21 @@ class DockerManager {
         cacheArgs = `--cache-from type=registry,ref=${imageName}:latest --cache-to type=inline`;
     }
 
-    // 构建命令 - 使用 buildx 以支持多平台构建
-    const buildCmd = `docker buildx build . --load ${buildArgs} ${tagArgs} ${cacheArgs}`;
+    const outputArg = this.envManager.context.isLocal ? '--load' : '--push';
+    const platformArgs = platformArg ? `--platform ${platformArg}` : '';
+
+    // 构建命令 - CI 使用 buildx --push 生成/推送多架构 manifest；本地仍 --load 方便 smoke。
+    const buildCmd = `docker buildx build . ${outputArg} ${platformArgs} ${buildArgs} ${tagArgs} ${cacheArgs}`;
     console.log(`[DEBUG] buildCmd: "${buildCmd}"`);
     console.log(`[DEBUG] buildCmd.split(' '):`, buildCmd.split(' '));
     this.execute(buildCmd, '构建镜像');
 
-    // 推送逻辑
     if (this.envManager.context.isLocal) {
-        console.log('ℹ️ 本地模式：尝试推送...');
-        try {
-            tags.forEach(tag => {
-                this.execute(`docker push ${tag}`, `推送镜像 ${tag}`);
-            });
-        } catch (e) {
-            console.warn('⚠️ 本地推送失败 (可能未登录或网络问题)，已忽略错误');
-        }
-    } else {
-        tags.forEach(tag => {
-            this.execute(`docker push ${tag}`, `推送镜像 ${tag}`);
-        });
+        console.log('ℹ️ 本地模式：镜像已加载到本地 Docker，跳过推送');
+        return;
     }
+
+    console.log('✅ Docker buildx 已完成镜像推送');
   }
 }
 
@@ -658,4 +698,4 @@ Commands:
   });
 }
 
-export { getCiPlan, normalizeCommand, resolveCiMode };
+export { buildDockerIdentityArgs, getCiPlan, normalizeCommand, resolveCiMode };

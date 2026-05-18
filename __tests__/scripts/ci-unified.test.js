@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'vitest';
 
-import { getCiPlan, normalizeCommand, resolveCiMode } from '../../scripts/ci-unified.js';
+import {
+  buildDockerIdentityArgs,
+  getCiPlan,
+  normalizeCommand,
+  resolveCiMode
+} from '../../scripts/ci-unified.js';
 
 describe('ci-unified command planning', () => {
   test('should reject unknown commands', () => {
@@ -22,5 +27,23 @@ describe('ci-unified command planning', () => {
 
   test('should reject unknown CI_MODE values', () => {
     expect(() => getCiPlan('full', { CI_MODE: 'not-a-mode' })).toThrow('未知 CI_MODE');
+  });
+
+  test('should build release identity docker args from git context', () => {
+    expect(buildDockerIdentityArgs({
+      nodeEnv: 'prod',
+      version: '4.33.1',
+      sha: 'abcdef1234567890',
+      shortSha: 'abcdef1',
+      imageTag: 'ghcr.io/owner/repo:sha-abcdef1',
+      buildTime: '2026-05-18T00:00:00.000Z'
+    })).toEqual([
+      'NODE_ENV=prod',
+      'APP_VERSION=4.33.1',
+      'GIT_SHA=abcdef1234567890',
+      'BUILD_TIME=2026-05-18T00:00:00.000Z',
+      'IMAGE_TAG=ghcr.io/owner/repo:sha-abcdef1',
+      'RELEASE_ID=4.33.1+abcdef123456'
+    ]);
   });
 });

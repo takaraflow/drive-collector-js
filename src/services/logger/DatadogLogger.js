@@ -1,5 +1,6 @@
 import { BaseLogger } from './BaseLogger.js';
 import { writeOriginalConsole } from './console-channel.js';
+import { getBuildDisplayVersion, getBuildIdentity, getBuildLogFields } from '../../utils/buildIdentity.js';
 
 class DatadogLogger extends BaseLogger {
     constructor(options = {}) {
@@ -8,10 +9,13 @@ class DatadogLogger extends BaseLogger {
         this.site = options.site || process.env.DATADOG_SITE || 'datadoghq.com';
         this.service = options.service || 'drive-collector';
         this.version = 'unknown';
+        this.buildIdentity = getBuildIdentity();
     }
 
     async initialize() {
         if (this.isInitialized) return;
+        this.buildIdentity = getBuildIdentity();
+        this.version = getBuildDisplayVersion(this.buildIdentity);
         if (!this.apiKey) {
             writeOriginalConsole('warn', 'Datadog API key not configured');
         }
@@ -36,6 +40,7 @@ class DatadogLogger extends BaseLogger {
             status: level,
             timestamp: Date.now() * 1000000,
             version: this.version,
+            ...getBuildLogFields(this.buildIdentity),
             additional_info: data
         };
 
