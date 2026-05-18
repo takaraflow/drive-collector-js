@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.33.1](https://github.com/takaraflow/drive-collector-js/compare/v4.33.0...v4.33.1) (2026-05-18)
+
+
+### 🐛 问题修复
+
+* tighten telegram ux flows ([5bb0a86](https://github.com/takaraflow/drive-collector-js/commit/5bb0a866afb7bd0e311a1ef3d6c210defced719a))
+
 ## [4.33.0](https://github.com/takaraflow/drive-collector-js/compare/v4.32.4...v4.33.0) (2026-05-17)
 
 
