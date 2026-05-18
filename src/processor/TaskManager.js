@@ -7,6 +7,7 @@ import { dependencyContainer } from "../services/DependencyContainer.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
 import {
     isTaskProcessingLockBusyError,
+    TaskProcessingLockBusyError,
     TASK_QUEUE_TRIGGER_SOURCES
 } from "../domain/task-queue-contract.js";
 import {
@@ -22,6 +23,8 @@ import { uploadTask } from "./TaskManager/TaskManager.upload.js";
 const getDeps = () => dependencyContainer.getAll();
 const getLog = () => getDeps().logger.withModule('TaskManager');
 const TELEGRAM_CLIENT_LOCK_KEY = "telegram_client";
+const STALLED_RECOVERY_LOCK_KEY = "task_recovery:stalled";
+const STALLED_RECOVERY_LOCK_TTL_SECONDS = 120;
 
 /**
  * --- 任务管理调度中心 (TaskManager) ---
@@ -157,7 +160,7 @@ export class TaskManager {
      * 初始化：恢复因重启中断的僵尸任务
      */
     static async init() {
-        const { cache, TaskRepository } = getDeps();
+        const { cache, TaskRepository, instanceCoordinator } = getDeps();
         const log = getLog();
         log.info("正在检查数据库中异常中断的任务");
 
@@ -173,7 +176,20 @@ export class TaskManager {
             log.info("故障转移实例开始执行延迟恢复检查");
         }
 
+        let recoveryLockAcquired = false;
         try {
+            if (instanceCoordinator && typeof instanceCoordinator.acquireLock === 'function') {
+                recoveryLockAcquired = await instanceCoordinator.acquireLock(
+                    STALLED_RECOVERY_LOCK_KEY,
+                    STALLED_RECOVERY_LOCK_TTL_SECONDS,
+                    { maxAttempts: 1, logContention: false }
+                );
+                if (!recoveryLockAcquired) {
+                    log.info("另一个实例正在执行任务恢复扫描，当前实例跳过");
+                    return;
+                }
+            }
+
             // 并行加载初始化数据：僵尸任务 + 预热常用缓存
             // 注意：如果是 failover 模式，commonData 可能已经预加载过了，但再次调用无害（通常有缓存或幂等）
             const results = await Promise.allSettled([
@@ -213,6 +229,10 @@ export class TaskManager {
             this.updateQueueUI();
         } catch (e) {
             log.error("TaskManager.init critical error", e);
+        } finally {
+            if (recoveryLockAcquired && typeof instanceCoordinator?.releaseLock === 'function') {
+                await instanceCoordinator.releaseLock(STALLED_RECOVERY_LOCK_KEY);
+            }
         }
     }
 
@@ -597,6 +617,16 @@ export class TaskManager {
         return null;
     }
 
+    static async _acquireWebhookTaskLock(instanceCoordinator, taskId, phase) {
+        const lockAcquired = await instanceCoordinator.acquireTaskLock(taskId);
+        if (!lockAcquired) {
+            const log = getLog();
+            log.info("Task processing lock busy, webhook will be retried", { taskId, phase });
+            throw new TaskProcessingLockBusyError(taskId, phase);
+        }
+        return true;
+    }
+
     /**
      * [私 evasion] 发布任务到 QStash 下载队列
      */
@@ -769,6 +799,7 @@ export class TaskManager {
         const { instanceCoordinator, TaskRepository, client, runMtprotoTaskWithRetry, PRIORITY } = getDeps();
         const log = getLog();
         let didClaim = false;
+        let lockAcquired = false;
         // Leader 状态校验：只有持有 telegram_client 锁的实例才能处理任务
         const leaderLease = await this._getTelegramClientLease(instanceCoordinator);
         if (!leaderLease) {
@@ -792,6 +823,7 @@ export class TaskManager {
                 return { success: true, statusCode: 200 };
             }
 
+            lockAcquired = await this._acquireWebhookTaskLock(instanceCoordinator, taskId, 'download');
             const claim = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.START_DOWNLOAD, null, {
                 claimedBy: leaderLease.instanceId,
                 claimLeaseId: leaderLease.leaseId,
@@ -823,6 +855,7 @@ export class TaskManager {
             // 创建任务对象
             const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
             task.fileName = dbTask.file_name;
+            task.processingLockHeld = true;
             attachClaimLease(task, leaderLease);
 
             // 检查是否属于组任务（通过 msgId 查询同组任务数量）
@@ -842,7 +875,6 @@ export class TaskManager {
         } catch (error) {
             log.error("Download webhook failed", { taskId, error });
             if (isTaskProcessingLockBusyError(error)) {
-                await this._resetAfterProcessingLockBusy(taskId, TASK_EVENTS.RETRY, 'handleDownloadWebhook.lock_busy', didClaim ? getClaimFenceOptions(leaderLease) : {});
                 return { success: false, statusCode: 503, message: error.message };
             }
             const code = this._classifyError(error);
@@ -856,6 +888,10 @@ export class TaskManager {
                 source: 'handleDownloadWebhook.error'
             });
             return { success: false, statusCode: code, message: error.message };
+        } finally {
+            if (lockAcquired) {
+                await instanceCoordinator.releaseTaskLock(taskId);
+            }
         }
     }
 
@@ -867,6 +903,7 @@ export class TaskManager {
         const { instanceCoordinator, TaskRepository, client, runMtprotoTaskWithRetry, PRIORITY, config } = getDeps();
         const log = getLog();
         let didClaim = false;
+        let lockAcquired = false;
         // Leader 状态校验：只有持有 telegram_client 锁 del 实例才能处理任务
         const leaderLease = await this._getTelegramClientLease(instanceCoordinator);
         if (!leaderLease) {
@@ -891,6 +928,7 @@ export class TaskManager {
                 return { success: true, statusCode: 200 };
             }
 
+            lockAcquired = await this._acquireWebhookTaskLock(instanceCoordinator, taskId, 'upload');
             const uploadStart = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.START_UPLOAD, null, {
                 claimedBy: leaderLease.instanceId,
                 claimLeaseId: leaderLease.leaseId,
@@ -934,6 +972,7 @@ export class TaskManager {
             const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
             task.localPath = localPath;
             task.fileName = dbTask.file_name;
+            task.processingLockHeld = true;
             attachClaimLease(task, leaderLease);
 
             // 检查是否属于组任务（通过 msgId 查询同组任务数量）
@@ -953,7 +992,6 @@ export class TaskManager {
         } catch (error) {
             log.error("Upload webhook failed", { taskId, error });
             if (isTaskProcessingLockBusyError(error)) {
-                await this._resetAfterProcessingLockBusy(taskId, TASK_EVENTS.RESET_UPLOAD, 'handleUploadWebhook.lock_busy', didClaim ? getClaimFenceOptions(leaderLease) : {});
                 return { success: false, statusCode: 503, message: error.message };
             }
             const code = this._classifyError(error);
@@ -967,6 +1005,10 @@ export class TaskManager {
                 source: 'handleUploadWebhook.error'
             });
             return { success: false, statusCode: code, message: error.message };
+        } finally {
+            if (lockAcquired) {
+                await instanceCoordinator.releaseTaskLock(taskId);
+            }
         }
     }
 
@@ -1033,26 +1075,6 @@ export class TaskManager {
             log.error(`Failed to retry task ${taskId}:`, error);
             return { success: false, statusCode: 500, message: error.message };
         }
-    }
-
-    static async _resetAfterProcessingLockBusy(taskId, event, source, claimFenceOptions = {}) {
-        const { TaskRepository } = getDeps();
-        const log = getLog();
-        const result = await TaskRepository.transitionStatus(taskId, event, 'Task processing lock busy', {
-            ...claimFenceOptions,
-            returnResult: true,
-            allowNoop: true,
-            source
-        });
-        if (result.blocked) {
-            log.warn("Unable to reset task after processing lock busy", {
-                taskId,
-                event,
-                reason: result.reason,
-                status: result.fromStatus || result.latestStatus
-            });
-        }
-        return result;
     }
 
     static async _resetAfterRetryableInfrastructureError(taskId, event, error, source, claimFenceOptions = {}) {

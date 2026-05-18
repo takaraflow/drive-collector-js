@@ -4,6 +4,7 @@ import { DistributedLock } from '../../src/services/DistributedLock.js';
 const createMockCache = () => ({
     get: vi.fn(),
     compareAndSet: vi.fn(),
+    deleteIfEquals: vi.fn(),
     delete: vi.fn(),
     listKeys: vi.fn().mockResolvedValue([])
 });
@@ -46,6 +47,10 @@ describe('DistributedLock - core behaviors', () => {
         }));
         expect(mockCache.compareAndSet).toHaveBeenCalledTimes(1);
         expect(mockCache.compareAndSet.mock.calls[0][0]).toBe(`lock:task:${taskId}`);
+        expect(mockCache.compareAndSet.mock.calls[0][2]).toMatchObject({
+            ifNotExists: true,
+            ttl: 120
+        });
         expect(lock.locks.has(taskId)).toBe(true);
         const storedLock = lock.locks.get(taskId);
         expect(storedLock?.owner).toBe(instanceId);
@@ -105,6 +110,10 @@ describe('DistributedLock - core behaviors', () => {
             stolenFrom: existing.instanceId
         });
         expect(mockCache.compareAndSet).toHaveBeenCalledTimes(2);
+        expect(mockCache.compareAndSet.mock.calls[1][2]).toMatchObject({
+            ifEquals: existing,
+            ttl: 120
+        });
     });
 
     test('acquire surfaces cache errors when retries exhausted', async () => {
@@ -120,14 +129,19 @@ describe('DistributedLock - core behaviors', () => {
     test('release returns true when current instance owns the lock', async () => {
         mockCache.get.mockResolvedValue({
             instanceId,
-            expiresAt: Date.now() + 1000
+            expiresAt: Date.now() + 1000,
+            version: 'v1'
         });
-        mockCache.delete.mockResolvedValue(true);
+        mockCache.deleteIfEquals.mockResolvedValue(true);
 
         const success = await lock.release(taskId, instanceId);
 
         expect(success).toBe(true);
-        expect(mockCache.delete).toHaveBeenCalledWith(`lock:task:${taskId}`);
+        expect(mockCache.deleteIfEquals).toHaveBeenCalledWith(
+            `lock:task:${taskId}`,
+            expect.objectContaining({ instanceId, version: 'v1' })
+        );
+        expect(mockCache.delete).not.toHaveBeenCalled();
     });
 
     test('release returns false when lock belongs to another instance', async () => {
@@ -142,12 +156,26 @@ describe('DistributedLock - core behaviors', () => {
         expect(mockCache.delete).not.toHaveBeenCalled();
     });
 
+    test('release returns false when conditional delete loses the race', async () => {
+        mockCache.get.mockResolvedValue({
+            instanceId,
+            expiresAt: Date.now() + 1000,
+            version: 'v1'
+        });
+        mockCache.deleteIfEquals.mockResolvedValue(false);
+
+        const success = await lock.release(taskId, instanceId);
+
+        expect(success).toBe(false);
+        expect(mockCache.delete).not.toHaveBeenCalled();
+    });
+
     test('release returns false on cache delete failure', async () => {
         mockCache.get.mockResolvedValue({
             instanceId,
             expiresAt: Date.now() + 1000
         });
-        mockCache.delete.mockRejectedValue(new Error('boom'));
+        mockCache.deleteIfEquals.mockRejectedValue(new Error('boom'));
 
         const success = await lock.release(taskId, instanceId);
 

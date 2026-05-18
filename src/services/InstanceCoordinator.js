@@ -9,7 +9,7 @@ import { CACHE_KEYS } from "../domain/cache-keys.js";
 const log = logger.withModule('InstanceCoordinator');
 export const TELEGRAM_CLIENT_LOCK_TTL_SECONDS = 90;
 const ATOMIC_LOCK_KEYS = new Set(["telegram_client"]);
-const ATOMIC_LOCK_PREFIXES = ["msg_lock:", "task:"];
+const ATOMIC_LOCK_PREFIXES = ["msg_lock:", "task:", "task_recovery:"];
 
 // 创建带 cache_provider 上下文的 logger 用于动态 provider 信息
 const logWithProvider = () => {
@@ -185,6 +185,16 @@ export class InstanceCoordinator {
      */
     async startHeartbeat() {
         logWithProvider().debug(`启动心跳，当前间隔: ${this.heartbeatInterval / 1000}s`);
+
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
+
+        if (this.lockRenewalTimer) {
+            clearInterval(this.lockRenewalTimer);
+            this.lockRenewalTimer = null;
+        }
         
         // 独立的锁续租逻辑 - 不会被其他操作阻塞
         const startLockRenewal = () => {
@@ -506,6 +516,7 @@ export class InstanceCoordinator {
                         // 停止旧定时器并启动新的
                         if (this.heartbeatTimer) {
                             clearInterval(this.heartbeatTimer);
+                            this.heartbeatTimer = null;
                         }
                         
                         this.heartbeatInterval = newInterval;

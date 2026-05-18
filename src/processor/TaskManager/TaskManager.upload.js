@@ -21,11 +21,14 @@ export async function uploadTask(task) {
     
     const { id } = task;
 
-    // Distributed lock: Try to acquire task lock to ensure same task won't be processed by multiple instances
-    const lockAcquired = await instanceCoordinator.acquireTaskLock(id);
-    if (!lockAcquired) {
-        log.info("Task lock exists, skipping upload", { taskId: id, instance: 'current' });
-        throw new TaskProcessingLockBusyError(id, 'upload');
+    const ownsProcessingLock = task.processingLockHeld === true;
+    let lockAcquired = ownsProcessingLock;
+    if (!ownsProcessingLock) {
+        lockAcquired = await instanceCoordinator.acquireTaskLock(id);
+        if (!lockAcquired) {
+            log.info("Task lock exists, skipping upload", { taskId: id, instance: 'current' });
+            throw new TaskProcessingLockBusyError(id, 'upload');
+        }
     }
 
     let didActivate = false;
@@ -223,7 +226,8 @@ export async function uploadTask(task) {
             this.inFlightTasks.delete(id);
         }
         
-        // Ensure distributed lock is released
-        await instanceCoordinator.releaseTaskLock(id);
+        if (!ownsProcessingLock && lockAcquired) {
+            await instanceCoordinator.releaseTaskLock(id);
+        }
     }
 }

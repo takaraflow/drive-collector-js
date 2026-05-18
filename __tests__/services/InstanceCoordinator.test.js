@@ -47,6 +47,18 @@ describe("Core InstanceCoordinator Tests", () => {
             clearInterval(instanceCoordinator.heartbeatTimer);
             instanceCoordinator.heartbeatTimer = null;
         }
+        if (instanceCoordinator.lockRenewalTimer) {
+            clearInterval(instanceCoordinator.lockRenewalTimer);
+            instanceCoordinator.lockRenewalTimer = null;
+        }
+        if (instanceCoordinator.heartbeatAdjustTimer) {
+            clearInterval(instanceCoordinator.heartbeatAdjustTimer);
+            instanceCoordinator.heartbeatAdjustTimer = null;
+        }
+        if (instanceCoordinator.instanceWatchTimer) {
+            clearInterval(instanceCoordinator.instanceWatchTimer);
+            instanceCoordinator.instanceWatchTimer = null;
+        }
 
         // Mock cache methods
         mockCacheGet = vi.fn().mockResolvedValue(null);
@@ -253,6 +265,18 @@ describe("Core InstanceCoordinator Tests", () => {
         expect(mockCacheCompareAndSet).not.toHaveBeenCalled();
     });
 
+    test("should fail closed for stalled recovery locks without atomic CAS", async () => {
+        instanceCoordinator.instanceId = 'lock-instance';
+        mockSupportsAtomicCompareAndSet.mockReturnValue(false);
+
+        const result = await instanceCoordinator.acquireLock('task_recovery:stalled', 120, { maxAttempts: 1 });
+
+        expect(result).toBe(false);
+        expect(mockCacheGet).not.toHaveBeenCalled();
+        expect(mockCacheSet).not.toHaveBeenCalled();
+        expect(mockCacheCompareAndSet).not.toHaveBeenCalled();
+    });
+
     test("should keep best-effort locking for non-critical advisory locks without atomic CAS", async () => {
         instanceCoordinator.instanceId = 'lock-instance';
         mockSupportsAtomicCompareAndSet.mockReturnValue(false);
@@ -389,6 +413,23 @@ describe("Core InstanceCoordinator Tests", () => {
             }),
             expect.objectContaining({ ifEquals: currentLock, ttl: 90 })
         );
+    });
+
+    test("should replace existing heartbeat and lock renewal timers when heartbeat restarts", async () => {
+        instanceCoordinator.instanceId = 'leader-instance';
+        mockCacheGet.mockResolvedValue({
+            instanceId: 'leader-instance',
+            acquiredAt: fixedTime - 1000,
+            ttl: 90
+        });
+
+        await instanceCoordinator.startHeartbeat();
+        const firstHeartbeatTimer = instanceCoordinator.heartbeatTimer;
+        const firstRenewalTimer = instanceCoordinator.lockRenewalTimer;
+        await instanceCoordinator.startHeartbeat();
+
+        expect(instanceCoordinator.heartbeatTimer).not.toBe(firstHeartbeatTimer);
+        expect(instanceCoordinator.lockRenewalTimer).not.toBe(firstRenewalTimer);
     });
 
     test("should not preempt a live telegram lock just because owner heartbeat is missing", async () => {

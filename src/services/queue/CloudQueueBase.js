@@ -294,15 +294,54 @@ export default class CloudQueueBase extends BaseQueue {
                     this._addProcessedMessage(messageId);
                     return true;
                 }
-
-                // 原子设置 key
-                await this.redisClient.setex(redisKey, this.idempotencyKeyTtl, '1');
             } catch (error) {
                 log.warn(`Redis idempotency check failed: ${error.message}`);
             }
         }
 
         return false;
+    }
+
+    async _markRedisIdempotencyProcessed(messageId) {
+        if (!this.useRedisIdempotency || !this.redisClient) return;
+        const redisKey = `${this.idempotencyKeyPrefix}${messageId}`;
+
+        try {
+            await this._setRedisIdempotencyKey(redisKey);
+        } catch (error) {
+            log.warn(`Redis idempotency mark failed: ${error.message}`);
+        }
+    }
+
+    async _setRedisIdempotencyKey(redisKey) {
+        if (!this.redisClient) return null;
+
+        if (typeof this.redisClient.setnxex === 'function') {
+            return await this.redisClient.setnxex(redisKey, this.idempotencyKeyTtl, '1');
+        }
+
+        if (typeof this.redisClient.set === 'function') {
+            const result = await this.redisClient.set(
+                redisKey,
+                '1',
+                'EX',
+                this.idempotencyKeyTtl,
+                'NX'
+            );
+            return result === 'OK' || result === true;
+        }
+
+        if (typeof this.redisClient.setex === 'function') {
+            await this.redisClient.setex(redisKey, this.idempotencyKeyTtl, '1');
+            return true;
+        }
+
+        return null;
+    }
+
+    async _markIdempotencyProcessed(messageId) {
+        this._addProcessedMessage(messageId);
+        await this._markRedisIdempotencyProcessed(messageId);
     }
 
     /**

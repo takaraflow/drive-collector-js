@@ -47,7 +47,7 @@ this.flushTimer = null;
 
 **核心特性**:
 ```javascript
-// 两层检查：本地缓存 + Redis 分布式
+// 三层检查：本地缓存 + Redis 成功记录 + QStash deduplicationId
 this.processedMessages = new Set();           // 本地快速路径
 this.useRedisIdempotency = process.env.QUEUE_USE_IDEMPOTENCY === 'true';
 ```
@@ -55,7 +55,7 @@ this.useRedisIdempotency = process.env.QUEUE_USE_IDEMPOTENCY === 'true';
 **配置**:
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `QUEUE_USE_IDEMPOTENCY` | `false` | 启用 Redis 分布式去重 |
+| `QUEUE_USE_IDEMPOTENCY` | `false` | 启用 Redis 原子分布式去重；任务队列同时使用 QStash deduplicationId |
 | `QUEUE_IDEMPOTENCY_TTL` | `86400` | Redis key TTL（秒） |
 | `QUEUE_LOCAL_IDEMPOTENCY_LIMIT` | `1000` | 本地缓存上限 |
 

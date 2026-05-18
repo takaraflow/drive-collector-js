@@ -182,7 +182,7 @@ export class QstashQueue extends CloudQueueBase {
             const { cache } = await import("../CacheService.js");
             const rawClient = cache?.primaryProvider?.client;
 
-            if (rawClient && typeof rawClient.get === 'function' && typeof rawClient.setex === 'function') {
+            if (rawClient && typeof rawClient.get === 'function' && (typeof rawClient.set === 'function' || typeof rawClient.setex === 'function')) {
                 this.redisClient = rawClient;
                 log.info('QStashQueue: Redis raw client initialized for distributed circuit breaker');
                 return;
@@ -194,6 +194,13 @@ export class QstashQueue extends CloudQueueBase {
                 this.redisClient = {
                     get: async (key) => {
                         return await cache.get(key, 'text', { skipL1: true });
+                    },
+                    setnxex: async (key, ttlSeconds, value) => {
+                        if (typeof cache.compareAndSet !== 'function') return false;
+                        return await cache.compareAndSet(key, value, {
+                            ifNotExists: true,
+                            ttl: ttlSeconds
+                        });
                     },
                     setex: async (key, ttlSeconds, value) => {
                         await cache.set(key, value, ttlSeconds, { skipTtlRandomization: true, skipL1: true });
@@ -423,11 +430,13 @@ export class QstashQueue extends CloudQueueBase {
         // 生成消息ID：任务队列使用显式稳定 key，避免 _meta.timestamp 破坏幂等。
         const {
             idempotencyKey,
+            deduplicationId,
             forceDirect: _forceDirect,
             requireDurableAck,
             ...publishOptions
         } = options;
-        const messageId = idempotencyKey || this._generateMessageId(topic, message);
+        const messageId = idempotencyKey || deduplicationId || this._generateMessageId(topic, message);
+        const qstashDeduplicationId = deduplicationId || idempotencyKey || publishOptions.deduplicationId;
 
         if (isQstashDebugEnabled()) {
             log.debug('QStash publish begin', {
@@ -459,7 +468,7 @@ export class QstashQueue extends CloudQueueBase {
                     throw new Error('Durable queue publish cannot be acknowledged in QStash mock mode');
                 }
                 // Mock 模式：不触发真实发布，但仍返回稳定 messageId 供链路追踪
-                this._addProcessedMessage(messageId);
+                await this._markIdempotencyProcessed(messageId);
                 return { messageId, mock: true };
             }
 
@@ -470,12 +479,13 @@ export class QstashQueue extends CloudQueueBase {
                     return await this.client.publishJSON({
                         url: topic,
                         body: message,
+                        ...(qstashDeduplicationId ? { deduplicationId: qstashDeduplicationId } : {}),
                         ...publishOptions
                     });
                 }, 3, '[QstashQueue]'));
 
                 // 只有成功发布后才标记为已处理，避免失败导致后续重试被误判为 duplicate
-                this._addProcessedMessage(messageId);
+                await this._markIdempotencyProcessed(messageId);
 
                 metrics.timing('publish.time', Date.now() - startTime);
                 if (isQstashDebugEnabled()) {

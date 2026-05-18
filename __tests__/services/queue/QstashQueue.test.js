@@ -96,13 +96,15 @@ const mockCacheSet = vi.fn().mockResolvedValue(true);
 const mockCacheGet = vi.fn();
 const mockCacheDelete = vi.fn().mockResolvedValue(true);
 const mockCacheListKeys = vi.fn();
+const mockCacheCompareAndSet = vi.fn().mockResolvedValue(true);
 
 vi.mock("../../../src/services/CacheService.js", () => ({
     cache: {
         set: mockCacheSet,
         get: mockCacheGet,
         delete: mockCacheDelete,
-        listKeys: mockCacheListKeys
+        listKeys: mockCacheListKeys,
+        compareAndSet: mockCacheCompareAndSet
     }
 }));
 
@@ -245,6 +247,8 @@ describe("QstashQueue - publish", () => {
         mockCacheGet.mockReset();
         mockCacheDelete.mockClear();
         mockCacheListKeys.mockReset();
+        mockCacheCompareAndSet.mockReset();
+        delete process.env.QUEUE_USE_IDEMPOTENCY;
         
         queue = new QstashQueue();
         await queue.initialize();
@@ -264,7 +268,7 @@ describe("QstashQueue - publish", () => {
         });
     });
 
-    test("should use explicit idempotency key without forwarding it to QStash", async () => {
+    test("should forward explicit idempotency key as QStash deduplication id", async () => {
         queue.batchSize = 1;
         mockPublishJSON.mockResolvedValue({ messageId: 'msg-1' });
 
@@ -282,7 +286,57 @@ describe("QstashQueue - publish", () => {
         expect(first).toEqual({ messageId: 'msg-1' });
         expect(second).toEqual({ messageId: 'download:download:task-1:initial', duplicate: true });
         expect(mockPublishJSON).toHaveBeenCalledTimes(1);
-        expect(mockPublishJSON.mock.calls[0][0]).not.toHaveProperty('idempotencyKey');
+        expect(mockPublishJSON.mock.calls[0][0]).toMatchObject({
+            deduplicationId: 'download:download:task-1:initial'
+        });
+    });
+
+    test("should mark Redis idempotency key atomically after durable publish succeeds", async () => {
+        process.env.QUEUE_USE_IDEMPOTENCY = 'true';
+        queue = new QstashQueue();
+        await queue.initialize();
+        queue.batchSize = 1;
+        mockPublishJSON.mockResolvedValue({ messageId: 'msg-1' });
+        mockCacheCompareAndSet.mockResolvedValueOnce(true);
+
+        await queue._publish('test-topic', {
+            taskId: 'task-1',
+            type: 'download'
+        }, { idempotencyKey: 'download:download:task-1:initial' });
+
+        expect(mockPublishJSON).toHaveBeenCalledTimes(1);
+        expect(mockCacheCompareAndSet).toHaveBeenCalledWith(
+            'queue:idempotency:download:download:task-1:initial',
+            '1',
+            expect.objectContaining({
+                ifNotExists: true,
+                ttl: 86400
+            })
+        );
+    });
+
+    test("should mark Redis idempotency key through setex-only raw clients after publish succeeds", async () => {
+        process.env.QUEUE_USE_IDEMPOTENCY = 'true';
+        queue = new QstashQueue();
+        await queue.initialize();
+        queue.batchSize = 1;
+        queue.redisClient = {
+            get: vi.fn().mockResolvedValue(null),
+            setex: vi.fn().mockResolvedValue('OK')
+        };
+        mockPublishJSON.mockResolvedValue({ messageId: 'msg-1' });
+
+        await queue._publish('test-topic', {
+            taskId: 'task-1',
+            type: 'download'
+        }, { idempotencyKey: 'download:download:task-1:initial' });
+
+        expect(mockPublishJSON).toHaveBeenCalledTimes(1);
+        expect(queue.redisClient.setex).toHaveBeenCalledWith(
+            'queue:idempotency:download:download:task-1:initial',
+            86400,
+            '1'
+        );
     });
 
     test("should publish again when retry uses a new queue attempt", async () => {

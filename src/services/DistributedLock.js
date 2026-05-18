@@ -149,11 +149,7 @@ export class DistributedLock {
         // 尝试原子获取锁
         const acquired = await this.cache.compareAndSet(lockKey, lockValue, {
             ifNotExists: true,
-            metadata: {
-                ttl: effectiveTtlSeconds,
-                taskId,
-                instanceId
-            }
+            ttl: effectiveTtlSeconds
         });
 
         if (acquired) {
@@ -194,11 +190,8 @@ export class DistributedLock {
             stolenAt: Date.now(),
             stolenReason: 'expired'
         }, {
-            metadata: { 
-                ttl: ttlSeconds,
-                stolen: true,
-                from: existingLock.instanceId
-            }
+            ifEquals: existingLock,
+            ttl: ttlSeconds
         });
 
         if (stolen) {
@@ -249,10 +242,8 @@ export class DistributedLock {
 
                     // 使用 compareAndSet 确保原子性
                     const renewed = await this.cache.compareAndSet(lockKey, newValue, {
-                        metadata: { 
-                            ttl: effectiveTtlSeconds,
-                            action: 'renewal'
-                        }
+                        ifEquals: current,
+                        ttl: effectiveTtlSeconds
                     });
 
                     if (renewed) {
@@ -316,8 +307,23 @@ export class DistributedLock {
             // 停止心跳
             this.cleanupLocalLock(taskId);
 
-            // 删除锁
-            await this.cache.delete(lockKey);
+            let released = false;
+            if (typeof this.cache.deleteIfEquals === 'function') {
+                released = await this.cache.deleteIfEquals(lockKey, current);
+            } else {
+                released = await this.cache.compareAndSet(lockKey, {
+                    released: true,
+                    releasedBy: instanceId,
+                    releasedAt: Date.now()
+                }, {
+                    ifEquals: current,
+                    ttl: 1
+                });
+            }
+            if (!released) {
+                this.logger.warn(`Release skipped because lock changed for task ${taskId}`);
+                return false;
+            }
             
             this.logger.debug(`Lock released for task ${taskId} by ${instanceId}`);
             return true;

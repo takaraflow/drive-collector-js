@@ -6,7 +6,7 @@
 
 ## 架构
 
-### 两层幂等性检查
+### 三层幂等性检查
 
 ```
 发布消息
@@ -19,10 +19,15 @@
     │ 未命中
     ▼
 ┌─────────────────────┐
-│  2. Redis 分布式检查 │  ← 可选 (需启用)
+│  2. Redis 成功记录检查 │  ← 可选 (需启用)
 │  queue:idempotency: │
 └─────────────────────┘
     │ 未命中
+    ▼
+┌─────────────────────┐
+│  3. QStash 去重      │  ← deduplicationId
+└─────────────────────┘
+    │
     ▼
   发布消息
 ```
@@ -45,7 +50,7 @@ QstashQueue (QStash 特有实现)
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `QUEUE_USE_IDEMPOTENCY` | `false` | 启用 Redis 分布式去重 |
+| `QUEUE_USE_IDEMPOTENCY` | `false` | 启用 Redis 原子分布式去重。生产任务队列还会把稳定 key 传给 QStash `deduplicationId` |
 | `QUEUE_IDEMPOTENCY_TTL` | `86400` | Redis key TTL（秒），默认 24 小时 |
 | `QUEUE_LOCAL_IDEMPOTENCY_LIMIT` | `1000` | 本地缓存最大条目数 |
 
@@ -85,20 +90,23 @@ this.processedMessagesLimit = 1000; // FIFO 驱逐
 - 优点：零网络开销，极速检查
 - 缺点：有内存上限，无 TTL
 
-### Redis 分布式去重
+### Redis 成功记录
 
 ```javascript
-// 检查 key 是否存在
-const existing = await redis.get(`queue:idempotency:${messageId}`);
-if (existing) {
-    return { duplicate: true };
-}
-// 设置 key 并设置 TTL
-await redis.setex(`queue:idempotency:${messageId}`, ttl, '1');
+// 发布成功后用原子 NX 记录，避免覆盖已有成功记录
+await redis.set(
+    `queue:idempotency:${messageId}`,
+    '1',
+    'EX',
+    ttl,
+    'NX'
+);
 ```
 
 - 跨实例共享状态
 - 自动 TTL 过期
+- 只在发布成功后写入，发布前不抢占；真正的发布幂等由 QStash `deduplicationId` 负责
+- 写入必须使用原子 NX 语义；CacheService 包装器使用 `compareAndSet(ifNotExists)`
 - 缺点：有网络开销
 
 ### 失败处理
@@ -159,12 +167,6 @@ if (result.duplicate) {
 process.env.QUEUE_USE_IDEMPOTENCY = 'true';
 
 const queue = new QstashQueue();
-
-// 方式2: 构造函数
-const queue = new QstashQueue({
-    idempotencyEnabled: true,
-    idempotencyTtl: 3600
-});
 ```
 
 ### 监控
@@ -205,11 +207,16 @@ const idempotencyStatus = queue.getIdempotencyStatus();
 
 ### 消息重复处理
 
-1. **确保 Redis 可用**
+1. **确保 QStash 去重 key 稳定**
+   - 任务队列应使用 `QueueService.enqueueDownloadTask/enqueueUploadTask`
+   - 发布请求应携带稳定 `deduplicationId`
+
+2. **确保 Redis 可用**
    - 检查 `QUEUE_USE_IDEMPOTENCY=true`
    - 检查 Redis 连接状态
+   - 检查 Redis provider 支持 `SET ... NX ... EX` 或 CacheService `compareAndSet(ifNotExists)`
 
-2. **检查 TTL 设置**
+3. **检查 TTL 设置**
    - 如果消息重试间隔超过 TTL，需要增大 `QUEUE_IDEMPOTENCY_TTL`
 
 ### 性能问题

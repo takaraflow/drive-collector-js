@@ -519,7 +519,7 @@ const PATH_MAP = {
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `QUEUE_USE_IDEMPOTENCY` | `false` | 启用 Redis 分布式去重 |
+| `QUEUE_USE_IDEMPOTENCY` | `false` | 启用 Redis 原子分布式去重；任务队列同时使用 QStash deduplicationId |
 | `QUEUE_IDEMPOTENCY_TTL` | `86400` | Redis key TTL（秒），默认 24 小时 |
 | `QUEUE_LOCAL_IDEMPOTENCY_LIMIT` | `1000` | 本地缓存最大条目数 |
 

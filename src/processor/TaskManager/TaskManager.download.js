@@ -26,11 +26,14 @@ export async function downloadTask(task) {
         const { message, id } = task;
         if (!message.media) return;
 
-        // Distributed lock: Try to acquire task lock to ensure same task won't be processed by multiple instances
-        const lockAcquired = await instanceCoordinator.acquireTaskLock(id);
-        if (!lockAcquired) {
-            log.info("Task lock exists, skipping download", { taskId: id, instance: 'current' });
-            throw new TaskProcessingLockBusyError(id, 'download');
+        const ownsProcessingLock = task.processingLockHeld === true;
+        let lockAcquired = ownsProcessingLock;
+        if (!ownsProcessingLock) {
+            lockAcquired = await instanceCoordinator.acquireTaskLock(id);
+            if (!lockAcquired) {
+                log.info("Task lock exists, skipping download", { taskId: id, instance: 'current' });
+                throw new TaskProcessingLockBusyError(id, 'download');
+            }
         }
 
         let didActivate = false;
@@ -98,8 +101,9 @@ export async function downloadTask(task) {
                 this.activeProcessors.delete(id);
                 this.inFlightTasks.delete(id);
             }
-            // Ensure distributed lock is released
-            await instanceCoordinator.releaseTaskLock(id);
+            if (!ownsProcessingLock && lockAcquired) {
+                await instanceCoordinator.releaseTaskLock(id);
+            }
         }
 }
 

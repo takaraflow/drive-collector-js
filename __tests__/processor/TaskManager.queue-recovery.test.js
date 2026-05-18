@@ -9,6 +9,7 @@ const mockTaskRepository = {
     createBatch: vi.fn(),
     findById: vi.fn(),
     findByMsgId: vi.fn(),
+    findStalledTasks: vi.fn(),
     transitionStatus: vi.fn()
 };
 
@@ -22,6 +23,9 @@ const mockInstanceCoordinator = {
     getInstanceId: vi.fn(() => 'instance-1'),
     getLockLease: vi.fn(),
     isLockLeaseCurrent: vi.fn(),
+    acquireLock: vi.fn(),
+    releaseLock: vi.fn(),
+    acquireTaskLock: vi.fn(),
     releaseTaskLock: vi.fn()
 };
 
@@ -166,7 +170,6 @@ vi.mock('fs', () => ({
 }));
 
 const { TaskManager } = await import('../../src/processor/TaskManager.js');
-const { TaskProcessingLockBusyError } = await import('../../src/domain/task-queue-contract.js');
 const { TASK_EVENTS } = await import('../../src/domain/task-state-machine.js');
 const { safeEdit } = await import('../../src/utils/common.js');
 
@@ -190,6 +193,7 @@ describe('TaskManager queue/recovery closure', () => {
             blocked: false,
             queueAttempt: `${eventOrStatus}:${taskId}:1700000000000`
         }));
+        mockTaskRepository.findStalledTasks.mockResolvedValue([]);
         mockTaskRepository.findByMsgId.mockResolvedValue([]);
         mockQueueService.enqueueDownloadTask.mockResolvedValue({ messageId: 'download-msg' });
         mockQueueService.enqueueUploadTask.mockResolvedValue({ messageId: 'upload-msg' });
@@ -199,6 +203,10 @@ describe('TaskManager queue/recovery closure', () => {
         mockInstanceCoordinator.hasLock.mockResolvedValue(true);
         mockInstanceCoordinator.getLockLease.mockResolvedValue({ instanceId: 'instance-1', leaseId: 'lease-1' });
         mockInstanceCoordinator.isLockLeaseCurrent.mockResolvedValue(true);
+        mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
+        mockInstanceCoordinator.releaseLock.mockResolvedValue(true);
+        mockInstanceCoordinator.acquireTaskLock.mockResolvedValue(true);
+        mockInstanceCoordinator.releaseTaskLock.mockResolvedValue(true);
         mockFs.existsSync.mockReturnValue(true);
     });
 
@@ -232,6 +240,29 @@ describe('TaskManager queue/recovery closure', () => {
         );
         expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledTimes(2);
         expect(mockQueueService.enqueueDownloadTask).not.toHaveBeenCalled();
+    });
+
+    it('skips stalled recovery init when another instance owns the recovery lease', async () => {
+        mockInstanceCoordinator.acquireLock.mockResolvedValueOnce(false);
+
+        await TaskManager.init();
+
+        expect(mockTaskRepository.findStalledTasks).not.toHaveBeenCalled();
+        expect(mockInstanceCoordinator.releaseLock).not.toHaveBeenCalled();
+    });
+
+    it('holds and releases a recovery lease around stalled recovery init', async () => {
+        mockTaskRepository.findStalledTasks.mockResolvedValue([]);
+
+        await TaskManager.init();
+
+        expect(mockInstanceCoordinator.acquireLock).toHaveBeenCalledWith(
+            'task_recovery:stalled',
+            120,
+            expect.objectContaining({ maxAttempts: 1, logContention: false })
+        );
+        expect(mockTaskRepository.findStalledTasks).toHaveBeenCalledWith(120000);
+        expect(mockInstanceCoordinator.releaseLock).toHaveBeenCalledWith('task_recovery:stalled');
     });
 
     it('resets uploading task to download when local file is missing', async () => {
@@ -329,7 +360,7 @@ describe('TaskManager queue/recovery closure', () => {
         );
     });
 
-    it('returns 503 and resets download state when task lock is busy after webhook claim', async () => {
+    it('returns 503 without touching task state when download processing lock is busy', async () => {
         mockTaskRepository.findById.mockResolvedValue({
             id: 'task-1',
             user_id: 'user-1',
@@ -339,33 +370,16 @@ describe('TaskManager queue/recovery closure', () => {
             file_name: 'test.mp4',
             status: 'queued'
         });
-        vi.spyOn(TaskManager, 'downloadTask')
-            .mockRejectedValueOnce(new TaskProcessingLockBusyError('task-1', 'download'));
+        mockInstanceCoordinator.acquireTaskLock.mockResolvedValueOnce(false);
 
         const result = await TaskManager.handleDownloadWebhook('task-1');
 
         expect(result.statusCode).toBe(503);
-        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
-            'task-1',
-            TASK_EVENTS.START_DOWNLOAD,
-            null,
-            expect.objectContaining({ source: 'handleDownloadWebhook' })
-        );
-        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
-            'task-1',
-            TASK_EVENTS.RETRY,
-            'Task processing lock busy',
-            expect.objectContaining({
-                source: 'handleDownloadWebhook.lock_busy',
-                requireClaim: true,
-                claimedBy: 'instance-1',
-                claimLeaseId: 'lease-1'
-            })
-        );
-        TaskManager.downloadTask.mockRestore();
+        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalled();
+        expect(mockInstanceCoordinator.releaseTaskLock).not.toHaveBeenCalled();
     });
 
-    it('returns 503 and resets upload state when task lock is busy after webhook claim', async () => {
+    it('returns 503 without touching task state when upload processing lock is busy', async () => {
         mockTaskRepository.findById.mockResolvedValue({
             id: 'task-1',
             user_id: 'user-1',
@@ -375,24 +389,39 @@ describe('TaskManager queue/recovery closure', () => {
             file_name: 'test.mp4',
             status: 'downloaded'
         });
-        vi.spyOn(TaskManager, 'uploadTask')
-            .mockRejectedValueOnce(new TaskProcessingLockBusyError('task-1', 'upload'));
+        mockInstanceCoordinator.acquireTaskLock.mockResolvedValueOnce(false);
 
         const result = await TaskManager.handleUploadWebhook('task-1');
 
         expect(result.statusCode).toBe(503);
-        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
-            'task-1',
-            TASK_EVENTS.RESET_UPLOAD,
-            'Task processing lock busy',
-            expect.objectContaining({
-                source: 'handleUploadWebhook.lock_busy',
-                requireClaim: true,
-                claimedBy: 'instance-1',
-                claimLeaseId: 'lease-1'
-            })
-        );
-        TaskManager.uploadTask.mockRestore();
+        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalled();
+        expect(mockInstanceCoordinator.releaseTaskLock).not.toHaveBeenCalled();
+    });
+
+    it('passes a held processing lock into download task and releases it after completion', async () => {
+        mockTaskRepository.findById.mockResolvedValue({
+            id: 'task-1',
+            user_id: 'user-1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'test.mp4',
+            status: 'queued'
+        });
+        const downloadSpy = vi.spyOn(TaskManager, 'downloadTask').mockResolvedValueOnce(undefined);
+
+        const result = await TaskManager.handleDownloadWebhook('task-1');
+
+        expect(result.statusCode).toBe(200);
+        expect(mockInstanceCoordinator.acquireTaskLock).toHaveBeenCalledWith('task-1');
+        expect(downloadSpy).toHaveBeenCalledWith(expect.objectContaining({
+            id: 'task-1',
+            processingLockHeld: true,
+            claimedBy: 'instance-1',
+            claimLeaseId: 'lease-1'
+        }));
+        expect(mockInstanceCoordinator.releaseTaskLock).toHaveBeenCalledWith('task-1');
+        downloadSpy.mockRestore();
     });
 
     it('does not update UI when terminal task cancellation is blocked', async () => {
