@@ -452,6 +452,11 @@
         "required": false,
         "description": "Alias for GIT_SHA when provided by the deployment platform"
       },
+      "NF_DEPLOYMENT_SHA": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank deployment commit SHA fallback for logs and telemetry"
+      },
       "BUILD_TIME": {
         "type": "string",
         "required": false,
@@ -476,6 +481,11 @@
         "type": "string",
         "required": false,
         "description": "Alias for IMAGE_TAG when provided by the deployment platform"
+      },
+      "NF_IMAGE": {
+        "type": "string",
+        "required": false,
+        "description": "Northflank runtime image reference fallback for logs and telemetry"
       },
       "RELEASE_ID": {
         "type": "string",

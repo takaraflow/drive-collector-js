@@ -58,6 +58,19 @@ describe('buildIdentity', () => {
         }));
     });
 
+    test('should use Northflank deployment metadata as platform fallback', () => {
+        const identity = getBuildIdentity({
+            APP_VERSION: '4.33.1',
+            NF_DEPLOYMENT_SHA: 'd41160e0f6d175e511a87f6fbc3f18420f5b7f39',
+            NF_IMAGE: 'registry.northflank.com/project/service:runtime-image'
+        });
+
+        expect(identity.gitSha).toBe('d41160e0f6d175e511a87f6fbc3f18420f5b7f39');
+        expect(identity.shortGitSha).toBe('d41160e0f6d1');
+        expect(identity.imageTag).toBe('registry.northflank.com/project/service:runtime-image');
+        expect(identity.releaseId).toBe('4.33.1+d41160e0f6d1');
+    });
+
     test('should derive short sha and release id from the same SSOT helper', () => {
         expect(getBuildShortGitSha('abcdef1234567890')).toBe('abcdef123456');
         expect(getBuildReleaseId('4.33.1', 'abcdef1234567890')).toBe('4.33.1+abcdef123456');

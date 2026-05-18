@@ -49,11 +49,12 @@ export function getBuildIdentity(env = process.env) {
         env.BUILD_SHA,
         env.COMMIT_SHA,
         env.GITHUB_SHA,
-        env.SOURCE_VERSION
+        env.SOURCE_VERSION,
+        env.NF_DEPLOYMENT_SHA
     );
     const shortGitSha = getBuildShortGitSha(gitSha);
     const buildTime = firstKnown(env.BUILD_TIME, env.BUILD_DATE);
-    const imageTag = firstKnown(env.IMAGE_TAG, env.CONTAINER_IMAGE, env.DOCKER_IMAGE_TAG);
+    const imageTag = firstKnown(env.IMAGE_TAG, env.CONTAINER_IMAGE, env.DOCKER_IMAGE_TAG, env.NF_IMAGE);
     const releaseId = firstKnown(
         env.RELEASE_ID,
         getBuildReleaseId(version, gitSha)
