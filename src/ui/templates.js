@@ -321,7 +321,13 @@ export class UIHelper {
  
          if (data.systemResources) {
              const res = data.systemResources;
-             html += `<code>内存: ${res.memoryMB || 'N/A'}</code>\n`;
+             if (res.rss || res.heap || res.external) {
+                 html += `<code>内存: ${res.rss || 'N/A'}</code>\n`;
+                 html += `<code>JS堆: ${res.heap || 'N/A'}</code>\n`;
+                 html += `<code>外部: ${res.external || 'N/A'}</code>\n`;
+             } else {
+                 html += `<code>内存: ${res.memoryMB || 'N/A'}</code>\n`;
+             }
              html += `<code>运行: ${res.uptime || 'N/A'}</code>\n`;
          } else {
              html += `<code>系统资源数据为空</code>\n`;

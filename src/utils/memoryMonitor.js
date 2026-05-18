@@ -1,3 +1,6 @@
+import fs from 'fs';
+import v8 from 'v8';
+
 /**
  * 轻量级内存监控器
  * 在 256MB 容器中，Node.js 堆限制 200MB，需要主动监控内存压力
@@ -6,10 +9,76 @@
 const HEAP_WARNING_RATIO = 0.75;  // 75% 堆使用时警告
 const HEAP_CRITICAL_RATIO = 0.90; // 90% 堆使用时紧急 GC
 const MONITOR_INTERVAL_MS = 30_000; // 30秒检查一次
+const BYTES_PER_MB = 1024 * 1024;
+const MAX_REASONABLE_MEMORY_LIMIT_BYTES = 1024 ** 5; // Ignore host-level cgroup sentinels.
 
 let monitorTimer = null;
 
-const formatMB = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+export const formatMB = (bytes) => `${(bytes / BYTES_PER_MB).toFixed(1)}MB`;
+const formatWholeMB = (bytes) => `${Math.round(bytes / BYTES_PER_MB)}MB`;
+const formatRatio = (usedBytes, limitBytes) => `${Math.round((usedBytes / limitBytes) * 100)}%`;
+
+const isUsableMemoryLimit = (bytes) => (
+    Number.isFinite(bytes) &&
+    bytes > 0 &&
+    bytes < MAX_REASONABLE_MEMORY_LIMIT_BYTES
+);
+
+export const readContainerMemoryLimitBytes = (readFileSync = fs.readFileSync) => {
+    const paths = [
+        '/sys/fs/cgroup/memory.max',
+        '/sys/fs/cgroup/memory/memory.limit_in_bytes'
+    ];
+
+    for (const path of paths) {
+        try {
+            const raw = String(readFileSync(path, 'utf8')).trim();
+            if (!raw || raw === 'max') continue;
+
+            const limit = Number.parseInt(raw, 10);
+            if (isUsableMemoryLimit(limit)) return limit;
+        } catch {
+            // Cgroup files differ by runtime; missing files are expected locally.
+        }
+    }
+
+    return null;
+};
+
+export const getV8HeapLimitBytes = (heapStatistics = v8.getHeapStatistics()) => {
+    const limit = Number(heapStatistics?.heap_size_limit);
+    return isUsableMemoryLimit(limit) ? limit : null;
+};
+
+const formatDiagnosticCapacity = (usedBytes, limitBytes) => {
+    if (isUsableMemoryLimit(limitBytes)) {
+        return `${formatWholeMB(usedBytes)} / ${formatWholeMB(limitBytes)} (${formatRatio(usedBytes, limitBytes)})`;
+    }
+
+    return formatWholeMB(usedBytes);
+};
+
+export const getMemoryDiagnostics = ({
+    memoryUsage = process.memoryUsage(),
+    heapStatistics = v8.getHeapStatistics(),
+    containerMemoryLimitBytes = readContainerMemoryLimitBytes()
+} = {}) => {
+    const heapLimitBytes = getV8HeapLimitBytes(heapStatistics);
+
+    return {
+        rss: formatDiagnosticCapacity(memoryUsage.rss, containerMemoryLimitBytes),
+        heap: formatDiagnosticCapacity(memoryUsage.heapUsed, heapLimitBytes),
+        external: formatWholeMB(memoryUsage.external || 0),
+        raw: {
+            rssBytes: memoryUsage.rss,
+            heapUsedBytes: memoryUsage.heapUsed,
+            heapTotalBytes: memoryUsage.heapTotal,
+            heapLimitBytes,
+            externalBytes: memoryUsage.external || 0,
+            containerMemoryLimitBytes
+        }
+    };
+};
 
 /**
  * 检查当前内存状态并采取行动
@@ -84,4 +153,12 @@ export const stopMemoryMonitor = () => {
     }
 };
 
-export default { checkMemoryPressure, startMemoryMonitor, stopMemoryMonitor };
+export default {
+    checkMemoryPressure,
+    formatMB,
+    getMemoryDiagnostics,
+    getV8HeapLimitBytes,
+    readContainerMemoryLimitBytes,
+    startMemoryMonitor,
+    stopMemoryMonitor
+};

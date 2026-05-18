@@ -406,7 +406,9 @@ describe("UIHelper", () => {
                     cacheFailover: true
                 },
                 systemResources: {
-                    memoryMB: '120MB (100MB/200MB)',
+                    rss: '120MB / 256MB (47%)',
+                    heap: '100MB / 200MB (50%)',
+                    external: '12MB',
                     uptime: '2h 15m'
                 }
             };
@@ -425,9 +427,26 @@ describe("UIHelper", () => {
             expect(result).toContain("TG-MT  : ✅ Telegram MTProto API 连接正常 (45ms)");
             expect(result).toContain("DB-D1  : ❌ Cloudflare D1 连接失败: Timeout (5000ms)");
             expect(result).toContain("💾 <b>系统资源</b>");
-            expect(result).toContain("内存: 120MB (100MB/200MB)");
+            expect(result).toContain("内存: 120MB / 256MB (47%)");
+            expect(result).toContain("JS堆: 100MB / 200MB (50%)");
+            expect(result).toContain("外部: 12MB");
             expect(result).toContain("运行: 2h 15m");
             expect(result).toContain("⚠️ 发现 1 个服务异常，请检查网络连接或配置。");
+        });
+
+        test("should keep legacy memory text as a fallback", () => {
+            const result = UIHelper.renderDiagnosisReport({
+                networkResults: { services: {} },
+                instanceInfo: {},
+                systemResources: {
+                    memoryMB: '120MB (100MB/200MB)',
+                    uptime: '2h 15m'
+                }
+            });
+
+            expect(result).toContain("内存: 120MB (100MB/200MB)");
+            expect(result).not.toContain("JS堆:");
+            expect(result).toContain("运行: 2h 15m");
         });
 
         test("should render diagnosis report with no errors", () => {
@@ -454,7 +473,9 @@ describe("UIHelper", () => {
                     instanceCount: 1
                 },
                 systemResources: {
-                    memoryMB: '80MB (60MB/120MB)',
+                    rss: '80MB / 256MB (31%)',
+                    heap: '60MB / 200MB (30%)',
+                    external: '8MB',
                     uptime: '1h 30m'
                 }
             };

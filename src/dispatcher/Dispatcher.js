@@ -18,6 +18,7 @@ import { parseDriveSessionData } from "../domain/drive-session-step.js";
 import { runBotTask, runBotTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 import { NetworkDiagnostic } from "../utils/NetworkDiagnostic.js";
+import { getMemoryDiagnostics } from "../utils/memoryMonitor.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { cache } from "../services/CacheService.js";
 import { queueService } from "../services/QueueService.js";
@@ -1315,19 +1316,14 @@ export class Dispatcher {
             NetworkDiagnostic.diagnoseAll(),
             this._getInstanceInfo()
         ]);
-        const memUsage = process.memoryUsage();
-        const rss = Math.round(memUsage.rss / 1024 / 1024);
-        const heapUsed = Math.round(memUsage.heapUsed / 1024 / 1024);
-        const heapTotal = Math.round(memUsage.heapTotal / 1024 / 1024);
-
         return {
             message: UIHelper.renderDiagnosisReport({
                 networkResults,
                 instanceInfo,
                 systemResources: {
-                    memoryMB: `${rss}MB (${heapUsed}MB/${heapTotal}MB)`,
+                    ...getMemoryDiagnostics(),
                     uptime: this._getUptime()
-                }
+                },
             }),
             buttons: this._getStatusButtons(true)
         };

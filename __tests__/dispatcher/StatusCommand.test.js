@@ -312,5 +312,13 @@ describe('Dispatcher /status command', () => {
         expect(mockClient.sendMessage).not.toHaveBeenCalled();
         expect(mockSafeEdit).toHaveBeenCalledWith('chat-1', 456, expect.stringContaining('正在执行系统诊断'), null, 'admin-1');
         expect(mockSafeEdit).toHaveBeenCalledWith('chat-1', 456, 'diagnosis report', expect.any(Array), 'admin-1');
+        expect(mockUIHelper.renderDiagnosisReport).toHaveBeenCalledWith(expect.objectContaining({
+            systemResources: expect.objectContaining({
+                rss: expect.any(String),
+                heap: expect.any(String),
+                external: expect.any(String),
+                uptime: expect.any(String)
+            })
+        }));
     });
 });
