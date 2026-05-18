@@ -7,6 +7,9 @@ const mockTaskRepository = {
     getUserQueueOverview: vi.fn(),
     getQueueOverview: vi.fn()
 };
+const mockUserRepository = {
+    normalizeFilter: vi.fn((filter) => filter || 'all')
+};
 const mockDriveRepository = {
     getDefaultDrive: vi.fn()
 };
@@ -42,6 +45,9 @@ vi.mock('../../src/services/telegram.js', () => ({
 }));
 vi.mock('../../src/repositories/TaskRepository.js', () => ({
     TaskRepository: mockTaskRepository
+}));
+vi.mock('../../src/repositories/UserRepository.js', () => ({
+    UserRepository: mockUserRepository
 }));
 vi.mock('../../src/repositories/DriveRepository.js', () => ({
     DriveRepository: mockDriveRepository
@@ -159,6 +165,7 @@ describe('Dispatcher /status command', () => {
         expect(sent.message).toContain('管理员诊断信息');
         expect(sent.message).toContain('运行时间');
         const callbackData = sent.buttons.flat().map(button => button.data.toString());
+        expect(callbackData).toContain('admin_users_open');
         expect(callbackData).toContain('task_queue_open');
         expect(callbackData).toContain('diagnosis_run');
     });

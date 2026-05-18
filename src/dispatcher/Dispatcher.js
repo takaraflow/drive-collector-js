@@ -18,6 +18,7 @@ import { CloudTool } from "../services/rclone.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
+import { UserRepository } from "../repositories/UserRepository.js";
 import { ApiKeyRepository } from "../repositories/ApiKeyRepository.js";
 import { safeEdit, escapeHTML } from "../utils/common.js";
 import { formatBytes } from "../utils/common.js";
@@ -63,6 +64,7 @@ const COMMAND_PERMISSIONS = {
     "/task_queue":        "system:admin",
 
     // 用户管理
+    "/users":             "user:manage",
     "/pro_admin":         "user:manage",
     "/de_admin":          "user:manage",
     "/ban":               "user:manage",
@@ -117,7 +119,10 @@ export class Dispatcher {
 
         if (isAdmin) {
             buttons.push([
-                Button.inline(STRINGS.status.btn_task_queue, Buffer.from("task_queue_open")),
+                Button.inline(STRINGS.status.btn_user_list, Buffer.from("admin_users_open")),
+                Button.inline(STRINGS.status.btn_task_queue, Buffer.from("task_queue_open"))
+            ]);
+            buttons.push([
                 Button.inline(STRINGS.status.btn_diagnosis, Buffer.from("diagnosis_run"))
             ]);
         }
@@ -134,10 +139,15 @@ export class Dispatcher {
         ];
 
         if (isAdmin) {
-            buttons.unshift([
-                Button.inline(STRINGS.status.btn_task_queue, Buffer.from("task_queue_open")),
-                Button.inline(STRINGS.status.btn_diagnosis, Buffer.from("diagnosis_run"))
-            ]);
+            buttons.unshift(
+                [
+                    Button.inline(STRINGS.status.btn_user_list, Buffer.from("admin_users_open")),
+                    Button.inline(STRINGS.status.btn_task_queue, Buffer.from("task_queue_open"))
+                ],
+                [
+                    Button.inline(STRINGS.status.btn_diagnosis, Buffer.from("diagnosis_run"))
+                ]
+            );
         }
 
         return buttons;
@@ -167,7 +177,10 @@ export class Dispatcher {
 
         if (isAdmin) {
             buttons.push([
-                Button.inline(STRINGS.status.btn_task_queue, Buffer.from("task_queue_open")),
+                Button.inline(STRINGS.status.btn_user_list, Buffer.from("admin_users_open")),
+                Button.inline(STRINGS.status.btn_task_queue, Buffer.from("task_queue_open"))
+            ]);
+            buttons.push([
                 Button.inline(STRINGS.status.btn_diagnosis, Buffer.from("diagnosis_run"))
             ]);
         }
@@ -600,6 +613,11 @@ export class Dispatcher {
                 return await answer();
             }
 
+            if (data === "admin_users_open") {
+                await this._editAdminUsers(event, userId);
+                return await answer();
+            }
+
             if (data === "task_action_back") {
                 await safeEdit(event.userId, event.msgId, STRINGS.task.action_cancelled, this._getStatusButtons(false), userId);
                 await answer(STRINGS.task.action_cancelled);
@@ -730,6 +748,9 @@ export class Dispatcher {
 
             } else if (data.startsWith("tq_")) {
                 await this._handleTaskQueueCallback(event, data, userId, answer);
+
+            } else if (data.startsWith("au_")) {
+                await this._handleAdminUsersCallback(event, data, userId, answer);
 
             } else if (data.startsWith("remote_folder_")) {
                 await this._handleRemoteFolderCallback(event, userId, answer);
@@ -909,6 +930,8 @@ export class Dispatcher {
                 await this._handleDiagnosisCommand(target, userId); return true;
             case "/task_queue":
                 await this._handleTaskQueueCommand(target, userId); return true;
+            case "/users":
+                await this._handleAdminUsersCommand(target, userId); return true;
             case "/open_service":
                 await this._handleModeSwitchCommand(target, userId, 'public'); return true;
             case "/close_service":
@@ -1544,6 +1567,100 @@ export class Dispatcher {
         } catch (error) {
             log.error("Task queue callback error:", error);
             await answerCallback("暂时无法查询任务队列");
+        }
+    }
+
+    /**
+     * [私有] 管理员用户列表
+     */
+    static async _handleAdminUsersCommand(target, userId) {
+        const canManageUsers = await AuthGuard.can(userId, "user:manage");
+        if (!canManageUsers) {
+            return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.status.no_permission,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        }
+
+        const placeholder = await runBotTaskWithRetry(() => client.sendMessage(target, {
+            message: STRINGS.admin_users.loading
+        }), userId, {}, false, 3);
+
+        (async () => {
+            try {
+                const { text, buttons } = await this._buildAdminUsersView(userId, "all", 0);
+                await safeEdit(target, placeholder.id, text, buttons, userId);
+            } catch (error) {
+                log.error("Admin users command error:", {
+                    userId,
+                    error: error?.message
+                });
+                await safeEdit(target, placeholder.id, STRINGS.admin_users.error, this._getStatusButtons(true), userId);
+            }
+        })();
+    }
+
+    static async _buildAdminUsersView(userId, filter = "all", page = 0) {
+        const canManageUsers = await AuthGuard.can(userId, "user:manage");
+        if (!canManageUsers) {
+            return { text: STRINGS.status.no_permission, buttons: null };
+        }
+
+        const data = await UserRepository.listForAdmin({
+            filter,
+            page,
+            pageSize: 8,
+            ownerId: getOwnerId()
+        });
+        return UIHelper.renderAdminUsers(data);
+    }
+
+    static async _editAdminUsers(event, userId, filter = "all", page = 0) {
+        try {
+            await safeEdit(event.userId, event.msgId, STRINGS.admin_users.loading, null, userId);
+            const { text, buttons } = await this._buildAdminUsersView(userId, filter, page);
+            await safeEdit(event.userId, event.msgId, text, buttons, userId);
+        } catch (error) {
+            log.error("Admin users callback error:", {
+                userId,
+                filter,
+                page,
+                error: error?.message
+            });
+            await safeEdit(event.userId, event.msgId, STRINGS.admin_users.error, this._getStatusButtons(true), userId);
+        }
+    }
+
+    static _parseAdminUsersCallback(data) {
+        const cleanData = data.replace("au_refresh_", "au_");
+        const parts = cleanData.split("_");
+        const page = Number.parseInt(parts.at(-1), 10);
+        const filter = parts.slice(1, -1).join("_") || "all";
+
+        return {
+            filter: UserRepository.normalizeFilter(filter),
+            page: Number.isInteger(page) && page >= 0 ? page : 0
+        };
+    }
+
+    static async _handleAdminUsersCallback(event, data, userId, answerCallback) {
+        try {
+            const canManageUsers = await AuthGuard.can(userId, "user:manage");
+            if (!canManageUsers) {
+                return await answerCallback(STRINGS.status.no_permission);
+            }
+
+            const { filter, page } = this._parseAdminUsersCallback(data);
+            const { text, buttons } = await this._buildAdminUsersView(userId, filter, page);
+            await safeEdit(event.userId, event.msgId, text, buttons, userId);
+            await answerCallback();
+        } catch (error) {
+            log.error("Admin users callback error:", {
+                userId,
+                data,
+                error: error?.message
+            });
+            await answerCallback("暂时无法查询用户列表");
         }
     }
 

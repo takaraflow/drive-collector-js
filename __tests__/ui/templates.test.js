@@ -91,6 +91,40 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
             btn_refresh: "🔄",
             btn_retry_failed_page: "重试本页失败任务",
             no_tasks_in_status: "📭 该状态下暂无任务。您可以发送文件或链接来创建新任务。",
+        },
+        admin_users: {
+            title: "👥 <b>用户列表</b>",
+            loading: "🔍 正在查询用户列表...",
+            error: "❌ <b>暂时无法查询用户列表</b>\n\n请重新加载；如果连续失败，请查看系统诊断。",
+            empty: "当前没有可显示的用户。\n用户绑定网盘、提交任务或被设置角色后，会出现在这里。",
+            summary: "共 {{total}} 位用户 · 活跃 {{active}} · 管理 {{admins}} · 封禁 {{banned}}",
+            filter_line: "筛选: {{filter}} · 第 {{current}}/{{totalPages}} 页",
+            user_row: "<code>{{index}}.</code> {{roleIcon}} <code>{{userId}}</code> · {{role}}",
+            user_meta: "   网盘 {{drives}} · 任务 {{tasks}} · 活跃 {{activeTasks}} · 最近 {{lastSeen}}",
+            user_result_meta: "   完成 {{completed}} · 失败 {{failed}}",
+            filters: {
+                all: "全部",
+                active: "活跃",
+                admin: "管理",
+                banned: "封禁",
+                nodrive: "未绑盘"
+            },
+            roles: {
+                owner: "所有者",
+                admin: "管理员",
+                trusted: "可信用户",
+                user: "普通用户",
+                banned: "已封禁"
+            },
+            btn_all: "全部",
+            btn_active: "活跃",
+            btn_admin: "管理",
+            btn_banned: "封禁",
+            btn_nodrive: "未绑盘",
+            btn_back: "返回",
+            btn_refresh: "刷新",
+            btn_prev: "上一页",
+            btn_next: "下一页",
         }
     },
     format: (s, args) => {
@@ -871,6 +905,99 @@ describe("UIHelper", () => {
         test("should return '刚刚' for future timestamps", () => {
             expect(UIHelper._formatRelativeTime(Date.now() + 300000)).toBe('刚刚');
             expect(UIHelper._formatRelativeTime(Date.now() + 86400000)).toBe('刚刚');
+        });
+    });
+
+    describe("renderAdminUsers", () => {
+        test("should render a compact admin user list without sensitive fields", () => {
+            const result = UIHelper.renderAdminUsers({
+                filter: "all",
+                users: [
+                    {
+                        user_id: "owner-1",
+                        role: "owner",
+                        active_drive_count: 1,
+                        task_count: 12,
+                        active_task_count: 2,
+                        completed_task_count: 8,
+                        failed_task_count: 1,
+                        last_seen_at: Date.now() - 120000,
+                        file_name: "secret.mp4",
+                        config_data: "{\"token\":\"secret\"}"
+                    },
+                    {
+                        user_id: "user-2",
+                        role: "user",
+                        active_drive_count: 0,
+                        task_count: 0,
+                        active_task_count: 0,
+                        completed_task_count: 0,
+                        failed_task_count: 0,
+                        last_seen_at: 0
+                    }
+                ],
+                summary: { total: 2, active: 1, admins: 1, banned: 0, noDrive: 1 },
+                total: 2,
+                page: 0,
+                pageSize: 8,
+                totalPages: 1
+            });
+
+            expect(result.text).toContain("用户列表");
+            expect(result.text).toContain("共 2 位用户 · 活跃 1 · 管理 1 · 封禁 0");
+            expect(result.text).toContain("👑 <code>owner-1</code> · 所有者");
+            expect(result.text).toContain("👤 <code>user-2</code> · 普通用户");
+            expect(result.text).toContain("网盘 1 · 任务 12 · 活跃 2");
+            expect(result.text).toContain("完成 8 · 失败 1");
+            expect(result.text).not.toContain("secret.mp4");
+            expect(result.text).not.toContain("token");
+
+            const callbackData = result.buttons.flat().map(button => button.data.toString());
+            expect(callbackData).toContain("au_all_0");
+            expect(callbackData).toContain("au_active_0");
+            expect(callbackData).toContain("au_admin_0");
+            expect(callbackData).toContain("au_banned_0");
+            expect(callbackData).toContain("au_nodrive_0");
+            expect(callbackData).toContain("au_refresh_all_0");
+            expect(callbackData).toContain("status_general");
+        });
+
+        test("should render empty state and omit disabled pagination callbacks", () => {
+            const result = UIHelper.renderAdminUsers({
+                filter: "banned",
+                users: [],
+                summary: { total: 3, active: 0, admins: 1, banned: 0, noDrive: 2 },
+                total: 0,
+                page: 0,
+                pageSize: 8,
+                totalPages: 1
+            });
+
+            expect(result.text).toContain("当前没有可显示的用户");
+            expect(result.text).toContain("筛选: 封禁 · 第 1/1 页");
+            const navRow = result.buttons[2];
+            expect(navRow.map(button => button.data.toString())).toEqual(["au_refresh_banned_0"]);
+        });
+
+        test("should include previous and next controls on middle pages", () => {
+            const result = UIHelper.renderAdminUsers({
+                filter: "active",
+                users: [{ user_id: "user-9", role: "trusted", active_drive_count: 1, task_count: 3, active_task_count: 1 }],
+                summary: { total: 30, active: 21, admins: 2, banned: 0, noDrive: 4 },
+                total: 21,
+                page: 1,
+                pageSize: 8,
+                totalPages: 3
+            });
+
+            const navData = result.buttons[2].map(button => button.data.toString());
+            expect(navData).toEqual([
+                "au_active_0",
+                "au_active_0",
+                "au_refresh_active_1",
+                "au_active_2",
+                "au_active_2"
+            ]);
         });
     });
 });

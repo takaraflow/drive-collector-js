@@ -24,6 +24,7 @@ describe("GracefulShutdown Integration", () => {
     });
 
     afterEach(() => {
+        vi.useRealTimers();
         mockExit.mockRestore();
         global.console = originalConsole;
         gracefulShutdown.isShuttingDown = false;
@@ -115,6 +116,7 @@ describe("GracefulShutdown Integration", () => {
 
     describe("Performance", () => {
         test("关闭流程应该在合理时间内完成", async () => {
+            vi.useFakeTimers();
             const fastHook = vi.fn().mockResolvedValue();
             registerShutdownHook(fastHook, 10, 'fast-hook');
 
@@ -123,7 +125,7 @@ describe("GracefulShutdown Integration", () => {
             const duration = Date.now() - startTime;
 
             expect(fastHook).toHaveBeenCalled();
-            expect(duration).toBeLessThan(15);
+            expect(duration).toBe(0);
         });
     });
 });

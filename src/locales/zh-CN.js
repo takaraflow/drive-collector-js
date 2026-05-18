@@ -11,6 +11,7 @@ export const STRINGS = {
               "• 设置保存目录\n\n" +
               "遇到问题请联系管理员。",
         help_admin: "\n\n<b>管理员工具</b>\n" +
+                    "/users - 查看用户列表\n" +
                     "/task_queue - 查看全局任务队列\n" +
                     "/diagnosis - 系统诊断\n" +
                     "/open_service - 开启公开访问\n" +
@@ -203,6 +204,7 @@ export const STRINGS = {
         btn_diagnosis: "🩺 系统诊断",
         btn_my_status: "我的状态",
         btn_task_queue: "全局队列",
+        btn_user_list: "用户列表",
     },
 
     // --- 系统诊断 ---
@@ -258,6 +260,42 @@ export const STRINGS = {
         btn_refresh: "刷新",
         btn_retry_failed_page: "重试本页失败任务",
         no_tasks_in_status: "📭 该状态下暂无任务。您可以发送文件或链接来创建新任务。",
+    },
+
+    // --- 管理员用户列表 ---
+    admin_users: {
+        title: "👥 <b>用户列表</b>",
+        loading: "🔍 正在查询用户列表...",
+        error: "❌ <b>暂时无法查询用户列表</b>\n\n请重新加载；如果连续失败，请查看系统诊断。",
+        empty: "当前没有可显示的用户。\n用户绑定网盘、提交任务或被设置角色后，会出现在这里。",
+        summary: "共 {{total}} 位用户 · 活跃 {{active}} · 管理 {{admins}} · 封禁 {{banned}}",
+        filter_line: "筛选: {{filter}} · 第 {{current}}/{{totalPages}} 页",
+        user_row: "<code>{{index}}.</code> {{roleIcon}} <code>{{userId}}</code> · {{role}}",
+        user_meta: "   网盘 {{drives}} · 任务 {{tasks}} · 活跃 {{activeTasks}} · 最近 {{lastSeen}}",
+        user_result_meta: "   完成 {{completed}} · 失败 {{failed}}",
+        filters: {
+            all: "全部",
+            active: "活跃",
+            admin: "管理",
+            banned: "封禁",
+            nodrive: "未绑盘"
+        },
+        roles: {
+            owner: "所有者",
+            admin: "管理员",
+            trusted: "可信用户",
+            user: "普通用户",
+            banned: "已封禁"
+        },
+        btn_all: "全部",
+        btn_active: "活跃",
+        btn_admin: "管理",
+        btn_banned: "封禁",
+        btn_nodrive: "未绑盘",
+        btn_back: "返回",
+        btn_refresh: "刷新",
+        btn_prev: "上一页",
+        btn_next: "下一页",
     },
 
     // --- 保存目录设置 ---

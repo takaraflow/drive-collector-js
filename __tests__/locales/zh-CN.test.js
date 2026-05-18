@@ -12,6 +12,7 @@ describe("zh-CN Locale", () => {
     expect(STRINGS.system.node_service_active).toBeDefined();
     expect(STRINGS.system.help).toContain("常用操作");
     expect(STRINGS.system.help).not.toContain("/diagnosis");
+    expect(STRINGS.system.help_admin).toContain("/users");
     expect(STRINGS.system.help_admin).toContain("/diagnosis");
   });
 
@@ -38,5 +39,13 @@ describe("zh-CN Locale", () => {
     expect(typeof STRINGS.status).toBe("object");
     expect(STRINGS.status.header).toBeDefined();
     expect(STRINGS.status.btn_diagnosis).toBeDefined();
+    expect(STRINGS.status.btn_user_list).toBeDefined();
+  });
+
+  test("should have admin user list strings", () => {
+    expect(STRINGS.admin_users).toBeDefined();
+    expect(STRINGS.admin_users.title).toContain("用户列表");
+    expect(STRINGS.admin_users.filters.all).toBe("全部");
+    expect(STRINGS.admin_users.roles.admin).toBeDefined();
   });
 });

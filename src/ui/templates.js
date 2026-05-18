@@ -513,6 +513,84 @@ export class UIHelper {
      }
 
      /**
+      * 渲染管理员用户列表
+      * @param {Object} data - UserRepository.listForAdmin 返回值
+      * @returns {{text: string, buttons: Array}}
+      */
+     static renderAdminUsers(data) {
+         const AU = STRINGS.admin_users;
+         const filter = data?.filter || 'all';
+         const users = Array.isArray(data?.users) ? data.users : [];
+         const summary = data?.summary || {};
+         const page = data?.page || 0;
+         const totalPages = data?.totalPages || 1;
+
+         let html = AU.title + '\n';
+         html += format(AU.summary, {
+             total: summary.total || 0,
+             active: summary.active || 0,
+             admins: summary.admins || 0,
+             banned: summary.banned || 0
+         }) + '\n';
+         html += format(AU.filter_line, {
+             filter: AU.filters[filter] || filter,
+             current: page + 1,
+             totalPages
+         }) + '\n';
+         html += '━━━━━━━━━━━━━━━━━━━\n';
+
+         if (users.length === 0) {
+             html += AU.empty + '\n';
+         } else {
+             for (let i = 0; i < users.length; i++) {
+                 const user = users[i];
+                 const role = user.role || 'user';
+                 html += format(AU.user_row, {
+                     index: page * (data.pageSize || users.length) + i + 1,
+                     roleIcon: this._adminUserRoleIcon(role),
+                     userId: escapeHTML(String(user.user_id || '-')),
+                     role: AU.roles[role] || role
+                 }) + '\n';
+                 html += format(AU.user_meta, {
+                     drives: user.active_drive_count || 0,
+                     tasks: user.task_count || 0,
+                     activeTasks: user.active_task_count || 0,
+                     lastSeen: this._formatAdminUserLastSeen(user.last_seen_at)
+                 }) + '\n';
+                 html += format(AU.user_result_meta, {
+                     completed: user.completed_task_count || 0,
+                     failed: user.failed_task_count || 0
+                 }) + '\n';
+             }
+         }
+
+         html += '━━━━━━━━━━━━━━━━━━━';
+
+         const filterRow = [
+             Button.inline(this._activeAdminFilterLabel(AU.btn_all, filter === 'all'), Buffer.from('au_all_0')),
+             Button.inline(this._activeAdminFilterLabel(AU.btn_active, filter === 'active'), Buffer.from('au_active_0')),
+             Button.inline(this._activeAdminFilterLabel(AU.btn_admin, filter === 'admin'), Buffer.from('au_admin_0'))
+         ];
+         const secondFilterRow = [
+             Button.inline(this._activeAdminFilterLabel(AU.btn_banned, filter === 'banned'), Buffer.from('au_banned_0')),
+             Button.inline(this._activeAdminFilterLabel(AU.btn_nodrive, filter === 'nodrive'), Buffer.from('au_nodrive_0'))
+         ];
+
+         const navRow = this._buildPaginationRow({
+             page,
+             totalPages,
+             refreshData: `au_refresh_${filter}_${page}`,
+             pageData: (targetPage) => `au_${filter}_${targetPage}`,
+             labels: AU
+         });
+         const backRow = [
+             Button.inline(this._withLeadingIcon(AU.btn_back, '↩️'), Buffer.from('status_general'))
+         ];
+
+         return { text: html, buttons: [filterRow, secondFilterRow, navRow, backRow] };
+     }
+
+     /**
       * 格式化相对时间
       */
      static _formatRelativeTime(timestamp) {
@@ -522,6 +600,27 @@ export class UIHelper {
          if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
          if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
          return `${Math.floor(diff / 86400000)}天前`;
+     }
+
+     static _formatAdminUserLastSeen(timestamp) {
+         const numericTimestamp = Number(timestamp || 0);
+         if (!numericTimestamp) return '无记录';
+         return this._formatRelativeTime(numericTimestamp);
+     }
+
+     static _adminUserRoleIcon(role) {
+         const icons = {
+             owner: '👑',
+             admin: '🛡️',
+             trusted: '⭐',
+             user: '👤',
+             banned: '🚫'
+         };
+         return icons[role] || '👤';
+     }
+
+     static _activeAdminFilterLabel(label, active) {
+         return active ? `✓ ${label}` : label;
      }
 
      static _statusActionIcon(status) {

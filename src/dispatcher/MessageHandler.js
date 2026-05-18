@@ -150,6 +150,7 @@ export class MessageHandler {
                             langCode: '',
                             commands: [
                                 ...commonCommands,
+                                new Api.BotCommand({ command: 'users', description: '👥 用户列表' }),
                                 new Api.BotCommand({ command: 'task_queue', description: '📊 全局任务队列' }),
                                 new Api.BotCommand({ command: 'diagnosis', description: '🩺 系统诊断' }),
                                 new Api.BotCommand({ command: 'open_service', description: '🔓 开启服务' }),
