@@ -46,12 +46,22 @@ let consoleProxyPreviousMethods = null;
 const CAPTURED_MESSAGE_PATTERNS = [
     'Telegram library TIMEOUT captured',
     'Telegram timeout warning captured',
-    'Telegram connection event captured'
+    'Telegram connection event captured',
+    'Telegram update loop TIMEOUT captured',
+    'Telegram update loop TIMEOUT burst captured'
 ];
 const CAPTURED_CONSOLE_MESSAGE_MAX_LENGTH = 500;
 const TELEGRAM_CONSOLE_DEDUP_WINDOW_MS = 60_000;
 const TELEGRAM_CONSOLE_DEDUP_MAX_KEYS = 100;
+const TELEGRAM_UPDATE_LOOP_TIMEOUT_BURST_WINDOW_MS = 60_000;
+const TELEGRAM_UPDATE_LOOP_TIMEOUT_BURST_THRESHOLD = 3;
+const TELEGRAM_UPDATE_LOOP_TIMEOUT_WARN_COOLDOWN_MS = 5 * 60_000;
 const telegramConsoleDedup = new Map();
+const telegramUpdateLoopTimeoutBurst = {
+    windowStartedAt: 0,
+    count: 0,
+    lastWarnAt: 0
+};
 
 const safeStringifyConsoleArg = (arg) => {
     if (arg instanceof Error) {
@@ -92,6 +102,47 @@ const isTimeoutPattern = (message) => {
     );
 };
 
+const isTelegramUpdateLoopTimeout = (message, args) => {
+    if (!/^\s*error:\s*timeout\s*$/i.test(message) && !/^\s*timeout\s*$/i.test(message)) {
+        return false;
+    }
+
+    return args.some(arg => {
+        if (!(arg instanceof Error)) return false;
+        const stack = String(arg.stack || '');
+        return (
+            /^TIMEOUT$/i.test(String(arg.message || '')) &&
+            /(?:^|[\\/])node_modules[\\/]telegram[\\/]client[\\/]updates\.js\b/.test(stack)
+        );
+    });
+};
+
+const recordTelegramUpdateLoopTimeout = (now = Date.now()) => {
+    if (
+        !telegramUpdateLoopTimeoutBurst.windowStartedAt ||
+        now - telegramUpdateLoopTimeoutBurst.windowStartedAt > TELEGRAM_UPDATE_LOOP_TIMEOUT_BURST_WINDOW_MS
+    ) {
+        telegramUpdateLoopTimeoutBurst.windowStartedAt = now;
+        telegramUpdateLoopTimeoutBurst.count = 0;
+    }
+
+    telegramUpdateLoopTimeoutBurst.count += 1;
+
+    const shouldWarn =
+        telegramUpdateLoopTimeoutBurst.count >= TELEGRAM_UPDATE_LOOP_TIMEOUT_BURST_THRESHOLD &&
+        now - telegramUpdateLoopTimeoutBurst.lastWarnAt >= TELEGRAM_UPDATE_LOOP_TIMEOUT_WARN_COOLDOWN_MS;
+
+    if (shouldWarn) {
+        telegramUpdateLoopTimeoutBurst.lastWarnAt = now;
+    }
+
+    return {
+        count: telegramUpdateLoopTimeoutBurst.count,
+        shouldWarn,
+        windowMs: TELEGRAM_UPDATE_LOOP_TIMEOUT_BURST_WINDOW_MS
+    };
+};
+
 const isTelegramConnectionPattern = (message) => {
     return /gramjs|tcpfull|149\.154\.|connection to .*complete|using layer|signed in successfully|disconnecting|connection closed/i.test(message);
 };
@@ -120,7 +171,7 @@ const shouldCaptureConsoleEvent = (kind, message, now = Date.now()) => {
     return true;
 };
 
-const captureTelegramConsoleEvent = (level, logMethod, message, args) => {
+const captureTelegramConsoleEvent = (level, logMethod, message, args, extraData = {}) => {
     if (isCapturedLoggerMessage(message)) return;
     if (!shouldCaptureConsoleEvent(logMethod, message)) return;
 
@@ -130,7 +181,8 @@ const captureTelegramConsoleEvent = (level, logMethod, message, args) => {
         source: 'console_proxy',
         message,
         argumentCount: args.length,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        ...extraData
     };
     const context = { module: 'TelegramService' };
 
@@ -158,6 +210,21 @@ export const enableTelegramConsoleProxy = () => {
 
     console.error = (...args) => {
         const msg = buildCapturedConsoleMessage(args);
+
+        if (isTelegramUpdateLoopTimeout(msg, args)) {
+            const burst = recordTelegramUpdateLoopTimeout();
+            const logMethod = burst.shouldWarn ? 'warn' : 'debug';
+            const eventName = burst.shouldWarn
+                ? 'Telegram update loop TIMEOUT burst captured'
+                : 'Telegram update loop TIMEOUT captured';
+
+            captureTelegramConsoleEvent(eventName, logMethod, msg, args, {
+                suppressedOriginal: true,
+                occurrenceCount: burst.count,
+                burstWindowMs: burst.windowMs
+            });
+            return;
+        }
 
         if (isTimeoutPattern(msg)) {
             captureTelegramConsoleEvent('Telegram library TIMEOUT captured', 'warn', msg, args);
@@ -196,6 +263,9 @@ export const disableTelegramConsoleProxy = () => {
         console.log = consoleProxyPreviousMethods.log;
     }
     telegramConsoleDedup.clear();
+    telegramUpdateLoopTimeoutBurst.windowStartedAt = 0;
+    telegramUpdateLoopTimeoutBurst.count = 0;
+    telegramUpdateLoopTimeoutBurst.lastWarnAt = 0;
     consoleProxyPreviousMethods = null;
     consoleProxyEnabled = false;
 };

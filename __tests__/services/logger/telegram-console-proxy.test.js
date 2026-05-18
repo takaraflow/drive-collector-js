@@ -10,6 +10,17 @@ const waitForAsyncConsoleLog = async () => {
     await new Promise(resolve => setImmediate(resolve));
 };
 
+const buildGramJsUpdateLoopTimeout = () => {
+    const error = new Error('TIMEOUT');
+    error.stack = [
+        'Error: TIMEOUT',
+        '    at /app/node_modules/telegram/client/updates.js:250:85',
+        '    at async attempts (/app/node_modules/telegram/client/updates.js:234:20)',
+        '    at async _updateLoop (/app/node_modules/telegram/client/updates.js:184:17)'
+    ].join('\n');
+    return error;
+};
+
 const importFreshLoggerWithConsoleSpies = async () => {
     vi.resetModules();
     delete globalThis[ORIGINAL_CONSOLE_SYMBOL];
@@ -164,5 +175,46 @@ describe('Telegram console proxy', () => {
 
         const warnCalls = warnSpy.mock.calls.map(call => call.map(String).join(' '));
         expect(warnCalls.filter(line => line.includes('Telegram library TIMEOUT captured'))).toHaveLength(1);
+    });
+
+    test('suppresses low-frequency GramJS update loop TIMEOUT stderr noise', async () => {
+        const { LoggerService, enableTelegramConsoleProxy, errorSpy, logSpy, warnSpy } = await importFreshLoggerWithConsoleSpies();
+
+        enableTelegramConsoleProxy();
+        await LoggerService.getInstance().initialize();
+
+        console.error(buildGramJsUpdateLoopTimeout());
+        await waitForAsyncConsoleLog();
+
+        const errorCalls = errorSpy.mock.calls.map(call => call.map(String).join(' '));
+        const warnCalls = warnSpy.mock.calls.map(call => call.map(String).join(' '));
+        const logCalls = logSpy.mock.calls.map(call => call.map(String).join(' '));
+
+        expect(errorCalls).toHaveLength(0);
+        expect(warnCalls.filter(line => line.includes('Telegram library TIMEOUT captured'))).toHaveLength(0);
+        expect(warnCalls.filter(line => line.includes('Telegram update loop TIMEOUT captured'))).toHaveLength(0);
+        expect(logCalls.filter(line => line.includes('Telegram update loop TIMEOUT captured'))).toHaveLength(1);
+    });
+
+    test('escalates repeated GramJS update loop TIMEOUT bursts to warn once', async () => {
+        const { LoggerService, enableTelegramConsoleProxy, errorSpy, logSpy, warnSpy } = await importFreshLoggerWithConsoleSpies();
+
+        enableTelegramConsoleProxy();
+        await LoggerService.getInstance().initialize();
+
+        console.error(buildGramJsUpdateLoopTimeout());
+        console.error(buildGramJsUpdateLoopTimeout());
+        console.error(buildGramJsUpdateLoopTimeout());
+        console.error(buildGramJsUpdateLoopTimeout());
+        await waitForAsyncConsoleLog();
+
+        const errorCalls = errorSpy.mock.calls.map(call => call.map(String).join(' '));
+        const warnCalls = warnSpy.mock.calls.map(call => call.map(String).join(' '));
+        const logCalls = logSpy.mock.calls.map(call => call.map(String).join(' '));
+
+        expect(errorCalls).toHaveLength(0);
+        expect(logCalls.filter(line => line.includes('Telegram update loop TIMEOUT captured'))).toHaveLength(1);
+        expect(warnCalls.filter(line => line.includes('Telegram update loop TIMEOUT burst captured'))).toHaveLength(1);
+        expect(warnCalls.filter(line => line.includes('Telegram library TIMEOUT captured'))).toHaveLength(0);
     });
 });
