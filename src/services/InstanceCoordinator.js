@@ -8,6 +8,8 @@ import { CACHE_KEYS } from "../domain/cache-keys.js";
 
 const log = logger.withModule('InstanceCoordinator');
 export const TELEGRAM_CLIENT_LOCK_TTL_SECONDS = 90;
+export const TASK_LOCK_TTL_SECONDS = 600;
+export const TASK_LOCK_RENEWAL_MAX_INTERVAL_MS = 120 * 1000;
 const ATOMIC_LOCK_KEYS = new Set(["telegram_client"]);
 const ATOMIC_LOCK_PREFIXES = ["msg_lock:", "task:", "task_recovery:"];
 
@@ -45,6 +47,7 @@ export class InstanceCoordinator {
         this.instanceTimeout = 90 * 1000;  // 90 秒超时（3个心跳周期）
         this.heartbeatTimer = null;
         this.lockRenewalTimer = null;  // 新增：锁续租定时器
+        this.taskLockRenewalTimers = new Map();
         this.isLeader = false;
         this.activeInstances = new Set();
 
@@ -120,6 +123,7 @@ export class InstanceCoordinator {
             clearInterval(this.instanceWatchTimer);
             this.instanceWatchTimer = null;
         }
+        this._stopAllTaskLockRenewals();
         this.atomicLockWarningsShown.clear();
 
         await this.unregisterInstance();
@@ -555,6 +559,7 @@ export class InstanceCoordinator {
             clearInterval(this.instanceWatchTimer);
             this.instanceWatchTimer = null;
         }
+        this._stopAllTaskLockRenewals();
     }
 
     /**
@@ -684,6 +689,62 @@ export class InstanceCoordinator {
         });
     }
 
+    async renewLock(lockKey, lease, ttl) {
+        if (!lease?.instanceId || !lease?.leaseId) return false;
+        try {
+            const cacheKey = CACHE_KEYS.lock(lockKey);
+            const existing = await cache.get(cacheKey, "json", { skipCache: true });
+            if (!existing ||
+                existing.instanceId !== lease.instanceId ||
+                existing.leaseId !== lease.leaseId ||
+                existing.instanceId !== this.instanceId) {
+                return false;
+            }
+
+            const renewedValue = this._createLockValue(lockKey, ttl, existing);
+            return await this._setLockIfEquals(lockKey, renewedValue, existing, ttl);
+        } catch (e) {
+            logWithProvider().warn(`🔒 锁续租失败 ${lockKey}: ${e?.message || String(e)}`);
+            return false;
+        }
+    }
+
+    _startTaskLockRenewal(taskId, lease, ttl = TASK_LOCK_TTL_SECONDS) {
+        this._stopTaskLockRenewal(taskId);
+
+        const lockKey = `task:${taskId}`;
+        const intervalMs = Math.max(
+            1000,
+            Math.min(TASK_LOCK_RENEWAL_MAX_INTERVAL_MS, Math.floor((ttl * 1000) / 3))
+        );
+
+        const renew = async () => {
+            const renewed = await this.renewLock(lockKey, lease, ttl);
+            if (!renewed) {
+                logWithProvider().warn(`🔒 任务锁续租失败，停止续租: ${taskId}`);
+                this._stopTaskLockRenewal(taskId);
+            }
+        };
+
+        const timer = setInterval(renew, intervalMs);
+        this.taskLockRenewalTimers.set(taskId, timer);
+    }
+
+    _stopTaskLockRenewal(taskId) {
+        const timer = this.taskLockRenewalTimers.get(taskId);
+        if (timer) {
+            clearInterval(timer);
+            this.taskLockRenewalTimers.delete(taskId);
+        }
+    }
+
+    _stopAllTaskLockRenewals() {
+        for (const timer of this.taskLockRenewalTimers.values()) {
+            clearInterval(timer);
+        }
+        this.taskLockRenewalTimers.clear();
+    }
+
     /**
      * 释放分布式锁
      * @param {string} lockKey - 锁的键
@@ -719,7 +780,23 @@ export class InstanceCoordinator {
      * @returns {boolean} 是否获取成功
      */
     async acquireTaskLock(taskId) {
-        return await this.acquireLock(`task:${taskId}`, 600); // 10分钟TTL
+        const acquired = await this.acquireLock(`task:${taskId}`, TASK_LOCK_TTL_SECONDS);
+        if (!acquired) return false;
+
+        let lease = null;
+        try {
+            lease = await this.getLockLease(`task:${taskId}`);
+        } catch (e) {
+            await this.releaseLock(`task:${taskId}`);
+            throw e;
+        }
+        if (!lease) {
+            await this.releaseLock(`task:${taskId}`);
+            return false;
+        }
+
+        this._startTaskLockRenewal(taskId, lease, TASK_LOCK_TTL_SECONDS);
+        return true;
     }
 
     /**
@@ -727,6 +804,7 @@ export class InstanceCoordinator {
      * @param {string} taskId - 任务ID
      */
     async releaseTaskLock(taskId) {
+        this._stopTaskLockRenewal(taskId);
         await this.releaseLock(`task:${taskId}`);
     }
 

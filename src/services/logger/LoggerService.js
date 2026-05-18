@@ -160,7 +160,7 @@ export const enableTelegramConsoleProxy = () => {
         const msg = buildCapturedConsoleMessage(args);
 
         if (isTimeoutPattern(msg)) {
-            captureTelegramConsoleEvent('Telegram library TIMEOUT captured', 'error', msg, args);
+            captureTelegramConsoleEvent('Telegram library TIMEOUT captured', 'warn', msg, args);
         }
 
         writeOriginalConsole('error', ...args);

@@ -43,6 +43,7 @@ describe("Core InstanceCoordinator Tests", () => {
         instanceCoordinator.activeInstances = new Set();
         instanceCoordinator.isLeader = false;
         instanceCoordinator.atomicLockWarningsShown = new Set();
+        instanceCoordinator._stopAllTaskLockRenewals();
         if (instanceCoordinator.heartbeatTimer) {
             clearInterval(instanceCoordinator.heartbeatTimer);
             instanceCoordinator.heartbeatTimer = null;
@@ -105,6 +106,7 @@ describe("Core InstanceCoordinator Tests", () => {
     });
 
     afterEach(() => {
+        instanceCoordinator._stopAllTaskLockRenewals();
         vi.useRealTimers();
     });
 
@@ -351,6 +353,108 @@ describe("Core InstanceCoordinator Tests", () => {
 
         expect(released).toBe(false);
         expect(mockCacheDelete).not.toHaveBeenCalled();
+    });
+
+    test("should start renewal for acquired task processing locks", async () => {
+        instanceCoordinator.instanceId = 'lock-instance';
+        mockCacheGet.mockResolvedValueOnce(null);
+        mockCacheCompareAndSet.mockResolvedValueOnce(true);
+        mockCacheGet.mockResolvedValueOnce({
+            instanceId: 'lock-instance',
+            leaseId: 'lock-instance:lease-1',
+            acquiredAt: fixedTime,
+            ttl: 600
+        });
+
+        const acquired = await instanceCoordinator.acquireTaskLock('task-1');
+
+        expect(acquired).toBe(true);
+        expect(instanceCoordinator.taskLockRenewalTimers.has('task-1')).toBe(true);
+        expect(mockCacheCompareAndSet).toHaveBeenCalledWith(
+            'lock:task:task-1',
+            expect.objectContaining({ instanceId: 'lock-instance' }),
+            expect.objectContaining({ ifNotExists: true, ttl: 600 })
+        );
+    });
+
+    test("should not report task lock acquired when lease cannot be read", async () => {
+        instanceCoordinator.instanceId = 'lock-instance';
+        mockCacheGet
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null);
+        mockCacheCompareAndSet.mockResolvedValueOnce(true);
+
+        const acquired = await instanceCoordinator.acquireTaskLock('task-1');
+
+        expect(acquired).toBe(false);
+        expect(instanceCoordinator.taskLockRenewalTimers.has('task-1')).toBe(false);
+        expect(mockCacheGet).toHaveBeenCalledWith('lock:task:task-1', 'json', { skipCache: true });
+    });
+
+    test("should release acquired task lock when lease read fails", async () => {
+        instanceCoordinator.instanceId = 'lock-instance';
+        mockCacheGet
+            .mockResolvedValueOnce(null)
+            .mockRejectedValueOnce(new Error('cache read failed'))
+            .mockResolvedValueOnce({ instanceId: 'lock-instance', leaseId: 'lock-instance:lease-1' });
+        mockCacheCompareAndSet.mockResolvedValueOnce(true);
+        mockCacheDeleteIfEquals.mockResolvedValueOnce(true);
+
+        await expect(instanceCoordinator.acquireTaskLock('task-1')).rejects.toThrow('cache read failed');
+
+        expect(instanceCoordinator.taskLockRenewalTimers.has('task-1')).toBe(false);
+        expect(mockCacheDeleteIfEquals).toHaveBeenCalledWith(
+            'lock:task:task-1',
+            expect.objectContaining({ instanceId: 'lock-instance' }),
+            expect.objectContaining({ requireAtomic: true })
+        );
+    });
+
+    test("should renew owned task lock with the same lease", async () => {
+        instanceCoordinator.instanceId = 'lock-instance';
+        const currentLock = {
+            instanceId: 'lock-instance',
+            leaseId: 'lock-instance:lease-1',
+            acquiredAt: fixedTime - 1000,
+            ttl: 600
+        };
+        const lease = {
+            instanceId: 'lock-instance',
+            leaseId: 'lock-instance:lease-1'
+        };
+        mockCacheGet.mockResolvedValue(currentLock);
+        mockCacheCompareAndSet.mockResolvedValue(true);
+
+        const renewed = await instanceCoordinator.renewLock('task:task-1', lease, 600);
+
+        expect(renewed).toBe(true);
+        expect(mockCacheCompareAndSet).toHaveBeenCalledWith(
+            'lock:task:task-1',
+            expect.objectContaining({
+                instanceId: 'lock-instance',
+                leaseId: 'lock-instance:lease-1',
+                acquiredAt: fixedTime,
+                ttl: 600
+            }),
+            expect.objectContaining({ ifEquals: currentLock, ttl: 600 })
+        );
+    });
+
+    test("should stop task lock renewal before release", async () => {
+        instanceCoordinator.instanceId = 'lock-instance';
+        const timer = setInterval(() => {}, 60000);
+        instanceCoordinator.taskLockRenewalTimers.set('task-1', timer);
+        mockCacheGet.mockResolvedValue({ instanceId: 'lock-instance', leaseId: 'lock-instance:lease-1' });
+        mockCacheDeleteIfEquals.mockResolvedValue(true);
+
+        await instanceCoordinator.releaseTaskLock('task-1');
+
+        expect(instanceCoordinator.taskLockRenewalTimers.has('task-1')).toBe(false);
+        expect(mockCacheDeleteIfEquals).toHaveBeenCalledWith(
+            'lock:task:task-1',
+            expect.objectContaining({ leaseId: 'lock-instance:lease-1' }),
+            expect.objectContaining({ requireAtomic: true })
+        );
     });
 
     test("should verify lock ownership", async () => {
