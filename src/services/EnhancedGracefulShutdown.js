@@ -11,8 +11,24 @@
  */
 
 import { logger } from "./logger/index.js";
+import { serializeErrorLike } from "../utils/serializer.js";
 
 const log = logger.withModule ? logger.withModule('EnhancedGracefulShutdown') : logger;
+
+const buildFatalErrorContext = (kind, reason, promise) => {
+    const serialized = serializeErrorLike(reason);
+    return {
+        error: serialized,
+        fatal_kind: kind,
+        fatal_error_name: serialized.name,
+        fatal_error_message: serialized.message,
+        fatal_error_type: serialized.type,
+        fatal_error_code: serialized.code,
+        fatal_error_stack: serialized.stack,
+        rejection_has_promise: !!promise,
+        rejection_promise_state: promise ? String(promise) : undefined
+    };
+};
 
 class EnhancedGracefulShutdown {
     constructor() {
@@ -223,32 +239,34 @@ class EnhancedGracefulShutdown {
      */
     setupErrorHandlers() {
         process.on('uncaughtException', async (err) => {
-            log.error('FATAL: Uncaught Exception:', err);
+            const fatalContext = buildFatalErrorContext('uncaughtException', err);
+            log.error('FATAL: Uncaught Exception', fatalContext);
             
             const isRecoverable = this.isRecoverableError(err);
             
             if (isRecoverable) {
-                log.warn('Error is recoverable, attempting to continue...');
+                log.warn('Error is recoverable, attempting to continue', fatalContext);
                 return;
             }
             
-            log.error('Unrecoverable error detected, initiating emergency shutdown...');
+            log.error('Unrecoverable error detected, initiating emergency shutdown', fatalContext);
             this.exitCode = 1;
             this.startHeartbeat('uncaughtException');
             await this.shutdown('uncaughtException', err);
         });
 
         process.on('unhandledRejection', async (reason, promise) => {
-            log.error('FATAL: Unhandled Rejection:', reason);
+            const fatalContext = buildFatalErrorContext('unhandledRejection', reason, promise);
+            log.error('FATAL: Unhandled Rejection', fatalContext);
             
             const isRecoverable = this.isRecoverableError(reason);
             
             if (isRecoverable) {
-                log.warn('Rejection is recoverable, attempting to continue...');
+                log.warn('Rejection is recoverable, attempting to continue', fatalContext);
                 return;
             }
             
-            log.error('Unrecoverable rejection detected, initiating emergency shutdown...');
+            log.error('Unrecoverable rejection detected, initiating emergency shutdown', fatalContext);
             this.exitCode = 1;
             this.startHeartbeat('unhandledRejection');
             await this.shutdown('unhandledRejection', reason);
@@ -343,7 +361,7 @@ class EnhancedGracefulShutdown {
             log.info(`Starting enhanced graceful shutdown (source: ${source}, reload: ${reloadMode})...`);
             
             if (error) {
-                log.error('Shutdown reason:', error.message || error);
+                log.error('Shutdown reason', buildFatalErrorContext(source, error));
             }
 
             // 记录初始资源状态

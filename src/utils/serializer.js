@@ -17,6 +17,11 @@ export const redactValueForKey = (key, value) => {
   return isSensitiveKey(key) && value !== undefined && value !== null ? REDACTED_VALUE : value;
 };
 
+const truncateString = (value, maxLength = 2000) => {
+  const text = String(value);
+  return text.length > maxLength ? `${text.substring(0, maxLength)}...` : text;
+};
+
 /**
  * 限制对象字段数量
  * @param {Object} obj - 要限制的对象
@@ -62,6 +67,77 @@ export const serializeError = (err) => {
       serialized[key] = redactValueForKey(key, err[key]);
     }
   }
+  return serialized;
+};
+
+/**
+ * Serialize any thrown/rejected value into a telemetry-friendly error shape.
+ * Promise rejections are not guaranteed to be Error instances; they can be
+ * strings, undefined, plain objects, or library-specific objects.
+ *
+ * @param {any} value - Unknown error/rejection value.
+ * @returns {Object} - Safe, structured error-like object.
+ */
+export const serializeErrorLike = (value) => {
+  if (value instanceof Error) {
+    return {
+      ...serializeError(value),
+      type: 'error',
+      constructorName: value.constructor?.name || value.name || 'Error'
+    };
+  }
+
+  if (value === undefined) {
+    return {
+      name: 'UndefinedRejection',
+      message: 'Promise rejected without a reason',
+      type: 'undefined'
+    };
+  }
+
+  if (value === null) {
+    return {
+      name: 'NullRejection',
+      message: 'Promise rejected with null',
+      type: 'null'
+    };
+  }
+
+  const valueType = typeof value;
+  if (valueType !== 'object') {
+    return {
+      name: `${valueType[0].toUpperCase()}${valueType.slice(1)}Rejection`,
+      message: truncateString(value),
+      type: valueType,
+      value: truncateString(value)
+    };
+  }
+
+  const constructorName = value.constructor?.name || 'Object';
+  const serialized = {
+    name: typeof value.name === 'string' && value.name ? value.name : constructorName,
+    message: typeof value.message === 'string' && value.message
+      ? truncateString(value.message)
+      : `Promise rejected with ${constructorName}`,
+    type: 'object',
+    constructorName
+  };
+
+  if (typeof value.stack === 'string' && value.stack) {
+    serialized.stack = truncateString(value.stack, 4000);
+  }
+
+  for (const key of ['code', 'status', 'statusCode', 'errno', 'syscall']) {
+    if (value[key] !== undefined && value[key] !== null) {
+      serialized[key] = redactValueForKey(key, value[key]);
+    }
+  }
+
+  const properties = pruneData(value, 2, 8);
+  if (properties && typeof properties === 'object' && Object.keys(properties).length > 0) {
+    serialized.properties = properties;
+  }
+
   return serialized;
 };
 

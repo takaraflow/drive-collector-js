@@ -1,6 +1,7 @@
 const { 
     limitFields, 
     serializeError, 
+    serializeErrorLike,
     pruneData, 
     serializeToString,
     isSensitiveKey
@@ -99,6 +100,69 @@ describe('Serializer Utils', () => {
                 message: 'custom error',
                 customField: 'custom value'
             });
+        });
+    });
+
+    describe('serializeErrorLike', () => {
+        test('should preserve Error diagnostics', () => {
+            const error = new Error('database failed');
+            error.stack = 'Error: database failed\n    at test';
+            error.code = 'DB_DOWN';
+
+            const result = serializeErrorLike(error);
+
+            expect(result).toMatchObject({
+                name: 'Error',
+                message: 'database failed',
+                stack: 'Error: database failed\n    at test',
+                code: 'DB_DOWN',
+                type: 'error',
+                constructorName: 'Error'
+            });
+        });
+
+        test('should make primitive promise rejections diagnosable', () => {
+            const result = serializeErrorLike('worker rejected');
+
+            expect(result).toEqual({
+                name: 'StringRejection',
+                message: 'worker rejected',
+                type: 'string',
+                value: 'worker rejected'
+            });
+        });
+
+        test('should make empty promise rejections diagnosable', () => {
+            expect(serializeErrorLike(undefined)).toMatchObject({
+                name: 'UndefinedRejection',
+                message: 'Promise rejected without a reason',
+                type: 'undefined'
+            });
+            expect(serializeErrorLike(null)).toMatchObject({
+                name: 'NullRejection',
+                message: 'Promise rejected with null',
+                type: 'null'
+            });
+        });
+
+        test('should preserve safe plain-object rejection fields', () => {
+            const result = serializeErrorLike({
+                name: 'LibraryRejection',
+                message: 'background worker failed',
+                code: 'WORKER_FAILED',
+                token: 'secret',
+                nested: { status: 'bad' }
+            });
+
+            expect(result).toMatchObject({
+                name: 'LibraryRejection',
+                message: 'background worker failed',
+                code: 'WORKER_FAILED',
+                type: 'object',
+                constructorName: 'Object'
+            });
+            expect(result.properties.token).toBe('[REDACTED]');
+            expect(result.properties.nested).toEqual({ status: 'bad' });
         });
     });
 

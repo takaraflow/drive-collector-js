@@ -11,8 +11,24 @@
 
 import { logger } from "./logger/index.js";
 import { CACHE_KEYS } from "../domain/cache-keys.js";
+import { serializeErrorLike } from "../utils/serializer.js";
 
 const log = logger.withModule ? logger.withModule('GracefulShutdown') : logger;
+
+const buildFatalErrorContext = (kind, reason, promise) => {
+    const serialized = serializeErrorLike(reason);
+    return {
+        error: serialized,
+        fatal_kind: kind,
+        fatal_error_name: serialized.name,
+        fatal_error_message: serialized.message,
+        fatal_error_type: serialized.type,
+        fatal_error_code: serialized.code,
+        fatal_error_stack: serialized.stack,
+        rejection_has_promise: !!promise,
+        rejection_promise_state: promise ? String(promise) : undefined
+    };
+};
 
 export class GracefulShutdown {
     constructor() {
@@ -91,35 +107,37 @@ export class GracefulShutdown {
      */
     setupErrorHandlers() {
         process.on('uncaughtException', async (err) => {
-            log.error('FATAL: Uncaught Exception:', err);
+            const fatalContext = buildFatalErrorContext('uncaughtException', err);
+            log.error('FATAL: Uncaught Exception', fatalContext);
             
             // 检查是否为可恢复的错误
             const isRecoverable = this.isRecoverableError(err);
             
             if (isRecoverable) {
-                log.warn('Error is recoverable, attempting to continue...');
+                log.warn('Error is recoverable, attempting to continue', fatalContext);
                 return;
             }
             
             // 不可恢复错误，执行优雅关闭
-            log.error('Unrecoverable error detected, initiating graceful shutdown...');
+            log.error('Unrecoverable error detected, initiating graceful shutdown', fatalContext);
             this.exitCode = 1;
             await this.shutdown('uncaughtException', err);
         });
 
         process.on('unhandledRejection', async (reason, promise) => {
-            log.error('FATAL: Unhandled Rejection:', reason);
+            const fatalContext = buildFatalErrorContext('unhandledRejection', reason, promise);
+            log.error('FATAL: Unhandled Rejection', fatalContext);
             
             // 检查是否为可恢复的错误
             const isRecoverable = this.isRecoverableError(reason);
             
             if (isRecoverable) {
-                log.warn('Rejection is recoverable, attempting to continue...');
+                log.warn('Rejection is recoverable, attempting to continue', fatalContext);
                 return;
             }
             
             // 不可恢复错误，执行优雅关闭
-            log.error('Unrecoverable rejection detected, initiating graceful shutdown...');
+            log.error('Unrecoverable rejection detected, initiating graceful shutdown', fatalContext);
             this.exitCode = 1;
             await this.shutdown('unhandledRejection', reason);
         });
@@ -224,7 +242,7 @@ export class GracefulShutdown {
             log.info(`Starting graceful shutdown (source: ${source}, reload: ${reloadMode})...`);
             
             if (error) {
-                log.error('Shutdown reason:', error.message || error);
+                log.error('Shutdown reason', buildFatalErrorContext(source, error));
             }
 
             // 1. 停止接受新请求（优先级最高）

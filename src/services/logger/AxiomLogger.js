@@ -1,7 +1,7 @@
 import { Axiom } from '@axiomhq/js';
 import { BaseLogger } from './BaseLogger.js';
 import { writeOriginalConsole } from './console-channel.js';
-import { limitFields, serializeError, serializeToString } from '../../utils/serializer.js';
+import { limitFields, serializeError, serializeErrorLike, serializeToString } from '../../utils/serializer.js';
 import { getBeijingISOString } from '../../utils/timeUtils.js';
 import { getBuildDisplayVersion, getBuildIdentity, getBuildLogFields } from '../../utils/buildIdentity.js';
 
@@ -139,12 +139,30 @@ class AxiomLogger extends BaseLogger {
             details: serializeToString(finalData)
         };
 
-        if (finalData instanceof Error || (finalData && finalData.error instanceof Error)) {
-            const errObj = finalData instanceof Error ? finalData : finalData.error;
-            payload.error_name = String(errObj.name).substring(0, 100);
-            payload.error_message = String(errObj.message).substring(0, 200);
-        } else if (finalData && finalData.error) {
-            payload.error_summary = String(finalData.error).substring(0, 200);
+        const errorLike = finalData instanceof Error
+            ? serializeErrorLike(finalData)
+            : finalData?.error
+                ? serializeErrorLike(finalData.error)
+            : finalData?.fatal_error_message
+                ? {
+                    name: finalData.fatal_error_name,
+                    message: finalData.fatal_error_message,
+                    stack: finalData.fatal_error_stack,
+                    code: finalData.fatal_error_code
+                }
+                : finalData?.message && finalData?.name
+                    ? finalData
+                    : null;
+
+        if (errorLike) {
+            payload.error_name = String(errorLike.name || 'Error').substring(0, 100);
+            payload.error_message = String(errorLike.message || '').substring(0, 500);
+            if (errorLike.code !== undefined && errorLike.code !== null) {
+                payload.error_code = String(errorLike.code).substring(0, 100);
+            }
+            if (errorLike.stack) {
+                payload.error_stack = String(errorLike.stack).substring(0, 4000);
+            }
         }
 
         const finalPayload = limitFields(payload, 50);

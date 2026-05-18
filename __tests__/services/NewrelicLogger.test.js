@@ -128,6 +128,46 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
         expect(payload['service.name']).toBe('test-service');
     });
 
+    it('should expose Error diagnostics as top-level searchable fields', async () => {
+        const error = new Error('fatal rejection');
+        error.stack = 'Error: fatal rejection\n    at worker';
+        error.code = 'FATAL_REJECTION';
+
+        const payload = logger._buildPayload('error', 'FATAL: Unhandled Rejection', { error }, {}, 'instance-1');
+
+        expect(payload.error_name).toBe('Error');
+        expect(payload.error_message).toBe('fatal rejection');
+        expect(payload.error_code).toBe('FATAL_REJECTION');
+        expect(payload.error_stack).toContain('fatal rejection');
+    });
+
+    it('should expose directly logged Error diagnostics as top-level searchable fields', async () => {
+        const error = new Error('direct failure');
+        error.stack = 'Error: direct failure\n    at direct';
+        error.code = 'DIRECT_FAILURE';
+
+        const payload = logger._buildPayload('error', 'direct error', error, {}, 'instance-1');
+
+        expect(payload.error_name).toBe('Error');
+        expect(payload.error_message).toBe('direct failure');
+        expect(payload.error_code).toBe('DIRECT_FAILURE');
+        expect(payload.error_stack).toContain('direct failure');
+    });
+
+    it('should expose structured fatal context diagnostics as top-level searchable fields', async () => {
+        const payload = logger._buildPayload('error', 'Shutdown reason', {
+            fatal_error_name: 'StringRejection',
+            fatal_error_message: 'worker rejected',
+            fatal_error_stack: 'StringRejection: worker rejected',
+            fatal_error_code: 'WORKER_REJECTED'
+        }, {}, 'instance-1');
+
+        expect(payload.error_name).toBe('StringRejection');
+        expect(payload.error_message).toBe('worker rejected');
+        expect(payload.error_code).toBe('WORKER_REJECTED');
+        expect(payload.error_stack).toBe('StringRejection: worker rejected');
+    });
+
     it('should attach build identity fields to log payloads', async () => {
         process.env.APP_VERSION = '9.9.9';
         process.env.GIT_SHA = 'abcdef1234567890';

@@ -1,6 +1,6 @@
 import { BaseLogger } from './BaseLogger.js';
 import { writeOriginalConsole } from './console-channel.js';
-import { serializeError, serializeToString, limitFields } from '../../utils/serializer.js';
+import { serializeError, serializeErrorLike, serializeToString, limitFields } from '../../utils/serializer.js';
 import { getBeijingISOString } from '../../utils/timeUtils.js';
 import { shouldSendLogLevel } from './log-level.js';
 import { trace } from '@opentelemetry/api';
@@ -168,10 +168,30 @@ class NewrelicLogger extends BaseLogger {
             payload['span.id'] = activeSpanContext.spanId;
         }
 
-        if (finalData instanceof Error || (finalData && finalData.error instanceof Error)) {
-            const errObj = finalData instanceof Error ? finalData : finalData.error;
-            payload.error_name = String(errObj.name).substring(0, 100);
-            payload.error_message = String(errObj.message).substring(0, 200);
+        const errorLike = finalData instanceof Error
+            ? serializeErrorLike(finalData)
+            : finalData?.error
+                ? serializeErrorLike(finalData.error)
+            : finalData?.fatal_error_message
+                ? {
+                    name: finalData.fatal_error_name,
+                    message: finalData.fatal_error_message,
+                    stack: finalData.fatal_error_stack,
+                    code: finalData.fatal_error_code
+                }
+                : finalData?.message && finalData?.name
+                    ? finalData
+                    : null;
+
+        if (errorLike) {
+            payload.error_name = String(errorLike.name || 'Error').substring(0, 100);
+            payload.error_message = String(errorLike.message || '').substring(0, 500);
+            if (errorLike.code !== undefined && errorLike.code !== null) {
+                payload.error_code = String(errorLike.code).substring(0, 100);
+            }
+            if (errorLike.stack) {
+                payload.error_stack = String(errorLike.stack).substring(0, 4000);
+            }
         }
 
         return limitFields(payload, 100);
