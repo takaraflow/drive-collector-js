@@ -115,7 +115,7 @@ describe('WebhookRouter', () => {
 
     beforeEach(async () => {
         setAppReadyState(true);
-        global.appInitializer = { businessModulesRunning: true };
+        global.appInitializer = { businessModulesRunning: true, config: null };
 
         req = {
             method: 'POST',
@@ -229,7 +229,34 @@ describe('WebhookRouter', () => {
             expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
             expect(JSON.parse(res.end.mock.calls[0][0])).toEqual(expect.objectContaining({
                 version: '4.33.1',
+                shortGitSha: 'abcdef123456',
+                releaseId: '4.33.1+abcdef123456'
+            }));
+            expect(JSON.parse(res.end.mock.calls[0][0])).not.toHaveProperty('gitSha');
+            expect(JSON.parse(res.end.mock.calls[0][0])).not.toHaveProperty('imageTag');
+            expect(JSON.parse(res.end.mock.calls[0][0])).not.toHaveProperty('buildTime');
+        });
+
+        it('should return full build identity for authenticated /version requests', async () => {
+            process.env.APP_VERSION = '4.33.1';
+            process.env.GIT_SHA = 'abcdef1234567890';
+            process.env.BUILD_TIME = '2026-05-18T00:00:00.000Z';
+            process.env.IMAGE_TAG = 'repo/app:sha-abcdef1';
+            global.appInitializer.config = { streamForwarding: { secret: 'test-secret' } };
+            setAppReadyState(false);
+            req.method = 'GET';
+            req.url = '/version';
+            req.headers['x-instance-secret'] = 'test-secret';
+
+            await handleWebhook(req, res);
+
+            expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
+            expect(JSON.parse(res.end.mock.calls[0][0])).toEqual(expect.objectContaining({
+                version: '4.33.1',
                 gitSha: 'abcdef1234567890',
+                shortGitSha: 'abcdef123456',
+                buildTime: '2026-05-18T00:00:00.000Z',
+                imageTag: 'repo/app:sha-abcdef1',
                 releaseId: '4.33.1+abcdef123456'
             }));
         });

@@ -13,6 +13,7 @@ export class AppInitializer {
     constructor() {
         this.isInitialized = false;
         this.businessModulesRunning = false;
+        this.config = null;
     }
 
     /**
@@ -197,7 +198,8 @@ export class AppInitializer {
         if (this.isInitialized) return;
 
         // 初始化配置
-        await initConfig();
+        const config = await initConfig();
+        this.config = config;
 
         // 显示配置信息并退出（用于诊断）
         if (process.argv.includes('--show-config')) {

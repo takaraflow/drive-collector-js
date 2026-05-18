@@ -141,11 +141,11 @@ describe("Health & Readiness Endpoints - after ready", () => {
         expect(res.writeHead).toHaveBeenCalledWith(200, { "Content-Type": "application/json" });
         expect(JSON.parse(res.end.mock.calls[0][0])).toEqual(expect.objectContaining({
             version: "4.33.1",
-            gitSha: "abcdef1234567890",
             shortGitSha: "abcdef123456",
-            buildTime: "2026-05-18T00:00:00.000Z",
-            imageTag: "repo/app:sha-abcdef1",
             releaseId: "4.33.1+abcdef123456"
         }));
+        expect(JSON.parse(res.end.mock.calls[0][0])).not.toHaveProperty("gitSha");
+        expect(JSON.parse(res.end.mock.calls[0][0])).not.toHaveProperty("buildTime");
+        expect(JSON.parse(res.end.mock.calls[0][0])).not.toHaveProperty("imageTag");
     });
 });

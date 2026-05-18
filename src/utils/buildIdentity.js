@@ -3,6 +3,30 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const UNKNOWN = 'unknown';
 const BUILD_SHORT_SHA_LENGTH = 12;
+const SERVICE_NAME_ENV_KEYS = Object.freeze(['NEW_RELIC_APP_NAME', 'APP_NAME']);
+const VERSION_ENV_KEYS = Object.freeze(['APP_VERSION']);
+const GIT_SHA_ENV_KEYS = Object.freeze([
+    'GIT_SHA',
+    'BUILD_SHA',
+    'COMMIT_SHA',
+    'GITHUB_SHA',
+    'SOURCE_VERSION',
+    'NF_DEPLOYMENT_SHA'
+]);
+const BUILD_TIME_ENV_KEYS = Object.freeze(['BUILD_TIME', 'BUILD_DATE']);
+const IMAGE_TAG_ENV_KEYS = Object.freeze(['IMAGE_TAG', 'CONTAINER_IMAGE', 'DOCKER_IMAGE_TAG', 'NF_IMAGE']);
+const RELEASE_ID_ENV_KEYS = Object.freeze(['RELEASE_ID']);
+
+export const BUILD_IDENTITY_ENV_KEY_GROUPS = Object.freeze({
+    serviceName: SERVICE_NAME_ENV_KEYS,
+    version: VERSION_ENV_KEYS,
+    gitSha: GIT_SHA_ENV_KEYS,
+    buildTime: BUILD_TIME_ENV_KEYS,
+    imageTag: IMAGE_TAG_ENV_KEYS,
+    releaseId: RELEASE_ID_ENV_KEYS
+});
+
+export const BUILD_IDENTITY_EARLY_ENV_KEY_GROUPS = Object.freeze(Object.values(BUILD_IDENTITY_ENV_KEY_GROUPS));
 
 let packageVersion = UNKNOWN;
 
@@ -43,25 +67,18 @@ export function getBuildReleaseId(version, gitSha) {
 }
 
 export function getBuildIdentity(env = process.env) {
-    const version = firstKnown(env.APP_VERSION, packageVersion);
-    const gitSha = firstKnown(
-        env.GIT_SHA,
-        env.BUILD_SHA,
-        env.COMMIT_SHA,
-        env.GITHUB_SHA,
-        env.SOURCE_VERSION,
-        env.NF_DEPLOYMENT_SHA
-    );
+    const version = firstKnown(...VERSION_ENV_KEYS.map(key => env[key]), packageVersion);
+    const gitSha = firstKnown(...GIT_SHA_ENV_KEYS.map(key => env[key]));
     const shortGitSha = getBuildShortGitSha(gitSha);
-    const buildTime = firstKnown(env.BUILD_TIME, env.BUILD_DATE);
-    const imageTag = firstKnown(env.IMAGE_TAG, env.CONTAINER_IMAGE, env.DOCKER_IMAGE_TAG, env.NF_IMAGE);
+    const buildTime = firstKnown(...BUILD_TIME_ENV_KEYS.map(key => env[key]));
+    const imageTag = firstKnown(...IMAGE_TAG_ENV_KEYS.map(key => env[key]));
     const releaseId = firstKnown(
-        env.RELEASE_ID,
+        ...RELEASE_ID_ENV_KEYS.map(key => env[key]),
         getBuildReleaseId(version, gitSha)
     );
 
     return Object.freeze({
-        serviceName: firstKnown(env.NEW_RELIC_APP_NAME, env.APP_NAME, 'drive-collector'),
+        serviceName: firstKnown(...SERVICE_NAME_ENV_KEYS.map(key => env[key]), 'drive-collector'),
         version,
         packageVersion,
         gitSha,
@@ -69,6 +86,15 @@ export function getBuildIdentity(env = process.env) {
         buildTime,
         imageTag,
         releaseId
+    });
+}
+
+export function getPublicBuildIdentity(identity = getBuildIdentity()) {
+    return Object.freeze({
+        serviceName: identity.serviceName,
+        version: identity.version,
+        shortGitSha: identity.shortGitSha,
+        releaseId: identity.releaseId
     });
 }
 

@@ -16,12 +16,19 @@
  */
 
 import { hydrateEarlyRuntimeEnv } from '../bootstrap/runtime-env.js';
-import { getBuildIdentity, getBuildResourceAttributes } from '../utils/buildIdentity.js';
+import {
+    BUILD_IDENTITY_EARLY_ENV_KEY_GROUPS,
+    getBuildIdentity,
+    getBuildResourceAttributes
+} from '../utils/buildIdentity.js';
 
 /** @type {import('@opentelemetry/sdk-node').NodeSDK | null} */
 let sdk = null;
 
-await hydrateEarlyRuntimeEnv({ requiredKeys: ['NEW_RELIC_LICENSE_KEY'] });
+await hydrateEarlyRuntimeEnv({
+    requiredKeys: ['NEW_RELIC_LICENSE_KEY'],
+    hydrateKeys: BUILD_IDENTITY_EARLY_ENV_KEY_GROUPS
+});
 
 const REDACTED_URL = '[REDACTED_TELEGRAM_BOT_URL]';
 const TELEGRAM_BOT_PATH_PATTERN = /\/bot[^/?#]+/i;

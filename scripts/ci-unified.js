@@ -69,6 +69,31 @@ function buildDockerIdentityArgs({ nodeEnv, version, sha, shortSha, imageTag, bu
   ];
 }
 
+function buildDockerBuildxArgs({ output, platforms = '', buildArgs = [], tags = [], cacheFromImage = '' }) {
+  if (!['--load', '--push'].includes(output)) {
+    throw new Error(`Unsupported Docker buildx output mode: ${output}`);
+  }
+  if (!tags.length) {
+    throw new Error('At least one Docker tag is required');
+  }
+
+  return [
+    'buildx',
+    'build',
+    '.',
+    output,
+    ...(platforms ? ['--platform', platforms] : []),
+    ...buildArgs.flatMap(arg => ['--build-arg', arg]),
+    ...tags.flatMap(tag => ['-t', tag]),
+    ...(cacheFromImage ? [
+      '--cache-from',
+      `type=registry,ref=${cacheFromImage}`,
+      '--cache-to',
+      'type=inline'
+    ] : [])
+  ];
+}
+
 /**
  * GitHub App 认证管理器
  * 负责生成 JWT 并获取 Installation Access Token
@@ -257,15 +282,12 @@ class DockerManager {
 
   execute(command, description) {
     console.log(`🐳 Docker: ${description}...`);
-    console.log(`[DEBUG] command: "${command}"`);
-    console.log(`[DEBUG] command.length: ${command.length}`);
-    const [cmd, ...args] = command.split(' ');
+    const [cmd, ...args] = Array.isArray(command) ? command : command.split(' ');
     console.log(`[DEBUG] cmd: "${cmd}"`);
     console.log(`[DEBUG] args:`, args);
     console.log(`[DEBUG] args.length: ${args.length}`);
     try {
-      // 使用 spawnSync 替代 execSync
-      const result = spawnSync(cmd, args, { stdio: 'inherit', encoding: 'utf8', shell: true });
+      const result = spawnSync(cmd, args, { stdio: 'inherit', encoding: 'utf8' });
       
       if (result.status !== 0) {
           throw new Error(`Command failed with status ${result.status}`);
@@ -423,26 +445,24 @@ class DockerManager {
     
     console.log(`🏷️ 生成的 Tags: \n${tags.map(t => `  - ${t}`).join('\n')}`);
 
-    const tagArgs = tags.map(t => `-t ${t}`).join(' ');
-    
-    // 构建参数
-    const buildArgs = identityBuildArgs.map(arg => `--build-arg ${arg}`).join(' ');
     const platformArg = this.getBuildPlatforms();
     
     // 缓存策略: 尝试从 registry 拉取缓存
     // 本地使用本地缓存，CI尝试使用 --cache-from
-    let cacheArgs = '';
-    if (!this.envManager.context.isLocal) {
-        cacheArgs = `--cache-from type=registry,ref=${imageName}:latest --cache-to type=inline`;
-    }
+    const cacheFromImage = this.envManager.context.isLocal ? '' : `${imageName}:latest`;
 
     const outputArg = this.envManager.context.isLocal ? '--load' : '--push';
-    const platformArgs = platformArg ? `--platform ${platformArg}` : '';
-
-    // 构建命令 - CI 使用 buildx --push 生成/推送多架构 manifest；本地仍 --load 方便 smoke。
-    const buildCmd = `docker buildx build . ${outputArg} ${platformArgs} ${buildArgs} ${tagArgs} ${cacheArgs}`;
-    console.log(`[DEBUG] buildCmd: "${buildCmd}"`);
-    console.log(`[DEBUG] buildCmd.split(' '):`, buildCmd.split(' '));
+    const buildCmd = [
+        'docker',
+        ...buildDockerBuildxArgs({
+            output: outputArg,
+            platforms: platformArg,
+            buildArgs: identityBuildArgs,
+            tags,
+            cacheFromImage
+        })
+    ];
+    console.log(`[DEBUG] buildCmd:`, buildCmd);
     this.execute(buildCmd, '构建镜像');
 
     if (this.envManager.context.isLocal) {
@@ -698,4 +718,4 @@ Commands:
   });
 }
 
-export { buildDockerIdentityArgs, getCiPlan, normalizeCommand, resolveCiMode };
+export { buildDockerBuildxArgs, buildDockerIdentityArgs, getCiPlan, normalizeCommand, resolveCiMode };

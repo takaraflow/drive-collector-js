@@ -4,6 +4,7 @@ import {
     getBuildDisplayVersion,
     getBuildIdentity,
     getBuildLogFields,
+    getPublicBuildIdentity,
     getBuildReleaseId,
     getBuildResourceAttributes,
     getBuildShortGitSha
@@ -75,5 +76,21 @@ describe('buildIdentity', () => {
         expect(getBuildShortGitSha('abcdef1234567890')).toBe('abcdef123456');
         expect(getBuildReleaseId('4.33.1', 'abcdef1234567890')).toBe('4.33.1+abcdef123456');
         expect(getBuildReleaseId('4.33.1', 'unknown')).toBe('4.33.1');
+    });
+
+    test('should expose only low-sensitivity fields in public identity', () => {
+        const identity = getBuildIdentity({
+            APP_VERSION: '4.33.1',
+            GIT_SHA: 'abcdef1234567890',
+            BUILD_TIME: '2026-05-18T00:00:00.000Z',
+            NF_IMAGE: 'registry.northflank.com/project/service:runtime-image'
+        });
+
+        expect(getPublicBuildIdentity(identity)).toEqual({
+            serviceName: 'drive-collector',
+            version: '4.33.1',
+            shortGitSha: 'abcdef123456',
+            releaseId: '4.33.1+abcdef123456'
+        });
     });
 });

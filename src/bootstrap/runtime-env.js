@@ -44,11 +44,25 @@ export function loadLocalRuntimeEnv() {
     return loaded > 0;
 }
 
-function hasRequiredKeys(requiredKeys) {
-    return requiredKeys.every(key => {
+function normalizeKeyGroups(keysOrGroups = []) {
+    return keysOrGroups
+        .map(item => Array.isArray(item) ? item : [item])
+        .map(group => group.filter(Boolean));
+}
+
+function hasAnyKeyInGroup(group) {
+    return group.some(key => {
         const value = process.env[key];
         return value !== undefined && value !== null && String(value).trim() !== '';
     });
+}
+
+function hasRequiredKeys(requiredKeys) {
+    return normalizeKeyGroups(requiredKeys).every(hasAnyKeyInGroup);
+}
+
+function hasMissingHydrationKeys(keysOrGroups) {
+    return normalizeKeyGroups(keysOrGroups).some(group => !hasAnyKeyInGroup(group));
 }
 
 async function loadInfisicalRuntimeEnv() {
@@ -92,9 +106,9 @@ async function loadInfisicalRuntimeEnv() {
     }
 }
 
-export async function hydrateEarlyRuntimeEnv({ requiredKeys = [] } = {}) {
+export async function hydrateEarlyRuntimeEnv({ requiredKeys = [], hydrateKeys = [] } = {}) {
     loadLocalRuntimeEnv();
-    if (hasRequiredKeys(requiredKeys)) {
+    if (hasRequiredKeys(requiredKeys) && !hasMissingHydrationKeys(hydrateKeys)) {
         return { infisicalLoaded: false };
     }
 

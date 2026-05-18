@@ -2,7 +2,7 @@ import { queueService } from '../services/QueueService.js';
 import { TaskManager } from '../processor/TaskManager.js';
 import { logger } from '../services/logger/index.js';
 import { resolveInstanceBaseUrl } from '../utils/instanceUrl.js';
-import { getBuildIdentity } from '../utils/buildIdentity.js';
+import { getBuildIdentity, getPublicBuildIdentity } from '../utils/buildIdentity.js';
 import { parseTaskQueuePayload, TASK_QUEUE_TRIGGER_SOURCES } from '../domain/task-queue-contract.js';
 import { CACHE_KEYS } from '../domain/cache-keys.js';
 
@@ -28,6 +28,21 @@ function isInstanceSecretAuthorized(req, cfg) {
     return hasValidInstanceSecret(req.headers?.['x-instance-secret'], cfg?.streamForwarding?.secret);
 }
 
+function getOptionalRuntimeConfig() {
+    try {
+        return global.appInitializer?.config || null;
+    } catch {
+        return null;
+    }
+}
+
+function getVersionResponseIdentity(req) {
+    const identity = getBuildIdentity();
+    return isInstanceSecretAuthorized(req, getOptionalRuntimeConfig())
+        ? identity
+        : getPublicBuildIdentity(identity);
+}
+
 /**
  * 处理健康检查请求
  */
@@ -45,7 +60,7 @@ function handleHealthChecks(req, res) {
             if ([healthPath, healthzPath, readyPath, versionPath].includes(path)) {
                 if (path === versionPath) {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(req.method === 'HEAD' ? '' : JSON.stringify(getBuildIdentity()));
+                    res.end(req.method === 'HEAD' ? '' : JSON.stringify(getVersionResponseIdentity(req)));
                     return true;
                 }
 

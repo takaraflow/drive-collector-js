@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import {
+  buildDockerBuildxArgs,
   buildDockerIdentityArgs,
   getCiPlan,
   normalizeCommand,
@@ -44,6 +45,41 @@ describe('ci-unified command planning', () => {
       'BUILD_TIME=2026-05-18T00:00:00.000Z',
       'IMAGE_TAG=ghcr.io/owner/repo:sha-abcdef1',
       'RELEASE_ID=4.33.1+abcdef123456'
+    ]);
+  });
+
+  test('should build docker publish args without shell splitting', () => {
+    expect(buildDockerBuildxArgs({
+      output: '--push',
+      platforms: 'linux/amd64,linux/arm64',
+      buildArgs: [
+        'NODE_ENV=prod',
+        'BUILD_TIME=2026-05-18T00:00:00.000Z'
+      ],
+      tags: [
+        'ghcr.io/owner/repo:sha-abcdef1',
+        'ghcr.io/owner/repo:latest'
+      ],
+      cacheFromImage: 'ghcr.io/owner/repo:latest'
+    })).toEqual([
+      'buildx',
+      'build',
+      '.',
+      '--push',
+      '--platform',
+      'linux/amd64,linux/arm64',
+      '--build-arg',
+      'NODE_ENV=prod',
+      '--build-arg',
+      'BUILD_TIME=2026-05-18T00:00:00.000Z',
+      '-t',
+      'ghcr.io/owner/repo:sha-abcdef1',
+      '-t',
+      'ghcr.io/owner/repo:latest',
+      '--cache-from',
+      'type=registry,ref=ghcr.io/owner/repo:latest',
+      '--cache-to',
+      'type=inline'
     ]);
   });
 });
