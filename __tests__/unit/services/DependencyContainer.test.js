@@ -10,7 +10,8 @@ vi.mock('../../../src/utils/common.js', () => ({
     getMediaInfo: vi.fn(),
     updateStatus: vi.fn(),
     escapeHTML: vi.fn(),
-    safeEdit: vi.fn()
+    safeEdit: vi.fn(),
+    formatBytes: vi.fn()
 }));
 vi.mock('../../../src/utils/limiter.js', () => ({
     runBotTask: vi.fn(),

@@ -5,6 +5,7 @@ import fs from "fs";
 import { Button } from "telegram/tl/custom/button.js";
 import { dependencyContainer } from "../services/DependencyContainer.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
+import { escapeHTML } from "../utils/common.js";
 import {
     isTaskProcessingLockBusyError,
     TaskProcessingLockBusyError,
@@ -14,10 +15,20 @@ import {
     attachClaimLease,
     getClaimFenceOptions
 } from "./TaskManager/claim-fence.js";
+import {
+    TASK_SOURCE_TYPES,
+    buildExternalUrlSourceRef,
+    buildTelegramMediaSourceRef,
+    isExternalUrlTask,
+    parseTaskSourceRef
+} from "../domain/task-source.js";
+import { buildExternalLocalFileName } from "./ExternalUrlPolicy.js";
+import { buildTaskObjectFromDb, resolveTaskSource } from "./TaskManager/TaskSourceResolver.js";
 
 // 导入模块化的方法
 import { downloadTask } from "./TaskManager/TaskManager.download.js";
 import { uploadTask } from "./TaskManager/TaskManager.upload.js";
+import { downloadExternalUrlTask } from "./TaskManager/TaskManager.external-download.js";
 
 // 获取依赖项的辅助函数
 const getDeps = () => dependencyContainer.getAll();
@@ -308,8 +319,11 @@ export class TaskManager {
         const { client, runMtprotoTaskWithRetry, PRIORITY, config, updateStatus, TaskRepository } = getDeps();
         const log = getLog();
         try {
-            const sourceMsgIds = rows.map(r => r.source_msg_id);
-            const messages = await runMtprotoTaskWithRetry(() => client.getMessages(chatId, { ids: sourceMsgIds }), { priority: PRIORITY.BACKGROUND });
+            const telegramRows = rows.filter(row => !isExternalUrlTask(row));
+            const sourceMsgIds = telegramRows.map(r => r.source_msg_id);
+            const messages = sourceMsgIds.length > 0
+                ? await runMtprotoTaskWithRetry(() => client.getMessages(chatId, { ids: sourceMsgIds }), { priority: PRIORITY.BACKGROUND })
+                : [];
 
             const messageMap = new Map();
             messages.forEach(m => {
@@ -322,19 +336,36 @@ export class TaskManager {
             const tasksToEnqueue = [];
             const tasksToUpload = [];
 
-            // 检查是否为批量任务（同一msg_id下有多个任务）
-            const isBatchTask = rows.length > 1;
+            const msgIdCounts = new Map();
+            for (const row of rows) {
+                const key = row.msg_id == null ? row.id : String(row.msg_id);
+                msgIdCounts.set(key, (msgIdCounts.get(key) || 0) + 1);
+            }
 
             for (const row of rows) {
-                const message = messageMap.get(row.source_msg_id);
-                if (!message || !message.media) {
-                    log.warn(`⚠️ 无法找到原始消息 (ID: ${row.source_msg_id})`);
-                    failedUpdates.push({ id: row.id, event: TASK_EVENTS.FAIL, error: 'Source msg missing' });
-                    continue;
-                }
+                let task;
+                if (isExternalUrlTask(row)) {
+                    const sourceRef = parseTaskSourceRef(row.source_ref);
+                    task = buildTaskObjectFromDb(row, {
+                        sourceType: TASK_SOURCE_TYPES.EXTERNAL_URL,
+                        sourceRef,
+                        fileInfo: {
+                            name: row.file_name || sourceRef?.fileName || "download.bin",
+                            size: Number(row.file_size) || Number(sourceRef?.fileSize) || 0
+                        }
+                    });
+                } else {
+                    const message = messageMap.get(row.source_msg_id);
+                    if (!message || !message.media) {
+                        log.warn(`⚠️ 无法找到原始消息 (ID: ${row.source_msg_id})`);
+                        failedUpdates.push({ id: row.id, event: TASK_EVENTS.FAIL, error: 'Source msg missing' });
+                        continue;
+                    }
 
-                const task = this._createTaskObject(row.id, row.user_id, row.chat_id, row.msg_id, message);
-                if (isBatchTask) {
+                    task = this._createTaskObject(row.id, row.user_id, row.chat_id, row.msg_id, message);
+                }
+                const msgKey = row.msg_id == null ? row.id : String(row.msg_id);
+                if ((msgIdCounts.get(msgKey) || 0) > 1) {
                     task.isGroup = true;
                 }
                 validTasks.push(task);
@@ -342,7 +373,10 @@ export class TaskManager {
                 // 根据任务状态决定恢复到哪个队列
                 if (row.status === TASK_STATUSES.DOWNLOADED || row.status === TASK_STATUSES.UPLOADING) {
                     // 恢复到上传队列
-                    const localPath = path.join(config.downloadDir, path.basename(row.file_name));
+                    const localFileName = isExternalUrlTask(row)
+                        ? buildExternalLocalFileName(row.id, row.file_name || task.sourceRef?.fileName)
+                        : path.basename(row.file_name);
+                    const localPath = path.join(config.downloadDir, localFileName);
                     if (fs.existsSync(localPath)) {
                         const reset = await TaskRepository.transitionStatus(row.id, TASK_EVENTS.RESET_UPLOAD, null, {
                             returnResult: true,
@@ -471,6 +505,8 @@ export class TaskManager {
                 chatId: chatIdStr,
                 msgId: statusMsg.id,
                 sourceMsgId: mediaMessage.id,
+                sourceType: TASK_SOURCE_TYPES.TELEGRAM_MEDIA,
+                sourceRef: buildTelegramMediaSourceRef({ chatId: chatIdStr, messageId: mediaMessage.id }),
                 fileName: info?.name,
                 fileSize: info?.size
             });
@@ -494,6 +530,72 @@ export class TaskManager {
                 });
             } catch (editError) {
                 log.warn("Failed to update error message", { error: editError.message });
+            }
+            throw e;
+        }
+    }
+
+    static async addExternalUrlTask(target, externalSource, userId) {
+        const { client, format, STRINGS, PRIORITY, TaskRepository, runBotTaskWithRetry } = getDeps();
+        const log = getLog();
+        const taskId = randomUUID();
+        const chatIdStr = (target?.userId ?? target?.chatId ?? target?.channelId ?? target?.id ?? target).toString();
+        const sourceRef = buildExternalUrlSourceRef(externalSource);
+
+        const statusMsg = await runBotTaskWithRetry(
+            () => client.sendMessage(target, {
+                message: format(STRINGS.task.external_captured, { name: escapeHTML(sourceRef.fileName) }),
+                buttons: [Button.inline(STRINGS.task.cancel_btn, Buffer.from(`cancel_confirm_${taskId}`))],
+                parseMode: "html"
+            }),
+            userId,
+            { priority: PRIORITY.UI },
+            false,
+            10
+        );
+
+        let taskCreated = false;
+        try {
+            await TaskRepository.create({
+                id: taskId,
+                userId: userId.toString(),
+                chatId: chatIdStr,
+                msgId: statusMsg.id,
+                sourceMsgId: null,
+                sourceType: TASK_SOURCE_TYPES.EXTERNAL_URL,
+                sourceRef,
+                fileName: sourceRef.fileName,
+                fileSize: sourceRef.fileSize || 0
+            });
+            taskCreated = true;
+
+            const task = {
+                id: taskId,
+                userId: userId.toString(),
+                chatId: chatIdStr,
+                msgId: statusMsg.id,
+                sourceType: TASK_SOURCE_TYPES.EXTERNAL_URL,
+                sourceRef,
+                fileName: sourceRef.fileName,
+                fileInfo: { name: sourceRef.fileName, size: sourceRef.fileSize || 0 },
+                lastText: "",
+                isCancelled: false
+            };
+            await this._enqueueTask(task);
+            log.info("External URL task created and enqueued", { taskId, status: "enqueued" });
+            return taskId;
+        } catch (e) {
+            log.error("External URL task creation failed", e);
+            if (taskCreated) {
+                await this._markTaskFailed(taskId, `Queue enqueue failed: ${e.message}`, "addExternalUrlTask.enqueue_failed");
+            }
+            try {
+                await client.editMessage(target, {
+                    message: statusMsg.id,
+                    text: STRINGS.task.create_failed
+                });
+            } catch (editError) {
+                log.warn("Failed to update external URL error message", { error: editError.message });
             }
             throw e;
         }
@@ -549,6 +651,8 @@ export class TaskManager {
                 chatId: chatIdStr,
                 msgId: statusMsg.id,
                 sourceMsgId: msg.id,
+                sourceType: TASK_SOURCE_TYPES.TELEGRAM_MEDIA,
+                sourceRef: buildTelegramMediaSourceRef({ chatId: chatIdStr, messageId: msg.id }),
                 fileName: info?.name,
                 fileSize: info?.size
             });
@@ -599,6 +703,7 @@ export class TaskManager {
             chatId: chatId.toString(),
             msgId,
             message,
+            sourceType: TASK_SOURCE_TYPES.TELEGRAM_MEDIA,
             fileName: info?.name || 'unknown',
             lastText: "",
             isCancelled: false
@@ -796,7 +901,7 @@ export class TaskManager {
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
     static async handleDownloadWebhook(taskId) {
-        const { instanceCoordinator, TaskRepository, client, runMtprotoTaskWithRetry, PRIORITY } = getDeps();
+        const { instanceCoordinator, TaskRepository } = getDeps();
         const log = getLog();
         let didClaim = false;
         let lockAcquired = false;
@@ -837,24 +942,8 @@ export class TaskManager {
             }
             didClaim = true;
 
-            // 获取原始消息
-            const messages = await runMtprotoTaskWithRetry(
-                () => client.getMessages(dbTask.chat_id, { ids: [dbTask.source_msg_id] }),
-                { priority: PRIORITY.BACKGROUND }
-            );
-            const message = messages[0];
-            if (!message || !message.media) {
-                await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, 'Source msg missing', {
-                    ...getClaimFenceOptions(leaderLease),
-                    allowNoop: true,
-                    source: 'handleDownloadWebhook.source_missing'
-                });
-                return { success: false, statusCode: 404, message: "Source message missing" };
-            }
-
-            // 创建任务对象
-            const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
-            task.fileName = dbTask.file_name;
+            const resolvedSource = await resolveTaskSource(dbTask);
+            const task = buildTaskObjectFromDb(dbTask, resolvedSource);
             task.processingLockHeld = true;
             attachClaimLease(task, leaderLease);
 
@@ -869,11 +958,23 @@ export class TaskManager {
             }
 
             // 执行下载逻辑
-            await this.downloadTask(task);
+            if (isExternalUrlTask(task)) {
+                await this.downloadExternalUrlTask(task);
+            } else {
+                await this.downloadTask(task);
+            }
             return { success: true, statusCode: 200 };
 
         } catch (error) {
             log.error("Download webhook failed", { taskId, error });
+            if (error?.code === 'TASK_SOURCE_MISSING') {
+                await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
+                    ...(didClaim ? getClaimFenceOptions(leaderLease) : {}),
+                    allowNoop: true,
+                    source: 'handleDownloadWebhook.source_missing'
+                });
+                return { success: false, statusCode: 404, message: "Source message missing" };
+            }
             if (isTaskProcessingLockBusyError(error)) {
                 return { success: false, statusCode: 503, message: error.message };
             }
@@ -900,7 +1001,7 @@ export class TaskManager {
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
      static async handleUploadWebhook(taskId) {
-        const { instanceCoordinator, TaskRepository, client, runMtprotoTaskWithRetry, PRIORITY, config } = getDeps();
+        const { instanceCoordinator, TaskRepository, config } = getDeps();
         const log = getLog();
         let didClaim = false;
         let lockAcquired = false;
@@ -942,8 +1043,11 @@ export class TaskManager {
             }
             didClaim = true;
 
-            // 验证本地文件存在
-            const localPath = path.join(config.downloadDir, path.basename(dbTask.file_name));
+            const sourceRef = parseTaskSourceRef(dbTask.source_ref);
+            const localFileName = isExternalUrlTask(dbTask)
+                ? buildExternalLocalFileName(taskId, dbTask.file_name || sourceRef?.fileName)
+                : path.basename(dbTask.file_name);
+            const localPath = path.join(config.downloadDir, localFileName);
             if (!fs.existsSync(localPath)) {
                 await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, 'Local file not found', {
                     ...getClaimFenceOptions(leaderLease),
@@ -953,23 +1057,8 @@ export class TaskManager {
                 return { success: false, statusCode: 404, message: "Local file not found" };
             }
 
-            // 获取原始消息
-            const messages = await runMtprotoTaskWithRetry(
-                () => client.getMessages(dbTask.chat_id, { ids: [dbTask.source_msg_id] }),
-                { priority: PRIORITY.BACKGROUND }
-            );
-            const message = messages[0];
-            if (!message || !message.media) {
-                await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, 'Source msg missing', {
-                    ...getClaimFenceOptions(leaderLease),
-                    allowNoop: true,
-                    source: 'handleUploadWebhook.source_missing'
-                });
-                return { success: false, statusCode: 404, message: "Source message missing" };
-            }
-
-            // 创建任务对象
-            const task = this._createTaskObject(taskId, dbTask.user_id, dbTask.chat_id, dbTask.msg_id, message);
+            const resolvedSource = await resolveTaskSource(dbTask);
+            const task = buildTaskObjectFromDb(dbTask, resolvedSource);
             task.localPath = localPath;
             task.fileName = dbTask.file_name;
             task.processingLockHeld = true;
@@ -991,6 +1080,14 @@ export class TaskManager {
 
         } catch (error) {
             log.error("Upload webhook failed", { taskId, error });
+            if (error?.code === 'TASK_SOURCE_MISSING') {
+                await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
+                    ...(didClaim ? getClaimFenceOptions(leaderLease) : {}),
+                    allowNoop: true,
+                    source: 'handleUploadWebhook.source_missing'
+                });
+                return { success: false, statusCode: 404, message: "Source message missing" };
+            }
             if (isTaskProcessingLockBusyError(error)) {
                 return { success: false, statusCode: 503, message: error.message };
             }
@@ -1146,6 +1243,10 @@ export class TaskManager {
      */
     static async uploadTask(task) {
         return uploadTask.call(this, task);
+    }
+
+    static async downloadExternalUrlTask(task) {
+        return downloadExternalUrlTask.call(this, task);
     }
 
     /**

@@ -25,7 +25,8 @@ const ACL = {
     
     // === 特殊权限 ===
     "maintenance:bypass": ["admin", "owner"],             // 绕过维护模式
-    "task:cancel:any":    ["admin", "owner"]              // 取消任意任务
+    "task:cancel:any":    ["admin", "owner"],             // 取消任意任务
+    "external_link:create": ["admin", "owner"]            // 创建外部链接离线下载任务
 };
 
 const roleRank = (role) => ROLE_ORDER.indexOf(role);

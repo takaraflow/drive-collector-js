@@ -90,7 +90,8 @@ vi.mock("../../src/utils/common.js", () => ({
     updateStatus: vi.fn(),
     getMediaInfo: vi.fn(() => ({ name: 'test.mp4', size: 1024 })),
     escapeHTML: vi.fn((str) => str),
-    safeEdit: vi.fn()
+    safeEdit: vi.fn(),
+    formatBytes: vi.fn((bytes) => `${bytes} B`)
 }));
 
 // Mock logger

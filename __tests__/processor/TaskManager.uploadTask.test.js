@@ -27,7 +27,8 @@ vi.mock('../../src/services/InstanceCoordinator.js', () => ({
 vi.mock('../../src/repositories/TaskRepository.js', () => ({
   TaskRepository: {
     updateStatus: vi.fn(),
-    transitionStatus: vi.fn().mockResolvedValue({ changed: true, blocked: false })
+    transitionStatus: vi.fn().mockResolvedValue({ changed: true, blocked: false }),
+    updateFileMetadata: vi.fn().mockResolvedValue(true)
   }
 }));
 
@@ -42,7 +43,8 @@ vi.mock('../../src/utils/common.js', () => ({
   getMediaInfo: vi.fn(() => ({ name: 'test.txt', size: 1024 })),
   updateStatus: vi.fn().mockResolvedValue(undefined),
   escapeHTML: (value) => value,
-  safeEdit: vi.fn()
+  safeEdit: vi.fn(),
+  formatBytes: (bytes) => `${bytes} B`
 }));
 
 vi.mock('fs', () => ({

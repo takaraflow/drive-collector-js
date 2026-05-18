@@ -11,6 +11,11 @@ import {
     TASK_TERMINAL_STATUSES,
     TaskStateMachine
 } from "../domain/task-state-machine.js";
+import {
+    TASK_SOURCE_TYPES,
+    normalizeTaskSourceType,
+    serializeTaskSourceRef
+} from "../domain/task-source.js";
 import { CACHE_KEYS } from "../domain/cache-keys.js";
 
 const log = logger.withModule ? logger.withModule('TaskRepository') : logger;
@@ -292,15 +297,18 @@ export class TaskRepository {
         }
 
         try {
+            const sourceType = normalizeTaskSourceType(taskData.sourceType || taskData.source_type || TASK_SOURCE_TYPES.TELEGRAM_MEDIA);
             await d1.run(`
-                INSERT INTO tasks (id, user_id, chat_id, msg_id, source_msg_id, file_name, file_size, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO tasks (id, user_id, chat_id, msg_id, source_msg_id, source_type, source_ref, file_name, file_size, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
                 taskData.id,
                 taskData.userId,
                 taskData.chatId,
                 taskData.msgId,
                 taskData.sourceMsgId,
+                sourceType,
+                serializeTaskSourceRef(taskData.sourceRef || taskData.source_ref),
                 taskData.fileName || 'unknown',
                 taskData.fileSize || 0,
                 TASK_STATUSES.QUEUED,
@@ -312,6 +320,49 @@ export class TaskRepository {
             log.error(`TaskRepository.create failed for ${taskData.id}:`, e);
             throw e;
         }
+    }
+
+    static async updateFileMetadata(taskId, { fileName, fileSize } = {}) {
+        if (!taskId) {
+            throw new Error("TaskRepository.updateFileMetadata: Missing taskId.");
+        }
+
+        const now = Date.now();
+        await d1.run(
+            `UPDATE tasks
+             SET file_name = COALESCE(?, file_name),
+                 file_size = COALESCE(?, file_size),
+                 updated_at = ?
+             WHERE id = ?`,
+            [
+                fileName || null,
+                Number.isFinite(fileSize) ? fileSize : null,
+                now,
+                taskId
+            ]
+        );
+        await cache.delete(`task:${taskId}:details`).catch(() => {});
+        return true;
+    }
+
+    static async updateSourceRef(taskId, sourceRef) {
+        if (!taskId) {
+            throw new Error("TaskRepository.updateSourceRef: Missing taskId.");
+        }
+
+        await d1.run(
+            `UPDATE tasks
+             SET source_ref = ?,
+                 updated_at = ?
+             WHERE id = ?`,
+            [
+                serializeTaskSourceRef(sourceRef),
+                Date.now(),
+                taskId
+            ]
+        );
+        await cache.delete(`task:${taskId}:details`).catch(() => {});
+        return true;
     }
 
     /**
@@ -614,7 +665,7 @@ export class TaskRepository {
         
         try {
             const tasks = await d1.fetchAll(
-                "SELECT id, file_name, status, error_msg, created_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                "SELECT id, file_name, status, error_msg, source_type, created_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
                 [userId, limit]
             );
             
@@ -650,11 +701,11 @@ export class TaskRepository {
                 [userId]
             ),
             d1.fetchAll(
-                `SELECT id, file_name, file_size, status, created_at, updated_at FROM tasks WHERE user_id = ? AND status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`,
+                `SELECT id, file_name, file_size, status, source_type, created_at, updated_at FROM tasks WHERE user_id = ? AND status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`,
                 [userId, ...TASK_ACTIVE_STATUSES, safeLimit]
             ),
             d1.fetchAll(
-                "SELECT id, file_name, status, error_msg, created_at, updated_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                "SELECT id, file_name, status, error_msg, source_type, created_at, updated_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
                 [userId, safeLimit]
             )
         ]);
@@ -690,7 +741,7 @@ export class TaskRepository {
         
         try {
             const tasks = await d1.fetchAll(
-                "SELECT id, user_id, chat_id, msg_id, file_name, status, error_msg FROM tasks WHERE msg_id = ? ORDER BY created_at ASC",
+                "SELECT id, user_id, chat_id, msg_id, file_name, status, error_msg, source_type FROM tasks WHERE msg_id = ? ORDER BY created_at ASC",
                 [msgId]
             );
             
@@ -768,10 +819,12 @@ export class TaskRepository {
         if (!tasksData || tasksData.length === 0) return true;
 
         const now = Date.now();
-        const statements = tasksData.map(taskData => ({
+        const statements = tasksData.map(taskData => {
+            const sourceType = normalizeTaskSourceType(taskData.sourceType || taskData.source_type || TASK_SOURCE_TYPES.TELEGRAM_MEDIA);
+            return {
             sql: `
-                INSERT INTO tasks (id, user_id, chat_id, msg_id, source_msg_id, file_name, file_size, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO tasks (id, user_id, chat_id, msg_id, source_msg_id, source_type, source_ref, file_name, file_size, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
             params: [
                 taskData.id,
@@ -779,13 +832,16 @@ export class TaskRepository {
                 taskData.chatId,
                 taskData.msgId,
                 taskData.sourceMsgId,
+                sourceType,
+                serializeTaskSourceRef(taskData.sourceRef || taskData.source_ref),
                 taskData.fileName || 'unknown',
                 taskData.fileSize || 0,
                 TASK_STATUSES.QUEUED,
                 now,
                 now
             ]
-        }));
+            };
+        });
 
         try {
             const results = await d1.batch(statements);
@@ -1005,7 +1061,7 @@ export class TaskRepository {
         const [statusCounts, activeTasks, userCounts] = await Promise.all([
             d1.fetchAll("SELECT status, COUNT(*) as count FROM tasks GROUP BY status"),
             d1.fetchAll(
-                `SELECT id, user_id, file_name, file_size, status, created_at, updated_at FROM tasks WHERE status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`,
+                `SELECT id, user_id, file_name, file_size, status, source_type, created_at, updated_at FROM tasks WHERE status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`,
                 [...TASK_ACTIVE_STATUSES, limit]
             ),
             d1.fetchAll(
@@ -1037,7 +1093,7 @@ export class TaskRepository {
         const offset = page * pageSize;
         const [tasks, countRow] = await Promise.all([
             d1.fetchAll(
-                "SELECT id, user_id, file_name, file_size, status, error_msg, created_at, updated_at FROM tasks WHERE status = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                "SELECT id, user_id, file_name, file_size, status, error_msg, source_type, created_at, updated_at FROM tasks WHERE status = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
                 [status, pageSize, offset]
             ),
             d1.fetchOne(

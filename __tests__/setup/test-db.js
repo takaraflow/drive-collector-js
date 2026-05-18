@@ -35,6 +35,8 @@ function createTables(db) {
       chat_id TEXT,
       msg_id INTEGER,
       source_msg_id INTEGER,
+      source_type TEXT DEFAULT 'telegram_media',
+      source_ref TEXT,
       file_name TEXT,
       file_size INTEGER DEFAULT 0,
       status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled')),

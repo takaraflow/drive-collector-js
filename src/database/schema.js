@@ -1,6 +1,6 @@
 import crypto from "crypto";
 
-export const LATEST_SCHEMA_VERSION = 6;
+export const LATEST_SCHEMA_VERSION = 7;
 
 const MIGRATION_LOCK_ID = "database-schema";
 const CANONICAL_TASK_STATUS_CHECK = "CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled'))";
@@ -46,6 +46,8 @@ const INITIAL_SCHEMA_STATEMENTS = [
         chat_id TEXT,
         msg_id INTEGER,
         source_msg_id INTEGER,
+        source_type TEXT DEFAULT 'telegram_media',
+        source_ref TEXT,
         file_name TEXT,
         file_size INTEGER DEFAULT 0,
         status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled')),
@@ -200,7 +202,7 @@ const SCHEMA_MIGRATION_LOCK_SQL = `CREATE TABLE IF NOT EXISTS schema_migration_l
 
 const REQUIRED_TABLE_COLUMNS = {
     schema_migrations: ["version", "name", "checksum", "applied_at"],
-    tasks: ["id", "user_id", "chat_id", "msg_id", "source_msg_id", "file_name", "file_size", "status", "error_msg", "claimed_by", "claim_lease_id", "created_at", "updated_at"],
+    tasks: ["id", "user_id", "chat_id", "msg_id", "source_msg_id", "source_type", "source_ref", "file_name", "file_size", "status", "error_msg", "claimed_by", "claim_lease_id", "created_at", "updated_at"],
     drives: ["id", "user_id", "name", "type", "config_data", "remote_folder", "status", "is_default", "created_at", "updated_at"],
     settings: ["key", "value", "created_at", "updated_at"],
     sessions: ["id", "user_id", "data", "created_at", "expires_at"],
@@ -308,6 +310,29 @@ function coalescedColumnExpression(columns, columnName, fallback) {
     return columns.includes(columnName) ? `COALESCE(${quoteIdentifier(columnName)}, ${fallback})` : fallback;
 }
 
+function telegramSourceRefExpression(columns) {
+    if (!columns.includes("chat_id") || !columns.includes("source_msg_id")) return "NULL";
+    return `
+        CASE
+            WHEN ${quoteIdentifier("chat_id")} IS NOT NULL AND ${quoteIdentifier("source_msg_id")} IS NOT NULL
+            THEN '{"chatId":' || json_quote(CAST(${quoteIdentifier("chat_id")} AS TEXT)) || ',"messageId":' || CAST(${quoteIdentifier("source_msg_id")} AS INTEGER) || '}'
+            ELSE NULL
+        END
+    `;
+}
+
+function taskSourceRefExpression(columns) {
+    const sourceTypeExpr = coalescedColumnExpression(columns, "source_type", literal("telegram_media"));
+    const sourceRefExpr = columnExpression(columns, "source_ref", "NULL");
+    return `
+        CASE
+            WHEN ${sourceTypeExpr} = 'telegram_media'
+            THEN COALESCE(${sourceRefExpr}, ${telegramSourceRefExpression(columns)})
+            ELSE ${sourceRefExpr}
+        END
+    `;
+}
+
 async function addMissingColumns(d1, tableName, columnDefinitions) {
     const columns = await getTableColumns(d1, tableName);
     for (const [columnName, definition] of Object.entries(columnDefinitions)) {
@@ -385,6 +410,8 @@ async function ensureTaskBaseSchema(d1) {
             chat_id: "TEXT",
             msg_id: "INTEGER",
             source_msg_id: "INTEGER",
+            source_type: "TEXT DEFAULT 'telegram_media'",
+            source_ref: "TEXT",
             file_name: "TEXT",
             file_size: "INTEGER DEFAULT 0",
             status: "TEXT DEFAULT 'queued'",
@@ -585,6 +612,8 @@ async function applyTaskStatusSsot({ d1 }) {
             chat_id TEXT,
             msg_id INTEGER,
             source_msg_id INTEGER,
+            source_type TEXT DEFAULT 'telegram_media',
+            source_ref TEXT,
             file_name TEXT,
             file_size INTEGER DEFAULT 0,
             status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled')),
@@ -595,7 +624,7 @@ async function applyTaskStatusSsot({ d1 }) {
             updated_at INTEGER
         )`,
         insertTemporaryTableSql: `INSERT INTO tasks_ssot_new (
-            id, user_id, chat_id, msg_id, source_msg_id, file_name, file_size,
+            id, user_id, chat_id, msg_id, source_msg_id, source_type, source_ref, file_name, file_size,
             status, error_msg, claimed_by, claim_lease_id, created_at, updated_at
         )
         SELECT
@@ -604,6 +633,8 @@ async function applyTaskStatusSsot({ d1 }) {
             ${columnExpression(columns, "chat_id", "NULL")},
             ${columnExpression(columns, "msg_id", "NULL")},
             ${sourceMsgExpr},
+            ${coalescedColumnExpression(columns, "source_type", literal("telegram_media"))},
+            ${taskSourceRefExpression(columns)},
             ${coalescedColumnExpression(columns, "file_name", literal("unknown"))},
             ${coalescedColumnExpression(columns, "file_size", "0")},
             ${statusExpr},
@@ -618,7 +649,44 @@ async function applyTaskStatusSsot({ d1 }) {
 }
 
 async function applyTaskClaimLeaseFencing({ d1 }) {
+    if (!(await tableExists(d1, "tasks"))) {
+        await ensureTaskBaseSchema(d1);
+        return;
+    }
+
+    await addMissingColumns(d1, "tasks", {
+        claim_lease_id: "TEXT"
+    });
+    await runStatements(d1, TASK_INDEX_STATEMENTS);
+}
+
+async function applyTaskSourceMetadata({ d1 }) {
     await ensureTaskBaseSchema(d1);
+    const columns = await getTableColumns(d1, "tasks");
+    if (!columns.includes("source_type") || !columns.includes("source_ref")) return;
+    await d1.run(`
+        UPDATE tasks
+        SET source_type = COALESCE(source_type, 'telegram_media'),
+            source_ref = COALESCE(source_ref, ${telegramSourceRefExpression(columns)})
+        WHERE COALESCE(source_type, 'telegram_media') = 'telegram_media'
+    `);
+}
+
+async function hasTelegramTasksMissingSourceRef(d1) {
+    if (!(await tableExists(d1, "tasks"))) return false;
+    if (!(await columnExists(d1, "tasks", "source_type")) || !(await columnExists(d1, "tasks", "source_ref"))) {
+        return true;
+    }
+    const row = await d1.fetchOne(`
+        SELECT id
+        FROM tasks
+        WHERE COALESCE(source_type, 'telegram_media') = 'telegram_media'
+          AND source_ref IS NULL
+          AND chat_id IS NOT NULL
+          AND source_msg_id IS NOT NULL
+        LIMIT 1
+    `);
+    return Boolean(row);
 }
 
 async function driveHasNoLegacyTypeTableUnique(d1) {
@@ -801,6 +869,17 @@ function getMigrations() {
                     !(await indexExists(d1, "idx_tasks_claim_lease"));
             },
             apply: applyTaskClaimLeaseFencing
+        },
+        {
+            version: 7,
+            name: "task_source_metadata",
+            sql: "add tasks.source_type and tasks.source_ref for non-Telegram task sources and backfill Telegram source refs",
+            shouldRun: async ({ d1 }) => {
+                return !(await columnExists(d1, "tasks", "source_type")) ||
+                    !(await columnExists(d1, "tasks", "source_ref")) ||
+                    await hasTelegramTasksMissingSourceRef(d1);
+            },
+            apply: applyTaskSourceMetadata
         }
     ];
 }

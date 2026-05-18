@@ -10,7 +10,8 @@ const mockTaskRepository = {
     findById: vi.fn(),
     findByMsgId: vi.fn(),
     findStalledTasks: vi.fn(),
-    transitionStatus: vi.fn()
+    transitionStatus: vi.fn(),
+    updateFileMetadata: vi.fn()
 };
 
 const mockQueueService = {
@@ -81,7 +82,8 @@ vi.mock('../../src/utils/common.js', () => ({
     })),
     updateStatus: vi.fn(),
     escapeHTML: vi.fn((value) => value),
-    safeEdit: vi.fn()
+    safeEdit: vi.fn(),
+    formatBytes: vi.fn((bytes) => `${bytes} B`)
 }));
 
 vi.mock('../../src/utils/limiter.js', () => ({
@@ -115,7 +117,7 @@ vi.mock('../../src/locales/zh-CN.js', () => ({
             success_sec_transfer: 'success'
         }
     },
-    format: vi.fn((template) => template)
+    format: vi.fn((template, vars = {}) => Object.entries(vars).reduce((text, [key, value]) => text.replaceAll(`{{${key}}}`, value), template))
 }));
 
 vi.mock('../../src/services/logger/index.js', () => ({
@@ -240,6 +242,34 @@ describe('TaskManager queue/recovery closure', () => {
         );
         expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledTimes(2);
         expect(mockQueueService.enqueueDownloadTask).not.toHaveBeenCalled();
+    });
+
+    it('restores external URL tasks without fetching Telegram source messages', async () => {
+        await TaskManager._restoreBatchTasks('chat-1', [{
+            id: 'external-1',
+            user_id: 'u1',
+            chat_id: 'chat-1',
+            msg_id: 2,
+            source_msg_id: null,
+            source_type: 'external_url',
+            source_ref: JSON.stringify({
+                url: 'https://files.example.com/report.pdf',
+                fileName: 'report.pdf',
+                fileSize: 2048
+            }),
+            file_name: 'report.pdf',
+            file_size: 2048,
+            status: 'downloaded'
+        }]);
+
+        expect(mockClient.getMessages).not.toHaveBeenCalled();
+        expect(mockFs.existsSync).toHaveBeenCalledWith('/tmp/downloads/external-1-report.pdf');
+        expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith(
+            'external-1',
+            expect.objectContaining({
+                localPath: '/tmp/downloads/external-1-report.pdf'
+            })
+        );
     });
 
     it('skips stalled recovery init when another instance owns the recovery lease', async () => {

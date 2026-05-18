@@ -447,6 +447,24 @@
         "required": false,
         "description": "Local download directory (defaults to OS temp downloads)"
       },
+      "EXTERNAL_DOWNLOAD_MAX_BYTES": {
+        "type": "number",
+        "required": false,
+        "default": 5368709120,
+        "description": "Maximum size for administrator external HTTP/HTTPS offline downloads"
+      },
+      "EXTERNAL_DOWNLOAD_TIMEOUT_MS": {
+        "type": "number",
+        "required": false,
+        "default": 30000,
+        "description": "Per-request timeout for external HTTP/HTTPS offline download probes and downloads"
+      },
+      "EXTERNAL_DOWNLOAD_MAX_REDIRECTS": {
+        "type": "number",
+        "required": false,
+        "default": 5,
+        "description": "Maximum redirect count for external HTTP/HTTPS offline downloads"
+      },
       "QSTASH_DEBUG": {
         "type": "string",
         "required": false,

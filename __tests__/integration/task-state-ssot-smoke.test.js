@@ -210,7 +210,8 @@ vi.mock('../../src/utils/common.js', () => ({
   getMediaInfo: vi.fn(() => ({ name: 'smoke.mp4', size: 1024 })),
   updateStatus: vi.fn(async () => true),
   escapeHTML: value => value,
-  safeEdit: vi.fn(async () => true)
+  safeEdit: vi.fn(async () => true),
+  formatBytes: bytes => `${bytes} B`
 }));
 
 vi.mock('../../src/utils/limiter.js', () => ({

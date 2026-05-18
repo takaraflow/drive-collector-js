@@ -54,7 +54,8 @@ vi.mock('../../src/processor/TaskManager.js', () => ({
 }));
 vi.mock('../../src/utils/common.js', () => ({
     safeEdit: mockSafeEdit,
-    escapeHTML: (t) => String(t)
+    escapeHTML: (t) => String(t),
+    formatBytes: (bytes) => `${bytes} B`
 }));
 vi.mock('../../src/utils/limiter.js', () => ({
     runBotTask: vi.fn((fn) => fn()),

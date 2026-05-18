@@ -82,6 +82,8 @@ describe('TaskRepository', () => {
                 chatId: 123456,
                 msgId: 789,
                 sourceMsgId: 101112,
+                sourceType: 'external_url',
+                sourceRef: { url: 'https://files.example.com/video.mp4', fileName: 'test.mp4' },
                 fileName: 'test.mp4',
                 fileSize: 1048576
             };
@@ -92,7 +94,20 @@ describe('TaskRepository', () => {
             expect(result).toBe(true);
             expect(mockD1.run).toHaveBeenCalledWith(
                 expect.stringContaining('INSERT INTO tasks'),
-                ['task123', 'user456', 123456, 789, 101112, 'test.mp4', 1048576, TASK_STATUSES.QUEUED, expect.any(Number), expect.any(Number)]
+                [
+                    'task123',
+                    'user456',
+                    123456,
+                    789,
+                    101112,
+                    'external_url',
+                    JSON.stringify({ url: 'https://files.example.com/video.mp4', fileName: 'test.mp4' }),
+                    'test.mp4',
+                    1048576,
+                    TASK_STATUSES.QUEUED,
+                    expect.any(Number),
+                    expect.any(Number)
+                ]
             );
         });
 
@@ -108,7 +123,20 @@ describe('TaskRepository', () => {
             expect(result).toBe(true);
             expect(mockD1.run).toHaveBeenCalledWith(
                 expect.stringContaining('INSERT INTO tasks'),
-                ['task123', 'user456', undefined, undefined, undefined, 'unknown', 0, TASK_STATUSES.QUEUED, expect.any(Number), expect.any(Number)]
+                [
+                    'task123',
+                    'user456',
+                    undefined,
+                    undefined,
+                    undefined,
+                    'telegram_media',
+                    null,
+                    'unknown',
+                    0,
+                    TASK_STATUSES.QUEUED,
+                    expect.any(Number),
+                    expect.any(Number)
+                ]
             );
         });
 
@@ -579,6 +607,20 @@ describe('TaskRepository', () => {
             const result = await TaskRepository.createBatch(tasks);
             expect(result).toBe(true);
             expect(mockD1.batch).toHaveBeenCalledTimes(1);
+            expect(mockD1.batch.mock.calls[0][0][0].params).toEqual([
+                'task1',
+                'user1',
+                undefined,
+                undefined,
+                undefined,
+                'telegram_media',
+                null,
+                'file1.mp4',
+                0,
+                TASK_STATUSES.QUEUED,
+                expect.any(Number),
+                expect.any(Number)
+            ]);
         });
 
         it('should handle empty task array', async () => {
@@ -696,7 +738,7 @@ describe('TaskRepository', () => {
             
             expect(result).toEqual(mockTasks);
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
-                expect.stringContaining('SELECT id, file_name, status, error_msg, created_at FROM tasks WHERE user_id = ?'),
+                expect.stringContaining('SELECT id, file_name, status, error_msg, source_type, created_at FROM tasks WHERE user_id = ?'),
                 ['user123', 10]
             );
         });
@@ -720,7 +762,7 @@ describe('TaskRepository', () => {
             
             expect(result).toEqual(mockTasks);
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
-                expect.stringContaining('SELECT id, user_id, chat_id, msg_id, file_name, status, error_msg FROM tasks WHERE msg_id = ?'),
+                expect.stringContaining('SELECT id, user_id, chat_id, msg_id, file_name, status, error_msg, source_type FROM tasks WHERE msg_id = ?'),
                 ['msg123']
             );
         });

@@ -277,7 +277,8 @@ function createDatabaseAppliedThroughVersionFive() {
             (2, 'tasks_status_ssot', '1a9b512a4fdc8988ab3e205278c9d41beb4964583b92a8e9af8b35a60d6937f7', 1778936683357, 7454),
             (3, 'drives_default_ssot', '5114937fdba3263de5eda29a075ac29262d7d819b59476b7544e4161a0aace9b', 1778936692390, 8058),
             (4, 'user_roles_ssot', '957c8724b63b7583df88c9944d822169f9ade6a11be8a02d0ba51b7342fc7e66', 1778999743954, 3580),
-            (5, 'drives_active_type_unique_ssot', '521fe2516142976cc218f0e21d87304c2d8726962768c13bb202330597047e99', 1778999752948, 8126);
+            (5, 'drives_active_type_unique_ssot', '521fe2516142976cc218f0e21d87304c2d8726962768c13bb202330597047e99', 1778999752948, 8126),
+            (6, 'task_claim_lease_fencing', 'a9e9eaf5e227918d03f2446ed0d9c79379fe5392f3d9df51ae46d67082e33971', 1778999760000, 1000);
     `);
     return db;
 }
@@ -303,7 +304,11 @@ describe("database schema migrations", () => {
 
         expect(result.status.isCurrent).toBe(true);
         expect(result.status.currentVersion).toBe(LATEST_SCHEMA_VERSION);
-        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied", "recorded", "recorded", "recorded"]);
+        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied", "recorded", "recorded", "recorded", "recorded"]);
+
+        const taskColumns = db.prepare("PRAGMA table_info(tasks)").all().map(column => column.name);
+        expect(taskColumns).toContain("source_type");
+        expect(taskColumns).toContain("source_ref");
 
         const driveColumns = db.prepare("PRAGMA table_info(drives)").all().map(column => column.name);
         expect(driveColumns).toContain("is_default");
@@ -315,7 +320,7 @@ describe("database schema migrations", () => {
         expect(indexes).toContain("idx_user_roles_role");
 
         const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
-        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6]);
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     });
 
     test("should create current schema with user_roles and active-only drive type uniqueness", async () => {
@@ -406,7 +411,7 @@ describe("database schema migrations", () => {
         expect(outdatedStatus.isCurrent).toBe(false);
         expect(outdatedStatus.issues).not.toContain("migration 1:initial_schema checksum drift");
         expect(outdatedStatus.missingMigrations).toEqual([
-            { version: 6, name: "task_claim_lease_fencing" }
+            { version: 7, name: "task_source_metadata" }
         ]);
 
         const result = await migrateDatabaseSchema({
@@ -416,8 +421,8 @@ describe("database schema migrations", () => {
         });
 
         expect(result.results).toContainEqual({
-            version: 6,
-            name: "task_claim_lease_fencing",
+            version: 7,
+            name: "task_source_metadata",
             action: "applied",
             executionTimeMs: expect.any(Number)
         });
@@ -425,12 +430,32 @@ describe("database schema migrations", () => {
 
         const taskColumns = db.prepare("PRAGMA table_info(tasks)").all().map(column => column.name);
         expect(taskColumns).toContain("claim_lease_id");
+        expect(taskColumns).toContain("source_type");
+        expect(taskColumns).toContain("source_ref");
 
         const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(row => row.name);
         expect(indexes).toContain("idx_tasks_claim_lease");
 
         const migrationOne = db.prepare("SELECT checksum FROM schema_migrations WHERE version = 1").get();
         expect(migrationOne.checksum).toBe("1c71fee80eb09f16419d0143c236c9e7e1d2261f80e8dde4b1c591e5539e5ce9");
+    });
+
+    test("should backfill Telegram task source refs when applying source metadata migration", async () => {
+        db = createDatabaseAppliedThroughVersionFive();
+        db.prepare(
+            "INSERT INTO tasks (id, user_id, chat_id, msg_id, source_msg_id, file_name, file_size, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run("telegram-old", "user-1", "chat-42", 101, 100, "old.mp4", 123, "queued", 1, 1);
+        const d1 = createD1RestCompatible(db);
+
+        await migrateDatabaseSchema({
+            d1,
+            useLock: false,
+            log: { info: vi.fn(), warn: vi.fn() }
+        });
+
+        const row = db.prepare("SELECT source_type, source_ref FROM tasks WHERE id = ?").get("telegram-old");
+        expect(row.source_type).toBe("telegram_media");
+        expect(JSON.parse(row.source_ref)).toEqual({ chatId: "chat-42", messageId: 100 });
     });
 
     test("should fail schema assertion before migrations are applied", async () => {
@@ -500,6 +525,8 @@ describe("database schema migrations", () => {
         const taskColumns = db.prepare("PRAGMA table_info(tasks)").all().map(column => column.name);
         expect(taskColumns).toContain("claimed_by");
         expect(taskColumns).toContain("claim_lease_id");
+        expect(taskColumns).toContain("source_type");
+        expect(taskColumns).toContain("source_ref");
         expect(taskColumns).not.toContain("drive_id");
 
         const migratedTask = db.prepare("SELECT * FROM tasks WHERE id = ?").get("task-prod-1");
@@ -513,9 +540,11 @@ describe("database schema migrations", () => {
             status: "queued",
             claimed_by: null,
             claim_lease_id: null,
+            source_type: "telegram_media",
             created_at: 1000,
             updated_at: 1000
         });
+        expect(JSON.parse(migratedTask.source_ref)).toEqual({ chatId: "chat-prod", messageId: 99 });
 
         const driveColumns = db.prepare("PRAGMA table_info(drives)").all().map(column => column.name);
         expect(driveColumns).toContain("is_default");
@@ -545,6 +574,6 @@ describe("database schema migrations", () => {
         expect(indexes).toContain("idx_drives_one_default_per_user");
 
         const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
-        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6]);
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     });
 });

@@ -214,6 +214,26 @@
         "STREAM_RESUME_DIR 保存断点续传 .part 文件，最终 copyto 成功后由 worker 清理",
         "STREAM_FINALIZATION_* 控制 leader 等待 worker 最终化的超时和轮询间隔"
       ]
+    },
+    "externalDownload": {
+      "name": "外部链接离线下载",
+      "icon": "🌐",
+      "description": "管理员可用的 HTTP/HTTPS 外部链接离线下载入口",
+      "configKeys": [
+        "EXTERNAL_DOWNLOAD_MAX_BYTES",
+        "EXTERNAL_DOWNLOAD_TIMEOUT_MS",
+        "EXTERNAL_DOWNLOAD_MAX_REDIRECTS"
+      ],
+      "reinitializationStrategy": {
+        "type": "restart",
+        "graceful": true,
+        "timeout": 20000
+      },
+      "behaviorNotes": [
+        "仅支持 HTTP/HTTPS，P2P、FTP、file/data 等协议会 fail closed",
+        "下载前会做 SSRF 防护并限制重定向次数",
+        "文件以流式方式写入临时 .part 文件，完成后原子重命名"
+      ]
     }
   },
   "criticalServices": [

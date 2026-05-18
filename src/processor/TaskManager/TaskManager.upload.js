@@ -5,6 +5,7 @@ import { createHeartbeat, handleTaskCompletion, handleTaskFailure, handleUploadF
 import { assertClaimFenceCurrent, getClaimFenceOptions } from "./claim-fence.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../../domain/task-state-machine.js";
 import { TaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
+import { isExternalUrlTask } from "../../domain/task-source.js";
 
 // 获取模块日志记录器
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager.upload');
@@ -45,7 +46,7 @@ export async function uploadTask(task) {
         this.inFlightTasks.set(id, task);
         didActivate = true;
 
-        info = getMediaInfo(task.message.media);
+        info = task.fileInfo || getMediaInfo(task.message?.media);
         if (!info) {
             return;
         }
@@ -57,10 +58,18 @@ export async function uploadTask(task) {
                 allowNoop: true,
                 source: 'upload_local_file_missing'
             });
-            const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
-            const fileNameHtml = `<a href="${fileLink}">${escapeHTML(info.name)}</a>`;
+            const fileLink = isExternalUrlTask(task) ? null : `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
+            const fileNameHtml = fileLink
+                ? `<a href="${fileLink}">${escapeHTML(info.name)}</a>`
+                : `<code>${escapeHTML(info.name)}</code>`;
             await updateStatus(task, format(STRINGS.task.failed_validation, { name: fileNameHtml }), true);
             return;
+        }
+
+        const localStat = fs.statSync(localPath);
+        if (!info.size || info.size <= 0) {
+            info = { ...info, size: localStat.size };
+            task.fileInfo = info;
         }
 
         // Create heartbeat function
@@ -68,12 +77,12 @@ export async function uploadTask(task) {
 
         // Duplicate check before upload: Skip upload if remote file with same name and size already exists
         // Use fast check mode: no retry, skip time-consuming directory fallback
-        const fileName = path.basename(localPath);
+        const fileName = path.basename(task.fileName || info.name || localPath);
         const remoteFile = await CloudTool.getRemoteFileInfo(fileName, task.userId, 1, true);
         
         if (remoteFile && this._isSizeMatch(remoteFile.Size, info.size)) {
             const actualUploadPath = await CloudTool._getUploadPath(task.userId);
-            const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
+            const fileLink = isExternalUrlTask(task) ? null : `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
             await handleTaskCompletion(task, this, updateStatus, fileName, actualUploadPath, fileLink);
             return;
         }
@@ -108,7 +117,10 @@ export async function uploadTask(task) {
             } else {
                 // Use rclone to upload single file directly
                 log.info(`📤 Using rclone to upload directly: ${fileName}`);
-                uploadResult = await CloudTool.uploadFile(localPath, task, (progress) => {
+                const uploadTask = isExternalUrlTask(task)
+                    ? { ...task, localPath, fileName }
+                    : task;
+                const reportUploadProgress = (progress) => {
                     const now = Date.now();
                     if (now - lastUpdate > 3000) {
                         lastUpdate = now;
@@ -117,7 +129,11 @@ export async function uploadTask(task) {
                             log.warn("Upload heartbeat failed", { taskId: task.id, error: err?.message || String(err) });
                         });
                     }
-                });
+                };
+
+                uploadResult = isExternalUrlTask(task) && typeof CloudTool.uploadLocalFileToRemote === "function"
+                    ? await CloudTool.uploadLocalFileToRemote(localPath, fileName, task.userId, reportUploadProgress)
+                    : await CloudTool.uploadFile(localPath, uploadTask, reportUploadProgress);
             }
         } catch (uploadError) {
             log.error(`Upload failed for task ${task.id}:`, uploadError);
@@ -132,7 +148,7 @@ export async function uploadTask(task) {
             await new Promise(resolve => setTimeout(resolve, 3000));
 
             // Extract correct file name from actual local file path
-            const actualFileName = path.basename(localPath);
+            const actualFileName = fileName;
 
             // More robust file validation logic
             let finalRemote = null;
@@ -163,7 +179,7 @@ export async function uploadTask(task) {
                 }
             }
 
-            const localSize = fs.statSync(localPath).size;
+            const localSize = localStat.size;
             const isOk = finalRemote && this._isSizeMatch(finalRemote.Size, localSize);
 
             if (!isOk) {
@@ -189,8 +205,10 @@ export async function uploadTask(task) {
             if (task.isGroup) {
                 await this._refreshGroupMonitor(task, finalStatus, 0, 0, errorMsg);
             } else {
-                const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
-                const fileNameHtml = `<a href="${fileLink}">${escapeHTML(info.name)}</a>`;
+                const fileLink = isExternalUrlTask(task) ? null : `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
+                const fileNameHtml = fileLink
+                    ? `<a href="${fileLink}">${escapeHTML(info.name)}</a>`
+                    : `<code>${escapeHTML(info.name)}</code>`;
                 const baseText = isOk
                     ? format(STRINGS.task.success, { name: fileNameHtml, folder: config.remoteFolder })
                     : format(STRINGS.task.failed_validation, { name: fileNameHtml });

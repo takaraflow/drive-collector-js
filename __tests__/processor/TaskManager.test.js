@@ -1,4 +1,6 @@
 // Mock all external dependencies
+import { Writable } from 'stream';
+
 vi.mock('../../src/config/index.js', () => ({
     config: {
         downloadDir: '/tmp/downloads',
@@ -43,6 +45,7 @@ vi.mock('../../src/services/rclone.js', () => ({
     CloudTool: {
         getRemoteFileInfo: vi.fn().mockResolvedValue(null),
         uploadFile: vi.fn().mockResolvedValue({ success: true }),
+        uploadLocalFileToRemote: vi.fn().mockResolvedValue({ success: true }),
         listRemoteFiles: vi.fn().mockResolvedValue([]),
     }
 }));
@@ -59,32 +62,66 @@ vi.mock('../../src/repositories/TaskRepository.js', () => ({
     TaskRepository: {
         updateStatus: vi.fn().mockResolvedValue(),
         transitionStatus: vi.fn().mockResolvedValue({ changed: true, blocked: false }),
+        updateFileMetadata: vi.fn().mockResolvedValue(true),
+        updateSourceRef: vi.fn().mockResolvedValue(true),
         findById: vi.fn().mockResolvedValue(null),
         findByMsgId: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockResolvedValue(true),
         createBatch: vi.fn().mockResolvedValue(true),
         markCancelled: vi.fn().mockResolvedValue(),
         claimTask: vi.fn().mockResolvedValue(true),
     }
 }));
 
-vi.mock('fs', () => ({
+const mockFileData = new Map();
+function createMockWriteStream(filePath) {
+    const chunks = [];
+    return new Writable({
+        write(chunk, _encoding, callback) {
+            chunks.push(Buffer.from(chunk));
+            callback();
+        },
+        final(callback) {
+            mockFileData.set(filePath, Buffer.concat(chunks));
+            callback();
+        }
+    });
+}
+
+const mockFs = {
+    existsSync: vi.fn().mockReturnValue(true),
+    createWriteStream: vi.fn(createMockWriteStream),
     default: {
         existsSync: vi.fn().mockReturnValue(true),
         promises: {
             stat: vi.fn().mockResolvedValue({ size: 1000 }),
             unlink: vi.fn().mockResolvedValue(),
+            mkdir: vi.fn().mockResolvedValue(),
+            rm: vi.fn().mockResolvedValue(),
+            rename: vi.fn(async (from, to) => {
+                mockFileData.set(to, mockFileData.get(from) || Buffer.alloc(0));
+                mockFileData.delete(from);
+            })
         },
         statSync: vi.fn().mockReturnValue({ size: 1000 }),
         unlinkSync: vi.fn(),
+        createWriteStream: vi.fn(createMockWriteStream)
     },
-    existsSync: vi.fn().mockReturnValue(true),
     promises: {
         stat: vi.fn().mockResolvedValue({ size: 1000 }),
         unlink: vi.fn().mockResolvedValue(),
+        mkdir: vi.fn().mockResolvedValue(),
+        rm: vi.fn().mockResolvedValue(),
+        rename: vi.fn(async (from, to) => {
+            mockFileData.set(to, mockFileData.get(from) || Buffer.alloc(0));
+            mockFileData.delete(from);
+        })
     },
     statSync: vi.fn().mockReturnValue({ size: 1000 }),
     unlinkSync: vi.fn(),
-}));
+    createWriteStream: vi.fn(createMockWriteStream)
+};
+vi.mock('fs', () => mockFs);
 
 vi.mock('../../src/services/oss.js', () => ({
     ossService: {
@@ -173,6 +210,7 @@ const { TaskManager } = await import('../../src/processor/TaskManager.js');
 describe('TaskManager', () => {
     beforeEach(async () => {
         vi.clearAllMocks();
+        mockFileData.clear();
         // Reset static properties
         TaskManager.waitingTasks = [];
         TaskManager.processingTasks = new Map();
@@ -180,6 +218,8 @@ describe('TaskManager', () => {
         TaskManager.currentTask = null;
         TaskManager.waitingUploadTasks = [];
         TaskManager.processingUploadTasks = new Set();
+        mockFs.default.promises.stat.mockResolvedValue({ size: 1000 });
+        mockFs.promises.stat.mockResolvedValue({ size: 1000 });
     });
 
     describe('static methods', () => {
@@ -341,6 +381,225 @@ describe('TaskManager', () => {
             }));
             
             downloadTaskSpy.mockRestore();
+        });
+
+        it('should create and enqueue external URL tasks with source metadata', async () => {
+            const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+            const { queueService } = await import('../../src/services/QueueService.js');
+            const { client } = await import('../../src/services/telegram.js');
+            client.sendMessage.mockResolvedValue({ id: 321 });
+
+            const taskId = await TaskManager.addExternalUrlTask(
+                { id: 'chat-1' },
+                {
+                    url: 'https://files.example.com/video.mp4?token=secret',
+                    finalUrl: 'https://files.example.com/video.mp4?token=secret',
+                    displayUrl: 'https://files.example.com/video.mp4',
+                    fileName: 'video.mp4',
+                    fileSize: 2048,
+                    contentType: 'video/mp4'
+                },
+                'user-1'
+            );
+
+            expect(taskId).toEqual(expect.any(String));
+            expect(TaskRepository.create).toHaveBeenCalledWith(expect.objectContaining({
+                id: taskId,
+                userId: 'user-1',
+                chatId: 'chat-1',
+                msgId: 321,
+                sourceMsgId: null,
+                sourceType: 'external_url',
+                fileName: 'video.mp4',
+                fileSize: 2048,
+                sourceRef: expect.objectContaining({
+                    url: 'https://files.example.com/video.mp4?token=secret',
+                    displayUrl: 'https://files.example.com/video.mp4'
+                })
+            }));
+            expect(queueService.enqueueDownloadTask).toHaveBeenCalledWith(
+                taskId,
+                expect.objectContaining({
+                    userId: 'user-1',
+                    chatId: 'chat-1',
+                    msgId: 321
+                })
+            );
+        });
+
+        it('should route external URL download webhooks without Telegram source lookup', async () => {
+            const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+            const { client } = await import('../../src/services/telegram.js');
+            TaskRepository.findById.mockResolvedValue({
+                id: 'external-task',
+                user_id: 'user-1',
+                chat_id: 'chat-1',
+                msg_id: 321,
+                source_msg_id: null,
+                source_type: 'external_url',
+                source_ref: JSON.stringify({
+                    url: 'https://files.example.com/video.mp4',
+                    fileName: 'video.mp4',
+                    fileSize: 2048
+                }),
+                file_name: 'video.mp4',
+                file_size: 2048,
+                status: 'queued'
+            });
+            const externalSpy = vi.spyOn(TaskManager, 'downloadExternalUrlTask').mockResolvedValue();
+
+            const result = await TaskManager.handleDownloadWebhook('external-task');
+
+            expect(result).toMatchObject({ success: true, statusCode: 200 });
+            expect(client.getMessages).not.toHaveBeenCalled();
+            expect(externalSpy).toHaveBeenCalledWith(expect.objectContaining({
+                id: 'external-task',
+                sourceType: 'external_url',
+                sourceRef: expect.objectContaining({ url: 'https://files.example.com/video.mp4' }),
+                fileInfo: { name: 'video.mp4', size: 2048 }
+            }));
+
+            externalSpy.mockRestore();
+        });
+
+        it('should route external URL upload webhooks without Telegram source lookup', async () => {
+            const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+            const { client } = await import('../../src/services/telegram.js');
+            TaskRepository.findById.mockResolvedValue({
+                id: 'external-upload',
+                user_id: 'user-1',
+                chat_id: 'chat-1',
+                msg_id: 321,
+                source_msg_id: null,
+                source_type: 'external_url',
+                source_ref: JSON.stringify({
+                    url: 'https://files.example.com/video.mp4',
+                    fileName: 'video.mp4',
+                    fileSize: 2048
+                }),
+                file_name: 'video.mp4',
+                file_size: 2048,
+                status: 'downloaded'
+            });
+            const uploadSpy = vi.spyOn(TaskManager, 'uploadTask').mockResolvedValue();
+
+            const result = await TaskManager.handleUploadWebhook('external-upload');
+
+            expect(result).toMatchObject({ success: true, statusCode: 200 });
+            expect(client.getMessages).not.toHaveBeenCalled();
+            expect(uploadSpy).toHaveBeenCalledWith(expect.objectContaining({
+                id: 'external-upload',
+                sourceType: 'external_url',
+                localPath: '/tmp/downloads/external-upload-video.mp4',
+                fileInfo: { name: 'video.mp4', size: 2048 }
+            }));
+
+            uploadSpy.mockRestore();
+        });
+
+        it('should stream external URL downloads, redact retained source, and enqueue upload', async () => {
+            const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+            const { queueService } = await import('../../src/services/QueueService.js');
+            const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+            const { Readable } = await import('stream');
+            instanceCoordinator.acquireTaskLock.mockResolvedValue(true);
+            instanceCoordinator.isLockLeaseCurrent.mockResolvedValue(true);
+            mockFs.default.promises.stat.mockResolvedValue({ size: 11 });
+            mockFs.promises.stat.mockResolvedValue({ size: 11 });
+            const requestImpl = vi.fn(async () => ({
+                status: 200,
+                ok: true,
+                headers: { get: (name) => name === 'content-length' ? '11' : null },
+                body: Readable.toWeb(Readable.from(['hello world']))
+            }));
+
+            await TaskManager.downloadExternalUrlTask({
+                id: 'external-stream',
+                userId: 'user-1',
+                chatId: 'chat-1',
+                msgId: 321,
+                sourceType: 'external_url',
+                sourceRef: {
+                    url: 'https://files.example.com/video.mp4?token=secret',
+                    displayUrl: 'https://files.example.com/video.mp4',
+                    fileName: 'video.mp4',
+                    fileSize: 11
+                },
+                externalUrlTransportOptions: {
+                    lookupImpl: vi.fn(async () => [{ address: '93.184.216.34', family: 4 }]),
+                    requestImpl
+                },
+                fileName: 'video.mp4',
+                fileInfo: { name: 'video.mp4', size: 11 },
+                lastText: '',
+                isCancelled: false
+            });
+
+            expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+                'external-stream',
+                'start_download',
+                null,
+                expect.objectContaining({ source: 'heartbeat' })
+            );
+            expect(mockFs.default.promises.rename).toHaveBeenCalledWith(
+                '/tmp/downloads/external-stream-video.mp4.part',
+                '/tmp/downloads/external-stream-video.mp4'
+            );
+            expect(TaskRepository.updateFileMetadata).toHaveBeenCalledWith('external-stream', {
+                fileName: 'video.mp4',
+                fileSize: 11
+            });
+            expect(TaskRepository.updateSourceRef).toHaveBeenCalledWith(
+                'external-stream',
+                expect.not.objectContaining({
+                    url: expect.any(String),
+                    finalUrl: expect.any(String)
+                })
+            );
+            expect(JSON.stringify(TaskRepository.updateSourceRef.mock.calls.at(-1)[1])).not.toContain('secret');
+            expect(queueService.enqueueUploadTask).toHaveBeenCalledWith('external-stream', expect.objectContaining({
+                localPath: '/tmp/downloads/external-stream-video.mp4'
+            }));
+        });
+
+        it('should redact external URL failures before persisting or displaying status', async () => {
+            const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+            const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+            instanceCoordinator.acquireTaskLock.mockResolvedValue(true);
+            instanceCoordinator.isLockLeaseCurrent.mockResolvedValue(true);
+
+            await TaskManager.downloadExternalUrlTask({
+                id: 'external-failed',
+                userId: 'user-1',
+                chatId: 'chat-1',
+                msgId: 321,
+                sourceType: 'external_url',
+                sourceRef: {
+                    url: 'https://files.example.com/video.mp4?token=secret',
+                    displayUrl: 'https://files.example.com/video.mp4',
+                    fileName: 'video.mp4',
+                    fileSize: 11
+                },
+                externalUrlTransportOptions: {
+                    lookupImpl: vi.fn(async () => [{ address: '93.184.216.34', family: 4 }]),
+                    requestImpl: vi.fn(async () => {
+                        throw new Error('fetch failed https://files.example.com/video.mp4?token=secret');
+                    })
+                },
+                fileName: 'video.mp4',
+                fileInfo: { name: 'video.mp4', size: 11 },
+                lastText: '',
+                isCancelled: false
+            });
+
+            expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+                'external-failed',
+                'fail',
+                '外部链接下载失败，请确认链接仍可公开访问且文件大小未超过限制。',
+                expect.objectContaining({ source: 'handleTaskFailure' })
+            );
+            expect(JSON.stringify(TaskRepository.transitionStatus.mock.calls)).not.toContain('secret');
+            expect(JSON.stringify(TaskRepository.updateSourceRef.mock.calls.at(-1))).not.toContain('secret');
         });
 
         it('should retry download webhook on D1 lookup errors without marking the task failed', async () => {

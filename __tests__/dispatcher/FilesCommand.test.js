@@ -37,7 +37,8 @@ vi.mock('../../src/utils/common.js', () => ({
     safeEdit: mockSafeEdit,
     escapeHTML: (t) => t,
     getMediaInfo: vi.fn(),
-    updateStatus: vi.fn()
+    updateStatus: vi.fn(),
+    formatBytes: (bytes) => `${bytes} B`
 }));
 const mockPriority = { UI: 10, NORMAL: 0, LOW: -10, BACKGROUND: -20 };
 global.PRIORITY = mockPriority; // 注入全局变量

@@ -433,6 +433,11 @@ function buildConfigObject(env) {
             migrationLockTtlMs: parseInt(env.DB_MIGRATION_LOCK_TTL_MS, 10) || 120000,
             migrationLockWaitMs: parseInt(env.DB_MIGRATION_LOCK_WAIT_MS, 10) || 30000
         },
+        externalDownload: {
+            maxBytes: parsePositiveNumber(env.EXTERNAL_DOWNLOAD_MAX_BYTES, 5 * 1024 * 1024 * 1024),
+            timeoutMs: parsePositiveNumber(env.EXTERNAL_DOWNLOAD_TIMEOUT_MS, 30000),
+            maxRedirects: parsePositiveInt(env.EXTERNAL_DOWNLOAD_MAX_REDIRECTS, 5)
+        },
         instance: {
             id: env.INSTANCE_ID || null,
             publicUrl: env.INSTANCE_PUBLIC_URL || env.APP_EXTERNAL_URL || env.LB_WEBHOOK_URL || null,

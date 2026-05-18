@@ -78,7 +78,9 @@ export async function handleTaskCompletion(task, context, updateStatus, fileName
     if (task.isGroup) {
         await context._refreshGroupMonitor(task, TASK_STATUSES.COMPLETED);
     } else {
-        const fileNameHtml = `<a href="${fileLink}">${escapeHTML(fileName)}</a>`;
+        const fileNameHtml = fileLink
+            ? `<a href="${fileLink}">${escapeHTML(fileName)}</a>`
+            : `<code>${escapeHTML(fileName)}</code>`;
         await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: fileNameHtml, folder: actualUploadPath }), true);
     }
 }

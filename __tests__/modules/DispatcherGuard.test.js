@@ -80,7 +80,8 @@ vi.mock('../../src/ui/templates.js', () => ({ UIHelper: {} }));
 vi.mock('../../src/services/rclone.js', () => ({ CloudTool: {} }));
 vi.mock('../../src/utils/common.js', () => ({ 
     safeEdit: vi.fn(),
-    escapeHTML: (str) => str // Mock escapeHTML to return string as-is
+    escapeHTML: (str) => str, // Mock escapeHTML to return string as-is
+    formatBytes: (bytes) => `${bytes} B`
 }));
 vi.mock('../../src/utils/limiter.js', () => ({ 
     runBotTaskWithRetry: async (fn) => fn(),

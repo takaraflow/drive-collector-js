@@ -7,6 +7,12 @@ import { SessionManager } from "../modules/SessionManager.js";
 import { DriveConfigFlow } from "../modules/DriveConfigFlow.js";
 import { TaskManager } from "../processor/TaskManager.js";
 import { LinkParser } from "../processor/LinkParser.js";
+import {
+    extractExternalHttpUrls,
+    findUnsupportedExternalLinks,
+    probeExternalUrl,
+    redactUrlForDisplay
+} from "../processor/ExternalUrlPolicy.js";
 import { UIHelper } from "../ui/templates.js";
 import { CloudTool } from "../services/rclone.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
@@ -14,6 +20,7 @@ import { DriveRepository } from "../repositories/DriveRepository.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
 import { ApiKeyRepository } from "../repositories/ApiKeyRepository.js";
 import { safeEdit, escapeHTML } from "../utils/common.js";
+import { formatBytes } from "../utils/common.js";
 import { parseDriveSessionData } from "../domain/drive-session-step.js";
 import { runBotTask, runBotTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
@@ -220,8 +227,19 @@ export class Dispatcher {
         ];
     }
 
+    static _getExternalUrlConfirmButtons(nonce) {
+        return [
+            [Button.inline(STRINGS.task.btn_keep_task, Buffer.from(`external_url_cancel_${nonce}`))],
+            [Button.inline(STRINGS.task.btn_confirm_external, Buffer.from(`external_url_execute_${nonce}`))]
+        ];
+    }
+
     static _createCallbackNonce() {
         return randomUUID().replace(/-/g, "").slice(0, 12);
+    }
+
+    static _targetChatId(target) {
+        return String(target?.userId ?? target?.chatId ?? target?.channelId ?? target?.id ?? target);
     }
 
     static _getCommandArg(fullText) {
@@ -512,6 +530,42 @@ export class Dispatcher {
                 const isAdmin = await AuthGuard.can(userId, "maintenance:bypass");
                 await safeEdit(event.userId, event.msgId, STRINGS.task.action_cancelled, this._getStatusButtons(isAdmin), userId);
                 return await answer(STRINGS.task.action_cancelled);
+            }
+
+            if (data.startsWith("external_url_cancel_")) {
+                const nonce = data.slice("external_url_cancel_".length);
+                const session = await SessionManager.get(userId);
+                const action = session?.current_step === "EXTERNAL_URL_CONFIRM"
+                    ? parseDriveSessionData(session)
+                    : null;
+                const callbackChatId = this._targetChatId(event.peer || event.userId);
+                if (!action?.nonce || action.nonce !== nonce || String(action.chatId) !== callbackChatId) {
+                    return await answer(STRINGS.task.task_not_found);
+                }
+                await SessionManager.clear(userId);
+                await safeEdit(event.peer || action.target || action.chatId, event.msgId, STRINGS.task.action_cancelled, this._getStatusButtons(false), userId);
+                return await answer(STRINGS.task.action_cancelled);
+            }
+
+            if (data.startsWith("external_url_execute_")) {
+                const canCreateExternal = await AuthGuard.can(userId, "external_link:create");
+                if (!canCreateExternal) return await answer(STRINGS.status.no_permission);
+
+                const nonce = data.slice("external_url_execute_".length);
+                const session = await SessionManager.get(userId);
+                const action = session?.current_step === "EXTERNAL_URL_CONFIRM"
+                    ? parseDriveSessionData(session)
+                    : null;
+                const callbackChatId = this._targetChatId(event.peer || event.userId);
+                if (!action?.nonce || action.nonce !== nonce || !action.source?.url || String(action.chatId) !== callbackChatId) {
+                    return await answer(STRINGS.task.task_not_found);
+                }
+
+                await SessionManager.clear(userId);
+                const taskTarget = event.peer || action.target || action.chatId;
+                await TaskManager.addExternalUrlTask(taskTarget, action.source, userId);
+                await safeEdit(taskTarget, event.msgId, STRINGS.task.cmd_sent, this._getStatusButtons(true), userId);
+                return await answer(STRINGS.task.cmd_sent);
             }
 
             if (data.startsWith("admin_action_execute_")) {
@@ -890,6 +944,8 @@ export class Dispatcher {
         if (!text) return false;
 
         try {
+            if (await this._handleExternalUrl(target, userId, text, finalSelectedDrive)) return true;
+
             const toProcess = await LinkParser.parse(text, userId);
             if (toProcess && toProcess.length > 0) {
                 if (!finalSelectedDrive) {
@@ -914,6 +970,75 @@ export class Dispatcher {
             return true;
         }
         return false;
+    }
+
+    static async _handleExternalUrl(target, userId, text, finalSelectedDrive) {
+        const urls = extractExternalHttpUrls(text);
+        const unsupported = findUnsupportedExternalLinks(text);
+        if (urls.length === 0 && unsupported.length === 0) return false;
+
+        const canCreateExternal = await AuthGuard.can(userId, "external_link:create");
+        if (!canCreateExternal) {
+            await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.task.external_admin_only,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+            return true;
+        }
+
+        if (urls.length === 0 || unsupported.length > 0) {
+            await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.task.external_unsupported,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+            return true;
+        }
+
+        if (urls.length > 1) {
+            await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.task.external_limit,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+            return true;
+        }
+
+        if (!finalSelectedDrive) {
+            await this._sendBindHint(target, userId);
+            return true;
+        }
+
+        try {
+            const externalDownloadConfig = getConfig().externalDownload || {};
+            const source = await probeExternalUrl(urls[0], {
+                timeoutMs: externalDownloadConfig.timeoutMs,
+                maxRedirects: externalDownloadConfig.maxRedirects,
+                maxBytes: externalDownloadConfig.maxBytes
+            });
+            const nonce = this._createCallbackNonce();
+            const chatId = this._targetChatId(target);
+            await SessionManager.start(userId, "EXTERNAL_URL_CONFIRM", { nonce, source, chatId });
+            await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: format(STRINGS.task.external_confirm, {
+                    name: escapeHTML(source.fileName),
+                    size: formatBytes(source.fileSize || 0),
+                    url: escapeHTML(source.displayUrl || redactUrlForDisplay(source.url))
+                }),
+                buttons: this._getExternalUrlConfirmButtons(nonce),
+                parseMode: "html"
+            }), userId, { priority: PRIORITY.UI }, false, 3);
+            return true;
+        } catch (error) {
+            log.warn("External URL probe failed", {
+                userId,
+                code: error?.code,
+                error: error?.message
+            });
+            await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.task.external_probe_failed,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+            return true;
+        }
     }
 
     /**

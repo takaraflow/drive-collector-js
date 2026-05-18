@@ -44,6 +44,7 @@ const mockTaskRepository = {
     transitionStatus: vi.fn().mockResolvedValue({ changed: true, blocked: false }),
     findByMsgId: vi.fn().mockResolvedValue([]),
     create: vi.fn(),
+    updateFileMetadata: vi.fn().mockResolvedValue(true),
     findCompletedByFile: vi.fn(),
     findAllCompletedByUser: vi.fn().mockResolvedValue([]),
 };
@@ -69,6 +70,7 @@ vi.mock("../../src/utils/common.js", () => ({
     updateStatus: vi.fn(),
     escapeHTML: vi.fn(s => s),
     safeEdit: vi.fn(),
+    formatBytes: vi.fn((bytes) => `${bytes} B`)
 }));
 
 vi.mock("../../src/utils/limiter.js", () => ({
