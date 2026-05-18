@@ -30,7 +30,8 @@ vi.mock("../../src/services/CacheService.js", () => ({
 
 vi.mock("../../src/services/DistributedLock.js", () => ({
   DistributedLock: class {
-    constructor() {
+    constructor(_cache, options = {}) {
+      this.options = options;
       this.acquire = vi.fn();
       this.release = vi.fn();
       this.getLockStatus = vi.fn();
@@ -95,6 +96,7 @@ describe("MediaGroupBuffer", () => {
   test("should create instance with persist key", () => {
     expect(buffer.persistKey).toBe("test-instance:media_group_buffer");
     expect(buffer.baseKey).toBe("media_group_buffer");
+    expect(mockLock.options.keyPrefix).toBe("media_group_buffer:lock:");
   });
 
   test("should buffer message and set timeout timer (no lock on add)", async () => {
@@ -136,13 +138,13 @@ describe("MediaGroupBuffer", () => {
     const result = await buffer.add(messages[1], target, userId);
 
     expect(result).toEqual({ added: true, reason: "flush_triggered" });
-    expect(mockLock.acquire).toHaveBeenCalledWith(`${baseKey}:lock:group-123`, "test-instance");
+    expect(mockLock.acquire).toHaveBeenCalledWith("group-123", "test-instance");
     expect(TaskManager.addBatchTasks).toHaveBeenCalledWith(
       target,
       expect.arrayContaining([expect.objectContaining({ id: "msg-1" }), expect.objectContaining({ id: "msg-2" })]),
       userId
     );
-    expect(mockLock.release).toHaveBeenCalledWith(`${baseKey}:lock:group-123`, "test-instance");
+    expect(mockLock.release).toHaveBeenCalledWith("group-123", "test-instance");
   });
 
   test("should flush expired buffer during cleanup", async () => {
@@ -165,7 +167,7 @@ describe("MediaGroupBuffer", () => {
     await buffer._cleanupStaleBuffers();
 
     expect(TaskManager.addBatchTasks).toHaveBeenCalled();
-    expect(mockLock.acquire).toHaveBeenCalledWith(`${baseKey}:lock:group-123`, "test-instance");
+    expect(mockLock.acquire).toHaveBeenCalledWith("group-123", "test-instance");
   });
 
   test("should persist snapshot to persistKey", async () => {

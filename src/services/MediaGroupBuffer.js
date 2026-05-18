@@ -77,7 +77,8 @@ export class MediaGroupBuffer {
 
         this.distributedLock = new DistributedLock(cache, {
             ttlSeconds: this.options.lockTtl,
-            logger: log
+            logger: log,
+            keyPrefix: `${this.baseKey}:lock:`
         });
 
         this.localBufferKeys = new Set();
@@ -91,7 +92,7 @@ export class MediaGroupBuffer {
     }
 
     _lockId(gid) {
-        return `${this.baseKey}:lock:${gid}`;
+        return gid.toString();
     }
 
     _bufferKey(gid) {

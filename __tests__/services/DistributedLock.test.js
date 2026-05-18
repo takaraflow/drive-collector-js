@@ -46,7 +46,7 @@ describe('DistributedLock - core behaviors', () => {
             version: expect.any(String)
         }));
         expect(mockCache.compareAndSet).toHaveBeenCalledTimes(1);
-        expect(mockCache.compareAndSet.mock.calls[0][0]).toBe(`lock:task:${taskId}`);
+        expect(mockCache.compareAndSet.mock.calls[0][0]).toBe(`distributed_lock:${taskId}`);
         expect(mockCache.compareAndSet.mock.calls[0][2]).toMatchObject({
             ifNotExists: true,
             ttl: 120
@@ -138,7 +138,7 @@ describe('DistributedLock - core behaviors', () => {
 
         expect(success).toBe(true);
         expect(mockCache.deleteIfEquals).toHaveBeenCalledWith(
-            `lock:task:${taskId}`,
+            `distributed_lock:${taskId}`,
             expect.objectContaining({ instanceId, version: 'v1' })
         );
         expect(mockCache.delete).not.toHaveBeenCalled();
@@ -193,7 +193,7 @@ describe('DistributedLock - core behaviors', () => {
         const success = await lock.forceRelease(taskId, 'admin-instance');
 
         expect(success).toBe(true);
-        expect(mockCache.delete).toHaveBeenCalledWith(`lock:task:${taskId}`);
+        expect(mockCache.delete).toHaveBeenCalledWith(`distributed_lock:${taskId}`);
     });
 
     test('forceRelease returns false when delete fails', async () => {
@@ -253,7 +253,7 @@ describe('DistributedLock - core behaviors', () => {
     });
 
     test('cleanupExpiredLocks should not throw on missing expiresAt', async () => {
-        mockCache.listKeys.mockResolvedValue(['lock:task:bad']);
+        mockCache.listKeys.mockResolvedValue(['distributed_lock:bad']);
         mockCache.get.mockResolvedValue({
             instanceId: 'some-instance'
             // expiresAt missing (corrupted/legacy)
@@ -261,11 +261,21 @@ describe('DistributedLock - core behaviors', () => {
 
         await lock.cleanupExpiredLocks();
 
-        expect(mockCache.delete).toHaveBeenCalledWith('lock:task:bad');
+        expect(mockCache.delete).toHaveBeenCalledWith('distributed_lock:bad');
         expect(mockLogger.error).not.toHaveBeenCalledWith(
             'Error cleaning up expired locks',
             expect.anything()
         );
+    });
+
+    test('cleanup scans only its own namespace and never shared task locks', async () => {
+        mockCache.listKeys.mockResolvedValue([]);
+
+        await lock.cleanupExpiredLocks();
+
+        expect(mockCache.listKeys).toHaveBeenCalledWith('distributed_lock:');
+        expect(mockCache.listKeys).not.toHaveBeenCalledWith('lock:task:*');
+        expect(mockCache.listKeys).not.toHaveBeenCalledWith('lock:task:');
     });
 
     test('getLockStatus reports released when missing', async () => {
@@ -279,7 +289,7 @@ describe('DistributedLock - core behaviors', () => {
 
     test('getStats aggregates held and expired locks', async () => {
         const base = Date.now();
-        mockCache.listKeys.mockResolvedValue(['lock:task:held', 'lock:task:expired']);
+        mockCache.listKeys.mockResolvedValue(['distributed_lock:held', 'distributed_lock:expired']);
         mockCache.get.mockImplementation(async (key) => {
             if (key.endsWith(':held')) {
                 return {

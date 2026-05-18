@@ -8,6 +8,7 @@ export const CACHE_KEYS = Object.freeze({
         drive: 'drive:',
         config: 'config:',
         queueDlq: 'queue:dlq:',
+        distributedLock: 'distributed_lock:',
         streamOwner: 'stream:owner:',
         streamProgress: 'stream:progress:',
         streamFinalization: 'stream:final:'

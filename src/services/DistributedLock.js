@@ -1,8 +1,7 @@
 import crypto from 'crypto';
 import { CACHE_KEYS } from "../domain/cache-keys.js";
 
-const TASK_LOCK_PREFIX = CACHE_KEYS.prefixes.taskLock;
-const TASK_LOCK_PATTERN = CACHE_KEYS.taskLockPattern();
+const DEFAULT_LOCK_PREFIX = CACHE_KEYS.prefixes.distributedLock;
 
 /**
  * DistributedLock - 分布式锁服务
@@ -36,7 +35,8 @@ export class DistributedLock {
             heartbeatInterval: normalizePositiveNumber(options.heartbeatInterval, 10000),  // 10秒心跳
             renewalThreshold: normalizePositiveNumber(options.renewalThreshold, 30000),    // 30秒续期阈值
             timeout: normalizePositiveNumber(options.timeout, 10000),               // 获取锁超时
-            maxRetries: normalizePositiveNumber(options.maxRetries, 3)              // 最大重试次数
+            maxRetries: normalizePositiveNumber(options.maxRetries, 3),             // 最大重试次数
+            keyPrefix: this._normalizeKeyPrefix(options.keyPrefix || DEFAULT_LOCK_PREFIX)
         };
 
         // 本地锁状态管理
@@ -65,7 +65,7 @@ export class DistributedLock {
         const effectiveTtlSeconds = this._normalizePositiveNumber(ttlSeconds, this.options.ttlSeconds);
         const effectiveMaxRetries = this._normalizePositiveNumber(maxRetries, this.options.maxRetries);
 
-        const lockKey = CACHE_KEYS.taskLock(taskId);
+        const lockKey = this._lockKey(taskId);
         const now = Date.now();
         const expiresAt = now + effectiveTtlSeconds * 1000;
         const version = crypto.randomUUID();
@@ -210,7 +210,7 @@ export class DistributedLock {
         const initialExpiresAt = Date.now() + effectiveTtlSeconds * 1000;
         const heartbeat = setInterval(async () => {
             try {
-                const lockKey = CACHE_KEYS.taskLock(taskId);
+                const lockKey = this._lockKey(taskId);
                 const current = await this.cache.get(lockKey, 'json');
                 
                 // 检查锁是否还属于当前实例
@@ -281,7 +281,7 @@ export class DistributedLock {
      * @returns {Promise<boolean>} - 是否成功释放
      */
     async release(taskId, instanceId) {
-        const lockKey = CACHE_KEYS.taskLock(taskId);
+        const lockKey = this._lockKey(taskId);
         
         try {
             // 获取当前锁信息
@@ -341,7 +341,7 @@ export class DistributedLock {
      * @param {string} adminInstanceId - 管理实例ID
      */
     async forceRelease(taskId, adminInstanceId) {
-        const lockKey = CACHE_KEYS.taskLock(taskId);
+        const lockKey = this._lockKey(taskId);
         
         try {
             const current = await this.cache.get(lockKey, 'json');
@@ -403,13 +403,29 @@ export class DistributedLock {
         return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
     }
 
+    _normalizeKeyPrefix(prefix) {
+        const normalized = String(prefix || DEFAULT_LOCK_PREFIX).trim();
+        if (!normalized) return DEFAULT_LOCK_PREFIX;
+        return normalized.endsWith(':') ? normalized : `${normalized}:`;
+    }
+
+    _lockKey(taskId) {
+        return `${this.options.keyPrefix}${taskId}`;
+    }
+
+    _taskIdFromLockKey(key) {
+        return String(key || '').startsWith(this.options.keyPrefix)
+            ? String(key).slice(this.options.keyPrefix.length)
+            : String(key || '');
+    }
+
     /**
      * 获取锁状态
      * @param {string} taskId - 任务ID
      * @returns {Promise<Object>} - 锁状态
      */
     async getLockStatus(taskId) {
-        const lockKey = CACHE_KEYS.taskLock(taskId);
+        const lockKey = this._lockKey(taskId);
         const lock = await this.cache.get(lockKey, 'json');
         
         if (!lock) {
@@ -452,7 +468,7 @@ export class DistributedLock {
      * 清理过期锁（定时任务）
      */
     async cleanupExpiredLocks() {
-        const pattern = TASK_LOCK_PATTERN;
+        const pattern = this.options.keyPrefix;
         
         try {
             const keys = await this.cache.listKeys(pattern);
@@ -461,7 +477,7 @@ export class DistributedLock {
                 const lock = await this.cache.get(key, 'json');
                 if (lock && this.isExpired(lock)) {
                     // 检查本地是否还有心跳
-                    const taskId = key.replace(TASK_LOCK_PREFIX, '');
+                    const taskId = this._taskIdFromLockKey(key);
                     const localLock = this.locks.get(taskId);
                     
                     if (localLock && localLock.owner === lock.instanceId) {
@@ -533,7 +549,7 @@ export class DistributedLock {
      * 获取锁统计信息
      */
     async getStats() {
-        const pattern = TASK_LOCK_PATTERN;
+        const pattern = this.options.keyPrefix;
         const keys = await this.cache.listKeys(pattern);
         
         let held = 0;

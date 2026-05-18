@@ -29,7 +29,8 @@ vi.mock("../../src/services/CacheService.js", () => ({
 
 vi.mock("../../src/services/DistributedLock.js", () => ({
   DistributedLock: class {
-    constructor() {
+    constructor(_cache, options = {}) {
+      this.options = options;
       this.acquire = vi.fn();
       this.release = vi.fn();
       this.getLockStatus = vi.fn();
