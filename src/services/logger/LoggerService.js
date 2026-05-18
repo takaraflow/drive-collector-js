@@ -2,7 +2,6 @@ import { AxiomLogger } from './AxiomLogger.js';
 import { NewrelicLogger } from './NewrelicLogger.js';
 import { ConsoleLogger } from './ConsoleLogger.js';
 import {
-    restoreOriginalConsole,
     writeOriginalConsole
 } from './console-channel.js';
 import {
@@ -43,6 +42,7 @@ const getSafeInstanceId = () => {
 };
 
 let consoleProxyEnabled = false;
+let consoleProxyPreviousMethods = null;
 const CAPTURED_MESSAGE_PATTERNS = [
     'Telegram library TIMEOUT captured',
     'Telegram timeout warning captured',
@@ -86,8 +86,8 @@ const isTimeoutPattern = (message) => {
     const msgLower = message.toLowerCase();
     return (
         msgLower.includes('timeout') ||
-        message.includes('ETIMEDOUT') ||
-        message.includes('ECONNRESET') ||
+        msgLower.includes('etimedout') ||
+        msgLower.includes('econnreset') ||
         msgLower.includes('timed out')
     );
 };
@@ -149,6 +149,11 @@ const captureTelegramConsoleEvent = (level, logMethod, message, args) => {
 export const enableTelegramConsoleProxy = () => {
     if (consoleProxyEnabled) return;
 
+    consoleProxyPreviousMethods = {
+        error: console.error,
+        warn: console.warn,
+        log: console.log
+    };
     consoleProxyEnabled = true;
 
     console.error = (...args) => {
@@ -185,8 +190,13 @@ export const enableTelegramConsoleProxy = () => {
 export const disableTelegramConsoleProxy = () => {
     if (!consoleProxyEnabled) return;
 
-    restoreOriginalConsole();
+    if (consoleProxyPreviousMethods) {
+        console.error = consoleProxyPreviousMethods.error;
+        console.warn = consoleProxyPreviousMethods.warn;
+        console.log = consoleProxyPreviousMethods.log;
+    }
     telegramConsoleDedup.clear();
+    consoleProxyPreviousMethods = null;
     consoleProxyEnabled = false;
 };
 

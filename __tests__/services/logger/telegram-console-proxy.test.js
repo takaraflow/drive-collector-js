@@ -126,4 +126,39 @@ describe('Telegram console proxy', () => {
         expect(warnCalls).toHaveLength(2);
         expect(logCalls).toHaveLength(2);
     });
+
+    test('restores the console methods that were active when the proxy was enabled', async () => {
+        const { enableTelegramConsoleProxy, disableTelegramConsoleProxy } = await importFreshLoggerWithConsoleSpies();
+        const enabledError = vi.fn();
+        const enabledWarn = vi.fn();
+        const enabledLog = vi.fn();
+
+        console.error = enabledError;
+        console.warn = enabledWarn;
+        console.log = enabledLog;
+
+        enableTelegramConsoleProxy();
+
+        const afterEnableError = console.error;
+        expect(afterEnableError).not.toBe(enabledError);
+
+        disableTelegramConsoleProxy();
+
+        expect(console.error).toBe(enabledError);
+        expect(console.warn).toBe(enabledWarn);
+        expect(console.log).toBe(enabledLog);
+    });
+
+    test('captures lowercase network timeout aliases', async () => {
+        const { LoggerService, enableTelegramConsoleProxy, errorSpy } = await importFreshLoggerWithConsoleSpies();
+
+        enableTelegramConsoleProxy();
+        await LoggerService.getInstance().initialize();
+
+        console.error('socket econnreset');
+        await waitForAsyncConsoleLog();
+
+        const renderedCalls = errorSpy.mock.calls.map(call => call.map(String).join(' '));
+        expect(renderedCalls.filter(line => line.includes('Telegram library TIMEOUT captured'))).toHaveLength(1);
+    });
 });
