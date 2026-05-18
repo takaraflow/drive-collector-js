@@ -415,6 +415,11 @@ async function initializeInfisicalSecrets(clientId, clientSecret, projectId) {
 function buildConfigObject(env) {
     return {
         downloadDir: path.resolve(env.DOWNLOAD_DIR || path.join(os.tmpdir(), 'downloads')),
+        localStorage: {
+            requiredHeadroomRatio: parsePositiveNumber(env.LOCAL_STORAGE_REQUIRED_HEADROOM_RATIO, 0.1),
+            requiredHeadroomBytes: parsePositiveNumber(env.LOCAL_STORAGE_REQUIRED_HEADROOM_BYTES, 256 * 1024 * 1024),
+            workerUploadMaxBufferBytes: parsePositiveNumber(env.OSS_WORKER_UPLOAD_MAX_BUFFER_BYTES, 32 * 1024 * 1024)
+        },
         apiId: parseInt(env.API_ID) || null,
         apiHash: env.API_HASH || null,
         botToken: env.BOT_TOKEN || null,

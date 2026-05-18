@@ -54,7 +54,7 @@ export class OSSService {
 
         log.info(`📤 开始上传: ${fileName} (${fileSize} bytes) -> ${remoteName}`);
 
-        if (this.hasWorker) {
+        if (this._shouldUseWorkerUpload(fileSize)) {
             try {
                 const result = await this._uploadViaWorker(localPath, remoteName, fileSize, onProgress);
                 if (result.success) {
@@ -64,6 +64,8 @@ export class OSSService {
             } catch (error) {
                 log.warn(`⚠️ Worker 上传失败: ${error.message}，尝试 S3 回退`);
             }
+        } else if (this.hasWorker) {
+            log.info(`⏭️ Worker 上传跳过: 文件大小 ${fileSize} bytes 超过安全缓冲上限 ${this._getWorkerUploadMaxBufferBytes()} bytes`);
         }
 
         try {
@@ -89,6 +91,18 @@ export class OSSService {
                 error: `所有上传路径都失败: ${error.message}`
             };
         }
+    }
+
+    _getWorkerUploadMaxBufferBytes() {
+        const config = getConfig();
+        const configured = Number(config.localStorage?.workerUploadMaxBufferBytes);
+        return Number.isFinite(configured) && configured > 0
+            ? configured
+            : 32 * 1024 * 1024;
+    }
+
+    _shouldUseWorkerUpload(fileSize) {
+        return this.hasWorker && Number(fileSize || 0) <= this._getWorkerUploadMaxBufferBytes();
     }
 
     async _uploadViaWorker(localPath, remoteName, fileSize, onProgress) {

@@ -82,7 +82,12 @@ vi.mock('../../src/config/index.js', () => ({
   getConfig: vi.fn(() => ({
     streamForwarding: {
       secret: 'test-secret',
-      lbUrl: 'https://lb.example.com'
+      lbUrl: 'https://lb.example.com',
+      resumeDir: path.join(os.tmpdir(), 'stream-resume-tests')
+    },
+    localStorage: {
+      requiredHeadroomBytes: 0,
+      requiredHeadroomRatio: 0
     },
     remoteFolder: '/drive/uploads'
   }))
@@ -224,6 +229,45 @@ describe('StreamTransferService', () => {
     )
 
     expect(result).toEqual({ success: false, statusCode: 401, message: 'Unauthorized' })
+  })
+
+  test('resumable progress rejects before staging when local storage is insufficient', async () => {
+    const statfsSpy = vi.spyOn(fs.promises, 'statfs').mockResolvedValueOnce({ bsize: 4096, bavail: 1 })
+    const mkdirSpy = vi.spyOn(fs.promises, 'mkdir').mockResolvedValue()
+    const accessSpy = vi.spyOn(fs.promises, 'access').mockResolvedValue()
+    const statSpy = vi.spyOn(fs.promises, 'stat').mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+
+    getConfig.mockReturnValueOnce({
+      streamForwarding: {
+        secret: 'test-secret',
+        lbUrl: 'https://lb.example.com',
+        resumeDir: path.join(os.tmpdir(), 'stream-resume-tests')
+      },
+      localStorage: {
+        requiredHeadroomBytes: 1024 * 1024,
+        requiredHeadroomRatio: 0
+      },
+      remoteFolder: '/drive/uploads'
+    })
+
+    const result = await streamTransferService.resumeTask('task-no-space', {
+      streamMode: 'resumable',
+      ownerInstanceId: 'worker-current',
+      fileName: 'huge.bin',
+      userId: 'user-123',
+      totalSize: 1024 * 1024 * 1024,
+      chunkSize: 512 * 1024
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('Insufficient local storage')
+    expect(mkdirSpy).toHaveBeenCalled()
+    expect(statfsSpy).toHaveBeenCalled()
+
+    statSpy.mockRestore()
+    accessSpy.mockRestore()
+    mkdirSpy.mockRestore()
+    statfsSpy.mockRestore()
   })
 
   test('forwardChunk posts directly and does not skip based on remote progress', async () => {

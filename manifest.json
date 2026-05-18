@@ -517,6 +517,24 @@
         "required": false,
         "description": "Local download directory (defaults to OS temp downloads)"
       },
+      "LOCAL_STORAGE_REQUIRED_HEADROOM_RATIO": {
+        "type": "number",
+        "required": false,
+        "default": 0.1,
+        "description": "Extra free-space ratio required before local file staging starts"
+      },
+      "LOCAL_STORAGE_REQUIRED_HEADROOM_BYTES": {
+        "type": "number",
+        "required": false,
+        "default": 268435456,
+        "description": "Fixed free-space headroom required before local file staging starts"
+      },
+      "OSS_WORKER_UPLOAD_MAX_BUFFER_BYTES": {
+        "type": "number",
+        "required": false,
+        "default": 33554432,
+        "description": "Maximum file size allowed for the Cloudflare Worker upload path that buffers in memory"
+      },
       "EXTERNAL_DOWNLOAD_MAX_BYTES": {
         "type": "number",
         "required": false,

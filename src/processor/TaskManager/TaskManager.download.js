@@ -5,6 +5,7 @@ import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { createHeartbeat, handleTaskCompletion, handleTaskFailure, escapeHTML } from "./TaskManager.utils.js";
 import { assertClaimFenceCurrent, getClaimFenceOptions } from "./claim-fence.js";
 import { resolveInstanceBaseUrl } from "../../utils/instanceUrl.js";
+import { assertLocalStorageCapacity } from "../../utils/storageGuard.js";
 import { TASK_EVENTS } from "../../domain/task-state-machine.js";
 import { TASK_QUEUE_TRIGGER_SOURCES, TaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
 
@@ -407,11 +408,18 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
 }
 
 async function _handleMTProtoDownload(context, deps, task, info, fileName, localPath, heartbeat, isLargeFile) {
-    const { client, runMtprotoFileTaskWithRetry, TaskRepository, updateStatus, STRINGS, format, queueService } = deps;
+    const { config, client, runMtprotoFileTaskWithRetry, TaskRepository, updateStatus, STRINGS, format, queueService } = deps;
     const log = dependencyContainer.get('logger').withModule('TaskManager');
     const { message } = task;
 
     // Download phase - MTProto file download
+    await assertLocalStorageCapacity({
+        dirPath: config.downloadDir,
+        expectedBytes: info.size,
+        config,
+        purpose: `Telegram download ${fileName}`
+    });
+
     let lastUpdate = Date.now();
     const downloadOptions = {
         outputFile: localPath,

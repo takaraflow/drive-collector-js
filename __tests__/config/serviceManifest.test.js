@@ -47,6 +47,10 @@ describe('ServiceConfigManager 测试', () => {
         expect(serviceConfigManager.getServiceName('STREAM_RESUME_DIR')).toBe('streamForwarding');
         expect(serviceConfigManager.getServiceName('STREAM_FINALIZATION_TIMEOUT_MS')).toBe('streamForwarding');
         expect(serviceConfigManager.getServiceName('STREAM_FINALIZATION_POLL_MS')).toBe('streamForwarding');
+        expect(serviceConfigManager.getServiceName('DOWNLOAD_DIR')).toBe('localStorage');
+        expect(serviceConfigManager.getServiceName('LOCAL_STORAGE_REQUIRED_HEADROOM_RATIO')).toBe('localStorage');
+        expect(serviceConfigManager.getServiceName('LOCAL_STORAGE_REQUIRED_HEADROOM_BYTES')).toBe('localStorage');
+        expect(serviceConfigManager.getServiceName('OSS_WORKER_UPLOAD_MAX_BUFFER_BYTES')).toBe('oss');
         expect(serviceConfigManager.getServiceName('UNKNOWN_KEY')).toBeUndefined();
     });
 

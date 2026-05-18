@@ -137,8 +137,12 @@ vi.mock("../../src/services/TunnelService.js", () => ({
 // Mock fs
 const mockFs = {
     existsSync: vi.fn(),
+    constants: { W_OK: 2 },
     promises: {
         stat: vi.fn(),
+        access: vi.fn().mockResolvedValue(),
+        mkdir: vi.fn().mockResolvedValue(),
+        statfs: vi.fn().mockResolvedValue({ bsize: 4096, bavail: 1000000 }),
         unlink: vi.fn().mockResolvedValue()
     },
     statSync: vi.fn(),
@@ -175,6 +179,9 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         mockStreamTransferService.clearStreamOwner.mockResolvedValue();
         mockTunnelService.getPublicUrl.mockResolvedValue("https://leader.example.com");
         mockInstanceCoordinator.getActiveInstances.mockResolvedValue([]);
+        mockFs.promises.access.mockResolvedValue();
+        mockFs.promises.mkdir.mockResolvedValue();
+        mockFs.promises.statfs.mockResolvedValue({ bsize: 4096, bavail: 1000000 });
 
         task = {
             id: "task_1",
@@ -265,6 +272,23 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
             msgId: 100,
             localPath: expect.stringContaining("test_file.mp4")
         }));
+    });
+
+    test("should fail before Telegram download when local storage is insufficient", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockFs.promises.statfs.mockResolvedValueOnce({ bsize: 4096, bavail: 1 });
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockClient.downloadMedia).not.toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "fail",
+            expect.stringContaining("Insufficient local storage"),
+            expect.objectContaining({ source: "handleTaskFailure" })
+        );
     });
 
     test("Scenario 4: Size Mismatch Tolerance - Remote Hit within tolerance", async () => {

@@ -93,8 +93,11 @@ const mockFs = {
     createWriteStream: vi.fn(createMockWriteStream),
     default: {
         existsSync: vi.fn().mockReturnValue(true),
+        constants: { W_OK: 2 },
         promises: {
             stat: vi.fn().mockResolvedValue({ size: 1000 }),
+            access: vi.fn().mockResolvedValue(),
+            statfs: vi.fn().mockResolvedValue({ bsize: 4096, bavail: 1000000 }),
             unlink: vi.fn().mockResolvedValue(),
             mkdir: vi.fn().mockResolvedValue(),
             rm: vi.fn().mockResolvedValue(),
@@ -109,6 +112,8 @@ const mockFs = {
     },
     promises: {
         stat: vi.fn().mockResolvedValue({ size: 1000 }),
+        access: vi.fn().mockResolvedValue(),
+        statfs: vi.fn().mockResolvedValue({ bsize: 4096, bavail: 1000000 }),
         unlink: vi.fn().mockResolvedValue(),
         mkdir: vi.fn().mockResolvedValue(),
         rm: vi.fn().mockResolvedValue(),
@@ -119,6 +124,7 @@ const mockFs = {
     },
     statSync: vi.fn().mockReturnValue({ size: 1000 }),
     unlinkSync: vi.fn(),
+    constants: { W_OK: 2 },
     createWriteStream: vi.fn(createMockWriteStream)
 };
 vi.mock('fs', () => mockFs);
@@ -560,6 +566,54 @@ describe('TaskManager', () => {
             expect(queueService.enqueueUploadTask).toHaveBeenCalledWith('external-stream', expect.objectContaining({
                 localPath: '/tmp/downloads/external-stream-video.mp4'
             }));
+        });
+
+        it('should reject external URL downloads before writing when local storage is insufficient', async () => {
+            const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+            const { queueService } = await import('../../src/services/QueueService.js');
+            const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+            const { Readable } = await import('stream');
+            instanceCoordinator.acquireTaskLock.mockResolvedValue(true);
+            instanceCoordinator.isLockLeaseCurrent.mockResolvedValue(true);
+            mockFs.default.promises.statfs.mockResolvedValueOnce({ bsize: 4096, bavail: 1 });
+
+            const requestImpl = vi.fn(async () => ({
+                status: 200,
+                ok: true,
+                headers: { get: (name) => name === 'content-length' ? String(1024 * 1024 * 1024) : null },
+                body: Readable.toWeb(Readable.from(['data']))
+            }));
+
+            await TaskManager.downloadExternalUrlTask({
+                id: 'external-no-space',
+                userId: 'user-1',
+                chatId: 'chat-1',
+                msgId: 321,
+                sourceType: 'external_url',
+                sourceRef: {
+                    url: 'https://files.example.com/large.bin',
+                    displayUrl: 'https://files.example.com/large.bin',
+                    fileName: 'large.bin',
+                    fileSize: 1024 * 1024 * 1024
+                },
+                externalUrlTransportOptions: {
+                    lookupImpl: vi.fn(async () => [{ address: '93.184.216.34', family: 4 }]),
+                    requestImpl
+                },
+                fileName: 'large.bin',
+                fileInfo: { name: 'large.bin', size: 1024 * 1024 * 1024 },
+                lastText: '',
+                isCancelled: false
+            });
+
+            expect(mockFs.default.createWriteStream).not.toHaveBeenCalled();
+            expect(queueService.enqueueUploadTask).not.toHaveBeenCalled();
+            expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+                'external-no-space',
+                'fail',
+                '外部链接下载失败，请确认链接仍可公开访问且文件大小未超过限制。',
+                expect.objectContaining({ source: 'handleTaskFailure' })
+            );
         });
 
         it('should redact external URL failures before persisting or displaying status', async () => {

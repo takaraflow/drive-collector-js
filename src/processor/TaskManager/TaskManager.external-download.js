@@ -11,6 +11,7 @@ import {
     openExternalUrlStream,
     urlFingerprint
 } from "../ExternalUrlPolicy.js";
+import { assertLocalStorageCapacity } from "../../utils/storageGuard.js";
 import { createHeartbeat, handleTaskFailure, escapeHTML } from "./TaskManager.utils.js";
 import { assertClaimFenceCurrent, getClaimFenceOptions } from "./claim-fence.js";
 
@@ -87,6 +88,13 @@ export async function downloadExternalUrlTask(task) {
         });
 
         const total = contentLength || task.fileInfo.size || 0;
+        await assertLocalStorageCapacity({
+            dirPath: config.downloadDir,
+            expectedBytes: total || configured.maxBytes || 0,
+            config,
+            purpose: `external URL download ${fileName}`
+        });
+
         let downloaded = 0;
         let lastUpdate = Date.now();
         const sourceStream = Readable.fromWeb(response.body);

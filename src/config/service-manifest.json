@@ -144,7 +144,8 @@
         "R2_BUCKET",
         "R2_PUBLIC_URL",
         "OSS_WORKER_URL",
-        "OSS_WORKER_SECRET"
+        "OSS_WORKER_SECRET",
+        "OSS_WORKER_UPLOAD_MAX_BUFFER_BYTES"
       ],
       "reinitializationStrategy": {
         "type": "reconfigure",
@@ -215,6 +216,25 @@
         "STREAM_FINALIZATION_* 控制 leader 等待 worker 最终化的超时和轮询间隔"
       ]
     },
+    "localStorage": {
+      "name": "本地暂存服务",
+      "icon": "💽",
+      "description": "下载目录和断点续传暂存空间保护",
+      "configKeys": [
+        "DOWNLOAD_DIR",
+        "LOCAL_STORAGE_REQUIRED_HEADROOM_RATIO",
+        "LOCAL_STORAGE_REQUIRED_HEADROOM_BYTES"
+      ],
+      "reinitializationStrategy": {
+        "type": "restart",
+        "graceful": true,
+        "timeout": 20000
+      },
+      "behaviorNotes": [
+        "本地文件暂存前会校验目录可写和剩余空间，避免大文件半路写爆磁盘",
+        "LOCAL_STORAGE_REQUIRED_HEADROOM_* 同时保护 Telegram 下载、外部链接下载和流式断点续传 staging"
+      ]
+    },
     "externalDownload": {
       "name": "外部链接离线下载",
       "icon": "🌐",
@@ -232,7 +252,8 @@
       "behaviorNotes": [
         "仅支持 HTTP/HTTPS，P2P、FTP、file/data 等协议会 fail closed",
         "下载前会做 SSRF 防护并限制重定向次数",
-        "文件以流式方式写入临时 .part 文件，完成后原子重命名"
+        "文件以流式方式写入临时 .part 文件，完成后原子重命名",
+        "落盘前复用 localStorage 守卫校验下载目录可写和剩余空间"
       ]
     }
   },

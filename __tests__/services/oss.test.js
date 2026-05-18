@@ -15,6 +15,9 @@ vi.mock('path', () => ({ default: mockPath }));
 
 vi.mock('../../src/config/index.js', () => ({
   config: {
+    localStorage: {
+      workerUploadMaxBufferBytes: 32 * 1024 * 1024
+    },
     oss: {
       workerUrl: 'http://test.worker',
       workerSecret: 'test-secret',
@@ -28,6 +31,9 @@ vi.mock('../../src/config/index.js', () => ({
     }
   },
   getConfig: () => ({
+    localStorage: {
+      workerUploadMaxBufferBytes: 32 * 1024 * 1024
+    },
     oss: {
       workerUrl: 'http://test.worker',
       workerSecret: 'test-secret',
@@ -42,6 +48,9 @@ vi.mock('../../src/config/index.js', () => ({
   }),
   default: {
     config: {
+      localStorage: {
+        workerUploadMaxBufferBytes: 32 * 1024 * 1024
+      },
       oss: {
         workerUrl: 'http://test.worker',
         workerSecret: 'test-secret',
@@ -55,6 +64,9 @@ vi.mock('../../src/config/index.js', () => ({
       }
     },
     getConfig: () => ({
+      localStorage: {
+        workerUploadMaxBufferBytes: 32 * 1024 * 1024
+      },
       oss: {
         workerUrl: 'http://test.worker',
         workerSecret: 'test-secret',
@@ -123,7 +135,7 @@ describe('OSSService', () => {
   });
 
   describe('Node.js 18 Compatibility', () => {
-    it('should use fs.readFileSync instead of createReadStream for worker upload', async () => {
+    it('should only buffer small files for worker upload', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ success: true, url: 'https://worker/url' })
@@ -139,6 +151,19 @@ describe('OSSService', () => {
       expect(mockFs.readFileSync).toHaveBeenCalledWith('/tmp/test.mp4');
       expect(mockFs.createReadStream).not.toHaveBeenCalled();
       expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('should skip worker upload for files larger than the safe buffer limit', async () => {
+      mockFs.statSync.mockReturnValueOnce({ size: 64 * 1024 * 1024 });
+      mockOssHelper.uploadToS3.mockResolvedValueOnce({ Location: 's3://location' });
+
+      const result = await ossService.upload('/tmp/large.mp4', 'large.mp4');
+
+      expect(result.success).toBe(true);
+      expect(result.method).toBe('s3');
+      expect(mockFs.readFileSync).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockOssHelper.uploadToS3).toHaveBeenCalledWith('/tmp/large.mp4', 'large.mp4', null);
     });
 
     it('should construct File object with Buffer for Node.js compatibility', async () => {

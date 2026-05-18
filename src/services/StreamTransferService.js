@@ -7,6 +7,7 @@ import { TaskRepository } from "../repositories/TaskRepository.js";
 import { TelegramBotApi } from "../utils/telegramBotApi.js";
 import { cache } from "./CacheService.js";
 import { resolveInstanceBaseUrl } from "../utils/instanceUrl.js";
+import { assertLocalStorageCapacity } from "../utils/storageGuard.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
 import { CACHE_KEYS } from "../domain/cache-keys.js";
 import { getClaimFenceOptions } from "../processor/TaskManager/claim-fence.js";
@@ -262,7 +263,6 @@ class StreamTransferService {
 
     async _getResumableProgress(taskId, metadata) {
         const paths = this._getResumablePaths(taskId, metadata.fileName);
-        await fs.promises.mkdir(paths.resumeDir, { recursive: true });
 
         let fileSize = 0;
         try {
@@ -271,6 +271,15 @@ class StreamTransferService {
         } catch (error) {
             if (error.code !== "ENOENT") throw error;
         }
+
+        const totalSize = Number(metadata.totalSize || 0);
+        const remainingBytes = Math.max(0, totalSize - fileSize);
+        await assertLocalStorageCapacity({
+            dirPath: paths.resumeDir,
+            expectedBytes: remainingBytes,
+            config: getConfig(),
+            purpose: `resumable stream staging ${metadata.fileName}`
+        });
 
         const progress = this._normalizeResumableProgress(fileSize, metadata.totalSize, metadata.chunkSize);
         if (progress.uploadedBytes !== fileSize) {
