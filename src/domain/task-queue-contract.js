@@ -1,3 +1,5 @@
+import crypto from "crypto";
+
 export const TASK_QUEUE_TYPES = Object.freeze({
     DOWNLOAD: "download",
     UPLOAD: "upload"
@@ -19,8 +21,29 @@ export function normalizeTaskQueueAttempt(queueAttempt) {
     return normalized || TASK_QUEUE_DEFAULT_ATTEMPT;
 }
 
+function buildIdempotencySource(topic, type, taskId, queueAttempt) {
+    return JSON.stringify([
+        String(topic || ""),
+        String(type || ""),
+        String(taskId || ""),
+        normalizeTaskQueueAttempt(queueAttempt)
+    ]);
+}
+
+function safeIdLabel(value) {
+    const label = String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-+|-+$/g, "");
+    return (label || "x").slice(0, 24);
+}
+
 export function buildTaskQueueIdempotencyKey(topic, type, taskId, queueAttempt = TASK_QUEUE_DEFAULT_ATTEMPT) {
-    return `${topic}:${type}:${taskId}:${normalizeTaskQueueAttempt(queueAttempt)}`;
+    const source = buildIdempotencySource(topic, type, taskId, queueAttempt);
+    const digest = crypto.createHash("sha256").update(source).digest("base64url");
+    return `tqv1_${safeIdLabel(topic)}_${safeIdLabel(type)}_${digest}`;
 }
 
 export class TaskProcessingLockBusyError extends Error {

@@ -242,7 +242,7 @@ describe("QueueService - Unit Tests", () => {
                 url: "https://example.com/file.mp4"
             }),
             {
-                idempotencyKey: "download:download:task-123:initial",
+                idempotencyKey: expect.stringMatching(/^tqv1_download_download_[A-Za-z0-9_-]+$/),
                 forceDirect: true,
                 requireDurableAck: true
             }
@@ -324,11 +324,42 @@ describe("QueueService - Unit Tests", () => {
                 })
             }),
             {
-                idempotencyKey: "download:download:task-123:queued:1700000000000",
+                idempotencyKey: expect.stringMatching(/^tqv1_download_download_[A-Za-z0-9_-]+$/),
                 forceDirect: true,
                 requireDurableAck: true
             }
         );
+        const idempotencyKey = mockProvider.publish.mock.calls[0][2].idempotencyKey;
+        expect(idempotencyKey).not.toContain(':');
+    });
+
+    test("should generate distinct provider-safe idempotency keys for queue attempts", async () => {
+        mockProvider = {
+            initialize: vi.fn(),
+            publish: vi.fn().mockResolvedValue({ messageId: 'msg-123' }),
+            batchPublish: vi.fn().mockResolvedValue([]),
+            verifyWebhook: vi.fn(),
+            getCircuitBreakerStatus: vi.fn(),
+            resetCircuitBreaker: vi.fn()
+        };
+
+        service = new QueueService(mockProvider);
+        await service.initialize();
+
+        await service.enqueueDownloadTask("task-123", {
+            _meta: { queueAttempt: "queued:1700000000000" }
+        });
+        await service.enqueueDownloadTask("task-123", {
+            _meta: { queueAttempt: "queued:1700000000001" }
+        });
+
+        const keys = mockProvider.publish.mock.calls.map(call => call[2].idempotencyKey);
+        expect(keys[0]).not.toBe(keys[1]);
+        expect(keys).toEqual([
+            expect.stringMatching(/^tqv1_download_download_[A-Za-z0-9_-]+$/),
+            expect.stringMatching(/^tqv1_download_download_[A-Za-z0-9_-]+$/)
+        ]);
+        expect(keys.some(key => key.includes(':'))).toBe(false);
     });
 
     test("should call enqueueUploadTask with correct topic and data", async () => {
@@ -354,7 +385,7 @@ describe("QueueService - Unit Tests", () => {
                 fileId: "file-789"
             }),
             {
-                idempotencyKey: "upload:upload:task-456:initial",
+                idempotencyKey: expect.stringMatching(/^tqv1_upload_upload_[A-Za-z0-9_-]+$/),
                 forceDirect: true,
                 requireDurableAck: true
             }

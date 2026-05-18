@@ -78,18 +78,23 @@ const mockCacheByKey = overrides => {
   })
 }
 
+const streamTestConfig = (streamForwarding = {}, overrides = {}) => ({
+  streamForwarding: {
+    secret: 'test-secret',
+    lbUrl: 'https://lb.example.com',
+    ...streamForwarding
+  },
+  localStorage: {
+    requiredHeadroomBytes: 0,
+    requiredHeadroomRatio: 0
+  },
+  remoteFolder: '/drive/uploads',
+  ...overrides
+})
+
 vi.mock('../../src/config/index.js', () => ({
-  getConfig: vi.fn(() => ({
-    streamForwarding: {
-      secret: 'test-secret',
-      lbUrl: 'https://lb.example.com',
-      resumeDir: path.join(os.tmpdir(), 'stream-resume-tests')
-    },
-    localStorage: {
-      requiredHeadroomBytes: 0,
-      requiredHeadroomRatio: 0
-    },
-    remoteFolder: '/drive/uploads'
+  getConfig: vi.fn(() => streamTestConfig({
+    resumeDir: path.join(os.tmpdir(), 'stream-resume-tests')
   }))
 }))
 
@@ -456,14 +461,7 @@ describe('StreamTransferService', () => {
       }
     })
     const resumeDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stream-wrong-worker-'))
-    getConfig.mockReturnValue({
-      streamForwarding: {
-        secret: 'test-secret',
-        lbUrl: 'https://lb.example.com',
-        resumeDir
-      },
-      remoteFolder: '/drive/uploads'
-    })
+    getConfig.mockReturnValue(streamTestConfig({ resumeDir }))
 
     const result = await streamTransferService.handleIncomingChunk(
       'task-wrong-resumable-worker',
@@ -634,16 +632,11 @@ describe('StreamTransferService', () => {
   test('resumable stream resumes from staging file size and uploads after final chunk', async () => {
     const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
     const resumeDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stream-resume-test-'))
-    getConfig.mockReturnValue({
-      streamForwarding: {
-        secret: 'test-secret',
-        lbUrl: 'https://lb.example.com',
-        resumeDir,
-        finalizationPollMs: 1,
-        finalizationTimeoutMs: 100
-      },
-      remoteFolder: '/drive/uploads'
-    })
+    getConfig.mockReturnValue(streamTestConfig({
+      resumeDir,
+      finalizationPollMs: 1,
+      finalizationTimeoutMs: 100
+    }))
     rcloneMock.CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'resume.bin', Size: 10 })
 
     const first = await streamTransferService.handleIncomingChunk(
@@ -711,16 +704,11 @@ describe('StreamTransferService', () => {
   test('resumeTask triggers finalization when staging file is already complete', async () => {
     const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
     const resumeDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stream-resume-complete-'))
-    getConfig.mockReturnValue({
-      streamForwarding: {
-        secret: 'test-secret',
-        lbUrl: 'https://lb.example.com',
-        resumeDir,
-        finalizationPollMs: 1,
-        finalizationTimeoutMs: 100
-      },
-      remoteFolder: '/drive/uploads'
-    })
+    getConfig.mockReturnValue(streamTestConfig({
+      resumeDir,
+      finalizationPollMs: 1,
+      finalizationTimeoutMs: 100
+    }))
     await fs.promises.writeFile(path.join(resumeDir, 'task-complete.complete.bin.part'), Buffer.from('helloworld'))
     rcloneMock.CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'complete.bin', Size: 10 })
 
@@ -760,16 +748,11 @@ describe('StreamTransferService', () => {
 
   test('completed finalization remains visible after active context cleanup', async () => {
     const resumeDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stream-resume-final-cache-'))
-    getConfig.mockReturnValue({
-      streamForwarding: {
-        secret: 'test-secret',
-        lbUrl: 'https://lb.example.com',
-        resumeDir,
-        finalizationPollMs: 1,
-        finalizationTimeoutMs: 100
-      },
-      remoteFolder: '/drive/uploads'
-    })
+    getConfig.mockReturnValue(streamTestConfig({
+      resumeDir,
+      finalizationPollMs: 1,
+      finalizationTimeoutMs: 100
+    }))
     await fs.promises.writeFile(path.join(resumeDir, 'task-final-cache.final-cache.bin.part'), Buffer.from('hello'))
     rcloneMock.CloudTool.getRemoteFileInfo.mockResolvedValueOnce({ Name: 'final-cache.bin', Size: 5 })
 
@@ -808,16 +791,11 @@ describe('StreamTransferService', () => {
 
   test('resumable chunks for the same task are serialized so duplicate retries do not append twice', async () => {
     const resumeDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stream-resume-serial-'))
-    getConfig.mockReturnValue({
-      streamForwarding: {
-        secret: 'test-secret',
-        lbUrl: 'https://lb.example.com',
-        resumeDir,
-        finalizationPollMs: 1,
-        finalizationTimeoutMs: 100
-      },
-      remoteFolder: '/drive/uploads'
-    })
+    getConfig.mockReturnValue(streamTestConfig({
+      resumeDir,
+      finalizationPollMs: 1,
+      finalizationTimeoutMs: 100
+    }))
     const headers = {
       'x-file-name': encodeURIComponent('serial.bin'),
       'x-stream-mode': 'resumable',
@@ -840,16 +818,11 @@ describe('StreamTransferService', () => {
 
   test('resumable stream rejects metadata drift instead of appending to the wrong staging file', async () => {
     const resumeDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stream-resume-drift-'))
-    getConfig.mockReturnValue({
-      streamForwarding: {
-        secret: 'test-secret',
-        lbUrl: 'https://lb.example.com',
-        resumeDir,
-        finalizationPollMs: 1,
-        finalizationTimeoutMs: 100
-      },
-      remoteFolder: '/drive/uploads'
-    })
+    getConfig.mockReturnValue(streamTestConfig({
+      resumeDir,
+      finalizationPollMs: 1,
+      finalizationTimeoutMs: 100
+    }))
 
     const first = await streamTransferService.handleIncomingChunk(
       'task-drift',
@@ -883,16 +856,11 @@ describe('StreamTransferService', () => {
   test('resetTask aborts in-flight resumable finalization and prevents stale completion', async () => {
     const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
     const resumeDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stream-resume-abort-'))
-    getConfig.mockReturnValue({
-      streamForwarding: {
-        secret: 'test-secret',
-        lbUrl: 'https://lb.example.com',
-        resumeDir,
-        finalizationPollMs: 1,
-        finalizationTimeoutMs: 100
-      },
-      remoteFolder: '/drive/uploads'
-    })
+    getConfig.mockReturnValue(streamTestConfig({
+      resumeDir,
+      finalizationPollMs: 1,
+      finalizationTimeoutMs: 100
+    }))
     let uploadSignal
     rcloneMock.CloudTool.uploadLocalFileToRemote.mockImplementation((_localPath, _fileName, _userId, _onProgress, options) => {
       uploadSignal = options.signal

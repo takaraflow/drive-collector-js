@@ -1,5 +1,6 @@
 import { Client, Receiver } from "@upstash/qstash";
 import { Mutex } from "async-mutex";
+import crypto from "crypto";
 import { getConfig } from "../../config/index.js";
 import { logger } from "../../services/logger/index.js";
 import { CircuitBreakerManager } from "../../services/CircuitBreaker.js";
@@ -74,6 +75,21 @@ function mergeDeadLetterQueues(localMessages = [], persistedMessages = []) {
         byId.set(item.id, snapshotDeadLetterMessage(item));
     }
     return [...byId.values()].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+}
+
+export function normalizeQstashDeduplicationId(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+
+    const safe = raw
+        .replace(/[^A-Za-z0-9_-]/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_+|_+$/g, "");
+
+    const digest = crypto.createHash("sha256").update(raw).digest("base64url");
+    const prefix = (safe || "dedupe").slice(0, 48);
+    return `qdk_${prefix}_${digest}`.slice(0, 128);
 }
 
 /**
@@ -435,8 +451,10 @@ export class QstashQueue extends CloudQueueBase {
             requireDurableAck,
             ...publishOptions
         } = options;
-        const messageId = idempotencyKey || deduplicationId || this._generateMessageId(topic, message);
-        const qstashDeduplicationId = deduplicationId || idempotencyKey || publishOptions.deduplicationId;
+        const messageId = idempotencyKey || deduplicationId || publishOptions.deduplicationId || this._generateMessageId(topic, message);
+        const qstashDeduplicationId = normalizeQstashDeduplicationId(
+            deduplicationId || idempotencyKey || publishOptions.deduplicationId
+        );
 
         if (isQstashDebugEnabled()) {
             log.debug('QStash publish begin', {

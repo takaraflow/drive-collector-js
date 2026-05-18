@@ -126,7 +126,7 @@ vi.mock("../../../src/services/CircuitBreaker.js", () => ({
     }
 }));
 
-import { QstashQueue } from "../../../src/services/queue/QstashQueue.js";
+import { QstashQueue, normalizeQstashDeduplicationId } from "../../../src/services/queue/QstashQueue.js";
 
 describe("QstashQueue - Initialize", () => {
     const originalNodeEnv = process.env.NODE_ENV;
@@ -268,7 +268,7 @@ describe("QstashQueue - publish", () => {
         });
     });
 
-    test("should forward explicit idempotency key as QStash deduplication id", async () => {
+    test("should forward explicit idempotency key as provider-safe QStash deduplication id", async () => {
         queue.batchSize = 1;
         mockPublishJSON.mockResolvedValue({ messageId: 'msg-1' });
 
@@ -286,9 +286,12 @@ describe("QstashQueue - publish", () => {
         expect(first).toEqual({ messageId: 'msg-1' });
         expect(second).toEqual({ messageId: 'download:download:task-1:initial', duplicate: true });
         expect(mockPublishJSON).toHaveBeenCalledTimes(1);
+        const deduplicationId = mockPublishJSON.mock.calls[0][0].deduplicationId;
         expect(mockPublishJSON.mock.calls[0][0]).toMatchObject({
-            deduplicationId: 'download:download:task-1:initial'
+            deduplicationId: normalizeQstashDeduplicationId('download:download:task-1:initial')
         });
+        expect(deduplicationId).not.toContain(':');
+        expect(deduplicationId).toMatch(/^qdk_[A-Za-z0-9_-]+$/);
     });
 
     test("should mark Redis idempotency key atomically after durable publish succeeds", async () => {
