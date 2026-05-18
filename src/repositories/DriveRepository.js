@@ -291,12 +291,9 @@ export class DriveRepository {
                 }
             }
 
-            const drives = [];
-            for (const id of activeIds) {
-                const drive = await this.findById(id);
-                if (drive) drives.push(drive);
-            }
-            return drives;
+            // ⚡ Bolt Optimization: Use Promise.all instead of sequential iteration to avoid N+1 I/O wait
+            const drives = await Promise.all(activeIds.map(id => this.findById(id)));
+            return drives.filter(Boolean);
         } catch (e) {
             log.error("DriveRepository.findAll error:", e);
             return [];
