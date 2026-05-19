@@ -211,6 +211,37 @@ describe('TaskRepository', () => {
             );
         });
 
+        it('should include retryable queue failed tasks only when requested', async () => {
+            mockD1.fetchAll.mockResolvedValue([]);
+
+            await TaskRepository.findStalledTasks(3600000, { includeRetryableFailed: true });
+
+            expect(mockD1.fetchAll).toHaveBeenCalledWith(
+                expect.stringContaining("error_msg LIKE '%Circuit breaker is OPEN%'"),
+                [
+                    ...TASK_ACTIVE_STATUSES,
+                    TASK_STATUSES.FAILED,
+                    expect.any(Number),
+                    TaskRepository.STALLED_TASKS_DEFAULT_LIMIT
+                ]
+            );
+        });
+
+        it('should not include retryable failed SQL when not requested', async () => {
+            mockD1.fetchAll.mockResolvedValue([]);
+
+            await TaskRepository.findStalledTasks(3600000);
+
+            const [sql, params] = mockD1.fetchAll.mock.calls.at(-1);
+            expect(sql).not.toContain("status = ?");
+            expect(sql).not.toContain("Recovery enqueue failed");
+            expect(params).toEqual([
+                ...TASK_ACTIVE_STATUSES,
+                expect.any(Number),
+                TaskRepository.STALLED_TASKS_DEFAULT_LIMIT
+            ]);
+        });
+
         it('should clamp maxResults between configured bounds', async () => {
             mockD1.fetchAll.mockResolvedValue([]);
 

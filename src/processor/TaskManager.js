@@ -28,6 +28,7 @@ import {
 } from "../domain/task-source.js";
 import { buildExternalLocalFileName } from "./ExternalUrlPolicy.js";
 import { buildTaskObjectFromDb, resolveTaskSource } from "./TaskManager/TaskSourceResolver.js";
+import { redactSensitiveText } from "../utils/serializer.js";
 
 // 导入模块化的方法
 import { downloadTask } from "./TaskManager/TaskManager.download.js";
@@ -40,6 +41,8 @@ const getLog = () => getDeps().logger.withModule('TaskManager');
 const TELEGRAM_CLIENT_LOCK_KEY = "telegram_client";
 const STALLED_RECOVERY_LOCK_KEY = "task_recovery:stalled";
 const STALLED_RECOVERY_LOCK_TTL_SECONDS = 120;
+const STALLED_RECOVERY_INTERVAL_MS = 60_000;
+const STALLED_RECOVERY_TIMEOUT_MS = 120_000;
 
 /**
  * --- 任务管理调度中心 (TaskManager) ---
@@ -102,6 +105,8 @@ export class TaskManager {
     static currentTask = null; // 兼容旧代码：当前正在下载的任务
     static processingUploadTasks = new Set(); // 正在上传的任务
     static waitingUploadTasks = []; // 等待上传的任务队列
+    static stalledRecoveryTimer = null;
+    static stalledRecoveryInProgress = false;
     
     // Max queue size limits to prevent unbounded growth
     static MAX_WAITING_TASKS = 1000;
@@ -175,7 +180,7 @@ export class TaskManager {
      * 初始化：恢复因重启中断的僵尸任务
      */
     static async init() {
-        const { cache, TaskRepository, instanceCoordinator } = getDeps();
+        const { cache } = getDeps();
         const log = getLog();
         log.info("正在检查数据库中异常中断的任务");
 
@@ -191,7 +196,51 @@ export class TaskManager {
             log.info("故障转移实例开始执行延迟恢复检查");
         }
 
+        try {
+            await this._runStalledTaskRecovery({ includeRetryableFailed: true });
+        } catch (e) {
+            log.error("TaskManager.init critical error", e);
+        } finally {
+            this._startStalledRecoveryLoop();
+        }
+    }
+
+    static _startStalledRecoveryLoop() {
+        const log = getLog();
+        if (this.stalledRecoveryTimer) return;
+
+        this.stalledRecoveryTimer = setInterval(() => {
+            void this._runStalledTaskRecovery({ includeRetryableFailed: true })
+                .catch(error => log.warn("Periodic stalled task recovery failed", {
+                    error: error.message
+                }));
+        }, STALLED_RECOVERY_INTERVAL_MS);
+
+        if (typeof this.stalledRecoveryTimer.unref === 'function') {
+            this.stalledRecoveryTimer.unref();
+        }
+        log.info("周期性任务恢复扫描已启动", { intervalMs: STALLED_RECOVERY_INTERVAL_MS });
+    }
+
+    static stopStalledRecoveryLoop() {
+        if (this.stalledRecoveryTimer) {
+            clearInterval(this.stalledRecoveryTimer);
+            this.stalledRecoveryTimer = null;
+        }
+        this.stalledRecoveryInProgress = false;
+    }
+
+    static async _runStalledTaskRecovery(options = {}) {
+        const { TaskRepository, instanceCoordinator } = getDeps();
+        const log = getLog();
+
+        if (this.stalledRecoveryInProgress) {
+            log.debug("任务恢复扫描仍在运行，跳过本轮");
+            return { restored: 0, skipped: true };
+        }
+
         let recoveryLockAcquired = false;
+        this.stalledRecoveryInProgress = true;
         try {
             if (instanceCoordinator && typeof instanceCoordinator.acquireLock === 'function') {
                 recoveryLockAcquired = await instanceCoordinator.acquireLock(
@@ -201,54 +250,59 @@ export class TaskManager {
                 );
                 if (!recoveryLockAcquired) {
                     log.info("另一个实例正在执行任务恢复扫描，当前实例跳过");
-                    return;
+                    return { restored: 0, skipped: true };
                 }
             }
 
-            // 并行加载初始化数据：僵尸任务 + 预热常用缓存
-            // 注意：如果是 failover 模式，commonData 可能已经预加载过了，但再次调用无害（通常有缓存或幂等）
             const results = await Promise.allSettled([
-                TaskRepository.findStalledTasks(120000), // 查找 2 分钟未更新的任务
-                this._preloadCommonData() 
+                TaskRepository.findStalledTasks(STALLED_RECOVERY_TIMEOUT_MS, {
+                    includeRetryableFailed: options.includeRetryableFailed === true
+                }),
+                this._preloadCommonData()
             ]);
-
             const tasks = results[0].status === 'fulfilled' ? results[0].value : [];
-            // 预加载失败不会影响主流程，只记录日志
-
             if (!tasks || tasks.length === 0) {
                 log.info("没有发现僵尸任务");
-                return;
+                return { restored: 0, skipped: false };
             }
 
             log.info("发现僵尸任务", { count: tasks.length, action: 'batch_restore' });
-
-            const chatGroups = new Map();
-            for (const row of tasks) {
-                if (!row.chat_id || row.chat_id.includes("Object")) {
-                    log.warn("跳过无效 chat_id 的任务", { taskId: row.id, chatId: row.chat_id });
-                    continue;
+            const chatGroups = this._groupRecoverableRowsByChat(tasks);
+            let restored = 0;
+            const groupedChats = [...chatGroups.entries()];
+            for (let index = 0; index < groupedChats.length; index += 1) {
+                const [chatId, rows] = groupedChats[index];
+                const result = await this._restoreBatchTasks(chatId, rows);
+                restored += result?.enqueued || 0;
+                if (index < groupedChats.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 3000));
                 }
-                if (!chatGroups.has(row.chat_id)) {
-                    chatGroups.set(row.chat_id, []);
-                }
-                chatGroups.get(row.chat_id).push(row);
-            }
-
-            // 顺序恢复所有chat groups的任务，避免并发冲击
-            for (const [chatId, rows] of chatGroups.entries()) {
-                await this._restoreBatchTasks(chatId, rows);
-                // 在会话间添加较长的延迟，避免启动时的流量峰值导致 429
-                await new Promise(resolve => setTimeout(resolve, 3000));
             }
 
             this.updateQueueUI();
-        } catch (e) {
-            log.error("TaskManager.init critical error", e);
+            return { restored, skipped: false };
         } finally {
+            this.stalledRecoveryInProgress = false;
             if (recoveryLockAcquired && typeof instanceCoordinator?.releaseLock === 'function') {
                 await instanceCoordinator.releaseLock(STALLED_RECOVERY_LOCK_KEY);
             }
         }
+    }
+
+    static _groupRecoverableRowsByChat(rows) {
+        const log = getLog();
+        const chatGroups = new Map();
+        for (const row of rows) {
+            if (!row.chat_id || row.chat_id.includes("Object")) {
+                log.warn("跳过无效 chat_id 的任务", { taskId: row.id, chatId: row.chat_id });
+                continue;
+            }
+            if (!chatGroups.has(row.chat_id)) {
+                chatGroups.set(row.chat_id, []);
+            }
+            chatGroups.get(row.chat_id).push(row);
+        }
+        return chatGroups;
     }
 
     /**
@@ -320,7 +374,7 @@ export class TaskManager {
      * [私有] 批量恢复同一个会话下的任务
      */
     static async _restoreBatchTasks(chatId, rows) {
-        const { client, runMtprotoTaskWithRetry, PRIORITY, config, updateStatus, TaskRepository } = getDeps();
+        const { client, runMtprotoTaskWithRetry, PRIORITY, config, TaskRepository, STRINGS, format } = getDeps();
         const log = getLog();
         try {
             const telegramRows = rows.filter(row => !isExternalUrlTask(row));
@@ -335,7 +389,6 @@ export class TaskManager {
             });
 
             // 预处理任务，分离有效和无效任务
-            const validTasks = [];
             const failedUpdates = [];
             const tasksToEnqueue = [];
             const tasksToUpload = [];
@@ -372,7 +425,6 @@ export class TaskManager {
                 if ((msgIdCounts.get(msgKey) || 0) > 1) {
                     task.isGroup = true;
                 }
-                validTasks.push(task);
 
                 // 根据任务状态决定恢复到哪个队列
                 if (row.status === TASK_STATUSES.DOWNLOADED || row.status === TASK_STATUSES.UPLOADING) {
@@ -410,13 +462,19 @@ export class TaskManager {
                         log.warn(`⚠️ 本地文件不存在，重新下载任务 ${row.id}`);
                         tasksToEnqueue.push(task);
                     }
-                } else if (row.status === TASK_STATUSES.QUEUED || row.status === TASK_STATUSES.DOWNLOADING) {
+                } else if (row.status === TASK_STATUSES.QUEUED || row.status === TASK_STATUSES.DOWNLOADING || row.status === TASK_STATUSES.FAILED) {
+                    if (row.status === TASK_STATUSES.FAILED && !this._isRetryableStalledFailure(row)) {
+                        log.warn("跳过不可自动恢复的失败任务", { taskId: row.id });
+                        continue;
+                    }
                     let queueAttempt = null;
-                    if (row.status === TASK_STATUSES.DOWNLOADING) {
+                    if (row.status === TASK_STATUSES.DOWNLOADING || row.status === TASK_STATUSES.FAILED) {
                         const reset = await TaskRepository.transitionStatus(row.id, TASK_EVENTS.RETRY, 'Downloading interrupted during recovery', {
                             returnResult: true,
                             allowNoop: true,
-                            source: 'restore_downloading_task'
+                            source: row.status === TASK_STATUSES.FAILED
+                                ? 'restore_retryable_failed_task'
+                                : 'restore_downloading_task'
                         });
                         if (reset.blocked) {
                             log.warn("下载中任务无法复位下载", { taskId: row.id, reason: reset.reason });
@@ -437,45 +495,96 @@ export class TaskManager {
                 await this.batchUpdateStatus(failedUpdates);
             }
 
-            // 限制并发发送恢复消息（使用小批量顺序处理，带UI节流控制）
-            const BATCH_SIZE = 2; // 减小批量大小
-            for (let i = 0; i < validTasks.length; i += BATCH_SIZE) {
-                const batch = validTasks.slice(i, i + BATCH_SIZE);
-                const recoveryPromises = batch.map(task =>
-                    this.canUpdateUI() 
-                        ? updateStatus(task, "🔄 **系统重启，检测到任务中断，已自动恢复...**")
-                        : Promise.resolve() // 跳过UI更新
-                );
-                await Promise.allSettled(recoveryPromises);
-                // 增加小批量间延迟，减少API压力
-                if (i + BATCH_SIZE < validTasks.length) {
-                    await new Promise(resolve => setTimeout(resolve, 1500)); // 从500ms增加到1500ms
-                }
-            }
-
             const enqueueWork = [
                 ...tasksToEnqueue.map(task => ({ task, type: 'download', run: () => this._enqueueTask(task) })),
                 ...tasksToUpload.map(task => ({ task, type: 'upload', run: () => this._enqueueUploadTask(task) }))
             ];
+            if (enqueueWork.length === 0) {
+                return { enqueued: 0, pendingRetry: 0, failed: failedUpdates.length };
+            }
+
             const enqueueResults = await Promise.allSettled(enqueueWork.map(work => work.run()));
             const failed = enqueueResults
                 .map((result, index) => ({ result, work: enqueueWork[index] }))
                 .filter(item => item.result.status === 'rejected');
+            const succeeded = enqueueResults
+                .map((result, index) => ({ result, work: enqueueWork[index] }))
+                .filter(item => item.result.status === 'fulfilled');
+
+            await this._notifyRecoveredTasks(
+                succeeded.map(({ work }) => work.task),
+                STRINGS.task.restore
+            );
+
             if (failed.length > 0) {
-                await Promise.allSettled(failed.map(({ result, work }) =>
-                    this._markTaskFailed(
-                        work.task.id,
-                        `Recovery enqueue failed: ${result.reason?.message || String(result.reason)}`,
-                        `restore_${work.type}_enqueue_failed`
-                    )
-                ));
-                throw new Error(`Recovery enqueue failed for ${failed.length} task(s): ${failed[0].result.reason?.message || String(failed[0].result.reason)}`);
+                const retryableFailures = failed.filter(({ result }) => this._isRetryableInfrastructureError(result.reason));
+                const terminalFailures = failed.filter(({ result }) => !this._isRetryableInfrastructureError(result.reason));
+
+                if (retryableFailures.length > 0) {
+                    log.warn("恢复任务入队暂时失败，将由周期扫描继续重试", {
+                        count: retryableFailures.length,
+                        taskIds: retryableFailures.map(({ work }) => work.task.id),
+                        reason: redactSensitiveText(retryableFailures[0].result.reason?.message || String(retryableFailures[0].result.reason))
+                    });
+                    await this._notifyRecoveredTasks(
+                        retryableFailures.map(({ work }) => work.task),
+                        STRINGS.task.recovery_pending
+                    );
+                }
+
+                if (terminalFailures.length > 0) {
+                    await Promise.allSettled(terminalFailures.map(async ({ result, work }) => {
+                        const reason = redactSensitiveText(result.reason?.message || String(result.reason));
+                        await this._markTaskFailed(
+                            work.task.id,
+                            `Recovery enqueue failed: ${reason}`,
+                            `restore_${work.type}_enqueue_failed`
+                        );
+                        await this._notifyRecoveredTasks(
+                            [work.task],
+                            format(STRINGS.task.failed_action_required, {
+                                reason: escapeHTML(`恢复队列失败：${reason}`)
+                            }),
+                            true
+                        );
+                    }));
+                    throw new Error(`Recovery enqueue failed for ${terminalFailures.length} task(s): ${redactSensitiveText(terminalFailures[0].result.reason?.message || String(terminalFailures[0].result.reason))}`);
+                }
             }
+
+            return {
+                enqueued: succeeded.length,
+                pendingRetry: failed.length,
+                failed: failedUpdates.length
+            };
 
         } catch (e) {
             log.error(`批量恢复会话 ${chatId} 的任务失败:`, e);
             throw e;
         }
+    }
+
+    static async _notifyRecoveredTasks(tasks, text, isFinal = false) {
+        const { updateStatus } = getDeps();
+        const BATCH_SIZE = 2;
+        for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
+            const batch = tasks.slice(i, i + BATCH_SIZE);
+            await Promise.allSettled(batch.map(task =>
+                this.canUpdateUI()
+                    ? updateStatus(task, text, isFinal)
+                    : Promise.resolve()
+            ));
+            if (i + BATCH_SIZE < tasks.length) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+        }
+    }
+
+    static _isRetryableStalledFailure(row) {
+        if (row?.status !== TASK_STATUSES.FAILED) return false;
+        const message = row.error_msg || row.error || "";
+        if (!message) return false;
+        return this._isRetryableInfrastructureError(new Error(message));
     }
 
     /**

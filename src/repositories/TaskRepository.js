@@ -374,15 +374,31 @@ export class TaskRepository {
         const deadLine = Date.now() - safeTimeout;
         const requestedLimit = Number.isFinite(options?.maxResults) ? Number(options.maxResults) : this.STALLED_TASKS_DEFAULT_LIMIT;
         const limit = Math.min(this.STALLED_TASKS_MAX_LIMIT, Math.max(this.STALLED_TASKS_MIN_LIMIT, requestedLimit));
+        const includeRetryableFailed = options?.includeRetryableFailed === true;
+        const retryableFailureSql = includeRetryableFailed
+            ? ` OR (
+                    status = ?
+                    AND (
+                        error_msg LIKE '%Circuit breaker is OPEN%'
+                        OR error_msg LIKE '%qstash%'
+                        OR error_msg LIKE '%Queue enqueue failed%'
+                        OR error_msg LIKE '%Recovery enqueue failed%'
+                    )
+                )`
+            : "";
+        const retryableFailureParams = includeRetryableFailed ? [TASK_STATUSES.FAILED] : [];
 
         try {
             return await d1.fetchAll(
                 `SELECT * FROM tasks
-                WHERE status IN (${this.ACTIVE_STATUS_SQL})
+                WHERE (
+                    status IN (${this.ACTIVE_STATUS_SQL})
+                    ${retryableFailureSql}
+                )
                 AND (updated_at IS NULL OR updated_at < ?)
                 ORDER BY created_at ASC
                 LIMIT ?`,
-                [...TASK_ACTIVE_STATUSES, deadLine, limit]
+                [...TASK_ACTIVE_STATUSES, ...retryableFailureParams, deadLine, limit]
             );
         } catch (e) {
             log.error("TaskRepository.findStalledTasks error:", e);

@@ -112,6 +112,9 @@ vi.mock('../../src/locales/zh-CN.js', () => ({
             downloaded_waiting_upload: 'downloaded',
             failed_validation: 'failed validation',
             failed_upload: 'failed upload',
+            failed_action_required: 'failed: {{reason}}',
+            restore: 'restore',
+            recovery_pending: 'recovery pending',
             error_prefix: 'error: ',
             success: 'success',
             success_sec_transfer: 'success'
@@ -193,6 +196,7 @@ describe('TaskManager queue/recovery closure', () => {
         TaskManager.inFlightTasks.clear();
         TaskManager.waitingTasks = [];
         TaskManager.waitingUploadTasks = [];
+        TaskManager.stopStalledRecoveryLoop();
         TaskManager.uiUpdateTracker = {
             count: 0,
             windowStart: Date.now(),
@@ -300,8 +304,87 @@ describe('TaskManager queue/recovery closure', () => {
             120,
             expect.objectContaining({ maxAttempts: 1, logContention: false })
         );
-        expect(mockTaskRepository.findStalledTasks).toHaveBeenCalledWith(120000);
+        expect(mockTaskRepository.findStalledTasks).toHaveBeenCalledWith(120000, {
+            includeRetryableFailed: true
+        });
         expect(mockInstanceCoordinator.releaseLock).toHaveBeenCalledWith('task_recovery:stalled');
+    });
+
+    it('retries retryable failed tasks by resetting them to the download queue', async () => {
+        const result = await TaskManager._restoreBatchTasks('chat-1', [{
+            id: 'failed-1',
+            user_id: 'u1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'failed.mp4',
+            status: 'failed',
+            error_msg: 'Queue enqueue failed: qstash down'
+        }]);
+
+        expect(result).toMatchObject({ enqueued: 1, pendingRetry: 0, failed: 0 });
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            'failed-1',
+            TASK_EVENTS.RETRY,
+            'Downloading interrupted during recovery',
+            expect.objectContaining({ source: 'restore_retryable_failed_task' })
+        );
+        expect(mockQueueService.enqueueDownloadTask).toHaveBeenCalledWith(
+            'failed-1',
+            expect.objectContaining({
+                _meta: expect.objectContaining({
+                    queueAttempt: `${TASK_EVENTS.RETRY}:failed-1:1700000000000`
+                })
+            })
+        );
+    });
+
+    it('does not automatically retry non-infrastructure failed tasks', async () => {
+        const { updateStatus } = await import('../../src/utils/common.js');
+
+        const result = await TaskManager._restoreBatchTasks('chat-1', [{
+            id: 'failed-1',
+            user_id: 'u1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'failed.mp4',
+            status: 'failed',
+            error_msg: 'Rclone exited with code 1'
+        }]);
+
+        expect(result).toMatchObject({ enqueued: 0, pendingRetry: 0, failed: 0 });
+        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+            'failed-1',
+            TASK_EVENTS.RETRY,
+            expect.anything(),
+            expect.anything()
+        );
+        expect(mockQueueService.enqueueDownloadTask).not.toHaveBeenCalled();
+        expect(updateStatus).not.toHaveBeenCalledWith(expect.anything(), 'restore');
+    });
+
+    it('does not show restored UI when recovery is blocked before enqueue', async () => {
+        const { updateStatus } = await import('../../src/utils/common.js');
+        mockTaskRepository.transitionStatus.mockResolvedValueOnce({
+            changed: false,
+            blocked: true,
+            reason: 'Cannot transition task from completed to queued'
+        });
+
+        const result = await TaskManager._restoreBatchTasks('chat-1', [{
+            id: 'downloading-1',
+            user_id: 'u1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'downloading.mp4',
+            status: 'downloading'
+        }]);
+
+        expect(result).toMatchObject({ enqueued: 0, pendingRetry: 0, failed: 0 });
+        expect(mockQueueService.enqueueDownloadTask).not.toHaveBeenCalled();
+        expect(updateStatus).not.toHaveBeenCalledWith(expect.anything(), 'restore');
     });
 
     it('resets uploading task to download when local file is missing', async () => {
@@ -359,7 +442,36 @@ describe('TaskManager queue/recovery closure', () => {
         Date.now.mockRestore();
     });
 
-    it('marks restored task failed and throws when recovery enqueue fails', async () => {
+    it('keeps restored task recoverable when recovery enqueue hits retryable infrastructure failure', async () => {
+        const { updateStatus } = await import('../../src/utils/common.js');
+        mockQueueService.enqueueDownloadTask.mockRejectedValueOnce(new Error('Circuit breaker is OPEN for qstash_publish'));
+
+        const result = await TaskManager._restoreBatchTasks('chat-1', [{
+            id: 'queued-1',
+            user_id: 'u1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'queued.mp4',
+            status: 'queued'
+        }]);
+
+        expect(result).toMatchObject({ enqueued: 0, pendingRetry: 1, failed: 0 });
+        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+            'queued-1',
+            TASK_EVENTS.FAIL,
+            expect.anything(),
+            expect.anything()
+        );
+        expect(updateStatus).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'queued-1' }),
+            'recovery pending',
+            false
+        );
+    });
+
+    it('marks restored task failed and updates UI when recovery enqueue fails permanently', async () => {
+        const { updateStatus } = await import('../../src/utils/common.js');
         mockQueueService.enqueueDownloadTask.mockRejectedValueOnce(new Error('queue unavailable'));
 
         await expect(TaskManager._restoreBatchTasks('chat-1', [{
@@ -378,6 +490,41 @@ describe('TaskManager queue/recovery closure', () => {
             'Recovery enqueue failed: queue unavailable',
             expect.objectContaining({ source: 'restore_download_enqueue_failed' })
         );
+        expect(updateStatus).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'queued-1' }),
+            expect.stringContaining('恢复队列失败：queue unavailable'),
+            true
+        );
+    });
+
+    it('counts only tasks actually enqueued during stalled recovery', async () => {
+        mockTaskRepository.findStalledTasks.mockResolvedValue([
+            {
+                id: 'queued-1',
+                user_id: 'u1',
+                chat_id: 'chat-1',
+                msg_id: 1,
+                source_msg_id: 10,
+                file_name: 'queued.mp4',
+                status: 'queued'
+            },
+            {
+                id: 'queued-2',
+                user_id: 'u1',
+                chat_id: 'chat-1',
+                msg_id: 2,
+                source_msg_id: 10,
+                file_name: 'queued2.mp4',
+                status: 'queued'
+            }
+        ]);
+        mockQueueService.enqueueDownloadTask
+            .mockResolvedValueOnce({ messageId: 'download-msg' })
+            .mockRejectedValueOnce(new Error('Circuit breaker is OPEN for qstash_publish'));
+
+        const result = await TaskManager._runStalledTaskRecovery({ includeRetryableFailed: true });
+
+        expect(result).toMatchObject({ restored: 1, skipped: false });
     });
 
     it('marks created single task failed and throws when enqueue fails', async () => {

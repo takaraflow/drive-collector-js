@@ -58,6 +58,7 @@ export const STRINGS = {
         external_limit: "⚠️ 一次只处理 1 个外部链接，请拆开发送。",
         btn_confirm_external: "确认下载",
         restore: "🔄 <b>系统重启，检测到任务中断，已自动恢复...</b>",
+        recovery_pending: "🔄 <b>任务恢复中</b>\n\n系统队列暂时繁忙，已保留任务状态，会继续自动重试。",
         downloading: "📥 正在下载资源...",
         downloaded_waiting_upload: "📥 <b>下载完成，等待转存...</b>",
         uploading: "📤 <b>资源拉取完成，正在启动转存...</b>",
