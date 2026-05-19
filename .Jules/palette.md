@@ -5,3 +5,6 @@
 ## 2026-04-28 - Improve Empty State UX with Actionable CTAs
 **Learning:** Conversational bot UI empty states (like 'no tasks' or 'empty directory') must include clear, context-specific call-to-actions (CTAs) instead of reusing generalized strings, guiding the user on what to do next.
 **Action:** Always provide specific, actionable instructions in empty states rather than just stating there is no data, avoiding the reuse of generic messages across different contexts.
+## 2026-05-19 - File size readability improvement
+**Learning:** The `.toFixed(2)` coupled with hardcoded MB unit caused file size readability problems, which was previously fixed in `formatBytes` utility, but missed a spot in `TaskManager.download.js` log message `Resuming transfer`, presenting confusingly raw formatted bytes on resumes.
+**Action:** Make sure to look through entire codebase next time to find hardcoded byte format logic when creating a formatting utility to cover all cases.
