@@ -63,7 +63,7 @@ vi.mock('../../src/services/logger/index.js', () => ({
     }
 }));
 
-vi.mock('../../src/services/oss.js', () => ({ oss: { configure: vi.fn() } }));
+vi.mock('../../src/services/oss.js', () => ({ ossService: { configure: vi.fn() } }));
 vi.mock('../../src/services/d1.js', () => ({ d1: { reconnect: vi.fn() } }));
 vi.mock('../../src/services/InstanceCoordinator.js', () => ({
     instanceCoordinator: {
@@ -71,6 +71,7 @@ vi.mock('../../src/services/InstanceCoordinator.js', () => ({
         start: vi.fn()
     }
 }));
+vi.mock('../../src/services/DirectTransferService.js', () => ({ directTransferService: { name: 'directTransfer' } }));
 
 describe('config hot update redaction', () => {
     const originalEnv = { ...process.env };

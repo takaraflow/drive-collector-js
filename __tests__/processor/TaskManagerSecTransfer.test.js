@@ -52,6 +52,18 @@ vi.mock("../../src/repositories/TaskRepository.js", () => ({
     TaskRepository: mockTaskRepository,
 }));
 
+const mockDriveRepository = {
+    getDefaultDrive: vi.fn().mockResolvedValue({
+        id: "drive_1",
+        user_id: "user_1",
+        type: "mega",
+        config_data: "{}"
+    })
+};
+vi.mock("../../src/repositories/DriveRepository.js", () => ({
+    DriveRepository: mockDriveRepository,
+}));
+
 // Mock InstanceCoordinator
 const mockInstanceCoordinator = {
     acquireTaskLock: vi.fn().mockResolvedValue(true),
@@ -127,6 +139,11 @@ vi.mock("../../src/services/StreamTransferService.js", () => ({
     streamTransferService: mockStreamTransferService
 }));
 
+const mockDirectTransferService = {
+    canAttempt: vi.fn().mockReturnValue({ supported: false, reason: "test-disabled" }),
+    transferTelegramMediaToRemote: vi.fn()
+};
+
 const mockTunnelService = {
     getPublicUrl: vi.fn().mockResolvedValue("https://leader.example.com")
 };
@@ -164,6 +181,12 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         TaskManager.activeProcessors.clear();
         TaskManager.waitingTasks = [];
         mockTaskRepository.transitionStatus.mockResolvedValue({ changed: true, blocked: false });
+        mockDriveRepository.getDefaultDrive.mockResolvedValue({
+            id: "drive_1",
+            user_id: "user_1",
+            type: "mega",
+            config_data: "{}"
+        });
         mockClient.iterDownload.mockReset();
         mockStreamTransferService.resumeTask.mockReset();
         mockStreamTransferService.resetTask.mockReset();
@@ -171,6 +194,9 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         mockStreamTransferService.waitForFinalization.mockReset();
         mockStreamTransferService.registerStreamOwner.mockReset();
         mockStreamTransferService.clearStreamOwner.mockReset();
+        mockDirectTransferService.canAttempt.mockReset();
+        mockDirectTransferService.transferTelegramMediaToRemote.mockReset();
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: false, reason: "test-disabled" });
         mockStreamTransferService.registerStreamOwner.mockResolvedValue({
             taskId: "task_1",
             instanceId: "worker-1",
@@ -272,6 +298,210 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
             msgId: 100,
             localPath: expect.stringContaining("test_file.mp4")
         }));
+    });
+
+    test("direct transfer success completes without local download or upload queue", async () => {
+        mockCloudTool.getRemoteFileInfo
+            .mockResolvedValueOnce(null)
+            .mockResolvedValue({ Name: "test_file.mp4", Size: 10485760 });
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: true, reason: "rclone-rcat" });
+        mockDirectTransferService.transferTelegramMediaToRemote.mockResolvedValue({
+            success: true,
+            method: "direct_stream",
+            fileName: "test_file.mp4",
+            bytes: 10485760
+        });
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                directTransfer: { enabled: true, fallbackToLocal: true },
+                streamForwarding: { enabled: false }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockDirectTransferService.transferTelegramMediaToRemote).toHaveBeenCalledWith(expect.objectContaining({
+            task: expect.objectContaining({ id: "task_1" }),
+            fileName: "test_file.mp4",
+            chunkSize: 128 * 1024,
+            driveType: "mega"
+        }));
+        expect(mockClient.downloadMedia).not.toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "complete",
+            null,
+            expect.objectContaining({ source: "direct_transfer_complete" })
+        );
+
+        getAllSpy.mockRestore();
+    });
+
+    test("direct transfer fallback resets state and continues through local staging", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: true, reason: "rclone-rcat" });
+        mockDirectTransferService.transferTelegramMediaToRemote.mockResolvedValue({
+            success: false,
+            fallback: true,
+            error: "backend does not support rcat"
+        });
+        mockClient.downloadMedia.mockResolvedValue();
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                directTransfer: { enabled: true, fallbackToLocal: true },
+                streamForwarding: { enabled: false }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "reset_stream_download",
+            "backend does not support rcat",
+            expect.objectContaining({ source: "direct_transfer_fallback" })
+        );
+        expect(mockClient.downloadMedia).toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith(
+            "task_1",
+            expect.objectContaining({ userId: "user_1" })
+        );
+
+        getAllSpy.mockRestore();
+    });
+
+    test("direct transfer skips OSS user drive and uses local staging", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDriveRepository.getDefaultDrive.mockResolvedValue({
+            id: "drive_oss",
+            user_id: "user_1",
+            type: "oss",
+            config_data: "{}"
+        });
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: false, reason: "oss-local-staging-required" });
+        mockClient.downloadMedia.mockResolvedValue();
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                directTransfer: { enabled: true, fallbackToLocal: true },
+                streamForwarding: { enabled: false }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockDirectTransferService.canAttempt).toHaveBeenCalledWith(
+            expect.any(Object),
+            { driveType: "oss" }
+        );
+        expect(mockDirectTransferService.transferTelegramMediaToRemote).not.toHaveBeenCalled();
+        expect(mockClient.downloadMedia).toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith(
+            "task_1",
+            expect.objectContaining({ userId: "user_1" })
+        );
+
+        getAllSpy.mockRestore();
+    });
+
+    test("direct transfer skips remote same-name conflicts before streaming", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Name: "test_file.mp4", Size: 10485760 + 2097152 });
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: true, reason: "rclone-rcat" });
+        mockClient.downloadMedia.mockResolvedValue();
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                directTransfer: { enabled: true, fallbackToLocal: true },
+                streamForwarding: { enabled: false }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockDirectTransferService.transferTelegramMediaToRemote).not.toHaveBeenCalled();
+        expect(mockClient.downloadMedia).toHaveBeenCalled();
+
+        getAllSpy.mockRestore();
+    });
+
+    test("direct transfer fallback skips stream forwarding and goes local", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: true, reason: "rclone-rcat" });
+        mockDirectTransferService.transferTelegramMediaToRemote.mockResolvedValue({
+            success: false,
+            fallback: true,
+            error: "rcat failed"
+        });
+        mockInstanceCoordinator.getActiveInstances.mockResolvedValue([
+            { id: "current-instance" },
+            { id: "worker-1", directUrl: "https://worker.example.com", activeTaskCount: 0 }
+        ]);
+        mockClient.downloadMedia.mockResolvedValue();
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            UIHelper: {
+                renderProgress: vi.fn(() => "stream progress")
+            },
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                port: 3000,
+                directTransfer: { enabled: true, fallbackToLocal: true },
+                streamForwarding: {
+                    enabled: true,
+                    lbUrl: "https://lb.example.com",
+                    externalUrl: "https://leader.example.com"
+                }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockStreamTransferService.registerStreamOwner).not.toHaveBeenCalled();
+        expect(mockStreamTransferService.forwardChunk).not.toHaveBeenCalled();
+        expect(mockClient.downloadMedia).toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith(
+            "task_1",
+            expect.objectContaining({ userId: "user_1" })
+        );
+
+        getAllSpy.mockRestore();
     });
 
     test("should fail before Telegram download when local storage is insufficient", async () => {

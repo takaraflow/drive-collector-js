@@ -16,17 +16,19 @@ export class ManifestBasedServiceReinitializer {
             const { queueService } = await import('../services/QueueService.js');
             const { logger } = await import('../services/logger/index.js');
             const telegramModule = await import('../services/telegram.js');
-            const { oss } = await import('../services/oss.js');
+            const { ossService } = await import('../services/oss.js');
             const { d1 } = await import('../services/d1.js');
             const { instanceCoordinator } = await import('../services/InstanceCoordinator.js');
+            const { directTransferService } = await import('../services/DirectTransferService.js');
             
             this.services.set('cache', cache);
             this.services.set('queue', queueService);
             this.services.set('logger', logger);
             this.services.set('telegram', telegramModule);
-            this.services.set('oss', oss);
+            this.services.set('oss', ossService);
             this.services.set('d1', d1);
             this.services.set('instanceCoordinator', instanceCoordinator);
+            this.services.set('directTransfer', directTransferService);
         } catch (error) {
             console.warn('⚠️ 部分服务模块导入失败:', error.message);
         }
@@ -68,6 +70,8 @@ export class ManifestBasedServiceReinitializer {
 
     async performReinitialization(serviceName, service, strategyType) {
         switch (strategyType) {
+            case 'none':
+                break;
             case 'destroy_initialize':
                 await this.reinitializeDestroyInitialize(service);
                 break;

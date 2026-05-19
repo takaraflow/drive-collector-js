@@ -95,7 +95,7 @@ export async function uploadTask(task) {
         ]);
 
         let uploadResult;
-        const isR2Drive = config.remoteName === 'r2' && config.oss?.r2?.bucket;
+        const isR2Drive = config.remoteName === 'r2' && (config.oss?.bucket || config.oss?.r2?.bucket);
         let lastUpdate = Date.now();
 
         try {

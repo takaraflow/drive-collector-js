@@ -440,6 +440,30 @@ describe('CloudTool', () => {
             expect(result).toMatchObject({ success: false });
             expect(result.error).toContain('permission denied');
         });
+
+        it('should move a sanitized remote staging file to the final remote name', async () => {
+            mockSpawn.mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 0);
+                p.emit('close', 0);
+            }));
+
+            const result = await CloudTool.moveRemoteFile('../stage.part', '../movie.mkv', 'user123');
+
+            expect(result).toEqual({ success: true, fileName: 'movie.mkv' });
+            expect(mockSpawn).toHaveBeenCalledWith(
+                expect.any(String),
+                expect.arrayContaining([
+                    'moveto',
+                    expect.stringContaining('Stream/stage.part'),
+                    expect.stringContaining('Stream/movie.mkv')
+                ]),
+                expect.any(Object)
+            );
+        });
     });
 
     describe('listRemoteFiles', () => {

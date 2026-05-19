@@ -65,13 +65,13 @@ export function createHeartbeat(task, context, updateStatus, fileName = null) {
  * @param {string} actualUploadPath - Actual upload path
  * @param {string} fileLink - File link for status display
  */
-export async function handleTaskCompletion(task, context, updateStatus, fileName, actualUploadPath, fileLink) {
+export async function handleTaskCompletion(task, context, updateStatus, fileName, actualUploadPath, fileLink, options = {}) {
     const { TaskRepository, STRINGS, format } = getDeps();
     const transition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.COMPLETE, null, {
         ...getClaimFenceOptions(task),
         returnResult: true,
         allowNoop: true,
-        source: 'handleTaskCompletion'
+        source: options.source || 'handleTaskCompletion'
     });
     if (transition.blocked) return;
     
@@ -81,7 +81,8 @@ export async function handleTaskCompletion(task, context, updateStatus, fileName
         const fileNameHtml = fileLink
             ? `<a href="${fileLink}">${escapeHTML(fileName)}</a>`
             : `<code>${escapeHTML(fileName)}</code>`;
-        await updateStatus(task, format(STRINGS.task.success_sec_transfer, { name: fileNameHtml, folder: actualUploadPath }), true);
+        const template = options.successTemplate || STRINGS.task.success_sec_transfer;
+        await updateStatus(task, format(template, { name: fileNameHtml, folder: actualUploadPath }), true);
     }
 }
 

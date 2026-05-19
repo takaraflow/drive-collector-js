@@ -535,6 +535,18 @@
         "default": 33554432,
         "description": "Maximum file size allowed for the Cloudflare Worker upload path that buffers in memory"
       },
+      "DIRECT_TRANSFER_ENABLED": {
+        "type": "boolean",
+        "required": false,
+        "default": true,
+        "description": "Enable same-worker direct streaming from Telegram to rclone rcat before falling back to local staging"
+      },
+      "DIRECT_TRANSFER_FALLBACK_TO_LOCAL": {
+        "type": "boolean",
+        "required": false,
+        "default": true,
+        "description": "Allow direct streaming failures or unsupported remotes to fall back to local file staging"
+      },
       "EXTERNAL_DOWNLOAD_MAX_BYTES": {
         "type": "number",
         "required": false,

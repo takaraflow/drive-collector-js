@@ -682,6 +682,30 @@ export class CloudTool {
         };
     }
 
+    static async moveRemoteFile(sourceFileName, targetFileName, userId) {
+        if (!userId) return { success: false, error: "Missing userId" };
+        if (!sourceFileName) return { success: false, error: "Missing sourceFileName" };
+        if (!targetFileName) return { success: false, error: "Missing targetFileName" };
+
+        const conf = await this._getUserConfig(userId);
+        const connectionString = this._getConnectionString(conf);
+        const userUploadPath = await this._getUploadPath(userId);
+        const sourceSafeName = this.sanitizeRemoteFileName(sourceFileName);
+        const targetSafeName = this.sanitizeRemoteFileName(targetFileName);
+        const sourcePath = this._joinRemotePath(connectionString, userUploadPath, sourceSafeName);
+        const targetPath = this._joinRemotePath(connectionString, userUploadPath, targetSafeName);
+
+        const ret = await this._runRclone(["moveto", sourcePath, targetPath], 10 * 60 * 1000);
+        if (ret.code === 0) {
+            return { success: true, fileName: targetSafeName };
+        }
+
+        return {
+            success: false,
+            error: ret.stderr || ret.error?.message || `rclone moveto exited with code ${ret.code}`
+        };
+    }
+
     /**
      * 获取文件列表 (带智能缓存策略)
      */

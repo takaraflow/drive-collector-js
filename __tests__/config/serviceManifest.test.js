@@ -51,6 +51,8 @@ describe('ServiceConfigManager 测试', () => {
         expect(serviceConfigManager.getServiceName('LOCAL_STORAGE_REQUIRED_HEADROOM_RATIO')).toBe('localStorage');
         expect(serviceConfigManager.getServiceName('LOCAL_STORAGE_REQUIRED_HEADROOM_BYTES')).toBe('localStorage');
         expect(serviceConfigManager.getServiceName('OSS_WORKER_UPLOAD_MAX_BUFFER_BYTES')).toBe('oss');
+        expect(serviceConfigManager.getServiceName('DIRECT_TRANSFER_ENABLED')).toBe('directTransfer');
+        expect(serviceConfigManager.getServiceName('DIRECT_TRANSFER_FALLBACK_TO_LOCAL')).toBe('directTransfer');
         expect(serviceConfigManager.getServiceName('UNKNOWN_KEY')).toBeUndefined();
     });
 
@@ -201,6 +203,14 @@ describe('ManifestBasedServiceReinitializer 测试', () => {
         expect(mockService.reconnect).toHaveBeenCalled();
         expect(mockService.destroy).not.toHaveBeenCalled();
         expect(mockService.initialize).not.toHaveBeenCalled();
+
+        vi.clearAllMocks();
+
+        await reinitializer.performReinitialization('directTransfer', mockService, 'none');
+        expect(mockService.destroy).not.toHaveBeenCalled();
+        expect(mockService.initialize).not.toHaveBeenCalled();
+        expect(mockService.reconnect).not.toHaveBeenCalled();
+        expect(mockService.configure).not.toHaveBeenCalled();
     });
 
     test('应该正确处理超时', async () => {

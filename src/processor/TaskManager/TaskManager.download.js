@@ -16,11 +16,11 @@ const getLog = () => dependencyContainer.get('logger').withModule('TaskManager')
  * Download Task - Responsible for MTProto download phase
  */
 export async function downloadTask(task) {
-    const { 
-        config, client, CloudTool, getMediaInfo, updateStatus, safeEdit, 
-        runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, 
-        runMtprotoFileTaskWithRetry, PRIORITY, TaskRepository, queueService, 
-        STRINGS, format, streamTransferService, instanceCoordinator 
+    const {
+        config, client, CloudTool, getMediaInfo, updateStatus, safeEdit,
+        runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry,
+        runMtprotoFileTaskWithRetry, PRIORITY, TaskRepository, DriveRepository, queueService,
+        STRINGS, format, streamTransferService, directTransferService, instanceCoordinator
     } = dependencyContainer.getAll();
     const log = getLog();
 
@@ -67,24 +67,31 @@ export async function downloadTask(task) {
             const heartbeat = createHeartbeat(task, this, updateStatus, fileName);
 
             try {
-                const deps = { config, client, CloudTool, updateStatus, runMtprotoFileTaskWithRetry, TaskRepository, queueService, STRINGS, format, streamTransferService, instanceCoordinator };
+                const deps = { config, client, CloudTool, updateStatus, runMtprotoFileTaskWithRetry, TaskRepository, DriveRepository, queueService, STRINGS, format, streamTransferService, directTransferService, instanceCoordinator };
 
                 // 1. Concurrent processing: Asynchronously initiate UI update without blocking instant transfer check and download preparation
                 const initialHeartbeat = heartbeat('downloading', 0, 0)
                     .catch(e => log.warn("Initial heartbeat failed", e));
-                
+
                 // 2. Priority check for remote instant transfer
                 if (await _handleInstantTransfer(this, deps, task, info, fileName, initialHeartbeat)) return;
 
                 // 2. Local file check
                 if (await _handleLocalFile(this, deps, task, info, fileName, localPath, initialHeartbeat)) return;
 
+                await initialHeartbeat;
+
                 const isLargeFile = info.size > 100 * 1024 * 1024;
 
-                // 3. Check if stream forwarding mode is enabled
-                if (await _handleStreamForwarding(this, deps, task, info, fileName, isLargeFile)) return;
+                const transferPlan = { skipStreamForwarding: false };
 
-                // 4. Download phase - MTProto file download
+                // 3. Direct stream upload on the current worker when the user's drive supports rclone rcat.
+                if (await _handleDirectTransfer(this, deps, task, info, fileName, heartbeat, isLargeFile, transferPlan)) return;
+
+                // 4. Check if stream forwarding mode is enabled
+                if (!transferPlan.skipStreamForwarding && await _handleStreamForwarding(this, deps, task, info, fileName, isLargeFile)) return;
+
+                // 5. Download phase - MTProto file download
                 await _handleMTProtoDownload(this, deps, task, info, fileName, localPath, heartbeat, isLargeFile);
 
 
@@ -405,6 +412,103 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
         }
     }
     return false;
+}
+
+async function _handleDirectTransfer(context, deps, task, info, fileName, heartbeat, isLargeFile, transferPlan = null) {
+    const { config, client, CloudTool, TaskRepository, DriveRepository, updateStatus, STRINGS, directTransferService, instanceCoordinator } = deps;
+    const log = dependencyContainer.get('logger').withModule('TaskManager');
+    const { message } = task;
+
+    if (config.directTransfer?.enabled === false) return false;
+    if (!directTransferService || typeof directTransferService.transferTelegramMediaToRemote !== "function") return false;
+
+    const defaultDrive = await DriveRepository.getDefaultDrive(task.userId);
+    const driveType = defaultDrive?.type || null;
+    const capability = directTransferService.canAttempt?.(config, { driveType });
+    if (capability && !capability.supported) {
+        log.info("Direct transfer skipped", { taskId: task.id, driveType, reason: capability.reason });
+        return false;
+    }
+
+    const existingRemoteFile = await CloudTool.getRemoteFileInfo(fileName, task.userId, 1, true);
+    if (existingRemoteFile && !context._isSizeMatch(existingRemoteFile.Size, info.size)) {
+        log.info("Direct transfer skipped because remote name already exists with different size", {
+            taskId: task.id,
+            fileName,
+            localSize: info.size,
+            remoteSize: existingRemoteFile.Size
+        });
+        return false;
+    }
+
+    await updateStatus(task, "📤 **Streaming directly to cloud...**");
+    await assertClaimFenceCurrent(task, instanceCoordinator);
+    const streamStartTransition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.START_STREAM_UPLOAD, null, {
+        ...getClaimFenceOptions(task),
+        returnResult: true,
+        allowNoop: true,
+        source: 'direct_transfer_started'
+    });
+    if (streamStartTransition.blocked) {
+        log.warn("Direct transfer start blocked by state machine", {
+            taskId: task.id,
+            reason: streamStartTransition.reason || 'invalid state'
+        });
+        return false;
+    }
+
+    const chunkSize = isLargeFile ? 512 * 1024 : 128 * 1024;
+    const result = await directTransferService.transferTelegramMediaToRemote({
+        task,
+        message,
+        client,
+        info,
+        fileName,
+        chunkSize,
+        config,
+        driveType,
+        existingRemoteFile,
+        isCancelled: () => context.cancelledTaskIds.has(task.id),
+        onProgress: async (progress) => {
+            await heartbeat('uploading', 0, 0, {
+                bytes: progress.bytes,
+                size: progress.size
+            });
+        }
+    });
+
+    if (result?.success) {
+        const actualUploadPath = await CloudTool._getUploadPath(task.userId);
+        const fileLink = `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
+        await handleTaskCompletion(task, context, updateStatus, result.fileName || fileName, actualUploadPath, fileLink, {
+            source: 'direct_transfer_complete',
+            successTemplate: STRINGS.task.success
+        });
+        context.activeProcessors.delete(task.id);
+        return true;
+    }
+
+    if (result?.fallback) {
+        if (transferPlan) {
+            transferPlan.skipStreamForwarding = true;
+        }
+        const resetTransition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.RESET_STREAM_DOWNLOAD, result.error || result.reason || null, {
+            ...getClaimFenceOptions(task),
+            returnResult: true,
+            allowNoop: true,
+            source: 'direct_transfer_fallback'
+        });
+        if (resetTransition.blocked) {
+            throw new Error(`Direct transfer fallback rejected: ${resetTransition.reason || 'state transition blocked'}`);
+        }
+        log.info("Direct transfer fell back to local-capable transfer path", {
+            taskId: task.id,
+            reason: result.error || result.reason || 'unsupported'
+        });
+        return false;
+    }
+
+    throw new Error(result?.error || "Direct transfer failed");
 }
 
 async function _handleMTProtoDownload(context, deps, task, info, fileName, localPath, heartbeat, isLargeFile) {

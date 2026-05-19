@@ -7,6 +7,7 @@ import { getMediaInfo, updateStatus, escapeHTML, safeEdit } from "../utils/commo
 import { runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry, runMtprotoFileTaskWithRetry, PRIORITY } from "../utils/limiter.js";
 import { AuthGuard } from "../modules/AuthGuard.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
+import { DriveRepository } from "../repositories/DriveRepository.js";
 import { d1 } from "./d1.js";
 import { cache } from "./CacheService.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
@@ -14,6 +15,7 @@ import { queueService } from "./QueueService.js";
 import { logger } from "./logger/index.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 import { streamTransferService } from "./StreamTransferService.js";
+import { directTransferService } from "./DirectTransferService.js";
 
 export class DependencyContainer {
     constructor() {
@@ -38,6 +40,7 @@ export class DependencyContainer {
             PRIORITY,
             AuthGuard,
             TaskRepository,
+            DriveRepository,
             d1,
             cache,
             instanceCoordinator,
@@ -45,7 +48,8 @@ export class DependencyContainer {
             logger,
             STRINGS,
             format,
-            streamTransferService
+            streamTransferService,
+            directTransferService
         };
     }
 

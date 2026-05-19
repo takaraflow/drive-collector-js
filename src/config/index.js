@@ -443,6 +443,10 @@ function buildConfigObject(env) {
             timeoutMs: parsePositiveNumber(env.EXTERNAL_DOWNLOAD_TIMEOUT_MS, 30000),
             maxRedirects: parsePositiveInt(env.EXTERNAL_DOWNLOAD_MAX_REDIRECTS, 5)
         },
+        directTransfer: {
+            enabled: env.DIRECT_TRANSFER_ENABLED !== 'false',
+            fallbackToLocal: env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL !== 'false'
+        },
         instance: {
             id: env.INSTANCE_ID || null,
             publicUrl: env.INSTANCE_PUBLIC_URL || env.APP_EXTERNAL_URL || env.LB_WEBHOOK_URL || null,

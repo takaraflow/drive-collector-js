@@ -235,6 +235,25 @@
         "LOCAL_STORAGE_REQUIRED_HEADROOM_* 同时保护 Telegram 下载、外部链接下载和流式断点续传 staging"
       ]
     },
+    "directTransfer": {
+      "name": "直传服务",
+      "icon": "📤",
+      "description": "普通 Telegram 文件同机无盘直传，优先 rclone rcat，不支持时回退本地暂存",
+      "configKeys": [
+        "DIRECT_TRANSFER_ENABLED",
+        "DIRECT_TRANSFER_FALLBACK_TO_LOCAL"
+      ],
+      "reinitializationStrategy": {
+        "type": "none",
+        "graceful": true,
+        "timeout": 0
+      },
+      "behaviorNotes": [
+        "DIRECT_TRANSFER_ENABLED=false 会完全关闭同机无盘直传，保留原本完整落盘转存路径",
+        "DIRECT_TRANSFER_FALLBACK_TO_LOCAL=true 时，rcat/moveto/远端校验失败会清理远端暂存并回退到本地暂存",
+        "直传只复用 rclone 支持的流式能力；OSS/R2 的 multipart stream 未收口前仍走本地暂存"
+      ]
+    },
     "externalDownload": {
       "name": "外部链接离线下载",
       "icon": "🌐",

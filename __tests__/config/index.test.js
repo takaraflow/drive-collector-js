@@ -258,4 +258,33 @@ describe("Config Module", () => {
     delete process.env.STREAM_FORWARDING_ENABLED;
     delete process.env.INSTANCE_SECRET;
   });
+
+  test("should default direct transfer to enabled with local fallback", async () => {
+    delete process.env.DIRECT_TRANSFER_ENABLED;
+    delete process.env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL;
+
+    __resetConfigForTests();
+    const config = await initConfig();
+
+    expect(config.directTransfer).toEqual({
+      enabled: true,
+      fallbackToLocal: true
+    });
+  });
+
+  test("should allow direct transfer and fallback to be disabled independently", async () => {
+    process.env.DIRECT_TRANSFER_ENABLED = "false";
+    process.env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL = "false";
+
+    __resetConfigForTests();
+    const config = await initConfig();
+
+    expect(config.directTransfer).toEqual({
+      enabled: false,
+      fallbackToLocal: false
+    });
+
+    delete process.env.DIRECT_TRANSFER_ENABLED;
+    delete process.env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL;
+  });
 });

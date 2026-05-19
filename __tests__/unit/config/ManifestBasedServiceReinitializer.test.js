@@ -21,9 +21,10 @@ vi.mock('../../../src/services/QueueService.js', () => ({ queueService: { name: 
 const loggerSingletonMock = vi.hoisted(() => ({ name: 'logger', reload: vi.fn(), configure: vi.fn() }));
 vi.mock('../../../src/services/logger/index.js', () => ({ logger: loggerSingletonMock }));
 vi.mock('../../../src/services/telegram.js', () => ({ default: { name: 'telegram' } }));
-vi.mock('../../../src/services/oss.js', () => ({ oss: { name: 'oss' } }));
+vi.mock('../../../src/services/oss.js', () => ({ ossService: { name: 'oss' } }));
 vi.mock('../../../src/services/d1.js', () => ({ d1: { name: 'd1' } }));
 vi.mock('../../../src/services/InstanceCoordinator.js', () => ({ instanceCoordinator: { name: 'instanceCoordinator' } }));
+vi.mock('../../../src/services/DirectTransferService.js', () => ({ directTransferService: { name: 'directTransfer' } }));
 
 describe('ManifestBasedServiceReinitializer', () => {
     let reinitializer;
@@ -51,6 +52,7 @@ describe('ManifestBasedServiceReinitializer', () => {
             expect(reinitializer.services.get('oss')).toBeDefined();
             expect(reinitializer.services.get('d1')).toBeDefined();
             expect(reinitializer.services.get('instanceCoordinator')).toBeDefined();
+            expect(reinitializer.services.get('directTransfer')).toBeDefined();
         });
 
         it('should handle import errors gracefully', async () => {
@@ -117,6 +119,14 @@ describe('ManifestBasedServiceReinitializer', () => {
             await reinitializer.performReinitialization('test-service', service, 'destroy_initialize');
             expect(service.destroy).toHaveBeenCalled();
             expect(service.initialize).toHaveBeenCalled();
+        });
+
+        it('should ignore none strategy', async () => {
+            const service = { destroy: vi.fn(), initialize: vi.fn(), reconnect: vi.fn() };
+            await reinitializer.performReinitialization('test-service', service, 'none');
+            expect(service.destroy).not.toHaveBeenCalled();
+            expect(service.initialize).not.toHaveBeenCalled();
+            expect(service.reconnect).not.toHaveBeenCalled();
         });
 
         it('should call lightweight_reconnect', async () => {

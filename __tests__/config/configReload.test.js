@@ -30,7 +30,7 @@ vi.mock('../../src/services/telegram.js', () => ({
 }));
 
 vi.mock('../../src/services/oss.js', () => ({
-    oss: {
+    ossService: {
         configure: vi.fn()
     }
 }));
@@ -45,6 +45,12 @@ vi.mock('../../src/services/InstanceCoordinator.js', () => ({
     instanceCoordinator: {
         stop: vi.fn(),
         start: vi.fn()
+    }
+}));
+
+vi.mock('../../src/services/DirectTransferService.js', () => ({
+    directTransferService: {
+        name: 'directTransfer'
     }
 }));
 
