@@ -2,10 +2,20 @@ import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../../domain/task-state-machine.js";
 import { getClaimFenceOptions } from "./claim-fence.js";
 import { redactSensitiveText } from "../../utils/serializer.js";
+import { getRcloneErrorUserMessage } from "../../utils/rcloneErrorMessage.js";
+import { classifyRcloneError } from "../../domain/rclone-error.js";
 
 // 获取依赖项的辅助函数
 const getDeps = () => dependencyContainer.getAll();
 const getLog = () => getDeps().logger.withModule('TaskManager.utils');
+const looksLikeRcloneDiagnostic = (message) => /rclone|failed to create file system|slog\/logger\.go|:mega|copyto|rcat/i.test(message || "");
+
+const resolveUploadFailureUserMessage = (failure) => {
+    if (failure?.userMessage) {
+        return redactSensitiveText(failure.userMessage);
+    }
+    return getRcloneErrorUserMessage(failure?.errorCode);
+};
 
 /**
  * Create heartbeat function for task status updates
@@ -96,9 +106,19 @@ export async function handleTaskCompletion(task, context, updateStatus, fileName
  * @param {boolean} isCancelled - Whether task was cancelled
  */
 export async function handleTaskFailure(task, context, updateStatus, errorMessage, isCancelled = false) {
-    const { TaskRepository, STRINGS } = getDeps();
+    const { TaskRepository, STRINGS, format } = getDeps();
     const event = isCancelled ? TASK_EVENTS.CANCEL : TASK_EVENTS.FAIL;
-    const safeErrorMessage = redactSensitiveText(errorMessage);
+    const failure = errorMessage && typeof errorMessage === 'object' ? errorMessage : null;
+    const rawErrorMessage = failure?.diagnosticMessage || failure?.error || failure?.message || errorMessage;
+    const safeErrorMessage = redactSensitiveText(rawErrorMessage);
+    const derivedClassification = looksLikeRcloneDiagnostic(safeErrorMessage)
+        ? classifyRcloneError(safeErrorMessage)
+        : null;
+    const errorCode = failure?.errorCode || derivedClassification?.code;
+    const userMessage = failure?.userMessage
+        ? redactSensitiveText(failure.userMessage)
+        : getRcloneErrorUserMessage(errorCode);
+    const showRetry = !isCancelled && (failure?.userRetryable ?? derivedClassification?.userRetryable) !== false;
     const transition = await TaskRepository.transitionStatus(task.id, event, safeErrorMessage, {
         ...getClaimFenceOptions(task),
         returnResult: true,
@@ -111,8 +131,12 @@ export async function handleTaskFailure(task, context, updateStatus, errorMessag
     if (task.isGroup) {
         await context._refreshGroupMonitor(task, status);
     } else {
-        const text = isCancelled ? STRINGS.task.cancelled : `${STRINGS.task.error_prefix}<code>${escapeHTML(safeErrorMessage)}</code>`;
-        await updateStatus(task, text, true, null, !isCancelled);
+        const text = isCancelled
+            ? STRINGS.task.cancelled
+            : userMessage
+                ? format(STRINGS.task.failed_action_required, { reason: escapeHTML(userMessage) })
+                : `${STRINGS.task.error_prefix}<code>${escapeHTML(safeErrorMessage)}</code>`;
+        await updateStatus(task, text, true, null, showRetry);
     }
 }
 
@@ -125,11 +149,15 @@ export async function handleTaskFailure(task, context, updateStatus, errorMessag
  */
 export async function handleUploadFailure(task, context, updateStatus, uploadResult) {
     const { TaskRepository, STRINGS, format } = getDeps();
-    if (task.isCancelled || uploadResult.error === "CANCELLED") {
+    if (task.isCancelled || uploadResult?.error === "CANCELLED") {
         throw new Error("CANCELLED");
     }
 
-    const errorMessage = redactSensitiveText(uploadResult.error || "Upload failed");
+    const failure = uploadResult || {};
+    const errorMessage = redactSensitiveText(failure.error || "Upload failed");
+    const userMessage = resolveUploadFailureUserMessage(failure);
+    const displayReason = userMessage || errorMessage;
+    const showRetry = failure.userRetryable !== false;
     const transition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.FAIL, errorMessage, {
         ...getClaimFenceOptions(task),
         returnResult: true,
@@ -139,11 +167,14 @@ export async function handleUploadFailure(task, context, updateStatus, uploadRes
     if (transition.blocked) return;
     
     if (task.isGroup) {
-        await context._refreshGroupMonitor(task, TASK_STATUSES.FAILED, 0, 0, errorMessage);
+        await context._refreshGroupMonitor(task, TASK_STATUSES.FAILED, 0, 0, displayReason);
     } else {
-        await updateStatus(task, format(STRINGS.task.failed_upload, {
-            reason: task.isCancelled ? "User cancelled manually" : escapeHTML(errorMessage)
-        }), true, null, true);
+        const template = userMessage
+            ? STRINGS.task.failed_upload_action_required
+            : STRINGS.task.failed_upload;
+        await updateStatus(task, format(template, {
+            reason: task.isCancelled ? "User cancelled manually" : escapeHTML(displayReason)
+        }), true, null, showRetry);
     }
 }
 

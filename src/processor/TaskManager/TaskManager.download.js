@@ -98,7 +98,7 @@ export async function downloadTask(task) {
             } catch (e) {
                 const isCancel = e.message === "CANCELLED";
                 try {
-                    await handleTaskFailure(task, this, updateStatus, e.message, isCancel);
+                    await handleTaskFailure(task, this, updateStatus, e, isCancel);
                 } catch (updateError) {
                     log.error(`Failed to update task status for ${task.id}:`, updateError);
                 }
@@ -518,7 +518,12 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
         return false;
     }
 
-    throw new Error(result?.error || "Direct transfer failed");
+    const error = new Error(result?.error || "Direct transfer failed");
+    error.errorCode = result?.errorCode;
+    error.userMessage = result?.userMessage;
+    error.retryable = result?.retryable;
+    error.userRetryable = result?.userRetryable;
+    throw error;
 }
 
 async function _handleMTProtoDownload(context, deps, task, info, fileName, localPath, heartbeat, isLargeFile) {

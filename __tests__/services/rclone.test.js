@@ -316,6 +316,17 @@ describe('CloudTool', () => {
             expect(CloudTool._isRetryableRcloneError('EOF')).toBe(false);
             expect(CloudTool._isRetryableRcloneError('authentication failed')).toBe(false);
         });
+
+        it('should classify MEGA object-not-found login failures as non-retryable auth failures', () => {
+            const result = CloudTool.classifyRcloneError(`CRITICAL | Failed to create file system for ":mega,user="[REDACTED]": couldn't login: Object (typically, node or user) not found`);
+
+            expect(result).toMatchObject({
+                code: 'DRIVE_AUTH_INVALID',
+                retryable: false,
+                userRetryable: false
+            });
+            expect(CloudTool._isRetryableRcloneError(`couldn't login: Object (typically, node or user) not found`)).toBe(false);
+        });
     });
 
     describe('validateConfig', () => {
@@ -489,6 +500,33 @@ describe('CloudTool', () => {
             expect(result.error).not.toContain('user@example.com');
             expect(result.error).not.toContain('secret-pass');
             expect(mockSpawn).toHaveBeenCalledTimes(3);
+        });
+
+        it('should preserve auth failure metadata and skip process retries for permanent MEGA login failures', async () => {
+            mockSpawn.mockImplementation(() => createAutoProcess((p) => {
+                p.stderr.emit('data', Buffer.from(`CRITICAL | Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":": couldn't login: Object (typically, node or user) not found\n`));
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 1);
+                p.emit('close', 1);
+            }));
+
+            const result = await CloudTool.uploadFile('/local/path', { userId: 'user123' });
+
+            expect(result).toMatchObject({
+                success: false,
+                retryable: false,
+                userRetryable: false,
+                errorCode: 'DRIVE_AUTH_INVALID'
+            });
+            expect(result.userMessage).toContain('重新绑定网盘');
+            expect(result.error).toContain('user="[REDACTED]"');
+            expect(result.error).toContain('pass="[REDACTED]"');
+            expect(result.error).not.toContain('user@example.com');
+            expect(result.error).not.toContain('secret-pass');
+            expect(mockSpawn).toHaveBeenCalledTimes(1);
         });
 
         it('should retry transient rclone filesystem creation failures before returning upload success', async () => {
@@ -682,6 +720,31 @@ describe('CloudTool', () => {
             expect(result.error).toContain('pass="[REDACTED]"');
             expect(result.error).not.toContain('user@example.com');
             expect(result.error).not.toContain('secret-pass');
+        });
+
+        it('should preserve failure metadata for external local-file uploads', async () => {
+            mockSpawn.mockImplementationOnce(() => createAutoProcess((p) => {
+                p.stderr.emit('data', Buffer.from(`CRITICAL | Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":Stream/movie.mkv": couldn't login: Object (typically, node or user) not found\n`));
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 1);
+                p.emit('close', 1);
+            }));
+
+            const result = await CloudTool.uploadLocalFileToRemote('/tmp/task.part', 'movie.mkv', 'user123');
+
+            expect(result).toMatchObject({
+                success: false,
+                retryable: false,
+                userRetryable: false,
+                errorCode: 'DRIVE_AUTH_INVALID'
+            });
+            expect(result.userMessage).toContain('重新绑定网盘');
+            expect(result.error).not.toContain('user@example.com');
+            expect(result.error).not.toContain('secret-pass');
+            expect(mockSpawn).toHaveBeenCalledTimes(1);
         });
 
         it('should create rcat stream with an exact size hint when provided', async () => {

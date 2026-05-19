@@ -168,11 +168,40 @@ describe("DirectTransferService", () => {
       fileName: "file.bin"
     });
 
-    expect(result).toMatchObject({ success: false, fallback: true });
+    expect(result).toMatchObject({ success: false, fallback: false });
     expect(result.error).toContain('user="[REDACTED]"');
     expect(result.error).toContain('pass="[REDACTED]"');
     expect(result.error).not.toContain('user@example.com');
     expect(result.error).not.toContain('secret-pass');
+  });
+
+  test("returns drive auth metadata for permanent MEGA login failures", async () => {
+    const proc = createProcess({
+      exitCode: 1,
+      stderr: `CRITICAL | Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":folder": couldn't login: Object (typically, node or user) not found`
+    });
+    const stdin = createWritable(proc);
+    const stagingName = ".drive-collector-task-auth-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-auth", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "file.bin"
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false,
+      errorCode: "DRIVE_AUTH_INVALID",
+      retryable: false,
+      userRetryable: false
+    });
+    expect(result.userMessage).toContain("重新绑定网盘");
+    expect(result.error).not.toContain("user@example.com");
+    expect(result.error).not.toContain("secret-pass");
   });
 
   test("times out a stuck rcat process and falls back to local staging", async () => {

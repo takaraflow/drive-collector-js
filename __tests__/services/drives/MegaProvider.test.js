@@ -261,6 +261,22 @@ describe('MegaProvider - Unit Tests', () => {
             expect(result.message).toContain('登录失败');
         });
 
+        test('should map MEGA object-not-found login failures to login guidance', async () => {
+            const { CloudTool } = await import('../../../src/services/rclone.js');
+            CloudTool.validateConfig.mockResolvedValue({
+                success: false,
+                reason: 'ERROR',
+                details: `couldn't login: Object (typically, node or user) not found`
+            });
+
+            const session = { data: { email: 'user@mega.nz' } };
+            const result = await provider.handleInput('WAIT_PASS', 'password123', session);
+
+            expect(result.success).toBe(false);
+            expect(result.reason).toBe('LOGIN_FAILED');
+            expect(result.message).toContain('登录失败');
+        });
+
         test('should handle 2FA error', async () => {
             const { CloudTool } = await import('../../../src/services/rclone.js');
             CloudTool.validateConfig.mockResolvedValue({

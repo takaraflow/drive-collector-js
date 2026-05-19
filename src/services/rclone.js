@@ -9,6 +9,8 @@ import { cache } from "./CacheService.js";
 import { logger } from "./logger/index.js";
 import { DriveProviderFactory } from "./drives/index.js";
 import { redactSensitiveText } from "../utils/serializer.js";
+import { classifyRcloneError, isRetryableRcloneError } from "../domain/rclone-error.js";
+import { getRcloneErrorUserMessage } from "../utils/rcloneErrorMessage.js";
 const log = logger.withModule ? logger.withModule('RcloneService') : logger;
 
 const buildRcloneEnv = () => ({
@@ -31,16 +33,6 @@ const sanitizeRemoteFileName = (fileName) => {
 
 const DEFAULT_RCLONE_PROCESS_ATTEMPTS = 3;
 const DEFAULT_RCLONE_RETRY_BASE_DELAY_MS = 1000;
-const RCLONE_RETRYABLE_ERROR_PATTERNS = [
-    /temporary failure/i,
-    /connection (reset|refused|aborted|closed)/i,
-    /i\/o timeout/i,
-    /TLS handshake timeout/i,
-    /timeout awaiting response headers/i,
-    /server closed idle connection/i,
-    /unexpected EOF/i,
-    /EOF while (reading|waiting|connecting)/i
-];
 
 export class CloudTool {
     static loading = false;
@@ -54,12 +46,25 @@ export class CloudTool {
     }
 
     static _isRetryableRcloneError(errorText) {
-        const text = String(errorText || "");
-        if (!text) return false;
-        if (/unexpected end of JSON input/i.test(text)) {
-            return /(failed to create file system|couldn'?t login|remote API|server response|mega)/i.test(text);
-        }
-        return RCLONE_RETRYABLE_ERROR_PATTERNS.some(pattern => pattern.test(text));
+        return isRetryableRcloneError(errorText);
+    }
+
+    static classifyRcloneError(errorText) {
+        return classifyRcloneError(errorText);
+    }
+
+    static _buildFailureResult(finalError, options = {}) {
+        const classification = this.classifyRcloneError(finalError);
+        const retryable = options.retryable !== false && classification.retryable === true;
+        const error = String(this.sanitizeRcloneOutput(finalError || "rclone command failed") || "rclone command failed").trim();
+        return {
+            success: false,
+            error,
+            retryable,
+            errorCode: classification.code,
+            userMessage: getRcloneErrorUserMessage(classification.code),
+            userRetryable: classification.userRetryable
+        };
     }
 
     static async _retryDelay(attempt, signal) {
@@ -445,7 +450,7 @@ export class CloudTool {
                 return lastResult;
             }
             if (!lastResult.retryable || attempt >= DEFAULT_RCLONE_PROCESS_ATTEMPTS) {
-                return { success: false, error: lastResult.error };
+                return lastResult;
             }
 
             log.warn("Retrying rclone upload after retryable process failure", {
@@ -457,7 +462,7 @@ export class CloudTool {
             await this._retryDelay(attempt);
         }
 
-        return { success: false, error: lastResult.error };
+        return lastResult;
     }
 
 
@@ -583,36 +588,33 @@ export class CloudTool {
                 const hasErrors = /(^|\b)(ERROR|CRITICAL|FATAL|Failed|failed|error|fatal)(\b|:)/.test(errorLogRef.content || "");
                 if (hasErrors) {
                     const sanitizedTail = this.sanitizeRcloneOutput(errorLogRef.content.slice(-500));
+                    const failureResult = this._buildFailureResult(`Upload completed but with errors: ${this.sanitizeRcloneOutput(errorLogRef.content.slice(-200).trim())}`, options);
                     log.error(`Rclone Batch completed with exit code 0 but contains errors`, {
                         error: new Error(sanitizedTail),
-                        rcloneExitCode: code
+                        rcloneExitCode: code,
+                        errorCode: failureResult.errorCode,
+                        retryable: failureResult.retryable
                     });
-                    safeResolve({ success: false, error: `Upload completed but with errors: ${this.sanitizeRcloneOutput(errorLogRef.content.slice(-200).trim())}` });
+                    safeResolve(failureResult);
                 } else {
                     safeResolve({ success: true });
                 }
             } else {
                 const finalError = this.sanitizeRcloneOutput(errorLogRef.content.slice(-500) || `Rclone exited with code ${code}`);
+                const failureResult = this._buildFailureResult(finalError, options);
                 log.error(`Rclone Batch Error`, {
                     error: new Error(finalError.trim()),
                     rcloneExitCode: code,
-                    retryable: options.retryable !== false && this._isRetryableRcloneError(finalError)
+                    retryable: failureResult.retryable,
+                    errorCode: failureResult.errorCode
                 });
-                safeResolve({
-                    success: false,
-                    error: finalError.trim(),
-                    retryable: options.retryable !== false && this._isRetryableRcloneError(finalError)
-                });
+                safeResolve(failureResult);
             }
         });
 
         proc.on("error", (err) => {
             const finalError = this.sanitizeRcloneOutput(err.message);
-            safeResolve({
-                success: false,
-                error: finalError,
-                retryable: options.retryable !== false && this._isRetryableRcloneError(finalError)
-            });
+            safeResolve(this._buildFailureResult(finalError, options));
         });
 
         // 写入文件列表到 stdin 并关闭
@@ -662,11 +664,7 @@ export class CloudTool {
                 });
             } catch (e) {
                 const finalError = this.sanitizeRcloneOutput(e.message);
-                safeResolve({
-                    success: false,
-                    error: finalError,
-                    retryable: this._isRetryableRcloneError(finalError)
-                });
+                safeResolve(this._buildFailureResult(finalError));
             }
         });
     }
@@ -736,7 +734,7 @@ export class CloudTool {
                     return lastResult;
                 }
                 if (!lastResult.retryable || attempt >= DEFAULT_RCLONE_PROCESS_ATTEMPTS) {
-                    return { success: false, error: lastResult.error };
+                    return lastResult;
                 }
 
                 log.warn("Retrying rclone copyto after retryable process failure", {
@@ -753,9 +751,9 @@ export class CloudTool {
                 }
             }
 
-            return { success: false, error: lastResult?.error || "rclone upload was not attempted" };
+            return lastResult || { success: false, error: "rclone upload was not attempted" };
         } catch (error) {
-            return { success: false, error: this.sanitizeRcloneOutput(error.message) };
+            return this._buildFailureResult(this.sanitizeRcloneOutput(error.message));
         }
     }
 
@@ -842,28 +840,16 @@ export class CloudTool {
                     }
 
                     const finalError = this.sanitizeRcloneOutput(errorLogRef.content.slice(-500).trim() || `rclone copyto exited with code ${code}`);
-                    safeResolve({
-                        success: false,
-                        error: finalError,
-                        retryable: this._isRetryableRcloneError(finalError)
-                    });
+                    safeResolve(this._buildFailureResult(finalError));
                 });
 
                 proc.on("error", (error) => {
                     const finalError = this.sanitizeRcloneOutput(error.message);
-                    safeResolve({
-                        success: false,
-                        error: finalError,
-                        retryable: this._isRetryableRcloneError(finalError)
-                    });
+                    safeResolve(this._buildFailureResult(finalError));
                 });
             } catch (error) {
                 const finalError = this.sanitizeRcloneOutput(error.message);
-                safeResolve({
-                    success: false,
-                    error: finalError,
-                    retryable: this._isRetryableRcloneError(finalError)
-                });
+                safeResolve(this._buildFailureResult(finalError));
             }
         });
     }

@@ -221,7 +221,7 @@ export async function uploadTask(task) {
         }
     } catch (e) {
         const isCancel = e.message === "CANCELLED";
-        await handleTaskFailure(task, this, updateStatus, e.message, isCancel);
+        await handleTaskFailure(task, this, updateStatus, e, isCancel);
     } finally {
         // Clean up local file asynchronously after upload
         if (localPath) {

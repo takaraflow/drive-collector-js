@@ -2,6 +2,7 @@ import { BaseDriveProvider, BindingStep, ActionResult, ValidationResult } from "
 import { CloudTool } from "../rclone.js";
 import { STRINGS } from "../../locales/drives/mega.js";
 import { logger } from "../logger/index.js";
+import { classifyRcloneError, RCLONE_ERROR_CODES } from "../../domain/rclone-error.js";
 
 const log = logger.withModule ? logger.withModule('MegaProvider') : logger;
 
@@ -131,10 +132,7 @@ export class MegaProvider extends BaseDriveProvider {
         
         if (!validation.success) {
             const errorMsg = this._formatErrorMessage(validation);
-            let errorReason = validation.reason || 'ERROR';
-            if (errorReason === 'ERROR' && validation.details?.includes("couldn't login")) {
-                errorReason = 'LOGIN_FAILED';
-            }
+            const errorReason = this._normalizeValidationReason(validation);
             return new ActionResult(false, errorMsg, null, null, errorReason);
         }
         
@@ -150,14 +148,31 @@ export class MegaProvider extends BaseDriveProvider {
      * 格式化错误消息
      */
     _formatErrorMessage(validation) {
-        if (validation.reason === '2FA') {
+        const reason = this._normalizeValidationReason(validation);
+        if (reason === '2FA') {
             return this.getErrorMessage('2FA');
         }
 
-        if (validation.details?.includes("couldn't login")) {
+        if (reason === 'LOGIN_FAILED') {
             return this.getErrorMessage('LOGIN_FAILED');
         }
 
         return this.getErrorMessage('NETWORK_ERROR');
+    }
+
+    _normalizeValidationReason(validation) {
+        if (validation.reason === '2FA') {
+            return '2FA';
+        }
+        if (validation.reason === 'LOGIN_FAILED') {
+            return 'LOGIN_FAILED';
+        }
+
+        const classification = classifyRcloneError(validation.details || '');
+        if (classification.code === RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID) {
+            return 'LOGIN_FAILED';
+        }
+
+        return validation.reason || 'ERROR';
     }
 }

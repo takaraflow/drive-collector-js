@@ -5,6 +5,8 @@ import { getConfig } from "../config/index.js";
 import { CloudTool } from "./rclone.js";
 import { logger } from "./logger/index.js";
 import { redactSensitiveText } from "../utils/serializer.js";
+import { classifyRcloneError, RCLONE_ERROR_CODES } from "../domain/rclone-error.js";
+import { getRcloneErrorUserMessage } from "../utils/rcloneErrorMessage.js";
 
 const log = logger.withModule ? logger.withModule("DirectTransferService") : logger;
 
@@ -14,6 +16,11 @@ const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
 const MAX_RCLONE_ERROR_LOG = 8000;
 const DEFAULT_TRANSFER_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const LOCAL_STAGING_REQUIRED_DRIVE_TYPES = new Set(["oss", "r2", "s3"]);
+const NON_FALLBACK_RCLONE_ERROR_CODES = new Set([
+    RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID,
+    RCLONE_ERROR_CODES.DRIVE_QUOTA_EXCEEDED,
+    RCLONE_ERROR_CODES.DRIVE_PERMISSION_DENIED
+]);
 
 export class DirectTransferService {
     constructor(cloudTool = CloudTool, options = {}) {
@@ -118,7 +125,7 @@ export class DirectTransferService {
             await this._endWritable(stdin);
             const rcloneResult = await rcloneCompletion;
             if (!rcloneResult.success) {
-                throw new DirectTransferFallbackError(rcloneResult.error || "rclone rcat failed");
+                throw new DirectTransferFallbackError(rcloneResult.error || "rclone rcat failed", rcloneResult);
             }
 
             const preMoveRemote = await this.cloudTool.getRemoteFileInfo(finalFileName, task.userId, 1, true);
@@ -162,8 +169,17 @@ export class DirectTransferService {
 
             const fallbackAllowed = config.directTransfer?.fallbackToLocal !== false;
             const message = redactSensitiveText(error?.message || String(error));
-            if (!fallbackAllowed) {
-                return { success: false, fallback: false, error: message };
+            const classification = classifyRcloneError(message);
+            const errorCode = error?.errorCode || classification.code;
+            const isPermanentDriveFailure = NON_FALLBACK_RCLONE_ERROR_CODES.has(errorCode);
+            const failureMetadata = {
+                errorCode,
+                userMessage: error?.userMessage || getRcloneErrorUserMessage(errorCode),
+                retryable: typeof error?.retryable === "boolean" ? error.retryable : classification.retryable,
+                userRetryable: error?.userRetryable ?? classification.userRetryable
+            };
+            if (!fallbackAllowed || isPermanentDriveFailure) {
+                return { success: false, fallback: false, error: message, ...failureMetadata };
             }
 
             log.warn("Direct transfer failed; falling back to local staging", {
@@ -171,7 +187,7 @@ export class DirectTransferService {
                 fileName,
                 reason: message
             });
-            return { success: false, fallback: true, error: message };
+            return { success: false, fallback: true, error: message, ...failureMetadata };
         }
     }
 
@@ -245,7 +261,7 @@ export class DirectTransferService {
                     try {
                         if (proc && !proc.killed) proc.kill("SIGTERM");
                     } catch {}
-                    safeResolve({ success: false, error: `rclone rcat timed out after ${timeoutMs}ms` });
+                    safeResolve(this._buildRcloneFailure(`rclone rcat timed out after ${timeoutMs}ms`));
                 }, timeoutMs);
             }
 
@@ -263,16 +279,29 @@ export class DirectTransferService {
                     return;
                 }
                 const errorTail = redactSensitiveText(stderrLog.slice(-500).trim());
-                safeResolve({ success: false, error: errorTail || `rclone rcat exited with code ${code}` });
+                safeResolve(this._buildRcloneFailure(errorTail || `rclone rcat exited with code ${code}`));
             });
 
             proc.on("error", (error) => {
-                safeResolve({ success: false, error: redactSensitiveText(error.message) });
+                safeResolve(this._buildRcloneFailure(error.message));
             });
         }).catch((error) => {
             log.warn("Direct transfer rclone watcher failed", { taskId, error: redactSensitiveText(error.message) });
-            return { success: false, error: redactSensitiveText(error.message) };
+            return this._buildRcloneFailure(error.message);
         });
+    }
+
+    _buildRcloneFailure(errorMessage) {
+        const message = String(redactSensitiveText(errorMessage || "rclone failed") || "rclone failed");
+        const classification = classifyRcloneError(message);
+        return {
+            success: false,
+            error: message,
+            errorCode: classification.code,
+            userMessage: getRcloneErrorUserMessage(classification.code),
+            retryable: classification.retryable,
+            userRetryable: classification.userRetryable
+        };
     }
 
     async _cleanupRemote(fileName, userId, reason) {
@@ -353,10 +382,14 @@ export class DirectTransferService {
 }
 
 class DirectTransferFallbackError extends Error {
-    constructor(message) {
+    constructor(message, metadata = {}) {
         super(message);
         this.name = "DirectTransferFallbackError";
         this.code = "DIRECT_TRANSFER_FALLBACK";
+        this.errorCode = metadata.errorCode;
+        this.userMessage = metadata.userMessage;
+        this.retryable = metadata.retryable;
+        this.userRetryable = metadata.userRetryable;
     }
 }
 

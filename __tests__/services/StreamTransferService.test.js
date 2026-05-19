@@ -601,6 +601,44 @@ describe('StreamTransferService', () => {
     )
   })
 
+  test('rcat auth failures show user guidance while storing redacted diagnostics', async () => {
+    const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
+    const { TelegramBotApi } = await import('../../src/utils/telegramBotApi.js')
+
+    const result = await streamTransferService.handleIncomingChunk(
+      'task-auth-error',
+      createChunkReq({
+        'x-file-name': encodeURIComponent('auth.txt'),
+        'x-is-last': 'true',
+        'x-chunk-index': '0',
+        'x-total-size': '11'
+      }, 'hello world')
+    )
+    const stream = rcloneMock.streams[0]
+
+    stream.proc.stderr.emit('data', Buffer.from(`CRITICAL | Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":folder": couldn't login: Object (typically, node or user) not found\n`))
+    stream.proc.emit('close', 1)
+    await flushAsyncEvents()
+
+    expect(result).toMatchObject({ success: true, statusCode: 200 })
+    expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+      'task-auth-error',
+      'fail',
+      expect.stringContaining('Object (typically, node or user) not found'),
+      expect.objectContaining({ source: 'stream_report_error' })
+    )
+    const persistedError = TaskRepository.transitionStatus.mock.calls.find(([taskId, event]) => taskId === 'task-auth-error' && event === 'fail')?.[2]
+    expect(persistedError).toContain('user="[REDACTED]"')
+    expect(persistedError).toContain('pass="[REDACTED]"')
+    expect(persistedError).not.toContain('user@example.com')
+    expect(persistedError).not.toContain('secret-pass')
+    const text = TelegramBotApi.editMessageText.mock.calls
+      .filter(([chatId]) => chatId === 'chat-123')
+      .at(-1)?.[2]
+    expect(text).toContain('重新绑定网盘')
+    expect(text).not.toContain('Object (typically, node or user) not found')
+  })
+
   test('finishTask completes when remote validation succeeds', async () => {
     const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
     const { TelegramBotApi } = await import('../../src/utils/telegramBotApi.js')

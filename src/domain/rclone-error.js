@@ -1,0 +1,119 @@
+export const RCLONE_ERROR_CODES = Object.freeze({
+    DRIVE_AUTH_INVALID: "DRIVE_AUTH_INVALID",
+    DRIVE_QUOTA_EXCEEDED: "DRIVE_QUOTA_EXCEEDED",
+    DRIVE_PERMISSION_DENIED: "DRIVE_PERMISSION_DENIED",
+    RCLONE_TRANSIENT: "RCLONE_TRANSIENT",
+    UNKNOWN: "UNKNOWN"
+});
+
+const TRANSIENT_ERROR_PATTERNS = [
+    /temporary failure/i,
+    /connection (reset|refused|aborted|closed)/i,
+    /i\/o timeout/i,
+    /TLS handshake timeout/i,
+    /timeout awaiting response headers/i,
+    /server closed idle connection/i,
+    /unexpected EOF/i,
+    /EOF while (reading|waiting|connecting)/i
+];
+
+const AUTH_ERROR_PATTERNS = [
+    /couldn'?t login/i,
+    /authentication failed/i,
+    /invalid (?:login|credentials|username|password)/i,
+    /bad password/i,
+    /login failed/i,
+    /unauthorized/i,
+    /invalid[_ -]?grant/i,
+    /token (?:expired|invalid|revoked)/i
+];
+
+const QUOTA_ERROR_PATTERNS = [
+    /quota exceeded/i,
+    /insufficient (?:storage|space)/i,
+    /not enough (?:storage|space)/i,
+    /storage .*full/i,
+    /disk full/i
+];
+
+const PERMISSION_ERROR_PATTERNS = [
+    /permission denied/i,
+    /access denied/i,
+    /forbidden/i,
+    /\b403\b/
+];
+
+const MEGA_LOGIN_OBJECT_NOT_FOUND = /couldn'?t login[\s\S]*Object \(typically, node or user\) not found/i;
+const TRANSIENT_JSON_STARTUP_ERROR = /unexpected end of JSON input/i;
+const TRANSIENT_JSON_CONTEXT = /(failed to create file system|couldn'?t login|remote API|server response|mega)/i;
+
+const hasAnyMatch = (text, patterns) => patterns.some(pattern => pattern.test(text));
+
+export function classifyRcloneError(errorText) {
+    const text = String(errorText || "").trim();
+    if (!text) {
+        return {
+            code: RCLONE_ERROR_CODES.UNKNOWN,
+            retryable: false,
+            userRetryable: true
+        };
+    }
+
+    if (MEGA_LOGIN_OBJECT_NOT_FOUND.test(text)) {
+        return {
+            code: RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID,
+            retryable: false,
+            userRetryable: false
+        };
+    }
+
+    if (TRANSIENT_JSON_STARTUP_ERROR.test(text) && TRANSIENT_JSON_CONTEXT.test(text)) {
+        return {
+            code: RCLONE_ERROR_CODES.RCLONE_TRANSIENT,
+            retryable: true,
+            userRetryable: true
+        };
+    }
+
+    if (hasAnyMatch(text, AUTH_ERROR_PATTERNS)) {
+        return {
+            code: RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID,
+            retryable: false,
+            userRetryable: false
+        };
+    }
+
+    if (hasAnyMatch(text, QUOTA_ERROR_PATTERNS)) {
+        return {
+            code: RCLONE_ERROR_CODES.DRIVE_QUOTA_EXCEEDED,
+            retryable: false,
+            userRetryable: true
+        };
+    }
+
+    if (hasAnyMatch(text, PERMISSION_ERROR_PATTERNS)) {
+        return {
+            code: RCLONE_ERROR_CODES.DRIVE_PERMISSION_DENIED,
+            retryable: false,
+            userRetryable: false
+        };
+    }
+
+    if (hasAnyMatch(text, TRANSIENT_ERROR_PATTERNS)) {
+        return {
+            code: RCLONE_ERROR_CODES.RCLONE_TRANSIENT,
+            retryable: true,
+            userRetryable: true
+        };
+    }
+
+    return {
+        code: RCLONE_ERROR_CODES.UNKNOWN,
+        retryable: false,
+        userRetryable: true
+    };
+}
+
+export function isRetryableRcloneError(errorText) {
+    return classifyRcloneError(errorText).retryable === true;
+}

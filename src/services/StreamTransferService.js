@@ -12,6 +12,8 @@ import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
 import { CACHE_KEYS } from "../domain/cache-keys.js";
 import { getClaimFenceOptions } from "../processor/TaskManager/claim-fence.js";
 import { redactSensitiveText } from "../utils/serializer.js";
+import { classifyRcloneError } from "../domain/rclone-error.js";
+import { getRcloneErrorUserMessage } from "../utils/rcloneErrorMessage.js";
 import { once } from "events";
 import fs from "fs";
 import os from "os";
@@ -881,7 +883,7 @@ class StreamTransferService {
                 await this._closeWriteStream(context.writeStream).catch(() => {});
                 this.activeStreams.delete(taskId);
                 await this.saveProgressToCache(taskId, context);
-                await this.reportError(taskId, context, error.message);
+                await this.reportError(taskId, context, error);
             }
             return { success: false, statusCode: 500, message: error.message };
         }
@@ -945,7 +947,7 @@ class StreamTransferService {
                 await this._saveFinalizationStatus(taskId, context.finalizeState);
                 if (!context.cancelled) {
                     await this.saveProgressToCache(taskId, context);
-                    await this.reportError(taskId, context, error.message);
+                    await this.reportError(taskId, context, error);
                 }
                 return { success: false, completed: false, error: error.message };
             });
@@ -982,7 +984,7 @@ class StreamTransferService {
         );
 
         if (!uploadResult?.success) {
-            throw new Error(uploadResult?.error || "Resumable stream upload failed");
+            throw new StreamTransferFinalizationError(uploadResult?.error || "Resumable stream upload failed", uploadResult);
         }
 
         if (context.cancelled || context.finalizeToken !== token) {
@@ -1387,8 +1389,20 @@ class StreamTransferService {
             })));
     }
 
-    async reportError(taskId, context, errorMsg) {
-        const safeErrorMsg = redactSensitiveText(errorMsg);
+    async reportError(taskId, context, errorMsg, failure = null) {
+        const metadata = failure || (errorMsg && typeof errorMsg === 'object' ? errorMsg : null);
+        const rawErrorMsg = metadata instanceof Error ? metadata.message : errorMsg;
+        const safeErrorMsg = String(redactSensitiveText(rawErrorMsg || "Stream transfer failed") || "Stream transfer failed");
+        const fallbackClassification = classifyRcloneError(safeErrorMsg);
+        const errorCode = metadata?.errorCode || fallbackClassification.code;
+        const classification = {
+            code: errorCode,
+            userMessage: metadata?.userMessage || getRcloneErrorUserMessage(errorCode),
+            retryable: typeof metadata?.retryable === 'boolean' ? metadata.retryable : fallbackClassification.retryable,
+            userRetryable: metadata?.userRetryable ?? fallbackClassification.userRetryable
+        };
+        const userMessage = classification.userMessage ? redactSensitiveText(classification.userMessage) : null;
+        const displayMessage = userMessage || safeErrorMsg;
         log.error(`❌ 任务上传失败: ${taskId} - ${safeErrorMsg}`);
         const transition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, safeErrorMsg, {
             ...getClaimFenceOptions(context),
@@ -1399,7 +1413,7 @@ class StreamTransferService {
         if (transition.blocked) return;
         
         try {
-            const text = `❌ 上传失败: ${safeErrorMsg}`;
+            const text = `❌ 上传失败: ${displayMessage}`;
             await TelegramBotApi.editMessageText(context.chatId, parseInt(context.msgId), text);
         } catch (error) {
             log.warn('Failed to update Telegram message after task error', {
@@ -1551,4 +1565,15 @@ class StreamTransferService {
 }
 
 export const streamTransferService = new StreamTransferService();
+
+class StreamTransferFinalizationError extends Error {
+    constructor(message, metadata = {}) {
+        super(message);
+        this.name = "StreamTransferFinalizationError";
+        this.errorCode = metadata.errorCode;
+        this.userMessage = metadata.userMessage;
+        this.retryable = metadata.retryable;
+        this.userRetryable = metadata.userRetryable;
+    }
+}
 export default streamTransferService;
