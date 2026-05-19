@@ -461,12 +461,44 @@ export class CloudTool {
     }
 
 
+    static _appendRcloneError(errorLogRef, value) {
+        const text = this.sanitizeRcloneOutput(String(value || "").trim());
+        if (!text) return;
+        errorLogRef.content += `${text}\n`;
+    }
+
+    static _formatRcloneJsonError(logEntry) {
+        if (!logEntry || typeof logEntry !== "object") return "";
+
+        const level = String(logEntry.level || "").toLowerCase();
+        const msg = String(logEntry.msg || logEntry.message || "").trim();
+        const error = String(logEntry.error || "").trim();
+        const object = String(logEntry.object || "").trim();
+        const source = String(logEntry.source || "").trim();
+        const hasErrorLevel = ["error", "fatal", "critical"].includes(level);
+        const hasErrorMessage = /(^|\b)(error|failed|failure|critical|fatal|couldn'?t)(\b|:)/i.test(`${msg} ${error}`);
+
+        if (!hasErrorLevel && !hasErrorMessage) return "";
+
+        const parts = [];
+        if (level) parts.push(level.toUpperCase());
+        if (object) parts.push(object);
+        if (msg) parts.push(msg);
+        if (error && error !== msg) parts.push(error);
+        if (source) parts.push(`source=${source}`);
+        return parts.join(" | ");
+    }
+
     static _processRcloneLog(line, tasks, onProgress, errorLogRef) {
         try {
-            const log = JSON.parse(line);
+            const logEntry = JSON.parse(line);
+            const formattedError = this._formatRcloneJsonError(logEntry);
+            if (formattedError) {
+                this._appendRcloneError(errorLogRef, formattedError);
+            }
             // 解析 rclone JSON 日志中的进度信息
-            if (log.msg === "Status update" || (log.stats && log.msg.includes("progress"))) {
-                const stats = log.stats || {};
+            if (logEntry.msg === "Status update" || (logEntry.stats && String(logEntry.msg || "").includes("progress"))) {
+                const stats = logEntry.stats || {};
                 if (onProgress && stats.transferring) {
                     // 匹配每个正在传输的文件到对应的任务
                     stats.transferring.forEach(transfer => {
@@ -486,7 +518,7 @@ export class CloudTool {
             }
         } catch (e) {
             // 解析失败的行通常是 Rclone 的普通文本错误日志，收集起来
-            errorLogRef.content += line + "\n";
+            this._appendRcloneError(errorLogRef, line);
         }
     }
 
@@ -539,22 +571,33 @@ export class CloudTool {
         });
 
         proc.on("close", (code) => {
+            if (stderrBuffer.trim()) {
+                this._processRcloneLog(stderrBuffer, tasks, onProgress, errorLogRef);
+                stderrBuffer = "";
+            }
             if (cancelled || isAnyTaskCancelled()) {
                 return safeResolve({ success: false, error: "CANCELLED" });
             }
             if (code === 0) {
                 // Even with exit code 0, check for errors in the log
-                const hasErrors = errorLogRef.content.includes('ERROR') || errorLogRef.content.includes('Failed') || errorLogRef.content.includes('failed');
+                const hasErrors = /(^|\b)(ERROR|CRITICAL|FATAL|Failed|failed|error|fatal)(\b|:)/.test(errorLogRef.content || "");
                 if (hasErrors) {
                     const sanitizedTail = this.sanitizeRcloneOutput(errorLogRef.content.slice(-500));
-                    log.error(`Rclone Batch completed with exit code 0 but contains errors:`, sanitizedTail);
+                    log.error(`Rclone Batch completed with exit code 0 but contains errors`, {
+                        error: new Error(sanitizedTail),
+                        rcloneExitCode: code
+                    });
                     safeResolve({ success: false, error: `Upload completed but with errors: ${this.sanitizeRcloneOutput(errorLogRef.content.slice(-200).trim())}` });
                 } else {
                     safeResolve({ success: true });
                 }
             } else {
                 const finalError = this.sanitizeRcloneOutput(errorLogRef.content.slice(-500) || `Rclone exited with code ${code}`);
-                log.error(`Rclone Batch Error:`, finalError);
+                log.error(`Rclone Batch Error`, {
+                    error: new Error(finalError.trim()),
+                    rcloneExitCode: code,
+                    retryable: options.retryable !== false && this._isRetryableRcloneError(finalError)
+                });
                 safeResolve({
                     success: false,
                     error: finalError.trim(),

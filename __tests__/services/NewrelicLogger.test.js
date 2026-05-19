@@ -186,6 +186,22 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
         expect(payload.error_stack).toBe('StringRejection: worker rejected');
     });
 
+    it('should expose rclone error object diagnostics as searchable New Relic fields', async () => {
+        const error = new Error('ERROR | movie.mp4 | Failed to copy | quota exceeded');
+
+        const payload = logger._buildPayload('error', 'Rclone Batch Error', {
+            error,
+            rcloneExitCode: 1,
+            retryable: false
+        }, { module: 'RcloneService' }, 'instance-1');
+
+        expect(payload.error_name).toBe('Error');
+        expect(payload.error_message).toContain('Failed to copy');
+        expect(payload.error_message).toContain('quota exceeded');
+        expect(payload.error_message).not.toContain('pass=');
+        expect(payload.attributes.details).toContain('rcloneExitCode');
+    });
+
     it('should attach build identity fields to log payloads', async () => {
         process.env.APP_VERSION = '9.9.9';
         process.env.GIT_SHA = 'abcdef1234567890';

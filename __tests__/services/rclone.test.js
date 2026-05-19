@@ -428,6 +428,47 @@ describe('CloudTool', () => {
             expect(result.error).toContain('disk full');
         });
 
+        it('should retain rclone JSON error logs as upload failure reason', async () => {
+            mockSpawn.mockImplementationOnce(() => createAutoProcess((p) => {
+                p.stderr.emit('data', Buffer.from(JSON.stringify({
+                    level: 'error',
+                    msg: 'Failed to copy',
+                    object: 'movie.mp4',
+                    error: 'could not create file: quota exceeded'
+                }) + '\n'));
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 1);
+                p.emit('close', 1);
+            }));
+
+            const result = await CloudTool.uploadFile('/local/path', { userId: 'user123' });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Failed to copy');
+            expect(result.error).toContain('quota exceeded');
+            expect(result.error).not.toBe('Rclone exited with code 1');
+        });
+
+        it('should flush trailing stderr without newline before resolving upload failure', async () => {
+            mockSpawn.mockImplementationOnce(() => createAutoProcess((p) => {
+                p.stderr.emit('data', Buffer.from('CRITICAL: upload failed without newline'));
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 1);
+                p.emit('close', 1);
+            }));
+
+            const result = await CloudTool.uploadFile('/local/path', { userId: 'user123' });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('upload failed without newline');
+        });
+
         it('should redact sensitive rclone stderr from upload failures', async () => {
             mockSpawn.mockImplementation(() => createAutoProcess((p) => {
                 p.stderr.emit('data', Buffer.from(`CRITICAL: Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":folder": unexpected end of JSON input\n`));
