@@ -103,4 +103,31 @@ describe("TaskManager upload failure handling", () => {
         );
         expect(updateStatus.mock.calls[0][1]).not.toContain("Object (typically, node or user) not found");
     });
+
+    test("does not expose retryable queue infrastructure diagnostics to users", async () => {
+        const updateStatus = vi.fn();
+
+        await handleTaskFailure(
+            { id: "task-queue", isGroup: false },
+            {},
+            updateStatus,
+            new Error("Circuit breaker is OPEN for qstash_publish"),
+            false
+        );
+
+        expect(mocks.transitionStatus).toHaveBeenCalledWith(
+            "task-queue",
+            "fail",
+            "Circuit breaker is OPEN for qstash_publish",
+            expect.objectContaining({ source: "handleTaskFailure" })
+        );
+        expect(updateStatus).toHaveBeenCalledWith(
+            expect.objectContaining({ id: "task-queue" }),
+            "action required 系统队列暂时繁忙，请稍后重试或查看状态。",
+            true,
+            null,
+            true
+        );
+        expect(updateStatus.mock.calls[0][1]).not.toContain("qstash_publish");
+    });
 });

@@ -8,6 +8,7 @@ import { resolveInstanceBaseUrl } from "../../utils/instanceUrl.js";
 import { assertLocalStorageCapacity } from "../../utils/storageGuard.js";
 import { TASK_EVENTS } from "../../domain/task-state-machine.js";
 import { TASK_QUEUE_TRIGGER_SOURCES, TaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
+import { isRetryableInfrastructureError } from "../../domain/infrastructure-error.js";
 
 // 获取模块日志记录器
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager');
@@ -65,6 +66,7 @@ export async function downloadTask(task) {
 
             // Create heartbeat function
             const heartbeat = createHeartbeat(task, this, updateStatus, fileName);
+            let downloadFinished = false;
 
             try {
                 const deps = { config, client, CloudTool, updateStatus, runMtprotoFileTaskWithRetry, TaskRepository, DriveRepository, queueService, STRINGS, format, streamTransferService, directTransferService, instanceCoordinator };
@@ -77,7 +79,11 @@ export async function downloadTask(task) {
                 if (await _handleInstantTransfer(this, deps, task, info, fileName, initialHeartbeat)) return;
 
                 // 2. Local file check
-                if (await _handleLocalFile(this, deps, task, info, fileName, localPath, initialHeartbeat)) return;
+                if (await _handleLocalFile(this, deps, task, info, fileName, localPath, initialHeartbeat, {
+                    markDownloadFinished: () => {
+                        downloadFinished = true;
+                    }
+                })) return;
 
                 await initialHeartbeat;
 
@@ -92,15 +98,27 @@ export async function downloadTask(task) {
                 if (!transferPlan.skipStreamForwarding && await _handleStreamForwarding(this, deps, task, info, fileName, isLargeFile)) return;
 
                 // 5. Download phase - MTProto file download
-                await _handleMTProtoDownload(this, deps, task, info, fileName, localPath, heartbeat, isLargeFile);
+                await _handleMTProtoDownload(this, deps, task, info, fileName, localPath, heartbeat, isLargeFile, {
+                    markDownloadFinished: () => {
+                        downloadFinished = true;
+                    }
+                });
 
 
             } catch (e) {
                 const isCancel = e.message === "CANCELLED";
-                try {
-                    await handleTaskFailure(task, this, updateStatus, e, isCancel);
-                } catch (updateError) {
-                    log.error(`Failed to update task status for ${task.id}:`, updateError);
+                if (downloadFinished && isRetryableInfrastructureError(e)) {
+                    log.warn("Download phase hit retryable infrastructure error; leaving state for webhook/recovery retry", {
+                        taskId: task.id,
+                        error: e.message
+                    });
+                    throw e;
+                } else {
+                    try {
+                        await handleTaskFailure(task, this, updateStatus, e, isCancel);
+                    } catch (updateError) {
+                        log.error(`Failed to update task status for ${task.id}:`, updateError);
+                    }
                 }
                 this.activeProcessors.delete(id);
             }
@@ -140,7 +158,7 @@ async function _handleInstantTransfer(context, deps, task, info, fileName, initi
     return false;
 }
 
-async function _handleLocalFile(context, deps, task, info, fileName, localPath, initialHeartbeat) {
+async function _handleLocalFile(context, deps, task, info, fileName, localPath, initialHeartbeat, phaseHooks = {}) {
     const { TaskRepository, updateStatus, format, STRINGS, queueService, instanceCoordinator } = deps;
     const log = dependencyContainer.get('logger').withModule('TaskManager');
 
@@ -168,6 +186,7 @@ async function _handleLocalFile(context, deps, task, info, fileName, localPath, 
             source: 'local_file_ready'
         });
         if (transition.blocked) return true;
+        phaseHooks.markDownloadFinished?.();
         if (!task.isGroup) {
             await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
         }
@@ -526,7 +545,7 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
     throw error;
 }
 
-async function _handleMTProtoDownload(context, deps, task, info, fileName, localPath, heartbeat, isLargeFile) {
+async function _handleMTProtoDownload(context, deps, task, info, fileName, localPath, heartbeat, isLargeFile, phaseHooks = {}) {
     const { config, client, runMtprotoFileTaskWithRetry, TaskRepository, updateStatus, STRINGS, format, queueService } = deps;
     const log = dependencyContainer.get('logger').withModule('TaskManager');
     const { message } = task;
@@ -569,6 +588,7 @@ async function _handleMTProtoDownload(context, deps, task, info, fileName, local
         source: 'download_complete'
     });
     if (transition.blocked) return true;
+    phaseHooks.markDownloadFinished?.();
     if (!task.isGroup) {
         await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
     }

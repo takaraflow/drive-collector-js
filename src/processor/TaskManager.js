@@ -12,6 +12,10 @@ import {
     TASK_QUEUE_TRIGGER_SOURCES
 } from "../domain/task-queue-contract.js";
 import {
+    classifyInfrastructureError,
+    isRetryableInfrastructureError
+} from "../domain/infrastructure-error.js";
+import {
     attachClaimLease,
     getClaimFenceOptions
 } from "./TaskManager/claim-fence.js";
@@ -779,6 +783,81 @@ export class TaskManager {
         return result;
     }
 
+    static _resolveDownloadedTaskLocalPath(dbTask, config) {
+        const sourceRef = parseTaskSourceRef(dbTask.source_ref);
+        const fileName = dbTask.file_name || sourceRef?.fileName || dbTask.id;
+        const localFileName = isExternalUrlTask(dbTask)
+            ? buildExternalLocalFileName(dbTask.id, fileName)
+            : path.basename(fileName);
+        return path.join(config.downloadDir, localFileName);
+    }
+
+    static async _enqueueDownloadedTaskForUpload(dbTask, source) {
+        const { config, TaskRepository } = getDeps();
+        const log = getLog();
+        const localPath = this._resolveDownloadedTaskLocalPath(dbTask, config);
+
+        if (!fs.existsSync(localPath)) {
+            const reset = await TaskRepository.transitionStatus(dbTask.id, TASK_EVENTS.RETRY, 'Local file missing during upload queue repair', {
+                returnResult: true,
+                allowNoop: true,
+                source: `${source}.local_missing`
+            });
+            if (reset.blocked) {
+                log.warn("Downloaded task upload repair could not reset missing local file", {
+                    taskId: dbTask.id,
+                    reason: reset.reason
+                });
+                return { success: true, statusCode: 200, message: "Ignored by task state machine" };
+            }
+            return { success: false, statusCode: 503, message: "Local file missing; task reset for download retry" };
+        }
+
+        const reset = await TaskRepository.transitionStatus(dbTask.id, TASK_EVENTS.RESET_UPLOAD, null, {
+            returnResult: true,
+            allowNoop: true,
+            source
+        });
+        if (reset.blocked) {
+            log.info("Downloaded task upload repair ignored by state machine", {
+                taskId: dbTask.id,
+                reason: reset.reason,
+                status: reset.fromStatus || reset.latestStatus
+            });
+            return { success: true, statusCode: 200, message: "Ignored by task state machine" };
+        }
+
+        await this._enqueueUploadTask({
+            id: dbTask.id,
+            userId: dbTask.user_id,
+            chatId: dbTask.chat_id,
+            msgId: dbTask.msg_id,
+            localPath,
+            queueAttempt: reset.queueAttempt
+        });
+        log.info("Downloaded task re-enqueued for upload", {
+            taskId: dbTask.id,
+            source
+        });
+        return { success: true, statusCode: 200, message: "Upload task re-enqueued" };
+    }
+
+    static async _downloadWebhookRecoveryEvent(taskId) {
+        const { TaskRepository } = getDeps();
+        try {
+            const latest = await TaskRepository.findById(taskId);
+            if (latest?.status === TASK_STATUSES.DOWNLOADED) {
+                return TASK_EVENTS.RESET_UPLOAD;
+            }
+        } catch (error) {
+            getLog().warn("Unable to inspect task state for retryable download recovery", {
+                taskId,
+                error: error.message
+            });
+        }
+        return TASK_EVENTS.RETRY;
+    }
+
     static _assertQueuePublishResult(result, taskId, type) {
         if (result?.fallback || result?.error) {
             throw new Error(`Queue enqueue failed for ${type} task ${taskId}: ${result.error || 'fallback result'}`);
@@ -847,8 +926,10 @@ export class TaskManager {
      * @returns {number} HTTP 状态码
      */
     static _classifyError(error) {
-        const msg = error.message || '';
-        const code = error.code || '';
+        const msg = error?.message || String(error || '');
+        const code = error?.code || '';
+        const infrastructure = classifyInfrastructureError(error);
+        if (infrastructure.retryable) return 503;
         
         // 任务不存在或无效参数 -> 404
         if (msg.includes('not found') || msg.includes('not found in database') || 
@@ -889,6 +970,7 @@ export class TaskManager {
 
     static _isRetryableInfrastructureError(error) {
         const msg = error?.message || '';
+        if (isRetryableInfrastructureError(error)) return true;
         if (this._classifyError(error) === 503) return true;
         return /D1 HTTP 5\d\d/i.test(msg) ||
             /D1 HTTP 400 \\[7500\\]/i.test(msg) ||
@@ -926,6 +1008,11 @@ export class TaskManager {
             if (dbTask.status === TASK_STATUSES.CANCELLED) {
                 log.info("Task cancelled, skipping download webhook", { taskId });
                 return { success: true, statusCode: 200 };
+            }
+
+            if (dbTask.status === TASK_STATUSES.DOWNLOADED) {
+                lockAcquired = await this._acquireWebhookTaskLock(instanceCoordinator, taskId, 'upload_queue_repair');
+                return await this._enqueueDownloadedTaskForUpload(dbTask, 'handleDownloadWebhook.upload_queue_repair');
             }
 
             lockAcquired = await this._acquireWebhookTaskLock(instanceCoordinator, taskId, 'download');
@@ -980,7 +1067,8 @@ export class TaskManager {
             }
             const code = this._classifyError(error);
             if (this._isRetryableInfrastructureError(error)) {
-                await this._resetAfterRetryableInfrastructureError(taskId, TASK_EVENTS.RETRY, error, 'handleDownloadWebhook.retryable_infra_error', didClaim ? getClaimFenceOptions(leaderLease) : {});
+                const recoveryEvent = await this._downloadWebhookRecoveryEvent(taskId);
+                await this._resetAfterRetryableInfrastructureError(taskId, recoveryEvent, error, 'handleDownloadWebhook.retryable_infra_error', didClaim ? getClaimFenceOptions(leaderLease) : {});
                 return { success: false, statusCode: code, message: error.message };
             }
             await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {

@@ -73,6 +73,8 @@ export const STRINGS = {
         upload_error_drive_quota_exceeded: "目标网盘空间不足。请清理空间或更换保存目录后再重试。",
         upload_error_drive_permission_denied: "目标网盘拒绝写入。请检查绑定账号权限或保存目录后再重试。",
         upload_error_transient: "网盘连接暂时异常，系统已自动重试但仍失败。请稍后再试。",
+        error_queue_temporarily_unavailable: "系统队列暂时繁忙，请稍后重试或查看状态。",
+        error_infrastructure_transient: "系统依赖暂时异常，任务会自动重试。请稍后查看状态。",
         parse_failed: "❌ 无法解析该媒体文件信息。",
         link_parse_failed: "❌ <b>无法解析这个链接</b>\n\n请确认链接可访问，或重新发送文件本身。",
         link_limit: "⚠️ 仅处理前 10 个媒体。",

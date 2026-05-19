@@ -14,6 +14,7 @@ import {
 import { assertLocalStorageCapacity } from "../../utils/storageGuard.js";
 import { createHeartbeat, handleTaskFailure, escapeHTML } from "./TaskManager.utils.js";
 import { assertClaimFenceCurrent, getClaimFenceOptions } from "./claim-fence.js";
+import { isRetryableInfrastructureError } from "../../domain/infrastructure-error.js";
 
 const getLog = () => dependencyContainer.get("logger").withModule("TaskManager.external-download");
 const EXTERNAL_URL_USER_FAILURE_MESSAGE = "外部链接下载失败，请确认链接仍可公开访问且文件大小未超过限制。";
@@ -43,6 +44,7 @@ export async function downloadExternalUrlTask(task) {
     let didActivate = false;
     let localPath = null;
     let partialPath = null;
+    let downloadFinished = false;
 
     try {
         if (this.activeProcessors.has(task.id)) {
@@ -142,6 +144,7 @@ export async function downloadExternalUrlTask(task) {
             source: "external_url_download_complete"
         });
         if (transition.blocked) return true;
+        downloadFinished = true;
 
         if (!task.isGroup) {
             await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
@@ -168,6 +171,13 @@ export async function downloadExternalUrlTask(task) {
         const isCancel = error.message === "CANCELLED";
         if (partialPath) {
             await fs.promises.rm(partialPath, { force: true }).catch(() => {});
+        }
+        if (downloadFinished && isRetryableInfrastructureError(error)) {
+            log.warn("External URL task hit retryable infrastructure error; leaving state for webhook/recovery retry", {
+                taskId: task.id,
+                error: error.message
+            });
+            throw error;
         }
         const sourceRef = task.sourceRef || {};
         log.warn("External URL download failed", {

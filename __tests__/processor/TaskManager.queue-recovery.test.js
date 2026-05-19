@@ -473,6 +473,87 @@ describe('TaskManager queue/recovery closure', () => {
         downloadSpy.mockRestore();
     });
 
+    it('repairs a downloaded task by enqueueing upload instead of re-downloading', async () => {
+        mockTaskRepository.findById.mockResolvedValue({
+            id: 'task-1',
+            user_id: 'user-1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'test.mp4',
+            status: 'downloaded'
+        });
+        mockFs.existsSync.mockReturnValue(true);
+        const downloadSpy = vi.spyOn(TaskManager, 'downloadTask');
+
+        const result = await TaskManager.handleDownloadWebhook('task-1');
+
+        expect(result).toMatchObject({
+            success: true,
+            statusCode: 200,
+            message: 'Upload task re-enqueued'
+        });
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            'task-1',
+            TASK_EVENTS.RESET_UPLOAD,
+            null,
+            expect.objectContaining({ source: 'handleDownloadWebhook.upload_queue_repair' })
+        );
+        expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith(
+            'task-1',
+            expect.objectContaining({
+                localPath: '/tmp/downloads/test.mp4',
+                _meta: expect.objectContaining({
+                    queueAttempt: `${TASK_EVENTS.RESET_UPLOAD}:task-1:1700000000000`
+                })
+            })
+        );
+        expect(downloadSpy).not.toHaveBeenCalled();
+        expect(mockInstanceCoordinator.acquireTaskLock).toHaveBeenCalledWith('task-1');
+        expect(mockInstanceCoordinator.releaseTaskLock).toHaveBeenCalledWith('task-1');
+    });
+
+    it('resets downloaded task to upload retry when QStash publish fails after download', async () => {
+        mockTaskRepository.findById
+            .mockResolvedValueOnce({
+                id: 'task-1',
+                user_id: 'user-1',
+                chat_id: 'chat-1',
+                msg_id: 1,
+                source_msg_id: 10,
+                file_name: 'test.mp4',
+                status: 'queued'
+            })
+            .mockResolvedValueOnce({
+                id: 'task-1',
+                status: 'downloaded',
+                file_name: 'test.mp4'
+            });
+        const circuitError = new Error('Circuit breaker is OPEN for qstash_publish');
+        const downloadSpy = vi.spyOn(TaskManager, 'downloadTask').mockRejectedValueOnce(circuitError);
+
+        const result = await TaskManager.handleDownloadWebhook('task-1');
+
+        expect(result).toMatchObject({
+            success: false,
+            statusCode: 503,
+            message: 'Circuit breaker is OPEN for qstash_publish'
+        });
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            'task-1',
+            TASK_EVENTS.RESET_UPLOAD,
+            'Circuit breaker is OPEN for qstash_publish',
+            expect.objectContaining({ source: 'handleDownloadWebhook.retryable_infra_error' })
+        );
+        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+            'task-1',
+            TASK_EVENTS.FAIL,
+            expect.anything(),
+            expect.anything()
+        );
+        downloadSpy.mockRestore();
+    });
+
     it('does not update UI when terminal task cancellation is blocked', async () => {
         mockTaskRepository.findById.mockResolvedValue({
             id: 'task-1',

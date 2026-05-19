@@ -197,6 +197,10 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         mockDirectTransferService.canAttempt.mockReset();
         mockDirectTransferService.transferTelegramMediaToRemote.mockReset();
         mockDirectTransferService.canAttempt.mockReturnValue({ supported: false, reason: "test-disabled" });
+        mockQueueService.enqueueUploadTask.mockReset();
+        mockQueueService.enqueueDownloadTask.mockReset();
+        mockQueueService.enqueueUploadTask.mockResolvedValue({ messageId: "upload-msg" });
+        mockQueueService.enqueueDownloadTask.mockResolvedValue({ messageId: "download-msg" });
         mockStreamTransferService.registerStreamOwner.mockResolvedValue({
             taskId: "task_1",
             instanceId: "worker-1",
@@ -298,6 +302,29 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
             msgId: 100,
             localPath: expect.stringContaining("test_file.mp4")
         }));
+    });
+
+    test("keeps downloaded task recoverable when upload queue publish circuit breaker is open", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockClient.downloadMedia.mockResolvedValue();
+        mockQueueService.enqueueUploadTask.mockRejectedValueOnce(new Error("Circuit breaker is OPEN for qstash_publish"));
+
+        await expect(TaskManager.downloadTask(task)).rejects.toThrow("Circuit breaker is OPEN for qstash_publish");
+
+        expect(mockClient.downloadMedia).toHaveBeenCalled();
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "finish_download",
+            null,
+            expect.objectContaining({ source: "download_complete" })
+        );
+        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+            "task_1",
+            "fail",
+            expect.stringContaining("qstash_publish"),
+            expect.anything()
+        );
     });
 
     test("direct transfer success completes without local download or upload queue", async () => {

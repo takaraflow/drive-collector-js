@@ -4,6 +4,8 @@ import { getClaimFenceOptions } from "./claim-fence.js";
 import { redactSensitiveText } from "../../utils/serializer.js";
 import { getRcloneErrorUserMessage } from "../../utils/rcloneErrorMessage.js";
 import { classifyRcloneError } from "../../domain/rclone-error.js";
+import { classifyInfrastructureError } from "../../domain/infrastructure-error.js";
+import { getInfrastructureErrorUserMessage } from "../../utils/infrastructureErrorMessage.js";
 
 // 获取依赖项的辅助函数
 const getDeps = () => dependencyContainer.getAll();
@@ -114,10 +116,11 @@ export async function handleTaskFailure(task, context, updateStatus, errorMessag
     const derivedClassification = looksLikeRcloneDiagnostic(safeErrorMessage)
         ? classifyRcloneError(safeErrorMessage)
         : null;
+    const infrastructureClassification = classifyInfrastructureError(failure || safeErrorMessage);
     const errorCode = failure?.errorCode || derivedClassification?.code;
     const userMessage = failure?.userMessage
         ? redactSensitiveText(failure.userMessage)
-        : getRcloneErrorUserMessage(errorCode);
+        : getRcloneErrorUserMessage(errorCode) || getInfrastructureErrorUserMessage(infrastructureClassification.code);
     const showRetry = !isCancelled && (failure?.userRetryable ?? derivedClassification?.userRetryable) !== false;
     const transition = await TaskRepository.transitionStatus(task.id, event, safeErrorMessage, {
         ...getClaimFenceOptions(task),
