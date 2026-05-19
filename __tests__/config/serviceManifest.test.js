@@ -53,6 +53,7 @@ describe('ServiceConfigManager 测试', () => {
         expect(serviceConfigManager.getServiceName('OSS_WORKER_UPLOAD_MAX_BUFFER_BYTES')).toBe('oss');
         expect(serviceConfigManager.getServiceName('DIRECT_TRANSFER_ENABLED')).toBe('directTransfer');
         expect(serviceConfigManager.getServiceName('DIRECT_TRANSFER_FALLBACK_TO_LOCAL')).toBe('directTransfer');
+        expect(serviceConfigManager.getServiceName('DIRECT_TRANSFER_TIMEOUT_MS')).toBe('directTransfer');
         expect(serviceConfigManager.getServiceName('UNKNOWN_KEY')).toBeUndefined();
     });
 

@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import { describe, expect, test, vi, beforeEach } from "vitest";
+import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 
 let config = {
   directTransfer: { enabled: true, fallbackToLocal: true },
@@ -64,6 +64,7 @@ describe("DirectTransferService", () => {
   let service;
 
   beforeEach(() => {
+    vi.useRealTimers();
     config = {
       directTransfer: { enabled: true, fallbackToLocal: true },
       remoteName: "mega",
@@ -83,6 +84,10 @@ describe("DirectTransferService", () => {
       })())
     };
     service = new DirectTransferService(cloudTool, { validationRetryDelayMs: 0 });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   test("streams Telegram chunks into rcat, moves staging file, and validates remote size", async () => {
@@ -138,6 +143,40 @@ describe("DirectTransferService", () => {
     });
 
     expect(result).toMatchObject({ success: false, fallback: true });
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
+  });
+
+  test("times out a stuck rcat process and falls back to local staging", async () => {
+    vi.useFakeTimers();
+    const proc = createProcess();
+    const stdin = createWritable();
+    const stagingName = ".drive-collector-task-timeout-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+    client.iterDownload.mockReturnValue((async function* () {
+      yield Buffer.from("hello");
+    })());
+
+    const resultPromise = service.transferTelegramMediaToRemote({
+      task: { id: "task-timeout", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 5 },
+      fileName: "file.bin",
+      config: {
+        directTransfer: {
+          enabled: true,
+          fallbackToLocal: true,
+          timeoutMs: 100
+        }
+      }
+    });
+
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(100);
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({ success: false, fallback: true });
+    expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
     expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
   });
 

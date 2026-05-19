@@ -422,8 +422,18 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
     if (config.directTransfer?.enabled === false) return false;
     if (!directTransferService || typeof directTransferService.transferTelegramMediaToRemote !== "function") return false;
 
-    const defaultDrive = await DriveRepository.getDefaultDrive(task.userId);
-    const driveType = defaultDrive?.type || null;
+    let driveType = null;
+    try {
+        const defaultDrive = await DriveRepository.getDefaultDrive(task.userId);
+        driveType = defaultDrive?.type || null;
+    } catch (error) {
+        log.warn("Direct transfer drive capability lookup failed; using local-capable transfer path", {
+            taskId: task.id,
+            userId: task.userId,
+            error: error.message
+        });
+        return false;
+    }
     const capability = directTransferService.canAttempt?.(config, { driveType });
     if (capability && !capability.supported) {
         log.info("Direct transfer skipped", { taskId: task.id, driveType, reason: capability.reason });

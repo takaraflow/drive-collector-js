@@ -428,6 +428,37 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         getAllSpy.mockRestore();
     });
 
+    test("direct transfer capability lookup failure falls back to local staging", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDriveRepository.getDefaultDrive.mockRejectedValue(new Error("D1 unavailable"));
+        mockClient.downloadMedia.mockResolvedValue();
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                directTransfer: { enabled: true, fallbackToLocal: true },
+                streamForwarding: { enabled: false }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockDirectTransferService.transferTelegramMediaToRemote).not.toHaveBeenCalled();
+        expect(mockClient.downloadMedia).toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith(
+            "task_1",
+            expect.objectContaining({ userId: "user_1" })
+        );
+
+        getAllSpy.mockRestore();
+    });
+
     test("direct transfer skips remote same-name conflicts before streaming", async () => {
         mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Name: "test_file.mp4", Size: 10485760 + 2097152 });
         mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));

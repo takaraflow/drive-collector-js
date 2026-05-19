@@ -262,29 +262,34 @@ describe("Config Module", () => {
   test("should default direct transfer to enabled with local fallback", async () => {
     delete process.env.DIRECT_TRANSFER_ENABLED;
     delete process.env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL;
+    delete process.env.DIRECT_TRANSFER_TIMEOUT_MS;
 
     __resetConfigForTests();
     const config = await initConfig();
 
     expect(config.directTransfer).toEqual({
       enabled: true,
-      fallbackToLocal: true
+      fallbackToLocal: true,
+      timeoutMs: 21600000
     });
   });
 
   test("should allow direct transfer and fallback to be disabled independently", async () => {
     process.env.DIRECT_TRANSFER_ENABLED = "false";
     process.env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL = "false";
+    process.env.DIRECT_TRANSFER_TIMEOUT_MS = "12345";
 
     __resetConfigForTests();
     const config = await initConfig();
 
     expect(config.directTransfer).toEqual({
       enabled: false,
-      fallbackToLocal: false
+      fallbackToLocal: false,
+      timeoutMs: 12345
     });
 
     delete process.env.DIRECT_TRANSFER_ENABLED;
     delete process.env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL;
+    delete process.env.DIRECT_TRANSFER_TIMEOUT_MS;
   });
 });

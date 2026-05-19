@@ -11,6 +11,7 @@ const DEFAULT_SMALL_CHUNK_SIZE = 128 * 1024;
 const DEFAULT_LARGE_CHUNK_SIZE = 512 * 1024;
 const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
 const MAX_RCLONE_ERROR_LOG = 8000;
+const DEFAULT_TRANSFER_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const LOCAL_STAGING_REQUIRED_DRIVE_TYPES = new Set(["oss", "r2", "s3"]);
 
 export class DirectTransferService {
@@ -90,7 +91,8 @@ export class DirectTransferService {
             proc = rcat.proc;
             const remoteStagingName = rcat.fileName;
             stagedRemoteName = remoteStagingName || stagingFileName;
-            const rcloneCompletion = this._watchRcloneProcess(proc, task.id);
+            const transferTimeoutMs = this._resolveTransferTimeoutMs(config);
+            const rcloneCompletion = this._watchRcloneProcess(proc, task.id, transferTimeoutMs);
 
             const downloadIterator = client.iterDownload({
                 file: message.media,
@@ -225,15 +227,26 @@ export class DirectTransferService {
         });
     }
 
-    _watchRcloneProcess(proc, taskId) {
+    _watchRcloneProcess(proc, taskId, timeoutMs = DEFAULT_TRANSFER_TIMEOUT_MS) {
         return new Promise((resolve) => {
             let stderrLog = "";
             let resolved = false;
+            let timeout = null;
             const safeResolve = (result) => {
                 if (resolved) return;
                 resolved = true;
+                if (timeout) clearTimeout(timeout);
                 resolve(result);
             };
+
+            if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+                timeout = setTimeout(() => {
+                    try {
+                        if (proc && !proc.killed) proc.kill("SIGTERM");
+                    } catch {}
+                    safeResolve({ success: false, error: `rclone rcat timed out after ${timeoutMs}ms` });
+                }, timeoutMs);
+            }
 
             proc.stderr?.on("data", (data) => {
                 stderrLog += data.toString();
@@ -323,6 +336,11 @@ export class DirectTransferService {
             fileName,
             bytes: totalSize || uploadedBytes
         };
+    }
+
+    _resolveTransferTimeoutMs(config) {
+        const value = Number(config?.directTransfer?.timeoutMs);
+        return Number.isFinite(value) && value > 0 ? value : DEFAULT_TRANSFER_TIMEOUT_MS;
     }
 
     _isSizeMatch(actual, expected) {

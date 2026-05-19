@@ -241,7 +241,8 @@
       "description": "普通 Telegram 文件同机无盘直传，优先 rclone rcat，不支持时回退本地暂存",
       "configKeys": [
         "DIRECT_TRANSFER_ENABLED",
-        "DIRECT_TRANSFER_FALLBACK_TO_LOCAL"
+        "DIRECT_TRANSFER_FALLBACK_TO_LOCAL",
+        "DIRECT_TRANSFER_TIMEOUT_MS"
       ],
       "reinitializationStrategy": {
         "type": "none",
@@ -251,6 +252,7 @@
       "behaviorNotes": [
         "DIRECT_TRANSFER_ENABLED=false 会完全关闭同机无盘直传，保留原本完整落盘转存路径",
         "DIRECT_TRANSFER_FALLBACK_TO_LOCAL=true 时，rcat/moveto/远端校验失败会清理远端暂存并回退到本地暂存",
+        "DIRECT_TRANSFER_TIMEOUT_MS 控制单个 rcat 直传最长运行时间，避免子进程挂死导致任务长期卡住",
         "直传只复用 rclone 支持的流式能力；OSS/R2 的 multipart stream 未收口前仍走本地暂存"
       ]
     },
