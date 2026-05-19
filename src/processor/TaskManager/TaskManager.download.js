@@ -361,7 +361,8 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
                         throw new Error(finalization?.error || 'Stream finalization failed');
                     }
                     downloadOptions.limit = Math.ceil(remaining / chunkSize);
-                    await updateStatus(task, `🔄 **Resuming transfer... (${(startOffset / 1024 / 1024).toFixed(2)}MB)**`);
+                    const { formatBytes } = await import("../../utils/common.js");
+                    await updateStatus(task, `🔄 **Resuming transfer... (${formatBytes(startOffset)})**`);
                 }
 
                 const downloadIterator = client.iterDownload(downloadOptions);
