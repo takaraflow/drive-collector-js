@@ -236,6 +236,88 @@ describe('CloudTool', () => {
         });
     });
 
+    describe('normalizePasswordForRclone', () => {
+        it('should obscure raw passwords', async () => {
+            mockSpawn
+                .mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                    p.stderr.emit('data', 'input is not obscured\n');
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.emit('close', 1);
+                }))
+                .mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                    p.stdout.emit('data', 'obscured-raw\n');
+                    p.stdout.emit('end');
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.emit('close', 0);
+                }));
+
+            const result = await CloudTool.normalizePasswordForRclone('raw-secret');
+
+            expect(result).toBe('obscured-raw');
+            expect(mockSpawn.mock.calls[0][1]).toEqual(['--config', '/dev/null', 'reveal', '--', 'raw-secret']);
+            expect(mockSpawn.mock.calls[1][1]).toEqual(['--config', '/dev/null', 'obscure', '--', 'raw-secret']);
+        });
+
+        it('should not obscure passwords that rclone can already reveal', async () => {
+            mockSpawn.mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                p.stdout.emit('data', 'plain-secret\n');
+                p.stdout.emit('end');
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.emit('close', 0);
+            }));
+
+            const result = await CloudTool.normalizePasswordForRclone('already-obscured');
+
+            expect(result).toBe('already-obscured');
+            expect(mockSpawn).toHaveBeenCalledTimes(1);
+            expect(mockSpawn.mock.calls[0][1]).toEqual(['--config', '/dev/null', 'reveal', '--', 'already-obscured']);
+        });
+
+        it('should pass password arguments after option terminator', async () => {
+            mockSpawn
+                .mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                    p.stderr.emit('data', 'input is not obscured\n');
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.emit('close', 1);
+                }))
+                .mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                    p.stdout.emit('data', 'obscured-leading-dash\n');
+                    p.stdout.emit('end');
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.emit('close', 0);
+                }));
+
+            const result = await CloudTool.normalizePasswordForRclone('-starts-with-dash');
+
+            expect(result).toBe('obscured-leading-dash');
+            expect(mockSpawn.mock.calls[0][1]).toEqual(['--config', '/dev/null', 'reveal', '--', '-starts-with-dash']);
+            expect(mockSpawn.mock.calls[1][1]).toEqual(['--config', '/dev/null', 'obscure', '--', '-starts-with-dash']);
+        });
+    });
+
+    describe('_isRetryableRcloneError', () => {
+        it('should classify known transient rclone startup failures as retryable', () => {
+            expect(CloudTool._isRetryableRcloneError('CRITICAL: Failed to create file system for ":mega,user="[REDACTED]",pass="[REDACTED]":folder": unexpected end of JSON input')).toBe(true);
+            expect(CloudTool._isRetryableRcloneError('read tcp 1.2.3.4: connection reset by peer')).toBe(true);
+            expect(CloudTool._isRetryableRcloneError('TLS handshake timeout')).toBe(true);
+        });
+
+        it('should not retry generic parse or EOF errors without transient context', () => {
+            expect(CloudTool._isRetryableRcloneError('unexpected end of JSON input')).toBe(false);
+            expect(CloudTool._isRetryableRcloneError('EOF')).toBe(false);
+            expect(CloudTool._isRetryableRcloneError('authentication failed')).toBe(false);
+        });
+    });
+
     describe('validateConfig', () => {
         it('should resolve success true when rclone returns 0', async () => {
             mockSpawn.mockImplementation((cmd, args) => {
@@ -302,11 +384,18 @@ describe('CloudTool', () => {
     });
 
     describe('uploadFile', () => {
+        let retryDelaySpy;
+
         beforeEach(() => {
             mockGetDefaultDrive.mockResolvedValue({
                 type: 'drive',
                 config_data: JSON.stringify({ user: 'u', pass: 'p' })
             });
+            retryDelaySpy = vi.spyOn(CloudTool, '_retryDelay').mockResolvedValue(true);
+        });
+
+        afterEach(() => {
+            retryDelaySpy?.mockRestore();
         });
 
         it('should handle successful upload', async () => {
@@ -340,7 +429,7 @@ describe('CloudTool', () => {
         });
 
         it('should redact sensitive rclone stderr from upload failures', async () => {
-            mockSpawn.mockImplementationOnce(() => createAutoProcess((p) => {
+            mockSpawn.mockImplementation(() => createAutoProcess((p) => {
                 p.stderr.emit('data', Buffer.from(`CRITICAL: Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":folder": unexpected end of JSON input\n`));
                 p.stderr.emit('end');
                 p.stderr.emit('close');
@@ -358,6 +447,33 @@ describe('CloudTool', () => {
             expect(result.error).toContain('unexpected end of JSON input');
             expect(result.error).not.toContain('user@example.com');
             expect(result.error).not.toContain('secret-pass');
+            expect(mockSpawn).toHaveBeenCalledTimes(3);
+        });
+
+        it('should retry transient rclone filesystem creation failures before returning upload success', async () => {
+            mockSpawn
+                .mockImplementationOnce(() => createAutoProcess((p) => {
+                    p.stderr.emit('data', Buffer.from('CRITICAL: Failed to create file system: unexpected end of JSON input\n'));
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.emit('exit', 1);
+                    p.emit('close', 1);
+                }))
+                .mockImplementationOnce(() => createAutoProcess((p) => {
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.emit('exit', 0);
+                    p.emit('close', 0);
+                }));
+
+            const result = await CloudTool.uploadFile('/local/path', { userId: 'user123' });
+
+            expect(result.success).toBe(true);
+            expect(mockSpawn).toHaveBeenCalledTimes(2);
         });
 
         it('should trigger onProgress callback', async () => {
@@ -430,6 +546,30 @@ describe('CloudTool', () => {
 
             await expect(uploadPromise).resolves.toEqual({ success: false, error: 'Upload cancelled' });
             expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+        });
+
+        it('should not spawn copyto when abort fires while preparing upload config', async () => {
+            const controller = new AbortController();
+            mockGetDefaultDrive.mockImplementationOnce(() => new Promise(resolve => {
+                setTimeout(() => resolve({
+                    type: 'drive',
+                    config_data: JSON.stringify({ user: 'u', pass: 'p' }),
+                    remote_folder: '/Stream'
+                }), 20);
+            }));
+
+            const uploadPromise = CloudTool.uploadLocalFileToRemote(
+                '/tmp/task.part',
+                'movie.mkv',
+                'user123',
+                undefined,
+                { signal: controller.signal }
+            );
+            controller.abort();
+
+            await expect(uploadPromise).resolves.toEqual({ success: false, error: 'Upload cancelled' });
+            await new Promise(resolve => setTimeout(resolve, 40));
+            expect(mockSpawn).not.toHaveBeenCalled();
         });
 
         it('should delete a sanitized remote stream file', async () => {

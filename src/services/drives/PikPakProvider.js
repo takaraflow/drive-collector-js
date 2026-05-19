@@ -57,8 +57,8 @@ export class PikPakProvider extends BaseDriveProvider {
     }
 
     async processPassword(password) {
-        if (typeof CloudTool._obscure === "function") {
-            return await CloudTool._obscure(password);
+        if (typeof CloudTool.normalizePasswordForRclone === "function") {
+            return await CloudTool.normalizePasswordForRclone(password);
         }
         return password;
     }

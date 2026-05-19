@@ -21,6 +21,7 @@ vi.mock('../../../src/services/logger/index.js', () => ({
 vi.mock('../../../src/services/rclone.js', () => ({
     CloudTool: {
         validateConfig: vi.fn(),
+        normalizePasswordForRclone: vi.fn((password) => Promise.resolve(`obscured_${password}`)),
         _obscure: vi.fn((password) => Promise.resolve(`obscured_${password}`))
     }
 }));
@@ -113,26 +114,24 @@ describe('MegaProvider - Unit Tests', () => {
             expect(result).not.toContain('[object Promise]');
         });
 
-        test('should call _obscure with correct password', async () => {
+        test('should call password normalizer with correct password', async () => {
             const { CloudTool } = await import('../../../src/services/rclone.js');
 
             await provider.processPassword('secret123');
 
-            expect(CloudTool._obscure).toHaveBeenCalledWith('secret123');
+            expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('secret123');
         });
 
-        test('should return password as-is when CloudTool._obscure is not available', async () => {
+        test('should return password as-is when password normalizer is not available', async () => {
             const { CloudTool } = await import('../../../src/services/rclone.js');
-            // 临时移除 _obscure
-            const originalObscure = CloudTool._obscure;
-            CloudTool._obscure = undefined;
+            const originalNormalizer = CloudTool.normalizePasswordForRclone;
+            CloudTool.normalizePasswordForRclone = undefined;
 
             const result = await provider.processPassword('myPassword');
 
             expect(result).toBe('myPassword');
 
-            // 恢复
-            CloudTool._obscure = originalObscure;
+            CloudTool.normalizePasswordForRclone = originalNormalizer;
         });
 
         test('processPassword should be async function', () => {

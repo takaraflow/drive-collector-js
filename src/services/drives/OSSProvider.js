@@ -73,13 +73,6 @@ export class OSSProvider extends BaseDriveProvider {
         return 'lsf';
     }
 
-    async processPassword(password) {
-        if (typeof CloudTool._obscure === "function") {
-            return await CloudTool._obscure(password);
-        }
-        return password;
-    }
-
     getConnectionString(config) {
         const endpoint = (config.endpoint || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const bucket = (config.bucket || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');

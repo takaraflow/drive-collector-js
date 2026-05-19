@@ -29,6 +29,19 @@ const sanitizeRemoteFileName = (fileName) => {
     return baseName || "unnamed.bin";
 };
 
+const DEFAULT_RCLONE_PROCESS_ATTEMPTS = 3;
+const DEFAULT_RCLONE_RETRY_BASE_DELAY_MS = 1000;
+const RCLONE_RETRYABLE_ERROR_PATTERNS = [
+    /temporary failure/i,
+    /connection (reset|refused|aborted|closed)/i,
+    /i\/o timeout/i,
+    /TLS handshake timeout/i,
+    /timeout awaiting response headers/i,
+    /server closed idle connection/i,
+    /unexpected EOF/i,
+    /EOF while (reading|waiting|connecting)/i
+];
+
 export class CloudTool {
     static loading = false;
 
@@ -38,6 +51,36 @@ export class CloudTool {
 
     static _buildRcloneError(ret, fallback) {
         return this.sanitizeRcloneOutput(ret?.stderr || ret?.error?.message || fallback || "rclone command failed");
+    }
+
+    static _isRetryableRcloneError(errorText) {
+        const text = String(errorText || "");
+        if (!text) return false;
+        if (/unexpected end of JSON input/i.test(text)) {
+            return /(failed to create file system|couldn'?t login|remote API|server response|mega)/i.test(text);
+        }
+        return RCLONE_RETRYABLE_ERROR_PATTERNS.some(pattern => pattern.test(text));
+    }
+
+    static async _retryDelay(attempt, signal) {
+        if (signal?.aborted) return false;
+        const delayMs = DEFAULT_RCLONE_RETRY_BASE_DELAY_MS * Math.max(1, attempt);
+        if (!signal) {
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            return true;
+        }
+
+        return await new Promise(resolve => {
+            const timer = setTimeout(() => {
+                signal.removeEventListener('abort', abortHandler);
+                resolve(true);
+            }, delayMs);
+            const abortHandler = () => {
+                clearTimeout(timer);
+                resolve(false);
+            };
+            signal.addEventListener('abort', abortHandler, { once: true });
+        });
     }
 
     static sanitizeRemoteFileName(fileName) {
@@ -143,7 +186,7 @@ export class CloudTool {
     static async _obscure(password) {
         if (!password) return "";
         try {
-            const ret = await this._runRclone(["obscure", password], 5000);
+            const ret = await this._runRclone(["obscure", "--", password], 5000);
 
             if (ret.code !== 0) {
                 log.error("Obscure failed:", this.sanitizeRcloneOutput(ret.stderr));
@@ -155,6 +198,32 @@ export class CloudTool {
             log.error("Password obscure error:", e);
             return password;
         }
+    }
+
+    static async _reveal(password) {
+        if (!password) return null;
+        try {
+            const ret = await this._runRclone(["reveal", "--", password], 5000);
+            if (ret.code !== 0) return null;
+            const revealed = ret.stdout?.trim();
+            return revealed || null;
+        } catch {
+            return null;
+        }
+    }
+
+    static async normalizePasswordForRclone(password) {
+        if (!password) return "";
+        if (typeof this._reveal === "function") {
+            const revealed = await this._reveal(password);
+            if (revealed) {
+                return password;
+            }
+        }
+        if (typeof this._obscure === "function") {
+            return await this._obscure(password);
+        }
+        return password;
     }
 
     /**
@@ -368,58 +437,27 @@ export class CloudTool {
      */
     static async uploadBatch(tasks, onProgress) {
         if (!tasks || tasks.length === 0) return { success: true };
-        
-        return new Promise(async (resolve) => {
-            let isResolved = false;
-            const safeResolve = (value) => {
-                if (isResolved) return;
-                isResolved = true;
-                resolve(value);
-            };
-            
-            try {
-                // 假设所有任务属于同一用户且目标一致（由调用者确保）
-                const firstTask = tasks[0];
-                const conf = await this._getUserConfig(firstTask.userId);
-                const connectionString = this._getConnectionString(conf);
-                
-                // 获取用户自定义上传路径
-                const userUploadPath = await this._getUploadPath(firstTask.userId);
-                const remotePath = this._joinRemotePath(connectionString, userUploadPath);
 
-                // 准备 --files-from 数据
-                const commonSourceDir = path.resolve(getRuntimeConfig().downloadDir || "/tmp/downloads");
-                const fileList = tasks
-                    .filter(t => t.localPath)
-                    .map(t => path.relative(commonSourceDir, path.resolve(t.localPath)))
-                    .join('\n');
-
-                const args = [
-                    "--config", "/dev/null",
-                    "copy", commonSourceDir, remotePath,
-                    "--files-from-raw", "-",
-                    "--progress",
-                    "--use-json-log",
-                    "--transfers", "4",
-                    "--checkers", "8",
-                    "--retries", "3",
-                    "--low-level-retries", "10",
-                    "--stats", "1s",
-                    "--buffer-size", "32M"
-                ];
-
-                const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
-
-                // 将进程关联到所有相关任务，以便统一取消
-                tasks.forEach(t => t.proc = proc);
-
-                // Setup the handlers via our extracted helper
-                this._setupUploadProcessHandlers(proc, tasks, safeResolve, onProgress, fileList);
-
-            } catch (e) {
-                safeResolve({ success: false, error: e.message });
+        let lastResult = { success: false, error: "rclone upload was not attempted" };
+        for (let attempt = 1; attempt <= DEFAULT_RCLONE_PROCESS_ATTEMPTS; attempt++) {
+            lastResult = await this._spawnUploadBatchOnce(tasks, onProgress);
+            if (lastResult.success || lastResult.error === "CANCELLED") {
+                return lastResult;
             }
-        });
+            if (!lastResult.retryable || attempt >= DEFAULT_RCLONE_PROCESS_ATTEMPTS) {
+                return { success: false, error: lastResult.error };
+            }
+
+            log.warn("Retrying rclone upload after retryable process failure", {
+                attempt,
+                maxAttempts: DEFAULT_RCLONE_PROCESS_ATTEMPTS,
+                taskIds: tasks.map(task => task.id).filter(Boolean),
+                error: lastResult.error
+            });
+            await this._retryDelay(attempt);
+        }
+
+        return { success: false, error: lastResult.error };
     }
 
 
@@ -453,6 +491,12 @@ export class CloudTool {
     }
 
     static _setupUploadProcessHandlers(proc, tasks, safeResolve, onProgress, fileList) {
+        this._attachUploadProcessHandlers(proc, tasks, safeResolve, onProgress, fileList, {
+            retryable: false
+        });
+    }
+
+    static _attachUploadProcessHandlers(proc, tasks, safeResolve, onProgress, fileList, options = {}) {
         let cancelled = false;
         const isAnyTaskCancelled = () => tasks.some(t => t?.isCancelled);
         const markCancelledAndKill = () => {
@@ -511,17 +555,77 @@ export class CloudTool {
             } else {
                 const finalError = this.sanitizeRcloneOutput(errorLogRef.content.slice(-500) || `Rclone exited with code ${code}`);
                 log.error(`Rclone Batch Error:`, finalError);
-                safeResolve({ success: false, error: finalError.trim() });
+                safeResolve({
+                    success: false,
+                    error: finalError.trim(),
+                    retryable: options.retryable !== false && this._isRetryableRcloneError(finalError)
+                });
             }
         });
 
         proc.on("error", (err) => {
-            safeResolve({ success: false, error: this.sanitizeRcloneOutput(err.message) });
+            const finalError = this.sanitizeRcloneOutput(err.message);
+            safeResolve({
+                success: false,
+                error: finalError,
+                retryable: options.retryable !== false && this._isRetryableRcloneError(finalError)
+            });
         });
 
         // 写入文件列表到 stdin 并关闭
         proc.stdin.write(fileList);
         proc.stdin.end();
+    }
+
+    static async _spawnUploadBatchOnce(tasks, onProgress) {
+        return new Promise(async (resolve) => {
+            let isResolved = false;
+            const safeResolve = (value) => {
+                if (isResolved) return;
+                isResolved = true;
+                resolve(value);
+            };
+
+            try {
+                const firstTask = tasks[0];
+                const conf = await this._getUserConfig(firstTask.userId);
+                const connectionString = this._getConnectionString(conf);
+                const userUploadPath = await this._getUploadPath(firstTask.userId);
+                const remotePath = this._joinRemotePath(connectionString, userUploadPath);
+                const commonSourceDir = path.resolve(getRuntimeConfig().downloadDir || "/tmp/downloads");
+                const fileList = tasks
+                    .filter(t => t.localPath)
+                    .map(t => path.relative(commonSourceDir, path.resolve(t.localPath)))
+                    .join('\n');
+
+                const args = [
+                    "--config", "/dev/null",
+                    "copy", commonSourceDir, remotePath,
+                    "--files-from-raw", "-",
+                    "--progress",
+                    "--use-json-log",
+                    "--transfers", "4",
+                    "--checkers", "8",
+                    "--retries", "3",
+                    "--low-level-retries", "10",
+                    "--stats", "1s",
+                    "--buffer-size", "32M"
+                ];
+
+                const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
+                tasks.forEach(t => t.proc = proc);
+                this._attachUploadProcessHandlers(proc, tasks, safeResolve, onProgress, fileList, {
+                    retryable: true
+                });
+            } catch (e) {
+                const finalError = this.sanitizeRcloneOutput(e.message);
+                safeResolve({
+                    success: false,
+                    error: finalError,
+                    retryable: this._isRetryableRcloneError(finalError)
+                });
+            }
+        });
     }
 
     /**
@@ -577,20 +681,57 @@ export class CloudTool {
         if (!localPath) return { success: false, error: "Missing localPath" };
         if (!userId) return { success: false, error: "Missing userId" };
 
+        try {
+            if (options.signal?.aborted) {
+                return { success: false, error: "Upload cancelled" };
+            }
+
+            let lastResult = null;
+            for (let attempt = 1; attempt <= DEFAULT_RCLONE_PROCESS_ATTEMPTS; attempt++) {
+                lastResult = await this._spawnUploadLocalFileToRemoteOnce(localPath, fileName, userId, onProgress, options);
+                if (lastResult.success || lastResult.error === "Upload cancelled") {
+                    return lastResult;
+                }
+                if (!lastResult.retryable || attempt >= DEFAULT_RCLONE_PROCESS_ATTEMPTS) {
+                    return { success: false, error: lastResult.error };
+                }
+
+                log.warn("Retrying rclone copyto after retryable process failure", {
+                    attempt,
+                    maxAttempts: DEFAULT_RCLONE_PROCESS_ATTEMPTS,
+                    userId,
+                    fileName: this.sanitizeRemoteFileName(fileName),
+                    error: lastResult.error
+                });
+
+                const delayCompleted = await this._retryDelay(attempt, options.signal);
+                if (!delayCompleted || options.signal?.aborted) {
+                    return { success: false, error: "Upload cancelled" };
+                }
+            }
+
+            return { success: false, error: lastResult?.error || "rclone upload was not attempted" };
+        } catch (error) {
+            return { success: false, error: this.sanitizeRcloneOutput(error.message) };
+        }
+    }
+
+    static async _spawnUploadLocalFileToRemoteOnce(localPath, fileName, userId, onProgress, options = {}) {
         return new Promise(async (resolve) => {
             let resolved = false;
             let proc = null;
+            let abortHandler = null;
+            const removeAbortHandler = () => {
+                if (abortHandler && options.signal?.removeEventListener) {
+                    options.signal.removeEventListener('abort', abortHandler);
+                }
+                abortHandler = null;
+            };
             const safeResolve = (value) => {
                 if (resolved) return;
                 resolved = true;
-                if (options.signal && abortHandler) {
-                    options.signal.removeEventListener('abort', abortHandler);
-                }
+                removeAbortHandler();
                 resolve(value);
-            };
-            const abortHandler = () => {
-                try { proc?.kill('SIGTERM'); } catch {}
-                safeResolve({ success: false, error: "Upload cancelled" });
             };
 
             try {
@@ -598,17 +739,22 @@ export class CloudTool {
                     safeResolve({ success: false, error: "Upload cancelled" });
                     return;
                 }
-                if (options.signal) {
+                if (options.signal?.addEventListener) {
+                    abortHandler = () => {
+                        try { proc?.kill('SIGTERM'); } catch {}
+                        safeResolve({ success: false, error: "Upload cancelled" });
+                    };
                     options.signal.addEventListener('abort', abortHandler, { once: true });
                 }
 
                 const conf = await this._getUserConfig(userId);
+                if (resolved || options.signal?.aborted) return;
                 const connectionString = this._getConnectionString(conf);
                 const userUploadPath = await this._getUploadPath(userId);
+                if (resolved || options.signal?.aborted) return;
                 const safeFileName = this.sanitizeRemoteFileName(fileName);
                 const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath, safeFileName);
-
-                if (resolved) return;
+                if (resolved || options.signal?.aborted) return;
 
                 const args = [
                     "--config", "/dev/null",
@@ -653,14 +799,28 @@ export class CloudTool {
                     }
 
                     const finalError = this.sanitizeRcloneOutput(errorLogRef.content.slice(-500).trim() || `rclone copyto exited with code ${code}`);
-                    safeResolve({ success: false, error: finalError });
+                    safeResolve({
+                        success: false,
+                        error: finalError,
+                        retryable: this._isRetryableRcloneError(finalError)
+                    });
                 });
 
                 proc.on("error", (error) => {
-                    safeResolve({ success: false, error: this.sanitizeRcloneOutput(error.message) });
+                    const finalError = this.sanitizeRcloneOutput(error.message);
+                    safeResolve({
+                        success: false,
+                        error: finalError,
+                        retryable: this._isRetryableRcloneError(finalError)
+                    });
                 });
             } catch (error) {
-                safeResolve({ success: false, error: this.sanitizeRcloneOutput(error.message) });
+                const finalError = this.sanitizeRcloneOutput(error.message);
+                safeResolve({
+                    success: false,
+                    error: finalError,
+                    retryable: this._isRetryableRcloneError(finalError)
+                });
             }
         });
     }

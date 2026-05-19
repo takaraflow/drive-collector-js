@@ -12,6 +12,7 @@ vi.mock('../../../src/services/logger/index.js', () => ({
 vi.mock('../../../src/services/rclone.js', () => ({
     CloudTool: {
         validateConfig: vi.fn(),
+        normalizePasswordForRclone: vi.fn(p => `obs_${p}`),
         _obscure: vi.fn(p => `obs_${p}`)
     }
 }));
@@ -40,7 +41,7 @@ describe('WebDAVProvider', () => {
         const result = await provider.validateConfig({ url: 'https://dav.com', user: 'u', pass: 'plain' });
 
         expect(result.success).toBe(true);
-        expect(CloudTool._obscure).toHaveBeenCalledWith('plain');
+        expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('plain');
         expect(CloudTool.validateConfig).toHaveBeenCalledWith('webdav', {
             url: 'https://dav.com',
             user: 'u',

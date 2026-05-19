@@ -12,6 +12,7 @@ vi.mock('../../../src/services/logger/index.js', () => ({
 vi.mock('../../../src/services/rclone.js', () => ({
     CloudTool: {
         validateConfig: vi.fn(),
+        normalizePasswordForRclone: vi.fn(p => `obs_${p}`),
         _obscure: vi.fn(p => `obs_${p}`)
     }
 }));
@@ -80,6 +81,7 @@ describe('OSSProvider', () => {
         await provider.validateConfig({ endpoint: 'e', bucket: 'bucket', ak: 'a', sk: 's' });
         
         expect(CloudTool.validateConfig).toHaveBeenCalledWith('oss', expect.anything(), 'lsf');
+        expect(CloudTool.normalizePasswordForRclone).not.toHaveBeenCalled();
     });
 
     test('should generate bucket-scoped s3 connection string', () => {

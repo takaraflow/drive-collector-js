@@ -12,6 +12,7 @@ vi.mock('../../../src/services/logger/index.js', () => ({
 vi.mock('../../../src/services/rclone.js', () => ({
     CloudTool: {
         validateConfig: vi.fn(),
+        normalizePasswordForRclone: vi.fn((password) => `obscured_${password}`),
         _obscure: vi.fn((password) => `obscured_${password}`)
     }
 }));
@@ -58,7 +59,7 @@ describe('PikPakProvider', () => {
         const result = await provider.validateConfig({ user: 'u', pass: 'plain' });
 
         expect(result.success).toBe(true);
-        expect(CloudTool._obscure).toHaveBeenCalledWith('plain');
+        expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('plain');
         expect(CloudTool.validateConfig).toHaveBeenCalledWith('pikpak', {
             user: 'u',
             pass: 'obscured_plain'

@@ -68,8 +68,8 @@ export class MegaProvider extends BaseDriveProvider {
      * 处理密码（使用 rclone obscure）
      */
     async processPassword(password) {
-        if (typeof CloudTool._obscure === "function") {
-            return await CloudTool._obscure(password);
+        if (typeof CloudTool.normalizePasswordForRclone === "function") {
+            return await CloudTool.normalizePasswordForRclone(password);
         }
 
         return password;
