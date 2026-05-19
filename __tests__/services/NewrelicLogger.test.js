@@ -141,6 +141,24 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
         expect(payload.error_stack).toContain('fatal rejection');
     });
 
+    it('should redact sensitive values from searchable top-level error fields and details', async () => {
+        const error = new Error('rclone failed :mega,user="user@example.com",pass="secret-pass":');
+        error.stack = 'Error: token={"access_token":"access-secret","refresh_token":"refresh-secret"}';
+
+        const payload = logger._buildPayload('error', 'upload failed pass="message-secret"', { error }, {}, 'instance-1');
+        const serializedPayload = JSON.stringify(payload);
+
+        expect(payload.message).toContain('pass="[REDACTED]"');
+        expect(payload.error_message).toContain('pass="[REDACTED]"');
+        expect(payload.error_stack).toContain('token=[REDACTED]');
+        expect(payload.attributes.details).toContain('pass=\\"[REDACTED]\\"');
+        expect(serializedPayload).not.toContain('user@example.com');
+        expect(serializedPayload).not.toContain('secret-pass');
+        expect(serializedPayload).not.toContain('message-secret');
+        expect(serializedPayload).not.toContain('access-secret');
+        expect(serializedPayload).not.toContain('refresh-secret');
+    });
+
     it('should expose directly logged Error diagnostics as top-level searchable fields', async () => {
         const error = new Error('direct failure');
         error.stack = 'Error: direct failure\n    at direct';

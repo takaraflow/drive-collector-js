@@ -12,6 +12,7 @@ import {
     normalizeLogLevel,
     shouldSendLogLevel
 } from './log-level.js';
+import { redactSensitiveData, redactSensitiveText } from '../../utils/serializer.js';
 
 let getInstanceIdFunc = () => 'unknown';
 const localFallbackId = `boot_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -487,7 +488,8 @@ class LoggerService {
         let emoji = moduleEmojis[mod] || levelEmojis[level] || '';
 
         // 智能语义追加：根据消息内容增强图标
-        const msgStr = String(message).substring(0, 2000);
+        const safeMessage = redactSensitiveText(message);
+        const msgStr = String(safeMessage).substring(0, 2000);
 
         if (msgStr.includes('启动') || msgStr.includes('Start')) emoji += '🚀';
         if (msgStr.includes('完成') || msgStr.includes('成功') || msgStr.includes('success') || msgStr.includes('✅')) {
@@ -503,14 +505,15 @@ class LoggerService {
             if (!emoji.includes('🛑')) emoji += '🛑';
         }
 
-        const formattedMessage = `${emoji} ${message}`;
+        const formattedMessage = `${emoji} ${safeMessage}`;
 
         const normalizedContext = this._normalizeContext(context);
-        const fullContext = { ...this._getContext(), ...normalizedContext };
+        const fullContext = redactSensitiveData({ ...this._getContext(), ...normalizedContext });
+        const safeData = redactSensitiveData(data);
 
         const promises = loggers.map(logger => {
             if (logger && typeof logger[level] === 'function') {
-                return logger[level](formattedMessage, data, fullContext).catch(error => {
+                return logger[level](formattedMessage, safeData, fullContext).catch(error => {
                     writeOriginalConsole('error', `Logger ${logger.getProviderName()} ${level} failed:`, error.message);
                 });
             }

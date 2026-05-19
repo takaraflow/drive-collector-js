@@ -17,6 +17,7 @@ import {
     serializeTaskSourceRef
 } from "../domain/task-source.js";
 import { CACHE_KEYS } from "../domain/cache-keys.js";
+import { redactSensitiveText } from "../utils/serializer.js";
 
 const log = logger.withModule ? logger.withModule('TaskRepository') : logger;
 
@@ -487,7 +488,7 @@ export class TaskRepository {
 
     static _buildTransitionSql(targetStatus, options = {}) {
         const assignments = ["status = ?", "error_msg = ?", "updated_at = ?"];
-        const params = [targetStatus, options.errorMsg ?? null, options.now];
+        const params = [targetStatus, options.errorMsg === undefined || options.errorMsg === null ? null : redactSensitiveText(options.errorMsg), options.now];
 
         if (Object.prototype.hasOwnProperty.call(options, 'claimedBy') && options.claimedBy !== undefined) {
             assignments.push("claimed_by = ?");
@@ -611,7 +612,8 @@ export class TaskRepository {
         }
 
         this.pendingUpdates.delete(taskId);
-        await this._syncDerivedTaskState(taskId, targetStatus, errorMsg);
+        const safeErrorMsg = errorMsg === undefined || errorMsg === null ? null : redactSensitiveText(errorMsg);
+        await this._syncDerivedTaskState(taskId, targetStatus, safeErrorMsg);
 
         return this._transitionResult({
             changed: true,

@@ -8,6 +8,7 @@ import { localCache } from "../utils/LocalCache.js";
 import { cache } from "./CacheService.js";
 import { logger } from "./logger/index.js";
 import { DriveProviderFactory } from "./drives/index.js";
+import { redactSensitiveText } from "../utils/serializer.js";
 const log = logger.withModule ? logger.withModule('RcloneService') : logger;
 
 const buildRcloneEnv = () => ({
@@ -30,6 +31,14 @@ const sanitizeRemoteFileName = (fileName) => {
 
 export class CloudTool {
     static loading = false;
+
+    static sanitizeRcloneOutput(value) {
+        return redactSensitiveText(value);
+    }
+
+    static _buildRcloneError(ret, fallback) {
+        return this.sanitizeRcloneOutput(ret?.stderr || ret?.error?.message || fallback || "rclone command failed");
+    }
 
     static sanitizeRemoteFileName(fileName) {
         return sanitizeRemoteFileName(fileName);
@@ -137,7 +146,7 @@ export class CloudTool {
             const ret = await this._runRclone(["obscure", password], 5000);
 
             if (ret.code !== 0) {
-                log.error("Obscure failed:", ret.stderr);
+                log.error("Obscure failed:", this.sanitizeRcloneOutput(ret.stderr));
                 return password;
             }
 
@@ -331,7 +340,7 @@ export class CloudTool {
                             resolve({ success: false, reason: "2FA" });
                         } else {
                             log.error("Validation failed. Type:", type);
-                            resolve({ success: false, reason: "ERROR", details: errorLog });
+                            resolve({ success: false, reason: "ERROR", details: this.sanitizeRcloneOutput(errorLog) });
                         }
                     }
                 });
@@ -340,13 +349,13 @@ export class CloudTool {
                     if (completed) return;
                     completed = true;
                     clearTimeout(timer);
-                    resolve({ success: false, reason: "ERROR", details: err.message });
+                    resolve({ success: false, reason: "ERROR", details: this.sanitizeRcloneOutput(err.message) });
                 });
 
             } catch (e) {
                 if (!completed) {
                     completed = true;
-                    resolve({ success: false, reason: "ERROR", details: e.message });
+                    resolve({ success: false, reason: "ERROR", details: this.sanitizeRcloneOutput(e.message) });
                 }
             }
         });
@@ -493,20 +502,21 @@ export class CloudTool {
                 // Even with exit code 0, check for errors in the log
                 const hasErrors = errorLogRef.content.includes('ERROR') || errorLogRef.content.includes('Failed') || errorLogRef.content.includes('failed');
                 if (hasErrors) {
-                    log.error(`Rclone Batch completed with exit code 0 but contains errors:`, errorLogRef.content.slice(-500));
-                    safeResolve({ success: false, error: `Upload completed but with errors: ${errorLogRef.content.slice(-200).trim()}` });
+                    const sanitizedTail = this.sanitizeRcloneOutput(errorLogRef.content.slice(-500));
+                    log.error(`Rclone Batch completed with exit code 0 but contains errors:`, sanitizedTail);
+                    safeResolve({ success: false, error: `Upload completed but with errors: ${this.sanitizeRcloneOutput(errorLogRef.content.slice(-200).trim())}` });
                 } else {
                     safeResolve({ success: true });
                 }
             } else {
-                const finalError = errorLogRef.content.slice(-500) || `Rclone exited with code ${code}`;
+                const finalError = this.sanitizeRcloneOutput(errorLogRef.content.slice(-500) || `Rclone exited with code ${code}`);
                 log.error(`Rclone Batch Error:`, finalError);
                 safeResolve({ success: false, error: finalError.trim() });
             }
         });
 
         proc.on("error", (err) => {
-            safeResolve({ success: false, error: err.message });
+            safeResolve({ success: false, error: this.sanitizeRcloneOutput(err.message) });
         });
 
         // 写入文件列表到 stdin 并关闭
@@ -555,7 +565,7 @@ export class CloudTool {
             stdin: proc.stdin,
             proc: proc,
             fileName: safeFileName,
-            remotePath: fullRemotePath
+            remotePath: this.sanitizeRcloneOutput(fullRemotePath)
         };
     }
 
@@ -642,15 +652,15 @@ export class CloudTool {
                         return;
                     }
 
-                    const finalError = errorLogRef.content.slice(-500).trim() || `rclone copyto exited with code ${code}`;
+                    const finalError = this.sanitizeRcloneOutput(errorLogRef.content.slice(-500).trim() || `rclone copyto exited with code ${code}`);
                     safeResolve({ success: false, error: finalError });
                 });
 
                 proc.on("error", (error) => {
-                    safeResolve({ success: false, error: error.message });
+                    safeResolve({ success: false, error: this.sanitizeRcloneOutput(error.message) });
                 });
             } catch (error) {
-                safeResolve({ success: false, error: error.message });
+                safeResolve({ success: false, error: this.sanitizeRcloneOutput(error.message) });
             }
         });
     }
@@ -682,7 +692,7 @@ export class CloudTool {
 
         return {
             success: false,
-            error: ret.stderr || ret.error?.message || `rclone deletefile exited with code ${ret.code}`
+            error: this._buildRcloneError(ret, `rclone deletefile exited with code ${ret.code}`)
         };
     }
 
@@ -706,7 +716,7 @@ export class CloudTool {
 
         return {
             success: false,
-            error: ret.stderr || ret.error?.message || `rclone moveto exited with code ${ret.code}`
+            error: this._buildRcloneError(ret, `rclone moveto exited with code ${ret.code}`)
         };
     }
 
@@ -761,7 +771,7 @@ export class CloudTool {
                     this.loading = false;
                     return [];
                 }
-                throw new Error(`Rclone lsjson failed: ${ret.stderr}`);
+                throw new Error(`Rclone lsjson failed: ${this.sanitizeRcloneOutput(ret.stderr)}`);
             }
 
             let files = JSON.parse(ret.stdout || "[]");
@@ -1021,18 +1031,18 @@ export class CloudTool {
                     if (code === 0) {
                         resolve({ success: true, exitCode: code });
                     } else {
-                        const errorMessage = errorLog.trim() || `Command exited with code ${code}`;
+                        const errorMessage = CloudTool.sanitizeRcloneOutput(errorLog.trim() || `Command exited with code ${code}`);
                         reject(new Error(errorMessage));
                     }
                 });
 
                 proc.on("error", (err) => {
                     if (cancelled) return;
-                    reject(new Error(`Process error: ${err.message}`));
+                    reject(new Error(`Process error: ${CloudTool.sanitizeRcloneOutput(err.message)}`));
                 });
 
             } catch (e) {
-                reject(new Error(`Failed to execute command: ${e.message}`));
+                reject(new Error(`Failed to execute command: ${CloudTool.sanitizeRcloneOutput(e.message)}`));
             }
         });
     }

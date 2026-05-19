@@ -11,6 +11,7 @@ import { assertLocalStorageCapacity } from "../utils/storageGuard.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
 import { CACHE_KEYS } from "../domain/cache-keys.js";
 import { getClaimFenceOptions } from "../processor/TaskManager/claim-fence.js";
+import { redactSensitiveText } from "../utils/serializer.js";
 import { once } from "events";
 import fs from "fs";
 import os from "os";
@@ -774,7 +775,7 @@ class StreamTransferService {
 
         // 监听 rclone 错误
         proc.stderr.on('data', (data) => {
-            const msg = data.toString();
+            const msg = redactSensitiveText(data.toString());
             streamContext.stderrLog += msg;
             if (streamContext.stderrLog.length > 8000) {
                 streamContext.stderrLog = streamContext.stderrLog.slice(-8000);
@@ -807,7 +808,7 @@ class StreamTransferService {
                 await this.finishTask(taskId, streamContext);
             } else {
                 streamContext.errorReported = true;
-                const errorTail = streamContext.stderrLog?.slice(-500).trim();
+                const errorTail = redactSensitiveText(streamContext.stderrLog?.slice(-500).trim());
                 await this._deletePartialRemoteFile(streamContext);
                 await this.reportError(taskId, streamContext, errorTail || `rclone exited with code ${code}`);
             }
@@ -1387,8 +1388,9 @@ class StreamTransferService {
     }
 
     async reportError(taskId, context, errorMsg) {
-        log.error(`❌ 任务上传失败: ${taskId} - ${errorMsg}`);
-        const transition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, errorMsg, {
+        const safeErrorMsg = redactSensitiveText(errorMsg);
+        log.error(`❌ 任务上传失败: ${taskId} - ${safeErrorMsg}`);
+        const transition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, safeErrorMsg, {
             ...getClaimFenceOptions(context),
             returnResult: true,
             allowNoop: true,
@@ -1397,7 +1399,7 @@ class StreamTransferService {
         if (transition.blocked) return;
         
         try {
-            const text = `❌ 上传失败: ${errorMsg}`;
+            const text = `❌ 上传失败: ${safeErrorMsg}`;
             await TelegramBotApi.editMessageText(context.chatId, parseInt(context.msgId), text);
         } catch (error) {
             log.warn('Failed to update Telegram message after task error', {
@@ -1409,7 +1411,7 @@ class StreamTransferService {
         }
 
         if (context.leaderUrl) {
-            await this.reportProgressToLeader(taskId, { ...context, status: TASK_STATUSES.FAILED, error: errorMsg });
+            await this.reportProgressToLeader(taskId, { ...context, status: TASK_STATUSES.FAILED, error: safeErrorMsg });
         }
     }
 

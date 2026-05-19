@@ -213,4 +213,37 @@ describe('LoggerService log level gate', () => {
             })
         );
     });
+
+    test('redacts sensitive values before dispatching to providers', async () => {
+        const logger = new LoggerService();
+        const provider = {
+            error: vi.fn().mockResolvedValue(undefined),
+            getProviderName: () => 'test-provider'
+        };
+        logger.activeLoggers = [provider];
+        logger.isInitialized = true;
+
+        await logger.error(
+            'upload failed pass="message-secret"',
+            {
+                stderr: 'rclone :mega,user="user@example.com",pass="secret-pass": failed',
+                token: 'plain-token'
+            },
+            { module: 'RcloneService', accessToken: 'context-token' }
+        );
+
+        const [message, data, context] = provider.error.mock.calls[0];
+        const serialized = JSON.stringify({ message, data, context });
+
+        expect(message).toContain('pass="[REDACTED]"');
+        expect(data.stderr).toContain('user="[REDACTED]"');
+        expect(data.stderr).toContain('pass="[REDACTED]"');
+        expect(data.token).toBe('[REDACTED]');
+        expect(context.accessToken).toBe('[REDACTED]');
+        expect(serialized).not.toContain('message-secret');
+        expect(serialized).not.toContain('user@example.com');
+        expect(serialized).not.toContain('secret-pass');
+        expect(serialized).not.toContain('plain-token');
+        expect(serialized).not.toContain('context-token');
+    });
 });

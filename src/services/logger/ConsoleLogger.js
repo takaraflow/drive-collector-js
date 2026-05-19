@@ -1,6 +1,6 @@
 import { BaseLogger } from './BaseLogger.js';
 import { getOriginalConsoleMethod } from './console-channel.js';
-import { serializeToString } from '../../utils/serializer.js';
+import { redactSensitiveText, serializeToString } from '../../utils/serializer.js';
 import { getBeijingTimestamp } from '../../utils/timeUtils.js';
 import { getBuildDisplayVersion, getBuildIdentity } from '../../utils/buildIdentity.js';
 
@@ -43,7 +43,7 @@ class ConsoleLogger extends BaseLogger {
         // 如果 instanceId 是 'console' 则省略，否则展示
         const instPart = (instanceId && instanceId !== 'console' && instanceId !== 'unknown') ? ` | ${instanceId}` : '';
 
-        return `${timestamp} | ${version} | ${env}${instPart} | ${mod} | ${message}`;
+        return `${timestamp} | ${version} | ${env}${instPart} | ${mod} | ${redactSensitiveText(message)}`;
     }
 
     _getConsoleMethod(level) {

@@ -1,6 +1,7 @@
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../../domain/task-state-machine.js";
 import { getClaimFenceOptions } from "./claim-fence.js";
+import { redactSensitiveText } from "../../utils/serializer.js";
 
 // 获取依赖项的辅助函数
 const getDeps = () => dependencyContainer.getAll();
@@ -97,7 +98,8 @@ export async function handleTaskCompletion(task, context, updateStatus, fileName
 export async function handleTaskFailure(task, context, updateStatus, errorMessage, isCancelled = false) {
     const { TaskRepository, STRINGS } = getDeps();
     const event = isCancelled ? TASK_EVENTS.CANCEL : TASK_EVENTS.FAIL;
-    const transition = await TaskRepository.transitionStatus(task.id, event, errorMessage, {
+    const safeErrorMessage = redactSensitiveText(errorMessage);
+    const transition = await TaskRepository.transitionStatus(task.id, event, safeErrorMessage, {
         ...getClaimFenceOptions(task),
         returnResult: true,
         allowNoop: true,
@@ -109,7 +111,7 @@ export async function handleTaskFailure(task, context, updateStatus, errorMessag
     if (task.isGroup) {
         await context._refreshGroupMonitor(task, status);
     } else {
-        const text = isCancelled ? STRINGS.task.cancelled : `${STRINGS.task.error_prefix}<code>${escapeHTML(errorMessage)}</code>`;
+        const text = isCancelled ? STRINGS.task.cancelled : `${STRINGS.task.error_prefix}<code>${escapeHTML(safeErrorMessage)}</code>`;
         await updateStatus(task, text, true, null, !isCancelled);
     }
 }
@@ -127,7 +129,7 @@ export async function handleUploadFailure(task, context, updateStatus, uploadRes
         throw new Error("CANCELLED");
     }
 
-    const errorMessage = uploadResult.error || "Upload failed";
+    const errorMessage = redactSensitiveText(uploadResult.error || "Upload failed");
     const transition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.FAIL, errorMessage, {
         ...getClaimFenceOptions(task),
         returnResult: true,

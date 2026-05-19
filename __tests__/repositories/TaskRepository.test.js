@@ -495,6 +495,21 @@ describe('TaskRepository', () => {
             expect(mockCache.delete).toHaveBeenCalledWith('task_status:task1');
         });
 
+        it('should redact sensitive values before persisting task errors', async () => {
+            mockD1.fetchOne.mockResolvedValueOnce({ id: 'task1', status: 'uploading' });
+            mockD1.run.mockResolvedValue({ changes: 1 });
+
+            const errorMessage = 'Rclone failed :mega,user="user@example.com",pass="secret-pass": unexpected end of JSON input';
+            await TaskRepository.transitionStatus('task1', 'failed', errorMessage, { returnResult: true });
+
+            const params = mockD1.run.mock.calls[0][1];
+            expect(params[1]).toContain('user="[REDACTED]"');
+            expect(params[1]).toContain('pass="[REDACTED]"');
+            expect(params[1]).toContain('unexpected end of JSON input');
+            expect(params[1]).not.toContain('user@example.com');
+            expect(params[1]).not.toContain('secret-pass');
+        });
+
         it('should keep terminal states from being overwritten by stale work', async () => {
             mockD1.fetchOne.mockResolvedValueOnce({ id: 'task1', status: 'completed' });
 

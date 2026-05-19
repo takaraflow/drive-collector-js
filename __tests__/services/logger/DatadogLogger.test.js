@@ -158,6 +158,33 @@ describe('DatadogLogger', () => {
             expect(payload.additional_info).toEqual({ foo: 'bar' });
         });
 
+        test('should redact sensitive values before sending payload', async () => {
+            const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+            vi.stubGlobal('fetch', fetchMock);
+
+            await logger._sendToDatadog(
+                'error',
+                'upload failed pass="message-secret"',
+                {
+                    stderr: 'rclone :mega,user="user@example.com",pass="secret-pass": failed',
+                    token: 'plain-token'
+                },
+                { instanceId: 'inst-1' }
+            );
+
+            const payload = JSON.parse(fetchMock.mock.calls[0][1].body)[0];
+            const serialized = JSON.stringify(payload);
+
+            expect(payload.message).toContain('pass="[REDACTED]"');
+            expect(payload.additional_info.stderr).toContain('user="[REDACTED]"');
+            expect(payload.additional_info.stderr).toContain('pass="[REDACTED]"');
+            expect(payload.additional_info.token).toBe('[REDACTED]');
+            expect(serialized).not.toContain('message-secret');
+            expect(serialized).not.toContain('user@example.com');
+            expect(serialized).not.toContain('secret-pass');
+            expect(serialized).not.toContain('plain-token');
+        });
+
         test('should throw error if fetch response is not ok', async () => {
             const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 });
             vi.stubGlobal('fetch', fetchMock);

@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { getConfig } from "../config/index.js";
 import { CloudTool } from "./rclone.js";
 import { logger } from "./logger/index.js";
+import { redactSensitiveText } from "../utils/serializer.js";
 
 const log = logger.withModule ? logger.withModule("DirectTransferService") : logger;
 
@@ -160,7 +161,7 @@ export class DirectTransferService {
             }
 
             const fallbackAllowed = config.directTransfer?.fallbackToLocal !== false;
-            const message = error?.message || String(error);
+            const message = redactSensitiveText(error?.message || String(error));
             if (!fallbackAllowed) {
                 return { success: false, fallback: false, error: message };
             }
@@ -261,16 +262,16 @@ export class DirectTransferService {
                     safeResolve({ success: true });
                     return;
                 }
-                const errorTail = stderrLog.slice(-500).trim();
+                const errorTail = redactSensitiveText(stderrLog.slice(-500).trim());
                 safeResolve({ success: false, error: errorTail || `rclone rcat exited with code ${code}` });
             });
 
             proc.on("error", (error) => {
-                safeResolve({ success: false, error: error.message });
+                safeResolve({ success: false, error: redactSensitiveText(error.message) });
             });
         }).catch((error) => {
-            log.warn("Direct transfer rclone watcher failed", { taskId, error: error.message });
-            return { success: false, error: error.message };
+            log.warn("Direct transfer rclone watcher failed", { taskId, error: redactSensitiveText(error.message) });
+            return { success: false, error: redactSensitiveText(error.message) };
         });
     }
 

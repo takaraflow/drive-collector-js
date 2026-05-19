@@ -1,6 +1,6 @@
 import { BaseLogger } from './BaseLogger.js';
 import { writeOriginalConsole } from './console-channel.js';
-import { serializeError, serializeErrorLike, serializeToString, limitFields } from '../../utils/serializer.js';
+import { serializeError, serializeErrorLike, serializeToString, limitFields, redactSensitiveText } from '../../utils/serializer.js';
 import { getBeijingISOString } from '../../utils/timeUtils.js';
 import { shouldSendLogLevel } from './log-level.js';
 import { trace } from '@opentelemetry/api';
@@ -143,7 +143,7 @@ class NewrelicLogger extends BaseLogger {
             finalData = serializeError(data);
         }
 
-        const messageStr = message instanceof Error ? message.message : String(message);
+        const messageStr = redactSensitiveText(message instanceof Error ? message.message : String(message));
         const activeSpanContext = trace.getActiveSpan()?.spanContext?.();
 
         const payload = {
@@ -184,13 +184,13 @@ class NewrelicLogger extends BaseLogger {
                     : null;
 
         if (errorLike) {
-            payload.error_name = String(errorLike.name || 'Error').substring(0, 100);
-            payload.error_message = String(errorLike.message || '').substring(0, 500);
+            payload.error_name = redactSensitiveText(String(errorLike.name || 'Error')).substring(0, 100);
+            payload.error_message = redactSensitiveText(String(errorLike.message || '')).substring(0, 500);
             if (errorLike.code !== undefined && errorLike.code !== null) {
-                payload.error_code = String(errorLike.code).substring(0, 100);
+                payload.error_code = redactSensitiveText(String(errorLike.code)).substring(0, 100);
             }
             if (errorLike.stack) {
-                payload.error_stack = String(errorLike.stack).substring(0, 4000);
+                payload.error_stack = redactSensitiveText(String(errorLike.stack)).substring(0, 4000);
             }
         }
 

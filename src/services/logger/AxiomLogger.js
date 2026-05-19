@@ -1,7 +1,7 @@
 import { Axiom } from '@axiomhq/js';
 import { BaseLogger } from './BaseLogger.js';
 import { writeOriginalConsole } from './console-channel.js';
-import { limitFields, serializeError, serializeErrorLike, serializeToString } from '../../utils/serializer.js';
+import { limitFields, serializeError, serializeErrorLike, serializeToString, redactSensitiveText } from '../../utils/serializer.js';
 import { getBeijingISOString } from '../../utils/timeUtils.js';
 import { getBuildDisplayVersion, getBuildIdentity, getBuildLogFields } from '../../utils/buildIdentity.js';
 
@@ -125,7 +125,7 @@ class AxiomLogger extends BaseLogger {
         }
 
         const normalizedContext = this._normalizeContext(context);
-        const messageStr = message instanceof Error ? message.message : String(message);
+        const messageStr = redactSensitiveText(message instanceof Error ? message.message : String(message));
 
         const payload = {
             ...normalizedContext,
@@ -155,13 +155,13 @@ class AxiomLogger extends BaseLogger {
                     : null;
 
         if (errorLike) {
-            payload.error_name = String(errorLike.name || 'Error').substring(0, 100);
-            payload.error_message = String(errorLike.message || '').substring(0, 500);
+            payload.error_name = redactSensitiveText(String(errorLike.name || 'Error')).substring(0, 100);
+            payload.error_message = redactSensitiveText(String(errorLike.message || '')).substring(0, 500);
             if (errorLike.code !== undefined && errorLike.code !== null) {
-                payload.error_code = String(errorLike.code).substring(0, 100);
+                payload.error_code = redactSensitiveText(String(errorLike.code)).substring(0, 100);
             }
             if (errorLike.stack) {
-                payload.error_stack = String(errorLike.stack).substring(0, 4000);
+                payload.error_stack = redactSensitiveText(String(errorLike.stack)).substring(0, 4000);
             }
         }
 

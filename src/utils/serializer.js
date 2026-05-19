@@ -5,7 +5,28 @@
 
 export const REDACTED_VALUE = '[REDACTED]';
 
-const SENSITIVE_KEY_PATTERN = /(token|password|passwd|pwd|secret|key|auth|authorization|cookie|configdata|credential|private|license)/i;
+const SENSITIVE_KEY_PATTERN = /(token|password|passwd|pwd|pass|secret|key|auth|authorization|cookie|configdata|credential|private|license|session)/i;
+const SENSITIVE_TEXT_KEYS = [
+  'access_token',
+  'refresh_token',
+  'client_secret',
+  'client_id',
+  'token',
+  'pass',
+  'password',
+  'passwd',
+  'pwd',
+  'secret',
+  'secret_access_key',
+  'access_key_id',
+  'api_key',
+  'apikey',
+  'authorization',
+  'cookie',
+  'session',
+  'user'
+];
+const SENSITIVE_TEXT_KEY_PATTERN = SENSITIVE_TEXT_KEYS.join('|');
 
 export const isSensitiveKey = (key) => {
   if (key === undefined || key === null) return false;
@@ -14,11 +35,51 @@ export const isSensitiveKey = (key) => {
 };
 
 export const redactValueForKey = (key, value) => {
-  return isSensitiveKey(key) && value !== undefined && value !== null ? REDACTED_VALUE : value;
+  if (value === undefined || value === null) return value;
+  if (isSensitiveKey(key)) return REDACTED_VALUE;
+  return typeof value === 'string' ? redactSensitiveText(value) : value;
+};
+
+export const redactSensitiveText = (value) => {
+  if (value === undefined || value === null) return value;
+
+  let text = String(value);
+  if (!text) return text;
+
+  text = text.replace(
+    new RegExp(`(\\\\?"(?:${SENSITIVE_TEXT_KEY_PATTERN})\\\\?"\\s*:\\s*\\\\?")([^"\\\\]*(?:\\\\.[^"\\\\]*)*)(\\\\?")`, 'gi'),
+    `$1${REDACTED_VALUE}$3`
+  );
+  text = text.replace(
+    new RegExp(`(\\b(?:${SENSITIVE_TEXT_KEY_PATTERN})\\b\\s*=\\s*\\\\?")([^"\\\\]*(?:\\\\.[^"\\\\]*)*)(\\\\?")`, 'gi'),
+    `$1${REDACTED_VALUE}$3`
+  );
+  text = text.replace(
+    new RegExp(`(\\b(?:access_token|refresh_token|client_secret|token|password|passwd|pwd|secret|secret_access_key|api_key|apikey)\\b\\s*=\\s*)\\{[^\\r\\n}]*\\}`, 'gi'),
+    `$1${REDACTED_VALUE}`
+  );
+  text = text.replace(
+    /(\bAuthorization\b\s*[:=]\s*(?:Bearer|Basic)\s+)([A-Za-z0-9._~+/=-]+)/gi,
+    `$1${REDACTED_VALUE}`
+  );
+  text = text.replace(
+    new RegExp(`(\\b(?:access_token|refresh_token|client_secret|token|pass|password|passwd|pwd|secret|secret_access_key|access_key_id|api_key|apikey|cookie|session)\\b\\s*[:=]\\s*)([^\\s,;&"'{}\\[\\]]+)`, 'gi'),
+    `$1${REDACTED_VALUE}`
+  );
+  text = text.replace(
+    /([?&](?:access_token|refresh_token|token|key|secret|password|pass|api_key|apikey)=)([^&#\s]+)/gi,
+    `$1${REDACTED_VALUE}`
+  );
+  text = text.replace(
+    /([a-z][a-z0-9+.-]*:\/\/)([^/\s:@]+):([^/\s@]+)@/gi,
+    `$1${REDACTED_VALUE}:${REDACTED_VALUE}@`
+  );
+
+  return text;
 };
 
 const truncateString = (value, maxLength = 2000) => {
-  const text = String(value);
+  const text = redactSensitiveText(value);
   return text.length > maxLength ? `${text.substring(0, maxLength)}...` : text;
 };
 
@@ -58,8 +119,8 @@ export const serializeError = (err) => {
   if (!(err instanceof Error)) return err;
   const serialized = {
     name: err.name,
-    message: err.message,
-    stack: err.stack,
+    message: redactSensitiveText(err.message),
+    stack: redactSensitiveText(err.stack),
   };
   // Add any additional enumerable properties
   for (const key in err) {
@@ -68,6 +129,40 @@ export const serializeError = (err) => {
     }
   }
   return serialized;
+};
+
+export const redactSensitiveData = (value, currentKey = '', seen = new WeakMap()) => {
+  if (isSensitiveKey(currentKey)) {
+    return value === undefined || value === null ? value : REDACTED_VALUE;
+  }
+
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string') return redactSensitiveText(value);
+  if (typeof value !== 'object') return value;
+
+  if (value instanceof Error) {
+    return serializeError(value);
+  }
+
+  if (seen.has(value)) {
+    return '[Circular Reference]';
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  seen.set(value, true);
+
+  if (Array.isArray(value)) {
+    return value.map(item => redactSensitiveData(item, currentKey, seen));
+  }
+
+  const redacted = {};
+  for (const [key, nestedValue] of Object.entries(value)) {
+    redacted[key] = redactSensitiveData(nestedValue, key, seen);
+  }
+  return redacted;
 };
 
 /**
@@ -159,10 +254,12 @@ export const pruneData = (obj, maxDepth = 2, maxKeys = 5, currentDepth = 0, seen
       if (typeof obj === 'object' && obj !== null) {
           return '[Truncated: Max Depth]';
       }
-      return obj;
+      return typeof obj === 'string' ? redactSensitiveText(obj) : obj;
   }
   
-  if (obj === null || typeof obj !== 'object') return obj;
+  if (obj === null || typeof obj !== 'object') {
+      return typeof obj === 'string' ? redactSensitiveText(obj) : obj;
+  }
   
   // 循环引用检测
   if (seen.has(obj)) {
@@ -228,7 +325,7 @@ export const serializeToString = (data, maxDepth = 2, maxLength = 5000) => {
   } catch (e) {
     return JSON.stringify({ 
       error: '[Prune failed]', 
-      reason: e.message 
+      reason: redactSensitiveText(e.message)
     });
   }
 
@@ -250,7 +347,7 @@ export const serializeToString = (data, maxDepth = 2, maxLength = 5000) => {
   } catch (e) {
     return JSON.stringify({
       error: '[Stringify failed]',
-      reason: e.message,
+      reason: redactSensitiveText(e.message),
       type: typeof data
     });
   }
@@ -260,7 +357,7 @@ export const serializeToString = (data, maxDepth = 2, maxLength = 5000) => {
     return JSON.stringify({
       summary: 'Data truncated',
       original_size: str.length,
-      preview: str.substring(0, 200) + '...',
+      preview: redactSensitiveText(str.substring(0, 200)) + '...',
       service: pruned?.service || 'unknown'
     });
   }

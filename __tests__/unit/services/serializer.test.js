@@ -4,7 +4,9 @@ const {
     serializeErrorLike,
     pruneData, 
     serializeToString,
-    isSensitiveKey
+    isSensitiveKey,
+    redactSensitiveText,
+    redactSensitiveData
 } = await import('../../../src/utils/serializer.js');
 
 describe('Serializer Utils', () => {
@@ -71,6 +73,7 @@ describe('Serializer Utils', () => {
             error.code = 'ERR_CODE';
             error.status = 500;
             error.apiKey = 'secret-key';
+            error.pass = 'plain-pass';
             
             const result = serializeError(error);
             
@@ -79,8 +82,22 @@ describe('Serializer Utils', () => {
                 message: 'test error',
                 code: 'ERR_CODE',
                 status: 500,
-                apiKey: '[REDACTED]'
+                apiKey: '[REDACTED]',
+                pass: '[REDACTED]'
             });
+        });
+
+        test('should redact sensitive values embedded in Error message and stack', () => {
+            const error = new Error('failed :mega,user="user@example.com",pass="secret-pass":');
+            error.stack = 'Error: token={"access_token":"access-secret","refresh_token":"refresh-secret"}';
+
+            const result = serializeError(error);
+
+            expect(result.message).toContain('pass="[REDACTED]"');
+            expect(result.stack).toContain('token=[REDACTED]');
+            expect(JSON.stringify(result)).not.toContain('secret-pass');
+            expect(JSON.stringify(result)).not.toContain('access-secret');
+            expect(JSON.stringify(result)).not.toContain('refresh-secret');
         });
 
         test('should handle custom error types', () => {
@@ -132,6 +149,15 @@ describe('Serializer Utils', () => {
             });
         });
 
+        test('should redact sensitive values in primitive promise rejections', () => {
+            const result = serializeErrorLike('remote failed pass="secret" access_token=abc123');
+
+            expect(result.message).toBe('remote failed pass="[REDACTED]" access_token=[REDACTED]');
+            expect(result.value).toBe('remote failed pass="[REDACTED]" access_token=[REDACTED]');
+            expect(JSON.stringify(result)).not.toContain('secret');
+            expect(JSON.stringify(result)).not.toContain('abc123');
+        });
+
         test('should make empty promise rejections diagnosable', () => {
             expect(serializeErrorLike(undefined)).toMatchObject({
                 name: 'UndefinedRejection',
@@ -163,6 +189,46 @@ describe('Serializer Utils', () => {
             });
             expect(result.properties.token).toBe('[REDACTED]');
             expect(result.properties.nested).toEqual({ status: 'bad' });
+        });
+    });
+
+    describe('redaction helpers', () => {
+        test('should redact rclone remote strings without removing diagnostic context', () => {
+            const input = `CRITICAL: Failed for ":mega,user="user@example.com",pass="secret-pass":folder/file": couldn't login`;
+            const result = redactSensitiveText(input);
+
+            expect(result).toContain(':mega,user="[REDACTED]",pass="[REDACTED]":folder/file');
+            expect(result).toContain("couldn't login");
+            expect(result).not.toContain('user@example.com');
+            expect(result).not.toContain('secret-pass');
+        });
+
+        test('should redact JSON tokens and bearer headers embedded in strings', () => {
+            const input = 'token={"access_token":"access-secret","refresh_token":"refresh-secret","client_secret":"client-secret"} Authorization: Bearer bearer-secret';
+            const result = redactSensitiveText(input);
+
+            expect(result).toContain('token=[REDACTED]');
+            expect(result).toContain('Authorization: Bearer [REDACTED]');
+            expect(result).not.toContain('access-secret');
+            expect(result).not.toContain('refresh-secret');
+            expect(result).not.toContain('client-secret');
+            expect(result).not.toContain('bearer-secret');
+        });
+
+        test('should redact sensitive strings deeply in objects', () => {
+            const result = redactSensitiveData({
+                message: 'failed pass="secret"',
+                nested: {
+                    token: 'plain-token',
+                    publicValue: 'visible'
+                }
+            });
+
+            expect(result.message).toBe('failed pass="[REDACTED]"');
+            expect(result.nested).toEqual({
+                token: '[REDACTED]',
+                publicValue: 'visible'
+            });
         });
     });
 
@@ -301,6 +367,19 @@ describe('Serializer Utils', () => {
             });
             expect(result).not.toContain('plain-secret');
             expect(result).not.toContain('"pass":"p"');
+        });
+
+        test('should redact sensitive values embedded in non-sensitive string fields', () => {
+            const result = serializeToString({
+                stderr: 'Failed to create file system for ":mega,user="u@example.com",pass="secret":root"',
+                url: 'https://example.com/callback?access_token=access-secret&safe=1'
+            }, 4, 5000);
+
+            expect(result).toContain('pass=\\"[REDACTED]\\"');
+            expect(result).toContain('access_token=[REDACTED]');
+            expect(result).not.toContain('u@example.com');
+            expect(result).not.toContain('secret');
+            expect(result).not.toContain('access-secret');
         });
 
         test('should detect sensitive keys', () => {

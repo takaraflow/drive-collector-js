@@ -1,6 +1,7 @@
 import { BaseLogger } from './BaseLogger.js';
 import { writeOriginalConsole } from './console-channel.js';
 import { getBuildDisplayVersion, getBuildIdentity, getBuildLogFields } from '../../utils/buildIdentity.js';
+import { redactSensitiveData, redactSensitiveText } from '../../utils/serializer.js';
 
 class DatadogLogger extends BaseLogger {
     constructor(options = {}) {
@@ -35,13 +36,13 @@ class DatadogLogger extends BaseLogger {
             ddsource: 'node',
             ddtags: `env:${process.env.NODE_ENV || 'unknown'},service:${this.service}`,
             hostname: context.instanceId || 'unknown',
-            message: message,
+            message: redactSensitiveText(message),
             service: this.service,
             status: level,
             timestamp: Date.now() * 1000000,
             version: this.version,
             ...getBuildLogFields(this.buildIdentity),
-            additional_info: data
+            additional_info: redactSensitiveData(data)
         };
 
         const url = `https://http-intake.logs.${this.site}/v1/input/${this.apiKey}`;

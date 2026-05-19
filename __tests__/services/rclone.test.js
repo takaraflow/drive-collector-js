@@ -272,6 +272,27 @@ describe('CloudTool', () => {
             expect(result.reason).toBe('2FA');
         });
 
+        it('should redact rclone stderr details when validation fails', async () => {
+            mockSpawn.mockImplementation(() => createAutoProcess((p) => {
+                p.stderr.emit('data', Buffer.from(`CRITICAL: Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":": couldn't login\n`));
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 1);
+                p.emit('close', 1);
+            }));
+
+            const result = await CloudTool.validateConfig('mega', { user: 'user@example.com', pass: 'secret-pass' });
+
+            expect(result.success).toBe(false);
+            expect(result.details).toContain('user="[REDACTED]"');
+            expect(result.details).toContain('pass="[REDACTED]"');
+            expect(result.details).toContain("couldn't login");
+            expect(result.details).not.toContain('user@example.com');
+            expect(result.details).not.toContain('secret-pass');
+        });
+
         it('should handle unexpected errors', async () => {
             mockSpawn.mockImplementation(() => { throw new Error('Unexpected'); });
             const result = await CloudTool.validateConfig('mega', { user: 'u', pass: 'p' });
@@ -316,6 +337,27 @@ describe('CloudTool', () => {
             const result = await CloudTool.uploadFile('/local/path', { userId: 'user123' });
             expect(result.success).toBe(false);
             expect(result.error).toContain('disk full');
+        });
+
+        it('should redact sensitive rclone stderr from upload failures', async () => {
+            mockSpawn.mockImplementationOnce(() => createAutoProcess((p) => {
+                p.stderr.emit('data', Buffer.from(`CRITICAL: Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":folder": unexpected end of JSON input\n`));
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 1);
+                p.emit('close', 1);
+            }));
+
+            const result = await CloudTool.uploadFile('/local/path', { userId: 'user123' });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('user="[REDACTED]"');
+            expect(result.error).toContain('pass="[REDACTED]"');
+            expect(result.error).toContain('unexpected end of JSON input');
+            expect(result.error).not.toContain('user@example.com');
+            expect(result.error).not.toContain('secret-pass');
         });
 
         it('should trigger onProgress callback', async () => {
@@ -439,6 +481,26 @@ describe('CloudTool', () => {
 
             expect(result).toMatchObject({ success: false });
             expect(result.error).toContain('permission denied');
+        });
+
+        it('should redact sensitive rclone stderr from remote cleanup failures', async () => {
+            mockSpawn.mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                p.stderr.emit('data', Buffer.from(`CRITICAL: Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":Stream/denied.mkv": couldn't login\n`));
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 1);
+                p.emit('close', 1);
+            }));
+
+            const result = await CloudTool.deleteRemoteFile('denied.mkv', 'user123');
+
+            expect(result).toMatchObject({ success: false });
+            expect(result.error).toContain('user="[REDACTED]"');
+            expect(result.error).toContain('pass="[REDACTED]"');
+            expect(result.error).not.toContain('user@example.com');
+            expect(result.error).not.toContain('secret-pass');
         });
 
         it('should create rcat stream with an exact size hint when provided', async () => {
