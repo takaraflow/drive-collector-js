@@ -121,6 +121,11 @@ describe("DirectTransferService", () => {
       chunkSize: 4,
       stride: 4
     }));
+    expect(cloudTool.createRcatStream).toHaveBeenCalledWith(
+      expect.stringMatching(/^\.drive-collector-task-1-/),
+      "user-1",
+      { size: 11 }
+    );
     expect(stdin.write).toHaveBeenCalledTimes(2);
     expect(stdin.end).toHaveBeenCalledTimes(1);
     expect(cloudTool.moveRemoteFile).toHaveBeenCalledWith(".stage.part.movie.mkv", "movie.mkv", "user-1");

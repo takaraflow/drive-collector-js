@@ -86,7 +86,7 @@ export class DirectTransferService {
         }
 
         try {
-            const rcat = await this.cloudTool.createRcatStream(stagingFileName, task.userId);
+            const rcat = await this.cloudTool.createRcatStream(stagingFileName, task.userId, { size: totalSize });
             stdin = rcat.stdin;
             proc = rcat.proc;
             const remoteStagingName = rcat.fileName;

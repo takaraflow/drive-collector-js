@@ -441,6 +441,24 @@ describe('CloudTool', () => {
             expect(result.error).toContain('permission denied');
         });
 
+        it('should create rcat stream with an exact size hint when provided', async () => {
+            mockGetDefaultDrive.mockResolvedValue({
+                type: 'drive',
+                config_data: JSON.stringify({ user: 'u', pass: 'p' })
+            });
+            const proc = createAutoProcess();
+            mockSpawn.mockReturnValue(proc);
+
+            const result = await CloudTool.createRcatStream('../movie.mkv', 'user123', { size: 12345 });
+
+            expect(result.fileName).toBe('movie.mkv');
+            const args = mockSpawn.mock.calls[0][1];
+            expect(args).toContain('rcat');
+            expect(args).toContain('--size');
+            expect(args).toContain('12345');
+            expect(args).toEqual(expect.arrayContaining([expect.stringContaining('test-folder/movie.mkv')]));
+        });
+
         it('should move a sanitized remote staging file to the final remote name', async () => {
             mockSpawn.mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
                 p.stderr.emit('end');

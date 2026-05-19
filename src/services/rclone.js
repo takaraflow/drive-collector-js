@@ -530,12 +530,13 @@ export class CloudTool {
      * @param {string} userId - 用户ID
      * @returns {Object} 包含 stdin 流和进程对象的对象
      */
-    static async createRcatStream(fileName, userId) {
+    static async createRcatStream(fileName, userId, options = {}) {
         const conf = await this._getUserConfig(userId);
         const connectionString = this._getConnectionString(conf);
         const userUploadPath = await this._getUploadPath(userId);
         const safeFileName = this.sanitizeRemoteFileName(fileName);
         const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath, safeFileName);
+        const size = Number(options.size);
 
         const args = [
             "--config", "/dev/null",
@@ -544,6 +545,9 @@ export class CloudTool {
             "--use-json-log",
             "--buffer-size", "32M"
         ];
+        if (Number.isFinite(size) && size >= 0) {
+            args.push("--size", String(size));
+        }
 
         const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
 
