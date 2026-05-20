@@ -1,10 +1,33 @@
 import { gracefulShutdown, registerShutdownHook } from "../../src/services/GracefulShutdown.js";
+import { logger } from "../../src/services/logger/index.js";
+
+vi.mock("../../src/services/logger/index.js", () => {
+    const mockLogger = {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        withModule: vi.fn().mockImplementation(() => mockLogger),
+        withContext: vi.fn().mockImplementation(() => mockLogger),
+        configure: vi.fn(),
+        isInitialized: vi.fn().mockReturnValue(true),
+        canSend: vi.fn().mockReturnValue(true),
+        flush: vi.fn().mockResolvedValue(undefined)
+    };
+
+    return {
+        default: mockLogger,
+        logger: mockLogger,
+        flushLogBuffer: vi.fn().mockResolvedValue(undefined)
+    };
+});
 
 describe("GracefulShutdown", () => {
     let originalProcessListeners = {};
     let mockExit;
 
     beforeEach(() => {
+        vi.clearAllMocks();
         // 保存原始的监听器
         originalProcessListeners = {
             SIGTERM: [...process.listeners('SIGTERM')],
@@ -18,6 +41,7 @@ describe("GracefulShutdown", () => {
     });
 
     afterEach(() => {
+        vi.useRealTimers();
         // 恢复原始的监听器
         process.removeAllListeners('SIGTERM');
         process.removeAllListeners('SIGINT');
@@ -147,6 +171,18 @@ describe("GracefulShutdown", () => {
 
             // 验证状态
             expect(gracefulShutdown.isShuttingDown).toBe(true);
+        });
+
+        test("无业务清理钩子时也应在退出前刷新日志缓冲", async () => {
+            vi.useFakeTimers();
+
+            const shutdownPromise = gracefulShutdown.shutdown('startup-failed');
+
+            await shutdownPromise;
+            expect(logger.flush).toHaveBeenCalledWith(5000);
+
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(mockExit).toHaveBeenCalledWith(0);
         });
     });
 

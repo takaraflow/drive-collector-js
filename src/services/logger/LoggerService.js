@@ -351,6 +351,7 @@ class LoggerService {
         this._baseContext = {};
         this._moduleLoggers = new Map();
         this._moduleTimestamp = _singletonTimestamp;
+        this._lifecyclePromise = null;
     }
 
     static getInstance() {
@@ -362,13 +363,30 @@ class LoggerService {
     }
 
     async initialize() {
+        if (this._lifecyclePromise) {
+            await this._lifecyclePromise;
+            return;
+        }
         if (this.isInitialized) return;
-        await this._initLoggers();
-        this.isInitialized = true;
+
+        const lifecyclePromise = (async () => {
+            const { loggers, providerName } = await this._buildLoggers();
+            this.activeLoggers = loggers;
+            this.currentProviderName = providerName;
+            this.isInitialized = true;
+        })();
+        const wrappedPromise = lifecyclePromise.finally(() => {
+            if (this._lifecyclePromise === wrappedPromise) {
+                this._lifecyclePromise = null;
+            }
+        });
+
+        this._lifecyclePromise = wrappedPromise;
+        await wrappedPromise;
     }
 
-    async _initLoggers() {
-        this.activeLoggers = [];
+    async _buildLoggers() {
+        const loggers = [];
 
         // Try Axiom
         try {
@@ -377,7 +395,7 @@ class LoggerService {
             await axiomLogger.connect();
 
             if (axiomLogger.client) {
-                this.activeLoggers.push(axiomLogger);
+                loggers.push(axiomLogger);
             }
         } catch (error) {
             // Ignore error
@@ -390,13 +408,13 @@ class LoggerService {
             await nrLogger.connect();
 
             if (nrLogger.licenseKey) {
-                this.activeLoggers.push(nrLogger);
+                loggers.push(nrLogger);
             }
         } catch (error) {
             // Ignore error
         }
 
-        const hasExternalLoggers = this.activeLoggers.length > 0;
+        const hasExternalLoggers = loggers.length > 0;
 
         // 始终添加 ConsoleLogger
         // 如果有外部 Logger (Axiom/NewRelic)，开启智能过滤 (smartFilter: true)
@@ -405,9 +423,20 @@ class LoggerService {
             smartFilter: hasExternalLoggers
         });
         await consoleLogger.initialize();
-        this.activeLoggers.push(consoleLogger);
+        loggers.push(consoleLogger);
 
-        this.currentProviderName = this.activeLoggers.map(l => l.getProviderName()).join('+');
+        return {
+            loggers,
+            providerName: loggers.map(l => l.getProviderName()).join('+')
+        };
+    }
+
+    async _disconnectLoggers(loggers) {
+        for (const logger of loggers) {
+            if (logger && typeof logger.disconnect === 'function') {
+                await logger.disconnect();
+            }
+        }
     }
 
     /**
@@ -415,28 +444,40 @@ class LoggerService {
      */
     async reload() {
         writeOriginalConsole('log', '[LoggerService] Reloading loggers with new configuration...');
-        // 关闭旧的 loggers
-        for (const logger of this.activeLoggers) {
-            if (logger && typeof logger.disconnect === 'function') {
-                await logger.disconnect();
-            }
+        if (this._lifecyclePromise) {
+            await this._lifecyclePromise.catch(() => {});
         }
 
-        // 重新初始化
-        await this._initLoggers();
+        const oldLoggers = this.activeLoggers;
+        const lifecyclePromise = (async () => {
+            const { loggers, providerName } = await this._buildLoggers();
+            this.activeLoggers = loggers;
+            this.currentProviderName = providerName;
+            this.isInitialized = true;
+            await this._disconnectLoggers(oldLoggers);
+        })();
+        const wrappedPromise = lifecyclePromise.finally(() => {
+            if (this._lifecyclePromise === wrappedPromise) {
+                this._lifecyclePromise = null;
+            }
+        });
+
+        this._lifecyclePromise = wrappedPromise;
+        await wrappedPromise;
         writeOriginalConsole('log', `[LoggerService] Reloaded. Active providers: ${this.currentProviderName}`);
     }
 
-    _ensureInitialized() {
+    async _ensureInitialized() {
+        if (this._lifecyclePromise) {
+            await this._lifecyclePromise;
+        }
+
         if (!this.isInitialized) {
-            this.initialize().catch(err => {
-                writeOriginalConsole('error', 'LoggerService auto-initialization failed:', err.message);
-            });
+            await this.initialize();
         }
     }
 
     _getLoggers() {
-        this._ensureInitialized();
         return this.activeLoggers;
     }
 
@@ -465,6 +506,13 @@ class LoggerService {
 
     async _log(level, message, data, context) {
         if (!this.canSend(level)) return;
+
+        try {
+            await this._ensureInitialized();
+        } catch (err) {
+            writeOriginalConsole('error', 'LoggerService initialization failed:', err.message);
+            return;
+        }
 
         const loggers = this._getLoggers();
         if (!loggers || loggers.length === 0) return;
@@ -564,6 +612,13 @@ class LoggerService {
     }
 
     async flush(timeoutMs = 10000) {
+        try {
+            await this._ensureInitialized();
+        } catch (err) {
+            writeOriginalConsole('error', 'LoggerService initialization failed before flush:', err.message);
+            return;
+        }
+
         const loggers = this._getLoggers();
         if (loggers && loggers.length > 0) {
             const promises = loggers.map(logger => {

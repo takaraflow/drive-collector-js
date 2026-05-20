@@ -313,12 +313,25 @@ export class GracefulShutdown {
                     log.error(`[SHUTDOWN] Exit code ${this.exitCode} = error exit, s6-overlay will restart`);
                 }
 
-                // 延迟退出，确保日志发送完成
+                log.info(`[SHUTDOWN] Calling process.exit(${this.exitCode}) now`);
+                await this.flushFinalLogs(source);
+
+                // 延迟退出，给容器日志采集器一点时间消费 stdout/stderr。
                 setTimeout(() => {
-                    log.info(`[SHUTDOWN] Calling process.exit(${this.exitCode}) now`);
                     process.exit(this.exitCode);
                 }, 1000);
             }
+        }
+    }
+
+    async flushFinalLogs(reason = 'shutdown-final') {
+        try {
+            if (typeof logger.flush === 'function') {
+                await logger.flush(5000);
+            }
+        } catch (error) {
+            // Last-resort observability must never prevent process termination.
+            process.stderr.write(`[GracefulShutdown] Final log flush failed (${reason}): ${error.message}\n`);
         }
     }
 

@@ -33,6 +33,7 @@ class NewrelicLogger extends BaseLogger {
         this.logBuffer = [];
         this.batchFlushTimer = null;
         this.isBatchFlushing = false;
+        this._activeFlushPromise = null;
         this.BATCH_MAX_SIZE = 100; // 降低批量大小，256MB容器内存有限
         this.LOG_BUFFER_MEMORY_LIMIT = 4 * 1024 * 1024; // 4MB 缓冲区内存上限
         this._estimatedBufferBytes = 0; // 增量追踪缓冲区内存占用
@@ -229,7 +230,11 @@ class NewrelicLogger extends BaseLogger {
     }
 
     async _flushLogsBatch() {
-        if (this.isBatchFlushing || !this.logBuffer.length) return;
+        if (this.isBatchFlushing) {
+            return this._activeFlushPromise;
+        }
+
+        if (!this.logBuffer.length) return;
 
         if (this.batchFlushTimer) {
             clearTimeout(this.batchFlushTimer);
@@ -241,28 +246,33 @@ class NewrelicLogger extends BaseLogger {
         this.logBuffer = [];
         this._estimatedBufferBytes = 0; // 重置内存追踪
 
-        try {
-            await this._sendBatch(batch);
-        } catch (error) {
-            // 打印错误信息，避免静默失败
-            let sanitizedError = error;
-            if (error && error.message && this.licenseKey) {
-                const sanitizedMessage = error.message.split(this.licenseKey).join('***');
-                sanitizedError = new Error(sanitizedMessage);
-                sanitizedError.stack = error.stack ? error.stack.split(this.licenseKey).join('***') : undefined;
+        this._activeFlushPromise = (async () => {
+            try {
+                await this._sendBatch(batch);
+            } catch (error) {
+                // 打印错误信息，避免静默失败
+                let sanitizedError = error;
+                if (error && error.message && this.licenseKey) {
+                    const sanitizedMessage = error.message.split(this.licenseKey).join('***');
+                    sanitizedError = new Error(sanitizedMessage);
+                    sanitizedError.stack = error.stack ? error.stack.split(this.licenseKey).join('***') : undefined;
+                }
+                writeOriginalConsole('error', '[NewrelicLogger] Failed to send log batch', { error: sanitizedError });
+                writeOriginalConsole('error', '[NewrelicLogger] Region:', this.region);
+                writeOriginalConsole('error', '[NewrelicLogger] Endpoint:', this._getLogUrl());
+                writeOriginalConsole('error', '[NewrelicLogger] Batch size:', batch.length);
+                // On failure, logs are currently lost to avoid memory leaks
+                // In a more robust system, we might retry or persist them
+            } finally {
+                this.isBatchFlushing = false;
+                this._activeFlushPromise = null;
+                if (this.logBuffer.length) {
+                    this._scheduleBatchFlush();
+                }
             }
-            writeOriginalConsole('error', '[NewrelicLogger] Failed to send log batch', { error: sanitizedError });
-            writeOriginalConsole('error', '[NewrelicLogger] Region:', this.region);
-            writeOriginalConsole('error', '[NewrelicLogger] Endpoint:', this._getLogUrl());
-            writeOriginalConsole('error', '[NewrelicLogger] Batch size:', batch.length);
-            // On failure, logs are currently lost to avoid memory leaks
-            // In a more robust system, we might retry or persist them
-        } finally {
-            this.isBatchFlushing = false;
-            if (this.logBuffer.length) {
-                this._scheduleBatchFlush();
-            }
-        }
+        })();
+
+        return this._activeFlushPromise;
     }
 
     async info(message, data = {}, context = {}) {
@@ -283,13 +293,32 @@ class NewrelicLogger extends BaseLogger {
 
     async flush(timeoutMs = 10000) {
         if (!this.logBuffer.length && !this.isBatchFlushing) return;
-        
-        const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Log flush timeout')), timeoutMs);
-        });
 
         try {
-            await Promise.race([this._flushLogsBatch(), timeoutPromise]);
+            const deadline = Date.now() + timeoutMs;
+            while (this.logBuffer.length || this.isBatchFlushing) {
+                const flushPromise = this.isBatchFlushing
+                    ? this._activeFlushPromise
+                    : this._flushLogsBatch();
+
+                if (!flushPromise) break;
+
+                const remainingMs = deadline - Date.now();
+                if (remainingMs <= 0) {
+                    throw new Error('Log flush timeout');
+                }
+
+                let timeoutId;
+                const timeoutPromise = new Promise((_, reject) => {
+                    timeoutId = setTimeout(() => reject(new Error('Log flush timeout')), remainingMs);
+                });
+
+                try {
+                    await Promise.race([flushPromise, timeoutPromise]);
+                } finally {
+                    clearTimeout(timeoutId);
+                }
+            }
         } catch (error) {
             process.stderr.write(`[NewrelicLogger] Flush failed: ${error.message}\n`);
         }

@@ -1,33 +1,85 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
+const loggerMocks = vi.hoisted(() => {
+    const axiomInitialize = vi.fn().mockResolvedValue(undefined);
+    const axiomConnect = vi.fn().mockResolvedValue(undefined);
+    const axiomFactory = vi.fn().mockImplementation(function () {
+        return {
+            initialize: axiomInitialize,
+            connect: axiomConnect,
+            client: null,
+            getProviderName: () => 'AxiomLogger'
+        };
+    });
+
+    const newrelicInitialize = vi.fn().mockResolvedValue(undefined);
+    const newrelicConnect = vi.fn().mockResolvedValue(undefined);
+    const newrelicInfo = vi.fn().mockResolvedValue(undefined);
+    const newrelicDisconnect = vi.fn().mockResolvedValue(undefined);
+    const newrelicFlush = vi.fn().mockResolvedValue(undefined);
+    let newrelicLicenseKey = null;
+    const newrelicFactory = vi.fn().mockImplementation(function () {
+        return {
+            initialize: newrelicInitialize,
+            connect: newrelicConnect,
+            licenseKey: newrelicLicenseKey,
+            info: newrelicInfo,
+            disconnect: newrelicDisconnect,
+            flush: newrelicFlush,
+            getProviderName: () => 'NewrelicLogger',
+            getConnectionInfo: () => ({ provider: 'NewrelicLogger', connected: Boolean(newrelicLicenseKey) })
+        };
+    });
+
+    const consoleInitialize = vi.fn().mockResolvedValue(undefined);
+    const consoleInfo = vi.fn().mockResolvedValue(undefined);
+    const consoleWarn = vi.fn().mockResolvedValue(undefined);
+    const consoleError = vi.fn().mockResolvedValue(undefined);
+    const consoleDebug = vi.fn().mockResolvedValue(undefined);
+    const consoleFactory = vi.fn().mockImplementation(function () {
+        return {
+            initialize: consoleInitialize,
+            info: consoleInfo,
+            warn: consoleWarn,
+            error: consoleError,
+            debug: consoleDebug,
+            getProviderName: () => 'ConsoleLogger',
+            getConnectionInfo: () => ({ provider: 'ConsoleLogger', connected: true })
+        };
+    });
+
+    return {
+        axiomInitialize,
+        axiomConnect,
+        axiomFactory,
+        newrelicInitialize,
+        newrelicConnect,
+        newrelicInfo,
+        newrelicDisconnect,
+        newrelicFlush,
+        newrelicFactory,
+        consoleInitialize,
+        consoleInfo,
+        consoleWarn,
+        consoleError,
+        consoleDebug,
+        consoleFactory,
+        setNewrelicLicenseKey(value) {
+            newrelicLicenseKey = value;
+        }
+    };
+});
+
 vi.mock('../../../src/services/logger/AxiomLogger.js', () => ({
-    AxiomLogger: vi.fn().mockImplementation(() => ({
-        initialize: vi.fn().mockResolvedValue(undefined),
-        connect: vi.fn().mockResolvedValue(undefined),
-        client: null,
-        getProviderName: () => 'AxiomLogger'
-    }))
+    AxiomLogger: loggerMocks.axiomFactory
 }));
 
 vi.mock('../../../src/services/logger/NewrelicLogger.js', () => ({
-    NewrelicLogger: vi.fn().mockImplementation(() => ({
-        initialize: vi.fn().mockResolvedValue(undefined),
-        connect: vi.fn().mockResolvedValue(undefined),
-        licenseKey: null,
-        getProviderName: () => 'NewrelicLogger'
-    }))
+    NewrelicLogger: loggerMocks.newrelicFactory
 }));
 
 vi.mock('../../../src/services/logger/ConsoleLogger.js', () => ({
-    ConsoleLogger: vi.fn().mockImplementation(() => ({
-        initialize: vi.fn().mockResolvedValue(undefined),
-        info: vi.fn().mockResolvedValue(undefined),
-        warn: vi.fn().mockResolvedValue(undefined),
-        error: vi.fn().mockResolvedValue(undefined),
-        debug: vi.fn().mockResolvedValue(undefined),
-        getProviderName: () => 'ConsoleLogger',
-        getConnectionInfo: () => ({ provider: 'ConsoleLogger', connected: true })
-    }))
+    ConsoleLogger: loggerMocks.consoleFactory
 }));
 
 const {
@@ -45,6 +97,8 @@ describe('LoggerService log level gate', () => {
     };
 
     beforeEach(() => {
+        vi.clearAllMocks();
+        loggerMocks.setNewrelicLicenseKey(null);
         delete process.env.LOG_LEVEL;
         process.env.NODE_ENV = 'test';
     });
@@ -245,5 +299,41 @@ describe('LoggerService log level gate', () => {
         expect(serialized).not.toContain('secret-pass');
         expect(serialized).not.toContain('plain-token');
         expect(serialized).not.toContain('context-token');
+    });
+
+    test('reload marks provider lifecycle initialized before dispatching startup logs', async () => {
+        loggerMocks.setNewrelicLicenseKey('license');
+        const logger = new LoggerService();
+
+        await logger.reload();
+        await logger.info('startup ready');
+
+        expect(loggerMocks.newrelicFactory).toHaveBeenCalledTimes(1);
+        expect(loggerMocks.consoleFactory).toHaveBeenCalledTimes(1);
+        expect(loggerMocks.newrelicInfo).toHaveBeenCalledWith(
+            expect.stringContaining('startup ready'),
+            {},
+            expect.objectContaining({ env: 'test', instanceId: expect.any(String) })
+        );
+        expect(loggerMocks.consoleInfo).toHaveBeenCalledWith(
+            expect.stringContaining('startup ready'),
+            {},
+            expect.objectContaining({ env: 'test', instanceId: expect.any(String) })
+        );
+    });
+
+    test('coalesces concurrent lazy initialization before dispatching logs', async () => {
+        loggerMocks.setNewrelicLicenseKey('license');
+        const logger = new LoggerService();
+
+        await Promise.all([
+            logger.info('first boot log'),
+            logger.info('second boot log')
+        ]);
+
+        expect(loggerMocks.newrelicFactory).toHaveBeenCalledTimes(1);
+        expect(loggerMocks.consoleFactory).toHaveBeenCalledTimes(1);
+        expect(loggerMocks.newrelicInfo).toHaveBeenCalledTimes(2);
+        expect(loggerMocks.consoleInfo).toHaveBeenCalledTimes(2);
     });
 });

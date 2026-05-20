@@ -252,4 +252,84 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
         await logger._flushLogsBatch();
         expect(console.debug).toHaveBeenCalledWith(expect.stringContaining('Log batch sent'));
     });
+
+    it('should wait for an in-flight batch when flush is requested', async () => {
+        let resolveFetch;
+        const fetchPromise = new Promise(resolve => {
+            resolveFetch = resolve;
+        });
+        fetch.mockReturnValue(fetchPromise);
+
+        await logger.info('slow batch');
+        const activeFlush = logger._flushLogsBatch();
+
+        let flushResolved = false;
+        const flushPromise = logger.flush().then(() => {
+            flushResolved = true;
+        });
+
+        await Promise.resolve();
+        expect(flushResolved).toBe(false);
+
+        resolveFetch({ ok: true, status: 202 });
+        await activeFlush;
+        await flushPromise;
+
+        expect(flushResolved).toBe(true);
+        expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('should drain logs queued while a batch is already flushing', async () => {
+        let resolveFirstFetch;
+        const firstFetchPromise = new Promise(resolve => {
+            resolveFirstFetch = resolve;
+        });
+        fetch
+            .mockReturnValueOnce(firstFetchPromise)
+            .mockResolvedValue({ ok: true, status: 202 });
+
+        await logger.info('first batch');
+        const firstFlush = logger._flushLogsBatch();
+
+        await logger.info('second batch');
+        const flushPromise = logger.flush();
+
+        resolveFirstFetch({ ok: true, status: 202 });
+        await firstFlush;
+        await flushPromise;
+
+        expect(fetch).toHaveBeenCalledTimes(2);
+
+        const secondRequestBody = JSON.parse(fetch.mock.calls[1][1].body);
+        expect(secondRequestBody[0].logs).toHaveLength(1);
+        expect(secondRequestBody[0].logs[0].message).toBe('second batch');
+    });
+
+    it('should wait for in-flight New Relic delivery before disconnecting', async () => {
+        let resolveFetch;
+        const fetchPromise = new Promise(resolve => {
+            resolveFetch = resolve;
+        });
+        fetch.mockReturnValue(fetchPromise);
+
+        await logger.connect();
+        await logger.info('shutdown batch');
+        const activeFlush = logger._flushLogsBatch();
+
+        let disconnectResolved = false;
+        const disconnectPromise = logger.disconnect().then(() => {
+            disconnectResolved = true;
+        });
+
+        await Promise.resolve();
+        expect(disconnectResolved).toBe(false);
+        expect(logger.connected).toBe(true);
+
+        resolveFetch({ ok: true, status: 202 });
+        await activeFlush;
+        await disconnectPromise;
+
+        expect(disconnectResolved).toBe(true);
+        expect(logger.connected).toBe(false);
+    });
 });
