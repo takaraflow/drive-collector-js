@@ -273,11 +273,17 @@ describe('TaskManager queue/recovery closure', () => {
         }]);
 
         expect(mockClient.getMessages).not.toHaveBeenCalled();
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            'queued-1',
+            TASK_EVENTS.RETRY,
+            null,
+            expect.objectContaining({ source: 'restore_queued_task' })
+        );
         expect(mockQueueService.enqueueDownloadTask).toHaveBeenCalledWith(
             'queued-1',
             expect.objectContaining({
                 _meta: expect.objectContaining({
-                    queueAttempt: expect.stringContaining('recovery:queued:')
+                    queueAttempt: `${TASK_EVENTS.RETRY}:queued-1:1700000000000`
                 })
             })
         );
@@ -443,9 +449,7 @@ describe('TaskManager queue/recovery closure', () => {
         );
     });
 
-    it('restores queued tasks with a fresh queue attempt so queue idempotency does not swallow recovery', async () => {
-        vi.spyOn(Date, 'now').mockReturnValue(1700000001234);
-
+    it('restores queued tasks with a state-machine queue attempt so queue idempotency does not swallow recovery', async () => {
         await TaskManager._restoreBatchTasks('chat-1', [{
             id: 'queued-1',
             user_id: 'u1',
@@ -460,12 +464,10 @@ describe('TaskManager queue/recovery closure', () => {
             'queued-1',
             expect.objectContaining({
                 _meta: expect.objectContaining({
-                    queueAttempt: 'recovery:queued:1700000001234'
+                    queueAttempt: `${TASK_EVENTS.RETRY}:queued-1:1700000000000`
                 })
             })
         );
-
-        Date.now.mockRestore();
     });
 
     it('keeps restored task recoverable when recovery enqueue hits retryable infrastructure failure', async () => {

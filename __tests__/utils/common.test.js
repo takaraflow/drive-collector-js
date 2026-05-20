@@ -1,6 +1,7 @@
 // Mock dependencies
 const mockClient = {
-    editMessage: vi.fn()
+    editMessage: vi.fn(),
+    sendMessage: vi.fn()
 };
 const mockRunBotTaskWithRetry = vi.fn();
 
@@ -38,6 +39,7 @@ describe('common utils', () => {
             return fn();
         });
         mockClient.editMessage.mockResolvedValue({});
+        mockClient.sendMessage.mockResolvedValue({});
     });
 
     describe('escapeHTML', () => {
@@ -100,6 +102,12 @@ describe('common utils', () => {
             mockClient.editMessage.mockRejectedValue(new Error('Edit failed'));
 
             await expect(safeEdit(123456, 789, 'test message')).resolves.not.toThrow();
+        });
+
+        it('should report edit failure as false', async () => {
+            mockClient.editMessage.mockRejectedValue(new Error('Edit failed'));
+
+            await expect(safeEdit(123456, 789, 'test message')).resolves.toBe(false);
         });
 
         it('should ignore MESSAGE_NOT_MODIFIED error', async () => {
@@ -346,6 +354,44 @@ describe('common utils', () => {
                 buttons: null,
                 parseMode: 'markdown'
             });
+        });
+
+        it('should send a fallback message when final status edit fails', async () => {
+            const task = {
+                id: 'task-4',
+                chatId: 123456,
+                msgId: 789,
+                userId: 'user123'
+            };
+            mockClient.editMessage.mockRejectedValueOnce(new Error('MESSAGE_ID_INVALID'));
+
+            await updateStatus(task, 'Failed!', true, null, true);
+
+            expect(mockClient.editMessage).toHaveBeenCalledWith(123456, {
+                message: 789,
+                text: 'Failed!',
+                buttons: [expect.objectContaining({ text: 'retry', data: 'retry_confirm_task-4' })],
+                parseMode: 'markdown'
+            });
+            expect(mockClient.sendMessage).toHaveBeenCalledWith(123456, {
+                message: 'Failed!',
+                buttons: [expect.objectContaining({ text: 'retry', data: 'retry_confirm_task-4' })],
+                parseMode: 'markdown'
+            });
+        });
+
+        it('should not send a fallback message when non-final status edit fails', async () => {
+            const task = {
+                id: 'task-5',
+                chatId: 123456,
+                msgId: 789,
+                userId: 'user123'
+            };
+            mockClient.editMessage.mockRejectedValueOnce(new Error('MESSAGE_ID_INVALID'));
+
+            await updateStatus(task, 'Downloading...', false);
+
+            expect(mockClient.sendMessage).not.toHaveBeenCalled();
         });
 
         it('should detect HTML content and use html parseMode', async () => {

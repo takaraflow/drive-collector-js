@@ -444,23 +444,26 @@ export class TaskManager {
                         log.warn("跳过不可自动恢复的失败任务", { taskId: row.id });
                         continue;
                     }
-                    let queueAttempt = null;
-                    if (row.status === TASK_STATUSES.DOWNLOADING || row.status === TASK_STATUSES.FAILED) {
-                        const reset = await TaskRepository.transitionStatus(row.id, TASK_EVENTS.RETRY, 'Downloading interrupted during recovery', {
-                            returnResult: true,
-                            allowNoop: true,
-                            source: row.status === TASK_STATUSES.FAILED
-                                ? 'restore_retryable_failed_task'
-                                : 'restore_downloading_task'
-                        });
-                        if (reset.blocked) {
-                            log.warn("下载中任务无法复位下载", { taskId: row.id, reason: reset.reason });
-                            continue;
-                        }
-                        queueAttempt = reset.queueAttempt;
+                    const resetSource = row.status === TASK_STATUSES.FAILED
+                        ? 'restore_retryable_failed_task'
+                        : row.status === TASK_STATUSES.DOWNLOADING
+                            ? 'restore_downloading_task'
+                            : 'restore_queued_task';
+                    const resetReason = row.status === TASK_STATUSES.QUEUED
+                        ? null
+                        : 'Downloading interrupted during recovery';
+                    const reset = await TaskRepository.transitionStatus(row.id, TASK_EVENTS.RETRY, resetReason, {
+                        returnResult: true,
+                        allowNoop: true,
+                        source: resetSource
+                    });
+                    if (reset.blocked) {
+                        log.warn("任务无法复位下载", { taskId: row.id, reason: reset.reason, status: row.status });
+                        continue;
                     }
-                    // 其他状态（queued, downloading）恢复到下载队列
-                    task.queueAttempt = queueAttempt || `recovery:${row.status}:${Date.now()}`;
+                    // 恢复到下载队列。即使原状态已经是 queued，也通过状态机刷新 updated_at/queueAttempt，
+                    // 避免旧 QStash 消息和恢复消息共享幂等键导致 UI 停在恢复提示。
+                    task.queueAttempt = reset.queueAttempt;
                     tasksToEnqueue.push(task);
                 } else {
                     log.warn("跳过不支持恢复的任务状态", { taskId: row.id, status: row.status });

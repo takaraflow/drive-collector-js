@@ -28,7 +28,7 @@ export const safeEdit = async (chatId, msgId, text, buttons = null, userId = nul
     // 延迟导入 client 避免循环依赖
     const { client } = await import("../services/telegram.js");
     try {
-        await runBotTaskWithRetry(
+        const result = await runBotTaskWithRetry(
             async () => {
                 try {
                     await client.editMessage(chatId, { message: msgId, text, buttons, parseMode });
@@ -42,7 +42,7 @@ export const safeEdit = async (chatId, msgId, text, buttons = null, userId = nul
                         const { clearSession } = await import("../services/telegram.js");
                         await clearSession();
                         log.error(`🚨 关键错误: AUTH_KEY_DUPLICATED 检测到，已清除 Session。建议重启服务。`);
-                        return;
+                        return false;
                     }
                     throw e;
                 }
@@ -52,12 +52,31 @@ export const safeEdit = async (chatId, msgId, text, buttons = null, userId = nul
             false,
             3
         );
+        return result !== false;
     } catch (e) {
         // 最终失败也不抛出，避免中断主流程
         if (e.code === 406 && (e.errorMessage?.includes('AUTH_KEY_DUPLICATED') || e.message?.includes('AUTH_KEY_DUPLICATED'))) {
-            return; // 已经在内部处理过了
+            return false; // 已经在内部处理过了
         }
-        log.warn(`[safeEdit Failed] msgId ${msgId}:`, e.message);
+        log.warn(`[safeEdit Failed] msgId ${msgId}:`, e.message, { chatId, msgId });
+        return false;
+    }
+};
+
+const safeSendStatusMessage = async (chatId, text, buttons = null, userId = null, parseMode = "html", options = {}) => {
+    const { client } = await import("../services/telegram.js");
+    try {
+        await runBotTaskWithRetry(
+            () => client.sendMessage(chatId, { message: text, buttons, parseMode }),
+            userId,
+            options,
+            false,
+            3
+        );
+        return true;
+    } catch (e) {
+        log.warn("[safeSendStatusMessage Failed]:", e.message, { chatId });
+        return false;
     }
 };
 
@@ -93,7 +112,12 @@ export const updateStatus = async (task, text, isFinal = false, priority = null,
     }
     const isHtml = /<\/?(b|i|code|pre|a)(\s|>)/i.test(text);
     const options = priority ? { priority } : {};
-    await safeEdit(task.chatId, task.msgId, text, buttons, task.userId, isHtml ? 'html' : 'markdown', options);
+    const parseMode = isHtml ? 'html' : 'markdown';
+    const edited = await safeEdit(task.chatId, task.msgId, text, buttons, task.userId, parseMode, options);
+    if (!edited && isFinal) {
+        return await safeSendStatusMessage(task.chatId, text, buttons, task.userId, parseMode, options);
+    }
+    return edited;
 };
 
 /**
