@@ -12,8 +12,7 @@ import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
 import { CACHE_KEYS } from "../domain/cache-keys.js";
 import { getClaimFenceOptions } from "../processor/TaskManager/claim-fence.js";
 import { redactSensitiveText } from "../utils/serializer.js";
-import { classifyRcloneError } from "../domain/rclone-error.js";
-import { getRcloneErrorUserMessage } from "../utils/rcloneErrorMessage.js";
+import { resolveRcloneFailureMetadata } from "../utils/rcloneErrorMessage.js";
 import { once } from "events";
 import fs from "fs";
 import os from "os";
@@ -1391,16 +1390,17 @@ class StreamTransferService {
 
     async reportError(taskId, context, errorMsg, failure = null) {
         const metadata = failure || (errorMsg && typeof errorMsg === 'object' ? errorMsg : null);
-        const rawErrorMsg = metadata instanceof Error ? metadata.message : errorMsg;
+        const rawErrorMsg = metadata instanceof Error
+            ? metadata.message
+            : metadata?.diagnosticMessage || metadata?.error || metadata?.message || errorMsg;
         const safeErrorMsg = String(redactSensitiveText(rawErrorMsg || "Stream transfer failed") || "Stream transfer failed");
-        const fallbackClassification = classifyRcloneError(safeErrorMsg, { operation: "stream", remotePathScoped: true });
-        const errorCode = metadata?.errorCode || fallbackClassification.code;
-        const classification = {
-            code: errorCode,
-            userMessage: metadata?.userMessage || getRcloneErrorUserMessage(errorCode),
-            retryable: typeof metadata?.retryable === 'boolean' ? metadata.retryable : fallbackClassification.retryable,
-            userRetryable: metadata?.userRetryable ?? fallbackClassification.userRetryable
-        };
+        const classification = resolveRcloneFailureMetadata({
+            ...metadata,
+            error: safeErrorMsg
+        }, {
+            operation: "stream",
+            remotePathScoped: true
+        });
         const userMessage = classification.userMessage ? redactSensitiveText(classification.userMessage) : null;
         const displayMessage = userMessage || safeErrorMsg;
         log.error(`❌ 任务上传失败: ${taskId} - ${safeErrorMsg}`);

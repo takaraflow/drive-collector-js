@@ -639,6 +639,37 @@ describe('StreamTransferService', () => {
     expect(text).not.toContain('Object (typically, node or user) not found')
   })
 
+  test('reportError prefers current rclone diagnostics over stale failure metadata', async () => {
+    const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
+    const { TelegramBotApi } = await import('../../src/utils/telegramBotApi.js')
+
+    await streamTransferService.reportError('task-stale-metadata', {
+      chatId: 'chat-123',
+      msgId: '456',
+      userId: 'user-123',
+      fileName: 'stale.txt',
+      totalSize: 10
+    }, {
+      error: `CRITICAL | Failed to create file system for ":mega,user=\\"[REDACTED]": couldn't login: Object (typically, node or user) not found`,
+      errorCode: 'DRIVE_AUTH_INVALID',
+      userMessage: '当前绑定的网盘无法登录。请重新绑定网盘后再重试。',
+      retryable: false,
+      userRetryable: false
+    })
+
+    expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
+      'task-stale-metadata',
+      'fail',
+      expect.stringContaining('Object (typically, node or user) not found'),
+      expect.objectContaining({ source: 'stream_report_error' })
+    )
+    const text = TelegramBotApi.editMessageText.mock.calls
+      .filter(([chatId]) => chatId === 'chat-123')
+      .at(-1)?.[2]
+    expect(text).toContain('保存目录')
+    expect(text).not.toContain('无法登录')
+  })
+
   test('finishTask completes when remote validation succeeds', async () => {
     const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
     const { TelegramBotApi } = await import('../../src/utils/telegramBotApi.js')

@@ -104,6 +104,32 @@ describe("TaskManager upload failure handling", () => {
         expect(updateStatus.mock.calls[0][1]).not.toContain("Object (typically, node or user) not found");
     });
 
+    test("prefers current rclone diagnostics over stale failure metadata", async () => {
+        const updateStatus = vi.fn();
+        const rawError = `CRITICAL | Failed to create file system for ":mega,user=\\"[REDACTED]": couldn't login: Object (typically, node or user) not found`;
+
+        await handleTaskFailure(
+            { id: "task-stale-code", isGroup: false },
+            {},
+            updateStatus,
+            {
+                error: rawError,
+                errorCode: "DRIVE_AUTH_INVALID",
+                userMessage: "当前绑定的网盘无法登录。请重新绑定网盘后再重试。",
+                userRetryable: false
+            },
+            false
+        );
+
+        expect(updateStatus).toHaveBeenCalledWith(
+            expect.objectContaining({ id: "task-stale-code" }),
+            "action required 目标网盘保存目录或远端节点不可用。请检查保存目录，或重新选择/重置保存目录后再重试。",
+            true,
+            null,
+            true
+        );
+    });
+
     test("does not expose retryable queue infrastructure diagnostics to users", async () => {
         const updateStatus = vi.fn();
 

@@ -4,19 +4,23 @@ import { getConfig } from "../config/index.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 import { escapeHTML, formatBytes } from "../utils/common.js";
 import { CloudTool } from "../services/rclone.js";
-import { classifyRcloneError } from "../domain/rclone-error.js";
-import { getRcloneErrorUserMessage } from "../utils/rcloneErrorMessage.js";
+import { resolveRcloneFailureMetadata } from "../utils/rcloneErrorMessage.js";
 
 /**
  * --- UI 模板工具库 (UIHelper) ---
  */
 export class UIHelper {
     static _taskFailureDisplayMessage(task) {
-        const message = task?.user_message || task?.error_msg || '';
+        const message = task?.error_msg || task?.user_message || '';
         if (!message) return '';
-        const classification = classifyRcloneError(message, { operation: "uploadBatch", remotePathScoped: true });
-        return getRcloneErrorUserMessage(classification.code)
-            || getRcloneErrorUserMessage(task?.error_code)
+        return resolveRcloneFailureMetadata({
+            error: message,
+            errorCode: task?.error_code,
+            userMessage: task?.user_message
+        }, {
+            operation: "uploadBatch",
+            remotePathScoped: true
+        }).userMessage
             || message;
     }
 

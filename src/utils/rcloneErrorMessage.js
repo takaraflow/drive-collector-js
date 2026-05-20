@@ -1,4 +1,4 @@
-import { RCLONE_ERROR_CODES } from "../domain/rclone-error.js";
+import { classifyRcloneError, RCLONE_ERROR_CODES } from "../domain/rclone-error.js";
 import { STRINGS } from "../locales/zh-CN.js";
 
 export function getRcloneErrorUserMessage(errorCode) {
@@ -12,4 +12,28 @@ export function getRcloneErrorUserMessage(errorCode) {
     };
 
     return messages[errorCode] || null;
+}
+
+export function resolveRcloneFailureMetadata(failure = {}, options = {}) {
+    const message = failure?.diagnosticMessage || failure?.error || failure?.message || "";
+    const classification = classifyRcloneError(message, options);
+    const hasDerivedCode = classification.code !== RCLONE_ERROR_CODES.UNKNOWN;
+    const errorCode = hasDerivedCode
+        ? classification.code
+        : (failure?.errorCode || classification.code);
+    const mappedUserMessage = getRcloneErrorUserMessage(errorCode);
+    const userMessage = hasDerivedCode
+        ? mappedUserMessage
+        : (failure?.userMessage || mappedUserMessage || null);
+
+    return {
+        errorCode,
+        userMessage,
+        retryable: hasDerivedCode
+            ? classification.retryable
+            : (typeof failure?.retryable === "boolean" ? failure.retryable : classification.retryable),
+        userRetryable: hasDerivedCode
+            ? classification.userRetryable
+            : (typeof failure?.userRetryable === "boolean" ? failure.userRetryable : classification.userRetryable)
+    };
 }

@@ -5,8 +5,8 @@ import { getConfig } from "../config/index.js";
 import { CloudTool } from "./rclone.js";
 import { logger } from "./logger/index.js";
 import { redactSensitiveText } from "../utils/serializer.js";
-import { classifyRcloneError, RCLONE_ERROR_CODES } from "../domain/rclone-error.js";
-import { getRcloneErrorUserMessage } from "../utils/rcloneErrorMessage.js";
+import { RCLONE_ERROR_CODES } from "../domain/rclone-error.js";
+import { resolveRcloneFailureMetadata } from "../utils/rcloneErrorMessage.js";
 
 const log = logger.withModule ? logger.withModule("DirectTransferService") : logger;
 
@@ -175,15 +175,15 @@ export class DirectTransferService {
             const fallbackAllowed = config.directTransfer?.fallbackToLocal !== false;
             const effectiveError = rcloneFailure?.success === false ? rcloneFailure : error;
             const message = redactSensitiveText(effectiveError?.error || effectiveError?.message || String(effectiveError));
-            const classification = classifyRcloneError(message, { operation: "rcat", remotePathScoped: true });
-            const errorCode = effectiveError?.errorCode || classification.code;
+            const failureMetadata = resolveRcloneFailureMetadata({
+                ...effectiveError,
+                error: message
+            }, {
+                operation: "rcat",
+                remotePathScoped: true
+            });
+            const errorCode = failureMetadata.errorCode;
             const isPermanentDriveFailure = NON_FALLBACK_RCLONE_ERROR_CODES.has(errorCode);
-            const failureMetadata = {
-                errorCode,
-                userMessage: effectiveError?.userMessage || getRcloneErrorUserMessage(errorCode),
-                retryable: typeof effectiveError?.retryable === "boolean" ? effectiveError.retryable : classification.retryable,
-                userRetryable: effectiveError?.userRetryable ?? classification.userRetryable
-            };
             if (!fallbackAllowed || isPermanentDriveFailure) {
                 return { success: false, fallback: false, error: message, ...failureMetadata };
             }
@@ -322,14 +322,14 @@ export class DirectTransferService {
 
     _buildRcloneFailure(errorMessage) {
         const message = String(redactSensitiveText(errorMessage || "rclone failed") || "rclone failed");
-        const classification = classifyRcloneError(message, { operation: "rcat", remotePathScoped: true });
+        const failureMetadata = resolveRcloneFailureMetadata({ error: message }, {
+            operation: "rcat",
+            remotePathScoped: true
+        });
         return {
             success: false,
             error: message,
-            errorCode: classification.code,
-            userMessage: getRcloneErrorUserMessage(classification.code),
-            retryable: classification.retryable,
-            userRetryable: classification.userRetryable
+            ...failureMetadata
         };
     }
 

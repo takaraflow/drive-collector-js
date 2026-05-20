@@ -2,8 +2,7 @@ import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../../domain/task-state-machine.js";
 import { getClaimFenceOptions } from "./claim-fence.js";
 import { redactSensitiveText } from "../../utils/serializer.js";
-import { getRcloneErrorUserMessage } from "../../utils/rcloneErrorMessage.js";
-import { classifyRcloneError } from "../../domain/rclone-error.js";
+import { resolveRcloneFailureMetadata } from "../../utils/rcloneErrorMessage.js";
 import { classifyInfrastructureError } from "../../domain/infrastructure-error.js";
 import { getInfrastructureErrorUserMessage } from "../../utils/infrastructureErrorMessage.js";
 
@@ -13,10 +12,10 @@ const getLog = () => getDeps().logger.withModule('TaskManager.utils');
 const looksLikeRcloneDiagnostic = (message) => /rclone|failed to create file system|slog\/logger\.go|:mega|copyto|rcat/i.test(message || "");
 
 const resolveUploadFailureUserMessage = (failure) => {
-    if (failure?.userMessage) {
-        return redactSensitiveText(failure.userMessage);
-    }
-    return getRcloneErrorUserMessage(failure?.errorCode);
+    return redactSensitiveText(resolveRcloneFailureMetadata(failure, {
+        operation: "uploadBatch",
+        remotePathScoped: true
+    }).userMessage);
 };
 
 /**
@@ -113,15 +112,14 @@ export async function handleTaskFailure(task, context, updateStatus, errorMessag
     const failure = errorMessage && typeof errorMessage === 'object' ? errorMessage : null;
     const rawErrorMessage = failure?.diagnosticMessage || failure?.error || failure?.message || errorMessage;
     const safeErrorMessage = redactSensitiveText(rawErrorMessage);
-    const derivedClassification = looksLikeRcloneDiagnostic(safeErrorMessage)
-        ? classifyRcloneError(safeErrorMessage, { operation: "uploadBatch", remotePathScoped: true })
+    const rcloneFailure = looksLikeRcloneDiagnostic(safeErrorMessage)
+        ? resolveRcloneFailureMetadata({ ...failure, error: safeErrorMessage }, { operation: "uploadBatch", remotePathScoped: true })
         : null;
     const infrastructureClassification = classifyInfrastructureError(failure || safeErrorMessage);
-    const errorCode = failure?.errorCode || derivedClassification?.code;
-    const userMessage = failure?.userMessage
-        ? redactSensitiveText(failure.userMessage)
-        : getRcloneErrorUserMessage(errorCode) || getInfrastructureErrorUserMessage(infrastructureClassification.code);
-    const showRetry = !isCancelled && (failure?.userRetryable ?? derivedClassification?.userRetryable) !== false;
+    const userMessage = rcloneFailure?.userMessage
+        || (failure?.userMessage ? redactSensitiveText(failure.userMessage) : null)
+        || getInfrastructureErrorUserMessage(infrastructureClassification.code);
+    const showRetry = !isCancelled && (rcloneFailure?.userRetryable ?? failure?.userRetryable) !== false;
     const transition = await TaskRepository.transitionStatus(task.id, event, safeErrorMessage, {
         ...getClaimFenceOptions(task),
         returnResult: true,

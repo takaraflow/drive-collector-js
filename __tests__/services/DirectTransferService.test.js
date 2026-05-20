@@ -248,6 +248,35 @@ describe("DirectTransferService", () => {
     expect(result.userMessage).toContain("保存目录");
   });
 
+  test("prefers current rclone diagnostics over stale rclone failure metadata", async () => {
+    const staleFailure = {
+      success: false,
+      error: `CRITICAL | Failed to create file system for ":mega,user=\\"[REDACTED]": couldn't login: Object (typically, node or user) not found`,
+      errorCode: "DRIVE_AUTH_INVALID",
+      userMessage: "当前绑定的网盘无法登录。请重新绑定网盘后再重试。",
+      retryable: false,
+      userRetryable: false
+    };
+    cloudTool.createRcatStream.mockRejectedValue(staleFailure);
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-stale", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "file.bin"
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false,
+      errorCode: "DRIVE_REMOTE_NOT_FOUND",
+      userRetryable: true
+    });
+    expect(result.userMessage).toContain("保存目录");
+    expect(result.userMessage).not.toContain("无法登录");
+  });
+
   test("uses rclone stderr instead of EPIPE when rcat exits during streaming", async () => {
     const proc = createProcess({
       exitCode: 1,
