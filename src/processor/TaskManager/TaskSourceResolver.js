@@ -1,6 +1,7 @@
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import {
     TASK_SOURCE_TYPES,
+    buildTelegramMediaSourceRef,
     isExternalUrlTask,
     normalizeTaskSourceType,
     parseTaskSourceRef
@@ -20,12 +21,26 @@ export async function resolveTaskSource(dbTask) {
     return await resolveTelegramMediaSource(dbTask);
 }
 
+export function resolveStoredTaskSource(dbTask) {
+    if (!dbTask) {
+        throw new Error("Task source requires a database task.");
+    }
+
+    const sourceType = normalizeTaskSourceType(dbTask.source_type);
+    if (sourceType === TASK_SOURCE_TYPES.EXTERNAL_URL) {
+        return resolveExternalUrlSource(dbTask);
+    }
+
+    return resolveStoredTelegramMediaSource(dbTask);
+}
+
 export function buildTaskObjectFromDb(dbTask, resolvedSource = {}) {
     const task = {
         id: dbTask.id,
         userId: dbTask.user_id?.toString(),
         chatId: dbTask.chat_id?.toString(),
         msgId: dbTask.msg_id,
+        sourceMsgId: dbTask.source_msg_id,
         message: resolvedSource.message || null,
         sourceType: resolvedSource.sourceType,
         sourceRef: resolvedSource.sourceRef || null,
@@ -40,6 +55,29 @@ export function buildTaskObjectFromDb(dbTask, resolvedSource = {}) {
     }
 
     return task;
+}
+
+function resolveStoredTelegramMediaSource(dbTask) {
+    const storedSourceRef = parseTaskSourceRef(dbTask.source_ref);
+    const sourceRef = storedSourceRef || buildTelegramMediaSourceRef({
+        chatId: dbTask.chat_id,
+        messageId: dbTask.source_msg_id
+    });
+    const messageId = sourceRef?.messageId || dbTask.source_msg_id;
+    if (!messageId) {
+        const error = new Error("Source msg missing");
+        error.code = "TASK_SOURCE_MISSING";
+        throw error;
+    }
+
+    return {
+        sourceType: TASK_SOURCE_TYPES.TELEGRAM_MEDIA,
+        sourceRef,
+        fileInfo: {
+            name: dbTask.file_name || "unknown",
+            size: Number(dbTask.file_size) || 0
+        }
+    };
 }
 
 async function resolveTelegramMediaSource(dbTask) {

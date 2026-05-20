@@ -27,7 +27,7 @@ import {
     parseTaskSourceRef
 } from "../domain/task-source.js";
 import { buildExternalLocalFileName } from "./ExternalUrlPolicy.js";
-import { buildTaskObjectFromDb, resolveTaskSource } from "./TaskManager/TaskSourceResolver.js";
+import { buildTaskObjectFromDb, resolveStoredTaskSource, resolveTaskSource } from "./TaskManager/TaskSourceResolver.js";
 import { redactSensitiveText } from "../utils/serializer.js";
 
 // 导入模块化的方法
@@ -374,20 +374,9 @@ export class TaskManager {
      * [私有] 批量恢复同一个会话下的任务
      */
     static async _restoreBatchTasks(chatId, rows) {
-        const { client, runMtprotoTaskWithRetry, PRIORITY, config, TaskRepository, STRINGS, format } = getDeps();
+        const { config, TaskRepository, STRINGS, format } = getDeps();
         const log = getLog();
         try {
-            const telegramRows = rows.filter(row => !isExternalUrlTask(row));
-            const sourceMsgIds = telegramRows.map(r => r.source_msg_id);
-            const messages = sourceMsgIds.length > 0
-                ? await runMtprotoTaskWithRetry(() => client.getMessages(chatId, { ids: sourceMsgIds }), { priority: PRIORITY.BACKGROUND })
-                : [];
-
-            const messageMap = new Map();
-            messages.forEach(m => {
-                if (m) messageMap.set(m.id, m);
-            });
-
             // 预处理任务，分离有效和无效任务
             const failedUpdates = [];
             const tasksToEnqueue = [];
@@ -401,26 +390,14 @@ export class TaskManager {
 
             for (const row of rows) {
                 let task;
-                if (isExternalUrlTask(row)) {
-                    const sourceRef = parseTaskSourceRef(row.source_ref);
-                    task = buildTaskObjectFromDb(row, {
-                        sourceType: TASK_SOURCE_TYPES.EXTERNAL_URL,
-                        sourceRef,
-                        fileInfo: {
-                            name: row.file_name || sourceRef?.fileName || "download.bin",
-                            size: Number(row.file_size) || Number(sourceRef?.fileSize) || 0
-                        }
-                    });
-                } else {
-                    const message = messageMap.get(row.source_msg_id);
-                    if (!message || !message.media) {
-                        log.warn(`⚠️ 无法找到原始消息 (ID: ${row.source_msg_id})`);
-                        failedUpdates.push({ id: row.id, event: TASK_EVENTS.FAIL, error: 'Source msg missing' });
-                        continue;
-                    }
-
-                    task = this._createTaskObject(row.id, row.user_id, row.chat_id, row.msg_id, message);
+                try {
+                    task = buildTaskObjectFromDb(row, resolveStoredTaskSource(row));
+                } catch (error) {
+                    log.warn("任务源元数据缺失，无法恢复", { taskId: row.id, error: error.message });
+                    failedUpdates.push({ id: row.id, event: TASK_EVENTS.FAIL, error: error.message });
+                    continue;
                 }
+
                 const msgKey = row.msg_id == null ? row.id : String(row.msg_id);
                 if ((msgIdCounts.get(msgKey) || 0) > 1) {
                     task.isGroup = true;
@@ -1254,7 +1231,7 @@ export class TaskManager {
                 return { success: false, statusCode: 404, message: "Local file not found" };
             }
 
-            const resolvedSource = await resolveTaskSource(dbTask);
+            const resolvedSource = resolveStoredTaskSource(dbTask);
             const task = buildTaskObjectFromDb(dbTask, resolvedSource);
             task.localPath = localPath;
             task.fileName = dbTask.file_name;

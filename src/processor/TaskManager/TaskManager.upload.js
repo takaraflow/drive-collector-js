@@ -10,6 +10,13 @@ import { isExternalUrlTask } from "../../domain/task-source.js";
 // 获取模块日志记录器
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager.upload');
 
+const buildTelegramMessageLink = (task) => {
+    if (isExternalUrlTask(task)) return null;
+    const messageId = task.message?.id || task.sourceRef?.messageId || task.sourceMsgId;
+    if (!task.chatId || !messageId) return null;
+    return `tg://openmessage?chat_id=${task.chatId}&message_id=${messageId}`;
+};
+
 /**
  * Upload Task - Responsible for rclone transfer phase (no MTProto required)
  */
@@ -58,7 +65,7 @@ export async function uploadTask(task) {
                 allowNoop: true,
                 source: 'upload_local_file_missing'
             });
-            const fileLink = isExternalUrlTask(task) ? null : `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
+            const fileLink = buildTelegramMessageLink(task);
             const fileNameHtml = fileLink
                 ? `<a href="${fileLink}">${escapeHTML(info.name)}</a>`
                 : `<code>${escapeHTML(info.name)}</code>`;
@@ -82,7 +89,7 @@ export async function uploadTask(task) {
         
         if (remoteFile && this._isSizeMatch(remoteFile.Size, info.size)) {
             const actualUploadPath = await CloudTool._getUploadPath(task.userId);
-            const fileLink = isExternalUrlTask(task) ? null : `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
+            const fileLink = buildTelegramMessageLink(task);
             await handleTaskCompletion(task, this, updateStatus, fileName, actualUploadPath, fileLink);
             return;
         }
@@ -205,7 +212,7 @@ export async function uploadTask(task) {
             if (task.isGroup) {
                 await this._refreshGroupMonitor(task, finalStatus, 0, 0, errorMsg);
             } else {
-                const fileLink = isExternalUrlTask(task) ? null : `tg://openmessage?chat_id=${task.chatId}&message_id=${task.message.id}`;
+                const fileLink = buildTelegramMessageLink(task);
                 const fileNameHtml = fileLink
                     ? `<a href="${fileLink}">${escapeHTML(info.name)}</a>`
                     : `<code>${escapeHTML(info.name)}</code>`;

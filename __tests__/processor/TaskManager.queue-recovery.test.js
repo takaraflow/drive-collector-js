@@ -186,6 +186,7 @@ vi.mock('fs', () => ({
 const { TaskManager } = await import('../../src/processor/TaskManager.js');
 const { TASK_EVENTS } = await import('../../src/domain/task-state-machine.js');
 const { safeEdit } = await import('../../src/utils/common.js');
+const { CloudTool } = await import('../../src/services/rclone.js');
 
 describe('TaskManager queue/recovery closure', () => {
     beforeEach(() => {
@@ -255,6 +256,31 @@ describe('TaskManager queue/recovery closure', () => {
         );
         expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledTimes(2);
         expect(mockQueueService.enqueueDownloadTask).not.toHaveBeenCalled();
+        expect(mockClient.getMessages).not.toHaveBeenCalled();
+    });
+
+    it('restores queued Telegram tasks without fetching source messages during recovery planning', async () => {
+        await TaskManager._restoreBatchTasks('chat-1', [{
+            id: 'queued-1',
+            user_id: 'u1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            source_ref: JSON.stringify({ chatId: 'chat-1', messageId: 10 }),
+            file_name: 'queued.mp4',
+            file_size: 1024,
+            status: 'queued'
+        }]);
+
+        expect(mockClient.getMessages).not.toHaveBeenCalled();
+        expect(mockQueueService.enqueueDownloadTask).toHaveBeenCalledWith(
+            'queued-1',
+            expect.objectContaining({
+                _meta: expect.objectContaining({
+                    queueAttempt: expect.stringContaining('recovery:queued:')
+                })
+            })
+        );
     });
 
     it('restores external URL tasks without fetching Telegram source messages', async () => {
@@ -592,6 +618,49 @@ describe('TaskManager queue/recovery closure', () => {
         );
         expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalled();
         expect(mockInstanceCoordinator.releaseTaskLock).not.toHaveBeenCalled();
+    });
+
+    it('handles upload webhook from stored task metadata without fetching Telegram source message', async () => {
+        mockTaskRepository.findById.mockResolvedValue({
+            id: 'task-1',
+            user_id: 'user-1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            source_ref: JSON.stringify({ chatId: 'chat-1', messageId: 10 }),
+            file_name: 'test.mp4',
+            file_size: 1024,
+            status: 'downloaded'
+        });
+        mockFs.existsSync.mockReturnValue(true);
+        mockFs.statSync.mockReturnValue({ size: 1024 });
+        CloudTool.getRemoteFileInfo
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({ Size: 1024 });
+        CloudTool.uploadFile.mockResolvedValue({ success: true });
+        CloudTool._getUploadPath.mockResolvedValue('/remote');
+
+        const result = await TaskManager.handleUploadWebhook('task-1');
+
+        expect(result).toMatchObject({ success: true, statusCode: 200 });
+        expect(mockClient.getMessages).not.toHaveBeenCalled();
+        expect(CloudTool.uploadFile).toHaveBeenCalledWith(
+            '/tmp/downloads/test.mp4',
+            expect.objectContaining({
+                id: 'task-1',
+                message: null,
+                sourceRef: expect.objectContaining({ messageId: 10 }),
+                sourceMsgId: 10,
+                localPath: '/tmp/downloads/test.mp4'
+            }),
+            expect.any(Function)
+        );
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            'task-1',
+            TASK_EVENTS.COMPLETE,
+            null,
+            expect.objectContaining({ source: 'upload_validation' })
+        );
     });
 
     it('passes a held processing lock into download task and releases it after completion', async () => {
