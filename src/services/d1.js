@@ -132,12 +132,15 @@ class D1Service {
 
         // Check for D1 network error code 7500
         const isD1NetworkError = response.status === 400 && errorCode === 7500;
+        const isRetryableHttpError = response.status >= 500 || isD1NetworkError;
+        const willRetry = isRetryableHttpError && attempts < maxAttempts - 1;
+        const logFailure = willRetry ? log.warn.bind(log) : log.error.bind(log);
 
         // 📊 诊断日志：详细错误信息
-        log.error(`🚨 D1 HTTP ${response.status} - ${response.statusText}${errorDetails}`);
-        log.error(`🚨 D1 Error Details - Code: ${errorCode}, Message: ${errorMessage}`);
-        log.error(`🚨 D1 Request Context - Attempt: ${attempts + 1}/${maxAttempts}, Duration: ${duration}ms`);
-        log.error("D1 config status", {
+        logFailure(`${willRetry ? '⚠️' : '🚨'} D1 HTTP ${response.status} - ${response.statusText}${errorDetails}`);
+        logFailure(`${willRetry ? '⚠️' : '🚨'} D1 Error Details - Code: ${errorCode}, Message: ${errorMessage}`);
+        logFailure(`${willRetry ? '⚠️' : '🚨'} D1 Request Context - Attempt: ${attempts + 1}/${maxAttempts}, Duration: ${duration}ms`);
+        logFailure("D1 config status", {
             accountConfigured: Boolean(this.accountId),
             databaseConfigured: Boolean(this.databaseId),
             endpoint: 'cloudflare-d1-query'
@@ -149,7 +152,7 @@ class D1Service {
         }
 
         // For server errors (5xx) or 400 with 7500, continue to retry
-        if (attempts < maxAttempts - 1) {
+        if (willRetry) {
             // Wait inside the main loop instead, or do it here and return true
             await new Promise(resolve => setTimeout(resolve, 2000));
             return true; // Signal retry
@@ -180,11 +183,13 @@ class D1Service {
     async _handleRequestError(error, attempts, maxAttempts, errorDuration) {
         // Network errors (TypeError: Failed to fetch)
         if (error instanceof TypeError) {
-            log.error(`🚨 D1 Network Error: ${error.message}`);
-            log.error(`🚨 D1 Network Error Context - Attempt: ${attempts + 1}/${maxAttempts}, Duration: ${errorDuration}ms`);
-            log.error(`🚨 D1 Network Error Details - Error Type: ${error.name}, Stack: ${error.stack?.split('\n')[1]?.trim() || 'N/A'}`);
+            const willRetry = attempts < maxAttempts - 1;
+            const logFailure = willRetry ? log.warn.bind(log) : log.error.bind(log);
+            logFailure(`${willRetry ? '⚠️' : '🚨'} D1 Network Error: ${error.message}`);
+            logFailure(`${willRetry ? '⚠️' : '🚨'} D1 Network Error Context - Attempt: ${attempts + 1}/${maxAttempts}, Duration: ${errorDuration}ms`);
+            logFailure(`${willRetry ? '⚠️' : '🚨'} D1 Network Error Details - Error Type: ${error.name}, Stack: ${error.stack?.split('\n')[1]?.trim() || 'N/A'}`);
 
-            if (attempts < maxAttempts - 1) {
+            if (willRetry) {
                 log.warn(`⏳ D1 Retrying in 2s... (Attempt ${attempts + 1}/${maxAttempts})`);
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 return true; // Signal retry

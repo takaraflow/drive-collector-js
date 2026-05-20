@@ -84,4 +84,51 @@ describe('D1 observability', () => {
         expect(infoMessages).not.toContain('mock_database_id');
         expect(infoPayload).not.toContain('mock_database_id');
     });
+
+    test('should log retryable HTTP failures as warnings until retries are exhausted', async () => {
+        vi.spyOn(global, 'setTimeout').mockImplementation((callback) => {
+            callback();
+            return 1;
+        });
+        mockFetch
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 500,
+                statusText: 'Internal Server Error',
+                text: () => Promise.resolve(JSON.stringify({
+                    success: false,
+                    errors: [{ code: 7500, message: 'internal error' }]
+                }))
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                json: () => Promise.resolve({ success: true, result: [{ results: [{ ok: 1 }] }] })
+            });
+
+        await expect(d1.fetchAll('SELECT 1')).resolves.toEqual([{ ok: 1 }]);
+
+        expect(mockD1Logger.warn).toHaveBeenCalledWith(expect.stringContaining('D1 HTTP 500'));
+        expect(mockD1Logger.error).not.toHaveBeenCalledWith(expect.stringContaining('D1 HTTP 500'));
+    });
+
+    test('should promote retryable HTTP failures to error only after max retries are exhausted', async () => {
+        vi.spyOn(global, 'setTimeout').mockImplementation((callback) => {
+            callback();
+            return 1;
+        });
+        mockFetch.mockResolvedValue({
+            ok: false,
+            status: 500,
+            statusText: 'Internal Server Error',
+            text: () => Promise.resolve(JSON.stringify({
+                success: false,
+                errors: [{ code: 7500, message: 'internal error' }]
+            }))
+        });
+
+        await expect(d1.fetchAll('SELECT 1')).rejects.toThrow('D1 HTTP 500 [7500]: internal error');
+
+        expect(mockD1Logger.warn).toHaveBeenCalledWith(expect.stringContaining('D1 HTTP 500'));
+        expect(mockD1Logger.error).toHaveBeenCalledWith(expect.stringContaining('D1 HTTP 500'));
+    });
 });
