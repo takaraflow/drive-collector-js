@@ -336,7 +336,7 @@ describe("D1 Service", () => {
         d1.apiUrl,
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify(statements)
+          body: JSON.stringify({ batch: statements })
         })
       );
       expect(results).toHaveLength(2);
@@ -371,7 +371,7 @@ describe("D1 Service", () => {
         d1.apiUrl,
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify(statements)
+          body: JSON.stringify({ batch: statements })
         })
       );
       expect(results).toEqual([

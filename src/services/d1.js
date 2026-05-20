@@ -324,9 +324,9 @@ class D1Service {
 
     /**
      * 批量执行 SQL 语句。
-     * Cloudflare D1 /query supports an array of parameterized statements as one
-     * batch call. This preserves D1's ordered batch semantics and lets callers
-     * inspect each statement result instead of hiding partial failures.
+     * Cloudflare D1 /query accepts batch statements through the documented
+     * object envelope `{ batch: [...] }`. Keep that wire format centralized here
+     * so repositories only deal with ordered statement results.
      * @param {Array<{sql: string, params: Array}>} statements
      */
     async batch(statements) {
@@ -337,7 +337,7 @@ class D1Service {
             params: statement.params || []
         }));
 
-        const responsePayload = await this._executePayload(payload, { statements: payload }, 3);
+        const responsePayload = await this._executePayload({ batch: payload }, { statements: payload }, 3);
         const results = responsePayload.result || [];
         return results.map((result, index) => {
             const errors = result.error
