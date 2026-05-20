@@ -58,6 +58,24 @@ function createWritable(proc = null) {
   return writable;
 }
 
+function createEpipeWritable(proc) {
+  const writable = new EventEmitter();
+  writable.writable = true;
+  writable.destroyed = false;
+  writable.closed = false;
+  writable.write = vi.fn(() => {
+    queueMicrotask(() => proc?.complete?.());
+    const error = new Error("write EPIPE");
+    error.code = "EPIPE";
+    throw error;
+  });
+  writable.end = vi.fn();
+  writable.destroy = vi.fn(() => {
+    writable.destroyed = true;
+  });
+  return writable;
+}
+
 describe("DirectTransferService", () => {
   let cloudTool;
   let client;
@@ -202,6 +220,35 @@ describe("DirectTransferService", () => {
     expect(result.userMessage).toContain("重新绑定网盘");
     expect(result.error).not.toContain("user@example.com");
     expect(result.error).not.toContain("secret-pass");
+  });
+
+  test("uses rclone stderr instead of EPIPE when rcat exits during streaming", async () => {
+    const proc = createProcess({
+      exitCode: 1,
+      stderr: `CRITICAL | Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":folder": couldn't login: Object (typically, node or user) not found`
+    });
+    const stdin = createEpipeWritable(proc);
+    const stagingName = ".drive-collector-task-epipe-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-epipe", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "file.bin"
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false,
+      errorCode: "DRIVE_AUTH_INVALID",
+      retryable: false,
+      userRetryable: false
+    });
+    expect(result.error).toContain('user="[REDACTED]"');
+    expect(result.error).not.toContain("write EPIPE");
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
   });
 
   test("times out a stuck rcat process and falls back to local staging", async () => {

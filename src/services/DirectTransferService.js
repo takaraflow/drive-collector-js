@@ -15,6 +15,7 @@ const DEFAULT_LARGE_CHUNK_SIZE = 512 * 1024;
 const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
 const MAX_RCLONE_ERROR_LOG = 8000;
 const DEFAULT_TRANSFER_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+const RCLONE_DIAGNOSTIC_GRACE_MS = 1500;
 const LOCAL_STAGING_REQUIRED_DRIVE_TYPES = new Set(["oss", "r2", "s3"]);
 const NON_FALLBACK_RCLONE_ERROR_CODES = new Set([
     RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID,
@@ -82,6 +83,7 @@ export class DirectTransferService {
         let uploadedBytes = 0;
         let stdin = null;
         let proc = null;
+        let rcloneCompletion = null;
 
         if (existingRemoteFile === undefined) {
             existingRemoteFile = await this.cloudTool.getRemoteFileInfo(finalFileName, task.userId, 1, true);
@@ -100,7 +102,7 @@ export class DirectTransferService {
             const remoteStagingName = rcat.fileName;
             stagedRemoteName = remoteStagingName || stagingFileName;
             const transferTimeoutMs = this._resolveTransferTimeoutMs(config);
-            const rcloneCompletion = this._watchRcloneProcess(proc, task.id, transferTimeoutMs);
+            rcloneCompletion = this._watchRcloneProcess(proc, task.id, transferTimeoutMs);
 
             const downloadIterator = client.iterDownload({
                 file: message.media,
@@ -159,6 +161,7 @@ export class DirectTransferService {
                 bytes: totalSize || uploadedBytes
             };
         } catch (error) {
+            const rcloneFailure = await this._resolveRcloneFailureAfterStreamError(rcloneCompletion, task.id, error);
             this._abortRclone(stdin, proc);
             if (!movedToFinal) {
                 await this._cleanupRemote(stagedRemoteName, task.userId, "transfer_failed");
@@ -168,15 +171,16 @@ export class DirectTransferService {
             }
 
             const fallbackAllowed = config.directTransfer?.fallbackToLocal !== false;
-            const message = redactSensitiveText(error?.message || String(error));
+            const effectiveError = rcloneFailure?.success === false ? rcloneFailure : error;
+            const message = redactSensitiveText(effectiveError?.error || effectiveError?.message || String(effectiveError));
             const classification = classifyRcloneError(message);
-            const errorCode = error?.errorCode || classification.code;
+            const errorCode = effectiveError?.errorCode || classification.code;
             const isPermanentDriveFailure = NON_FALLBACK_RCLONE_ERROR_CODES.has(errorCode);
             const failureMetadata = {
                 errorCode,
-                userMessage: error?.userMessage || getRcloneErrorUserMessage(errorCode),
-                retryable: typeof error?.retryable === "boolean" ? error.retryable : classification.retryable,
-                userRetryable: error?.userRetryable ?? classification.userRetryable
+                userMessage: effectiveError?.userMessage || getRcloneErrorUserMessage(errorCode),
+                retryable: typeof effectiveError?.retryable === "boolean" ? effectiveError.retryable : classification.retryable,
+                userRetryable: effectiveError?.userRetryable ?? classification.userRetryable
             };
             if (!fallbackAllowed || isPermanentDriveFailure) {
                 return { success: false, fallback: false, error: message, ...failureMetadata };
@@ -189,6 +193,29 @@ export class DirectTransferService {
             });
             return { success: false, fallback: true, error: message, ...failureMetadata };
         }
+    }
+
+    async _resolveRcloneFailureAfterStreamError(rcloneCompletion, taskId, error) {
+        if (!rcloneCompletion) return null;
+
+        const message = String(error?.message || error || "");
+        const isLikelyRclonePipeFailure = /EPIPE|ERR_STREAM_DESTROYED|write after end|stdin is not writable/i.test(message);
+        if (!isLikelyRclonePipeFailure) return null;
+
+        try {
+            const result = await Promise.race([
+                rcloneCompletion,
+                this._delay(RCLONE_DIAGNOSTIC_GRACE_MS).then(() => null)
+            ]);
+            if (result?.success === false) return result;
+        } catch (watchError) {
+            log.warn("Direct transfer failed to resolve rclone diagnostic after stream write error", {
+                taskId,
+                error: redactSensitiveText(watchError?.message || String(watchError))
+            });
+        }
+
+        return null;
     }
 
     _abortRclone(stdin, proc) {
