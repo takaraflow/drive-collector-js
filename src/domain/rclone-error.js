@@ -59,11 +59,27 @@ const CONFIG_INVALID_PATTERNS = [
 ];
 const TRANSIENT_JSON_STARTUP_ERROR = /unexpected end of JSON input/i;
 const TRANSIENT_JSON_CONTEXT = /(failed to create file system|couldn'?t login|remote API|server response|mega)/i;
+const PATH_SCOPED_OPERATIONS = new Set([
+    "copy",
+    "copyto",
+    "deletefile",
+    "listRemoteFiles",
+    "lsjson",
+    "mkdir",
+    "moveto",
+    "rcat",
+    "stream",
+    "uploadBatch"
+]);
 
 const hasAnyMatch = (text, patterns) => patterns.some(pattern => pattern.test(text));
 const hasMegaRemotePath = (text) => /:mega,[\s\S]*?:(?!["\\\s])/i.test(text);
+const isPathScopedOperation = (options = {}) => (
+    options.remotePathScoped === true ||
+    PATH_SCOPED_OPERATIONS.has(String(options.operation || ""))
+);
 
-export function classifyRcloneError(errorText) {
+export function classifyRcloneError(errorText, options = {}) {
     const text = String(errorText || "").trim();
     if (!text) {
         return {
@@ -74,10 +90,11 @@ export function classifyRcloneError(errorText) {
     }
 
     if (MEGA_LOGIN_OBJECT_NOT_FOUND.test(text)) {
+        const remotePathScoped = isPathScopedOperation(options) || hasMegaRemotePath(text);
         return {
-            code: hasMegaRemotePath(text) ? RCLONE_ERROR_CODES.DRIVE_REMOTE_NOT_FOUND : RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID,
+            code: remotePathScoped ? RCLONE_ERROR_CODES.DRIVE_REMOTE_NOT_FOUND : RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID,
             retryable: false,
-            userRetryable: hasMegaRemotePath(text)
+            userRetryable: remotePathScoped
         };
     }
 

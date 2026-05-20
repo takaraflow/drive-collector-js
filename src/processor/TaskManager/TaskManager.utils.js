@@ -114,7 +114,7 @@ export async function handleTaskFailure(task, context, updateStatus, errorMessag
     const rawErrorMessage = failure?.diagnosticMessage || failure?.error || failure?.message || errorMessage;
     const safeErrorMessage = redactSensitiveText(rawErrorMessage);
     const derivedClassification = looksLikeRcloneDiagnostic(safeErrorMessage)
-        ? classifyRcloneError(safeErrorMessage)
+        ? classifyRcloneError(safeErrorMessage, { operation: "uploadBatch", remotePathScoped: true })
         : null;
     const infrastructureClassification = classifyInfrastructureError(failure || safeErrorMessage);
     const errorCode = failure?.errorCode || derivedClassification?.code;

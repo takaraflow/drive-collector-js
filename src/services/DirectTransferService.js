@@ -175,7 +175,7 @@ export class DirectTransferService {
             const fallbackAllowed = config.directTransfer?.fallbackToLocal !== false;
             const effectiveError = rcloneFailure?.success === false ? rcloneFailure : error;
             const message = redactSensitiveText(effectiveError?.error || effectiveError?.message || String(effectiveError));
-            const classification = classifyRcloneError(message);
+            const classification = classifyRcloneError(message, { operation: "rcat", remotePathScoped: true });
             const errorCode = effectiveError?.errorCode || classification.code;
             const isPermanentDriveFailure = NON_FALLBACK_RCLONE_ERROR_CODES.has(errorCode);
             const failureMetadata = {
@@ -322,7 +322,7 @@ export class DirectTransferService {
 
     _buildRcloneFailure(errorMessage) {
         const message = String(redactSensitiveText(errorMessage || "rclone failed") || "rclone failed");
-        const classification = classifyRcloneError(message);
+        const classification = classifyRcloneError(message, { operation: "rcat", remotePathScoped: true });
         return {
             success: false,
             error: message,

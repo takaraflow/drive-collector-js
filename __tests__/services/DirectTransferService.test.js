@@ -222,6 +222,32 @@ describe("DirectTransferService", () => {
     expect(result.error).not.toContain("secret-pass");
   });
 
+  test("uses rcat context when sanitized diagnostics lose remote path", async () => {
+    const proc = createProcess({
+      exitCode: 1,
+      stderr: `CRITICAL | Failed to create file system for ":mega,user=\\"[REDACTED]": couldn't login: Object (typically, node or user) not found`
+    });
+    const stdin = createWritable(proc);
+    const stagingName = ".drive-collector-task-auth-ctx-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-auth-ctx", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "file.bin"
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false,
+      errorCode: "DRIVE_REMOTE_NOT_FOUND",
+      userRetryable: true
+    });
+    expect(result.userMessage).toContain("保存目录");
+  });
+
   test("uses rclone stderr instead of EPIPE when rcat exits during streaming", async () => {
     const proc = createProcess({
       exitCode: 1,

@@ -48,7 +48,13 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
         },
         task: {
             downloading: "Downloading",
-            batch_monitor: "📊 <b>媒体组转存看板 ({{current}}/{{total}})</b>\n━━━━━━━━━━━━━━\n{{statusText}}\n━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件"
+            batch_monitor: "📊 <b>媒体组转存看板 ({{current}}/{{total}})</b>\n━━━━━━━━━━━━━━\n{{statusText}}\n━━━━━━━━━━━━━━\n💡 进度条仅显示当前正在处理的文件",
+            upload_error_drive_auth_invalid: "当前绑定的网盘无法登录。请重新绑定网盘后再重试。",
+            upload_error_drive_config_invalid: "当前网盘绑定配置不完整。请重新绑定网盘后再重试。",
+            upload_error_drive_remote_not_found: "目标网盘保存目录或远端节点不可用。请检查保存目录，或重新选择/重置保存目录后再重试。",
+            upload_error_drive_quota_exceeded: "目标网盘空间不足。请清理空间或更换保存目录后再重试。",
+            upload_error_drive_permission_denied: "目标网盘拒绝写入。请检查绑定账号权限或保存目录后再重试。",
+            upload_error_transient: "网盘连接暂时异常，系统已自动重试但仍失败。请稍后再试。"
         },
         files: {
             directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
@@ -878,6 +884,41 @@ describe("UIHelper", () => {
 
             expect(result.text).toContain('...');
             expect(result.text).not.toContain('A'.repeat(51));
+        });
+
+        test("should render rclone remote node failures as user guidance", () => {
+            const rawError = `CRITICAL | Failed to create file system for ":mega,user=\\"[REDACTED]": couldn't login: Object (typically, node or user) not found`;
+            const data = {
+                tasks: [{ id: 't1', user_id: 'u1', file_name: 'a.mp4', status: 'failed', error_msg: rawError, updated_at: Date.now() }],
+                total: 1, page: 0, pageSize: 10, totalPages: 1
+            };
+
+            const result = UIHelper.renderTaskQueueDetail('failed', data);
+
+            expect(result.text).toContain('保存目录');
+            expect(result.text).not.toContain('Object (typically, node or user) not found');
+            expect(result.text).not.toContain('无法登录');
+        });
+
+        test("should prefer derived rclone guidance over stale stored error codes", () => {
+            const rawError = `CRITICAL | Failed to create file system for ":mega,user=\\"[REDACTED]": couldn't login: Object (typically, node or user) not found`;
+            const data = {
+                tasks: [{
+                    id: 't1',
+                    user_id: 'u1',
+                    file_name: 'a.mp4',
+                    status: 'failed',
+                    error_code: 'DRIVE_AUTH_INVALID',
+                    error_msg: rawError,
+                    updated_at: Date.now()
+                }],
+                total: 1, page: 0, pageSize: 10, totalPages: 1
+            };
+
+            const result = UIHelper.renderTaskQueueDetail('failed', data);
+
+            expect(result.text).toContain('保存目录');
+            expect(result.text).not.toContain('无法登录');
         });
     });
 

@@ -8,7 +8,8 @@ vi.mock('child_process', () => ({
 
 vi.mock('../../src/repositories/DriveRepository.js', () => ({
     DriveRepository: {
-        findByUserId: vi.fn()
+        findByUserId: vi.fn(),
+        getDefaultDrive: vi.fn()
     }
 }));
 
@@ -57,23 +58,6 @@ describe('CloudTool Batch Upload', () => {
     });
 
     it('should abort upload when task is cancelled before spawn', async () => {
-        let closeCb;
-        const mockProc = {
-            stderr: { on: vi.fn() },
-            on: vi.fn((event, cb) => {
-                if (event === 'close') closeCb = cb;
-            }),
-            kill: vi.fn(() => {
-                process.nextTick(() => closeCb?.(143));
-            }),
-            stdin: {
-                write: vi.fn(),
-                end: vi.fn()
-            },
-            stdout: { on: vi.fn() }
-        };
-        mockSpawn.mockReturnValue(mockProc);
-
         vi.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({
             type: 'mega',
             user: 'test',
@@ -86,12 +70,25 @@ describe('CloudTool Batch Upload', () => {
 
         const result = await CloudTool.uploadBatch(tasks);
 
-        expect(mockProc.kill).toHaveBeenCalled();
         expect(result).toEqual({ success: false, error: 'CANCELLED' });
+        expect(mockSpawn).not.toHaveBeenCalled();
     });
 
     it('should call rclone with correct batch arguments', async () => {
-        const mockProc = {
+        const mkdirProc = {
+            stderr: { on: vi.fn() },
+            stdout: { on: vi.fn() },
+            on: vi.fn((event, cb) => {
+                if (event === 'close') {
+                    process.nextTick(() => cb(0));
+                }
+            }),
+            stdin: {
+                write: vi.fn(),
+                end: vi.fn()
+            }
+        };
+        const copyProc = {
             stderr: { on: vi.fn() },
             on: vi.fn((event, cb) => {
                 if (event === 'close') {
@@ -105,7 +102,9 @@ describe('CloudTool Batch Upload', () => {
             },
             stdout: { on: vi.fn() }
         };
-        mockSpawn.mockReturnValue(mockProc);
+        mockSpawn
+            .mockReturnValueOnce(mkdirProc)
+            .mockReturnValueOnce(copyProc);
 
         const tasks = [
             { id: '1', userId: 'user1', localPath: '/tmp/downloads/file1.mp4' },
@@ -126,7 +125,12 @@ describe('CloudTool Batch Upload', () => {
             expect(mockSpawn).toHaveBeenCalled();
         });
 
-        const [, args, options] = mockSpawn.mock.calls[0];
+        expect(mockSpawn.mock.calls[0][1]).toEqual(expect.arrayContaining([
+            '--config', '/dev/null',
+            'mkdir',
+            ':mega,user="test",pass="pass":test-remote'
+        ]));
+        const [, args, options] = mockSpawn.mock.calls[1];
         expect(args).toEqual(expect.arrayContaining([
             '--config', '/dev/null',
             'copy',
@@ -149,12 +153,22 @@ describe('CloudTool Batch Upload', () => {
 
         const result = await promise;
         expect(result.success).toBe(true);
-        expect(mockProc.stdin.write).toHaveBeenCalledWith('file1.mp4\nfile2.mp4');
+        expect(copyProc.stdin.write).toHaveBeenCalledWith('file1.mp4\nfile2.mp4');
     });
 
     it('should parse JSON progress and trigger callback', async () => {
         let progressCallback;
-        const mockProc = {
+        const mkdirProc = {
+            stderr: { on: vi.fn() },
+            stdout: { on: vi.fn() },
+            on: vi.fn((event, cb) => {
+                if (event === 'close') {
+                    process.nextTick(() => cb(0));
+                }
+            }),
+            stdin: { write: vi.fn(), end: vi.fn() }
+        };
+        const copyProc = {
             stderr: { 
                 on: vi.fn((event, cb) => {
                     if (event === 'data') progressCallback = cb;
@@ -167,7 +181,9 @@ describe('CloudTool Batch Upload', () => {
             }),
             stdin: { write: vi.fn(), end: vi.fn() }
         };
-        mockSpawn.mockReturnValue(mockProc);
+        mockSpawn
+            .mockReturnValueOnce(mkdirProc)
+            .mockReturnValueOnce(copyProc);
 
         const tasks = [
             { id: 'task-1', userId: 'u1', localPath: '/tmp/downloads/movie.mp4' }

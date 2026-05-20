@@ -1393,7 +1393,7 @@ class StreamTransferService {
         const metadata = failure || (errorMsg && typeof errorMsg === 'object' ? errorMsg : null);
         const rawErrorMsg = metadata instanceof Error ? metadata.message : errorMsg;
         const safeErrorMsg = String(redactSensitiveText(rawErrorMsg || "Stream transfer failed") || "Stream transfer failed");
-        const fallbackClassification = classifyRcloneError(safeErrorMsg);
+        const fallbackClassification = classifyRcloneError(safeErrorMsg, { operation: "stream", remotePathScoped: true });
         const errorCode = metadata?.errorCode || fallbackClassification.code;
         const classification = {
             code: errorCode,

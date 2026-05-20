@@ -49,12 +49,12 @@ export class CloudTool {
         return isRetryableRcloneError(errorText);
     }
 
-    static classifyRcloneError(errorText) {
-        return classifyRcloneError(errorText);
+    static classifyRcloneError(errorText, options = {}) {
+        return classifyRcloneError(errorText, options);
     }
 
     static _buildFailureResult(finalError, options = {}) {
-        const classification = this.classifyRcloneError(finalError);
+        const classification = this.classifyRcloneError(finalError, options);
         const retryable = options.retryable !== false && classification.retryable === true;
         const error = String(this.sanitizeRcloneOutput(finalError || "rclone command failed") || "rclone command failed").trim();
         return {
@@ -67,8 +67,36 @@ export class CloudTool {
         };
     }
 
+    static _buildFailureError(failureResult) {
+        const error = new Error(failureResult?.error || "rclone command failed");
+        error.errorCode = failureResult?.errorCode;
+        error.userMessage = failureResult?.userMessage;
+        error.retryable = failureResult?.retryable;
+        error.userRetryable = failureResult?.userRetryable;
+        error.error = failureResult?.error;
+        return error;
+    }
+
     static _isRemoteNotFoundError(stderr = "") {
         return /directory not found|object not found|error listing|Object \(typically, node or user\) not found/i.test(stderr);
+    }
+
+    static async _ensureUploadDirectory(connectionString, userUploadPath) {
+        const normalizedUploadPath = this._normalizePath(userUploadPath);
+        if (!normalizedUploadPath || normalizedUploadPath === "/") {
+            return { success: true };
+        }
+
+        const fullRemotePath = this._joinRemotePath(connectionString, normalizedUploadPath);
+        const ret = await this._runRclone(["mkdir", fullRemotePath], 15000);
+        if (ret.code === 0) {
+            return { success: true };
+        }
+
+        return this._buildFailureResult(
+            this._buildRcloneError(ret, `rclone mkdir exited with code ${ret.code}`),
+            { operation: "mkdir", remotePathScoped: true }
+        );
     }
 
     static async _retryDelay(attempt, signal) {
@@ -528,7 +556,9 @@ export class CloudTool {
 
     static _setupUploadProcessHandlers(proc, tasks, safeResolve, onProgress, fileList) {
         this._attachUploadProcessHandlers(proc, tasks, safeResolve, onProgress, fileList, {
-            retryable: false
+            retryable: false,
+            operation: "uploadBatch",
+            remotePathScoped: true
         });
     }
 
@@ -632,10 +662,19 @@ export class CloudTool {
 
             try {
                 const firstTask = tasks[0];
+                if (tasks.some(t => t?.isCancelled)) {
+                    safeResolve({ success: false, error: "CANCELLED" });
+                    return;
+                }
                 const conf = await this._getUserConfig(firstTask.userId);
                 const connectionString = this._getConnectionString(conf);
                 const userUploadPath = await this._getUploadPath(firstTask.userId);
                 const remotePath = this._joinRemotePath(connectionString, userUploadPath);
+                const ensureDirectoryResult = await this._ensureUploadDirectory(connectionString, userUploadPath);
+                if (!ensureDirectoryResult.success) {
+                    safeResolve(ensureDirectoryResult);
+                    return;
+                }
                 const commonSourceDir = path.resolve(getRuntimeConfig().downloadDir || "/tmp/downloads");
                 const fileList = tasks
                     .filter(t => t.localPath)
@@ -659,11 +698,13 @@ export class CloudTool {
                 const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
                 tasks.forEach(t => t.proc = proc);
                 this._attachUploadProcessHandlers(proc, tasks, safeResolve, onProgress, fileList, {
-                    retryable: true
+                    retryable: true,
+                    operation: "uploadBatch",
+                    remotePathScoped: true
                 });
             } catch (e) {
                 const finalError = this.sanitizeRcloneOutput(e.message);
-                safeResolve(this._buildFailureResult(finalError));
+                safeResolve(this._buildFailureResult(finalError, { operation: "uploadBatch", remotePathScoped: true }));
             }
         });
     }
@@ -691,6 +732,11 @@ export class CloudTool {
         const safeFileName = this.sanitizeRemoteFileName(fileName);
         const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath, safeFileName);
         const size = Number(options.size);
+
+        const ensureDirectoryResult = await this._ensureUploadDirectory(connectionString, userUploadPath);
+        if (!ensureDirectoryResult.success) {
+            throw this._buildFailureError(ensureDirectoryResult);
+        }
 
         const args = [
             "--config", "/dev/null",
@@ -752,7 +798,10 @@ export class CloudTool {
 
             return lastResult || { success: false, error: "rclone upload was not attempted" };
         } catch (error) {
-            return this._buildFailureResult(this.sanitizeRcloneOutput(error.message));
+            return this._buildFailureResult(
+                this.sanitizeRcloneOutput(error.message),
+                { operation: "copyto", remotePathScoped: true }
+            );
         }
     }
 
@@ -794,6 +843,13 @@ export class CloudTool {
                 if (resolved || options.signal?.aborted) return;
                 const safeFileName = this.sanitizeRemoteFileName(fileName);
                 const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath, safeFileName);
+                if (resolved || options.signal?.aborted) return;
+
+                const ensureDirectoryResult = await this._ensureUploadDirectory(connectionString, userUploadPath);
+                if (!ensureDirectoryResult.success) {
+                    safeResolve(ensureDirectoryResult);
+                    return;
+                }
                 if (resolved || options.signal?.aborted) return;
 
                 const args = [
@@ -839,16 +895,16 @@ export class CloudTool {
                     }
 
                     const finalError = this.sanitizeRcloneOutput(errorLogRef.content.slice(-500).trim() || `rclone copyto exited with code ${code}`);
-                    safeResolve(this._buildFailureResult(finalError));
+                    safeResolve(this._buildFailureResult(finalError, { operation: "copyto", remotePathScoped: true }));
                 });
 
                 proc.on("error", (error) => {
                     const finalError = this.sanitizeRcloneOutput(error.message);
-                    safeResolve(this._buildFailureResult(finalError));
+                    safeResolve(this._buildFailureResult(finalError, { operation: "copyto", remotePathScoped: true }));
                 });
             } catch (error) {
                 const finalError = this.sanitizeRcloneOutput(error.message);
-                safeResolve(this._buildFailureResult(finalError));
+                safeResolve(this._buildFailureResult(finalError, { operation: "copyto", remotePathScoped: true }));
             }
         });
     }
@@ -877,10 +933,10 @@ export class CloudTool {
             return { success: true };
         }
 
-        return {
-            success: false,
-            error: this._buildRcloneError(ret, `rclone deletefile exited with code ${ret.code}`)
-        };
+        return this._buildFailureResult(
+            this._buildRcloneError(ret, `rclone deletefile exited with code ${ret.code}`),
+            { operation: "deletefile", remotePathScoped: true }
+        );
     }
 
     static async moveRemoteFile(sourceFileName, targetFileName, userId) {
@@ -901,10 +957,10 @@ export class CloudTool {
             return { success: true, fileName: targetSafeName };
         }
 
-        return {
-            success: false,
-            error: this._buildRcloneError(ret, `rclone moveto exited with code ${ret.code}`)
-        };
+        return this._buildFailureResult(
+            this._buildRcloneError(ret, `rclone moveto exited with code ${ret.code}`),
+            { operation: "moveto", remotePathScoped: true }
+        );
     }
 
     /**
@@ -958,7 +1014,10 @@ export class CloudTool {
                     this.loading = false;
                     return [];
                 }
-                throw new Error(`Rclone lsjson failed: ${this.sanitizeRcloneOutput(ret.stderr)}`);
+                throw this._buildFailureError(this._buildFailureResult(
+                    `Rclone lsjson failed: ${this.sanitizeRcloneOutput(ret.stderr)}`,
+                    { operation: "listRemoteFiles", remotePathScoped: true }
+                ));
             }
 
             let files = JSON.parse(ret.stdout || "[]");

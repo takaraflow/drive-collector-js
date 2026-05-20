@@ -4,11 +4,22 @@ import { getConfig } from "../config/index.js";
 import { STRINGS, format } from "../locales/zh-CN.js";
 import { escapeHTML, formatBytes } from "../utils/common.js";
 import { CloudTool } from "../services/rclone.js";
+import { classifyRcloneError } from "../domain/rclone-error.js";
+import { getRcloneErrorUserMessage } from "../utils/rcloneErrorMessage.js";
 
 /**
  * --- UI 模板工具库 (UIHelper) ---
  */
 export class UIHelper {
+    static _taskFailureDisplayMessage(task) {
+        const message = task?.user_message || task?.error_msg || '';
+        if (!message) return '';
+        const classification = classifyRcloneError(message, { operation: "uploadBatch", remotePathScoped: true });
+        return getRcloneErrorUserMessage(classification.code)
+            || getRcloneErrorUserMessage(task?.error_code)
+            || message;
+    }
+
     /**
      * 生成 ASCII 进度条文本
      */
@@ -188,7 +199,7 @@ export class UIHelper {
 
                 // 如果失败状态有错误信息，显示简短错误提示
                 if (displayStatus === 'failed') {
-                    const errorMsg = isFocus ? focusErrorMsg : t.error_msg;
+                    const errorMsg = isFocus ? focusErrorMsg : this._taskFailureDisplayMessage(t);
                     if (errorMsg) {
                         const shortError = errorMsg.length > 30 ? errorMsg.substring(0, 30) + '...' : errorMsg;
                         statusText += `: ${escapeHTML(shortError)}`;
@@ -464,8 +475,9 @@ export class UIHelper {
                      time
                  }) + '\n';
                  // 失败任务显示错误原因
-                 if (status === 'failed' && t.error_msg) {
-                     const shortError = t.error_msg.length > 50 ? t.error_msg.substring(0, 50) + '...' : t.error_msg;
+                 const errorMessage = this._taskFailureDisplayMessage(t);
+                 if (status === 'failed' && errorMessage) {
+                     const shortError = errorMessage.length > 50 ? errorMessage.substring(0, 50) + '...' : errorMessage;
                      html += format(TQ.task_error_row, { error: escapeHTML(shortError) }) + '\n';
                  }
                  // 显示文件大小

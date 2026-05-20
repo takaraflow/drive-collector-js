@@ -27,6 +27,73 @@ const SENSITIVE_TEXT_KEYS = [
   'user'
 ];
 const SENSITIVE_TEXT_KEY_PATTERN = SENSITIVE_TEXT_KEYS.join('|');
+const RCLONE_SECRET_PARAM_PATTERN = 'user|pass|password|token|access_token|refresh_token|client_secret|client_id|secret|key|api_key|apikey';
+
+const redactSensitiveAssignments = (text, keyPattern) => {
+  const pattern = new RegExp(`\\b(?:${keyPattern})\\b\\s*=\\s*`, 'gi');
+  let output = '';
+  let index = 0;
+  let match;
+
+  while ((match = pattern.exec(text)) !== null) {
+    const valueStart = pattern.lastIndex;
+    output += text.slice(index, valueStart);
+
+    let cursor = valueStart;
+    let slashCount = 0;
+    while (text[cursor] === '\\') {
+      slashCount++;
+      cursor++;
+    }
+
+    if (text[cursor] !== '"') {
+      let valueEnd = cursor;
+      if (text.slice(cursor, cursor + REDACTED_VALUE.length) === REDACTED_VALUE) {
+        valueEnd = cursor + REDACTED_VALUE.length;
+      } else if (text[valueEnd] === '{') {
+        let depth = 0;
+        while (valueEnd < text.length) {
+          if (text[valueEnd] === '{') depth++;
+          if (text[valueEnd] === '}') {
+            depth--;
+            valueEnd++;
+            if (depth <= 0) break;
+            continue;
+          }
+          valueEnd++;
+        }
+      }
+      while (valueEnd < text.length && !/[\s,;&'{}\[\]:]/.test(text[valueEnd])) {
+        valueEnd++;
+      }
+      output += REDACTED_VALUE;
+      index = valueEnd;
+      pattern.lastIndex = valueEnd;
+      continue;
+    }
+
+    const quoteToken = `${'\\'.repeat(slashCount)}"`;
+    cursor++;
+    let endQuote = -1;
+    for (let i = cursor; i < text.length; i++) {
+      if (text[i] !== '"') continue;
+      let precedingSlashes = 0;
+      for (let j = i - 1; j >= 0 && text[j] === '\\'; j--) {
+        precedingSlashes++;
+      }
+      if (precedingSlashes === slashCount) {
+        endQuote = i;
+        break;
+      }
+    }
+
+    output += `${quoteToken}${REDACTED_VALUE}${quoteToken}`;
+    index = endQuote === -1 ? cursor : endQuote + 1;
+    pattern.lastIndex = index;
+  }
+
+  return output + text.slice(index);
+};
 
 export const isSensitiveKey = (key) => {
   if (key === undefined || key === null) return false;
@@ -47,13 +114,11 @@ export const redactSensitiveText = (value) => {
   if (!text) return text;
 
   text = text.replace(
-    new RegExp(`(\\\\?"(?:${SENSITIVE_TEXT_KEY_PATTERN})\\\\?"\\s*:\\s*\\\\?")([^"\\\\]*(?:\\\\.[^"\\\\]*)*)(\\\\?")`, 'gi'),
+    new RegExp(`(\\\\?"(?:${SENSITIVE_TEXT_KEY_PATTERN})\\\\?"\\s*:\\s*\\\\*")((?:\\\\.|[^"\\\\])*)(\\\\*")`, 'gi'),
     `$1${REDACTED_VALUE}$3`
   );
-  text = text.replace(
-    new RegExp(`(\\b(?:${SENSITIVE_TEXT_KEY_PATTERN})\\b\\s*=\\s*)(\\\\?")([^"]*?)(\\\\?")`, 'gi'),
-    `$1$2${REDACTED_VALUE}$4`
-  );
+  text = redactSensitiveAssignments(text, SENSITIVE_TEXT_KEY_PATTERN);
+  text = redactSensitiveAssignments(text, RCLONE_SECRET_PARAM_PATTERN);
   text = text.replace(
     new RegExp(`(\\b(?:access_token|refresh_token|client_secret|token|password|passwd|pwd|secret|secret_access_key|api_key|apikey)\\b\\s*=\\s*)\\{[^\\r\\n}]*\\}`, 'gi'),
     `$1${REDACTED_VALUE}`

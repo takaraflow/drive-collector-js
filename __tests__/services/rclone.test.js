@@ -547,12 +547,20 @@ describe('CloudTool', () => {
                     p.stdout.emit('close');
                     p.emit('exit', 0);
                     p.emit('close', 0);
+                }))
+                .mockImplementationOnce(() => createAutoProcess((p) => {
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.emit('exit', 0);
+                    p.emit('close', 0);
                 }));
 
             const result = await CloudTool.uploadFile('/local/path', { userId: 'user123' });
 
             expect(result.success).toBe(true);
-            expect(mockSpawn).toHaveBeenCalledTimes(2);
+            expect(mockSpawn).toHaveBeenCalledTimes(3);
         });
 
         it('should trigger onProgress callback', async () => {
@@ -596,21 +604,39 @@ describe('CloudTool', () => {
                 p.emit('exit', 0);
                 p.emit('close', 0);
             }));
+            mockSpawn.mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 0);
+                p.emit('close', 0);
+            }));
 
             const result = await CloudTool.uploadLocalFileToRemote('/tmp/task.part', '../movie.mkv', 'user123');
 
             expect(result).toEqual({ success: true, fileName: 'movie.mkv' });
-            expect(mockSpawn).toHaveBeenCalledWith(
+            expect(mockSpawn.mock.calls[0][1]).toEqual(expect.arrayContaining(['mkdir', expect.stringContaining('Stream')]));
+            expect(mockSpawn.mock.calls[1]).toEqual([
                 expect.any(String),
                 expect.arrayContaining(['copyto', '/tmp/task.part', expect.stringContaining('Stream/movie.mkv')]),
                 expect.any(Object)
-            );
+            ]);
         });
 
         it('should cancel the copyto process when the abort signal fires', async () => {
             const controller = new AbortController();
             const proc = createAutoProcess();
-            mockSpawn.mockReturnValueOnce(proc);
+            mockSpawn
+                .mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.emit('exit', 0);
+                    p.emit('close', 0);
+                }))
+                .mockReturnValueOnce(proc);
 
             const uploadPromise = CloudTool.uploadLocalFileToRemote(
                 '/tmp/task.part',
@@ -620,7 +646,7 @@ describe('CloudTool', () => {
                 { signal: controller.signal }
             );
 
-            await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
+            await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(2));
             controller.abort();
 
             await expect(uploadPromise).resolves.toEqual({ success: false, error: 'Upload cancelled' });
@@ -747,6 +773,54 @@ describe('CloudTool', () => {
             expect(mockSpawn).toHaveBeenCalledTimes(1);
         });
 
+        it('should create missing upload folders before external local-file uploads', async () => {
+            mockSpawn
+                .mockImplementationOnce(() => createAutoProcess((p) => {
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.emit('exit', 0);
+                    p.emit('close', 0);
+                }))
+                .mockImplementationOnce(() => createAutoProcess((p) => {
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.emit('exit', 0);
+                    p.emit('close', 0);
+                }));
+
+            const result = await CloudTool.uploadLocalFileToRemote('/tmp/task.part', 'movie.mkv', 'user123');
+
+            expect(result).toEqual({ success: true, fileName: 'movie.mkv' });
+            expect(mockSpawn.mock.calls[0][1]).toEqual(expect.arrayContaining(['mkdir', expect.stringContaining('Stream')]));
+            expect(mockSpawn.mock.calls[1][1]).toEqual(expect.arrayContaining(['copyto', '/tmp/task.part', expect.stringContaining('Stream/movie.mkv')]));
+        });
+
+        it('should classify mkdir object-not-found as remote folder guidance', async () => {
+            mockSpawn.mockImplementationOnce(() => createAutoProcess((p) => {
+                p.stderr.emit('data', Buffer.from(`CRITICAL | Failed to create file system for ":mega,user="[REDACTED]": couldn't login: Object (typically, node or user) not found\n`));
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 1);
+                p.emit('close', 1);
+            }));
+
+            const result = await CloudTool.uploadLocalFileToRemote('/tmp/task.part', 'movie.mkv', 'user123');
+
+            expect(result).toMatchObject({
+                success: false,
+                errorCode: 'DRIVE_REMOTE_NOT_FOUND',
+                userRetryable: true
+            });
+            expect(result.userMessage).toContain('保存目录');
+            expect(mockSpawn).toHaveBeenCalledTimes(1);
+        });
+
         it('should attempt to create the configured folder when MEGA reports node not found while listing files', async () => {
             mockGetDefaultDrive.mockResolvedValue({
                 type: 'mega',
@@ -794,12 +868,21 @@ describe('CloudTool', () => {
                 config_data: JSON.stringify({ user: 'u', pass: 'p' })
             });
             const proc = createAutoProcess();
-            mockSpawn.mockReturnValue(proc);
+            mockSpawn
+                .mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.emit('exit', 0);
+                    p.emit('close', 0);
+                }))
+                .mockReturnValueOnce(proc);
 
             const result = await CloudTool.createRcatStream('../movie.mkv', 'user123', { size: 12345 });
 
             expect(result.fileName).toBe('movie.mkv');
-            const args = mockSpawn.mock.calls[0][1];
+            const args = mockSpawn.mock.calls[1][1];
             expect(args).toContain('rcat');
             expect(args).toContain('--size');
             expect(args).toContain('12345');
