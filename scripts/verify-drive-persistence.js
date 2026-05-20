@@ -6,8 +6,19 @@
  */
 
 import { cache } from "../src/services/CacheService.js";
+import { markRclonePasswordConfig } from "../src/domain/drive-credentials.js";
 import { DriveRepository } from "../src/repositories/DriveRepository.js";
 import { logger } from "../src/services/logger/index.js";
+
+function firstDrive(result) {
+    return Array.isArray(result) ? result[0] : result;
+}
+
+function parseConfigData(drive) {
+    if (!drive?.config_data) return {};
+    if (typeof drive.config_data === "object") return drive.config_data;
+    return JSON.parse(drive.config_data);
+}
 
 async function verifyDrivePersistence() {
     try {
@@ -20,10 +31,9 @@ async function verifyDrivePersistence() {
 
         // 记录测试用户
         const testUserId = "test_persistence_user";
-        const testDriveData = {
+        const testDriveData = markRclonePasswordConfig({
             user: "test@example.com",
-            pass: "test_password_123"
-        };
+        }, "test_obscured_password_123");
 
         // 步骤2: 创建测试 drive
         logger.info("➕ 步骤2: 创建测试 drive");
@@ -36,7 +46,7 @@ async function verifyDrivePersistence() {
         logger.info(`   创建结果: ${createResult}`);
 
         // 验证创建
-        const createdDrive = await DriveRepository.findByUserId(testUserId);
+        const createdDrive = firstDrive(await DriveRepository.findByUserId(testUserId));
         if (!createdDrive) {
             throw new Error("创建的 drive 无法找到");
         }
@@ -50,7 +60,7 @@ async function verifyDrivePersistence() {
 
         // 步骤4: 验证 Read-Through（Cache miss 回源 D1）
         logger.info("🔄 步骤4: 验证 Read-Through");
-        const driveFromD1 = await DriveRepository.findByUserId(testUserId);
+        const driveFromD1 = firstDrive(await DriveRepository.findByUserId(testUserId));
         if (!driveFromD1) {
             throw new Error("Read-Through 失败，无法从 D1 回源");
         }
@@ -59,7 +69,7 @@ async function verifyDrivePersistence() {
         // 验证数据一致性
         if (driveFromD1.name !== "Test-Mega-Persistence" ||
             driveFromD1.type !== "mega" ||
-            JSON.stringify(driveFromD1.config_data) !== JSON.stringify(testDriveData)) {
+            JSON.stringify(parseConfigData(driveFromD1)) !== JSON.stringify(testDriveData)) {
             throw new Error("回源数据不一致");
         }
         logger.info("   ✅ 数据一致性验证通过");
@@ -85,20 +95,15 @@ async function verifyDrivePersistence() {
 
         // 验证删除：D1 中应标记为 deleted
         const deletedFromD1 = await DriveRepository.findByUserId(testUserId);
-        if (deletedFromD1) {
+        if (deletedFromD1.length > 0) {
             throw new Error("删除后仍能从 D1 找到数据");
         }
         logger.info("   ✅ Write-Through 删除验证通过");
 
         // 步骤7: 清理测试数据
         logger.info("🧹 步骤7: 清理测试数据");
-        // 从 D1 中彻底删除测试数据（可选）
-        try {
-            await DriveRepository.delete(createdDrive.id);
-            logger.info("   测试数据清理完成");
-        } catch (error) {
-            logger.warn("⚠️ 清理测试数据失败（可能已被删除）:", error.message);
-        }
+        await DriveRepository.deleteByUserId(testUserId);
+        logger.info("   测试数据清理完成");
 
         logger.info("🎉 网盘持久化验证全部通过！");
         logger.info("✅ Read-Through: Cache miss 时正确回源 D1");

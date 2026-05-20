@@ -306,20 +306,24 @@ export class DriveRepository {
         try {
             // 先从 Cache 获取
             let drive = await cache.get(this.getDriveIdKey(driveId), "json");
-            if (drive) return drive;
+            if (drive) {
+                const [migratedDrive] = await this._migrateLegacyPasswordFormats(drive);
+                return migratedDrive || null;
+            }
 
             // Cache miss，从 D1 回源
             drive = await d1.fetchOne(
                 `SELECT ${DRIVE_COLUMNS} FROM drives WHERE id = ? AND status = ?`,
                 [driveId, DRIVE_STATUSES.ACTIVE]
             );
+            const [migratedDrive] = await this._migrateLegacyPasswordFormats(drive);
 
             // 如果找到，写入 Cache
-            if (drive) {
-                await cache.set(this.getDriveIdKey(driveId), drive);
+            if (migratedDrive) {
+                await cache.set(this.getDriveIdKey(driveId), migratedDrive);
             }
 
-            return drive;
+            return migratedDrive || null;
         } catch (e) {
             log.error(`DriveRepository.findById error for ${driveId}:`, e);
             return null;

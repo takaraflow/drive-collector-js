@@ -533,6 +533,55 @@ describe("DriveRepository", () => {
             expect(mockCache.get).toHaveBeenCalledWith("drive_id:drive123", "json");
             expect(result).toEqual(mockDrive);
         });
+
+        it("should lazily mark legacy password configs from drive id cache", async () => {
+            const legacyDrive = {
+                id: "drive123",
+                user_id: "user1",
+                type: "mega",
+                config_data: JSON.stringify({ user: "test@example.com", pass: "raw-pass" }),
+                status: "active"
+            };
+            mockCache.get.mockResolvedValue(legacyDrive);
+            mockD1.run.mockResolvedValue({ changes: 1 });
+
+            const result = await DriveRepository.findById("drive123");
+
+            expect(result.config_data).toContain('"pass_format":"legacy_unknown"');
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE drives SET config_data = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = ?",
+                expect.arrayContaining([
+                    expect.stringContaining('"pass_format":"legacy_unknown"'),
+                    expect.any(Number),
+                    "drive123",
+                    "user1",
+                    "active"
+                ])
+            );
+            expect(mockCache.delete).toHaveBeenCalledWith("drive:user1");
+            expect(mockCache.delete).toHaveBeenCalledWith("drive_id:drive123");
+        });
+
+        it("should lazily mark legacy password configs from D1 by id before caching", async () => {
+            const legacyDrive = {
+                id: "drive123",
+                user_id: "user1",
+                type: "mega",
+                config_data: JSON.stringify({ user: "test@example.com", pass: "raw-pass" }),
+                status: "active"
+            };
+            mockCache.get.mockResolvedValue(null);
+            mockD1.fetchOne.mockResolvedValue(legacyDrive);
+            mockD1.run.mockResolvedValue({ changes: 1 });
+
+            const result = await DriveRepository.findById("drive123");
+
+            expect(result.config_data).toContain('"pass_format":"legacy_unknown"');
+            expect(mockCache.set).toHaveBeenCalledWith("drive_id:drive123", expect.objectContaining({
+                id: "drive123",
+                config_data: expect.stringContaining('"pass_format":"legacy_unknown"')
+            }));
+        });
     });
 
     describe("findByUserAndId", () => {
