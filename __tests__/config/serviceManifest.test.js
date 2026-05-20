@@ -43,6 +43,8 @@ describe('ServiceConfigManager 测试', () => {
         expect(serviceConfigManager.getServiceName('LOG_LEVEL')).toBe('logger');
         expect(serviceConfigManager.getServiceName('MESSAGE_SLOW_WARN_THRESHOLD_MS')).toBe('logger');
         expect(serviceConfigManager.getServiceName('DB_AUTO_MIGRATE')).toBe('d1');
+        expect(serviceConfigManager.getServiceName('CF_D1_DATABASE_ID')).toBe('d1');
+        expect(serviceConfigManager.getServiceName('CF_D1_TOKEN')).toBe('d1');
         expect(serviceConfigManager.getServiceName('STREAM_FORWARDING_ENABLED')).toBe('streamForwarding');
         expect(serviceConfigManager.getServiceName('STREAM_RESUME_DIR')).toBe('streamForwarding');
         expect(serviceConfigManager.getServiceName('STREAM_FINALIZATION_TIMEOUT_MS')).toBe('streamForwarding');
@@ -51,6 +53,8 @@ describe('ServiceConfigManager 测试', () => {
         expect(serviceConfigManager.getServiceName('LOCAL_STORAGE_REQUIRED_HEADROOM_RATIO')).toBe('localStorage');
         expect(serviceConfigManager.getServiceName('LOCAL_STORAGE_REQUIRED_HEADROOM_BYTES')).toBe('localStorage');
         expect(serviceConfigManager.getServiceName('OSS_WORKER_UPLOAD_MAX_BUFFER_BYTES')).toBe('oss');
+        expect(serviceConfigManager.getServiceName('R2_WORKER_URL')).toBe('oss');
+        expect(serviceConfigManager.getServiceName('R2_WORKER_AUTH_TOKEN')).toBe('oss');
         expect(serviceConfigManager.getServiceName('DIRECT_TRANSFER_ENABLED')).toBe('directTransfer');
         expect(serviceConfigManager.getServiceName('DIRECT_TRANSFER_FALLBACK_TO_LOCAL')).toBe('directTransfer');
         expect(serviceConfigManager.getServiceName('DIRECT_TRANSFER_TIMEOUT_MS')).toBe('directTransfer');

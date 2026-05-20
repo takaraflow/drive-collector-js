@@ -7,6 +7,14 @@ import { mapNodeEnvToInfisicalEnv, normalizeNodeEnv } from '../utils/envMapper.j
 import { serviceConfigManager } from './ServiceConfigManager.js';
 import { ManifestBasedServiceReinitializer } from './ManifestBasedServiceReinitializer.js';
 import { redactValueForKey } from '../utils/serializer.js';
+import {
+    D1_ACCOUNT_ID_ENV_KEYS,
+    D1_DATABASE_ID_ENV_KEYS,
+    D1_TOKEN_ENV_KEYS,
+    OSS_WORKER_SECRET_ENV_KEYS,
+    OSS_WORKER_URL_ENV_KEYS,
+    firstEnvValue
+} from './env-aliases.js';
 
 // 保护重要环境变量不被 .env 覆盖
 const PROTECTED_ENV_VARS = ['NODE_ENV', 'INFISICAL_ENV', 'INFISICAL_TOKEN', 'INFISICAL_PROJECT_ID'];
@@ -499,13 +507,13 @@ function buildConfigObject(env) {
             secretAccessKey: env.R2_SECRET_ACCESS_KEY || null,
             bucket: env.R2_BUCKET || 'drive-collector',
             publicUrl: env.R2_PUBLIC_URL || null,
-            workerUrl: env.OSS_WORKER_URL || null,
-            workerSecret: env.OSS_WORKER_SECRET || null
+            workerUrl: firstEnvValue(env, OSS_WORKER_URL_ENV_KEYS),
+            workerSecret: firstEnvValue(env, OSS_WORKER_SECRET_ENV_KEYS)
         },
         d1: {
-            accountId: env.CLOUDFLARE_D1_ACCOUNT_ID || env.CLOUDFLARE_ACCOUNT_ID || null,
-            databaseId: env.CLOUDFLARE_D1_DATABASE_ID || null,
-            token: env.CLOUDFLARE_D1_TOKEN || null
+            accountId: firstEnvValue(env, D1_ACCOUNT_ID_ENV_KEYS),
+            databaseId: firstEnvValue(env, D1_DATABASE_ID_ENV_KEYS),
+            token: firstEnvValue(env, D1_TOKEN_ENV_KEYS)
         },
         telegram: {
             apiId: parseInt(env.API_ID) || null,
@@ -661,10 +669,18 @@ export function getConfig() {
     return config;
 }
 
+export function cleanupConfigResources() {
+    if (provider && typeof provider.cleanup === 'function') {
+        provider.cleanup();
+    }
+    provider = null;
+}
+
 export function __resetConfigForTests() {
     if (process.env.NODE_ENV !== 'test') {
         return;
     }
+    cleanupConfigResources();
     config = null;
     isInitialized = false;
 }

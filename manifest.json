@@ -417,6 +417,11 @@
         "required": false,
         "description": "Node.js runtime options"
       },
+      "ZBPACK_DOCKERFILE_NAME": {
+        "type": "string",
+        "required": false,
+        "description": "Platform build configuration: Dockerfile name used by ZBPACK/Zeabur-compatible builders"
+      },
       "APP_VERSION": {
         "type": "string",
         "required": false,
@@ -827,10 +832,24 @@
         "required": false,
         "description": "OSS Worker URL for object storage operations"
       },
+      "R2_WORKER_URL": {
+        "type": "string",
+        "required": false,
+        "description": "Legacy alias for OSS_WORKER_URL"
+      },
       "OSS_WORKER_SECRET": {
         "type": "string",
         "required": false,
         "description": "OSS Worker secret for authentication",
+        "sensitive": true,
+        "configPaths": [
+          "workerSecret"
+        ]
+      },
+      "R2_WORKER_AUTH_TOKEN": {
+        "type": "string",
+        "required": false,
+        "description": "Legacy alias for OSS_WORKER_SECRET",
         "sensitive": true,
         "configPaths": [
           "workerSecret"
@@ -911,15 +930,30 @@
         "required": false,
         "description": "Cloudflare D1 account ID"
       },
+      "CF_D1_ACCOUNT_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Legacy alias for CLOUDFLARE_D1_ACCOUNT_ID"
+      },
       "CLOUDFLARE_D1_DATABASE_ID": {
         "type": "string",
         "required": false,
         "description": "Cloudflare D1 database ID"
       },
+      "CF_D1_DATABASE_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Legacy alias for CLOUDFLARE_D1_DATABASE_ID"
+      },
       "CLOUDFLARE_D1_TOKEN": {
         "type": "string",
         "required": false,
         "description": "Cloudflare D1 API token"
+      },
+      "CF_D1_TOKEN": {
+        "type": "string",
+        "required": false,
+        "description": "Legacy alias for CLOUDFLARE_D1_TOKEN"
       },
       "DB_SCHEMA_CHECK": {
         "type": "boolean",
@@ -945,6 +979,11 @@
         "type": "string",
         "required": false,
         "description": "Cloudflare account ID (fallback for KV/D1)"
+      },
+      "CF_ACCOUNT_ID": {
+        "type": "string",
+        "required": false,
+        "description": "Legacy alias for CLOUDFLARE_ACCOUNT_ID"
       },
       "CLOUDFLARE_KV_ACCOUNT_ID": {
         "type": "string",

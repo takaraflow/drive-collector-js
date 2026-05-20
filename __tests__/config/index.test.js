@@ -220,6 +220,75 @@ describe("Config Module", () => {
     delete process.env.DB_MIGRATION_LOCK_WAIT_MS;
   });
 
+  test("should accept legacy Cloudflare D1 and R2 worker aliases", async () => {
+    delete process.env.CLOUDFLARE_D1_ACCOUNT_ID;
+    delete process.env.CLOUDFLARE_D1_DATABASE_ID;
+    delete process.env.CLOUDFLARE_D1_TOKEN;
+    delete process.env.OSS_WORKER_URL;
+    delete process.env.OSS_WORKER_SECRET;
+    process.env.CF_D1_ACCOUNT_ID = "legacy_acc";
+    process.env.CF_D1_DATABASE_ID = "legacy_db";
+    process.env.CF_D1_TOKEN = "legacy_token";
+    process.env.R2_WORKER_URL = "https://legacy-worker.example.com";
+    process.env.R2_WORKER_AUTH_TOKEN = "legacy_worker_token";
+
+    __resetConfigForTests();
+    const config = await initConfig();
+
+    expect(config.d1).toMatchObject({
+      accountId: "legacy_acc",
+      databaseId: "legacy_db",
+      token: "legacy_token"
+    });
+    expect(config.oss).toMatchObject({
+      workerUrl: "https://legacy-worker.example.com",
+      workerSecret: "legacy_worker_token"
+    });
+
+    delete process.env.CF_D1_ACCOUNT_ID;
+    delete process.env.CF_D1_DATABASE_ID;
+    delete process.env.CF_D1_TOKEN;
+    delete process.env.R2_WORKER_URL;
+    delete process.env.R2_WORKER_AUTH_TOKEN;
+  });
+
+  test("should prefer canonical Cloudflare D1 and OSS worker variables over legacy aliases", async () => {
+    process.env.CLOUDFLARE_D1_ACCOUNT_ID = "canonical_acc";
+    process.env.CLOUDFLARE_D1_DATABASE_ID = "canonical_db";
+    process.env.CLOUDFLARE_D1_TOKEN = "canonical_token";
+    process.env.CF_D1_ACCOUNT_ID = "legacy_acc";
+    process.env.CF_D1_DATABASE_ID = "legacy_db";
+    process.env.CF_D1_TOKEN = "legacy_token";
+    process.env.OSS_WORKER_URL = "https://canonical-worker.example.com";
+    process.env.OSS_WORKER_SECRET = "canonical_worker_token";
+    process.env.R2_WORKER_URL = "https://legacy-worker.example.com";
+    process.env.R2_WORKER_AUTH_TOKEN = "legacy_worker_token";
+
+    __resetConfigForTests();
+    const config = await initConfig();
+
+    expect(config.d1).toMatchObject({
+      accountId: "canonical_acc",
+      databaseId: "canonical_db",
+      token: "canonical_token"
+    });
+    expect(config.oss).toMatchObject({
+      workerUrl: "https://canonical-worker.example.com",
+      workerSecret: "canonical_worker_token"
+    });
+
+    delete process.env.CLOUDFLARE_D1_ACCOUNT_ID;
+    delete process.env.CLOUDFLARE_D1_DATABASE_ID;
+    delete process.env.CLOUDFLARE_D1_TOKEN;
+    delete process.env.CF_D1_ACCOUNT_ID;
+    delete process.env.CF_D1_DATABASE_ID;
+    delete process.env.CF_D1_TOKEN;
+    delete process.env.OSS_WORKER_URL;
+    delete process.env.OSS_WORKER_SECRET;
+    delete process.env.R2_WORKER_URL;
+    delete process.env.R2_WORKER_AUTH_TOKEN;
+  });
+
   test("should accept QSTASH_AUTH_TOKEN as fallback for QStash token", async () => {
     delete process.env.QSTASH_TOKEN;
     process.env.QSTASH_AUTH_TOKEN = "legacy-qstash-token";

@@ -1,4 +1,10 @@
 import { logger } from "./logger/index.js";
+import {
+    D1_ACCOUNT_ID_ENV_KEYS,
+    D1_DATABASE_ID_ENV_KEYS,
+    D1_TOKEN_ENV_KEYS,
+    firstEnvValue
+} from "../config/env-aliases.js";
 
 const log = logger.withModule ? logger.withModule('D1') : logger;
 
@@ -34,12 +40,12 @@ class D1Service {
     async initialize() {
         if (this.isInitialized) return;
 
-        this.accountId = process.env.CLOUDFLARE_D1_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID;
-        this.databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
-        this.token = process.env.CLOUDFLARE_D1_TOKEN;
+        this.accountId = firstEnvValue(process.env, D1_ACCOUNT_ID_ENV_KEYS);
+        this.databaseId = firstEnvValue(process.env, D1_DATABASE_ID_ENV_KEYS);
+        this.token = firstEnvValue(process.env, D1_TOKEN_ENV_KEYS);
 
         if (!this.accountId || !this.databaseId || !this.token) {
-            log.warn("⚠️ D1配置不完整: 请检查 CLOUDFLARE_D1_ACCOUNT_ID (或 CLOUDFLARE_ACCOUNT_ID), CLOUDFLARE_D1_DATABASE_ID, CLOUDFLARE_D1_TOKEN");
+            log.warn("⚠️ D1配置不完整: 请检查 CLOUDFLARE_D1_* (或兼容别名 CF_D1_*/CLOUDFLARE_ACCOUNT_ID/CF_ACCOUNT_ID)");
         } else {
             this.apiUrl = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/d1/database/${this.databaseId}/query`;
             this.isInitialized = true;

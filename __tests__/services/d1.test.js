@@ -94,9 +94,26 @@ describe("D1 Service", () => {
       d1._reset();
       await d1.initialize();
       
-      // Should have undefined token (no fallback) and not be initialized
-      expect(d1.token).toBeUndefined();
+      // Should have no token fallback and not be initialized
+      expect(d1.token).toBeNull();
       expect(d1.isInitialized).toBe(false);
+    });
+
+    test("should accept legacy CF_D1_* aliases when canonical D1 variables are absent", async () => {
+      delete process.env.CLOUDFLARE_D1_ACCOUNT_ID;
+      delete process.env.CLOUDFLARE_D1_DATABASE_ID;
+      delete process.env.CLOUDFLARE_D1_TOKEN;
+      process.env.CF_D1_ACCOUNT_ID = "legacy_account";
+      process.env.CF_D1_DATABASE_ID = "legacy_db";
+      process.env.CF_D1_TOKEN = "legacy_token";
+
+      d1._reset();
+      await d1.initialize();
+
+      expect(d1.accountId).toBe("legacy_account");
+      expect(d1.databaseId).toBe("legacy_db");
+      expect(d1.token).toBe("legacy_token");
+      expect(d1.apiUrl).toBe("https://api.cloudflare.com/client/v4/accounts/legacy_account/d1/database/legacy_db/query");
     });
   });
 

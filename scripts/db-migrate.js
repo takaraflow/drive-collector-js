@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { initConfig, getConfig } from "../src/config/index.js";
+import { cleanupConfigResources, initConfig, getConfig } from "../src/config/index.js";
 import { d1 } from "../src/services/d1.js";
 import { logger } from "../src/services/logger/index.js";
 import {
@@ -65,7 +65,11 @@ async function main() {
     }
 }
 
-main().catch(error => {
-    console.error(`Database migration failed: ${error.message}`);
-    process.exit(1);
-});
+main()
+    .catch(error => {
+        console.error(`Database migration failed: ${error.message}`);
+        process.exitCode = 1;
+    })
+    .finally(() => {
+        cleanupConfigResources();
+    });

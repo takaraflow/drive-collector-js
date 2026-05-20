@@ -531,6 +531,22 @@ describe("database schema migrations", () => {
         });
 
         expect(ready.status.isCurrent).toBe(true);
+        expect(log.info).toHaveBeenCalledWith(
+            "Database auto-migrate enabled; checking pending schema migrations",
+            expect.objectContaining({
+                latestVersion: LATEST_SCHEMA_VERSION
+            })
+        );
+        expect(log.info).toHaveBeenCalledWith(
+            "Database auto-migrate completed",
+            expect.objectContaining({
+                currentVersion: LATEST_SCHEMA_VERSION,
+                latestVersion: LATEST_SCHEMA_VERSION,
+                isCurrent: true,
+                appliedCount: expect.any(Number),
+                alreadyAppliedCount: expect.any(Number)
+            })
+        );
     });
 
     test("should report current status after migrations", async () => {

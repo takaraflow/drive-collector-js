@@ -1266,12 +1266,34 @@ export async function ensureDatabaseSchemaReady({ d1, config = {}, log = console
     }
 
     if (databaseConfig.autoMigrate === true) {
-        return await migrateDatabaseSchema({
+        log.info?.("Database auto-migrate enabled; checking pending schema migrations", {
+            latestVersion: LATEST_SCHEMA_VERSION,
+            lockTtlMs: databaseConfig.migrationLockTtlMs,
+            lockWaitMs: databaseConfig.migrationLockWaitMs
+        });
+
+        const result = await migrateDatabaseSchema({
             d1,
             log,
             lockTtlMs: databaseConfig.migrationLockTtlMs,
             lockWaitMs: databaseConfig.migrationLockWaitMs
         });
+
+        const actionCounts = result.results.reduce((counts, item) => {
+            counts[item.action] = (counts[item.action] || 0) + 1;
+            return counts;
+        }, {});
+        log.info?.("Database auto-migrate completed", {
+            currentVersion: result.status.currentVersion,
+            latestVersion: result.status.latestVersion,
+            isCurrent: result.status.isCurrent,
+            migrationCount: result.results.length,
+            appliedCount: actionCounts.applied || 0,
+            recordedCount: actionCounts.recorded || 0,
+            alreadyAppliedCount: actionCounts.already_applied || 0
+        });
+
+        return result;
     }
 
     const status = await assertDatabaseSchemaCurrent({ d1 });
