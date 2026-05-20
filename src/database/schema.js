@@ -5,7 +5,7 @@ import {
     RCLONE_PASSWORD_FORMATS
 } from "../domain/drive-credentials.js";
 
-export const LATEST_SCHEMA_VERSION = 8;
+export const LATEST_SCHEMA_VERSION = 9;
 
 const MIGRATION_LOCK_ID = "database-schema";
 const CANONICAL_TASK_STATUS_CHECK = "CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled'))";
@@ -22,7 +22,8 @@ const TASK_INDEX_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_tasks_claimed_by ON tasks(claimed_by)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_claim_lease ON tasks(claimed_by, claim_lease_id)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status)",
-    "CREATE INDEX IF NOT EXISTS idx_tasks_status_updated ON tasks(status, updated_at)"
+    "CREATE INDEX IF NOT EXISTS idx_tasks_status_updated ON tasks(status, updated_at)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_stalled_recovery ON tasks(status, updated_at, created_at)"
 ];
 
 const DRIVE_INDEX_STATEMENTS = [
@@ -70,6 +71,7 @@ const INITIAL_SCHEMA_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_tasks_claim_lease ON tasks(claimed_by, claim_lease_id)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_status_updated ON tasks(status, updated_at)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_stalled_recovery ON tasks(status, updated_at, created_at)",
 
     `CREATE TABLE IF NOT EXISTS drives (
         id TEXT PRIMARY KEY,
@@ -217,6 +219,7 @@ const REQUIRED_TABLE_COLUMNS = {
 
 const REQUIRED_INDEXES = [
     "idx_tasks_status_updated",
+    "idx_tasks_stalled_recovery",
     "idx_tasks_claim_lease",
     "idx_drives_user_default",
     "idx_drives_one_default_per_user",
@@ -856,6 +859,23 @@ async function applyDrivePasswordFormatSsot({ d1 }) {
     );
 }
 
+async function applyTaskStalledRecoveryIndex({ d1 }) {
+    if (!(await tableExists(d1, "tasks"))) {
+        await ensureTaskBaseSchema(d1);
+        return;
+    }
+
+    const now = Date.now();
+    await d1.run(
+        `UPDATE tasks
+         SET created_at = COALESCE(created_at, updated_at, ?),
+             updated_at = COALESCE(updated_at, created_at, ?)
+         WHERE created_at IS NULL OR updated_at IS NULL`,
+        [now, now]
+    );
+    await d1.run("CREATE INDEX IF NOT EXISTS idx_tasks_stalled_recovery ON tasks(status, updated_at, created_at)");
+}
+
 function getMigrations() {
     return [
         {
@@ -939,6 +959,17 @@ function getMigrations() {
             sql: "mark legacy rclone password drive configs with explicit unknown password format",
             shouldRun: async ({ d1 }) => await hasLegacyRclonePasswordConfigs(d1),
             apply: applyDrivePasswordFormatSsot
+        },
+        {
+            version: 9,
+            name: "task_stalled_recovery_index",
+            sql: "backfill nullable task timestamps and add tasks(status, updated_at, created_at) index for bounded stalled task recovery scans",
+            shouldRun: async ({ d1 }) => {
+                if (!(await indexExists(d1, "idx_tasks_stalled_recovery"))) return true;
+                const row = await d1.fetchOne("SELECT id FROM tasks WHERE created_at IS NULL OR updated_at IS NULL LIMIT 1");
+                return Boolean(row);
+            },
+            apply: applyTaskStalledRecoveryIndex
         }
     ];
 }

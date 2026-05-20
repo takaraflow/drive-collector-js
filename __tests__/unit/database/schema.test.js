@@ -304,7 +304,7 @@ describe("database schema migrations", () => {
 
         expect(result.status.isCurrent).toBe(true);
         expect(result.status.currentVersion).toBe(LATEST_SCHEMA_VERSION);
-        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied", "recorded", "recorded", "recorded", "recorded", "recorded"]);
+        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied", "recorded", "recorded", "recorded", "recorded", "recorded", "recorded"]);
 
         const taskColumns = db.prepare("PRAGMA table_info(tasks)").all().map(column => column.name);
         expect(taskColumns).toContain("source_type");
@@ -315,12 +315,13 @@ describe("database schema migrations", () => {
 
         const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(row => row.name);
         expect(indexes).toContain("idx_tasks_claim_lease");
+        expect(indexes).toContain("idx_tasks_stalled_recovery");
         expect(indexes).toContain("idx_drives_one_default_per_user");
         expect(indexes).toContain("idx_drives_one_active_type_per_user");
         expect(indexes).toContain("idx_user_roles_role");
 
         const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
-        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     });
 
     test("should create current schema with user_roles and active-only drive type uniqueness", async () => {
@@ -445,7 +446,8 @@ describe("database schema migrations", () => {
         expect(outdatedStatus.issues).not.toContain("migration 1:initial_schema checksum drift");
         expect(outdatedStatus.missingMigrations).toEqual([
             { version: 7, name: "task_source_metadata" },
-            { version: 8, name: "drive_password_format_ssot" }
+            { version: 8, name: "drive_password_format_ssot" },
+            { version: 9, name: "task_stalled_recovery_index" }
         ]);
 
         const result = await migrateDatabaseSchema({
@@ -466,6 +468,12 @@ describe("database schema migrations", () => {
             action: "recorded",
             executionTimeMs: expect.any(Number)
         });
+        expect(result.results).toContainEqual({
+            version: 9,
+            name: "task_stalled_recovery_index",
+            action: "recorded",
+            executionTimeMs: expect.any(Number)
+        });
         expect(result.status.isCurrent).toBe(true);
 
         const taskColumns = db.prepare("PRAGMA table_info(tasks)").all().map(column => column.name);
@@ -475,6 +483,7 @@ describe("database schema migrations", () => {
 
         const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(row => row.name);
         expect(indexes).toContain("idx_tasks_claim_lease");
+        expect(indexes).toContain("idx_tasks_stalled_recovery");
 
         const migrationOne = db.prepare("SELECT checksum FROM schema_migrations WHERE version = 1").get();
         expect(migrationOne.checksum).toBe("1c71fee80eb09f16419d0143c236c9e7e1d2261f80e8dde4b1c591e5539e5ce9");
@@ -496,6 +505,33 @@ describe("database schema migrations", () => {
         const row = db.prepare("SELECT source_type, source_ref FROM tasks WHERE id = ?").get("telegram-old");
         expect(row.source_type).toBe("telegram_media");
         expect(JSON.parse(row.source_ref)).toEqual({ chatId: "chat-42", messageId: 100 });
+    });
+
+    test("should backfill nullable task timestamps before marking stalled recovery index migration applied", async () => {
+        db = createDatabaseAppliedThroughVersionFive();
+        db.prepare(
+            "INSERT INTO tasks (id, user_id, chat_id, msg_id, source_msg_id, file_name, file_size, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run("legacy-null-times", "user-1", "chat-1", 102, 101, "legacy.mp4", 1, "downloading", null, null);
+        const d1 = createD1RestCompatible(db);
+
+        const result = await migrateDatabaseSchema({
+            d1,
+            useLock: false,
+            log: { info: vi.fn(), warn: vi.fn() }
+        });
+
+        expect(result.results).toContainEqual({
+            version: 9,
+            name: "task_stalled_recovery_index",
+            action: "applied",
+            executionTimeMs: expect.any(Number)
+        });
+        const row = db.prepare("SELECT created_at, updated_at FROM tasks WHERE id = ?").get("legacy-null-times");
+        expect(row.created_at).toEqual(expect.any(Number));
+        expect(row.updated_at).toEqual(expect.any(Number));
+
+        const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(index => index.name);
+        expect(indexes).toContain("idx_tasks_stalled_recovery");
     });
 
     test("should fail schema assertion before migrations are applied", async () => {
@@ -626,10 +662,11 @@ describe("database schema migrations", () => {
 
         const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(row => row.name);
         expect(indexes).toContain("idx_tasks_status_updated");
+        expect(indexes).toContain("idx_tasks_stalled_recovery");
         expect(indexes).toContain("idx_tasks_claim_lease");
         expect(indexes).toContain("idx_drives_one_default_per_user");
 
         const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
-        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     });
 });

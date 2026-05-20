@@ -67,6 +67,7 @@ describe('TaskRepository', () => {
         mockCache.get.mockResolvedValue(null);
         mockD1.fetchOne.mockResolvedValue(null);
         mockD1.fetchAll.mockResolvedValue([]);
+        mockD1.batch.mockResolvedValue([]);
         vi.useFakeTimers();
     });
 
@@ -165,22 +166,36 @@ describe('TaskRepository', () => {
                 { id: 'task2', status: 'uploading' }
             ];
 
-            mockD1.fetchAll.mockResolvedValue(mockTasks);
+            mockD1.batch.mockResolvedValue([
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: mockTasks } },
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } }
+            ]);
             mockCache.listKeys.mockResolvedValue([]);
 
             const result = await TaskRepository.findStalledTasks(3600000); // 1 hour
 
             expect(result).toEqual(mockTasks);
-            expect(mockD1.fetchAll).toHaveBeenCalledWith(
-                expect.stringContaining('SELECT * FROM tasks'),
-                [...TASK_ACTIVE_STATUSES, expect.any(Number), TaskRepository.STALLED_TASKS_DEFAULT_LIMIT]
-            );
+            expect(mockD1.batch).toHaveBeenCalledTimes(1);
+            expect(mockD1.batch.mock.calls[0][0]).toHaveLength(TASK_ACTIVE_STATUSES.length);
+            expect(mockD1.batch.mock.calls[0][0][0]).toEqual({
+                sql: expect.stringContaining('WHERE status = ?'),
+                params: [TASK_ACTIVE_STATUSES[0], expect.any(Number), TaskRepository.STALLED_TASKS_DEFAULT_LIMIT]
+            });
+            expect(mockD1.batch.mock.calls[0][0][0].sql).toContain('updated_at < ?');
+            expect(mockD1.batch.mock.calls[0][0][0].sql).not.toContain('SELECT *');
         });
 
         it('should not merge cache-only task states into stalled recovery', async () => {
             const d1Tasks = [{ id: 'task1', status: 'downloading' }];
             
-            mockD1.fetchAll.mockResolvedValue(d1Tasks);
+            mockD1.batch.mockResolvedValue([
+                { success: true, result: { results: d1Tasks } },
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } }
+            ]);
             mockCache.listKeys.mockResolvedValue(['task_status:task2']);
             mockCache.get.mockResolvedValue({ status: 'uploading', updatedAt: Date.now() - 4000000 });
 
@@ -192,7 +207,12 @@ describe('TaskRepository', () => {
 
         it('should handle Redis errors gracefully', async () => {
             const mockTasks = [{ id: 'task1', status: 'downloading' }];
-            mockD1.fetchAll.mockResolvedValue(mockTasks);
+            mockD1.batch.mockResolvedValue([
+                { success: true, result: { results: mockTasks } },
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } }
+            ]);
             mockCache.listKeys.mockRejectedValue(new Error('Redis error'));
 
             const result = await TaskRepository.findStalledTasks(3600000);
@@ -201,17 +221,19 @@ describe('TaskRepository', () => {
         });
 
         it('should use default timeout if not provided', async () => {
-            mockD1.fetchAll.mockResolvedValue([]);
+            mockD1.batch.mockResolvedValue([]);
 
             await TaskRepository.findStalledTasks();
 
-            expect(mockD1.fetchAll).toHaveBeenCalledWith(
-                expect.stringContaining('SELECT * FROM tasks'),
-                [...TASK_ACTIVE_STATUSES, expect.any(Number), TaskRepository.STALLED_TASKS_DEFAULT_LIMIT]
-            );
+            expect(mockD1.batch.mock.calls[0][0][0].params).toEqual([
+                TASK_ACTIVE_STATUSES[0],
+                expect.any(Number),
+                TaskRepository.STALLED_TASKS_DEFAULT_LIMIT
+            ]);
         });
 
         it('should include retryable queue failed tasks only when requested', async () => {
+            mockD1.batch.mockResolvedValue([]);
             mockD1.fetchAll.mockResolvedValue([]);
 
             await TaskRepository.findStalledTasks(3600000, { includeRetryableFailed: true });
@@ -219,7 +241,6 @@ describe('TaskRepository', () => {
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
                 expect.stringContaining("error_msg LIKE '%Circuit breaker is OPEN%'"),
                 [
-                    ...TASK_ACTIVE_STATUSES,
                     TASK_STATUSES.FAILED,
                     expect.any(Number),
                     TaskRepository.STALLED_TASKS_DEFAULT_LIMIT
@@ -228,42 +249,81 @@ describe('TaskRepository', () => {
         });
 
         it('should not include retryable failed SQL when not requested', async () => {
-            mockD1.fetchAll.mockResolvedValue([]);
+            mockD1.batch.mockResolvedValue([]);
 
             await TaskRepository.findStalledTasks(3600000);
 
-            const [sql, params] = mockD1.fetchAll.mock.calls.at(-1);
-            expect(sql).not.toContain("status = ?");
-            expect(sql).not.toContain("Recovery enqueue failed");
-            expect(params).toEqual([
-                ...TASK_ACTIVE_STATUSES,
+            expect(mockD1.fetchAll).not.toHaveBeenCalled();
+            const statements = mockD1.batch.mock.calls.at(-1)[0];
+            expect(statements).toHaveLength(TASK_ACTIVE_STATUSES.length);
+            expect(statements[0].sql).toContain("status = ?");
+            expect(statements[0].sql).not.toContain("Recovery enqueue failed");
+            expect(statements[0].params).toEqual([
+                TASK_ACTIVE_STATUSES[0],
                 expect.any(Number),
                 TaskRepository.STALLED_TASKS_DEFAULT_LIMIT
             ]);
         });
 
         it('should clamp maxResults between configured bounds', async () => {
-            mockD1.fetchAll.mockResolvedValue([]);
+            mockD1.batch.mockResolvedValue([]);
 
             await TaskRepository.findStalledTasks(3600000, { maxResults: 10 });
-            expect(mockD1.fetchAll).toHaveBeenCalledWith(
-                expect.stringContaining('SELECT * FROM tasks'),
-                [...TASK_ACTIVE_STATUSES, expect.any(Number), TaskRepository.STALLED_TASKS_MIN_LIMIT]
-            );
+            expect(mockD1.batch.mock.calls[0][0][0].params.at(-1)).toBe(TaskRepository.STALLED_TASKS_MIN_LIMIT);
 
-            mockD1.fetchAll.mockClear();
+            mockD1.batch.mockClear();
             await TaskRepository.findStalledTasks(3600000, { maxResults: 5000 });
-            expect(mockD1.fetchAll).toHaveBeenCalledWith(
-                expect.stringContaining('SELECT * FROM tasks'),
-                [...TASK_ACTIVE_STATUSES, expect.any(Number), TaskRepository.STALLED_TASKS_MAX_LIMIT]
-            );
+            expect(mockD1.batch.mock.calls[0][0][0].params.at(-1)).toBe(TaskRepository.STALLED_TASKS_MAX_LIMIT);
+        });
+
+        it('should merge active and retryable failed rows by original creation order', async () => {
+            mockD1.batch.mockResolvedValue([
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [{ id: 'active-newer', status: 'downloading', created_at: 300 }] } },
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } }
+            ]);
+            mockD1.fetchAll.mockResolvedValue([{ id: 'failed-older', status: 'failed', created_at: 100 }]);
+
+            const result = await TaskRepository.findStalledTasks(3600000, { includeRetryableFailed: true });
+
+            expect(result.map(task => task.id)).toEqual(['failed-older', 'active-newer']);
+            expect(mockD1.fetchAll).toHaveBeenCalledTimes(1);
+            expect(mockD1.fetchAll.mock.calls[0][0]).toContain('WHERE status = ?');
+            expect(mockD1.fetchAll.mock.calls[0][1]).toEqual([
+                TASK_STATUSES.FAILED,
+                expect.any(Number),
+                TaskRepository.STALLED_TASKS_DEFAULT_LIMIT - 1
+            ]);
         });
 
         it('should handle database errors', async () => {
-            mockD1.fetchAll.mockRejectedValue(new Error('DB Error'));
+            mockD1.batch.mockRejectedValue(new Error('DB Error'));
 
             const result = await TaskRepository.findStalledTasks(3600000);
             expect(result).toEqual([]);
+        });
+
+        it('should fall back to individual indexed status queries when batch is unavailable', async () => {
+            const originalBatch = mockD1.batch;
+            delete mockD1.batch;
+            mockD1.fetchAll
+                .mockResolvedValueOnce([{ id: 'queued-old', status: 'queued', created_at: 1 }])
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([]);
+
+            const result = await TaskRepository.findStalledTasks(3600000);
+
+            expect(result.map(task => task.id)).toEqual(['queued-old']);
+            expect(mockD1.fetchAll).toHaveBeenCalledTimes(TASK_ACTIVE_STATUSES.length);
+            expect(mockD1.fetchAll.mock.calls[0][0]).toContain('WHERE status = ?');
+            expect(mockD1.fetchAll.mock.calls[0][1]).toEqual([
+                TASK_ACTIVE_STATUSES[0],
+                expect.any(Number),
+                TaskRepository.STALLED_TASKS_DEFAULT_LIMIT
+            ]);
+            mockD1.batch = originalBatch;
         });
     });
 

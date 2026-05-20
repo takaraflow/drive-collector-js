@@ -35,6 +35,21 @@ export class TaskRepository {
     static STALLED_TASKS_MIN_LIMIT = 50;
     static STALLED_TASKS_MAX_LIMIT = 1000;
     static MAX_PENDING_UPDATES = 1000; // Max size limit for pendingUpdates Map
+    static STALLED_TASK_COLUMNS = [
+        "id",
+        "user_id",
+        "chat_id",
+        "msg_id",
+        "source_msg_id",
+        "source_type",
+        "source_ref",
+        "file_name",
+        "file_size",
+        "status",
+        "error_msg",
+        "created_at",
+        "updated_at"
+    ].join(", ");
     
     // 状态分类来自领域状态机；D1 是权威状态源，缓存只保留派生视图。
     static IMPORTANT_STATUSES = [TASK_STATUSES.DOWNLOADING, TASK_STATUSES.UPLOADING];
@@ -52,6 +67,56 @@ export class TaskRepository {
 
     static _placeholders(values) {
         return values.map(() => '?').join(',');
+    }
+
+    static _sortStalledRecoveryRows(rows) {
+        return rows.sort((left, right) => {
+            const leftCreatedAt = Number(left?.created_at);
+            const rightCreatedAt = Number(right?.created_at);
+            const leftCreated = Number.isFinite(leftCreatedAt) ? leftCreatedAt : Number.MAX_SAFE_INTEGER;
+            const rightCreated = Number.isFinite(rightCreatedAt) ? rightCreatedAt : Number.MAX_SAFE_INTEGER;
+            if (leftCreated !== rightCreated) return leftCreated - rightCreated;
+            return String(left?.id || "").localeCompare(String(right?.id || ""));
+        });
+    }
+
+    static _activeStalledTaskStatements(deadLine, perStatusLimit) {
+        return TASK_ACTIVE_STATUSES.map(status => ({
+            sql: `SELECT ${this.STALLED_TASK_COLUMNS}
+                  FROM tasks
+                  WHERE status = ?
+                    AND updated_at < ?
+                  ORDER BY updated_at ASC, created_at ASC
+                  LIMIT ?`,
+            params: [status, deadLine, perStatusLimit]
+        }));
+    }
+
+    static _retryableFailedStalledTaskStatement(deadLine, limit) {
+        return {
+            sql: `SELECT ${this.STALLED_TASK_COLUMNS}
+                  FROM tasks
+                  WHERE status = ?
+                    AND updated_at < ?
+                    AND (
+                      error_msg LIKE '%Circuit breaker is OPEN%'
+                      OR error_msg LIKE '%qstash%'
+                      OR error_msg LIKE '%Queue enqueue failed%'
+                      OR error_msg LIKE '%Recovery enqueue failed%'
+                    )
+                  ORDER BY updated_at ASC, created_at ASC
+                  LIMIT ?`,
+            params: [TASK_STATUSES.FAILED, deadLine, limit]
+        };
+    }
+
+    static _rowsFromBatchResults(results = []) {
+        return results.flatMap(result => {
+            if (result?.success === false) {
+                throw result.error || new Error("D1 batch statement failed");
+            }
+            return result?.result?.results || [];
+        });
     }
 
     static async _getCurrentTaskState(taskId) {
@@ -375,31 +440,31 @@ export class TaskRepository {
         const requestedLimit = Number.isFinite(options?.maxResults) ? Number(options.maxResults) : this.STALLED_TASKS_DEFAULT_LIMIT;
         const limit = Math.min(this.STALLED_TASKS_MAX_LIMIT, Math.max(this.STALLED_TASKS_MIN_LIMIT, requestedLimit));
         const includeRetryableFailed = options?.includeRetryableFailed === true;
-        const retryableFailureSql = includeRetryableFailed
-            ? ` OR (
-                    status = ?
-                    AND (
-                        error_msg LIKE '%Circuit breaker is OPEN%'
-                        OR error_msg LIKE '%qstash%'
-                        OR error_msg LIKE '%Queue enqueue failed%'
-                        OR error_msg LIKE '%Recovery enqueue failed%'
-                    )
-                )`
-            : "";
-        const retryableFailureParams = includeRetryableFailed ? [TASK_STATUSES.FAILED] : [];
 
         try {
-            return await d1.fetchAll(
-                `SELECT * FROM tasks
-                WHERE (
-                    status IN (${this.ACTIVE_STATUS_SQL})
-                    ${retryableFailureSql}
-                )
-                AND (updated_at IS NULL OR updated_at < ?)
-                ORDER BY created_at ASC
-                LIMIT ?`,
-                [...TASK_ACTIVE_STATUSES, ...retryableFailureParams, deadLine, limit]
-            );
+            const perStatusLimit = limit;
+            let rows;
+            if (typeof d1.batch === "function") {
+                rows = this._rowsFromBatchResults(
+                    await d1.batch(this._activeStalledTaskStatements(deadLine, perStatusLimit))
+                );
+            } else {
+                const groups = await Promise.all(
+                    this._activeStalledTaskStatements(deadLine, perStatusLimit)
+                        .map(statement => d1.fetchAll(statement.sql, statement.params))
+                );
+                rows = groups.flat();
+            }
+            rows = this._sortStalledRecoveryRows(rows).slice(0, limit);
+
+            const remaining = Math.max(0, limit - rows.length);
+            if (includeRetryableFailed && remaining > 0) {
+                const retryableStatement = this._retryableFailedStalledTaskStatement(deadLine, remaining);
+                const retryableRows = await d1.fetchAll(retryableStatement.sql, retryableStatement.params);
+                rows.push(...retryableRows);
+            }
+
+            return this._sortStalledRecoveryRows(rows);
         } catch (e) {
             log.error("TaskRepository.findStalledTasks error:", e);
             return [];

@@ -107,6 +107,15 @@ function createTables(db) {
   `);
 
   db.exec(`CREATE INDEX IF NOT EXISTS idx_api_keys_token ON api_keys(token)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_msg_id ON tasks(msg_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_claimed_by ON tasks(claimed_by)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_claim_lease ON tasks(claimed_by, claim_lease_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_status_updated ON tasks(status, updated_at)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_stalled_recovery ON tasks(status, updated_at, created_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_drives_user_default ON drives(user_id, is_default)`);
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_drives_one_default_per_user ON drives(user_id) WHERE is_default = 1 AND status = 'active'`);
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_drives_one_active_type_per_user ON drives(user_id, type) WHERE status = 'active'`);
