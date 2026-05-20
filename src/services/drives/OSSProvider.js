@@ -74,6 +74,7 @@ export class OSSProvider extends BaseDriveProvider {
     }
 
     getConnectionString(config) {
+        this.assertRequiredConfig(config, ['endpoint', 'bucket', 'ak', 'sk']);
         const endpoint = (config.endpoint || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const bucket = (config.bucket || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const ak = (config.ak || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');

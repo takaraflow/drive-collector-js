@@ -52,6 +52,7 @@ export class DropboxProvider extends BaseDriveProvider {
     }
 
     getConnectionString(config) {
+        this.assertRequiredConfig(config, ['token']);
         const token = (config.token || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         return `:${this.type},token="${token}":`;
     }

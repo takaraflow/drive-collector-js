@@ -203,6 +203,16 @@ describe('Serializer Utils', () => {
             expect(result).not.toContain('secret-pass');
         });
 
+        test('should redact escaped rclone remote strings without truncating path context', () => {
+            const input = `CRITICAL: Failed for ":mega,user=\\"user@example.com\\",pass=\\"secret-pass\\":folder/file": couldn't login`;
+            const result = redactSensitiveText(input);
+
+            expect(result).toContain(':mega,user=\\"[REDACTED]\\",pass=\\"[REDACTED]\\":folder/file');
+            expect(result).toContain("couldn't login");
+            expect(result).not.toContain('user@example.com');
+            expect(result).not.toContain('secret-pass');
+        });
+
         test('should redact JSON tokens and bearer headers embedded in strings', () => {
             const input = 'token={"access_token":"access-secret","refresh_token":"refresh-secret","client_secret":"client-secret"} Authorization: Bearer bearer-secret';
             const result = redactSensitiveText(input);

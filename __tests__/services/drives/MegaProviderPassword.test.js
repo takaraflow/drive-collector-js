@@ -265,7 +265,7 @@ describe('MegaProvider - Unit Tests', () => {
             expect(result.message).toContain('登录失败');
         });
 
-        test('should map MEGA object-not-found login failures to login guidance', async () => {
+        test('should map root MEGA object-not-found validation failures to login guidance', async () => {
             const { CloudTool } = await import('../../../src/services/rclone.js');
             CloudTool.validateConfig.mockResolvedValue({
                 success: false,

@@ -601,7 +601,7 @@ describe('StreamTransferService', () => {
     )
   })
 
-  test('rcat auth failures show user guidance while storing redacted diagnostics', async () => {
+  test('rcat remote node failures show user guidance while storing redacted diagnostics', async () => {
     const { TaskRepository } = await import('../../src/repositories/TaskRepository.js')
     const { TelegramBotApi } = await import('../../src/utils/telegramBotApi.js')
 
@@ -635,7 +635,7 @@ describe('StreamTransferService', () => {
     const text = TelegramBotApi.editMessageText.mock.calls
       .filter(([chatId]) => chatId === 'chat-123')
       .at(-1)?.[2]
-    expect(text).toContain('重新绑定网盘')
+    expect(text).toContain('保存目录')
     expect(text).not.toContain('Object (typically, node or user) not found')
   })
 

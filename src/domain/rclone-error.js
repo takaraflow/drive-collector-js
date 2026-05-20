@@ -1,5 +1,7 @@
 export const RCLONE_ERROR_CODES = Object.freeze({
     DRIVE_AUTH_INVALID: "DRIVE_AUTH_INVALID",
+    DRIVE_CONFIG_INVALID: "DRIVE_CONFIG_INVALID",
+    DRIVE_REMOTE_NOT_FOUND: "DRIVE_REMOTE_NOT_FOUND",
     DRIVE_QUOTA_EXCEEDED: "DRIVE_QUOTA_EXCEEDED",
     DRIVE_PERMISSION_DENIED: "DRIVE_PERMISSION_DENIED",
     RCLONE_TRANSIENT: "RCLONE_TRANSIENT",
@@ -44,10 +46,22 @@ const PERMISSION_ERROR_PATTERNS = [
 ];
 
 const MEGA_LOGIN_OBJECT_NOT_FOUND = /couldn'?t login[\s\S]*Object \(typically, node or user\) not found/i;
+const REMOTE_NOT_FOUND_PATTERNS = [
+    /Object \(typically, node or user\) not found/i,
+    /directory not found/i,
+    /object not found/i,
+    /node not found/i
+];
+const CONFIG_INVALID_PATTERNS = [
+    /missing required drive config/i,
+    /missing required .* config/i,
+    /invalid drive config/i
+];
 const TRANSIENT_JSON_STARTUP_ERROR = /unexpected end of JSON input/i;
 const TRANSIENT_JSON_CONTEXT = /(failed to create file system|couldn'?t login|remote API|server response|mega)/i;
 
 const hasAnyMatch = (text, patterns) => patterns.some(pattern => pattern.test(text));
+const hasMegaRemotePath = (text) => /:mega,[\s\S]*?:(?!["\\\s])/i.test(text);
 
 export function classifyRcloneError(errorText) {
     const text = String(errorText || "").trim();
@@ -61,9 +75,25 @@ export function classifyRcloneError(errorText) {
 
     if (MEGA_LOGIN_OBJECT_NOT_FOUND.test(text)) {
         return {
-            code: RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID,
+            code: hasMegaRemotePath(text) ? RCLONE_ERROR_CODES.DRIVE_REMOTE_NOT_FOUND : RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID,
             retryable: false,
-            userRetryable: false
+            userRetryable: hasMegaRemotePath(text)
+        };
+    }
+
+    if (hasAnyMatch(text, CONFIG_INVALID_PATTERNS)) {
+        return {
+            code: RCLONE_ERROR_CODES.DRIVE_CONFIG_INVALID,
+            retryable: false,
+            userRetryable: true
+        };
+    }
+
+    if (hasAnyMatch(text, REMOTE_NOT_FOUND_PATTERNS)) {
+        return {
+            code: RCLONE_ERROR_CODES.DRIVE_REMOTE_NOT_FOUND,
+            retryable: false,
+            userRetryable: true
         };
     }
 

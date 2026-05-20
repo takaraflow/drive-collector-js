@@ -68,6 +68,7 @@ export class PCloudProvider extends BaseDriveProvider {
     }
 
     getConnectionString(config) {
+        this.assertRequiredConfig(config, ['token']);
         const token = (config.token || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const hostname = (config.hostname || DEFAULT_HOSTNAME).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         return `:${this.type},token="${token}",hostname="${hostname}":`;

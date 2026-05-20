@@ -16,7 +16,7 @@ vi.mock('../../../src/services/logger/index.js', () => ({
     }
 }));
 
-import { BaseDriveProvider, BindingStep, ActionResult, ValidationResult } from '../../../src/services/drives/BaseDriveProvider.js';
+import { BaseDriveProvider, BindingStep, ActionResult, ValidationResult, DriveConfigValidationError } from '../../../src/services/drives/BaseDriveProvider.js';
 
 describe('BaseDriveProvider', () => {
     let TestProvider;
@@ -179,6 +179,15 @@ describe('BaseDriveProvider', () => {
         const connStr = provider.getConnectionString({ user: 'test"user', pass: 'pass\\word' });
 
         expect(connStr).toBe(':test,user="test\\"user",pass="pass\\\\word":');
+    });
+
+    test('should fail before building a connection string with incomplete credentials', () => {
+        const provider = new TestProvider();
+
+        expect(() => provider.getConnectionString({ user: 'test@example.com' }))
+            .toThrow(DriveConfigValidationError);
+        expect(() => provider.getConnectionString({ user: 'test@example.com' }))
+            .toThrow('Missing required drive config for test: pass');
     });
 
     test('should derive display account without leaking secret fields', () => {

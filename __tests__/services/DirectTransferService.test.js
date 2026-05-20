@@ -193,7 +193,7 @@ describe("DirectTransferService", () => {
     expect(result.error).not.toContain('secret-pass');
   });
 
-  test("returns drive auth metadata for permanent MEGA login failures", async () => {
+  test("returns remote-not-found metadata for permanent MEGA node failures", async () => {
     const proc = createProcess({
       exitCode: 1,
       stderr: `CRITICAL | Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":folder": couldn't login: Object (typically, node or user) not found`
@@ -213,11 +213,11 @@ describe("DirectTransferService", () => {
     expect(result).toMatchObject({
       success: false,
       fallback: false,
-      errorCode: "DRIVE_AUTH_INVALID",
+      errorCode: "DRIVE_REMOTE_NOT_FOUND",
       retryable: false,
-      userRetryable: false
+      userRetryable: true
     });
-    expect(result.userMessage).toContain("重新绑定网盘");
+    expect(result.userMessage).toContain("保存目录");
     expect(result.error).not.toContain("user@example.com");
     expect(result.error).not.toContain("secret-pass");
   });
@@ -242,9 +242,9 @@ describe("DirectTransferService", () => {
     expect(result).toMatchObject({
       success: false,
       fallback: false,
-      errorCode: "DRIVE_AUTH_INVALID",
+      errorCode: "DRIVE_REMOTE_NOT_FOUND",
       retryable: false,
-      userRetryable: false
+      userRetryable: true
     });
     expect(result.error).toContain('user="[REDACTED]"');
     expect(result.error).not.toContain("write EPIPE");

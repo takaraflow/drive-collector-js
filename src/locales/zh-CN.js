@@ -71,6 +71,8 @@ export const STRINGS = {
         failed_upload: "❌ <b>转存失败</b>\n\n原因: <code>{{reason}}</code>\n你可以重试，或重新发送文件。",
         failed_upload_action_required: "❌ <b>转存失败</b>\n\n{{reason}}",
         upload_error_drive_auth_invalid: "当前绑定的网盘无法登录。请重新绑定网盘后再重试。",
+        upload_error_drive_config_invalid: "当前网盘绑定配置不完整。请重新绑定网盘后再重试。",
+        upload_error_drive_remote_not_found: "目标网盘保存目录或远端节点不可用。请检查保存目录，或重新选择/重置保存目录后再重试。",
         upload_error_drive_quota_exceeded: "目标网盘空间不足。请清理空间或更换保存目录后再重试。",
         upload_error_drive_permission_denied: "目标网盘拒绝写入。请检查绑定账号权限或保存目录后再重试。",
         upload_error_transient: "网盘连接暂时异常，系统已自动重试但仍失败。请稍后再试。",

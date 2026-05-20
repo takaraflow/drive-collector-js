@@ -64,6 +64,7 @@ export class PikPakProvider extends BaseDriveProvider {
     }
 
     getConnectionString(config) {
+        this.assertRequiredConfig(config, ['user', 'pass']);
         const user = (config.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const pass = (config.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         return `:${this.type},user="${user}",pass="${pass}":`;

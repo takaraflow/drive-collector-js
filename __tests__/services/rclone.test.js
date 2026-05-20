@@ -317,13 +317,13 @@ describe('CloudTool', () => {
             expect(CloudTool._isRetryableRcloneError('authentication failed')).toBe(false);
         });
 
-        it('should classify MEGA object-not-found login failures as non-retryable auth failures', () => {
-            const result = CloudTool.classifyRcloneError(`CRITICAL | Failed to create file system for ":mega,user="[REDACTED]": couldn't login: Object (typically, node or user) not found`);
+        it('should classify MEGA object-not-found login failures as remote-not-found guidance', () => {
+            const result = CloudTool.classifyRcloneError(`CRITICAL | Failed to create file system for ":mega,user="[REDACTED]":folder": couldn't login: Object (typically, node or user) not found`);
 
             expect(result).toMatchObject({
-                code: 'DRIVE_AUTH_INVALID',
+                code: 'DRIVE_REMOTE_NOT_FOUND',
                 retryable: false,
-                userRetryable: false
+                userRetryable: true
             });
             expect(CloudTool._isRetryableRcloneError(`couldn't login: Object (typically, node or user) not found`)).toBe(false);
         });
@@ -502,9 +502,9 @@ describe('CloudTool', () => {
             expect(mockSpawn).toHaveBeenCalledTimes(3);
         });
 
-        it('should preserve auth failure metadata and skip process retries for permanent MEGA login failures', async () => {
+        it('should preserve remote-not-found metadata and skip process retries for permanent MEGA node failures', async () => {
             mockSpawn.mockImplementation(() => createAutoProcess((p) => {
-                p.stderr.emit('data', Buffer.from(`CRITICAL | Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":": couldn't login: Object (typically, node or user) not found\n`));
+                p.stderr.emit('data', Buffer.from(`CRITICAL | Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":folder": couldn't login: Object (typically, node or user) not found\n`));
                 p.stderr.emit('end');
                 p.stderr.emit('close');
                 p.stdout.emit('end');
@@ -518,10 +518,10 @@ describe('CloudTool', () => {
             expect(result).toMatchObject({
                 success: false,
                 retryable: false,
-                userRetryable: false,
-                errorCode: 'DRIVE_AUTH_INVALID'
+                userRetryable: true,
+                errorCode: 'DRIVE_REMOTE_NOT_FOUND'
             });
-            expect(result.userMessage).toContain('重新绑定网盘');
+            expect(result.userMessage).toContain('保存目录');
             expect(result.error).toContain('user="[REDACTED]"');
             expect(result.error).toContain('pass="[REDACTED]"');
             expect(result.error).not.toContain('user@example.com');
@@ -738,13 +738,54 @@ describe('CloudTool', () => {
             expect(result).toMatchObject({
                 success: false,
                 retryable: false,
-                userRetryable: false,
-                errorCode: 'DRIVE_AUTH_INVALID'
+                userRetryable: true,
+                errorCode: 'DRIVE_REMOTE_NOT_FOUND'
             });
-            expect(result.userMessage).toContain('重新绑定网盘');
+            expect(result.userMessage).toContain('保存目录');
             expect(result.error).not.toContain('user@example.com');
             expect(result.error).not.toContain('secret-pass');
             expect(mockSpawn).toHaveBeenCalledTimes(1);
+        });
+
+        it('should attempt to create the configured folder when MEGA reports node not found while listing files', async () => {
+            mockGetDefaultDrive.mockResolvedValue({
+                type: 'mega',
+                config_data: JSON.stringify({ user: 'u', pass: 'p' }),
+                remote_folder: '/Stream'
+            });
+            mockSpawn
+                .mockImplementationOnce(() => createAutoProcess((p) => {
+                    p.stderr.emit('data', Buffer.from(`CRITICAL | Failed to create file system for ":mega,user="u",pass="p":Stream": couldn't login: Object (typically, node or user) not found\n`));
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.emit('exit', 1);
+                    p.emit('close', 1);
+                }))
+                .mockImplementationOnce(() => createAutoProcess((p) => {
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.emit('exit', 0);
+                    p.emit('close', 0);
+                }))
+                .mockImplementationOnce(() => createAutoProcess((p) => {
+                    p.stdout.emit('data', Buffer.from('[]'));
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.emit('exit', 0);
+                    p.emit('close', 0);
+                }));
+
+            const files = await CloudTool.listRemoteFiles('user-node-missing', true);
+
+            expect(files).toEqual([]);
+            expect(mockSpawn).toHaveBeenCalledTimes(3);
+            expect(mockSpawn.mock.calls[1][1]).toEqual(expect.arrayContaining(['mkdir']));
         });
 
         it('should create rcat stream with an exact size hint when provided', async () => {

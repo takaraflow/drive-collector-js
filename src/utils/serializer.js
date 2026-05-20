@@ -51,8 +51,8 @@ export const redactSensitiveText = (value) => {
     `$1${REDACTED_VALUE}$3`
   );
   text = text.replace(
-    new RegExp(`(\\b(?:${SENSITIVE_TEXT_KEY_PATTERN})\\b\\s*=\\s*\\\\?")([^"\\\\]*(?:\\\\.[^"\\\\]*)*)(\\\\?")`, 'gi'),
-    `$1${REDACTED_VALUE}$3`
+    new RegExp(`(\\b(?:${SENSITIVE_TEXT_KEY_PATTERN})\\b\\s*=\\s*)(\\\\?")([^"]*?)(\\\\?")`, 'gi'),
+    `$1$2${REDACTED_VALUE}$4`
   );
   text = text.replace(
     new RegExp(`(\\b(?:access_token|refresh_token|client_secret|token|password|passwd|pwd|secret|secret_access_key|api_key|apikey)\\b\\s*=\\s*)\\{[^\\r\\n}]*\\}`, 'gi'),
@@ -64,7 +64,7 @@ export const redactSensitiveText = (value) => {
   );
   text = text.replace(
     new RegExp(`(\\b(?:access_token|refresh_token|client_secret|token|pass|password|passwd|pwd|secret|secret_access_key|access_key_id|api_key|apikey|cookie|session)\\b\\s*[:=]\\s*)([^\\s,;&"'{}\\[\\]]+)`, 'gi'),
-    `$1${REDACTED_VALUE}`
+    (match, prefix, rawValue) => rawValue === '\\' ? match : `${prefix}${REDACTED_VALUE}`
   );
   text = text.replace(
     /([?&](?:access_token|refresh_token|token|key|secret|password|pass|api_key|apikey)=)([^&#\s]+)/gi,

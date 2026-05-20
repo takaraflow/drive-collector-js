@@ -74,6 +74,7 @@ export class WebDAVProvider extends BaseDriveProvider {
     }
 
     getConnectionString(config) {
+        this.assertRequiredConfig(config, ['url', 'user', 'pass']);
         const url = (config.url || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const user = (config.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const pass = (config.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');

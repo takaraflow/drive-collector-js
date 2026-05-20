@@ -75,7 +75,7 @@ describe('CloudTool Batch Upload', () => {
         mockSpawn.mockReturnValue(mockProc);
 
         vi.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({
-            type: 'onedrive',
+            type: 'mega',
             user: 'test',
             pass: 'pass'
         });
@@ -173,7 +173,7 @@ describe('CloudTool Batch Upload', () => {
             { id: 'task-1', userId: 'u1', localPath: '/tmp/downloads/movie.mp4' }
         ];
 
-        vi.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({ type: 'drive', user: 'u', pass: 'p' });
+        vi.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({ type: 'mega', user: 'u', pass: 'p' });
 
         const onProgress = vi.fn();
         const uploadPromise = CloudTool.uploadBatch(tasks, onProgress);

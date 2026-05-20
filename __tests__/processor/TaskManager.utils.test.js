@@ -39,9 +39,9 @@ describe("TaskManager upload failure handling", () => {
         });
     });
 
-    test("shows user-actionable drive auth guidance without raw rclone diagnostics", async () => {
+    test("shows remote folder guidance without raw rclone diagnostics", async () => {
         const updateStatus = vi.fn();
-        const rawError = `CRITICAL | Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":": couldn't login: Object (typically, node or user) not found`;
+        const rawError = `CRITICAL | Failed to create file system for ":mega,user="user@example.com",pass="secret-pass":folder": couldn't login: Object (typically, node or user) not found`;
 
         await handleUploadFailure(
             { id: "task-1", isGroup: false },
@@ -50,9 +50,9 @@ describe("TaskManager upload failure handling", () => {
             {
                 success: false,
                 error: rawError,
-                errorCode: "DRIVE_AUTH_INVALID",
-                userMessage: "当前绑定的网盘无法登录。请重新绑定网盘后再重试。",
-                userRetryable: false
+                errorCode: "DRIVE_REMOTE_NOT_FOUND",
+                userMessage: "目标网盘保存目录或远端节点不可用。请检查保存目录，或重新选择/重置保存目录后再重试。",
+                userRetryable: true
             }
         );
 
@@ -67,18 +67,18 @@ describe("TaskManager upload failure handling", () => {
 
         expect(updateStatus).toHaveBeenCalledWith(
             expect.objectContaining({ id: "task-1" }),
-            "action required 当前绑定的网盘无法登录。请重新绑定网盘后再重试。",
+            "action required 目标网盘保存目录或远端节点不可用。请检查保存目录，或重新选择/重置保存目录后再重试。",
             true,
             null,
-            false
+            true
         );
         expect(updateStatus.mock.calls[0][1]).not.toContain("Object (typically, node or user) not found");
         expect(updateStatus.mock.calls[0][1]).not.toContain("Rclone");
     });
 
-    test("maps raw rclone task failures to user-actionable guidance", async () => {
+    test("maps raw rclone task failures to remote folder guidance", async () => {
         const updateStatus = vi.fn();
-        const rawError = `Download failed: CRITICAL | Failed to create file system for ":mega,user="[REDACTED]": couldn't login: Object (typically, node or user) not found`;
+        const rawError = `Download failed: CRITICAL | Failed to create file system for ":mega,user="[REDACTED]":folder": couldn't login: Object (typically, node or user) not found`;
 
         await handleTaskFailure(
             { id: "task-2", isGroup: false },
@@ -96,10 +96,10 @@ describe("TaskManager upload failure handling", () => {
         );
         expect(updateStatus).toHaveBeenCalledWith(
             expect.objectContaining({ id: "task-2" }),
-            "action required 当前绑定的网盘无法登录。请重新绑定网盘后再重试。",
+            "action required 目标网盘保存目录或远端节点不可用。请检查保存目录，或重新选择/重置保存目录后再重试。",
             true,
             null,
-            false
+            true
         );
         expect(updateStatus.mock.calls[0][1]).not.toContain("Object (typically, node or user) not found");
     });

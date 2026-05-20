@@ -67,6 +67,10 @@ export class CloudTool {
         };
     }
 
+    static _isRemoteNotFoundError(stderr = "") {
+        return /directory not found|object not found|error listing|Object \(typically, node or user\) not found/i.test(stderr);
+    }
+
     static async _retryDelay(attempt, signal) {
         if (signal?.aborted) return false;
         const delayMs = DEFAULT_RCLONE_RETRY_BASE_DELAY_MS * Math.max(1, attempt);
@@ -239,13 +243,8 @@ export class CloudTool {
             const provider = DriveProviderFactory.getProvider(conf.type);
             return provider.getConnectionString(conf);
         } catch (e) {
-            // Fallback for unknown types or errors
             log.error(`Failed to get connection string for type ${conf.type}:`, e);
-            const user = String(conf.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-            const pass = String(conf.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-
-            // 兜底逻辑：如果找不到 Provider，尝试直接使用 type (保持向后兼容)
-            return `:${conf.type},user="${user}",pass="${pass}":`;
+            throw e;
         }
     }
 
@@ -869,8 +868,7 @@ export class CloudTool {
 
         const ret = await this._runRclone(["deletefile", fullRemotePath], 15000);
         const notFound = ret.stderr && (
-            ret.stderr.includes("directory not found") ||
-            ret.stderr.includes("object not found") ||
+            this._isRemoteNotFoundError(ret.stderr) ||
             ret.stderr.includes("not found") ||
             ret.stderr.includes("error listing")
         );
@@ -946,7 +944,7 @@ export class CloudTool {
 
             let ret = await this._runRclone(["lsjson", fullRemotePath]);
 
-            if (ret.code !== 0 && ret.stderr && (ret.stderr.includes("directory not found") || ret.stderr.includes("error listing"))) {
+            if (ret.code !== 0 && ret.stderr && this._isRemoteNotFoundError(ret.stderr)) {
                 log.info(`Directory ${userUploadPath} not found, attempting to create it...`);
                 // 尝试创建一个空目录/触发目录初始化 (异步化)
                 await this._runRclone(["mkdir", fullRemotePath], 10000);
@@ -955,7 +953,7 @@ export class CloudTool {
             }
 
             if (ret.code !== 0) {
-                if (ret.stderr && (ret.stderr.includes("directory not found") || ret.stderr.includes("error listing"))) {
+                if (ret.stderr && this._isRemoteNotFoundError(ret.stderr)) {
                     log.warn("Rclone directory still not found after attempt, returning empty list.");
                     this.loading = false;
                     return [];
@@ -1069,10 +1067,7 @@ export class CloudTool {
 
                 // 如果明确返回“不存在”类错误，直接退出，不重试，不回退
                 if (ret.code !== 0 && ret.stderr) {
-                    const isNotFound =
-                        ret.stderr.includes("directory not found") ||
-                        ret.stderr.includes("object not found") ||
-                        ret.stderr.includes("error listing");
+                    const isNotFound = this._isRemoteNotFoundError(ret.stderr);
 
                     if (isNotFound) {
                         log.debug(`[getRemoteFileInfo] File clearly not found: ${fileName}`);
@@ -1120,7 +1115,7 @@ export class CloudTool {
                 }
 
                 // 如果都没有找到或出错，记录日志（排除找不到文件的情况，减少日志噪音）
-                if (ret.code !== 0 && !ret.stderr.includes("directory not found") && !ret.stderr.includes("error listing")) {
+                if (ret.code !== 0 && !this._isRemoteNotFoundError(ret.stderr)) {
                     // console.warn(`[getRemoteFileInfo] Status ${ret.code} for ${fileName}: ${ret.stderr}`);
                 }
             } catch (e) {

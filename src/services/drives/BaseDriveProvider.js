@@ -3,6 +3,17 @@ import { logger } from "../logger/index.js";
 const log = logger.withModule ? logger.withModule('BaseDriveProvider') : logger;
 const VALID_SUPPORT_LEVELS = new Set(['stable', 'advanced']);
 
+export class DriveConfigValidationError extends Error {
+    constructor(providerType, fields = []) {
+        const missingFields = [...new Set(fields.filter(Boolean))];
+        super(`Missing required drive config for ${providerType}: ${missingFields.join(', ')}`);
+        this.name = 'DriveConfigValidationError';
+        this.code = 'DRIVE_CONFIG_INVALID';
+        this.providerType = providerType;
+        this.fields = missingFields;
+    }
+}
+
 /**
  * 网盘 Provider 抽象基类
  * 所有网盘实现必须继承此类并实现抽象方法
@@ -95,9 +106,20 @@ export class BaseDriveProvider {
      * @returns {string} rclone 连接字符串
      */
     getConnectionString(config) {
+        this.assertRequiredConfig(config, ['user', 'pass']);
         const user = (config.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const pass = (config.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         return `:${this.getRcloneBackendType()},user="${user}",pass="${pass}":`;
+    }
+
+    assertRequiredConfig(config = {}, fields = []) {
+        const missing = fields.filter(field => {
+            const value = config[field];
+            return value === undefined || value === null || String(value).trim() === '';
+        });
+        if (missing.length > 0) {
+            throw new DriveConfigValidationError(this.type, missing);
+        }
     }
 
     /**

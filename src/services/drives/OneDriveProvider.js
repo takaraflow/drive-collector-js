@@ -59,6 +59,7 @@ export class OneDriveProvider extends BaseDriveProvider {
     }
 
     getConnectionString(config) {
+        this.assertRequiredConfig(config, ['token', 'drive_id', 'drive_type']);
         const token = (config.token || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const driveId = (config.drive_id || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const driveType = (config.drive_type || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
