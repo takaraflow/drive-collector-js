@@ -11,6 +11,13 @@ import { DriveProviderFactory } from "./drives/index.js";
 import { redactSensitiveText } from "../utils/serializer.js";
 import { classifyRcloneError, isRetryableRcloneError } from "../domain/rclone-error.js";
 import { getRcloneErrorUserMessage } from "../utils/rcloneErrorMessage.js";
+import {
+    DRIVE_CONFIG_SCHEMA_VERSION,
+    RCLONE_PASSWORD_FORMATS,
+    normalizePasswordFormat,
+    requiresRcloneObscuredPassword,
+    isCanonicalRclonePasswordConfig
+} from "../domain/drive-credentials.js";
 const log = logger.withModule ? logger.withModule('RcloneService') : logger;
 
 const buildRcloneEnv = () => ({
@@ -143,8 +150,29 @@ export class CloudTool {
         
         // Allow provider to process password if present
         if (config.pass) {
-            // Await the result as processPassword might be async (e.g. using _obscure)
-            config.pass = await provider.processPassword(config.pass);
+            const wasCanonical = isCanonicalRclonePasswordConfig(driveConfig);
+            config.pass = await provider.processPassword(config.pass, config);
+            if (requiresRcloneObscuredPassword(activeDrive.type)) {
+                config.pass_format = RCLONE_PASSWORD_FORMATS.RCLONE_OBSCURED;
+                config.config_schema_version = DRIVE_CONFIG_SCHEMA_VERSION;
+                if (activeDrive.id && !wasCanonical) {
+                    const canonicalConfig = {
+                        ...driveConfig,
+                        pass: config.pass,
+                        pass_format: RCLONE_PASSWORD_FORMATS.RCLONE_OBSCURED,
+                        config_schema_version: DRIVE_CONFIG_SCHEMA_VERSION
+                    };
+                    try {
+                        await DriveRepository.updateConfigData(activeDrive.user_id || userId, activeDrive.id, canonicalConfig);
+                    } catch (error) {
+                        log.warn("Failed to persist canonical drive password config", {
+                            userId,
+                            driveId: activeDrive.id,
+                            error: error.message
+                        });
+                    }
+                }
+            }
         }
         
         // 4. 返回清洗后的配置对象
@@ -223,18 +251,24 @@ export class CloudTool {
     static async _obscure(password) {
         if (!password) return "";
         try {
-            const ret = await this._runRclone(["obscure", "--", password], 5000);
-
-            if (ret.code !== 0) {
-                log.error("Obscure failed:", this.sanitizeRcloneOutput(ret.stderr));
-                return password;
-            }
-
-            return ret.stdout.trim();
+            return await this._obscureRequired(password);
         } catch (e) {
             log.error("Password obscure error:", e);
             return password;
         }
+    }
+
+    static async _obscureRequired(password) {
+        if (!password) return "";
+        const ret = await this._runRclone(["obscure", "--", password], 5000);
+        if (ret.code !== 0) {
+            throw new Error(this.sanitizeRcloneOutput(ret.stderr || ret.error?.message || "rclone obscure failed"));
+        }
+        const obscured = ret.stdout?.trim();
+        if (!obscured) {
+            throw new Error("rclone obscure returned an empty password");
+        }
+        return obscured;
     }
 
     static async _reveal(password) {
@@ -249,18 +283,25 @@ export class CloudTool {
         }
     }
 
-    static async normalizePasswordForRclone(password) {
+    static async normalizePasswordForRclone(password, options = {}) {
         if (!password) return "";
-        if (typeof this._reveal === "function") {
-            const revealed = await this._reveal(password);
-            if (revealed) {
-                return password;
+        const format = normalizePasswordFormat(options.format);
+        if (format === RCLONE_PASSWORD_FORMATS.RCLONE_OBSCURED) {
+            return password;
+        }
+        if (format === RCLONE_PASSWORD_FORMATS.PLAIN) {
+            return await this._obscureRequired(password);
+        }
+        if (format === RCLONE_PASSWORD_FORMATS.LEGACY_UNKNOWN || !format) {
+            if (typeof this._reveal === "function") {
+                const revealed = await this._reveal(password);
+                if (revealed) {
+                    return password;
+                }
             }
+            return await this._obscureRequired(password);
         }
-        if (typeof this._obscure === "function") {
-            return await this._obscure(password);
-        }
-        return password;
+        return await this._obscureRequired(password);
     }
 
     /**

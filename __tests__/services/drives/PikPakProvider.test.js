@@ -59,15 +59,22 @@ describe('PikPakProvider', () => {
         const result = await provider.validateConfig({ user: 'u', pass: 'plain' });
 
         expect(result.success).toBe(true);
-        expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('plain');
+        expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('plain', { format: 'plain' });
         expect(CloudTool.validateConfig).toHaveBeenCalledWith('pikpak', {
             user: 'u',
-            pass: 'obscured_plain'
+            pass: 'obscured_plain',
+            pass_format: 'rclone_obscured',
+            config_schema_version: 1
         });
     });
 
     test('should generate connection string', () => {
-        const conn = provider.getConnectionString({ user: 'u', pass: 'p' });
+        const conn = provider.getConnectionString({ user: 'u', pass: 'p', pass_format: 'rclone_obscured' });
         expect(conn).toBe(':pikpak,user="u",pass="p":');
+    });
+
+    test('should reject unnormalized password before building connection string', () => {
+        expect(() => provider.getConnectionString({ user: 'u', pass: 'p', pass_format: 'plain' }))
+            .toThrow('pass_format:rclone_obscured');
     });
 });

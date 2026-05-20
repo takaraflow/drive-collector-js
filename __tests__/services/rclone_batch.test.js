@@ -61,7 +61,8 @@ describe('CloudTool Batch Upload', () => {
         vi.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({
             type: 'mega',
             user: 'test',
-            pass: 'pass'
+            pass: 'pass',
+            pass_format: 'rclone_obscured'
         });
 
         const tasks = [
@@ -115,7 +116,8 @@ describe('CloudTool Batch Upload', () => {
         vi.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({
             type: 'mega',
             user: 'test',
-            pass: 'pass'
+            pass: 'pass',
+            pass_format: 'rclone_obscured'
         });
 
         const promise = CloudTool.uploadBatch(tasks);
@@ -189,7 +191,12 @@ describe('CloudTool Batch Upload', () => {
             { id: 'task-1', userId: 'u1', localPath: '/tmp/downloads/movie.mp4' }
         ];
 
-        vi.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({ type: 'mega', user: 'u', pass: 'p' });
+        vi.spyOn(CloudTool, '_getUserConfig').mockResolvedValue({
+            type: 'mega',
+            user: 'u',
+            pass: 'p',
+            pass_format: 'rclone_obscured'
+        });
 
         const onProgress = vi.fn();
         const uploadPromise = CloudTool.uploadBatch(tasks, onProgress);

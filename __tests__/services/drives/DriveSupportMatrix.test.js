@@ -51,7 +51,7 @@ function sampleConfigFor(type) {
     case 'oss':
       return { endpoint: 's3.example.com', bucket: 'bucket-name', ak: 'access-key', sk: 'secret-key' };
     case 'pikpak':
-      return { user: 'user@example.com', pass: 'password' };
+      return { user: 'user@example.com', pass: 'password', pass_format: 'rclone_obscured' };
     default:
       return {};
   }

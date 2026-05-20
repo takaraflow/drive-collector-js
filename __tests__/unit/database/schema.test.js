@@ -304,7 +304,7 @@ describe("database schema migrations", () => {
 
         expect(result.status.isCurrent).toBe(true);
         expect(result.status.currentVersion).toBe(LATEST_SCHEMA_VERSION);
-        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied", "recorded", "recorded", "recorded", "recorded"]);
+        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied", "recorded", "recorded", "recorded", "recorded", "recorded"]);
 
         const taskColumns = db.prepare("PRAGMA table_info(tasks)").all().map(column => column.name);
         expect(taskColumns).toContain("source_type");
@@ -320,7 +320,7 @@ describe("database schema migrations", () => {
         expect(indexes).toContain("idx_user_roles_role");
 
         const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
-        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     });
 
     test("should create current schema with user_roles and active-only drive type uniqueness", async () => {
@@ -354,6 +354,39 @@ describe("database schema migrations", () => {
         const status = await getDatabaseSchemaStatus({ d1 });
         expect(status.isCurrent).toBe(true);
         expect(status.issues).toEqual([]);
+    });
+
+    test("should mark legacy rclone password configs with explicit unknown format", async () => {
+        db = new Database(":memory:");
+        const d1 = createD1(db);
+
+        await migrateDatabaseSchema({
+            d1,
+            useLock: false,
+            log: { info: vi.fn(), warn: vi.fn() }
+        });
+        db.prepare(
+            "INSERT INTO drives (id, user_id, name, type, config_data, status, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run("drive-legacy", "user-1", "Mega", "mega", JSON.stringify({ user: "u", pass: "legacy-pass" }), "active", 0, 1, 1);
+        db.prepare("DELETE FROM schema_migrations WHERE version = 8").run();
+
+        const result = await migrateDatabaseSchema({
+            d1,
+            useLock: false,
+            log: { info: vi.fn(), warn: vi.fn() }
+        });
+
+        expect(result.results).toContainEqual({
+            version: 8,
+            name: "drive_password_format_ssot",
+            action: "applied",
+            executionTimeMs: expect.any(Number)
+        });
+        const drive = db.prepare("SELECT config_data FROM drives WHERE id = ?").get("drive-legacy");
+        expect(JSON.parse(drive.config_data)).toMatchObject({
+            pass_format: "legacy_unknown",
+            config_schema_version: 1
+        });
     });
 
     test("should normalize duplicate active drives before creating active-only type uniqueness", async () => {
@@ -411,7 +444,8 @@ describe("database schema migrations", () => {
         expect(outdatedStatus.isCurrent).toBe(false);
         expect(outdatedStatus.issues).not.toContain("migration 1:initial_schema checksum drift");
         expect(outdatedStatus.missingMigrations).toEqual([
-            { version: 7, name: "task_source_metadata" }
+            { version: 7, name: "task_source_metadata" },
+            { version: 8, name: "drive_password_format_ssot" }
         ]);
 
         const result = await migrateDatabaseSchema({
@@ -424,6 +458,12 @@ describe("database schema migrations", () => {
             version: 7,
             name: "task_source_metadata",
             action: "applied",
+            executionTimeMs: expect.any(Number)
+        });
+        expect(result.results).toContainEqual({
+            version: 8,
+            name: "drive_password_format_ssot",
+            action: "recorded",
             executionTimeMs: expect.any(Number)
         });
         expect(result.status.isCurrent).toBe(true);
@@ -574,6 +614,6 @@ describe("database schema migrations", () => {
         expect(indexes).toContain("idx_drives_one_default_per_user");
 
         const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
-        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     });
 });

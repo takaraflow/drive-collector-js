@@ -1,4 +1,5 @@
 import { logger } from "../logger/index.js";
+import { RCLONE_PASSWORD_FORMATS, normalizePasswordFormat, requiresRcloneObscuredPassword } from "../../domain/drive-credentials.js";
 
 const log = logger.withModule ? logger.withModule('BaseDriveProvider') : logger;
 const VALID_SUPPORT_LEVELS = new Set(['stable', 'advanced']);
@@ -107,9 +108,18 @@ export class BaseDriveProvider {
      */
     getConnectionString(config) {
         this.assertRequiredConfig(config, ['user', 'pass']);
+        this.assertRclonePasswordReady(config);
         const user = (config.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const pass = (config.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         return `:${this.getRcloneBackendType()},user="${user}",pass="${pass}":`;
+    }
+
+    assertRclonePasswordReady(config = {}) {
+        if (!requiresRcloneObscuredPassword(this.type) || !config.pass) return;
+        const passFormat = normalizePasswordFormat(config.pass_format);
+        if (passFormat !== RCLONE_PASSWORD_FORMATS.RCLONE_OBSCURED) {
+            throw new DriveConfigValidationError(this.type, ['pass_format:rclone_obscured']);
+        }
     }
 
     assertRequiredConfig(config = {}, fields = []) {

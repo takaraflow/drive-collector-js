@@ -37,7 +37,9 @@ vi.mock('../../src/services/drives/DriveProviderFactory.js', () => ({
                     type: 'mega',
                     name: 'Mega',
                     // For mega, processPassword uses the hoisted mock reference
-                    processPassword: (pass) => {
+                    processPassword: (pass, config = {}) => {
+                        if (config.pass_format === 'rclone_obscured') return pass;
+                        if (config.pass_format === 'legacy_unknown') return pass;
                         return mockSpawnSyncForProvider.call(pass);
                     },
                     getConnectionString: (config) => {
@@ -79,7 +81,8 @@ const mockCacheService = {
 vi.mock('../../src/repositories/DriveRepository.js', () => ({
     DriveRepository: {
         findByUserId: mockFindByUserId,
-        getDefaultDrive: mockGetDefaultDrive
+        getDefaultDrive: mockGetDefaultDrive,
+        updateConfigData: vi.fn()
     }
 }));
 
@@ -106,6 +109,7 @@ vi.mock('../../src/services/CacheService.js', () => ({
 
 // --- Import under test ---
 const { CloudTool } = await import('../../src/services/rclone.js');
+const { DriveRepository: MockDriveRepository } = await import('../../src/repositories/DriveRepository.js');
 
 // --- Helper: 创建自动触发事件的 Mock 进程 ---
 // 模拟真实 child_process 事件顺序：data -> end -> exit -> close
@@ -177,15 +181,74 @@ describe('CloudTool', () => {
             });
         });
 
-        it('should obscure password for mega drive', async () => {
+        it('should obscure legacy plain password for mega drive', async () => {
             mockGetDefaultDrive.mockResolvedValue({
+                id: 'drive-mega',
+                user_id: 'user123',
                 type: 'mega',
-                config_data: JSON.stringify({ user: 'testuser', pass: 'rawpass' })
+                config_data: JSON.stringify({ user: 'testuser', pass: 'rawpass', pass_format: 'plain' })
             });
             mockSpawnSync.mockReturnValue({ status: 0, stdout: 'obscuredpass\n', stderr: '' });
 
             const result = await CloudTool._getUserConfig('user123');
             expect(result.pass).toBe('obscuredpass');
+            expect(result.pass_format).toBe('rclone_obscured');
+            expect(result.config_schema_version).toBe(1);
+            expect(mockSpawnSync).toHaveBeenCalledWith('rclone', ['--config', '/dev/null', 'obscure', 'rawpass'], { encoding: 'utf-8' });
+            expect(MockDriveRepository.updateConfigData).toHaveBeenCalledWith('user123', 'drive-mega', {
+                user: 'testuser',
+                pass: 'obscuredpass',
+                pass_format: 'rclone_obscured',
+                config_schema_version: 1
+            });
+        });
+
+        it('should not re-obscure canonical rclone password configs', async () => {
+            mockGetDefaultDrive.mockResolvedValue({
+                id: 'drive-mega',
+                user_id: 'user123',
+                type: 'mega',
+                config_data: JSON.stringify({
+                    user: 'testuser',
+                    pass: 'stored-obscured',
+                    pass_format: 'rclone_obscured',
+                    config_schema_version: 1
+                })
+            });
+
+            const result = await CloudTool._getUserConfig('user123');
+
+            expect(result.pass).toBe('stored-obscured');
+            expect(result.pass_format).toBe('rclone_obscured');
+            expect(mockSpawn).not.toHaveBeenCalled();
+            expect(MockDriveRepository.updateConfigData).not.toHaveBeenCalled();
+        });
+
+        it('should preserve and canonicalize legacy unknown passwords that rclone can reveal', async () => {
+            mockGetDefaultDrive.mockResolvedValue({
+                id: 'drive-mega',
+                user_id: 'user123',
+                type: 'mega',
+                config_data: JSON.stringify({
+                    user: 'testuser',
+                    pass: 'stored-obscured',
+                    pass_format: 'legacy_unknown',
+                    config_schema_version: 1
+                })
+            });
+            mockSpawnSync.mockReturnValue({ status: 0, stdout: 'plain-secret\n', stderr: '' });
+
+            const result = await CloudTool._getUserConfig('user123');
+
+            expect(result.pass).toBe('stored-obscured');
+            expect(result.pass_format).toBe('rclone_obscured');
+            expect(mockSpawnSync.mock.calls.some(call => call[1]?.[3] === 'obscure')).toBe(false);
+            expect(MockDriveRepository.updateConfigData).toHaveBeenCalledWith('user123', 'drive-mega', {
+                user: 'testuser',
+                pass: 'stored-obscured',
+                pass_format: 'rclone_obscured',
+                config_schema_version: 1
+            });
         });
     });
 
@@ -234,6 +297,17 @@ describe('CloudTool', () => {
             const result = await CloudTool._obscure('plain');
             expect(result).toBe('plain');
         });
+
+        it('should throw when required password obscure fails', async () => {
+            mockSpawn.mockImplementation((cmd, args) => createAutoProcess((p) => {
+                p.stderr.emit('data', 'error\n');
+                p.stdout.emit('end');
+                p.stderr.emit('end');
+                p.emit('close', 1);
+            }));
+
+            await expect(CloudTool._obscureRequired('plain')).rejects.toThrow('error');
+        });
     });
 
     describe('normalizePasswordForRclone', () => {
@@ -262,6 +336,28 @@ describe('CloudTool', () => {
             expect(mockSpawn.mock.calls[1][1]).toEqual(['--config', '/dev/null', 'obscure', '--', 'raw-secret']);
         });
 
+        it('should respect explicit plain password format instead of guessing from reveal', async () => {
+            mockSpawn.mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                p.stdout.emit('data', 'obscured-via-explicit-format\n');
+                p.stdout.emit('end');
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.emit('close', 0);
+            }));
+
+            const result = await CloudTool.normalizePasswordForRclone('legacy-plain-secret', { format: 'plain' });
+
+            expect(result).toBe('obscured-via-explicit-format');
+            expect(mockSpawn.mock.calls[0][1]).toEqual(['--config', '/dev/null', 'obscure', '--', 'legacy-plain-secret']);
+        });
+
+        it('should keep explicit rclone obscured passwords unchanged', async () => {
+            const result = await CloudTool.normalizePasswordForRclone('already-obscured-token', { format: 'rclone_obscured' });
+
+            expect(result).toBe('already-obscured-token');
+            expect(mockSpawn).not.toHaveBeenCalled();
+        });
+
         it('should not obscure passwords that rclone can already reveal', async () => {
             mockSpawn.mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
                 p.stdout.emit('data', 'plain-secret\n');
@@ -272,6 +368,22 @@ describe('CloudTool', () => {
             }));
 
             const result = await CloudTool.normalizePasswordForRclone('already-obscured');
+
+            expect(result).toBe('already-obscured');
+            expect(mockSpawn).toHaveBeenCalledTimes(1);
+            expect(mockSpawn.mock.calls[0][1]).toEqual(['--config', '/dev/null', 'reveal', '--', 'already-obscured']);
+        });
+
+        it('should preserve legacy unknown passwords that rclone can reveal', async () => {
+            mockSpawn.mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                p.stdout.emit('data', 'plain-secret\n');
+                p.stdout.emit('end');
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.emit('close', 0);
+            }));
+
+            const result = await CloudTool.normalizePasswordForRclone('already-obscured', { format: 'legacy_unknown' });
 
             expect(result).toBe('already-obscured');
             expect(mockSpawn).toHaveBeenCalledTimes(1);
@@ -342,7 +454,7 @@ describe('CloudTool', () => {
                 });
                 return proc;
             });
-            const result = await CloudTool.validateConfig('mega', { user: 'u', pass: 'p' });
+            const result = await CloudTool.validateConfig('mega', { user: 'u', pass: 'p', pass_format: 'rclone_obscured' });
             // 调试输出
             if (!result.success) {
                 console.error('validateConfig failed:', result);
@@ -360,7 +472,7 @@ describe('CloudTool', () => {
                 p.emit('exit', 1);
                 p.emit('close', 1);
             }));
-            const result = await CloudTool.validateConfig('mega', { user: 'u', pass: 'p' });
+            const result = await CloudTool.validateConfig('mega', { user: 'u', pass: 'p', pass_format: 'rclone_obscured' });
             expect(result.success).toBe(false);
             expect(result.reason).toBe('2FA');
         });
@@ -376,7 +488,7 @@ describe('CloudTool', () => {
                 p.emit('close', 1);
             }));
 
-            const result = await CloudTool.validateConfig('mega', { user: 'user@example.com', pass: 'secret-pass' });
+            const result = await CloudTool.validateConfig('mega', { user: 'user@example.com', pass: 'secret-pass', pass_format: 'rclone_obscured' });
 
             expect(result.success).toBe(false);
             expect(result.details).toContain('user="[REDACTED]"');
@@ -388,7 +500,7 @@ describe('CloudTool', () => {
 
         it('should handle unexpected errors', async () => {
             mockSpawn.mockImplementation(() => { throw new Error('Unexpected'); });
-            const result = await CloudTool.validateConfig('mega', { user: 'u', pass: 'p' });
+            const result = await CloudTool.validateConfig('mega', { user: 'u', pass: 'p', pass_format: 'rclone_obscured' });
             expect(result.success).toBe(false);
             expect(result.reason).toBe('ERROR');
         });

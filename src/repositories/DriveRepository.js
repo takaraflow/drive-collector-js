@@ -5,6 +5,12 @@ import { d1 } from "../services/d1.js";
 import { logger } from "../services/logger/index.js";
 import { CACHE_KEYS } from "../domain/cache-keys.js";
 import { DRIVE_COLUMNS, DRIVE_STATUSES, isDefaultDrive } from "../domain/drive.js";
+import {
+    RCLONE_OBSCURED_PASSWORD_DRIVE_TYPES,
+    hasPasswordCredential,
+    hasExplicitRclonePasswordFormat,
+    markLegacyUnknownRclonePasswordConfig
+} from "../domain/drive-credentials.js";
 
 const log = logger.withModule ? logger.withModule('DriveRepository') : logger;
 
@@ -48,6 +54,56 @@ export class DriveRepository {
         localCache.del(this.getAllDrivesKey());
     }
 
+    static _parseConfigData(configData) {
+        if (!configData) return {};
+        if (typeof configData === "object") return { ...configData };
+        try {
+            return JSON.parse(configData);
+        } catch {
+            return {};
+        }
+    }
+
+    static _needsLegacyPasswordFormatMigration(drive) {
+        if (!drive?.id || !drive?.user_id || !RCLONE_OBSCURED_PASSWORD_DRIVE_TYPES.includes(String(drive.type || "").toLowerCase())) {
+            return false;
+        }
+        const configData = this._parseConfigData(drive.config_data);
+        return hasPasswordCredential(configData) && !hasExplicitRclonePasswordFormat(configData);
+    }
+
+    static _markLegacyPasswordFormat(drive) {
+        const configData = this._parseConfigData(drive.config_data);
+        return markLegacyUnknownRclonePasswordConfig(configData);
+    }
+
+    static async _migrateLegacyPasswordFormat(drive) {
+        if (!this._needsLegacyPasswordFormatMigration(drive)) return drive;
+        const migratedConfig = this._markLegacyPasswordFormat(drive);
+        const serializedConfigData = JSON.stringify(migratedConfig);
+        const now = Date.now();
+        await d1.run(
+            "UPDATE drives SET config_data = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = ?",
+            [serializedConfigData, now, drive.id, String(drive.user_id), DRIVE_STATUSES.ACTIVE]
+        );
+        const migratedDrive = {
+            ...drive,
+            config_data: serializedConfigData,
+            updated_at: now
+        };
+        await this.clearUserDriveCache(drive.user_id, [drive.id]);
+        return migratedDrive;
+    }
+
+    static async _migrateLegacyPasswordFormats(drives = []) {
+        const list = Array.isArray(drives) ? drives : [drives].filter(Boolean);
+        const migrated = [];
+        for (const drive of list) {
+            migrated.push(await this._migrateLegacyPasswordFormat(drive));
+        }
+        return migrated;
+    }
+
     /**
      * 获取用户的所有绑定网盘 (Read-Through)
      * @param {string} userId
@@ -64,14 +120,15 @@ export class DriveRepository {
 
         let drives = localCache.get(cacheKey);
         if (drives !== null) {
-            return Array.isArray(drives) ? drives : [drives].filter(Boolean);
+            return await this._migrateLegacyPasswordFormats(drives);
         }
 
         try {
             drives = await cache.get(this.getDriveKey(userId), "json");
             if (drives) {
-                localCache.set(cacheKey, drives, 60 * 1000);
-                return Array.isArray(drives) ? drives : [drives].filter(Boolean);
+                const migratedDrives = await this._migrateLegacyPasswordFormats(drives);
+                localCache.set(cacheKey, migratedDrives, 60 * 1000);
+                return migratedDrives;
             }
         } catch (cacheError) {
             log.warn(`Cache unavailable for ${userId}, falling back to D1:`, cacheError);
@@ -157,6 +214,21 @@ export class DriveRepository {
             log.error(`DriveRepository.create failed for ${userId}:`, e);
             throw e;
         }
+    }
+
+    static async updateConfigData(userId, driveId, configData) {
+        if (!userId || !driveId || !configData) {
+            throw new Error("DriveRepository.updateConfigData: Missing required parameters.");
+        }
+
+        const now = Date.now();
+        const serializedConfigData = JSON.stringify(configData);
+        await d1.run(
+            "UPDATE drives SET config_data = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = ?",
+            [serializedConfigData, now, driveId, String(userId), DRIVE_STATUSES.ACTIVE]
+        );
+        await this.clearUserDriveCache(userId, [driveId]);
+        return true;
     }
 
     /**
@@ -321,7 +393,7 @@ export class DriveRepository {
                 `SELECT ${DRIVE_COLUMNS} FROM drives WHERE user_id = ? AND status = ? ORDER BY is_default DESC, created_at DESC`,
                 [safeUserId, DRIVE_STATUSES.ACTIVE]
             );
-            return result || [];
+            return await this._migrateLegacyPasswordFormats(result || []);
         } catch (e) {
             log.error(`DriveRepository._findDriveInD1 error for ${safeUserId}:`, e);
             return [];

@@ -147,5 +147,35 @@ describe("BindingService", () => {
                 { bucket: "media-bucket" }
             );
         });
+
+        it("应该在写库前调用 Provider 的存储规范化，保存带格式标记的凭证", async () => {
+            const session = { current_step: "MEGA:WAIT_PASS", temp_data: "{}" };
+            mockFactory.getSupportedTypes.mockReturnValue(["mega"]);
+            mockFactory.isSupported.mockReturnValue(true);
+            mockFactory.create.mockReturnValue(mockProvider);
+            mockProvider.getBindingSteps.mockReturnValue([{ step: "WAIT_PASS" }]);
+            mockProvider.handleInput.mockResolvedValue({ success: true, data: { user: "u@example.com", pass: "raw-pass" } });
+            mockProvider.prepareConfigForStorage = vi.fn().mockResolvedValue({
+                user: "u@example.com",
+                pass: "obscured-pass",
+                pass_format: "rclone_obscured",
+                config_schema_version: 1
+            });
+
+            await BindingService.handleInput("user1", session, "raw-pass");
+
+            expect(mockProvider.prepareConfigForStorage).toHaveBeenCalledWith({ user: "u@example.com", pass: "raw-pass" });
+            expect(mockDriveRepo.create).toHaveBeenCalledWith(
+                "user1",
+                "Mega-u@example.com",
+                "mega",
+                {
+                    user: "u@example.com",
+                    pass: "obscured-pass",
+                    pass_format: "rclone_obscured",
+                    config_schema_version: 1
+                }
+            );
+        });
     });
 });

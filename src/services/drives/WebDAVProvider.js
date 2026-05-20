@@ -2,6 +2,11 @@ import { BaseDriveProvider, BindingStep, ActionResult, ValidationResult } from "
 import { CloudTool } from "../rclone.js";
 import { STRINGS } from "../../locales/drives/webdav.js";
 import { logger } from "../logger/index.js";
+import {
+    DRIVE_CONFIG_SCHEMA_VERSION,
+    RCLONE_PASSWORD_FORMATS,
+    markRclonePasswordConfig
+} from "../../domain/drive-credentials.js";
 
 const log = logger.withModule ? logger.withModule('WebDAVProvider') : logger;
 
@@ -51,7 +56,11 @@ export class WebDAVProvider extends BaseDriveProvider {
         try {
             const processedConfig = {
                 ...configData,
-                pass: await this.processPassword(configData.pass)
+                pass: await this.processPassword(configData.pass, {
+                    pass_format: configData.pass_format || RCLONE_PASSWORD_FORMATS.PLAIN
+                }),
+                pass_format: RCLONE_PASSWORD_FORMATS.RCLONE_OBSCURED,
+                config_schema_version: DRIVE_CONFIG_SCHEMA_VERSION
             };
             const result = await CloudTool.validateConfig(this.type, processedConfig);
             if (result.success) return new ValidationResult(true);
@@ -62,11 +71,20 @@ export class WebDAVProvider extends BaseDriveProvider {
         }
     }
 
-    async processPassword(password) {
+    async processPassword(password, configData = {}) {
         if (typeof CloudTool.normalizePasswordForRclone === "function") {
-            return await CloudTool.normalizePasswordForRclone(password);
+            return await CloudTool.normalizePasswordForRclone(password, {
+                format: configData.pass_format
+            });
         }
         return password;
+    }
+
+    async prepareConfigForStorage(configData) {
+        const pass = await this.processPassword(configData.pass, {
+            pass_format: configData.pass_format || RCLONE_PASSWORD_FORMATS.PLAIN
+        });
+        return markRclonePasswordConfig(configData, pass);
     }
 
     getValidationCommand() {
@@ -75,6 +93,7 @@ export class WebDAVProvider extends BaseDriveProvider {
 
     getConnectionString(config) {
         this.assertRequiredConfig(config, ['url', 'user', 'pass']);
+        this.assertRclonePasswordReady(config);
         const url = (config.url || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const user = (config.user || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         const pass = (config.pass || "").replace(/\\/g, '\\\\').replace(/"/g, '\\"');

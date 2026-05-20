@@ -95,7 +95,9 @@ export class BindingService {
             }
 
             // Final success - create the drive
-            const configData = result.data;
+            const configData = typeof provider.prepareConfigForStorage === "function"
+                ? await provider.prepareConfigForStorage(result.data)
+                : result.data;
             const displayAccount = provider.getDisplayAccount(configData);
             const driveName = `${driveType.charAt(0).toUpperCase() + driveType.slice(1)}-${displayAccount}`;
 

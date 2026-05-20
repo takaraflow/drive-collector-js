@@ -41,16 +41,23 @@ describe('WebDAVProvider', () => {
         const result = await provider.validateConfig({ url: 'https://dav.com', user: 'u', pass: 'plain' });
 
         expect(result.success).toBe(true);
-        expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('plain');
+        expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('plain', { format: 'plain' });
         expect(CloudTool.validateConfig).toHaveBeenCalledWith('webdav', {
             url: 'https://dav.com',
             user: 'u',
-            pass: 'obs_plain'
+            pass: 'obs_plain',
+            pass_format: 'rclone_obscured',
+            config_schema_version: 1
         });
     });
 
     test('should generate connection string', () => {
-        const conn = provider.getConnectionString({ url: 'u', user: 'n', pass: 'p' });
+        const conn = provider.getConnectionString({ url: 'u', user: 'n', pass: 'p', pass_format: 'rclone_obscured' });
         expect(conn).toBe(':webdav,url="u",user="n",pass="p",vendor="other":');
+    });
+
+    test('should reject unnormalized password before building connection string', () => {
+        expect(() => provider.getConnectionString({ url: 'u', user: 'n', pass: 'p', pass_format: 'plain' }))
+            .toThrow('pass_format:rclone_obscured');
     });
 });

@@ -115,6 +115,12 @@ vi.mock("../../src/services/drives/index.js", () => ({
                 }
                 return Promise.resolve({ success: true, data: { user: "test@example.com", pass: text } });
             }),
+            prepareConfigForStorage: vi.fn((config) => Promise.resolve({
+                ...config,
+                pass: `obscured_${config.pass}`,
+                pass_format: "rclone_obscured",
+                config_schema_version: 1
+            })),
             getDisplayAccount: vi.fn((config) => config.user || config.bucket || "configured"),
         }),
         getSupportedDrives: vi.fn().mockReturnValue([
@@ -170,6 +176,12 @@ describe("DriveConfigFlow", () => {
             }
             return Promise.resolve({ success: true, data: { user: "test@example.com", pass: text } });
         });
+        mockProvider.prepareConfigForStorage.mockImplementation((config) => Promise.resolve({
+            ...config,
+            pass: `obscured_${config.pass}`,
+            pass_format: "rclone_obscured",
+            config_schema_version: 1
+        }));
     });
 
     describe("sendDriveManager", () => {
@@ -462,7 +474,12 @@ describe("DriveConfigFlow", () => {
             const result = await DriveConfigFlow.handleInput(event, "user456", session);
 
             expect(mockClient.deleteMessages).toHaveBeenCalledWith("chat123", ["msg200"], { revoke: true });
-            expect(mockDriveRepository.create).toHaveBeenCalledWith("user456", "Mega-test@example.com", "mega", { user: "test@example.com", pass: "password123" });
+            expect(mockDriveRepository.create).toHaveBeenCalledWith("user456", "Mega-test@example.com", "mega", {
+                user: "test@example.com",
+                pass: "obscured_password123",
+                pass_format: "rclone_obscured",
+                config_schema_version: 1
+            });
             expect(mockSessionManager.clear).toHaveBeenCalledWith("user456");
             expect(mockClient.editMessage).toHaveBeenCalled();
             const editPayload = mockClient.editMessage.mock.calls[0][1];
@@ -542,7 +559,12 @@ describe("DriveConfigFlow", () => {
             const result = await DriveConfigFlow.handleInput(event, "user456", session);
 
             expect(mockClient.deleteMessages).toHaveBeenCalledWith("chat123", ["msg200"], { revoke: true });
-            expect(mockDriveRepository.create).toHaveBeenCalledWith("user456", "Mega-test@example.com", "mega", { user: "test@example.com", pass: "password123" });
+            expect(mockDriveRepository.create).toHaveBeenCalledWith("user456", "Mega-test@example.com", "mega", {
+                user: "test@example.com",
+                pass: "obscured_password123",
+                pass_format: "rclone_obscured",
+                config_schema_version: 1
+            });
             expect(mockSessionManager.clear).toHaveBeenCalledWith("user456");
             expect(mockClient.editMessage).toHaveBeenCalled();
             expect(result).toBe(true);

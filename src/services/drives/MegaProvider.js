@@ -3,6 +3,11 @@ import { CloudTool } from "../rclone.js";
 import { STRINGS } from "../../locales/drives/mega.js";
 import { logger } from "../logger/index.js";
 import { classifyRcloneError, RCLONE_ERROR_CODES } from "../../domain/rclone-error.js";
+import {
+    DRIVE_CONFIG_SCHEMA_VERSION,
+    RCLONE_PASSWORD_FORMATS,
+    markRclonePasswordConfig
+} from "../../domain/drive-credentials.js";
 
 const log = logger.withModule ? logger.withModule('MegaProvider') : logger;
 
@@ -46,12 +51,16 @@ export class MegaProvider extends BaseDriveProvider {
      */
     async validateConfig(configData) {
         try {
-            const processedPass = await this.processPassword(configData.pass);
+            const processedPass = await this.processPassword(configData.pass, {
+                pass_format: configData.pass_format || RCLONE_PASSWORD_FORMATS.PLAIN
+            });
 
             // 调用 rclone 验证
             const result = await CloudTool.validateConfig(this.type, {
                 user: configData.user,
-                pass: processedPass
+                pass: processedPass,
+                pass_format: RCLONE_PASSWORD_FORMATS.RCLONE_OBSCURED,
+                config_schema_version: DRIVE_CONFIG_SCHEMA_VERSION
             });
 
             if (result.success) {
@@ -68,12 +77,25 @@ export class MegaProvider extends BaseDriveProvider {
     /**
      * 处理密码（使用 rclone obscure）
      */
-    async processPassword(password) {
+    async processPassword(password, configData = {}) {
         if (typeof CloudTool.normalizePasswordForRclone === "function") {
-            return await CloudTool.normalizePasswordForRclone(password);
+            return await CloudTool.normalizePasswordForRclone(password, {
+                format: configData.pass_format
+            });
         }
 
         return password;
+    }
+
+    async prepareConfigForStorage(configData) {
+        const pass = await this.processPassword(configData.pass, {
+            pass_format: configData.pass_format || RCLONE_PASSWORD_FORMATS.PLAIN
+        });
+        return markRclonePasswordConfig(configData, pass);
+    }
+
+    getConnectionString(config) {
+        return super.getConnectionString(config);
     }
 
     /**

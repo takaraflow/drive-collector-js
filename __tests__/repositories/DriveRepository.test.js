@@ -121,6 +121,61 @@ describe("DriveRepository", () => {
             expect(result).toEqual(mockDrives);
         });
 
+        it("should lazily mark unversioned legacy rclone password configs when loading drives", async () => {
+            const legacyDrive = {
+                id: "drive1",
+                user_id: "user1",
+                name: "Mega",
+                type: "mega",
+                config_data: JSON.stringify({ user: "test@example.com", pass: "raw-pass" }),
+                status: "active",
+                is_default: 1
+            };
+            mockD1.fetchAll.mockResolvedValue([legacyDrive]);
+            mockD1.run.mockResolvedValue({ changes: 1 });
+
+            const result = await DriveRepository.findByUserId("user1", true);
+
+            expect(result[0].config_data).toContain('"pass_format":"legacy_unknown"');
+            expect(result[0].config_data).toContain('"config_schema_version":1');
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE drives SET config_data = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = ?",
+                expect.arrayContaining([
+                    expect.stringContaining('"pass_format":"legacy_unknown"'),
+                    expect.any(Number),
+                    "drive1",
+                    "user1",
+                    "active"
+                ])
+            );
+            expect(mockCache.delete).toHaveBeenCalledWith("drive:user1");
+            expect(mockCache.delete).toHaveBeenCalledWith("drive_id:drive1");
+            expect(mockLocalCache.del).toHaveBeenCalledWith("drive_user1");
+        });
+
+        it("should not repeatedly migrate already marked legacy password configs", async () => {
+            const legacyDrive = {
+                id: "drive1",
+                user_id: "user1",
+                name: "Mega",
+                type: "mega",
+                config_data: JSON.stringify({
+                    user: "test@example.com",
+                    pass: "raw-pass",
+                    pass_format: "legacy_unknown",
+                    config_schema_version: 1
+                }),
+                status: "active",
+                is_default: 1
+            };
+            mockD1.fetchAll.mockResolvedValue([legacyDrive]);
+
+            const result = await DriveRepository.findByUserId("user1", true);
+
+            expect(result).toEqual([legacyDrive]);
+            expect(mockD1.run).not.toHaveBeenCalled();
+        });
+
         it("should fallback to D1 when cache fails", async () => {
             mockCache.get.mockRejectedValue(new Error("KV Error"));
             const d1Drives = [
@@ -275,6 +330,42 @@ describe("DriveRepository", () => {
 
             await expect(DriveRepository.create("user1", "name", "mega", {})).rejects.toThrow("D1 Error");
             expect(logger.error).toHaveBeenCalled();
+        });
+    });
+
+    describe("updateConfigData", () => {
+        beforeEach(() => {
+            vi.clearAllMocks();
+            mockD1.run.mockResolvedValue({ changes: 1 });
+        });
+
+        it("should update drive config and invalidate derived caches", async () => {
+            const configData = {
+                user: "test@example.com",
+                pass: "stored-obscured",
+                pass_format: "rclone_obscured",
+                config_schema_version: 1
+            };
+
+            const result = await DriveRepository.updateConfigData("user1", "drive1", configData);
+
+            expect(result).toBe(true);
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE drives SET config_data = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = ?",
+                [JSON.stringify(configData), expect.any(Number), "drive1", "user1", "active"]
+            );
+            expect(mockCache.delete).toHaveBeenCalledWith("drive:user1");
+            expect(mockCache.delete).toHaveBeenCalledWith("drive_id:drive1");
+            expect(mockLocalCache.del).toHaveBeenCalledWith("drive_user1");
+        });
+
+        it("should reject missing required parameters", async () => {
+            await expect(DriveRepository.updateConfigData(null, "drive1", {}))
+                .rejects.toThrow("DriveRepository.updateConfigData: Missing required parameters.");
+            await expect(DriveRepository.updateConfigData("user1", null, {}))
+                .rejects.toThrow("DriveRepository.updateConfigData: Missing required parameters.");
+            await expect(DriveRepository.updateConfigData("user1", "drive1", null))
+                .rejects.toThrow("DriveRepository.updateConfigData: Missing required parameters.");
         });
     });
 

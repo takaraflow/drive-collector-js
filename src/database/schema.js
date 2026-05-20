@@ -1,6 +1,11 @@
 import crypto from "crypto";
+import {
+    DRIVE_CONFIG_SCHEMA_VERSION,
+    RCLONE_OBSCURED_PASSWORD_DRIVE_TYPES,
+    RCLONE_PASSWORD_FORMATS
+} from "../domain/drive-credentials.js";
 
-export const LATEST_SCHEMA_VERSION = 7;
+export const LATEST_SCHEMA_VERSION = 8;
 
 const MIGRATION_LOCK_ID = "database-schema";
 const CANONICAL_TASK_STATUS_CHECK = "CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled'))";
@@ -804,6 +809,53 @@ async function applyUserRolesSsot({ d1 }) {
     await ensureUserRolesSchema(d1);
 }
 
+async function hasLegacyRclonePasswordConfigs(d1) {
+    if (!(await tableExists(d1, "drives"))) return false;
+    const placeholders = RCLONE_OBSCURED_PASSWORD_DRIVE_TYPES.map(() => "?").join(", ");
+    const row = await d1.fetchOne(
+        `SELECT id FROM drives
+         WHERE status = 'active'
+           AND type IN (${placeholders})
+           AND json_valid(config_data)
+           AND json_extract(config_data, '$.pass') IS NOT NULL
+           AND (
+             json_extract(config_data, '$.pass_format') IS NULL
+             OR json_extract(config_data, '$.config_schema_version') IS NULL
+           )
+         LIMIT 1`,
+        RCLONE_OBSCURED_PASSWORD_DRIVE_TYPES
+    );
+    return Boolean(row);
+}
+
+async function applyDrivePasswordFormatSsot({ d1 }) {
+    if (!(await tableExists(d1, "drives"))) return;
+    const placeholders = RCLONE_OBSCURED_PASSWORD_DRIVE_TYPES.map(() => "?").join(", ");
+    await d1.run(
+        `UPDATE drives
+         SET config_data = json_set(
+               config_data,
+               '$.pass_format', ?,
+               '$.config_schema_version', ?
+             ),
+             updated_at = ?
+         WHERE status = 'active'
+           AND type IN (${placeholders})
+           AND json_valid(config_data)
+           AND json_extract(config_data, '$.pass') IS NOT NULL
+           AND (
+             json_extract(config_data, '$.pass_format') IS NULL
+             OR json_extract(config_data, '$.config_schema_version') IS NULL
+           )`,
+        [
+            RCLONE_PASSWORD_FORMATS.LEGACY_UNKNOWN,
+            DRIVE_CONFIG_SCHEMA_VERSION,
+            Date.now(),
+            ...RCLONE_OBSCURED_PASSWORD_DRIVE_TYPES
+        ]
+    );
+}
+
 function getMigrations() {
     return [
         {
@@ -880,6 +932,13 @@ function getMigrations() {
                     await hasTelegramTasksMissingSourceRef(d1);
             },
             apply: applyTaskSourceMetadata
+        },
+        {
+            version: 8,
+            name: "drive_password_format_ssot",
+            sql: "mark legacy rclone password drive configs with explicit unknown password format",
+            shouldRun: async ({ d1 }) => await hasLegacyRclonePasswordConfigs(d1),
+            apply: applyDrivePasswordFormatSsot
         }
     ];
 }

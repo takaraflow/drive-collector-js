@@ -122,7 +122,7 @@ describe('MegaProvider - Unit Tests', () => {
 
             await provider.processPassword('secret123');
 
-            expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('secret123');
+            expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('secret123', { format: undefined });
         });
 
         test('should return password as-is when password normalizer is not available', async () => {
@@ -159,7 +159,9 @@ describe('MegaProvider - Unit Tests', () => {
             // 验证 CloudTool.validateConfig 接收到的是处理后的字符串，不是 Promise
             expect(CloudTool.validateConfig).toHaveBeenCalledWith('mega', {
                 user: 'test@example.com',
-                pass: 'obscured_password'  // 应该是字符串，不是 "[object Promise]"
+                pass: 'obscured_password',  // 应该是字符串，不是 "[object Promise]"
+                pass_format: 'rclone_obscured',
+                config_schema_version: 1
             });
 
             // 验证传递的 password 不是 Promise
@@ -336,7 +338,8 @@ describe('MegaProvider - Unit Tests', () => {
         test('should generate correct connection string', () => {
             const connStr = provider.getConnectionString({
                 user: 'test@mega.nz',
-                pass: 'password123'
+                pass: 'password123',
+                pass_format: 'rclone_obscured'
             });
 
             expect(connStr).toBe(':mega,user="test@mega.nz",pass="password123":');
@@ -345,10 +348,19 @@ describe('MegaProvider - Unit Tests', () => {
         test('should escape special characters in connection string', () => {
             const connStr = provider.getConnectionString({
                 user: 'test"user@mega.nz',
-                pass: 'pass\\word'
+                pass: 'pass\\word',
+                pass_format: 'rclone_obscured'
             });
 
             expect(connStr).toBe(':mega,user="test\\"user@mega.nz",pass="pass\\\\word":');
+        });
+
+        test('should reject unnormalized password before building connection string', () => {
+            expect(() => provider.getConnectionString({
+                user: 'test@mega.nz',
+                pass: 'password123',
+                pass_format: 'plain'
+            })).toThrow('pass_format:rclone_obscured');
         });
     });
 });
