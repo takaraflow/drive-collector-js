@@ -372,6 +372,45 @@ describe("DirectTransferService", () => {
     expect(cloudTool.deleteRemoteFile).not.toHaveBeenCalled();
   });
 
+  test("does not allow local fallback for remote name conflicts in strict zero-disk mode", async () => {
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-conflict-strict", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "file.bin",
+      existingRemoteFile: { Name: "file.bin", Size: 42 },
+      config: {
+        directTransfer: { enabled: true, fallbackToLocal: false },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    expect(result).toMatchObject({ success: false, fallback: false, reason: "remote-name-conflict" });
+    expect(cloudTool.createRcatStream).not.toHaveBeenCalled();
+    expect(cloudTool.deleteRemoteFile).not.toHaveBeenCalled();
+  });
+
+  test("does not allow local fallback for unsupported targets in strict zero-disk mode", async () => {
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-oss-strict", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "file.bin",
+      driveType: "oss",
+      config: {
+        directTransfer: { enabled: true, fallbackToLocal: false },
+        remoteName: "oss",
+        oss: {}
+      }
+    });
+
+    expect(result).toMatchObject({ success: false, fallback: false, reason: "oss-local-staging-required" });
+    expect(cloudTool.createRcatStream).not.toHaveBeenCalled();
+  });
+
   test("does not delete final remote name when validation fails after moveto", async () => {
     const proc = createProcess();
     const stdin = createWritable(proc);

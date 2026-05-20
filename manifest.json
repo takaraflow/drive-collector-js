@@ -539,19 +539,19 @@
         "type": "boolean",
         "required": false,
         "default": true,
-        "description": "Enable same-worker direct streaming from Telegram to rclone rcat before falling back to local staging"
+        "description": "Enable same-worker direct streaming from Telegram to rclone rcat"
       },
       "DIRECT_TRANSFER_FALLBACK_TO_LOCAL": {
         "type": "boolean",
         "required": false,
         "default": true,
-        "description": "Allow direct streaming failures or unsupported remotes to fall back to local file staging"
+        "description": "Allow preferred direct streaming to fall back to local file staging. Set false for strict zero-disk mode."
       },
       "DIRECT_TRANSFER_TIMEOUT_MS": {
         "type": "number",
         "required": false,
         "default": 21600000,
-        "description": "Maximum duration for one same-worker direct rcat transfer before falling back to local staging"
+        "description": "Maximum duration for one same-worker direct rcat transfer"
       },
       "EXTERNAL_DOWNLOAD_MAX_BYTES": {
         "type": "number",

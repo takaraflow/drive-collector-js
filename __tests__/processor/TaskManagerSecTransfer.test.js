@@ -455,6 +455,46 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         getAllSpy.mockRestore();
     });
 
+    test("strict zero-disk mode fails unsupported drives instead of local staging", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDriveRepository.getDefaultDrive.mockResolvedValue({
+            id: "drive_oss",
+            user_id: "user_1",
+            type: "oss",
+            config_data: "{}"
+        });
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: false, reason: "oss-local-staging-required" });
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                directTransfer: { enabled: true, fallbackToLocal: false },
+                streamForwarding: { enabled: false }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockFs.promises.stat).not.toHaveBeenCalled();
+        expect(mockDirectTransferService.transferTelegramMediaToRemote).not.toHaveBeenCalled();
+        expect(mockClient.downloadMedia).not.toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "fail",
+            expect.stringContaining("Zero-disk direct transfer unavailable: oss-local-staging-required"),
+            expect.objectContaining({ source: "handleTaskFailure" })
+        );
+
+        getAllSpy.mockRestore();
+    });
+
     test("direct transfer capability lookup failure falls back to local staging", async () => {
         mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
         mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
@@ -486,6 +526,40 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         getAllSpy.mockRestore();
     });
 
+    test("strict zero-disk mode fails capability lookup errors instead of local staging", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDriveRepository.getDefaultDrive.mockRejectedValue(new Error("D1 unavailable"));
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                directTransfer: { enabled: true, fallbackToLocal: false },
+                streamForwarding: { enabled: false }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockFs.promises.stat).not.toHaveBeenCalled();
+        expect(mockDirectTransferService.transferTelegramMediaToRemote).not.toHaveBeenCalled();
+        expect(mockClient.downloadMedia).not.toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "fail",
+            expect.stringContaining("Zero-disk direct transfer unavailable: drive-capability-lookup-failed"),
+            expect.objectContaining({ source: "handleTaskFailure" })
+        );
+
+        getAllSpy.mockRestore();
+    });
+
     test("direct transfer skips remote same-name conflicts before streaming", async () => {
         mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Name: "test_file.mp4", Size: 10485760 + 2097152 });
         mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
@@ -509,6 +583,40 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
 
         expect(mockDirectTransferService.transferTelegramMediaToRemote).not.toHaveBeenCalled();
         expect(mockClient.downloadMedia).toHaveBeenCalled();
+
+        getAllSpy.mockRestore();
+    });
+
+    test("strict zero-disk mode fails remote same-name conflicts instead of local staging", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue({ Name: "test_file.mp4", Size: 10485760 + 2097152 });
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: true, reason: "rclone-rcat" });
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                directTransfer: { enabled: true, fallbackToLocal: false },
+                streamForwarding: { enabled: false }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockFs.promises.stat).not.toHaveBeenCalled();
+        expect(mockDirectTransferService.transferTelegramMediaToRemote).not.toHaveBeenCalled();
+        expect(mockClient.downloadMedia).not.toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "fail",
+            expect.stringContaining("Zero-disk direct transfer unavailable: remote-name-conflict"),
+            expect.objectContaining({ source: "handleTaskFailure" })
+        );
 
         getAllSpy.mockRestore();
     });
@@ -557,6 +665,107 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith(
             "task_1",
             expect.objectContaining({ userId: "user_1" })
+        );
+
+        getAllSpy.mockRestore();
+    });
+
+    test("strict zero-disk mode fails direct transfer fallback instead of stream forwarding or local staging", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: true, reason: "rclone-rcat" });
+        mockDirectTransferService.transferTelegramMediaToRemote.mockResolvedValue({
+            success: false,
+            fallback: true,
+            error: "rcat failed"
+        });
+        mockInstanceCoordinator.getActiveInstances.mockResolvedValue([
+            { id: "current-instance" },
+            { id: "worker-1", directUrl: "https://worker.example.com", activeTaskCount: 0 }
+        ]);
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            UIHelper: {
+                renderProgress: vi.fn(() => "stream progress")
+            },
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                port: 3000,
+                directTransfer: { enabled: true, fallbackToLocal: false },
+                streamForwarding: {
+                    enabled: true,
+                    lbUrl: "https://lb.example.com",
+                    externalUrl: "https://leader.example.com"
+                }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockFs.promises.stat).not.toHaveBeenCalled();
+        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+            "task_1",
+            "reset_stream_download",
+            expect.anything(),
+            expect.objectContaining({ source: "direct_transfer_fallback" })
+        );
+        expect(mockStreamTransferService.registerStreamOwner).not.toHaveBeenCalled();
+        expect(mockStreamTransferService.forwardChunk).not.toHaveBeenCalled();
+        expect(mockClient.downloadMedia).not.toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "fail",
+            expect.stringContaining("Zero-disk direct transfer unavailable: rcat failed"),
+            expect.objectContaining({ source: "handleTaskFailure" })
+        );
+
+        getAllSpy.mockRestore();
+    });
+
+    test("strict zero-disk mode fails blocked direct-transfer state starts instead of local staging", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: true, reason: "rclone-rcat" });
+        mockTaskRepository.transitionStatus.mockImplementation(async (_taskId, event) => {
+            if (event === "start_stream_upload") {
+                return {
+                    changed: false,
+                    blocked: true,
+                    reason: "state changed concurrently"
+                };
+            }
+            return { changed: true, blocked: false };
+        });
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                directTransfer: { enabled: true, fallbackToLocal: false },
+                streamForwarding: { enabled: false }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockDirectTransferService.transferTelegramMediaToRemote).not.toHaveBeenCalled();
+        expect(mockClient.downloadMedia).not.toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "fail",
+            expect.stringContaining("Zero-disk direct transfer unavailable: state-transition-blocked"),
+            expect.objectContaining({ source: "handleTaskFailure" })
         );
 
         getAllSpy.mockRestore();

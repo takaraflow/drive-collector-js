@@ -13,6 +13,25 @@ import { isRetryableInfrastructureError } from "../../domain/infrastructure-erro
 // 获取模块日志记录器
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager');
 
+const STRICT_DIRECT_TRANSFER_ERROR_CODE = 'DIRECT_TRANSFER_STRICT_UNAVAILABLE';
+
+function isStrictDirectTransfer(config) {
+    return config.directTransfer?.enabled !== false && config.directTransfer?.fallbackToLocal === false;
+}
+
+function createStrictDirectTransferError(reason, detail = null) {
+    const safeReason = String(reason || 'unavailable');
+    const error = new Error(`Zero-disk direct transfer unavailable: ${safeReason}`);
+    error.errorCode = STRICT_DIRECT_TRANSFER_ERROR_CODE;
+    error.retryable = false;
+    error.userRetryable = false;
+    error.userMessage = `零落盘直传无法继续：${safeReason}。为避免本地落盘，任务已停止。`;
+    if (detail) {
+        error.diagnosticMessage = `Zero-disk direct transfer unavailable: ${safeReason}; ${detail}`;
+    }
+    return error;
+}
+
 /**
  * Download Task - Responsible for MTProto download phase
  */
@@ -78,8 +97,13 @@ export async function downloadTask(task) {
                 // 2. Priority check for remote instant transfer
                 if (await _handleInstantTransfer(this, deps, task, info, fileName, initialHeartbeat)) return;
 
-                // 2. Local file check
-                if (await _handleLocalFile(this, deps, task, info, fileName, localPath, initialHeartbeat, {
+                const transferPlan = {
+                    skipStreamForwarding: false,
+                    strictDirectTransfer: isStrictDirectTransfer(config)
+                };
+
+                // 2. Local file check. Strict zero-disk mode must not use local staging/cache paths.
+                if (!transferPlan.strictDirectTransfer && await _handleLocalFile(this, deps, task, info, fileName, localPath, initialHeartbeat, {
                     markDownloadFinished: () => {
                         downloadFinished = true;
                     }
@@ -88,8 +112,6 @@ export async function downloadTask(task) {
                 await initialHeartbeat;
 
                 const isLargeFile = info.size > 100 * 1024 * 1024;
-
-                const transferPlan = { skipStreamForwarding: false };
 
                 // 3. Direct stream upload on the current worker when the user's drive supports rclone rcat.
                 if (await _handleDirectTransfer(this, deps, task, info, fileName, heartbeat, isLargeFile, transferPlan)) return;
@@ -442,15 +464,24 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
     const { config, client, CloudTool, TaskRepository, DriveRepository, updateStatus, STRINGS, directTransferService, instanceCoordinator } = deps;
     const log = dependencyContainer.get('logger').withModule('TaskManager');
     const { message } = task;
+    const strictDirectTransfer = transferPlan?.strictDirectTransfer === true || isStrictDirectTransfer(config);
 
     if (config.directTransfer?.enabled === false) return false;
-    if (!directTransferService || typeof directTransferService.transferTelegramMediaToRemote !== "function") return false;
+    if (!directTransferService || typeof directTransferService.transferTelegramMediaToRemote !== "function") {
+        if (strictDirectTransfer) {
+            throw createStrictDirectTransferError("direct-transfer-service-unavailable");
+        }
+        return false;
+    }
 
     let driveType = null;
     try {
         const defaultDrive = await DriveRepository.getDefaultDrive(task.userId);
         driveType = defaultDrive?.type || null;
     } catch (error) {
+        if (strictDirectTransfer) {
+            throw createStrictDirectTransferError("drive-capability-lookup-failed", error.message);
+        }
         log.warn("Direct transfer drive capability lookup failed; using local-capable transfer path", {
             taskId: task.id,
             userId: task.userId,
@@ -460,12 +491,18 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
     }
     const capability = directTransferService.canAttempt?.(config, { driveType });
     if (capability && !capability.supported) {
+        if (strictDirectTransfer) {
+            throw createStrictDirectTransferError(capability.reason || "unsupported-drive");
+        }
         log.info("Direct transfer skipped", { taskId: task.id, driveType, reason: capability.reason });
         return false;
     }
 
     const existingRemoteFile = await CloudTool.getRemoteFileInfo(fileName, task.userId, 1, true);
     if (existingRemoteFile && !context._isSizeMatch(existingRemoteFile.Size, info.size)) {
+        if (strictDirectTransfer) {
+            throw createStrictDirectTransferError("remote-name-conflict");
+        }
         log.info("Direct transfer skipped because remote name already exists with different size", {
             taskId: task.id,
             fileName,
@@ -484,6 +521,9 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
         source: 'direct_transfer_started'
     });
     if (streamStartTransition.blocked) {
+        if (strictDirectTransfer) {
+            throw createStrictDirectTransferError("state-transition-blocked", streamStartTransition.reason || "invalid state");
+        }
         log.warn("Direct transfer start blocked by state machine", {
             taskId: task.id,
             reason: streamStartTransition.reason || 'invalid state'
@@ -523,6 +563,9 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
     }
 
     if (result?.fallback) {
+        if (strictDirectTransfer) {
+            throw createStrictDirectTransferError(result.error || result.reason || "direct-transfer-fallback");
+        }
         if (transferPlan) {
             transferPlan.skipStreamForwarding = true;
         }

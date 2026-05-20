@@ -71,7 +71,7 @@ export class DirectTransferService {
     }) {
         const capability = this.canAttempt(config, { driveType });
         if (!capability.supported) {
-            return { success: false, fallback: true, reason: capability.reason };
+            return this._buildFallbackResult(config, capability.reason);
         }
 
         const totalSize = Number(info?.size || 0);
@@ -94,7 +94,7 @@ export class DirectTransferService {
             if (this._isSizeMatch(existingRemoteFile.Size, totalSize)) {
                 return this._buildExistingRemoteResult(finalFileName, totalSize, uploadedBytes);
             }
-            return { success: false, fallback: true, reason: "remote-name-conflict" };
+            return this._buildFallbackResult(config, "remote-name-conflict");
         }
 
         try {
@@ -172,7 +172,7 @@ export class DirectTransferService {
                 throw error;
             }
 
-            const fallbackAllowed = config.directTransfer?.fallbackToLocal !== false;
+            const fallbackAllowed = this._isLocalFallbackAllowed(config);
             const effectiveError = rcloneFailure?.success === false ? rcloneFailure : error;
             const message = redactSensitiveText(effectiveError?.error || effectiveError?.message || String(effectiveError));
             const failureMetadata = resolveRcloneFailureMetadata({
@@ -195,6 +195,19 @@ export class DirectTransferService {
             });
             return { success: false, fallback: true, error: message, ...failureMetadata };
         }
+    }
+
+    _isLocalFallbackAllowed(config) {
+        return config.directTransfer?.fallbackToLocal !== false;
+    }
+
+    _buildFallbackResult(config, reason, extra = {}) {
+        return {
+            success: false,
+            fallback: this._isLocalFallbackAllowed(config),
+            reason,
+            ...extra
+        };
     }
 
     async _resolveRcloneFailureAfterStreamError(rcloneCompletion, taskId, error) {
