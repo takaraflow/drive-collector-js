@@ -4,7 +4,7 @@ import { Readable, Transform } from "stream";
 import { pipeline } from "stream/promises";
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { TASK_EVENTS } from "../../domain/task-state-machine.js";
-import { TASK_QUEUE_TRIGGER_SOURCES, TaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
+import { TASK_QUEUE_TRIGGER_SOURCES, TaskProcessingLockBusyError, isTaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
 import {
     buildExternalLocalFileName,
     buildRetainedExternalUrlSourceRef,
@@ -168,6 +168,9 @@ export async function downloadExternalUrlTask(task) {
         });
         return true;
     } catch (error) {
+        if (isTaskProcessingLockBusyError(error)) {
+            throw error;
+        }
         const isCancel = error.message === "CANCELLED";
         if (partialPath) {
             await fs.promises.rm(partialPath, { force: true }).catch(() => {});

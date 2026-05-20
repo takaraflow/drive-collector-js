@@ -2,6 +2,7 @@ import { TaskManager } from '../../src/processor/TaskManager.js';
 import { instanceCoordinator } from '../../src/services/InstanceCoordinator.js';
 import { TaskRepository } from '../../src/repositories/TaskRepository.js';
 import { CloudTool } from '../../src/services/rclone.js';
+import { TaskProcessingLockBusyError } from '../../src/domain/task-queue-contract.js';
 import fs from 'fs';
 
 vi.mock('../../src/config/index.js', () => ({
@@ -203,5 +204,36 @@ describe('TaskManager uploadTask', () => {
 
     // 验证本地文件被删除
     expect(fs.promises.unlink).toHaveBeenCalledWith('/tmp/test.txt');
+  });
+
+  test('should propagate local active processor contention without marking task failed', async () => {
+    const task = {
+      id: 'test-task-busy',
+      chatId: '12345',
+      msgId: 6,
+      message: {
+        media: {
+          document: {
+            fileName: 'test.txt'
+          }
+        }
+      },
+      localPath: '/tmp/test.txt'
+    };
+    TaskManager.activeProcessors.add(task.id);
+
+    await expect(TaskManager.uploadTask(task)).rejects.toBeInstanceOf(TaskProcessingLockBusyError);
+
+    expect(TaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+      task.id,
+      expect.anything(),
+      expect.stringContaining('Task processing lock busy'),
+      expect.anything()
+    );
+    expect(CloudTool.uploadFile).not.toHaveBeenCalled();
+    expect(fs.promises.unlink).not.toHaveBeenCalledWith('/tmp/test.txt');
+    expect(TaskManager.activeProcessors.has(task.id)).toBe(true);
+
+    TaskManager.activeProcessors.delete(task.id);
   });
 });

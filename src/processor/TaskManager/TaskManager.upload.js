@@ -4,7 +4,7 @@ import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { createHeartbeat, handleTaskCompletion, handleTaskFailure, handleUploadFailure, escapeHTML } from "./TaskManager.utils.js";
 import { assertClaimFenceCurrent, getClaimFenceOptions } from "./claim-fence.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../../domain/task-state-machine.js";
-import { TaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
+import { TaskProcessingLockBusyError, isTaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
 import { isExternalUrlTask } from "../../domain/task-source.js";
 
 // 获取模块日志记录器
@@ -227,6 +227,9 @@ export async function uploadTask(task) {
             await handleUploadFailure(task, this, updateStatus, uploadResult);
         }
     } catch (e) {
+        if (isTaskProcessingLockBusyError(e)) {
+            throw e;
+        }
         const isCancel = e.message === "CANCELLED";
         await handleTaskFailure(task, this, updateStatus, e, isCancel);
     } finally {
@@ -243,11 +246,8 @@ export async function uploadTask(task) {
             }
         }
         
-        // Ensure activeProcessors is cleaned up
-        this.activeProcessors.delete(id);
-        
-        // Ensure inFlightTasks is cleaned up
         if (didActivate) {
+            this.activeProcessors.delete(id);
             this.inFlightTasks.delete(id);
         }
         

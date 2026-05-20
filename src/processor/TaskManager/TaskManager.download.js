@@ -106,6 +106,9 @@ export async function downloadTask(task) {
 
 
             } catch (e) {
+                if (e instanceof TaskProcessingLockBusyError || e?.code === 'TASK_PROCESSING_LOCK_BUSY') {
+                    throw e;
+                }
                 const isCancel = e.message === "CANCELLED";
                 if (downloadFinished && isRetryableInfrastructureError(e)) {
                     log.warn("Download phase hit retryable infrastructure error; leaving state for webhook/recovery retry", {
@@ -120,7 +123,9 @@ export async function downloadTask(task) {
                         log.error(`Failed to update task status for ${task.id}:`, updateError);
                     }
                 }
-                this.activeProcessors.delete(id);
+                if (didActivate) {
+                    this.activeProcessors.delete(id);
+                }
             }
         } finally {
             if (didActivate) {
