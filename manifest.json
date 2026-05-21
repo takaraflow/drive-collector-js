@@ -975,6 +975,21 @@
         "required": false,
         "description": "Database migration lock wait timeout in milliseconds"
       },
+      "DB_SCHEMA_READY_RETRY_ATTEMPTS": {
+        "type": "number",
+        "required": false,
+        "description": "Number of startup retries for transient D1 schema readiness failures"
+      },
+      "DB_SCHEMA_READY_RETRY_INITIAL_DELAY_MS": {
+        "type": "number",
+        "required": false,
+        "description": "Initial backoff delay in milliseconds for transient D1 schema readiness retries"
+      },
+      "DB_SCHEMA_READY_RETRY_MAX_DELAY_MS": {
+        "type": "number",
+        "required": false,
+        "description": "Maximum backoff delay in milliseconds for transient D1 schema readiness retries"
+      },
       "CLOUDFLARE_ACCOUNT_ID": {
         "type": "string",
         "required": false,

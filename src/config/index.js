@@ -83,6 +83,11 @@ function parsePositiveInt(value, fallback) {
     return parsed && parsed > 0 ? parsed : fallback;
 }
 
+function parseNonNegativeInt(value, fallback) {
+    const parsed = parseOptionalInt(value);
+    return parsed !== null && parsed >= 0 ? parsed : fallback;
+}
+
 function parsePositiveNumber(value, fallback) {
     if (value === undefined || value === null || value === '') {
         return fallback;
@@ -446,7 +451,10 @@ function buildConfigObject(env) {
             schemaCheck: parseBoolean(env.DB_SCHEMA_CHECK, true),
             autoMigrate: parseBoolean(env.DB_AUTO_MIGRATE, false),
             migrationLockTtlMs: parseInt(env.DB_MIGRATION_LOCK_TTL_MS, 10) || 120000,
-            migrationLockWaitMs: parseInt(env.DB_MIGRATION_LOCK_WAIT_MS, 10) || 30000
+            migrationLockWaitMs: parseInt(env.DB_MIGRATION_LOCK_WAIT_MS, 10) || 30000,
+            schemaReadyRetryAttempts: parsePositiveInt(env.DB_SCHEMA_READY_RETRY_ATTEMPTS, 4),
+            schemaReadyRetryInitialDelayMs: parseNonNegativeInt(env.DB_SCHEMA_READY_RETRY_INITIAL_DELAY_MS, 2000),
+            schemaReadyRetryMaxDelayMs: parseNonNegativeInt(env.DB_SCHEMA_READY_RETRY_MAX_DELAY_MS, 15000)
         },
         externalDownload: {
             maxBytes: parsePositiveNumber(env.EXTERNAL_DOWNLOAD_MAX_BYTES, 5 * 1024 * 1024 * 1024),

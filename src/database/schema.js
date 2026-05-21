@@ -4,10 +4,16 @@ import {
     RCLONE_OBSCURED_PASSWORD_DRIVE_TYPES,
     RCLONE_PASSWORD_FORMATS
 } from "../domain/drive-credentials.js";
+import { classifyInfrastructureError } from "../domain/infrastructure-error.js";
 
 export const LATEST_SCHEMA_VERSION = 9;
 
 const MIGRATION_LOCK_ID = "database-schema";
+const SCHEMA_READY_RETRY_DEFAULTS = Object.freeze({
+    attempts: 4,
+    initialDelayMs: 2000,
+    maxDelayMs: 15000
+});
 const CANONICAL_TASK_STATUS_CHECK = "CHECK (status IN ('queued', 'downloading', 'downloaded', 'uploading', 'completed', 'failed', 'cancelled'))";
 const CANONICAL_DRIVE_STATUS_CHECK = "CHECK (status IN ('active', 'deleted'))";
 const CANONICAL_DRIVE_DEFAULT_CHECK = "CHECK (is_default IN (0, 1))";
@@ -1149,6 +1155,78 @@ function createMigrationOwner() {
     return `${process.pid || "pid"}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
 }
 
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function parsePositiveInteger(value, fallback) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseNonNegativeInteger(value, fallback) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function resolveSchemaReadyRetryOptions(databaseConfig = {}) {
+    const attempts = parsePositiveInteger(
+        databaseConfig.schemaReadyRetryAttempts,
+        SCHEMA_READY_RETRY_DEFAULTS.attempts
+    );
+    const initialDelayMs = parseNonNegativeInteger(
+        databaseConfig.schemaReadyRetryInitialDelayMs,
+        SCHEMA_READY_RETRY_DEFAULTS.initialDelayMs
+    );
+    const maxDelayMs = parseNonNegativeInteger(
+        databaseConfig.schemaReadyRetryMaxDelayMs,
+        SCHEMA_READY_RETRY_DEFAULTS.maxDelayMs
+    );
+
+    return {
+        attempts,
+        initialDelayMs,
+        maxDelayMs: Math.max(initialDelayMs, maxDelayMs)
+    };
+}
+
+function isRetryableDatabaseReadinessError(error) {
+    const classification = classifyInfrastructureError(error);
+    return classification.retryScope === "database" && classification.retryable === true;
+}
+
+async function runWithDatabaseReadinessRetry(operation, {
+    databaseConfig = {},
+    log = console,
+    label = "database schema readiness"
+} = {}) {
+    const retryOptions = resolveSchemaReadyRetryOptions(databaseConfig);
+    let attempt = 0;
+    let delayMs = retryOptions.initialDelayMs;
+
+    while (attempt < retryOptions.attempts) {
+        attempt += 1;
+        try {
+            return await operation();
+        } catch (error) {
+            const shouldRetry = attempt < retryOptions.attempts && isRetryableDatabaseReadinessError(error);
+            if (!shouldRetry) {
+                throw error;
+            }
+
+            log.warn?.("Database schema readiness hit transient D1 failure; retrying", {
+                label,
+                attempt,
+                maxAttempts: retryOptions.attempts,
+                nextDelayMs: delayMs,
+                error: error?.message || String(error)
+            });
+            await sleep(delayMs);
+            delayMs = Math.min(delayMs * 2, retryOptions.maxDelayMs);
+        }
+    }
+}
+
 export async function getDatabaseSchemaStatus({ d1 } = {}) {
     if (!d1) throw new Error("D1 service is required");
 
@@ -1303,12 +1381,19 @@ export async function ensureDatabaseSchemaReady({ d1, config = {}, log = console
             lockWaitMs: databaseConfig.migrationLockWaitMs
         });
 
-        const result = await migrateDatabaseSchema({
-            d1,
-            log,
-            lockTtlMs: databaseConfig.migrationLockTtlMs,
-            lockWaitMs: databaseConfig.migrationLockWaitMs
-        });
+        const result = await runWithDatabaseReadinessRetry(
+            () => migrateDatabaseSchema({
+                d1,
+                log,
+                lockTtlMs: databaseConfig.migrationLockTtlMs,
+                lockWaitMs: databaseConfig.migrationLockWaitMs
+            }),
+            {
+                databaseConfig,
+                log,
+                label: "database auto-migrate"
+            }
+        );
 
         const actionCounts = result.results.reduce((counts, item) => {
             counts[item.action] = (counts[item.action] || 0) + 1;
@@ -1327,7 +1412,14 @@ export async function ensureDatabaseSchemaReady({ d1, config = {}, log = console
         return result;
     }
 
-    const status = await assertDatabaseSchemaCurrent({ d1 });
+    const status = await runWithDatabaseReadinessRetry(
+        () => assertDatabaseSchemaCurrent({ d1 }),
+        {
+            databaseConfig,
+            log,
+            label: "database schema check"
+        }
+    );
     log.info?.(`Database schema current at version ${status.currentVersion}`);
     return { skipped: false, status };
 }

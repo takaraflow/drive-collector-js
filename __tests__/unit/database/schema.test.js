@@ -585,6 +585,68 @@ describe("database schema migrations", () => {
         );
     });
 
+    test("should retry transient D1 readiness failures before failing startup", async () => {
+        db = createLegacyDatabase();
+        const baseD1 = createD1(db);
+        await migrateDatabaseSchema({ d1: baseD1, useLock: false, log: { info: vi.fn(), warn: vi.fn() } });
+        const d1 = {
+            ...baseD1,
+            fetchOne: vi.fn()
+                .mockRejectedValueOnce(new Error("D1 HTTP 500 [7500]: internal error"))
+                .mockImplementation((sql, params = []) => baseD1.fetchOne(sql, params))
+        };
+        const log = { info: vi.fn(), warn: vi.fn() };
+        vi.spyOn(global, "setTimeout").mockImplementation((callback) => {
+            callback();
+            return 1;
+        });
+
+        const ready = await ensureDatabaseSchemaReady({
+            d1,
+            config: {
+                nodeEnv: "prod",
+                d1: { accountId: "a", databaseId: "d", token: "t" },
+                database: {
+                    schemaCheck: true,
+                    autoMigrate: false,
+                    schemaReadyRetryAttempts: 2,
+                    schemaReadyRetryInitialDelayMs: 0,
+                    schemaReadyRetryMaxDelayMs: 0
+                }
+            },
+            log
+        });
+
+        expect(ready.status.isCurrent).toBe(true);
+        expect(d1.fetchOne.mock.calls.length).toBeGreaterThan(1);
+        expect(log.warn).toHaveBeenCalledWith(
+            "Database schema readiness hit transient D1 failure; retrying",
+            expect.objectContaining({
+                label: "database schema check",
+                attempt: 1,
+                maxAttempts: 2
+            })
+        );
+    });
+
+    test("should not retry structural schema drift", async () => {
+        db = createLegacyDatabase();
+        const d1 = createD1(db);
+        const log = { info: vi.fn(), warn: vi.fn() };
+
+        await expect(ensureDatabaseSchemaReady({
+            d1,
+            config: {
+                nodeEnv: "prod",
+                d1: { accountId: "a", databaseId: "d", token: "t" },
+                database: { schemaCheck: true, autoMigrate: false, schemaReadyRetryAttempts: 3 }
+            },
+            log
+        })).rejects.toThrow("Database schema is not current");
+
+        expect(log.warn).not.toHaveBeenCalled();
+    });
+
     test("should report current status after migrations", async () => {
         db = createLegacyDatabase();
         const d1 = createD1(db);

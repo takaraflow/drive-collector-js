@@ -198,6 +198,9 @@ describe("Config Module", () => {
     process.env.DB_SCHEMA_CHECK = "true";
     process.env.DB_MIGRATION_LOCK_TTL_MS = "45000";
     process.env.DB_MIGRATION_LOCK_WAIT_MS = "9000";
+    process.env.DB_SCHEMA_READY_RETRY_ATTEMPTS = "5";
+    process.env.DB_SCHEMA_READY_RETRY_INITIAL_DELAY_MS = "1500";
+    process.env.DB_SCHEMA_READY_RETRY_MAX_DELAY_MS = "12000";
 
     __resetConfigForTests();
     const config = await initConfig();
@@ -208,7 +211,10 @@ describe("Config Module", () => {
       schemaCheck: true,
       autoMigrate: true,
       migrationLockTtlMs: 45000,
-      migrationLockWaitMs: 9000
+      migrationLockWaitMs: 9000,
+      schemaReadyRetryAttempts: 5,
+      schemaReadyRetryInitialDelayMs: 1500,
+      schemaReadyRetryMaxDelayMs: 12000
     });
 
     delete process.env.CLOUDFLARE_D1_ACCOUNT_ID;
@@ -218,6 +224,9 @@ describe("Config Module", () => {
     delete process.env.DB_SCHEMA_CHECK;
     delete process.env.DB_MIGRATION_LOCK_TTL_MS;
     delete process.env.DB_MIGRATION_LOCK_WAIT_MS;
+    delete process.env.DB_SCHEMA_READY_RETRY_ATTEMPTS;
+    delete process.env.DB_SCHEMA_READY_RETRY_INITIAL_DELAY_MS;
+    delete process.env.DB_SCHEMA_READY_RETRY_MAX_DELAY_MS;
   });
 
   test("should accept legacy Cloudflare D1 and R2 worker aliases", async () => {

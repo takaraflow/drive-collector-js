@@ -45,6 +45,9 @@ describe('ServiceConfigManager 测试', () => {
         expect(serviceConfigManager.getServiceName('DB_AUTO_MIGRATE')).toBe('d1');
         expect(serviceConfigManager.getServiceName('CF_D1_DATABASE_ID')).toBe('d1');
         expect(serviceConfigManager.getServiceName('CF_D1_TOKEN')).toBe('d1');
+        expect(serviceConfigManager.getServiceName('DB_SCHEMA_READY_RETRY_ATTEMPTS')).toBe('d1');
+        expect(serviceConfigManager.getServiceName('DB_SCHEMA_READY_RETRY_INITIAL_DELAY_MS')).toBe('d1');
+        expect(serviceConfigManager.getServiceName('DB_SCHEMA_READY_RETRY_MAX_DELAY_MS')).toBe('d1');
         expect(serviceConfigManager.getServiceName('STREAM_FORWARDING_ENABLED')).toBe('streamForwarding');
         expect(serviceConfigManager.getServiceName('STREAM_RESUME_DIR')).toBe('streamForwarding');
         expect(serviceConfigManager.getServiceName('STREAM_FINALIZATION_TIMEOUT_MS')).toBe('streamForwarding');

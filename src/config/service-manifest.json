@@ -171,7 +171,10 @@
         "DB_SCHEMA_CHECK",
         "DB_AUTO_MIGRATE",
         "DB_MIGRATION_LOCK_TTL_MS",
-        "DB_MIGRATION_LOCK_WAIT_MS"
+        "DB_MIGRATION_LOCK_WAIT_MS",
+        "DB_SCHEMA_READY_RETRY_ATTEMPTS",
+        "DB_SCHEMA_READY_RETRY_INITIAL_DELAY_MS",
+        "DB_SCHEMA_READY_RETRY_MAX_DELAY_MS"
       ],
       "reinitializationStrategy": {
         "type": "reconnect",
