@@ -127,6 +127,17 @@ const createAutoProcess = (onSpawn) => {
     return proc;
 };
 
+const createClosedProcess = ({ stdout = '', stderr = '', code = 0 } = {}) => createAutoProcess((p) => {
+    if (stdout) p.stdout.emit('data', Buffer.from(stdout));
+    if (stderr) p.stderr.emit('data', Buffer.from(stderr));
+    p.stdout.emit('end');
+    p.stdout.emit('close');
+    p.stderr.emit('end');
+    p.stderr.emit('close');
+    p.emit('exit', code);
+    p.emit('close', code);
+});
+
 describe('CloudTool', () => {
     beforeEach(() => {
         vi.useRealTimers();
@@ -181,29 +192,37 @@ describe('CloudTool', () => {
             });
         });
 
-        it('should obscure legacy plain password for mega drive', async () => {
+        it('should verify and persist legacy plain password for mega drive', async () => {
             mockGetDefaultDrive.mockResolvedValue({
                 id: 'drive-mega',
                 user_id: 'user123',
                 type: 'mega',
                 config_data: JSON.stringify({ user: 'testuser', pass: 'rawpass', pass_format: 'plain' })
             });
-            mockSpawnSync.mockReturnValue({ status: 0, stdout: 'obscuredpass\n', stderr: '' });
+            mockSpawn
+                .mockImplementationOnce(() => createClosedProcess({ stdout: 'obscuredpass\n' }))
+                .mockImplementationOnce(() => createClosedProcess({ stdout: '[]' }));
 
             const result = await CloudTool._getUserConfig('user123');
             expect(result.pass).toBe('obscuredpass');
             expect(result.pass_format).toBe('rclone_obscured');
             expect(result.config_schema_version).toBe(1);
-            expect(mockSpawnSync).toHaveBeenCalledWith('rclone', ['--config', '/dev/null', 'obscure', 'rawpass'], { encoding: 'utf-8' });
-            expect(MockDriveRepository.updateConfigData).toHaveBeenCalledWith('user123', 'drive-mega', {
+            expect(result.credential_verified).toBe(true);
+            expect(result.credential_verification_version).toBe(1);
+            expect(mockSpawn.mock.calls[0][1]).toEqual(['--config', '/dev/null', 'obscure', '--', 'rawpass']);
+            expect(mockSpawn.mock.calls[1][1]).toEqual(['--config', '/dev/null', 'lsjson', '--max-depth', '1', ':mega,user="testuser",pass="obscuredpass":']);
+            expect(MockDriveRepository.updateConfigData).toHaveBeenCalledWith('user123', 'drive-mega', expect.objectContaining({
                 user: 'testuser',
                 pass: 'obscuredpass',
                 pass_format: 'rclone_obscured',
-                config_schema_version: 1
-            });
+                config_schema_version: 1,
+                credential_verified: true,
+                credential_verification_version: 1,
+                credential_migration_source: 'plain'
+            }));
         });
 
-        it('should not re-obscure canonical rclone password configs', async () => {
+        it('should not re-probe verified canonical rclone password configs', async () => {
             mockGetDefaultDrive.mockResolvedValue({
                 id: 'drive-mega',
                 user_id: 'user123',
@@ -212,7 +231,9 @@ describe('CloudTool', () => {
                     user: 'testuser',
                     pass: 'stored-obscured',
                     pass_format: 'rclone_obscured',
-                    config_schema_version: 1
+                    config_schema_version: 1,
+                    credential_verified: true,
+                    credential_verification_version: 1
                 })
             });
 
@@ -224,7 +245,7 @@ describe('CloudTool', () => {
             expect(MockDriveRepository.updateConfigData).not.toHaveBeenCalled();
         });
 
-        it('should preserve and canonicalize legacy unknown passwords that rclone can reveal', async () => {
+        it('should verify and canonicalize legacy unknown passwords when the stored credential works', async () => {
             mockGetDefaultDrive.mockResolvedValue({
                 id: 'drive-mega',
                 user_id: 'user123',
@@ -236,19 +257,83 @@ describe('CloudTool', () => {
                     config_schema_version: 1
                 })
             });
-            mockSpawnSync.mockReturnValue({ status: 0, stdout: 'plain-secret\n', stderr: '' });
+            mockSpawn.mockImplementationOnce(() => createClosedProcess({ stdout: '[]' }));
 
             const result = await CloudTool._getUserConfig('user123');
 
             expect(result.pass).toBe('stored-obscured');
             expect(result.pass_format).toBe('rclone_obscured');
-            expect(mockSpawnSync.mock.calls.some(call => call[1]?.[3] === 'obscure')).toBe(false);
-            expect(MockDriveRepository.updateConfigData).toHaveBeenCalledWith('user123', 'drive-mega', {
+            expect(result.credential_verified).toBe(true);
+            expect(mockSpawn.mock.calls[0][1]).toEqual(['--config', '/dev/null', 'lsjson', '--max-depth', '1', ':mega,user="testuser",pass="stored-obscured":']);
+            expect(mockSpawn.mock.calls.some(call => call[1]?.includes('obscure'))).toBe(false);
+            expect(MockDriveRepository.updateConfigData).toHaveBeenCalledWith('user123', 'drive-mega', expect.objectContaining({
                 user: 'testuser',
                 pass: 'stored-obscured',
                 pass_format: 'rclone_obscured',
-                config_schema_version: 1
+                config_schema_version: 1,
+                credential_verified: true,
+                credential_verification_version: 1,
+                credential_migration_source: 'stored_legacy_unknown'
+            }));
+        });
+
+        it('should repair historical canonical passwords that were actually stored as plain text', async () => {
+            mockGetDefaultDrive.mockResolvedValue({
+                id: 'drive-mega',
+                user_id: 'user123',
+                type: 'mega',
+                config_data: JSON.stringify({
+                    user: 'testuser',
+                    pass: 'rawpass',
+                    pass_format: 'rclone_obscured',
+                    config_schema_version: 1
+                })
             });
+            mockSpawn
+                .mockImplementationOnce(() => createClosedProcess({
+                    stderr: `CRITICAL | Failed to create file system for ":mega,user="testuser",pass="rawpass":": couldn't login\n`,
+                    code: 1
+                }))
+                .mockImplementationOnce(() => createClosedProcess({ stdout: 'repaired-obscured\n' }))
+                .mockImplementationOnce(() => createClosedProcess({ stdout: '[]' }));
+
+            const result = await CloudTool._getUserConfig('user123');
+
+            expect(result.pass).toBe('repaired-obscured');
+            expect(result.pass_format).toBe('rclone_obscured');
+            expect(result.credential_verified).toBe(true);
+            expect(mockSpawn.mock.calls[0][1]).toEqual(['--config', '/dev/null', 'lsjson', '--max-depth', '1', ':mega,user="testuser",pass="rawpass":']);
+            expect(mockSpawn.mock.calls[1][1]).toEqual(['--config', '/dev/null', 'obscure', '--', 'rawpass']);
+            expect(mockSpawn.mock.calls[2][1]).toEqual(['--config', '/dev/null', 'lsjson', '--max-depth', '1', ':mega,user="testuser",pass="repaired-obscured":']);
+            expect(MockDriveRepository.updateConfigData).toHaveBeenCalledWith('user123', 'drive-mega', expect.objectContaining({
+                pass: 'repaired-obscured',
+                pass_format: 'rclone_obscured',
+                credential_verified: true,
+                credential_verification_version: 1,
+                credential_migration_source: 'stored_plain_repaired_from_misclassified_rclone_obscured'
+            }));
+        });
+
+        it('should not mutate credentials when the verification probe fails transiently', async () => {
+            mockGetDefaultDrive.mockResolvedValue({
+                id: 'drive-mega',
+                user_id: 'user123',
+                type: 'mega',
+                config_data: JSON.stringify({
+                    user: 'testuser',
+                    pass: 'stored-obscured',
+                    pass_format: 'rclone_obscured',
+                    config_schema_version: 1
+                })
+            });
+            mockSpawn.mockImplementationOnce(() => createClosedProcess({ stderr: 'TIMEOUT', code: -1 }));
+
+            await expect(CloudTool._getUserConfig('user123')).rejects.toMatchObject({
+                errorCode: 'RCLONE_TRANSIENT'
+            });
+
+            expect(mockSpawn).toHaveBeenCalledTimes(1);
+            expect(MockDriveRepository.updateConfigData).not.toHaveBeenCalled();
         });
     });
 
@@ -621,7 +706,9 @@ describe('CloudTool', () => {
                     user: 'user@example.com',
                     pass: 'secret-pass',
                     pass_format: 'rclone_obscured',
-                    config_schema_version: 1
+                    config_schema_version: 1,
+                    credential_verified: true,
+                    credential_verification_version: 1
                 })
             });
             mockSpawn
@@ -956,7 +1043,9 @@ describe('CloudTool', () => {
                     user: 'u',
                     pass: 'p',
                     pass_format: 'rclone_obscured',
-                    config_schema_version: 1
+                    config_schema_version: 1,
+                    credential_verified: true,
+                    credential_verification_version: 1
                 }),
                 remote_folder: '/Stream'
             });
@@ -1028,7 +1117,14 @@ describe('CloudTool', () => {
         it('should attempt to create the configured folder when MEGA reports node not found while listing files', async () => {
             mockGetDefaultDrive.mockResolvedValue({
                 type: 'mega',
-                config_data: JSON.stringify({ user: 'u', pass: 'p' }),
+                config_data: JSON.stringify({
+                    user: 'u',
+                    pass: 'p',
+                    pass_format: 'rclone_obscured',
+                    config_schema_version: 1,
+                    credential_verified: true,
+                    credential_verification_version: 1
+                }),
                 remote_folder: '/Stream'
             });
             mockSpawn
@@ -1101,7 +1197,9 @@ describe('CloudTool', () => {
                     user: 'u',
                     pass: 'p',
                     pass_format: 'rclone_obscured',
-                    config_schema_version: 1
+                    config_schema_version: 1,
+                    credential_verified: true,
+                    credential_verification_version: 1
                 }),
                 remote_folder: '/Missing'
             });
@@ -1140,7 +1238,9 @@ describe('CloudTool', () => {
                     user: 'u',
                     pass: 'p',
                     pass_format: 'rclone_obscured',
-                    config_schema_version: 1
+                    config_schema_version: 1,
+                    credential_verified: true,
+                    credential_verification_version: 1
                 }),
                 remote_folder: '/Missing'
             });
@@ -1292,7 +1392,9 @@ describe('CloudTool', () => {
                     user: 'u',
                     pass: 'p',
                     pass_format: 'rclone_obscured',
-                    config_schema_version: 1
+                    config_schema_version: 1,
+                    credential_verified: true,
+                    credential_verification_version: 1
                 }),
                 remote_folder: '/Missing'
             });
@@ -1335,7 +1437,9 @@ describe('CloudTool', () => {
                     user: 'u',
                     pass: 'p',
                     pass_format: 'rclone_obscured',
-                    config_schema_version: 1
+                    config_schema_version: 1,
+                    credential_verified: true,
+                    credential_verification_version: 1
                 }),
                 remote_folder: '/Movies'
             });

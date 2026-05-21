@@ -65,7 +65,12 @@ export class DriveRepository {
     }
 
     static _needsLegacyPasswordFormatMigration(drive) {
-        if (!drive?.id || !drive?.user_id || !RCLONE_OBSCURED_PASSWORD_DRIVE_TYPES.includes(String(drive.type || "").toLowerCase())) {
+        if (
+            !drive?.id ||
+            !drive?.user_id ||
+            drive.status !== DRIVE_STATUSES.ACTIVE ||
+            !RCLONE_OBSCURED_PASSWORD_DRIVE_TYPES.includes(String(drive.type || "").toLowerCase())
+        ) {
             return false;
         }
         const configData = this._parseConfigData(drive.config_data);

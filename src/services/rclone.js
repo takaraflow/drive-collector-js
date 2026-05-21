@@ -16,7 +16,9 @@ import {
     RCLONE_PASSWORD_FORMATS,
     normalizePasswordFormat,
     requiresRcloneObscuredPassword,
-    isCanonicalRclonePasswordConfig
+    isCanonicalRclonePasswordConfig,
+    isVerifiedRclonePasswordConfig,
+    markVerifiedRclonePasswordConfig
 } from "../domain/drive-credentials.js";
 const log = logger.withModule ? logger.withModule('RcloneService') : logger;
 
@@ -124,6 +126,140 @@ export class CloudTool {
         };
     }
 
+    static _getRcloneCredentialCandidateFactories(password, format) {
+        const normalizedFormat = normalizePasswordFormat(format);
+        const storedPassword = String(password || "");
+        const asStored = (source) => ({
+            source,
+            create: async () => storedPassword
+        });
+        const asObscured = (source) => ({
+            source,
+            create: async () => this._obscureRequired(storedPassword)
+        });
+
+        if (normalizedFormat === RCLONE_PASSWORD_FORMATS.PLAIN) {
+            return [asObscured("plain")];
+        }
+
+        if (normalizedFormat === RCLONE_PASSWORD_FORMATS.RCLONE_OBSCURED) {
+            return [
+                asStored("stored_rclone_obscured"),
+                asObscured("stored_plain_repaired_from_misclassified_rclone_obscured")
+            ];
+        }
+
+        if (normalizedFormat === RCLONE_PASSWORD_FORMATS.LEGACY_UNKNOWN || !normalizedFormat) {
+            return [
+                asStored("stored_legacy_unknown"),
+                asObscured("legacy_plain")
+            ];
+        }
+
+        return [asObscured("unknown_format_plain")];
+    }
+
+    static async _persistVerifiedRclonePasswordConfig(activeDrive, userId, driveConfig, pass, migrationSource) {
+        if (!activeDrive?.id) return;
+
+        const verifiedConfig = markVerifiedRclonePasswordConfig(driveConfig, pass, { migrationSource });
+        try {
+            await DriveRepository.updateConfigData(activeDrive.user_id || userId, activeDrive.id, verifiedConfig);
+        } catch (error) {
+            log.warn("Failed to persist verified drive password config", {
+                userId,
+                driveId: activeDrive.id,
+                type: activeDrive.type,
+                error: error.message
+            });
+        }
+    }
+
+    static async _resolveVerifiedRclonePasswordConfig(activeDrive, userId, driveConfig, runtimeConfig) {
+        const candidateFactories = this._getRcloneCredentialCandidateFactories(
+            driveConfig.pass,
+            driveConfig.pass_format
+        );
+        const failures = [];
+        const seenPasswords = new Set();
+
+        for (const candidateFactory of candidateFactories) {
+            let candidatePass;
+            try {
+                candidatePass = await candidateFactory.create();
+            } catch (error) {
+                failures.push(this._buildFailureResult(
+                    this.sanitizeRcloneOutput(error.message),
+                    { operation: "credential_migration", remotePathScoped: false }
+                ));
+                continue;
+            }
+
+            if (!candidatePass || seenPasswords.has(candidatePass)) {
+                continue;
+            }
+            seenPasswords.add(candidatePass);
+
+            const candidateConfig = {
+                ...runtimeConfig,
+                pass: candidatePass,
+                pass_format: RCLONE_PASSWORD_FORMATS.RCLONE_OBSCURED,
+                config_schema_version: DRIVE_CONFIG_SCHEMA_VERSION
+            };
+            const connectionString = this._getConnectionString(candidateConfig);
+            const probe = await this._verifyRemoteRootAvailable(connectionString, 20000);
+
+            if (probe.available) {
+                await this._persistVerifiedRclonePasswordConfig(
+                    activeDrive,
+                    userId,
+                    driveConfig,
+                    candidatePass,
+                    candidateFactory.source
+                );
+
+                if (candidateFactory.source !== "stored_rclone_obscured") {
+                    log.info("Verified and repaired historical rclone drive credential", {
+                        userId,
+                        driveId: activeDrive.id,
+                        type: activeDrive.type,
+                        migrationSource: candidateFactory.source
+                    });
+                }
+
+                return {
+                    ...markVerifiedRclonePasswordConfig(driveConfig, candidatePass, {
+                        migrationSource: candidateFactory.source
+                    }),
+                    type: activeDrive.type
+                };
+            }
+
+            if (probe.failure?.retryable) {
+                throw this._buildFailureError(probe.failure);
+            }
+
+            if (![
+                RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID,
+                RCLONE_ERROR_CODES.DRIVE_CONFIG_INVALID,
+                RCLONE_ERROR_CODES.DRIVE_REMOTE_NOT_FOUND
+            ].includes(probe.failure?.errorCode)) {
+                throw this._buildFailureError(probe.failure);
+            }
+
+            failures.push(probe.failure);
+        }
+
+        const failure = failures.find(item => item?.errorCode === RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID) ||
+            failures.find(item => item?.errorCode === RCLONE_ERROR_CODES.DRIVE_CONFIG_INVALID) ||
+            failures[0] ||
+            this._buildFailureResult("Drive credential verification failed", {
+                operation: "credential_migration",
+                remotePathScoped: false
+            });
+        throw this._buildFailureError(failure);
+    }
+
     static async _resolvePathScopedNotFound(ret, connectionString, {
         rootTimeout = 15000,
         missingResult = null
@@ -215,27 +351,20 @@ export class CloudTool {
         
         // Allow provider to process password if present
         if (config.pass) {
-            const wasCanonical = isCanonicalRclonePasswordConfig(driveConfig);
-            config.pass = await provider.processPassword(config.pass, config);
             if (requiresRcloneObscuredPassword(activeDrive.type)) {
-                config.pass_format = RCLONE_PASSWORD_FORMATS.RCLONE_OBSCURED;
-                config.config_schema_version = DRIVE_CONFIG_SCHEMA_VERSION;
-                if (activeDrive.id && !wasCanonical) {
-                    const canonicalConfig = {
-                        ...driveConfig,
-                        pass: config.pass,
-                        pass_format: RCLONE_PASSWORD_FORMATS.RCLONE_OBSCURED,
-                        config_schema_version: DRIVE_CONFIG_SCHEMA_VERSION
-                    };
-                    try {
-                        await DriveRepository.updateConfigData(activeDrive.user_id || userId, activeDrive.id, canonicalConfig);
-                    } catch (error) {
-                        log.warn("Failed to persist canonical drive password config", {
-                            userId,
-                            driveId: activeDrive.id,
-                            error: error.message
-                        });
-                    }
+                if (isVerifiedRclonePasswordConfig(driveConfig)) {
+                    config.pass = driveConfig.pass;
+                    config.pass_format = RCLONE_PASSWORD_FORMATS.RCLONE_OBSCURED;
+                    config.config_schema_version = DRIVE_CONFIG_SCHEMA_VERSION;
+                } else {
+                    return await this._resolveVerifiedRclonePasswordConfig(activeDrive, userId, driveConfig, config);
+                }
+            } else {
+                const wasCanonical = isCanonicalRclonePasswordConfig(driveConfig);
+                config.pass = await provider.processPassword(config.pass, config);
+                if (wasCanonical) {
+                    config.pass_format = RCLONE_PASSWORD_FORMATS.RCLONE_OBSCURED;
+                    config.config_schema_version = DRIVE_CONFIG_SCHEMA_VERSION;
                 }
             }
         }

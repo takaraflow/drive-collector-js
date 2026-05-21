@@ -176,6 +176,24 @@ describe("DriveRepository", () => {
             expect(mockD1.run).not.toHaveBeenCalled();
         });
 
+        it("should not lazily migrate stale deleted drives from cache", async () => {
+            const deletedDrive = {
+                id: "drive1",
+                user_id: "user1",
+                name: "Mega",
+                type: "mega",
+                config_data: JSON.stringify({ user: "test@example.com", pass: "raw-pass" }),
+                status: "deleted",
+                is_default: 0
+            };
+            mockLocalCache.get.mockReturnValue([deletedDrive]);
+
+            const result = await DriveRepository.findByUserId("user1");
+
+            expect(result).toEqual([deletedDrive]);
+            expect(mockD1.run).not.toHaveBeenCalled();
+        });
+
         it("should fallback to D1 when cache fails", async () => {
             mockCache.get.mockRejectedValue(new Error("KV Error"));
             const d1Drives = [
