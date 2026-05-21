@@ -25,6 +25,7 @@ vi.mock("../../src/services/logger/index.js", () => ({
 }));
 
 const { DirectTransferService } = await import("../../src/services/DirectTransferService.js");
+const { RCLONE_ERROR_CODES } = await import("../../src/domain/rclone-error.js");
 
 function createProcess({ exitCode = 0, signal = null, stderr = "" } = {}) {
   const proc = new EventEmitter();
@@ -830,6 +831,45 @@ describe("DirectTransferService", () => {
       "Direct transfer failed closed",
       expect.objectContaining({
         taskId: "task-string-strict",
+        fallbackAllowed: false
+      })
+    );
+  });
+
+  test("classifies rclone over-quota stderr as a drive quota failure", async () => {
+    const quotaStderr = `{"time":"2026-05-21T17:49:45.876097777Z","level":"notice","msg":"Failed to rcat with 2 errors: last error was: upload file failed to create session: [REDACTED] over quota","source":"slog/logger.go:256"}`;
+    const proc = createProcess({ exitCode: 1, stderr: quotaStderr });
+    const stdin = createWritable(proc);
+    const stagingName = ".drive-collector-task-quota-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-quota", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "file.bin",
+      config: {
+        directTransfer: { enabled: true, fallbackToLocal: false },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false,
+      errorCode: RCLONE_ERROR_CODES.DRIVE_QUOTA_EXCEEDED,
+      retryable: false,
+      userRetryable: true
+    });
+    expect(result.userMessage).toBe("目标网盘空间不足。请清理空间或更换保存目录后再重试。");
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
+    expect(loggerFns.warn).toHaveBeenCalledWith(
+      "Direct transfer failed closed",
+      expect.objectContaining({
+        taskId: "task-quota",
+        errorCode: RCLONE_ERROR_CODES.DRIVE_QUOTA_EXCEEDED,
         fallbackAllowed: false
       })
     );

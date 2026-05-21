@@ -88,6 +88,11 @@ describe("rclone error classification", () => {
             retryable: false,
             userRetryable: true
         });
+        expect(classifyRcloneError("upload file failed to create session: [REDACTED] over quota")).toMatchObject({
+            code: RCLONE_ERROR_CODES.DRIVE_QUOTA_EXCEEDED,
+            retryable: false,
+            userRetryable: true
+        });
         expect(classifyRcloneError("Failed to copy: permission denied")).toMatchObject({
             code: RCLONE_ERROR_CODES.DRIVE_PERMISSION_DENIED,
             retryable: false,

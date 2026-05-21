@@ -37,6 +37,7 @@ const AUTH_ERROR_PATTERNS = [
 
 const QUOTA_ERROR_PATTERNS = [
     /quota exceeded/i,
+    /over quota/i,
     /insufficient (?:storage|space)/i,
     /not enough (?:storage|space)/i,
     /storage .*full/i,
