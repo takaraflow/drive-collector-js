@@ -152,6 +152,19 @@ export class CloudTool {
             return { success: true };
         }
 
+        try {
+            await this._resolvePathScopedNotFound(ret, connectionString);
+        } catch (error) {
+            return {
+                success: false,
+                error: error.error || error.message,
+                retryable: error.retryable === true,
+                errorCode: error.errorCode || RCLONE_ERROR_CODES.UNKNOWN,
+                userMessage: error.userMessage || getRcloneErrorUserMessage(error.errorCode),
+                userRetryable: error.userRetryable !== false
+            };
+        }
+
         return this._buildFailureResult(
             this._buildRcloneError(ret, `rclone mkdir exited with code ${ret.code}`),
             { operation: "mkdir", remotePathScoped: true }
