@@ -17,7 +17,7 @@ const getLog = () => dependencyContainer.get('logger').withModule('TaskManager')
 const STRICT_DIRECT_TRANSFER_ERROR_CODE = 'DIRECT_TRANSFER_STRICT_UNAVAILABLE';
 
 function isStrictDirectTransfer(config) {
-    return parseBoolean(config.directTransfer?.enabled, true) && !parseBoolean(config.directTransfer?.fallbackToLocal, true);
+    return parseBoolean(config.directTransfer?.enabled, true) && !parseBoolean(config.directTransfer?.fallbackToLocal, false);
 }
 
 function createStrictDirectTransferError(reason, detail = null) {

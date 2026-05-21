@@ -160,6 +160,7 @@ vi.mock('../../src/config/index.js', () => ({
     downloadDir: '/tmp/drive-collector-ssot-smoke',
     remoteFolder: '/smoke',
     remoteName: 'drive',
+    directTransfer: { enabled: false, fallbackToLocal: true },
     streamForwarding: { enabled: false },
     oss: {}
   }))

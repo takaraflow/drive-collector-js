@@ -124,16 +124,22 @@ export class DriveRepository {
         }
 
         let drives = localCache.get(cacheKey);
-        if (drives !== null) {
+        if (Array.isArray(drives) && drives.length > 0) {
             return await this._migrateLegacyPasswordFormats(drives);
+        }
+        if (drives !== null) {
+            localCache.del(cacheKey);
         }
 
         try {
             drives = await cache.get(this.getDriveKey(userId), "json");
-            if (drives) {
+            if (Array.isArray(drives) && drives.length > 0) {
                 const migratedDrives = await this._migrateLegacyPasswordFormats(drives);
                 localCache.set(cacheKey, migratedDrives, 60 * 1000);
                 return migratedDrives;
+            }
+            if (Array.isArray(drives)) {
+                await cache.delete(this.getDriveKey(userId)).catch(() => {});
             }
         } catch (cacheError) {
             log.warn(`Cache unavailable for ${userId}, falling back to D1:`, cacheError);
@@ -472,7 +478,11 @@ export class DriveRepository {
 
     static async getDefaultDrive(userId) {
         const drives = await this.findByUserId(userId);
-        if (!drives || drives.length === 0) return null;
+        if (!drives || drives.length === 0) {
+            const d1Drives = await this.findByUserId(userId, true);
+            if (!d1Drives || d1Drives.length === 0) return null;
+            return d1Drives.find(isDefaultDrive) || d1Drives[0];
+        }
         return drives.find(isDefaultDrive) || drives[0];
     }
 

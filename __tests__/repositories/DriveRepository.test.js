@@ -101,6 +101,27 @@ describe("DriveRepository", () => {
             expect(result).toEqual(mockDrives);
         });
 
+        it("should treat cached empty drive arrays as stale and read through to D1", async () => {
+            const d1Drives = [
+                { id: "drive1", user_id: "user1", status: "active", is_default: 0 }
+            ];
+            mockLocalCache.get.mockReturnValue([]);
+            mockCache.get.mockResolvedValue([]);
+            mockD1.fetchAll.mockResolvedValue(d1Drives);
+
+            const result = await DriveRepository.findByUserId("user1");
+
+            expect(mockLocalCache.del).toHaveBeenCalledWith("drive_user1");
+            expect(mockCache.delete).toHaveBeenCalledWith("drive:user1");
+            expect(mockD1.fetchAll).toHaveBeenCalledWith(
+                "SELECT id, user_id, name, type, config_data, remote_folder, status, is_default, created_at FROM drives WHERE user_id = ? AND status = ? ORDER BY is_default DESC, created_at DESC",
+                ["user1", "active"]
+            );
+            expect(mockCache.set).toHaveBeenCalledWith("drive:user1", d1Drives);
+            expect(mockLocalCache.set).toHaveBeenCalledWith("drive_user1", d1Drives, 60 * 1000);
+            expect(result).toEqual(d1Drives);
+        });
+
         it("should return D1 drive array when cache miss", async () => {
             const mockDrives = [
                 { id: "drive1", user_id: "user1", status: "active" },
@@ -676,6 +697,21 @@ describe("DriveRepository", () => {
             mockD1.fetchAll.mockResolvedValue(drives);
 
             await expect(DriveRepository.getDefaultDrive("user1")).resolves.toEqual(drives[0]);
+        });
+
+        it("should resolve default drive from D1 when derived caches contain stale empty arrays", async () => {
+            const drives = [
+                { id: "drive-fresh", user_id: "user1", is_default: 0, status: "active" }
+            ];
+            mockLocalCache.get.mockReturnValue([]);
+            mockCache.get.mockResolvedValue([]);
+            mockD1.fetchAll.mockResolvedValue(drives);
+
+            await expect(DriveRepository.getDefaultDrive("user1")).resolves.toEqual(drives[0]);
+            expect(mockD1.fetchAll).toHaveBeenCalledWith(
+                "SELECT id, user_id, name, type, config_data, remote_folder, status, is_default, created_at FROM drives WHERE user_id = ? AND status = ? ORDER BY is_default DESC, created_at DESC",
+                ["user1", "active"]
+            );
         });
 
         it("should set exactly one active default drive for the user", async () => {

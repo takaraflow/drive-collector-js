@@ -445,6 +445,39 @@ describe("DirectTransferService", () => {
     );
   });
 
+  test("fails closed by default when fallback is not explicitly enabled", async () => {
+    const proc = createProcess({ exitCode: 1, stderr: "i/o timeout" });
+    const stdin = createWritable(proc);
+    const stagingName = ".drive-collector-task-default-strict-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-default-strict", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "file.bin",
+      config: {
+        directTransfer: { enabled: true },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false
+    });
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
+    expect(loggerFns.warn).toHaveBeenCalledWith(
+      "Direct transfer failed closed",
+      expect.objectContaining({
+        taskId: "task-default-strict",
+        fallbackAllowed: false
+      })
+    );
+  });
+
   test("retries retryable direct transfer timeouts before falling back", async () => {
     const firstProc = createProcess();
     const secondProc = createProcess();

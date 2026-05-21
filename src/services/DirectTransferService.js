@@ -307,7 +307,7 @@ export class DirectTransferService {
     }
 
     _isLocalFallbackAllowed(config) {
-        return parseBoolean(config.directTransfer?.fallbackToLocal, true);
+        return parseBoolean(config?.directTransfer?.fallbackToLocal, false);
     }
 
     _buildFallbackResult(config, reason, extra = {}) {
@@ -472,7 +472,7 @@ export class DirectTransferService {
                     fileName,
                     userId,
                     reason,
-                    error: result?.error
+                    error: redactSensitiveText(result?.error || "delete remote staging file failed")
                 });
             }
         } catch (error) {
@@ -480,7 +480,7 @@ export class DirectTransferService {
                 fileName,
                 userId,
                 reason,
-                error: error.message
+                error: redactSensitiveText(error?.message || String(error))
             });
         }
     }

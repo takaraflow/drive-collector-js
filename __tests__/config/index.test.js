@@ -337,7 +337,7 @@ describe("Config Module", () => {
     delete process.env.INSTANCE_SECRET;
   });
 
-  test("should default direct transfer to enabled with local fallback", async () => {
+  test("should default direct transfer to strict zero-disk mode", async () => {
     delete process.env.DIRECT_TRANSFER_ENABLED;
     delete process.env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL;
     delete process.env.DIRECT_TRANSFER_TIMEOUT_MS;
@@ -347,7 +347,7 @@ describe("Config Module", () => {
 
     expect(config.directTransfer).toEqual({
       enabled: true,
-      fallbackToLocal: true,
+      fallbackToLocal: false,
       timeoutMs: 21600000,
       maxAttempts: 3,
       retryDelayMs: 1000

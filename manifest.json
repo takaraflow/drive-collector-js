@@ -549,7 +549,7 @@
       "DIRECT_TRANSFER_FALLBACK_TO_LOCAL": {
         "type": "boolean",
         "required": false,
-        "default": true,
+        "default": false,
         "description": "Allow preferred direct streaming to fall back to local file staging. Set false for strict zero-disk mode."
       },
       "DIRECT_TRANSFER_TIMEOUT_MS": {

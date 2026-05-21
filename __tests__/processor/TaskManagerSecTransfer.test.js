@@ -3,19 +3,27 @@ vi.mock("../../src/config/index.js", () => ({
     config: {
         downloadDir: "/tmp/downloads",
         remoteFolder: "remote_folder",
+        directTransfer: { enabled: false, fallbackToLocal: true },
+        streamForwarding: { enabled: false }
     },
     getConfig: () => ({
         downloadDir: "/tmp/downloads",
         remoteFolder: "remote_folder",
+        directTransfer: { enabled: false, fallbackToLocal: true },
+        streamForwarding: { enabled: false }
     }),
     default: {
         config: {
             downloadDir: "/tmp/downloads",
             remoteFolder: "remote_folder",
+            directTransfer: { enabled: false, fallbackToLocal: true },
+            streamForwarding: { enabled: false }
         },
         getConfig: () => ({
             downloadDir: "/tmp/downloads",
             remoteFolder: "remote_folder",
+            directTransfer: { enabled: false, fallbackToLocal: true },
+            streamForwarding: { enabled: false }
         })
     }
 }));
@@ -1066,6 +1074,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
                 downloadDir: "/tmp/downloads",
                 remoteFolder: "remote_folder",
                 port: 3000,
+                directTransfer: { enabled: false, fallbackToLocal: true },
                 streamForwarding: {
                     enabled: true,
                     lbUrl: "https://lb.example.com",
@@ -1138,6 +1147,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
                 downloadDir: "/tmp/downloads",
                 remoteFolder: "remote_folder",
                 port: 3000,
+                directTransfer: { enabled: false, fallbackToLocal: true },
                 streamForwarding: {
                     enabled: true,
                     lbUrl: "https://lb.example.com",
@@ -1214,6 +1224,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
                 downloadDir: "/tmp/downloads",
                 remoteFolder: "remote_folder",
                 port: 3000,
+                directTransfer: { enabled: false, fallbackToLocal: true },
                 streamForwarding: {
                     enabled: true,
                     lbUrl: "https://lb.example.com",
@@ -1366,6 +1377,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
                 downloadDir: "/tmp/downloads",
                 remoteFolder: "remote_folder",
                 port: 3000,
+                directTransfer: { enabled: false, fallbackToLocal: true },
                 streamForwarding: {
                     enabled: true,
                     lbUrl: "https://lb.example.com",
