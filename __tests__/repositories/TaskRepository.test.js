@@ -238,14 +238,17 @@ describe('TaskRepository', () => {
 
             await TaskRepository.findStalledTasks(3600000, { includeRetryableFailed: true });
 
-            expect(mockD1.fetchAll).toHaveBeenCalledWith(
-                expect.stringContaining("error_msg LIKE '%Circuit breaker is OPEN%'"),
-                [
-                    TASK_STATUSES.FAILED,
-                    expect.any(Number),
-                    TaskRepository.STALLED_TASKS_DEFAULT_LIMIT
-                ]
-            );
+            const [sql, params] = mockD1.fetchAll.mock.calls[0];
+            expect(sql).toContain("error_msg LIKE ?");
+            expect(params).toEqual([
+                TASK_STATUSES.FAILED,
+                expect.any(Number),
+                ...TaskRepository.RETRYABLE_FAILED_ERROR_PATTERNS,
+                TaskRepository.STALLED_TASKS_DEFAULT_LIMIT
+            ]);
+            expect(params).toContain("%Circuit breaker is OPEN%");
+            expect(params).toContain("%TIMEOUT%");
+            expect(params).toContain("%RCLONE_TRANSIENT%");
         });
 
         it('should not include retryable failed SQL when not requested', async () => {
@@ -257,7 +260,7 @@ describe('TaskRepository', () => {
             const statements = mockD1.batch.mock.calls.at(-1)[0];
             expect(statements).toHaveLength(TASK_ACTIVE_STATUSES.length);
             expect(statements[0].sql).toContain("status = ?");
-            expect(statements[0].sql).not.toContain("Recovery enqueue failed");
+            expect(statements[0].sql).not.toContain("error_msg LIKE");
             expect(statements[0].params).toEqual([
                 TASK_ACTIVE_STATUSES[0],
                 expect.any(Number),
@@ -293,6 +296,7 @@ describe('TaskRepository', () => {
             expect(mockD1.fetchAll.mock.calls[0][1]).toEqual([
                 TASK_STATUSES.FAILED,
                 expect.any(Number),
+                ...TaskRepository.RETRYABLE_FAILED_ERROR_PATTERNS,
                 TaskRepository.STALLED_TASKS_DEFAULT_LIMIT - 1
             ]);
         });

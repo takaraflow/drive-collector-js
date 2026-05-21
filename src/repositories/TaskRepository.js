@@ -57,6 +57,21 @@ export class TaskRepository {
     static ACTIVE_TASK_PREFIXES = [CACHE_KEYS.prefixes.taskStatus, CACHE_KEYS.prefixes.consistentTask];
     static INSTANCE_PREFIX = CACHE_KEYS.prefixes.instance;
     static INSTANCE_STALE_MS = 2 * 60 * 1000;
+    static RETRYABLE_FAILED_ERROR_PATTERNS = Object.freeze([
+        "%Circuit breaker is OPEN%",
+        "%qstash%",
+        "%Queue enqueue failed%",
+        "%Recovery enqueue failed%",
+        "%TIMEOUT%",
+        "%RCLONE_TRANSIENT%",
+        "%timed out%",
+        "%temporary failure%",
+        "%unexpected EOF%",
+        "%Network connection lost%",
+        "%fetch failed%",
+        "%ETIMEDOUT%",
+        "%ECONNRESET%"
+    ]);
 
     static _getChanges(result) {
         if (!result) return 0;
@@ -93,20 +108,25 @@ export class TaskRepository {
     }
 
     static _retryableFailedStalledTaskStatement(deadLine, limit) {
+        const predicates = this.RETRYABLE_FAILED_ERROR_PATTERNS
+            .map(() => "error_msg LIKE ?")
+            .join("\n                      OR ");
         return {
             sql: `SELECT ${this.STALLED_TASK_COLUMNS}
                   FROM tasks
                   WHERE status = ?
                     AND updated_at < ?
                     AND (
-                      error_msg LIKE '%Circuit breaker is OPEN%'
-                      OR error_msg LIKE '%qstash%'
-                      OR error_msg LIKE '%Queue enqueue failed%'
-                      OR error_msg LIKE '%Recovery enqueue failed%'
+                      ${predicates}
                     )
                   ORDER BY updated_at ASC, created_at ASC
                   LIMIT ?`,
-            params: [TASK_STATUSES.FAILED, deadLine, limit]
+            params: [
+                TASK_STATUSES.FAILED,
+                deadLine,
+                ...this.RETRYABLE_FAILED_ERROR_PATTERNS,
+                limit
+            ]
         };
     }
 

@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import { Button } from "telegram/tl/custom/button.js";
 import { dependencyContainer } from "../services/DependencyContainer.js";
-import { TASK_EVENTS, TASK_STATUSES } from "../domain/task-state-machine.js";
+import { TASK_ACTIVE_STATUSES, TASK_EVENTS, TASK_STATUSES, TASK_TERMINAL_STATUSES } from "../domain/task-state-machine.js";
 import { escapeHTML } from "../utils/common.js";
 import {
     isTaskProcessingLockBusyError,
@@ -15,6 +15,7 @@ import {
     classifyInfrastructureError,
     isRetryableInfrastructureError
 } from "../domain/infrastructure-error.js";
+import { isRetryableRcloneError } from "../domain/rclone-error.js";
 import {
     attachClaimLease,
     getClaimFenceOptions
@@ -38,6 +39,8 @@ import { downloadExternalUrlTask } from "./TaskManager/TaskManager.external-down
 // 获取依赖项的辅助函数
 const getDeps = () => dependencyContainer.getAll();
 const getLog = () => getDeps().logger.withModule('TaskManager');
+const ACTIVE_STATUS_SET = new Set(TASK_ACTIVE_STATUSES);
+const TERMINAL_STATUS_SET = new Set(TASK_TERMINAL_STATUSES);
 const TELEGRAM_CLIENT_LOCK_KEY = "telegram_client";
 const STALLED_RECOVERY_LOCK_KEY = "task_recovery:stalled";
 const STALLED_RECOVERY_LOCK_TTL_SECONDS = 120;
@@ -564,7 +567,25 @@ export class TaskManager {
         if (row?.status !== TASK_STATUSES.FAILED) return false;
         const message = row.error_msg || row.error || "";
         if (!message) return false;
-        return this._isRetryableInfrastructureError(new Error(message));
+        return this._isRetryableInfrastructureError(new Error(message)) || isRetryableRcloneError(message);
+    }
+
+    static _resolveBlockedWebhookResult(kind, transitionResult, fallbackStatus = null) {
+        const status = transitionResult?.fromStatus || transitionResult?.latestStatus || fallbackStatus || null;
+        if (ACTIVE_STATUS_SET.has(status)) {
+            return {
+                success: false,
+                statusCode: 503,
+                message: `${kind} task is active; retry later`
+            };
+        }
+        return {
+            success: true,
+            statusCode: 200,
+            message: TERMINAL_STATUS_SET.has(status)
+                ? "Task already terminal"
+                : `Ignored by ${kind} state machine`
+        };
     }
 
     /**
@@ -1114,7 +1135,7 @@ export class TaskManager {
             });
             if (claim.blocked) {
                 log.info("Download webhook ignored by state machine", { taskId, reason: claim.reason, status: claim.fromStatus || claim.latestStatus });
-                return { success: true, statusCode: 200, message: "Ignored by task state machine" };
+                return this._resolveBlockedWebhookResult('download', claim, dbTask.status);
             }
             didClaim = true;
 
@@ -1216,7 +1237,7 @@ export class TaskManager {
             });
             if (uploadStart.blocked) {
                 log.info("Upload webhook ignored by state machine", { taskId, reason: uploadStart.reason, status: uploadStart.fromStatus || uploadStart.latestStatus });
-                return { success: true, statusCode: 200, message: "Ignored by task state machine" };
+                return this._resolveBlockedWebhookResult('upload', uploadStart, dbTask.status);
             }
             didClaim = true;
 

@@ -184,7 +184,7 @@ vi.mock('fs', () => ({
 }));
 
 const { TaskManager } = await import('../../src/processor/TaskManager.js');
-const { TASK_EVENTS } = await import('../../src/domain/task-state-machine.js');
+const { TASK_EVENTS, TASK_STATUSES } = await import('../../src/domain/task-state-machine.js');
 const { safeEdit } = await import('../../src/utils/common.js');
 const { CloudTool } = await import('../../src/services/rclone.js');
 
@@ -366,6 +366,35 @@ describe('TaskManager queue/recovery closure', () => {
             expect.objectContaining({
                 _meta: expect.objectContaining({
                     queueAttempt: `${TASK_EVENTS.RETRY}:failed-1:1700000000000`
+                })
+            })
+        );
+    });
+
+    it('retries failed direct-transfer transient tasks during stalled recovery', async () => {
+        const result = await TaskManager._restoreBatchTasks('chat-1', [{
+            id: 'failed-timeout-1',
+            user_id: 'u1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'failed-timeout.mp4',
+            status: 'failed',
+            error_msg: 'Zero-disk direct transfer failed: TIMEOUT RCLONE_TRANSIENT'
+        }]);
+
+        expect(result).toMatchObject({ enqueued: 1, pendingRetry: 0, failed: 0 });
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            'failed-timeout-1',
+            TASK_EVENTS.RETRY,
+            'Downloading interrupted during recovery',
+            expect.objectContaining({ source: 'restore_retryable_failed_task' })
+        );
+        expect(mockQueueService.enqueueDownloadTask).toHaveBeenCalledWith(
+            'failed-timeout-1',
+            expect.objectContaining({
+                _meta: expect.objectContaining({
+                    queueAttempt: `${TASK_EVENTS.RETRY}:failed-timeout-1:1700000000000`
                 })
             })
         );
@@ -596,6 +625,99 @@ describe('TaskManager queue/recovery closure', () => {
         );
         expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalled();
         expect(mockInstanceCoordinator.releaseTaskLock).not.toHaveBeenCalled();
+    });
+
+    it('returns 503 when active download webhook is blocked by the state machine', async () => {
+        mockTaskRepository.findById.mockResolvedValue({
+            id: 'task-1',
+            user_id: 'user-1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'test.mp4',
+            status: TASK_STATUSES.UPLOADING
+        });
+        mockTaskRepository.transitionStatus.mockResolvedValueOnce({
+            changed: false,
+            blocked: true,
+            reason: 'Task status changed concurrently from downloading to uploading',
+            fromStatus: TASK_STATUSES.UPLOADING,
+            toStatus: TASK_STATUSES.DOWNLOADING
+        });
+        const downloadSpy = vi.spyOn(TaskManager, 'downloadTask');
+
+        const result = await TaskManager.handleDownloadWebhook('task-1');
+
+        expect(result).toMatchObject({
+            success: false,
+            statusCode: 503,
+            message: 'download task is active; retry later'
+        });
+        expect(downloadSpy).not.toHaveBeenCalled();
+        expect(mockInstanceCoordinator.releaseTaskLock).toHaveBeenCalledWith('task-1');
+        downloadSpy.mockRestore();
+    });
+
+    it('acks terminal download webhook blocked by the state machine', async () => {
+        mockTaskRepository.findById.mockResolvedValue({
+            id: 'task-1',
+            user_id: 'user-1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'test.mp4',
+            status: TASK_STATUSES.COMPLETED
+        });
+        mockTaskRepository.transitionStatus.mockResolvedValueOnce({
+            changed: false,
+            blocked: true,
+            reason: 'Cannot transition task from completed to downloading',
+            fromStatus: TASK_STATUSES.COMPLETED,
+            toStatus: TASK_STATUSES.DOWNLOADING
+        });
+        const downloadSpy = vi.spyOn(TaskManager, 'downloadTask');
+
+        const result = await TaskManager.handleDownloadWebhook('task-1');
+
+        expect(result).toMatchObject({
+            success: true,
+            statusCode: 200,
+            message: 'Task already terminal'
+        });
+        expect(downloadSpy).not.toHaveBeenCalled();
+        expect(mockInstanceCoordinator.releaseTaskLock).toHaveBeenCalledWith('task-1');
+        downloadSpy.mockRestore();
+    });
+
+    it('returns 503 when active upload webhook is blocked by the state machine', async () => {
+        mockTaskRepository.findById.mockResolvedValue({
+            id: 'task-1',
+            user_id: 'user-1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'test.mp4',
+            status: TASK_STATUSES.DOWNLOADING
+        });
+        mockTaskRepository.transitionStatus.mockResolvedValueOnce({
+            changed: false,
+            blocked: true,
+            reason: 'Cannot transition task from downloading to uploading',
+            fromStatus: TASK_STATUSES.DOWNLOADING,
+            toStatus: TASK_STATUSES.UPLOADING
+        });
+        const uploadSpy = vi.spyOn(TaskManager, 'uploadTask');
+
+        const result = await TaskManager.handleUploadWebhook('task-1');
+
+        expect(result).toMatchObject({
+            success: false,
+            statusCode: 503,
+            message: 'upload task is active; retry later'
+        });
+        expect(uploadSpy).not.toHaveBeenCalled();
+        expect(mockInstanceCoordinator.releaseTaskLock).toHaveBeenCalledWith('task-1');
+        uploadSpy.mockRestore();
     });
 
     it('returns 503 without touching task state when upload processing lock is busy', async () => {

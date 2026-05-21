@@ -32,6 +32,24 @@ function createStrictDirectTransferError(reason, detail = null) {
     return error;
 }
 
+function createStrictDirectTransferFailure(result = {}) {
+    const reason = result.error || result.reason || "direct-transfer-failed";
+    const safeReason = String(reason || "direct-transfer-failed");
+    const error = new Error(`Zero-disk direct transfer failed: ${safeReason}`);
+    error.errorCode = STRICT_DIRECT_TRANSFER_ERROR_CODE;
+    error.retryable = false;
+    error.userRetryable = result.userRetryable === true || result.retryable === true;
+    error.userMessage = result.userMessage || (
+        error.userRetryable
+            ? `零落盘直传暂时失败：${safeReason}。可以稍后重试；系统不会改用本地落盘。`
+            : `零落盘直传无法继续：${safeReason}。为避免本地落盘，任务已停止。`
+    );
+    error.diagnosticMessage = "Zero-disk direct transfer failed; local fallback disabled";
+    error.directTransferErrorCode = result.errorCode;
+    error.directTransferReason = safeReason;
+    return error;
+}
+
 /**
  * Download Task - Responsible for MTProto download phase
  */
@@ -132,7 +150,7 @@ export async function downloadTask(task) {
                     throw e;
                 }
                 const isCancel = e.message === "CANCELLED";
-                if (isRetryableInfrastructureError(e) || e?.retryable === true) {
+                if (e?.retryable !== false && (isRetryableInfrastructureError(e) || e?.retryable === true)) {
                     log.warn("Download phase hit retryable infrastructure error; leaving state for webhook/recovery retry", {
                         taskId: task.id,
                         error: e.message,
@@ -563,27 +581,34 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
         return true;
     }
 
-    if (result?.fallback) {
+    const shouldFallbackToLocal = !strictDirectTransfer && (result?.fallback || result?.retryable === true);
+    if (shouldFallbackToLocal) {
         if (strictDirectTransfer) {
-            throw createStrictDirectTransferError(result.error || result.reason || "direct-transfer-fallback");
+            throw createStrictDirectTransferFailure(result);
         }
         if (transferPlan) {
             transferPlan.skipStreamForwarding = true;
         }
+        const fallbackSource = result?.fallback ? 'direct_transfer_fallback' : 'direct_transfer_transient_fallback';
         const resetTransition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.RESET_STREAM_DOWNLOAD, result.error || result.reason || null, {
             ...getClaimFenceOptions(task),
             returnResult: true,
             allowNoop: true,
-            source: 'direct_transfer_fallback'
+            source: fallbackSource
         });
         if (resetTransition.blocked) {
             throw new Error(`Direct transfer fallback rejected: ${resetTransition.reason || 'state transition blocked'}`);
         }
         log.info("Direct transfer fell back to local-capable transfer path", {
             taskId: task.id,
-            reason: result.error || result.reason || 'unsupported'
+            reason: result.error || result.reason || 'unsupported',
+            source: fallbackSource
         });
         return false;
+    }
+
+    if (strictDirectTransfer) {
+        throw createStrictDirectTransferFailure(result);
     }
 
     const error = new Error(result?.error || "Direct transfer failed");

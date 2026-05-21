@@ -414,6 +414,56 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         getAllSpy.mockRestore();
     });
 
+    test("direct transfer transient timeout falls back to local staging when local fallback is enabled", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: true, reason: "rclone-rcat" });
+        mockDirectTransferService.transferTelegramMediaToRemote.mockResolvedValue({
+            success: false,
+            fallback: false,
+            error: "TIMEOUT",
+            errorCode: "RCLONE_TRANSIENT",
+            retryable: true,
+            userRetryable: true
+        });
+        mockClient.downloadMedia.mockResolvedValue();
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                directTransfer: { enabled: true, fallbackToLocal: true },
+                streamForwarding: { enabled: false }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "reset_stream_download",
+            "TIMEOUT",
+            expect.objectContaining({ source: "direct_transfer_transient_fallback" })
+        );
+        expect(mockClient.downloadMedia).toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).toHaveBeenCalledWith(
+            "task_1",
+            expect.objectContaining({ userId: "user_1" })
+        );
+        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+            "task_1",
+            "fail",
+            expect.anything(),
+            expect.objectContaining({ source: "handleTaskFailure" })
+        );
+
+        getAllSpy.mockRestore();
+    });
+
     test("direct transfer skips OSS user drive and uses local staging", async () => {
         mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
         mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
@@ -721,7 +771,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
             "task_1",
             "fail",
-            expect.stringContaining("Zero-disk direct transfer unavailable: rcat failed"),
+            "Zero-disk direct transfer failed; local fallback disabled",
             expect.objectContaining({ source: "handleTaskFailure" })
         );
 
@@ -1121,7 +1171,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         getAllSpy.mockRestore();
     });
 
-    test("strict zero-disk direct transfer timeout stays retryable instead of failing the task", async () => {
+    test("strict zero-disk direct transfer timeout fails closed without local staging", async () => {
         mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
         mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
         mockDirectTransferService.canAttempt.mockReturnValue({ supported: true, reason: "rclone-rcat" });
@@ -1147,14 +1197,14 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         };
         const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
 
-        await expect(TaskManager.downloadTask(task)).rejects.toThrow("TIMEOUT");
+        await TaskManager.downloadTask(task);
 
         expect(mockClient.downloadMedia).not.toHaveBeenCalled();
         expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
-        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
             "task_1",
             "fail",
-            expect.anything(),
+            "Zero-disk direct transfer failed; local fallback disabled",
             expect.objectContaining({ source: "handleTaskFailure" })
         );
 

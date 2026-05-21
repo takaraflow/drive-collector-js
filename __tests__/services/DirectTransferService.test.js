@@ -336,6 +336,51 @@ describe("DirectTransferService", () => {
     const result = await resultPromise;
 
     expect(result).toMatchObject({ success: false, fallback: true });
+    expect(result).toMatchObject({
+      errorCode: "RCLONE_TRANSIENT",
+      retryable: true,
+      userRetryable: true
+    });
+    expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
+  });
+
+  test("keeps transient timeout metadata but disallows local fallback in strict zero-disk mode", async () => {
+    vi.useFakeTimers();
+    const proc = createProcess();
+    const stdin = createWritable();
+    const stagingName = ".drive-collector-task-timeout-strict-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+    client.iterDownload.mockReturnValue((async function* () {
+      yield Buffer.from("hello");
+    })());
+
+    const resultPromise = service.transferTelegramMediaToRemote({
+      task: { id: "task-timeout-strict", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 5 },
+      fileName: "file.bin",
+      config: {
+        directTransfer: {
+          enabled: true,
+          fallbackToLocal: false,
+          timeoutMs: 100
+        }
+      }
+    });
+
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(100);
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false,
+      errorCode: "RCLONE_TRANSIENT",
+      retryable: true,
+      userRetryable: true
+    });
     expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
     expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
   });
