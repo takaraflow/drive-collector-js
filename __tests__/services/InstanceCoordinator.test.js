@@ -490,6 +490,56 @@ describe("Core InstanceCoordinator Tests", () => {
         );
     });
 
+    test("should release stale task processing lock with atomic compare delete", async () => {
+        const staleLock = {
+            instanceId: 'old-instance',
+            leaseId: 'old-instance:lease-1',
+            acquiredAt: fixedTime - 180000,
+            ttl: 600
+        };
+        mockCacheGet.mockResolvedValue(staleLock);
+        mockCacheDeleteIfEquals.mockResolvedValue(true);
+
+        const released = await instanceCoordinator.releaseStaleTaskLock('task-1');
+
+        expect(released).toBe(true);
+        expect(mockCacheDeleteIfEquals).toHaveBeenCalledWith(
+            'lock:task:task-1',
+            staleLock,
+            expect.objectContaining({ requireAtomic: true })
+        );
+    });
+
+    test("should not release fresh task processing lock during stale recovery", async () => {
+        const freshLock = {
+            instanceId: 'old-instance',
+            leaseId: 'old-instance:lease-1',
+            acquiredAt: fixedTime - 30000,
+            ttl: 600
+        };
+        mockCacheGet.mockResolvedValue(freshLock);
+
+        const released = await instanceCoordinator.releaseStaleTaskLock('task-1');
+
+        expect(released).toBe(false);
+        expect(mockCacheDeleteIfEquals).not.toHaveBeenCalled();
+    });
+
+    test("should not release stale task lock without atomic conditional delete", async () => {
+        cache.deleteIfEquals = undefined;
+        mockCacheGet.mockResolvedValue({
+            instanceId: 'old-instance',
+            leaseId: 'old-instance:lease-1',
+            acquiredAt: fixedTime - 180000,
+            ttl: 600
+        });
+
+        const released = await instanceCoordinator.releaseStaleTaskLock('task-1');
+
+        expect(released).toBe(false);
+        expect(mockCacheDelete).not.toHaveBeenCalled();
+    });
+
     test("should verify lock ownership", async () => {
         instanceCoordinator.instanceId = 'owner-instance';
         const lockKey = 'owner-lock';

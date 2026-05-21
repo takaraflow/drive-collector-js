@@ -27,6 +27,7 @@ const mockInstanceCoordinator = {
     acquireLock: vi.fn(),
     releaseLock: vi.fn(),
     acquireTaskLock: vi.fn(),
+    releaseStaleTaskLock: vi.fn(),
     releaseTaskLock: vi.fn()
 };
 
@@ -223,6 +224,7 @@ describe('TaskManager queue/recovery closure', () => {
         mockInstanceCoordinator.acquireLock.mockResolvedValue(true);
         mockInstanceCoordinator.releaseLock.mockResolvedValue(true);
         mockInstanceCoordinator.acquireTaskLock.mockResolvedValue(true);
+        mockInstanceCoordinator.releaseStaleTaskLock.mockResolvedValue(false);
         mockInstanceCoordinator.releaseTaskLock.mockResolvedValue(true);
         mockFs.existsSync.mockReturnValue(true);
     });
@@ -752,6 +754,65 @@ describe('TaskManager queue/recovery closure', () => {
         );
         expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalled();
         expect(mockInstanceCoordinator.releaseTaskLock).not.toHaveBeenCalled();
+    });
+
+    it('clears a stale download processing lock only when canonical task state is idle', async () => {
+        mockTaskRepository.findById.mockResolvedValue({
+            id: 'task-1',
+            user_id: 'user-1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            source_ref: JSON.stringify({ chatId: 'chat-1', messageId: 10 }),
+            file_name: 'test.mp4',
+            status: TASK_STATUSES.QUEUED,
+            claimed_by: null,
+            claim_lease_id: null
+        });
+        mockInstanceCoordinator.acquireTaskLock
+            .mockResolvedValueOnce(false)
+            .mockResolvedValueOnce(true);
+        mockInstanceCoordinator.releaseStaleTaskLock.mockResolvedValueOnce(true);
+        const downloadSpy = vi.spyOn(TaskManager, 'downloadTask').mockResolvedValueOnce(undefined);
+
+        const result = await TaskManager.handleDownloadWebhook('task-1');
+
+        expect(result).toEqual({ success: true, statusCode: 200 });
+        expect(mockInstanceCoordinator.releaseStaleTaskLock).toHaveBeenCalledWith('task-1');
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            'task-1',
+            TASK_EVENTS.START_DOWNLOAD,
+            null,
+            expect.objectContaining({
+                claimedBy: 'instance-1',
+                claimLeaseId: 'lease-1'
+            })
+        );
+        expect(downloadSpy).toHaveBeenCalled();
+        expect(mockInstanceCoordinator.releaseTaskLock).toHaveBeenCalledWith('task-1');
+        downloadSpy.mockRestore();
+    });
+
+    it('does not clear a busy download processing lock while canonical task state is claimed', async () => {
+        mockTaskRepository.findById.mockResolvedValue({
+            id: 'task-1',
+            user_id: 'user-1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'test.mp4',
+            status: TASK_STATUSES.DOWNLOADING,
+            claimed_by: 'instance-2',
+            claim_lease_id: 'lease-2'
+        });
+        mockInstanceCoordinator.acquireTaskLock.mockResolvedValueOnce(false);
+
+        const result = await TaskManager.handleDownloadWebhook('task-1');
+
+        expect(result.statusCode).toBe(503);
+        expect(result.message).toContain('Task processing lock busy');
+        expect(mockInstanceCoordinator.releaseStaleTaskLock).not.toHaveBeenCalled();
+        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalled();
     });
 
     it('returns 503 when active download webhook is blocked by the state machine', async () => {

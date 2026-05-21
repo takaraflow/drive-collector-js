@@ -9,6 +9,7 @@ import { CACHE_KEYS } from "../domain/cache-keys.js";
 const log = logger.withModule('InstanceCoordinator');
 export const TELEGRAM_CLIENT_LOCK_TTL_SECONDS = 90;
 export const TASK_LOCK_TTL_SECONDS = 600;
+export const STALE_TASK_LOCK_RECOVERY_MIN_AGE_MS = 120 * 1000;
 export const TASK_LOCK_RENEWAL_MAX_INTERVAL_MS = 120 * 1000;
 export const TASK_LOCK_RENEWAL_MAX_CONSECUTIVE_FAILURES = 3;
 const ATOMIC_LOCK_KEYS = new Set(["telegram_client"]);
@@ -828,6 +829,44 @@ export class InstanceCoordinator {
     async releaseTaskLock(taskId) {
         this._stopTaskLockRenewal(taskId);
         await this.releaseLock(`task:${taskId}`);
+    }
+
+    async releaseStaleTaskLock(taskId, options = {}) {
+        const minAgeMs = Number.isFinite(options.minAgeMs)
+            ? Math.max(0, options.minAgeMs)
+            : STALE_TASK_LOCK_RECOVERY_MIN_AGE_MS;
+        const lockKey = `task:${taskId}`;
+        const cacheKey = CACHE_KEYS.lock(lockKey);
+
+        if (typeof cache.deleteIfEquals !== 'function') {
+            logWithProvider().warn(`🔒 当前缓存 provider 不支持原子条件删除，拒绝清理残留任务锁: ${lockKey}`);
+            return false;
+        }
+
+        try {
+            const existing = await cache.get(cacheKey, "json", { skipCache: true });
+            if (!existing?.instanceId || !Number.isFinite(Number(existing.acquiredAt))) {
+                return false;
+            }
+
+            const ageMs = Date.now() - Number(existing.acquiredAt);
+            if (ageMs < minAgeMs) {
+                return false;
+            }
+
+            const released = await cache.deleteIfEquals(cacheKey, existing, { requireAtomic: true });
+            if (released) {
+                logWithProvider().warn(`🔒 已清理残留任务锁: ${lockKey}`, {
+                    taskId,
+                    owner: existing.instanceId,
+                    ageMs
+                });
+            }
+            return Boolean(released);
+        } catch (e) {
+            logWithProvider().error(`清理残留任务锁失败 ${lockKey}:`, e?.message || String(e));
+            return false;
+        }
     }
 
     /**

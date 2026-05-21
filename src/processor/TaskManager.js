@@ -888,14 +888,28 @@ export class TaskManager {
         return null;
     }
 
-    static async _acquireWebhookTaskLock(instanceCoordinator, taskId, phase) {
+    static async _acquireWebhookTaskLock(instanceCoordinator, taskId, phase, dbTask = null) {
         const lockAcquired = await instanceCoordinator.acquireTaskLock(taskId);
+        if (!lockAcquired && this._canRecoverStaleTaskProcessingLock(dbTask)) {
+            const released = await instanceCoordinator.releaseStaleTaskLock?.(taskId);
+            if (released) {
+                const retryAcquired = await instanceCoordinator.acquireTaskLock(taskId);
+                if (retryAcquired) return true;
+            }
+        }
+
         if (!lockAcquired) {
             const log = getLog();
             log.info("Task processing lock busy, webhook will be retried", { taskId, phase });
             throw new TaskProcessingLockBusyError(taskId, phase);
         }
         return true;
+    }
+
+    static _canRecoverStaleTaskProcessingLock(dbTask) {
+        if (!dbTask) return false;
+        if (dbTask.claimed_by || dbTask.claim_lease_id) return false;
+        return dbTask.status === TASK_STATUSES.QUEUED || dbTask.status === TASK_STATUSES.DOWNLOADED;
     }
 
     /**
@@ -1174,11 +1188,11 @@ export class TaskManager {
             }
 
             if (dbTask.status === TASK_STATUSES.DOWNLOADED) {
-                lockAcquired = await this._acquireWebhookTaskLock(instanceCoordinator, taskId, 'upload_queue_repair');
+                lockAcquired = await this._acquireWebhookTaskLock(instanceCoordinator, taskId, 'upload_queue_repair', dbTask);
                 return await this._enqueueDownloadedTaskForUpload(dbTask, 'handleDownloadWebhook.upload_queue_repair');
             }
 
-            lockAcquired = await this._acquireWebhookTaskLock(instanceCoordinator, taskId, 'download');
+            lockAcquired = await this._acquireWebhookTaskLock(instanceCoordinator, taskId, 'download', dbTask);
             const claim = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.START_DOWNLOAD, null, {
                 claimedBy: leaderLease.instanceId,
                 claimLeaseId: leaderLease.leaseId,
@@ -1280,7 +1294,7 @@ export class TaskManager {
                 return { success: true, statusCode: 200 };
             }
 
-            lockAcquired = await this._acquireWebhookTaskLock(instanceCoordinator, taskId, 'upload');
+            lockAcquired = await this._acquireWebhookTaskLock(instanceCoordinator, taskId, 'upload', dbTask);
             const uploadStart = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.START_UPLOAD, null, {
                 claimedBy: leaderLease.instanceId,
                 claimLeaseId: leaderLease.leaseId,
