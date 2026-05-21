@@ -51,7 +51,10 @@ export class TelegramErrorClassifier {
         if (
             msg.includes('Not connected') ||
             msg.includes('Connection closed') ||
-            msg.includes('Client not initialized')
+            msg.includes('Client not initialized') ||
+            msg.includes('CONNECTION_NOT_INITED') ||
+            msg.includes('Cannot send requests while disconnected') ||
+            /Cannot read propert(?:y|ies) of undefined \(reading ['"]dcId['"]\)/i.test(msg)
         ) {
             return this.ERROR_TYPES.NOT_CONNECTED;
         }

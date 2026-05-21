@@ -40,7 +40,9 @@ describe("TelegramErrorClassifier", () => {
             const errors = [
                 new Error("Not connected"),
                 new Error("Connection closed"),
-                new Error("Client not initialized")
+                new Error("Client not initialized"),
+                new Error("400: CONNECTION_NOT_INITED (caused by upload.GetFile)"),
+                new TypeError("Cannot read properties of undefined (reading 'dcId')")
             ];
 
             errors.forEach(error => {

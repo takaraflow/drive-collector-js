@@ -43,6 +43,13 @@ const NETWORK_ERROR_PATTERNS = [
     /ENOTFOUND/i,
     /getaddrinfo/i,
     /network connection lost/i,
+    /CONNECTION_NOT_INITED/i,
+    /Cannot send requests while disconnected/i,
+    /Not connected/i,
+    /Connection closed/i,
+    /Client not initialized/i,
+    /upload\.GetFile/i,
+    /Cannot read propert(?:y|ies) of undefined \(reading ['"]dcId['"]\)/i,
     /rate limit/i,
     /\b429\b/
 ];

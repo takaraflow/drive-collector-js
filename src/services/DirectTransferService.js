@@ -20,6 +20,16 @@ const DEFAULT_MAX_DIRECT_ATTEMPTS = 3;
 const DEFAULT_DIRECT_RETRY_DELAY_MS = 1000;
 const RCLONE_DIAGNOSTIC_GRACE_MS = 1500;
 const LOCAL_STAGING_REQUIRED_DRIVE_TYPES = new Set(["oss", "r2", "s3"]);
+const TELEGRAM_SOURCE_TRANSIENT_ERROR_CODE = "TELEGRAM_SOURCE_TRANSIENT";
+const TELEGRAM_SOURCE_TRANSIENT_ERROR_PATTERNS = [
+    /CONNECTION_NOT_INITED/i,
+    /Cannot send requests while disconnected/i,
+    /Not connected/i,
+    /Connection closed/i,
+    /Client not initialized/i,
+    /upload\.GetFile/i,
+    /Cannot read propert(?:y|ies) of undefined \(reading ['"]dcId['"]\)/i
+];
 const NON_FALLBACK_RCLONE_ERROR_CODES = new Set([
     RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID,
     RCLONE_ERROR_CODES.DRIVE_CONFIG_INVALID,
@@ -153,8 +163,21 @@ export class DirectTransferService {
                 chunkSize: effectiveChunkSize,
                 stride: effectiveChunkSize
             });
+            const sourceIterator = downloadIterator?.[Symbol.asyncIterator]?.() || downloadIterator;
 
-            for await (const chunk of downloadIterator) {
+            while (true) {
+                let nextChunk;
+                try {
+                    nextChunk = await sourceIterator.next();
+                } catch (sourceError) {
+                    if (this._isTelegramSourceTransientError(sourceError)) {
+                        sourceError.errorCode = TELEGRAM_SOURCE_TRANSIENT_ERROR_CODE;
+                        sourceError.retryScope = "telegram_source";
+                    }
+                    throw sourceError;
+                }
+                if (nextChunk.done) break;
+                const chunk = nextChunk.value;
                 if (isCancelled?.()) {
                     throw new Error("CANCELLED");
                 }
@@ -213,9 +236,21 @@ export class DirectTransferService {
                 throw error;
             }
 
-            const fallbackAllowed = this._isLocalFallbackAllowed(config);
             const effectiveError = rcloneFailure?.success === false ? rcloneFailure : error;
             const message = redactSensitiveText(effectiveError?.error || effectiveError?.message || String(effectiveError));
+            if (!rcloneFailure && effectiveError?.retryScope === "telegram_source") {
+                return {
+                    success: false,
+                    fallback: false,
+                    error: message,
+                    errorCode: TELEGRAM_SOURCE_TRANSIENT_ERROR_CODE,
+                    retryable: true,
+                    userRetryable: true,
+                    retryScope: "telegram_source"
+                };
+            }
+
+            const fallbackAllowed = this._isLocalFallbackAllowed(config);
             const failureMetadata = resolveRcloneFailureMetadata({
                 ...effectiveError,
                 error: message
@@ -231,6 +266,17 @@ export class DirectTransferService {
 
             return { success: false, fallback: true, error: message, ...failureMetadata };
         }
+    }
+
+    _isTelegramSourceTransientError(error) {
+        const text = [
+            error?.name,
+            error?.code,
+            error?.message,
+            error?.errorMessage,
+            error?.cause?.message
+        ].filter(Boolean).join(" ");
+        return TELEGRAM_SOURCE_TRANSIENT_ERROR_PATTERNS.some(pattern => pattern.test(text));
     }
 
     _logFinalDirectTransferFailure(args, result, attempts) {

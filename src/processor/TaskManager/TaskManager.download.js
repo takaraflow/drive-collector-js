@@ -585,20 +585,16 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
         return true;
     }
 
-    const shouldFallbackToLocal = !strictDirectTransfer && (result?.fallback || result?.retryable === true);
+    const shouldFallbackToLocal = !strictDirectTransfer && result?.fallback === true;
     if (shouldFallbackToLocal) {
-        if (strictDirectTransfer) {
-            throw createStrictDirectTransferFailure(result);
-        }
         if (transferPlan) {
             transferPlan.skipStreamForwarding = true;
         }
-        const fallbackSource = result?.fallback ? 'direct_transfer_fallback' : 'direct_transfer_transient_fallback';
         const resetTransition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.RESET_STREAM_DOWNLOAD, result.error || result.reason || null, {
             ...getClaimFenceOptions(task),
             returnResult: true,
             allowNoop: true,
-            source: fallbackSource
+            source: 'direct_transfer_fallback'
         });
         if (resetTransition.blocked) {
             throw new Error(`Direct transfer fallback rejected: ${resetTransition.reason || 'state transition blocked'}`);
@@ -606,13 +602,23 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
         log.info("Direct transfer fell back to local-capable transfer path", {
             taskId: task.id,
             reason: result.error || result.reason || 'unsupported',
-            source: fallbackSource
+            source: 'direct_transfer_fallback'
         });
         return false;
     }
 
     if (strictDirectTransfer) {
         throw createStrictDirectTransferFailure(result);
+    }
+
+    if (result?.retryable === true) {
+        const error = new Error(result.error || result.reason || "Direct transfer retryable failure");
+        error.errorCode = result.errorCode;
+        error.retryable = true;
+        error.userRetryable = result.userRetryable;
+        error.userMessage = result.userMessage;
+        error.retryScope = result.retryScope;
+        throw error;
     }
 
     const error = new Error(result?.error || "Direct transfer failed");

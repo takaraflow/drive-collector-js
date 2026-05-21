@@ -1118,6 +1118,7 @@ export class TaskManager {
 
     static _isRetryableInfrastructureError(error) {
         const msg = error?.message || '';
+        if (error?.retryable === true) return true;
         if (isRetryableInfrastructureError(error)) return true;
         if (this._classifyError(error) === 503) return true;
         return /D1 HTTP 5\d\d/i.test(msg) ||

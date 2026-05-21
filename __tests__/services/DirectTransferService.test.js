@@ -175,6 +175,44 @@ describe("DirectTransferService", () => {
     expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
   });
 
+  test("keeps Telegram source connection failures retryable without local fallback", async () => {
+    const proc = createProcess();
+    const stdin = createWritable(proc);
+    const stagingName = ".drive-collector-task-source-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+    client.iterDownload.mockReturnValue((async function* () {
+      throw new Error("400: CONNECTION_NOT_INITED (caused by upload.GetFile)");
+    })());
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-source", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "file.bin",
+      config: {
+        directTransfer: {
+          enabled: true,
+          fallbackToLocal: true,
+          maxAttempts: 1,
+          retryDelayMs: 0
+        },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false,
+      errorCode: "TELEGRAM_SOURCE_TRANSIENT",
+      retryable: true,
+      userRetryable: true,
+      retryScope: "telegram_source"
+    });
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
+  });
+
   test("redacts sensitive rclone stderr before returning fallback errors", async () => {
     const proc = createProcess({
       exitCode: 1,

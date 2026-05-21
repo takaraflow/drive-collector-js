@@ -23,4 +23,20 @@ describe("infrastructure-error SSOT", () => {
             retryable: false
         });
     });
+
+    test("classifies Telegram file sender connection errors as retryable network infrastructure", () => {
+        const errors = [
+            new Error("400: CONNECTION_NOT_INITED (caused by upload.GetFile)"),
+            new TypeError("Cannot read properties of undefined (reading 'dcId')")
+        ];
+
+        for (const error of errors) {
+            expect(classifyInfrastructureError(error)).toMatchObject({
+                code: INFRASTRUCTURE_ERROR_CODES.NETWORK_TRANSIENT,
+                retryable: true,
+                retryScope: "network"
+            });
+            expect(isRetryableInfrastructureError(error)).toBe(true);
+        }
+    });
 });
