@@ -558,6 +558,18 @@
         "default": 21600000,
         "description": "Maximum duration for one same-worker direct rcat transfer"
       },
+      "DIRECT_TRANSFER_MAX_ATTEMPTS": {
+        "type": "number",
+        "required": false,
+        "default": 3,
+        "description": "Maximum number of zero-disk direct transfer attempts before applying the fallback policy"
+      },
+      "DIRECT_TRANSFER_RETRY_DELAY_MS": {
+        "type": "number",
+        "required": false,
+        "default": 1000,
+        "description": "Base backoff delay between retryable zero-disk direct transfer attempts"
+      },
       "EXTERNAL_DOWNLOAD_MAX_BYTES": {
         "type": "number",
         "required": false,

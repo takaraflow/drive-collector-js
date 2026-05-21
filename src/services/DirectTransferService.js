@@ -16,6 +16,8 @@ const DEFAULT_LARGE_CHUNK_SIZE = 512 * 1024;
 const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
 const MAX_RCLONE_ERROR_LOG = 8000;
 const DEFAULT_TRANSFER_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_MAX_DIRECT_ATTEMPTS = 3;
+const DEFAULT_DIRECT_RETRY_DELAY_MS = 1000;
 const RCLONE_DIAGNOSTIC_GRACE_MS = 1500;
 const LOCAL_STAGING_REQUIRED_DRIVE_TYPES = new Set(["oss", "r2", "s3"]);
 const NON_FALLBACK_RCLONE_ERROR_CODES = new Set([
@@ -57,7 +59,45 @@ export class DirectTransferService {
         return { supported: true, reason: "rclone-rcat" };
     }
 
-    async transferTelegramMediaToRemote({
+    async transferTelegramMediaToRemote(args) {
+        const config = args?.config || getConfig();
+        const maxAttempts = this._resolveMaxAttempts(config);
+        const retryDelayMs = this._resolveRetryDelayMs(config);
+        let lastResult = null;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            lastResult = await this._transferTelegramMediaToRemoteOnce(args);
+            if (lastResult?.success) return lastResult;
+
+            const shouldRetry = lastResult?.retryable === true && attempt < maxAttempts;
+            if (!shouldRetry) {
+                this._logFinalDirectTransferFailure(args, lastResult, attempt);
+                return {
+                    ...lastResult,
+                    directTransferAttempts: attempt
+                };
+            }
+
+            log.info("Retrying direct transfer after retryable failure", {
+                taskId: args?.task?.id,
+                userId: args?.task?.userId,
+                fileName: args?.fileName,
+                attempt,
+                maxAttempts,
+                errorCode: lastResult.errorCode,
+                reason: redactSensitiveText(lastResult.error || lastResult.reason || "retryable direct transfer failure")
+            });
+
+            await this._delay(retryDelayMs * attempt);
+        }
+
+        return {
+            ...(lastResult || this._buildFallbackResult(config, "direct-transfer-not-attempted")),
+            directTransferAttempts: maxAttempts
+        };
+    }
+
+    async _transferTelegramMediaToRemoteOnce({
         task,
         message,
         client,
@@ -186,27 +226,38 @@ export class DirectTransferService {
             const errorCode = failureMetadata.errorCode;
             const isPermanentDriveFailure = NON_FALLBACK_RCLONE_ERROR_CODES.has(errorCode);
             if (!fallbackAllowed || isPermanentDriveFailure) {
-                log.warn("Direct transfer failed closed", {
-                    taskId: task.id,
-                    userId: task.userId,
-                    fileName,
-                    driveType,
-                    errorCode,
-                    retryable: failureMetadata.retryable,
-                    userRetryable: failureMetadata.userRetryable,
-                    fallbackAllowed,
-                    reason: message
-                });
                 return { success: false, fallback: false, error: message, ...failureMetadata };
             }
 
-            log.warn("Direct transfer failed; falling back to local staging", {
-                taskId: task.id,
-                fileName,
-                reason: message
-            });
             return { success: false, fallback: true, error: message, ...failureMetadata };
         }
+    }
+
+    _logFinalDirectTransferFailure(args, result, attempts) {
+        if (!result || result.success) return;
+
+        const task = args?.task || {};
+        const payload = {
+            taskId: task.id,
+            userId: task.userId,
+            fileName: args?.fileName,
+            driveType: args?.driveType,
+            attempts,
+            errorCode: result.errorCode,
+            retryable: result.retryable,
+            userRetryable: result.userRetryable,
+            reason: redactSensitiveText(result.error || result.reason || "direct transfer failed")
+        };
+
+        if (result.fallback) {
+            log.warn("Direct transfer failed; falling back to local staging", payload);
+            return;
+        }
+
+        log.warn("Direct transfer failed closed", {
+            ...payload,
+            fallbackAllowed: this._isLocalFallbackAllowed(args?.config || getConfig())
+        });
     }
 
     _isLocalFallbackAllowed(config) {
@@ -425,6 +476,20 @@ export class DirectTransferService {
     _resolveTransferTimeoutMs(config) {
         const value = Number(config?.directTransfer?.timeoutMs);
         return Number.isFinite(value) && value > 0 ? value : DEFAULT_TRANSFER_TIMEOUT_MS;
+    }
+
+    _resolveMaxAttempts(config) {
+        const value = Number(config?.directTransfer?.maxAttempts);
+        return Number.isFinite(value) && value > 0
+            ? Math.floor(value)
+            : DEFAULT_MAX_DIRECT_ATTEMPTS;
+    }
+
+    _resolveRetryDelayMs(config) {
+        const value = Number(config?.directTransfer?.retryDelayMs);
+        return Number.isFinite(value) && value >= 0
+            ? Math.floor(value)
+            : DEFAULT_DIRECT_RETRY_DELAY_MS;
     }
 
     _isSizeMatch(actual, expected) {

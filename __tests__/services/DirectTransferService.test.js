@@ -332,7 +332,9 @@ describe("DirectTransferService", () => {
         directTransfer: {
           enabled: true,
           fallbackToLocal: true,
-          timeoutMs: 100
+          timeoutMs: 100,
+          maxAttempts: 1,
+          retryDelayMs: 0
         }
       }
     });
@@ -371,7 +373,9 @@ describe("DirectTransferService", () => {
         directTransfer: {
           enabled: true,
           fallbackToLocal: false,
-          timeoutMs: 100
+          timeoutMs: 100,
+          maxAttempts: 1,
+          retryDelayMs: 0
         }
       }
     });
@@ -399,6 +403,73 @@ describe("DirectTransferService", () => {
         retryable: true,
         userRetryable: true,
         fallbackAllowed: false
+      })
+    );
+  });
+
+  test("retries retryable direct transfer timeouts before falling back", async () => {
+    const firstProc = createProcess();
+    const secondProc = createProcess();
+    const firstStaging = ".drive-collector-task-retry-1-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    const secondStaging = ".drive-collector-task-retry-2-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    const firstStdIn = createWritable(firstProc);
+    const secondStdIn = createWritable(secondProc);
+    let remoteCalls = 0;
+
+    cloudTool.createRcatStream
+      .mockResolvedValueOnce({ stdin: firstStdIn, proc: firstProc, fileName: firstStaging })
+      .mockResolvedValueOnce({ stdin: secondStdIn, proc: secondProc, fileName: secondStaging });
+    cloudTool.moveRemoteFile.mockResolvedValue({ success: true, fileName: "movie.mkv" });
+    cloudTool.getRemoteFileInfo.mockImplementation(async () => {
+      remoteCalls += 1;
+      return remoteCalls >= 4 ? { Name: "movie.mkv", Size: 11 } : null;
+    });
+    client.iterDownload
+      .mockImplementationOnce(() => (async function* () {
+        yield Buffer.from("hello");
+        throw new Error("TIMEOUT");
+      })())
+      .mockImplementationOnce(() => (async function* () {
+        yield Buffer.from("hello ");
+        yield Buffer.from("world");
+      })());
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-retry", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "movie.mkv",
+      config: {
+        directTransfer: {
+          enabled: true,
+          fallbackToLocal: true,
+          timeoutMs: 1000,
+          maxAttempts: 2,
+          retryDelayMs: 0
+        },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      method: "direct_stream",
+      fileName: "movie.mkv",
+      bytes: 11
+    });
+    expect(cloudTool.createRcatStream).toHaveBeenCalledTimes(2);
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(firstStaging, "user-1");
+    expect(cloudTool.moveRemoteFile).toHaveBeenCalledWith(secondStaging, "movie.mkv", "user-1");
+    expect(loggerFns.info).toHaveBeenCalledWith(
+      "Retrying direct transfer after retryable failure",
+      expect.objectContaining({
+        taskId: "task-retry",
+        userId: "user-1",
+        fileName: "movie.mkv",
+        attempt: 1,
+        maxAttempts: 2
       })
     );
   });

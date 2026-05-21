@@ -251,7 +251,9 @@
       "configKeys": [
         "DIRECT_TRANSFER_ENABLED",
         "DIRECT_TRANSFER_FALLBACK_TO_LOCAL",
-        "DIRECT_TRANSFER_TIMEOUT_MS"
+        "DIRECT_TRANSFER_TIMEOUT_MS",
+        "DIRECT_TRANSFER_MAX_ATTEMPTS",
+        "DIRECT_TRANSFER_RETRY_DELAY_MS"
       ],
       "reinitializationStrategy": {
         "type": "none",
@@ -262,7 +264,8 @@
         "DIRECT_TRANSFER_ENABLED=false 会完全关闭同机无盘直传，保留原本完整落盘转存路径",
         "DIRECT_TRANSFER_FALLBACK_TO_LOCAL=true 时，rcat/moveto/远端校验失败会清理远端暂存并回退到本地暂存",
         "DIRECT_TRANSFER_FALLBACK_TO_LOCAL=false 是严格零落盘模式：能力不支持、远端冲突或直传失败都会 fail closed，不进入本地缓存/下载/上传链路",
-        "DIRECT_TRANSFER_TIMEOUT_MS 控制单个 rcat 直传最长运行时间，避免子进程挂死导致任务长期卡住",
+        "DIRECT_TRANSFER_TIMEOUT_MS 控制单次 rcat 直传最长运行时间，避免子进程挂死导致任务长期卡住",
+        "DIRECT_TRANSFER_MAX_ATTEMPTS / DIRECT_TRANSFER_RETRY_DELAY_MS 控制零落盘直传遇到可重试错误时的重试预算，耗尽后才按 fallback 策略处理",
         "直传只复用 rclone 支持的流式能力；OSS/R2 的 multipart stream 未收口前必须使用 fallback=true 才会走本地暂存"
       ]
     },

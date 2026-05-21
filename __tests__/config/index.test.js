@@ -348,7 +348,9 @@ describe("Config Module", () => {
     expect(config.directTransfer).toEqual({
       enabled: true,
       fallbackToLocal: true,
-      timeoutMs: 21600000
+      timeoutMs: 21600000,
+      maxAttempts: 3,
+      retryDelayMs: 1000
     });
   });
 
@@ -363,7 +365,9 @@ describe("Config Module", () => {
     expect(config.directTransfer).toEqual({
       enabled: false,
       fallbackToLocal: false,
-      timeoutMs: 12345
+      timeoutMs: 12345,
+      maxAttempts: 3,
+      retryDelayMs: 1000
     });
 
     delete process.env.DIRECT_TRANSFER_ENABLED;

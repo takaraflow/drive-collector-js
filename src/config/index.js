@@ -464,7 +464,9 @@ function buildConfigObject(env) {
         directTransfer: {
             enabled: parseBoolean(env.DIRECT_TRANSFER_ENABLED, true),
             fallbackToLocal: parseBoolean(env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL, true),
-            timeoutMs: parsePositiveNumber(env.DIRECT_TRANSFER_TIMEOUT_MS, 6 * 60 * 60 * 1000)
+            timeoutMs: parsePositiveNumber(env.DIRECT_TRANSFER_TIMEOUT_MS, 6 * 60 * 60 * 1000),
+            maxAttempts: parsePositiveInt(env.DIRECT_TRANSFER_MAX_ATTEMPTS, 3),
+            retryDelayMs: parseNonNegativeInt(env.DIRECT_TRANSFER_RETRY_DELAY_MS, 1000)
         },
         instance: {
             id: env.INSTANCE_ID || null,
