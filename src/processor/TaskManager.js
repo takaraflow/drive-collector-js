@@ -1417,13 +1417,33 @@ export class TaskManager {
                 return { success: false, statusCode: 409, message: retryTransition.reason || "Task cannot be retried" };
             }
 
-            // 通过 QStash 重新派发，leader 的 handleDownloadWebhook 会处理完整流程
-            await queueService.enqueueDownloadTask(taskId, {
-                _meta: {
-                    triggerSource: TASK_QUEUE_TRIGGER_SOURCES.MANUAL_RETRY,
-                    queueAttempt: retryTransition.queueAttempt
+            // 通过 QStash 重新派发；当 durable queue 暂时不可用时，和恢复扫描保持同一套
+            // fail-open 策略：当前 Telegram leader 直接接管，任务仍以 D1 状态机为 SSOT。
+            try {
+                await queueService.enqueueDownloadTask(taskId, {
+                    _meta: {
+                        triggerSource: TASK_QUEUE_TRIGGER_SOURCES.MANUAL_RETRY,
+                        queueAttempt: retryTransition.queueAttempt
+                    }
+                });
+            } catch (enqueueError) {
+                if (!this._isRetryableInfrastructureError(enqueueError)) {
+                    throw enqueueError;
                 }
-            });
+
+                log.warn("Manual retry queue unavailable, falling back to local download handler", {
+                    taskId,
+                    reason: redactSensitiveText(enqueueError.message || String(enqueueError))
+                });
+                const fallbackResult = await this.handleDownloadWebhook(taskId);
+                if (!fallbackResult?.success) {
+                    return {
+                        success: false,
+                        statusCode: fallbackResult?.statusCode || 503,
+                        message: fallbackResult?.message || "Task queued; local retry fallback unavailable"
+                    };
+                }
+            }
 
             log.info(`Task ${taskId} re-enqueued for retry`);
             return { success: true, statusCode: 200, message: "Task re-enqueued" };

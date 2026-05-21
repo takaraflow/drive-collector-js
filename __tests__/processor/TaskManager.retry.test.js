@@ -234,6 +234,77 @@ describe('TaskManager - Retry', () => {
         }));
     });
 
+    it('should run local fallback when manual retry queue publish is temporarily unavailable', async () => {
+        const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+        const { queueService } = await import('../../src/services/QueueService.js');
+        TaskRepository.transitionStatus.mockResolvedValue({
+            changed: true,
+            blocked: false,
+            toStatus: 'queued',
+            queueAttempt: 'queued:1700000000002'
+        });
+        TaskRepository.findById.mockResolvedValue({
+            id: 'task-123',
+            user_id: 'u1',
+            status: 'failed'
+        });
+        queueService.enqueueDownloadTask.mockRejectedValueOnce(new Error('Circuit breaker is OPEN for qstash_publish'));
+        const fallbackSpy = vi.spyOn(TaskManager, 'handleDownloadWebhook').mockResolvedValueOnce({
+            success: true,
+            statusCode: 200
+        });
+
+        const result = await TaskManager.retryTask('task-123');
+
+        expect(queueService.enqueueDownloadTask).toHaveBeenCalledWith('task-123', expect.objectContaining({
+            _meta: expect.objectContaining({
+                triggerSource: 'manual-retry',
+                queueAttempt: 'queued:1700000000002'
+            })
+        }));
+        expect(fallbackSpy).toHaveBeenCalledWith('task-123');
+        expect(result).toEqual({ success: true, statusCode: 200, message: "Task re-enqueued" });
+        fallbackSpy.mockRestore();
+    });
+
+    it('should keep task queued when manual retry local fallback cannot run on this instance', async () => {
+        const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+        const { queueService } = await import('../../src/services/QueueService.js');
+        TaskRepository.transitionStatus.mockResolvedValue({
+            changed: true,
+            blocked: false,
+            toStatus: 'queued',
+            queueAttempt: 'queued:1700000000003'
+        });
+        TaskRepository.findById.mockResolvedValue({
+            id: 'task-123',
+            user_id: 'u1',
+            status: 'failed'
+        });
+        queueService.enqueueDownloadTask.mockRejectedValueOnce(new Error('Circuit breaker is OPEN for qstash_publish'));
+        const fallbackSpy = vi.spyOn(TaskManager, 'handleDownloadWebhook').mockResolvedValueOnce({
+            success: false,
+            statusCode: 503,
+            message: 'Service Unavailable - Not Leader'
+        });
+
+        const result = await TaskManager.retryTask('task-123');
+
+        expect(fallbackSpy).toHaveBeenCalledWith('task-123');
+        expect(TaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+            'task-123',
+            'fail',
+            expect.anything(),
+            expect.anything()
+        );
+        expect(result).toEqual({
+            success: false,
+            statusCode: 503,
+            message: 'Service Unavailable - Not Leader'
+        });
+        fallbackSpy.mockRestore();
+    });
+
     it('should reject manual retry for active tasks instead of re-enqueueing', async () => {
         const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
         const { queueService } = await import('../../src/services/QueueService.js');
