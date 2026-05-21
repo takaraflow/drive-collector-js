@@ -26,14 +26,14 @@ vi.mock("../../src/services/logger/index.js", () => ({
 
 const { DirectTransferService } = await import("../../src/services/DirectTransferService.js");
 
-function createProcess({ exitCode = 0, stderr = "" } = {}) {
+function createProcess({ exitCode = 0, signal = null, stderr = "" } = {}) {
   const proc = new EventEmitter();
   proc.stderr = new EventEmitter();
   proc.kill = vi.fn();
   proc.killed = false;
   proc.complete = () => {
     if (stderr) proc.stderr.emit("data", Buffer.from(stderr));
-    proc.emit("close", exitCode);
+    proc.emit("close", exitCode, signal);
   };
   return proc;
 }
@@ -456,6 +456,86 @@ describe("DirectTransferService", () => {
         fallbackAllowed: false
       })
     );
+  });
+
+  test("treats rclone signal termination as retryable in strict zero-disk mode", async () => {
+    const proc = createProcess({ exitCode: null, signal: "SIGTERM" });
+    const stdin = createWritable(proc);
+    const stagingName = ".drive-collector-task-signal-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+    client.iterDownload.mockReturnValue((async function* () {
+      yield Buffer.from("hello");
+    })());
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-signal", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 5 },
+      fileName: "file.bin",
+      config: {
+        directTransfer: {
+          enabled: true,
+          fallbackToLocal: false,
+          maxAttempts: 1,
+          retryDelayMs: 0
+        },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false,
+      error: "rclone rcat terminated by signal SIGTERM",
+      errorCode: "RCLONE_TRANSIENT",
+      retryable: true,
+      userRetryable: true
+    });
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
+  });
+
+  test("preserves rclone process exit metadata when stderr is present", async () => {
+    const proc = createProcess({
+      exitCode: null,
+      signal: "SIGTERM",
+      stderr: "INFO : backend emitted diagnostic before shutdown"
+    });
+    const stdin = createWritable(proc);
+    const stagingName = ".drive-collector-task-null-exit-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+    client.iterDownload.mockReturnValue((async function* () {
+      yield Buffer.from("hello");
+    })());
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-null-exit", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 5 },
+      fileName: "file.bin",
+      config: {
+        directTransfer: {
+          enabled: true,
+          fallbackToLocal: false,
+          maxAttempts: 1,
+          retryDelayMs: 0
+        },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false,
+      error: "rclone rcat terminated by signal SIGTERM; INFO : backend emitted diagnostic before shutdown",
+      errorCode: "RCLONE_TRANSIENT",
+      retryable: true,
+      userRetryable: true
+    });
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
   });
 
   test("fails strict zero-disk transfer when Telegram source makes no progress", async () => {

@@ -67,6 +67,21 @@ describe("rclone error classification", () => {
         expect(isRetryableRcloneError("TIMEOUT")).toBe(true);
     });
 
+    test("classifies rclone process exits without a code as retryable transient failures", () => {
+        for (const message of [
+            "rclone rcat exited with code null",
+            "rclone rcat exited without an exit code",
+            "rclone rcat terminated by signal SIGTERM"
+        ]) {
+            expect(classifyRcloneError(message)).toMatchObject({
+                code: RCLONE_ERROR_CODES.RCLONE_TRANSIENT,
+                retryable: true,
+                userRetryable: true
+            });
+            expect(isRetryableRcloneError(message)).toBe(true);
+        }
+    });
+
     test("classifies quota and permission errors as user-actionable failures", () => {
         expect(classifyRcloneError("Failed to copy: quota exceeded")).toMatchObject({
             code: RCLONE_ERROR_CODES.DRIVE_QUOTA_EXCEEDED,

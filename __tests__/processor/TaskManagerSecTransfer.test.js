@@ -827,7 +827,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
             "task_1",
             "fail",
-            "Zero-disk direct transfer failed; local fallback disabled",
+            "Zero-disk direct transfer failed; local fallback disabled; reason=rcat failed",
             expect.objectContaining({ source: "handleTaskFailure" })
         );
 
@@ -1293,6 +1293,52 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
             expect.anything(),
             expect.objectContaining({ source: "handleTaskFailure" })
         );
+
+        getAllSpy.mockRestore();
+    });
+
+    test("strict zero-disk terminal failures preserve direct-transfer diagnostics", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: true, reason: "rclone-rcat" });
+        mockDirectTransferService.transferTelegramMediaToRemote.mockResolvedValue({
+            success: false,
+            fallback: false,
+            error: "quota exceeded",
+            errorCode: "DRIVE_QUOTA_EXCEEDED",
+            retryable: false,
+            userRetryable: true
+        });
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                directTransfer: { enabled: true, fallbackToLocal: false },
+                streamForwarding: { enabled: false }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "fail",
+            expect.stringContaining("directTransferErrorCode=DRIVE_QUOTA_EXCEEDED"),
+            expect.objectContaining({ source: "handleTaskFailure" })
+        );
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "fail",
+            expect.stringContaining("reason=quota exceeded"),
+            expect.objectContaining({ source: "handleTaskFailure" })
+        );
+        expect(mockClient.downloadMedia).not.toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
 
         getAllSpy.mockRestore();
     });

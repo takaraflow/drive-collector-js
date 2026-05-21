@@ -36,6 +36,11 @@ function createStrictDirectTransferError(reason, detail = null) {
 function createStrictDirectTransferFailure(result = {}) {
     const reason = result.error || result.reason || "direct-transfer-failed";
     const safeReason = String(reason || "direct-transfer-failed");
+    const diagnosticParts = [
+        "Zero-disk direct transfer failed; local fallback disabled",
+        result.errorCode ? `directTransferErrorCode=${result.errorCode}` : null,
+        safeReason ? `reason=${safeReason}` : null
+    ].filter(Boolean);
     const error = new Error(`Zero-disk direct transfer failed: ${safeReason}`);
     error.errorCode = STRICT_DIRECT_TRANSFER_ERROR_CODE;
     error.retryable = false;
@@ -45,7 +50,7 @@ function createStrictDirectTransferFailure(result = {}) {
             ? `零落盘直传暂时失败：${safeReason}。可以稍后重试；系统不会改用本地落盘。`
             : `零落盘直传无法继续：${safeReason}。为避免本地落盘，任务已停止。`
     );
-    error.diagnosticMessage = "Zero-disk direct transfer failed; local fallback disabled";
+    error.diagnosticMessage = diagnosticParts.join("; ");
     error.directTransferErrorCode = result.errorCode;
     error.directTransferReason = safeReason;
     return error;

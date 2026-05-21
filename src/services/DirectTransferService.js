@@ -521,14 +521,22 @@ export class DirectTransferService {
                 }
             });
 
-            proc.on("close", (code) => {
+            proc.on("close", (code, signal) => {
                 const hasErrors = /(^|\b)(ERROR|Failed|failed|error)(\b|:)/.test(stderrLog || "");
                 if (code === 0 && !hasErrors) {
                     safeResolve({ success: true });
                     return;
                 }
+                const fallbackMessage = signal
+                    ? `rclone rcat terminated by signal ${signal}`
+                    : code === null || code === undefined
+                        ? "rclone rcat exited without an exit code"
+                        : `rclone rcat exited with code ${code}`;
                 const errorTail = redactSensitiveText(stderrLog.slice(-500).trim());
-                safeResolve(this._buildRcloneFailure(errorTail || `rclone rcat exited with code ${code}`));
+                const diagnosticMessage = errorTail
+                    ? `${fallbackMessage}; ${errorTail}`
+                    : fallbackMessage;
+                safeResolve(this._buildRcloneFailure(diagnosticMessage));
             });
 
             proc.on("error", (error) => {
