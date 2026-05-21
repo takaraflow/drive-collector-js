@@ -15,6 +15,8 @@ import {
     OSS_WORKER_URL_ENV_KEYS,
     firstEnvValue
 } from './env-aliases.js';
+import { parseBoolean } from './boolean.js';
+export { parseBoolean } from './boolean.js';
 
 // 保护重要环境变量不被 .env 覆盖
 const PROTECTED_ENV_VARS = ['NODE_ENV', 'INFISICAL_ENV', 'INFISICAL_TOKEN', 'INFISICAL_PROJECT_ID'];
@@ -368,7 +370,7 @@ function setupInfisicalPolling() {
 
 
 async function initializeInfisicalSecrets(clientId, clientSecret, projectId) {
-    if (process.env.SKIP_INFISICAL_RUNTIME === 'true') {
+    if (parseBoolean(process.env.SKIP_INFISICAL_RUNTIME, false)) {
         console.log(`ℹ️ 跳过 Infisical 运行时获取 (SKIP_INFISICAL_RUNTIME=true)`);
         return;
     }
@@ -410,7 +412,7 @@ async function initializeInfisicalSecrets(clientId, clientSecret, projectId) {
         console.log(`✅ 成功获取 Infisical Secrets。`);
 
         // 启动轮询（可配置）
-        const pollingEnabled = process.env.INFISICAL_POLLING_ENABLED === 'true';
+        const pollingEnabled = parseBoolean(process.env.INFISICAL_POLLING_ENABLED, false);
         if (pollingEnabled) {
             setupInfisicalPolling();
         }
@@ -441,8 +443,8 @@ function buildConfigObject(env) {
             messageSlowWarnThresholdMs: parsePositiveInt(env.MESSAGE_SLOW_WARN_THRESHOLD_MS, 2000)
         },
         database: {
-            schemaCheck: env.DB_SCHEMA_CHECK !== 'false',
-            autoMigrate: env.DB_AUTO_MIGRATE === 'true',
+            schemaCheck: parseBoolean(env.DB_SCHEMA_CHECK, true),
+            autoMigrate: parseBoolean(env.DB_AUTO_MIGRATE, false),
             migrationLockTtlMs: parseInt(env.DB_MIGRATION_LOCK_TTL_MS, 10) || 120000,
             migrationLockWaitMs: parseInt(env.DB_MIGRATION_LOCK_WAIT_MS, 10) || 30000
         },
@@ -452,8 +454,8 @@ function buildConfigObject(env) {
             maxRedirects: parsePositiveInt(env.EXTERNAL_DOWNLOAD_MAX_REDIRECTS, 5)
         },
         directTransfer: {
-            enabled: env.DIRECT_TRANSFER_ENABLED !== 'false',
-            fallbackToLocal: env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL !== 'false',
+            enabled: parseBoolean(env.DIRECT_TRANSFER_ENABLED, true),
+            fallbackToLocal: parseBoolean(env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL, true),
             timeoutMs: parsePositiveNumber(env.DIRECT_TRANSFER_TIMEOUT_MS, 6 * 60 * 60 * 1000)
         },
         instance: {
@@ -462,9 +464,9 @@ function buildConfigObject(env) {
             region: env.INSTANCE_REGION || null
         },
         http2: {
-            enabled: env.HTTP2_ENABLED === 'true',
-            plain: env.HTTP2_PLAIN === 'true',
-            allowHttp1: env.HTTP2_ALLOW_HTTP1 !== 'false',
+            enabled: parseBoolean(env.HTTP2_ENABLED, false),
+            plain: parseBoolean(env.HTTP2_PLAIN, false),
+            allowHttp1: parseBoolean(env.HTTP2_ALLOW_HTTP1, true),
             keyPath: env.HTTP2_TLS_KEY_PATH || env.TLS_KEY_PATH || null,
             certPath: env.HTTP2_TLS_CERT_PATH || env.TLS_CERT_PATH || null
         },
@@ -472,9 +474,9 @@ function buildConfigObject(env) {
             url: env.NF_REDIS_URL || env.REDIS_URL || null,
             token: env.REDIS_TOKEN || env.UPSTASH_REDIS_REST_TOKEN || null,
             tls: {
-                enabled: (env.REDIS_TLS_ENABLED || env.NF_REDIS_TLS_ENABLED) !== 'false' &&
+                enabled: parseBoolean(env.REDIS_TLS_ENABLED || env.NF_REDIS_TLS_ENABLED, true) &&
                         ((env.NF_REDIS_URL || env.REDIS_URL || '').startsWith('rediss://') ||
-                         (env.REDIS_TLS_ENABLED || env.NF_REDIS_TLS_ENABLED) === 'true')
+                         parseBoolean(env.REDIS_TLS_ENABLED || env.NF_REDIS_TLS_ENABLED, false))
             }
         },
         kv: {
@@ -490,8 +492,8 @@ function buildConfigObject(env) {
             webhookUrl: env.LB_WEBHOOK_URL || null,
             pathTemplate: env.QSTASH_PATH_TEMPLATE || '/api/v2/tasks/${topic}',
             debug: env.QSTASH_DEBUG || 'false',
-            forceDirect: env.QSTASH_FORCE_DIRECT === 'true',
-            mockMode: env.QSTASH_MOCK_MODE === 'true',
+            forceDirect: parseBoolean(env.QSTASH_FORCE_DIRECT, false),
+            mockMode: parseBoolean(env.QSTASH_MOCK_MODE, false),
             batchSize: parsePositiveInt(env.QSTASH_BATCH_SIZE, 10),
             batchTimeout: parsePositiveInt(env.QSTASH_BATCH_TIMEOUT, 100),
             maxBufferSize: parsePositiveInt(env.QSTASH_MAX_BUFFER_SIZE, 1000),
@@ -526,7 +528,7 @@ function buildConfigObject(env) {
             serverPort: parseOptionalInt(env.TG_SERVER_PORT),
             // Test mode logic: Explicit TG_TEST_MODE overrides dev mode default
             testMode: env.TG_TEST_MODE !== undefined
-                ? env.TG_TEST_MODE === 'true'
+                ? parseBoolean(env.TG_TEST_MODE, false)
                 : (process.env.NODE_ENV === 'dev' || process.env.NODE_MODE === 'dev'),
             proxy: (env.TG_PROXY_HOST || env.TELEGRAM_PROXY_HOST) ? {
                 host: env.TG_PROXY_HOST || env.TELEGRAM_PROXY_HOST,
@@ -537,13 +539,13 @@ function buildConfigObject(env) {
             } : null
         },
         tunnel: {
-            enabled: env.TUNNEL_ENABLED === 'true',
+            enabled: parseBoolean(env.TUNNEL_ENABLED, false),
             provider: env.TUNNEL_PROVIDER || 'cloudflare',
             metricsPort: parseInt(env.TUNNEL_METRICS_PORT) || 2000,
             metricsHost: env.TUNNEL_METRICS_HOST || '127.0.0.1'
         },
         streamForwarding: (() => {
-            const enabled = env.STREAM_FORWARDING_ENABLED === 'true';
+            const enabled = parseBoolean(env.STREAM_FORWARDING_ENABLED, false);
             const secret = typeof env.INSTANCE_SECRET === 'string' ? env.INSTANCE_SECRET.trim() : '';
             if (enabled && !secret) {
                 console.warn('⚠️ STREAM_FORWARDING_ENABLED=true 但 INSTANCE_SECRET 未配置，内部控制接口将拒绝请求');

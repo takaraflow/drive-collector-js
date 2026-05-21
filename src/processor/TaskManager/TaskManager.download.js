@@ -9,6 +9,7 @@ import { assertLocalStorageCapacity } from "../../utils/storageGuard.js";
 import { TASK_EVENTS } from "../../domain/task-state-machine.js";
 import { TASK_QUEUE_TRIGGER_SOURCES, TaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
 import { isRetryableInfrastructureError } from "../../domain/infrastructure-error.js";
+import { parseBoolean } from "../../config/boolean.js";
 
 // 获取模块日志记录器
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager');
@@ -16,7 +17,7 @@ const getLog = () => dependencyContainer.get('logger').withModule('TaskManager')
 const STRICT_DIRECT_TRANSFER_ERROR_CODE = 'DIRECT_TRANSFER_STRICT_UNAVAILABLE';
 
 function isStrictDirectTransfer(config) {
-    return config.directTransfer?.enabled !== false && config.directTransfer?.fallbackToLocal === false;
+    return parseBoolean(config.directTransfer?.enabled, true) && !parseBoolean(config.directTransfer?.fallbackToLocal, true);
 }
 
 function createStrictDirectTransferError(reason, detail = null) {

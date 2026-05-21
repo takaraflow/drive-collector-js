@@ -2,6 +2,7 @@ import { once } from "events";
 import path from "path";
 import { randomUUID } from "crypto";
 import { getConfig } from "../config/index.js";
+import { parseBoolean } from "../config/boolean.js";
 import { CloudTool } from "./rclone.js";
 import { logger } from "./logger/index.js";
 import { redactSensitiveText } from "../utils/serializer.js";
@@ -34,7 +35,7 @@ export class DirectTransferService {
     }
 
     canAttempt(config = getConfig(), options = {}) {
-        if (config.directTransfer?.enabled === false) {
+        if (!parseBoolean(config.directTransfer?.enabled, true)) {
             return { supported: false, reason: "disabled" };
         }
 
@@ -209,7 +210,7 @@ export class DirectTransferService {
     }
 
     _isLocalFallbackAllowed(config) {
-        return config.directTransfer?.fallbackToLocal !== false;
+        return parseBoolean(config.directTransfer?.fallbackToLocal, true);
     }
 
     _buildFallbackResult(config, reason, extra = {}) {

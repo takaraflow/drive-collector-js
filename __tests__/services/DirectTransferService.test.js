@@ -474,6 +474,36 @@ describe("DirectTransferService", () => {
     expect(cloudTool.createRcatStream).not.toHaveBeenCalled();
   });
 
+  test("treats string false fallback config as strict zero-disk mode", async () => {
+    const proc = createProcess({ exitCode: 1, stderr: "backend timeout" });
+    const stdin = createWritable(proc);
+    const stagingName = ".drive-collector-task-string-strict-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-string-strict", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "file.bin",
+      config: {
+        directTransfer: { enabled: "TRUE", fallbackToLocal: "FALSE" },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    expect(result).toMatchObject({ success: false, fallback: false });
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
+    expect(loggerFns.warn).toHaveBeenCalledWith(
+      "Direct transfer failed closed",
+      expect.objectContaining({
+        taskId: "task-string-strict",
+        fallbackAllowed: false
+      })
+    );
+  });
+
   test("does not delete final remote name when validation fails after moveto", async () => {
     const proc = createProcess();
     const stdin = createWritable(proc);

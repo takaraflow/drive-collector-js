@@ -361,4 +361,33 @@ describe("Config Module", () => {
     delete process.env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL;
     delete process.env.DIRECT_TRANSFER_TIMEOUT_MS;
   });
+
+  test("should parse boolean env values case-insensitively", async () => {
+    process.env.DIRECT_TRANSFER_ENABLED = "FALSE";
+    process.env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL = " 0 ";
+    process.env.DB_AUTO_MIGRATE = "YES";
+    process.env.DB_SCHEMA_CHECK = "On";
+    process.env.STREAM_FORWARDING_ENABLED = "ON";
+    process.env.INSTANCE_SECRET = "shared-secret";
+
+    __resetConfigForTests();
+    const config = await initConfig();
+
+    expect(config.directTransfer).toMatchObject({
+      enabled: false,
+      fallbackToLocal: false
+    });
+    expect(config.database).toMatchObject({
+      autoMigrate: true,
+      schemaCheck: true
+    });
+    expect(config.streamForwarding.enabled).toBe(true);
+
+    delete process.env.DIRECT_TRANSFER_ENABLED;
+    delete process.env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL;
+    delete process.env.DB_AUTO_MIGRATE;
+    delete process.env.DB_SCHEMA_CHECK;
+    delete process.env.STREAM_FORWARDING_ENABLED;
+    delete process.env.INSTANCE_SECRET;
+  });
 });
