@@ -132,10 +132,11 @@ export async function downloadTask(task) {
                     throw e;
                 }
                 const isCancel = e.message === "CANCELLED";
-                if (downloadFinished && isRetryableInfrastructureError(e)) {
+                if (isRetryableInfrastructureError(e) || e?.retryable === true) {
                     log.warn("Download phase hit retryable infrastructure error; leaving state for webhook/recovery retry", {
                         taskId: task.id,
-                        error: e.message
+                        error: e.message,
+                        downloadFinished
                     });
                     throw e;
                 } else {

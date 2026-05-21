@@ -9,9 +9,11 @@ export const RCLONE_ERROR_CODES = Object.freeze({
 });
 
 const TRANSIENT_ERROR_PATTERNS = [
+    /^TIMEOUT$/i,
     /temporary failure/i,
     /connection (reset|refused|aborted|closed)/i,
     /i\/o timeout/i,
+    /rclone [\s\S]* timed out/i,
     /TLS handshake timeout/i,
     /timeout awaiting response headers/i,
     /server closed idle connection/i,

@@ -1121,6 +1121,46 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         getAllSpy.mockRestore();
     });
 
+    test("strict zero-disk direct transfer timeout stays retryable instead of failing the task", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: true, reason: "rclone-rcat" });
+        mockDirectTransferService.transferTelegramMediaToRemote.mockResolvedValue({
+            success: false,
+            fallback: false,
+            error: "TIMEOUT",
+            errorCode: "RCLONE_TRANSIENT",
+            retryable: true,
+            userRetryable: true
+        });
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                directTransfer: { enabled: true, fallbackToLocal: false },
+                streamForwarding: { enabled: false }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await expect(TaskManager.downloadTask(task)).rejects.toThrow("TIMEOUT");
+
+        expect(mockClient.downloadMedia).not.toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
+        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+            "task_1",
+            "fail",
+            expect.anything(),
+            expect.objectContaining({ source: "handleTaskFailure" })
+        );
+
+        getAllSpy.mockRestore();
+    });
+
     test("stream forwarding start blocked falls back to local download instead of swallowing the task", async () => {
         mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
         mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
