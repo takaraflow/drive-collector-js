@@ -1,6 +1,6 @@
 import { BaseLogger } from './BaseLogger.js';
 import { writeOriginalConsole } from './console-channel.js';
-import { serializeError, serializeErrorLike, serializeToString, limitFields, redactSensitiveText } from '../../utils/serializer.js';
+import { serializeError, serializeErrorLike, pruneData, limitFields, redactSensitiveText } from '../../utils/serializer.js';
 import { getBeijingISOString } from '../../utils/timeUtils.js';
 import { shouldSendLogLevel } from './log-level.js';
 import { trace } from '@opentelemetry/api';
@@ -160,7 +160,7 @@ class NewrelicLogger extends BaseLogger {
             local_time: getBeijingISOString(),
             ...context,
             attributes: {
-                details: serializeToString(finalData)
+                details: pruneData(finalData, 4, 50)
             }
         };
 

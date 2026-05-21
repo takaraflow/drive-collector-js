@@ -151,7 +151,7 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
         expect(payload.message).toContain('pass="[REDACTED]"');
         expect(payload.error_message).toContain('pass="[REDACTED]"');
         expect(payload.error_stack).toContain('token=[REDACTED]');
-        expect(payload.attributes.details).toContain('pass=\\"[REDACTED]\\"');
+        expect(JSON.stringify(payload.attributes.details)).toContain('pass=\\"[REDACTED]\\"');
         expect(serializedPayload).not.toContain('user@example.com');
         expect(serializedPayload).not.toContain('secret-pass');
         expect(serializedPayload).not.toContain('message-secret');
@@ -199,7 +199,35 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
         expect(payload.error_message).toContain('Failed to copy');
         expect(payload.error_message).toContain('quota exceeded');
         expect(payload.error_message).not.toContain('pass=');
-        expect(payload.attributes.details).toContain('rcloneExitCode');
+        expect(payload.attributes.details.rcloneExitCode).toBe(1);
+    });
+
+    it('should preserve direct transfer failure diagnostics as structured New Relic details', async () => {
+        const payload = logger._buildPayload('warn', 'Direct transfer failed closed', {
+            errorCode: 'RCLONE_TRANSIENT',
+            retryable: true,
+            userRetryable: true,
+            fallbackAllowed: false,
+            reason: 'rclone rcat timed out after 100ms',
+            taskId: 'task-1',
+            userId: 'user-1',
+            fileName: 'movie.mp4',
+            driveType: 'mega',
+            attempts: 3
+        }, { module: 'DirectTransferService' }, 'instance-1');
+
+        expect(payload.attributes.details).toMatchObject({
+            errorCode: 'RCLONE_TRANSIENT',
+            retryable: true,
+            userRetryable: true,
+            fallbackAllowed: false,
+            reason: 'rclone rcat timed out after 100ms',
+            taskId: 'task-1',
+            userId: 'user-1',
+            fileName: 'movie.mp4',
+            driveType: 'mega',
+            attempts: 3
+        });
     });
 
     it('should attach build identity fields to log payloads', async () => {
