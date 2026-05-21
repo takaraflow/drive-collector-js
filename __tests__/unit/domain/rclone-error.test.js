@@ -27,10 +27,10 @@ describe("rclone error classification", () => {
         });
     });
 
-    test("uses operation context when sanitized diagnostics lose path context", () => {
+    test("uses remote path context when sanitized diagnostics lose path context", () => {
         const error = `CRITICAL | Failed to create file system for ":mega,user=\\"[REDACTED]": couldn't login: Object (typically, node or user) not found`;
 
-        expect(classifyRcloneError(error, { operation: "copyto", remotePathScoped: true })).toMatchObject({
+        expect(classifyRcloneError(error, { remotePathScoped: true })).toMatchObject({
             code: RCLONE_ERROR_CODES.DRIVE_REMOTE_NOT_FOUND,
             retryable: false,
             userRetryable: true

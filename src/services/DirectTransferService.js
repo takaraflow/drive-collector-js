@@ -185,6 +185,17 @@ export class DirectTransferService {
             const errorCode = failureMetadata.errorCode;
             const isPermanentDriveFailure = NON_FALLBACK_RCLONE_ERROR_CODES.has(errorCode);
             if (!fallbackAllowed || isPermanentDriveFailure) {
+                log.warn("Direct transfer failed closed", {
+                    taskId: task.id,
+                    userId: task.userId,
+                    fileName,
+                    driveType,
+                    errorCode,
+                    retryable: failureMetadata.retryable,
+                    userRetryable: failureMetadata.userRetryable,
+                    fallbackAllowed,
+                    reason: message
+                });
                 return { success: false, fallback: false, error: message, ...failureMetadata };
             }
 

@@ -9,7 +9,7 @@ import { cache } from "./CacheService.js";
 import { logger } from "./logger/index.js";
 import { DriveProviderFactory } from "./drives/index.js";
 import { redactSensitiveText } from "../utils/serializer.js";
-import { classifyRcloneError, isRetryableRcloneError } from "../domain/rclone-error.js";
+import { classifyRcloneError, isRetryableRcloneError, RCLONE_ERROR_CODES } from "../domain/rclone-error.js";
 import { getRcloneErrorUserMessage } from "../utils/rcloneErrorMessage.js";
 import {
     DRIVE_CONFIG_SCHEMA_VERSION,
@@ -40,6 +40,12 @@ const sanitizeRemoteFileName = (fileName) => {
 
 const DEFAULT_RCLONE_PROCESS_ATTEMPTS = 3;
 const DEFAULT_RCLONE_RETRY_BASE_DELAY_MS = 1000;
+const NON_RETRYABLE_RCLONE_ERROR_CODES = new Set([
+    RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID,
+    RCLONE_ERROR_CODES.DRIVE_CONFIG_INVALID,
+    RCLONE_ERROR_CODES.DRIVE_QUOTA_EXCEEDED,
+    RCLONE_ERROR_CODES.DRIVE_PERMISSION_DENIED
+]);
 
 export class CloudTool {
     static loading = false;
@@ -86,6 +92,52 @@ export class CloudTool {
 
     static _isRemoteNotFoundError(stderr = "") {
         return /directory not found|object not found|error listing|Object \(typically, node or user\) not found/i.test(stderr);
+    }
+
+    static _classifyRcloneFailure(ret, options = {}) {
+        return this.classifyRcloneError(
+            this._buildRcloneError(ret, `rclone exited with code ${ret?.code}`),
+            options
+        );
+    }
+
+    static _isRemotePathNotFound(ret, options = {}) {
+        return this._classifyRcloneFailure(ret, {
+            ...options,
+            remotePathScoped: true
+        }).code === RCLONE_ERROR_CODES.DRIVE_REMOTE_NOT_FOUND;
+    }
+
+    static async _verifyRemoteRootAvailable(connectionString, timeout = 15000) {
+        const ret = await this._runRclone(["lsjson", "--max-depth", "1", connectionString], timeout);
+        if (ret.code === 0) {
+            return { available: true };
+        }
+
+        const failure = this._buildFailureResult(
+            this._buildRcloneError(ret, `rclone root probe exited with code ${ret.code}`),
+            { operation: "lsjson", remotePathScoped: false }
+        );
+        return {
+            available: false,
+            failure
+        };
+    }
+
+    static async _resolvePathScopedNotFound(ret, connectionString, {
+        rootTimeout = 15000,
+        missingResult = null
+    } = {}) {
+        if (!ret?.stderr || !this._isRemotePathNotFound(ret)) {
+            return null;
+        }
+
+        const rootProbe = await this._verifyRemoteRootAvailable(connectionString, rootTimeout);
+        if (!rootProbe.available) {
+            throw this._buildFailureError(rootProbe.failure);
+        }
+
+        return missingResult;
     }
 
     static async _ensureUploadDirectory(connectionString, userUploadPath) {
@@ -965,7 +1017,7 @@ export class CloudTool {
 
         const ret = await this._runRclone(["deletefile", fullRemotePath], 15000);
         const notFound = ret.stderr && (
-            this._isRemoteNotFoundError(ret.stderr) ||
+            this._isRemotePathNotFound(ret, { operation: "deletefile" }) ||
             ret.stderr.includes("not found") ||
             ret.stderr.includes("error listing")
         );
@@ -1041,7 +1093,8 @@ export class CloudTool {
 
             let ret = await this._runRclone(["lsjson", fullRemotePath]);
 
-            if (ret.code !== 0 && ret.stderr && this._isRemoteNotFoundError(ret.stderr)) {
+            if (ret.code !== 0 && this._isRemotePathNotFound(ret, { operation: "listRemoteFiles" })) {
+                await this._resolvePathScopedNotFound(ret, connectionString);
                 log.info(`Directory ${userUploadPath} not found, attempting to create it...`);
                 // 尝试创建一个空目录/触发目录初始化 (异步化)
                 await this._runRclone(["mkdir", fullRemotePath], 10000);
@@ -1050,7 +1103,8 @@ export class CloudTool {
             }
 
             if (ret.code !== 0) {
-                if (ret.stderr && this._isRemoteNotFoundError(ret.stderr)) {
+                if (this._isRemotePathNotFound(ret, { operation: "listRemoteFiles" })) {
+                    await this._resolvePathScopedNotFound(ret, connectionString);
                     log.warn("Rclone directory still not found after attempt, returning empty list.");
                     this.loading = false;
                     return [];
@@ -1165,11 +1219,12 @@ export class CloudTool {
                 const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath, fileName);
                 let ret = await this._runRclone(["lsjson", fullRemotePath], 10000);
 
-                // 如果明确返回“不存在”类错误，直接退出，不重试，不回退
+                // 如果明确返回“不存在”类错误，先确认远端根仍可访问。
+                // MEGA 会把凭据/根节点异常和路径节点异常都写成 Object not found；
+                // 根可用才表示目标文件/目录不存在，否则应暴露真实绑定问题。
                 if (ret.code !== 0 && ret.stderr) {
-                    const isNotFound = this._isRemoteNotFoundError(ret.stderr);
-
-                    if (isNotFound) {
+                    if (this._isRemotePathNotFound(ret, { operation: "lsjson" })) {
+                        await this._resolvePathScopedNotFound(ret, connectionString);
                         log.debug(`[getRemoteFileInfo] File clearly not found: ${fileName}`);
                         return null;
                     }
@@ -1215,10 +1270,13 @@ export class CloudTool {
                 }
 
                 // 如果都没有找到或出错，记录日志（排除找不到文件的情况，减少日志噪音）
-                if (ret.code !== 0 && !this._isRemoteNotFoundError(ret.stderr)) {
+                if (ret.code !== 0 && !this._isRemotePathNotFound(ret, { operation: "lsjson" })) {
                     // console.warn(`[getRemoteFileInfo] Status ${ret.code} for ${fileName}: ${ret.stderr}`);
                 }
             } catch (e) {
+                if (NON_RETRYABLE_RCLONE_ERROR_CODES.has(e?.errorCode)) {
+                    throw e;
+                }
                 log.warn(`[getRemoteFileInfo] Attempt ${i + 1} failed for ${fileName}:`, e.message);
             }
 

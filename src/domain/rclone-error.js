@@ -61,24 +61,10 @@ const CONFIG_INVALID_PATTERNS = [
 ];
 const TRANSIENT_JSON_STARTUP_ERROR = /unexpected end of JSON input/i;
 const TRANSIENT_JSON_CONTEXT = /(failed to create file system|couldn'?t login|remote API|server response|mega)/i;
-const PATH_SCOPED_OPERATIONS = new Set([
-    "copy",
-    "copyto",
-    "deletefile",
-    "listRemoteFiles",
-    "lsjson",
-    "mkdir",
-    "moveto",
-    "rcat",
-    "stream",
-    "uploadBatch"
-]);
-
 const hasAnyMatch = (text, patterns) => patterns.some(pattern => pattern.test(text));
 const hasMegaRemotePath = (text) => /:mega,[\s\S]*?:(?!["\\\s])/i.test(text);
 const isPathScopedOperation = (options = {}) => (
-    options.remotePathScoped === true ||
-    PATH_SCOPED_OPERATIONS.has(String(options.operation || ""))
+    options.remotePathScoped === true
 );
 
 export function classifyRcloneError(errorText, options = {}) {
@@ -163,6 +149,6 @@ export function classifyRcloneError(errorText, options = {}) {
     };
 }
 
-export function isRetryableRcloneError(errorText) {
-    return classifyRcloneError(errorText).retryable === true;
+export function isRetryableRcloneError(errorText, options = {}) {
+    return classifyRcloneError(errorText, options).retryable === true;
 }

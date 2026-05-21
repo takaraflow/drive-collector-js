@@ -1,6 +1,13 @@
 import { EventEmitter } from "events";
 import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 
+const loggerFns = vi.hoisted(() => ({
+  warn: vi.fn(),
+  info: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn()
+}));
+
 let config = {
   directTransfer: { enabled: true, fallbackToLocal: true },
   remoteName: "mega",
@@ -13,12 +20,7 @@ vi.mock("../../src/config/index.js", () => ({
 
 vi.mock("../../src/services/logger/index.js", () => ({
   logger: {
-    withModule: () => ({
-      warn: vi.fn(),
-      info: vi.fn(),
-      error: vi.fn(),
-      debug: vi.fn()
-    })
+    withModule: () => loggerFns
   }
 }));
 
@@ -83,6 +85,10 @@ describe("DirectTransferService", () => {
 
   beforeEach(() => {
     vi.useRealTimers();
+    loggerFns.warn.mockClear();
+    loggerFns.info.mockClear();
+    loggerFns.error.mockClear();
+    loggerFns.debug.mockClear();
     config = {
       directTransfer: { enabled: true, fallbackToLocal: true },
       remoteName: "mega",
@@ -383,6 +389,18 @@ describe("DirectTransferService", () => {
     });
     expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
     expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
+    expect(loggerFns.warn).toHaveBeenCalledWith(
+      "Direct transfer failed closed",
+      expect.objectContaining({
+        taskId: "task-timeout-strict",
+        userId: "user-1",
+        fileName: "file.bin",
+        errorCode: "RCLONE_TRANSIENT",
+        retryable: true,
+        userRetryable: true,
+        fallbackAllowed: false
+      })
+    );
   });
 
   test("skips direct transfer for OSS/R2 local staging targets", () => {

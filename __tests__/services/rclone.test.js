@@ -655,6 +655,15 @@ describe('CloudTool', () => {
                 .mockImplementationOnce(() => createAutoProcess((p) => {
                     p.stderr.emit('end');
                     p.stderr.emit('close');
+                    p.stdout.emit('data', Buffer.from('[]'));
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.emit('exit', 0);
+                    p.emit('close', 0);
+                }))
+                .mockImplementationOnce(() => createAutoProcess((p) => {
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
                     p.stdout.emit('end');
                     p.stdout.emit('close');
                     p.emit('exit', 0);
@@ -970,8 +979,9 @@ describe('CloudTool', () => {
             const files = await CloudTool.listRemoteFiles('user-node-missing', true);
 
             expect(files).toEqual([]);
-            expect(mockSpawn).toHaveBeenCalledTimes(3);
-            expect(mockSpawn.mock.calls[1][1]).toEqual(expect.arrayContaining(['mkdir']));
+            expect(mockSpawn).toHaveBeenCalledTimes(4);
+            expect(mockSpawn.mock.calls[1][1]).toEqual(expect.arrayContaining(['lsjson', '--max-depth', '1', expect.stringContaining(':mega')]));
+            expect(mockSpawn.mock.calls[2][1]).toEqual(expect.arrayContaining(['mkdir']));
         });
 
         it('should create rcat stream with an exact size hint when provided', async () => {
@@ -999,6 +1009,35 @@ describe('CloudTool', () => {
             expect(args).toContain('--size');
             expect(args).toContain('12345');
             expect(args).toEqual(expect.arrayContaining([expect.stringContaining('test-folder/movie.mkv')]));
+        });
+
+        it('should surface upload directory failures before opening rcat', async () => {
+            mockGetDefaultDrive.mockResolvedValue({
+                type: 'mega',
+                config_data: JSON.stringify({
+                    user: 'u',
+                    pass: 'p',
+                    pass_format: 'rclone_obscured',
+                    config_schema_version: 1
+                }),
+                remote_folder: '/Missing'
+            });
+            mockSpawn.mockImplementationOnce(() => createAutoProcess((p) => {
+                p.stderr.emit('data', Buffer.from(`CRITICAL | Failed to create file system for ":mega,user="u",pass="p":Missing": couldn't login: Object (typically, node or user) not found\n`));
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 1);
+                p.emit('close', 1);
+            }));
+
+            await expect(CloudTool.createRcatStream('movie.mkv', 'user123')).rejects.toMatchObject({
+                errorCode: 'DRIVE_REMOTE_NOT_FOUND',
+                userRetryable: true,
+                retryable: false
+            });
+            expect(mockSpawn).toHaveBeenCalledTimes(1);
         });
 
         it('should move a sanitized remote staging file to the final remote name', async () => {
@@ -1112,6 +1151,78 @@ describe('CloudTool', () => {
             }));
             const info = await CloudTool.getRemoteFileInfo('test.txt', 'user123');
             expect(info.Name).toBe('test.txt');
+        });
+
+        it('should return null for a missing file only after the remote root is available', async () => {
+            mockGetDefaultDrive.mockResolvedValue({
+                type: 'mega',
+                config_data: JSON.stringify({
+                    user: 'u',
+                    pass: 'p',
+                    pass_format: 'rclone_obscured',
+                    config_schema_version: 1
+                }),
+                remote_folder: '/Missing'
+            });
+            mockSpawn
+                .mockImplementationOnce(() => createAutoProcess((p) => {
+                    p.stderr.emit('data', Buffer.from(`CRITICAL | Failed to create file system for ":mega,user="u",pass="p":Missing/movie.mkv": couldn't login: Object (typically, node or user) not found\n`));
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.emit('exit', 1);
+                    p.emit('close', 1);
+                }))
+                .mockImplementationOnce(() => createAutoProcess((p) => {
+                    p.stdout.emit('data', Buffer.from('[]'));
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.emit('exit', 0);
+                    p.emit('close', 0);
+                }));
+
+            const info = await CloudTool.getRemoteFileInfo('movie.mkv', 'user123', 1, true);
+
+            expect(info).toBeNull();
+            expect(mockSpawn).toHaveBeenCalledTimes(2);
+            expect(mockSpawn.mock.calls[1][1]).toEqual(expect.arrayContaining([
+                'lsjson',
+                '--max-depth',
+                '1',
+                expect.stringContaining(':mega')
+            ]));
+        });
+
+        it('should throw an actionable auth error when MEGA object-not-found also affects the remote root', async () => {
+            mockGetDefaultDrive.mockResolvedValue({
+                type: 'mega',
+                config_data: JSON.stringify({
+                    user: 'u',
+                    pass: 'p',
+                    pass_format: 'rclone_obscured',
+                    config_schema_version: 1
+                }),
+                remote_folder: '/Movies'
+            });
+            mockSpawn.mockImplementation(() => createAutoProcess((p) => {
+                p.stderr.emit('data', Buffer.from(`CRITICAL | Failed to create file system for ":mega,user="u",pass="p":": couldn't login: Object (typically, node or user) not found\n`));
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 1);
+                p.emit('close', 1);
+            }));
+
+            await expect(CloudTool.getRemoteFileInfo('movie.mkv', 'user123', 1, true)).rejects.toMatchObject({
+                errorCode: 'DRIVE_AUTH_INVALID',
+                userRetryable: false,
+                retryable: false
+            });
+            expect(mockSpawn).toHaveBeenCalledTimes(2);
         });
 
         it('should retry on failure and eventually return info (Verification of Retry Logic)', async () => {
