@@ -340,6 +340,80 @@ describe('WebhookRouter', () => {
             expect(res.end).toHaveBeenCalledWith(JSON.stringify({ success: true, statusCode: 200 }));
         });
 
+        it('should forward internal retry to Telegram leader when current instance is not leader', async () => {
+            req.url = '/api/v2/tasks/123/retry?source=manual';
+            req.method = 'POST';
+            req.headers['x-instance-secret'] = 'test-secret';
+
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
+
+            const { TaskManager } = await import('../../../src/processor/TaskManager.js');
+            TaskManager.retryTask.mockResolvedValue({
+                success: false,
+                statusCode: 503,
+                message: 'Service Unavailable - Not Leader'
+            });
+
+            const { cache } = await import('../../../src/services/CacheService.js');
+            cache.get.mockResolvedValue({ instanceId: 'leader-instance' });
+
+            const { instanceCoordinator } = await import('../../../src/services/InstanceCoordinator.js');
+            instanceCoordinator.getActiveInstances.mockResolvedValue([{ id: 'leader-instance', url: 'http://leader.local' }]);
+
+            vi.spyOn(global, 'fetch').mockResolvedValue({
+                ok: true,
+                status: 200,
+                text: () => Promise.resolve(JSON.stringify({ success: true, statusCode: 200 }))
+            });
+
+            await handleWebhook(req, res);
+
+            expect(global.fetch).toHaveBeenCalledWith(
+                'http://leader.local/api/v2/tasks/123/retry?source=manual',
+                expect.objectContaining({
+                    method: 'POST',
+                    headers: expect.objectContaining({
+                        'x-instance-secret': 'test-secret',
+                        'x-forwarded-by-instance': 'test-instance'
+                    })
+                })
+            );
+            expect(cache.get).toHaveBeenCalledWith('lock:telegram_client', 'json', { skipCache: true });
+            expect(instanceCoordinator.getActiveInstances).toHaveBeenCalledWith({ strong: true });
+            expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
+            expect(res.end).toHaveBeenCalledWith(JSON.stringify({ success: true, statusCode: 200 }));
+        });
+
+        it('should not forward internal retry again when already forwarded', async () => {
+            req.url = '/api/v2/tasks/123/retry';
+            req.method = 'POST';
+            req.headers['x-instance-secret'] = 'test-secret';
+            req.headers['x-forwarded-by-instance'] = 'other-instance';
+
+            const { getConfig } = await import('../../../src/config/index.js');
+            getConfig.mockReturnValue({ streamForwarding: { secret: 'test-secret' } });
+
+            const { TaskManager } = await import('../../../src/processor/TaskManager.js');
+            TaskManager.retryTask.mockResolvedValue({
+                success: false,
+                statusCode: 503,
+                message: 'Service Unavailable - Not Leader'
+            });
+
+            vi.spyOn(global, 'fetch');
+
+            await handleWebhook(req, res);
+
+            expect(global.fetch).not.toHaveBeenCalled();
+            expect(res.writeHead).toHaveBeenCalledWith(503, { 'Content-Type': 'application/json' });
+            expect(res.end).toHaveBeenCalledWith(JSON.stringify({
+                success: false,
+                statusCode: 503,
+                message: 'Service Unavailable - Not Leader'
+            }));
+        });
+
         it('should reject /api/v2/tasks/:taskId/retry with invalid secret', async () => {
             req.url = '/api/v2/tasks/123/retry';
             req.method = 'POST';

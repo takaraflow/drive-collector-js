@@ -43,6 +43,55 @@ function getVersionResponseIdentity(req) {
         : getPublicBuildIdentity(identity);
 }
 
+function isNotTelegramLeaderResult(result) {
+    return result?.statusCode === 503 &&
+        typeof result?.message === 'string' &&
+        result.message.includes('Not Leader');
+}
+
+async function resolveTelegramLeaderBaseUrl() {
+    try {
+        const [{ cache }, { instanceCoordinator }] = await Promise.all([
+            import("../services/CacheService.js"),
+            import("../services/InstanceCoordinator.js")
+        ]);
+
+        const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), 'json', { skipCache: true });
+        const leaderInstanceId = lockData?.instanceId;
+        if (!leaderInstanceId) return null;
+
+        const activeInstances = (await instanceCoordinator.getActiveInstances?.({ strong: true })) || [];
+        const leaderInstance = activeInstances.find(i => i.id === leaderInstanceId);
+        const baseUrl = resolveInstanceBaseUrl(leaderInstance);
+        if (!baseUrl) return null;
+
+        return String(baseUrl).replace(/\/$/, '');
+    } catch (error) {
+        log.warn('Failed to resolve Telegram leader URL', { error: error?.message || String(error) });
+        return null;
+    }
+}
+
+async function forwardPostToTelegramLeader(req, targetBaseUrl, requestPath, headers, bodyString) {
+    const { instanceCoordinator } = await import("../services/InstanceCoordinator.js");
+    return fetch(`${targetBaseUrl}${requestPath}`, {
+        method: 'POST',
+        headers: {
+            'content-type': 'application/json',
+            ...headers,
+            'x-forwarded-by-instance': instanceCoordinator.instanceId || 'unknown'
+        },
+        body: bodyString || '',
+        signal: AbortSignal.timeout(15000)
+    });
+}
+
+function getRequestPath(req) {
+    const hostHeader = req.headers?.host || req.headers?.[':authority'] || 'localhost';
+    const url = new URL(req.url, `http://${hostHeader}`);
+    return `${url.pathname}${url.search}`;
+}
+
 /**
  * 处理健康检查请求
  */
@@ -242,6 +291,30 @@ async function handleStreamForwarding(req, res) {
         }
         
         const result = await TaskManager.retryTask(taskId);
+        if (isNotTelegramLeaderResult(result) && !req.headers?.['x-forwarded-by-instance']) {
+            const targetBaseUrl = await resolveTelegramLeaderBaseUrl();
+            if (targetBaseUrl) {
+                log.debug('➡️ Forwarding manual retry to Telegram leader', {
+                    taskId,
+                    targetBaseUrl
+                });
+                const forwardedResponse = await forwardPostToTelegramLeader(
+                    req,
+                    targetBaseUrl,
+                    getRequestPath(req),
+                    { 'x-instance-secret': config.streamForwarding.secret },
+                    body
+                );
+                const upstreamBody = await forwardedResponse.text();
+                res.writeHead(forwardedResponse.status || 503, { 'Content-Type': 'application/json' });
+                res.end(upstreamBody || JSON.stringify({
+                    success: false,
+                    statusCode: forwardedResponse.status || 503,
+                    message: 'Telegram leader retry returned an empty response'
+                }));
+                return true;
+            }
+        }
         
         res.writeHead(result.statusCode || 200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
@@ -338,56 +411,10 @@ async function processWebhookData(req, res, signature, body) {
  * 处理webhook转发到leader实例
  */
 async function handleWebhookForwarding(req, res, result, data, path, body) {
-    const isNotLeader503 =
-        result?.statusCode === 503 &&
-        typeof result?.message === 'string' &&
-        result.message.includes('Not Leader');
-
     const alreadyForwarded = Boolean(req.headers?.['x-forwarded-by-instance']);
 
-    if (isNotLeader503 && !alreadyForwarded) {
-        const resolveWebhookLeaderUrl = async () => {
-            try {
-                const [{ cache }, { instanceCoordinator }] = await Promise.all([
-                    import("../services/CacheService.js"),
-                    import("../services/InstanceCoordinator.js")
-                ]);
-
-                const lockData = await cache.get(CACHE_KEYS.telegramClientLock(), 'json', { skipL1: true });
-                const leaderInstanceId = lockData?.instanceId;
-                if (!leaderInstanceId) return null;
-
-                const activeInstances = (await instanceCoordinator.getActiveInstances?.({ strong: true })) || [];
-                const leaderInstance = activeInstances.find(i => i.id === leaderInstanceId);
-                const baseUrl = resolveInstanceBaseUrl(leaderInstance);
-                if (!baseUrl) return null;
-                return String(baseUrl).replace(/\/$/, '');
-            } catch (error) {
-                log.warn('Failed to resolve webhook leader URL', { error: error?.message || String(error) });
-                return null;
-            }
-        };
-
-        const forwardWebhookToLeader = async ({ targetBaseUrl, requestPath, signature, bodyString }) => {
-            const { instanceCoordinator } = await import("../services/InstanceCoordinator.js");
-            const targetUrl = `${targetBaseUrl}${requestPath}`;
-            const forwardHeaders = {
-                'upstash-signature': signature,
-                'content-type': 'application/json',
-                'x-forwarded-by-instance': instanceCoordinator.instanceId || 'unknown'
-            };
-
-            return fetch(targetUrl, {
-                method: 'POST',
-                headers: forwardHeaders,
-                body: bodyString,
-                signal: AbortSignal.timeout(15000)
-            });
-        };
-
-        const hostHeader = req.headers?.host || req.headers?.[':authority'] || 'localhost';
-        const url = new URL(req.url, `http://${hostHeader}`);
-        const targetBaseUrl = await resolveWebhookLeaderUrl();
+    if (isNotTelegramLeaderResult(result) && !alreadyForwarded) {
+        const targetBaseUrl = await resolveTelegramLeaderBaseUrl();
         if (targetBaseUrl) {
             log.debug('➡️ Forwarding webhook to leader', {
                 path,
@@ -398,12 +425,13 @@ async function handleWebhookForwarding(req, res, result, data, path, body) {
                 instanceId: data._meta?.instanceId
             });
 
-            const forwardedResponse = await forwardWebhookToLeader({
+            const forwardedResponse = await forwardPostToTelegramLeader(
+                req,
                 targetBaseUrl,
-                requestPath: `${url.pathname}${url.search}`,
-                signature: req.headers['upstash-signature'],
-                bodyString: body
-            });
+                getRequestPath(req),
+                { 'upstash-signature': req.headers['upstash-signature'] },
+                body
+            );
 
             const upstreamStatus = forwardedResponse.status;
             if (forwardedResponse.ok) {
