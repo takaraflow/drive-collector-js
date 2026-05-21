@@ -17,6 +17,7 @@ import { once } from "events";
 import fs from "fs";
 import os from "os";
 import path from "path";
+import crypto from "node:crypto";
 
 const log = logger.withModule('StreamTransferService');
 const getStreamConfig = () => getConfig().streamForwarding;
@@ -910,7 +911,7 @@ class StreamTransferService {
             return context.finalizePromise;
         }
 
-        const token = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+        const token = `${Date.now()}:${crypto.randomUUID()}`;
         context.phase = 'finalizing';
         context.finalizeToken = token;
         context.finalizeState = {
