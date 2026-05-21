@@ -60,6 +60,19 @@ function createWritable(proc = null) {
   return writable;
 }
 
+function createStalledBackpressureWritable() {
+  const writable = new EventEmitter();
+  writable.writable = true;
+  writable.destroyed = false;
+  writable.closed = false;
+  writable.write = vi.fn(() => false);
+  writable.end = vi.fn();
+  writable.destroy = vi.fn(() => {
+    writable.destroyed = true;
+  });
+  return writable;
+}
+
 function createEpipeWritable(proc) {
   const writable = new EventEmitter();
   writable.writable = true;
@@ -443,6 +456,102 @@ describe("DirectTransferService", () => {
         fallbackAllowed: false
       })
     );
+  });
+
+  test("fails strict zero-disk transfer when Telegram source makes no progress", async () => {
+    vi.useFakeTimers();
+    const proc = createProcess();
+    const stdin = createWritable(proc);
+    const stagingName = ".drive-collector-task-source-stall-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    const sourceIterator = {
+      next: vi.fn(() => new Promise(() => {})),
+      return: vi.fn(async () => ({ done: true }))
+    };
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+    client.iterDownload.mockReturnValue(sourceIterator);
+
+    const resultPromise = service.transferTelegramMediaToRemote({
+      task: { id: "task-source-stall", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 5 },
+      fileName: "file.bin",
+      config: {
+        directTransfer: {
+          enabled: true,
+          fallbackToLocal: false,
+          timeoutMs: 10000,
+          stallTimeoutMs: 100,
+          maxAttempts: 1,
+          retryDelayMs: 0
+        },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(100);
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false,
+      errorCode: "RCLONE_TRANSIENT",
+      retryable: true,
+      userRetryable: true
+    });
+    expect(result.error).toContain("direct transfer stall timeout");
+    expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(sourceIterator.return).toHaveBeenCalled();
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
+  });
+
+  test("fails strict zero-disk transfer when rclone stdin backpressure stalls", async () => {
+    vi.useFakeTimers();
+    const proc = createProcess();
+    const stdin = createStalledBackpressureWritable();
+    const stagingName = ".drive-collector-task-write-stall-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+    client.iterDownload.mockReturnValue((async function* () {
+      yield Buffer.from("hello");
+    })());
+
+    const resultPromise = service.transferTelegramMediaToRemote({
+      task: { id: "task-write-stall", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 5 },
+      fileName: "file.bin",
+      config: {
+        directTransfer: {
+          enabled: true,
+          fallbackToLocal: false,
+          timeoutMs: 10000,
+          stallTimeoutMs: 100,
+          maxAttempts: 1,
+          retryDelayMs: 0
+        },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(100);
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false,
+      errorCode: "RCLONE_TRANSIENT",
+      retryable: true,
+      userRetryable: true
+    });
+    expect(result.error).toContain("rclone_stdin");
+    expect(stdin.destroy).toHaveBeenCalled();
+    expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
   });
 
   test("fails closed by default when fallback is not explicitly enabled", async () => {

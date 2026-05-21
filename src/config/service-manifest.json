@@ -252,6 +252,7 @@
         "DIRECT_TRANSFER_ENABLED",
         "DIRECT_TRANSFER_FALLBACK_TO_LOCAL",
         "DIRECT_TRANSFER_TIMEOUT_MS",
+        "DIRECT_TRANSFER_STALL_TIMEOUT_MS",
         "DIRECT_TRANSFER_MAX_ATTEMPTS",
         "DIRECT_TRANSFER_RETRY_DELAY_MS"
       ],
@@ -265,6 +266,7 @@
         "DIRECT_TRANSFER_FALLBACK_TO_LOCAL 默认为 false，严格零落盘：能力不支持、远端冲突或直传失败都会 fail closed，不进入本地缓存/下载/上传链路",
         "只有显式设置 DIRECT_TRANSFER_FALLBACK_TO_LOCAL=true 时，rcat/moveto/远端校验失败才会清理远端暂存并回退到本地暂存",
         "DIRECT_TRANSFER_TIMEOUT_MS 控制单次 rcat 直传最长运行时间，避免子进程挂死导致任务长期卡住",
+        "DIRECT_TRANSFER_STALL_TIMEOUT_MS 控制零落盘链路无进展超时，覆盖 Telegram 读取、rclone stdin 写入和进度回调",
         "DIRECT_TRANSFER_MAX_ATTEMPTS / DIRECT_TRANSFER_RETRY_DELAY_MS 控制零落盘直传遇到可重试错误时的重试预算，耗尽后才按 fallback 策略处理",
         "直传只复用 rclone 支持的流式能力；OSS/R2 的 multipart stream 未收口前必须使用 fallback=true 才会走本地暂存"
       ]

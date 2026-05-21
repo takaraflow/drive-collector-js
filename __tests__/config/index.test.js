@@ -341,6 +341,7 @@ describe("Config Module", () => {
     delete process.env.DIRECT_TRANSFER_ENABLED;
     delete process.env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL;
     delete process.env.DIRECT_TRANSFER_TIMEOUT_MS;
+    delete process.env.DIRECT_TRANSFER_STALL_TIMEOUT_MS;
 
     __resetConfigForTests();
     const config = await initConfig();
@@ -349,6 +350,7 @@ describe("Config Module", () => {
       enabled: true,
       fallbackToLocal: false,
       timeoutMs: 21600000,
+      stallTimeoutMs: 180000,
       maxAttempts: 3,
       retryDelayMs: 1000
     });
@@ -358,6 +360,7 @@ describe("Config Module", () => {
     process.env.DIRECT_TRANSFER_ENABLED = "false";
     process.env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL = "false";
     process.env.DIRECT_TRANSFER_TIMEOUT_MS = "12345";
+    process.env.DIRECT_TRANSFER_STALL_TIMEOUT_MS = "6789";
 
     __resetConfigForTests();
     const config = await initConfig();
@@ -366,6 +369,7 @@ describe("Config Module", () => {
       enabled: false,
       fallbackToLocal: false,
       timeoutMs: 12345,
+      stallTimeoutMs: 6789,
       maxAttempts: 3,
       retryDelayMs: 1000
     });
@@ -373,6 +377,7 @@ describe("Config Module", () => {
     delete process.env.DIRECT_TRANSFER_ENABLED;
     delete process.env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL;
     delete process.env.DIRECT_TRANSFER_TIMEOUT_MS;
+    delete process.env.DIRECT_TRANSFER_STALL_TIMEOUT_MS;
   });
 
   test("should parse boolean env values case-insensitively", async () => {

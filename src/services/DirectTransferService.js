@@ -16,6 +16,7 @@ const DEFAULT_LARGE_CHUNK_SIZE = 512 * 1024;
 const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
 const MAX_RCLONE_ERROR_LOG = 8000;
 const DEFAULT_TRANSFER_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_STALL_TIMEOUT_MS = 3 * 60 * 1000;
 const DEFAULT_MAX_DIRECT_ATTEMPTS = 3;
 const DEFAULT_DIRECT_RETRY_DELAY_MS = 1000;
 const RCLONE_DIAGNOSTIC_GRACE_MS = 1500;
@@ -137,6 +138,7 @@ export class DirectTransferService {
         let stdin = null;
         let proc = null;
         let rcloneCompletion = null;
+        let sourceIterator = null;
 
         if (existingRemoteFile === undefined) {
             existingRemoteFile = await this.cloudTool.getRemoteFileInfo(finalFileName, task.userId, 1, true);
@@ -155,6 +157,7 @@ export class DirectTransferService {
             const remoteStagingName = rcat.fileName;
             stagedRemoteName = remoteStagingName || stagingFileName;
             const transferTimeoutMs = this._resolveTransferTimeoutMs(config);
+            const stallTimeoutMs = this._resolveStallTimeoutMs(config);
             rcloneCompletion = this._watchRcloneProcess(proc, task.id, transferTimeoutMs);
 
             const downloadIterator = client.iterDownload({
@@ -163,12 +166,20 @@ export class DirectTransferService {
                 chunkSize: effectiveChunkSize,
                 stride: effectiveChunkSize
             });
-            const sourceIterator = downloadIterator?.[Symbol.asyncIterator]?.() || downloadIterator;
+            sourceIterator = downloadIterator?.[Symbol.asyncIterator]?.() || downloadIterator;
 
             while (true) {
                 let nextChunk;
                 try {
-                    nextChunk = await sourceIterator.next();
+                    nextChunk = await this._withStallTimeout(
+                        () => sourceIterator.next(),
+                        {
+                            taskId: task.id,
+                            timeoutMs: stallTimeoutMs,
+                            phase: "telegram_source",
+                            onTimeout: () => this._abortRclone(stdin, proc)
+                        }
+                    );
                 } catch (sourceError) {
                     if (this._isTelegramSourceTransientError(sourceError)) {
                         sourceError.errorCode = TELEGRAM_SOURCE_TRANSIENT_ERROR_CODE;
@@ -181,17 +192,49 @@ export class DirectTransferService {
                 if (isCancelled?.()) {
                     throw new Error("CANCELLED");
                 }
-                await this._writeWithBackpressure(stdin, chunk);
+                await this._withStallTimeout(
+                    () => this._writeWithBackpressure(stdin, chunk),
+                    {
+                        taskId: task.id,
+                        timeoutMs: stallTimeoutMs,
+                        phase: "rclone_stdin",
+                        onTimeout: () => this._abortRclone(stdin, proc)
+                    }
+                );
                 uploadedBytes += chunk.length;
-                await onProgress?.({
-                    bytes: Math.min(uploadedBytes, totalSize || uploadedBytes),
-                    size: totalSize || uploadedBytes,
-                    method: "direct_stream"
-                });
+                await this._withStallTimeout(
+                    () => onProgress?.({
+                        bytes: Math.min(uploadedBytes, totalSize || uploadedBytes),
+                        size: totalSize || uploadedBytes,
+                        method: "direct_stream"
+                    }),
+                    {
+                        taskId: task.id,
+                        timeoutMs: stallTimeoutMs,
+                        phase: "progress_callback",
+                        onTimeout: () => this._abortRclone(stdin, proc)
+                    }
+                );
             }
 
-            await this._endWritable(stdin);
-            const rcloneResult = await rcloneCompletion;
+            await this._withStallTimeout(
+                () => this._endWritable(stdin),
+                {
+                    taskId: task.id,
+                    timeoutMs: stallTimeoutMs,
+                    phase: "rclone_stdin_end",
+                    onTimeout: () => this._abortRclone(stdin, proc)
+                }
+            );
+            const rcloneResult = await this._withStallTimeout(
+                () => rcloneCompletion,
+                {
+                    taskId: task.id,
+                    timeoutMs: stallTimeoutMs,
+                    phase: "rclone_completion",
+                    onTimeout: () => this._abortRclone(stdin, proc)
+                }
+            );
             if (!rcloneResult.success) {
                 throw new DirectTransferFallbackError(rcloneResult.error || "rclone rcat failed", rcloneResult);
             }
@@ -229,6 +272,7 @@ export class DirectTransferService {
         } catch (error) {
             const rcloneFailure = await this._resolveRcloneFailureAfterStreamError(rcloneCompletion, task.id, error);
             this._abortRclone(stdin, proc);
+            await this._closeSourceIterator(sourceIterator, task.id);
             if (!movedToFinal) {
                 await this._cleanupRemote(stagedRemoteName, task.userId, "transfer_failed");
             }
@@ -373,6 +417,45 @@ export class DirectTransferService {
         }
     }
 
+    async _withStallTimeout(operation, { taskId, timeoutMs, phase, onTimeout } = {}) {
+        if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+            return await operation();
+        }
+
+        let timeout = null;
+        let settled = false;
+        const timeoutPromise = new Promise((_, reject) => {
+            timeout = setTimeout(() => {
+                if (settled) return;
+                const error = new DirectTransferStallError(
+                    `direct transfer stall timeout after ${timeoutMs}ms during ${phase || "unknown"}`,
+                    { phase, timeoutMs }
+                );
+                try {
+                    onTimeout?.(error);
+                } catch (abortError) {
+                    log.warn("Direct transfer stall abort hook failed", {
+                        taskId,
+                        phase,
+                        error: redactSensitiveText(abortError?.message || String(abortError))
+                    });
+                }
+                reject(error);
+            }, timeoutMs);
+            timeout.unref?.();
+        });
+
+        try {
+            return await Promise.race([
+                Promise.resolve().then(operation),
+                timeoutPromise
+            ]);
+        } finally {
+            settled = true;
+            if (timeout) clearTimeout(timeout);
+        }
+    }
+
     async _endWritable(writable) {
         if (!writable || writable.destroyed || writable.closed) return;
         await new Promise((resolve, reject) => {
@@ -393,6 +476,21 @@ export class DirectTransferService {
             writable.once("finish", onFinish);
             writable.end();
         });
+    }
+
+    async _closeSourceIterator(sourceIterator, taskId) {
+        if (!sourceIterator || typeof sourceIterator.return !== "function") return;
+        try {
+            await Promise.race([
+                Promise.resolve(sourceIterator.return()),
+                this._delay(500)
+            ]);
+        } catch (error) {
+            log.warn("Direct transfer source iterator cleanup failed", {
+                taskId,
+                error: redactSensitiveText(error?.message || String(error))
+            });
+        }
     }
 
     _watchRcloneProcess(proc, taskId, timeoutMs = DEFAULT_TRANSFER_TIMEOUT_MS) {
@@ -524,6 +622,11 @@ export class DirectTransferService {
         return Number.isFinite(value) && value > 0 ? value : DEFAULT_TRANSFER_TIMEOUT_MS;
     }
 
+    _resolveStallTimeoutMs(config) {
+        const value = Number(config?.directTransfer?.stallTimeoutMs);
+        return Number.isFinite(value) && value > 0 ? value : DEFAULT_STALL_TIMEOUT_MS;
+    }
+
     _resolveMaxAttempts(config) {
         const value = Number(config?.directTransfer?.maxAttempts);
         return Number.isFinite(value) && value > 0
@@ -555,6 +658,19 @@ class DirectTransferFallbackError extends Error {
         this.userMessage = metadata.userMessage;
         this.retryable = metadata.retryable;
         this.userRetryable = metadata.userRetryable;
+    }
+}
+
+class DirectTransferStallError extends Error {
+    constructor(message, metadata = {}) {
+        super(message);
+        this.name = "DirectTransferStallError";
+        this.code = "DIRECT_TRANSFER_STALL_TIMEOUT";
+        this.errorCode = RCLONE_ERROR_CODES.RCLONE_TRANSIENT;
+        this.retryable = true;
+        this.userRetryable = true;
+        this.phase = metadata.phase;
+        this.timeoutMs = metadata.timeoutMs;
     }
 }
 

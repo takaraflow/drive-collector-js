@@ -61,6 +61,7 @@ describe('ServiceConfigManager 测试', () => {
         expect(serviceConfigManager.getServiceName('DIRECT_TRANSFER_ENABLED')).toBe('directTransfer');
         expect(serviceConfigManager.getServiceName('DIRECT_TRANSFER_FALLBACK_TO_LOCAL')).toBe('directTransfer');
         expect(serviceConfigManager.getServiceName('DIRECT_TRANSFER_TIMEOUT_MS')).toBe('directTransfer');
+        expect(serviceConfigManager.getServiceName('DIRECT_TRANSFER_STALL_TIMEOUT_MS')).toBe('directTransfer');
         expect(serviceConfigManager.getServiceName('UNKNOWN_KEY')).toBeUndefined();
     });
 
