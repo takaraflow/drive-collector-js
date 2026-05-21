@@ -497,6 +497,7 @@ export class TaskManager {
             const succeeded = enqueueResults
                 .map((result, index) => ({ result, work: enqueueWork[index] }))
                 .filter(item => item.result.status === 'fulfilled');
+            let fallbackSucceeded = [];
 
             await this._notifyRecoveredTasks(
                 succeeded.map(({ work }) => work.task),
@@ -506,6 +507,7 @@ export class TaskManager {
             if (failed.length > 0) {
                 const retryableFailures = failed.filter(({ result }) => this._isRetryableInfrastructureError(result.reason));
                 const terminalFailures = failed.filter(({ result }) => !this._isRetryableInfrastructureError(result.reason));
+                let fallbackFailed = [];
 
                 if (retryableFailures.length > 0) {
                     log.warn("恢复任务入队暂时失败，将由周期扫描继续重试", {
@@ -513,10 +515,15 @@ export class TaskManager {
                         taskIds: retryableFailures.map(({ work }) => work.task.id),
                         reason: redactSensitiveText(retryableFailures[0].result.reason?.message || String(retryableFailures[0].result.reason))
                     });
-                    await this._notifyRecoveredTasks(
-                        retryableFailures.map(({ work }) => work.task),
-                        STRINGS.task.recovery_pending
-                    );
+                    const fallbackResults = await this._runRecoveryLocalFallback(retryableFailures);
+                    fallbackSucceeded = fallbackResults.succeeded;
+                    fallbackFailed = fallbackResults.failed;
+                    if (fallbackFailed.length > 0) {
+                        await this._notifyRecoveredTasks(
+                            fallbackFailed.map(({ work }) => work.task),
+                            STRINGS.task.recovery_pending
+                        );
+                    }
                 }
 
                 if (terminalFailures.length > 0) {
@@ -540,8 +547,8 @@ export class TaskManager {
             }
 
             return {
-                enqueued: succeeded.length,
-                pendingRetry: failed.length,
+                enqueued: succeeded.length + fallbackSucceeded.length,
+                pendingRetry: failed.length - fallbackSucceeded.length,
                 failed: failedUpdates.length
             };
 
@@ -565,6 +572,33 @@ export class TaskManager {
                 await new Promise(resolve => setTimeout(resolve, 1500));
             }
         }
+    }
+
+    static async _runRecoveryLocalFallback(retryableFailures) {
+        const log = getLog();
+        const results = await Promise.allSettled(retryableFailures.map(async ({ work, result }) => {
+            log.warn("恢复队列不可用，切换为当前实例直接恢复任务", {
+                taskId: work.task.id,
+                type: work.type,
+                reason: redactSensitiveText(result.reason?.message || String(result.reason))
+            });
+            const webhookResult = work.type === 'upload'
+                ? await this.handleUploadWebhook(work.task.id)
+                : await this.handleDownloadWebhook(work.task.id);
+            if (!webhookResult?.success) {
+                throw new Error(webhookResult?.message || `Local recovery fallback failed with status ${webhookResult?.statusCode || 'unknown'}`);
+            }
+            return webhookResult;
+        }));
+
+        return {
+            succeeded: results
+                .map((result, index) => ({ result, work: retryableFailures[index].work }))
+                .filter(item => item.result.status === 'fulfilled'),
+            failed: results
+                .map((result, index) => ({ result, work: retryableFailures[index].work }))
+                .filter(item => item.result.status === 'rejected')
+        };
     }
 
     static _isRetryableStalledFailure(row) {

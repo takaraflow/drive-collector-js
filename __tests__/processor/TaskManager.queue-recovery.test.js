@@ -502,6 +502,11 @@ describe('TaskManager queue/recovery closure', () => {
     it('keeps restored task recoverable when recovery enqueue hits retryable infrastructure failure', async () => {
         const { updateStatus } = await import('../../src/utils/common.js');
         mockQueueService.enqueueDownloadTask.mockRejectedValueOnce(new Error('Circuit breaker is OPEN for qstash_publish'));
+        const fallbackSpy = vi.spyOn(TaskManager, 'handleDownloadWebhook').mockResolvedValueOnce({
+            success: false,
+            statusCode: 503,
+            message: 'Service Unavailable - Not Leader'
+        });
 
         const result = await TaskManager._restoreBatchTasks('chat-1', [{
             id: 'queued-1',
@@ -514,6 +519,7 @@ describe('TaskManager queue/recovery closure', () => {
         }]);
 
         expect(result).toMatchObject({ enqueued: 0, pendingRetry: 1, failed: 0 });
+        expect(fallbackSpy).toHaveBeenCalledWith('queued-1');
         expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
             'queued-1',
             TASK_EVENTS.FAIL,
@@ -525,6 +531,35 @@ describe('TaskManager queue/recovery closure', () => {
             'recovery pending',
             false
         );
+        fallbackSpy.mockRestore();
+    });
+
+    it('directly runs recovered download task when durable queue publish is temporarily unavailable', async () => {
+        const { updateStatus } = await import('../../src/utils/common.js');
+        mockQueueService.enqueueDownloadTask.mockRejectedValueOnce(new Error('Circuit breaker is OPEN for qstash_publish'));
+        const fallbackSpy = vi.spyOn(TaskManager, 'handleDownloadWebhook').mockResolvedValueOnce({
+            success: true,
+            statusCode: 200
+        });
+
+        const result = await TaskManager._restoreBatchTasks('chat-1', [{
+            id: 'queued-1',
+            user_id: 'u1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'queued.mp4',
+            status: 'queued'
+        }]);
+
+        expect(result).toMatchObject({ enqueued: 1, pendingRetry: 0, failed: 0 });
+        expect(fallbackSpy).toHaveBeenCalledWith('queued-1');
+        expect(updateStatus).not.toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'queued-1' }),
+            'recovery pending',
+            false
+        );
+        fallbackSpy.mockRestore();
     });
 
     it('marks restored task failed and updates UI when recovery enqueue fails permanently', async () => {
