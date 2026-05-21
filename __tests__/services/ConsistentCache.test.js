@@ -70,7 +70,20 @@ describe('ConsistentCache - service facade', () => {
         expect(result).toBe(true);
         expect(cache.set).toHaveBeenCalledWith('consistent:user:123', payload, 3600);
         expect(localCache.set).toHaveBeenCalledWith('consistent:user:123', payload, 60);
-        expect(queueService.publish).toHaveBeenCalled();
+        expect(queueService.publish).toHaveBeenCalledWith(
+            'cache_sync',
+            expect.objectContaining({ action: 'set', key: 'consistent:user:123' }),
+            { bestEffort: true }
+        );
+    });
+
+    test('set succeeds when best-effort broadcast is dropped', async () => {
+        queueService.publish.mockResolvedValue({ dropped: true, bestEffort: true });
+
+        const result = await cacheInstance.set('user:123', { foo: 'bar' });
+
+        expect(result).toBe(true);
+        expect(cache.set).toHaveBeenCalledWith('consistent:user:123', { foo: 'bar' }, 3600);
     });
 
     test('set honors lock option and always releases the lock', async () => {

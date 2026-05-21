@@ -68,6 +68,18 @@ function snapshotDeadLetterQueue(messages = []) {
     return messages.map(snapshotDeadLetterMessage);
 }
 
+function isBestEffortPublish(options = {}) {
+    return options.bestEffort === true && options.requireDurableAck !== true;
+}
+
+function normalizePublishOptions(options = {}) {
+    if (!isBestEffortPublish(options)) return options;
+    return {
+        ...options,
+        forceDirect: true
+    };
+}
+
 function mergeDeadLetterQueues(localMessages = [], persistedMessages = []) {
     const byId = new Map();
     for (const item of [...localMessages, ...persistedMessages]) {
@@ -239,9 +251,10 @@ export class QstashQueue extends CloudQueueBase {
     }
 
     async _publish(topic, message, options = {}) {
+        const normalizedOptions = normalizePublishOptions(options);
         const effectiveOptions = this.forceDirect
-            ? { ...options, forceDirect: true }
-            : options;
+            ? { ...normalizedOptions, forceDirect: true }
+            : normalizedOptions;
 
         if (isQstashDebugEnabled()) {
             log.debug('QStash publish requested', {
@@ -448,6 +461,7 @@ export class QstashQueue extends CloudQueueBase {
             idempotencyKey,
             deduplicationId,
             forceDirect: _forceDirect,
+            bestEffort,
             requireDurableAck,
             ...publishOptions
         } = options;
@@ -493,14 +507,18 @@ export class QstashQueue extends CloudQueueBase {
             // 实际发布：不使用 fallback 静默吞错，避免"看似入队成功但实际未发送"
             const startTime = Date.now();
             try {
-                const result = await this.publishBreaker.execute(() => this._executeWithRetry(async () => {
-                    return await this.client.publishJSON({
-                        url: topic,
-                        body: message,
-                        ...(qstashDeduplicationId ? { deduplicationId: qstashDeduplicationId } : {}),
-                        ...publishOptions
-                    });
-                }, 3, '[QstashQueue]'));
+                const publishPayload = {
+                    url: topic,
+                    body: message,
+                    ...(qstashDeduplicationId ? { deduplicationId: qstashDeduplicationId } : {}),
+                    ...publishOptions
+                };
+                const bestEffortPublish = isBestEffortPublish({ bestEffort, requireDurableAck });
+                const result = bestEffortPublish
+                    ? await this.client.publishJSON(publishPayload)
+                    : await this.publishBreaker.execute(() => this._executeWithRetry(async () => {
+                        return await this.client.publishJSON(publishPayload);
+                    }, 3, '[QstashQueue]'));
 
                 // 只有成功发布后才标记为已处理，避免失败导致后续重试被误判为 duplicate
                 await this._markIdempotencyProcessed(messageId);
@@ -524,6 +542,22 @@ export class QstashQueue extends CloudQueueBase {
 
                 // 发布失败时清理 Redis key，允许后续重试
                 await this._clearIdempotencyKey(messageId);
+
+                if (isBestEffortPublish({ bestEffort, requireDurableAck })) {
+                    metrics.increment('messages.best_effort.dropped');
+                    log.warn('Best-effort QStash publish dropped', {
+                        messageId,
+                        target: summarizeTargetUrl(topic),
+                        taskId: message?.taskId,
+                        error: error?.message
+                    });
+                    return {
+                        messageId,
+                        dropped: true,
+                        bestEffort: true,
+                        error: error?.message || String(error)
+                    };
+                }
 
                 // 失败时加入死信队列，避免静默丢消息
                 await this._addToDeadLetterQueue({ topic, message, options }, 'publish_failed', error);

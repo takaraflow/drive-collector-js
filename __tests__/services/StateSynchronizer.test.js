@@ -87,7 +87,11 @@ describe('StateSynchronizer - synchronization workflow', () => {
         expect(instanceCoordinator.releaseLock).toHaveBeenCalled();
         expect(cache.set).toHaveBeenCalledWith(localKey, remoteState, 3600);
         expect(localCache.set).toHaveBeenCalledWith(localKey, remoteState, 60);
-        expect(queueService.publish).toHaveBeenCalledWith('state_sync', expect.objectContaining({ userId, stateType }));
+        expect(queueService.publish).toHaveBeenCalledWith(
+            'state_sync',
+            expect.objectContaining({ userId, stateType }),
+            { bestEffort: true }
+        );
     });
 
     test('syncUserState returns false when lock acquisition fails', async () => {
@@ -118,15 +122,38 @@ describe('StateSynchronizer - synchronization workflow', () => {
                 type: 'state_change',
                 userId: 'user-2',
                 stateType: 'sessions'
-            })
+            }),
+            { bestEffort: true }
         );
         expect(cache.set).toHaveBeenCalledWith('sync:user-2:sessions', { status: 'open' }, 300);
     });
 
-    test('publishStateChange throws error when queue publish fails', async () => {
+    test('publishStateChange stores cache before best-effort queue publish', async () => {
+        queueService.publish.mockResolvedValue({ dropped: true, bestEffort: true });
+
+        await synchronizer.publishStateChange('user-2', 'sessions', { status: 'open' });
+
+        expect(cache.set).toHaveBeenCalledWith('sync:user-2:sessions', { status: 'open' }, 300);
+        expect(queueService.publish).toHaveBeenCalledWith(
+            'state_sync',
+            expect.objectContaining({ userId: 'user-2', stateType: 'sessions' }),
+            { bestEffort: true }
+        );
+    });
+
+    test('publishStateChange ignores best-effort queue rejection after cache write', async () => {
         queueService.publish.mockRejectedValue(new Error('Queue error'));
 
-        await expect(synchronizer.publishStateChange('user-2', 'sessions', { status: 'open' })).rejects.toThrow('Queue error');
+        await expect(synchronizer.publishStateChange('user-2', 'sessions', { status: 'open' })).resolves.toBeUndefined();
+
+        expect(cache.set).toHaveBeenCalledWith('sync:user-2:sessions', { status: 'open' }, 300);
+    });
+
+    test('publishStateChange throws error when authoritative cache write fails', async () => {
+        cache.set.mockRejectedValue(new Error('Cache error'));
+        queueService.publish.mockRejectedValue(new Error('Queue error'));
+
+        await expect(synchronizer.publishStateChange('user-2', 'sessions', { status: 'open' })).rejects.toThrow('Cache error');
     });
 
     test('subscribe returns id and unsubscribe removes it', () => {

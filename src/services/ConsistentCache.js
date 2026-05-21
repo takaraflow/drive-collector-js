@@ -238,10 +238,10 @@ export class ConsistentCache {
             source: instanceCoordinator.getInstanceId()
         };
 
-        // 通过队列广播给其他实例
+        // 通过队列广播给其他实例。底层缓存写入已经完成，这里只是低延迟派生通知。
         try {
             const { queueService } = await import("./QueueService.js");
-            await queueService.publish('cache_sync', event);
+            await queueService.publish('cache_sync', event, { bestEffort: true });
         } catch (error) {
             log.warn('Failed to broadcast cache change:', error);
         }

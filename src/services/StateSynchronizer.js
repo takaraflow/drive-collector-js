@@ -118,12 +118,20 @@ export class StateSynchronizer {
         };
 
         try {
-            // 通过队列广播
-            await queueService.publish('state_sync', event);
-            
             // 同时存储到缓存供其他实例拉取
             const cacheKey = `${this.syncPrefix}${userId}:${stateType}`;
             await cache.set(cacheKey, state, 300); // 5分钟TTL
+
+            // 通过队列广播派生视图。D1/Redis 缓存是权威同步面，QStash 这里只做低延迟通知。
+            try {
+                await queueService.publish('state_sync', event, { bestEffort: true });
+            } catch (broadcastError) {
+                log.warn('Best-effort state change broadcast failed', {
+                    userId,
+                    stateType,
+                    error: broadcastError?.message || String(broadcastError)
+                });
+            }
             
             log.debug(`Published state change for user ${userId}, type: ${stateType}`);
         } catch (error) {

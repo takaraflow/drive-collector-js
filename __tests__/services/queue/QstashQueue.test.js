@@ -6,6 +6,14 @@
 // Mock QStash client using factory functions
 const mockPublishJSON = vi.fn();
 const mockVerify = vi.fn();
+const mockCircuitBreakerExecute = vi.fn(async (fn, fallback) => {
+    try {
+        return await fn();
+    } catch (error) {
+        if (fallback) return fallback();
+        throw error;
+    }
+});
 
 vi.mock("@upstash/qstash", () => ({
     Client: function(options) {
@@ -112,14 +120,7 @@ vi.mock("../../../src/services/CacheService.js", () => ({
 vi.mock("../../../src/services/CircuitBreaker.js", () => ({
     CircuitBreakerManager: {
         get: vi.fn(() => ({
-            execute: vi.fn(async (fn, fallback) => {
-                try {
-                    return await fn();
-                } catch (error) {
-                    if (fallback) return fallback();
-                    throw error;
-                }
-            }),
+            execute: mockCircuitBreakerExecute,
             getStatus: vi.fn(() => ({ state: 'CLOSED' })),
             reset: vi.fn()
         }))
@@ -243,6 +244,7 @@ describe("QstashQueue - publish", () => {
     beforeEach(async () => {
         vi.clearAllMocks();
         mockPublishJSON.mockReset();
+        mockCircuitBreakerExecute.mockClear();
         mockCacheSet.mockClear();
         mockCacheGet.mockReset();
         mockCacheDelete.mockClear();
@@ -433,6 +435,57 @@ describe("QstashQueue - publish", () => {
             }),
             604800,
             expect.objectContaining({ skipL1: true, skipTtlRandomization: true })
+        );
+    });
+
+    test("should drop best-effort publish failures without persisting DLQ", async () => {
+        queue.batchSize = 1;
+        mockPublishJSON.mockRejectedValue(new Error('publish failed'));
+
+        const result = await queue._publish('test-topic', { data: 'test' }, {
+            forceDirect: true,
+            bestEffort: true
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+            bestEffort: true,
+            dropped: true,
+            error: 'publish failed'
+        }));
+        expect(mockPublishJSON).toHaveBeenCalledWith({
+            url: 'test-topic',
+            body: { data: 'test' }
+        });
+        expect(mockCircuitBreakerExecute).not.toHaveBeenCalled();
+        expect(queue.deadLetterQueue).toHaveLength(0);
+        expect(mockCacheSet).not.toHaveBeenCalledWith(
+            expect.stringMatching(/^queue:dlq:dlq_/),
+            expect.anything(),
+            expect.anything(),
+            expect.anything()
+        );
+    });
+
+    test("should force direct best-effort publishes so buffer overflow cannot create DLQ entries", async () => {
+        const batchingQueue = new QstashQueue({ batchSize: 5, batchTimeout: 1000, maxBufferSize: 1 });
+        await batchingQueue.initialize();
+        mockPublishJSON.mockResolvedValue({ messageId: 'best-effort-msg' });
+
+        const result = await batchingQueue._publish('test-topic', { data: 'derived' }, {
+            bestEffort: true
+        });
+
+        expect(result).toEqual({ messageId: 'best-effort-msg' });
+        expect(batchingQueue.buffer).toHaveLength(0);
+        expect(mockPublishJSON).toHaveBeenCalledWith({
+            url: 'test-topic',
+            body: { data: 'derived' }
+        });
+        expect(mockCacheSet).not.toHaveBeenCalledWith(
+            expect.stringMatching(/^queue:dlq:dlq_/),
+            expect.anything(),
+            expect.anything(),
+            expect.anything()
         );
     });
 
