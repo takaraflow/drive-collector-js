@@ -209,6 +209,7 @@ describe('TaskManager queue/recovery closure', () => {
             blocked: false,
             queueAttempt: `${eventOrStatus}:${taskId}:1700000000000`
         }));
+        mockTaskRepository.findById.mockResolvedValue(null);
         mockTaskRepository.findStalledTasks.mockResolvedValue([]);
         mockTaskRepository.findByMsgId.mockResolvedValue([]);
         mockQueueService.enqueueDownloadTask.mockResolvedValue({ messageId: 'download-msg' });
@@ -340,6 +341,42 @@ describe('TaskManager queue/recovery closure', () => {
             includeRetryableFailed: true
         });
         expect(mockInstanceCoordinator.releaseLock).toHaveBeenCalledWith('task_recovery:stalled');
+    });
+
+    it('does not touch stalled queued tasks when the recovery scanner is not the Telegram leader', async () => {
+        mockInstanceCoordinator.getLockLease.mockResolvedValueOnce(null);
+        mockTaskRepository.findStalledTasks.mockResolvedValue([{
+            id: 'queued-1',
+            user_id: 'u1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            source_ref: JSON.stringify({ chatId: 'chat-1', messageId: 10 }),
+            file_name: 'queued.mp4',
+            file_size: 1024,
+            status: 'queued'
+        }]);
+
+        const result = await TaskManager._runStalledTaskRecovery({ includeRetryableFailed: true });
+
+        expect(result).toMatchObject({
+            restored: 0,
+            skipped: true,
+            reason: 'not_telegram_leader'
+        });
+        expect(mockInstanceCoordinator.acquireLock).not.toHaveBeenCalledWith(
+            'task_recovery:stalled',
+            expect.anything(),
+            expect.anything()
+        );
+        expect(mockTaskRepository.findStalledTasks).not.toHaveBeenCalled();
+        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+            'queued-1',
+            TASK_EVENTS.RETRY,
+            expect.anything(),
+            expect.objectContaining({ source: 'restore_queued_task' })
+        );
+        expect(mockQueueService.enqueueDownloadTask).not.toHaveBeenCalled();
     });
 
     it('retries retryable failed tasks by resetting them to the download queue', async () => {
@@ -560,6 +597,61 @@ describe('TaskManager queue/recovery closure', () => {
             false
         );
         fallbackSpy.mockRestore();
+    });
+
+    it('executes recovered download locally on the Telegram leader when durable queue publish is temporarily unavailable', async () => {
+        mockTaskRepository.findStalledTasks.mockResolvedValue([{
+            id: 'queued-1',
+            user_id: 'u1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            source_ref: JSON.stringify({ chatId: 'chat-1', messageId: 10 }),
+            file_name: 'queued.mp4',
+            file_size: 1024,
+            status: 'queued'
+        }]);
+        mockTaskRepository.findById.mockResolvedValue({
+            id: 'queued-1',
+            user_id: 'u1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            source_ref: JSON.stringify({ chatId: 'chat-1', messageId: 10 }),
+            file_name: 'queued.mp4',
+            file_size: 1024,
+            status: 'queued'
+        });
+        mockQueueService.enqueueDownloadTask.mockRejectedValueOnce(new Error('Circuit breaker is OPEN for qstash_publish'));
+        const downloadSpy = vi.spyOn(TaskManager, 'downloadTask').mockResolvedValueOnce(undefined);
+
+        const result = await TaskManager._runStalledTaskRecovery({ includeRetryableFailed: true });
+
+        expect(result).toMatchObject({ restored: 1, skipped: false });
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            'queued-1',
+            TASK_EVENTS.RETRY,
+            null,
+            expect.objectContaining({ source: 'restore_queued_task' })
+        );
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            'queued-1',
+            TASK_EVENTS.START_DOWNLOAD,
+            null,
+            expect.objectContaining({
+                claimedBy: 'instance-1',
+                claimLeaseId: 'lease-1',
+                source: 'handleDownloadWebhook'
+            })
+        );
+        expect(downloadSpy).toHaveBeenCalledWith(expect.objectContaining({
+            id: 'queued-1',
+            processingLockHeld: true,
+            claimedBy: 'instance-1',
+            claimLeaseId: 'lease-1'
+        }));
+        expect(mockInstanceCoordinator.releaseTaskLock).toHaveBeenCalledWith('queued-1');
+        downloadSpy.mockRestore();
     });
 
     it('marks restored task failed and updates UI when recovery enqueue fails permanently', async () => {

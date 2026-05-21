@@ -249,6 +249,12 @@ export class TaskManager {
         let recoveryLockAcquired = false;
         this.stalledRecoveryInProgress = true;
         try {
+            const leaderLease = await this._getTelegramClientLease(instanceCoordinator);
+            if (!leaderLease) {
+                log.info("当前实例未持有 Telegram 处理租约，跳过任务恢复扫描");
+                return { restored: 0, skipped: true, reason: 'not_telegram_leader' };
+            }
+
             if (instanceCoordinator && typeof instanceCoordinator.acquireLock === 'function') {
                 recoveryLockAcquired = await instanceCoordinator.acquireLock(
                     STALLED_RECOVERY_LOCK_KEY,
@@ -259,6 +265,12 @@ export class TaskManager {
                     log.info("另一个实例正在执行任务恢复扫描，当前实例跳过");
                     return { restored: 0, skipped: true };
                 }
+            }
+
+            const currentLeaderLease = await this._getTelegramClientLease(instanceCoordinator);
+            if (!currentLeaderLease) {
+                log.info("任务恢复租约已获取，但当前实例不再持有 Telegram 处理租约，跳过任务恢复扫描");
+                return { restored: 0, skipped: true, reason: 'lost_telegram_leader' };
             }
 
             const results = await Promise.allSettled([
@@ -863,6 +875,8 @@ export class TaskManager {
     }
 
     static async _getTelegramClientLease(instanceCoordinator) {
+        if (!instanceCoordinator) return null;
+
         if (typeof instanceCoordinator.getLockLease === 'function') {
             const lease = await instanceCoordinator.getLockLease(TELEGRAM_CLIENT_LOCK_KEY);
             if (lease) return lease;
