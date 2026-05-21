@@ -10,6 +10,7 @@ import { getInfrastructureErrorUserMessage } from "../../utils/infrastructureErr
 const getDeps = () => dependencyContainer.getAll();
 const getLog = () => getDeps().logger.withModule('TaskManager.utils');
 const looksLikeRcloneDiagnostic = (message) => /rclone|failed to create file system|slog\/logger\.go|:mega|copyto|rcat/i.test(message || "");
+const HEARTBEAT_MIN_INTERVAL_MS = 3000;
 
 const resolveUploadFailureUserMessage = (failure) => {
     return redactSensitiveText(resolveRcloneFailureMetadata(failure, {
@@ -36,6 +37,16 @@ export function createHeartbeat(task, context, updateStatus, fileName = null) {
             task.isCancelled = true;
             throw new Error("CANCELLED");
         }
+
+        const now = Date.now();
+        const completed = total > 0 && downloaded >= total;
+        const uploadCompleted = uploadProgress?.size > 0 && uploadProgress.bytes >= uploadProgress.size;
+        const shouldThrottle = lastUpdate > 0 &&
+            !completed &&
+            !uploadCompleted &&
+            (now - lastUpdate) < HEARTBEAT_MIN_INTERVAL_MS;
+        if (shouldThrottle) return;
+        lastUpdate = now;
         
         const event = status === 'uploading' ? TASK_EVENTS.START_UPLOAD : TASK_EVENTS.START_DOWNLOAD;
         const transition = await TaskRepository.transitionStatus(task.id, event, null, {

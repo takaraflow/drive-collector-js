@@ -11,7 +11,7 @@ vi.mock("../../src/services/DependencyContainer.js", () => ({
     }
 }));
 
-import { handleTaskFailure, handleUploadFailure } from "../../src/processor/TaskManager/TaskManager.utils.js";
+import { createHeartbeat, handleTaskFailure, handleUploadFailure } from "../../src/processor/TaskManager/TaskManager.utils.js";
 
 const format = (template, values = {}) => Object.entries(values).reduce(
     (text, [key, value]) => text.replaceAll(`{{${key}}}`, String(value)),
@@ -155,5 +155,65 @@ describe("TaskManager upload failure handling", () => {
             true
         );
         expect(updateStatus.mock.calls[0][1]).not.toContain("qstash_publish");
+    });
+});
+
+describe("TaskManager heartbeat handling", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.useFakeTimers();
+        vi.setSystemTime(1700000000000);
+        mocks.transitionStatus.mockResolvedValue({ changed: true, blocked: false, toStatus: "uploading" });
+        mocks.getAll.mockReturnValue({
+            TaskRepository: {
+                transitionStatus: mocks.transitionStatus
+            },
+            STRINGS: {
+                task: {
+                    uploading: "uploading",
+                    downloading: "downloading"
+                }
+            },
+            UIHelper: {
+                renderProgress: vi.fn(() => "progress")
+            },
+            format
+        });
+    });
+
+    test("throttles non-final heartbeat writes to D1 and UI", async () => {
+        const updateStatus = vi.fn();
+        const heartbeat = createHeartbeat(
+            { id: "task-heartbeat", isGroup: false },
+            { cancelledTaskIds: new Set() },
+            updateStatus,
+            "file.bin"
+        );
+
+        await heartbeat("uploading", 0, 0, { bytes: 1024, size: 4096 });
+        vi.setSystemTime(1700000001000);
+        await heartbeat("uploading", 0, 0, { bytes: 2048, size: 4096 });
+        vi.setSystemTime(1700000003000);
+        await heartbeat("uploading", 0, 0, { bytes: 3072, size: 4096 });
+
+        expect(mocks.transitionStatus).toHaveBeenCalledTimes(2);
+        expect(updateStatus).toHaveBeenCalledTimes(2);
+    });
+
+    test("does not throttle final heartbeat progress", async () => {
+        const updateStatus = vi.fn();
+        const heartbeat = createHeartbeat(
+            { id: "task-heartbeat-final", isGroup: false },
+            { cancelledTaskIds: new Set() },
+            updateStatus,
+            "file.bin"
+        );
+
+        await heartbeat("uploading", 0, 0, { bytes: 1024, size: 4096 });
+        vi.setSystemTime(1700000001000);
+        await heartbeat("uploading", 0, 0, { bytes: 4096, size: 4096 });
+
+        expect(mocks.transitionStatus).toHaveBeenCalledTimes(2);
+        expect(updateStatus).toHaveBeenCalledTimes(2);
     });
 });
