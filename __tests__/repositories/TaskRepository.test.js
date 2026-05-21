@@ -249,6 +249,9 @@ describe('TaskRepository', () => {
             expect(params).toContain("%Circuit breaker is OPEN%");
             expect(params).toContain("%TIMEOUT%");
             expect(params).toContain("%RCLONE_TRANSIENT%");
+            expect(params).toContain("%CONNECTION_NOT_INITED%");
+            expect(params).toContain("%upload.GetFile%");
+            expect(params).toContain("%Cannot read properties of undefined (reading 'dcId')%");
         });
 
         it('should not include retryable failed SQL when not requested', async () => {

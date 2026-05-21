@@ -1246,7 +1246,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         getAllSpy.mockRestore();
     });
 
-    test("strict zero-disk direct transfer timeout fails closed without local staging", async () => {
+    test("strict zero-disk direct transfer timeout remains recoverable without local staging", async () => {
         mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
         mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
         mockDirectTransferService.canAttempt.mockReturnValue({ supported: true, reason: "rclone-rcat" });
@@ -1272,14 +1272,55 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         };
         const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
 
-        await TaskManager.downloadTask(task);
+        await expect(TaskManager.downloadTask(task)).rejects.toThrow("TIMEOUT");
 
         expect(mockClient.downloadMedia).not.toHaveBeenCalled();
         expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
-        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
             "task_1",
             "fail",
-            "Zero-disk direct transfer failed; local fallback disabled",
+            expect.anything(),
+            expect.objectContaining({ source: "handleTaskFailure" })
+        );
+
+        getAllSpy.mockRestore();
+    });
+
+    test("strict zero-disk direct transfer source errors remain recoverable without local staging", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: true, reason: "rclone-rcat" });
+        mockDirectTransferService.transferTelegramMediaToRemote.mockResolvedValue({
+            success: false,
+            fallback: false,
+            error: "400: CONNECTION_NOT_INITED (caused by upload.GetFile)",
+            errorCode: "TELEGRAM_SOURCE_TRANSIENT",
+            retryable: true,
+            userRetryable: true,
+            retryScope: "telegram_source"
+        });
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            directTransferService: mockDirectTransferService,
+            DriveRepository: mockDriveRepository,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                directTransfer: { enabled: true, fallbackToLocal: false },
+                streamForwarding: { enabled: false }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await expect(TaskManager.downloadTask(task)).rejects.toThrow("CONNECTION_NOT_INITED");
+
+        expect(mockClient.downloadMedia).not.toHaveBeenCalled();
+        expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
+        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+            "task_1",
+            "fail",
+            expect.anything(),
             expect.objectContaining({ source: "handleTaskFailure" })
         );
 

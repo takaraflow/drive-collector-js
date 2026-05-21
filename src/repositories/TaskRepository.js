@@ -70,7 +70,11 @@ export class TaskRepository {
         "%Network connection lost%",
         "%fetch failed%",
         "%ETIMEDOUT%",
-        "%ECONNRESET%"
+        "%ECONNRESET%",
+        "%CONNECTION_NOT_INITED%",
+        "%upload.GetFile%",
+        "%Cannot read property of undefined (reading 'dcId')%",
+        "%Cannot read properties of undefined (reading 'dcId')%"
     ]);
 
     static _getChanges(result) {

@@ -607,10 +607,6 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
         return false;
     }
 
-    if (strictDirectTransfer) {
-        throw createStrictDirectTransferFailure(result);
-    }
-
     if (result?.retryable === true) {
         const error = new Error(result.error || result.reason || "Direct transfer retryable failure");
         error.errorCode = result.errorCode;
@@ -619,6 +615,10 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
         error.userMessage = result.userMessage;
         error.retryScope = result.retryScope;
         throw error;
+    }
+
+    if (strictDirectTransfer) {
+        throw createStrictDirectTransferFailure(result);
     }
 
     const error = new Error(result?.error || "Direct transfer failed");
