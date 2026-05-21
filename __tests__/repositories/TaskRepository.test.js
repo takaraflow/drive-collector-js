@@ -67,6 +67,9 @@ describe('TaskRepository', () => {
         mockCache.get.mockResolvedValue(null);
         mockD1.fetchOne.mockResolvedValue(null);
         mockD1.fetchAll.mockResolvedValue([]);
+        if (typeof mockD1.batch !== 'function') {
+            mockD1.batch = vi.fn();
+        }
         mockD1.batch.mockResolvedValue([]);
         vi.useFakeTimers();
     });
@@ -233,25 +236,32 @@ describe('TaskRepository', () => {
         });
 
         it('should include retryable queue failed tasks only when requested', async () => {
-            mockD1.batch.mockResolvedValue([]);
-            mockD1.fetchAll.mockResolvedValue([]);
+            mockD1.batch
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([]);
 
             await TaskRepository.findStalledTasks(3600000, { includeRetryableFailed: true });
 
-            const [sql, params] = mockD1.fetchAll.mock.calls[0];
+            expect(mockD1.fetchAll).not.toHaveBeenCalled();
+            expect(mockD1.batch).toHaveBeenCalledTimes(2);
+            const retryableStatements = mockD1.batch.mock.calls[1][0];
+            expect(retryableStatements).toHaveLength(TaskRepository.RETRYABLE_FAILED_ERROR_PATTERNS.length);
+            const { sql, params } = retryableStatements[0];
             expect(sql).toContain("error_msg LIKE ?");
+            expect(sql).not.toContain(" OR ");
             expect(params).toEqual([
                 TASK_STATUSES.FAILED,
                 expect.any(Number),
-                ...TaskRepository.RETRYABLE_FAILED_ERROR_PATTERNS,
+                TaskRepository.RETRYABLE_FAILED_ERROR_PATTERNS[0],
                 TaskRepository.STALLED_TASKS_DEFAULT_LIMIT
             ]);
-            expect(params).toContain("%Circuit breaker is OPEN%");
-            expect(params).toContain("%TIMEOUT%");
-            expect(params).toContain("%RCLONE_TRANSIENT%");
-            expect(params).toContain("%CONNECTION_NOT_INITED%");
-            expect(params).toContain("%upload.GetFile%");
-            expect(params).toContain("%Cannot read properties of undefined (reading 'dcId')%");
+            const queriedPatterns = retryableStatements.map(statement => statement.params[2]);
+            expect(queriedPatterns).toContain("%Circuit breaker is OPEN%");
+            expect(queriedPatterns).toContain("%TIMEOUT%");
+            expect(queriedPatterns).toContain("%RCLONE_TRANSIENT%");
+            expect(queriedPatterns).toContain("%CONNECTION_NOT_INITED%");
+            expect(queriedPatterns).toContain("%upload.GetFile%");
+            expect(queriedPatterns).toContain("%Cannot read%dcId%");
         });
 
         it('should not include retryable failed SQL when not requested', async () => {
@@ -283,25 +293,49 @@ describe('TaskRepository', () => {
         });
 
         it('should merge active and retryable failed rows by original creation order', async () => {
-            mockD1.batch.mockResolvedValue([
-                { success: true, result: { results: [] } },
-                { success: true, result: { results: [{ id: 'active-newer', status: 'downloading', created_at: 300 }] } },
-                { success: true, result: { results: [] } },
-                { success: true, result: { results: [] } }
-            ]);
-            mockD1.fetchAll.mockResolvedValue([{ id: 'failed-older', status: 'failed', created_at: 100 }]);
+            mockD1.batch
+                .mockResolvedValueOnce([
+                    { success: true, result: { results: [] } },
+                    { success: true, result: { results: [{ id: 'active-newer', status: 'downloading', created_at: 300 }] } },
+                    { success: true, result: { results: [] } },
+                    { success: true, result: { results: [] } }
+                ])
+                .mockResolvedValueOnce([
+                    { success: true, result: { results: [{ id: 'failed-older', status: 'failed', created_at: 100 }] } },
+                    ...TaskRepository.RETRYABLE_FAILED_ERROR_PATTERNS.slice(1).map(() => ({ success: true, result: { results: [] } }))
+                ]);
 
             const result = await TaskRepository.findStalledTasks(3600000, { includeRetryableFailed: true });
 
             expect(result.map(task => task.id)).toEqual(['failed-older', 'active-newer']);
-            expect(mockD1.fetchAll).toHaveBeenCalledTimes(1);
-            expect(mockD1.fetchAll.mock.calls[0][0]).toContain('WHERE status = ?');
-            expect(mockD1.fetchAll.mock.calls[0][1]).toEqual([
+            expect(mockD1.batch).toHaveBeenCalledTimes(2);
+            const retryableStatements = mockD1.batch.mock.calls[1][0];
+            expect(retryableStatements[0].sql).toContain('WHERE status = ?');
+            expect(retryableStatements[0].params).toEqual([
                 TASK_STATUSES.FAILED,
                 expect.any(Number),
-                ...TaskRepository.RETRYABLE_FAILED_ERROR_PATTERNS,
+                TaskRepository.RETRYABLE_FAILED_ERROR_PATTERNS[0],
                 TaskRepository.STALLED_TASKS_DEFAULT_LIMIT - 1
             ]);
+        });
+
+        it('should dedupe retryable failed rows that match multiple recovery patterns', async () => {
+            mockD1.batch
+                .mockResolvedValueOnce([
+                    { success: true, result: { results: [] } },
+                    { success: true, result: { results: [] } },
+                    { success: true, result: { results: [] } },
+                    { success: true, result: { results: [] } }
+                ])
+                .mockResolvedValueOnce([
+                    { success: true, result: { results: [{ id: 'failed-1', status: 'failed', created_at: 100 }] } },
+                    { success: true, result: { results: [{ id: 'failed-1', status: 'failed', created_at: 100 }] } },
+                    ...TaskRepository.RETRYABLE_FAILED_ERROR_PATTERNS.slice(2).map(() => ({ success: true, result: { results: [] } }))
+                ]);
+
+            const result = await TaskRepository.findStalledTasks(3600000, { includeRetryableFailed: true });
+
+            expect(result.map(task => task.id)).toEqual(['failed-1']);
         });
 
         it('should handle database errors', async () => {

@@ -73,8 +73,7 @@ export class TaskRepository {
         "%ECONNRESET%",
         "%CONNECTION_NOT_INITED%",
         "%upload.GetFile%",
-        "%Cannot read property of undefined (reading 'dcId')%",
-        "%Cannot read properties of undefined (reading 'dcId')%"
+        "%Cannot read%dcId%"
     ]);
 
     static _getChanges(result) {
@@ -120,27 +119,33 @@ export class TaskRepository {
         }));
     }
 
-    static _retryableFailedStalledTaskStatement(deadLine, limit) {
-        const predicates = this.RETRYABLE_FAILED_ERROR_PATTERNS
-            .map(() => "error_msg LIKE ?")
-            .join("\n                      OR ");
-        return {
+    static _retryableFailedStalledTaskStatements(deadLine, perPatternLimit) {
+        return this.RETRYABLE_FAILED_ERROR_PATTERNS.map(pattern => ({
             sql: `SELECT ${this.STALLED_TASK_COLUMNS}
                   FROM tasks
                   WHERE status = ?
                     AND updated_at < ?
-                    AND (
-                      ${predicates}
-                    )
+                    AND error_msg LIKE ?
                   ORDER BY updated_at ASC, created_at ASC
                   LIMIT ?`,
             params: [
                 TASK_STATUSES.FAILED,
                 deadLine,
-                ...this.RETRYABLE_FAILED_ERROR_PATTERNS,
-                limit
+                pattern,
+                perPatternLimit
             ]
-        };
+        }));
+    }
+
+    static _dedupeRowsById(rows) {
+        const byId = new Map();
+        for (const row of rows) {
+            if (!row?.id) continue;
+            if (!byId.has(row.id)) {
+                byId.set(row.id, row);
+            }
+        }
+        return [...byId.values()];
     }
 
     static _rowsFromBatchResults(results = []) {
@@ -493,12 +498,16 @@ export class TaskRepository {
 
             const remaining = Math.max(0, limit - rows.length);
             if (includeRetryableFailed && remaining > 0) {
-                const retryableStatement = this._retryableFailedStalledTaskStatement(deadLine, remaining);
-                const retryableRows = await d1.fetchAll(retryableStatement.sql, retryableStatement.params);
-                rows.push(...retryableRows);
+                const retryableStatements = this._retryableFailedStalledTaskStatements(deadLine, remaining);
+                const retryableResults = typeof d1.batch === "function"
+                    ? this._rowsFromBatchResults(await d1.batch(retryableStatements))
+                    : (await Promise.all(
+                        retryableStatements.map(statement => d1.fetchAll(statement.sql, statement.params))
+                    )).flat();
+                rows.push(...this._sortStalledRecoveryRows(this._dedupeRowsById(retryableResults)).slice(0, remaining));
             }
 
-            return this._sortStalledRecoveryRows(rows);
+            return this._sortStalledRecoveryRows(this._dedupeRowsById(rows));
         } catch (e) {
             log.error("TaskRepository.findStalledTasks error:", e);
             return [];
