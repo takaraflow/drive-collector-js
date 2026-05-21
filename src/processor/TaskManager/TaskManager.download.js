@@ -81,8 +81,11 @@ export async function downloadTask(task) {
         try {
             // Anti-reentrancy: Check if task is already being processed
             if (this.activeProcessors.has(id)) {
-                log.warn("Task already processing, skipping download", { taskId: id });
-                throw new TaskProcessingLockBusyError(id, 'download');
+                if (!lockAcquired) {
+                    log.warn("Task already processing, skipping download", { taskId: id });
+                    throw new TaskProcessingLockBusyError(id, 'download');
+                }
+                log.warn("Replacing stale local processor marker after canonical download claim", { taskId: id });
             }
             this.activeProcessors.add(id);
             this.inFlightTasks.set(id, task);

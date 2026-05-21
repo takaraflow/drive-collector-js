@@ -964,6 +964,33 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         getAllSpy.mockRestore();
     });
 
+    test("should allow canonical claim to replace stale local processor marker", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
+        mockClient.downloadMedia.mockResolvedValue();
+        mockDirectTransferService.canAttempt.mockReturnValue({ supported: false, reason: "test-disabled" });
+        TaskManager.activeProcessors.add("task_1");
+
+        const depsSnapshot = {
+            ...dependencyContainer.getAll(),
+            directTransferService: mockDirectTransferService,
+            config: {
+                downloadDir: "/tmp/downloads",
+                remoteFolder: "remote_folder",
+                directTransfer: { enabled: false, fallbackToLocal: true },
+                streamForwarding: { enabled: false }
+            }
+        };
+        const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+
+        await TaskManager.downloadTask(task);
+
+        expect(mockClient.downloadMedia).toHaveBeenCalled();
+        expect(TaskManager.activeProcessors.has("task_1")).toBe(false);
+
+        getAllSpy.mockRestore();
+    });
+
     test("stream forwarding waits for worker finalization before considering the task handled", async () => {
         mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
         mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));

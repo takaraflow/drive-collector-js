@@ -41,6 +41,10 @@ const getDeps = () => dependencyContainer.getAll();
 const getLog = () => getDeps().logger.withModule('TaskManager');
 const ACTIVE_STATUS_SET = new Set(TASK_ACTIVE_STATUSES);
 const TERMINAL_STATUS_SET = new Set(TASK_TERMINAL_STATUSES);
+const MANUAL_RETRY_ALLOWED_STATUS_SET = new Set([
+    TASK_STATUSES.FAILED,
+    TASK_STATUSES.QUEUED
+]);
 const TELEGRAM_CLIENT_LOCK_KEY = "telegram_client";
 const STALLED_RECOVERY_LOCK_KEY = "task_recovery:stalled";
 const STALLED_RECOVERY_LOCK_TTL_SECONDS = 120;
@@ -1344,7 +1348,15 @@ export class TaskManager {
                 return { success: false, statusCode: 400, message: "Task is cancelled" };
             }
 
-            // 清理旧的任务锁，避免与 stalled recovery 冲突
+            if (!MANUAL_RETRY_ALLOWED_STATUS_SET.has(dbTask.status)) {
+                return {
+                    success: false,
+                    statusCode: 409,
+                    message: `Task is ${dbTask.status}; manual retry is only allowed for failed or queued tasks`
+                };
+            }
+
+            // 只对 failed/queued 清理陈旧任务锁；活动态必须交给 claim lease 和恢复扫描处理。
             await instanceCoordinator.releaseTaskLock(taskId);
 
             const retryTransition = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.RETRY, null, {

@@ -46,8 +46,11 @@ export async function uploadTask(task) {
     try {
         // Anti-reentrancy: Add check for upload Task as well
         if (this.activeProcessors.has(id)) {
-            log.warn("Task already processing, skipping upload", { taskId: id });
-            throw new TaskProcessingLockBusyError(id, 'upload');
+            if (!lockAcquired) {
+                log.warn("Task already processing, skipping upload", { taskId: id });
+                throw new TaskProcessingLockBusyError(id, 'upload');
+            }
+            log.warn("Replacing stale local processor marker after canonical upload claim", { taskId: id });
         }
         this.activeProcessors.add(id);
         this.inFlightTasks.set(id, task);

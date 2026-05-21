@@ -48,8 +48,11 @@ export async function downloadExternalUrlTask(task) {
 
     try {
         if (this.activeProcessors.has(task.id)) {
-            log.warn("Task already processing, skipping external URL download", { taskId: task.id });
-            throw new TaskProcessingLockBusyError(task.id, "download");
+            if (!lockAcquired) {
+                log.warn("Task already processing, skipping external URL download", { taskId: task.id });
+                throw new TaskProcessingLockBusyError(task.id, "download");
+            }
+            log.warn("Replacing stale local processor marker after canonical external download claim", { taskId: task.id });
         }
         this.activeProcessors.add(task.id);
         this.inFlightTasks.set(task.id, task);

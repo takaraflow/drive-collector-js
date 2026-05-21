@@ -233,4 +233,26 @@ describe('TaskManager - Retry', () => {
             _meta: expect.objectContaining({ queueAttempt: 'queued:1700000000001' })
         }));
     });
+
+    it('should reject manual retry for active tasks instead of re-enqueueing', async () => {
+        const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
+        const { queueService } = await import('../../src/services/QueueService.js');
+        const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
+        TaskRepository.findById.mockResolvedValue({
+            id: 'task-active',
+            user_id: 'u1',
+            status: 'downloading'
+        });
+
+        const result = await TaskManager.retryTask('task-active');
+
+        expect(result).toEqual({
+            success: false,
+            statusCode: 409,
+            message: 'Task is downloading; manual retry is only allowed for failed or queued tasks'
+        });
+        expect(instanceCoordinator.releaseTaskLock).not.toHaveBeenCalled();
+        expect(TaskRepository.transitionStatus).not.toHaveBeenCalled();
+        expect(queueService.enqueueDownloadTask).not.toHaveBeenCalled();
+    });
 });
