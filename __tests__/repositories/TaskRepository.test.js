@@ -45,7 +45,7 @@ const { TaskRepository } = await import('../../src/repositories/TaskRepository.j
 const { d1 } = await import('../../src/services/d1.js');
 const { cache } = await import('../../src/services/CacheService.js');
 const { localCache } = await import('../../src/utils/LocalCache.js');
-const { TASK_ACTIVE_STATUSES, TASK_STATUSES } = await import('../../src/domain/task-state-machine.js');
+const { TASK_ACTIVE_STATUSES, TASK_EVENTS, TASK_STATUSES } = await import('../../src/domain/task-state-machine.js');
 
 describe('TaskRepository', () => {
     beforeEach(() => {
@@ -642,6 +642,67 @@ describe('TaskRepository', () => {
                 "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = NULL, claim_lease_id = NULL WHERE id = ? AND status = ?",
                 ['queued', null, expect.any(Number), 'task1', 'failed']
             );
+        });
+
+        it('should refresh an already queued retry with a fresh queue attempt', async () => {
+            vi.setSystemTime(new Date('2026-05-18T00:00:00.000Z'));
+            const previousUpdatedAt = Date.now();
+            const expectedUpdatedAt = previousUpdatedAt + 1;
+            mockD1.fetchOne.mockResolvedValueOnce({
+                id: 'task1',
+                status: 'queued',
+                updated_at: previousUpdatedAt,
+                claimed_by: 'stale-instance',
+                claim_lease_id: 'stale-lease'
+            });
+            mockD1.run.mockResolvedValue({ changes: 1 });
+
+            const result = await TaskRepository.transitionStatus('task1', TASK_EVENTS.RETRY, null, { returnResult: true });
+
+            expect(result).toMatchObject({
+                changed: true,
+                blocked: false,
+                fromStatus: 'queued',
+                toStatus: 'queued',
+                idempotent: false,
+                queueAttempt: `queued:${expectedUpdatedAt}`
+            });
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE tasks SET status = ?, error_msg = ?, updated_at = ?, claimed_by = NULL, claim_lease_id = NULL WHERE id = ? AND status = ?",
+                ['queued', null, expectedUpdatedAt, 'task1', 'queued']
+            );
+            expect(mockCache.set).toHaveBeenCalledWith(
+                'task_status:task1',
+                expect.objectContaining({ status: 'queued', updatedAt: expectedUpdatedAt }),
+                300
+            );
+        });
+
+        it('should not reuse a stale queue attempt when queued retry refresh loses the write', async () => {
+            vi.setSystemTime(new Date('2026-05-18T00:00:00.000Z'));
+            const previousUpdatedAt = Date.now();
+            mockD1.fetchOne
+                .mockResolvedValueOnce({
+                    id: 'task1',
+                    status: 'queued',
+                    updated_at: previousUpdatedAt
+                })
+                .mockResolvedValueOnce({
+                    id: 'task1',
+                    status: 'queued',
+                    updated_at: previousUpdatedAt
+                });
+            mockD1.run.mockResolvedValue({ changes: 0 });
+
+            const result = await TaskRepository.transitionStatus('task1', TASK_EVENTS.RETRY, null, { returnResult: true });
+
+            expect(result).toMatchObject({
+                changed: false,
+                blocked: true,
+                reason: 'Queued retry attempt refresh failed',
+                queueAttempt: `queued:${previousUpdatedAt}`
+            });
+            expect(mockCache.set).not.toHaveBeenCalled();
         });
 
         it('should fence claimed task transitions by owner and lease', async () => {

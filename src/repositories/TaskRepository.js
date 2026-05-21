@@ -80,6 +80,15 @@ export class TaskRepository {
         return result.success === true ? 1 : 0;
     }
 
+    static _nextTransitionTimestamp(currentTaskState = null) {
+        const wallClock = Date.now();
+        const previousUpdatedAt = Number(currentTaskState?.updated_at);
+        if (!Number.isFinite(previousUpdatedAt)) {
+            return wallClock;
+        }
+        return Math.max(wallClock, previousUpdatedAt + 1);
+    }
+
     static _placeholders(values) {
         return values.map(() => '?').join(',');
     }
@@ -148,8 +157,9 @@ export class TaskRepository {
         return row?.status || null;
     }
 
-    static async _syncDerivedTaskState(taskId, status, errorMsg = null) {
-        const payload = { status, errorMsg, updatedAt: Date.now() };
+    static async _syncDerivedTaskState(taskId, status, errorMsg = null, options = {}) {
+        const updatedAt = Number.isFinite(options.updatedAt) ? options.updatedAt : Date.now();
+        const payload = { status, errorMsg, updatedAt };
         const operations = [
             cache.delete(`task:${taskId}:details`)
         ];
@@ -645,6 +655,7 @@ export class TaskRepository {
         const targetStatus = TaskStateMachine.targetStatusForEvent(event);
         const currentTaskState = await this._getCurrentTaskState(taskId);
         const currentStatus = currentTaskState?.status || null;
+        const now = this._nextTransitionTimestamp(currentTaskState);
 
         if (!currentStatus) {
             return this._transitionResult({
@@ -669,7 +680,7 @@ export class TaskRepository {
             }, options);
         }
 
-        const now = Date.now();
+        const requiresFreshQueueAttempt = event === TASK_EVENTS.RETRY && currentStatus === TASK_STATUSES.QUEUED;
         const { assignments, params } = this._buildTransitionSql(targetStatus, {
             now,
             errorMsg,
@@ -689,32 +700,43 @@ export class TaskRepository {
             const latestState = await this._getCurrentTaskState(taskId);
             const latestStatus = latestState?.status || null;
             const racedToTarget = latestStatus === targetStatus;
+            const latestUpdatedAt = Number(latestState?.updated_at);
+            const hasFreshQueueAttempt = Number.isFinite(latestUpdatedAt) && latestUpdatedAt >= now;
+            const canUseTargetAttempt = racedToTarget && (!requiresFreshQueueAttempt || hasFreshQueueAttempt);
+            let reason = null;
+            if (!canUseTargetAttempt) {
+                if (requiresFreshQueueAttempt && racedToTarget) {
+                    reason = "Queued retry attempt refresh failed";
+                } else if (
+                    fence.clauses.length > 0 &&
+                    latestStatus === currentStatus &&
+                    (latestState?.claimed_by !== options.claimedBy || latestState?.claim_lease_id !== options.claimLeaseId)
+                ) {
+                    reason = "Task claim lease no longer matches current worker";
+                } else {
+                    reason = `Task status changed concurrently from ${currentStatus} to ${latestStatus}`;
+                }
+            }
             return this._transitionResult({
                 changed: false,
-                blocked: !racedToTarget,
-                conflict: !racedToTarget,
+                blocked: !canUseTargetAttempt,
+                conflict: !canUseTargetAttempt,
                 taskId,
                 event,
                 fromStatus: currentStatus,
                 latestStatus,
                 toStatus: targetStatus,
-                idempotent: racedToTarget,
-                queueAttempt: racedToTarget
+                idempotent: canUseTargetAttempt && !requiresFreshQueueAttempt,
+                queueAttempt: canUseTargetAttempt
                     ? `${targetStatus}:${latestState?.updated_at || now}`
                     : `${currentStatus}:${currentTaskState.updated_at || now}`,
-                reason: racedToTarget ? null : (
-                    fence.clauses.length > 0 &&
-                    latestStatus === currentStatus &&
-                    (latestState?.claimed_by !== options.claimedBy || latestState?.claim_lease_id !== options.claimLeaseId)
-                        ? "Task claim lease no longer matches current worker"
-                        : `Task status changed concurrently from ${currentStatus} to ${latestStatus}`
-                )
+                reason
             }, options);
         }
 
         this.pendingUpdates.delete(taskId);
         const safeErrorMsg = errorMsg === undefined || errorMsg === null ? null : redactSensitiveText(errorMsg);
-        await this._syncDerivedTaskState(taskId, targetStatus, safeErrorMsg);
+        await this._syncDerivedTaskState(taskId, targetStatus, safeErrorMsg, { updatedAt: now });
 
         return this._transitionResult({
             changed: true,
@@ -723,7 +745,7 @@ export class TaskRepository {
             event,
             fromStatus: currentStatus,
             toStatus: targetStatus,
-            idempotent: resolution.idempotent,
+            idempotent: requiresFreshQueueAttempt ? false : resolution.idempotent,
             queueAttempt: `${targetStatus}:${now}`
         }, options);
     }
