@@ -1,6 +1,7 @@
 export const CACHE_KEYS = Object.freeze({
     prefixes: Object.freeze({
         taskStatus: 'task_status:',
+        taskProgress: 'task_progress:',
         taskDetails: 'task:',
         consistentTask: 'consistent:task:',
         taskLock: 'lock:task:',
@@ -29,6 +30,7 @@ export const CACHE_KEYS = Object.freeze({
     taskLock: taskId => `lock:task:${taskId}`,
 
     taskStatus: taskId => `task_status:${taskId}`,
+    taskProgress: taskId => `task_progress:${taskId}`,
     consistentTask: taskId => `consistent:task:${taskId}`,
     taskSync: taskId => `sync:${taskId}`,
     taskStatusPattern: () => 'task_status:*',

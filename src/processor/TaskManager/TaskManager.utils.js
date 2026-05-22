@@ -10,7 +10,8 @@ import { getInfrastructureErrorUserMessage } from "../../utils/infrastructureErr
 const getDeps = () => dependencyContainer.getAll();
 const getLog = () => getDeps().logger.withModule('TaskManager.utils');
 const looksLikeRcloneDiagnostic = (message) => /rclone|failed to create file system|slog\/logger\.go|:mega|copyto|rcat/i.test(message || "");
-const HEARTBEAT_MIN_INTERVAL_MS = 3000;
+const CANONICAL_HEARTBEAT_MIN_INTERVAL_MS = 60_000;
+const UI_HEARTBEAT_MIN_INTERVAL_MS = 3000;
 
 const resolveUploadFailureUserMessage = (failure) => {
     return redactSensitiveText(resolveRcloneFailureMetadata(failure, {
@@ -29,7 +30,9 @@ const resolveUploadFailureUserMessage = (failure) => {
  */
 export function createHeartbeat(task, context, updateStatus, fileName = null) {
     const { TaskRepository, STRINGS, UIHelper } = getDeps();
-    let lastUpdate = 0;
+    let lastCanonicalUpdate = 0;
+    let lastUiUpdate = 0;
+    let lastCanonicalStatus = null;
     
     return async (status, downloaded = 0, total = 0, uploadProgress = null) => {
         // Check if task is cancelled
@@ -41,21 +44,48 @@ export function createHeartbeat(task, context, updateStatus, fileName = null) {
         const now = Date.now();
         const completed = total > 0 && downloaded >= total;
         const uploadCompleted = uploadProgress?.size > 0 && uploadProgress.bytes >= uploadProgress.size;
-        const shouldThrottle = lastUpdate > 0 &&
-            !completed &&
-            !uploadCompleted &&
-            (now - lastUpdate) < HEARTBEAT_MIN_INTERVAL_MS;
-        if (shouldThrottle) return;
-        lastUpdate = now;
-        
-        const event = status === 'uploading' ? TASK_EVENTS.START_UPLOAD : TASK_EVENTS.START_DOWNLOAD;
-        const transition = await TaskRepository.transitionStatus(task.id, event, null, {
-            ...getClaimFenceOptions(task),
-            returnResult: true,
-            allowNoop: true,
-            source: 'heartbeat'
+        const isFinalProgress = completed || uploadCompleted;
+        const progress = uploadProgress
+            ? { transferred: uploadProgress.bytes, total: uploadProgress.size, fileName }
+            : { transferred: downloaded, total, fileName };
+
+        const shouldRefreshCanonical = lastCanonicalStatus !== status
+            || isFinalProgress
+            || lastCanonicalUpdate === 0
+            || (now - lastCanonicalUpdate) >= CANONICAL_HEARTBEAT_MIN_INTERVAL_MS;
+        if (shouldRefreshCanonical) {
+            const fenceOptions = getClaimFenceOptions(task);
+            let transition;
+            if (lastCanonicalStatus === status && typeof TaskRepository.refreshActiveTaskLiveness === 'function') {
+                transition = await TaskRepository.refreshActiveTaskLiveness(task.id, status, {
+                    ...fenceOptions,
+                    returnResult: true,
+                    source: 'heartbeat_liveness'
+                });
+            } else {
+                const event = status === 'uploading' ? TASK_EVENTS.START_UPLOAD : TASK_EVENTS.START_DOWNLOAD;
+                transition = await TaskRepository.transitionStatus(task.id, event, null, {
+                    ...fenceOptions,
+                    returnResult: true,
+                    allowNoop: true,
+                    source: 'heartbeat'
+                });
+            }
+            if (transition.blocked) return;
+            lastCanonicalUpdate = now;
+            lastCanonicalStatus = status;
+        }
+
+        await TaskRepository.recordTaskProgress?.(task.id, status, progress, {
+            updatedAt: now,
+            fileName
         });
-        if (transition.blocked) return;
+
+        const shouldUpdateUi = isFinalProgress
+            || lastUiUpdate === 0
+            || (now - lastUiUpdate) >= UI_HEARTBEAT_MIN_INTERVAL_MS;
+        if (!shouldUpdateUi) return;
+        lastUiUpdate = now;
 
         if (task.isGroup) {
             // Update group monitor for group tasks

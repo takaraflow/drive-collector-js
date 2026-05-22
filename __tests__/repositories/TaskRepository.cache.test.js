@@ -108,6 +108,7 @@ describe("TaskRepository Cache", () => {
         expect(TaskRepository.pendingUpdates.has("task1")).toBe(false);
         expect(d1.run).toHaveBeenCalled();
         expect(cache.delete).toHaveBeenCalledWith("task_status:task1");
+        expect(cache.delete).toHaveBeenCalledWith("task_progress:task1");
     });
 
     it("should immediately write critical status updates (failed)", async () => {
@@ -180,5 +181,30 @@ describe("TaskRepository Cache", () => {
 
         expect(d1.run).toHaveBeenCalled();
         expect(TaskRepository.pendingUpdates.has("task1")).toBe(false);
+    });
+
+    it("should record task progress only in derived cache", async () => {
+        const result = await TaskRepository.recordTaskProgress("task1", "uploading", {
+            transferred: 2048,
+            total: 4096,
+            fileName: "file.bin"
+        }, { updatedAt: 1700000000000 });
+
+        expect(result).toBe(true);
+        expect(d1.run).not.toHaveBeenCalled();
+        expect(cache.set).toHaveBeenCalledWith(
+            "task_progress:task1",
+            {
+                taskId: "task1",
+                status: "uploading",
+                phase: "uploading",
+                transferred: 2048,
+                total: 4096,
+                updatedAt: 1700000000000,
+                fileName: "file.bin"
+            },
+            300,
+            { skipL1: true, skipTtlRandomization: true }
+        );
     });
 });

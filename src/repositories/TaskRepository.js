@@ -34,6 +34,7 @@ export class TaskRepository {
     static STALLED_TASKS_DEFAULT_LIMIT = 200;
     static STALLED_TASKS_MIN_LIMIT = 50;
     static STALLED_TASKS_MAX_LIMIT = 1000;
+    static TASK_PROGRESS_TTL_SECONDS = 300;
     static MAX_PENDING_UPDATES = 1000; // Max size limit for pendingUpdates Map
     static STALLED_TASK_COLUMNS = [
         "id",
@@ -176,10 +177,20 @@ export class TaskRepository {
         if (TASK_TERMINAL_STATUSES.includes(status)) {
             operations.push(
                 cache.delete(CACHE_KEYS.taskStatus(taskId)),
+                cache.delete(CACHE_KEYS.taskProgress(taskId)),
                 taskConsistentCache?.delete?.(`task:${taskId}`),
                 taskStateSynchronizer?.clearTaskState?.(taskId)
             );
         } else {
+            const progressState = options.progress || null;
+            if (progressState) {
+                operations.push(
+                    this.recordTaskProgress(taskId, status, progressState, {
+                        updatedAt,
+                        fileName: options.fileName
+                    })
+                );
+            }
             operations.push(
                 cache.set(CACHE_KEYS.taskStatus(taskId), payload, 300),
                 taskConsistentCache?.set?.(`task:${taskId}`, payload, { ttl: 300 }),
@@ -194,6 +205,123 @@ export class TaskRepository {
                 failures: failures.map(result => result.reason?.message || String(result.reason))
             });
         }
+    }
+
+    static _normalizeProgressNumber(value) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) return 0;
+        return Math.max(0, number);
+    }
+
+    static async recordTaskProgress(taskId, status, progress = {}, options = {}) {
+        if (!taskId || !TASK_ACTIVE_STATUSES.includes(status)) return false;
+
+        const total = this._normalizeProgressNumber(progress.total ?? progress.size);
+        const transferred = Math.min(
+            this._normalizeProgressNumber(progress.transferred ?? progress.bytes ?? progress.downloaded),
+            total > 0 ? total : Number.MAX_SAFE_INTEGER
+        );
+        const updatedAt = Number.isFinite(options.updatedAt) ? options.updatedAt : Date.now();
+        const payload = {
+            taskId,
+            status,
+            phase: status,
+            transferred,
+            total,
+            updatedAt
+        };
+
+        if (progress.fileName || options.fileName) {
+            payload.fileName = String(progress.fileName || options.fileName);
+        }
+
+        try {
+            await cache.set(
+                CACHE_KEYS.taskProgress(taskId),
+                payload,
+                options.ttlSeconds || this.TASK_PROGRESS_TTL_SECONDS,
+                { skipL1: true, skipTtlRandomization: true }
+            );
+            return true;
+        } catch (error) {
+            log.warn(`TaskRepository.recordTaskProgress failed for ${taskId}:`, error.message);
+            return false;
+        }
+    }
+
+    static async getTaskProgress(taskId) {
+        if (!taskId) return null;
+
+        try {
+            return await cache.get(CACHE_KEYS.taskProgress(taskId), 'json', { skipCache: true });
+        } catch (error) {
+            log.warn(`TaskRepository.getTaskProgress failed for ${taskId}:`, error.message);
+            return null;
+        }
+    }
+
+    static async refreshActiveTaskLiveness(taskId, status, options = {}) {
+        if (!taskId || !TASK_ACTIVE_STATUSES.includes(status)) {
+            return this._transitionResult({
+                changed: false,
+                blocked: true,
+                taskId,
+                reason: "Active task liveness requires an active task status"
+            }, options);
+        }
+
+        const currentTaskState = await this._getCurrentTaskState(taskId);
+        const currentStatus = currentTaskState?.status || null;
+        if (!currentStatus) {
+            return this._transitionResult({
+                changed: false,
+                blocked: true,
+                taskId,
+                reason: "Task not found"
+            }, options);
+        }
+        if (currentStatus !== status) {
+            return this._transitionResult({
+                changed: false,
+                blocked: true,
+                taskId,
+                fromStatus: currentStatus,
+                toStatus: status,
+                reason: `Task status changed concurrently from ${status} to ${currentStatus}`
+            }, options);
+        }
+
+        const fence = this._buildClaimFenceWhere(options);
+        const now = this._nextTransitionTimestamp(currentTaskState);
+        const result = await d1.run(
+            `UPDATE tasks SET updated_at = ? WHERE id = ? AND status = ?${fence.clauses.length ? ` AND ${fence.clauses.join(' AND ')}` : ''}`,
+            [now, taskId, status, ...fence.params]
+        );
+        const changed = this._getChanges(result) > 0;
+        if (!changed) {
+            const latestState = await this._getCurrentTaskState(taskId);
+            return this._transitionResult({
+                changed: false,
+                blocked: true,
+                taskId,
+                fromStatus: currentStatus,
+                latestStatus: latestState?.status || null,
+                toStatus: status,
+                reason: fence.clauses.length > 0
+                    ? "Task claim lease no longer matches current worker"
+                    : `Task status changed concurrently from ${currentStatus} to ${latestState?.status || null}`
+            }, options);
+        }
+
+        await this._syncDerivedTaskState(taskId, status, null, { updatedAt: now });
+        return this._transitionResult({
+            changed: true,
+            blocked: false,
+            taskId,
+            fromStatus: status,
+            toStatus: status,
+            queueAttempt: `${status}:${now}`
+        }, options);
     }
 
     /**
@@ -1069,14 +1197,16 @@ export class TaskRepository {
         }
 
         const canonical = await this.findById(taskId, { strong: true });
-        const [syncState, cacheState] = await Promise.all([
+        const [syncState, cacheState, progressState] = await Promise.all([
             this.getTaskStatusSynchronized(taskId),
-            this.getTaskStatusFromCache(taskId)
+            this.getTaskStatusFromCache(taskId),
+            this.getTaskProgress(taskId)
         ]);
 
         const derivedViews = {};
         if (syncState) derivedViews.synchronizer = syncState;
         if (cacheState) derivedViews.consistentCache = cacheState;
+        if (progressState) derivedViews.progress = progressState;
         const memoryState = this.pendingUpdates.get(taskId);
         if (memoryState) derivedViews.memory = memoryState;
 
@@ -1157,6 +1287,7 @@ export class TaskRepository {
                 taskConsistentCache?.delete?.(`task:${taskId}`),
                 taskStateSynchronizer?.clearTaskState?.(taskId),
                 cache.delete(CACHE_KEYS.taskStatus(taskId)),
+                cache.delete(CACHE_KEYS.taskProgress(taskId)),
                 cache.delete(`task:${taskId}:details`)
             ]);
             this.pendingUpdates.delete(taskId);
@@ -1180,7 +1311,10 @@ export class TaskRepository {
             await Promise.allSettled(taskIds.map(id => taskStateSynchronizer?.clearTaskState?.(id)));
 
             // 批量清理 Redis
-            const redisKeys = taskIds.map(id => CACHE_KEYS.taskStatus(id));
+            const redisKeys = taskIds.flatMap(id => [
+                CACHE_KEYS.taskStatus(id),
+                CACHE_KEYS.taskProgress(id)
+            ]);
             await BatchProcessor.processBatch('redis-delete', redisKeys);
 
             // 清理内存

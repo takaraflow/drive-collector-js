@@ -489,7 +489,11 @@ class CacheService {
         }
 
         // Determine strategy based on key pattern
-        if (key.startsWith(CACHE_KEYS.prefixes.taskStatus) || key.startsWith(CACHE_KEYS.prefixes.taskDetails)) {
+        if (
+            key.startsWith(CACHE_KEYS.prefixes.taskStatus)
+            || key.startsWith(CACHE_KEYS.prefixes.taskProgress)
+            || key.startsWith(CACHE_KEYS.prefixes.taskDetails)
+        ) {
             return this.cacheStrategies.taskStatus;
         } else if (key.startsWith(CACHE_KEYS.prefixes.instance)) {
             return this.cacheStrategies.instanceStatus;

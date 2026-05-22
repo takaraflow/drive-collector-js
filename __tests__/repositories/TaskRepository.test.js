@@ -535,6 +535,7 @@ describe('TaskRepository', () => {
             mockD1.fetchOne.mockResolvedValueOnce({ id: 'task1', status: 'completed' });
             mockStateSynchronizer.getTaskState.mockResolvedValueOnce({ status: 'queued' });
             mockConsistentCache.get.mockResolvedValueOnce({ status: 'downloading' });
+            mockCache.get.mockResolvedValueOnce({ status: 'uploading', transferred: 2048, total: 4096 });
             TaskRepository.pendingUpdates.set('task1', { status: 'uploading' });
 
             const result = await TaskRepository.getTaskStatusFull('task1');
@@ -545,6 +546,7 @@ describe('TaskRepository', () => {
                 derivedViews: {
                     synchronizer: { status: 'queued' },
                     consistentCache: { status: 'downloading' },
+                    progress: { status: 'uploading', transferred: 2048, total: 4096 },
                     memory: { status: 'uploading' }
                 }
             });
@@ -554,6 +556,7 @@ describe('TaskRepository', () => {
             mockD1.fetchOne.mockResolvedValueOnce(null);
             mockStateSynchronizer.getTaskState.mockResolvedValueOnce({ status: 'downloading' });
             mockConsistentCache.get.mockResolvedValueOnce({ status: 'uploading' });
+            mockCache.get.mockResolvedValueOnce({ status: 'uploading', transferred: 1024, total: 4096 });
             TaskRepository.pendingUpdates.set('missing-task', { status: 'queued' });
 
             await expect(TaskRepository.inspectTaskStateViews('missing-task')).resolves.toEqual({
@@ -562,6 +565,7 @@ describe('TaskRepository', () => {
                 derivedViews: {
                     synchronizer: { status: 'downloading' },
                     consistentCache: { status: 'uploading' },
+                    progress: { status: 'uploading', transferred: 1024, total: 4096 },
                     memory: { status: 'queued' }
                 }
             });
@@ -597,6 +601,7 @@ describe('TaskRepository', () => {
                 .mockResolvedValueOnce({ id: 'task1', status: 'completed' })
                 .mockResolvedValueOnce({ id: 'task1', status: 'completed' });
             mockConsistentCache.get.mockResolvedValueOnce({ status: 'downloading' });
+            mockCache.get.mockResolvedValueOnce({ status: 'uploading', transferred: 4096, total: 4096 });
 
             const result = await TaskRepository.getTaskInfo('task1');
 
@@ -606,7 +611,8 @@ describe('TaskRepository', () => {
                 canonicalStatusSource: 'd1',
                 cacheStatus: 'derived',
                 derivedStateViews: {
-                    consistentCache: { status: 'downloading' }
+                    consistentCache: { status: 'downloading' },
+                    progress: { status: 'uploading', transferred: 4096, total: 4096 }
                 }
             });
         });
@@ -625,6 +631,7 @@ describe('TaskRepository', () => {
                 ['completed', 'All good', expect.any(Number), 'task1', 'uploading']
             );
             expect(mockCache.delete).toHaveBeenCalledWith('task_status:task1');
+            expect(mockCache.delete).toHaveBeenCalledWith('task_progress:task1');
         });
 
         it('should redact sensitive values before persisting task errors', async () => {
@@ -666,6 +673,76 @@ describe('TaskRepository', () => {
                 expect.objectContaining({ status: 'downloading' }),
                 300
             );
+        });
+
+        it('should refresh active task liveness without changing canonical status', async () => {
+            vi.setSystemTime(new Date('2026-05-18T00:00:00.000Z'));
+            const previousUpdatedAt = Date.now();
+            const expectedUpdatedAt = previousUpdatedAt + 1;
+            mockD1.fetchOne.mockResolvedValueOnce({
+                id: 'task1',
+                status: 'uploading',
+                updated_at: previousUpdatedAt,
+                claimed_by: 'instance1',
+                claim_lease_id: 'lease1'
+            });
+            mockD1.run.mockResolvedValue({ changes: 1 });
+
+            const result = await TaskRepository.refreshActiveTaskLiveness('task1', 'uploading', {
+                requireClaim: true,
+                claimedBy: 'instance1',
+                claimLeaseId: 'lease1',
+                returnResult: true
+            });
+
+            expect(result).toMatchObject({
+                changed: true,
+                blocked: false,
+                fromStatus: 'uploading',
+                toStatus: 'uploading',
+                queueAttempt: `uploading:${expectedUpdatedAt}`
+            });
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE tasks SET updated_at = ? WHERE id = ? AND status = ? AND claimed_by = ? AND claim_lease_id = ?",
+                [expectedUpdatedAt, 'task1', 'uploading', 'instance1', 'lease1']
+            );
+            expect(mockCache.set).toHaveBeenCalledWith(
+                'task_status:task1',
+                expect.objectContaining({ status: 'uploading', updatedAt: expectedUpdatedAt }),
+                300
+            );
+        });
+
+        it('should not refresh active task liveness when the claim fence changed', async () => {
+            mockD1.fetchOne
+                .mockResolvedValueOnce({
+                    id: 'task1',
+                    status: 'uploading',
+                    updated_at: 100,
+                    claimed_by: 'instance1',
+                    claim_lease_id: 'lease1'
+                })
+                .mockResolvedValueOnce({
+                    id: 'task1',
+                    status: 'uploading',
+                    updated_at: 100,
+                    claimed_by: 'instance2',
+                    claim_lease_id: 'lease2'
+                });
+            mockD1.run.mockResolvedValue({ changes: 0 });
+
+            const result = await TaskRepository.refreshActiveTaskLiveness('task1', 'uploading', {
+                requireClaim: true,
+                claimedBy: 'instance1',
+                claimLeaseId: 'lease1',
+                returnResult: true
+            });
+
+            expect(result).toMatchObject({
+                changed: false,
+                blocked: true,
+                reason: 'Task claim lease no longer matches current worker'
+            });
         });
 
         it('should allow retry from failed to queued', async () => {

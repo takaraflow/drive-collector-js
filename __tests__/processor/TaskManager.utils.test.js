@@ -2,7 +2,9 @@ import { describe, expect, test, beforeEach, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
     getAll: vi.fn(),
-    transitionStatus: vi.fn()
+    transitionStatus: vi.fn(),
+    recordTaskProgress: vi.fn(),
+    refreshActiveTaskLiveness: vi.fn()
 }));
 
 vi.mock("../../src/services/DependencyContainer.js", () => ({
@@ -164,9 +166,13 @@ describe("TaskManager heartbeat handling", () => {
         vi.useFakeTimers();
         vi.setSystemTime(1700000000000);
         mocks.transitionStatus.mockResolvedValue({ changed: true, blocked: false, toStatus: "uploading" });
+        mocks.recordTaskProgress.mockResolvedValue(true);
+        mocks.refreshActiveTaskLiveness.mockResolvedValue({ changed: true, blocked: false, toStatus: "uploading" });
         mocks.getAll.mockReturnValue({
             TaskRepository: {
-                transitionStatus: mocks.transitionStatus
+                transitionStatus: mocks.transitionStatus,
+                recordTaskProgress: mocks.recordTaskProgress,
+                refreshActiveTaskLiveness: mocks.refreshActiveTaskLiveness
             },
             STRINGS: {
                 task: {
@@ -181,7 +187,7 @@ describe("TaskManager heartbeat handling", () => {
         });
     });
 
-    test("throttles non-final heartbeat writes to D1 and UI", async () => {
+    test("keeps high-frequency heartbeat progress in Redis while throttling D1 and UI", async () => {
         const updateStatus = vi.fn();
         const heartbeat = createHeartbeat(
             { id: "task-heartbeat", isGroup: false },
@@ -196,8 +202,44 @@ describe("TaskManager heartbeat handling", () => {
         vi.setSystemTime(1700000003000);
         await heartbeat("uploading", 0, 0, { bytes: 3072, size: 4096 });
 
-        expect(mocks.transitionStatus).toHaveBeenCalledTimes(2);
+        expect(mocks.recordTaskProgress).toHaveBeenCalledTimes(3);
+        expect(mocks.recordTaskProgress).toHaveBeenLastCalledWith(
+            "task-heartbeat",
+            "uploading",
+            expect.objectContaining({ transferred: 3072, total: 4096, fileName: "file.bin" }),
+            expect.objectContaining({ fileName: "file.bin" })
+        );
+        expect(mocks.transitionStatus).toHaveBeenCalledTimes(1);
+        expect(mocks.refreshActiveTaskLiveness).not.toHaveBeenCalled();
         expect(updateStatus).toHaveBeenCalledTimes(2);
+    });
+
+    test("refreshes canonical liveness after the heartbeat interval", async () => {
+        const updateStatus = vi.fn();
+        const heartbeat = createHeartbeat(
+            { id: "task-heartbeat-liveness", isGroup: false },
+            { cancelledTaskIds: new Set() },
+            updateStatus,
+            "file.bin"
+        );
+
+        await heartbeat("downloading", 1024, 4096);
+        vi.setSystemTime(1700000060000);
+        await heartbeat("downloading", 2048, 4096);
+
+        expect(mocks.recordTaskProgress).toHaveBeenCalledTimes(2);
+        expect(mocks.transitionStatus).toHaveBeenCalledTimes(1);
+        expect(mocks.transitionStatus).toHaveBeenCalledWith(
+            "task-heartbeat-liveness",
+            "start_download",
+            null,
+            expect.objectContaining({ source: "heartbeat" })
+        );
+        expect(mocks.refreshActiveTaskLiveness).toHaveBeenCalledWith(
+            "task-heartbeat-liveness",
+            "downloading",
+            expect.objectContaining({ source: "heartbeat_liveness" })
+        );
     });
 
     test("does not throttle final heartbeat progress", async () => {
@@ -213,7 +255,29 @@ describe("TaskManager heartbeat handling", () => {
         vi.setSystemTime(1700000001000);
         await heartbeat("uploading", 0, 0, { bytes: 4096, size: 4096 });
 
-        expect(mocks.transitionStatus).toHaveBeenCalledTimes(2);
+        expect(mocks.recordTaskProgress).toHaveBeenCalledTimes(2);
+        expect(mocks.transitionStatus).toHaveBeenCalledTimes(1);
+        expect(mocks.refreshActiveTaskLiveness).toHaveBeenCalledTimes(1);
         expect(updateStatus).toHaveBeenCalledTimes(2);
+    });
+
+    test("does not write derived progress when canonical heartbeat is blocked", async () => {
+        mocks.transitionStatus.mockResolvedValueOnce({
+            changed: false,
+            blocked: true,
+            reason: "Task status changed concurrently"
+        });
+        const updateStatus = vi.fn();
+        const heartbeat = createHeartbeat(
+            { id: "task-heartbeat-blocked", isGroup: false },
+            { cancelledTaskIds: new Set() },
+            updateStatus,
+            "file.bin"
+        );
+
+        await heartbeat("uploading", 0, 0, { bytes: 1024, size: 4096 });
+
+        expect(mocks.recordTaskProgress).not.toHaveBeenCalled();
+        expect(updateStatus).not.toHaveBeenCalled();
     });
 });
