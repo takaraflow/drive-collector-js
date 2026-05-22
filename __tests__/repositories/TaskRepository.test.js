@@ -257,6 +257,8 @@ describe('TaskRepository', () => {
             ]);
             const queriedPatterns = retryableStatements.map(statement => statement.params[2]);
             expect(queriedPatterns).toContain("%Circuit breaker is OPEN%");
+            expect(queriedPatterns).toContain("%claim lease%");
+            expect(queriedPatterns).toContain("%lease is no longer current%");
             expect(queriedPatterns).toContain("%CONNECTION_NOT_INITED%");
             expect(queriedPatterns).toContain("%upload.GetFile%");
             expect(queriedPatterns).toContain("%Cannot read%dcId%");

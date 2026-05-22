@@ -63,6 +63,8 @@ export class TaskRepository {
         "%qstash%",
         "%Queue enqueue failed%",
         "%Recovery enqueue failed%",
+        "%claim lease%",
+        "%lease is no longer current%",
         "%timed out%",
         "%temporary failure%",
         "%unexpected EOF%",
