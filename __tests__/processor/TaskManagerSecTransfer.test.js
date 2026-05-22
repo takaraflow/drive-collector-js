@@ -108,8 +108,11 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
             parse_failed: "parse failed",
             success_sec_transfer: "sec transfer success",
             downloaded_waiting_upload: "downloaded waiting",
+            uploading: "uploading",
+            downloading: "downloading",
             cancelled: "cancelled",
-            error_prefix: "error: "
+            error_prefix: "error: ",
+            failed_action_required: "failed: {{reason}}"
         }
     },
     format: vi.fn((s, args) => s)
@@ -1257,7 +1260,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         getAllSpy.mockRestore();
     });
 
-    test("strict zero-disk direct transfer timeout remains recoverable without local staging", async () => {
+    test("strict zero-disk direct transfer timeout fails terminally after bounded direct attempts", async () => {
         mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
         mockFs.promises.stat.mockRejectedValue(new Error("ENOENT"));
         mockDirectTransferService.canAttempt.mockReturnValue({ supported: true, reason: "rclone-rcat" });
@@ -1283,14 +1286,20 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         };
         const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
 
-        await expect(TaskManager.downloadTask(task)).rejects.toThrow("TIMEOUT");
+        await TaskManager.downloadTask(task);
 
         expect(mockClient.downloadMedia).not.toHaveBeenCalled();
         expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
-        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
             "task_1",
             "fail",
-            expect.anything(),
+            expect.stringContaining("directTransferErrorCode=RCLONE_TRANSIENT"),
+            expect.objectContaining({ source: "handleTaskFailure" })
+        );
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            "task_1",
+            "fail",
+            expect.stringContaining("reason=TIMEOUT"),
             expect.objectContaining({ source: "handleTaskFailure" })
         );
 

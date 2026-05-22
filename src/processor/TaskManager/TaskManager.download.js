@@ -15,6 +15,9 @@ import { parseBoolean } from "../../config/boolean.js";
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager');
 
 const STRICT_DIRECT_TRANSFER_ERROR_CODE = 'DIRECT_TRANSFER_STRICT_UNAVAILABLE';
+const DIRECT_TRANSFER_AUTO_RECOVERABLE_RETRY_SCOPES = new Set([
+    'telegram_source'
+]);
 
 function isStrictDirectTransfer(config) {
     return parseBoolean(config.directTransfer?.enabled, true) && !parseBoolean(config.directTransfer?.fallbackToLocal, false);
@@ -53,7 +56,14 @@ function createStrictDirectTransferFailure(result = {}) {
     error.diagnosticMessage = diagnosticParts.join("; ");
     error.directTransferErrorCode = result.errorCode;
     error.directTransferReason = safeReason;
+    error.retryScope = result.retryScope;
     return error;
+}
+
+function isStrictDirectTransferAutoRecoverable(error) {
+    if (error?.directTransferErrorCode === 'TELEGRAM_SOURCE_TRANSIENT') return true;
+    if (DIRECT_TRANSFER_AUTO_RECOVERABLE_RETRY_SCOPES.has(error?.retryScope)) return true;
+    return false;
 }
 
 /**
@@ -159,7 +169,16 @@ export async function downloadTask(task) {
                     throw e;
                 }
                 const isCancel = e.message === "CANCELLED";
-                if (e?.retryable !== false && (isRetryableInfrastructureError(e) || e?.retryable === true)) {
+                if (
+                    e?.errorCode === STRICT_DIRECT_TRANSFER_ERROR_CODE &&
+                    !isStrictDirectTransferAutoRecoverable(e)
+                ) {
+                    try {
+                        await handleTaskFailure(task, this, updateStatus, e, false);
+                    } catch (updateError) {
+                        log.error(`Failed to update task status for ${task.id}:`, updateError);
+                    }
+                } else if (e?.retryable !== false && (isRetryableInfrastructureError(e) || e?.retryable === true)) {
                     log.warn("Download phase hit retryable infrastructure error; leaving state for webhook/recovery retry", {
                         taskId: task.id,
                         error: e.message,
@@ -610,6 +629,10 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
             source: 'direct_transfer_fallback'
         });
         return false;
+    }
+
+    if (strictDirectTransfer && result?.retryable === true && result?.retryScope !== 'telegram_source') {
+        throw createStrictDirectTransferFailure(result);
     }
 
     if (result?.retryable === true) {
