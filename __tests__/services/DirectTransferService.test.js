@@ -441,7 +441,8 @@ describe("DirectTransferService", () => {
       fallback: false,
       errorCode: "RCLONE_TRANSIENT",
       retryable: true,
-      userRetryable: true
+      userRetryable: true,
+      retryScope: "rclone_target"
     });
     expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
     expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
@@ -492,7 +493,8 @@ describe("DirectTransferService", () => {
       error: "rclone rcat terminated by signal SIGTERM",
       errorCode: "RCLONE_TRANSIENT",
       retryable: true,
-      userRetryable: true
+      userRetryable: true,
+      retryScope: "rclone_target"
     });
     expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
   });
@@ -534,7 +536,8 @@ describe("DirectTransferService", () => {
       error: "rclone rcat terminated by signal SIGTERM; INFO : backend emitted diagnostic before shutdown",
       errorCode: "RCLONE_TRANSIENT",
       retryable: true,
-      userRetryable: true
+      userRetryable: true,
+      retryScope: "rclone_target"
     });
     expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
   });
@@ -578,9 +581,10 @@ describe("DirectTransferService", () => {
     expect(result).toMatchObject({
       success: false,
       fallback: false,
-      errorCode: "RCLONE_TRANSIENT",
+      errorCode: "TELEGRAM_SOURCE_TRANSIENT",
       retryable: true,
-      userRetryable: true
+      userRetryable: true,
+      retryScope: "telegram_source"
     });
     expect(result.error).toContain("direct transfer stall timeout");
     expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
@@ -627,7 +631,8 @@ describe("DirectTransferService", () => {
       fallback: false,
       errorCode: "RCLONE_TRANSIENT",
       retryable: true,
-      userRetryable: true
+      userRetryable: true,
+      retryScope: "rclone_target"
     });
     expect(result.error).toContain("rclone_stdin");
     expect(stdin.destroy).toHaveBeenCalled();
@@ -668,7 +673,7 @@ describe("DirectTransferService", () => {
     );
   });
 
-  test("retries retryable direct transfer timeouts before falling back", async () => {
+  test("retries retryable Telegram source timeouts before falling back", async () => {
     const firstProc = createProcess();
     const secondProc = createProcess();
     const firstStaging = ".drive-collector-task-retry-1-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";

@@ -1,6 +1,10 @@
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../../domain/task-state-machine.js";
-import { getClaimFenceOptions } from "./claim-fence.js";
+import {
+    createClaimFenceStaleError,
+    getClaimFenceOptions,
+    isClaimFenceConflictReason
+} from "./claim-fence.js";
 import { redactSensitiveText } from "../../utils/serializer.js";
 import { resolveRcloneFailureMetadata } from "../../utils/rcloneErrorMessage.js";
 import { classifyInfrastructureError } from "../../domain/infrastructure-error.js";
@@ -71,7 +75,16 @@ export function createHeartbeat(task, context, updateStatus, fileName = null) {
                     source: 'heartbeat'
                 });
             }
-            if (transition.blocked) return;
+            if (transition.blocked) {
+                if (isClaimFenceConflictReason(transition.reason)) {
+                    throw createClaimFenceStaleError(transition.reason, {
+                        taskId: task.id,
+                        status,
+                        source: transition.source || 'heartbeat'
+                    });
+                }
+                return;
+            }
             lastCanonicalUpdate = now;
             lastCanonicalStatus = status;
         }

@@ -39,4 +39,12 @@ describe("infrastructure-error SSOT", () => {
             expect(isRetryableInfrastructureError(error)).toBe(true);
         }
     });
+
+    test("classifies stale task claim leases as retryable lock infrastructure", () => {
+        expect(classifyInfrastructureError(new Error("Task claim lease is no longer current"))).toMatchObject({
+            code: INFRASTRUCTURE_ERROR_CODES.LOCK_BUSY,
+            retryable: true,
+            retryScope: "lock"
+        });
+    });
 });

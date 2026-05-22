@@ -63,8 +63,6 @@ export class TaskRepository {
         "%qstash%",
         "%Queue enqueue failed%",
         "%Recovery enqueue failed%",
-        "%TIMEOUT%",
-        "%RCLONE_TRANSIENT%",
         "%timed out%",
         "%temporary failure%",
         "%unexpected EOF%",

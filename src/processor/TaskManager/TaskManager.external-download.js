@@ -13,7 +13,11 @@ import {
 } from "../ExternalUrlPolicy.js";
 import { assertLocalStorageCapacity } from "../../utils/storageGuard.js";
 import { createHeartbeat, handleTaskFailure, escapeHTML } from "./TaskManager.utils.js";
-import { assertClaimFenceCurrent, getClaimFenceOptions } from "./claim-fence.js";
+import {
+    assertClaimFenceCurrent,
+    getClaimFenceOptions,
+    isClaimFenceStaleError
+} from "./claim-fence.js";
 import { isRetryableInfrastructureError } from "../../domain/infrastructure-error.js";
 
 const getLog = () => dependencyContainer.get("logger").withModule("TaskManager.external-download");
@@ -171,7 +175,7 @@ export async function downloadExternalUrlTask(task) {
         });
         return true;
     } catch (error) {
-        if (isTaskProcessingLockBusyError(error)) {
+        if (isTaskProcessingLockBusyError(error) || isClaimFenceStaleError(error)) {
             throw error;
         }
         const isCancel = error.message === "CANCELLED";

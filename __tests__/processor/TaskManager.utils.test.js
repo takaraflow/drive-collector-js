@@ -158,6 +158,35 @@ describe("TaskManager upload failure handling", () => {
         );
         expect(updateStatus.mock.calls[0][1]).not.toContain("qstash_publish");
     });
+
+    test("stops the current worker when heartbeat loses its claim fence", async () => {
+        const updateStatus = vi.fn();
+        mocks.transitionStatus.mockResolvedValueOnce({
+            changed: false,
+            blocked: true,
+            reason: "Task claim lease no longer matches current worker"
+        });
+        const heartbeat = createHeartbeat(
+            {
+                id: "task-stale-lease",
+                isGroup: false,
+                claimedBy: "instance-1",
+                claimLeaseId: "lease-1"
+            },
+            { cancelledTaskIds: new Set() },
+            updateStatus,
+            "file.bin"
+        );
+
+        await expect(heartbeat("uploading", 0, 0, { bytes: 1024, size: 4096 }))
+            .rejects.toMatchObject({
+                code: "TASK_CLAIM_LEASE_STALE",
+                retryable: true,
+                retryScope: "lock"
+            });
+        expect(mocks.recordTaskProgress).not.toHaveBeenCalled();
+        expect(updateStatus).not.toHaveBeenCalled();
+    });
 });
 
 describe("TaskManager heartbeat handling", () => {

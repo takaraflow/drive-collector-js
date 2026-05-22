@@ -257,11 +257,11 @@ describe('TaskRepository', () => {
             ]);
             const queriedPatterns = retryableStatements.map(statement => statement.params[2]);
             expect(queriedPatterns).toContain("%Circuit breaker is OPEN%");
-            expect(queriedPatterns).toContain("%TIMEOUT%");
-            expect(queriedPatterns).toContain("%RCLONE_TRANSIENT%");
             expect(queriedPatterns).toContain("%CONNECTION_NOT_INITED%");
             expect(queriedPatterns).toContain("%upload.GetFile%");
             expect(queriedPatterns).toContain("%Cannot read%dcId%");
+            expect(queriedPatterns).not.toContain("%TIMEOUT%");
+            expect(queriedPatterns).not.toContain("%RCLONE_TRANSIENT%");
         });
 
         it('should not include retryable failed SQL when not requested', async () => {

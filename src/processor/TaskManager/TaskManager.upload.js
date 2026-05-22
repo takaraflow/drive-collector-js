@@ -2,7 +2,11 @@ import path from "path";
 import fs from "fs";
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { createHeartbeat, handleTaskCompletion, handleTaskFailure, handleUploadFailure, escapeHTML } from "./TaskManager.utils.js";
-import { assertClaimFenceCurrent, getClaimFenceOptions } from "./claim-fence.js";
+import {
+    assertClaimFenceCurrent,
+    getClaimFenceOptions,
+    isClaimFenceStaleError
+} from "./claim-fence.js";
 import { TASK_EVENTS, TASK_STATUSES } from "../../domain/task-state-machine.js";
 import { TaskProcessingLockBusyError, isTaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
 import { isExternalUrlTask } from "../../domain/task-source.js";
@@ -230,7 +234,7 @@ export async function uploadTask(task) {
             await handleUploadFailure(task, this, updateStatus, uploadResult);
         }
     } catch (e) {
-        if (isTaskProcessingLockBusyError(e)) {
+        if (isTaskProcessingLockBusyError(e) || isClaimFenceStaleError(e)) {
             throw e;
         }
         const isCancel = e.message === "CANCELLED";

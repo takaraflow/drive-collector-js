@@ -23,7 +23,10 @@ const QUEUE_ERROR_PATTERNS = [
 
 const LOCK_ERROR_PATTERNS = [
     /task processing lock busy/i,
-    /lock acquisition failed/i
+    /lock acquisition failed/i,
+    /claim lease/i,
+    /lease is no longer current/i,
+    /lease no longer matches/i
 ];
 
 const CACHE_ERROR_PATTERNS = [

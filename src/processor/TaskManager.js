@@ -18,7 +18,8 @@ import {
 import { isRetryableRcloneError } from "../domain/rclone-error.js";
 import {
     attachClaimLease,
-    getClaimFenceOptions
+    getClaimFenceOptions,
+    isClaimFenceStaleError
 } from "./TaskManager/claim-fence.js";
 import {
     TASK_SOURCE_TYPES,
@@ -1106,6 +1107,7 @@ export class TaskManager {
         const code = error?.code || '';
         const infrastructure = classifyInfrastructureError(error);
         if (infrastructure.retryable) return 503;
+        if (isClaimFenceStaleError(error)) return 503;
         
         // 任务不存在或无效参数 -> 404
         if (msg.includes('not found') || msg.includes('not found in database') || 
@@ -1145,6 +1147,7 @@ export class TaskManager {
     }
 
     static _isRetryableInfrastructureError(error) {
+        if (isClaimFenceStaleError(error)) return true;
         const msg = error?.message || '';
         if (error?.retryable === true) return true;
         if (isRetryableInfrastructureError(error)) return true;

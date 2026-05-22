@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    CLAIM_FENCE_STALE_ERROR_CODE,
+    assertClaimFenceCurrent,
     attachClaimLease,
-    getClaimFenceOptions
+    getClaimFenceOptions,
+    isClaimFenceConflictReason,
+    isClaimFenceStaleError
 } from '../../src/processor/TaskManager/claim-fence.js';
 
 describe('TaskManager claim fence helpers', () => {
@@ -52,5 +56,29 @@ describe('TaskManager claim fence helpers', () => {
 
         expect(attachClaimLease(task, { instanceId: 'instance-1' })).toBe(task);
         expect(task).toEqual({ id: 'task-1' });
+    });
+
+    it('throws a structured retryable error when the claim lease is stale', async () => {
+        const error = await assertClaimFenceCurrent(
+            {
+                id: 'task-1',
+                claimedBy: 'instance-1',
+                claimLeaseId: 'lease-1'
+            },
+            {
+                isLockLeaseCurrent: async () => false
+            }
+        ).catch(e => e);
+
+        expect(error).toBeInstanceOf(Error);
+        expect(error.code).toBe(CLAIM_FENCE_STALE_ERROR_CODE);
+        expect(error.retryable).toBe(true);
+        expect(error.retryScope).toBe('lock');
+        expect(isClaimFenceStaleError(error)).toBe(true);
+    });
+
+    it('recognizes repository claim fence conflict reasons', () => {
+        expect(isClaimFenceConflictReason('Task claim lease no longer matches current worker')).toBe(true);
+        expect(isClaimFenceConflictReason('Task status changed concurrently from uploading to completed')).toBe(false);
     });
 });

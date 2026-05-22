@@ -9,6 +9,35 @@ function normalizeClaimFenceSource(source) {
     };
 }
 
+export const CLAIM_FENCE_STALE_ERROR_CODE = "TASK_CLAIM_LEASE_STALE";
+
+export class ClaimFenceStaleError extends Error {
+    constructor(message = "Task claim lease is no longer current", details = {}) {
+        super(message);
+        this.name = "ClaimFenceStaleError";
+        this.code = CLAIM_FENCE_STALE_ERROR_CODE;
+        this.retryable = true;
+        this.retryScope = "lock";
+        this.details = details;
+    }
+}
+
+export function isClaimFenceStaleError(error) {
+    return error?.code === CLAIM_FENCE_STALE_ERROR_CODE
+        || error instanceof ClaimFenceStaleError;
+}
+
+export function isClaimFenceConflictReason(reason) {
+    return /claim lease|lease is no longer current|lease no longer matches/i.test(String(reason || ""));
+}
+
+export function createClaimFenceStaleError(reason, details = {}) {
+    return new ClaimFenceStaleError(
+        reason || "Task claim lease is no longer current",
+        details
+    );
+}
+
 export function getClaimFenceOptions(source) {
     const { claimedBy, claimLeaseId } = normalizeClaimFenceSource(source);
     if (!claimedBy || !claimLeaseId) {
@@ -49,6 +78,9 @@ export async function assertClaimFenceCurrent(task, instanceCoordinator) {
     });
 
     if (!isCurrent) {
-        throw new Error("Task claim lease is no longer current");
+        throw createClaimFenceStaleError("Task claim lease is no longer current", {
+            claimedBy,
+            claimLeaseId
+        });
     }
 }

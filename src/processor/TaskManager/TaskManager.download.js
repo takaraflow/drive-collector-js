@@ -3,13 +3,18 @@ import fs from "fs";
 import bigInt from "big-integer";
 import { dependencyContainer } from "../../services/DependencyContainer.js";
 import { createHeartbeat, handleTaskCompletion, handleTaskFailure, escapeHTML } from "./TaskManager.utils.js";
-import { assertClaimFenceCurrent, getClaimFenceOptions } from "./claim-fence.js";
+import {
+    assertClaimFenceCurrent,
+    getClaimFenceOptions,
+    isClaimFenceStaleError
+} from "./claim-fence.js";
 import { resolveInstanceBaseUrl } from "../../utils/instanceUrl.js";
 import { assertLocalStorageCapacity } from "../../utils/storageGuard.js";
 import { TASK_EVENTS } from "../../domain/task-state-machine.js";
 import { TASK_QUEUE_TRIGGER_SOURCES, TaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
 import { isRetryableInfrastructureError } from "../../domain/infrastructure-error.js";
 import { parseBoolean } from "../../config/boolean.js";
+import { redactSensitiveText } from "../../utils/serializer.js";
 
 // 获取模块日志记录器
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager');
@@ -24,7 +29,7 @@ function isStrictDirectTransfer(config) {
 }
 
 function createStrictDirectTransferError(reason, detail = null) {
-    const safeReason = String(reason || 'unavailable');
+    const safeReason = redactSensitiveText(String(reason || 'unavailable'));
     const error = new Error(`Zero-disk direct transfer unavailable: ${safeReason}`);
     error.errorCode = STRICT_DIRECT_TRANSFER_ERROR_CODE;
     error.retryable = false;
@@ -38,7 +43,7 @@ function createStrictDirectTransferError(reason, detail = null) {
 
 function createStrictDirectTransferFailure(result = {}) {
     const reason = result.error || result.reason || "direct-transfer-failed";
-    const safeReason = String(reason || "direct-transfer-failed");
+    const safeReason = redactSensitiveText(String(reason || "direct-transfer-failed"));
     const diagnosticParts = [
         "Zero-disk direct transfer failed; local fallback disabled",
         result.errorCode ? `directTransferErrorCode=${result.errorCode}` : null,
@@ -165,7 +170,11 @@ export async function downloadTask(task) {
 
 
             } catch (e) {
-                if (e instanceof TaskProcessingLockBusyError || e?.code === 'TASK_PROCESSING_LOCK_BUSY') {
+                if (
+                    e instanceof TaskProcessingLockBusyError ||
+                    e?.code === 'TASK_PROCESSING_LOCK_BUSY' ||
+                    isClaimFenceStaleError(e)
+                ) {
                     throw e;
                 }
                 const isCancel = e.message === "CANCELLED";

@@ -23,6 +23,7 @@ const RCLONE_DIAGNOSTIC_GRACE_MS = 1500;
 const LOCAL_STAGING_REQUIRED_DRIVE_TYPES = new Set(["oss", "r2", "s3"]);
 const TELEGRAM_SOURCE_TRANSIENT_ERROR_CODE = "TELEGRAM_SOURCE_TRANSIENT";
 const TELEGRAM_SOURCE_TRANSIENT_ERROR_PATTERNS = [
+    /^TIMEOUT$/i,
     /CONNECTION_NOT_INITED/i,
     /Cannot send requests while disconnected/i,
     /Not connected/i,
@@ -38,6 +39,8 @@ const NON_FALLBACK_RCLONE_ERROR_CODES = new Set([
     RCLONE_ERROR_CODES.DRIVE_QUOTA_EXCEEDED,
     RCLONE_ERROR_CODES.DRIVE_PERMISSION_DENIED
 ]);
+
+const RCLONE_TARGET_RETRY_SCOPE = "rclone_target";
 
 export class DirectTransferService {
     constructor(cloudTool = CloudTool, options = {}) {
@@ -304,15 +307,19 @@ export class DirectTransferService {
             });
             const errorCode = failureMetadata.errorCode;
             const isPermanentDriveFailure = NON_FALLBACK_RCLONE_ERROR_CODES.has(errorCode);
+            const scopedFailureMetadata = failureMetadata.retryable
+                ? { ...failureMetadata, retryScope: RCLONE_TARGET_RETRY_SCOPE }
+                : failureMetadata;
             if (!fallbackAllowed || isPermanentDriveFailure) {
-                return { success: false, fallback: false, error: message, ...failureMetadata };
+                return { success: false, fallback: false, error: message, ...scopedFailureMetadata };
             }
 
-            return { success: false, fallback: true, error: message, ...failureMetadata };
+            return { success: false, fallback: true, error: message, ...scopedFailureMetadata };
         }
     }
 
     _isTelegramSourceTransientError(error) {
+        if (error?.phase === "telegram_source") return true;
         const text = [
             error?.name,
             error?.code,

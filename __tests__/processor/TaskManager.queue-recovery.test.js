@@ -1082,6 +1082,46 @@ describe('TaskManager queue/recovery closure', () => {
         downloadSpy.mockRestore();
     });
 
+    it('does not mark a task failed when the active worker loses its claim lease', async () => {
+        mockTaskRepository.findById.mockResolvedValueOnce({
+            id: 'task-lease-stale',
+            user_id: 'user-1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'test.mp4',
+            status: 'queued'
+        });
+        const staleLeaseError = Object.assign(new Error('Task claim lease is no longer current'), {
+            code: 'TASK_CLAIM_LEASE_STALE',
+            retryable: true,
+            retryScope: 'lock'
+        });
+        const downloadSpy = vi.spyOn(TaskManager, 'downloadTask').mockRejectedValueOnce(staleLeaseError);
+
+        const result = await TaskManager.handleDownloadWebhook('task-lease-stale');
+
+        expect(result).toMatchObject({
+            success: false,
+            statusCode: 503,
+            message: 'Task claim lease is no longer current'
+        });
+        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
+            'task-lease-stale',
+            TASK_EVENTS.RETRY,
+            'Task claim lease is no longer current',
+            expect.objectContaining({ source: 'handleDownloadWebhook.retryable_infra_error' })
+        );
+        expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
+            'task-lease-stale',
+            TASK_EVENTS.FAIL,
+            expect.anything(),
+            expect.anything()
+        );
+
+        downloadSpy.mockRestore();
+    });
+
     it('does not update UI when terminal task cancellation is blocked', async () => {
         mockTaskRepository.findById.mockResolvedValue({
             id: 'task-1',
