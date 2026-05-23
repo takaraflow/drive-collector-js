@@ -161,24 +161,32 @@ export default class CloudQueueBase extends BaseQueue {
      * @returns {Promise<Array>} - 执行结果
      */
     async _executeBatch(tasks, concurrency = 5, singleTaskFn, loggerPrefix = '[CloudQueue]') {
-        const results = [];
+        const len = tasks.length;
+        // ⚡ Bolt Optimization: Pre-allocate results array to avoid dynamic resizing memory footprint
+        // and eliminate array.map closure overhead. Replaced chunk-based Promise.allSettled with a
+        // continuous async worker pool to maximize throughput while respecting the concurrency limit.
+        const results = new Array(len);
         
-        for (let i = 0; i < tasks.length; i += concurrency) {
-            const batch = tasks.slice(i, i + concurrency);
-            const batchResults = await Promise.allSettled(
-                batch.map(async (task) => {
-                    return this._executeWithRetry(async () => {
+        let currentIndex = 0;
+        const worker = async () => {
+            while (currentIndex < len) {
+                const index = currentIndex++;
+                const task = tasks[index];
+
+                try {
+                    const result = await this._executeWithRetry(async () => {
                         return await singleTaskFn(task);
                     }, 3, loggerPrefix);
-                })
-            );
-            results.push(...batchResults);
-            
-            // 批次间添加小延迟，避免突发流量
-            if (i + concurrency < tasks.length) {
-                await new Promise(resolve => setTimeout(resolve, 10));
+                    results[index] = { status: 'fulfilled', value: result };
+                } catch (error) {
+                    results[index] = { status: 'rejected', reason: error };
+                }
             }
-        }
+        };
+
+        const workerCount = Math.min(concurrency || len, len);
+        const workers = Array.from({ length: workerCount }, worker);
+        await Promise.all(workers);
         
         return results;
     }
