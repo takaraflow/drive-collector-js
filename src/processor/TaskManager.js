@@ -51,6 +51,8 @@ const STALLED_RECOVERY_LOCK_KEY = "task_recovery:stalled";
 const STALLED_RECOVERY_LOCK_TTL_SECONDS = 120;
 const STALLED_RECOVERY_INTERVAL_MS = 60_000;
 const STALLED_RECOVERY_TIMEOUT_MS = 120_000;
+const RECOVERY_FALLBACK_DELAY_MS = 5_000;
+const RATE_LIMIT_COOLDOWN_MS = 5 * 60_000;
 
 /**
  * --- 任务管理调度中心 (TaskManager) ---
@@ -589,36 +591,54 @@ export class TaskManager {
 
     static async _runRecoveryLocalFallback(retryableFailures) {
         const log = getLog();
-        const results = await Promise.allSettled(retryableFailures.map(async ({ work, result }) => {
+        const succeeded = [];
+        const failed = [];
+
+        for (let i = 0; i < retryableFailures.length; i++) {
+            const { work, result } = retryableFailures[i];
             log.warn("恢复队列不可用，切换为当前实例直接恢复任务", {
                 taskId: work.task.id,
                 type: work.type,
                 reason: redactSensitiveText(result.reason?.message || String(result.reason))
             });
-            const webhookResult = work.type === 'upload'
-                ? await this.handleUploadWebhook(work.task.id)
-                : await this.handleDownloadWebhook(work.task.id);
-            if (!webhookResult?.success) {
-                throw new Error(webhookResult?.message || `Local recovery fallback failed with status ${webhookResult?.statusCode || 'unknown'}`);
+            try {
+                const webhookResult = work.type === 'upload'
+                    ? await this.handleUploadWebhook(work.task.id)
+                    : await this.handleDownloadWebhook(work.task.id);
+                if (!webhookResult?.success) {
+                    throw new Error(webhookResult?.message || `Local recovery fallback failed with status ${webhookResult?.statusCode || 'unknown'}`);
+                }
+                succeeded.push({ result: { status: 'fulfilled', value: webhookResult }, work });
+            } catch (err) {
+                failed.push({ result: { status: 'rejected', reason: err }, work });
             }
-            return webhookResult;
-        }));
 
-        return {
-            succeeded: results
-                .map((result, index) => ({ result, work: retryableFailures[index].work }))
-                .filter(item => item.result.status === 'fulfilled'),
-            failed: results
-                .map((result, index) => ({ result, work: retryableFailures[index].work }))
-                .filter(item => item.result.status === 'rejected')
-        };
+            if (i < retryableFailures.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, RECOVERY_FALLBACK_DELAY_MS));
+            }
+        }
+
+        return { succeeded, failed };
     }
 
     static _isRetryableStalledFailure(row) {
         if (row?.status !== TASK_STATUSES.FAILED) return false;
         const message = row.error_msg || row.error || "";
         if (!message) return false;
+        if (this._isRateLimitFailure(message) && this._isWithinRateLimitCooldown(row)) {
+            return false;
+        }
         return this._isRetryableInfrastructureError(new Error(message)) || isRetryableRcloneError(message);
+    }
+
+    static _isRateLimitFailure(message) {
+        return /\b429\b/i.test(message) || /rate limit/i.test(message);
+    }
+
+    static _isWithinRateLimitCooldown(row) {
+        const updatedAt = Number(row?.updated_at);
+        if (!Number.isFinite(updatedAt)) return false;
+        return Date.now() - updatedAt < RATE_LIMIT_COOLDOWN_MS;
     }
 
     static _resolveBlockedWebhookResult(kind, transitionResult, fallbackStatus = null) {

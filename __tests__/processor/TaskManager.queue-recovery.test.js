@@ -1122,6 +1122,95 @@ describe('TaskManager queue/recovery closure', () => {
         downloadSpy.mockRestore();
     });
 
+    it('executes recovery fallback tasks sequentially with delay', async () => {
+        const fallbackSpy = vi.spyOn(TaskManager, 'handleDownloadWebhook').mockResolvedValue({
+            success: true,
+            statusCode: 200
+        });
+        mockQueueService.enqueueDownloadTask.mockRejectedValue(new Error('Circuit breaker is OPEN'));
+
+        const start = Date.now();
+        const result = await TaskManager._restoreBatchTasks('chat-1', [
+            {
+                id: 'queued-1',
+                user_id: 'u1',
+                chat_id: 'chat-1',
+                msg_id: 1,
+                source_msg_id: 10,
+                file_name: 'queued1.mp4',
+                status: 'queued'
+            },
+            {
+                id: 'queued-2',
+                user_id: 'u1',
+                chat_id: 'chat-1',
+                msg_id: 2,
+                source_msg_id: 11,
+                file_name: 'queued2.mp4',
+                status: 'queued'
+            }
+        ]);
+        const elapsed = Date.now() - start;
+
+        expect(result).toMatchObject({ enqueued: 2, pendingRetry: 0, failed: 0 });
+        expect(fallbackSpy).toHaveBeenCalledTimes(2);
+        expect(elapsed).toBeGreaterThanOrEqual(4000);
+        fallbackSpy.mockRestore();
+    });
+
+    it('skips 429-failed tasks during recovery when within cooldown window', async () => {
+        const recent429 = {
+            id: 'rate-limited-1',
+            user_id: 'u1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'rate-limited.mp4',
+            status: 'failed',
+            error_msg: 'Max retries (10) exceeded for 429 errors',
+            updated_at: Date.now() - 60_000
+        };
+
+        expect(TaskManager._isRetryableStalledFailure(recent429)).toBe(false);
+    });
+
+    it('recovers 429-failed tasks after cooldown period expires', async () => {
+        const old429 = {
+            id: 'rate-limited-old',
+            user_id: 'u1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            file_name: 'rate-limited-old.mp4',
+            status: 'failed',
+            error_msg: 'Max retries (10) exceeded for 429 errors',
+            updated_at: Date.now() - 6 * 60_000
+        };
+
+        expect(TaskManager._isRetryableStalledFailure(old429)).toBe(true);
+    });
+
+    it('skips rate limit failed tasks during stalled recovery scan', async () => {
+        mockTaskRepository.findStalledTasks.mockResolvedValue([{
+            id: 'rate-limited-1',
+            user_id: 'u1',
+            chat_id: 'chat-1',
+            msg_id: 1,
+            source_msg_id: 10,
+            source_ref: JSON.stringify({ chatId: 'chat-1', messageId: 10 }),
+            file_name: 'rate-limited.mp4',
+            file_size: 1024,
+            status: 'failed',
+            error_msg: 'Max retries (10) exceeded for 429 errors. Last retry-after: 30000ms',
+            updated_at: Date.now() - 120_000
+        }]);
+
+        const result = await TaskManager._runStalledTaskRecovery({ includeRetryableFailed: true });
+
+        expect(result).toMatchObject({ restored: 0, skipped: false });
+        expect(mockQueueService.enqueueDownloadTask).not.toHaveBeenCalled();
+    });
+
     it('does not update UI when terminal task cancellation is blocked', async () => {
         mockTaskRepository.findById.mockResolvedValue({
             id: 'task-1',
