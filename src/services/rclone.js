@@ -1157,7 +1157,13 @@ export class CloudTool {
         const safeFileName = this.sanitizeRemoteFileName(fileName);
         const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath, safeFileName);
 
-        const ret = await this._runRclone(["deletefile", fullRemotePath], 15000);
+        const driveType = conf?.type;
+        const isMegaHardDelete = driveType === "mega";
+        const deleteArgs = isMegaHardDelete
+            ? ["deletefile", "--mega-hard-delete", fullRemotePath]
+            : ["deletefile", fullRemotePath];
+
+        const ret = await this._runRclone(deleteArgs, 15000);
         const notFound = ret.stderr && (
             this._isRemotePathNotFound(ret, { operation: "deletefile" }) ||
             ret.stderr.includes("not found") ||
@@ -1166,6 +1172,27 @@ export class CloudTool {
 
         if (ret.code === 0 || notFound) {
             return { success: true };
+        }
+
+        if (isMegaHardDelete) {
+            log.warn("rclone deletefile with --mega-hard-delete failed, falling back to trash delete", {
+                userId,
+                fileName: safeFileName,
+                exitCode: ret.code
+            });
+            const fallbackRet = await this._runRclone(["deletefile", fullRemotePath], 15000);
+            const fallbackNotFound = fallbackRet.stderr && (
+                this._isRemotePathNotFound(fallbackRet, { operation: "deletefile" }) ||
+                fallbackRet.stderr.includes("not found") ||
+                fallbackRet.stderr.includes("error listing")
+            );
+            if (fallbackRet.code === 0 || fallbackNotFound) {
+                return { success: true };
+            }
+            return this._buildFailureResult(
+                this._buildRcloneError(fallbackRet, `rclone deletefile fallback exited with code ${fallbackRet.code}`),
+                { operation: "deletefile", remotePathScoped: true }
+            );
         }
 
         return this._buildFailureResult(
