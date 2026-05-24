@@ -159,7 +159,7 @@ export async function downloadTask(task) {
                 if (await _handleDirectTransfer(this, deps, task, info, fileName, heartbeat, isLargeFile, transferPlan)) return;
 
                 // 4. Check if stream forwarding mode is enabled
-                if (!transferPlan.skipStreamForwarding && await _handleStreamForwarding(this, deps, task, info, fileName, isLargeFile)) return;
+                if (!transferPlan.skipStreamForwarding && await _handleStreamForwarding(this, deps, task, info, fileName, heartbeat, isLargeFile)) return;
 
                 // 5. Download phase - MTProto file download
                 await _handleMTProtoDownload(this, deps, task, info, fileName, localPath, heartbeat, isLargeFile, {
@@ -290,7 +290,7 @@ async function _handleLocalFile(context, deps, task, info, fileName, localPath, 
     return false;
 }
 
-async function _handleStreamForwarding(context, deps, task, info, fileName, isLargeFile) {
+async function _handleStreamForwarding(context, deps, task, info, fileName, heartbeat, isLargeFile) {
     const { config, instanceCoordinator, TaskRepository, updateStatus, client, streamTransferService } = deps;
     const log = dependencyContainer.get('logger').withModule('TaskManager');
     const { message } = task;
@@ -345,7 +345,10 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
                     });
                     return false;
                 }
-                await updateStatus(task, "🚀 **Uploading via stream forwarding...**");
+                await heartbeat('uploading', 0, 0, {
+                    bytes: 0,
+                    size: info.size
+                });
                 await assertClaimFenceCurrent(task, instanceCoordinator);
                 const streamStartTransition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.START_STREAM_UPLOAD, null, {
                     ...getClaimFenceOptions(task),
@@ -444,7 +447,10 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
                         throw new Error(finalization?.error || 'Stream finalization failed');
                     }
                     downloadOptions.limit = Math.ceil(remaining / chunkSize);
-                    await updateStatus(task, `🔄 **Resuming transfer... (${(startOffset / 1024 / 1024).toFixed(2)}MB)**`);
+                    await heartbeat('uploading', startOffset, info.size, {
+                        bytes: startOffset,
+                        size: info.size
+                    });
                 }
 
                 const downloadIterator = client.iterDownload(downloadOptions);
@@ -470,8 +476,10 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, isLa
                     });
 
                     if (chunkIndex % 20 === 0 || isLast) {
-                        const statusText = startOffset > 0 ? "🔄 Resuming transfer..." : "📥 Forwarding stream...";
-                        await updateStatus(task, UIHelper.renderProgress(downloaded, info.size, statusText, fileName));
+                        await heartbeat('uploading', downloaded, info.size, {
+                            bytes: downloaded,
+                            size: info.size
+                        });
                     }
                     chunkIndex++;
                 }
@@ -568,7 +576,10 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
         return false;
     }
 
-    await updateStatus(task, "📤 **Streaming directly to cloud...**");
+    await heartbeat('uploading', 0, info.size, {
+        bytes: 0,
+        size: info.size
+    });
     await assertClaimFenceCurrent(task, instanceCoordinator);
     const streamStartTransition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.START_STREAM_UPLOAD, null, {
         ...getClaimFenceOptions(task),

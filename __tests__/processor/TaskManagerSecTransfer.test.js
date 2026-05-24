@@ -1086,6 +1086,7 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
             }
         };
         const getAllSpy = vi.spyOn(dependencyContainer, "getAll").mockReturnValue(depsSnapshot);
+        const { updateStatus } = await import("../../src/utils/common.js");
 
         await TaskManager.downloadTask(task);
 
@@ -1122,6 +1123,10 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         expect(mockStreamTransferService.resetTask).not.toHaveBeenCalled();
         expect(mockClient.downloadMedia).not.toHaveBeenCalled();
         expect(mockQueueService.enqueueUploadTask).not.toHaveBeenCalled();
+        expect(updateStatus).toHaveBeenCalledWith(
+            task,
+            "stream progress"
+        );
 
         getAllSpy.mockRestore();
     });
