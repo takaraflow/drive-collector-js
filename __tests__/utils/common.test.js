@@ -30,11 +30,12 @@ vi.mock('telegram/tl/custom/button.js', () => ({
     }
 }));
 
-const { escapeHTML, safeEdit, getMediaInfo, updateStatus, sanitizeHeaders } = await import('../../src/utils/common.js');
+const { escapeHTML, safeEdit, getMediaInfo, updateStatus, sanitizeHeaders, __resetSafeEditStateForTests } = await import('../../src/utils/common.js');
 
 describe('common utils', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        __resetSafeEditStateForTests();
         mockRunBotTaskWithRetry.mockImplementation(async (fn) => {
             return fn();
         });
@@ -130,6 +131,46 @@ describe('common utils', () => {
             
             // runBotTaskWithRetry handles the retries, here it's called once
             expect(mockRunBotTaskWithRetry).toHaveBeenCalledTimes(1);
+        });
+
+        it('should coalesce queued edits for the same message and only apply the latest queued text', async () => {
+            let releaseFirstEdit;
+            let firstEditStarted;
+            const firstEditStartedPromise = new Promise((resolve) => {
+                firstEditStarted = resolve;
+            });
+            mockClient.editMessage
+                .mockImplementationOnce(() => new Promise((resolve) => {
+                    firstEditStarted();
+                    releaseFirstEdit = resolve;
+                }))
+                .mockResolvedValueOnce({});
+
+            const first = safeEdit(123456, 789, 'old progress');
+            await firstEditStartedPromise;
+            const second = safeEdit(123456, 789, 'mid progress');
+            const third = safeEdit(123456, 789, 'new progress');
+
+            expect(mockRunBotTaskWithRetry).toHaveBeenCalledTimes(1);
+
+            releaseFirstEdit({});
+            await first;
+            await second;
+            await third;
+
+            expect(mockClient.editMessage).toHaveBeenCalledTimes(2);
+            expect(mockClient.editMessage).toHaveBeenNthCalledWith(1, 123456, {
+                message: 789,
+                text: 'old progress',
+                buttons: null,
+                parseMode: 'html'
+            });
+            expect(mockClient.editMessage).toHaveBeenNthCalledWith(2, 123456, {
+                message: 789,
+                text: 'new progress',
+                buttons: null,
+                parseMode: 'html'
+            });
         });
     });
 

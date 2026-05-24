@@ -5,6 +5,20 @@ import { logger } from "../services/logger/index.js";
 import crypto from "crypto";
 
 const log = logger.withModule ? logger.withModule('CommonUtils') : logger;
+const messageEditQueues = new Map();
+const latestMessageEditIntents = new Map();
+
+const buildEditQueueKey = (chatId, msgId) => `${String(chatId)}:${String(msgId)}`;
+const buildEditIntentFingerprint = (text, buttons, parseMode) => JSON.stringify({
+    text,
+    buttons: buttons ?? null,
+    parseMode
+});
+
+export const __resetSafeEditStateForTests = () => {
+    messageEditQueues.clear();
+    latestMessageEditIntents.clear();
+};
 
 /**
  * --- 辅助工具函数 (Internal Helpers) ---
@@ -25,42 +39,68 @@ export const escapeHTML = (str) => {
 
 // 安全编辑消息，统一处理异常
 export const safeEdit = async (chatId, msgId, text, buttons = null, userId = null, parseMode = "html", options = {}) => {
-    // 延迟导入 client 避免循环依赖
-    const { client } = await import("../services/telegram.js");
-    try {
-        const result = await runBotTaskWithRetry(
-            async () => {
-                try {
-                    await client.editMessage(chatId, { message: msgId, text, buttons, parseMode });
-                } catch (e) {
-                    // 忽略 "Message Not Modified" 错误
-                    if (e.message && (e.message.includes("MESSAGE_NOT_MODIFIED") || e.code === 400 && e.errorMessage === "MESSAGE_NOT_MODIFIED")) {
-                        return;
-                    }
-                    // 处理 AUTH_KEY_DUPLICATED 错误
-                    if (e.code === 406 && (e.errorMessage?.includes('AUTH_KEY_DUPLICATED') || e.message?.includes('AUTH_KEY_DUPLICATED'))) {
-                        const { clearSession } = await import("../services/telegram.js");
-                        await clearSession();
-                        log.error(`🚨 关键错误: AUTH_KEY_DUPLICATED 检测到，已清除 Session。建议重启服务。`);
-                        return false;
-                    }
-                    throw e;
+    const queueKey = buildEditQueueKey(chatId, msgId);
+    const intendedFingerprint = buildEditIntentFingerprint(text, buttons, parseMode);
+    latestMessageEditIntents.set(queueKey, intendedFingerprint);
+
+    const previous = messageEditQueues.get(queueKey) || Promise.resolve();
+    const next = previous
+        .catch(() => {})
+        .then(async () => {
+            if (latestMessageEditIntents.get(queueKey) !== intendedFingerprint) {
+                return true;
+            }
+
+            const { client } = await import("../services/telegram.js");
+            try {
+                const result = await runBotTaskWithRetry(
+                    async () => {
+                        if (latestMessageEditIntents.get(queueKey) !== intendedFingerprint) {
+                            return true;
+                        }
+                        try {
+                            await client.editMessage(chatId, { message: msgId, text, buttons, parseMode });
+                        } catch (e) {
+                            // 忽略 "Message Not Modified" 错误
+                            if (e.message && (e.message.includes("MESSAGE_NOT_MODIFIED") || e.code === 400 && e.errorMessage === "MESSAGE_NOT_MODIFIED")) {
+                                return;
+                            }
+                            // 处理 AUTH_KEY_DUPLICATED 错误
+                            if (e.code === 406 && (e.errorMessage?.includes('AUTH_KEY_DUPLICATED') || e.message?.includes('AUTH_KEY_DUPLICATED'))) {
+                                const { clearSession } = await import("../services/telegram.js");
+                                await clearSession();
+                                log.error(`🚨 关键错误: AUTH_KEY_DUPLICATED 检测到，已清除 Session。建议重启服务。`);
+                                return false;
+                            }
+                            throw e;
+                        }
+                    },
+                    userId,
+                    options,
+                    false,
+                    3
+                );
+                return result !== false;
+            } catch (e) {
+                if (e.code === 406 && (e.errorMessage?.includes('AUTH_KEY_DUPLICATED') || e.message?.includes('AUTH_KEY_DUPLICATED'))) {
+                    return false;
                 }
-            },
-            userId,
-            options,
-            false,
-            3
-        );
-        return result !== false;
-    } catch (e) {
-        // 最终失败也不抛出，避免中断主流程
-        if (e.code === 406 && (e.errorMessage?.includes('AUTH_KEY_DUPLICATED') || e.message?.includes('AUTH_KEY_DUPLICATED'))) {
-            return false; // 已经在内部处理过了
-        }
-        log.warn(`[safeEdit Failed] msgId ${msgId}:`, e.message, { chatId, msgId });
-        return false;
-    }
+                log.warn(`[safeEdit Failed] msgId ${msgId}:`, e.message, { chatId, msgId });
+                return false;
+            } finally {
+                if (latestMessageEditIntents.get(queueKey) === intendedFingerprint) {
+                    latestMessageEditIntents.delete(queueKey);
+                }
+            }
+        })
+        .finally(() => {
+            if (messageEditQueues.get(queueKey) === next) {
+                messageEditQueues.delete(queueKey);
+            }
+        });
+
+    messageEditQueues.set(queueKey, next);
+    return await next;
 };
 
 const safeSendStatusMessage = async (chatId, text, buttons = null, userId = null, parseMode = "html", options = {}) => {
