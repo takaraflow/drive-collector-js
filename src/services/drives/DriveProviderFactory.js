@@ -8,6 +8,7 @@ import { DropboxProvider } from "./DropboxProvider.js";
 import { BoxProvider } from "./BoxProvider.js";
 import { WebDAVProvider } from "./WebDAVProvider.js";
 import { OSSProvider } from "./OSSProvider.js";
+import { ProtonDriveProvider } from "./ProtonDriveProvider.js";
 import { logger } from "../logger/index.js";
 
 const log = logger.withModule ? logger.withModule('DriveProviderFactory') : logger;
@@ -132,3 +133,4 @@ DriveProviderFactory.register('dropbox', DropboxProvider);
 DriveProviderFactory.register('box', BoxProvider);
 DriveProviderFactory.register('webdav', WebDAVProvider);
 DriveProviderFactory.register('oss', OSSProvider);
+DriveProviderFactory.register('protondrive', ProtonDriveProvider);

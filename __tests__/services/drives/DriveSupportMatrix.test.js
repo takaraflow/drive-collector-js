@@ -15,13 +15,14 @@ describe('Drive support matrix', () => {
       'oss',
       'pcloud',
       'pikpak',
+      'protondrive',
       'webdav'
     ]);
 
     expect(byType.get('mega')).toMatchObject({ supportLevel: 'stable' });
     expect(byType.get('webdav')).toMatchObject({ supportLevel: 'stable' });
 
-    for (const type of ['box', 'dropbox', 'google_drive', 'onedrive', 'oss', 'pcloud', 'pikpak']) {
+    for (const type of ['box', 'dropbox', 'google_drive', 'onedrive', 'oss', 'pcloud', 'pikpak', 'protondrive']) {
       expect(byType.get(type)).toMatchObject({ supportLevel: 'advanced' });
       expect(byType.get(type).supportNote).toEqual(expect.any(String));
       expect(byType.get(type).supportNote.length).toBeGreaterThan(0);
@@ -29,7 +30,7 @@ describe('Drive support matrix', () => {
   });
 
   test('advanced providers should still have complete binding steps and rclone connection strings', () => {
-    for (const type of ['box', 'dropbox', 'google_drive', 'onedrive', 'oss', 'pcloud', 'pikpak']) {
+    for (const type of ['box', 'dropbox', 'google_drive', 'onedrive', 'oss', 'pcloud', 'pikpak', 'protondrive']) {
       const provider = DriveProviderFactory.getProvider(type);
       expect(provider.getBindingSteps().length).toBeGreaterThan(0);
       expect(provider.getConnectionString(sampleConfigFor(type))).toMatch(/^:.+:/);
@@ -52,6 +53,8 @@ function sampleConfigFor(type) {
       return { endpoint: 's3.example.com', bucket: 'bucket-name', ak: 'access-key', sk: 'secret-key' };
     case 'pikpak':
       return { user: 'user@example.com', pass: 'password', pass_format: 'rclone_obscured' };
+    case 'protondrive':
+      return { username: 'user@example.com', password: 'password' };
     default:
       return {};
   }

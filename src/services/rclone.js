@@ -347,8 +347,8 @@ export class CloudTool {
         const provider = DriveProviderFactory.getProvider(activeDrive.type);
         
         // Clone config and inject type
-        const config = { ...driveConfig, type: activeDrive.type };
-        
+        let config = { ...driveConfig, type: activeDrive.type };
+
         // Allow provider to process password if present
         if (config.pass) {
             if (requiresRcloneObscuredPassword(activeDrive.type)) {
@@ -367,6 +367,10 @@ export class CloudTool {
                     config.config_schema_version = DRIVE_CONFIG_SCHEMA_VERSION;
                 }
             }
+        }
+
+        if (typeof provider.prepareConfigForRuntime === "function") {
+            config = await provider.prepareConfigForRuntime(config);
         }
         
         // 4. 返回清洗后的配置对象

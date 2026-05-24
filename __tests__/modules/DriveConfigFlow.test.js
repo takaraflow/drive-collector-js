@@ -127,9 +127,10 @@ vi.mock("../../src/services/drives/index.js", () => ({
             { type: "mega", name: "Mega" },
             { type: "google_drive", name: "Google Drive", supportLevel: "advanced" },
             { type: "webdav", name: "WebDAV" },
-            { type: "oss", name: "S3 / OSS", supportLevel: "advanced" }
+            { type: "oss", name: "S3 / OSS", supportLevel: "advanced" },
+            { type: "protondrive", name: "Proton Drive", supportLevel: "advanced" }
         ]),
-        getSupportedTypes: vi.fn().mockReturnValue(["mega", "google_drive", "webdav", "oss"]),
+        getSupportedTypes: vi.fn().mockReturnValue(["mega", "google_drive", "webdav", "oss", "protondrive"]),
         isSupported: vi.fn().mockReturnValue(true)
     }
 }));

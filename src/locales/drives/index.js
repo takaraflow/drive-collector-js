@@ -7,3 +7,4 @@ export { STRINGS as DROPBOX_STRINGS } from './dropbox.js';
 export { STRINGS as BOX_STRINGS } from './box.js';
 export { STRINGS as WEBDAV_STRINGS } from './webdav.js';
 export { STRINGS as OSS_STRINGS } from './oss.js';
+export { STRINGS as PROTONDRIVE_STRINGS } from './protondrive.js';

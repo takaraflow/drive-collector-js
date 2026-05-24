@@ -76,6 +76,26 @@ export class BaseDriveProvider {
     }
 
     /**
+     * 在持久化前规范化配置。
+     * 默认直接返回原配置，子类可用于混淆敏感字段或补充 schema 信息。
+     * @param {Object} configData
+     * @returns {Promise<Object>}
+     */
+    async prepareConfigForStorage(configData) {
+        return configData;
+    }
+
+    /**
+     * 在运行时将持久化配置转换为 rclone 可直接使用的配置。
+     * 默认直接返回原配置，子类可用于恢复/校验自定义敏感字段。
+     * @param {Object} configData
+     * @returns {Promise<Object>}
+     */
+    async prepareConfigForRuntime(configData) {
+        return configData;
+    }
+
+    /**
      * 获取错误消息
      * @param {string} errorType - 错误类型
      * @returns {string} 错误消息

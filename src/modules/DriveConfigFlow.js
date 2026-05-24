@@ -30,7 +30,8 @@ const DRIVE_ACTION_LABELS = Object.freeze({
     pcloud: "🔵 pCloud",
     dropbox: "📦 Dropbox",
     box: "📁 Box",
-    oss: "🗄️ S3 / OSS"
+    oss: "🗄️ S3 / OSS",
+    protondrive: "🛡️ Proton Drive"
 });
 
 /**
