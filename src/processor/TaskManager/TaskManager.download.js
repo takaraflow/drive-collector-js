@@ -2,7 +2,7 @@ import path from "path";
 import fs from "fs";
 import bigInt from "big-integer";
 import { dependencyContainer } from "../../services/DependencyContainer.js";
-import { createHeartbeat, handleTaskCompletion, handleTaskFailure, escapeHTML } from "./TaskManager.utils.js";
+import { createHeartbeat, handleTaskCompletion, handleTaskFailure, retireTaskHeartbeat, escapeHTML } from "./TaskManager.utils.js";
 import {
     assertClaimFenceCurrent,
     getClaimFenceOptions,
@@ -270,6 +270,7 @@ async function _handleLocalFile(context, deps, task, info, fileName, localPath, 
         });
         if (transition.blocked) return true;
         phaseHooks.markDownloadFinished?.();
+        retireTaskHeartbeat(task);
         if (!task.isGroup) {
             await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
         }
@@ -721,6 +722,7 @@ async function _handleMTProtoDownload(context, deps, task, info, fileName, local
     });
     if (transition.blocked) return true;
     phaseHooks.markDownloadFinished?.();
+    retireTaskHeartbeat(task);
     if (!task.isGroup) {
         await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));
     }

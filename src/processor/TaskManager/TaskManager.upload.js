@@ -1,7 +1,7 @@
 import path from "path";
 import fs from "fs";
 import { dependencyContainer } from "../../services/DependencyContainer.js";
-import { createHeartbeat, handleTaskCompletion, handleTaskFailure, handleUploadFailure, escapeHTML } from "./TaskManager.utils.js";
+import { createHeartbeat, handleTaskCompletion, handleTaskFailure, handleUploadFailure, retireTaskHeartbeat, escapeHTML } from "./TaskManager.utils.js";
 import {
     assertClaimFenceCurrent,
     getClaimFenceOptions,
@@ -215,6 +215,7 @@ export async function uploadTask(task) {
                 source: 'upload_validation'
             });
             if (transition.blocked) return;
+            retireTaskHeartbeat(task);
 
             if (task.isGroup) {
                 await this._refreshGroupMonitor(task, finalStatus, 0, 0, errorMsg);

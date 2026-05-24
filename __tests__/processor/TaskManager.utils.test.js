@@ -17,7 +17,8 @@ import {
     __resetHeartbeatGenerationStateForTests,
     createHeartbeat,
     handleTaskFailure,
-    handleUploadFailure
+    handleUploadFailure,
+    retireTaskHeartbeat
 } from "../../src/processor/TaskManager/TaskManager.utils.js";
 
 const format = (template, values = {}) => Object.entries(values).reduce(
@@ -354,5 +355,21 @@ describe("TaskManager heartbeat handling", () => {
             task,
             "progress"
         );
+    });
+
+    test("retires the current heartbeat before follow-up stage text so late progress cannot overwrite it", async () => {
+        const updateStatus = vi.fn();
+        const task = { id: "task-stage-transition", isGroup: false };
+        const context = { cancelledTaskIds: new Set() };
+
+        const heartbeat = createHeartbeat(task, context, updateStatus, "file.bin");
+        await heartbeat("downloading", 1024, 4096);
+
+        retireTaskHeartbeat(task);
+        await heartbeat("downloading", 2048, 4096);
+
+        expect(mocks.recordTaskProgress).toHaveBeenCalledTimes(1);
+        expect(updateStatus).toHaveBeenCalledTimes(1);
+        expect(updateStatus).toHaveBeenCalledWith(task, "progress");
     });
 });

@@ -12,7 +12,7 @@ import {
     urlFingerprint
 } from "../ExternalUrlPolicy.js";
 import { assertLocalStorageCapacity } from "../../utils/storageGuard.js";
-import { createHeartbeat, handleTaskFailure, escapeHTML } from "./TaskManager.utils.js";
+import { createHeartbeat, handleTaskFailure, retireTaskHeartbeat, escapeHTML } from "./TaskManager.utils.js";
 import {
     assertClaimFenceCurrent,
     getClaimFenceOptions,
@@ -152,6 +152,7 @@ export async function downloadExternalUrlTask(task) {
         });
         if (transition.blocked) return true;
         downloadFinished = true;
+        retireTaskHeartbeat(task);
 
         if (!task.isGroup) {
             await updateStatus(task, format(STRINGS.task.downloaded_waiting_upload, { name: escapeHTML(fileName) }));

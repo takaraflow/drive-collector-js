@@ -32,6 +32,11 @@ const retireHeartbeatGeneration = (taskId, generation) => {
     }
 };
 
+export function retireTaskHeartbeat(task) {
+    if (!task?.id) return;
+    retireHeartbeatGeneration(task.id, task.heartbeatGeneration);
+}
+
 export function __resetHeartbeatGenerationStateForTests() {
     taskHeartbeatGenerations.clear();
 }
@@ -168,6 +173,7 @@ export async function handleTaskCompletion(task, context, updateStatus, fileName
         source: options.source || 'handleTaskCompletion'
     });
     if (transition.blocked) return;
+    retireTaskHeartbeat(task);
     
     if (task.isGroup) {
         await context._refreshGroupMonitor(task, TASK_STATUSES.COMPLETED);
@@ -178,7 +184,6 @@ export async function handleTaskCompletion(task, context, updateStatus, fileName
         const template = options.successTemplate || STRINGS.task.success_sec_transfer;
         await updateStatus(task, format(template, { name: fileNameHtml, folder: actualUploadPath }), true);
     }
-    retireHeartbeatGeneration(task.id, task.heartbeatGeneration);
 }
 
 /**
@@ -211,6 +216,7 @@ export async function handleTaskFailure(task, context, updateStatus, errorMessag
     });
     if (transition.blocked) return;
     const status = transition.toStatus;
+    retireTaskHeartbeat(task);
     
     if (task.isGroup) {
         await context._refreshGroupMonitor(task, status);
@@ -222,7 +228,6 @@ export async function handleTaskFailure(task, context, updateStatus, errorMessag
                 : `${STRINGS.task.error_prefix}<code>${escapeHTML(safeErrorMessage)}</code>`;
         await updateStatus(task, text, true, null, showRetry);
     }
-    retireHeartbeatGeneration(task.id, task.heartbeatGeneration);
 }
 
 /**
@@ -250,6 +255,7 @@ export async function handleUploadFailure(task, context, updateStatus, uploadRes
         source: 'handleUploadFailure'
     });
     if (transition.blocked) return;
+    retireTaskHeartbeat(task);
     
     if (task.isGroup) {
         await context._refreshGroupMonitor(task, TASK_STATUSES.FAILED, 0, 0, displayReason);
@@ -261,7 +267,6 @@ export async function handleUploadFailure(task, context, updateStatus, uploadRes
             reason: task.isCancelled ? "User cancelled manually" : escapeHTML(displayReason)
         }), true, null, showRetry);
     }
-    retireHeartbeatGeneration(task.id, task.heartbeatGeneration);
 }
 
 /**

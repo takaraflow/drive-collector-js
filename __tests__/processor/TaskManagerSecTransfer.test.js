@@ -284,6 +284,19 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
         }));
     });
 
+    test("does not let a retired download heartbeat overwrite waiting-for-upload text on local cache hit", async () => {
+        mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
+        mockFs.promises.stat.mockResolvedValue({ size: 10485760 });
+
+        const { updateStatus } = await import("../../src/utils/common.js");
+        await TaskManager.downloadTask(task);
+
+        const waitingIndex = updateStatus.mock.calls.findIndex(([, text]) => text === "downloaded waiting");
+        expect(waitingIndex).toBeGreaterThanOrEqual(0);
+        expect(updateStatus.mock.calls.slice(waitingIndex + 1).map(([, text]) => text)).not.toContain("downloading");
+        expect(updateStatus.mock.calls.slice(waitingIndex + 1).map(([, text]) => text)).not.toContain("stream progress");
+    });
+
     test("Scenario 3: Full Flow (No Hits) - Should download then queue upload", async () => {
         // Mock Remote File missing
         mockCloudTool.getRemoteFileInfo.mockResolvedValue(null);
