@@ -2,6 +2,90 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.33.2](https://github.com/takaraflow/drive-collector-js/compare/v4.33.1...v4.33.2) (2026-05-24)
+
+
+### 🔧 其他任务
+
+* add build identity observability ([d41160e](https://github.com/takaraflow/drive-collector-js/commit/d41160e0f6d175e511a87f6fbc3f18420f5b7f39))
+
+
+### ✨ 新特性
+
+* add telegram admin user list ([e10910c](https://github.com/takaraflow/drive-collector-js/commit/e10910c12452bd5fc329c3f4c3fb713e0bce50e0))
+* stream ordinary transfers before local staging ([d9f43b3](https://github.com/takaraflow/drive-collector-js/commit/d9f43b317b265808f3951cc7f0e1e971701148cf))
+
+
+### 🐛 问题修复
+
+* add drive password format ssot ([744bfb2](https://github.com/takaraflow/drive-collector-js/commit/744bfb2c3a5035a00d1b4f2e0e42a7ad71226a15))
+* avoid error logs for task lock retries ([a09702c](https://github.com/takaraflow/drive-collector-js/commit/a09702c160d1266a178c3892d6d786b16b4c823c))
+* avoid mtproto during recovery planning ([5dde5a6](https://github.com/takaraflow/drive-collector-js/commit/5dde5a672fff84487c49503a64dd3604ba4ee6c1))
+* bound zero-disk transfer stalls ([55d70b3](https://github.com/takaraflow/drive-collector-js/commit/55d70b3625fbe5e55f820710469647366905752e))
+* clarify rclone remote errors ([da1ece6](https://github.com/takaraflow/drive-collector-js/commit/da1ece6479a8f9ee9a5069f13919f2d5a4a11320))
+* classify mega remote failures accurately ([ec573d2](https://github.com/takaraflow/drive-collector-js/commit/ec573d284a00aecb5e093d1ddd935ce34ed54d53))
+* classify path-scoped rclone failures ([a4efed6](https://github.com/takaraflow/drive-collector-js/commit/a4efed696304c6e26467062302c410883a3714ee))
+* classify rclone drive failures ([8fbf83a](https://github.com/takaraflow/drive-collector-js/commit/8fbf83a88de700756a80f2ad3aed7b68d2a997c0))
+* classify rclone over quota failures ([c342a8b](https://github.com/takaraflow/drive-collector-js/commit/c342a8bd8da509654b038883c0f947e2114eeae8))
+* close database migration config loop ([417e420](https://github.com/takaraflow/drive-collector-js/commit/417e4201aee23f97f7f84fe0685777d09bccc105))
+* close direct transfer timeout recovery ([3f4ee15](https://github.com/takaraflow/drive-collector-js/commit/3f4ee15b6dc7793e7e23e600d7eb6f57fed4880f))
+* close drive lookup password migration gaps ([359eb58](https://github.com/takaraflow/drive-collector-js/commit/359eb5832e4168125ee10697e7996a1db1914a3f))
+* close stalled task recovery loop ([ad34f00](https://github.com/takaraflow/drive-collector-js/commit/ad34f00064108a58a96bc61e681a5a02ff68f13a))
+* close task recovery ui state ([b76080d](https://github.com/takaraflow/drive-collector-js/commit/b76080dcc53067496603eef350495d292da84991))
+* enforce strict zero-disk direct transfer ([e8ef1fe](https://github.com/takaraflow/drive-collector-js/commit/e8ef1fe58c66dfbfaa412f57f79c1b63bb1ce08d))
+* fail closed zero-disk transfers by default ([b21a82b](https://github.com/takaraflow/drive-collector-js/commit/b21a82b0a183f1b41eca0479523c02a1fd034a66))
+* fallback manual retry when queue unavailable ([91378b9](https://github.com/takaraflow/drive-collector-js/commit/91378b9d127bd21987169529a2eb9bb5dcc3a548))
+* fence stale task heartbeat phase updates ([1c17950](https://github.com/takaraflow/drive-collector-js/commit/1c179505f556ae4f2e2af3caf1b457bebf6e3932))
+* forward manual retry to telegram leader ([82e6275](https://github.com/takaraflow/drive-collector-js/commit/82e6275220b7b749c5f76d06e545b9fa8991fe61))
+* gate stalled recovery to telegram leader ([ab4b0b3](https://github.com/takaraflow/drive-collector-js/commit/ab4b0b317040689f5bd978cb50a41b2e0764a59f))
+* hard-delete MEGA staging files to avoid trash accumulation ([352a04d](https://github.com/takaraflow/drive-collector-js/commit/352a04d204469007c826e369c28991cd2b09b914))
+* harden build identity release gates ([23f7280](https://github.com/takaraflow/drive-collector-js/commit/23f7280849edb1d665c8e6506d31fe4a62eb84fc))
+* harden direct transfer fallback boundaries ([91034e0](https://github.com/takaraflow/drive-collector-js/commit/91034e0752e2700eee682363cec706365361caa7))
+* harden large file staging ([34f666a](https://github.com/takaraflow/drive-collector-js/commit/34f666a6ccd59cca335884dfbd5715f11b297097))
+* harden logger lifecycle flushing ([ca48990](https://github.com/takaraflow/drive-collector-js/commit/ca489907cb2fadca235b5da770e5a5ff20ae555b))
+* index stalled task recovery scans ([9f3878d](https://github.com/takaraflow/drive-collector-js/commit/9f3878dd48fd12bb30aeacb172cf83ba51844308))
+* isolate derived sync queue broadcasts ([21d3683](https://github.com/takaraflow/drive-collector-js/commit/21d3683d7009a6f951369a6b132600d860baea3f))
+* isolate distributed lock namespaces ([3463480](https://github.com/takaraflow/drive-collector-js/commit/346348052e723c8fb53168281211ba0fd483729e))
+* keep direct transfer timeouts retryable ([a41b6a6](https://github.com/takaraflow/drive-collector-js/commit/a41b6a697714e971c32765e2f6c865216831b43f))
+* keep manual retry out of active tasks ([9888bd5](https://github.com/takaraflow/drive-collector-js/commit/9888bd5d3e2f42bd60e26f1901760157b976181f))
+* keep stale task leases recoverable ([fe69ab3](https://github.com/takaraflow/drive-collector-js/commit/fe69ab39ccbb675cf76c3172357139a673e2f8ee))
+* keep task contention retryable ([3f7e0ba](https://github.com/takaraflow/drive-collector-js/commit/3f7e0ba9b43dcbd36e3be91302dfe62d329ecb78))
+* move task progress heartbeats to redis ([a72be89](https://github.com/takaraflow/drive-collector-js/commit/a72be89f89bb4a513f534f666152a2288f416cbf))
+* normalize boolean config for zero-disk transfers ([b14f210](https://github.com/takaraflow/drive-collector-js/commit/b14f210e1ed48b7437e6c88342f7cca40b18ab38))
+* normalize qstash deduplication ids ([9b5c4db](https://github.com/takaraflow/drive-collector-js/commit/9b5c4db1b66c2249fbbf701b750418bff13bc741))
+* pass exact size to direct rcat uploads ([1230484](https://github.com/takaraflow/drive-collector-js/commit/12304847ed66936b71aa2d8215b33bc2e7399280))
+* preserve fatal rejection diagnostics ([3803651](https://github.com/takaraflow/drive-collector-js/commit/3803651e04728a4ad2042695f25ac624b5d8fc7d))
+* preserve rclone diagnostics on direct stream failure ([0572200](https://github.com/takaraflow/drive-collector-js/commit/05722009af250424bc9ef1d5311af6d50aa47031))
+* preserve rclone json error diagnostics ([16ad760](https://github.com/takaraflow/drive-collector-js/commit/16ad760e1650807254f12d72ed1d3a2b0ef6c0b2))
+* preserve retryable rclone process exits ([808e16e](https://github.com/takaraflow/drive-collector-js/commit/808e16e966d4e479aa63c6eefbe5beca16e1ca8a))
+* preserve structured new relic log details ([45dae5a](https://github.com/takaraflow/drive-collector-js/commit/45dae5a8dc2f5a7b10bbdf94b75a22e6e76eaacf))
+* probe rclone root before directory guidance ([308ed2c](https://github.com/takaraflow/drive-collector-js/commit/308ed2cde1e72c8e43d22e9387b187443dc3bedb))
+* query retryable failed recoveries safely ([1490108](https://github.com/takaraflow/drive-collector-js/commit/1490108cc10597c9554d8c8ca570a5936169bff2))
+* recover stale lease failure records ([3cf5043](https://github.com/takaraflow/drive-collector-js/commit/3cf50434d17f1bdafd65a0cb5e9e3db645c8749f))
+* recover stale task processing locks ([1c56983](https://github.com/takaraflow/drive-collector-js/commit/1c569839a628656ce82452fdb233a5f832142c40))
+* recover tasks when queue publish is unavailable ([2d10cab](https://github.com/takaraflow/drive-collector-js/commit/2d10cab08dc4b0deaeff29afaadfa0b777211578))
+* recover telegram source transfer failures ([d18a377](https://github.com/takaraflow/drive-collector-js/commit/d18a377ad38c26598953d1a18cd4e94770a670e3))
+* recover upload queue publish failures ([f481bae](https://github.com/takaraflow/drive-collector-js/commit/f481bae44c9dba452f397b899625ef8f9b8f0268))
+* recover zero-disk transfer source failures ([95ddafe](https://github.com/takaraflow/drive-collector-js/commit/95ddafef230ec89ab6e723796f54525d106e7964))
+* redact transfer errors across logging pipeline ([b0ff25c](https://github.com/takaraflow/drive-collector-js/commit/b0ff25c3e8df7b3f543fb3c9ef22fa32171e793d))
+* reduce d1 transient error noise ([0e4b318](https://github.com/takaraflow/drive-collector-js/commit/0e4b318039a0aa024cc1c2a688a11623ff0348a4))
+* refresh queued retry queue attempts ([9e151ac](https://github.com/takaraflow/drive-collector-js/commit/9e151ac09384522a4d79f95b3c140226751fd2a1))
+* resolve build identity from northflank metadata ([a4434d7](https://github.com/takaraflow/drive-collector-js/commit/a4434d7b8a5433dbfb11dc543428cfda0ba17eb8))
+* retire stale task heartbeats before stage transitions ([9bffb51](https://github.com/takaraflow/drive-collector-js/commit/9bffb516111b695762f3518a8565bb0a8d9bdb6a))
+* retry transient cloudflare d1 throttling ([32813df](https://github.com/takaraflow/drive-collector-js/commit/32813df1fef9eaf6cbde40f89c74c68750ef1b78))
+* retry transient D1 schema readiness failures ([77869d7](https://github.com/takaraflow/drive-collector-js/commit/77869d7a1a8989d403d67dc43602db47ebf3834c))
+* retry transient rclone startup failures ([921e382](https://github.com/takaraflow/drive-collector-js/commit/921e382bb13fde491f594b8b4bc3952174ad42ad))
+* retry zero-disk direct transfer timeouts ([f0fbbc7](https://github.com/takaraflow/drive-collector-js/commit/f0fbbc78fdf797ffa7e9692609bb0a4dfb32e102))
+* send D1 batch query envelope ([ac19034](https://github.com/takaraflow/drive-collector-js/commit/ac190342fb440b5a2b2d0979dbdfef2916815dff))
+* serialize recovery fallback and add 429 cooldown ([b9a54e7](https://github.com/takaraflow/drive-collector-js/commit/b9a54e715b7bb0aad3c6f5074bc3024f48571b6b))
+* stabilize telegram progress message updates ([a105b98](https://github.com/takaraflow/drive-collector-js/commit/a105b981477aaec41f28b6ca947d4f27a204c576))
+* stop infinite zero-disk direct transfer retries ([3b29bd7](https://github.com/takaraflow/drive-collector-js/commit/3b29bd767f8035b817a52c163156af373fbf2b46))
+* suppress telegram update loop timeout noise ([b672abc](https://github.com/takaraflow/drive-collector-js/commit/b672abc8e8607fe127976dc692f55d4c59b575ac))
+* throttle task heartbeat writes ([efc1252](https://github.com/takaraflow/drive-collector-js/commit/efc1252860ba3d457f9fcfeda8cc1be1aec1fe36))
+* unify rclone failure metadata resolution ([114b16a](https://github.com/takaraflow/drive-collector-js/commit/114b16ad8dbd6522b57a5ae3e6ededad5d7928cc))
+* unify task progress updates across transfer modes ([5647b00](https://github.com/takaraflow/drive-collector-js/commit/5647b001e8cec37751371ad632a5aa4d35eb1a89))
+* verify historical rclone drive credentials ([12b290d](https://github.com/takaraflow/drive-collector-js/commit/12b290d9508cfd867b7d993fe090de439a5705ef))
+
 ### [4.33.1](https://github.com/takaraflow/drive-collector-js/compare/v4.33.0...v4.33.1) (2026-05-18)
 
 
