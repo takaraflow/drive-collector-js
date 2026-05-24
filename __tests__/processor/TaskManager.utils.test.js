@@ -13,7 +13,12 @@ vi.mock("../../src/services/DependencyContainer.js", () => ({
     }
 }));
 
-import { createHeartbeat, handleTaskFailure, handleUploadFailure } from "../../src/processor/TaskManager/TaskManager.utils.js";
+import {
+    __resetHeartbeatGenerationStateForTests,
+    createHeartbeat,
+    handleTaskFailure,
+    handleUploadFailure
+} from "../../src/processor/TaskManager/TaskManager.utils.js";
 
 const format = (template, values = {}) => Object.entries(values).reduce(
     (text, [key, value]) => text.replaceAll(`{{${key}}}`, String(value)),
@@ -194,6 +199,7 @@ describe("TaskManager heartbeat handling", () => {
         vi.clearAllMocks();
         vi.useFakeTimers();
         vi.setSystemTime(1700000000000);
+        __resetHeartbeatGenerationStateForTests();
         mocks.transitionStatus.mockResolvedValue({ changed: true, blocked: false, toStatus: "uploading" });
         mocks.recordTaskProgress.mockResolvedValue(true);
         mocks.refreshActiveTaskLiveness.mockResolvedValue({ changed: true, blocked: false, toStatus: "uploading" });
@@ -308,5 +314,45 @@ describe("TaskManager heartbeat handling", () => {
 
         expect(mocks.recordTaskProgress).not.toHaveBeenCalled();
         expect(updateStatus).not.toHaveBeenCalled();
+    });
+
+    test("suppresses stale download heartbeat updates after upload heartbeat takes over", async () => {
+        const updateStatus = vi.fn();
+        const task = { id: "task-phase-switch", isGroup: false };
+        const context = { cancelledTaskIds: new Set() };
+
+        const downloadHeartbeat = createHeartbeat(task, context, updateStatus, "file.bin");
+        await downloadHeartbeat("downloading", 1024, 4096);
+
+        const uploadHeartbeat = createHeartbeat(task, context, updateStatus, "file.bin");
+        await uploadHeartbeat("uploading", 0, 0, { bytes: 2048, size: 4096 });
+        await downloadHeartbeat("downloading", 3072, 4096);
+
+        expect(mocks.recordTaskProgress).toHaveBeenCalledTimes(2);
+        expect(mocks.recordTaskProgress).toHaveBeenNthCalledWith(
+            1,
+            "task-phase-switch",
+            "downloading",
+            expect.objectContaining({ transferred: 1024, total: 4096 }),
+            expect.any(Object)
+        );
+        expect(mocks.recordTaskProgress).toHaveBeenNthCalledWith(
+            2,
+            "task-phase-switch",
+            "uploading",
+            expect.objectContaining({ transferred: 2048, total: 4096 }),
+            expect.any(Object)
+        );
+        expect(updateStatus).toHaveBeenCalledTimes(2);
+        expect(updateStatus).toHaveBeenNthCalledWith(
+            1,
+            task,
+            "progress"
+        );
+        expect(updateStatus).toHaveBeenNthCalledWith(
+            2,
+            task,
+            "progress"
+        );
     });
 });

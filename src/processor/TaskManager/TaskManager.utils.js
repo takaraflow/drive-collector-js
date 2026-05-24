@@ -16,6 +16,25 @@ const getLog = () => getDeps().logger.withModule('TaskManager.utils');
 const looksLikeRcloneDiagnostic = (message) => /rclone|failed to create file system|slog\/logger\.go|:mega|copyto|rcat/i.test(message || "");
 const CANONICAL_HEARTBEAT_MIN_INTERVAL_MS = 60_000;
 const UI_HEARTBEAT_MIN_INTERVAL_MS = 3000;
+const taskHeartbeatGenerations = new Map();
+
+const registerHeartbeatGeneration = (taskId) => {
+    const nextGeneration = (taskHeartbeatGenerations.get(taskId) || 0) + 1;
+    taskHeartbeatGenerations.set(taskId, nextGeneration);
+    return nextGeneration;
+};
+
+const isCurrentHeartbeatGeneration = (taskId, generation) => taskHeartbeatGenerations.get(taskId) === generation;
+
+const retireHeartbeatGeneration = (taskId, generation) => {
+    if (taskHeartbeatGenerations.get(taskId) === generation) {
+        taskHeartbeatGenerations.delete(taskId);
+    }
+};
+
+export function __resetHeartbeatGenerationStateForTests() {
+    taskHeartbeatGenerations.clear();
+}
 
 const resolveUploadFailureUserMessage = (failure) => {
     return redactSensitiveText(resolveRcloneFailureMetadata(failure, {
@@ -37,8 +56,13 @@ export function createHeartbeat(task, context, updateStatus, fileName = null) {
     let lastCanonicalUpdate = 0;
     let lastUiUpdate = 0;
     let lastCanonicalStatus = null;
+    const generation = registerHeartbeatGeneration(task.id);
+    task.heartbeatGeneration = generation;
+    const isCurrentGeneration = () => isCurrentHeartbeatGeneration(task.id, generation);
     
     return async (status, downloaded = 0, total = 0, uploadProgress = null) => {
+        if (!isCurrentGeneration()) return;
+
         // Check if task is cancelled
         if (context.cancelledTaskIds.has(task.id)) {
             task.isCancelled = true;
@@ -85,14 +109,17 @@ export function createHeartbeat(task, context, updateStatus, fileName = null) {
                 }
                 return;
             }
+            if (!isCurrentGeneration()) return;
             lastCanonicalUpdate = now;
             lastCanonicalStatus = status;
         }
 
+        if (!isCurrentGeneration()) return;
         await TaskRepository.recordTaskProgress?.(task.id, status, progress, {
             updatedAt: now,
             fileName
         });
+        if (!isCurrentGeneration()) return;
 
         const shouldUpdateUi = isFinalProgress
             || lastUiUpdate === 0
@@ -117,6 +144,7 @@ export function createHeartbeat(task, context, updateStatus, fileName = null) {
             }
             
             // Update status for single tasks
+            if (!isCurrentGeneration()) return;
             await updateStatus(task, text);
         }
     };
@@ -150,6 +178,7 @@ export async function handleTaskCompletion(task, context, updateStatus, fileName
         const template = options.successTemplate || STRINGS.task.success_sec_transfer;
         await updateStatus(task, format(template, { name: fileNameHtml, folder: actualUploadPath }), true);
     }
+    retireHeartbeatGeneration(task.id, task.heartbeatGeneration);
 }
 
 /**
@@ -193,6 +222,7 @@ export async function handleTaskFailure(task, context, updateStatus, errorMessag
                 : `${STRINGS.task.error_prefix}<code>${escapeHTML(safeErrorMessage)}</code>`;
         await updateStatus(task, text, true, null, showRetry);
     }
+    retireHeartbeatGeneration(task.id, task.heartbeatGeneration);
 }
 
 /**
@@ -231,6 +261,7 @@ export async function handleUploadFailure(task, context, updateStatus, uploadRes
             reason: task.isCancelled ? "User cancelled manually" : escapeHTML(displayReason)
         }), true, null, showRetry);
     }
+    retireHeartbeatGeneration(task.id, task.heartbeatGeneration);
 }
 
 /**
