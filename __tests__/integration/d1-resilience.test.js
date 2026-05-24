@@ -128,6 +128,36 @@ describe("D1 Service Resilience and Retry Mechanisms", () => {
         expect(result).toEqual({ changes: 1 });
     });
 
+    test("should retry on D1 429 storage timeout resets", async () => {
+        mockFetch
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 429,
+                statusText: "Too Many Requests",
+                text: () => Promise.resolve('{"errors":[{"code":7429,"message":"D1 DB storage operation exceeded timeout which caused object to be reset."}],"success":false}')
+            })
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 429,
+                statusText: "Too Many Requests",
+                text: () => Promise.resolve('{"errors":[{"code":7429,"message":"D1 DB storage operation exceeded timeout which caused object to be reset."}],"success":false}')
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                json: () => Promise.resolve({
+                    success: true,
+                    result: [{ changes: 1 }]
+                })
+            });
+
+        const promise = d1Instance.run("UPDATE test SET status = ?", ["ok"]);
+        await vi.advanceTimersByTimeAsync(10000);
+        const result = await promise;
+
+        expect(mockFetch).toHaveBeenCalledTimes(3);
+        expect(result).toEqual({ changes: 1 });
+    });
+
     test("should fail after max retries exhausted", async () => {
         // Mock fetch to always fail with network errors
         mockFetch.mockRejectedValue(new TypeError("Failed to fetch"));

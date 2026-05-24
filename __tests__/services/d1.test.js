@@ -223,6 +223,60 @@ describe("D1 Service", () => {
       expect(d1.isInitialized).toBe(true);
     });
 
+    test("should retry transient D1 429 timeout errors and eventually succeed", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 429,
+          statusText: "Too Many Requests",
+          text: () => Promise.resolve(JSON.stringify({
+            success: false,
+            errors: [{ code: 7429, message: "D1 DB storage operation exceeded timeout which caused object to be reset." }]
+          })),
+          json: () => Promise.resolve({
+            success: false,
+            errors: [{ code: 7429, message: "D1 DB storage operation exceeded timeout which caused object to be reset." }]
+          })
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({
+            success: true,
+            result: [{ results: [{ ok: 1 }] }]
+          })
+        });
+
+      await expect(d1.fetchAll("SELECT 1")).resolves.toEqual([{ ok: 1 }]);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(d1.isInitialized).toBe(true);
+    });
+
+    test("should surface persistent transient D1 429 timeout errors after retries", async () => {
+      const transient429Response = {
+        ok: false,
+        status: 429,
+        statusText: "Too Many Requests",
+        text: () => Promise.resolve(JSON.stringify({
+          success: false,
+          errors: [{ code: 7429, message: "D1 DB storage operation exceeded timeout which caused object to be reset." }]
+        })),
+        json: () => Promise.resolve({
+          success: false,
+          errors: [{ code: 7429, message: "D1 DB storage operation exceeded timeout which caused object to be reset." }]
+        })
+      };
+      mockFetch
+        .mockResolvedValueOnce(transient429Response)
+        .mockResolvedValueOnce(transient429Response)
+        .mockResolvedValueOnce(transient429Response);
+
+      await expect(d1.fetchAll("SELECT 1")).rejects.toThrow(
+        "D1 transient error persisted after retries: HTTP 429 [7429]: D1 DB storage operation exceeded timeout which caused object to be reset."
+      );
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(d1.isInitialized).toBe(false);
+    });
+
     test("should log param types but not values for 400 error", async () => {
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
         const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});

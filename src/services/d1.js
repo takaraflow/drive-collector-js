@@ -25,6 +25,19 @@ function summarizeSql(sql = '') {
     return { operation, length: String(sql).length };
 }
 
+const D1_RETRY_DELAY_MS = 2000;
+const D1_RETRYABLE_CLIENT_ERROR_CODES = new Set([7500, 7429]);
+
+function normalizeD1ErrorCode(code) {
+    const numeric = Number(code);
+    return Number.isFinite(numeric) ? numeric : null;
+}
+
+function isRetryableD1ClientError(status, errorCode) {
+    if (status === 429) return true;
+    return status === 400 && D1_RETRYABLE_CLIENT_ERROR_CODES.has(errorCode);
+}
+
 /**
  * --- D1 数据库服务层 ---
  */
@@ -136,9 +149,9 @@ class D1Service {
             errorDetails = ` [${errorCode}]: ${response.statusText}`;
         }
 
-        // Check for D1 network error code 7500
-        const isD1NetworkError = response.status === 400 && errorCode === 7500;
-        const isRetryableHttpError = response.status >= 500 || isD1NetworkError;
+        const normalizedErrorCode = normalizeD1ErrorCode(errorCode);
+        const isRetryableClientError = isRetryableD1ClientError(response.status, normalizedErrorCode);
+        const isRetryableHttpError = response.status >= 500 || isRetryableClientError;
         const willRetry = isRetryableHttpError && attempts < maxAttempts - 1;
         const logFailure = willRetry ? log.warn.bind(log) : log.error.bind(log);
 
@@ -152,22 +165,21 @@ class D1Service {
             endpoint: 'cloudflare-d1-query'
         });
 
-        // Client errors (4xx) should not retry, except 400 with 7500
-        if (response.status >= 400 && response.status < 500 && !isD1NetworkError) {
+        // Client errors (4xx) should not retry unless Cloudflare marks them as transient.
+        if (response.status >= 400 && response.status < 500 && !isRetryableClientError) {
             throw new Error(`D1 HTTP ${response.status}${errorDetails}`);
         }
 
-        // For server errors (5xx) or 400 with 7500, continue to retry
+        // Retry bounded transient errors surfaced by D1/DO infrastructure.
         if (willRetry) {
-            // Wait inside the main loop instead, or do it here and return true
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, D1_RETRY_DELAY_MS));
             return true; // Signal retry
         }
 
         // Max retries exceeded
-        if (isD1NetworkError) {
+        if (isRetryableClientError) {
             this._handleTransientFailure();
-            throw new Error("D1 Error: Network connection lost (Max retries exceeded)");
+            throw new Error(`D1 transient error persisted after retries: HTTP ${response.status}${errorDetails}`);
         }
         this._handleTransientFailure();
         throw new Error(`D1 HTTP ${response.status}${errorDetails}`);
@@ -196,8 +208,8 @@ class D1Service {
             logFailure(`${willRetry ? '⚠️' : '🚨'} D1 Network Error Details - Error Type: ${error.name}, Stack: ${error.stack?.split('\n')[1]?.trim() || 'N/A'}`);
 
             if (willRetry) {
-                log.warn(`⏳ D1 Retrying in 2s... (Attempt ${attempts + 1}/${maxAttempts})`);
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                log.warn(`⏳ D1 Retrying in ${D1_RETRY_DELAY_MS}ms... (Attempt ${attempts + 1}/${maxAttempts})`);
+                await new Promise(resolve => setTimeout(resolve, D1_RETRY_DELAY_MS));
                 return true; // Signal retry
             }
 

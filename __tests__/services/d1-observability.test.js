@@ -111,6 +111,32 @@ describe('D1 observability', () => {
         expect(mockD1Logger.error).not.toHaveBeenCalledWith(expect.stringContaining('D1 HTTP 500'));
     });
 
+    test('should treat D1 429 timeout responses as retryable warnings before succeeding', async () => {
+        vi.spyOn(global, 'setTimeout').mockImplementation((callback) => {
+            callback();
+            return 1;
+        });
+        mockFetch
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 429,
+                statusText: 'Too Many Requests',
+                text: () => Promise.resolve(JSON.stringify({
+                    success: false,
+                    errors: [{ code: 7429, message: 'D1 DB storage operation exceeded timeout which caused object to be reset.' }]
+                }))
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                json: () => Promise.resolve({ success: true, result: [{ results: [{ ok: 1 }] }] })
+            });
+
+        await expect(d1.fetchAll('SELECT 1')).resolves.toEqual([{ ok: 1 }]);
+
+        expect(mockD1Logger.warn).toHaveBeenCalledWith(expect.stringContaining('D1 HTTP 429'));
+        expect(mockD1Logger.error).not.toHaveBeenCalledWith(expect.stringContaining('D1 HTTP 429'));
+    });
+
     test('should promote retryable HTTP failures to error only after max retries are exhausted', async () => {
         vi.spyOn(global, 'setTimeout').mockImplementation((callback) => {
             callback();
