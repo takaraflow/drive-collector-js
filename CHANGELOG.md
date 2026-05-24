@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.33.3](https://github.com/takaraflow/drive-collector-js/compare/v4.33.2...v4.33.3) (2026-05-24)
+
+
+### ✨ 新特性
+
+* add proton drive support via rclone ([aa783ee](https://github.com/takaraflow/drive-collector-js/commit/aa783ee327198f5890ad507b3abdd0ac4dd57fc4))
+
 ### [4.33.2](https://github.com/takaraflow/drive-collector-js/compare/v4.33.1...v4.33.2) (2026-05-24)
 
 
