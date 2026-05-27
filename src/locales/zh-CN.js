@@ -120,7 +120,7 @@ export const STRINGS = {
         unbind_confirm: "⚠️ <b>确认解绑这个网盘？</b>\n\n网盘：<code>{{type}}</code>\n账号：<code>{{account}}</code>\n\n解绑后不能继续转存到这个网盘，已转存文件不会从云端删除。",
         unbind_all_confirm: "⚠️ <b>确认解绑所有网盘？</b>\n\n解绑后需要重新绑定网盘才能继续转存，已转存文件不会从云端删除。",
         unbind_success: "✅ <b>解绑成功</b>\n\n您的账号信息已从本系统中移除。",
-        no_drive_unbind: "⚠️ 您当前未绑定任何网盘，无需解绑。",
+        no_drive_unbind: "⚠️ 您当前未绑定任何网盘，无需解绑。请输入 /drive 绑定一个新的网盘。",
         no_drive_found: "🚫 <b>还没有绑定网盘</b>\n\n请先绑定网盘，然后再发送文件或链接。",
         
         // 绑定流程
@@ -190,7 +190,7 @@ export const STRINGS = {
         active_tasks: "⚡ 活跃任务",
         user_history: "👤 您的任务历史",
         no_tasks: "尚无任务记录。请直接向我发送文件、图片或链接来开始转存。",
-        no_active_tasks: "✅ 当前没有排队或处理中任务。",
+        no_active_tasks: "✅ 当前没有排队或处理中任务。您可以直接向我发送文件或链接来开始转存。",
         task_item: "{{index}}. {{status}} <code>{{name}}</code> ({{statusText}})",
         active_action_hint: "可直接取消当前仍在排队或处理的任务。",
         failed_action_hint: "最近有失败任务，可从这里重新排队。",
