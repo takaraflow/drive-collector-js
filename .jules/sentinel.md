@@ -11,3 +11,8 @@
 **Vulnerability:** A `log.error` statement was outputting the first 5 characters of a sensitive token (`this.token?.substring(0, 5)`) upon authentication failure.
 **Learning:** Logging partial tokens is unsafe. Even truncated pieces of secrets can provide valuable clues for an attacker during a brute-force attack or when attempting to identify compromised credentials among various leaks. Information exposure through logs breaks the "defense in depth" principle and increases risk.
 **Prevention:** Never log substrings or snippets of API keys, passwords, or authentication tokens. Instead, only log non-sensitive metadata, such as token length or presence/absence indicators, to provide debugging context without leaking the actual secret.
+
+## 2025-06-02 - Prevent Predictability in Finalization Tokens
+**Vulnerability:** Used insecure `Math.random()` to generate the token for StreamTransferService resumable upload finalization.
+**Learning:** `Math.random()` is not cryptographically secure, meaning generated finalization tokens are predictable. Attackers could guess the token and attempt to hijack or interfere with the finalization process of resumable stream uploads.
+**Prevention:** Always use cryptographically secure PRNGs such as `crypto.randomUUID()` for tokens that require unguessability for security or correctness in multi-step flows.
