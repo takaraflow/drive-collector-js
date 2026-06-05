@@ -11,3 +11,8 @@
 **Vulnerability:** A `log.error` statement was outputting the first 5 characters of a sensitive token (`this.token?.substring(0, 5)`) upon authentication failure.
 **Learning:** Logging partial tokens is unsafe. Even truncated pieces of secrets can provide valuable clues for an attacker during a brute-force attack or when attempting to identify compromised credentials among various leaks. Information exposure through logs breaks the "defense in depth" principle and increases risk.
 **Prevention:** Never log substrings or snippets of API keys, passwords, or authentication tokens. Instead, only log non-sensitive metadata, such as token length or presence/absence indicators, to provide debugging context without leaking the actual secret.
+
+## 2024-05-18 - Prevent Predictability in Shutdown Hooks ID Generation
+**Vulnerability:** Used insecure `Math.random()` to generate hook IDs in `EnhancedGracefulShutdown`.
+**Learning:** `Math.random()` generates predictable values, allowing an attacker to guess the hook ID and potentially interfere with resource cleanup during graceful shutdown.
+**Prevention:** Always use cryptographically secure PRNGs like `crypto.randomUUID()` for unique identifiers that may have security implications in cleanup or state management.
