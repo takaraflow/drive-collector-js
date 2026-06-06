@@ -378,12 +378,11 @@ export class DriveRepository {
                 }
             }
 
-            const drives = [];
-            for (const id of activeIds) {
-                const drive = await this.findById(id);
-                if (drive) drives.push(drive);
-            }
-            return drives;
+            // Use Promise.all to fetch drives concurrently, eliminating N+1 I/O wait bottleneck
+            const drives = await Promise.all(
+                activeIds.map(id => this.findById(id))
+            );
+            return drives.filter(Boolean);
         } catch (e) {
             log.error("DriveRepository.findAll error:", e);
             return [];
