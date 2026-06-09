@@ -122,7 +122,7 @@ export const STRINGS = {
         unbind_success: "✅ <b>解绑成功</b>\n\n您的账号信息已从本系统中移除。",
         no_drive_unbind: "⚠️ 您当前未绑定任何网盘，无需解绑。",
         no_drive_found: "🚫 <b>还没有绑定网盘</b>\n\n请先绑定网盘，然后再发送文件或链接。",
-        
+
         // 绑定流程
         mega_input_email: "📧 <b>请输入您的 Mega 登录邮箱</b>：",
         mega_input_pass: "🔑 <b>请输入密码</b>",
@@ -278,7 +278,7 @@ export const STRINGS = {
         title: "👥 <b>用户列表</b>",
         loading: "🔍 正在查询用户列表...",
         error: "❌ <b>暂时无法查询用户列表</b>\n\n请重新加载；如果连续失败，请查看系统诊断。",
-        empty: "当前没有可显示的用户。\n用户绑定网盘、提交任务或被设置角色后，会出现在这里。",
+        empty: "ℹ️ <b>当前没有可显示的用户</b>\n\n你可以通过发送 /bind 绑定网盘或上传文件来生成用户记录。",
         summary: "共 {{total}} 位用户 · 活跃 {{active}} · 管理 {{admins}} · 封禁 {{banned}}",
         filter_line: "筛选: {{filter}} · 第 {{current}}/{{totalPages}} 页",
         user_row: "<code>{{index}}.</code> {{roleIcon}} <code>{{userId}}</code> · {{role}}",
