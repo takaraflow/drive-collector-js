@@ -57,15 +57,12 @@ export class InstanceRepository {
     static async findAll(options = {}) {
         try {
             const keys = await cache.listKeys(this.PREFIX);
-            const instances = [];
             const readOptions = this._readOptions(options);
-            for (const key of keys) {
-                const data = await cache.get(key, "json", readOptions);
-                if (data) {
-                    instances.push(data);
-                }
-            }
-            return instances;
+            // Optimization: Replace sequential await in for...of with concurrent Promise.all to avoid N+1 I/O wait
+            const instances = await Promise.all(
+                keys.map(key => cache.get(key, "json", readOptions))
+            );
+            return instances.filter(Boolean);
         } catch (e) {
             log.error("InstanceRepository.findAll failed:", e);
             return [];
@@ -127,14 +124,10 @@ export class InstanceRepository {
         const now = Date.now();
         try {
             const all = await this.findAll({ strong: true });
-            let count = 0;
-            for (const inst of all) {
-                if ((now - inst.lastHeartbeat) > timeoutMs) {
-                    await this.markOffline(inst.id);
-                    count++;
-                }
-            }
-            return count;
+            const expiredInstances = all.filter(inst => (now - inst.lastHeartbeat) > timeoutMs);
+            // Optimization: Replace sequential await in for...of with concurrent Promise.all to avoid N+1 I/O wait
+            await Promise.all(expiredInstances.map(inst => this.markOffline(inst.id)));
+            return expiredInstances.length;
         } catch (e) {
             log.error("InstanceRepository.deleteExpired failed:", e);
             return 0;
