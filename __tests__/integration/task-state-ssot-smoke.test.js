@@ -304,6 +304,8 @@ describe('Task state SSOT smoke', () => {
   test('should close the queued-to-completed webhook chain through the repository state machine', async () => {
     const downloadResult = await TaskManager.handleDownloadWebhook('task-smoke');
     expect(downloadResult).toEqual({ success: true, statusCode: 200 });
+    // Fire-and-forget: download runs in background, wait for it to complete
+    await new Promise(resolve => setTimeout(resolve, 200));
     expect(tasks.get('task-smoke').status).toBe('downloaded');
     expect(enqueueUploadTask).toHaveBeenCalledWith('task-smoke', expect.objectContaining({
       userId: 'user-smoke',
@@ -313,6 +315,8 @@ describe('Task state SSOT smoke', () => {
 
     const uploadResult = await TaskManager.handleUploadWebhook('task-smoke');
     expect(uploadResult).toEqual({ success: true, statusCode: 200 });
+    // Fire-and-forget: upload runs in background, wait for it to complete
+    await new Promise(resolve => setTimeout(resolve, 200));
 
     expect(tasks.get('task-smoke')).toMatchObject({
       status: 'completed',

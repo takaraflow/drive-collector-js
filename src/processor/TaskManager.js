@@ -1179,26 +1179,94 @@ export class TaskManager {
     }
 
     /**
+     * 后台执行下载任务（fire-and-forget 模式）
+     * 由 handleDownloadWebhook 在返回 200 后启动，负责错误自愈和锁释放。
+     */
+    static async _executeDownloadInBackground(task, leaderLease, log) {
+        const { instanceCoordinator, TaskRepository } = getDeps();
+        const taskId = task.id;
+        try {
+            if (isExternalUrlTask(task)) {
+                await this.downloadExternalUrlTask(task);
+            } else {
+                await this.downloadTask(task);
+            }
+        } catch (error) {
+            if (isClaimFenceStaleError(error)) {
+                log.info("Download bg: claim fence stale, another instance took over", { taskId });
+                return;
+            }
+            if (isTaskProcessingLockBusyError(error)) {
+                log.warn("Download bg: unexpected lock contention", { taskId });
+                return;
+            }
+            if (this._isRetryableInfrastructureError(error)) {
+                log.warn("Download bg: retryable infra error, resetting for retry", { taskId, error: error.message });
+                try {
+                    const recoveryEvent = await this._downloadWebhookRecoveryEvent(taskId);
+                    await this._resetAfterRetryableInfrastructureError(
+                        taskId, recoveryEvent, error,
+                        'handleDownloadWebhook.bg.retryable_infra_error',
+                        getClaimFenceOptions(leaderLease)
+                    );
+                } catch (resetError) {
+                    log.error("Download bg: failed to reset after retryable error", { taskId, error: resetError.message });
+                }
+                return;
+            }
+            log.error("Download bg: unexpected error", { taskId, error: error?.message });
+        } finally {
+            try { await instanceCoordinator.releaseTaskLock(taskId); }
+            catch (e) { log.warn("Download bg: failed to release lock", { taskId, error: e.message }); }
+        }
+    }
+
+    /**
+     * 后台执行上传任务（fire-and-forget 模式）
+     * 由 handleUploadWebhook 在返回 200 后启动，负责错误自愈和锁释放。
+     */
+    static async _executeUploadInBackground(task, leaderLease, log) {
+        const { instanceCoordinator } = getDeps();
+        const taskId = task.id;
+        try {
+            await this.uploadTask(task);
+        } catch (error) {
+            if (isClaimFenceStaleError(error)) {
+                log.info("Upload bg: claim fence stale, another instance took over", { taskId });
+                return;
+            }
+            if (isTaskProcessingLockBusyError(error)) {
+                log.warn("Upload bg: unexpected lock contention", { taskId });
+                return;
+            }
+            log.error("Upload bg: unexpected error", { taskId, error: error?.message });
+        } finally {
+            try { await instanceCoordinator.releaseTaskLock(taskId); }
+            catch (e) { log.warn("Upload bg: failed to release lock", { taskId, error: e.message }); }
+        }
+    }
+
+    /**
      * 处理下载 Webhook - QStash 事件驱动
      * @returns {Promise<{success: boolean, statusCode: number, message?: string}>}
      */
     static async handleDownloadWebhook(taskId) {
         const { instanceCoordinator, TaskRepository } = getDeps();
         const log = getLog();
-        let didClaim = false;
-        let lockAcquired = false;
+
         // Leader 状态校验：只有持有 telegram_client 锁的实例才能处理任务
         const leaderLease = await this._getTelegramClientLease(instanceCoordinator);
         if (!leaderLease) {
             return { success: false, statusCode: 503, message: "Service Unavailable - Not Leader" };
         }
 
+        let lockAcquired = false;
+        let backgroundLaunched = false;
+
         try {
             // 从数据库获取任务信息
             const dbTask = await TaskRepository.findById(taskId);
-            log.debug(`QStash Received download webhook for Task: ${taskId}`, {
-                taskId
-            });
+            log.debug(`QStash Received download webhook for Task: ${taskId}`, { taskId });
             if (!dbTask) {
                 log.error(`❌ Task ${taskId} not found in database`);
                 return { success: false, statusCode: 404, message: "Task not found" };
@@ -1212,10 +1280,16 @@ export class TaskManager {
 
             if (dbTask.status === TASK_STATUSES.DOWNLOADED) {
                 lockAcquired = await this._acquireWebhookTaskLock(instanceCoordinator, taskId, 'upload_queue_repair', dbTask);
-                return await this._enqueueDownloadedTaskForUpload(dbTask, 'handleDownloadWebhook.upload_queue_repair');
+                try {
+                    return await this._enqueueDownloadedTaskForUpload(dbTask, 'handleDownloadWebhook.upload_queue_repair');
+                } finally {
+                    if (lockAcquired) await instanceCoordinator.releaseTaskLock(taskId);
+                    lockAcquired = false;
+                }
             }
 
             lockAcquired = await this._acquireWebhookTaskLock(instanceCoordinator, taskId, 'download', dbTask);
+
             const claim = await TaskRepository.transitionStatus(taskId, TASK_EVENTS.START_DOWNLOAD, null, {
                 claimedBy: leaderLease.instanceId,
                 claimLeaseId: leaderLease.leaseId,
@@ -1227,39 +1301,34 @@ export class TaskManager {
                 log.info("Download webhook ignored by state machine", { taskId, reason: claim.reason, status: claim.fromStatus || claim.latestStatus });
                 return this._resolveBlockedWebhookResult('download', claim, dbTask.status);
             }
-            didClaim = true;
 
             const resolvedSource = await resolveTaskSource(dbTask);
             const task = buildTaskObjectFromDb(dbTask, resolvedSource);
             task.processingLockHeld = true;
             attachClaimLease(task, leaderLease);
 
-            // 检查是否属于组任务（通过 msgId 查询同组任务数量）
             try {
                 const siblings = await TaskRepository.findByMsgId(dbTask.msg_id);
-                if (siblings && siblings.length > 1) {
-                    task.isGroup = true;
-                }
+                if (siblings && siblings.length > 1) task.isGroup = true;
             } catch (e) {
                 log.warn(`Failed to check group status for task ${taskId}`, e);
             }
 
-            // 执行下载逻辑
-            if (isExternalUrlTask(task)) {
-                await this.downloadExternalUrlTask(task);
-            } else {
-                await this.downloadTask(task);
-            }
+            // Fire-and-forget: 后台执行下载，立即返回 200 给 QStash
+            backgroundLaunched = true;
+            void this._executeDownloadInBackground(task, leaderLease, log).catch(() => {});
+
             return { success: true, statusCode: 200 };
 
         } catch (error) {
+            // Setup 阶段错误处理（transitionStatus / resolveTaskSource 等）
             if (isTaskProcessingLockBusyError(error)) {
                 return { success: false, statusCode: 503, message: error.message };
             }
-            log.error("Download webhook failed", { taskId, error });
+            log.error("Download webhook setup failed", { taskId, error });
             if (error?.code === 'TASK_SOURCE_MISSING') {
                 await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
-                    ...(didClaim ? getClaimFenceOptions(leaderLease) : {}),
+                    ...getClaimFenceOptions(leaderLease),
                     allowNoop: true,
                     source: 'handleDownloadWebhook.source_missing'
                 });
@@ -1268,17 +1337,18 @@ export class TaskManager {
             const code = this._classifyError(error);
             if (this._isRetryableInfrastructureError(error)) {
                 const recoveryEvent = await this._downloadWebhookRecoveryEvent(taskId);
-                await this._resetAfterRetryableInfrastructureError(taskId, recoveryEvent, error, 'handleDownloadWebhook.retryable_infra_error', didClaim ? getClaimFenceOptions(leaderLease) : {});
+                await this._resetAfterRetryableInfrastructureError(taskId, recoveryEvent, error, 'handleDownloadWebhook.retryable_infra_error', getClaimFenceOptions(leaderLease));
                 return { success: false, statusCode: code, message: error.message };
             }
             await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
-                ...(didClaim ? getClaimFenceOptions(leaderLease) : {}),
+                ...getClaimFenceOptions(leaderLease),
                 allowNoop: true,
                 source: 'handleDownloadWebhook.error'
             });
             return { success: false, statusCode: code, message: error.message };
         } finally {
-            if (lockAcquired) {
+            // 仅在未启动后台任务时释放锁（后台任务负责释放）
+            if (lockAcquired && !backgroundLaunched) {
                 await instanceCoordinator.releaseTaskLock(taskId);
             }
         }
@@ -1291,8 +1361,8 @@ export class TaskManager {
      static async handleUploadWebhook(taskId) {
         const { instanceCoordinator, TaskRepository, config } = getDeps();
         const log = getLog();
-        let didClaim = false;
         let lockAcquired = false;
+        let backgroundLaunched = false;
         // Leader 状态校验：只有持有 telegram_client 锁 del 实例才能处理任务
         const leaderLease = await this._getTelegramClientLease(instanceCoordinator);
         if (!leaderLease) {
@@ -1305,7 +1375,7 @@ export class TaskManager {
             log.debug(`QStash Received upload webhook for Task: ${taskId}`, {
                 taskId
             });
-            
+
             if (!dbTask) {
                 log.error(`❌ Task ${taskId} not found in database`);
                 return { success: false, statusCode: 404, message: "Task not found" };
@@ -1329,7 +1399,6 @@ export class TaskManager {
                 log.info("Upload webhook ignored by state machine", { taskId, reason: uploadStart.reason, status: uploadStart.fromStatus || uploadStart.latestStatus });
                 return this._resolveBlockedWebhookResult('upload', uploadStart, dbTask.status);
             }
-            didClaim = true;
 
             const sourceRef = parseTaskSourceRef(dbTask.source_ref);
             const localFileName = isExternalUrlTask(dbTask)
@@ -1362,18 +1431,21 @@ export class TaskManager {
                 log.warn(`Failed to check group status for upload task ${taskId}`, e);
             }
 
-            // 执行上传逻辑
-            await this.uploadTask(task);
+            // Fire-and-forget: 后台执行上传，立即返回 200 给 QStash
+            backgroundLaunched = true;
+            void this._executeUploadInBackground(task, leaderLease, log).catch(() => {});
+
             return { success: true, statusCode: 200 };
 
         } catch (error) {
+            // Setup 阶段错误处理（transitionStatus / resolveTaskSource 等）
             if (isTaskProcessingLockBusyError(error)) {
                 return { success: false, statusCode: 503, message: error.message };
             }
-            log.error("Upload webhook failed", { taskId, error });
+            log.error("Upload webhook setup failed", { taskId, error });
             if (error?.code === 'TASK_SOURCE_MISSING') {
                 await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
-                    ...(didClaim ? getClaimFenceOptions(leaderLease) : {}),
+                    ...getClaimFenceOptions(leaderLease),
                     allowNoop: true,
                     source: 'handleUploadWebhook.source_missing'
                 });
@@ -1381,17 +1453,18 @@ export class TaskManager {
             }
             const code = this._classifyError(error);
             if (this._isRetryableInfrastructureError(error)) {
-                await this._resetAfterRetryableInfrastructureError(taskId, TASK_EVENTS.RESET_UPLOAD, error, 'handleUploadWebhook.retryable_infra_error', didClaim ? getClaimFenceOptions(leaderLease) : {});
+                await this._resetAfterRetryableInfrastructureError(taskId, TASK_EVENTS.RESET_UPLOAD, error, 'handleUploadWebhook.retryable_infra_error', getClaimFenceOptions(leaderLease));
                 return { success: false, statusCode: code, message: error.message };
             }
             await TaskRepository.transitionStatus(taskId, TASK_EVENTS.FAIL, error.message, {
-                ...(didClaim ? getClaimFenceOptions(leaderLease) : {}),
+                ...getClaimFenceOptions(leaderLease),
                 allowNoop: true,
                 source: 'handleUploadWebhook.error'
             });
             return { success: false, statusCode: code, message: error.message };
         } finally {
-            if (lockAcquired) {
+            // 仅在未启动后台任务时释放锁（后台任务负责释放）
+            if (lockAcquired && !backgroundLaunched) {
                 await instanceCoordinator.releaseTaskLock(taskId);
             }
         }

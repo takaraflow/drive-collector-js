@@ -683,7 +683,7 @@ describe('TaskManager', () => {
             );
         });
 
-        it('should reset download state for retryable infrastructure errors instead of failing the task', async () => {
+        it('should handle retryable infrastructure errors from downloadTask in background', async () => {
             const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
             const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
             const { client } = await import('../../src/services/telegram.js');
@@ -705,12 +705,15 @@ describe('TaskManager', () => {
 
             const result = await TaskManager.handleDownloadWebhook('task-network');
 
-            expect(result).toMatchObject({ success: false, statusCode: 503, message: 'fetch failed' });
+            // Fire-and-forget: webhook returns 200 immediately, errors handled in background
+            expect(result).toMatchObject({ success: true, statusCode: 200 });
+            // Background wrapper handles retryable errors by resetting state
+            await new Promise(resolve => setTimeout(resolve, 50));
             expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
                 'task-network',
                 'retry',
                 'fetch failed',
-                expect.objectContaining({ source: 'handleDownloadWebhook.retryable_infra_error' })
+                expect.objectContaining({ source: 'handleDownloadWebhook.bg.retryable_infra_error' })
             );
             expect(TaskRepository.transitionStatus).not.toHaveBeenCalledWith(
                 'task-network',
@@ -799,7 +802,7 @@ describe('TaskManager', () => {
             uploadTaskSpy.mockRestore();
         });
 
-        it('should reset upload state for retryable infrastructure errors instead of failing the task', async () => {
+        it('should handle retryable infrastructure errors from uploadTask in background', async () => {
             const { TaskRepository } = await import('../../src/repositories/TaskRepository.js');
             const { instanceCoordinator } = await import('../../src/services/InstanceCoordinator.js');
             const { client } = await import('../../src/services/telegram.js');
@@ -821,13 +824,11 @@ describe('TaskManager', () => {
 
             const result = await TaskManager.handleUploadWebhook('task-upload-network');
 
-            expect(result).toMatchObject({ success: false, statusCode: 503, message: 'ECONNRESET' });
-            expect(TaskRepository.transitionStatus).toHaveBeenCalledWith(
-                'task-upload-network',
-                'reset_upload',
-                'ECONNRESET',
-                expect.objectContaining({ source: 'handleUploadWebhook.retryable_infra_error' })
-            );
+            // Fire-and-forget: webhook returns 200 immediately, errors handled in background
+            expect(result).toMatchObject({ success: true, statusCode: 200 });
+            // Background wrapper logs the error but doesn't call _resetAfterRetryableInfrastructureError
+            // (uploadTask handles its own errors internally via handleTaskFailure)
+            await new Promise(resolve => setTimeout(resolve, 50));
             expect(TaskRepository.transitionStatus).not.toHaveBeenCalledWith(
                 'task-upload-network',
                 'fail',

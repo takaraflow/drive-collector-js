@@ -954,7 +954,10 @@ describe('TaskManager queue/recovery closure', () => {
 
         const result = await TaskManager.handleUploadWebhook('task-1');
 
+        // Fire-and-forget: webhook returns 200 immediately
         expect(result).toMatchObject({ success: true, statusCode: 200 });
+        // Wait for background upload to complete (includes 3s validation delay)
+        await new Promise(resolve => setTimeout(resolve, 4000));
         expect(mockClient.getMessages).not.toHaveBeenCalled();
         expect(CloudTool.uploadFile).toHaveBeenCalledWith(
             '/tmp/downloads/test.mp4',
@@ -1062,16 +1065,15 @@ describe('TaskManager queue/recovery closure', () => {
 
         const result = await TaskManager.handleDownloadWebhook('task-1');
 
-        expect(result).toMatchObject({
-            success: false,
-            statusCode: 503,
-            message: 'Circuit breaker is OPEN for qstash_publish'
-        });
+        // Fire-and-forget: webhook returns 200 immediately, error handled in background
+        expect(result).toMatchObject({ success: true, statusCode: 200 });
+        // Background wrapper handles retryable errors by resetting state
+        await new Promise(resolve => setTimeout(resolve, 50));
         expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
             'task-1',
             TASK_EVENTS.RESET_UPLOAD,
             'Circuit breaker is OPEN for qstash_publish',
-            expect.objectContaining({ source: 'handleDownloadWebhook.retryable_infra_error' })
+            expect.objectContaining({ source: 'handleDownloadWebhook.bg.retryable_infra_error' })
         );
         expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
             'task-1',
@@ -1101,17 +1103,10 @@ describe('TaskManager queue/recovery closure', () => {
 
         const result = await TaskManager.handleDownloadWebhook('task-lease-stale');
 
-        expect(result).toMatchObject({
-            success: false,
-            statusCode: 503,
-            message: 'Task claim lease is no longer current'
-        });
-        expect(mockTaskRepository.transitionStatus).toHaveBeenCalledWith(
-            'task-lease-stale',
-            TASK_EVENTS.RETRY,
-            'Task claim lease is no longer current',
-            expect.objectContaining({ source: 'handleDownloadWebhook.retryable_infra_error' })
-        );
+        // Fire-and-forget: webhook returns 200 immediately, error handled in background
+        expect(result).toMatchObject({ success: true, statusCode: 200 });
+        // Background wrapper handles claim fence stale errors silently
+        await new Promise(resolve => setTimeout(resolve, 50));
         expect(mockTaskRepository.transitionStatus).not.toHaveBeenCalledWith(
             'task-lease-stale',
             TASK_EVENTS.FAIL,
