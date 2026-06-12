@@ -1,0 +1,31 @@
+<<<<<<< SEARCH
+function hasValidInstanceSecret(headerSecret, configuredSecret) {
+    if (typeof headerSecret !== 'string' || typeof configuredSecret !== 'string') {
+        return false;
+    }
+
+    const header = headerSecret.trim();
+    const secret = configuredSecret.trim();
+    return header !== '' && secret !== '' && header === secret;
+}
+=======
+import crypto from 'node:crypto';
+
+function hasValidInstanceSecret(headerSecret, configuredSecret) {
+    if (typeof headerSecret !== 'string' || typeof configuredSecret !== 'string') {
+        return false;
+    }
+
+    const header = headerSecret.trim();
+    const secret = configuredSecret.trim();
+    if (header === '' || secret === '') return false;
+
+    try {
+        const headerHash = crypto.createHash('sha256').update(header).digest();
+        const secretHash = crypto.createHash('sha256').update(secret).digest();
+        return crypto.timingSafeEqual(headerHash, secretHash);
+    } catch {
+        return false;
+    }
+}
+>>>>>>> REPLACE
