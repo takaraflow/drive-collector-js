@@ -57,15 +57,12 @@ export class InstanceRepository {
     static async findAll(options = {}) {
         try {
             const keys = await cache.listKeys(this.PREFIX);
-            const instances = [];
             const readOptions = this._readOptions(options);
-            for (const key of keys) {
-                const data = await cache.get(key, "json", readOptions);
-                if (data) {
-                    instances.push(data);
-                }
-            }
-            return instances;
+            // ⚡ Bolt Optimization: Replace O(N) sequential await with concurrent O(1) fetch to prevent N+1 I/O wait
+            const instances = await Promise.all(
+                keys.map(key => cache.get(key, "json", readOptions))
+            );
+            return instances.filter(Boolean);
         } catch (e) {
             log.error("InstanceRepository.findAll failed:", e);
             return [];
