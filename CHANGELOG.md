@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.33.4](https://github.com/takaraflow/drive-collector-js/compare/v4.33.3...v4.33.4) (2026-06-13)
+
+
+### 🐛 问题修复
+
+* fire-and-forget webhook handlers to avoid QStash timeout ([071c29b](https://github.com/takaraflow/drive-collector-js/commit/071c29b22527f7036e840c969210623a892b6ec4))
+
 ### [4.33.3](https://github.com/takaraflow/drive-collector-js/compare/v4.33.2...v4.33.3) (2026-05-24)
 
 
