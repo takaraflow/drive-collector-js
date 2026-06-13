@@ -11,3 +11,7 @@
 ## 2024-05-13 - Optimize executeBatch memory footprint and concurrency
 **Learning:** In highly concurrent utility methods like `SmartFailover.executeBatch`, using `Promise.allSettled(array.map(...))` coupled with `{...options}` inside the `.map()` iterates the object's properties creating unnecessary heap allocation pressure per execution. Furthermore, fallback serial processing using `Object.create(options)` created objects with properties attached to the prototype chain which can cause tricky regressions downstream in loops relying on "own properties".
 **Action:** Replace `array.map()` and `Promise.allSettled()` with a native async worker pool using a pre-allocated array (`results.length = len`). Ensure concurrency behavior is preserved by defaulting the async worker length to the length of the batch if concurrency isn't specified explicitly. Use `Object.assign({}, options)` instead of object spread inside hot loops for lower allocation overhead while safely producing objects with "own properties".
+
+## 2024-06-05 - [Resolve N+1 I/O wait in repository findAll]
+**Learning:** In `DriveRepository.findAll`, using a sequential `for...of` loop to hydrate active IDs via `findById` creates an N+1 I/O bottleneck, as each database/cache read blocks the next.
+**Action:** Replace sequential `for...of` loops hydrating items from a list of IDs with concurrent fetching using `Promise.all(ids.map(...))` and `.filter(Boolean)` to safely remove null/undefined responses.
