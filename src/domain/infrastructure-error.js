@@ -54,7 +54,11 @@ const NETWORK_ERROR_PATTERNS = [
     /upload\.GetFile/i,
     /Cannot read propert(?:y|ies) of undefined \(reading ['"]dcId['"]\)/i,
     /rate limit/i,
-    /\b429\b/
+    /\b429\b/,
+    /FLOOD_WAIT/i,
+    /RPC_CALL_FAIL/i,
+    /RPC_CALL_EMPTY/i,
+    /CALL_BACK_OFF/i
 ];
 
 const DATABASE_TRANSIENT_PATTERNS = [

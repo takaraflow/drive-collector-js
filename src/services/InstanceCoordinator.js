@@ -635,6 +635,8 @@ export class InstanceCoordinator {
         }
     }
 
+    // NOTE: Best-effort lock acquisition. The set+verify pattern is non-atomic (TOCTOU),
+    // but this is acceptable for best-effort semantics where false positives are tolerated.
     async _tryAcquireBestEffort(lockKey, ttl) {
         const existing = await cache.get(CACHE_KEYS.lock(lockKey), "json", { skipCache: true });
 
@@ -867,13 +869,6 @@ export class InstanceCoordinator {
             logWithProvider().error(`清理残留任务锁失败 ${lockKey}:`, e?.message || String(e));
             return false;
         }
-    }
-
-    /**
-     * 检查实例是否为领导者
-     */
-    isLeader() {
-        return this.isLeader;
     }
 
     /**

@@ -193,6 +193,7 @@ export async function downloadTask(task) {
                         error: e.message,
                         downloadFinished
                     });
+                    retireTaskHeartbeat(task);
                     throw e;
                 } else {
                     try {
@@ -459,6 +460,7 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, hear
                 const { UIHelper } = dependencyContainer.getAll();
 
                 // Continue transferring remaining chunks
+                try {
                 for await (const chunk of downloadIterator) {
                     if (context.cancelledTaskIds.has(task.id)) throw new Error("CANCELLED");
                     const downloaded = Math.min(info.size, startOffset + ((chunkIndex - Math.floor(startOffset / chunkSize)) * chunkSize) + chunk.length);
@@ -483,6 +485,11 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, hear
                         });
                     }
                     chunkIndex++;
+                }
+                } finally {
+                    if (typeof downloadIterator.return === 'function') {
+                        await downloadIterator.return().catch(() => {});
+                    }
                 }
                 const finalization = await streamTransferService.waitForFinalization(task.id, { targetUrl });
                 if (!finalization?.success || !finalization.completed) {

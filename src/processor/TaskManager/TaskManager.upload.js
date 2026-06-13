@@ -231,6 +231,15 @@ export async function uploadTask(task) {
                 const finalMsg = isOk ? baseText : `${baseText}\n<code>${escapeHTML(errorMsg)}</code>`;
                 await updateStatus(task, finalMsg, true);
             }
+
+            // Clean up local file only on success
+            if (localPath) {
+                try {
+                    await fs.promises.unlink(localPath).catch(() => {});
+                } catch (e) {
+                    log.warn(`Failed to cleanup local file ${localPath}:`, e);
+                }
+            }
         } else {
             await handleUploadFailure(task, this, updateStatus, uploadResult);
         }
@@ -239,21 +248,12 @@ export async function uploadTask(task) {
             throw e;
         }
         const isCancel = e.message === "CANCELLED";
-        await handleTaskFailure(task, this, updateStatus, e, isCancel);
-    } finally {
-        // Clean up local file asynchronously after upload
-        if (localPath) {
-            try {
-                if (fs.promises && fs.promises.unlink) {
-                    await fs.promises.unlink(localPath);
-                } else {
-                    fs.unlinkSync(localPath);
-                }
-            } catch (e) {
-                log.warn(`Failed to cleanup local file ${localPath}:`, e);
-            }
+        try {
+            await handleTaskFailure(task, this, updateStatus, e, isCancel);
+        } catch (updateError) {
+            log.error(`Failed to update task status for ${task.id}:`, updateError);
         }
-        
+    } finally {
         if (didActivate) {
             this.activeProcessors.delete(id);
             this.inFlightTasks.delete(id);

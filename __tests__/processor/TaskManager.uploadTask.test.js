@@ -201,8 +201,8 @@ describe('TaskManager uploadTask', () => {
 
     await TaskManager.uploadTask(task);
 
-    // 验证本地文件被删除
-    expect(fs.promises.unlink).toHaveBeenCalledWith('/tmp/test.txt');
+    // 验证失败时本地文件不被删除（保留用于重试）
+    expect(fs.promises.unlink).not.toHaveBeenCalled();
   });
 
   test('should let canonical task lock replace stale local active processor marker', async () => {

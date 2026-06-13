@@ -9,6 +9,8 @@ import { redactSensitiveText } from "../../utils/serializer.js";
 import { resolveRcloneFailureMetadata } from "../../utils/rcloneErrorMessage.js";
 import { classifyInfrastructureError } from "../../domain/infrastructure-error.js";
 import { getInfrastructureErrorUserMessage } from "../../utils/infrastructureErrorMessage.js";
+import { escapeHTML } from "../../utils/common.js";
+export { escapeHTML };
 
 // 获取依赖项的辅助函数
 const getDeps = () => dependencyContainer.getAll();
@@ -269,16 +271,3 @@ export async function handleUploadFailure(task, context, updateStatus, uploadRes
     }
 }
 
-/**
- * Escape HTML special characters
- * @param {string} str - String to escape
- * @returns {string} Escaped string
- */
-export function escapeHTML(str) {
-    return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}

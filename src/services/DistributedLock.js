@@ -46,6 +46,7 @@ export class DistributedLock {
         this.cleanupInterval = setInterval(() => {
             this.cleanupExpiredLocks();
         }, 60000); // 每分钟清理一次
+        this.cleanupInterval.unref();
     }
 
     /**

@@ -490,7 +490,14 @@ export async function handleWebhook(req, res) {
 
     // 获取请求体
     let body = '';
+    let bodySize = 0;
     for await (const chunk of req) {
+        bodySize += chunk.length;
+        if (bodySize > 1024 * 1024) {
+            res.writeHead(413);
+            res.end('Payload Too Large');
+            return;
+        }
         body += chunk;
     }
 

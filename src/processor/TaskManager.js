@@ -1122,6 +1122,8 @@ export class TaskManager {
      * @param {Error} error - 错误对象
      * @returns {number} HTTP 状态码
      */
+    // NOTE: String-based classification. May misclassify errors with ambiguous messages.
+    // Consider structured error codes in future refactoring.
     static _classifyError(error) {
         const msg = error?.message || String(error || '');
         const code = error?.code || '';
@@ -1697,6 +1699,7 @@ export class TaskManager {
         } catch (e) {
             // safeEdit 内部已兜底，这里不再抛出
         }
+        this.cancelledTaskIds.delete(taskId);
         return true;
     }
 
@@ -1811,6 +1814,14 @@ export class TaskManager {
         const msgId = task.msgId;
         const lastUpdate = this.monitorLocks.get(msgId) || 0;
         const now = Date.now();
+
+        // Evict stale entries to prevent unbounded growth
+        if (this.monitorLocks.size > 1000) {
+            const staleThreshold = now - 3600000; // 1 hour
+            for (const [key, ts] of this.monitorLocks) {
+                if (ts < staleThreshold) this.monitorLocks.delete(key);
+            }
+        }
         const isFinal = [TASK_STATUSES.COMPLETED, TASK_STATUSES.FAILED, TASK_STATUSES.CANCELLED].includes(status);
 
         if (now - lastUpdate < 2000 && !isFinal) return;
