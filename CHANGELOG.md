@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.33.6](https://github.com/takaraflow/drive-collector-js/compare/v4.33.5...v4.33.6) (2026-06-13)
+
+
+### 🐛 问题修复
+
+* restart Node.js on crash when s6-overlay is bypassed ([807c227](https://github.com/takaraflow/drive-collector-js/commit/807c22752cbf643e26847b1f650c33cd414a3ea2))
+* sync manifest.json version to 4.33.5 ([687bac8](https://github.com/takaraflow/drive-collector-js/commit/687bac83012f40af655b6228b9229f88aa161be6))
+
 ### [4.33.4](https://github.com/takaraflow/drive-collector-js/compare/v4.33.3...v4.33.4) (2026-06-13)
 
 
