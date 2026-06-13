@@ -575,7 +575,7 @@ describe("DirectTransferService", () => {
     });
 
     await vi.runAllTicks();
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(1600);
     const result = await resultPromise;
 
     expect(result).toMatchObject({
@@ -623,7 +623,7 @@ describe("DirectTransferService", () => {
     });
 
     await vi.runAllTicks();
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(1600);
     const result = await resultPromise;
 
     expect(result).toMatchObject({

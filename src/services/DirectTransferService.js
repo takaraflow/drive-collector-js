@@ -373,10 +373,6 @@ export class DirectTransferService {
     async _resolveRcloneFailureAfterStreamError(rcloneCompletion, taskId, error) {
         if (!rcloneCompletion) return null;
 
-        const message = String(error?.message || error || "");
-        const isLikelyRclonePipeFailure = /EPIPE|ERR_STREAM_DESTROYED|write after end|stdin is not writable/i.test(message);
-        if (!isLikelyRclonePipeFailure) return null;
-
         try {
             const result = await Promise.race([
                 rcloneCompletion,
@@ -384,7 +380,7 @@ export class DirectTransferService {
             ]);
             if (result?.success === false) return result;
         } catch (watchError) {
-            log.warn("Direct transfer failed to resolve rclone diagnostic after stream write error", {
+            log.warn("Direct transfer failed to resolve rclone diagnostic after stream error", {
                 taskId,
                 error: redactSensitiveText(watchError?.message || String(watchError))
             });
