@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [4.33.7](https://github.com/takaraflow/drive-collector-js/compare/v4.33.6...v4.33.7) (2026-06-13)
+
+
+### 🐛 问题修复
+
+* recover rclone diagnostics for all direct transfer error types ([8714ee2](https://github.com/takaraflow/drive-collector-js/commit/8714ee2eccf6f846a667fff17cd18fcad9966674))
+
 ### [4.33.6](https://github.com/takaraflow/drive-collector-js/compare/v4.33.5...v4.33.6) (2026-06-13)
 
 
