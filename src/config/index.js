@@ -466,6 +466,7 @@ function buildConfigObject(env) {
             fallbackToLocal: parseBoolean(env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL, false),
             timeoutMs: parsePositiveNumber(env.DIRECT_TRANSFER_TIMEOUT_MS, 6 * 60 * 60 * 1000),
             stallTimeoutMs: parsePositiveNumber(env.DIRECT_TRANSFER_STALL_TIMEOUT_MS, 3 * 60 * 1000),
+            minStallTimeoutMs: parseNonNegativeInt(env.DIRECT_TRANSFER_MIN_STALL_TIMEOUT_MS, undefined),
             maxAttempts: parsePositiveInt(env.DIRECT_TRANSFER_MAX_ATTEMPTS, 3),
             retryDelayMs: parseNonNegativeInt(env.DIRECT_TRANSFER_RETRY_DELAY_MS, 1000)
         },

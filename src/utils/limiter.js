@@ -237,8 +237,8 @@ export const runBotTask = (fn, userId, addOptions = {}, isFileUpload = false) =>
 // MTProto 文件传输：使用 token bucket 算法，30 请求突发，25/秒填充（带自动缩放）
 const mtprotoFileTokenBucket = createTokenBucketLimiter(30, 25);
 const mtprotoFileLimiter = createAutoScalingLimiter(
-    { concurrency: 5 },
-    { min: 3, max: 7, factor: 0.7, interval: 5000 }
+    { concurrency: 3 },
+    { min: 2, max: 4, factor: 0.7, interval: 5000 }
 );
 export const runMtprotoFileTask = async (fn, addOptions = {}) => {
     const priority = addOptions.priority ?? PRIORITY.LOW;

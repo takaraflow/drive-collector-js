@@ -20,6 +20,13 @@ const DEFAULT_STALL_TIMEOUT_MS = 3 * 60 * 1000;
 const DEFAULT_MAX_DIRECT_ATTEMPTS = 3;
 const DEFAULT_DIRECT_RETRY_DELAY_MS = 1000;
 const RCLONE_DIAGNOSTIC_GRACE_MS = 1500;
+
+// Adaptive stall timeout constants
+const ADAPTIVE_STALL_WINDOW_MS = 60_000;
+const ADAPTIVE_STALL_MIN_TIMEOUT_MS = 90_000;
+const ADAPTIVE_STALL_MAX_TIMEOUT_MS = 30 * 60 * 1000;
+const ADAPTIVE_STALL_SAFETY_FACTOR = 5;
+const ADAPTIVE_STALL_WARMUP_BYTES = 2 * 1024 * 1024;
 const LOCAL_STAGING_REQUIRED_DRIVE_TYPES = new Set(["oss", "r2", "s3"]);
 const TELEGRAM_SOURCE_TRANSIENT_ERROR_CODE = "TELEGRAM_SOURCE_TRANSIENT";
 const TELEGRAM_SOURCE_TRANSIENT_ERROR_PATTERNS = [
@@ -41,6 +48,67 @@ const NON_FALLBACK_RCLONE_ERROR_CODES = new Set([
 ]);
 
 const RCLONE_TARGET_RETRY_SCOPE = "rclone_target";
+
+class TransferSpeedMonitor {
+    constructor({ windowMs = ADAPTIVE_STALL_WINDOW_MS } = {}) {
+        this._windowMs = windowMs;
+        this._samples = [];
+        this._totalBytes = 0;
+        this._startTime = Date.now();
+    }
+
+    record(bytes) {
+        const now = Date.now();
+        this._samples.push({ bytes, ts: now });
+        this._totalBytes += bytes;
+        const cutoff = now - this._windowMs;
+        while (this._samples.length > 1 && this._samples[0].ts < cutoff) {
+            this._samples.shift();
+        }
+    }
+
+    getBytesPerSecond() {
+        if (this._samples.length < 2) return null;
+        const first = this._samples[0];
+        const last = this._samples[this._samples.length - 1];
+        const elapsedMs = last.ts - first.ts;
+        if (elapsedMs <= 0) return null;
+        let windowBytes = 0;
+        for (let i = 1; i < this._samples.length; i++) {
+            windowBytes += this._samples[i].bytes;
+        }
+        return (windowBytes / elapsedMs) * 1000;
+    }
+
+    getElapsedMs() {
+        return Date.now() - this._startTime;
+    }
+
+    getTotalBytes() {
+        return this._totalBytes;
+    }
+
+    getAdaptiveStallTimeoutMs(chunkSize, configTimeoutMs, { minTimeoutMs } = {}) {
+        const baseTimeout = Number.isFinite(configTimeoutMs) && configTimeoutMs > 0
+            ? configTimeoutMs
+            : DEFAULT_STALL_TIMEOUT_MS;
+        const effectiveMin = Number.isFinite(minTimeoutMs) && minTimeoutMs >= 0
+            ? minTimeoutMs
+            : ADAPTIVE_STALL_MIN_TIMEOUT_MS;
+        if (this._totalBytes < ADAPTIVE_STALL_WARMUP_BYTES) {
+            return Math.max(baseTimeout, effectiveMin);
+        }
+        const speed = this.getBytesPerSecond();
+        if (!speed || speed <= 0) {
+            return Math.max(baseTimeout, effectiveMin);
+        }
+        const estimatedMs = (chunkSize / speed) * 1000 * ADAPTIVE_STALL_SAFETY_FACTOR;
+        return Math.min(
+            Math.max(estimatedMs, effectiveMin),
+            ADAPTIVE_STALL_MAX_TIMEOUT_MS
+        );
+    }
+}
 
 export class DirectTransferService {
     constructor(cloudTool = CloudTool, options = {}) {
@@ -161,6 +229,8 @@ export class DirectTransferService {
             stagedRemoteName = remoteStagingName || stagingFileName;
             const transferTimeoutMs = this._resolveTransferTimeoutMs(config);
             const stallTimeoutMs = this._resolveStallTimeoutMs(config);
+            const minStallTimeoutMs = this._resolveMinStallTimeoutMs(config);
+            const speedMonitor = new TransferSpeedMonitor();
             rcloneCompletion = this._watchRcloneProcess(proc, task.id, transferTimeoutMs);
 
             const downloadIterator = client.iterDownload({
@@ -172,13 +242,14 @@ export class DirectTransferService {
             sourceIterator = downloadIterator?.[Symbol.asyncIterator]?.() || downloadIterator;
 
             while (true) {
+                const adaptiveTimeout = speedMonitor.getAdaptiveStallTimeoutMs(effectiveChunkSize, stallTimeoutMs, { minTimeoutMs: minStallTimeoutMs });
                 let nextChunk;
                 try {
                     nextChunk = await this._withStallTimeout(
                         () => sourceIterator.next(),
                         {
                             taskId: task.id,
-                            timeoutMs: stallTimeoutMs,
+                            timeoutMs: adaptiveTimeout,
                             phase: "telegram_source",
                             onTimeout: () => this._abortRclone(stdin, proc)
                         }
@@ -199,12 +270,13 @@ export class DirectTransferService {
                     () => this._writeWithBackpressure(stdin, chunk),
                     {
                         taskId: task.id,
-                        timeoutMs: stallTimeoutMs,
+                        timeoutMs: adaptiveTimeout,
                         phase: "rclone_stdin",
                         onTimeout: () => this._abortRclone(stdin, proc)
                     }
                 );
                 uploadedBytes += chunk.length;
+                speedMonitor.record(chunk.length);
                 await this._withStallTimeout(
                     () => onProgress?.({
                         bytes: Math.min(uploadedBytes, totalSize || uploadedBytes),
@@ -213,7 +285,7 @@ export class DirectTransferService {
                     }),
                     {
                         taskId: task.id,
-                        timeoutMs: stallTimeoutMs,
+                        timeoutMs: adaptiveTimeout,
                         phase: "progress_callback",
                         onTimeout: () => this._abortRclone(stdin, proc)
                     }
@@ -638,6 +710,11 @@ export class DirectTransferService {
         return Number.isFinite(value) && value > 0 ? value : DEFAULT_STALL_TIMEOUT_MS;
     }
 
+    _resolveMinStallTimeoutMs(config) {
+        const value = Number(config?.directTransfer?.minStallTimeoutMs);
+        return Number.isFinite(value) && value >= 0 ? value : undefined;
+    }
+
     _resolveMaxAttempts(config) {
         const value = Number(config?.directTransfer?.maxAttempts);
         return Number.isFinite(value) && value > 0
@@ -685,4 +762,5 @@ class DirectTransferStallError extends Error {
     }
 }
 
+export { TransferSpeedMonitor };
 export const directTransferService = new DirectTransferService();

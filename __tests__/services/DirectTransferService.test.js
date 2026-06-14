@@ -566,6 +566,7 @@ describe("DirectTransferService", () => {
           fallbackToLocal: false,
           timeoutMs: 10000,
           stallTimeoutMs: 100,
+          minStallTimeoutMs: 0,
           maxAttempts: 1,
           retryDelayMs: 0
         },
@@ -614,6 +615,7 @@ describe("DirectTransferService", () => {
           fallbackToLocal: false,
           timeoutMs: 10000,
           stallTimeoutMs: 100,
+          minStallTimeoutMs: 0,
           maxAttempts: 1,
           retryDelayMs: 0
         },
@@ -923,5 +925,91 @@ describe("DirectTransferService", () => {
     expect(result).toMatchObject({ success: true, method: "remote_existing", fileName: "file.bin" });
     expect(cloudTool.moveRemoteFile).not.toHaveBeenCalled();
     expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
+  });
+});
+
+describe("TransferSpeedMonitor", () => {
+  let TransferSpeedMonitor;
+
+  beforeAll(async () => {
+    const mod = await import("../../src/services/DirectTransferService.js");
+    TransferSpeedMonitor = mod.TransferSpeedMonitor;
+  });
+
+  test("returns null speed with fewer than 2 samples", () => {
+    const monitor = new TransferSpeedMonitor();
+    expect(monitor.getBytesPerSecond()).toBeNull();
+    monitor.record(1024);
+    expect(monitor.getBytesPerSecond()).toBeNull();
+  });
+
+  test("calculates bytes per second from samples", () => {
+    vi.useFakeTimers();
+    const monitor = new TransferSpeedMonitor({ windowMs: 60000 });
+    monitor.record(1000);
+    vi.advanceTimersByTime(1000);
+    monitor.record(1000);
+    const speed = monitor.getBytesPerSecond();
+    expect(speed).toBeGreaterThan(0);
+    expect(speed).toBeCloseTo(1000, -2);
+    vi.useRealTimers();
+  });
+
+  test("uses adaptive min timeout during warmup", () => {
+    const monitor = new TransferSpeedMonitor();
+    monitor.record(100);
+    const timeout = monitor.getAdaptiveStallTimeoutMs(512 * 1024, 180000);
+    expect(timeout).toBeGreaterThanOrEqual(90000);
+  });
+
+  test("uses base timeout when it exceeds adaptive min during warmup", () => {
+    const monitor = new TransferSpeedMonitor();
+    monitor.record(100);
+    const timeout = monitor.getAdaptiveStallTimeoutMs(512 * 1024, 300000);
+    expect(timeout).toBe(300000);
+  });
+
+  test("respects custom minTimeoutMs parameter", () => {
+    const monitor = new TransferSpeedMonitor();
+    monitor.record(100);
+    const timeout = monitor.getAdaptiveStallTimeoutMs(512 * 1024, 100, { minTimeoutMs: 0 });
+    expect(timeout).toBe(100);
+  });
+
+  test("computes adaptive timeout from speed after warmup", () => {
+    vi.useFakeTimers();
+    const monitor = new TransferSpeedMonitor({ windowMs: 60000 });
+    const chunkSize = 512 * 1024;
+    for (let i = 0; i < 10; i++) {
+      monitor.record(chunkSize);
+      vi.advanceTimersByTime(100);
+    }
+    const timeout = monitor.getAdaptiveStallTimeoutMs(chunkSize, 180000, { minTimeoutMs: 0 });
+    expect(timeout).toBeGreaterThan(0);
+    expect(timeout).toBeLessThanOrEqual(30 * 60 * 1000);
+    vi.useRealTimers();
+  });
+
+  test("caps adaptive timeout at maximum", () => {
+    vi.useFakeTimers();
+    const monitor = new TransferSpeedMonitor({ windowMs: 60000 });
+    for (let i = 0; i < 5; i++) {
+      monitor.record(1);
+      vi.advanceTimersByTime(100);
+    }
+    const timeout = monitor.getAdaptiveStallTimeoutMs(512 * 1024, 180000, { minTimeoutMs: 0 });
+    expect(timeout).toBeLessThanOrEqual(30 * 60 * 1000);
+    vi.useRealTimers();
+  });
+
+  test("tracks total bytes and elapsed time", () => {
+    vi.useFakeTimers();
+    const monitor = new TransferSpeedMonitor();
+    monitor.record(1000);
+    vi.advanceTimersByTime(500);
+    monitor.record(2000);
+    expect(monitor.getTotalBytes()).toBe(3000);
+    expect(monitor.getElapsedMs()).toBeGreaterThanOrEqual(500);
+    vi.useRealTimers();
   });
 });
