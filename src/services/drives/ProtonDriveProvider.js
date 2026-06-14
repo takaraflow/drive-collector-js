@@ -21,7 +21,6 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             new BindingStep('WAIT_USERNAME', 'input_username', this._validateUsername.bind(this)),
             new BindingStep('WAIT_PASSWORD', 'input_password'),
             new BindingStep('WAIT_USE_2FA', 'input_use_2fa', this._validateBoolean.bind(this)),
-            new BindingStep('WAIT_2FA', 'input_2fa_optional'),
             new BindingStep('WAIT_OTP_SECRET_KEY', 'input_otp_secret_key_optional'),
             new BindingStep('WAIT_MAILBOX_PASSWORD', 'input_mailbox_password_optional')
         ];
@@ -180,12 +179,19 @@ export class ProtonDriveProvider extends BaseDriveProvider {
 
         const normalized = String(input || '').trim().toLowerCase();
         const twoFactorEnabled = BOOLEAN_TRUE_INPUTS.has(normalized);
-        const nextPrompt = twoFactorEnabled ? STRINGS.input_2fa_optional : STRINGS.input_otp_secret_key_optional;
-        const nextStep = twoFactorEnabled ? 'WAIT_2FA' : 'WAIT_OTP_SECRET_KEY';
 
-        return new ActionResult(true, nextPrompt, nextStep, {
+        if (!twoFactorEnabled) {
+            return new ActionResult(true, STRINGS.input_mailbox_password_optional, 'WAIT_MAILBOX_PASSWORD', {
+                ...session.data,
+                two_factor_enabled: false,
+                two_factor: '',
+                otp_secret_key: ''
+            });
+        }
+
+        return new ActionResult(true, STRINGS.input_otp_secret_key_optional, 'WAIT_OTP_SECRET_KEY', {
             ...session.data,
-            two_factor_enabled: twoFactorEnabled,
+            two_factor_enabled: true,
             two_factor: ''
         });
     }
@@ -195,16 +201,25 @@ export class ProtonDriveProvider extends BaseDriveProvider {
         if (session.data?.two_factor_enabled && !twoFactor) {
             return new ActionResult(false, STRINGS.use_2fa_required);
         }
-        return new ActionResult(true, STRINGS.input_otp_secret_key_optional, 'WAIT_OTP_SECRET_KEY', {
+        return new ActionResult(true, STRINGS.input_mailbox_password_optional, 'WAIT_MAILBOX_PASSWORD', {
             ...session.data,
             two_factor: twoFactor
         });
     }
 
     _handleOtpSecretInput(input, session) {
+        const otpSecretKey = String(input || '').trim();
+
+        if (!otpSecretKey && session.data?.two_factor_enabled) {
+            return new ActionResult(true, STRINGS.input_2fa_optional, 'WAIT_2FA', {
+                ...session.data,
+                otp_secret_key: ''
+            });
+        }
+
         return new ActionResult(true, STRINGS.input_mailbox_password_optional, 'WAIT_MAILBOX_PASSWORD', {
             ...session.data,
-            otp_secret_key: String(input || '').trim()
+            otp_secret_key: otpSecretKey
         });
     }
 
