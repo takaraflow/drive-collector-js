@@ -26,7 +26,7 @@ const ADAPTIVE_STALL_WINDOW_MS = 60_000;
 const ADAPTIVE_STALL_MIN_TIMEOUT_MS = 90_000;
 const ADAPTIVE_STALL_MAX_TIMEOUT_MS = 30 * 60 * 1000;
 const ADAPTIVE_STALL_SAFETY_FACTOR = 5;
-const ADAPTIVE_STALL_WARMUP_BYTES = 2 * 1024 * 1024;
+const ADAPTIVE_STALL_WARMUP_BYTES = 512 * 1024;
 const LOCAL_STAGING_REQUIRED_DRIVE_TYPES = new Set(["oss", "r2", "s3"]);
 const TELEGRAM_SOURCE_TRANSIENT_ERROR_CODE = "TELEGRAM_SOURCE_TRANSIENT";
 const TELEGRAM_SOURCE_TRANSIENT_ERROR_PATTERNS = [
@@ -241,8 +241,19 @@ export class DirectTransferService {
             });
             sourceIterator = downloadIterator?.[Symbol.asyncIterator]?.() || downloadIterator;
 
+            let lastLoggedTimeout = 0;
             while (true) {
                 const adaptiveTimeout = speedMonitor.getAdaptiveStallTimeoutMs(effectiveChunkSize, stallTimeoutMs, { minTimeoutMs: minStallTimeoutMs });
+                if (Math.abs(adaptiveTimeout - lastLoggedTimeout) > 30000) {
+                    log.info("Adaptive stall timeout adjusted", {
+                        taskId: task.id,
+                        adaptiveTimeoutMs: Math.round(adaptiveTimeout),
+                        baseTimeoutMs: stallTimeoutMs,
+                        speedBps: speedMonitor.getBytesPerSecond() ? Math.round(speedMonitor.getBytesPerSecond()) : null,
+                        totalBytes: speedMonitor.getTotalBytes()
+                    });
+                    lastLoggedTimeout = adaptiveTimeout;
+                }
                 let nextChunk;
                 try {
                     nextChunk = await this._withStallTimeout(
@@ -292,20 +303,22 @@ export class DirectTransferService {
                 );
             }
 
+            const endAdaptiveTimeout = speedMonitor.getAdaptiveStallTimeoutMs(effectiveChunkSize, stallTimeoutMs, { minTimeoutMs: minStallTimeoutMs });
             await this._withStallTimeout(
                 () => this._endWritable(stdin),
                 {
                     taskId: task.id,
-                    timeoutMs: stallTimeoutMs,
+                    timeoutMs: endAdaptiveTimeout,
                     phase: "rclone_stdin_end",
                     onTimeout: () => this._abortRclone(stdin, proc)
                 }
             );
+            const completionAdaptiveTimeout = speedMonitor.getAdaptiveStallTimeoutMs(effectiveChunkSize, stallTimeoutMs, { minTimeoutMs: minStallTimeoutMs });
             const rcloneResult = await this._withStallTimeout(
                 () => rcloneCompletion,
                 {
                     taskId: task.id,
-                    timeoutMs: stallTimeoutMs,
+                    timeoutMs: completionAdaptiveTimeout,
                     phase: "rclone_completion",
                     onTimeout: () => this._abortRclone(stdin, proc)
                 }
