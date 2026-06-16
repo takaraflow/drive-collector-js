@@ -594,7 +594,7 @@ describe("DriveConfigFlow", () => {
             await DriveConfigFlow.handleUnbind("chat123", "user456");
 
             expect(mockClient.sendMessage).toHaveBeenCalledWith("chat123", {
-                message: "⚠️ 您当前未绑定任何网盘，无需解绑。",
+                message: "⚠️ 您当前未绑定任何网盘，无需解绑。请输入 /drive 绑定一个新的网盘。",
                 parseMode: "html"
             });
         });
