@@ -5,3 +5,7 @@
 ## 2026-04-28 - Improve Empty State UX with Actionable CTAs
 **Learning:** Conversational bot UI empty states (like 'no tasks' or 'empty directory') must include clear, context-specific call-to-actions (CTAs) instead of reusing generalized strings, guiding the user on what to do next.
 **Action:** Always provide specific, actionable instructions in empty states rather than just stating there is no data, avoiding the reuse of generic messages across different contexts.
+
+## 2026-05-19 - Improve Status Empty State with Actionable CTA
+**Learning:** The previous status empty state message '✅ 当前没有排队或处理中任务。' simply informed the user there were no tasks, without guiding them on the next step, which is a common pattern observed in bot UX to reduce friction.
+**Action:** Updated the message to '✅ 当前没有排队或处理中任务。您可以直接向我发送文件或链接来开始转存。', providing clear and contextual guidance that directly addresses what the user should do next, consistent with other empty states in the application.
