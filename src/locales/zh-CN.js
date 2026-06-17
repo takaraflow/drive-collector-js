@@ -122,7 +122,7 @@ export const STRINGS = {
         unbind_success: "✅ <b>解绑成功</b>\n\n您的账号信息已从本系统中移除。",
         no_drive_unbind: "⚠️ 您当前未绑定任何网盘，无需解绑。",
         no_drive_found: "🚫 <b>还没有绑定网盘</b>\n\n请先绑定网盘，然后再发送文件或链接。",
-        
+
         // 绑定流程
         mega_input_email: "📧 <b>请输入您的 Mega 登录邮箱</b>：",
         mega_input_pass: "🔑 <b>请输入密码</b>",
@@ -190,7 +190,7 @@ export const STRINGS = {
         active_tasks: "⚡ 活跃任务",
         user_history: "👤 您的任务历史",
         no_tasks: "尚无任务记录。请直接向我发送文件、图片或链接来开始转存。",
-        no_active_tasks: "✅ 当前没有排队或处理中任务。",
+        no_active_tasks: "✅ 当前没有排队或处理中任务。您可以直接发送文件或链接来开始转存。",
         task_item: "{{index}}. {{status}} <code>{{name}}</code> ({{statusText}})",
         active_action_hint: "可直接取消当前仍在排队或处理的任务。",
         failed_action_hint: "最近有失败任务，可从这里重新排队。",
