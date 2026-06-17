@@ -1153,12 +1153,22 @@ export class TaskRepository {
      */
     static async updateStatusBatch(updates) {
         if (!updates || updates.length === 0) return;
-        await Promise.all(updates.map(u =>
-            this.transitionStatus(u.taskId, u.event || u.status, u.errorMsg, {
-                source: 'updateStatusBatch',
-                allowNoop: true
-            })
-        ));
+        const len = updates.length;
+        let cursor = 0;
+
+        const worker = async () => {
+            while (cursor < len) {
+                const i = cursor++;
+                const u = updates[i];
+                await this.transitionStatus(u.taskId, u.event || u.status, u.errorMsg, {
+                    source: 'updateStatusBatch',
+                    allowNoop: true
+                });
+            }
+        };
+
+        const workers = Array.from({ length: len }, worker);
+        await Promise.all(workers);
     }
 
     /**
