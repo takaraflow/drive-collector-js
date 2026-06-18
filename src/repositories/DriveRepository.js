@@ -102,11 +102,8 @@ export class DriveRepository {
 
     static async _migrateLegacyPasswordFormats(drives = []) {
         const list = Array.isArray(drives) ? drives : [drives].filter(Boolean);
-        const migrated = [];
-        for (const drive of list) {
-            migrated.push(await this._migrateLegacyPasswordFormat(drive));
-        }
-        return migrated;
+        // Optimize N+1 I/O wait by executing migrations concurrently
+        return Promise.all(list.map(drive => this._migrateLegacyPasswordFormat(drive)));
     }
 
     /**
@@ -378,12 +375,9 @@ export class DriveRepository {
                 }
             }
 
-            const drives = [];
-            for (const id of activeIds) {
-                const drive = await this.findById(id);
-                if (drive) drives.push(drive);
-            }
-            return drives;
+            // Optimize N+1 I/O wait bottleneck by hydrating drives concurrently
+            const drives = await Promise.all(activeIds.map(id => this.findById(id)));
+            return drives.filter(Boolean);
         } catch (e) {
             log.error("DriveRepository.findAll error:", e);
             return [];
