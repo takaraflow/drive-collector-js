@@ -1,0 +1,18 @@
+<<<<<<< SEARCH
+    async _executeBatch(tasks, concurrency = 5, singleTaskFn, loggerPrefix = '[CloudQueue]') {
+        const len = tasks.length;
+        const results = new Array(len);
+
+        let currentIndex = 0;
+        const worker = async () => {
+=======
+    async _executeBatch(tasks, concurrency = 5, singleTaskFn, loggerPrefix = '[CloudQueue]') {
+        const len = tasks.length;
+        // ⚡ Bolt Optimization: Pre-allocate results array to avoid dynamic resizing memory footprint
+        // and eliminate array.map closure overhead. Replaced chunk-based Promise.allSettled with a
+        // continuous async worker pool to maximize throughput while respecting the concurrency limit.
+        const results = new Array(len);
+
+        let currentIndex = 0;
+        const worker = async () => {
+>>>>>>> REPLACE
