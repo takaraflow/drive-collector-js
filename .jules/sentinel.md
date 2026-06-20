@@ -11,3 +11,8 @@
 **Vulnerability:** A `log.error` statement was outputting the first 5 characters of a sensitive token (`this.token?.substring(0, 5)`) upon authentication failure.
 **Learning:** Logging partial tokens is unsafe. Even truncated pieces of secrets can provide valuable clues for an attacker during a brute-force attack or when attempting to identify compromised credentials among various leaks. Information exposure through logs breaks the "defense in depth" principle and increases risk.
 **Prevention:** Never log substrings or snippets of API keys, passwords, or authentication tokens. Instead, only log non-sensitive metadata, such as token length or presence/absence indicators, to provide debugging context without leaking the actual secret.
+
+## 2025-05-26 - Prevent Information Exposure via Logged Secrets Length
+**Vulnerability:** A `log.error` statement was outputting the length of a sensitive token (`this.token?.length || 0`) upon authentication failure.
+**Learning:** Logging the length of secrets can still be dangerous. It provides attackers with information about the expected format and size of the token, which can aid in brute-force attacks or when matching compromised credentials. Information exposure through logs breaks the "defense in depth" principle and increases risk.
+**Prevention:** Never log the exact length of API keys, passwords, or authentication tokens. Instead, log non-sensitive metadata such as token presence/absence (`this.token ? 'present' : 'missing'`) to provide debugging context without leaking any characteristics of the secret.
