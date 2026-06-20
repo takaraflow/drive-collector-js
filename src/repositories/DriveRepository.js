@@ -378,12 +378,12 @@ export class DriveRepository {
                 }
             }
 
-            const drives = [];
-            for (const id of activeIds) {
-                const drive = await this.findById(id);
-                if (drive) drives.push(drive);
-            }
-            return drives;
+            // [Performance Optimization]: Replace sequential 'for...of' loop with concurrent 'Promise.all'
+            // to eliminate N+1 I/O wait bottlenecks during cache hydration, reducing total execution time.
+            const drives = await Promise.all(
+                activeIds.map(id => this.findById(id))
+            );
+            return drives.filter(Boolean);
         } catch (e) {
             log.error("DriveRepository.findAll error:", e);
             return [];
