@@ -168,7 +168,7 @@ export const STRINGS = {
         // 🆕 新增
         directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
         dir_empty: "ℹ️ 目录为空。您可以直接发送文件给我，将其转存到此目录。",
-        batch_empty: "ℹ️ 尚无文件排队或加载中。您可以直接向我发送文件或链接来开始转存。",
+        batch_empty: "ℹ️ 尚无文件排队或加载中。请直接向我发送您想转存的文件或支持的链接。",
         page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 个文件</i>",
         btn_home: "首页",
         btn_prev: "上一页",
@@ -190,7 +190,7 @@ export const STRINGS = {
         active_tasks: "⚡ 活跃任务",
         user_history: "👤 您的任务历史",
         no_tasks: "尚无任务记录。请直接向我发送文件、图片或链接来开始转存。",
-        no_active_tasks: "✅ 当前没有排队或处理中任务。",
+        no_active_tasks: "✅ 当前没有排队或处理中任务。您可以直接向我发送文件或链接来开始转存。",
         task_item: "{{index}}. {{status}} <code>{{name}}</code> ({{statusText}})",
         active_action_hint: "可直接取消当前仍在排队或处理的任务。",
         failed_action_hint: "最近有失败任务，可从这里重新排队。",
@@ -270,7 +270,7 @@ export const STRINGS = {
         btn_back: "返回",
         btn_refresh: "刷新",
         btn_retry_failed_page: "重试本页失败任务",
-        no_tasks_in_status: "📭 该状态下暂无任务。您可以发送文件或链接来创建新任务。",
+        no_tasks_in_status: "📭 该状态下暂无任务。请发送文件或支持的链接来创建新的转存任务。",
     },
 
     // --- 管理员用户列表 ---
