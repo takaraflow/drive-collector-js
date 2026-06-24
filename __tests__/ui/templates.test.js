@@ -59,7 +59,7 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
         files: {
             directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
             dir_empty: "ℹ️ 目录为空。您可以直接发送文件给我，将其转存到此目录。",
-            batch_empty: "ℹ️ 尚无文件排队或加载中。您可以直接向我发送文件或链接来开始转存。",
+            batch_empty: "ℹ️ 尚无文件排队或加载中。请直接向我发送您想转存的文件或支持的链接。",
             page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 个文件</i>",
             btn_home: "⏮️",
             btn_prev: "⬅️",
@@ -96,7 +96,7 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
             btn_back: "🔙 返回",
             btn_refresh: "🔄",
             btn_retry_failed_page: "重试本页失败任务",
-            no_tasks_in_status: "📭 该状态下暂无任务。您可以发送文件或链接来创建新任务。",
+            no_tasks_in_status: "📭 该状态下暂无任务。请发送文件或支持的链接来创建新的转存任务。",
         },
         admin_users: {
             title: "👥 <b>用户列表</b>",
@@ -839,7 +839,7 @@ describe("UIHelper", () => {
 
             const result = UIHelper.renderTaskQueueDetail('completed', data);
 
-            expect(result.text).toContain("该状态下暂无任务。您可以发送文件或链接来创建新任务。");
+            expect(result.text).toContain("该状态下暂无任务。请发送文件或支持的链接来创建新的转存任务。");
             expect(result.text).toContain("任务队列 — ✅ 已完成 (共 0 条)");
         });
 
