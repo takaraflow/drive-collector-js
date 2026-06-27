@@ -1153,12 +1153,24 @@ export class TaskRepository {
      */
     static async updateStatusBatch(updates) {
         if (!updates || updates.length === 0) return;
-        await Promise.all(updates.map(u =>
-            this.transitionStatus(u.taskId, u.event || u.status, u.errorMsg, {
-                source: 'updateStatusBatch',
-                allowNoop: true
-            })
-        ));
+        // ⚡ Bolt Optimization: Replace unbounded Promise.all mapping with Native Async Worker Pool to prevent memory exhaustion
+        let cursor = 0;
+        let hasError = false;
+        const workers = new Array(Math.min(updates.length, 5)).fill(null).map(async () => {
+            while (cursor < updates.length && !hasError) {
+                const update = updates[cursor++];
+                try {
+                    await this.transitionStatus(update.taskId, update.event || update.status, update.errorMsg, {
+                        source: 'updateStatusBatch',
+                        allowNoop: true
+                    });
+                } catch (err) {
+                    hasError = true;
+                    throw err;
+                }
+            }
+        });
+        await Promise.all(workers);
     }
 
     /**
