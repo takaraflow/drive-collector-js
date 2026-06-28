@@ -57,12 +57,33 @@ export class InstanceRepository {
     static async findAll(options = {}) {
         try {
             const keys = await cache.listKeys(this.PREFIX);
-            const instances = [];
             const readOptions = this._readOptions(options);
-            for (const key of keys) {
-                const data = await cache.get(key, "json", readOptions);
-                if (data) {
-                    instances.push(data);
+
+            // Optimization: Replace O(N) sequential cache.get with bounded concurrent worker pool
+            // Reduces latency from O(N) to bounded parallel execution
+            const results = new Array(keys.length);
+            let cursor = 0;
+            let hasError = false;
+
+            const worker = async () => {
+                while (cursor < keys.length && !hasError) {
+                    const i = cursor++;
+                    try {
+                        results[i] = await cache.get(keys[i], "json", readOptions);
+                    } catch (err) {
+                        hasError = true;
+                        throw err;
+                    }
+                }
+            };
+
+            const workers = Array.from({ length: Math.min(5, keys.length) }, worker);
+            await Promise.all(workers);
+
+            const instances = [];
+            for (let i = 0; i < results.length; i++) {
+                if (results[i]) {
+                    instances.push(results[i]);
                 }
             }
             return instances;
