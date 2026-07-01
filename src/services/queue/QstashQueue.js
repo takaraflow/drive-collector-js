@@ -644,12 +644,33 @@ export class QstashQueue extends CloudQueueBase {
         try {
             const { cache } = await import("../CacheService.js");
             const keys = await cache.listKeys(CACHE_KEYS.queueDlqPrefix());
-            const persisted = [];
-            for (const key of keys) {
-                const item = await cache.get(key, "json", { skipCache: true });
-                if (item) persisted.push(item);
-            }
-            return snapshotDeadLetterQueue(persisted).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+            // ⚡ Bolt Optimization: Replace sequential N+1 Cache lookups with a bounded async worker pool
+            // This drastically reduces I/O wait time while preventing connection pool exhaustion.
+            const persisted = new Array(keys.length);
+            let currentIndex = 0;
+            let hasError = false;
+            const concurrencyLimit = 5;
+
+            const worker = async () => {
+                while (currentIndex < keys.length && !hasError) {
+                    const index = currentIndex++;
+                    const key = keys[index];
+                    try {
+                        const item = await cache.get(key, "json", { skipCache: true });
+                        persisted[index] = item;
+                    } catch (err) {
+                        hasError = true;
+                        throw err;
+                    }
+                }
+            };
+
+            const workers = Array.from({ length: Math.min(concurrencyLimit, keys.length) }, worker);
+            await Promise.all(workers);
+
+            const validPersisted = persisted.filter(Boolean);
+            return snapshotDeadLetterQueue(validPersisted).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
         } catch (error) {
             log.error('Failed to read persistent QStash dead letter queue', {
                 error: error?.message || String(error)
