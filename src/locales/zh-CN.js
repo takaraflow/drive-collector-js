@@ -278,7 +278,7 @@ export const STRINGS = {
         title: "👥 <b>用户列表</b>",
         loading: "🔍 正在查询用户列表...",
         error: "❌ <b>暂时无法查询用户列表</b>\n\n请重新加载；如果连续失败，请查看系统诊断。",
-        empty: "当前没有可显示的用户。\n用户绑定网盘、提交任务或被设置角色后，会出现在这里。",
+        empty: "📭 <b>当前没有可显示的用户</b>\n\n💡 用户在绑定网盘、提交任务或被设置角色后会出现在这里。\n👉 <b>下一步：</b>您可以尝试发送 /drive 绑定网盘，或直接发送文件开始转存体验！",
         summary: "共 {{total}} 位用户 · 活跃 {{active}} · 管理 {{admins}} · 封禁 {{banned}}",
         filter_line: "筛选: {{filter}} · 第 {{current}}/{{totalPages}} 页",
         user_row: "<code>{{index}}.</code> {{roleIcon}} <code>{{userId}}</code> · {{role}}",
