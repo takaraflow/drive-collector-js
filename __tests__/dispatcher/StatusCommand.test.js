@@ -193,7 +193,7 @@ describe('Dispatcher /status command', () => {
         const sent = mockClient.sendMessage.mock.calls[0][1].message;
         expect(sent).toContain('🕒 排队中: 0');
         expect(sent).toContain('🔄 处理中: 0');
-        expect(sent).toContain('✅ 当前没有排队或处理中任务。');
+        expect(sent).toContain('✅ 当前没有排队或处理中任务。您可以直接发送文件或链接来创建新任务。');
         expect(sent).not.toContain('wrong-memory-task.mp4');
     });
 
