@@ -165,10 +165,18 @@ export class UserRepository {
             FROM user_rows
             WHERE ${where}`;
 
-        const [summaryRow, countRow] = await Promise.all([
-            d1.fetchOne(summarySql, baseParams),
-            d1.fetchOne(countSql, baseParams)
+        // ⚡ Bolt Optimization: Use d1.batch to reduce N+1 HTTP requests to Cloudflare D1
+        const batchResults = await d1.batch([
+            { sql: summarySql, params: baseParams },
+            { sql: countSql, params: baseParams }
         ]);
+
+        for (const res of batchResults) {
+            if (!res.success) throw res.error || new Error("D1 batch statement failed");
+        }
+
+        const summaryRow = batchResults[0]?.result?.results?.[0] || null;
+        const countRow = batchResults[1]?.result?.results?.[0] || null;
 
         const total = Number(countRow?.total || 0);
         const totalPages = Math.max(1, Math.ceil(total / safePageSize));
