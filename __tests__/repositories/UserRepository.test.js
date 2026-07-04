@@ -4,7 +4,17 @@ let db;
 
 const mockD1 = {
     fetchOne: vi.fn((sql, params = []) => db.prepare(sql).get(params) || null),
-    fetchAll: vi.fn((sql, params = []) => db.prepare(sql).all(params))
+    fetchAll: vi.fn((sql, params = []) => db.prepare(sql).all(params)),
+    batch: vi.fn(async (statements) => {
+        return statements.map(stmt => {
+            try {
+                const results = stmt.sql.trim().toUpperCase().startsWith('SELECT COUNT') || stmt.sql.includes('COUNT(*)') ? [db.prepare(stmt.sql).get(stmt.params) || null] : db.prepare(stmt.sql).all(stmt.params);
+                return { success: true, result: { results } };
+            } catch (e) {
+                return { success: false, error: e };
+            }
+        });
+    })
 };
 
 vi.mock("../../src/services/d1.js", () => ({
