@@ -441,9 +441,32 @@ export class TaskRepository {
                 const instanceKeys = await cache.listKeys(this.INSTANCE_PREFIX);
                 if (Array.isArray(instanceKeys) && instanceKeys.length > 0) {
                     const now = Date.now();
-                    const instanceDatas = await Promise.allSettled(
-                        instanceKeys.map(key => cache.get(key, 'json', { cacheTtl: 30000 }))
-                    );
+
+                    // ⚡ Bolt Optimization: Use native async worker pool instead of unbounded Promise.allSettled
+                    // Reduces memory allocation from array mapping and limits concurrent I/O operations
+                    const concurrencyLimit = 5;
+                    const instanceDatas = new Array(instanceKeys.length);
+                    let currentIndex = 0;
+                    let hasError = false;
+
+                    const worker = async () => {
+                        while (currentIndex < instanceKeys.length && !hasError) {
+                            const i = currentIndex++;
+                            try {
+                                const data = await cache.get(instanceKeys[i], 'json', { cacheTtl: 30000 });
+                                instanceDatas[i] = { status: 'fulfilled', value: data };
+                            } catch (e) {
+                                hasError = true;
+                                instanceDatas[i] = { status: 'rejected', reason: e };
+                            }
+                        }
+                    };
+
+                    const workers = [];
+                    for (let i = 0; i < Math.min(concurrencyLimit, instanceKeys.length); i++) {
+                        workers.push(worker());
+                    }
+                    await Promise.all(workers);
 
                     let sum = 0;
                     let hasAny = false;
