@@ -474,27 +474,48 @@ export class DistributedLock {
         try {
             const keys = await this.cache.listKeys(pattern);
             
-            for (const key of keys) {
-                const lock = await this.cache.get(key, 'json');
-                if (lock && this.isExpired(lock)) {
-                    // 检查本地是否还有心跳
-                    const taskId = this._taskIdFromLockKey(key);
-                    const localLock = this.locks.get(taskId);
-                    
-                    if (localLock && localLock.owner === lock.instanceId) {
-                        // 本地还有心跳，说明锁可能正在续期中，跳过
-                        continue;
-                    }
+            // ⚡ Bolt Optimization: Use a bounded native async worker pool instead of sequential N+1 lookups
+            // Reduces I/O wait time while preventing connection pool exhaustion
+            let currentIndex = 0;
+            let hasError = false;
+            const concurrencyLimit = 5;
 
-                    // 删除过期锁
-                    await this.cache.delete(key);
-                    const expiredAt = this._safeToISOString(lock.expiresAt) || 'unknown';
-                    this.logger.info(`Cleaned up expired lock: ${key}`, {
-                        expiredAt,
-                        owner: lock.instanceId
-                    });
+            const worker = async () => {
+                while (currentIndex < keys.length && !hasError) {
+                    const index = currentIndex++;
+                    const key = keys[index];
+                    try {
+                        const lock = await this.cache.get(key, 'json');
+                        if (lock && this.isExpired(lock)) {
+                            // 检查本地是否还有心跳
+                            const taskId = this._taskIdFromLockKey(key);
+                            const localLock = this.locks.get(taskId);
+
+                            if (localLock && localLock.owner === lock.instanceId) {
+                                // 本地还有心跳，说明锁可能正在续期中，跳过
+                                continue;
+                            }
+
+                            // 删除过期锁
+                            await this.cache.delete(key);
+                            const expiredAt = this._safeToISOString(lock.expiresAt) || 'unknown';
+                            this.logger.info(`Cleaned up expired lock: ${key}`, {
+                                expiredAt,
+                                owner: lock.instanceId
+                            });
+                        }
+                    } catch (err) {
+                        hasError = true;
+                        throw err;
+                    }
                 }
-            }
+            };
+
+            const workers = Array.from(
+                { length: Math.min(concurrencyLimit, keys.length) },
+                worker
+            );
+            await Promise.all(workers);
         } catch (error) {
             this.logger.error('Error cleaning up expired locks', error);
         }
@@ -557,16 +578,37 @@ export class DistributedLock {
         let expired = 0;
         let total = keys.length;
 
-        for (const key of keys) {
-            const lock = await this.cache.get(key, 'json');
-            if (lock) {
-                if (this.isExpired(lock)) {
-                    expired++;
-                } else {
-                    held++;
+        // ⚡ Bolt Optimization: Use a bounded native async worker pool instead of sequential N+1 lookups
+        // Reduces I/O wait time while preventing connection pool exhaustion
+        let currentIndex = 0;
+        let hasError = false;
+        const concurrencyLimit = 5;
+
+        const worker = async () => {
+            while (currentIndex < keys.length && !hasError) {
+                const index = currentIndex++;
+                const key = keys[index];
+                try {
+                    const lock = await this.cache.get(key, 'json');
+                    if (lock) {
+                        if (this.isExpired(lock)) {
+                            expired++;
+                        } else {
+                            held++;
+                        }
+                    }
+                } catch (err) {
+                    hasError = true;
+                    throw err;
                 }
             }
-        }
+        };
+
+        const workers = Array.from(
+            { length: Math.min(concurrencyLimit, keys.length) },
+            worker
+        );
+        await Promise.all(workers);
 
         return {
             total,
