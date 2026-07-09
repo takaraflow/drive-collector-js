@@ -11,3 +11,8 @@
 **Vulnerability:** A `log.error` statement was outputting the first 5 characters of a sensitive token (`this.token?.substring(0, 5)`) upon authentication failure.
 **Learning:** Logging partial tokens is unsafe. Even truncated pieces of secrets can provide valuable clues for an attacker during a brute-force attack or when attempting to identify compromised credentials among various leaks. Information exposure through logs breaks the "defense in depth" principle and increases risk.
 **Prevention:** Never log substrings or snippets of API keys, passwords, or authentication tokens. Instead, only log non-sensitive metadata, such as token length or presence/absence indicators, to provide debugging context without leaking the actual secret.
+
+## 2026-07-09 - Timing Attack Vulnerability in Secret Comparison
+**Vulnerability:** Simple string equality (`===`) was used to verify `x-instance-secret` headers, exposing the application to timing attacks.
+**Learning:** Comparing secrets character-by-character allows attackers to measure the response time and gradually guess the secret.
+**Prevention:** Always use `crypto.timingSafeEqual` when comparing passwords, API keys, or security tokens to ensure constant-time comparison.
