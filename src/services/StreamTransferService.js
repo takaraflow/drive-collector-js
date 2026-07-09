@@ -1,5 +1,6 @@
 import { getConfig } from "../config/index.js";
 import { logger } from "./logger/index.js";
+import crypto from "node:crypto";
 import { CloudTool } from "./rclone.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
 import { escapeHTML } from "../utils/common.js";
@@ -32,7 +33,17 @@ function hasValidInstanceSecret(headerSecret, configuredSecret) {
 
     const header = headerSecret.trim();
     const secret = configuredSecret.trim();
-    return header !== '' && secret !== '' && header === secret;
+
+    if (header === '' || secret === '') return false;
+
+    const bufHeader = Buffer.from(header);
+    const bufSecret = Buffer.from(secret);
+
+    if (bufHeader.length !== bufSecret.length) {
+        return false;
+    }
+
+    return crypto.timingSafeEqual(bufHeader, bufSecret);
 }
 
 function sanitizeTaskPathSegment(value) {

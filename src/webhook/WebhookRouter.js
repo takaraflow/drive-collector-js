@@ -5,6 +5,7 @@ import { resolveInstanceBaseUrl } from '../utils/instanceUrl.js';
 import { getBuildIdentity, getPublicBuildIdentity } from '../utils/buildIdentity.js';
 import { parseTaskQueuePayload, TASK_QUEUE_TRIGGER_SOURCES } from '../domain/task-queue-contract.js';
 import { CACHE_KEYS } from '../domain/cache-keys.js';
+import crypto from "node:crypto";
 
 const log = logger.withModule ? logger.withModule('WebhookRouter') : logger;
 
@@ -21,7 +22,17 @@ function hasValidInstanceSecret(headerSecret, configuredSecret) {
 
     const header = headerSecret.trim();
     const secret = configuredSecret.trim();
-    return header !== '' && secret !== '' && header === secret;
+
+    if (header === '' || secret === '') return false;
+
+    const bufHeader = Buffer.from(header);
+    const bufSecret = Buffer.from(secret);
+
+    if (bufHeader.length !== bufSecret.length) {
+        return false;
+    }
+
+    return crypto.timingSafeEqual(bufHeader, bufSecret);
 }
 
 function isInstanceSecretAuthorized(req, cfg) {
