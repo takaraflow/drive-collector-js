@@ -1153,12 +1153,41 @@ export class TaskRepository {
      */
     static async updateStatusBatch(updates) {
         if (!updates || updates.length === 0) return;
-        await Promise.all(updates.map(u =>
-            this.transitionStatus(u.taskId, u.event || u.status, u.errorMsg, {
-                source: 'updateStatusBatch',
-                allowNoop: true
-            })
-        ));
+
+        // ⚡ Bolt Optimization: Use bounded native async worker pool instead of unbounded Promise.all
+        // This prevents connection exhaustion for large arrays and improves memory efficiency by avoiding O(N) closure allocation.
+        // It maintains a concurrency limit of 5 and preserves fail-fast error semantics.
+        let currentIndex = 0;
+        const concurrencyLimit = 5;
+        let hasError = false;
+        let firstError = null;
+
+        const worker = async () => {
+            while (currentIndex < updates.length && !hasError) {
+                const index = currentIndex++;
+                const u = updates[index];
+                try {
+                    await this.transitionStatus(u.taskId, u.event || u.status, u.errorMsg, {
+                        source: 'updateStatusBatch',
+                        allowNoop: true
+                    });
+                } catch (error) {
+                    hasError = true;
+                    firstError = error;
+                }
+            }
+        };
+
+        const workers = [];
+        const workerCount = Math.min(concurrencyLimit, updates.length);
+        for (let i = 0; i < workerCount; i++) {
+            workers.push(worker());
+        }
+        await Promise.all(workers);
+
+        if (hasError) {
+            throw firstError;
+        }
     }
 
     /**
