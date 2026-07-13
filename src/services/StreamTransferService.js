@@ -1,5 +1,6 @@
 import { getConfig } from "../config/index.js";
 import { logger } from "./logger/index.js";
+import crypto from "node:crypto";
 import { CloudTool } from "./rclone.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
 import { escapeHTML } from "../utils/common.js";
@@ -910,7 +911,7 @@ class StreamTransferService {
             return context.finalizePromise;
         }
 
-        const token = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+        const token = `${Date.now()}:${crypto.randomUUID()}`;
         context.phase = 'finalizing';
         context.finalizeToken = token;
         context.finalizeState = {
