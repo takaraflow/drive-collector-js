@@ -1,10 +1,4 @@
-🔒 Fix regex injection vulnerability in PathResolver and CacheService
-
-🎯 **What:**
-A Regular Expression Denial of Service (ReDoS) and regex injection vulnerability existed in `src/domain/PathResolver.js` (in `shouldIgnore` and `matchPattern`) and in `src/services/CacheService.js` (in `_matchPattern`). User-provided patterns with wildcard rules were directly injected into a `RegExp` object constructor without proper escaping. Only `*` and `?` were being properly translated, leaving other regex characters (like `.`, `+`, `[`, `]`, `(`, `)`) active.
-
-⚠️ **Risk:**
-Attackers or malicious inputs could craft specific file paths or rules exploiting these unescaped characters. This allows arbitrary pattern matching bypassing intended filters or rules (Regex Injection). Furthermore, certain complex unescaped patterns might evaluate with extreme backtracking times resulting in a ReDoS vector, potentially leading to significant performance degradation or service crashes.
-
-🛡️ **Solution:**
-The fix escapes all special regex characters (such as `+`, `[`, `]`, `(`, `)`, `$`, `^`, etc.) using a standard string replacement method before wildcard translations apply. In `PathResolver.js`, it properly escapes characters leaving `*` safe to map to `.*`. In `CacheService.js`, the escape logic correctly accommodates both `*` and `?` wildcards. Robust unit tests (`PathResolver.test.js`) have been added to verify regex injections are thwarted and standard glob matching continues to work reliably.
+💡 What: Added absolute transfer sizes (e.g. 50MB/100MB) next to the percentage in the active file progress bar during batch transfers.
+🎯 Why: When transferring large files, a simple percentage update isn't sufficient. Users get anxious when the percentage changes slowly without context. Displaying absolute downloaded/total bytes provides a better estimation of file transfers.
+📸 Before/After: Before: `[50%]` After: `[50%] (50MB/100MB)`
+♿ Accessibility: Provides explicit, easily understandable progress metrics rather than relying solely on visual bars or percentages.
