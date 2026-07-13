@@ -11,3 +11,8 @@
 **Vulnerability:** A `log.error` statement was outputting the first 5 characters of a sensitive token (`this.token?.substring(0, 5)`) upon authentication failure.
 **Learning:** Logging partial tokens is unsafe. Even truncated pieces of secrets can provide valuable clues for an attacker during a brute-force attack or when attempting to identify compromised credentials among various leaks. Information exposure through logs breaks the "defense in depth" principle and increases risk.
 **Prevention:** Never log substrings or snippets of API keys, passwords, or authentication tokens. Instead, only log non-sensitive metadata, such as token length or presence/absence indicators, to provide debugging context without leaking the actual secret.
+
+## 2026-07-13 - Prevent Predictability in Security-Sensitive Tokens
+**Vulnerability:** Used insecure `Math.random()` to generate identifiers like `finalizeToken` in `StreamTransferService.js` and hook IDs in `EnhancedGracefulShutdown.js`.
+**Learning:** `Math.random()` is predictable. When used to generate authentication or synchronization tokens (like `finalizeToken` used to validate resumable uploads), an attacker could predict the token, potentially hijacking the operation or causing a denial of service by spoofing finalization requests.
+**Prevention:** Always use cryptographically secure PRNGs such as `crypto.randomUUID()` from `node:crypto` to generate unguessable tokens for critical workflows.
