@@ -161,24 +161,34 @@ export default class CloudQueueBase extends BaseQueue {
      * @returns {Promise<Array>} - 执行结果
      */
     async _executeBatch(tasks, concurrency = 5, singleTaskFn, loggerPrefix = '[CloudQueue]') {
-        const results = [];
-        
-        for (let i = 0; i < tasks.length; i += concurrency) {
-            const batch = tasks.slice(i, i + concurrency);
-            const batchResults = await Promise.allSettled(
-                batch.map(async (task) => {
-                    return this._executeWithRetry(async () => {
-                        return await singleTaskFn(task);
+        // ⚡ Bolt Optimization: Replace chunking with a continuous native async worker pool.
+        // This eliminates I/O wait times where fast tasks wait for slow tasks in the same chunk,
+        // and avoids excessive memory allocation from array.map() closures.
+        const results = new Array(tasks.length);
+        let currentIndex = 0;
+
+        const worker = async () => {
+            while (currentIndex < tasks.length) {
+                const index = currentIndex++;
+                try {
+                    const value = await this._executeWithRetry(async () => {
+                        return await singleTaskFn(tasks[index]);
                     }, 3, loggerPrefix);
-                })
-            );
-            results.push(...batchResults);
-            
-            // 批次间添加小延迟，避免突发流量
-            if (i + concurrency < tasks.length) {
+                    results[index] = { status: 'fulfilled', value };
+                } catch (reason) {
+                    results[index] = { status: 'rejected', reason };
+                }
+
+                // Add small delay between executions to avoid burst traffic
                 await new Promise(resolve => setTimeout(resolve, 10));
             }
-        }
+        };
+
+        const workers = Array.from(
+            { length: Math.min(concurrency, tasks.length) },
+            () => worker()
+        );
+        await Promise.all(workers);
         
         return results;
     }
