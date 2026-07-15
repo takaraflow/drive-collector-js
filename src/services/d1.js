@@ -121,7 +121,8 @@ class D1Service {
     async _handleHttpError(response, attempts, maxAttempts, duration) {
         // 对于 401 错误，记录更详细的上下文但不泄露完整 token
         if (response.status === 401) {
-            log.error(`🚨 D1 Authentication Failed. Token length: ${this.token?.length || 0}`);
+            const tokenPresence = this.token ? 'present' : 'missing';
+            log.error(`🚨 D1 Authentication Failed. Token: ${tokenPresence}`);
         }
 
         let errorDetails = "";
