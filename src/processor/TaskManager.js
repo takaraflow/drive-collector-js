@@ -77,15 +77,34 @@ export class TaskManager {
         const log = getLog();
 
         try {
-            const results = await Promise.allSettled(updates.map(update =>
-                TaskRepository.transitionStatus(update.id, update.event || update.status, update.error, {
-                    returnResult: true,
-                    allowNoop: true,
-                    source: 'TaskManager.batchUpdateStatus'
-                })
-            ));
+            // ⚡ Bolt Optimization: Use native async worker pool instead of unbounded Promise.allSettled + map
+            // Reduces closure allocation and prevents connection exhaustion for large batches
+            const len = updates.length;
+            const results = new Array(len);
+            let currentIndex = 0;
+            const concurrencyLimit = 5;
 
-            const failed = results.filter(result => result.status === 'rejected');
+            const worker = async () => {
+                while (currentIndex < len) {
+                    const index = currentIndex++;
+                    const update = updates[index];
+                    try {
+                        const value = await TaskRepository.transitionStatus(update.id, update.event || update.status, update.error, {
+                            returnResult: true,
+                            allowNoop: true,
+                            source: 'TaskManager.batchUpdateStatus'
+                        });
+                        results[index] = { status: 'fulfilled', value };
+                    } catch (error) {
+                        results[index] = { status: 'rejected', reason: error };
+                    }
+                }
+            };
+
+            const workers = Array.from({ length: Math.min(concurrencyLimit, len) }, worker);
+            await Promise.all(workers);
+
+            const failed = results.filter(result => result && result.status === 'rejected');
             if (failed.length > 0) {
                 throw failed[0].reason;
             }
