@@ -15,6 +15,7 @@ import { redactSensitiveText } from "../utils/serializer.js";
 import { resolveRcloneFailureMetadata } from "../utils/rcloneErrorMessage.js";
 import { once } from "events";
 import fs from "fs";
+import crypto from "crypto";
 import os from "os";
 import path from "path";
 
@@ -910,7 +911,7 @@ class StreamTransferService {
             return context.finalizePromise;
         }
 
-        const token = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+        const token = `${Date.now()}:${crypto.randomUUID()}`;
         context.phase = 'finalizing';
         context.finalizeToken = token;
         context.finalizeState = {
