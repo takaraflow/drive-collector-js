@@ -557,16 +557,32 @@ export class DistributedLock {
         let expired = 0;
         let total = keys.length;
 
-        for (const key of keys) {
-            const lock = await this.cache.get(key, 'json');
-            if (lock) {
-                if (this.isExpired(lock)) {
-                    expired++;
-                } else {
-                    held++;
+        // ⚡ Bolt Optimization: Use bounded native async worker pool instead of sequential for...of
+        // Reduces N+1 cache read latency from O(N) to O(N/5) while preventing connection exhaustion
+        let currentIndex = 0;
+        let hasError = false;
+        const worker = async () => {
+            while (currentIndex < total && !hasError) {
+                const index = currentIndex++;
+                const key = keys[index];
+                try {
+                    const lock = await this.cache.get(key, 'json');
+                    if (lock) {
+                        if (this.isExpired(lock)) {
+                            expired++;
+                        } else {
+                            held++;
+                        }
+                    }
+                } catch (error) {
+                    hasError = true;
+                    throw error;
                 }
             }
-        }
+        };
+
+        const concurrency = Math.min(5, total);
+        await Promise.all(Array.from({ length: concurrency }, worker));
 
         return {
             total,
