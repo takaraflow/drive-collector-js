@@ -378,12 +378,28 @@ export class DriveRepository {
                 }
             }
 
-            const drives = [];
-            for (const id of activeIds) {
-                const drive = await this.findById(id);
-                if (drive) drives.push(drive);
-            }
-            return drives;
+            if (!activeIds || activeIds.length === 0) return [];
+
+            const drives = new Array(activeIds.length);
+            let hasError = false;
+            let currentIndex = 0;
+
+            // ⚡ Bolt: Optimize sequential database/cache reads with a bounded native async worker pool
+            // Reduces N+1 I/O wait time from O(N) to O(N/concurrency) while preserving order and bounding connection usage.
+            const worker = async () => {
+                while (currentIndex < activeIds.length && !hasError) {
+                    const index = currentIndex++;
+                    try {
+                        drives[index] = await this.findById(activeIds[index]);
+                    } catch (err) {
+                        hasError = true;
+                        throw err;
+                    }
+                }
+            };
+
+            await Promise.all(Array.from({ length: Math.min(5, activeIds.length) }, worker));
+            return drives.filter(Boolean);
         } catch (e) {
             log.error("DriveRepository.findAll error:", e);
             return [];
