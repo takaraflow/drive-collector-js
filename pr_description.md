@@ -1,10 +1,11 @@
-🔒 Fix regex injection vulnerability in PathResolver and CacheService
+## 💡 What
+Replaced unbounded `for (const id of activeIds)` sequential await loops in `InstanceRepository.findAll` and `DriveRepository.findAll` with a bounded (concurrency: 5) native async worker pool using pre-allocated arrays.
 
-🎯 **What:**
-A Regular Expression Denial of Service (ReDoS) and regex injection vulnerability existed in `src/domain/PathResolver.js` (in `shouldIgnore` and `matchPattern`) and in `src/services/CacheService.js` (in `_matchPattern`). User-provided patterns with wildcard rules were directly injected into a `RegExp` object constructor without proper escaping. Only `*` and `?` were being properly translated, leaving other regex characters (like `.`, `+`, `[`, `]`, `(`, `)`) active.
+## 🎯 Why
+Iterating through a list of IDs and performing sequential cache/database lookups causes an N+1 I/O wait problem, blocking the event loop on each sequential read. By executing these queries concurrently with a small concurrency limit, we reduce overall wait time without overwhelming the connection pools, while preserving the array order using pre-allocated arrays (`new Array(length)`).
 
-⚠️ **Risk:**
-Attackers or malicious inputs could craft specific file paths or rules exploiting these unescaped characters. This allows arbitrary pattern matching bypassing intended filters or rules (Regex Injection). Furthermore, certain complex unescaped patterns might evaluate with extreme backtracking times resulting in a ReDoS vector, potentially leading to significant performance degradation or service crashes.
+## 📊 Impact
+Reduces execution time for multi-instance and multi-drive lookups from `O(N)` to `O(N/5)`, lowering latency significantly for heavily multi-tenant setups while capping concurrent connections.
 
-🛡️ **Solution:**
-The fix escapes all special regex characters (such as `+`, `[`, `]`, `(`, `)`, `$`, `^`, etc.) using a standard string replacement method before wildcard translations apply. In `PathResolver.js`, it properly escapes characters leaving `*` safe to map to `.*`. In `CacheService.js`, the escape logic correctly accommodates both `*` and `?` wildcards. Robust unit tests (`PathResolver.test.js`) have been added to verify regex injections are thwarted and standard glob matching continues to work reliably.
+## 🔬 Measurement
+Verify the optimizations logic by reviewing the updated functions and verifying that the Vitest test suite passes successfully (`pnpm run ci:full`).
