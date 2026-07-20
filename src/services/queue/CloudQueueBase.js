@@ -161,24 +161,34 @@ export default class CloudQueueBase extends BaseQueue {
      * @returns {Promise<Array>} - 执行结果
      */
     async _executeBatch(tasks, concurrency = 5, singleTaskFn, loggerPrefix = '[CloudQueue]') {
-        const results = [];
-        
-        for (let i = 0; i < tasks.length; i += concurrency) {
-            const batch = tasks.slice(i, i + concurrency);
-            const batchResults = await Promise.allSettled(
-                batch.map(async (task) => {
-                    return this._executeWithRetry(async () => {
-                        return await singleTaskFn(task);
+        const len = tasks.length;
+        // ⚡ Bolt Optimization: Pre-allocate array to avoid dynamic resizing overhead.
+        // Replaced chunked execution loop (`tasks.slice()` + `Promise.allSettled()`)
+        // with a continuous native async worker pool to eliminate head-of-line blocking
+        // and reduce memory overhead from closures and array slicing.
+        const results = new Array(len);
+        let currentIndex = 0;
+
+        const worker = async () => {
+            while (currentIndex < len) {
+                const index = currentIndex++;
+                try {
+                    const value = await this._executeWithRetry(async () => {
+                        return await singleTaskFn(tasks[index]);
                     }, 3, loggerPrefix);
-                })
-            );
-            results.push(...batchResults);
-            
-            // 批次间添加小延迟，避免突发流量
-            if (i + concurrency < tasks.length) {
-                await new Promise(resolve => setTimeout(resolve, 10));
+                    results[index] = { status: 'fulfilled', value };
+                } catch (reason) {
+                    results[index] = { status: 'rejected', reason };
+                }
+
+                // Add small delay between items to avoid bursting too much at once
+                await new Promise(resolve => setTimeout(resolve, 2));
             }
-        }
+        };
+
+        const workerCount = Math.min(concurrency, len);
+        const workers = Array.from({ length: workerCount }, worker);
+        await Promise.all(workers);
         
         return results;
     }
