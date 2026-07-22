@@ -28,7 +28,7 @@ NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=${MAX_HEAP} --max-semi-spac
 OTEL_TRACES_SAMPLER="${OTEL_TRACES_SAMPLER:-parentbased_traceidratio}"
 OTEL_TRACES_SAMPLER_ARG="${OTEL_TRACES_SAMPLER_ARG:-0.1}"
 OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE="${OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE:-delta}"
-export OTEL_TRACES_SAMPLER OTEL_TRACES_SAMPLER_ARG OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+export NODE_OPTIONS OTEL_TRACES_SAMPLER OTEL_TRACES_SAMPLER_ARG OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
 
 # Restart loop: if Node.js crashes, wait and restart.
 # This handles the case where a platform sidecar (e.g. env-injector) is PID 1
@@ -50,7 +50,7 @@ trap cleanup INT TERM
 
 while true; do
   set +e
-  node src/bootstrap/start.js &
+  NODE_MODE="${NODE_MODE:-all}" node src/bootstrap/start.js &
   NODE_PID=$!
   wait "$NODE_PID"
   exit_code=$?

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/command/with-contenv sh
 # s6-overlay finish script for app service
 # This script runs after the app service exits
 # Return code determines whether s6-overlay restarts the service:

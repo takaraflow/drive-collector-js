@@ -1,7 +1,12 @@
-#!/bin/sh
+#!/command/with-contenv sh
 echo "[s6-cloudflared] === RUN SCRIPT EXECUTED ===" # Debug: Confirm script execution
 # 由 Node.js 通过 s6-svc -u 触发启动
 # 这样可以确保 Infisical 加载的变量生效
+
+if [ "${TUNNEL_ENABLED:-false}" != "true" ]; then
+    echo "[s6-cloudflared] TUNNEL_ENABLED is not true; cloudflared disabled."
+    exec sleep infinity
+fi
 
 PORT=${PORT:-7860}
 TUNNEL_METRICS_PORT=${TUNNEL_METRICS_PORT:-2000}
@@ -39,5 +44,3 @@ echo "[s6-cloudflared] Starting cloudflared tunnel..."
 cloudflared tunnel --url "http://127.0.0.1:$PORT" \
     --metrics "127.0.0.1:$TUNNEL_METRICS_PORT" \
     --no-autoupdate 2>&1 | tee /tmp/cloudflared.log
-
-

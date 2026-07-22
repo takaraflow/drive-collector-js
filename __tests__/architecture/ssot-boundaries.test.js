@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { execFileSync } from "child_process";
 import { describe, expect, test } from "vitest";
 
 const root = process.cwd();
@@ -96,6 +97,8 @@ describe("SSOT architecture boundaries", () => {
     test("runtime entrypoints should converge on telemetry-aware bootstrap", () => {
         const packageJson = JSON.parse(read("package.json"));
         const manifest = JSON.parse(read("manifest.json"));
+        const s6AppRun = read("etc/s6-overlay/s6-rc.d/app/run");
+        const s6CloudflaredRun = read("etc/s6-overlay/s6-rc.d/cloudflared/run");
 
         expect(read("src/bootstrap/start.js")).toContain("telemetry/tracing.js");
         expect(manifest.entrypoint).toBe("src/bootstrap/start.js");
@@ -103,6 +106,34 @@ describe("SSOT architecture boundaries", () => {
         expect(packageJson.scripts["start:prod"]).toContain("node src/bootstrap/start.js");
         expect(packageJson.scripts["dev:debug"]).toContain("src/bootstrap/start.js");
         expect(read("entrypoint.sh")).toContain("node src/bootstrap/start.js");
-        expect(read("etc/s6-overlay/s6-rc.d/app/run")).toContain("node src/bootstrap/start.js");
+        expect(s6AppRun).toContain("node src/bootstrap/start.js");
+        expect(s6AppRun).toContain('APP_DIR="${APP_DIR:-/app}"');
+        expect(s6AppRun).toContain('cd "$APP_DIR"');
+        expect(s6AppRun.indexOf('cd "$APP_DIR"')).toBeLessThan(s6AppRun.indexOf("node src/bootstrap/start.js"));
+        expect(s6AppRun).toMatch(/export .*NODE_OPTIONS/);
+        expect(s6AppRun).toContain('NODE_MODE="${NODE_MODE:-all}"');
+        expect(s6AppRun).not.toContain("NODE_MODE=all exec node");
+        expect(s6AppRun.startsWith("#!/command/with-contenv sh")).toBe(true);
+        expect(s6CloudflaredRun.startsWith("#!/command/with-contenv sh")).toBe(true);
+        expect(s6CloudflaredRun).toContain('TUNNEL_ENABLED:-false');
+    });
+
+    test("deployment shell entrypoints should remain syntactically valid", () => {
+        [
+            "entrypoint.sh",
+            "etc/s6-overlay/s6-rc.d/app/run",
+            "etc/s6-overlay/s6-rc.d/app/finish",
+            "etc/s6-overlay/s6-rc.d/cloudflared/run"
+        ].forEach(file => {
+            expect(() => execFileSync("sh", ["-n", path.join(root, file)])).not.toThrow();
+        });
+    });
+
+    test("package lock version should match package metadata", () => {
+        const packageJson = JSON.parse(read("package.json"));
+        const packageLock = JSON.parse(read("package-lock.json"));
+
+        expect(packageLock.version).toBe(packageJson.version);
+        expect(packageLock.packages[""].version).toBe(packageJson.version);
     });
 });
