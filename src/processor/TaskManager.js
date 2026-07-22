@@ -77,15 +77,34 @@ export class TaskManager {
         const log = getLog();
 
         try {
-            const results = await Promise.allSettled(updates.map(update =>
-                TaskRepository.transitionStatus(update.id, update.event || update.status, update.error, {
-                    returnResult: true,
-                    allowNoop: true,
-                    source: 'TaskManager.batchUpdateStatus'
-                })
-            ));
+            // ⚡ Bolt Optimization: Use native async worker pool instead of array.map() with Promise.allSettled()
+            // Avoids OOM from upfront closures on large batches and prevents connection pool exhaustion.
+            const len = updates.length;
+            const results = new Array(len);
+            let currentIndex = 0;
 
-            const failed = results.filter(result => result.status === 'rejected');
+            const worker = async () => {
+                while (currentIndex < len) {
+                    const index = currentIndex++;
+                    const update = updates[index];
+                    try {
+                        const value = await TaskRepository.transitionStatus(update.id, update.event || update.status, update.error, {
+                            returnResult: true,
+                            allowNoop: true,
+                            source: 'TaskManager.batchUpdateStatus'
+                        });
+                        results[index] = { status: 'fulfilled', value };
+                    } catch (reason) {
+                        results[index] = { status: 'rejected', reason };
+                    }
+                }
+            };
+
+            const concurrency = Math.min(len, 5); // Bound connection concurrency
+            const workers = Array.from({ length: concurrency }, worker);
+            await Promise.all(workers);
+
+            const failed = results.filter(result => result && result.status === 'rejected');
             if (failed.length > 0) {
                 throw failed[0].reason;
             }
