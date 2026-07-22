@@ -133,7 +133,7 @@
   },
   "overrides": {
     "fast-xml-parser": "^5.7.0",
-    "protobufjs": "^7.5.8",
+    "protobufjs": "^7.6.5",
     "@protobufjs/utf8": "^1.1.1"
   },
   "engines": {
