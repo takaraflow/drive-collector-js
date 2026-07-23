@@ -1,6 +1,8 @@
 import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
+import fsp from "fs/promises";
+import os from "os";
 import { getConfig } from "../config/index.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
 import { STRINGS } from "../locales/zh-CN.js";
@@ -372,6 +374,14 @@ export class CloudTool {
         if (typeof provider.prepareConfigForRuntime === "function") {
             config = await provider.prepareConfigForRuntime(config);
         }
+
+        if (typeof provider.ensureRuntimeSession === "function") {
+            config = await provider.ensureRuntimeSession(config, {
+                activeDrive,
+                userId,
+                cloudTool: this
+            });
+        }
         
         // 4. 返回清洗后的配置对象
         return config;
@@ -513,6 +523,155 @@ export class CloudTool {
             log.error(`Failed to get connection string for type ${conf.type}:`, e);
             throw e;
         }
+    }
+
+    /**
+     * Escape a value for rclone conf file format.
+     * @private
+     */
+    static _escapeRcloneConfValue(value) {
+        return String(value ?? '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n');
+    }
+
+    /**
+     * Build a temporary rclone remote conf body for providers that need writable session state.
+     * @private
+     */
+    static _buildTemporaryRcloneConf(remoteName, conf = {}) {
+        const provider = DriveProviderFactory.getProvider(conf.type);
+        const backend = typeof provider.getRcloneBackendType === 'function'
+            ? provider.getRcloneBackendType()
+            : conf.type;
+        const lines = [`[${remoteName}]`, `type = ${backend}`];
+
+        if (typeof provider.getWritableRcloneConfigEntries === 'function') {
+            const entries = provider.getWritableRcloneConfigEntries(conf) || {};
+            for (const [key, value] of Object.entries(entries)) {
+                if (value === undefined || value === null || value === '') continue;
+                lines.push(`${key} = ${this._escapeRcloneConfValue(value)}`);
+            }
+        }
+
+        return `${lines.join('\n')}\n`;
+    }
+
+    /**
+     * Parse simple rclone conf dump/file content into a key/value map for one remote.
+     * @private
+     */
+    static _parseRcloneConfSection(confText, remoteName) {
+        const lines = String(confText || '').split(/\r?\n/);
+        let inSection = false;
+        const values = {};
+        for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+            const sectionMatch = line.match(/^\[([^\]]+)\]$/);
+            if (sectionMatch) {
+                inSection = sectionMatch[1] === remoteName;
+                continue;
+            }
+            if (!inSection) continue;
+            const eq = line.indexOf('=');
+            if (eq <= 0) continue;
+            const key = line.slice(0, eq).trim();
+            const value = line.slice(eq + 1).trim();
+            values[key] = value;
+        }
+        return values;
+    }
+
+    /**
+     * Run an rclone command against a temporary named remote config, then return
+     * any config keys the backend wrote back (e.g. Proton session tokens).
+     */
+    static async runWithWritableRcloneConfig(conf, commandArgs = [], options = {}) {
+        const timeout = Number.isFinite(options.timeout) ? options.timeout : 30000;
+        const remoteName = options.remoteName || 'tmpdrive';
+        const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'rclone-conf-'));
+        const configPath = path.join(tempDir, 'rclone.conf');
+
+        try {
+            const body = this._buildTemporaryRcloneConf(remoteName, conf);
+            await fsp.writeFile(configPath, body, { encoding: 'utf8', mode: 0o600 });
+
+            const args = ['--config', configPath, ...commandArgs.map((arg) => (
+                arg === '__REMOTE__' ? `${remoteName}:` : String(arg).replaceAll('__REMOTE__', `${remoteName}:`)
+            ))];
+
+            // Bypass _runRclone because it forces --config /dev/null.
+            const ret = await new Promise((resolve) => {
+                let completed = false;
+                try {
+                    const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
+                    const timer = setTimeout(() => {
+                        if (completed) return;
+                        completed = true;
+                        try { proc.kill('SIGKILL'); } catch {}
+                        resolve({ code: -1, stdout: '', stderr: 'TIMEOUT', error: new Error('Node.js enforced timeout') });
+                    }, timeout);
+
+                    let stdout = '';
+                    let stderr = '';
+                    proc.stdout.on('data', (data) => { stdout += data.toString(); });
+                    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+                    proc.on('close', (code) => {
+                        if (completed) return;
+                        completed = true;
+                        clearTimeout(timer);
+                        resolve({ code, stdout, stderr });
+                    });
+                    proc.on('error', (err) => {
+                        if (completed) return;
+                        completed = true;
+                        clearTimeout(timer);
+                        resolve({ code: -1, stdout, stderr, error: err });
+                    });
+                } catch (error) {
+                    resolve({ code: -1, stdout: '', stderr: error.message, error });
+                }
+            });
+
+            const confText = await fsp.readFile(configPath, 'utf8').catch(() => '');
+            const remoteConfig = this._parseRcloneConfSection(confText, remoteName);
+            return {
+                ...ret,
+                remoteName,
+                remoteConfig
+            };
+        } finally {
+            await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+        }
+    }
+
+    /**
+     * Validate config. Providers that need durable session bootstrap can opt into writable conf.
+     */
+    static async validateConfigWithWritableSession(type, configData, checkCommand = 'about') {
+        const conf = { ...configData, type };
+        const provider = DriveProviderFactory.getProvider(type);
+        const finalCheckCommand = checkCommand === 'about'
+            ? provider.getValidationCommand()
+            : checkCommand;
+
+        const ret = await this.runWithWritableRcloneConfig(
+            conf,
+            [finalCheckCommand, '__REMOTE__', '--max-depth', '1', '--timeout', '15s'],
+            { timeout: 25000 }
+        );
+
+        if (ret.code === 0) {
+            return {
+                success: true,
+                remoteConfig: ret.remoteConfig || {}
+            };
+        }
+
+        const errorLog = this.sanitizeRcloneOutput(ret.stderr || ret.error?.message || '');
+        if (/Multi-factor authentication|\b2FA\b|auth\/v4\/2fa|Code=8002/i.test(errorLog)) {
+            return { success: false, reason: '2FA', details: errorLog, remoteConfig: ret.remoteConfig || {} };
+        }
+        return { success: false, reason: 'ERROR', details: errorLog, remoteConfig: ret.remoteConfig || {} };
     }
 
     /**

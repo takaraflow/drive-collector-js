@@ -257,9 +257,10 @@ export class ActionResult {
  * 验证结果类
  */
 export class ValidationResult {
-    constructor(success, reason = null, details = null) {
+    constructor(success, reason = null, details = null, data = null) {
         this.success = success;
         this.reason = reason;
         this.details = details;
+        this.data = data;
     }
 }

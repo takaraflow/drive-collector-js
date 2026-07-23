@@ -2,6 +2,7 @@ import { BaseDriveProvider, BindingStep, ActionResult, ValidationResult } from "
 import { CloudTool } from "../rclone.js";
 import { STRINGS } from "../../locales/drives/protondrive.js";
 import { logger } from "../logger/index.js";
+import { DriveRepository } from "../../repositories/DriveRepository.js";
 import {
     normalizeBindingText,
     normalizeOptionalBindingInput,
@@ -15,15 +16,26 @@ const USE_2FA_CHOICES = Object.freeze([
     { value: 'no', label: '未开启 2FA' }
 ]);
 
+const SESSION_KEYS = Object.freeze([
+    'client_uid',
+    'client_access_token',
+    'client_refresh_token',
+    'client_salted_key_pass'
+]);
+
 /**
  * Proton Drive binding follows a user-facing path, not a raw rclone form dump:
  * username → password → 2FA yes/no → (code) → optional long-term OTP secret → optional mailbox password.
+ *
+ * One-time 2FA codes are only for bootstrap login. Durable access comes from rclone session
+ * tokens (client_uid / access / refresh / salted key pass). OTP secret remains an optional
+ * advanced path and is not required for normal users.
  */
 export class ProtonDriveProvider extends BaseDriveProvider {
     constructor() {
         super('protondrive', 'Proton Drive', {
             supportLevel: 'advanced',
-            supportNote: 'Username/password binding with optional one-time 2FA code, optional long-term TOTP secret, and optional mailbox password. Backend is beta upstream.'
+            supportNote: 'Username/password binding with optional one-time 2FA code, optional long-term TOTP secret, and optional mailbox password. Session tokens are captured after bind for durable access. Backend is beta upstream.'
         });
     }
 
@@ -83,9 +95,14 @@ export class ProtonDriveProvider extends BaseDriveProvider {
     async validateConfig(configData) {
         try {
             const runtimeConfig = await this.prepareConfigForRuntime(configData);
-            const result = await CloudTool.validateConfig(this.type, runtimeConfig);
+            const result = await CloudTool.validateConfigWithWritableSession(this.type, runtimeConfig);
             if (result.success) {
-                return new ValidationResult(true);
+                const session = this._extractSessionFromRemoteConfig(result.remoteConfig);
+                return new ValidationResult(true, null, null, {
+                    ...configData,
+                    ...session,
+                    session_bootstrap_ok: this._hasReusableSession(session)
+                });
             }
             return new ValidationResult(false, result.reason, result.details);
         } catch (error) {
@@ -103,32 +120,43 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             configData.mailbox_password,
             configData.mailbox_password_format
         );
+        const session = this._pickSessionFields(configData);
 
+        // Never persist one-time 2FA codes. They expire within ~30s and break later transfers.
         return {
             username: normalizeBindingText(configData.username),
             password: await this._normalizeSecret(configData.password, configData.password_format || 'plain'),
             password_format: 'rclone_obscured',
-            two_factor: normalizeBindingText(configData.two_factor),
             two_factor_enabled: configData.two_factor_enabled === true,
             otp_secret_key: otpSecretKey,
             otp_secret_key_format: otpSecretKey ? 'rclone_obscured' : null,
             mailbox_password: mailboxPassword,
-            mailbox_password_format: mailboxPassword ? 'rclone_obscured' : null
+            mailbox_password_format: mailboxPassword ? 'rclone_obscured' : null,
+            ...session,
+            session_bootstrap_ok: this._hasReusableSession(session)
         };
     }
 
     async prepareConfigForRuntime(configData = {}) {
         // Binding-time credentials are plain. Only persisted configs carry *_format=rclone_obscured.
         // Defaulting missing format to rclone_obscured would skip obscure and make rclone try to
-        // decrypt a plain password ("illegal base64 data at input byte ...").
+        // decrypt a plain password ("illegal base64 data").
         const passwordFormat = configData.password_format || 'plain';
         const runtime = {
             ...configData,
             username: normalizeBindingText(configData.username),
             password: await this._normalizeSecret(configData.password, passwordFormat),
-            password_format: 'rclone_obscured',
-            two_factor: normalizeBindingText(configData.two_factor)
+            password_format: 'rclone_obscured'
         };
+
+        // One-time 2FA codes are bind-time only (plain credentials). Never replay codes from
+        // persisted configs — they expire quickly and cause transfer-time 422 2FA failures.
+        const allowOneTime2fa = (configData.password_format || 'plain') === 'plain';
+        if (this._hasReusableSession(runtime) || !allowOneTime2fa) {
+            runtime.two_factor = '';
+        } else {
+            runtime.two_factor = normalizeBindingText(configData.two_factor);
+        }
 
         if (runtime.otp_secret_key) {
             runtime.otp_secret_key = await this._normalizeSecret(
@@ -149,27 +177,132 @@ export class ProtonDriveProvider extends BaseDriveProvider {
         return runtime;
     }
 
-    getValidationCommand() {
-        return 'lsd';
+    /**
+     * Ensure runtime config has a reusable Proton session when possible.
+     * Used after load so transfers do not re-submit an expired 2FA code.
+     */
+    async ensureRuntimeSession(configData = {}, context = {}) {
+        if (this._hasReusableSession(configData)) {
+            return {
+                ...configData,
+                two_factor: ''
+            };
+        }
+
+        // Without a reusable session, only OTP secret (or a still-fresh one-time code during bind)
+        // can establish a new login. Prefer otp secret when present.
+        const canBootstrap =
+            Boolean(normalizeBindingText(configData.otp_secret_key)) ||
+            Boolean(normalizeBindingText(configData.two_factor));
+
+        if (!canBootstrap) {
+            return configData;
+        }
+
+        try {
+            const cloudTool = context.cloudTool || CloudTool;
+            const result = await cloudTool.validateConfigWithWritableSession(this.type, {
+                ...configData,
+                type: this.type
+            });
+
+            if (!result.success) {
+                log.warn('Proton session bootstrap failed at runtime', {
+                    reason: result.reason,
+                    details: result.details
+                });
+                return configData;
+            }
+
+            const session = this._extractSessionFromRemoteConfig(result.remoteConfig);
+            if (!this._hasReusableSession(session)) {
+                return configData;
+            }
+
+            const next = {
+                ...configData,
+                ...session,
+                two_factor: '',
+                session_bootstrap_ok: true
+            };
+
+            if (context.activeDrive?.id && context.userId) {
+                try {
+                    const stored = await this.prepareConfigForStorage(next);
+                    await DriveRepository.updateConfigData(context.userId, context.activeDrive.id, stored);
+                } catch (error) {
+                    log.warn('Failed to persist refreshed Proton session', {
+                        error: error.message,
+                        driveId: context.activeDrive.id
+                    });
+                }
+            }
+
+            return next;
+        } catch (error) {
+            log.warn('Proton ensureRuntimeSession error', { error: error.message });
+            return configData;
+        }
     }
 
-    getConnectionString(config) {
-        this.assertRequiredConfig(config, ['username', 'password']);
-        const username = this._escapeValue(config.username);
-        const password = this._escapeValue(config.password);
-        const segments = [
-            `username="${username}"`,
-            `password="${password}"`
-        ];
+    /**
+     * Entries written into a temporary named rclone conf for session bootstrap / runtime.
+     */
+    getWritableRcloneConfigEntries(config = {}) {
+        const entries = {
+            username: normalizeBindingText(config.username),
+            password: normalizeBindingText(config.password)
+        };
 
-        const twoFactor = normalizeBindingText(config.two_factor);
-        if (twoFactor) {
-            segments.push(`2fa="${this._escapeValue(twoFactor)}"`);
+        const mailboxPassword = normalizeBindingText(config.mailbox_password);
+        if (mailboxPassword) {
+            entries.mailbox_password = mailboxPassword;
+        }
+
+        if (this._hasReusableSession(config)) {
+            for (const key of SESSION_KEYS) {
+                entries[key] = normalizeBindingText(config[key]);
+            }
+            return entries;
         }
 
         const otpSecretKey = normalizeBindingText(config.otp_secret_key);
         if (otpSecretKey) {
-            segments.push(`otp_secret_key="${this._escapeValue(otpSecretKey)}"`);
+            entries.otp_secret_key = otpSecretKey;
+            return entries;
+        }
+
+        const allowOneTime2fa = (config.password_format || 'plain') === 'plain';
+        const twoFactor = normalizeBindingText(config.two_factor);
+        if (allowOneTime2fa && twoFactor) {
+            entries['2fa'] = twoFactor;
+        }
+
+        return entries;
+    }
+
+    getConnectionString(config = {}) {
+        this.assertRequiredConfig(config, ['username', 'password']);
+        const segments = [
+            `username="${this._escapeValue(config.username)}"`,
+            `password="${this._escapeValue(config.password)}"`
+        ];
+
+        if (this._hasReusableSession(config)) {
+            for (const key of SESSION_KEYS) {
+                segments.push(`${key}="${this._escapeValue(config[key])}"`);
+            }
+        } else {
+            const otpSecretKey = normalizeBindingText(config.otp_secret_key);
+            if (otpSecretKey) {
+                segments.push(`otp_secret_key="${this._escapeValue(otpSecretKey)}"`);
+            } else {
+                const allowOneTime2fa = (config.password_format || 'plain') === 'plain';
+                const twoFactor = normalizeBindingText(config.two_factor);
+                if (allowOneTime2fa && twoFactor) {
+                    segments.push(`2fa="${this._escapeValue(twoFactor)}"`);
+                }
+            }
         }
 
         const mailboxPassword = normalizeBindingText(config.mailbox_password);
@@ -301,11 +434,14 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             );
         }
 
+        // Prefer validated payload that may include captured session tokens.
+        const finalData = validation.data || configData;
+
         return new ActionResult(
             true,
-            STRINGS.success.replace('{{username}}', configData.username),
+            STRINGS.success.replace('{{username}}', finalData.username),
             null,
-            configData
+            finalData
         );
     }
 
@@ -319,6 +455,28 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             return `${STRINGS.fail_login}\n${details}`;
         }
         return STRINGS.fail_login;
+    }
+
+    _extractSessionFromRemoteConfig(remoteConfig = {}) {
+        const session = {};
+        for (const key of SESSION_KEYS) {
+            const value = normalizeBindingText(remoteConfig[key]);
+            if (value) session[key] = value;
+        }
+        return session;
+    }
+
+    _pickSessionFields(config = {}) {
+        const session = {};
+        for (const key of SESSION_KEYS) {
+            const value = normalizeBindingText(config[key]);
+            if (value) session[key] = value;
+        }
+        return session;
+    }
+
+    _hasReusableSession(config = {}) {
+        return SESSION_KEYS.every((key) => Boolean(normalizeBindingText(config[key])));
     }
 
     async _normalizeSecret(secret, format) {

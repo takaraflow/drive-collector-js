@@ -259,6 +259,7 @@ describe('ValidationResult', () => {
         expect(result.success).toBe(false);
         expect(result.reason).toBe('2FA');
         expect(result.details).toBe('Multi-factor required');
+        expect(result.data).toBeNull();
     });
 
     test('should create ValidationResult with default values', () => {
@@ -267,5 +268,11 @@ describe('ValidationResult', () => {
         expect(result.success).toBe(true);
         expect(result.reason).toBeNull();
         expect(result.details).toBeNull();
+        expect(result.data).toBeNull();
+    });
+
+    test('should create ValidationResult with optional data payload', () => {
+        const result = new ValidationResult(true, null, null, { client_uid: 'uid-1' });
+        expect(result.data).toEqual({ client_uid: 'uid-1' });
     });
 });
