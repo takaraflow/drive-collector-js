@@ -278,14 +278,45 @@ export class CloudTool {
         return missingResult;
     }
 
-    static async _ensureUploadDirectory(connectionString, userUploadPath) {
+    static async _ensureUploadDirectory(connectionString, userUploadPath, options = {}) {
         const normalizedUploadPath = this._normalizePath(userUploadPath);
         if (!normalizedUploadPath || normalizedUploadPath === "/") {
             return { success: true };
         }
 
         const fullRemotePath = this._joinRemotePath(connectionString, normalizedUploadPath);
-        const ret = await this._runRclone(["mkdir", fullRemotePath], 15000);
+        const configArgs = Array.isArray(options.configArgs) ? options.configArgs : ['--config', '/dev/null'];
+        // _runRclone forces --config /dev/null; for writable runtimes spawn with explicit configArgs.
+        const ret = await new Promise((resolve) => {
+            let completed = false;
+            try {
+                const proc = spawn(rcloneBinary, [...configArgs, 'mkdir', fullRemotePath], { env: buildRcloneEnv() });
+                const timer = setTimeout(() => {
+                    if (completed) return;
+                    completed = true;
+                    try { proc.kill('SIGKILL'); } catch {}
+                    resolve({ code: -1, stdout: '', stderr: 'TIMEOUT', error: new Error('Node.js enforced timeout') });
+                }, 15000);
+                let stdout = '';
+                let stderr = '';
+                proc.stdout.on('data', (d) => { stdout += d.toString(); });
+                proc.stderr.on('data', (d) => { stderr += d.toString(); });
+                proc.on('close', (code) => {
+                    if (completed) return;
+                    completed = true;
+                    clearTimeout(timer);
+                    resolve({ code, stdout, stderr });
+                });
+                proc.on('error', (err) => {
+                    if (completed) return;
+                    completed = true;
+                    clearTimeout(timer);
+                    resolve({ code: -1, stdout, stderr, error: err });
+                });
+            } catch (error) {
+                resolve({ code: -1, stdout: '', stderr: error.message, error });
+            }
+        });
         if (ret.code === 0) {
             return { success: true };
         }
@@ -298,7 +329,7 @@ export class CloudTool {
                 error: error.error || error.message,
                 retryable: error.retryable === true,
                 errorCode: error.errorCode || RCLONE_ERROR_CODES.UNKNOWN,
-                userMessage: error.userMessage || getRcloneErrorUserMessage(error.errorCode),
+                userMessage: error.userMessage,
                 userRetryable: error.userRetryable !== false
             };
         }
@@ -575,7 +606,14 @@ export class CloudTool {
             const eq = line.indexOf('=');
             if (eq <= 0) continue;
             const key = line.slice(0, eq).trim();
-            const value = line.slice(eq + 1).trim();
+            // Keep raw value after first '='; tokens may contain '='.
+            let value = line.slice(eq + 1).trim();
+            if (
+                (value.startsWith('"') && value.endsWith('"') && value.length >= 2) ||
+                (value.startsWith("'") && value.endsWith("'") && value.length >= 2)
+            ) {
+                value = value.slice(1, -1);
+            }
             values[key] = value;
         }
         return values;
@@ -654,9 +692,13 @@ export class CloudTool {
             ? provider.getValidationCommand()
             : checkCommand;
 
+        const commandArgs = finalCheckCommand === 'about' || finalCheckCommand === 'version'
+            ? [finalCheckCommand, '__REMOTE__', '--timeout', '15s']
+            : [finalCheckCommand, '__REMOTE__', '--max-depth', '1', '--timeout', '15s'];
+
         const ret = await this.runWithWritableRcloneConfig(
             conf,
-            [finalCheckCommand, '__REMOTE__', '--max-depth', '1', '--timeout', '15s'],
+            commandArgs,
             { timeout: 25000 }
         );
 
@@ -672,6 +714,79 @@ export class CloudTool {
             return { success: false, reason: '2FA', details: errorLog, remoteConfig: ret.remoteConfig || {} };
         }
         return { success: false, reason: 'ERROR', details: errorLog, remoteConfig: ret.remoteConfig || {} };
+    }
+
+    /**
+     * Open a per-user rclone remote runtime.
+     * Session-capable providers (e.g. Proton Drive) get a temporary writable conf so refreshed
+     * tokens can be harvested after the command completes.
+     * @private
+     */
+    static async _openUserRemoteRuntime(userId, conf = null) {
+        const resolvedConf = conf || await this._getUserConfig(userId);
+        const provider = DriveProviderFactory.getProvider(resolvedConf.type);
+        const usesWritableConf = typeof provider.getWritableRcloneConfigEntries === 'function';
+
+        if (!usesWritableConf) {
+            const connectionString = this._getConnectionString(resolvedConf);
+            return {
+                conf: resolvedConf,
+                provider,
+                connectionString,
+                configArgs: ['--config', '/dev/null'],
+                remoteName: null,
+                configPath: null,
+                tempDir: null,
+                async finalize() {
+                    return resolvedConf;
+                },
+                async dispose() {}
+            };
+        }
+
+        const remoteName = `u${String(userId || 'anon').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'anon'}`;
+        const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'rclone-user-'));
+        const configPath = path.join(tempDir, 'rclone.conf');
+        const body = this._buildTemporaryRcloneConf(remoteName, resolvedConf);
+        await fsp.writeFile(configPath, body, { encoding: 'utf8', mode: 0o600 });
+
+        let finalized = false;
+        const runtime = {
+            conf: resolvedConf,
+            provider,
+            connectionString: `${remoteName}:`,
+            configArgs: ['--config', configPath],
+            remoteName,
+            configPath,
+            tempDir,
+            async finalize() {
+                if (finalized) return runtime.conf;
+                finalized = true;
+                try {
+                    const confText = await fsp.readFile(configPath, 'utf8').catch(() => '');
+                    const remoteConfig = CloudTool._parseRcloneConfSection(confText, remoteName);
+                    if (typeof provider.mergeRuntimeSessionFromRemoteConfig === 'function') {
+                        const merged = await provider.mergeRuntimeSessionFromRemoteConfig(resolvedConf, remoteConfig, {
+                            userId,
+                            cloudTool: CloudTool
+                        });
+                        if (merged) runtime.conf = merged;
+                    }
+                } catch (error) {
+                    log.warn('Failed to finalize writable rclone runtime session', {
+                        userId,
+                        type: resolvedConf.type,
+                        error: error.message
+                    });
+                }
+                return runtime.conf;
+            },
+            async dispose() {
+                await runtime.finalize();
+                await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+            }
+        };
+        return runtime;
     }
 
     /**
@@ -1125,36 +1240,59 @@ export class CloudTool {
      */
     static async createRcatStream(fileName, userId, options = {}) {
         const conf = await this._getUserConfig(userId);
-        const connectionString = this._getConnectionString(conf);
+        const runtime = await this._openUserRemoteRuntime(userId, conf);
         const userUploadPath = await this._getUploadPath(userId);
         const safeFileName = this.sanitizeRemoteFileName(fileName);
-        const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath, safeFileName);
+        const fullRemotePath = this._joinRemotePath(runtime.connectionString, userUploadPath, safeFileName);
         const size = Number(options.size);
 
-        const ensureDirectoryResult = await this._ensureUploadDirectory(connectionString, userUploadPath);
-        if (!ensureDirectoryResult.success) {
-            throw this._buildFailureError(ensureDirectoryResult);
+        try {
+            const ensureDirectoryResult = await this._ensureUploadDirectory(
+                runtime.connectionString,
+                userUploadPath,
+                { configArgs: runtime.configArgs }
+            );
+            if (!ensureDirectoryResult.success) {
+                await runtime.dispose();
+                throw this._buildFailureError(ensureDirectoryResult);
+            }
+
+            const args = [
+                ...runtime.configArgs,
+                "rcat", fullRemotePath,
+                "--progress",
+                "--use-json-log",
+                "--buffer-size", "32M"
+            ];
+            if (Number.isFinite(size) && size >= 0) {
+                args.push("--size", String(size));
+            }
+
+            const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
+            let disposed = false;
+            const disposeRuntime = async () => {
+                if (disposed) return;
+                disposed = true;
+                await runtime.dispose();
+            };
+            proc.on('close', () => {
+                disposeRuntime().catch(() => {});
+            });
+            proc.on('error', () => {
+                disposeRuntime().catch(() => {});
+            });
+
+            return {
+                stdin: proc.stdin,
+                proc: proc,
+                fileName: safeFileName,
+                remotePath: this.sanitizeRcloneOutput(fullRemotePath),
+                dispose: disposeRuntime
+            };
+        } catch (error) {
+            await runtime.dispose().catch(() => {});
+            throw error;
         }
-
-        const args = [
-            "--config", "/dev/null",
-            "rcat", fullRemotePath,
-            "--progress",
-            "--use-json-log",
-            "--buffer-size", "32M"
-        ];
-        if (Number.isFinite(size) && size >= 0) {
-            args.push("--size", String(size));
-        }
-
-        const proc = spawn(rcloneBinary, args, { env: buildRcloneEnv() });
-
-        return {
-            stdin: proc.stdin,
-            proc: proc,
-            fileName: safeFileName,
-            remotePath: this.sanitizeRcloneOutput(fullRemotePath)
-        };
     }
 
     /**
@@ -1315,53 +1453,88 @@ export class CloudTool {
         if (!userId) return { success: false, error: "Missing userId" };
 
         const conf = await this._getUserConfig(userId);
-        const connectionString = this._getConnectionString(conf);
-        const userUploadPath = await this._getUploadPath(userId);
-        const safeFileName = this.sanitizeRemoteFileName(fileName);
-        const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath, safeFileName);
+        const runtime = await this._openUserRemoteRuntime(userId, conf);
+        try {
+            const userUploadPath = await this._getUploadPath(userId);
+            const safeFileName = this.sanitizeRemoteFileName(fileName);
+            const fullRemotePath = this._joinRemotePath(runtime.connectionString, userUploadPath, safeFileName);
 
-        const driveType = conf?.type;
-        const isMegaHardDelete = driveType === "mega";
-        const deleteArgs = isMegaHardDelete
-            ? ["deletefile", "--mega-hard-delete", fullRemotePath]
-            : ["deletefile", fullRemotePath];
-
-        const ret = await this._runRclone(deleteArgs, 15000);
-        const notFound = ret.stderr && (
-            this._isRemotePathNotFound(ret, { operation: "deletefile" }) ||
-            ret.stderr.includes("not found") ||
-            ret.stderr.includes("error listing")
-        );
-
-        if (ret.code === 0 || notFound) {
-            return { success: true };
-        }
-
-        if (isMegaHardDelete) {
-            log.warn("rclone deletefile with --mega-hard-delete failed, falling back to trash delete", {
-                userId,
-                fileName: safeFileName,
-                exitCode: ret.code
+            const driveType = conf?.type;
+            const isMegaHardDelete = driveType === "mega";
+            const runDelete = async (args, timeout = 15000) => new Promise((resolve) => {
+                let completed = false;
+                try {
+                    const proc = spawn(rcloneBinary, [...runtime.configArgs, ...args], { env: buildRcloneEnv() });
+                    const timer = setTimeout(() => {
+                        if (completed) return;
+                        completed = true;
+                        try { proc.kill('SIGKILL'); } catch {}
+                        resolve({ code: -1, stdout: '', stderr: 'TIMEOUT', error: new Error('Node.js enforced timeout') });
+                    }, timeout);
+                    let stdout = '';
+                    let stderr = '';
+                    proc.stdout.on('data', (d) => { stdout += d.toString(); });
+                    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+                    proc.on('close', (code) => {
+                        if (completed) return;
+                        completed = true;
+                        clearTimeout(timer);
+                        resolve({ code, stdout, stderr });
+                    });
+                    proc.on('error', (err) => {
+                        if (completed) return;
+                        completed = true;
+                        clearTimeout(timer);
+                        resolve({ code: -1, stdout, stderr, error: err });
+                    });
+                } catch (error) {
+                    resolve({ code: -1, stdout: '', stderr: error.message, error });
+                }
             });
-            const fallbackRet = await this._runRclone(["deletefile", fullRemotePath], 15000);
-            const fallbackNotFound = fallbackRet.stderr && (
-                this._isRemotePathNotFound(fallbackRet, { operation: "deletefile" }) ||
-                fallbackRet.stderr.includes("not found") ||
-                fallbackRet.stderr.includes("error listing")
+
+            const deleteArgs = isMegaHardDelete
+                ? ["deletefile", "--mega-hard-delete", fullRemotePath]
+                : ["deletefile", fullRemotePath];
+
+            const ret = await runDelete(deleteArgs, 15000);
+            const notFound = ret.stderr && (
+                this._isRemotePathNotFound(ret, { operation: "deletefile" }) ||
+                ret.stderr.includes("not found") ||
+                ret.stderr.includes("error listing")
             );
-            if (fallbackRet.code === 0 || fallbackNotFound) {
+
+            if (ret.code === 0 || notFound) {
                 return { success: true };
             }
+
+            if (isMegaHardDelete) {
+                log.warn("rclone deletefile with --mega-hard-delete failed, falling back to trash delete", {
+                    userId,
+                    fileName: safeFileName,
+                    exitCode: ret.code
+                });
+                const fallbackRet = await runDelete(["deletefile", fullRemotePath], 15000);
+                const fallbackNotFound = fallbackRet.stderr && (
+                    this._isRemotePathNotFound(fallbackRet, { operation: "deletefile" }) ||
+                    fallbackRet.stderr.includes("not found") ||
+                    fallbackRet.stderr.includes("error listing")
+                );
+                if (fallbackRet.code === 0 || fallbackNotFound) {
+                    return { success: true };
+                }
+                return this._buildFailureResult(
+                    this._buildRcloneError(fallbackRet, `rclone deletefile fallback exited with code ${fallbackRet.code}`),
+                    { operation: "deletefile", remotePathScoped: true }
+                );
+            }
+
             return this._buildFailureResult(
-                this._buildRcloneError(fallbackRet, `rclone deletefile fallback exited with code ${fallbackRet.code}`),
+                this._buildRcloneError(ret, `rclone deletefile exited with code ${ret.code}`),
                 { operation: "deletefile", remotePathScoped: true }
             );
+        } finally {
+            await runtime.dispose();
         }
-
-        return this._buildFailureResult(
-            this._buildRcloneError(ret, `rclone deletefile exited with code ${ret.code}`),
-            { operation: "deletefile", remotePathScoped: true }
-        );
     }
 
     static async moveRemoteFile(sourceFileName, targetFileName, userId) {
@@ -1370,22 +1543,60 @@ export class CloudTool {
         if (!targetFileName) return { success: false, error: "Missing targetFileName" };
 
         const conf = await this._getUserConfig(userId);
-        const connectionString = this._getConnectionString(conf);
-        const userUploadPath = await this._getUploadPath(userId);
-        const sourceSafeName = this.sanitizeRemoteFileName(sourceFileName);
-        const targetSafeName = this.sanitizeRemoteFileName(targetFileName);
-        const sourcePath = this._joinRemotePath(connectionString, userUploadPath, sourceSafeName);
-        const targetPath = this._joinRemotePath(connectionString, userUploadPath, targetSafeName);
+        const runtime = await this._openUserRemoteRuntime(userId, conf);
+        try {
+            const userUploadPath = await this._getUploadPath(userId);
+            const sourceSafeName = this.sanitizeRemoteFileName(sourceFileName);
+            const targetSafeName = this.sanitizeRemoteFileName(targetFileName);
+            const sourcePath = this._joinRemotePath(runtime.connectionString, userUploadPath, sourceSafeName);
+            const targetPath = this._joinRemotePath(runtime.connectionString, userUploadPath, targetSafeName);
 
-        const ret = await this._runRclone(["moveto", sourcePath, targetPath], 10 * 60 * 1000);
-        if (ret.code === 0) {
-            return { success: true, fileName: targetSafeName };
+            const ret = await new Promise((resolve) => {
+                let completed = false;
+                try {
+                    const proc = spawn(
+                        rcloneBinary,
+                        [...runtime.configArgs, 'moveto', sourcePath, targetPath],
+                        { env: buildRcloneEnv() }
+                    );
+                    const timer = setTimeout(() => {
+                        if (completed) return;
+                        completed = true;
+                        try { proc.kill('SIGKILL'); } catch {}
+                        resolve({ code: -1, stdout: '', stderr: 'TIMEOUT', error: new Error('Node.js enforced timeout') });
+                    }, 10 * 60 * 1000);
+                    let stdout = '';
+                    let stderr = '';
+                    proc.stdout.on('data', (d) => { stdout += d.toString(); });
+                    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+                    proc.on('close', (code) => {
+                        if (completed) return;
+                        completed = true;
+                        clearTimeout(timer);
+                        resolve({ code, stdout, stderr });
+                    });
+                    proc.on('error', (err) => {
+                        if (completed) return;
+                        completed = true;
+                        clearTimeout(timer);
+                        resolve({ code: -1, stdout, stderr, error: err });
+                    });
+                } catch (error) {
+                    resolve({ code: -1, stdout: '', stderr: error.message, error });
+                }
+            });
+
+            if (ret.code === 0) {
+                return { success: true, fileName: targetSafeName };
+            }
+
+            return this._buildFailureResult(
+                this._buildRcloneError(ret, `rclone moveto exited with code ${ret.code}`),
+                { operation: "moveto", remotePathScoped: true }
+            );
+        } finally {
+            await runtime.dispose();
         }
-
-        return this._buildFailureResult(
-            this._buildRcloneError(ret, `rclone moveto exited with code ${ret.code}`),
-            { operation: "moveto", remotePathScoped: true }
-        );
     }
 
     /**

@@ -113,7 +113,8 @@ describe('ProtonDriveProvider', () => {
         expect(conn).toContain('client_refresh_token="refresh-1"');
         expect(conn).toContain('client_salted_key_pass="salt-1"');
         expect(conn).not.toContain('2fa=');
-        expect(conn).not.toContain('otp_secret_key=');
+        // otp secret is kept as fallback even when session is present
+        expect(conn).toContain('otp_secret_key="obs_otp"');
         expect(conn).toContain('mailbox_password="obs_mail"');
     });
 
@@ -387,4 +388,129 @@ describe('ProtonDriveProvider', () => {
         });
         expect(withCode['2fa']).toBe('123456');
     });
+
+    test('should reject bind when 2FA login cannot capture session', async () => {
+        const { CloudTool } = await import('../../../src/services/rclone.js');
+        CloudTool.validateConfigWithWritableSession.mockResolvedValue({
+            success: true,
+            remoteConfig: {}
+        });
+
+        const result = await provider.validateConfig({
+            username: 'alice',
+            password: 'secret',
+            two_factor_enabled: true,
+            two_factor: '123456'
+        });
+        expect(result.success).toBe(false);
+        expect(result.reason).toBe('SESSION_BOOTSTRAP_FAILED');
+    });
+
+    test('should allow non-2FA bind without session tokens', async () => {
+        const { CloudTool } = await import('../../../src/services/rclone.js');
+        CloudTool.validateConfigWithWritableSession.mockResolvedValue({
+            success: true,
+            remoteConfig: {}
+        });
+
+        const result = await provider.validateConfig({
+            username: 'alice',
+            password: 'secret',
+            two_factor_enabled: false
+        });
+        expect(result.success).toBe(true);
+        expect(result.data.session_bootstrap_ok).toBe(false);
+    });
+
+    test('should bootstrap session for non-2FA accounts using password only', async () => {
+        const { CloudTool } = await import('../../../src/services/rclone.js');
+        CloudTool.validateConfigWithWritableSession.mockResolvedValue({
+            success: true,
+            remoteConfig: {
+                client_uid: 'uid-pw',
+                client_access_token: 'access-pw',
+                client_refresh_token: 'refresh-pw',
+                client_salted_key_pass: 'salt-pw'
+            }
+        });
+
+        const next = await provider.ensureRuntimeSession({
+            username: 'alice',
+            password: 'obs_secret',
+            password_format: 'rclone_obscured',
+            two_factor_enabled: false
+        }, {
+            userId: 'u1',
+            activeDrive: { id: 'd2' },
+            cloudTool: CloudTool
+        });
+
+        expect(next.client_uid).toBe('uid-pw');
+        expect(DriveRepository.updateConfigData).toHaveBeenCalled();
+    });
+
+    test('writable conf entries should keep otp secret with session for fallback', () => {
+        const entries = provider.getWritableRcloneConfigEntries({
+            username: 'alice',
+            password: 'obs_secret',
+            otp_secret_key: 'obs_otp',
+            client_uid: 'uid-1',
+            client_access_token: 'access-1',
+            client_refresh_token: 'refresh-1',
+            client_salted_key_pass: 'salt-1'
+        });
+        expect(entries.otp_secret_key).toBe('obs_otp');
+        expect(entries.client_uid).toBe('uid-1');
+        expect(entries).not.toHaveProperty('2fa');
+    });
+
+    test('should surface session bootstrap failure message', async () => {
+        const { CloudTool } = await import('../../../src/services/rclone.js');
+        CloudTool.validateConfigWithWritableSession.mockResolvedValue({
+            success: true,
+            remoteConfig: {}
+        });
+
+        const finalResult = await provider.handleInput('WAIT_MAILBOX_PASSWORD', '跳过', {
+            data: {
+                username: 'alice',
+                password: 'secret',
+                two_factor_enabled: true,
+                two_factor: '123456',
+                otp_secret_key: ''
+            }
+        });
+        expect(finalResult.success).toBe(false);
+        expect(finalResult.message).toContain('未能保存长期会话');
+    });
+
+
+    test('should merge and persist harvested session tokens from remote conf', async () => {
+        const merged = await provider.mergeRuntimeSessionFromRemoteConfig({
+            username: 'alice',
+            password: 'obs_secret',
+            password_format: 'rclone_obscured',
+            client_uid: 'old',
+            client_access_token: 'old-a',
+            client_refresh_token: 'old-r',
+            client_salted_key_pass: 'old-s'
+        }, {
+            client_uid: 'new-uid',
+            client_access_token: 'new-access',
+            client_refresh_token: 'new-refresh',
+            client_salted_key_pass: 'new-salt'
+        }, {
+            userId: 'u1',
+            activeDrive: { id: 'd9' }
+        });
+
+        expect(merged.client_uid).toBe('new-uid');
+        expect(merged.two_factor).toBe('');
+        expect(DriveRepository.updateConfigData).toHaveBeenCalledWith(
+            'u1',
+            'd9',
+            expect.objectContaining({ client_uid: 'new-uid', session_bootstrap_ok: true })
+        );
+    });
+
 });

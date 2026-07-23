@@ -96,15 +96,32 @@ export class ProtonDriveProvider extends BaseDriveProvider {
         try {
             const runtimeConfig = await this.prepareConfigForRuntime(configData);
             const result = await CloudTool.validateConfigWithWritableSession(this.type, runtimeConfig);
-            if (result.success) {
-                const session = this._extractSessionFromRemoteConfig(result.remoteConfig);
-                return new ValidationResult(true, null, null, {
-                    ...configData,
-                    ...session,
-                    session_bootstrap_ok: this._hasReusableSession(session)
-                });
+            if (!result.success) {
+                return new ValidationResult(false, result.reason, result.details);
             }
-            return new ValidationResult(false, result.reason, result.details);
+
+            const session = this._extractSessionFromRemoteConfig(result.remoteConfig);
+            const hasSession = this._hasReusableSession(session);
+            const requiresDurableAuth =
+                configData.two_factor_enabled === true ||
+                Boolean(normalizeBindingText(configData.two_factor)) ||
+                Boolean(normalizeBindingText(configData.otp_secret_key));
+
+            // 2FA/OTP accounts must capture rclone session tokens. Without them, later transfers
+            // would only have an expired one-time code (or would re-require interactive 2FA).
+            if (requiresDurableAuth && !hasSession) {
+                return new ValidationResult(
+                    false,
+                    'SESSION_BOOTSTRAP_FAILED',
+                    'login succeeded but durable session tokens were not captured'
+                );
+            }
+
+            return new ValidationResult(true, null, null, {
+                ...configData,
+                ...session,
+                session_bootstrap_ok: hasSession
+            });
         } catch (error) {
             log.error('Proton Drive validation error:', error);
             return new ValidationResult(false, 'ERROR', error.message);
@@ -189,13 +206,18 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             };
         }
 
-        // Without a reusable session, only OTP secret (or a still-fresh one-time code during bind)
-        // can establish a new login. Prefer otp secret when present.
-        const canBootstrap =
-            Boolean(normalizeBindingText(configData.otp_secret_key)) ||
+        // Bootstrap login materials:
+        // - otp secret (preferred for 2FA accounts without session)
+        // - still-fresh one-time 2FA code (bind-time plain configs only)
+        // - password alone for non-2FA accounts
+        const hasOtp = Boolean(normalizeBindingText(configData.otp_secret_key));
+        const hasFreshCode =
+            (configData.password_format || 'plain') === 'plain' &&
             Boolean(normalizeBindingText(configData.two_factor));
+        const non2faAccount = configData.two_factor_enabled !== true && !hasOtp && !hasFreshCode;
+        const canBootstrap = hasOtp || hasFreshCode || non2faAccount;
 
-        if (!canBootstrap) {
+        if (!canBootstrap || !normalizeBindingText(configData.username) || !normalizeBindingText(configData.password)) {
             return configData;
         }
 
@@ -246,6 +268,63 @@ export class ProtonDriveProvider extends BaseDriveProvider {
     }
 
     /**
+     * Merge session tokens harvested from a temporary rclone conf back into stored config.
+     */
+    async mergeRuntimeSessionFromRemoteConfig(configData = {}, remoteConfig = {}, context = {}) {
+        const session = this._extractSessionFromRemoteConfig(remoteConfig);
+        if (!this._hasReusableSession(session)) {
+            return null;
+        }
+
+        const sameSession = SESSION_KEYS.every((key) => (
+            normalizeBindingText(configData[key]) === normalizeBindingText(session[key])
+        ));
+        if (sameSession) {
+            return {
+                ...configData,
+                ...session,
+                two_factor: '',
+                session_bootstrap_ok: true
+            };
+        }
+
+        const next = {
+            ...configData,
+            ...session,
+            two_factor: '',
+            session_bootstrap_ok: true
+        };
+
+        if (context.userId && context.activeDrive?.id) {
+            try {
+                const stored = await this.prepareConfigForStorage(next);
+                await DriveRepository.updateConfigData(context.userId, context.activeDrive.id, stored);
+            } catch (error) {
+                log.warn('Failed to persist harvested Proton session', {
+                    error: error.message,
+                    driveId: context.activeDrive.id
+                });
+            }
+        } else if (context.userId) {
+            // Best-effort: resolve default drive if caller only has userId.
+            try {
+                const drive = await DriveRepository.getDefaultDrive(context.userId);
+                if (drive?.id && String(drive.type || '').toLowerCase() === this.type) {
+                    const stored = await this.prepareConfigForStorage(next);
+                    await DriveRepository.updateConfigData(context.userId, drive.id, stored);
+                }
+            } catch (error) {
+                log.warn('Failed to persist harvested Proton session via default drive', {
+                    error: error.message,
+                    userId: context.userId
+                });
+            }
+        }
+
+        return next;
+    }
+
+    /**
      * Entries written into a temporary named rclone conf for session bootstrap / runtime.
      */
     getWritableRcloneConfigEntries(config = {}) {
@@ -259,6 +338,12 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             entries.mailbox_password = mailboxPassword;
         }
 
+        // Always keep otp secret when present so rclone can fall back if session credentials fail.
+        const otpSecretKey = normalizeBindingText(config.otp_secret_key);
+        if (otpSecretKey) {
+            entries.otp_secret_key = otpSecretKey;
+        }
+
         if (this._hasReusableSession(config)) {
             for (const key of SESSION_KEYS) {
                 entries[key] = normalizeBindingText(config[key]);
@@ -266,15 +351,10 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             return entries;
         }
 
-        const otpSecretKey = normalizeBindingText(config.otp_secret_key);
-        if (otpSecretKey) {
-            entries.otp_secret_key = otpSecretKey;
-            return entries;
-        }
-
+        // One-time codes only during bind-time plain credential validation.
         const allowOneTime2fa = (config.password_format || 'plain') === 'plain';
         const twoFactor = normalizeBindingText(config.two_factor);
-        if (allowOneTime2fa && twoFactor) {
+        if (!otpSecretKey && allowOneTime2fa && twoFactor) {
             entries['2fa'] = twoFactor;
         }
 
@@ -292,16 +372,17 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             for (const key of SESSION_KEYS) {
                 segments.push(`${key}="${this._escapeValue(config[key])}"`);
             }
-        } else {
-            const otpSecretKey = normalizeBindingText(config.otp_secret_key);
-            if (otpSecretKey) {
-                segments.push(`otp_secret_key="${this._escapeValue(otpSecretKey)}"`);
-            } else {
-                const allowOneTime2fa = (config.password_format || 'plain') === 'plain';
-                const twoFactor = normalizeBindingText(config.two_factor);
-                if (allowOneTime2fa && twoFactor) {
-                    segments.push(`2fa="${this._escapeValue(twoFactor)}"`);
-                }
+        }
+
+        const otpSecretKey = normalizeBindingText(config.otp_secret_key);
+        if (otpSecretKey) {
+            // Keep as fallback when session credentials are rejected by Proton.
+            segments.push(`otp_secret_key="${this._escapeValue(otpSecretKey)}"`);
+        } else if (!this._hasReusableSession(config)) {
+            const allowOneTime2fa = (config.password_format || 'plain') === 'plain';
+            const twoFactor = normalizeBindingText(config.two_factor);
+            if (allowOneTime2fa && twoFactor) {
+                segments.push(`2fa="${this._escapeValue(twoFactor)}"`);
             }
         }
 
@@ -439,7 +520,7 @@ export class ProtonDriveProvider extends BaseDriveProvider {
 
         return new ActionResult(
             true,
-            STRINGS.success.replace('{{username}}', finalData.username),
+            this._formatSuccessMessage(finalData),
             null,
             finalData
         );
@@ -449,12 +530,23 @@ export class ProtonDriveProvider extends BaseDriveProvider {
         if (validation.reason === '2FA') {
             return this.getErrorMessage('2FA');
         }
+        if (validation.reason === 'SESSION_BOOTSTRAP_FAILED') {
+            return STRINGS.fail_session_bootstrap;
+        }
 
         const details = normalizeBindingText(validation.details);
         if (details) {
             return `${STRINGS.fail_login}\n${details}`;
         }
         return STRINGS.fail_login;
+    }
+
+    _formatSuccessMessage(configData = {}) {
+        const username = normalizeBindingText(configData.username) || 'protondrive';
+        if (this._hasReusableSession(configData)) {
+            return STRINGS.success_with_session.replace('{{username}}', username);
+        }
+        return STRINGS.success_without_session.replace('{{username}}', username);
     }
 
     _extractSessionFromRemoteConfig(remoteConfig = {}) {
