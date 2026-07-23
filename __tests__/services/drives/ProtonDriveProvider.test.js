@@ -513,4 +513,42 @@ describe('ProtonDriveProvider', () => {
         );
     });
 
+
+    test('should keep one-time 2fa after obscure for bind-time writable conf', async () => {
+        const runtime = await provider.prepareConfigForRuntime({
+            username: 'alice',
+            password: 'plain-pass',
+            two_factor_enabled: true,
+            two_factor: '123456'
+        });
+
+        expect(runtime.password).toBe('obs_plain-pass');
+        expect(runtime.password_format).toBe('rclone_obscured');
+        expect(runtime.allow_one_time_2fa).toBe(true);
+        expect(runtime.two_factor).toBe('123456');
+
+        const entries = provider.getWritableRcloneConfigEntries(runtime);
+        expect(entries['2fa']).toBe('123456');
+        expect(entries.password).toBe('obs_plain-pass');
+
+        const conn = provider.getConnectionString(runtime);
+        expect(conn).toContain('2fa="123456"');
+        expect(conn).toContain('password="obs_plain-pass"');
+    });
+
+    test('should not keep one-time 2fa for persisted configs without allow flag', async () => {
+        const runtime = await provider.prepareConfigForRuntime({
+            username: 'alice',
+            password: 'obs_secret',
+            password_format: 'rclone_obscured',
+            two_factor_enabled: true,
+            two_factor: '123456'
+        });
+        expect(runtime.two_factor).toBe('');
+        expect(runtime.allow_one_time_2fa).toBe(false);
+
+        const entries = provider.getWritableRcloneConfigEntries(runtime);
+        expect(entries).not.toHaveProperty('2fa');
+    });
+
 });

@@ -140,6 +140,7 @@ export class ProtonDriveProvider extends BaseDriveProvider {
         const session = this._pickSessionFields(configData);
 
         // Never persist one-time 2FA codes. They expire within ~30s and break later transfers.
+        // Also never persist allow_one_time_2fa — that flag is request-scoped only.
         return {
             username: normalizeBindingText(configData.username),
             password: await this._normalizeSecret(configData.password, configData.password_format || 'plain'),
@@ -159,16 +160,23 @@ export class ProtonDriveProvider extends BaseDriveProvider {
         // Defaulting missing format to rclone_obscured would skip obscure and make rclone try to
         // decrypt a plain password ("illegal base64 data").
         const passwordFormat = configData.password_format || 'plain';
+        // Capture this BEFORE rewriting password_format. After obscure we always mark
+        // password_format=rclone_obscured, so later steps must not use that field to decide
+        // whether a one-time 2FA code is still valid for this request.
+        const allowOneTime2fa =
+            configData.allow_one_time_2fa === true ||
+            passwordFormat === 'plain';
+
         const runtime = {
             ...configData,
             username: normalizeBindingText(configData.username),
             password: await this._normalizeSecret(configData.password, passwordFormat),
-            password_format: 'rclone_obscured'
+            password_format: 'rclone_obscured',
+            allow_one_time_2fa: allowOneTime2fa
         };
 
         // One-time 2FA codes are bind-time only (plain credentials). Never replay codes from
         // persisted configs — they expire quickly and cause transfer-time 422 2FA failures.
-        const allowOneTime2fa = (configData.password_format || 'plain') === 'plain';
         if (this._hasReusableSession(runtime) || !allowOneTime2fa) {
             runtime.two_factor = '';
         } else {
@@ -212,7 +220,10 @@ export class ProtonDriveProvider extends BaseDriveProvider {
         // - password alone for non-2FA accounts
         const hasOtp = Boolean(normalizeBindingText(configData.otp_secret_key));
         const hasFreshCode =
-            (configData.password_format || 'plain') === 'plain' &&
+            (
+                configData.allow_one_time_2fa === true ||
+                (configData.password_format || 'plain') === 'plain'
+            ) &&
             Boolean(normalizeBindingText(configData.two_factor));
         const non2faAccount = configData.two_factor_enabled !== true && !hasOtp && !hasFreshCode;
         const canBootstrap = hasOtp || hasFreshCode || non2faAccount;
@@ -351,9 +362,13 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             return entries;
         }
 
-        // One-time codes only during bind-time plain credential validation.
-        const allowOneTime2fa = (config.password_format || 'plain') === 'plain';
+        // One-time codes only when prepareConfigForRuntime kept them for this request.
+        // IMPORTANT: do not key off password_format here — runtime configs always mark
+        // password_format=rclone_obscured after obscure, even during bind-time validation.
         const twoFactor = normalizeBindingText(config.two_factor);
+        const allowOneTime2fa =
+            config.allow_one_time_2fa === true ||
+            (config.password_format || 'plain') === 'plain';
         if (!otpSecretKey && allowOneTime2fa && twoFactor) {
             entries['2fa'] = twoFactor;
         }
@@ -379,7 +394,9 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             // Keep as fallback when session credentials are rejected by Proton.
             segments.push(`otp_secret_key="${this._escapeValue(otpSecretKey)}"`);
         } else if (!this._hasReusableSession(config)) {
-            const allowOneTime2fa = (config.password_format || 'plain') === 'plain';
+            const allowOneTime2fa =
+                config.allow_one_time_2fa === true ||
+                (config.password_format || 'plain') === 'plain';
             const twoFactor = normalizeBindingText(config.two_factor);
             if (allowOneTime2fa && twoFactor) {
                 segments.push(`2fa="${this._escapeValue(twoFactor)}"`);
