@@ -188,7 +188,7 @@ export class UIHelper {
             let line;
             if (isFocus && total > 0 && (displayStatus === 'downloading' || displayStatus === 'uploading')) {
                 const progress = Math.round((downloaded / total) * 100);
-                line = `${statusIcon} ${displayName} [${progress}%]`;
+                line = `${statusIcon} ${displayName} [${progress}%] (${formatBytes(downloaded)}/${formatBytes(total)})`;
             } else if (isFocus && displayStatus === 'uploading' && !total) {
                 // 上传中但尚未获取到具体大小时，显示上传中标识
                 line = `${statusIcon} ${displayName} [上传中]`;
