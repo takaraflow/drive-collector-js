@@ -76,8 +76,9 @@ export class BindingService {
         const providerSession = { ...session, data: sessionData };
 
         const provider = DriveProviderFactory.create(driveType);
-        const bindingSteps = provider.getBindingSteps();
-        const isFinalStep = bindingSteps?.[bindingSteps.length - 1]?.step === stepName;
+        const isFinalStep = typeof provider.isFinalBindingStep === 'function'
+            ? provider.isFinalBindingStep(stepName, providerSession)
+            : (provider.getBindingSteps?.() || []).slice(-1)[0]?.step === stepName;
 
         try {
             const result = await provider.handleInput(stepName, text, providerSession);

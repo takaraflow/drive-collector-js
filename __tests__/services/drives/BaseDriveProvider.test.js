@@ -207,6 +207,8 @@ describe('BindingStep', () => {
         expect(step.step).toBe('WAIT_EMAIL');
         expect(step.prompt).toBe('Enter email');
         expect(step.validator).toBe(validator);
+        expect(step.optional).toBe(false);
+        expect(step.sensitive).toBe(false);
     });
 
     test('should create BindingStep without validator', () => {
@@ -215,6 +217,18 @@ describe('BindingStep', () => {
         expect(step.step).toBe('WAIT_PASS');
         expect(step.prompt).toBe('Enter password');
         expect(step.validator).toBeNull();
+        expect(step.sensitive).toBe(true);
+    });
+
+    test('should accept optional/sensitive/choices metadata', () => {
+        const step = new BindingStep('WAIT_OPTIONAL', 'Optional', null, {
+            optional: true,
+            sensitive: true,
+            choices: [{ value: 'skip', label: 'Skip' }]
+        });
+        expect(step.optional).toBe(true);
+        expect(step.sensitive).toBe(true);
+        expect(step.choices).toEqual([{ value: 'skip', label: 'Skip' }]);
     });
 });
 

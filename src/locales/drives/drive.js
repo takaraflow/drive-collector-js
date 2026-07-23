@@ -13,5 +13,7 @@ export const STRINGS = {
 
     // 通用验证
     cancel_prompt: "发送 /cancel 或输入 取消 可随时退出绑定流程。",
+    skip_prompt: "Telegram 不能发送空消息。可选步骤请点「跳过」，或发送：跳过 / skip / -",
+    btn_skip: "跳过",
     cancelled: "🚫 绑定流程已取消。"
 };

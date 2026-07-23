@@ -1,5 +1,6 @@
 import { logger } from "../logger/index.js";
 import { RCLONE_PASSWORD_FORMATS, normalizePasswordFormat, requiresRcloneObscuredPassword } from "../../domain/drive-credentials.js";
+import { isSensitiveBindingStepName } from "../../domain/binding-input.js";
 
 const log = logger.withModule ? logger.withModule('BaseDriveProvider') : logger;
 const VALID_SUPPORT_LEVELS = new Set(['stable', 'advanced']);
@@ -40,10 +41,48 @@ export class BaseDriveProvider {
 
     /**
      * 获取绑定步骤配置
-     * @returns {Array<{step: string, prompt: string, validator?: Function}>}
+     * @returns {Array<BindingStep>}
      */
     getBindingSteps() {
         throw new Error(`${this.type}: getBindingSteps() must be implemented`);
+    }
+
+    /**
+     * Resolve a declared binding step, including dynamic branches not listed as linear start steps.
+     * @param {string} stepName
+     * @returns {BindingStep|null}
+     */
+    getBindingStep(stepName) {
+        if (!stepName) return null;
+        const steps = this.getBindingSteps() || [];
+        return steps.find(step => step.step === stepName) || null;
+    }
+
+    /**
+     * Whether this step is the terminal validation/submit step for the current branch.
+     * Providers with dynamic branches should override when needed.
+     * @param {string} stepName
+     * @param {Object} [session]
+     * @returns {boolean}
+     */
+    isFinalBindingStep(stepName, session = null) {
+        void session;
+        const steps = this.getBindingSteps() || [];
+        if (!steps.length) return false;
+        return steps[steps.length - 1]?.step === stepName;
+    }
+
+    /**
+     * Whether the raw user message for this step should be deleted after capture.
+     * @param {string} stepName
+     * @returns {boolean}
+     */
+    isSensitiveBindingStep(stepName) {
+        const step = this.getBindingStep(stepName);
+        if (step && typeof step.sensitive === 'boolean') {
+            return step.sensitive;
+        }
+        return isSensitiveBindingStepName(stepName);
     }
 
     /**
@@ -179,10 +218,25 @@ export class BaseDriveProvider {
  * 绑定步骤配置类
  */
 export class BindingStep {
-    constructor(step, prompt, validator = null) {
+    /**
+     * @param {string} step
+     * @param {string} prompt
+     * @param {Function|null} validator
+     * @param {{
+     *   optional?: boolean,
+     *   sensitive?: boolean,
+     *   choices?: Array<{value: string, label: string}>
+     * }} [options]
+     */
+    constructor(step, prompt, validator = null, options = {}) {
         this.step = step;
         this.prompt = prompt;
         this.validator = validator;
+        this.optional = options.optional === true;
+        this.sensitive = typeof options.sensitive === 'boolean'
+            ? options.sensitive
+            : isSensitiveBindingStepName(step);
+        this.choices = Array.isArray(options.choices) ? options.choices : null;
     }
 }
 

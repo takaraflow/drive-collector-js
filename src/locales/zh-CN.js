@@ -114,6 +114,8 @@ export const STRINGS = {
         btn_unbind: "❌ 解绑网盘",
         btn_bind_mega: "➕ 绑定 Mega 网盘",
         cancel_prompt: "发送 /cancel 或输入 取消 可随时退出绑定流程。",
+        skip_prompt: "Telegram 不能发送空消息。可选步骤请点「跳过」，或发送：跳过 / skip / -",
+        btn_skip: "跳过",
         credential_notice: "为减少暴露，我会在提交后尝试删除这条敏感消息。请只在可信聊天中输入。",
         cancelled: "绑定流程已取消，输入 /drive 可重新开始。",
         not_found: "🚫 未找到对应网盘",

@@ -92,6 +92,7 @@ const mockSessionManager = {
     start: vi.fn(),
     update: vi.fn(),
     clear: vi.fn(),
+    get: vi.fn(),
 };
 vi.mock("../../src/modules/SessionManager.js", () => ({
     SessionManager: mockSessionManager,
@@ -109,6 +110,21 @@ vi.mock("../../src/services/drives/index.js", () => ({
                 { step: "WAIT_EMAIL", prompt: "mega_input_email" },
                 { step: "WAIT_PASS", prompt: "mega_input_pass" }
             ]),
+            getBindingStep: vi.fn().mockImplementation((stepName) => {
+                const steps = [
+                    { step: "WAIT_EMAIL", prompt: "mega_input_email", sensitive: false, optional: false },
+                    { step: "WAIT_PASS", prompt: "mega_input_pass", sensitive: true, optional: false },
+                    { step: "WAIT_TOKEN", prompt: "input_token", sensitive: true, optional: false },
+                    { step: "WAIT_OTP_SECRET_KEY", prompt: "input_otp_secret_key_optional", sensitive: true, optional: true },
+                    { step: "WAIT_USE_2FA", prompt: "input_use_2fa", sensitive: false, optional: false, choices: [
+                        { value: "yes", label: "已开启 2FA" },
+                        { value: "no", label: "未开启 2FA" }
+                    ] }
+                ];
+                return steps.find(step => step.step === stepName) || null;
+            }),
+            isFinalBindingStep: vi.fn().mockImplementation((stepName) => stepName === "WAIT_PASS" || stepName === "WAIT_MAILBOX_PASSWORD"),
+            isSensitiveBindingStep: vi.fn().mockImplementation((stepName) => /PASS|TOKEN|SECRET|2FA$|OTP|SK/i.test(stepName) && !/USE_2FA/i.test(stepName)),
             handleInput: vi.fn().mockImplementation((step, text, session) => {
                 if (step === "WAIT_EMAIL") {
                     return Promise.resolve({ success: true, nextStep: "WAIT_PASS", data: { email: text }, message: "mega_input_pass" });
@@ -122,6 +138,7 @@ vi.mock("../../src/services/drives/index.js", () => ({
                 config_schema_version: 1
             })),
             getDisplayAccount: vi.fn((config) => config.user || config.bucket || "configured"),
+            getErrorMessage: vi.fn((reason) => reason === "2FA" ? "需要有效的 2FA 验证码" : "未知错误"),
         }),
         getSupportedDrives: vi.fn().mockReturnValue([
             { type: "mega", name: "Mega" },
@@ -163,6 +180,7 @@ describe("DriveConfigFlow", () => {
         mockSessionManager.start.mockResolvedValue();
         mockSessionManager.update.mockResolvedValue();
         mockSessionManager.clear.mockResolvedValue();
+        mockSessionManager.get.mockResolvedValue(null);
         mockBindingService.unbindDrive.mockResolvedValue();
         mockBindingService.setDefaultDrive.mockResolvedValue();
         mockBindingService.startBinding.mockResolvedValue({ success: true, message: "请检查输入" });
@@ -171,6 +189,22 @@ describe("DriveConfigFlow", () => {
             { step: "WAIT_EMAIL", prompt: "mega_input_email" },
             { step: "WAIT_PASS", prompt: "mega_input_pass" }
         ]);
+        mockProvider.getBindingStep.mockImplementation((stepName) => {
+            const steps = [
+                { step: "WAIT_EMAIL", prompt: "mega_input_email", sensitive: false, optional: false },
+                { step: "WAIT_PASS", prompt: "mega_input_pass", sensitive: true, optional: false },
+                { step: "WAIT_TOKEN", prompt: "input_token", sensitive: true, optional: false },
+                { step: "WAIT_OTP_SECRET_KEY", prompt: "input_otp_secret_key_optional", sensitive: true, optional: true },
+                { step: "WAIT_USE_2FA", prompt: "input_use_2fa", sensitive: false, optional: false, choices: [
+                    { value: "yes", label: "已开启 2FA" },
+                    { value: "no", label: "未开启 2FA" }
+                ] }
+            ];
+            return steps.find(step => step.step === stepName) || null;
+        });
+        mockProvider.isFinalBindingStep.mockImplementation((stepName) => stepName === "WAIT_PASS" || stepName === "WAIT_MAILBOX_PASSWORD");
+        mockProvider.isSensitiveBindingStep.mockImplementation((stepName) => /PASS|TOKEN|SECRET|2FA$|OTP|SK/i.test(stepName) && !/USE_2FA/i.test(stepName));
+        mockProvider.getErrorMessage.mockImplementation((reason) => reason === "2FA" ? "需要有效的 2FA 验证码" : "未知错误");
         mockProvider.handleInput.mockImplementation((step, text, session) => {
             if (step === "WAIT_EMAIL") {
                 return Promise.resolve({ success: true, nextStep: "WAIT_PASS", data: { email: text }, message: "mega_input_pass" });
@@ -597,6 +631,88 @@ describe("DriveConfigFlow", () => {
                 message: "⚠️ 您当前未绑定任何网盘，无需解绑。",
                 parseMode: "html"
             });
+        });
+    });
+
+    describe("optional binding UX", () => {
+        test("should render skip button and skip hint for optional steps", async () => {
+            const event = {
+                message: { message: "alice", peerId: "chat123", id: "msg100" }
+            };
+            const session = {
+                current_step: "PROTONDRIVE:WAIT_USERNAME",
+                temp_data: JSON.stringify({})
+            };
+
+            const mockProvider = DriveProviderFactory.create();
+            mockProvider.handleInput.mockResolvedValueOnce({
+                success: true,
+                nextStep: "WAIT_OTP_SECRET_KEY",
+                data: { username: "alice" },
+                message: "input_otp_secret_key_optional"
+            });
+
+            const result = await DriveConfigFlow.handleInput(event, "user456", session);
+            expect(result).toBe(true);
+            expect(mockClient.sendMessage).toHaveBeenCalledWith("chat123", expect.objectContaining({
+                message: expect.stringContaining("跳过"),
+                buttons: expect.any(Array),
+                parseMode: "html"
+            }));
+            const payload = mockClient.sendMessage.mock.calls.at(-1)[1];
+            expect(payload.buttons.flat().map(button => button.data.toString())).toContain("drive_bind_input_skip");
+        });
+
+        test("should accept skip callback as optional empty input", async () => {
+            mockSessionManager.get.mockResolvedValue({
+                current_step: "PROTONDRIVE:WAIT_OTP_SECRET_KEY",
+                temp_data: JSON.stringify({ username: "alice", password: "secret", two_factor_enabled: true, two_factor: "123456" })
+            });
+            const mockProvider = DriveProviderFactory.create();
+            mockProvider.handleInput.mockResolvedValueOnce({
+                success: true,
+                nextStep: "WAIT_MAILBOX_PASSWORD",
+                data: { username: "alice", password: "secret", otp_secret_key: "" },
+                message: "input_mailbox_password_optional"
+            });
+            mockProvider.isFinalBindingStep.mockImplementation((step) => step === "WAIT_MAILBOX_PASSWORD");
+
+            const event = {
+                data: Buffer.from("drive_bind_input_skip"),
+                userId: "user456",
+                msgId: 999
+            };
+
+            const result = await DriveConfigFlow.handleCallback(event, "user456");
+            expect(result).toBe("请查看输入提示");
+            expect(mockProvider.handleInput).toHaveBeenCalledWith(
+                "WAIT_OTP_SECRET_KEY",
+                "skip",
+                expect.objectContaining({ data: expect.any(Object) })
+            );
+        });
+
+        test("should delete sensitive one-time 2FA code messages", async () => {
+            const event = {
+                message: { message: "123456", peerId: "chat123", id: "msg2fa" }
+            };
+            const session = {
+                current_step: "PROTONDRIVE:WAIT_2FA",
+                temp_data: JSON.stringify({ username: "alice", password: "secret", two_factor_enabled: true })
+            };
+            const mockProvider = DriveProviderFactory.create();
+            mockProvider.isFinalBindingStep.mockReturnValue(false);
+            mockProvider.isSensitiveBindingStep.mockReturnValue(true);
+            mockProvider.handleInput.mockResolvedValueOnce({
+                success: true,
+                nextStep: "WAIT_OTP_SECRET_KEY",
+                data: { username: "alice", password: "secret", two_factor: "123456" },
+                message: "input_otp_secret_key_optional"
+            });
+
+            const result = await DriveConfigFlow.handleInput(event, "user456", session);
+            expect(result).toBe(true);
+            expect(mockClient.deleteMessages).toHaveBeenCalledWith("chat123", ["msg2fa"], { revoke: true });
         });
     });
 

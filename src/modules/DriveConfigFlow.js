@@ -14,13 +14,13 @@ import {
     encodeDriveSessionStep,
     parseDriveSessionData
 } from "../domain/drive-session-step.js";
+import { isSensitiveBindingStepName } from "../domain/binding-input.js";
 
 const log = logger.withModule ? logger.withModule('DriveConfigFlow') : logger;
 
 // 网盘国际化字符串缓存
 const driveStringsCache = new Map();
 const CANCEL_KEYWORDS = new Set(["/cancel", "cancel", "/取消", "取消"]);
-const SENSITIVE_BINDING_STEP = /(^|_)(PASS|PASSWORD|TOKEN|SECRET|SK)(_|$)/i;
 const DRIVE_ACTION_LABELS = Object.freeze({
     mega: "🟢 Mega",
     webdav: "🌐 WebDAV",
@@ -61,17 +61,91 @@ export class DriveConfigFlow {
         return driveStrings?.[prompt] || STRINGS.drive?.[prompt] || prompt;
     }
 
-    static _appendCredentialNotice(prompt, stepName) {
+    static _appendCredentialNotice(prompt, stepName, provider = null) {
         const notice = STRINGS.drive.credential_notice;
-        if (!prompt || !notice || !SENSITIVE_BINDING_STEP.test(stepName || '')) {
+        const sensitive = provider && typeof provider.isSensitiveBindingStep === 'function'
+            ? provider.isSensitiveBindingStep(stepName)
+            : isSensitiveBindingStepName(stepName);
+        if (!prompt || !notice || !sensitive) {
             return prompt;
         }
         return prompt.includes(notice) ? prompt : `${prompt}\n\n${notice}`;
     }
 
-    static _buildBindingPrompt(prompt, driveStrings, stepName) {
-        const promptWithNotice = this._appendCredentialNotice(prompt, stepName);
-        return this._appendCancelHint(promptWithNotice, driveStrings);
+    static _buildBindingPrompt(prompt, driveStrings, stepName, provider = null, stepMeta = null) {
+        const promptWithNotice = this._appendCredentialNotice(prompt, stepName, provider);
+        const withSkip = this._appendSkipHint(promptWithNotice, driveStrings, stepMeta);
+        return this._appendCancelHint(withSkip, driveStrings);
+    }
+
+    static _appendSkipHint(prompt, driveStrings, stepMeta) {
+        if (!stepMeta?.optional) return prompt || '';
+        const hint = driveStrings?.skip_prompt || STRINGS.drive.skip_prompt;
+        if (!prompt) return hint || '';
+        if (!hint || prompt.includes(hint)) return prompt;
+        return `${prompt}\n\n${hint}`;
+    }
+
+    static _resolveBindingStep(provider, stepName) {
+        if (provider && typeof provider.getBindingStep === 'function') {
+            return provider.getBindingStep(stepName);
+        }
+        const steps = provider?.getBindingSteps?.() || [];
+        return steps.find(step => step.step === stepName) || null;
+    }
+
+    static _isFinalBindingStep(provider, stepName, session = null) {
+        if (provider && typeof provider.isFinalBindingStep === 'function') {
+            return provider.isFinalBindingStep(stepName, session) === true;
+        }
+        const steps = provider?.getBindingSteps?.() || [];
+        return steps?.[steps.length - 1]?.step === stepName;
+    }
+
+    static _isSensitiveBindingStep(provider, stepName) {
+        if (provider && typeof provider.isSensitiveBindingStep === 'function') {
+            return provider.isSensitiveBindingStep(stepName) === true;
+        }
+        return isSensitiveBindingStepName(stepName);
+    }
+
+    static _buildStepButtons(stepMeta) {
+        const buttons = [];
+        const choices = Array.isArray(stepMeta?.choices) ? stepMeta.choices : [];
+        for (const choice of choices) {
+            if (!choice?.value || !choice?.label) continue;
+            buttons.push([Button.inline(choice.label, Buffer.from(`drive_bind_input_${choice.value}`))]);
+        }
+        if (stepMeta?.optional) {
+            buttons.push([Button.inline(STRINGS.drive.btn_skip || '跳过', Buffer.from('drive_bind_input_skip'))]);
+        }
+        return buttons.length > 0 ? buttons : null;
+    }
+
+    static async _sendBindingPrompt(peerId, userId, {
+        prompt,
+        driveStrings,
+        stepName,
+        provider = null,
+        editMessageId = null
+    }) {
+        const stepMeta = this._resolveBindingStep(provider, stepName);
+        const message = this._buildBindingPrompt(prompt, driveStrings, stepName, provider, stepMeta);
+        const buttons = this._buildStepButtons(stepMeta);
+        const payload = { message, parseMode: 'html' };
+        if (buttons) payload.buttons = buttons;
+
+        if (editMessageId) {
+            await runBotTask(() => client.editMessage(peerId, {
+                message: editMessageId,
+                text: message,
+                buttons: buttons || undefined,
+                parseMode: 'html'
+            }), userId, { priority: PRIORITY.HIGH });
+            return;
+        }
+
+        await runBotTask(() => client.sendMessage(peerId, payload), userId, { priority: PRIORITY.HIGH });
     }
 
     static _getBindingRecoveryButtons() {
@@ -232,17 +306,37 @@ export class DriveConfigFlow {
             return await this._handleDriveTypeSelection(event, userId, { showAll: true });
         }
         
+        if (data.startsWith("drive_bind_input_")) {
+            const value = this._callbackValue(data, "drive_bind_input_");
+            const session = await SessionManager.get(userId);
+            if (!session?.current_step) {
+                return STRINGS.drive.not_found;
+            }
+            const parsedStep = decodeDriveSessionStep(session.current_step, DriveProviderFactory.getSupportedTypes());
+            if (!parsedStep) {
+                return STRINGS.drive.not_found;
+            }
+            await this._processInput(event, userId, session, parsedStep.driveType, parsedStep.step, {
+                textOverride: value === 'skip' ? 'skip' : value,
+                source: 'callback'
+            });
+            return STRINGS.drive.check_input;
+        }
+
         if (data.startsWith("drive_bind_")) {
             const driveType = data.replace("drive_bind_", "");
             const result = await BindingService.startBinding(userId, driveType);
 
             if (result.success) {
-                // 获取国际化文本
                 const driveStrings = await this._getDriveStrings(driveType);
+                const provider = DriveProviderFactory.create(driveType);
                 const prompt = this._resolveDrivePrompt(result.prompt, driveStrings) || STRINGS.drive.check_input;
-                const message = this._buildBindingPrompt(prompt, driveStrings, result.step);
-
-                await runBotTask(() => client.sendMessage(event.userId, { message, parseMode: "html" }), userId, { priority: PRIORITY.HIGH });
+                await this._sendBindingPrompt(event.userId, userId, {
+                    prompt,
+                    driveStrings,
+                    stepName: result.step,
+                    provider
+                });
                 return STRINGS.drive.check_input;
             }
         }
@@ -258,10 +352,7 @@ export class DriveConfigFlow {
      * @returns {Promise<boolean>} 是否拦截了消息
      */
     static async handleInput(event, userId, session) {
-        const text = event.message.message;
         const step = session.current_step;
-        const peerId = event.message.peerId;
-
         if (!step) return false;
 
         const parsedStep = decodeDriveSessionStep(step, DriveProviderFactory.getSupportedTypes());
@@ -273,9 +364,12 @@ export class DriveConfigFlow {
      * 内部处理输入逻辑
      * @private
      */
-    static async _processInput(event, userId, session, driveType, stepName) {
-        const text = event.message.message;
-        const peerId = event.message.peerId;
+    static async _processInput(event, userId, session, driveType, stepName, options = {}) {
+        const source = options.source || 'message';
+        const text = options.textOverride != null
+            ? options.textOverride
+            : event.message?.message;
+        const peerId = event.message?.peerId || event.userId;
 
         if (!DriveProviderFactory.isSupported(driveType)) {
             return false;
@@ -285,10 +379,8 @@ export class DriveConfigFlow {
         const providerSession = { ...session, data: sessionData };
 
         const provider = DriveProviderFactory.create(driveType);
-        const bindingSteps = provider.getBindingSteps();
-        const finalStep = bindingSteps?.[bindingSteps.length - 1]?.step;
-        const isFinalStep = finalStep === stepName;
-        const isSensitiveStep = SENSITIVE_BINDING_STEP.test(stepName || '');
+        const isFinalStep = this._isFinalBindingStep(provider, stepName, providerSession);
+        const isSensitiveStep = this._isSensitiveBindingStep(provider, stepName);
 
         const driveStrings = await this._getDriveStrings(driveType);
 
@@ -301,7 +393,7 @@ export class DriveConfigFlow {
         }
 
         let verifyingMessage = null;
-        if (isSensitiveStep) {
+        if (source === 'message' && isSensitiveStep && event.message?.id) {
             try {
                 await runMtprotoTask(() => client.deleteMessages(peerId, [event.message.id], { revoke: true }), { priority: PRIORITY.HIGH });
             } catch (error) {
@@ -329,14 +421,22 @@ export class DriveConfigFlow {
                 }
 
                 await SessionManager.clear(userId);
-                const targetMessageId = verifyingMessage?.id || event.message.id;
-                const failureMessage = this._buildFailureMessage(driveType, result);
-                await runBotTask(() => client.editMessage(peerId, {
-                    message: targetMessageId,
-                    text: failureMessage,
-                    buttons: this._getBindingRecoveryButtons(),
-                    parseMode: "html"
-                }), userId, { priority: PRIORITY.HIGH });
+                const targetMessageId = verifyingMessage?.id || event.message?.id;
+                const failureMessage = this._buildFailureMessage(driveType, result, provider);
+                if (targetMessageId) {
+                    await runBotTask(() => client.editMessage(peerId, {
+                        message: targetMessageId,
+                        text: failureMessage,
+                        buttons: this._getBindingRecoveryButtons(),
+                        parseMode: "html"
+                    }), userId, { priority: PRIORITY.HIGH });
+                } else {
+                    await runBotTask(() => client.sendMessage(peerId, {
+                        message: failureMessage,
+                        buttons: this._getBindingRecoveryButtons(),
+                        parseMode: "html"
+                    }), userId, { priority: PRIORITY.HIGH });
+                }
                 return true;
             }
 
@@ -344,8 +444,12 @@ export class DriveConfigFlow {
                 await SessionManager.update(userId, encodeDriveSessionStep(driveType, result.nextStep), result.data);
 
                 const prompt = this._resolveDrivePrompt(result.message, driveStrings);
-                const message = this._buildBindingPrompt(prompt, driveStrings, result.nextStep);
-                await runBotTask(() => client.sendMessage(peerId, { message, parseMode: "html" }), userId, { priority: PRIORITY.HIGH });
+                await this._sendBindingPrompt(peerId, userId, {
+                    prompt,
+                    driveStrings,
+                    stepName: result.nextStep,
+                    provider
+                });
                 return true;
             }
 
@@ -359,13 +463,21 @@ export class DriveConfigFlow {
             await SessionManager.clear(userId);
 
             const successMessage = result.message || driveStrings.success || STRINGS.drive.mega_success;
-            const targetMessageId = verifyingMessage?.id || event.message.id;
-            await runBotTask(() => client.editMessage(peerId, {
-                message: targetMessageId,
-                text: successMessage,
-                buttons: this._getBindingSuccessButtons(),
-                parseMode: "html"
-            }), userId, { priority: PRIORITY.HIGH });
+            const targetMessageId = verifyingMessage?.id || event.message?.id || event.msgId;
+            if (targetMessageId) {
+                await runBotTask(() => client.editMessage(peerId, {
+                    message: targetMessageId,
+                    text: successMessage,
+                    buttons: this._getBindingSuccessButtons(),
+                    parseMode: "html"
+                }), userId, { priority: PRIORITY.HIGH });
+            } else {
+                await runBotTask(() => client.sendMessage(peerId, {
+                    message: successMessage,
+                    buttons: this._getBindingSuccessButtons(),
+                    parseMode: "html"
+                }), userId, { priority: PRIORITY.HIGH });
+            }
             return true;
         } catch (error) {
             log.error(`Error handling drive input for ${driveType}:`, error);
@@ -442,15 +554,23 @@ export class DriveConfigFlow {
     /**
      * 构建失败消息 (兼容 legacy zh-CN strings)
      */
-    static _buildFailureMessage(driveType, result) {
-        const legacySuffixes = {
-            '2FA': STRINGS.drive.mega_fail_2fa,
-            'LOGIN_FAILED': STRINGS.drive.mega_fail_login
-        };
+    static _buildFailureMessage(driveType, result, provider = null) {
+        let reason = result?.message || STRINGS.drive.bind_failed;
 
-        const reason = driveType === 'mega' && result.reason
-            ? (legacySuffixes[result.reason] || result.message)
-            : result.message;
+        if ((!result?.message || result.message === STRINGS.drive.bind_failed) && result?.reason) {
+            if (provider && typeof provider.getErrorMessage === 'function') {
+                const providerMessage = provider.getErrorMessage(result.reason);
+                if (providerMessage && providerMessage !== '未知错误') {
+                    reason = providerMessage;
+                }
+            } else if (driveType === 'mega') {
+                const legacySuffixes = {
+                    '2FA': STRINGS.drive.mega_fail_2fa,
+                    'LOGIN_FAILED': STRINGS.drive.mega_fail_login
+                };
+                reason = legacySuffixes[result.reason] || reason;
+            }
+        }
 
         return format(STRINGS.drive.bind_failed_help, {
             reason: reason || STRINGS.drive.bind_failed

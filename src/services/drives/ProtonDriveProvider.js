@@ -2,28 +2,63 @@ import { BaseDriveProvider, BindingStep, ActionResult, ValidationResult } from "
 import { CloudTool } from "../rclone.js";
 import { STRINGS } from "../../locales/drives/protondrive.js";
 import { logger } from "../logger/index.js";
+import {
+    normalizeBindingText,
+    normalizeOptionalBindingInput,
+    parseBooleanInput
+} from "../../domain/binding-input.js";
 
 const log = logger.withModule ? logger.withModule('ProtonDriveProvider') : logger;
 
-const BOOLEAN_TRUE_INPUTS = new Set(["1", "true", "yes", "y", "on", "是", "有"]);
-const BOOLEAN_FALSE_INPUTS = new Set(["0", "false", "no", "n", "off", "否", "无"]);
+const USE_2FA_CHOICES = Object.freeze([
+    { value: 'yes', label: '已开启 2FA' },
+    { value: 'no', label: '未开启 2FA' }
+]);
 
+/**
+ * Proton Drive binding follows a user-facing path, not a raw rclone form dump:
+ * username → password → 2FA yes/no → (code) → optional long-term OTP secret → optional mailbox password.
+ */
 export class ProtonDriveProvider extends BaseDriveProvider {
     constructor() {
         super('protondrive', 'Proton Drive', {
             supportLevel: 'advanced',
-            supportNote: 'Matches the rclone Proton Drive backend: username/password with optional 2FA, optional TOTP secret, and optional mailbox password. Backend is beta upstream.'
+            supportNote: 'Username/password binding with optional one-time 2FA code, optional long-term TOTP secret, and optional mailbox password. Backend is beta upstream.'
         });
     }
 
     getBindingSteps() {
         return [
-            new BindingStep('WAIT_USERNAME', 'input_username', this._validateUsername.bind(this)),
-            new BindingStep('WAIT_PASSWORD', 'input_password'),
-            new BindingStep('WAIT_USE_2FA', 'input_use_2fa', this._validateBoolean.bind(this)),
-            new BindingStep('WAIT_OTP_SECRET_KEY', 'input_otp_secret_key_optional'),
-            new BindingStep('WAIT_MAILBOX_PASSWORD', 'input_mailbox_password_optional')
+            new BindingStep('WAIT_USERNAME', 'input_username', this._validateUsername.bind(this), {
+                sensitive: false
+            }),
+            new BindingStep('WAIT_PASSWORD', 'input_password', null, {
+                sensitive: true
+            }),
+            new BindingStep('WAIT_USE_2FA', 'input_use_2fa', this._validateBoolean.bind(this), {
+                sensitive: false,
+                choices: USE_2FA_CHOICES
+            }),
+            new BindingStep('WAIT_2FA', 'input_2fa_code', null, {
+                sensitive: true
+            }),
+            new BindingStep('WAIT_OTP_SECRET_KEY', 'input_otp_secret_key_optional', null, {
+                optional: true,
+                sensitive: true
+            }),
+            new BindingStep('WAIT_MAILBOX_PASSWORD', 'input_mailbox_password_optional', null, {
+                optional: true,
+                sensitive: true
+            })
         ];
+    }
+
+    getBindingStep(stepName) {
+        return super.getBindingStep(stepName);
+    }
+
+    isFinalBindingStep(stepName) {
+        return stepName === 'WAIT_MAILBOX_PASSWORD';
     }
 
     async handleInput(step, input, session) {
@@ -60,25 +95,38 @@ export class ProtonDriveProvider extends BaseDriveProvider {
     }
 
     async prepareConfigForStorage(configData = {}) {
+        const otpSecretKey = await this._normalizeOptionalSecret(
+            configData.otp_secret_key,
+            configData.otp_secret_key_format
+        );
+        const mailboxPassword = await this._normalizeOptionalSecret(
+            configData.mailbox_password,
+            configData.mailbox_password_format
+        );
+
         return {
-            username: String(configData.username || '').trim(),
+            username: normalizeBindingText(configData.username),
             password: await this._normalizeSecret(configData.password, configData.password_format),
             password_format: 'rclone_obscured',
-            two_factor: configData.two_factor || '',
+            two_factor: normalizeBindingText(configData.two_factor),
             two_factor_enabled: configData.two_factor_enabled === true,
-            otp_secret_key: await this._normalizeOptionalSecret(configData.otp_secret_key, configData.otp_secret_key_format),
-            otp_secret_key_format: configData.otp_secret_key ? 'rclone_obscured' : null,
-            mailbox_password: await this._normalizeOptionalSecret(configData.mailbox_password, configData.mailbox_password_format),
-            mailbox_password_format: configData.mailbox_password ? 'rclone_obscured' : null
+            otp_secret_key: otpSecretKey,
+            otp_secret_key_format: otpSecretKey ? 'rclone_obscured' : null,
+            mailbox_password: mailboxPassword,
+            mailbox_password_format: mailboxPassword ? 'rclone_obscured' : null
         };
     }
 
     async prepareConfigForRuntime(configData = {}) {
         const runtime = {
             ...configData,
-            username: String(configData.username || '').trim(),
-            password: await this._normalizeSecret(configData.password, configData.password_format || 'rclone_obscured'),
-            password_format: 'rclone_obscured'
+            username: normalizeBindingText(configData.username),
+            password: await this._normalizeSecret(
+                configData.password,
+                configData.password_format || 'rclone_obscured'
+            ),
+            password_format: 'rclone_obscured',
+            two_factor: normalizeBindingText(configData.two_factor)
         };
 
         if (runtime.otp_secret_key) {
@@ -113,41 +161,51 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             `password="${password}"`
         ];
 
-        const twoFactor = String(config.two_factor || '').trim();
+        const twoFactor = normalizeBindingText(config.two_factor);
         if (twoFactor) {
             segments.push(`2fa="${this._escapeValue(twoFactor)}"`);
         }
 
-        const otpSecretKey = String(config.otp_secret_key || '').trim();
+        const otpSecretKey = normalizeBindingText(config.otp_secret_key);
         if (otpSecretKey) {
             segments.push(`otp_secret_key="${this._escapeValue(otpSecretKey)}"`);
         }
 
-        const mailboxPassword = String(config.mailbox_password || '').trim();
+        const mailboxPassword = normalizeBindingText(config.mailbox_password);
         if (mailboxPassword) {
             segments.push(`mailbox_password="${this._escapeValue(mailboxPassword)}"`);
         }
 
-        return `:${this.type},${segments.join(',')}:`;
+        return `:protondrive,${segments.join(',')}:`;
     }
 
     getDisplayAccount(config = {}) {
         return config.username || 'protondrive';
     }
 
+    getErrorMessage(errorType) {
+        const errorMessages = {
+            '2FA': STRINGS.fail_2fa,
+            'LOGIN_FAILED': STRINGS.fail_login,
+            'NETWORK_ERROR': STRINGS.fail_network,
+            'UNKNOWN': STRINGS.fail_unknown
+        };
+        return errorMessages[errorType] || errorMessages.UNKNOWN;
+    }
+
     _validateUsername(username) {
-        if (!String(username || '').trim()) {
+        if (!normalizeBindingText(username)) {
             return { valid: false, message: STRINGS.username_invalid };
         }
         return { valid: true };
     }
 
     _validateBoolean(input) {
-        const normalized = String(input || '').trim().toLowerCase();
-        if (BOOLEAN_TRUE_INPUTS.has(normalized) || BOOLEAN_FALSE_INPUTS.has(normalized)) {
-            return { valid: true };
+        const parsed = parseBooleanInput(input);
+        if (!parsed.valid) {
+            return { valid: false, message: STRINGS.use_2fa_invalid };
         }
-        return { valid: false, message: STRINGS.use_2fa_invalid };
+        return { valid: true };
     }
 
     _handleUsernameInput(input) {
@@ -156,12 +214,12 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             return new ActionResult(false, validation.message);
         }
         return new ActionResult(true, STRINGS.input_password, 'WAIT_PASSWORD', {
-            username: String(input).trim()
+            username: normalizeBindingText(input)
         });
     }
 
     _handlePasswordInput(input, session) {
-        const password = String(input || '').trim();
+        const password = normalizeBindingText(input);
         if (!password) {
             return new ActionResult(false, STRINGS.password_invalid);
         }
@@ -172,15 +230,12 @@ export class ProtonDriveProvider extends BaseDriveProvider {
     }
 
     _handleUse2faInput(input, session) {
-        const validation = this._validateBoolean(input);
-        if (!validation.valid) {
-            return new ActionResult(false, validation.message);
+        const parsed = parseBooleanInput(input);
+        if (!parsed.valid) {
+            return new ActionResult(false, STRINGS.use_2fa_invalid);
         }
 
-        const normalized = String(input || '').trim().toLowerCase();
-        const twoFactorEnabled = BOOLEAN_TRUE_INPUTS.has(normalized);
-
-        if (!twoFactorEnabled) {
+        if (!parsed.value) {
             return new ActionResult(true, STRINGS.input_mailbox_password_optional, 'WAIT_MAILBOX_PASSWORD', {
                 ...session.data,
                 two_factor_enabled: false,
@@ -189,34 +244,31 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             });
         }
 
-        return new ActionResult(true, STRINGS.input_otp_secret_key_optional, 'WAIT_OTP_SECRET_KEY', {
+        return new ActionResult(true, STRINGS.input_2fa_code, 'WAIT_2FA', {
             ...session.data,
             two_factor_enabled: true,
-            two_factor: ''
+            two_factor: '',
+            otp_secret_key: ''
         });
     }
 
     _handle2faInput(input, session) {
-        const twoFactor = String(input || '').trim();
+        const twoFactor = normalizeBindingText(input);
         if (session.data?.two_factor_enabled && !twoFactor) {
             return new ActionResult(false, STRINGS.use_2fa_required);
         }
-        return new ActionResult(true, STRINGS.input_mailbox_password_optional, 'WAIT_MAILBOX_PASSWORD', {
+        if (twoFactor && !/^\d{6}$/.test(twoFactor)) {
+            return new ActionResult(false, STRINGS.two_factor_invalid);
+        }
+
+        return new ActionResult(true, STRINGS.input_otp_secret_key_optional, 'WAIT_OTP_SECRET_KEY', {
             ...session.data,
             two_factor: twoFactor
         });
     }
 
     _handleOtpSecretInput(input, session) {
-        const otpSecretKey = String(input || '').trim();
-
-        if (!otpSecretKey && session.data?.two_factor_enabled) {
-            return new ActionResult(true, STRINGS.input_2fa_optional, 'WAIT_2FA', {
-                ...session.data,
-                otp_secret_key: ''
-            });
-        }
-
+        const otpSecretKey = normalizeOptionalBindingInput(input);
         return new ActionResult(true, STRINGS.input_mailbox_password_optional, 'WAIT_MAILBOX_PASSWORD', {
             ...session.data,
             otp_secret_key: otpSecretKey
@@ -226,19 +278,46 @@ export class ProtonDriveProvider extends BaseDriveProvider {
     async _handleMailboxPasswordInput(input, session) {
         const configData = {
             ...session.data,
-            mailbox_password: String(input || '').trim()
+            mailbox_password: normalizeOptionalBindingInput(input)
         };
 
         if (!configData.username || !configData.password) {
             return new ActionResult(false, STRINGS.username_invalid);
         }
 
-        const validation = await this.validateConfig(configData);
-        if (!validation.success) {
-            return new ActionResult(false, STRINGS.fail_login + "\n" + (validation.details || ""), null, null, validation.reason);
+        if (configData.two_factor_enabled && !configData.two_factor && !configData.otp_secret_key) {
+            return new ActionResult(false, STRINGS.use_2fa_required);
         }
 
-        return new ActionResult(true, STRINGS.success.replace('{{username}}', configData.username), null, configData);
+        const validation = await this.validateConfig(configData);
+        if (!validation.success) {
+            return new ActionResult(
+                false,
+                this._formatValidationMessage(validation),
+                null,
+                null,
+                validation.reason
+            );
+        }
+
+        return new ActionResult(
+            true,
+            STRINGS.success.replace('{{username}}', configData.username),
+            null,
+            configData
+        );
+    }
+
+    _formatValidationMessage(validation) {
+        if (validation.reason === '2FA') {
+            return this.getErrorMessage('2FA');
+        }
+
+        const details = normalizeBindingText(validation.details);
+        if (details) {
+            return `${STRINGS.fail_login}\n${details}`;
+        }
+        return STRINGS.fail_login;
     }
 
     async _normalizeSecret(secret, format) {
@@ -246,7 +325,7 @@ export class ProtonDriveProvider extends BaseDriveProvider {
     }
 
     async _normalizeOptionalSecret(secret, format) {
-        const value = String(secret || '').trim();
+        const value = normalizeBindingText(secret);
         if (!value) return '';
         return await this._normalizeSecret(value, format || 'plain');
     }
