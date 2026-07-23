@@ -95,8 +95,26 @@ export class ProtonDriveProvider extends BaseDriveProvider {
     async validateConfig(configData) {
         try {
             const runtimeConfig = await this.prepareConfigForRuntime(configData);
+            log.info('Proton bind validation materials', {
+                username: runtimeConfig.username,
+                hasPassword: Boolean(runtimeConfig.password),
+                passwordFormat: runtimeConfig.password_format,
+                twoFactorEnabled: configData.two_factor_enabled === true,
+                hasOneTime2fa: Boolean(runtimeConfig.two_factor),
+                allowOneTime2fa: runtimeConfig.allow_one_time_2fa === true,
+                hasOtpSecret: Boolean(runtimeConfig.otp_secret_key),
+                hasMailboxPassword: Boolean(runtimeConfig.mailbox_password),
+                hasSession: this._hasReusableSession(runtimeConfig)
+            });
             const result = await CloudTool.validateConfigWithWritableSession(this.type, runtimeConfig);
             if (!result.success) {
+                log.warn('Proton bind validation failed', {
+                    reason: result.reason,
+                    details: result.details,
+                    hasOneTime2fa: Boolean(runtimeConfig.two_factor),
+                    allowOneTime2fa: runtimeConfig.allow_one_time_2fa === true,
+                    remoteConfigKeys: Object.keys(result.remoteConfig || {})
+                });
                 return new ValidationResult(false, result.reason, result.details);
             }
 
