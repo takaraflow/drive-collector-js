@@ -106,7 +106,7 @@ export class ProtonDriveProvider extends BaseDriveProvider {
 
         return {
             username: normalizeBindingText(configData.username),
-            password: await this._normalizeSecret(configData.password, configData.password_format),
+            password: await this._normalizeSecret(configData.password, configData.password_format || 'plain'),
             password_format: 'rclone_obscured',
             two_factor: normalizeBindingText(configData.two_factor),
             two_factor_enabled: configData.two_factor_enabled === true,
@@ -118,13 +118,14 @@ export class ProtonDriveProvider extends BaseDriveProvider {
     }
 
     async prepareConfigForRuntime(configData = {}) {
+        // Binding-time credentials are plain. Only persisted configs carry *_format=rclone_obscured.
+        // Defaulting missing format to rclone_obscured would skip obscure and make rclone try to
+        // decrypt a plain password ("illegal base64 data at input byte ...").
+        const passwordFormat = configData.password_format || 'plain';
         const runtime = {
             ...configData,
             username: normalizeBindingText(configData.username),
-            password: await this._normalizeSecret(
-                configData.password,
-                configData.password_format || 'rclone_obscured'
-            ),
+            password: await this._normalizeSecret(configData.password, passwordFormat),
             password_format: 'rclone_obscured',
             two_factor: normalizeBindingText(configData.two_factor)
         };
@@ -132,7 +133,7 @@ export class ProtonDriveProvider extends BaseDriveProvider {
         if (runtime.otp_secret_key) {
             runtime.otp_secret_key = await this._normalizeSecret(
                 runtime.otp_secret_key,
-                runtime.otp_secret_key_format || 'rclone_obscured'
+                runtime.otp_secret_key_format || 'plain'
             );
             runtime.otp_secret_key_format = 'rclone_obscured';
         }
@@ -140,7 +141,7 @@ export class ProtonDriveProvider extends BaseDriveProvider {
         if (runtime.mailbox_password) {
             runtime.mailbox_password = await this._normalizeSecret(
                 runtime.mailbox_password,
-                runtime.mailbox_password_format || 'rclone_obscured'
+                runtime.mailbox_password_format || 'plain'
             );
             runtime.mailbox_password_format = 'rclone_obscured';
         }

@@ -9,7 +9,10 @@ vi.mock('../../../src/services/logger/index.js', () => ({
 vi.mock('../../../src/services/rclone.js', () => ({
     CloudTool: {
         validateConfig: vi.fn(),
-        normalizePasswordForRclone: vi.fn((value) => `obs_${value}`)
+        normalizePasswordForRclone: vi.fn((value, options = {}) => {
+            if (options.format === 'rclone_obscured') return value;
+            return `obs_${value}`;
+        })
     }
 }));
 
@@ -192,4 +195,49 @@ describe('ProtonDriveProvider', () => {
         expect(provider.getErrorMessage('2FA')).toContain('2FA');
         expect(provider.getErrorMessage('2FA')).not.toContain('暂不支持');
     });
+    test('should obscure plain credentials during binding-time runtime prep', async () => {
+        const runtime = await provider.prepareConfigForRuntime({
+            username: 'alice',
+            password: 'plain-pass',
+            two_factor: '123456',
+            otp_secret_key: 'otp-plain',
+            mailbox_password: 'mail-plain'
+        });
+
+        expect(runtime).toMatchObject({
+            username: 'alice',
+            password: 'obs_plain-pass',
+            password_format: 'rclone_obscured',
+            two_factor: '123456',
+            otp_secret_key: 'obs_otp-plain',
+            otp_secret_key_format: 'rclone_obscured',
+            mailbox_password: 'obs_mail-plain',
+            mailbox_password_format: 'rclone_obscured'
+        });
+
+        const { CloudTool } = await import('../../../src/services/rclone.js');
+        expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('plain-pass', { format: 'plain' });
+        expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('otp-plain', { format: 'plain' });
+        expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('mail-plain', { format: 'plain' });
+    });
+
+    test('should not re-obscure already persisted rclone_obscured secrets', async () => {
+        const runtime = await provider.prepareConfigForRuntime({
+            username: 'alice',
+            password: 'obs_stored',
+            password_format: 'rclone_obscured',
+            otp_secret_key: 'obs_otp',
+            otp_secret_key_format: 'rclone_obscured',
+            mailbox_password: 'obs_mail',
+            mailbox_password_format: 'rclone_obscured'
+        });
+
+        expect(runtime.password).toBe('obs_stored');
+        expect(runtime.otp_secret_key).toBe('obs_otp');
+        expect(runtime.mailbox_password).toBe('obs_mail');
+
+        const { CloudTool } = await import('../../../src/services/rclone.js');
+        expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('obs_stored', { format: 'rclone_obscured' });
+    });
+
 });
