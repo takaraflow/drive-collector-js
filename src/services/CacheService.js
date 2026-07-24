@@ -943,21 +943,32 @@ class CacheService {
 
         const startTime = Date.now();
 
-        // Process in batches to avoid overwhelming the system
-        const batchSize = 3;
-        for (let i = 0; i < keys.length; i += batchSize) {
-            const batch = keys.slice(i, i + batchSize);
-            const batchPromises = batch.map(keyConfig => this._preheatKey(keyConfig));
-            const batchResults = await Promise.allSettled(batchPromises);
-            
-            batchResults.forEach(result => {
-                if (result.status === 'fulfilled' && result.value) {
-                    results.success++;
-                } else {
+        // ⚡ Bolt Optimization: Replaced chunked array.slice() + Promise.allSettled() with a continuous native async worker pool.
+        // Expected impact: Eliminates head-of-line blocking where fast tasks wait for slow tasks in the same batch, and reduces memory overhead from closures, maximizing throughput.
+        const concurrency = 3;
+        let currentIndex = 0;
+
+        const worker = async () => {
+            while (currentIndex < keys.length) {
+                const index = currentIndex++;
+                try {
+                    const success = await this._preheatKey(keys[index]);
+                    if (success) {
+                        results.success++;
+                    } else {
+                        results.failed++;
+                    }
+                } catch (e) {
                     results.failed++;
                 }
-            });
+            }
+        };
+
+        const workers = [];
+        for (let i = 0; i < Math.min(concurrency, keys.length); i++) {
+            workers.push(worker());
         }
+        await Promise.all(workers);
 
         results.totalTime = Date.now() - startTime;
         log.info(`Preheat completed: ${results.success} succeeded, ${results.failed} failed in ${results.totalTime}ms`);
