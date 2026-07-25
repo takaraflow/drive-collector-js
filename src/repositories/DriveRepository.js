@@ -378,10 +378,34 @@ export class DriveRepository {
                 }
             }
 
+            // Performance Optimization: Use a bounded native async worker pool (concurrency limit 5)
+            // to fetch active drives in parallel. This eliminates the N+1 sequential blocking
+            // while preventing connection pool exhaustion and avoiding excessive closure memory overhead.
+            const length = activeIds.length;
+            const results = new Array(length);
+            let hasError = false;
+            let currentIndex = 0;
+
+            const worker = async () => {
+                while (currentIndex < length && !hasError) {
+                    const idx = currentIndex++;
+                    try {
+                        const drive = await this.findById(activeIds[idx]);
+                        results[idx] = drive;
+                    } catch (err) {
+                        hasError = true;
+                        throw err;
+                    }
+                }
+            };
+
+            const concurrency = Math.min(5, length);
+            const workers = Array.from({ length: concurrency }, worker);
+            await Promise.all(workers);
+
             const drives = [];
-            for (const id of activeIds) {
-                const drive = await this.findById(id);
-                if (drive) drives.push(drive);
+            for (let i = 0; i < length; i++) {
+                if (results[i]) drives.push(results[i]);
             }
             return drives;
         } catch (e) {
