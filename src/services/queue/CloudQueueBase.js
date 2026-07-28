@@ -161,25 +161,34 @@ export default class CloudQueueBase extends BaseQueue {
      * @returns {Promise<Array>} - 执行结果
      */
     async _executeBatch(tasks, concurrency = 5, singleTaskFn, loggerPrefix = '[CloudQueue]') {
-        const results = [];
-        
-        for (let i = 0; i < tasks.length; i += concurrency) {
-            const batch = tasks.slice(i, i + concurrency);
-            const batchResults = await Promise.allSettled(
-                batch.map(async (task) => {
-                    return this._executeWithRetry(async () => {
+        const results = new Array(tasks.length);
+        let currentIndex = 0;
+
+        // ⚡ Bolt Optimization: Use a native async worker pool instead of array slice + map with Promise.allSettled
+        // This avoids memory overhead from thousands of closures, eliminates head-of-line blocking from chunked execution, and preserves complete-all semantics.
+        const worker = async () => {
+            while (currentIndex < tasks.length) {
+                const index = currentIndex++;
+                const task = tasks[index];
+
+                try {
+                    const value = await this._executeWithRetry(async () => {
                         return await singleTaskFn(task);
                     }, 3, loggerPrefix);
-                })
-            );
-            results.push(...batchResults);
-            
-            // 批次间添加小延迟，避免突发流量
-            if (i + concurrency < tasks.length) {
-                await new Promise(resolve => setTimeout(resolve, 10));
+                    results[index] = { status: 'fulfilled', value };
+                } catch (reason) {
+                    results[index] = { status: 'rejected', reason };
+                }
             }
+        };
+
+        const workers = [];
+        const actualConcurrency = Math.min(concurrency, tasks.length);
+        for (let i = 0; i < actualConcurrency; i++) {
+            workers.push(worker());
         }
-        
+
+        await Promise.all(workers);
         return results;
     }
 
