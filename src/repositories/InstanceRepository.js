@@ -57,14 +57,38 @@ export class InstanceRepository {
     static async findAll(options = {}) {
         try {
             const keys = await cache.listKeys(this.PREFIX);
-            const instances = [];
             const readOptions = this._readOptions(options);
-            for (const key of keys) {
-                const data = await cache.get(key, "json", readOptions);
-                if (data) {
-                    instances.push(data);
+
+            // ⚡ Bolt Optimization: Replace sequential N+1 cache lookups with bounded native async worker pool.
+            // This eliminates head-of-line blocking and sequential I/O wait overhead,
+            // while preventing connection exhaustion via bounded concurrency.
+            const results = new Array(keys.length);
+            let currentIndex = 0;
+            let hasError = false;
+            const concurrencyLimit = 5;
+
+            const worker = async () => {
+                while (currentIndex < keys.length && !hasError) {
+                    const index = currentIndex++;
+                    try {
+                        results[index] = await cache.get(keys[index], "json", readOptions);
+                    } catch (error) {
+                        hasError = true;
+                        throw error;
+                    }
+                }
+            };
+
+            const workers = Array.from({ length: Math.min(concurrencyLimit, keys.length) }, worker);
+            await Promise.all(workers);
+
+            const instances = [];
+            for (let i = 0; i < results.length; i++) {
+                if (results[i]) {
+                    instances.push(results[i]);
                 }
             }
+
             return instances;
         } catch (e) {
             log.error("InstanceRepository.findAll failed:", e);
