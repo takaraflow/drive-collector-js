@@ -15,3 +15,7 @@
 ## 2026-07-08 - Optimize sequential cache lookups with bounded native async worker pool
 **Learning:** Sequential `for...of` loops over arrays for cache lookups (like in `DistributedLock.cleanupExpiredLocks` and `getStats`) introduce severe N+1 I/O wait performance bottlenecks. Conversely, using unbounded `Promise.all()` risks exhausting connection pools and causing high memory allocations.
 **Action:** Replace sequential N+1 lookups with concurrent operations using a bounded native async worker pool (e.g., concurrency limit 5). Always include a shared cancellation flag (`let hasError = false;`) evaluated in the worker's loop condition to stop background processing and preserve fail-fast error semantics if a worker throws.
+
+## 2026-08-03 - Rejected micro-optimization for worker pools on small collections
+**Learning:** Hand-written worker-pools or Promise.all replacements on small collections (like active drives, small batches) without benchmarks are low-value speculative optimizations. They duplicate boilerplate, break architectural consistency, and may unintentionally alter fault-tolerance semantics or remove deliberate rate limits.
+**Action:** Only propose concurrency optimizations for actual measured hotspots (with benchmarks), and extract any worker-pool logic into a shared helper function instead of inlining boilerplate in individual modules.
