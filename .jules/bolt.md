@@ -15,3 +15,7 @@
 ## 2026-06-21 - [DriveRepository N+1 Cache/D1 Lookup Bottleneck]
 **Learning:** In `DriveRepository.findAll()`, iterating over `activeIds` with a `for...of` loop and sequentially calling `await this.findById(id)` creates an N+1 query bottleneck against the cache (and potentially the D1 database on misses). This drastically degrades performance when there are many active drives.
 **Action:** Use `Promise.all(array.map(...))` to fetch independent entities concurrently instead of looping sequentially, maximizing concurrent throughput while preserving the read-through cache benefits.
+
+## 2026-08-03 - [Refusal of Speculative Micro-Optimizations]
+**Learning:** Replacing sequential loops with `Promise.all` on small datasets (like active drives) without benchmarks is considered low-value and speculative. It can violate architectural consistency, alter intentional rate-limiting/fault-tolerance semantics, and the meaningful D1 N+1 issues are better solved via `d1.batch`.
+**Action:** Do not submit concurrency micro-optimizations (like converting small loops to `Promise.all`) without a proven benchmark, a shared concurrency helper, and verifying it doesn't break rate limits.
