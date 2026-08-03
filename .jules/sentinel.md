@@ -11,3 +11,8 @@
 **Vulnerability:** A `log.error` statement was outputting the first 5 characters of a sensitive token (`this.token?.substring(0, 5)`) upon authentication failure.
 **Learning:** Logging partial tokens is unsafe. Even truncated pieces of secrets can provide valuable clues for an attacker during a brute-force attack or when attempting to identify compromised credentials among various leaks. Information exposure through logs breaks the "defense in depth" principle and increases risk.
 **Prevention:** Never log substrings or snippets of API keys, passwords, or authentication tokens. Instead, only log non-sensitive metadata, such as token length or presence/absence indicators, to provide debugging context without leaking the actual secret.
+
+## 2026-06-07 - Verify Attack Surface Before Over-Engineering Tokens
+**Vulnerability:** Assumed `finalizeToken` using `Math.random()` in `StreamTransferService` was a security vulnerability due to predictability.
+**Learning:** The `finalizeToken` is strictly a process-internal idempotency guard (comparing local state to local state) and is never exposed externally, nor is it used as an authentication credential. Its predictability presents zero actual attack surface. Treating it as a security vulnerability is technically incorrect, although replacing it with `crypto.randomUUID()` is good code hygiene.
+**Prevention:** Before labeling predictable identifiers as security vulnerabilities, explicitly trace their lifecycle and exposure boundaries to confirm a valid attack vector exists.
