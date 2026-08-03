@@ -898,32 +898,9 @@ class CacheService {
             const keys = await this.listKeys();
             const matchingKeys = keys.filter(k => this._matchPattern(k, pattern));
             
-            // ⚡ Bolt Optimization: Use bounded async worker pool instead of unbounded array.map and Promise.all
-            // Prevents connection pool exhaustion on large deletes and reduces memory footprint
-            const concurrencyLimit = 5;
-            let currentIndex = 0;
-            let hasError = false;
-            let firstError = null;
-
-            const worker = async () => {
-                while (currentIndex < matchingKeys.length && !hasError) {
-                    const index = currentIndex++;
-                    const key = matchingKeys[index];
-                    try {
-                        await this.delete(key);
-                    } catch (error) {
-                        hasError = true;
-                        firstError = error;
-                    }
-                }
-            };
-
-            const workers = Array.from({ length: Math.min(concurrencyLimit, matchingKeys.length) }, worker);
-            await Promise.all(workers);
-
-            if (hasError) {
-                throw firstError;
-            }
+            // Delete matching keys
+            const deletePromises = matchingKeys.map(key => this.delete(key));
+            await Promise.all(deletePromises);
 
             log.info(`Deleted ${matchingKeys.length} keys matching pattern: ${pattern}`);
             return matchingKeys.length;
