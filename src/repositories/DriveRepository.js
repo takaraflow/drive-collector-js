@@ -378,10 +378,12 @@ export class DriveRepository {
                 }
             }
 
-            // ⚡ Bolt: concurrent fetch optimization. Execution time reduction from O(N) to O(1)
-            // relative to database/cache round-trip delays, preventing N+1 I/O wait bottlenecks.
-            const drives = await Promise.all(activeIds.map(id => this.findById(id)));
-            return drives.filter(Boolean);
+            const drives = [];
+            for (const id of activeIds) {
+                const drive = await this.findById(id);
+                if (drive) drives.push(drive);
+            }
+            return drives;
         } catch (e) {
             log.error("DriveRepository.findAll error:", e);
             return [];
