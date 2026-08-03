@@ -943,29 +943,21 @@ class CacheService {
 
         const startTime = Date.now();
 
-        // ⚡ Bolt Optimization: Use continuous native async worker pool to prevent head-of-line blocking
-        // and reduce memory overhead from chunked arrays/closures. Preserves complete-all semantics.
-        let currentIndex = 0;
-        const workerCount = Math.min(3, keys.length);
+        // Process in batches to avoid overwhelming the system
+        const batchSize = 3;
+        for (let i = 0; i < keys.length; i += batchSize) {
+            const batch = keys.slice(i, i + batchSize);
+            const batchPromises = batch.map(keyConfig => this._preheatKey(keyConfig));
+            const batchResults = await Promise.allSettled(batchPromises);
 
-        const worker = async () => {
-            while (currentIndex < keys.length) {
-                const index = currentIndex++;
-                try {
-                    const result = await this._preheatKey(keys[index]);
-                    if (result) {
-                        results.success++;
-                    } else {
-                        results.failed++;
-                    }
-                } catch (error) {
+            batchResults.forEach(result => {
+                if (result.status === 'fulfilled' && result.value) {
+                    results.success++;
+                } else {
                     results.failed++;
                 }
-            }
-        };
-
-        const workers = Array.from({ length: workerCount }, worker);
-        await Promise.all(workers);
+            });
+        }
 
         results.totalTime = Date.now() - startTime;
         log.info(`Preheat completed: ${results.success} succeeded, ${results.failed} failed in ${results.totalTime}ms`);
