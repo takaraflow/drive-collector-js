@@ -25,8 +25,8 @@ export const STRINGS = {
         maintenance_alert: "🚧 系统维护中",
         welcome: "👋 <b>欢迎使用云转存助手</b>\n\n直接发送文件、图片、视频或支持的链接，我会转存到你的网盘。",
         unknown_input: "🤔 <b>没有识别这个操作</b>\n\n你可以直接发送文件或链接，或使用下面的常用操作。",
-        btn_bind_drive: "绑定网盘",
-        btn_help: "帮助",
+        btn_bind_drive: "➕ 绑定网盘",
+        btn_help: "❓ 帮助",
         unknown_error: "❌ 发生未知错误，请稍后重试。",
         // 🆕 新增
         node_service_active: "Node Service Active",
@@ -122,8 +122,8 @@ export const STRINGS = {
         unbind_confirm: "⚠️ <b>确认解绑这个网盘？</b>\n\n网盘：<code>{{type}}</code>\n账号：<code>{{account}}</code>\n\n解绑后不能继续转存到这个网盘，已转存文件不会从云端删除。",
         unbind_all_confirm: "⚠️ <b>确认解绑所有网盘？</b>\n\n解绑后需要重新绑定网盘才能继续转存，已转存文件不会从云端删除。",
         unbind_success: "✅ <b>解绑成功</b>\n\n您的账号信息已从本系统中移除。",
-        no_drive_unbind: "⚠️ 您当前未绑定任何网盘，无需解绑。\n\n您可以发送 /drive 命令来绑定新的网盘。",
-        no_drive_found: "🚫 <b>还没有绑定网盘</b>\n\n请先绑定网盘，然后再发送文件或链接。",
+        no_drive_unbind: "⚠️ <b>未绑定网盘</b>\n\n您当前未绑定任何网盘，无需解绑。\n\n您可以发送 /drive 命令或点击下方按钮绑定新的网盘。",
+        no_drive_found: "🚫 <b>尚未绑定网盘</b>\n\n请先绑定网盘，然后再发送文件或链接以进行转存。",
         
         // 绑定流程
         mega_input_email: "📧 <b>请输入您的 Mega 登录邮箱</b>：",
@@ -169,8 +169,8 @@ export const STRINGS = {
         refresh_success: "刷新成功",
         // 🆕 新增
         directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
-        dir_empty: "ℹ️ 目录为空。您可以直接发送文件给我，将其转存到此目录。",
-        batch_empty: "ℹ️ 尚无文件排队或加载中。您可以直接向我发送文件或链接来开始转存。",
+        dir_empty: "📭 <b>目录为空</b>\n\n您可以直接向我发送文件或链接，它们将自动转存到此目录。",
+        batch_empty: "✅ <b>当前无排队文件</b>\n\n您可以直接向我发送文件或链接来开始转存。",
         page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 个文件</i>",
         btn_home: "首页",
         btn_prev: "上一页",
@@ -191,8 +191,8 @@ export const STRINGS = {
         current_file: "📄 当前任务: <code>{{name}}</code>",
         active_tasks: "⚡ 活跃任务",
         user_history: "👤 您的任务历史",
-        no_tasks: "尚无任务记录。请直接向我发送文件、图片或链接来开始转存。",
-        no_active_tasks: "✅ 当前没有排队或处理中任务。请直接向我发送文件或链接来开始转存。",
+        no_tasks: "📭 <b>尚无任务记录</b>\n\n您可以直接向我发送文件、图片或链接来开始转存。",
+        no_active_tasks: "✅ <b>当前无活跃任务</b>\n\n没有排队或处理中的任务。您可以直接向我发送文件或链接来开始转存。",
         task_item: "{{index}}. {{status}} <code>{{name}}</code> ({{statusText}})",
         active_action_hint: "可直接取消当前仍在排队或处理的任务。",
         failed_action_hint: "最近有失败任务，可从这里重新排队。",
@@ -252,8 +252,8 @@ export const STRINGS = {
         task_row: "<code>{{index}}.</code> {{statusIcon}} <code>{{name}}</code> | 👤 <code>{{user}}</code> | {{time}}",
         user_dist: "👥 <b>用户活跃分布</b> (Top 5)",
         user_row: "<code>{{index}}.</code> 👤 <code>{{userId}}</code> — {{count}} 个任务",
-        no_active: "✅ 当前无活跃任务。请发送文件或链接来创建新任务。",
-        no_data: "📭 暂无任务记录。快发送文件或链接开始您的第一次转存吧！",
+        no_active: "✅ <b>当前无活跃任务</b>\n\n您可以发送文件或链接来创建新任务。",
+        no_data: "📭 <b>暂无任务记录</b>\n\n您可以发送文件或链接开始您的第一次转存。",
         error: "❌ <b>暂时无法查询任务队列</b>\n\n请重新加载；如果连续失败，请查看系统诊断。",
         status_labels: {
             queued: "🕒 排队中",
@@ -272,7 +272,7 @@ export const STRINGS = {
         btn_back: "返回",
         btn_refresh: "刷新",
         btn_retry_failed_page: "重试本页失败任务",
-        no_tasks_in_status: "📭 该状态下暂无任务。您可以发送文件或链接来创建新任务。",
+        no_tasks_in_status: "📭 <b>该状态下暂无任务</b>\n\n您可以发送文件或链接来创建新任务。",
     },
 
     // --- 管理员用户列表 ---
@@ -280,7 +280,7 @@ export const STRINGS = {
         title: "👥 <b>用户列表</b>",
         loading: "🔍 正在查询用户列表...",
         error: "❌ <b>暂时无法查询用户列表</b>\n\n请重新加载；如果连续失败，请查看系统诊断。",
-        empty: "当前没有可显示的用户。\n用户绑定网盘、提交任务或被设置角色后，会出现在这里。",
+        empty: "📭 <b>当前没有可显示的用户</b>\n\n用户绑定网盘、提交任务或被设置角色后，会出现在这里。\n\n💡 <b>提示:</b> 您可以发送 /drive 命令自己绑定网盘以作为第一个用户。",
         summary: "共 {{total}} 位用户 · 活跃 {{active}} · 管理 {{admins}} · 封禁 {{banned}}",
         filter_line: "筛选: {{filter}} · 第 {{current}}/{{totalPages}} 页",
         user_row: "<code>{{index}}.</code> {{roleIcon}} <code>{{userId}}</code> · {{role}}",
