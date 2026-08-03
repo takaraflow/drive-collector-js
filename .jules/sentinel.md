@@ -12,7 +12,8 @@
 **Learning:** Logging partial tokens is unsafe. Even truncated pieces of secrets can provide valuable clues for an attacker during a brute-force attack or when attempting to identify compromised credentials among various leaks. Information exposure through logs breaks the "defense in depth" principle and increases risk.
 **Prevention:** Never log substrings or snippets of API keys, passwords, or authentication tokens. Instead, only log non-sensitive metadata, such as token length or presence/absence indicators, to provide debugging context without leaking the actual secret.
 
-## 2026-06-10 - Prevent Predictable ID Generation in Shutdown Hooks
-**Vulnerability:** Used insecure `Math.random()` to generate the unique ID for shutdown hooks in `EnhancedGracefulShutdown.js`.
-**Learning:** `Math.random()` is not cryptographically secure, meaning generated identifiers are predictable. This can lead to identifier collisions or allow attackers to guess hook IDs in concurrent environments.
-**Prevention:** Always use cryptographically secure PRNGs such as `crypto.randomUUID()` imported from `node:crypto` to generate identifiers.
+
+## 2026-08-03 - Rejected: Math.random for Internal Identifiers
+**Vulnerability:** Initially thought `Math.random()` for generating shutdown hook IDs was a vulnerability.
+**Learning:** The hook ID is purely an internal process identifier (`name-timestamp-random`). It is not exposed externally, nor is it used for authentication or authorization. Replacing it with a CSPRNG (like `crypto.randomUUID()`) provides no actual security benefit and only adds unnecessary noise to the codebase.
+**Prevention:** When evaluating the security of random number generation, consider the context and scope of the identifier. If it is strictly internal and has no security implications, `Math.random()` may be acceptable. Avoid 'security theater' changes.
