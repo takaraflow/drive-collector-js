@@ -12,7 +12,6 @@
 
 import { logger } from "./logger/index.js";
 import { serializeErrorLike } from "../utils/serializer.js";
-import crypto from "node:crypto";
 
 const log = logger.withModule ? logger.withModule('EnhancedGracefulShutdown') : logger;
 
@@ -80,7 +79,7 @@ class EnhancedGracefulShutdown {
             dependencies,
             requiresCleanup,
             resourceType,
-            id: `${name}-${Date.now()}-${crypto.randomUUID()}`,
+            id: `${name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             state: 'registered', // registered, running, completed, failed, timeout
             startTime: null,
             endTime: null,
