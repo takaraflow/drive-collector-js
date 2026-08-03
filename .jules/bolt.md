@@ -14,3 +14,7 @@
 ## 2026-06-12 - Prevent N+1 I/O wait bottlenecks with concurrent fetching
 **Learning:** Repositories implementing `findAll` logic using a sequential `for...of` loop with `await` for each item (read-through cache strategy) cause severe N+1 I/O wait bottlenecks.
 **Action:** Prevent these bottlenecks by fetching each object concurrently via `Promise.all(ids.map(...))`, while filtering out any null results with `.filter(Boolean)` to ensure data consistency and eliminate the sequential wait.
+
+## 2026-08-03 - N+1 Cache Hydration Optimization Rejected (Insufficient Benchmark / Architecture Drift)
+**Learning:** Replacing existing batching logic (e.g., `for...of` or `Promise.allSettled`) with `Promise.all` or custom worker pools on small collections (like active drives or keys) is a speculative micro-optimization. Without benchmarks, this introduces boilerplate that violates architectural consistency and may accidentally alter fault-tolerance semantics or remove intentional rate-limiting. High-value N+1 fixes (like `d1.batch`) are preferred at the architecture level.
+**Action:** Avoid speculative concurrency rewrites on small collections unless backed by concrete benchmarks. If a genuine hotspot exists, propose a reusable, shared concurrency utility rather than repeatedly inlining boilerplate pool logic. Respect existing rate-limiting and error-handling semantics.
