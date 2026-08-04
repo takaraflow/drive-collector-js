@@ -1,4 +1,3 @@
-import { Api } from "telegram";
 import { logger } from "./logger/index.js";
 import { cache } from "./CacheService.js";
 import { DistributedLock } from "./DistributedLock.js";
@@ -248,18 +247,8 @@ export class MediaGroupBuffer {
 
     _sanitizeTarget(target) {
         if (!target) return null;
-        if (target.userId) return { userId: target.userId.toString() };
-        if (target.chatId) return { chatId: target.chatId.toString() };
-        if (target.channelId) return { channelId: target.channelId.toString() };
-        return null;
-    }
-
-    _restoreTarget(targetData) {
-        if (!targetData) return null;
-        if (targetData.userId) return new Api.PeerUser({ userId: BigInt(targetData.userId) });
-        if (targetData.chatId) return new Api.PeerChat({ chatId: BigInt(targetData.chatId) });
-        if (targetData.channelId) return new Api.PeerChannel({ channelId: BigInt(targetData.channelId) });
-        return null;
+        const id = target.userId ?? target.chatId ?? target.channelId ?? target.id;
+        return id != null ? { chatId: id.toString() } : null;
     }
 
     async _addMessageToBuffer(gid, message, target, userId) {
@@ -344,9 +333,9 @@ export class MediaGroupBuffer {
                 return;
             }
 
-            const restoredTarget = this._restoreTarget(meta.target);
-            if (!restoredTarget) {
-                log.error(`Cannot restore target for group ${gid}`);
+            const chatIdStr = meta.target?.chatId;
+            if (!chatIdStr) {
+                log.error(`Cannot resolve chatId for group ${gid}`);
                 await this._cleanupBuffer(gid);
                 return;
             }
@@ -357,7 +346,7 @@ export class MediaGroupBuffer {
                 const { client } = await import("../services/telegram.js");
                 const { runMtprotoTask } = await import("../utils/limiter.js");
                 fetchedMessages = await runMtprotoTask(() =>
-                    client.getMessages(restoredTarget, { ids: messageIds })
+                    client.getMessages(chatIdStr, { ids: messageIds })
                 );
             } catch (fetchError) {
                 log.error(`Failed to re-fetch messages for group ${gid}:`, fetchError);
@@ -370,6 +359,13 @@ export class MediaGroupBuffer {
 
             if (validMessages.length === 0) {
                 log.warn(`No valid media messages found after re-fetch for group ${gid}`);
+                await this._cleanupBuffer(gid);
+                return;
+            }
+
+            const restoredTarget = validMessages[0]?.peerId || null;
+            if (!restoredTarget) {
+                log.error(`Cannot determine target from fetched messages for group ${gid}`);
                 await this._cleanupBuffer(gid);
                 return;
             }

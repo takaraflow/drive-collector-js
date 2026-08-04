@@ -132,7 +132,7 @@ describe("MediaGroupBuffer", () => {
     const buf = store.get(`${baseKey}:buffer:9999`);
     expect(buf).toEqual(
       expect.objectContaining({
-        target: { userId: "500" },
+        target: { chatId: "500" },
         userId,
         messages: expect.arrayContaining([expect.objectContaining({ id: "1001" })])
       })
@@ -155,8 +155,8 @@ describe("MediaGroupBuffer", () => {
 
     // Mock client.getMessages to return full message objects with media
     client.getMessages.mockResolvedValue([
-      { id: 1001, media: { className: "MessageMediaPhoto" } },
-      { id: 1002, media: { className: "MessageMediaDocument" } }
+      { id: 1001, media: { className: "MessageMediaPhoto" }, peerId: new Api.PeerUser({ userId: 500n }) },
+      { id: 1002, media: { className: "MessageMediaDocument" }, peerId: new Api.PeerUser({ userId: 500n }) }
     ]);
 
     await buffer.add(messages[0], target, userId);
@@ -165,14 +165,14 @@ describe("MediaGroupBuffer", () => {
     expect(result).toEqual({ added: true, reason: "flush_triggered" });
     expect(mockLock.acquire).toHaveBeenCalledWith("9999", "test-instance");
     expect(client.getMessages).toHaveBeenCalledWith(
-      expect.any(Api.PeerUser),
+      "500",
       { ids: [1001n, 1002n] }
     );
     expect(TaskManager.addBatchTasks).toHaveBeenCalledWith(
-      expect.any(Api.PeerUser),
+      expect.anything(),
       expect.arrayContaining([
-        expect.objectContaining({ id: 1001, media: expect.any(Object) }),
-        expect.objectContaining({ id: 1002, media: expect.any(Object) })
+        expect.objectContaining({ id: expect.any(Number), media: expect.any(Object) }),
+        expect.objectContaining({ id: expect.any(Number), media: expect.any(Object) })
       ]),
       userId
     );
@@ -186,13 +186,13 @@ describe("MediaGroupBuffer", () => {
     mockLock.getLockStatus.mockResolvedValue({ status: "held", owner: "test-instance", version: "v1" });
 
     client.getMessages.mockResolvedValue([
-      { id: 1001, media: { className: "MessageMediaPhoto" } }
+      { id: 1001, media: { className: "MessageMediaPhoto" }, peerId: new Api.PeerUser({ userId: 500n }) }
     ]);
 
     store.set(`${baseKey}:index`, { gids: ["9999"] });
     store.set(`${baseKey}:timer:9999`, { expiresAt: Date.now() - 1000, updatedAt: Date.now(), instanceId: "test-instance" });
     store.set(`${baseKey}:buffer:9999`, {
-      target: { userId: "500" },
+      target: { chatId: "500" },
       userId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -210,7 +210,7 @@ describe("MediaGroupBuffer", () => {
 
     store.set(`${baseKey}:index`, { gids: ["9999"] });
     store.set(`${baseKey}:buffer:9999`, {
-      target: { userId: "500" },
+      target: { chatId: "500" },
       userId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -233,12 +233,12 @@ describe("MediaGroupBuffer", () => {
     mockLock.getLockStatus.mockResolvedValue({ status: "held", owner: "test-instance", version: "v1" });
 
     client.getMessages.mockResolvedValue([
-      { id: 1001, media: { className: "MessageMediaPhoto" } }
+      { id: 1001, media: { className: "MessageMediaPhoto" }, peerId: new Api.PeerUser({ userId: 500n }) }
     ]);
 
     store.set(`${baseKey}:index`, { gids: ["9999"] });
     store.set(`${baseKey}:buffer:9999`, {
-      target: { userId: "500" },
+      target: { chatId: "500" },
       userId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
