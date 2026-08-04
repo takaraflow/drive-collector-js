@@ -3,9 +3,12 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
+import { Api } from "telegram";
 import { MediaGroupBuffer } from "../../src/services/MediaGroupBuffer.js";
 import { cache } from "../../src/services/CacheService.js";
 import { TaskManager } from "../../src/processor/TaskManager.js";
+import { client } from "../../src/services/telegram.js";
+import { runMtprotoTask } from "../../src/utils/limiter.js";
 
 vi.mock("../../src/services/logger/index.js", () => ({
   logger: {
@@ -46,6 +49,21 @@ vi.mock("../../src/processor/TaskManager.js", () => ({
   }
 }));
 
+vi.mock("../../src/services/telegram.js", () => ({
+  client: {
+    getMessages: vi.fn()
+  }
+}));
+
+vi.mock("../../src/utils/limiter.js", () => ({
+  runMtprotoTask: vi.fn((fn) => fn()),
+  runBotTask: vi.fn(),
+  runBotTaskWithRetry: vi.fn(),
+  runMtprotoTaskWithRetry: vi.fn(),
+  runMtprotoFileTaskWithRetry: vi.fn(),
+  PRIORITY: { UI: 0, BACKGROUND: 1 }
+}));
+
 describe("MediaGroupBuffer", () => {
   const baseKey = "media_group_buffer";
   let buffer;
@@ -78,6 +96,8 @@ describe("MediaGroupBuffer", () => {
       return true;
     });
 
+    runMtprotoTask.mockImplementation(async (fn) => fn());
+
     buffer = new MediaGroupBuffer({
       instanceId: "test-instance",
       bufferTimeout: 100,
@@ -100,87 +120,101 @@ describe("MediaGroupBuffer", () => {
   });
 
   test("should buffer message and set timeout timer (no lock on add)", async () => {
-    const message = { id: "msg-1", media: { file_id: "photo1" }, groupedId: "group-123" };
-    const target = { id: "target-1" };
+    const message = { id: 1001n, media: { className: "MessageMediaPhoto" }, groupedId: 9999n };
+    const target = new Api.PeerUser({ userId: 500n });
     const userId = "user-1";
-
-    store.set(`${baseKey}:processed_messages:msg-1`, null);
 
     const result = await buffer.add(message, target, userId);
 
     expect(result).toEqual({ added: true, reason: "buffered" });
     expect(mockLock.acquire).not.toHaveBeenCalled();
-    expect(store.get(`${baseKey}:timer:group-123`)).toEqual(expect.objectContaining({ expiresAt: expect.any(Number) }));
-    expect(store.get(`${baseKey}:buffer:group-123`)).toEqual(
+    expect(store.get(`${baseKey}:timer:9999`)).toEqual(expect.objectContaining({ expiresAt: expect.any(Number) }));
+    const buf = store.get(`${baseKey}:buffer:9999`);
+    expect(buf).toEqual(
       expect.objectContaining({
-        target,
+        target: { userId: "500" },
         userId,
-        messages: expect.arrayContaining([expect.objectContaining({ id: "msg-1" })])
+        messages: expect.arrayContaining([expect.objectContaining({ id: "1001" })])
       })
     );
+    // Stored message must NOT contain media or groupedId (BigInt-unsafe fields)
+    expect(buf.messages[0].media).toBeUndefined();
+    expect(buf.messages[0].groupedId).toBeUndefined();
   });
 
   test("should flush when batch size is reached", async () => {
-    const target = { id: "target-1" };
+    const target = new Api.PeerUser({ userId: 500n });
     const userId = "user-1";
     const messages = [
-      { id: "msg-1", media: { file_id: "photo1" }, groupedId: "group-123" },
-      { id: "msg-2", media: { file_id: "photo2" }, groupedId: "group-123" }
+      { id: 1001n, media: { className: "MessageMediaPhoto" }, groupedId: 9999n },
+      { id: 1002n, media: { className: "MessageMediaDocument" }, groupedId: 9999n }
     ];
 
     mockLock.acquire.mockResolvedValue({ success: true, version: "v1" });
     mockLock.getLockStatus.mockResolvedValue({ status: "held", owner: "test-instance", version: "v1" });
 
-    store.set(`${baseKey}:processed_messages:msg-1`, null);
-    store.set(`${baseKey}:processed_messages:msg-2`, null);
+    // Mock client.getMessages to return full message objects with media
+    client.getMessages.mockResolvedValue([
+      { id: 1001, media: { className: "MessageMediaPhoto" } },
+      { id: 1002, media: { className: "MessageMediaDocument" } }
+    ]);
 
     await buffer.add(messages[0], target, userId);
     const result = await buffer.add(messages[1], target, userId);
 
     expect(result).toEqual({ added: true, reason: "flush_triggered" });
-    expect(mockLock.acquire).toHaveBeenCalledWith("group-123", "test-instance");
+    expect(mockLock.acquire).toHaveBeenCalledWith("9999", "test-instance");
+    expect(client.getMessages).toHaveBeenCalledWith(
+      expect.any(Api.PeerUser),
+      { ids: [1001n, 1002n] }
+    );
     expect(TaskManager.addBatchTasks).toHaveBeenCalledWith(
-      target,
-      expect.arrayContaining([expect.objectContaining({ id: "msg-1" }), expect.objectContaining({ id: "msg-2" })]),
+      expect.any(Api.PeerUser),
+      expect.arrayContaining([
+        expect.objectContaining({ id: 1001, media: expect.any(Object) }),
+        expect.objectContaining({ id: 1002, media: expect.any(Object) })
+      ]),
       userId
     );
-    expect(mockLock.release).toHaveBeenCalledWith("group-123", "test-instance");
+    expect(mockLock.release).toHaveBeenCalledWith("9999", "test-instance");
   });
 
   test("should flush expired buffer during cleanup", async () => {
-    const target = { id: "target-1" };
     const userId = "user-1";
 
     mockLock.acquire.mockResolvedValue({ success: true, version: "v1" });
     mockLock.getLockStatus.mockResolvedValue({ status: "held", owner: "test-instance", version: "v1" });
 
-    store.set(`${baseKey}:index`, { gids: ["group-123"] });
-    store.set(`${baseKey}:timer:group-123`, { expiresAt: Date.now() - 1000, updatedAt: Date.now(), instanceId: "test-instance" });
-    store.set(`${baseKey}:buffer:group-123`, {
-      target,
+    client.getMessages.mockResolvedValue([
+      { id: 1001, media: { className: "MessageMediaPhoto" } }
+    ]);
+
+    store.set(`${baseKey}:index`, { gids: ["9999"] });
+    store.set(`${baseKey}:timer:9999`, { expiresAt: Date.now() - 1000, updatedAt: Date.now(), instanceId: "test-instance" });
+    store.set(`${baseKey}:buffer:9999`, {
+      target: { userId: "500" },
       userId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      messages: [{ id: "msg-1", media: { file_id: "photo1" }, groupedId: "group-123", _seq: 1 }]
+      messages: [{ id: "1001", _seq: 1 }]
     });
 
     await buffer._cleanupStaleBuffers();
 
     expect(TaskManager.addBatchTasks).toHaveBeenCalled();
-    expect(mockLock.acquire).toHaveBeenCalledWith("group-123", "test-instance");
+    expect(mockLock.acquire).toHaveBeenCalledWith("9999", "test-instance");
   });
 
   test("should persist snapshot to persistKey", async () => {
-    const target = { id: "target-1" };
     const userId = "user-1";
 
-    store.set(`${baseKey}:index`, { gids: ["group-123"] });
-    store.set(`${baseKey}:buffer:group-123`, {
-      target,
+    store.set(`${baseKey}:index`, { gids: ["9999"] });
+    store.set(`${baseKey}:buffer:9999`, {
+      target: { userId: "500" },
       userId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      messages: [{ id: "msg-1", media: { file_id: "photo1" }, groupedId: "group-123", _seq: 1 }]
+      messages: [{ id: "1001", _seq: 1 }]
     });
 
     await buffer.persist();
@@ -193,22 +227,38 @@ describe("MediaGroupBuffer", () => {
   });
 
   test("should restore by scanning cache buffers", async () => {
-    const target = { id: "target-1" };
     const userId = "user-1";
 
     mockLock.acquire.mockResolvedValue({ success: true, version: "v1" });
     mockLock.getLockStatus.mockResolvedValue({ status: "held", owner: "test-instance", version: "v1" });
-    store.set(`${baseKey}:index`, { gids: ["group-123"] });
-    store.set(`${baseKey}:buffer:group-123`, {
-      target,
+
+    client.getMessages.mockResolvedValue([
+      { id: 1001, media: { className: "MessageMediaPhoto" } }
+    ]);
+
+    store.set(`${baseKey}:index`, { gids: ["9999"] });
+    store.set(`${baseKey}:buffer:9999`, {
+      target: { userId: "500" },
       userId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      messages: [{ id: "msg-1", media: { file_id: "photo1" }, groupedId: "group-123", _seq: 1 }]
+      messages: [{ id: "1001", _seq: 1 }]
     });
 
     await buffer.restore();
 
     expect(TaskManager.addBatchTasks).toHaveBeenCalled();
+  });
+
+  test("should store only serializable data (no BigInt fields) in buffer", async () => {
+    const message = { id: 1001n, media: { className: "MessageMediaPhoto" }, groupedId: 9999n };
+    const target = new Api.PeerUser({ userId: 500n });
+    const userId = "user-1";
+
+    await buffer.add(message, target, userId);
+
+    const buf = store.get(`${baseKey}:buffer:9999`);
+    // Verify the entire buffer is JSON-serializable (no BigInt)
+    expect(() => JSON.stringify(buf)).not.toThrow();
   });
 });

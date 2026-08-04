@@ -1,3 +1,4 @@
+import { Api } from "telegram";
 import { logger } from "./logger/index.js";
 import { cache } from "./CacheService.js";
 import { DistributedLock } from "./DistributedLock.js";
@@ -245,15 +246,29 @@ export class MediaGroupBuffer {
         return false;
     }
 
+    _sanitizeTarget(target) {
+        if (!target) return null;
+        if (target.userId) return { userId: target.userId.toString() };
+        if (target.chatId) return { chatId: target.chatId.toString() };
+        if (target.channelId) return { channelId: target.channelId.toString() };
+        return null;
+    }
+
+    _restoreTarget(targetData) {
+        if (!targetData) return null;
+        if (targetData.userId) return new Api.PeerUser({ userId: BigInt(targetData.userId) });
+        if (targetData.chatId) return new Api.PeerChat({ chatId: BigInt(targetData.chatId) });
+        if (targetData.channelId) return new Api.PeerChannel({ channelId: BigInt(targetData.channelId) });
+        return null;
+    }
+
     async _addMessageToBuffer(gid, message, target, userId) {
         const bufferKey = this._bufferKey(gid);
         const now = Date.now();
+        const sanitizedTarget = this._sanitizeTarget(target);
 
         const messageData = {
-            id: message.id,
-            media: message.media,
-            groupedId: message.groupedId,
-            _bufferedAt: now,
+            id: message.id.toString(),
             _seq: now
         };
 
@@ -265,7 +280,7 @@ export class MediaGroupBuffer {
 
             const nextMessages = [...currentMessages, messageData];
             const next = {
-                target: current?.target || target,
+                target: current?.target || sanitizedTarget,
                 userId: current?.userId || userId,
                 createdAt: current?.createdAt || now,
                 updatedAt: now,
@@ -276,14 +291,13 @@ export class MediaGroupBuffer {
             if (ok) return nextMessages.length;
         }
 
-        // Best-effort fallback
         const current = await cache.get(bufferKey, "json");
         const currentMessages = Array.isArray(current?.messages) ? current.messages : [];
         const nextMessages = [...currentMessages, messageData];
         await cache.set(
             bufferKey,
             {
-                target: current?.target || target,
+                target: current?.target || sanitizedTarget,
                 userId: current?.userId || userId,
                 createdAt: current?.createdAt || now,
                 updatedAt: now,
@@ -324,23 +338,44 @@ export class MediaGroupBuffer {
 
             messages.sort((a, b) => a._seq - b._seq);
 
-            const validation = this._validateMediaGroup(messages);
-            if (!validation.isValid) {
-                log.warn(`Media group ${gid} validation failed: ${validation.reason}`);
-                setTimeout(() => {
-                    this._attemptFlush(gid).catch((error) => log.error(`Retry flush failed for group ${gid}:`, error));
-                }, this.options.bufferTimeout);
-                return;
-            }
-
             if (!meta) {
                 log.error(`Missing metadata for group ${gid}`);
                 await this._cleanupBuffer(gid);
                 return;
             }
 
-            await TaskManager.addBatchTasks(meta.target, messages, meta.userId);
-            log.info(`Successfully processed media group ${gid} with ${messages.length} messages`);
+            const restoredTarget = this._restoreTarget(meta.target);
+            if (!restoredTarget) {
+                log.error(`Cannot restore target for group ${gid}`);
+                await this._cleanupBuffer(gid);
+                return;
+            }
+
+            const messageIds = messages.map((m) => BigInt(m.id));
+            let fetchedMessages = [];
+            try {
+                const { client } = await import("../services/telegram.js");
+                const { runMtprotoTask } = await import("../utils/limiter.js");
+                fetchedMessages = await runMtprotoTask(() =>
+                    client.getMessages(restoredTarget, { ids: messageIds })
+                );
+            } catch (fetchError) {
+                log.error(`Failed to re-fetch messages for group ${gid}:`, fetchError);
+                throw fetchError;
+            }
+
+            const validMessages = Array.isArray(fetchedMessages)
+                ? fetchedMessages.filter((m) => m && m.media)
+                : [];
+
+            if (validMessages.length === 0) {
+                log.warn(`No valid media messages found after re-fetch for group ${gid}`);
+                await this._cleanupBuffer(gid);
+                return;
+            }
+
+            await TaskManager.addBatchTasks(restoredTarget, validMessages, meta.userId);
+            log.info(`Successfully processed media group ${gid} with ${validMessages.length} messages`);
 
             await this._cleanupBuffer(gid);
         } catch (error) {
@@ -390,13 +425,6 @@ export class MediaGroupBuffer {
             messages
         };
         return { meta, messages };
-    }
-
-    _validateMediaGroup(messages) {
-        if (!messages || messages.length === 0) return { isValid: false, reason: "empty_buffer" };
-        const allHaveMedia = messages.every((m) => m.media);
-        if (!allHaveMedia) return { isValid: false, reason: "missing_media" };
-        return { isValid: true };
     }
 
     async _cleanupBuffer(gid) {
@@ -476,8 +504,6 @@ export class MediaGroupBuffer {
                     userId: meta.userId,
                     messages: messages.map((m) => ({
                         id: m.id,
-                        media: m.media,
-                        groupedId: m.groupedId,
                         _seq: m._seq
                     })),
                     createdAt: meta.createdAt
@@ -510,7 +536,7 @@ export class MediaGroupBuffer {
                 for (const message of bufferData.messages) {
                     await this._addMessageToBuffer(
                         bufferData.gid,
-                        { id: message.id, media: message.media, groupedId: message.groupedId },
+                        { id: message.id },
                         bufferData.target,
                         bufferData.userId
                     );
