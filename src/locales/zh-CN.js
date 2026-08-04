@@ -123,7 +123,7 @@ export const STRINGS = {
         unbind_all_confirm: "⚠️ <b>确认解绑所有网盘？</b>\n\n解绑后需要重新绑定网盘才能继续转存，已转存文件不会从云端删除。",
         unbind_success: "✅ <b>解绑成功</b>\n\n您的账号信息已从本系统中移除。",
         no_drive_unbind: "⚠️ 您当前未绑定任何网盘，无需解绑。\n\n您可以发送 /drive 命令来绑定新的网盘。",
-        no_drive_found: "🚫 <b>还没有绑定网盘</b>\n\n请先绑定网盘，然后再发送文件或链接。",
+        no_drive_found: "🚫 <b>还没有绑定网盘</b>\n\n请先绑定网盘，然后再发送文件或链接。发送 /drive 绑定网盘。",
         
         // 绑定流程
         mega_input_email: "📧 <b>请输入您的 Mega 登录邮箱</b>：",
@@ -280,7 +280,7 @@ export const STRINGS = {
         title: "👥 <b>用户列表</b>",
         loading: "🔍 正在查询用户列表...",
         error: "❌ <b>暂时无法查询用户列表</b>\n\n请重新加载；如果连续失败，请查看系统诊断。",
-        empty: "当前没有可显示的用户。\n用户绑定网盘、提交任务或被设置角色后，会出现在这里。",
+        empty: "当前没有可显示的用户。\n用户绑定网盘、提交任务或被设置角色后，会出现在这里。可发送 /drive 绑定网盘。",
         summary: "共 {{total}} 位用户 · 活跃 {{active}} · 管理 {{admins}} · 封禁 {{banned}}",
         filter_line: "筛选: {{filter}} · 第 {{current}}/{{totalPages}} 页",
         user_row: "<code>{{index}}.</code> {{roleIcon}} <code>{{userId}}</code> · {{role}}",
@@ -327,7 +327,7 @@ export const STRINGS = {
         invalid_path: "⚠️ <b>路径格式无效</b>\n\n" +
                       "路径应以 / 开头，且不包含特殊字符。\n" +
                       "示例: /Movies/2024",
-        no_permission: "🚫 <b>还不能设置保存目录</b>\n\n请先绑定网盘，然后再设置保存目录。",
+        no_permission: "🚫 <b>还不能设置保存目录</b>\n\n请先绑定网盘，然后再设置保存目录。发送 /drive 绑定网盘。",
         error_saving: "❌ <b>保存失败</b>\n\n" +
                       "无法保存路径设置，请稍后重试。",
         error_reading: "❌ <b>读取失败</b>\n\n" +
