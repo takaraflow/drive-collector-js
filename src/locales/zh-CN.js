@@ -122,7 +122,7 @@ export const STRINGS = {
         unbind_confirm: "⚠️ <b>确认解绑这个网盘？</b>\n\n网盘：<code>{{type}}</code>\n账号：<code>{{account}}</code>\n\n解绑后不能继续转存到这个网盘，已转存文件不会从云端删除。",
         unbind_all_confirm: "⚠️ <b>确认解绑所有网盘？</b>\n\n解绑后需要重新绑定网盘才能继续转存，已转存文件不会从云端删除。",
         unbind_success: "✅ <b>解绑成功</b>\n\n您的账号信息已从本系统中移除。",
-        no_drive_unbind: "⚠️ 您当前未绑定任何网盘，无需解绑。\n\n您可以发送 /drive 命令来绑定新的网盘。",
+        no_drive_unbind: "⚠️ 您当前未绑定任何网盘，无需解绑。\n\n您可以点击下方按钮或发送 /drive 命令来绑定新的网盘。",
         no_drive_found: "🚫 <b>还没有绑定网盘</b>\n\n请先绑定网盘，然后再发送文件或链接。",
         
         // 绑定流程
