@@ -1363,22 +1363,25 @@ export class TaskRepository {
      */
     static async getTasksByStatus(status, page = 0, pageSize = 10) {
         const offset = page * pageSize;
-        const [tasks, countRow] = await Promise.all([
-            d1.fetchAll(
-                "SELECT id, user_id, file_name, file_size, status, error_msg, source_type, created_at, updated_at FROM tasks WHERE status = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-                [status, pageSize, offset]
-            ),
-            d1.fetchOne(
-                "SELECT COUNT(*) as total FROM tasks WHERE status = ?",
-                [status]
-            )
+        // ⚡ Bolt Optimization: Use d1.batch to eliminate N+1 HTTP network requests to Cloudflare D1
+        const batchResults = await d1.batch([
+            {
+                sql: "SELECT id, user_id, file_name, file_size, status, error_msg, source_type, created_at, updated_at FROM tasks WHERE status = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                params: [status, pageSize, offset]
+            },
+            {
+                sql: "SELECT COUNT(*) as total FROM tasks WHERE status = ?",
+                params: [status]
+            }
         ]);
+        const tasks = batchResults[0]?.result?.results || [];
+        const total = Number(batchResults[1]?.result?.results?.[0]?.total || 0);
         return {
-            tasks: tasks || [],
-            total: countRow?.total || 0,
+            tasks,
+            total,
             page,
             pageSize,
-            totalPages: Math.ceil((countRow?.total || 0) / pageSize)
+            totalPages: Math.ceil(total / pageSize)
         };
     }
 }
