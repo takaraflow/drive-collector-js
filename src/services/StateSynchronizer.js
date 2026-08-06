@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { logger } from "./logger/index.js";
 import { cache } from "./CacheService.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
@@ -147,7 +148,7 @@ export class StateSynchronizer {
      * @returns {string} 订阅ID
      */
     subscribe(stateType, callback) {
-        const subscriptionId = `${stateType}:${Date.now()}:${Math.random()}`;
+        const subscriptionId = `${stateType}:${Date.now()}:${crypto.randomUUID()}`;
         
         if (!this.subscribers.has(stateType)) {
             this.subscribers.set(stateType, new Map());
