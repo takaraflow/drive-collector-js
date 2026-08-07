@@ -375,6 +375,13 @@ export class UIHelper {
          const statusLabels = TQ.status_labels;
          let html = TQ.title + '\n━━━━━━━━━━━━━━━━━━━\n';
 
+         // 空状态处理
+         const hasAnyTask = data.statusCounts && Object.values(data.statusCounts).some(count => count > 0);
+         if (!hasAnyTask) {
+             html += TQ.no_data + '\n━━━━━━━━━━━━━━━━━━━';
+             return { text: html, buttons: [] };
+         }
+
          // 状态分布
          html += TQ.status_dist + '\n';
          const orderedStatuses = ['queued', 'downloading', 'uploading', 'completed', 'failed', 'cancelled'];
