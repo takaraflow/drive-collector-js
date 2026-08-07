@@ -701,7 +701,9 @@ describe("UIHelper", () => {
 
             const result = UIHelper.renderTaskQueue(data);
 
-            expect(result.text).toContain("📭 暂无任务记录。快发送文件或链接开始您的第一次转存吧！");
+            expect(result.text).toContain("📊 <b>全局任务队列</b>");
+            expect(result.text).toContain("📈 <b>状态分布</b>");
+            expect(result.text).toContain("✅ 当前无活跃任务。请发送文件或链接来创建新任务。");
             expect(result.text).not.toContain("👥");
         });
 
