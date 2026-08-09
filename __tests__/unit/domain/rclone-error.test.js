@@ -47,6 +47,19 @@ describe("rclone error classification", () => {
         });
     });
 
+    test("classifies Proton invalid token and 2FA refresh failures as invalid auth", () => {
+        const error = `2026/08/09 14:14:20 NOTICE: proton drive root link ID 'DriveCollectorBot': 401 GET https://drive-api.proton.me/core/v4/users: Invalid access token (Code=401, Status=401), Attempt 1
+2026/08/09 14:14:21 NOTICE: proton drive root link ID 'DriveCollectorBot': 400 POST https://drive-api.proton.me/auth/v4/refresh: Invalid refresh token (Code=10013, Status=400), Attempt 1
+2026/08/09 14:14:25 CRITICAL: Failed to create file system for "u7428626313:DriveCollectorBot": couldn't initialize a new proton drive instance: this account requires a 2FA code. Can be provided with --protondrive-2fa=000000`;
+
+        expect(classifyRcloneError(error)).toMatchObject({
+            code: RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID,
+            retryable: false,
+            userRetryable: false
+        });
+        expect(isRetryableRcloneError(error)).toBe(false);
+    });
+
     test("keeps transient MEGA startup parse failures retryable", () => {
         const error = `CRITICAL: Failed to create file system for ":mega,user=\\"[REDACTED]\\",pass=\\"[REDACTED]\\":folder": unexpected end of JSON input`;
 

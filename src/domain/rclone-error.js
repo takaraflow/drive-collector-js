@@ -28,11 +28,15 @@ const AUTH_ERROR_PATTERNS = [
     /couldn'?t login/i,
     /authentication failed/i,
     /invalid (?:login|credentials|username|password)/i,
+    /invalid (?:access|refresh)?\s*token/i,
     /bad password/i,
     /login failed/i,
     /unauthorized/i,
     /invalid[_ -]?grant/i,
-    /token (?:expired|invalid|revoked)/i
+    /token (?:expired|invalid|revoked)/i,
+    /auth\/v\d+\/refresh/i,
+    /Code=10013/i,
+    /requires a 2FA code/i
 ];
 
 const QUOTA_ERROR_PATTERNS = [
