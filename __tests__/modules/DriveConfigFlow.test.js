@@ -64,6 +64,7 @@ const mockDriveRepository = {
     findById: vi.fn(),
     findByUserAndId: vi.fn(),
     getDefaultDrive: vi.fn(),
+    ensureDefaultDrive: vi.fn(),
     create: vi.fn(),
     delete: vi.fn(),
     deleteByUserId: vi.fn(),

@@ -293,9 +293,10 @@ describe("DriveRepository", () => {
             await expect(DriveRepository.create("user1", "name", "mega", null)).rejects.toThrow("DriveRepository.create: Missing required parameters.");
         });
 
-        it("should create drive successfully with Write-Through and invalidate derived list cache", async () => {
+        it("should create first drive successfully and persist it as default", async () => {
             const configData = { user: "test@example.com", pass: "password" };
             mockD1.fetchOne.mockResolvedValue(null);
+            mockD1.fetchAll.mockResolvedValue([]);
 
             const result = await DriveRepository.create("user1", "Mega-test@example.com", "mega", configData);
 
@@ -303,6 +304,10 @@ describe("DriveRepository", () => {
             expect(mockD1.run).toHaveBeenCalledWith(
                 "INSERT INTO drives (id, user_id, name, type, config_data, status, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 expect.arrayContaining(["user1", "Mega-test@example.com", "mega", JSON.stringify(configData), "active", 0])
+            );
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE drives SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END, updated_at = ? WHERE user_id = ? AND status = ?",
+                [expect.stringMatching(/^drive_.+/), expect.any(Number), "user1", "active"]
             );
 
             // Verify drive_id cache write
@@ -316,6 +321,48 @@ describe("DriveRepository", () => {
             expect(mockLocalCache.del).toHaveBeenCalledWith("drive_user1");
             expect(mockLocalCache.del).toHaveBeenCalledWith("drives:active");
             expect(result).toBe(true);
+        });
+
+        it("should not make a newly bound drive default when the user already has a default drive", async () => {
+            const configData = { user: "test@example.com", pass: "password" };
+            mockD1.fetchOne.mockResolvedValue(null);
+            mockD1.fetchAll
+                .mockResolvedValueOnce([
+                    { id: "drive-existing", user_id: "user1", status: "active", is_default: 1 }
+                ])
+                .mockResolvedValue([]);
+
+            await DriveRepository.create("user1", "Mega-test@example.com", "mega", configData);
+
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "INSERT INTO drives (id, user_id, name, type, config_data, status, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                expect.arrayContaining(["user1", "Mega-test@example.com", "mega", JSON.stringify(configData), "active", 0])
+            );
+            expect(mockD1.run).not.toHaveBeenCalledWith(
+                "UPDATE drives SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END, updated_at = ? WHERE user_id = ? AND status = ?",
+                expect.arrayContaining([expect.stringMatching(/^drive_.+/), expect.any(Number), "user1", "active"])
+            );
+        });
+
+        it("should repair an existing missing default before adding another drive", async () => {
+            const configData = { token: "new-token" };
+            mockD1.fetchOne.mockResolvedValue(null);
+            mockD1.fetchAll
+                .mockResolvedValueOnce([
+                    { id: "drive-existing", user_id: "user1", status: "active", is_default: 0 }
+                ])
+                .mockResolvedValue([]);
+
+            await DriveRepository.create("user1", "Dropbox-test@example.com", "dropbox", configData);
+
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE drives SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END, updated_at = ? WHERE user_id = ? AND status = ?",
+                ["drive-existing", expect.any(Number), "user1", "active"]
+            );
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "INSERT INTO drives (id, user_id, name, type, config_data, status, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                expect.arrayContaining(["user1", "Dropbox-test@example.com", "dropbox", JSON.stringify(configData), "active", 0])
+            );
         });
 
         it("should reject creating a duplicate active drive of the same type", async () => {
@@ -352,6 +399,10 @@ describe("DriveRepository", () => {
             expect(mockD1.run).toHaveBeenCalledWith(
                 "UPDATE drives SET name = ?, config_data = ?, remote_folder = NULL, status = ?, is_default = 0, updated_at = ? WHERE id = ? AND user_id = ? AND type = ? AND status = ?",
                 ["Mega-new", JSON.stringify({ user: "new@example.com" }), "active", expect.any(Number), "drive-deleted", "user1", "mega", "deleted"]
+            );
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE drives SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END, updated_at = ? WHERE user_id = ? AND status = ?",
+                ["drive-deleted", expect.any(Number), "user1", "active"]
             );
             expect(mockD1.run).not.toHaveBeenCalledWith(
                 expect.stringContaining("INSERT INTO drives"),
@@ -699,7 +750,7 @@ describe("DriveRepository", () => {
             await expect(DriveRepository.getDefaultDrive("user1")).resolves.toEqual(drives[0]);
         });
 
-        it("should resolve default drive from D1 when derived caches contain stale empty arrays", async () => {
+        it("should repair and resolve default drive from D1 when derived caches contain stale empty arrays", async () => {
             const drives = [
                 { id: "drive-fresh", user_id: "user1", is_default: 0, status: "active" }
             ];
@@ -707,10 +758,17 @@ describe("DriveRepository", () => {
             mockCache.get.mockResolvedValue([]);
             mockD1.fetchAll.mockResolvedValue(drives);
 
-            await expect(DriveRepository.getDefaultDrive("user1")).resolves.toEqual(drives[0]);
+            await expect(DriveRepository.getDefaultDrive("user1")).resolves.toEqual({
+                ...drives[0],
+                is_default: 1
+            });
             expect(mockD1.fetchAll).toHaveBeenCalledWith(
                 "SELECT id, user_id, name, type, config_data, remote_folder, status, is_default, created_at FROM drives WHERE user_id = ? AND status = ? ORDER BY is_default DESC, created_at DESC",
                 ["user1", "active"]
+            );
+            expect(mockD1.run).toHaveBeenCalledWith(
+                "UPDATE drives SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END, updated_at = ? WHERE user_id = ? AND status = ?",
+                ["drive-fresh", expect.any(Number), "user1", "active"]
             );
         });
 

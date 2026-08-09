@@ -42,6 +42,37 @@ export class DriveRepository {
         return result.success === true ? 1 : 0;
     }
 
+    static _findDefaultCandidate(drives = []) {
+        if (!Array.isArray(drives) || drives.length === 0) return null;
+        return drives.find(isDefaultDrive) || drives[0] || null;
+    }
+
+    static async _writeDefaultDrive(userId, driveId, driveIds = []) {
+        const safeUserId = String(userId);
+        const now = Date.now();
+        await d1.run(
+            "UPDATE drives SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END, updated_at = ? WHERE user_id = ? AND status = ?",
+            [driveId, now, safeUserId, DRIVE_STATUSES.ACTIVE]
+        );
+        await this.clearUserDriveCache(safeUserId, driveIds);
+        await this._updateActiveDrivesList();
+        log.info("Default drive set", { userId: safeUserId, driveId });
+    }
+
+    static async _ensureDefaultFromDrives(userId, drives = []) {
+        if (!Array.isArray(drives) || drives.length === 0) return null;
+        const candidate = this._findDefaultCandidate(drives);
+        if (!candidate) return null;
+        if (isDefaultDrive(candidate)) return candidate;
+
+        const driveIds = drives.map(drive => drive.id).filter(Boolean);
+        await this._writeDefaultDrive(userId, candidate.id, driveIds);
+        return {
+            ...candidate,
+            is_default: 1
+        };
+    }
+
     static async clearUserDriveCache(userId, driveIds = []) {
         if (!userId) return;
         const uniqueDriveIds = [...new Set((driveIds || []).filter(Boolean))];
@@ -198,6 +229,11 @@ export class DriveRepository {
                 `SELECT ${DRIVE_COLUMNS} FROM drives WHERE user_id = ? AND type = ? AND status = ? ORDER BY updated_at DESC, created_at DESC LIMIT 1`,
                 [userId.toString(), type, DRIVE_STATUSES.DELETED]
             );
+            const activeDrivesBeforeCreate = await this._findDriveInD1(userId);
+            const hadActiveDrives = activeDrivesBeforeCreate.length > 0;
+            if (hadActiveDrives) {
+                await this._ensureDefaultFromDrives(userId, activeDrivesBeforeCreate);
+            }
 
             if (existingDeleted) {
                 driveData.id = existingDeleted.id;
@@ -216,6 +252,10 @@ export class DriveRepository {
 
             await cache.set(this.getDriveIdKey(driveData.id), driveData);
             await this.clearUserDriveCache(userId);
+
+            if (!hadActiveDrives) {
+                await this._writeDefaultDrive(userId, driveData.id, [driveData.id]);
+            }
 
             // 更新活跃网盘列表
             await this._updateActiveDrivesList();
@@ -300,6 +340,7 @@ export class DriveRepository {
             await this.clearUserDriveCache(userId, [driveId]);
             await this._updateActiveDrivesList();
             localCache.del(this.getAllDrivesKey());
+            await this.ensureDefaultDrive(userId);
             return deleted;
         } catch (e) {
             log.error(`DriveRepository.delete failed for ${userId}/${driveId}:`, e);
@@ -479,11 +520,17 @@ export class DriveRepository {
     static async getDefaultDrive(userId) {
         const d1Drives = await this.findByUserId(userId, true);
         if (d1Drives && d1Drives.length > 0) {
-            return d1Drives.find(isDefaultDrive) || d1Drives[0];
+            return await this._ensureDefaultFromDrives(userId, d1Drives);
         }
         const drives = await this.findByUserId(userId);
         if (!drives || drives.length === 0) return null;
-        return drives.find(isDefaultDrive) || drives[0];
+        return await this._ensureDefaultFromDrives(userId, drives);
+    }
+
+    static async ensureDefaultDrive(userId) {
+        if (!userId) return null;
+        const drives = await this._findDriveInD1(userId);
+        return await this._ensureDefaultFromDrives(userId, drives);
     }
 
     static async setDefaultDrive(userId, driveId) {
@@ -500,12 +547,7 @@ export class DriveRepository {
         }
 
         const userDriveIds = (await this._findDriveInD1(userId)).map(item => item.id);
-        await d1.run(
-            "UPDATE drives SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END, updated_at = ? WHERE user_id = ? AND status = ?",
-            [driveId, Date.now(), String(userId), DRIVE_STATUSES.ACTIVE]
-        );
-        await this.clearUserDriveCache(userId, userDriveIds);
-        await this._updateActiveDrivesList();
+        await this._writeDefaultDrive(userId, driveId, userDriveIds);
         return true;
     }
 

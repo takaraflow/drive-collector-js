@@ -171,7 +171,8 @@ export class DriveConfigFlow {
     }
 
     static async _buildDriveManagerPayload(userId) {
-        const drives = await DriveRepository.findByUserId(userId);
+        await DriveRepository.ensureDefaultDrive(userId);
+        const drives = await DriveRepository.findByUserId(userId, true);
         const defaultDrive = drives?.find(isDefaultDrive) || drives?.[0] || null;
         const defaultDriveId = defaultDrive?.id || null;
 

@@ -6,7 +6,7 @@ import {
 } from "../domain/drive-credentials.js";
 import { classifyInfrastructureError } from "../domain/infrastructure-error.js";
 
-export const LATEST_SCHEMA_VERSION = 9;
+export const LATEST_SCHEMA_VERSION = 10;
 
 const MIGRATION_LOCK_ID = "database-schema";
 const SCHEMA_READY_RETRY_DEFAULTS = Object.freeze({
@@ -882,6 +882,62 @@ async function applyTaskStalledRecoveryIndex({ d1 }) {
     await d1.run("CREATE INDEX IF NOT EXISTS idx_tasks_stalled_recovery ON tasks(status, updated_at, created_at)");
 }
 
+async function hasUsersMissingActiveDriveDefault(d1) {
+    if (!(await tableExists(d1, "drives"))) return false;
+    const columns = await getTableColumns(d1, "drives");
+    const hasRequiredColumns = ["id", "user_id", "status", "is_default", "created_at"].every(column => columns.includes(column));
+    if (!hasRequiredColumns) return false;
+
+    const row = await d1.fetchOne(`
+        SELECT user_id
+        FROM drives
+        WHERE status = 'active'
+        GROUP BY user_id
+        HAVING SUM(CASE WHEN is_default = 1 THEN 1 ELSE 0 END) = 0
+        LIMIT 1
+    `);
+    return Boolean(row);
+}
+
+async function applyActiveDriveDefaultBackfill({ d1 }) {
+    if (!(await tableExists(d1, "drives"))) return;
+    const columns = await getTableColumns(d1, "drives");
+    const hasRequiredColumns = ["id", "user_id", "status", "is_default", "created_at", "updated_at"].every(column => columns.includes(column));
+    if (!hasRequiredColumns) return;
+
+    await d1.run(`
+        UPDATE drives
+        SET is_default = 1,
+            updated_at = ?
+        WHERE status = 'active'
+          AND id IN (
+            SELECT selected.id
+            FROM drives selected
+            WHERE selected.status = 'active'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM drives existing_default
+                WHERE existing_default.user_id = selected.user_id
+                  AND existing_default.status = 'active'
+                  AND existing_default.is_default = 1
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM drives newer
+                WHERE newer.user_id = selected.user_id
+                  AND newer.status = 'active'
+                  AND (
+                    COALESCE(newer.created_at, 0) > COALESCE(selected.created_at, 0)
+                    OR (
+                      COALESCE(newer.created_at, 0) = COALESCE(selected.created_at, 0)
+                      AND newer.id > selected.id
+                    )
+                  )
+              )
+          )
+    `, [Date.now()]);
+}
+
 function getMigrations() {
     return [
         {
@@ -976,6 +1032,13 @@ function getMigrations() {
                 return Boolean(row);
             },
             apply: applyTaskStalledRecoveryIndex
+        },
+        {
+            version: 10,
+            name: "active_drive_default_backfill",
+            sql: "backfill one default drive for users with active drives but no active default",
+            shouldRun: async ({ d1 }) => await hasUsersMissingActiveDriveDefault(d1),
+            apply: applyActiveDriveDefaultBackfill
         }
     ];
 }

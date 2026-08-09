@@ -304,7 +304,7 @@ describe("database schema migrations", () => {
 
         expect(result.status.isCurrent).toBe(true);
         expect(result.status.currentVersion).toBe(LATEST_SCHEMA_VERSION);
-        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied", "recorded", "recorded", "recorded", "recorded", "recorded", "recorded"]);
+        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied", "recorded", "recorded", "recorded", "recorded", "recorded", "recorded", "recorded"]);
 
         const taskColumns = db.prepare("PRAGMA table_info(tasks)").all().map(column => column.name);
         expect(taskColumns).toContain("source_type");
@@ -321,7 +321,7 @@ describe("database schema migrations", () => {
         expect(indexes).toContain("idx_user_roles_role");
 
         const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
-        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     });
 
     test("should create current schema with user_roles and active-only drive type uniqueness", async () => {
@@ -447,7 +447,8 @@ describe("database schema migrations", () => {
         expect(outdatedStatus.missingMigrations).toEqual([
             { version: 7, name: "task_source_metadata" },
             { version: 8, name: "drive_password_format_ssot" },
-            { version: 9, name: "task_stalled_recovery_index" }
+            { version: 9, name: "task_stalled_recovery_index" },
+            { version: 10, name: "active_drive_default_backfill" }
         ]);
 
         const result = await migrateDatabaseSchema({
@@ -471,6 +472,12 @@ describe("database schema migrations", () => {
         expect(result.results).toContainEqual({
             version: 9,
             name: "task_stalled_recovery_index",
+            action: "recorded",
+            executionTimeMs: expect.any(Number)
+        });
+        expect(result.results).toContainEqual({
+            version: 10,
+            name: "active_drive_default_backfill",
             action: "recorded",
             executionTimeMs: expect.any(Number)
         });
@@ -711,9 +718,9 @@ describe("database schema migrations", () => {
             config_data: '{"user":"u"}',
             remote_folder: "/remote",
             status: "active",
-            is_default: 0,
+            is_default: 1,
             created_at: 900,
-            updated_at: 950
+            updated_at: expect.any(Number)
         });
 
         const settingsColumns = db.prepare("PRAGMA table_info(settings)").all().map(column => column.name);
@@ -729,6 +736,6 @@ describe("database schema migrations", () => {
         expect(indexes).toContain("idx_drives_one_default_per_user");
 
         const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
-        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     });
 });
