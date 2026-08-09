@@ -714,6 +714,21 @@ describe("DriveRepository", () => {
             );
         });
 
+        it("should prefer D1 default drive when cached drive list is stale", async () => {
+            const staleCachedDrives = [
+                { id: "drive-stale", user_id: "user1", is_default: 1, status: "active" }
+            ];
+            const d1Drives = [
+                { id: "drive-fresh", user_id: "user1", is_default: 1, status: "active" },
+                { id: "drive-stale", user_id: "user1", is_default: 0, status: "active" }
+            ];
+            mockLocalCache.get.mockReturnValue(staleCachedDrives);
+            mockCache.get.mockResolvedValue(staleCachedDrives);
+            mockD1.fetchAll.mockResolvedValue(d1Drives);
+
+            await expect(DriveRepository.getDefaultDrive("user1")).resolves.toEqual(d1Drives[0]);
+        });
+
         it("should set exactly one active default drive for the user", async () => {
             mockD1.fetchOne.mockResolvedValue({ id: "drive1", user_id: "user1", status: "active" });
             mockD1.fetchAll.mockResolvedValue([

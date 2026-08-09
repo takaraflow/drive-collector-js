@@ -477,12 +477,12 @@ export class DriveRepository {
     }
 
     static async getDefaultDrive(userId) {
-        const drives = await this.findByUserId(userId);
-        if (!drives || drives.length === 0) {
-            const d1Drives = await this.findByUserId(userId, true);
-            if (!d1Drives || d1Drives.length === 0) return null;
+        const d1Drives = await this.findByUserId(userId, true);
+        if (d1Drives && d1Drives.length > 0) {
             return d1Drives.find(isDefaultDrive) || d1Drives[0];
         }
+        const drives = await this.findByUserId(userId);
+        if (!drives || drives.length === 0) return null;
         return drives.find(isDefaultDrive) || drives[0];
     }
 

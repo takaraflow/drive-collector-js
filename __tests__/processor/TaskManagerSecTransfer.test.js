@@ -393,6 +393,15 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
             null,
             expect.objectContaining({ source: "direct_transfer_complete" })
         );
+        const startStreamUploadCall = mockTaskRepository.transitionStatus.mock.calls.findIndex(
+            ([, event]) => event === "start_stream_upload"
+        );
+        const heartbeatUploadCall = mockTaskRepository.transitionStatus.mock.calls.findIndex(
+            ([, event, , options]) => event === "start_upload" && options?.source === "heartbeat"
+        );
+        expect(startStreamUploadCall).toBeGreaterThanOrEqual(0);
+        expect(heartbeatUploadCall).toBeGreaterThanOrEqual(0);
+        expect(startStreamUploadCall).toBeLessThan(heartbeatUploadCall);
 
         getAllSpy.mockRestore();
     });

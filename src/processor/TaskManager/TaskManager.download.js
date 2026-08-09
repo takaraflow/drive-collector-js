@@ -584,10 +584,6 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
         return false;
     }
 
-    await heartbeat('uploading', 0, info.size, {
-        bytes: 0,
-        size: info.size
-    });
     await assertClaimFenceCurrent(task, instanceCoordinator);
     const streamStartTransition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.START_STREAM_UPLOAD, null, {
         ...getClaimFenceOptions(task),
@@ -605,6 +601,10 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
         });
         return false;
     }
+    await heartbeat('uploading', 0, info.size, {
+        bytes: 0,
+        size: info.size
+    });
 
     const chunkSize = isLargeFile ? 512 * 1024 : 128 * 1024;
     const result = await directTransferService.transferTelegramMediaToRemote({
