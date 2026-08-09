@@ -1301,7 +1301,10 @@ describe('CloudTool', () => {
         beforeEach(() => {
             mockCacheService.get.mockReturnValue(null);
             mockGetDefaultDrive.mockResolvedValue({
-                type: 'drive', config_data: JSON.stringify({ user: 'u', pass: 'p' })
+                id: 'drive-default',
+                type: 'drive',
+                remote_folder: null,
+                config_data: JSON.stringify({ user: 'u', pass: 'p' })
             });
         });
 
@@ -1332,6 +1335,49 @@ describe('CloudTool', () => {
             expect(mockSpawn).not.toHaveBeenCalled();
         });
 
+        it('should not reuse file cache across different default drives', async () => {
+            const megaFiles = [{ Name: 'mega-file.txt', IsDir: false, ModTime: '2023-01-01T00:00:00Z' }];
+            const protonFiles = [{ Name: 'proton-file.txt', IsDir: false, ModTime: '2023-01-02T00:00:00Z' }];
+            mockGetDefaultDrive
+                .mockResolvedValueOnce({
+                    id: 'drive-mega',
+                    type: 'drive',
+                    remote_folder: null,
+                    config_data: JSON.stringify({ user: 'mega-user', pass: 'p' })
+                })
+                .mockResolvedValueOnce({
+                    id: 'drive-proton',
+                    type: 'drive',
+                    remote_folder: null,
+                    config_data: JSON.stringify({ user: 'proton-user', pass: 'p' })
+                })
+                .mockResolvedValueOnce({
+                    id: 'drive-proton',
+                    type: 'drive',
+                    remote_folder: null,
+                    config_data: JSON.stringify({ user: 'proton-user', pass: 'p' })
+                });
+            mockKv.get
+                .mockResolvedValueOnce({ files: megaFiles })
+                .mockResolvedValueOnce(null);
+            mockSpawn.mockImplementationOnce(() => createAutoProcess((p) => {
+                p.stdout.emit('data', Buffer.from(JSON.stringify(protonFiles)));
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.emit('exit', 0);
+                p.emit('close', 0);
+            }));
+
+            await expect(CloudTool.listRemoteFiles('user-drive-switch')).resolves.toEqual(megaFiles);
+            await expect(CloudTool.listRemoteFiles('user-drive-switch')).resolves.toEqual(protonFiles);
+
+            expect(mockKv.get).toHaveBeenNthCalledWith(1, 'files_user-drive-switch_drive-mega_', 'json');
+            expect(mockKv.get).toHaveBeenNthCalledWith(2, 'files_user-drive-switch_drive-proton_', 'json');
+            expect(mockSpawn).toHaveBeenCalledTimes(1);
+        });
+
         it('should force refresh when requested', async () => {
             mockSpawn.mockImplementation(() => createAutoProcess((p) => {
                 p.stdout.emit('data', Buffer.from('[]'));
@@ -1360,6 +1406,22 @@ describe('CloudTool', () => {
             }));
             const files = await CloudTool.listRemoteFiles('user126');
             expect(files).toEqual([]);
+        });
+
+        it('should throw auth failures instead of returning a stale-looking empty list', async () => {
+            mockSpawn.mockImplementation(() => createAutoProcess((p) => {
+                p.stderr.emit('data', Buffer.from('Invalid refresh token (Code=10013): this account requires a 2FA code\n'));
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 1);
+                p.emit('close', 1);
+            }));
+
+            await expect(CloudTool.listRemoteFiles('user-auth-failed', true)).rejects.toMatchObject({
+                errorCode: 'DRIVE_AUTH_INVALID'
+            });
         });
     });
 

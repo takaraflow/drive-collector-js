@@ -1603,7 +1603,16 @@ export class CloudTool {
      * 获取文件列表 (带智能缓存策略)
      */
     static async listRemoteFiles(userId, forceRefresh = false) {
-        const cacheKey = `files_${userId}`;
+        const activeDrive = await DriveRepository.getDefaultDrive(userId);
+        if (!activeDrive) {
+            throw new Error(STRINGS.drive.no_drive_found);
+        }
+        const cacheKey = [
+            "files",
+            String(userId),
+            String(activeDrive.id || activeDrive.type || "default"),
+            String(activeDrive.remote_folder || "")
+        ].join("_");
 
         if (!forceRefresh) {
             // 1. 尝试内存缓存
@@ -1691,6 +1700,13 @@ export class CloudTool {
         } catch (e) {
             log.error("List files error (Detail):", e);
             this.loading = false;
+            if ([
+                RCLONE_ERROR_CODES.DRIVE_AUTH_INVALID,
+                RCLONE_ERROR_CODES.DRIVE_CONFIG_INVALID,
+                RCLONE_ERROR_CODES.DRIVE_PERMISSION_DENIED
+            ].includes(e?.errorCode)) {
+                throw e;
+            }
             return [];
         }
     }
