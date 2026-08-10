@@ -85,6 +85,20 @@ export class DriveRepository {
         localCache.del(this.getAllDrivesKey());
     }
 
+    static async clearUserFileListCache(userId) {
+        if (!userId) return;
+        const legacyKey = CACHE_KEYS.filesByUser(userId);
+        const driveScopedPrefix = CACHE_KEYS.filesByUserPrefix(userId);
+        await Promise.allSettled([
+            cache.delete(legacyKey),
+            cache.delete(null, { pattern: `${driveScopedPrefix}*` })
+        ]);
+        localCache.del(legacyKey);
+        if (typeof localCache.delByPrefix === "function") {
+            localCache.delByPrefix(driveScopedPrefix);
+        }
+    }
+
     static _parseConfigData(configData) {
         if (!configData) return {};
         if (typeof configData === "object") return { ...configData };
@@ -445,15 +459,24 @@ export class DriveRepository {
         const safeUserId = String(userId);
 
         try {
-            const result = await d1.fetchAll(
-                `SELECT ${DRIVE_COLUMNS} FROM drives WHERE user_id = ? AND status = ? ORDER BY is_default DESC, created_at DESC`,
-                [safeUserId, DRIVE_STATUSES.ACTIVE]
-            );
-            return await this._migrateLegacyPasswordFormats(result || []);
+            return await this._findDriveInD1Strict(safeUserId);
         } catch (e) {
             log.error(`DriveRepository._findDriveInD1 error for ${safeUserId}:`, e);
             return [];
         }
+    }
+
+    static async _findDriveInD1Strict(userId) {
+        if (userId === undefined || userId === null) {
+            return [];
+        }
+
+        const safeUserId = String(userId);
+        const result = await d1.fetchAll(
+            `SELECT ${DRIVE_COLUMNS} FROM drives WHERE user_id = ? AND status = ? ORDER BY is_default DESC, created_at DESC`,
+            [safeUserId, DRIVE_STATUSES.ACTIVE]
+        );
+        return await this._migrateLegacyPasswordFormats(result || []);
     }
 
     /**
@@ -483,8 +506,7 @@ export class DriveRepository {
                 localCache.del(this.getLocalDriveKey(userId));
                 
                 // 清理文件列表缓存，因为路径变更会影响文件列表
-                await cache.delete(CACHE_KEYS.filesByUser(userId));
-                localCache.del(CACHE_KEYS.filesByUser(userId));
+                await this.clearUserFileListCache(userId);
                 
                 // 清理可能的路径缓存
                 localCache.del(CACHE_KEYS.uploadPathByUser(userId));
@@ -518,18 +540,14 @@ export class DriveRepository {
     }
 
     static async getDefaultDrive(userId) {
-        const d1Drives = await this.findByUserId(userId, true);
-        if (d1Drives && d1Drives.length > 0) {
-            return await this._ensureDefaultFromDrives(userId, d1Drives);
-        }
-        const drives = await this.findByUserId(userId);
-        if (!drives || drives.length === 0) return null;
+        if (!userId) return null;
+        const drives = await this._findDriveInD1Strict(userId);
         return await this._ensureDefaultFromDrives(userId, drives);
     }
 
     static async ensureDefaultDrive(userId) {
         if (!userId) return null;
-        const drives = await this._findDriveInD1(userId);
+        const drives = await this._findDriveInD1Strict(userId);
         return await this._ensureDefaultFromDrives(userId, drives);
     }
 
@@ -546,14 +564,14 @@ export class DriveRepository {
             throw new Error("DriveRepository.setDefaultDrive: Drive not found for user.");
         }
 
-        const userDriveIds = (await this._findDriveInD1(userId)).map(item => item.id);
+        const userDriveIds = (await this._findDriveInD1Strict(userId)).map(item => item.id);
         await this._writeDefaultDrive(userId, driveId, userDriveIds);
         return true;
     }
 
     static async clearDefaultDrive(userId) {
         if (!userId) return;
-        const userDriveIds = (await this._findDriveInD1(userId)).map(item => item.id);
+        const userDriveIds = (await this._findDriveInD1Strict(userId)).map(item => item.id);
         await d1.run(
             "UPDATE drives SET is_default = 0, updated_at = ? WHERE user_id = ? AND status = ?",
             [Date.now(), String(userId), DRIVE_STATUSES.ACTIVE]

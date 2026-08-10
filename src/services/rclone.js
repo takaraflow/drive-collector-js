@@ -10,6 +10,7 @@ import { localCache } from "../utils/LocalCache.js";
 import { cache } from "./CacheService.js";
 import { logger } from "./logger/index.js";
 import { DriveProviderFactory } from "./drives/index.js";
+import { CACHE_KEYS } from "../domain/cache-keys.js";
 import { redactSensitiveText } from "../utils/serializer.js";
 import { classifyRcloneError, isRetryableRcloneError, RCLONE_ERROR_CODES } from "../domain/rclone-error.js";
 import { getRcloneErrorUserMessage } from "../utils/rcloneErrorMessage.js";
@@ -1607,12 +1608,7 @@ export class CloudTool {
         if (!activeDrive) {
             throw new Error(STRINGS.drive.no_drive_found);
         }
-        const cacheKey = [
-            "files",
-            String(userId),
-            String(activeDrive.id || activeDrive.type || "default"),
-            String(activeDrive.remote_folder || "")
-        ].join("_");
+        const cacheKey = CACHE_KEYS.filesByDrive(userId, activeDrive.id || activeDrive.type, activeDrive.remote_folder);
 
         if (!forceRefresh) {
             // 1. 尝试内存缓存

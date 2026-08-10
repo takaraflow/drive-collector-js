@@ -12,6 +12,7 @@ const mockLocalCache = {
     get: vi.fn(),
     set: vi.fn(),
     del: vi.fn(),
+    delByPrefix: vi.fn(),
     getOrSet: vi.fn(),
 };
 
@@ -785,6 +786,28 @@ describe("DriveRepository", () => {
             mockD1.fetchAll.mockResolvedValue(d1Drives);
 
             await expect(DriveRepository.getDefaultDrive("user1")).resolves.toEqual(d1Drives[0]);
+        });
+
+        it("should not resolve a default drive from stale caches when D1 lookup fails", async () => {
+            const staleCachedDrives = [
+                { id: "drive-stale", user_id: "user1", is_default: 1, status: "active" }
+            ];
+            mockLocalCache.get.mockReturnValue(staleCachedDrives);
+            mockCache.get.mockResolvedValue(staleCachedDrives);
+            mockD1.fetchAll.mockRejectedValue(new Error("D1 unavailable"));
+
+            await expect(DriveRepository.getDefaultDrive("user1")).rejects.toThrow("D1 unavailable");
+            expect(mockLocalCache.get).not.toHaveBeenCalledWith("drive_user1");
+            expect(mockCache.get).not.toHaveBeenCalledWith("drive:user1", "json");
+        });
+
+        it("should clear legacy and drive-scoped file list caches", async () => {
+            await DriveRepository.clearUserFileListCache("user1");
+
+            expect(mockCache.delete).toHaveBeenCalledWith("files_user1");
+            expect(mockCache.delete).toHaveBeenCalledWith(null, { pattern: "files_user1_*" });
+            expect(mockLocalCache.del).toHaveBeenCalledWith("files_user1");
+            expect(mockLocalCache.delByPrefix).toHaveBeenCalledWith("files_user1_");
         });
 
         it("should set exactly one active default drive for the user", async () => {

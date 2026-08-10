@@ -31,7 +31,6 @@ import { instanceCoordinator } from "../services/InstanceCoordinator.js";
 import { cache } from "../services/CacheService.js";
 import { queueService } from "../services/QueueService.js";
 import { logger } from "../services/logger/index.js";
-import { localCache } from "../utils/LocalCache.js";
 import { getBuildDisplayVersion, getBuildIdentity } from "../utils/buildIdentity.js";
 import mediaGroupBuffer from "../services/MediaGroupBuffer.js";
 import { TASK_STATUSES } from "../domain/task-state-machine.js";
@@ -1867,10 +1866,8 @@ export class Dispatcher {
             await this._setUserUploadPathInD1(userId, pathArg);
 
             // 清除该用户的文件缓存
-            const cacheKey = `files_${userId}`;
-            localCache.del(cacheKey);
             try {
-                await cache.delete(cacheKey);
+                await DriveRepository.clearUserFileListCache(userId);
             } catch (e) {
                 log.warn(`Failed to clear cache for user ${userId}:`, e.message);
             }
@@ -1946,10 +1943,8 @@ export class Dispatcher {
                 await this._setUserUploadPathInD1(userId, text);
 
                 // 清除缓存
-                const cacheKey = `files_${userId}`;
-                localCache.del(cacheKey);
                 try {
-                    await cache.delete(cacheKey);
+                    await DriveRepository.clearUserFileListCache(userId);
                 } catch (e) {
                     log.warn(`Failed to clear cache for user ${userId}:`, e.message);
                 }

@@ -23,6 +23,8 @@ export const CACHE_KEYS = Object.freeze({
     activeDrives: () => "drives:active",
     localDriveByUser: userId => `drive_${userId}`,
     filesByUser: userId => `files_${userId}`,
+    filesByUserPrefix: userId => `files_${userId}_`,
+    filesByDrive: (userId, driveId, remoteFolder = "") => `files_${userId}_${driveId || "default"}_${remoteFolder || ""}`,
     uploadPathByUser: userId => `upload_path_${userId}`,
 
     lock: lockKey => `lock:${lockKey}`,

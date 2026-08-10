@@ -24,6 +24,17 @@ describe("LocalCache", () => {
     expect(localCache.get("test")).toBeNull();
   });
 
+  it("should delete cache entries by prefix", () => {
+    localCache.set("files_user1_drive1", "a");
+    localCache.set("files_user1_drive2", "b");
+    localCache.set("files_user2_drive1", "c");
+
+    expect(localCache.delByPrefix("files_user1_")).toBe(2);
+    expect(localCache.get("files_user1_drive1")).toBeNull();
+    expect(localCache.get("files_user1_drive2")).toBeNull();
+    expect(localCache.get("files_user2_drive1")).toBe("c");
+  });
+
   it("should use getOrSet correctly", async () => {
     const loader = vi.fn().mockResolvedValue("loaded");
     const result1 = await localCache.getOrSet("key", loader, 1000);

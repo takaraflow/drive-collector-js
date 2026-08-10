@@ -62,6 +62,17 @@ class LocalCache {
         this.ttls.delete(key);
     }
 
+    delByPrefix(prefix) {
+        let deleted = 0;
+        for (const key of this.cache.keys()) {
+            if (String(key).startsWith(prefix)) {
+                this.del(key);
+                deleted += 1;
+            }
+        }
+        return deleted;
+    }
+
     /**
      * 清除所有缓存
      */
