@@ -58,8 +58,8 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
         },
         files: {
             directory_prefix: "📂 <b>目录</b>: <code>{{folder}}</code>\n\n",
-            dir_empty: "ℹ️ 目录为空。您可以直接发送文件给我，将其转存到此目录。",
-            batch_empty: "ℹ️ 尚无文件排队或加载中。您可以直接向我发送文件或链接来开始转存。",
+            dir_empty: "ℹ️ 目录为空。👉 提示：您可以直接向我发送文件或图片，将其转存到此目录。",
+            batch_empty: "ℹ️ 尚无文件排队或加载中。👉 提示：请向我发送文件或链接以开始转存。",
             page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 个文件</i>",
             btn_home: "⏮️",
             btn_prev: "⬅️",
@@ -96,13 +96,13 @@ vi.mock("../../src/locales/zh-CN.js", () => ({
             btn_back: "🔙 返回",
             btn_refresh: "🔄",
             btn_retry_failed_page: "重试本页失败任务",
-            no_tasks_in_status: "📭 该状态下暂无任务。您可以发送文件或链接来创建新任务。",
+            no_tasks_in_status: "📭 该状态下暂无任务。👉 提示：您可以发送文件或链接来创建新任务。",
         },
         admin_users: {
             title: "👥 <b>用户列表</b>",
             loading: "🔍 正在查询用户列表...",
             error: "❌ <b>暂时无法查询用户列表</b>\n\n请重新加载；如果连续失败，请查看系统诊断。",
-            empty: "当前没有可显示的用户。\n用户绑定网盘、提交任务或被设置角色后，会出现在这里。",
+            empty: "当前没有可显示的用户。\n👉 提示：用户绑定网盘、提交任务或被设置角色后，会出现在这里。",
             summary: "共 {{total}} 位用户 · 活跃 {{active}} · 管理 {{admins}} · 封禁 {{banned}}",
             filter_line: "筛选: {{filter}} · 第 {{current}}/{{totalPages}} 页",
             user_row: "<code>{{index}}.</code> {{roleIcon}} <code>{{userId}}</code> · {{role}}",
@@ -839,7 +839,7 @@ describe("UIHelper", () => {
 
             const result = UIHelper.renderTaskQueueDetail('completed', data);
 
-            expect(result.text).toContain("该状态下暂无任务。您可以发送文件或链接来创建新任务。");
+            expect(result.text).toContain("该状态下暂无任务。👉 提示：您可以发送文件或链接来创建新任务。");
             expect(result.text).toContain("任务队列 — ✅ 已完成 (共 0 条)");
         });
 
