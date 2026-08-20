@@ -961,20 +961,27 @@ export class TaskRepository {
         }
 
         const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : 10;
-        const [statusCounts, activeTasks, recentTasks] = await Promise.all([
-            d1.fetchAll(
-                "SELECT status, COUNT(*) as count FROM tasks WHERE user_id = ? GROUP BY status",
-                [userId]
-            ),
-            d1.fetchAll(
-                `SELECT id, file_name, file_size, status, source_type, created_at, updated_at FROM tasks WHERE user_id = ? AND status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`,
-                [userId, ...TASK_ACTIVE_STATUSES, safeLimit]
-            ),
-            d1.fetchAll(
-                "SELECT id, file_name, status, error_msg, source_type, created_at, updated_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
-                [userId, safeLimit]
-            )
-        ]);
+
+        // ⚡ Bolt Optimization: Use d1.batch() to consolidate N+1 queries into a single HTTP request
+        // This eliminates separate roundtrips to Cloudflare D1 and reduces overall network latency.
+        const statements = [
+            { sql: "SELECT status, COUNT(*) as count FROM tasks WHERE user_id = ? GROUP BY status", params: [userId] },
+            { sql: `SELECT id, file_name, file_size, status, source_type, created_at, updated_at FROM tasks WHERE user_id = ? AND status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`, params: [userId, ...TASK_ACTIVE_STATUSES, safeLimit] },
+            { sql: "SELECT id, file_name, status, error_msg, source_type, created_at, updated_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?", params: [userId, safeLimit] }
+        ];
+
+        let statusCounts, activeTasks, recentTasks;
+        if (typeof d1.batch === "function") {
+            const results = await d1.batch(statements);
+            TaskRepository._rowsFromBatchResults(results); // Validate successful batch execution
+            statusCounts = results[0]?.result?.results || [];
+            activeTasks = results[1]?.result?.results || [];
+            recentTasks = results[2]?.result?.results || [];
+        } else {
+            [statusCounts, activeTasks, recentTasks] = await Promise.all(
+                statements.map(s => d1.fetchAll(s.sql, s.params))
+            );
+        }
 
         const statusMap = {};
         for (const row of (statusCounts || [])) {
@@ -1330,17 +1337,26 @@ export class TaskRepository {
      * @returns {Promise<{statusCounts: Object, activeTasks: Array, userCounts: Array}>}
      */
     static async getQueueOverview(limit = 10) {
-        const [statusCounts, activeTasks, userCounts] = await Promise.all([
-            d1.fetchAll("SELECT status, COUNT(*) as count FROM tasks GROUP BY status"),
-            d1.fetchAll(
-                `SELECT id, user_id, file_name, file_size, status, source_type, created_at, updated_at FROM tasks WHERE status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`,
-                [...TASK_ACTIVE_STATUSES, limit]
-            ),
-            d1.fetchAll(
-                `SELECT user_id, COUNT(*) as count FROM tasks WHERE status IN (${this.ACTIVE_STATUS_SQL}) GROUP BY user_id ORDER BY count DESC LIMIT 5`,
-                [...TASK_ACTIVE_STATUSES]
-            )
-        ]);
+        // ⚡ Bolt Optimization: Consolidate multiple queries into a single HTTP payload via d1.batch()
+        // This mitigates N+1 HTTP request overhead to Cloudflare D1 for improved throughput.
+        const statements = [
+            { sql: "SELECT status, COUNT(*) as count FROM tasks GROUP BY status", params: [] },
+            { sql: `SELECT id, user_id, file_name, file_size, status, source_type, created_at, updated_at FROM tasks WHERE status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`, params: [...TASK_ACTIVE_STATUSES, limit] },
+            { sql: `SELECT user_id, COUNT(*) as count FROM tasks WHERE status IN (${this.ACTIVE_STATUS_SQL}) GROUP BY user_id ORDER BY count DESC LIMIT 5`, params: [...TASK_ACTIVE_STATUSES] }
+        ];
+
+        let statusCounts, activeTasks, userCounts;
+        if (typeof d1.batch === "function") {
+            const results = await d1.batch(statements);
+            TaskRepository._rowsFromBatchResults(results); // Validate successful batch execution
+            statusCounts = results[0]?.result?.results || [];
+            activeTasks = results[1]?.result?.results || [];
+            userCounts = results[2]?.result?.results || [];
+        } else {
+            [statusCounts, activeTasks, userCounts] = await Promise.all(
+                statements.map(s => d1.fetchAll(s.sql, s.params))
+            );
+        }
 
         const statusMap = {};
         for (const row of (statusCounts || [])) {
@@ -1363,16 +1379,26 @@ export class TaskRepository {
      */
     static async getTasksByStatus(status, page = 0, pageSize = 10) {
         const offset = page * pageSize;
-        const [tasks, countRow] = await Promise.all([
-            d1.fetchAll(
-                "SELECT id, user_id, file_name, file_size, status, error_msg, source_type, created_at, updated_at FROM tasks WHERE status = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-                [status, pageSize, offset]
-            ),
-            d1.fetchOne(
-                "SELECT COUNT(*) as total FROM tasks WHERE status = ?",
-                [status]
-            )
-        ]);
+
+        // ⚡ Bolt Optimization: Use d1.batch() to perform the data fetch and total count query in one HTTP request
+        // Reduces query latency effectively by dropping N+1 HTTP overhead to D1.
+        const statements = [
+            { sql: "SELECT id, user_id, file_name, file_size, status, error_msg, source_type, created_at, updated_at FROM tasks WHERE status = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?", params: [status, pageSize, offset] },
+            { sql: "SELECT COUNT(*) as total FROM tasks WHERE status = ?", params: [status] }
+        ];
+
+        let tasks, countRow;
+        if (typeof d1.batch === "function") {
+            const results = await d1.batch(statements);
+            TaskRepository._rowsFromBatchResults(results); // Validate successful batch execution
+            tasks = results[0]?.result?.results || [];
+            countRow = (results[1]?.result?.results || [])[0] || null;
+        } else {
+            [tasks, countRow] = await Promise.all([
+                d1.fetchAll(statements[0].sql, statements[0].params),
+                d1.fetchOne(statements[1].sql, statements[1].params)
+            ]);
+        }
         return {
             tasks: tasks || [],
             total: countRow?.total || 0,

@@ -1111,6 +1111,10 @@ describe('TaskRepository', () => {
     });
 
     describe('getQueueOverview', () => {
+        let originalBatch;
+        beforeAll(() => { originalBatch = mockD1.batch; });
+        beforeEach(() => { mockD1.batch = undefined; });
+        afterAll(() => { mockD1.batch = originalBatch; });
         it('should return status counts, active tasks, and user counts', async () => {
             const mockStatusCounts = [
                 { status: 'queued', count: 5 },
@@ -1175,7 +1179,8 @@ describe('TaskRepository', () => {
 
             // First query: status GROUP BY
             expect(mockD1.fetchAll).toHaveBeenNthCalledWith(1,
-                expect.stringContaining('GROUP BY status')
+                expect.stringContaining('GROUP BY status'),
+                []
             );
             // Second query: active tasks with limit parameter
             expect(mockD1.fetchAll).toHaveBeenNthCalledWith(2,
@@ -1205,6 +1210,10 @@ describe('TaskRepository', () => {
     });
 
     describe('getUserQueueOverview', () => {
+        let originalBatch;
+        beforeAll(() => { originalBatch = mockD1.batch; });
+        beforeEach(() => { mockD1.batch = undefined; });
+        afterAll(() => { mockD1.batch = originalBatch; });
         it('should return status counts, active tasks, and recent tasks for one user', async () => {
             const mockStatusCounts = [
                 { status: 'queued', count: 2 },
@@ -1281,6 +1290,10 @@ describe('TaskRepository', () => {
     });
 
     describe('getTasksByStatus', () => {
+        let originalBatch;
+        beforeAll(() => { originalBatch = mockD1.batch; });
+        beforeEach(() => { mockD1.batch = undefined; });
+        afterAll(() => { mockD1.batch = originalBatch; });
         it('should return paginated tasks for a given status', async () => {
             const mockTasks = [
                 { id: 't1', user_id: 'u1', file_name: 'a.mp4', status: 'failed', error_msg: 'timeout' },
