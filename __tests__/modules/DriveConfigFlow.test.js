@@ -1,4 +1,6 @@
 import { describe, test, expect, beforeEach, vi } from 'vitest';
+import { Button } from "telegram/tl/custom/button.js";
+import { STRINGS } from "../../src/locales/zh-CN.js";
 
 // 1. Mock 依赖项
 // Mock config
@@ -630,7 +632,11 @@ describe("DriveConfigFlow", () => {
 
             expect(mockClient.sendMessage).toHaveBeenCalledWith("chat123", {
                 message: "⚠️ 您当前未绑定任何网盘，无需解绑。\n\n您可以发送 /drive 命令来绑定新的网盘。",
-                parseMode: "html"
+                parseMode: "html",
+                buttons: [
+                    [Button.inline(STRINGS.system.btn_bind_drive, Buffer.from("drive_select_type"))],
+                    [Button.inline(STRINGS.system.btn_help, Buffer.from("help_main"))]
+                ]
             });
         });
     });

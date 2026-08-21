@@ -499,7 +499,14 @@ export class DriveConfigFlow {
         const drives = await DriveRepository.findByUserId(userId);
 
         if (!drives || drives.length === 0) {
-            return await runBotTask(() => client.sendMessage(chatId, { message: STRINGS.drive.no_drive_unbind, parseMode: "html" }), userId);
+            return await runBotTask(() => client.sendMessage(chatId, {
+                message: STRINGS.drive.no_drive_unbind,
+                parseMode: "html",
+                buttons: [
+                    [Button.inline(STRINGS.system.btn_bind_drive, Buffer.from("drive_select_type"))],
+                    [Button.inline(STRINGS.system.btn_help, Buffer.from("help_main"))]
+                ]
+            }), userId);
         }
 
         await runBotTask(() => client.sendMessage(chatId, { 
