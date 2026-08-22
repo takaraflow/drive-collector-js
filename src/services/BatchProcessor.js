@@ -3,6 +3,7 @@ import { queueService } from "./QueueService.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
 import { cache } from "./CacheService.js";
 import { localCache } from "../utils/LocalCache.js";
+import crypto from "node:crypto";
 
 const log = logger.withModule('BatchProcessor');
 
@@ -31,7 +32,7 @@ export class BatchProcessor {
      * @returns {Promise<string>} 批量ID
      */
     async createBatch(batchType, items, options = {}) {
-        const batchId = `${batchType}:${Date.now()}:${Math.random().toString(36).substr(2, 9)}`;
+        const batchId = `${batchType}:${Date.now()}:${crypto.randomUUID().substring(0, 8)}`;
         const { userId, priority = 'normal', metadata = {} } = options;
 
         // 验证批量大小
