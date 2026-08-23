@@ -1286,8 +1286,10 @@ describe('TaskRepository', () => {
                 { id: 't1', user_id: 'u1', file_name: 'a.mp4', status: 'failed', error_msg: 'timeout' },
                 { id: 't2', user_id: 'u2', file_name: 'b.mp4', status: 'failed', error_msg: 'crash' }
             ];
-            mockD1.fetchAll.mockResolvedValueOnce(mockTasks);
-            mockD1.fetchOne.mockResolvedValueOnce({ total: 15 });
+            mockD1.batch.mockResolvedValueOnce([
+                { result: { results: mockTasks } },
+                { result: { results: [{ total: 15 }] } }
+            ]);
 
             const result = await TaskRepository.getTasksByStatus('failed', 0, 10);
 
@@ -1299,8 +1301,10 @@ describe('TaskRepository', () => {
         });
 
         it('should handle empty results', async () => {
-            mockD1.fetchAll.mockResolvedValueOnce([]);
-            mockD1.fetchOne.mockResolvedValueOnce({ total: 0 });
+            mockD1.batch.mockResolvedValueOnce([
+                { result: { results: [] } },
+                { result: { results: [{ total: 0 }] } }
+            ]);
 
             const result = await TaskRepository.getTasksByStatus('completed', 0, 10);
 
@@ -1310,8 +1314,10 @@ describe('TaskRepository', () => {
         });
 
         it('should handle null returns from D1', async () => {
-            mockD1.fetchAll.mockResolvedValueOnce(null);
-            mockD1.fetchOne.mockResolvedValueOnce(null);
+            mockD1.batch.mockResolvedValueOnce([
+                { result: null },
+                { result: null }
+            ]);
 
             const result = await TaskRepository.getTasksByStatus('queued', 0, 10);
 
@@ -1321,31 +1327,43 @@ describe('TaskRepository', () => {
         });
 
         it('should calculate correct offset for page 2', async () => {
-            mockD1.fetchAll.mockResolvedValueOnce([]);
-            mockD1.fetchOne.mockResolvedValueOnce({ total: 25 });
+            mockD1.batch.mockResolvedValueOnce([
+                { result: { results: [] } },
+                { result: { results: [{ total: 25 }] } }
+            ]);
 
             await TaskRepository.getTasksByStatus('failed', 2, 10);
 
-            expect(mockD1.fetchAll).toHaveBeenCalledWith(
-                expect.stringContaining('LIMIT ? OFFSET ?'),
-                ['failed', 10, 20]
-            );
+            expect(mockD1.batch).toHaveBeenCalledWith([
+                {
+                    sql: expect.stringContaining('LIMIT ? OFFSET ?'),
+                    params: ['failed', 10, 20]
+                },
+                {
+                    sql: expect.stringContaining('COUNT(*)'),
+                    params: ['failed']
+                }
+            ]);
         });
 
         it('should verify SQL query structure', async () => {
-            mockD1.fetchAll.mockResolvedValueOnce([]);
-            mockD1.fetchOne.mockResolvedValueOnce({ total: 0 });
+            mockD1.batch.mockResolvedValueOnce([
+                { result: { results: [] } },
+                { result: { results: [{ total: 0 }] } }
+            ]);
 
             await TaskRepository.getTasksByStatus('completed', 0, 10);
 
-            expect(mockD1.fetchAll).toHaveBeenCalledWith(
-                expect.stringContaining('WHERE status = ?'),
-                ['completed', 10, 0]
-            );
-            expect(mockD1.fetchOne).toHaveBeenCalledWith(
-                expect.stringContaining('COUNT(*)'),
-                ['completed']
-            );
+            expect(mockD1.batch).toHaveBeenCalledWith([
+                {
+                    sql: expect.stringContaining('WHERE status = ?'),
+                    params: ['completed', 10, 0]
+                },
+                {
+                    sql: expect.stringContaining('COUNT(*)'),
+                    params: ['completed']
+                }
+            ]);
         });
     });
 });
