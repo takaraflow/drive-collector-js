@@ -590,7 +590,7 @@ export class QstashQueue extends CloudQueueBase {
             reason,
             error: error?.message,
             timestamp: Date.now(),
-            id: `dlq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            id: `dlq_${Date.now()}_${crypto.randomUUID().substring(0, 8)}`
         };
 
         this.deadLetterQueue.push(dlqMessage);

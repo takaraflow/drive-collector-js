@@ -3,6 +3,7 @@
  * 提供内存缓冲 + 文件持久化的双重保障
  */
 
+import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { logger } from '../logger/index.js';
@@ -217,7 +218,7 @@ class LocalBufferQueue {
    * 生成唯一ID
    */
   generateId() {
-    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return `${Date.now()}-${crypto.randomUUID().substring(0, 8)}`;
   }
 
   /**
