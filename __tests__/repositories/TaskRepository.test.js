@@ -1219,64 +1219,67 @@ describe('TaskRepository', () => {
                 { id: 't3', file_name: 'done.mp4', status: 'completed', created_at: Date.now() }
             ];
 
-            mockD1.fetchAll
-                .mockResolvedValueOnce(mockStatusCounts)
-                .mockResolvedValueOnce(mockActiveTasks)
-                .mockResolvedValueOnce(mockRecentTasks);
+            mockD1.batch.mockResolvedValueOnce([
+                { success: true, result: { results: mockStatusCounts } },
+                { success: true, result: { results: mockActiveTasks } },
+                { success: true, result: { results: mockRecentTasks } }
+            ]);
 
             const result = await TaskRepository.getUserQueueOverview('user123', 5);
 
             expect(result.statusCounts).toEqual({ queued: 2, uploading: 1, completed: 5 });
             expect(result.activeTasks).toEqual(mockActiveTasks);
             expect(result.recentTasks).toEqual(mockRecentTasks);
-            expect(mockD1.fetchAll).toHaveBeenCalledTimes(3);
+            expect(mockD1.batch).toHaveBeenCalledTimes(1);
         });
 
         it('should filter every query by user id and active statuses', async () => {
-            mockD1.fetchAll
-                .mockResolvedValueOnce([])
-                .mockResolvedValueOnce([])
-                .mockResolvedValueOnce([]);
+            mockD1.batch.mockResolvedValueOnce([
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } }
+            ]);
 
             await TaskRepository.getUserQueueOverview('user123', 7);
 
-            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(1,
-                expect.stringContaining('WHERE user_id = ?'),
-                ['user123']
-            );
-            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(2,
-                expect.stringContaining('WHERE user_id = ? AND status IN'),
-                ['user123', ...TASK_ACTIVE_STATUSES, 7]
-            );
-            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(3,
-                expect.stringContaining('WHERE user_id = ?'),
-                ['user123', 7]
-            );
+            expect(mockD1.batch).toHaveBeenCalledWith(expect.arrayContaining([
+                expect.objectContaining({
+                    sql: expect.stringContaining('WHERE user_id = ? GROUP BY status'),
+                    params: ['user123']
+                }),
+                expect.objectContaining({
+                    sql: expect.stringContaining('WHERE user_id = ? AND status IN'),
+                    params: ['user123', ...TASK_ACTIVE_STATUSES, 7]
+                }),
+                expect.objectContaining({
+                    sql: expect.stringContaining('ORDER BY created_at DESC LIMIT ?'),
+                    params: ['user123', 7]
+                })
+            ]));
         });
 
         it('should return empty data without querying D1 when user id is missing', async () => {
             const result = await TaskRepository.getUserQueueOverview(null);
 
             expect(result).toEqual({ statusCounts: {}, activeTasks: [], recentTasks: [] });
-            expect(mockD1.fetchAll).not.toHaveBeenCalled();
+            expect(mockD1.batch).not.toHaveBeenCalled();
         });
 
         it('should use default limit for invalid limit values', async () => {
-            mockD1.fetchAll
-                .mockResolvedValueOnce([])
-                .mockResolvedValueOnce([])
-                .mockResolvedValueOnce([]);
+            mockD1.batch.mockResolvedValueOnce([
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } }
+            ]);
 
             await TaskRepository.getUserQueueOverview('user123', 0);
 
-            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(2,
-                expect.stringContaining('LIMIT ?'),
-                ['user123', ...TASK_ACTIVE_STATUSES, 10]
-            );
-            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(3,
-                expect.stringContaining('LIMIT ?'),
-                ['user123', 10]
-            );
+            expect(mockD1.batch).toHaveBeenCalledWith(expect.arrayContaining([
+                expect.objectContaining({
+                    sql: expect.stringContaining('LIMIT ?'),
+                    params: ['user123', ...TASK_ACTIVE_STATUSES, 10]
+                })
+            ]));
         });
     });
 

@@ -961,30 +961,41 @@ export class TaskRepository {
         }
 
         const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : 10;
-        const [statusCounts, activeTasks, recentTasks] = await Promise.all([
-            d1.fetchAll(
-                "SELECT status, COUNT(*) as count FROM tasks WHERE user_id = ? GROUP BY status",
-                [userId]
-            ),
-            d1.fetchAll(
-                `SELECT id, file_name, file_size, status, source_type, created_at, updated_at FROM tasks WHERE user_id = ? AND status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`,
-                [userId, ...TASK_ACTIVE_STATUSES, safeLimit]
-            ),
-            d1.fetchAll(
-                "SELECT id, file_name, status, error_msg, source_type, created_at, updated_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
-                [userId, safeLimit]
-            )
+
+        // ⚡ Bolt 优化：使用 d1.batch 减少向 Cloudflare D1 发起的 N+1 HTTP 请求
+        // 预期影响：通过将 3 个独立的查询合并为单个网络请求负载，显著降低网络往返延迟开销，并降低连接池耗尽的风险。
+        const batchResults = await d1.batch([
+            {
+                sql: "SELECT status, COUNT(*) as count FROM tasks WHERE user_id = ? GROUP BY status",
+                params: [userId]
+            },
+            {
+                sql: `SELECT id, file_name, file_size, status, source_type, created_at, updated_at FROM tasks WHERE user_id = ? AND status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`,
+                params: [userId, ...TASK_ACTIVE_STATUSES, safeLimit]
+            },
+            {
+                sql: "SELECT id, file_name, status, error_msg, source_type, created_at, updated_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                params: [userId, safeLimit]
+            }
         ]);
 
+        for (const res of batchResults) {
+            if (!res.success) throw res.error || new Error("getUserQueueOverview 中 D1 批量查询失败");
+        }
+
+        const statusCounts = batchResults[0]?.result?.results || [];
+        const activeTasks = batchResults[1]?.result?.results || [];
+        const recentTasks = batchResults[2]?.result?.results || [];
+
         const statusMap = {};
-        for (const row of (statusCounts || [])) {
+        for (const row of statusCounts) {
             statusMap[row.status] = row.count;
         }
 
         return {
             statusCounts: statusMap,
-            activeTasks: activeTasks || [],
-            recentTasks: recentTasks || []
+            activeTasks,
+            recentTasks
         };
     }
 
