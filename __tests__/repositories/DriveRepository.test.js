@@ -20,6 +20,7 @@ const mockD1 = {
     fetchOne: vi.fn(),
     fetchAll: vi.fn(),
     run: vi.fn(),
+    batch: vi.fn(),
 };
 
 vi.mock("../../src/services/CacheService.js", () => ({
@@ -482,8 +483,8 @@ describe("DriveRepository", () => {
 
             await DriveRepository.deleteByUserId("user1");
 
-            // Verify D1 updates for EACH drive
-            expect(mockD1.run).toHaveBeenCalledTimes(2);
+            // Verify D1 updates using batch
+            expect(mockD1.batch).toHaveBeenCalledTimes(1);
             
             // Verify Cache deletes (drive_id keys)
             expect(mockCache.delete).toHaveBeenCalledWith("drive_id:drive1");
@@ -500,7 +501,7 @@ describe("DriveRepository", () => {
 
             await DriveRepository.deleteByUserId("user1");
 
-            expect(mockD1.run).not.toHaveBeenCalled();
+            expect(mockD1.batch).not.toHaveBeenCalled();
             // We expect cache.delete to be called to clean up the user key (even if empty)
             expect(mockCache.delete).toHaveBeenCalledWith("drive:user1");
         });
@@ -508,7 +509,7 @@ describe("DriveRepository", () => {
         it("should handle errors in deleteByUserId", async () => {
             const mockDrives = [{ id: "drive1", user_id: "user1" }];
             mockD1.fetchAll.mockResolvedValue(mockDrives);
-            mockD1.run.mockRejectedValue(new Error("D1 Error"));
+            mockD1.batch.mockRejectedValue(new Error("D1 Error"));
 
             await expect(DriveRepository.deleteByUserId("user1")).rejects.toThrow("D1 Error");
             expect(logger.error).toHaveBeenCalledWith("DriveRepository.deleteByUserId failed for user1:", expect.any(Error));

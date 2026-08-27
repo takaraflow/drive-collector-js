@@ -308,13 +308,17 @@ export class DriveRepository {
             
             if (drives && drives.length > 0) {
                 const now = Date.now();
-                for (const drive of drives) {
-                    await d1.run(
-                        "UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id = ?",
-                        [DRIVE_STATUSES.DELETED, now, drive.id]
-                    );
-                    await cache.delete(this.getDriveIdKey(drive.id));
-                }
+
+                // ⚡ Bolt Optimization: Use d1.batch to eliminate N+1 network requests
+                const statements = drives.map(drive => ({
+                    sql: "UPDATE drives SET status = ?, is_default = 0, updated_at = ? WHERE id = ?",
+                    params: [DRIVE_STATUSES.DELETED, now, drive.id]
+                }));
+                await d1.batch(statements);
+
+                const cacheDeletePromises = drives.map(drive => cache.delete(this.getDriveIdKey(drive.id)));
+                await Promise.all(cacheDeletePromises);
+
                 await this._updateActiveDrivesList();
             }
 
