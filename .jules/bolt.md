@@ -14,3 +14,6 @@
 ## 2026-07-04 - D1 Batch Optimization for N+1 HTTP Requests
 **Learning:** Using `Promise.all` with `d1.fetchOne`/`d1.fetchAll` executes concurrent queries but still incurs the overhead of multiple separate HTTP roundtrips to Cloudflare D1. This creates a bottleneck.
 **Action:** Use `d1.batch()` to consolidate multiple queries into a single HTTP payload, effectively eliminating N+1 network requests to D1.
+## $(date +%Y-%m-%d) - D1 Batch Optimization for Task Queue Overview
+**Learning:** In `TaskRepository.js`, aggregating metrics for queue overviews (`getUserQueueOverview` and `getQueueOverview`) used `Promise.all` with multiple `d1.fetchAll` queries. While executing concurrently, this still resulted in N+1 HTTP roundtrips to Cloudflare D1, adding unnecessary network latency and connection overhead.
+**Action:** Replace `Promise.all` with native `d1.batch()` for related analytical or overview queries to combine multiple SQL statements into a single HTTP payload, eliminating the N+1 network request bottleneck.

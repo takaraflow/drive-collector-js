@@ -1111,7 +1111,10 @@ describe('TaskRepository', () => {
     });
 
     describe('getQueueOverview', () => {
-        it('should return status counts, active tasks, and user counts', async () => {
+        beforeEach(() => {
+            mockD1.batch = vi.fn();
+        });
+        it('should return status counts, active tasks, and user counts using batch', async () => {
             const mockStatusCounts = [
                 { status: 'queued', count: 5 },
                 { status: 'downloading', count: 2 },
@@ -1126,24 +1129,26 @@ describe('TaskRepository', () => {
                 { user_id: 'u2', count: 1 }
             ];
 
-            mockD1.fetchAll
-                .mockResolvedValueOnce(mockStatusCounts)
-                .mockResolvedValueOnce(mockActiveTasks)
-                .mockResolvedValueOnce(mockUserCounts);
+            mockD1.batch.mockResolvedValueOnce([
+                { success: true, result: { results: mockStatusCounts } },
+                { success: true, result: { results: mockActiveTasks } },
+                { success: true, result: { results: mockUserCounts } }
+            ]);
 
             const result = await TaskRepository.getQueueOverview(10);
 
             expect(result.statusCounts).toEqual({ queued: 5, downloading: 2, completed: 100 });
             expect(result.activeTasks).toEqual(mockActiveTasks);
             expect(result.userCounts).toEqual(mockUserCounts);
-            expect(mockD1.fetchAll).toHaveBeenCalledTimes(3);
+            expect(mockD1.batch).toHaveBeenCalledTimes(1);
         });
 
-        it('should handle empty results', async () => {
-            mockD1.fetchAll
-                .mockResolvedValueOnce([])
-                .mockResolvedValueOnce([])
-                .mockResolvedValueOnce([]);
+        it('should handle empty results using batch', async () => {
+            mockD1.batch.mockResolvedValueOnce([
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } }
+            ]);
 
             const result = await TaskRepository.getQueueOverview();
 
@@ -1152,11 +1157,12 @@ describe('TaskRepository', () => {
             expect(result.userCounts).toEqual([]);
         });
 
-        it('should handle null returns from D1 (partial failure)', async () => {
-            mockD1.fetchAll
-                .mockResolvedValueOnce(null)
-                .mockResolvedValueOnce(null)
-                .mockResolvedValueOnce(null);
+        it('should handle null returns from D1 using batch (partial failure)', async () => {
+            mockD1.batch.mockResolvedValueOnce([
+                { success: true, result: null },
+                { success: true, result: null },
+                { success: true, result: null }
+            ]);
 
             const result = await TaskRepository.getQueueOverview();
 
@@ -1165,47 +1171,53 @@ describe('TaskRepository', () => {
             expect(result.userCounts).toEqual([]);
         });
 
-        it('should verify SQL query structure and parameters', async () => {
-            mockD1.fetchAll
-                .mockResolvedValueOnce([])
-                .mockResolvedValueOnce([])
-                .mockResolvedValueOnce([]);
+        it('should verify SQL query structure and parameters in batch', async () => {
+            mockD1.batch.mockResolvedValueOnce([
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } }
+            ]);
 
             await TaskRepository.getQueueOverview(15);
 
+            expect(mockD1.batch).toHaveBeenCalledTimes(1);
+            const batchArgs = mockD1.batch.mock.calls[0][0];
+            expect(batchArgs).toHaveLength(3);
+
             // First query: status GROUP BY
-            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(1,
-                expect.stringContaining('GROUP BY status')
-            );
+            expect(batchArgs[0].sql).toContain('GROUP BY status');
+
             // Second query: active tasks with limit parameter
-            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(2,
-                expect.stringContaining('LIMIT ?'),
-                [...TASK_ACTIVE_STATUSES, 15]
-            );
+            expect(batchArgs[1].sql).toContain('LIMIT ?');
+            expect(batchArgs[1].params).toEqual([...TASK_ACTIVE_STATUSES, 15]);
+
             // Third query: user distribution with hardcoded LIMIT 5
-            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(3,
-                expect.stringContaining('LIMIT 5'),
-                [...TASK_ACTIVE_STATUSES]
-            );
+            expect(batchArgs[2].sql).toContain('LIMIT 5');
+            expect(batchArgs[2].params).toEqual([...TASK_ACTIVE_STATUSES]);
         });
 
-        it('should use default limit of 10 when not specified', async () => {
-            mockD1.fetchAll
-                .mockResolvedValueOnce([])
-                .mockResolvedValueOnce([])
-                .mockResolvedValueOnce([]);
+        it('should use default limit of 10 when not specified in batch', async () => {
+            mockD1.batch.mockResolvedValueOnce([
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } }
+            ]);
 
             await TaskRepository.getQueueOverview();
 
-            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(2,
-                expect.stringContaining('LIMIT ?'),
-                [...TASK_ACTIVE_STATUSES, 10]
-            );
+            expect(mockD1.batch).toHaveBeenCalledTimes(1);
+            const batchArgs = mockD1.batch.mock.calls[0][0];
+
+            expect(batchArgs[1].sql).toContain('LIMIT ?');
+            expect(batchArgs[1].params).toEqual([...TASK_ACTIVE_STATUSES, 10]);
         });
     });
 
     describe('getUserQueueOverview', () => {
-        it('should return status counts, active tasks, and recent tasks for one user', async () => {
+        beforeEach(() => {
+            mockD1.batch = vi.fn();
+        });
+        it('should return status counts, active tasks, and recent tasks for one user using batch', async () => {
             const mockStatusCounts = [
                 { status: 'queued', count: 2 },
                 { status: 'uploading', count: 1 },
@@ -1219,64 +1231,67 @@ describe('TaskRepository', () => {
                 { id: 't3', file_name: 'done.mp4', status: 'completed', created_at: Date.now() }
             ];
 
-            mockD1.fetchAll
-                .mockResolvedValueOnce(mockStatusCounts)
-                .mockResolvedValueOnce(mockActiveTasks)
-                .mockResolvedValueOnce(mockRecentTasks);
+            mockD1.batch.mockResolvedValueOnce([
+                { success: true, result: { results: mockStatusCounts } },
+                { success: true, result: { results: mockActiveTasks } },
+                { success: true, result: { results: mockRecentTasks } }
+            ]);
 
             const result = await TaskRepository.getUserQueueOverview('user123', 5);
 
             expect(result.statusCounts).toEqual({ queued: 2, uploading: 1, completed: 5 });
             expect(result.activeTasks).toEqual(mockActiveTasks);
             expect(result.recentTasks).toEqual(mockRecentTasks);
-            expect(mockD1.fetchAll).toHaveBeenCalledTimes(3);
+            expect(mockD1.batch).toHaveBeenCalledTimes(1);
         });
 
-        it('should filter every query by user id and active statuses', async () => {
-            mockD1.fetchAll
-                .mockResolvedValueOnce([])
-                .mockResolvedValueOnce([])
-                .mockResolvedValueOnce([]);
+        it('should filter every query by user id and active statuses using batch', async () => {
+            mockD1.batch.mockResolvedValueOnce([
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } }
+            ]);
 
             await TaskRepository.getUserQueueOverview('user123', 7);
 
-            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(1,
-                expect.stringContaining('WHERE user_id = ?'),
-                ['user123']
-            );
-            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(2,
-                expect.stringContaining('WHERE user_id = ? AND status IN'),
-                ['user123', ...TASK_ACTIVE_STATUSES, 7]
-            );
-            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(3,
-                expect.stringContaining('WHERE user_id = ?'),
-                ['user123', 7]
-            );
+            expect(mockD1.batch).toHaveBeenCalledTimes(1);
+            const batchArgs = mockD1.batch.mock.calls[0][0];
+            expect(batchArgs).toHaveLength(3);
+
+            expect(batchArgs[0].sql).toContain('WHERE user_id = ?');
+            expect(batchArgs[0].params).toEqual(['user123']);
+
+            expect(batchArgs[1].sql).toContain('WHERE user_id = ? AND status IN');
+            expect(batchArgs[1].params).toEqual(['user123', ...TASK_ACTIVE_STATUSES, 7]);
+
+            expect(batchArgs[2].sql).toContain('WHERE user_id = ?');
+            expect(batchArgs[2].params).toEqual(['user123', 7]);
         });
 
         it('should return empty data without querying D1 when user id is missing', async () => {
             const result = await TaskRepository.getUserQueueOverview(null);
 
             expect(result).toEqual({ statusCounts: {}, activeTasks: [], recentTasks: [] });
+            expect(mockD1.batch).not.toHaveBeenCalled();
             expect(mockD1.fetchAll).not.toHaveBeenCalled();
         });
 
-        it('should use default limit for invalid limit values', async () => {
-            mockD1.fetchAll
-                .mockResolvedValueOnce([])
-                .mockResolvedValueOnce([])
-                .mockResolvedValueOnce([]);
+        it('should use default limit for invalid limit values in batch', async () => {
+            mockD1.batch.mockResolvedValueOnce([
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } },
+                { success: true, result: { results: [] } }
+            ]);
 
             await TaskRepository.getUserQueueOverview('user123', 0);
 
-            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(2,
-                expect.stringContaining('LIMIT ?'),
-                ['user123', ...TASK_ACTIVE_STATUSES, 10]
-            );
-            expect(mockD1.fetchAll).toHaveBeenNthCalledWith(3,
-                expect.stringContaining('LIMIT ?'),
-                ['user123', 10]
-            );
+            expect(mockD1.batch).toHaveBeenCalledTimes(1);
+            const batchArgs = mockD1.batch.mock.calls[0][0];
+
+            expect(batchArgs[1].sql).toContain('LIMIT ?');
+            expect(batchArgs[1].params).toEqual(['user123', ...TASK_ACTIVE_STATUSES, 10]);
+            expect(batchArgs[2].sql).toContain('LIMIT ?');
+            expect(batchArgs[2].params).toEqual(['user123', 10]);
         });
     });
 

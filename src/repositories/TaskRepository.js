@@ -961,20 +961,38 @@ export class TaskRepository {
         }
 
         const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : 10;
-        const [statusCounts, activeTasks, recentTasks] = await Promise.all([
-            d1.fetchAll(
-                "SELECT status, COUNT(*) as count FROM tasks WHERE user_id = ? GROUP BY status",
-                [userId]
-            ),
-            d1.fetchAll(
-                `SELECT id, file_name, file_size, status, source_type, created_at, updated_at FROM tasks WHERE user_id = ? AND status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`,
-                [userId, ...TASK_ACTIVE_STATUSES, safeLimit]
-            ),
-            d1.fetchAll(
-                "SELECT id, file_name, status, error_msg, source_type, created_at, updated_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
-                [userId, safeLimit]
-            )
-        ]);
+        // ⚡ Bolt Optimization: Use d1.batch() instead of Promise.all() to eliminate N+1 network requests
+        // Expected impact: Consolidates 3 HTTP requests to Cloudflare D1 into 1, reducing network overhead and wait times.
+        let statusCounts, activeTasks, recentTasks;
+        if (typeof d1.batch === "function") {
+            const batchResults = await d1.batch([
+                { sql: "SELECT status, COUNT(*) as count FROM tasks WHERE user_id = ? GROUP BY status", params: [userId] },
+                { sql: `SELECT id, file_name, file_size, status, source_type, created_at, updated_at FROM tasks WHERE user_id = ? AND status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`, params: [userId, ...TASK_ACTIVE_STATUSES, safeLimit] },
+                { sql: "SELECT id, file_name, status, error_msg, source_type, created_at, updated_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?", params: [userId, safeLimit] }
+            ]);
+
+            const failed = (batchResults || []).find(r => r?.success === false);
+            if (failed) throw failed.error || new Error("D1 batch statement failed");
+
+            statusCounts = batchResults[0]?.result?.results || [];
+            activeTasks = batchResults[1]?.result?.results || [];
+            recentTasks = batchResults[2]?.result?.results || [];
+        } else {
+            [statusCounts, activeTasks, recentTasks] = await Promise.all([
+                d1.fetchAll(
+                    "SELECT status, COUNT(*) as count FROM tasks WHERE user_id = ? GROUP BY status",
+                    [userId]
+                ),
+                d1.fetchAll(
+                    `SELECT id, file_name, file_size, status, source_type, created_at, updated_at FROM tasks WHERE user_id = ? AND status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`,
+                    [userId, ...TASK_ACTIVE_STATUSES, safeLimit]
+                ),
+                d1.fetchAll(
+                    "SELECT id, file_name, status, error_msg, source_type, created_at, updated_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                    [userId, safeLimit]
+                )
+            ]);
+        }
 
         const statusMap = {};
         for (const row of (statusCounts || [])) {
@@ -1330,17 +1348,35 @@ export class TaskRepository {
      * @returns {Promise<{statusCounts: Object, activeTasks: Array, userCounts: Array}>}
      */
     static async getQueueOverview(limit = 10) {
-        const [statusCounts, activeTasks, userCounts] = await Promise.all([
-            d1.fetchAll("SELECT status, COUNT(*) as count FROM tasks GROUP BY status"),
-            d1.fetchAll(
-                `SELECT id, user_id, file_name, file_size, status, source_type, created_at, updated_at FROM tasks WHERE status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`,
-                [...TASK_ACTIVE_STATUSES, limit]
-            ),
-            d1.fetchAll(
-                `SELECT user_id, COUNT(*) as count FROM tasks WHERE status IN (${this.ACTIVE_STATUS_SQL}) GROUP BY user_id ORDER BY count DESC LIMIT 5`,
-                [...TASK_ACTIVE_STATUSES]
-            )
-        ]);
+        // ⚡ Bolt Optimization: Use d1.batch() instead of Promise.all() to eliminate N+1 network requests
+        // Expected impact: Consolidates 3 HTTP requests to Cloudflare D1 into 1, reducing network overhead and wait times.
+        let statusCounts, activeTasks, userCounts;
+        if (typeof d1.batch === "function") {
+            const batchResults = await d1.batch([
+                { sql: "SELECT status, COUNT(*) as count FROM tasks GROUP BY status", params: [] },
+                { sql: `SELECT id, user_id, file_name, file_size, status, source_type, created_at, updated_at FROM tasks WHERE status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`, params: [...TASK_ACTIVE_STATUSES, limit] },
+                { sql: `SELECT user_id, COUNT(*) as count FROM tasks WHERE status IN (${this.ACTIVE_STATUS_SQL}) GROUP BY user_id ORDER BY count DESC LIMIT 5`, params: [...TASK_ACTIVE_STATUSES] }
+            ]);
+
+            const failed = (batchResults || []).find(r => r?.success === false);
+            if (failed) throw failed.error || new Error("D1 batch statement failed");
+
+            statusCounts = batchResults[0]?.result?.results || [];
+            activeTasks = batchResults[1]?.result?.results || [];
+            userCounts = batchResults[2]?.result?.results || [];
+        } else {
+            [statusCounts, activeTasks, userCounts] = await Promise.all([
+                d1.fetchAll("SELECT status, COUNT(*) as count FROM tasks GROUP BY status"),
+                d1.fetchAll(
+                    `SELECT id, user_id, file_name, file_size, status, source_type, created_at, updated_at FROM tasks WHERE status IN (${this.ACTIVE_STATUS_SQL}) ORDER BY updated_at DESC LIMIT ?`,
+                    [...TASK_ACTIVE_STATUSES, limit]
+                ),
+                d1.fetchAll(
+                    `SELECT user_id, COUNT(*) as count FROM tasks WHERE status IN (${this.ACTIVE_STATUS_SQL}) GROUP BY user_id ORDER BY count DESC LIMIT 5`,
+                    [...TASK_ACTIVE_STATUSES]
+                )
+            ]);
+        }
 
         const statusMap = {};
         for (const row of (statusCounts || [])) {
