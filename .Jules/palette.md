@@ -8,3 +8,6 @@
 ## 2025-02-18 - Improve File List Readability with Specific Icons
 **Learning:** In text-based file explorers (like Telegram bots), users heavily rely on visual anchors. Grouping a wider variety of file extensions with distinct emojis (especially adding audio `🎵` and expanding video `🎞️`/image `🖼️`/document `📝` formats) significantly speeds up scannability compared to using a generic file emoji for unrecognized common formats.
 **Action:** Always provide comprehensive type-to-icon mappings in list views, rather than just covering a few common extensions and defaulting the rest.
+## 2026-08-31 - Improve Pagination Readability with Consistent Icons
+**Learning:** In text-based Telegram bots, pagination buttons mapped directly to locale strings can lose their visual anchors if emojis aren't explicitly included in the translation file. This makes scannability harder.
+**Action:** Always wrap pagination button labels with a utility like `_withLeadingIcon` to ensure consistent visual indicators (like ⬅️, ➡️, 🔄) are present regardless of the text-only translation string.
