@@ -117,6 +117,19 @@ describe('CircuitBreaker', () => {
             expect(fallbackFn).toHaveBeenCalledTimes(1);
         });
 
+        test('should execute fallback on command failure', async () => {
+            const error = new Error('command failed');
+            const mockFn = vi.fn().mockRejectedValue(error);
+            const fallbackFn = vi.fn().mockReturnValue('fallback');
+
+            const result = await circuitBreaker.execute(mockFn, fallbackFn);
+
+            expect(result).toBe('fallback');
+            expect(mockFn).toHaveBeenCalledTimes(1);
+            expect(fallbackFn).toHaveBeenCalledTimes(1);
+            expect(circuitBreaker.failureCount).toBe(1);
+        });
+
         test('should transition to HALF_OPEN after timeout', async () => {
             const error = new Error('test error');
             const mockFn = vi.fn().mockRejectedValue(error);
