@@ -77,6 +77,18 @@ describe('CircuitBreaker', () => {
             expect(circuitBreaker.state).toBe('CLOSED');
         });
 
+        test('should execute fallback when command fails', async () => {
+            const error = new Error('test error');
+            const mockFn = vi.fn().mockRejectedValue(error);
+            const fallbackFn = vi.fn().mockReturnValue('fallback result');
+
+            const result = await circuitBreaker.execute(mockFn, fallbackFn);
+
+            expect(result).toBe('fallback result');
+            expect(circuitBreaker.failureCount).toBe(1);
+            expect(fallbackFn).toHaveBeenCalledTimes(1);
+        });
+
         test('should open after failure threshold reached', async () => {
             const error = new Error('test error');
             const mockFn = vi.fn().mockRejectedValue(error);
