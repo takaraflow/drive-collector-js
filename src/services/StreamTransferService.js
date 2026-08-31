@@ -33,7 +33,19 @@ function hasValidInstanceSecret(headerSecret, configuredSecret) {
 
     const header = headerSecret.trim();
     const secret = configuredSecret.trim();
-    return header !== '' && secret !== '' && header === secret;
+
+    if (header === '' || secret === '') {
+        return false;
+    }
+
+    const headerBuf = Buffer.from(header);
+    const secretBuf = Buffer.from(secret);
+
+    if (headerBuf.length !== secretBuf.length) {
+        return false;
+    }
+
+    return crypto.timingSafeEqual(headerBuf, secretBuf);
 }
 
 function sanitizeTaskPathSegment(value) {
