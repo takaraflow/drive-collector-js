@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { AxiomLogger } from './AxiomLogger.js';
 import { NewrelicLogger } from './NewrelicLogger.js';
 import { ConsoleLogger } from './ConsoleLogger.js';
@@ -15,7 +16,7 @@ import {
 import { redactSensitiveData, redactSensitiveText } from '../../utils/serializer.js';
 
 let getInstanceIdFunc = () => 'unknown';
-const localFallbackId = `boot_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+const localFallbackId = `boot_${Date.now()}_${crypto.randomBytes(2).toString('hex')}`;
 
 export {
     defaultLogLevelForEnv,

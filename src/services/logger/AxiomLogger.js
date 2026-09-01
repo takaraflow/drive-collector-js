@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Axiom } from '@axiomhq/js';
 import { BaseLogger } from './BaseLogger.js';
 import { writeOriginalConsole } from './console-channel.js';
@@ -167,7 +168,7 @@ class AxiomLogger extends BaseLogger {
 
         const finalPayload = limitFields(payload, 50);
         finalPayload._time = finalPayload.timestamp;
-        finalPayload.eventId = `${instanceId}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        finalPayload.eventId = `${instanceId}_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
 
         return finalPayload;
     }
