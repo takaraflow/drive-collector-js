@@ -10,6 +10,7 @@
  * 5. 异常恢复机制
  */
 
+import crypto from 'node:crypto';
 import { logger } from "./logger/index.js";
 import { serializeErrorLike } from "../utils/serializer.js";
 
@@ -79,7 +80,7 @@ class EnhancedGracefulShutdown {
             dependencies,
             requiresCleanup,
             resourceType,
-            id: `${name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            id: `${name}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
             state: 'registered', // registered, running, completed, failed, timeout
             startTime: null,
             endTime: null,

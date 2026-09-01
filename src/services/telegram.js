@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import { getConfig } from "../config/index.js";
@@ -1011,7 +1012,7 @@ const handleWatchdogFailureThreshold = async (errorType, diff) => {
  */
 export const startWatchdog = () => {
     if (watchdogTimer) clearInterval(watchdogTimer);
-    const watchdogId = Math.random().toString(36).substring(7);
+    const watchdogId = crypto.randomBytes(4).toString('hex');
     log.info(`🐶 Starting watchdog [ID: ${watchdogId}] for instance [${instanceCoordinator.getInstanceId()}]`);
     
     watchdogTimer = setInterval(async () => {
