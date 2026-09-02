@@ -3,6 +3,7 @@ import { cache } from "./CacheService.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
 import { queueService } from "./QueueService.js";
 import { localCache } from "../utils/LocalCache.js";
+import crypto from "crypto";
 
 const log = logger.withModule('StateSynchronizer');
 
@@ -147,7 +148,7 @@ export class StateSynchronizer {
      * @returns {string} 订阅ID
      */
     subscribe(stateType, callback) {
-        const subscriptionId = `${stateType}:${Date.now()}:${Math.random()}`;
+        const subscriptionId = `${stateType}:${Date.now()}:${crypto.randomUUID()}`;
         
         if (!this.subscribers.has(stateType)) {
             this.subscribers.set(stateType, new Map());

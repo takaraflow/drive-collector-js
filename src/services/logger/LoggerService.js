@@ -13,9 +13,10 @@ import {
     shouldSendLogLevel
 } from './log-level.js';
 import { redactSensitiveData, redactSensitiveText } from '../../utils/serializer.js';
+import crypto from "crypto";
 
 let getInstanceIdFunc = () => 'unknown';
-const localFallbackId = `boot_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+const localFallbackId = `boot_${Date.now()}_${crypto.randomUUID().substring(0, 4)}`;
 
 export {
     defaultLogLevelForEnv,

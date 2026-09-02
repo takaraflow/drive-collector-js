@@ -5,6 +5,7 @@ import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
 import logger, { enableTelegramConsoleProxy } from "./logger/index.js";
 import { TelegramErrorClassifier } from "./telegram-error-classifier.js";
+import crypto from "crypto";
 
 const log = logger.withModule ? logger.withModule('TelegramService') : logger;
 
@@ -1011,7 +1012,7 @@ const handleWatchdogFailureThreshold = async (errorType, diff) => {
  */
 export const startWatchdog = () => {
     if (watchdogTimer) clearInterval(watchdogTimer);
-    const watchdogId = Math.random().toString(36).substring(7);
+    const watchdogId = crypto.randomUUID().substring(0, 6);
     log.info(`🐶 Starting watchdog [ID: ${watchdogId}] for instance [${instanceCoordinator.getInstanceId()}]`);
     
     watchdogTimer = setInterval(async () => {
