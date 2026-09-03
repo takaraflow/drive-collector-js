@@ -15,3 +15,7 @@
 **Vulnerability:** Used insecure `Math.random()` to generate unique identifiers for batch jobs and queue messages.
 **Learning:** `Math.random()` is not cryptographically secure, meaning generated identifiers are predictable. This can lead to ID collisions in high-concurrency environments like batches or queues, potentially causing message loss, incorrect tracking, or ID hijacking.
 **Prevention:** Always use cryptographically secure PRNGs (Pseudo-Random Number Generators) such as `crypto.randomUUID()` to generate unique tracking identifiers.
+## 2026-09-03 - Prevent Timing Attacks in Secret Validation
+**Vulnerability:** Used basic string comparison (`===`) to validate `x-instance-secret` in StreamTransferService.
+**Learning:** Basic string equality checks return early when characters don't match, allowing attackers to measure response times and progressively guess the secret character by character (timing attack).
+**Prevention:** Always use `crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b))` when comparing secrets, passwords, or authentication tokens to ensure comparison takes a constant amount of time regardless of input.
