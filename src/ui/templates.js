@@ -93,15 +93,15 @@ export class UIHelper {
         const row = [];
 
         if (page > 0) {
-            row.push(Button.inline(labels.btn_home || "⏮️", Buffer.from(pageData(0))));
-            row.push(Button.inline(labels.btn_prev || "⬅️", Buffer.from(pageData(page - 1))));
+            row.push(Button.inline(UIHelper._withLeadingIcon(labels.btn_home || "⏮️", "⏮️"), Buffer.from(pageData(0))));
+            row.push(Button.inline(UIHelper._withLeadingIcon(labels.btn_prev || "⬅️", "⬅️"), Buffer.from(pageData(page - 1))));
         }
 
-        row.push(Button.inline(labels.btn_refresh || "🔄", Buffer.from(refreshData)));
+        row.push(Button.inline(UIHelper._withLeadingIcon(labels.btn_refresh || "🔄", "🔄"), Buffer.from(refreshData)));
 
         if (page < lastPage) {
-            row.push(Button.inline(labels.btn_next || "➡️", Buffer.from(pageData(page + 1))));
-            row.push(Button.inline(labels.btn_end || "⏭️", Buffer.from(pageData(lastPage))));
+            row.push(Button.inline(UIHelper._withLeadingIcon(labels.btn_next || "➡️", "➡️"), Buffer.from(pageData(page + 1))));
+            row.push(Button.inline(UIHelper._withLeadingIcon(labels.btn_end || "⏭️", "⏭️"), Buffer.from(pageData(lastPage))));
         }
 
         return row;
