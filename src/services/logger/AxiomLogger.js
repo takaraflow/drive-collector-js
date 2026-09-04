@@ -4,6 +4,7 @@ import { writeOriginalConsole } from './console-channel.js';
 import { limitFields, serializeError, serializeErrorLike, serializeToString, redactSensitiveText } from '../../utils/serializer.js';
 import { getBeijingISOString } from '../../utils/timeUtils.js';
 import { getBuildDisplayVersion, getBuildIdentity, getBuildLogFields } from '../../utils/buildIdentity.js';
+import crypto from "crypto";
 
 const AXIOM_UNAVAILABLE_BACKOFF_MS = 3 * 1000;
 
@@ -167,7 +168,7 @@ class AxiomLogger extends BaseLogger {
 
         const finalPayload = limitFields(payload, 50);
         finalPayload._time = finalPayload.timestamp;
-        finalPayload.eventId = `${instanceId}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        finalPayload.eventId = `${instanceId}_${Date.now()}_${crypto.randomUUID().substring(0, 4)}`;
 
         return finalPayload;
     }
