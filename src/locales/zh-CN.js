@@ -25,8 +25,8 @@ export const STRINGS = {
         maintenance_alert: "🚧 系统维护中",
         welcome: "👋 <b>欢迎使用云转存助手</b>\n\n直接发送文件、图片、视频或支持的链接，我会转存到你的网盘。",
         unknown_input: "🤔 <b>没有识别这个操作</b>\n\n你可以直接发送文件或链接，或使用下面的常用操作。",
-        btn_bind_drive: "绑定网盘",
-        btn_help: "帮助",
+        btn_bind_drive: "🔗 绑定网盘",
+        btn_help: "❓ 帮助",
         unknown_error: "❌ 发生未知错误，请稍后重试。",
         // 🆕 新增
         node_service_active: "Node Service Active",
