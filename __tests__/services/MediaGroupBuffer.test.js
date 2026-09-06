@@ -166,7 +166,7 @@ describe("MediaGroupBuffer", () => {
     expect(mockLock.acquire).toHaveBeenCalledWith("9999", "test-instance");
     expect(client.getMessages).toHaveBeenCalledWith(
       "500",
-      { ids: [1001n, 1002n] }
+      { ids: [1001, 1002] }
     );
     expect(TaskManager.addBatchTasks).toHaveBeenCalledWith(
       expect.anything(),

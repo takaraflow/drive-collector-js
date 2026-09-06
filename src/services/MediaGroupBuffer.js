@@ -340,7 +340,8 @@ export class MediaGroupBuffer {
                 return;
             }
 
-            const messageIds = messages.map((m) => BigInt(m.id));
+            // Telegram 消息编号是 32 位整数；GramJS 不接受 BigInt 作为 InputMessage。
+            const messageIds = messages.map((m) => Number(m.id));
             let fetchedMessages = [];
             try {
                 const { client } = await import("../services/telegram.js");
