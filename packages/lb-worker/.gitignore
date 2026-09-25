@@ -1,0 +1,13 @@
+dist/
+plans/
+node_modules/
+.wrangler/
+wrangler.toml
+.env
+.env.local
+.env.*
+!.env.example
+.jest-cache/
+.act.secrets
+.roo/
+coverage/

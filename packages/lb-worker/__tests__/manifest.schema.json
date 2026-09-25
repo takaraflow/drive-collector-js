@@ -1,0 +1,127 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "manifest_version",
+    "id",
+    "name",
+    "version",
+    "type",
+    "entrypoint"
+  ],
+  "properties": {
+    "manifest_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "description": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["worker"]
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "behaviors": {
+      "type": "object"
+    },
+    "instanceRegistration": {
+      "type": "object"
+    },
+    "entrypoint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "env": {
+          "type": "object",
+          "patternProperties": {
+            "^.+$": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": ["type", "required", "description"]
+            }
+          }
+        }
+      }
+    },
+    "endpoints": {
+      "type": "object",
+      "required": [
+        "health",
+        "webhookBase",
+        "download",
+        "upload",
+        "batch",
+        "systemEvents"
+      ],
+      "properties": {
+        "health": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "webhookBase": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "download": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "upload": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "batch": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "systemEvents": {
+          "type": "string",
+          "pattern": "^/"
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}

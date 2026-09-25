@@ -1,0 +1,20 @@
+name = "lb-worker-js-test"
+account_id = "00000000000000000000000000000000"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+VERSION = "1.1.0"
+NODE_ENV = "test"
+CACHE_PROVIDERS = "[]"
+ADMIN_API_TOKEN = "test-token"
+QSTASH_CURRENT_SIGNING_KEY = "sig_test"
+QSTASH_NEXT_SIGNING_KEY = "sig_test_next"
+
+# 强制覆盖本地 .env，确保不启用任何异步日志系统
+AXIOM_TOKEN = ""
+AXIOM_DATASET = ""
+AXIOM_ORG_ID = ""
+ENABLE_OTEL = "false"
+DEBUG_AXIOM = "false"

@@ -1,0 +1,242 @@
+import fs from 'fs';
+import path from 'path';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+
+const ENV_ALIASES = {
+    development: 'dev',
+    dev: 'dev',
+    production: 'prod',
+    prod: 'prod',
+    staging: 'pre',
+    pre: 'pre'
+};
+
+function normalizeEnvName(value = 'dev') {
+    const key = String(value || '').toLowerCase();
+    return ENV_ALIASES[key] || key || 'dev';
+}
+
+/**
+ * 设置环境变量 - 解析 --env 参数并加载对应的 .env 文件
+ * @param {string[]} argv - process.argv 数组，默认为 process.argv
+ * @returns {string} - 解析出的 canonical env（dev/pre/prod）
+ */
+export function setupEnvironment(argv = process.argv) {
+    // 解析 --env 参数并标准化为缩写
+    const envArg = argv.find(arg => arg.startsWith('--env='));
+    const rawEnv = envArg ? envArg.split('=')[1] : 'dev';
+    const targetEnv = normalizeEnvName(rawEnv);
+
+    // 1. 优先加载 .env (作为本地覆盖)
+    dotenv.config();
+
+    // 2. 如果存在特定环境的 .env 文件，也加载它 (作为额外覆盖)
+    const specificEnvPath = path.resolve(process.cwd(), `.env.${targetEnv}`);
+    if (fs.existsSync(specificEnvPath)) {
+        dotenv.config({ path: specificEnvPath, override: true });
+    }
+
+    return targetEnv;
+}
+
+/**
+ * 脱敏敏感信息
+ * @param {string} str - 需要脱敏的字符串
+ * @returns {string} - 脱敏后的字符串
+ */
+function redactSensitiveInfo(str) {
+    if (!str) return str;
+    
+    // 增强的脱敏模式：覆盖更多敏感关键词和场景
+    const patterns = [
+        // 1. 匹配 --var 或 export 后的敏感变量名（包含 TOKEN, KEY, SECRET, PASSWORD, PWD, URL, ID 等）
+        {
+            regex: /(--var\s+|export\s+)([^=]*(?:TOKEN|KEY|SECRET|PASSWORD|PWD|URL|ID|AUTH|TOKEN_|KEY_|SECRET_|PASSWORD_|PWD_|URL_|ID_|AUTH_)[^=]*)(=)([^;\s]+)/gi,
+            replacement: (match, p1, p2, p3, p4) => {
+                // 如果是 URL，尝试保留协议头但隐藏敏感部分
+                if (p4.includes('://') && p4.length > 10) {
+                    return `${p1}${p2}${p3}"***REDACTED***"`;
+                }
+                return `${p1}${p2}${p3}***REDACTED***`;
+            }
+        },
+        // 2. 匹配 URL 中的密码部分 (redis://:password@host)
+        {
+            regex: /(redis|rediss|postgres|mysql|mongodb):\/\/([^@]+@)?([^@]+)(:\d+)?/gi,
+            replacement: (match, protocol, userPass, host, port) => {
+                // 如果包含密码 (:password@)
+                if (userPass && userPass.includes(':')) {
+                    return `${protocol}://***REDACTED***@${host}${port || ''}`;
+                }
+                return match;
+            }
+        },
+        // 3. 匹配 JSON 格式中的敏感字段
+        {
+            regex: /("([^"]*(?:TOKEN|KEY|SECRET|PASSWORD|PWD|URL|ID|AUTH)[^"]*)"\s*:\s*)("([^"]*)"|'([^']*)')/gi,
+            replacement: (match, p1, p2, p3, p4) => `${p1}"***REDACTED***"`
+        }
+    ];
+    
+    let result = str;
+    for (const { regex, replacement } of patterns) {
+        result = result.replace(regex, replacement);
+    }
+    return result;
+}
+
+/**
+ * 动态生成 wrangler deploy 命令
+ * 1. 从 GHA Context JSON (GHA_SECRETS_JSON, GHA_VARS_JSON) 解析所有变量
+ * 2. 结合当前 process.env
+ * 3. 根据 manifest.json 定义自动匹配并注入
+ * 4. 支持 KV 命名空间绑定
+ */
+export function generateWranglerCommand(env = process.env) {
+  try {
+    const manifestPath = path.resolve(process.cwd(), 'manifest.json');
+    if (!fs.existsSync(manifestPath)) {
+      return 'npx wrangler deploy';
+    }
+
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    const envConfig = manifest.config?.env || {};
+    const infraConfig = manifest.infrastructure || {};
+
+    // 解析 GHA Context
+    const secretsJson = env.GHA_SECRETS_JSON ? JSON.parse(env.GHA_SECRETS_JSON) : {};
+    const varsJson = env.GHA_VARS_JSON ? JSON.parse(env.GHA_VARS_JSON) : {};
+
+    // 2026-01-04: 修复本地环境从 Infisical 获取密钥的问题
+    // 在本地调试或 act 环境下，如果 process.env 中没有 CLOUDFLARE_API_TOKEN 或 CLOUDFLARE_ACCOUNT_ID
+    // 则尝试从 .act.secrets 文件中读取，而不是依赖 Infisical 拉取
+    const localOverrides = {};
+    if (env.ACT || !env.GITHUB_ACTIONS) {
+        // 检查是否缺少关键密钥
+        const needsCloudflareTokens = !env.CLOUDFLARE_API_TOKEN || !env.CLOUDFLARE_ACCOUNT_ID;
+        
+        if (needsCloudflareTokens) {
+            // 尝试从 .act.secrets 读取
+            try {
+                const secretsPath = path.resolve(process.cwd(), '.act.secrets');
+                
+                if (fs.existsSync(secretsPath)) {
+                    const content = fs.readFileSync(secretsPath, 'utf8');
+                    const lines = content.split('\n').filter(l => l && !l.startsWith('#'));
+                    
+                    lines.forEach(line => {
+                        const [key, ...rest] = line.split('=');
+                        const value = rest.join('=');
+                        if (key && value) {
+                            const cleanValue = value.replace(/^\"|\"$/g, '');
+                            if (!env[key]) {
+                                localOverrides[key] = cleanValue;
+                            }
+                        }
+                    });
+                }
+            } catch (error) {
+                console.warn('无法从 .act.secrets 读取:', error.message);
+            }
+        }
+    }
+
+    const allAvailableVars = {
+      ...env,
+      ...varsJson,
+      ...secretsJson,
+      ...localOverrides // 本地覆盖，优先级最高
+    };
+
+    // 统一环境标识为缩写（dev/pre/prod）
+    if (allAvailableVars.NODE_ENV) {
+        allAvailableVars.NODE_ENV = normalizeEnvName(allAvailableVars.NODE_ENV);
+    }
+
+    // 2026-01-04: 如果环境变量中存在 CLOUDFLARE_API_TOKEN 或 CLOUDFLARE_ACCOUNT_ID，将其导出
+    // 这对于从 .act.secrets 或 Infisical 获取的变量至关重要，因为它们需要传递给 wrangler 进程
+    const extraExports = [];
+    if (allAvailableVars.CLOUDFLARE_API_TOKEN) {
+        extraExports.push(`export CLOUDFLARE_API_TOKEN="${allAvailableVars.CLOUDFLARE_API_TOKEN}"`);
+    }
+    if (allAvailableVars.CLOUDFLARE_ACCOUNT_ID) {
+        extraExports.push(`export CLOUDFLARE_ACCOUNT_ID="${allAvailableVars.CLOUDFLARE_ACCOUNT_ID}"`);
+    }
+    
+    const args = [];
+    const vars = [];
+
+    // 处理环境变量
+    for (const [key, config] of Object.entries(envConfig)) {
+      // 跳过 KV 命名空间，它们通过 --kv 绑定
+      if (config.type === 'kv-namespace') continue;
+
+      const value = allAvailableVars[key];
+      
+      // 检查是否为必需变量
+      if (config.required && (value === undefined || value === '')) {
+        // 在本地调试模式下 (非 GHA 环境)，只打印警告而不退出
+        if (!env.GITHUB_ACTIONS && !env.ACT) {
+            console.warn(`⚠️ 警告: 缺少必需的环境变量 [${key}]，已跳过`);
+            continue;
+        }
+        
+        console.error(`❌ 错误: 缺少必需的环境变量 [${key}]`);
+        // In test mode, we might want to throw instead of exit
+        if (env.NODE_ENV === 'test') {
+          throw new Error(`缺少必需的环境变量 ${key}`);
+        }
+        process.exit(1);
+      }
+
+      // 只有当值存在且不为空时才添加
+      if (value !== undefined && value !== '') {
+        // 清理值两侧可能存在的冗余引号（Infisical 导出有时会带引号）
+        let cleanValue = String(value).trim();
+        while (cleanValue.length > 1 && ((cleanValue.startsWith('"') && cleanValue.endsWith('"')) || (cleanValue.startsWith("'") && cleanValue.endsWith("'")))) {
+            cleanValue = cleanValue.substring(1, cleanValue.length - 1);
+        }
+        const escapedValue = cleanValue.replace(/"/g, '\\"');
+        
+        // 关键：只将 config.env 中的变量注入为 --var
+        // infrastructure 中的变量 (如 CLOUDFLARE_ACCOUNT_ID) 不需要也不应该作为 Worker 的业务变量注入
+        if (envConfig[key]) {
+            vars.push(`--var`, `${key}="${escapedValue}"`);
+        }
+      }
+    }
+
+    // 处理 KV 命名空间绑定 (从 manifest 中提取)
+    // 注意：这里假设 KV 绑定名称是固定的，或者需要从 wrangler.build.toml 读取
+    // 为了简化，我们只处理业务变量，KV 绑定通常在 wrangler.toml 中定义
+    // 但如果需要动态 KV，可以在这里添加逻辑
+
+    // 构建基础命令
+    let command = 'npx wrangler deploy -c wrangler.toml --compatibility-flags="nodejs_compat"';
+    
+    // 添加所有 --var 参数
+    if (vars.length > 0) {
+      command += ' ' + vars.join(' ');
+    }
+
+    // 如果有额外的 exports，将它们前置到命令中
+    // 注意：eval 会执行整个字符串。
+    // 格式：export A="b"; export C="d"; npx wrangler ...
+    if (extraExports.length > 0) {
+        command = extraExports.join('; ') + '; ' + command;
+    }
+
+    return command;
+  } catch (error) {
+    console.error('❌ 生成 Wrangler 命令失败 (Error generating wrangler command):', error.message);
+    if (env.NODE_ENV === 'test') throw error;
+    return 'npx wrangler deploy';
+  }
+}
+
+// Only execute if running directly
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // 脱敏后输出命令
+  console.log(redactSensitiveInfo(generateWranglerCommand()));
+}
