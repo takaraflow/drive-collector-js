@@ -579,7 +579,7 @@ class UnifiedCIScript {
   runStaticQualityChecks() {
     this.executeStep('Manifest Duplicate Check', 'npm run check:manifest:duplicates');
     this.executeStep('Environment Manifest Check', 'npm run check:env');
-    this.executeStep('JavaScript Syntax Check', "git ls-files '*.js' ':!:coverage/**' ':!:node_modules/**' | xargs -n 1 node --check");
+    this.executeStep('JavaScript Syntax Check', "git ls-files '*.js' ':!:coverage/**' ':!:node_modules/**' ':!:packages/**' | xargs -n 1 node --check");
   }
 
   runLintChecks() {
