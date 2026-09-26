@@ -20,10 +20,10 @@ vi.mock("../../src/config/index.js", () => ({
 }));
 
 // ================== Mock 2: Logger (Internal) ==================
-let mockLoggerError = vi.fn();
-let mockLoggerWarn = vi.fn();
-let mockLoggerInfo = vi.fn();
-let mockLoggerDebug = vi.fn();
+const mockLoggerError = vi.fn();
+const mockLoggerWarn = vi.fn();
+const mockLoggerInfo = vi.fn();
+const mockLoggerDebug = vi.fn();
 
 vi.mock('../../src/services/logger/index.js', () => ({
     logger: {
@@ -84,7 +84,7 @@ vi.mock("telegram/sessions/index.js", () => ({
 }));
 
 // ================== Mock 4: Axiom (External) ==================
-let mockAxiomIngest = vi.fn();
+const mockAxiomIngest = vi.fn();
 vi.mock('@axiomhq/js', () => ({
     Axiom: vi.fn().mockImplementation(() => ({
         ingest: mockAxiomIngest
@@ -403,4 +403,33 @@ describe("Telegram Service", () => {
             vi.useRealTimers();
         });
     });
+
+    describe("洪流拦截:gramjs 导出连接错误钩子", () => {
+        test("computeFloodBackoff 指数增长且封顶,且恒为正(可让出事件循环)", () => {
+            // 命门:返回值必须 > 0,钩子 await 它才能让出定时器阶段、打断 microtask 洪流。
+            expect(module.computeFloodBackoff(1)).toBe(250);   // 250 * 2^0
+            expect(module.computeFloodBackoff(2)).toBe(500);   // 250 * 2^1
+            expect(module.computeFloodBackoff(3)).toBe(1000);  // 250 * 2^2
+            expect(module.computeFloodBackoff(6)).toBe(5000);  // 250 * 2^5 = 8000 -> clamp 5000
+            expect(module.computeFloodBackoff(999)).toBe(5000); // 恒封顶
+            expect(module.computeFloodBackoff(1)).toBeGreaterThan(0);
+        });
+
+        test("handleTelegramClientError 用退避 await 结束(不是同步递归),让定时器得以运行", async () => {
+            vi.useFakeTimers();
+            // 关键回归点:洪流的病根是 gramjs 内部零延迟 microtask 递归饿死事件循环。
+            // 钩子必须以一个真实定时器(setTimeout)结束 —— 只有推进 fake timer 才能 resolve,
+            // 证明它把控制权交回定时器阶段(心跳/看门狗/锁续租得以排队执行)。
+            const p = module.handleTelegramClientError(new Error("Cannot send requests while disconnected"));
+            let settled = false;
+            p.then(() => { settled = true; });
+            await Promise.resolve();
+            expect(settled).toBe(false);           // 未推进定时器前不 resolve => 确实在等 setTimeout
+            await vi.advanceTimersByTimeAsync(5000);
+            await p;
+            expect(settled).toBe(true);
+            vi.useRealTimers();
+        });
+    });
+
 });

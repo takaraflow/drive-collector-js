@@ -173,6 +173,83 @@ const RECONNECT_HEALTHCHECK_TIMEOUT_MS = 15000;
 // isReconnecting 被视为"卡死"的上限;超过则由看门狗强制解锁,兜底任何未预料的挂起。
 const MAX_RECONNECT_STUCK_MS = 5 * 60 * 1000;
 
+// gramjs 的 _borrowExportedSender catch 块在下载途中断线时会无退避、无上限地原地递归
+// (node_modules/telegram/.../telegramBaseClient.js:284-290),每秒数千次同步 console.error,
+// 把 Node 事件循环的定时器阶段饿死 → 心跳/看门狗/锁续租(300s TTL)/自愈重连全排不进队,进程瘫成活死人。
+// gramjs 那段 catch 会先查 client._errorHandler,若已设置则先 await 它 —— 我们挂一个钩子,
+// 在钩子里 await sleep(退避):这一次 await 就让出定时器阶段,microtask 死循环当场被打断,
+// 定时器得以运行、自愈机器复活。这是掐洪流的命门(纯 src 注入,不碰 node_modules)。
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const FLOOD_BACKOFF_BASE_MS = 250;
+const FLOOD_BACKOFF_MAX_MS = 5000;
+const FLOOD_RESET_AFTER_MS = 30000;      // 静默超过此值则重置连续计数
+const FLOOD_LOG_THROTTLE_MS = 5000;      // 结构化日志最多每 5s 一条,不给洪流添柴
+const FLOOD_RECOVERY_THROTTLE_MS = 10000; // 触发主连接重连最多每 10s 一次
+const floodState = {
+    consecutive: 0,
+    lastErrorAt: 0,
+    lastLogAt: 0,
+    lastRecoveryAt: 0,
+    suppressed: 0,
+};
+
+/**
+ * 纯函数:按连续错误次数计算退避毫秒(指数增长,上限 clamp)。
+ * 命门在于返回值 > 0 —— 钩子里 await 它就让出事件循环定时器阶段。导出以便单元测试。
+ */
+export function computeFloodBackoff(consecutive) {
+    const n = Math.max(0, consecutive - 1);
+    return Math.min(FLOOD_BACKOFF_BASE_MS * 2 ** Math.min(n, 5), FLOOD_BACKOFF_MAX_MS);
+}
+
+/**
+ * gramjs 客户端级错误钩子(挂到 client.onError → _errorHandler)。
+ * 命门是末尾的 await sleep(backoff):让出事件循环定时器阶段,打断 gramjs 内部无退避的 microtask 递归洪流。
+ * 导出以便单元测试。
+ * @param {Error} err gramjs 抛出的错误
+ */
+export async function handleTelegramClientError(err) {
+    const now = Date.now();
+    if (now - floodState.lastErrorAt > FLOOD_RESET_AFTER_MS) {
+        floodState.consecutive = 0;
+        floodState.suppressed = 0;
+    }
+    floodState.consecutive += 1;
+    floodState.lastErrorAt = now;
+
+    const errorType = TelegramErrorClassifier.classify(err);
+
+    if (now - floodState.lastLogAt >= FLOOD_LOG_THROTTLE_MS) {
+        log.warn(
+            `🌊 拦截 gramjs 导出连接错误洪流 [类型=${errorType}, 连续=${floodState.consecutive}, 期间抑制=${floodState.suppressed}]: ${(err?.message || "").slice(0, 200)}`,
+            { service: "telegram" }
+        );
+        floodState.lastLogAt = now;
+        floodState.suppressed = 0;
+    } else {
+        floodState.suppressed += 1;
+    }
+
+    // 限频触发主连接重连;handleConnectionIssue 自身按 isReconnecting/锁/断路器去重,
+    // 门禁 !isReconnecting && !isClientInitializing 避免干扰正在进行的合法重连/初始化。
+    if (
+        now - floodState.lastRecoveryAt >= FLOOD_RECOVERY_THROTTLE_MS &&
+        !isReconnecting &&
+        !isClientInitializing
+    ) {
+        floodState.lastRecoveryAt = now;
+        setImmediate(() => {
+            handleConnectionIssue(true, errorType).catch((e) => {
+                log.error("❌ onError 恢复触发失败:", { error: e?.message });
+            });
+        });
+    }
+
+    // 命门:await 一个 setTimeout,让出定时器阶段,打断纯 microtask 递归洪流。
+    await sleep(computeFloodBackoff(floodState.consecutive));
+}
+
+
 const TEST_MODE_DC_CONFIG = {
     dcId: 2,
     serverIp: "149.154.167.40",
@@ -264,11 +341,11 @@ async function logCurrentDCInfo(client, config) {
     try {
         // 获取期望的 DC 配置
         const dcConfig = getTelegramDcConfig(config);
-        const expectedDC = dcConfig.mode !== "default" ? {
+        const expectedDC = dcConfig.mode === "default" ? null : {
             id: dcConfig.dcId,
             ipAddress: dcConfig.serverIp,
             port: dcConfig.serverPort
-        } : null;
+        };
         
         // 获取实际的 DC 信息
         const actualDC = await client.getDC();
@@ -281,11 +358,11 @@ async function logCurrentDCInfo(client, config) {
     } catch (e) {
         // 即使无法获取实际 DC，也要显示期望的 DC 配置
         const dcConfig = getTelegramDcConfig(config);
-        const expectedDC = dcConfig.mode !== "default" ? {
+        const expectedDC = dcConfig.mode === "default" ? null : {
             id: dcConfig.dcId,
             ipAddress: dcConfig.serverIp,
             port: dcConfig.serverPort
-        } : null;
+        };
         
         if (expectedDC) {
             log.warn(`⚠️ 无法获取实际 DC 信息: ${e.message} | 期望: DC ${expectedDC.id} @ ${expectedDC.ipAddress}:${expectedDC.port}`);
@@ -307,11 +384,11 @@ export async function getCurrentDCInfo() {
         const config = getConfig();
         const dcConfig = getTelegramDcConfig(config);
         
-        const expectedDC = dcConfig.mode !== "default" ? {
+        const expectedDC = dcConfig.mode === "default" ? null : {
             id: dcConfig.dcId,
             ipAddress: dcConfig.serverIp,
             port: dcConfig.serverPort
-        } : null;
+        };
         
         const actualDC = await telegramClient.getDC();
         
@@ -645,6 +722,11 @@ async function initTelegramClient() {
         telegramClient = await createTelegramClientInstance(config, dcConfig, clientConfig, sessionString);
 
         setupEventListeners(telegramClient);
+
+        // 挂客户端级错误钩子:接管 gramjs 内部 _borrowExportedSender/_connectSender 的错误路径,
+        // 用退避 await 打断无刹车的递归洪流(否则事件循环被饿死、进程瘫成活死人)。
+        telegramClient.onError = handleTelegramClientError;
+
 
         return telegramClient;
     } finally {
