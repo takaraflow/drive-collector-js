@@ -380,5 +380,27 @@ describe("Telegram Service", () => {
 
             vi.useRealTimers();
         });
+
+        test("ensureConnected 断线时主动触发重连,而非干等看门狗周期", async () => {
+            const { instanceCoordinator } = await import("../../src/services/InstanceCoordinator.js");
+            instanceCoordinator.hasLock.mockResolvedValue(true);
+            if (module.resetCircuitBreaker) module.resetCircuitBreaker();
+
+            const clientInstance = await module.getClient();
+            clientInstance.connected = false;
+            clientInstance._sender = { disconnect: vi.fn().mockResolvedValue(undefined) };
+            clientInstance.disconnect = vi.fn().mockResolvedValue(undefined);
+            clientInstance.start = vi.fn().mockResolvedValue(undefined);
+            clientInstance.getMe = vi.fn().mockResolvedValue({ id: 1 });
+            // 重连时 connect 成功并置为已连接
+            clientInstance.connect = vi.fn(() => { clientInstance.connected = true; return Promise.resolve(); });
+
+            vi.useFakeTimers();
+            const p = module.ensureConnected();
+            await vi.advanceTimersByTimeAsync(20000); // 覆盖重连退避(~10s)+ 轮询(1s)
+            await expect(p).resolves.toBeUndefined();
+            expect(clientInstance.connect).toHaveBeenCalled(); // 证明主动重连被触发,而非纯等待
+            vi.useRealTimers();
+        });
     });
 });

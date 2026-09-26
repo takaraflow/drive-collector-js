@@ -829,6 +829,10 @@ export const ensureConnected = async () => {
     const client = await getClient();
     if (client.connected) return;
 
+    // 主动触发一次重连(非阻塞),不必干等看门狗周期;reconnectBot 内部按
+    // isReconnecting/锁/熔断器去重,并发调用安全。
+    reconnectBot(true).catch(() => {});
+
     log.info("⏳ 等待 Telegram 客户端连接...");
     return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
