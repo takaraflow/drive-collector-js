@@ -15,6 +15,7 @@ import { TASK_QUEUE_TRIGGER_SOURCES, TaskProcessingLockBusyError } from "../../d
 import { isRetryableInfrastructureError } from "../../domain/infrastructure-error.js";
 import { parseBoolean } from "../../config/boolean.js";
 import { redactSensitiveText } from "../../utils/serializer.js";
+import { ensureConnected } from "../../services/telegram.js";
 
 // 获取模块日志记录器
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager');
@@ -154,6 +155,12 @@ export async function downloadTask(task) {
                 await initialHeartbeat;
 
                 const isLargeFile = info.size > 100 * 1024 * 1024;
+
+                // 下载前确保 Telegram 主连接可用:断线期间在此快速失败(错误含 "timeout" →
+                // 归类为 retryable,交由 webhook/恢复扫描稍后重试),避免在 disconnected 的
+                // client 上发起 iterDownload/downloadMedia,触发 gramjs 无退避的内部重试洪流。
+                // 注:此守卫位于秒传/本地文件检查之后,不会阻塞无需 Telegram 的快速路径。
+                await ensureConnected();
 
                 // 3. Direct stream upload on the current worker when the user's drive supports rclone rcat.
                 if (await _handleDirectTransfer(this, deps, task, info, fileName, heartbeat, isLargeFile, transferPlan)) return;

@@ -36,6 +36,7 @@ const mockClient = {
 };
 vi.mock("../../src/services/telegram.js", () => ({
     client: mockClient,
+    ensureConnected: vi.fn().mockResolvedValue(undefined),
 }));
 
 const mockCloudTool = {
