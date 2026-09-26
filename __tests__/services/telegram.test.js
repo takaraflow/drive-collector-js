@@ -332,4 +332,53 @@ describe("Telegram Service", () => {
             expect(mockLoggerWarn.mock.calls.some(call => String(call[0]).includes("TG_SERVER_DC/IP/PORT"))).toBe(true);
         });
     });
+
+    describe("重连自愈:超时与卡死兜底", () => {
+        test("withTimeout 按时完成时返回原结果", async () => {
+            await expect(module.withTimeout(Promise.resolve("ok"), 5000, "op")).resolves.toBe("ok");
+        });
+
+        test("withTimeout 在被包裹 Promise 挂起时超时 reject", async () => {
+            vi.useFakeTimers();
+            const pending = module.withTimeout(new Promise(() => {}), 5000, "op");
+            const assertion = expect(pending).rejects.toThrow("op timeout after 5s");
+            await vi.advanceTimersByTimeAsync(5000);
+            await assertion;
+            vi.useRealTimers();
+        });
+
+        test("isReconnectStuck 仅在已开始且超过上限时为 true", () => {
+            expect(module.isReconnectStuck(10_000, 0, 5000)).toBe(false);      // 未开始
+            expect(module.isReconnectStuck(10_000, 8_000, 5000)).toBe(false);  // 2s < 5s
+            expect(module.isReconnectStuck(10_000, 4_000, 5000)).toBe(true);   // 6s > 5s
+        });
+
+        test("重连中 connect 永久挂起时必须超时结束,不能永久锁死 isReconnecting", async () => {
+            const { instanceCoordinator } = await import("../../src/services/InstanceCoordinator.js");
+            instanceCoordinator.hasLock.mockResolvedValue(true);
+            if (module.resetCircuitBreaker) module.resetCircuitBreaker();
+
+            const clientInstance = await module.getClient();
+            clientInstance.connected = false;
+            clientInstance.disconnect = vi.fn().mockResolvedValue(undefined);
+            clientInstance._sender = { disconnect: vi.fn().mockResolvedValue(undefined) };
+            // 模拟线上故障:与 Telegram 的 connect 永久卡住(DC 无响应)
+            clientInstance.connect = vi.fn(() => new Promise(() => {}));
+
+            vi.useFakeTimers();
+            const first = module.reconnectBot(true);
+            await vi.advanceTimersByTimeAsync(120000); // 覆盖 ~10s 退避 + 90s connect 超时
+            // 关键回归点:重连必须结束(而非永挂),否则 isReconnecting 会被永久锁死
+            await expect(first).resolves.toBeUndefined();
+
+            // isReconnecting 已复位 => 再次重连能再次尝试 connect,证明未被卡死锁定
+            clientInstance.connect.mockClear();
+            const second = module.reconnectBot(true);
+            await vi.advanceTimersByTimeAsync(120000);
+            await second;
+            expect(clientInstance.connect).toHaveBeenCalled();
+
+            vi.useRealTimers();
+        });
+    });
 });

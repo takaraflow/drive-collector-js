@@ -159,9 +159,19 @@ let updateHealthMonitor = null;
 let lastHeartbeat = Date.now();
 let consecutiveFailures = 0;
 let isReconnecting = false;
+// 记录重连开始时间;用于检测"重连卡死"(isReconnecting 被永久锁死)并强制解锁自愈。
+let reconnectStartedAt = 0;
 let connectionStatusCallback = null;
 let watchdogTimer = null;
 let reconnectTimeout = null;
+
+// 重连各网络步骤的超时上限。任何一步(connect/start/getMe 等)若无超时挂起,
+// 会导致 handleConnectionIssue 的 finally 永远执行不到、isReconnecting 被永久锁死,
+// 使看门狗与所有后续重连彻底失效(线上曾因此 6.5 小时无法自愈)。
+const RECONNECT_STEP_TIMEOUT_MS = 90000;
+const RECONNECT_HEALTHCHECK_TIMEOUT_MS = 15000;
+// isReconnecting 被视为"卡死"的上限;超过则由看门狗强制解锁,兜底任何未预料的挂起。
+const MAX_RECONNECT_STUCK_MS = 5 * 60 * 1000;
 
 const TEST_MODE_DC_CONFIG = {
     dcId: 2,
@@ -411,7 +421,32 @@ const resetWatchdogFailureState = () => {
     consecutiveFailures = 0;
     lastHeartbeat = Date.now();
     isReconnecting = false;
+    reconnectStartedAt = 0;
 };
+
+/**
+ * 给可能挂起的 Promise 套一个超时上限:超时则 reject(而非静默),
+ * 让调用方的 catch/finally 一定能执行到,避免 isReconnecting 被永久锁死。
+ * 仅用于重连握手类操作(connect/start/getMe),与文件下载无关、不随文件大小变化。
+ * 导出以便单元测试。
+ */
+export function withTimeout(promise, ms, label) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timeout after ${Math.floor(ms / 1000)}s`)), ms);
+    });
+    timer?.unref?.();
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * 纯函数:判断一次重连是否已"卡死"(isReconnecting 长时间未复位)。
+ * 作为兜底,即使某个未被 withTimeout 包裹的 await 挂起,看门狗也能强制解锁自愈。
+ * 导出以便单元测试。
+ */
+export function isReconnectStuck(now, startedAt, maxMs) {
+    return startedAt > 0 && now - startedAt > maxMs;
+}
 
 const stopLocalClientIfPresent = async (reason) => {
     if (!telegramClient) return;
@@ -851,7 +886,8 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
     }
 
     isReconnecting = true;
-    
+    reconnectStartedAt = Date.now();
+
     try {
         const client = await getClient();
         const config = getConfig();
@@ -902,16 +938,18 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
 
         // 使用电路断路器保护重连
         await telegramCircuitBreaker.execute(async () => {
-            await client.connect();
-            await client.start({ botAuthToken: config.botToken });
-            await saveSession();
+            // 每一步都套超时:任一步挂起都必须抛错,否则下面的 finally 无法复位 isReconnecting,
+            // 会导致看门狗与后续所有重连被永久锁死(线上曾因此 6.5 小时无法自愈)。
+            await withTimeout(client.connect(), RECONNECT_STEP_TIMEOUT_MS, 'client.connect');
+            await withTimeout(client.start({ botAuthToken: config.botToken }), RECONNECT_STEP_TIMEOUT_MS, 'client.start');
+            await withTimeout(saveSession(), RECONNECT_STEP_TIMEOUT_MS, 'saveSession');
 
             log.info("✅ 重连成功");
             lastHeartbeat = Date.now();
             consecutiveFailures = 0;
 
             // 验证连接健康
-            const healthCheck = await client.getMe().catch(e => {
+            const healthCheck = await withTimeout(client.getMe(), RECONNECT_HEALTHCHECK_TIMEOUT_MS, 'client.getMe').catch(e => {
                 log.error("❌ 重连后健康检查失败:", e);
                 throw e;
             });
@@ -934,6 +972,7 @@ async function handleConnectionIssue(lightweight = false, errorType = TelegramEr
         }
     } finally {
         isReconnecting = false;
+        reconnectStartedAt = 0;
     }
 }
 
@@ -1026,7 +1065,19 @@ export const startWatchdog = () => {
         }
 
         if (isReconnecting) {
-            return;
+            // 兜底:重连正常应在 RECONNECT_STEP_TIMEOUT_MS 内结束;若 isReconnecting 长时间未复位,
+            // 说明某处 await 卡死(如未被 withTimeout 包裹的路径),强制解锁让自愈得以继续。
+            if (isReconnectStuck(now, reconnectStartedAt, MAX_RECONNECT_STUCK_MS)) {
+                log.error(`🚨 重连疑似卡死超过 ${Math.floor(MAX_RECONNECT_STUCK_MS / 1000)}s,强制解除锁定以恢复自愈`, {
+                    service: 'telegram',
+                    stuckMs: now - reconnectStartedAt
+                });
+                isReconnecting = false;
+                reconnectStartedAt = 0;
+                // 不 return:让本轮继续检测连接状态并按需触发新的重连
+            } else {
+                return;
+            }
         }
 
         try {
@@ -1106,6 +1157,7 @@ export const stopWatchdog = () => {
         reconnectTimeout = null;
     }
     isReconnecting = false;
+    reconnectStartedAt = 0;
     lastHeartbeat = Date.now();
 };
 
