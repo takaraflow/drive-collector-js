@@ -4,6 +4,9 @@
   "description": "A modular Telegram bot for transferring files to Rclone remotes",
   "main": "index.js",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "sync:env": "node scripts/sync-env.js",
     "start": "cross-env NODE_MODE=all node src/bootstrap/start.js",

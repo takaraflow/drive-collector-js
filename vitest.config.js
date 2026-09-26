@@ -5,7 +5,8 @@ export default defineConfig({
     environment: 'node',
     include: ['**/__tests__/**/*.test.js', '**/?(*.)+(spec|test).js'],
     exclude: [
-      '**/node_modules/**'
+      '**/node_modules/**',
+      'packages/**'
     ],
     globals: true,
     testTimeout: 20000,

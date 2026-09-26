@@ -17,6 +17,9 @@ dist
 build
 *.tgz
 
+# Monorepo sibling package (deploys separately to Cloudflare Workers)
+packages
+
 # IDE
 .vscode
 .idea

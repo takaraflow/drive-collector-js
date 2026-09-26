@@ -1,0 +1,97 @@
+name: Deploy to Cloudflare Workers
+
+on:
+  push:
+    branches: [ "**" ]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  deploy-with-secrets:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'develop' && 'pre' || 'dev' }}
+    env:
+      INFISICAL_TOKEN: ${{ secrets.INFISICAL_TOKEN }}
+      # Use secret for project ID to support both GHA vars and local 'act' secrets
+      INFISICAL_PROJECT_ID: ${{ vars.INFISICAL_PROJECT_ID }}
+      USE_ORCHESTRATED_SECRETS: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Align NODE_ENV with DEPLOY_ENV
+        shell: bash
+        run: |
+          DEFAULT_NODE_ENV="${{ vars.NODE_ENV || 'dev' }}"
+          if [ -n "$DEPLOY_ENV" ]; then
+            echo "NODE_ENV=$DEPLOY_ENV" >> "$GITHUB_ENV"
+          else
+            echo "NODE_ENV=$DEFAULT_NODE_ENV" >> "$GITHUB_ENV"
+          fi
+
+      - name: Normalize Environment
+        run: |
+          ENV_ALIAS=$(echo "${NODE_ENV:-dev}" | tr '[:upper:]' '[:lower:]')
+          case "$ENV_ALIAS" in
+            prod|production) TARGET_ENV="prod" ;;
+            dev|development) TARGET_ENV="dev" ;;
+            pre|staging) TARGET_ENV="pre" ;;
+            *) TARGET_ENV="dev" ;;
+          esac
+          echo "TARGET_ENV=$TARGET_ENV" >> "$GITHUB_ENV"
+          # Override DEPLOY_ENV and NODE_ENV with the normalized short name for consistency
+          echo "DEPLOY_ENV=$TARGET_ENV" >> "$GITHUB_ENV"
+          echo "NODE_ENV=$TARGET_ENV" >> "$GITHUB_ENV"
+
+      - name: Validate Manifest
+        run: npm run validate:manifest
+
+      - name: Build with Secrets Orchestrator
+        run: npm run build -- --env=${{ env.TARGET_ENV }}
+
+      - name: Deploy with Secrets Orchestrator
+        run: node scripts/deploy-with-secrets.js
+
+      - name: Notify Bark result
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            TITLE="✅ GHA 部署成功"
+          else
+            TITLE="❌ GHA 部署失败"
+          fi
+          
+          # Use printf to handle multiline content safely for JSON
+          CONTENT="Workflow: ${{ github.workflow }}\nJob: ${{ github.job }}\nStatus: ${{ job.status }}\nCommit: ${{ github.sha }}"
+          
+          # Check if Bark environment variables are available
+          if [ -z "$BARK_WEBHOOK_URL" ] || [ -z "$BARK_DEVICE_TOKEN" ]; then
+            echo "BARK_WEBHOOK_URL or BARK_DEVICE_TOKEN not set, skipping notification"
+            exit 0
+          fi
+          
+          # Ensure BARK_WEBHOOK_URL ends with / if it's just the domain
+          # 使用更健壮的方式清理首尾可能的引号或换行符
+          CLEAN_URL=$(echo "${BARK_WEBHOOK_URL}" | sed -e 's/^[[:space:]'\'\"']*//' -e 's/[[:space:]'\'\"']*$//')
+          BASE_URL="${CLEAN_URL%/}"
+          
+          # Construct JSON body for Bark POST API
+          curl -L -f -s -X POST "$BASE_URL/push" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{
+              \"title\": \"$TITLE\",
+              \"body\": \"$CONTENT\",
+              \"device_key\": \"$BARK_DEVICE_TOKEN\",
+              \"group\": \"GHA\"
+            }"
