@@ -126,7 +126,7 @@
     "bloom-filters": "^3.0.4",
     "dotenv": "^17.2.3",
     "ioredis": "^5.8.2",
-    "joi": "^18.0.2",
+    "joi": "^18.2.5",
     "p-queue": "^8.0.1",
     "patch-package": "^8.0.1",
     "telegram": "^2.22.2"
