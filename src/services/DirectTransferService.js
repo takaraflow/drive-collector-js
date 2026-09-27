@@ -17,8 +17,11 @@ const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
 const MAX_RCLONE_ERROR_LOG = 8000;
 const DEFAULT_TRANSFER_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_STALL_TIMEOUT_MS = 3 * 60 * 1000;
-const DEFAULT_MAX_DIRECT_ATTEMPTS = 3;
-const DEFAULT_DIRECT_RETRY_DELAY_MS = 1000;
+const DEFAULT_MAX_DIRECT_ATTEMPTS = 5;
+const DEFAULT_DIRECT_RETRY_DELAY_MS = 2000;
+// 连接抖动(telegram_source)时用指数退避,让大文件能活过 15-30s 的断连-重连窗口;
+// 封顶避免单任务重试拖太久。
+const MAX_DIRECT_RETRY_DELAY_MS = 30000;
 const RCLONE_DIAGNOSTIC_GRACE_MS = 1500;
 
 // Adaptive stall timeout constants
@@ -160,6 +163,8 @@ export class DirectTransferService {
                 };
             }
 
+            // 指数退避 + 封顶: retryDelayMs * 2^(attempt-1),比线性更能活过持续断连窗口。
+            const backoffMs = Math.min(retryDelayMs * (2 ** (attempt - 1)), MAX_DIRECT_RETRY_DELAY_MS);
             log.info("Retrying direct transfer after retryable failure", {
                 taskId: args?.task?.id,
                 userId: args?.task?.userId,
@@ -167,10 +172,12 @@ export class DirectTransferService {
                 attempt,
                 maxAttempts,
                 errorCode: lastResult.errorCode,
+                retryScope: lastResult.retryScope,
+                backoffMs,
                 reason: redactSensitiveText(lastResult.error || lastResult.reason || "retryable direct transfer failure")
             });
 
-            await this._delay(retryDelayMs * attempt);
+            await this._delay(backoffMs);
         }
 
         return {
