@@ -1,8 +1,8 @@
 diff --git a/node_modules/telegram/client/updates.js b/node_modules/telegram/client/updates.js
-index c420907..bd4de92 100644
+index c420907..a04bd3f 100644
 --- a/node_modules/telegram/client/updates.js
 +++ b/node_modules/telegram/client/updates.js
-@@ -167,7 +167,7 @@ async function _updateLoop(client) {
+@@ -167,13 +167,13 @@ async function _updateLoop(client) {
          await (0, Helpers_1.sleep)(PING_INTERVAL, true);
          if (client._destroyed)
              break;
@@ -11,6 +11,13 @@ index c420907..bd4de92 100644
              lastPongAt = undefined;
              continue;
          }
+         try {
+             const ping = () => {
+-                return client._sender.send(new tl_1.Api.PingDelayDisconnect({
++                return client._sender?.send(new tl_1.Api.PingDelayDisconnect({
+                     pingId: (0, Helpers_1.returnBigInt)((0, Helpers_1.getRandomInt)(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)),
+                     disconnectDelay: PING_DISCONNECT_DELAY,
+                 }));
 @@ -206,10 +206,10 @@ async function _updateLoop(client) {
                  console.error(err);
              }
