@@ -351,8 +351,9 @@ describe("Config Module", () => {
       fallbackToLocal: false,
       timeoutMs: 21600000,
       stallTimeoutMs: 180000,
-      maxAttempts: 3,
-      retryDelayMs: 1000
+      minStallTimeoutMs: undefined,
+      maxAttempts: 5,
+      retryDelayMs: 2000
     });
   });
 
@@ -370,8 +371,9 @@ describe("Config Module", () => {
       fallbackToLocal: false,
       timeoutMs: 12345,
       stallTimeoutMs: 6789,
-      maxAttempts: 3,
-      retryDelayMs: 1000
+      minStallTimeoutMs: undefined,
+      maxAttempts: 5,
+      retryDelayMs: 2000
     });
 
     delete process.env.DIRECT_TRANSFER_ENABLED;
