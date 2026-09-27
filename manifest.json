@@ -581,6 +581,12 @@
         "default": 1000,
         "description": "Base backoff delay between retryable zero-disk direct transfer attempts"
       },
+      "DIRECT_TRANSFER_LOCAL_STAGING_TTL_MS": {
+        "type": "number",
+        "required": false,
+        "default": 86400000,
+        "description": "Time-to-live for large-file local staging fallback files before cleanup (default 24h)"
+      },
       "EXTERNAL_DOWNLOAD_MAX_BYTES": {
         "type": "number",
         "required": false,
