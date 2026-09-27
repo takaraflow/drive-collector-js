@@ -227,6 +227,46 @@ describe("DirectTransferService", () => {
     expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
   });
 
+  test("retries retryable Telegram source failures up to maxAttempts before giving up", async () => {
+    const stagingName = ".drive-collector-task-retry-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    cloudTool.createRcatStream.mockImplementation(() => {
+      const proc = createProcess();
+      const stdin = createWritable(proc);
+      return Promise.resolve({ stdin, proc, fileName: stagingName });
+    });
+    // 每次都抛可重试的 telegram 断连错误
+    client.iterDownload.mockImplementation(() => (async function* () {
+      throw new Error("400: CONNECTION_NOT_INITED (caused by upload.GetFile)");
+    })());
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-retry", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "file.bin",
+      config: {
+        directTransfer: {
+          enabled: true,
+          fallbackToLocal: false,
+          maxAttempts: 3,
+          retryDelayMs: 0
+        },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      retryable: true,
+      errorCode: "TELEGRAM_SOURCE_TRANSIENT",
+      directTransferAttempts: 3
+    });
+    // maxAttempts=3 → 应尝试 3 次
+    expect(client.iterDownload).toHaveBeenCalledTimes(3);
+  });
+
   test("redacts sensitive rclone stderr before returning fallback errors", async () => {
     const proc = createProcess({
       exitCode: 1,

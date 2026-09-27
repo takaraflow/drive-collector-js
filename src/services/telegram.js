@@ -570,26 +570,28 @@ function resolveTelegramLogLevel() {
 }
 
 function buildClientConfig(config, proxyOptions) {
+    // gramjs 只认这几个连接 key(connectionRetries/requestRetries/retryDelay/timeout/
+    // maxConcurrentDownloads/floodSleepThreshold/useWSS/autoReconnect)。之前那批
+    // connectionTimeout/socketTimeout/keepAliveTimeout/pingIntervalMs/connectionPoolSize/
+    // updateGetIntervalMs 全是死配置(0 引用),已删除,避免误导后人以为调它们能治断连。
+    // 心跳是 gramjs 硬编码 PING_INTERVAL(约9s),无法从这里改。
+    //
+    // useWSS: 走 443/TLS 隧道,比明文 80 TCPFull 更抗中间网络设备干扰(周期性 EOF)。
+    // gramjs 硬约束: useWSS + proxy 会直接抛错,所以有 proxy 时强制回退明文。
+    const hasProxy = Boolean(proxyOptions?.proxy);
     return {
         connectionRetries: 3,
         requestRetries: 3,
-        retryDelay: {
-            min: 5000,
-            max: 15000
-        },
+        // 必须是数字 ms: gramjs 直接 setTimeout(resolve, retryDelay),传对象会被 Number()
+        // 变 NaN → 0ms 无刹车重连,加剧重连风暴。
+        retryDelay: 5000,
         timeout: 120000,
-        connectionTimeout: 60000,
-        socketTimeout: 90000,
         maxConcurrentDownloads: 2,
-        connectionPoolSize: 3,
-        updateGetIntervalMs: 15000,
-        pingIntervalMs: 45000,
-        keepAliveTimeout: 45000,
         floodSleepThreshold: 300,
         deviceModel: config.telegram?.deviceModel || "DriveCollector-Server",
         systemVersion: config.telegram?.systemVersion || "Linux",
         appVersion: config.telegram?.appVersion || "2.3.3",
-        useWSS: false,
+        useWSS: !hasProxy,
         autoReconnect: true,
         dcId: undefined,
         useIPv6: false,
