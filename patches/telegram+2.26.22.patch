@@ -1,0 +1,26 @@
+diff --git a/node_modules/telegram/client/updates.js b/node_modules/telegram/client/updates.js
+index c420907..bd4de92 100644
+--- a/node_modules/telegram/client/updates.js
++++ b/node_modules/telegram/client/updates.js
+@@ -167,7 +167,7 @@ async function _updateLoop(client) {
+         await (0, Helpers_1.sleep)(PING_INTERVAL, true);
+         if (client._destroyed)
+             break;
+-        if (client._sender.isReconnecting || client._isSwitchingDc) {
++        if (client._sender?.isReconnecting || client._isSwitchingDc) {
+             lastPongAt = undefined;
+             continue;
+         }
+@@ -206,10 +206,10 @@ async function _updateLoop(client) {
+                 console.error(err);
+             }
+             lastPongAt = undefined;
+-            if (client._sender.isReconnecting || client._isSwitchingDc) {
++            if (client._sender?.isReconnecting || client._isSwitchingDc) {
+                 continue;
+             }
+-            client._sender.reconnect();
++            client._sender?.reconnect();
+         }
+         // We need to send some content-related request at least hourly
+         // for Telegram to keep delivering updates, otherwise they will

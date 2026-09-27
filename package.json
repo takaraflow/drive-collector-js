@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "postinstall": "patch-package",
     "sync:env": "node scripts/sync-env.js",
     "start": "cross-env NODE_MODE=all node src/bootstrap/start.js",
     "start:dispatcher": "cross-env NODE_MODE=dispatcher node src/bootstrap/start.js",
@@ -127,6 +128,7 @@
     "ioredis": "^5.8.2",
     "joi": "^18.0.2",
     "p-queue": "^8.0.1",
+    "patch-package": "^8.0.1",
     "telegram": "^2.22.2"
   },
   "optionalDependencies": {
