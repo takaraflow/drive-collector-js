@@ -53,6 +53,9 @@ const STALLED_RECOVERY_INTERVAL_MS = 60_000;
 const STALLED_RECOVERY_TIMEOUT_MS = 120_000;
 const RECOVERY_FALLBACK_DELAY_MS = 5_000;
 const RATE_LIMIT_COOLDOWN_MS = 5 * 60_000;
+// ponytail: 同一任务被恢复扫描反复捞起而始终跑不动时，超过此上限判终态失败，避免鬼打墙刷屏。
+// 内存计数，进程重启自然清零（重启本就是新一轮恢复，合理）。
+const MAX_STALLED_RECOVERY_ATTEMPTS = 5;
 
 /**
  * --- 任务管理调度中心 (TaskManager) ---
@@ -202,6 +205,8 @@ export class TaskManager {
 
     // 运行中任务对象引用（用于取消正在处理的任务）
     static inFlightTasks = new Map(); // taskId -> task object
+    // ponytail: taskId -> 连续被恢复扫描捞起的次数；任务转终态/成功推进时清零。内存态，重启自清。
+    static stalledRecoveryAttempts = new Map();
 
     // 用户取消标记（用于 QStash 触发前/中途快速拦截）
     static cancelledTaskIds = new Set();
@@ -431,11 +436,38 @@ export class TaskManager {
             }
 
             for (const row of rows) {
+                // ponytail: 同一任务被反复捞起而始终跑不动 → 超上限判终态失败，终结鬼打墙刷屏。
+                const attempts = (this.stalledRecoveryAttempts.get(row.id) || 0) + 1;
+                this.stalledRecoveryAttempts.set(row.id, attempts);
+                if (attempts > MAX_STALLED_RECOVERY_ATTEMPTS) {
+                    log.warn("任务反复恢复仍无进展，判定终态失败", { taskId: row.id, attempts, status: row.status });
+                    this.stalledRecoveryAttempts.delete(row.id);
+                    failedUpdates.push({
+                        id: row.id,
+                        event: TASK_EVENTS.FAIL,
+                        error: `Recovery aborted after ${MAX_STALLED_RECOVERY_ATTEMPTS} attempts`
+                    });
+                    try {
+                        const staleTask = buildTaskObjectFromDb(row, resolveStoredTaskSource(row));
+                        await this._notifyRecoveredTasks(
+                            [staleTask],
+                            format(STRINGS.task.failed_action_required, {
+                                reason: escapeHTML("任务多次自动恢复仍失败，已停止重试。请重新发送文件。")
+                            }),
+                            true
+                        );
+                    } catch (notifyErr) {
+                        log.warn("终态失败通知发送失败", { taskId: row.id, error: notifyErr.message });
+                    }
+                    continue;
+                }
+
                 let task;
                 try {
                     task = buildTaskObjectFromDb(row, resolveStoredTaskSource(row));
                 } catch (error) {
                     log.warn("任务源元数据缺失，无法恢复", { taskId: row.id, error: error.message });
+                    this.stalledRecoveryAttempts.delete(row.id);
                     failedUpdates.push({ id: row.id, event: TASK_EVENTS.FAIL, error: error.message });
                     continue;
                 }
@@ -538,6 +570,10 @@ export class TaskManager {
                 succeeded.map(({ work }) => work.task),
                 STRINGS.task.restore
             );
+            // ponytail: 成功重新入队的任务清零计数（它们已重新动起，不算鬼打墙）。
+            for (const { work } of succeeded) {
+                this.stalledRecoveryAttempts.delete(work.task.id);
+            }
 
             if (failed.length > 0) {
                 const retryableFailures = failed.filter(({ result }) => this._isRetryableInfrastructureError(result.reason));
