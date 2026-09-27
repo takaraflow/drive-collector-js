@@ -6,6 +6,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY package*.json ./
+COPY patches ./patches
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
