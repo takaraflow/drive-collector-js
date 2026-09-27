@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "postinstall": "patch-package",
+    "postinstall": "patch-package --error-on-fail",
     "sync:env": "node scripts/sync-env.js",
     "start": "cross-env NODE_MODE=all node src/bootstrap/start.js",
     "start:dispatcher": "cross-env NODE_MODE=dispatcher node src/bootstrap/start.js",
