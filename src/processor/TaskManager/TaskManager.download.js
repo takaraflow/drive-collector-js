@@ -16,6 +16,7 @@ import { isRetryableInfrastructureError } from "../../domain/infrastructure-erro
 import { parseBoolean } from "../../config/boolean.js";
 import { redactSensitiveText } from "../../utils/serializer.js";
 import { ensureConnected } from "../../services/telegram.js";
+import { resumableDownloadService } from "../../services/ResumableDownloadService.js";
 
 // 获取模块日志记录器
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager');
@@ -80,8 +81,10 @@ export async function downloadTask(task) {
         config, client, CloudTool, getMediaInfo, updateStatus, safeEdit,
         runBotTask, runMtprotoTask, runBotTaskWithRetry, runMtprotoTaskWithRetry,
         runMtprotoFileTaskWithRetry, PRIORITY, TaskRepository, DriveRepository, queueService,
-        STRINGS, format, streamTransferService, directTransferService, instanceCoordinator
+        STRINGS, format, streamTransferService, directTransferService, instanceCoordinator,
+        resumableDownloadService: injectedResumableDownloadService
     } = dependencyContainer.getAll();
+    const resolvedResumableDownloadService = injectedResumableDownloadService || resumableDownloadService;
     const log = getLog();
 
         const { message, id } = task;
@@ -131,7 +134,7 @@ export async function downloadTask(task) {
             let downloadFinished = false;
 
             try {
-                const deps = { config, client, CloudTool, updateStatus, runMtprotoFileTaskWithRetry, TaskRepository, DriveRepository, queueService, STRINGS, format, streamTransferService, directTransferService, instanceCoordinator };
+                const deps = { config, client, CloudTool, updateStatus, runMtprotoFileTaskWithRetry, TaskRepository, DriveRepository, queueService, STRINGS, format, streamTransferService, directTransferService, instanceCoordinator, resumableDownloadService: resolvedResumableDownloadService };
 
                 // 1. Concurrent processing: Asynchronously initiate UI update without blocking instant transfer check and download preparation
                 const initialHeartbeat = heartbeat('downloading', 0, 0)
@@ -694,6 +697,7 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
 
 async function _handleMTProtoDownload(context, deps, task, info, fileName, localPath, heartbeat, isLargeFile, phaseHooks = {}) {
     const { config, client, runMtprotoFileTaskWithRetry, TaskRepository, updateStatus, STRINGS, format, queueService } = deps;
+    const resumable = deps.resumableDownloadService || resumableDownloadService;
     const log = dependencyContainer.get('logger').withModule('TaskManager');
     const { message } = task;
 
@@ -705,25 +709,37 @@ async function _handleMTProtoDownload(context, deps, task, info, fileName, local
         purpose: `Telegram download ${fileName}`
     });
 
-    let lastUpdate = Date.now();
-    const downloadOptions = {
-        outputFile: localPath,
-        chunkSize: isLargeFile ? 512 * 1024 : 128 * 1024,
-        workers: isLargeFile ? 3 : 1,
-        progressCallback: async (downloaded, total) => {
-            const now = Date.now();
-            if (now - lastUpdate > 3000 || downloaded === total) {
-                lastUpdate = now;
-                await heartbeat('downloading', downloaded, total);
-            }
-        }
-    };
+    // 机会式清理过期 .part 半成品(TTL),不新起后台 timer。
+    await resumable.cleanupStalePartFiles(config.downloadDir, config.directTransfer?.localStagingTtlMs).catch(() => {});
 
+    let lastUpdate = Date.now();
+    const chunkSize = isLargeFile ? 512 * 1024 : 128 * 1024;
+
+    // 可断点续传下载: 边下边 append 到 .part,断了下次从末尾续。gramjs 的 downloadMedia
+    // 是截断重写,扛不住 Telegram 连接慢性断连;这里用 iterDownload({offset}) 治本。
     try {
-        await runMtprotoFileTaskWithRetry(() => client.downloadMedia(message, downloadOptions), {}, 10); // Increase retry count to 10
+        await runMtprotoFileTaskWithRetry(() => resumable.downloadToLocal({
+            client,
+            message,
+            info,
+            localPath,
+            chunkSize,
+            isCancelled: () => context.cancelledTaskIds.has(task.id),
+            onProgress: async (progress) => {
+                const now = Date.now();
+                if (now - lastUpdate > 3000 || progress.bytes === progress.size) {
+                    lastUpdate = now;
+                    await heartbeat('downloading', progress.bytes, progress.size);
+                }
+            }
+        }), {}, 10);
     } catch (downloadError) {
+        if (downloadError?.message === "CANCELLED") throw downloadError;
         log.error(`Download failed for task ${task.id}:`, downloadError);
-        throw new Error(`Download failed: ${downloadError.message}`);
+        const err = new Error(`Download failed: ${downloadError.message}`);
+        // 断连类错误标记可重试,交恢复扫描下次从 .part 续传(不算终态失败)。
+        if (downloadError?.retryable !== false) err.retryable = true;
+        throw err;
     }
 
     // Download complete, push to upload queue

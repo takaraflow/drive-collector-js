@@ -311,11 +311,11 @@ function setupInfisicalPolling() {
 
         // 3. 更新环境变量
         changes.forEach(change => {
-            if (change.newValue !== undefined) {
+            if (change.newValue === undefined) {
+                delete process.env[change.key];
+            } else {
                 const cleanValue = sanitizeValue(change.newValue);
                 process.env[change.key] = cleanValue;
-            } else {
-                delete process.env[change.key];
             }
         });
 
@@ -468,7 +468,8 @@ function buildConfigObject(env) {
             stallTimeoutMs: parsePositiveNumber(env.DIRECT_TRANSFER_STALL_TIMEOUT_MS, 3 * 60 * 1000),
             minStallTimeoutMs: parseNonNegativeInt(env.DIRECT_TRANSFER_MIN_STALL_TIMEOUT_MS, undefined),
             maxAttempts: parsePositiveInt(env.DIRECT_TRANSFER_MAX_ATTEMPTS, 5),
-            retryDelayMs: parseNonNegativeInt(env.DIRECT_TRANSFER_RETRY_DELAY_MS, 2000)
+            retryDelayMs: parseNonNegativeInt(env.DIRECT_TRANSFER_RETRY_DELAY_MS, 2000),
+            localStagingTtlMs: parsePositiveNumber(env.DIRECT_TRANSFER_LOCAL_STAGING_TTL_MS, 24 * 60 * 60 * 1000)
         },
         instance: {
             id: env.INSTANCE_ID || null,
@@ -539,9 +540,9 @@ function buildConfigObject(env) {
             serverIp: env.TG_SERVER_IP || null,
             serverPort: parseOptionalInt(env.TG_SERVER_PORT),
             // Test mode logic: Explicit TG_TEST_MODE overrides dev mode default
-            testMode: env.TG_TEST_MODE !== undefined
-                ? parseBoolean(env.TG_TEST_MODE, false)
-                : (process.env.NODE_ENV === 'dev' || process.env.NODE_MODE === 'dev'),
+            testMode: env.TG_TEST_MODE === undefined
+                ? (process.env.NODE_ENV === 'dev' || process.env.NODE_MODE === 'dev')
+                : parseBoolean(env.TG_TEST_MODE, false),
             proxy: (env.TG_PROXY_HOST || env.TELEGRAM_PROXY_HOST) ? {
                 host: env.TG_PROXY_HOST || env.TELEGRAM_PROXY_HOST,
                 port: parseInt(env.TG_PROXY_PORT || env.TELEGRAM_PROXY_PORT),
@@ -615,7 +616,7 @@ export async function initConfig() {
     
     // Log environment and test mode status
     const envMode = process.env.NODE_MODE || 'unknown';
-    const testModeSource = env.TG_TEST_MODE !== undefined ? `TG_TEST_MODE=${env.TG_TEST_MODE}` : `default (NODE_MODE=${envMode})`;
+    const testModeSource = env.TG_TEST_MODE === undefined ? `default (NODE_MODE=${envMode})` : `TG_TEST_MODE=${env.TG_TEST_MODE}`;
     console.log(`⚙️ NODE_ENV=${process.env.NODE_ENV}, NODE_MODE=${envMode}, Telegram 测试模式: ${config.telegram.testMode}`);
     
     return config;

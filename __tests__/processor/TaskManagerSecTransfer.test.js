@@ -181,6 +181,20 @@ vi.mock("fs", () => ({
     default: mockFs
 }));
 
+// 可断点续传下载服务:测试里用 downloadMedia 替身保持既有断言(下载确实发生),
+// 不触碰真实 fs.createWriteStream(fs 被 mock,无该方法)。
+const mockResumableDownloadService = {
+    downloadToLocal: vi.fn(async ({ client, message, localPath, info }) => {
+        await client.downloadMedia(message, { outputFile: localPath });
+        return { success: true, localPath, bytes: info?.size || 0, resumedFrom: 0 };
+    }),
+    cleanupStalePartFiles: vi.fn().mockResolvedValue({ removed: 0 })
+};
+vi.mock("../../src/services/ResumableDownloadService.js", () => ({
+    ResumableDownloadService: vi.fn(() => mockResumableDownloadService),
+    resumableDownloadService: mockResumableDownloadService
+}));
+
 // Import TaskManager
 const { TaskManager } = await import("../../src/processor/TaskManager.js");
 const { dependencyContainer } = await import("../../src/services/DependencyContainer.js");

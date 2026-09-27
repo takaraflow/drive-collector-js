@@ -353,7 +353,8 @@ describe("Config Module", () => {
       stallTimeoutMs: 180000,
       minStallTimeoutMs: undefined,
       maxAttempts: 5,
-      retryDelayMs: 2000
+      retryDelayMs: 2000,
+      localStagingTtlMs: 86400000
     });
   });
 
@@ -373,7 +374,8 @@ describe("Config Module", () => {
       stallTimeoutMs: 6789,
       minStallTimeoutMs: undefined,
       maxAttempts: 5,
-      retryDelayMs: 2000
+      retryDelayMs: 2000,
+      localStagingTtlMs: 86400000
     });
 
     delete process.env.DIRECT_TRANSFER_ENABLED;
