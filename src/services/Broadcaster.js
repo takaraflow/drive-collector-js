@@ -28,8 +28,8 @@ export class Broadcaster {
         this.handlers = new Map(); // channel -> Set<fn>
         this.starting = null;
         this._messageWired = false;
-        this._unavailable = false; // 主 provider 无 ioredis 客户端时置位,后续 publish/subscribe 直接 no-op
-        this._stopped = false;     // stop() 后置位:防止停机后残留的 publish 又把连接拉起来(幽灵连接)
+        this._warnedUnavailable = false; // 日志节流:provider 无 ioredis 时只告警一次,不永久锁死(可自愈)
+        this._stopped = false;           // stop() 后置位:防止停机后残留的 publish 又把连接拉起来(幽灵连接)
     }
 
     _makeConnection(role) {
@@ -42,28 +42,35 @@ export class Broadcaster {
     }
 
     async _ensure() {
-        if (this._stopped || this._unavailable) return false;
+        if (this._stopped) return false;
         if (this.publisher?.status === 'ready' && this.subscriber?.status === 'ready') return true;
         if (!this.starting) {
             this.starting = (async () => {
-                if (!this.publisher) this.publisher = this._makeConnection('publisher');
-                if (!this.subscriber) {
-                    this.subscriber = this._makeConnection('subscriber');
-                    if (this.subscriber) {
-                        this.subscriber.on('ready', () => this._resubscribe()); // 断线重连成功后自动恢复订阅
-                        this._wireMessages();
+                // 注:连接从主 cache provider 克隆一次并复用整个进程生命周期;不跟随 cache 故障切换。
+                // provider 若切到新端点,这里仍连旧端点直到进程重启——正确性由 TTL 兜底(通知丢失无害)。
+                const pub = this.publisher || this._makeConnection('publisher');
+                const sub = this.subscriber || this._makeConnection('subscriber');
+                if (!pub || !sub) {
+                    // 主 provider 暂无 ioredis 客户端(如全部 provider 失败降级到 MemoryCache):
+                    // 本轮不可用,但不永久锁死——provider 恢复后下次调用重试(自愈)。日志只警告一次防刷屏。
+                    if (!this._warnedUnavailable) {
+                        this._warnedUnavailable = true;
+                        log.warn('Broadcaster 暂不可用:主缓存 provider 无 ioredis 客户端,pub/sub 本轮跳过(通知由 TTL 兜底,provider 恢复后自愈)');
                     }
+                    return; // 保持 publisher/subscriber 原值(null),下次重试
                 }
-                if (!this.publisher || !this.subscriber) {
-                    this._unavailable = true;
-                    log.warn('Broadcaster 不可用:主缓存 provider 无 ioredis 客户端,pub/sub 关闭(通知改由 TTL 兜底)');
-                    return;
+                this.publisher = pub;
+                this.subscriber = sub;
+                this._warnedUnavailable = false; // 恢复了,允许下次故障再次告警
+                if (!this._messageWired) {
+                    this.subscriber.on('ready', () => this._resubscribe()); // 断线重连成功后自动恢复订阅
+                    this._wireMessages();
                 }
                 await Promise.all([this._connect(this.publisher), this._connect(this.subscriber)]);
             })().finally(() => { this.starting = null; });
         }
         await this.starting;
-        return !this._unavailable && !!this.publisher && !!this.subscriber;
+        return !this._stopped && !!this.publisher && !!this.subscriber;
     }
 
     async _connect(conn) {

@@ -90,4 +90,19 @@ describe('Broadcaster - pub/sub 载重不变量', () => {
         await b.publish('dc:test', { a: 2 }); // stop 后不得再建连
         expect(made).toBe(madeAfterFirst);
     });
+
+    test('provider 恢复后自愈:无 ioredis 时降级,provider 就绪后 publish 自动建连(不永久锁死)', async () => {
+        let hasClient = false;
+        const pub = makeFakeClient();
+        const sub = makeFakeClient();
+        duplicateImpl = (overrides) => hasClient ? (overrides && overrides.maxRetriesPerRequest === null ? sub : pub) : null;
+        b = new Broadcaster();
+
+        await b.publish('dc:test', { a: 1 }); // provider 未就绪 → no-op
+        expect(pub.publish).not.toHaveBeenCalled();
+
+        hasClient = true;                     // provider 恢复
+        await b.publish('dc:test', { a: 2 }); // 自愈 → 真正发布
+        expect(pub.publish).toHaveBeenCalled();
+    });
 });

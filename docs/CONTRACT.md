@@ -633,10 +633,12 @@ curl -X GET "https://api.axiom.co/v1/datasets/<dataset>/query?apiKey=<token>"
 | `download` | `/api/v2/tasks/download` | `TaskManager.handleDownloadWebhook()` |
 | `upload` | `/api/v2/tasks/upload` | `TaskManager.handleUploadWebhook()` |
 | `system-events` | `/api/v2/tasks/system-events` | `MediaGroupBuffer.handleFlushEvent()` |
-| `state_sync` | `/api/v2/tasks/state_sync` | `StateSynchronizer.handleSyncEvent()` |
-| `cache_sync` | `/api/v2/tasks/cache_sync` | `ConsistentCache.handleSyncEvent()` |
 
 **注意**: `batch` 不是独立 topic，而是通过 `download` topic 的 batch publish 触发。
+
+> **已迁移**：`state_sync` / `cache_sync` 实例间通知已从 QStash 迁到 Redis pub/sub（频道
+> `dc:state:changed` / `dc:cache:invalidate`，见 `Broadcaster.js`），对应 webhook 端点已删除。
+> 这类"丢了也无害"的广播不再占用 QStash 配额；权威数据仍锚在缓存 + TTL。
 
 ### B. 实例注册格式
 
