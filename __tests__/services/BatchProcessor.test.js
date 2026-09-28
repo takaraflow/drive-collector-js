@@ -35,6 +35,20 @@ vi.mock('../../src/services/QueueService.js', () => ({
   }
 }));
 
+// batch_events 进度广播已改走 pub/sub;mock 掉避免单测触碰真实 Redis 连接
+vi.mock('../../src/services/Broadcaster.js', () => ({
+  broadcaster: {
+    publish: vi.fn().mockResolvedValue(undefined),
+    subscribe: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue(undefined)
+  },
+  CHANNELS: {
+    stateChanged: 'dc:state:changed',
+    cacheInvalidate: 'dc:cache:invalidate',
+    batchEvents: 'dc:batch:events'
+  }
+}));
+
 vi.mock('../../src/services/InstanceCoordinator.js', () => ({
   instanceCoordinator: {
     acquireLock: vi.fn(),
@@ -167,6 +181,13 @@ describe('BatchProcessor - 批量处理器服务', () => {
     expect(result.success).toBe(true);
     expect(instanceCoordinator.acquireLock).toHaveBeenCalledWith('batch_process:test-batch-123', 120);
     expect(instanceCoordinator.releaseLock).toHaveBeenCalledWith('batch_process:test-batch-123');
+
+    // 回归锁:batch 进度必须经 broadcaster 广播(此前漏 import broadcaster,publish 静默抛 ReferenceError)
+    const { broadcaster, CHANNELS } = await import('../../src/services/Broadcaster.js');
+    expect(broadcaster.publish).toHaveBeenCalledWith(
+      CHANNELS.batchEvents,
+      expect.objectContaining({ type: 'batch_update' })
+    );
   });
 
   test('should fail to process when lock cannot be acquired', async () => {

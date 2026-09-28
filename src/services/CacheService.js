@@ -400,6 +400,20 @@ class CacheService {
     }
 
     /**
+     * 复制主 provider 的底层 ioredis 连接。用于 pub/sub 等需要独立连接的场景
+     * (订阅态连接不能再执行普通命令,必须单独一条)。复制出的连接继承主 provider 的
+     * url/TLS/auth/db/重试策略,不重复解析配置。
+     * 仅当主 provider 是 ioredis 系(Valkey/Redis)时可用;HTTP/内存 provider 返回 null。
+     * @param {Object} [overrides] - 传给 ioredis duplicate 的选项覆盖
+     * @returns {import('ioredis').Redis | null}
+     */
+    duplicateClient(overrides = {}) {
+        const client = this.primaryProvider?.client;
+        if (!client || typeof client.duplicate !== 'function') return null;
+        return client.duplicate(overrides);
+    }
+
+    /**
      * Core Get Method with L1/L2/L3 and Failover
      */
     async get(key, type = "json", options = {}) {

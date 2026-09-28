@@ -26,9 +26,23 @@ vi.mock('../../src/utils/LocalCache.js', () => ({
     }
 }));
 
+// QStash 保持 mock 作为"防复活"回归锁:缓存失效广播已改走 pub/sub,绝不能再回 QStash。
 vi.mock('../../src/services/QueueService.js', () => ({
     queueService: {
         publish: vi.fn().mockResolvedValue(true)
+    }
+}));
+
+vi.mock('../../src/services/Broadcaster.js', () => ({
+    broadcaster: {
+        publish: vi.fn().mockResolvedValue(undefined),
+        subscribe: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined)
+    },
+    CHANNELS: {
+        stateChanged: 'dc:state:changed',
+        cacheInvalidate: 'dc:cache:invalidate',
+        batchEvents: 'dc:batch:events'
     }
 }));
 
@@ -36,6 +50,7 @@ import { cache } from '../../src/services/CacheService.js';
 import { instanceCoordinator } from '../../src/services/InstanceCoordinator.js';
 import { localCache } from '../../src/utils/LocalCache.js';
 import { queueService } from '../../src/services/QueueService.js';
+import { broadcaster, CHANNELS } from '../../src/services/Broadcaster.js';
 import { ConsistentCache } from '../../src/services/ConsistentCache.js';
 
 describe('ConsistentCache - service facade', () => {
@@ -50,6 +65,8 @@ describe('ConsistentCache - service facade', () => {
         instanceCoordinator.acquireLock.mockResolvedValue(true);
         instanceCoordinator.releaseLock.mockResolvedValue(true);
         instanceCoordinator.getInstanceId.mockReturnValue('test-instance');
+        broadcaster.publish.mockResolvedValue(undefined);
+        broadcaster.subscribe.mockResolvedValue(undefined);
         cacheInstance = new ConsistentCache();
     });
 
@@ -70,15 +87,16 @@ describe('ConsistentCache - service facade', () => {
         expect(result).toBe(true);
         expect(cache.set).toHaveBeenCalledWith('consistent:user:123', payload, 3600);
         expect(localCache.set).toHaveBeenCalledWith('consistent:user:123', payload, 60);
-        expect(queueService.publish).toHaveBeenCalledWith(
-            'cache_sync',
-            expect.objectContaining({ action: 'set', key: 'consistent:user:123' }),
-            { bestEffort: true }
+        expect(broadcaster.publish).toHaveBeenCalledWith(
+            CHANNELS.cacheInvalidate,
+            expect.objectContaining({ action: 'set', key: 'consistent:user:123' })
         );
+        // 防复活:缓存失效广播绝不再走 QStash
+        expect(queueService.publish).not.toHaveBeenCalled();
     });
 
-    test('set succeeds when best-effort broadcast is dropped', async () => {
-        queueService.publish.mockResolvedValue({ dropped: true, bestEffort: true });
+    test('set succeeds when the invalidation notification is dropped', async () => {
+        broadcaster.publish.mockResolvedValue(undefined);
 
         const result = await cacheInstance.set('user:123', { foo: 'bar' });
 
@@ -152,18 +170,29 @@ describe('ConsistentCache - service facade', () => {
         expect(instanceCoordinator.releaseLock).toHaveBeenCalled();
     });
 
-    test('handleSyncEvent applies remote set and delete', async () => {
-        await cacheInstance.handleSyncEvent({ source: 'peer', action: 'set', key: 'hello', value: 'world' });
-        expect(localCache.set).toHaveBeenCalledWith('consistent:hello', 'world', 60);
+    test('handleSyncEvent invalidates the exact local key a peer wrote (no double-prefix)', async () => {
+        // 关键回归:_broadcastChange 发出的 event.key 已是完整前缀键('consistent:foo'),
+        // 与 set()/get() 写读本地缓存用的键一致。handleSyncEvent 必须原样 del,不能再加前缀,
+        // 否则删的是从不存在的 'consistent:consistent:foo',跨实例失效彻底失灵。
+        await cacheInstance.handleSyncEvent({ source: 'peer', action: 'set', key: 'consistent:foo' });
+        expect(localCache.del).toHaveBeenCalledWith('consistent:foo');
+        expect(localCache.set).not.toHaveBeenCalled();
 
-        await cacheInstance.handleSyncEvent({ source: 'peer', action: 'delete', key: 'hello' });
-        expect(localCache.del).toHaveBeenCalledWith('consistent:hello');
+        localCache.del.mockClear();
+        await cacheInstance.handleSyncEvent({ source: 'peer', action: 'delete', key: 'consistent:foo' });
+        expect(localCache.del).toHaveBeenCalledWith('consistent:foo');
     });
 
     test('handleSyncEvent ignores own events', async () => {
         instanceCoordinator.getInstanceId.mockReturnValue('self');
-        await cacheInstance.handleSyncEvent({ source: 'self', action: 'set', key: 'ignored', value: 'x' });
-        expect(localCache.set).not.toHaveBeenCalledWith('consistent:ignored', 'x', 60);
+        await cacheInstance.handleSyncEvent({ source: 'self', action: 'set', key: 'consistent:ignored' });
+        expect(localCache.del).not.toHaveBeenCalled();
+        expect(localCache.set).not.toHaveBeenCalled();
+    });
+
+    test('init subscribes to the cache-invalidate pub/sub channel', async () => {
+        await cacheInstance.init();
+        expect(broadcaster.subscribe).toHaveBeenCalledWith(CHANNELS.cacheInvalidate, expect.any(Function));
     });
 
     test('restoreConsistency reapplies logs and clears local cache', async () => {

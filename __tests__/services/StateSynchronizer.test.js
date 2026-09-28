@@ -17,10 +17,25 @@ vi.mock('../../src/services/InstanceCoordinator.js', () => ({
     }
 }));
 
+// QStash 保持 mock:StateSynchronizer 已不再 import 它,这里作为"防复活"回归锁——
+// 一旦有人再把状态广播塞回 QStash,下面的 not.toHaveBeenCalled 断言就会红。
 vi.mock('../../src/services/QueueService.js', () => ({
     queueService: {
         publish: vi.fn().mockResolvedValue(true),
         subscribe: vi.fn().mockResolvedValue(true)
+    }
+}));
+
+vi.mock('../../src/services/Broadcaster.js', () => ({
+    broadcaster: {
+        publish: vi.fn().mockResolvedValue(undefined),
+        subscribe: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined)
+    },
+    CHANNELS: {
+        stateChanged: 'dc:state:changed',
+        cacheInvalidate: 'dc:cache:invalidate',
+        batchEvents: 'dc:batch:events'
     }
 }));
 
@@ -36,6 +51,7 @@ vi.mock('../../src/utils/LocalCache.js', () => ({
 import { cache } from '../../src/services/CacheService.js';
 import { instanceCoordinator } from '../../src/services/InstanceCoordinator.js';
 import { queueService } from '../../src/services/QueueService.js';
+import { broadcaster, CHANNELS } from '../../src/services/Broadcaster.js';
 import { localCache } from '../../src/utils/LocalCache.js';
 import { StateSynchronizer } from '../../src/services/StateSynchronizer.js';
 
@@ -46,6 +62,8 @@ describe('StateSynchronizer - synchronization workflow', () => {
         vi.clearAllMocks();
         cache.get.mockResolvedValue(null);
         cache.set.mockResolvedValue(true);
+        broadcaster.publish.mockResolvedValue(undefined);
+        broadcaster.subscribe.mockResolvedValue(undefined);
         instanceCoordinator.acquireLock.mockResolvedValue(true);
         instanceCoordinator.releaseLock.mockResolvedValue(true);
         instanceCoordinator.getActiveInstances.mockResolvedValue(['self', 'peer-instance']);
@@ -64,7 +82,7 @@ describe('StateSynchronizer - synchronization workflow', () => {
         expect(synchronizer.subscribers.size).toBe(0);
     });
 
-    test('syncUserState merges remote state, publishes change, and releases lock', async () => {
+    test('syncUserState merges remote state, broadcasts change, and releases lock', async () => {
         const userId = 'user-1';
         const stateType = 'tasks';
         const localKey = `state:${userId}:${stateType}`;
@@ -87,11 +105,12 @@ describe('StateSynchronizer - synchronization workflow', () => {
         expect(instanceCoordinator.releaseLock).toHaveBeenCalled();
         expect(cache.set).toHaveBeenCalledWith(localKey, remoteState, 3600);
         expect(localCache.set).toHaveBeenCalledWith(localKey, remoteState, 60);
-        expect(queueService.publish).toHaveBeenCalledWith(
-            'state_sync',
-            expect.objectContaining({ userId, stateType }),
-            { bestEffort: true }
+        expect(broadcaster.publish).toHaveBeenCalledWith(
+            CHANNELS.stateChanged,
+            expect.objectContaining({ userId, stateType })
         );
+        // 防复活:状态广播绝不再走 QStash
+        expect(queueService.publish).not.toHaveBeenCalled();
     });
 
     test('syncUserState returns false when lock acquisition fails', async () => {
@@ -113,45 +132,42 @@ describe('StateSynchronizer - synchronization workflow', () => {
         expect(instanceCoordinator.releaseLock).toHaveBeenCalled();
     });
 
-    test('publishStateChange pushes event to queue and cache', async () => {
+    test('publishStateChange broadcasts event and writes authoritative cache', async () => {
         await synchronizer.publishStateChange('user-2', 'sessions', { status: 'open' });
 
-        expect(queueService.publish).toHaveBeenCalledWith(
-            'state_sync',
+        expect(broadcaster.publish).toHaveBeenCalledWith(
+            CHANNELS.stateChanged,
             expect.objectContaining({
                 type: 'state_change',
                 userId: 'user-2',
                 stateType: 'sessions'
-            }),
-            { bestEffort: true }
+            })
         );
         expect(cache.set).toHaveBeenCalledWith('sync:user-2:sessions', { status: 'open' }, 300);
+        expect(queueService.publish).not.toHaveBeenCalled();
     });
 
-    test('publishStateChange stores cache before best-effort queue publish', async () => {
-        queueService.publish.mockResolvedValue({ dropped: true, bestEffort: true });
+    test('publishStateChange writes authoritative cache before broadcasting', async () => {
+        const order = [];
+        cache.set.mockImplementation(async () => { order.push('cache'); return true; });
+        broadcaster.publish.mockImplementation(async () => { order.push('broadcast'); });
 
         await synchronizer.publishStateChange('user-2', 'sessions', { status: 'open' });
 
-        expect(cache.set).toHaveBeenCalledWith('sync:user-2:sessions', { status: 'open' }, 300);
-        expect(queueService.publish).toHaveBeenCalledWith(
-            'state_sync',
-            expect.objectContaining({ userId: 'user-2', stateType: 'sessions' }),
-            { bestEffort: true }
-        );
+        expect(order).toEqual(['cache', 'broadcast']);
     });
 
-    test('publishStateChange ignores best-effort queue rejection after cache write', async () => {
-        queueService.publish.mockRejectedValue(new Error('Queue error'));
+    test('publishStateChange resolves even if the notification layer misbehaves', async () => {
+        // broadcaster.publish 设计上永不 reject(内部吞错);这里显式验证通知层不影响主流程
+        broadcaster.publish.mockResolvedValue(undefined);
 
         await expect(synchronizer.publishStateChange('user-2', 'sessions', { status: 'open' })).resolves.toBeUndefined();
 
         expect(cache.set).toHaveBeenCalledWith('sync:user-2:sessions', { status: 'open' }, 300);
     });
 
-    test('publishStateChange throws error when authoritative cache write fails', async () => {
+    test('publishStateChange throws when authoritative cache write fails', async () => {
         cache.set.mockRejectedValue(new Error('Cache error'));
-        queueService.publish.mockRejectedValue(new Error('Queue error'));
 
         await expect(synchronizer.publishStateChange('user-2', 'sessions', { status: 'open' })).rejects.toThrow('Cache error');
     });
@@ -219,16 +235,16 @@ describe('StateSynchronizer - synchronization workflow', () => {
         expect(callback).not.toHaveBeenCalled();
     });
 
-    test('restoreStateSnapshot writes caches and publishes change', async () => {
+    test('restoreStateSnapshot writes caches and broadcasts change', async () => {
         cache.set.mockResolvedValue(true);
-        queueService.publish.mockResolvedValue(true);
 
         const result = await synchronizer.restoreStateSnapshot('user-5', 'sessions', { status: 'restored' });
 
         expect(result).toBe(true);
         expect(cache.set).toHaveBeenCalledWith('state:user-5:sessions', { status: 'restored' }, 3600);
         expect(localCache.set).toHaveBeenCalledWith('state:user-5:sessions', { status: 'restored' }, 60);
-        expect(queueService.publish).toHaveBeenCalled();
+        expect(broadcaster.publish).toHaveBeenCalled();
+        expect(queueService.publish).not.toHaveBeenCalled();
     });
 
     test('restoreStateSnapshot returns false when cache fails', async () => {
@@ -238,40 +254,16 @@ describe('StateSynchronizer - synchronization workflow', () => {
         expect(result).toBe(false);
     });
 
-    test('init subscribes to queue and schedules periodic sync', async () => {
+    test('init subscribes to the state-changed pub/sub channel (no polling timer)', async () => {
         await synchronizer.init();
 
-        expect(queueService.subscribe).toHaveBeenCalledWith('state_sync', expect.any(Function));
-        expect(synchronizer.syncTimer).not.toBeNull();
+        expect(broadcaster.subscribe).toHaveBeenCalledWith(CHANNELS.stateChanged, expect.any(Function));
+        expect(synchronizer.syncTimer).toBeUndefined();
+        // 防复活:不再有 5 秒定时全量广播,也不再订阅 QStash
+        expect(queueService.subscribe).not.toHaveBeenCalled();
     });
 
-    test('addActiveUser adds user to active users list', async () => {
-        cache.get.mockResolvedValue(['user-1']);
-
-        await synchronizer.addActiveUser('user-2');
-
-        expect(cache.get).toHaveBeenCalledWith('active_users');
-        expect(cache.set).toHaveBeenCalledWith('active_users', ['user-1', 'user-2'], 3600);
-    });
-
-    test('addActiveUser handles empty users list', async () => {
-        cache.get.mockResolvedValue(null);
-
-        await synchronizer.addActiveUser('user-1');
-
-        expect(cache.set).toHaveBeenCalledWith('active_users', ['user-1'], 3600);
-    });
-
-    test('addActiveUser handles cache failure', async () => {
-        cache.get.mockRejectedValue(new Error('Cache error'));
-
-        await synchronizer.addActiveUser('user-1');
-
-        expect(cache.get).toHaveBeenCalled();
-        expect(cache.set).not.toHaveBeenCalled();
-    });
-
-    test('getStats returns synchronization statistics', async () => {
+    test('getStats returns synchronization statistics without a polling interval', async () => {
         const callback = vi.fn();
         synchronizer.subscribe('tasks', callback);
         synchronizer.subscribe('sessions', vi.fn());
@@ -283,15 +275,15 @@ describe('StateSynchronizer - synchronization workflow', () => {
                 { type: 'tasks', count: 1 },
                 { type: 'sessions', count: 1 }
             ],
-            syncInterval: 5000,
             instanceId: 'self'
         });
+        expect(stats.syncInterval).toBeUndefined();
     });
 
     test('getTaskState retrieves task state from system snapshot', async () => {
         const taskId = 'task-123';
         const taskState = { status: 'running', progress: 50 };
-        
+
         vi.spyOn(synchronizer, 'getStateSnapshot').mockResolvedValue(taskState);
 
         const result = await synchronizer.getTaskState(taskId);
@@ -322,7 +314,7 @@ describe('StateSynchronizer - synchronization workflow', () => {
     test('updateTaskState updates task state using restoreStateSnapshot', async () => {
         const taskId = 'task-123';
         const taskState = { status: 'completed' };
-        
+
         vi.spyOn(synchronizer, 'restoreStateSnapshot').mockResolvedValue(true);
 
         const result = await synchronizer.updateTaskState(taskId, taskState);
@@ -334,7 +326,7 @@ describe('StateSynchronizer - synchronization workflow', () => {
     test('_mergeStates returns local state when no remote states', () => {
         const localState = { status: 'local', timestamp: 1000 };
         const remoteStates = [];
-        
+
         const result = synchronizer._mergeStates(localState, remoteStates);
         expect(result).toBe(localState);
     });
@@ -350,7 +342,7 @@ describe('StateSynchronizer - synchronization workflow', () => {
             { instanceId: 'instance-1', state: { status: 'remote1', timestamp: 1500 } },
             { instanceId: 'instance-2', state: { status: 'remote2', timestamp: 2000 } }
         ];
-        
+
         const result = synchronizer._mergeStates(localState, remoteStates);
         expect(result).toEqual({ status: 'remote2', timestamp: 2000 });
     });
@@ -360,64 +352,39 @@ describe('StateSynchronizer - synchronization workflow', () => {
         const remoteStates = [
             { instanceId: 'instance-1', state: { status: 'remote1' } }
         ];
-        
+
         const result = synchronizer._mergeStates(localState, remoteStates);
         expect(result).toBe(localState);
-    });
-
-    test('_getActiveUsers returns empty array when cache fails', async () => {
-        cache.get.mockRejectedValue(new Error('Cache error'));
-        
-        // 注意：_getActiveUsers 是私有方法，我们需要通过其他方法间接测试
-        vi.spyOn(synchronizer, '_getActiveUsers').mockResolvedValue([]);
-        
-        // 测试 addActiveUser 间接调用 _getActiveUsers 的情况
-        await synchronizer.addActiveUser('user-1');
-        expect(cache.get).toHaveBeenCalledWith('active_users');
     });
 
     test('handleSyncEvent handles subscriber callback errors gracefully', async () => {
         const errorCallback = vi.fn().mockRejectedValue(new Error('Callback error'));
         const successCallback = vi.fn();
-        
+
         synchronizer.subscribe('tasks', errorCallback);
         synchronizer.subscribe('tasks', successCallback);
-        
+
         const event = {
             source: 'peer-instance',
             userId: 'user-4',
             stateType: 'tasks',
             state: { progress: 50 }
         };
-        
+
         await synchronizer.handleSyncEvent(event);
-        
+
         expect(errorCallback).toHaveBeenCalled();
         expect(successCallback).toHaveBeenCalled();
     });
 
-    test('stop clears subscribers and timer', async () => {
-        // 先初始化以设置定时器
+    test('stop clears subscribers', async () => {
         await synchronizer.init();
-        expect(synchronizer.syncTimer).not.toBeNull();
-        
-        // 添加订阅者
+
         synchronizer.subscribe('tasks', vi.fn());
         expect(synchronizer.subscribers.size).toBe(1);
-        
-        // 停止同步器
-        await synchronizer.stop();
-        
-        expect(synchronizer.syncTimer).toBeNull();
-        expect(synchronizer.subscribers.size).toBe(0);
-    });
 
-    test('_subscribeToEvents handles queue subscribe failure', async () => {
-        queueService.subscribe.mockRejectedValue(new Error('Subscribe error'));
-        
-        // 注意：_subscribeToEvents 是私有方法，我们通过 init 方法间接测试
-        await synchronizer.init();
-        
-        expect(queueService.subscribe).toHaveBeenCalledWith('state_sync', expect.any(Function));
+        await synchronizer.stop();
+
+        expect(synchronizer.subscribers.size).toBe(0);
     });
 });

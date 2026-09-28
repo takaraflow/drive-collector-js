@@ -444,61 +444,8 @@ describe('WebhookRouter', () => {
             expect(res.end).toHaveBeenCalledWith(JSON.stringify({ success: true }));
         });
 
-        it('should handle state_sync queue webhooks without warning as unknown', async () => {
-            req.url = '/api/v2/tasks/state_sync';
-            req.method = 'POST';
-            req[Symbol.asyncIterator] = async function* () {
-                yield Buffer.from(JSON.stringify({
-                    type: 'state_change',
-                    source: 'peer-instance',
-                    userId: 'user-1',
-                    stateType: 'tasks',
-                    state: { active: 1 }
-                }));
-            };
-
-            const { stateSynchronizer } = await import('../../../src/services/StateSynchronizer.js');
-
-            await handleWebhook(req, res);
-
-            expect(stateSynchronizer.handleSyncEvent).toHaveBeenCalledWith(expect.objectContaining({
-                type: 'state_change',
-                userId: 'user-1',
-                stateType: 'tasks'
-            }));
-            expect(webhookLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('未知的 Webhook 路径'));
-            expect(res.writeHead).toHaveBeenCalledWith(200);
-        });
-
-        it('should route cache_sync queue webhooks to ConsistentCache without treating them as task webhooks', async () => {
-            req.url = '/api/v2/tasks/cache_sync';
-            req.method = 'POST';
-            req[Symbol.asyncIterator] = async function* () {
-                yield Buffer.from(JSON.stringify({
-                    type: 'cache_change',
-                    action: 'set',
-                    key: 'task:user-1',
-                    value: { active: 1 },
-                    source: 'peer-instance'
-                }));
-            };
-
-            const { consistentCache } = await import('../../../src/services/ConsistentCache.js');
-            const { TaskManager } = await import('../../../src/processor/TaskManager.js');
-
-            await handleWebhook(req, res);
-
-            expect(consistentCache.handleSyncEvent).toHaveBeenCalledWith(expect.objectContaining({
-                type: 'cache_change',
-                action: 'set',
-                key: 'task:user-1'
-            }));
-            expect(TaskManager.handleDownloadWebhook).not.toHaveBeenCalled();
-            expect(TaskManager.handleUploadWebhook).not.toHaveBeenCalled();
-            expect(TaskManager.handleMediaBatchWebhook).not.toHaveBeenCalled();
-            expect(webhookLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('未知的 Webhook 路径'));
-            expect(res.writeHead).toHaveBeenCalledWith(200);
-        });
+        // 注:/state_sync 与 /cache_sync 两条 webhook 分支已随 QStash→pub/sub 迁移删除
+        // (实例间通知改走 Redis pub/sub,不再经 QStash webhook 投递),对应用例一并移除。
 
         it('should return 500 when /api/v2/config/refresh fails', async () => {
             req.url = '/api/v2/config/refresh';
