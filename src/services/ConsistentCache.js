@@ -1,6 +1,7 @@
 import { logger } from "./logger/index.js";
 import { cache } from "./CacheService.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
+import { broadcaster, CHANNELS } from "./Broadcaster.js";
 import { localCache } from "../utils/LocalCache.js";
 
 
@@ -17,6 +18,15 @@ export class ConsistentCache {
     constructor() {
         this.prefix = 'consistent:';
         this.syncInProgress = new Map();
+    }
+
+    /**
+     * 订阅跨实例缓存失效通知。权威数据在分布式缓存 + TTL,这里只在其他实例改动时
+     * 让本地副本失效(丢了也无害,下次读会回源)。启动时调用一次。
+     */
+    async init() {
+        await broadcaster.subscribe(CHANNELS.cacheInvalidate, (event) => this.handleSyncEvent(event));
+        log.info('ConsistentCache subscribed to cache-invalidate channel');
     }
 
     /**
@@ -238,13 +248,13 @@ export class ConsistentCache {
             source: instanceCoordinator.getInstanceId()
         };
 
-        // 通过队列广播给其他实例。底层缓存写入已经完成，这里只是低延迟派生通知。
-        try {
-            const { queueService } = await import("./QueueService.js");
-            await queueService.publish('cache_sync', event, { bestEffort: true });
-        } catch (error) {
-            log.warn('Failed to broadcast cache change:', error);
-        }
+        // 通过 pub/sub 广播给其他实例。底层缓存写入已经完成，这里只是低延迟派生通知(丢了由 TTL 兜底)。
+        await broadcaster.publish(CHANNELS.cacheInvalidate, {
+            type: event.type,
+            action: event.action,
+            key: event.key,
+            source: event.source
+        });
     }
 
     /**
@@ -256,15 +266,11 @@ export class ConsistentCache {
             return; // 忽略自己的事件
         }
 
-        const fullKey = this.prefix + event.key;
-        
-        if (event.action === 'set') {
-            localCache.set(fullKey, event.value, 60);
-            log.debug(`Synced set operation for ${event.key} from ${event.source}`);
-        } else if (event.action === 'delete') {
-            localCache.del(fullKey);
-            log.debug(`Synced delete operation for ${event.key} from ${event.source}`);
-        }
+        // 失效语义:通知不再携带 value(不把可能很大的值塞进 fire-and-forget 通道)。
+        // event.key 已是带前缀的完整键(_broadcastChange 收到的就是 fullKey),直接失效本地副本,
+        // 下次读回源到权威缓存。绝不能再加 this.prefix,否则删的是一个从不存在的双前缀键。
+        localCache.del(event.key);
+        log.debug(`Invalidated local cache for ${event.key} (${event.action}) from ${event.source}`);
     }
 
     /**

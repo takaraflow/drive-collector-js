@@ -1,7 +1,7 @@
 import { logger } from "./logger/index.js";
 import { cache } from "./CacheService.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
-import { queueService } from "./QueueService.js";
+import { broadcaster, CHANNELS } from "./Broadcaster.js";
 import { localCache } from "../utils/LocalCache.js";
 
 const log = logger.withModule('StateSynchronizer');
@@ -18,8 +18,6 @@ export class StateSynchronizer {
         this.syncPrefix = 'sync:';
         this.statePrefix = 'state:';
         this.subscribers = new Map();
-        this.syncInterval = 5000; // 5秒同步一次
-        this.syncTimer = null;
     }
 
     /**
@@ -27,17 +25,11 @@ export class StateSynchronizer {
      */
     async init() {
         log.info('Initializing StateSynchronizer...');
-        
-        // 启动定期同步
-        this.syncTimer = setInterval(() => {
-            this._periodicSync().catch(error => {
-                log.error('Periodic sync failed:', error);
-            });
-        }, this.syncInterval);
 
-        // 订阅队列事件
-        await this._subscribeToEvents();
-        
+        // 权威同步面是 D1/Redis 缓存 + TTL;这里只订阅跨实例变更通知(丢了也无害,TTL 兜底)。
+        // 不再做定时全量广播——那是 QStash 配额被 5 秒×N用户×3状态 烧爆的根因。
+        await broadcaster.subscribe(CHANNELS.stateChanged, (event) => this.handleSyncEvent(event));
+
         log.info('StateSynchronizer initialized');
     }
 
@@ -46,15 +38,10 @@ export class StateSynchronizer {
      */
     async stop() {
         log.info('Stopping StateSynchronizer...');
-        
-        if (this.syncTimer) {
-            clearInterval(this.syncTimer);
-            this.syncTimer = null;
-        }
 
         // 取消所有订阅
         this.subscribers.clear();
-        
+
         log.info('StateSynchronizer stopped');
     }
 
@@ -122,17 +109,9 @@ export class StateSynchronizer {
             const cacheKey = `${this.syncPrefix}${userId}:${stateType}`;
             await cache.set(cacheKey, state, 300); // 5分钟TTL
 
-            // 通过队列广播派生视图。D1/Redis 缓存是权威同步面，QStash 这里只做低延迟通知。
-            try {
-                await queueService.publish('state_sync', event, { bestEffort: true });
-            } catch (broadcastError) {
-                log.warn('Best-effort state change broadcast failed', {
-                    userId,
-                    stateType,
-                    error: broadcastError?.message || String(broadcastError)
-                });
-            }
-            
+            // 缓存写入是权威同步面,pub/sub 只是低延迟通知(丢了由 TTL 兜底,绝不消耗 QStash 配额)。
+            await broadcaster.publish(CHANNELS.stateChanged, event);
+
             log.debug(`Published state change for user ${userId}, type: ${stateType}`);
         } catch (error) {
             log.error('Failed to publish state change:', error);
@@ -240,7 +219,10 @@ export class StateSynchronizer {
 
         const { userId, stateType, state } = event;
 
-        // 1. 更新本地缓存
+        // 1. 用通知携带的 state 预热本地缓存(60s TTL)。这只是加速:通知丢了不影响正确性——
+        //    读路径 miss 会回源到权威分布式缓存。与 cache_sync 的纯失效不同,state_sync 通知本身
+        //    携带的就是发送实例刚算出的权威合并态,故这里预热而非失效。
+        // ponytail: 60s L1 TTL 封顶乱序陈旧;若将来要严格顺序,用 event.sequence 丢弃比本地更旧的消息。
         const cacheKey = `${this.statePrefix}${userId}:${stateType}`;
         localCache.set(cacheKey, state, 60);
 
@@ -257,38 +239,6 @@ export class StateSynchronizer {
         }
 
         log.debug(`Handled sync event for user ${userId}, type: ${stateType}`);
-    }
-
-    /**
-     * 定期同步（用于故障恢复）
-     * @private
-     */
-    async _periodicSync() {
-        const activeUsers = await this._getActiveUsers();
-        
-        for (const userId of activeUsers) {
-            const stateTypes = ['tasks', 'drives', 'sessions'];
-            
-            for (const stateType of stateTypes) {
-                await this.syncUserState(userId, stateType);
-            }
-        }
-    }
-
-    /**
-     * 订阅队列事件
-     * @private
-     */
-    async _subscribeToEvents() {
-        try {
-            await queueService.subscribe('state_sync', async (event) => {
-                await this.handleSyncEvent(event);
-            });
-            
-            log.info('Subscribed to state_sync queue');
-        } catch (error) {
-            log.error('Failed to subscribe to state_sync queue:', error);
-        }
     }
 
     /**
@@ -393,40 +343,6 @@ export class StateSynchronizer {
     }
 
     /**
-     * 获取活跃用户列表
-     * @private
-     */
-    async _getActiveUsers() {
-        try {
-            // 从缓存获取最近活跃的用户
-            const activeUsersKey = 'active_users';
-            const users = await cache.get(activeUsersKey);
-            return users || [];
-        } catch (error) {
-            log.warn('Failed to get active users:', error);
-            return [];
-        }
-    }
-
-    /**
-     * 添加活跃用户
-     * @param {string} userId - 用户ID
-     */
-    async addActiveUser(userId) {
-        try {
-            const activeUsersKey = 'active_users';
-            const users = await cache.get(activeUsersKey) || [];
-            
-            if (!users.includes(userId)) {
-                users.push(userId);
-                await cache.set(activeUsersKey, users, 3600);
-            }
-        } catch (error) {
-            log.warn(`Failed to add active user ${userId}:`, error);
-        }
-    }
-
-    /**
      * 获取同步统计信息
      */
     async getStats() {
@@ -435,7 +351,6 @@ export class StateSynchronizer {
                 type,
                 count: callbacks.size
             })),
-            syncInterval: this.syncInterval,
             instanceId: instanceCoordinator.getInstanceId()
         };
     }

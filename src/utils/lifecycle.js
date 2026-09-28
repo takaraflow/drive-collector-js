@@ -116,6 +116,13 @@ export async function registerShutdownHooks() {
         }
     }, 45, 'distributed-lock');
 
+    // 6.5 关闭实例间广播的 pub/sub 连接 (priority: 46) —— 必须早于 Cache 断开(它复制了同一底层连接)
+    gracefulShutdown.register(async () => {
+        const { broadcaster } = await import("../services/Broadcaster.js");
+        await broadcaster.stop();
+        log.info('✅ Broadcaster pub/sub 连接已关闭');
+    }, 46, 'broadcaster-pubsub');
+
     // 7. 停止 MediaGroupBuffer 清理任务 (priority: 48)
     gracefulShutdown.register(async () => {
         if (mediaGroupBuffer && typeof mediaGroupBuffer.stopCleanup === 'function') {

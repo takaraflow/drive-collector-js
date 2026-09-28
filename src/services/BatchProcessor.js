@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { logger } from "./logger/index.js";
-import { queueService } from "./QueueService.js";
+import { broadcaster, CHANNELS } from "./Broadcaster.js";
 import { instanceCoordinator } from "./InstanceCoordinator.js";
 import { cache } from "./CacheService.js";
 import { localCache } from "../utils/LocalCache.js";
@@ -380,7 +380,9 @@ export class BatchProcessor {
         };
 
         try {
-            await queueService.publish('batch_events', event);
+            // 进度广播,丢了无碍(消费方轮询权威状态兜底),绝不消耗 QStash 配额。
+            // 注:batch_events 此前无任何订阅方(走 QStash webhook 也没人消费),纯烧配额;通知留总线,消费方将来接 broadcaster.subscribe。
+            await broadcaster.publish(CHANNELS.batchEvents, event);
         } catch (error) {
             log.warn('Failed to publish batch update:', error);
         }
