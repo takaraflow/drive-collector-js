@@ -263,6 +263,13 @@ describe('StateSynchronizer - synchronization workflow', () => {
         expect(queueService.subscribe).not.toHaveBeenCalled();
     });
 
+    test('init 幂等:重复调用(如热重载)只订阅一次,不叠加处理器', async () => {
+        await synchronizer.init();
+        await synchronizer.init();
+        await synchronizer.init();
+        expect(broadcaster.subscribe).toHaveBeenCalledTimes(1);
+    });
+
     test('getStats returns synchronization statistics without a polling interval', async () => {
         const callback = vi.fn();
         synchronizer.subscribe('tasks', callback);

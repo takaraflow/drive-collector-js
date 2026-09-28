@@ -195,6 +195,13 @@ describe('ConsistentCache - service facade', () => {
         expect(broadcaster.subscribe).toHaveBeenCalledWith(CHANNELS.cacheInvalidate, expect.any(Function));
     });
 
+    test('init 幂等:重复调用(如热重载)只订阅一次,不叠加处理器', async () => {
+        await cacheInstance.init();
+        await cacheInstance.init();
+        await cacheInstance.init();
+        expect(broadcaster.subscribe).toHaveBeenCalledTimes(1);
+    });
+
     test('restoreConsistency reapplies logs and clears local cache', async () => {
         const logs = [
             { type: 'set', key: 'consistent:set-key', value: 'value' },

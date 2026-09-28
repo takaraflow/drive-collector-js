@@ -24,6 +24,8 @@ export class StateSynchronizer {
      * 初始化状态同步器
      */
     async init() {
+        if (this._subscribed) return; // 幂等:SIGUSR2 热重载会再次调用 init(),避免重复注册处理器叠加分发
+        this._subscribed = true;
         log.info('Initializing StateSynchronizer...');
 
         // 权威同步面是 D1/Redis 缓存 + TTL;这里只订阅跨实例变更通知(丢了也无害,TTL 兜底)。
@@ -41,6 +43,7 @@ export class StateSynchronizer {
 
         // 取消所有订阅
         this.subscribers.clear();
+        this._subscribed = false;
 
         log.info('StateSynchronizer stopped');
     }

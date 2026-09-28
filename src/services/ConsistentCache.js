@@ -25,6 +25,8 @@ export class ConsistentCache {
      * 让本地副本失效(丢了也无害,下次读会回源)。启动时调用一次。
      */
     async init() {
+        if (this._subscribed) return; // 幂等:SIGUSR2 热重载会再次调用 init(),避免重复注册处理器叠加分发
+        this._subscribed = true;
         await broadcaster.subscribe(CHANNELS.cacheInvalidate, (event) => this.handleSyncEvent(event));
         log.info('ConsistentCache subscribed to cache-invalidate channel');
     }
