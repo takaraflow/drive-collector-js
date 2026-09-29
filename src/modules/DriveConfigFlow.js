@@ -94,9 +94,9 @@ export class DriveConfigFlow {
         return steps.find(step => step.step === stepName) || null;
     }
 
-    static _isFinalBindingStep(provider, stepName, session = null) {
+    static _isFinalBindingStep(provider, stepName, session = null, input = null) {
         if (provider && typeof provider.isFinalBindingStep === 'function') {
-            return provider.isFinalBindingStep(stepName, session) === true;
+            return provider.isFinalBindingStep(stepName, session, input) === true;
         }
         const steps = provider?.getBindingSteps?.() || [];
         return steps?.[steps.length - 1]?.step === stepName;
@@ -380,7 +380,7 @@ export class DriveConfigFlow {
         const providerSession = { ...session, data: sessionData };
 
         const provider = DriveProviderFactory.create(driveType);
-        const isFinalStep = this._isFinalBindingStep(provider, stepName, providerSession);
+        const isFinalStep = this._isFinalBindingStep(provider, stepName, providerSession, text);
         const isSensitiveStep = this._isSensitiveBindingStep(provider, stepName);
 
         const driveStrings = await this._getDriveStrings(driveType);

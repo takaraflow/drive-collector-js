@@ -5,7 +5,6 @@ import { logger } from "../logger/index.js";
 import { DriveRepository } from "../../repositories/DriveRepository.js";
 import {
     normalizeBindingText,
-    normalizeOptionalBindingInput,
     parseBooleanInput
 } from "../../domain/binding-input.js";
 
@@ -25,17 +24,16 @@ const SESSION_KEYS = Object.freeze([
 
 /**
  * Proton Drive binding follows a user-facing path, not a raw rclone form dump:
- * username → password → 2FA yes/no → (code) → optional long-term OTP secret → optional mailbox password.
+ * username → password → 2FA yes/no → (code, only when 2FA is on).
  *
  * One-time 2FA codes are only for bootstrap login. Durable access comes from rclone session
- * tokens (client_uid / access / refresh / salted key pass). OTP secret remains an optional
- * advanced path and is not required for normal users.
+ * tokens (client_uid / access / refresh / salted key pass) captured after bind.
  */
 export class ProtonDriveProvider extends BaseDriveProvider {
     constructor() {
         super('protondrive', 'Proton Drive', {
             supportLevel: 'advanced',
-            supportNote: 'Username/password binding with optional one-time 2FA code, optional long-term TOTP secret, and optional mailbox password. Session tokens are captured after bind for durable access. Backend is beta upstream.'
+            supportNote: 'Username/password binding with an optional one-time 2FA code. Session tokens are captured after bind for durable access. Backend is beta upstream.'
         });
     }
 
@@ -53,14 +51,6 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             }),
             new BindingStep('WAIT_2FA', 'input_2fa_code', null, {
                 sensitive: true
-            }),
-            new BindingStep('WAIT_OTP_SECRET_KEY', 'input_otp_secret_key_optional', null, {
-                optional: true,
-                sensitive: true
-            }),
-            new BindingStep('WAIT_MAILBOX_PASSWORD', 'input_mailbox_password_optional', null, {
-                optional: true,
-                sensitive: true
             })
         ];
     }
@@ -69,8 +59,23 @@ export class ProtonDriveProvider extends BaseDriveProvider {
         return super.getBindingStep(stepName);
     }
 
-    isFinalBindingStep(stepName) {
-        return stepName === 'WAIT_MAILBOX_PASSWORD';
+    isFinalBindingStep(stepName, session = null, input = null) {
+        void session;
+        // Finality is keyed off the pending input so a step that only sometimes submits does
+        // not prematurely trigger the verifying prompt / session-clearing failure path:
+        // - WAIT_2FA: terminal only for a well-formed 6-digit code. A malformed/blank code is
+        //   rejected in place (non-final), so the user retypes without losing the whole session.
+        // - WAIT_USE_2FA: terminal only on "no" (submits now); "yes" advances to WAIT_2FA and
+        //   must NOT flash the verifying prompt.
+        // Both format checks mirror _handle2faInput / _handleUse2faInput and must stay in sync.
+        if (stepName === 'WAIT_2FA') {
+            return /^\d{6}$/.test(normalizeBindingText(input));
+        }
+        if (stepName === 'WAIT_USE_2FA') {
+            const parsed = parseBooleanInput(input);
+            return parsed.valid && parsed.value === false;
+        }
+        return false;
     }
 
     async handleInput(step, input, session) {
@@ -83,10 +88,6 @@ export class ProtonDriveProvider extends BaseDriveProvider {
                 return this._handleUse2faInput(input, session);
             case 'WAIT_2FA':
                 return this._handle2faInput(input, session);
-            case 'WAIT_OTP_SECRET_KEY':
-                return this._handleOtpSecretInput(input, session);
-            case 'WAIT_MAILBOX_PASSWORD':
-                return this._handleMailboxPasswordInput(input, session);
             default:
                 return new ActionResult(false, '未知步骤');
         }
@@ -102,8 +103,6 @@ export class ProtonDriveProvider extends BaseDriveProvider {
                 twoFactorEnabled: configData.two_factor_enabled === true,
                 hasOneTime2fa: Boolean(runtimeConfig.two_factor),
                 allowOneTime2fa: runtimeConfig.allow_one_time_2fa === true,
-                hasOtpSecret: Boolean(runtimeConfig.otp_secret_key),
-                hasMailboxPassword: Boolean(runtimeConfig.mailbox_password),
                 hasSession: this._hasReusableSession(runtimeConfig)
             });
             const result = await CloudTool.validateConfigWithWritableSession(this.type, runtimeConfig);
@@ -122,10 +121,9 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             const hasSession = this._hasReusableSession(session);
             const requiresDurableAuth =
                 configData.two_factor_enabled === true ||
-                Boolean(normalizeBindingText(configData.two_factor)) ||
-                Boolean(normalizeBindingText(configData.otp_secret_key));
+                Boolean(normalizeBindingText(configData.two_factor));
 
-            // 2FA/OTP accounts must capture rclone session tokens. Without them, later transfers
+            // 2FA accounts must capture rclone session tokens. Without them, later transfers
             // would only have an expired one-time code (or would re-require interactive 2FA).
             if (requiresDurableAuth && !hasSession) {
                 return new ValidationResult(
@@ -147,14 +145,6 @@ export class ProtonDriveProvider extends BaseDriveProvider {
     }
 
     async prepareConfigForStorage(configData = {}) {
-        const otpSecretKey = await this._normalizeOptionalSecret(
-            configData.otp_secret_key,
-            configData.otp_secret_key_format
-        );
-        const mailboxPassword = await this._normalizeOptionalSecret(
-            configData.mailbox_password,
-            configData.mailbox_password_format
-        );
         const session = this._pickSessionFields(configData);
 
         // Never persist one-time 2FA codes. They expire within ~30s and break later transfers.
@@ -164,10 +154,6 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             password: await this._normalizeSecret(configData.password, configData.password_format || 'plain'),
             password_format: 'rclone_obscured',
             two_factor_enabled: configData.two_factor_enabled === true,
-            otp_secret_key: otpSecretKey,
-            otp_secret_key_format: otpSecretKey ? 'rclone_obscured' : null,
-            mailbox_password: mailboxPassword,
-            mailbox_password_format: mailboxPassword ? 'rclone_obscured' : null,
             ...session,
             session_bootstrap_ok: this._hasReusableSession(session)
         };
@@ -201,22 +187,6 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             runtime.two_factor = normalizeBindingText(configData.two_factor);
         }
 
-        if (runtime.otp_secret_key) {
-            runtime.otp_secret_key = await this._normalizeSecret(
-                runtime.otp_secret_key,
-                runtime.otp_secret_key_format || 'plain'
-            );
-            runtime.otp_secret_key_format = 'rclone_obscured';
-        }
-
-        if (runtime.mailbox_password) {
-            runtime.mailbox_password = await this._normalizeSecret(
-                runtime.mailbox_password,
-                runtime.mailbox_password_format || 'plain'
-            );
-            runtime.mailbox_password_format = 'rclone_obscured';
-        }
-
         return runtime;
     }
 
@@ -233,18 +203,16 @@ export class ProtonDriveProvider extends BaseDriveProvider {
         }
 
         // Bootstrap login materials:
-        // - otp secret (preferred for 2FA accounts without session)
         // - still-fresh one-time 2FA code (bind-time plain configs only)
         // - password alone for non-2FA accounts
-        const hasOtp = Boolean(normalizeBindingText(configData.otp_secret_key));
         const hasFreshCode =
             (
                 configData.allow_one_time_2fa === true ||
                 (configData.password_format || 'plain') === 'plain'
             ) &&
             Boolean(normalizeBindingText(configData.two_factor));
-        const non2faAccount = configData.two_factor_enabled !== true && !hasOtp && !hasFreshCode;
-        const canBootstrap = hasOtp || hasFreshCode || non2faAccount;
+        const non2faAccount = configData.two_factor_enabled !== true && !hasFreshCode;
+        const canBootstrap = hasFreshCode || non2faAccount;
 
         if (!canBootstrap || !normalizeBindingText(configData.username) || !normalizeBindingText(configData.password)) {
             return configData;
@@ -362,17 +330,6 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             password: normalizeBindingText(config.password)
         };
 
-        const mailboxPassword = normalizeBindingText(config.mailbox_password);
-        if (mailboxPassword) {
-            entries.mailbox_password = mailboxPassword;
-        }
-
-        // Always keep otp secret when present so rclone can fall back if session credentials fail.
-        const otpSecretKey = normalizeBindingText(config.otp_secret_key);
-        if (otpSecretKey) {
-            entries.otp_secret_key = otpSecretKey;
-        }
-
         if (this._hasReusableSession(config)) {
             for (const key of SESSION_KEYS) {
                 entries[key] = normalizeBindingText(config[key]);
@@ -387,7 +344,7 @@ export class ProtonDriveProvider extends BaseDriveProvider {
         const allowOneTime2fa =
             config.allow_one_time_2fa === true ||
             (config.password_format || 'plain') === 'plain';
-        if (!otpSecretKey && allowOneTime2fa && twoFactor) {
+        if (allowOneTime2fa && twoFactor) {
             entries['2fa'] = twoFactor;
         }
 
@@ -405,13 +362,8 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             for (const key of SESSION_KEYS) {
                 segments.push(`${key}="${this._escapeValue(config[key])}"`);
             }
-        }
-
-        const otpSecretKey = normalizeBindingText(config.otp_secret_key);
-        if (otpSecretKey) {
-            // Keep as fallback when session credentials are rejected by Proton.
-            segments.push(`otp_secret_key="${this._escapeValue(otpSecretKey)}"`);
-        } else if (!this._hasReusableSession(config)) {
+        } else {
+            // No durable session yet: pass the one-time code only when this request still allows it.
             const allowOneTime2fa =
                 config.allow_one_time_2fa === true ||
                 (config.password_format || 'plain') === 'plain';
@@ -419,11 +371,6 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             if (allowOneTime2fa && twoFactor) {
                 segments.push(`2fa="${this._escapeValue(twoFactor)}"`);
             }
-        }
-
-        const mailboxPassword = normalizeBindingText(config.mailbox_password);
-        if (mailboxPassword) {
-            segments.push(`mailbox_password="${this._escapeValue(mailboxPassword)}"`);
         }
 
         return `:protondrive,${segments.join(',')}:`;
@@ -479,30 +426,29 @@ export class ProtonDriveProvider extends BaseDriveProvider {
         });
     }
 
-    _handleUse2faInput(input, session) {
+    async _handleUse2faInput(input, session) {
         const parsed = parseBooleanInput(input);
         if (!parsed.valid) {
             return new ActionResult(false, STRINGS.use_2fa_invalid);
         }
 
         if (!parsed.value) {
-            return new ActionResult(true, STRINGS.input_mailbox_password_optional, 'WAIT_MAILBOX_PASSWORD', {
+            // No 2FA: nothing left to ask — submit and bind now.
+            return this._finalizeBinding({
                 ...session.data,
                 two_factor_enabled: false,
-                two_factor: '',
-                otp_secret_key: ''
+                two_factor: ''
             });
         }
 
         return new ActionResult(true, STRINGS.input_2fa_code, 'WAIT_2FA', {
             ...session.data,
             two_factor_enabled: true,
-            two_factor: '',
-            otp_secret_key: ''
+            two_factor: ''
         });
     }
 
-    _handle2faInput(input, session) {
+    async _handle2faInput(input, session) {
         const twoFactor = normalizeBindingText(input);
         if (session.data?.two_factor_enabled && !twoFactor) {
             return new ActionResult(false, STRINGS.use_2fa_required);
@@ -511,31 +457,24 @@ export class ProtonDriveProvider extends BaseDriveProvider {
             return new ActionResult(false, STRINGS.two_factor_invalid);
         }
 
-        return new ActionResult(true, STRINGS.input_otp_secret_key_optional, 'WAIT_OTP_SECRET_KEY', {
+        // 2FA branch terminus: submit and bind now.
+        return this._finalizeBinding({
             ...session.data,
             two_factor: twoFactor
         });
     }
 
-    _handleOtpSecretInput(input, session) {
-        const otpSecretKey = normalizeOptionalBindingInput(input);
-        return new ActionResult(true, STRINGS.input_mailbox_password_optional, 'WAIT_MAILBOX_PASSWORD', {
-            ...session.data,
-            otp_secret_key: otpSecretKey
-        });
-    }
-
-    async _handleMailboxPasswordInput(input, session) {
-        const configData = {
-            ...session.data,
-            mailbox_password: normalizeOptionalBindingInput(input)
-        };
-
+    /**
+     * Validate the assembled config and, on success, return the terminal ActionResult
+     * (nextStep=null) so the flow persists the drive. Shared by both bind endpoints:
+     * the "no 2FA" answer and the one-time-code step.
+     */
+    async _finalizeBinding(configData) {
         if (!configData.username || !configData.password) {
             return new ActionResult(false, STRINGS.username_invalid);
         }
 
-        if (configData.two_factor_enabled && !configData.two_factor && !configData.otp_secret_key) {
+        if (configData.two_factor_enabled && !configData.two_factor) {
             return new ActionResult(false, STRINGS.use_2fa_required);
         }
 
@@ -609,10 +548,10 @@ export class ProtonDriveProvider extends BaseDriveProvider {
     /**
      * Recovery for a server-side-dead Proton session (Code=10013): clear the stored session
      * tokens so `_hasReusableSession` turns false and the next transfer re-bootstraps a login
-     * instead of feeding the dead refresh_token to rclone forever. Non-2FA (or stored-OTP)
-     * accounts self-heal; a 2FA account with no durable OTP surfaces a clean "please rebind"
-     * signal instead of silently looping 10013. Best-effort — never throws into the caller.
-     * Username/password/otp_secret_key/mailbox_password are preserved so bootstrap can run.
+     * instead of feeding the dead refresh_token to rclone forever. Non-2FA accounts self-heal
+     * via password; a 2FA account surfaces a clean "please rebind" signal instead of silently
+     * looping 10013. Best-effort — never throws into the caller. Username/password are preserved
+     * so bootstrap can run.
      */
     async invalidateStoredSession(userId) {
         if (!userId) return false;
@@ -648,12 +587,6 @@ export class ProtonDriveProvider extends BaseDriveProvider {
 
     async _normalizeSecret(secret, format) {
         return await CloudTool.normalizePasswordForRclone(secret, { format: format || 'plain' });
-    }
-
-    async _normalizeOptionalSecret(secret, format) {
-        const value = normalizeBindingText(secret);
-        if (!value) return '';
-        return await this._normalizeSecret(value, format || 'plain');
     }
 
     _escapeValue(value) {

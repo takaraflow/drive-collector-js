@@ -42,15 +42,13 @@ describe('ProtonDriveProvider', () => {
         });
     });
 
-    test('should declare code-first binding steps with optional advanced fields', () => {
+    test('should declare code-first binding steps', () => {
         const steps = provider.getBindingSteps();
         expect(steps.map(step => step.step)).toEqual([
             'WAIT_USERNAME',
             'WAIT_PASSWORD',
             'WAIT_USE_2FA',
-            'WAIT_2FA',
-            'WAIT_OTP_SECRET_KEY',
-            'WAIT_MAILBOX_PASSWORD'
+            'WAIT_2FA'
         ]);
 
         const use2fa = provider.getBindingStep('WAIT_USE_2FA');
@@ -59,8 +57,19 @@ describe('ProtonDriveProvider', () => {
             { value: 'no', label: '未开启 2FA' }
         ]);
         expect(provider.getBindingStep('WAIT_2FA').sensitive).toBe(true);
-        expect(provider.getBindingStep('WAIT_OTP_SECRET_KEY').optional).toBe(true);
-        expect(provider.getBindingStep('WAIT_MAILBOX_PASSWORD').optional).toBe(true);
+    });
+
+    test('isFinalBindingStep is input-aware: code step final only for a 6-digit code, use-2FA final only on "no"', () => {
+        expect(provider.isFinalBindingStep('WAIT_2FA', null, '123456')).toBe(true);
+        expect(provider.isFinalBindingStep('WAIT_2FA', null, '12345')).toBe(false);
+        expect(provider.isFinalBindingStep('WAIT_2FA', null, '123 456')).toBe(false);
+        expect(provider.isFinalBindingStep('WAIT_2FA', null, '')).toBe(false);
+        expect(provider.isFinalBindingStep('WAIT_2FA', null, undefined)).toBe(false);
+        expect(provider.isFinalBindingStep('WAIT_USE_2FA', null, 'no')).toBe(true);
+        expect(provider.isFinalBindingStep('WAIT_USE_2FA', null, '否')).toBe(true);
+        expect(provider.isFinalBindingStep('WAIT_USE_2FA', null, 'yes')).toBe(false);
+        expect(provider.isFinalBindingStep('WAIT_USE_2FA', null, undefined)).toBe(false);
+        expect(provider.isFinalBindingStep('WAIT_USERNAME', null, 'anything')).toBe(false);
     });
 
     test('should prepare storage with obscured secrets and omit one-time 2fa code', async () => {
@@ -69,8 +78,6 @@ describe('ProtonDriveProvider', () => {
             password: 'secret',
             two_factor_enabled: true,
             two_factor: '123456',
-            otp_secret_key: 'otp-secret',
-            mailbox_password: 'mail-secret',
             client_uid: 'uid-1',
             client_access_token: 'access-1',
             client_refresh_token: 'refresh-1',
@@ -82,10 +89,6 @@ describe('ProtonDriveProvider', () => {
             password: 'obs_secret',
             password_format: 'rclone_obscured',
             two_factor_enabled: true,
-            otp_secret_key: 'obs_otp-secret',
-            otp_secret_key_format: 'rclone_obscured',
-            mailbox_password: 'obs_mail-secret',
-            mailbox_password_format: 'rclone_obscured',
             client_uid: 'uid-1',
             client_access_token: 'access-1',
             client_refresh_token: 'refresh-1',
@@ -93,6 +96,8 @@ describe('ProtonDriveProvider', () => {
             session_bootstrap_ok: true
         });
         expect(stored).not.toHaveProperty('two_factor');
+        expect(stored).not.toHaveProperty('otp_secret_key');
+        expect(stored).not.toHaveProperty('mailbox_password');
     });
 
     test('should prefer session tokens over 2fa in connection string', () => {
@@ -100,8 +105,6 @@ describe('ProtonDriveProvider', () => {
             username: 'alice',
             password: 'obs_secret',
             two_factor: '123456',
-            otp_secret_key: 'obs_otp',
-            mailbox_password: 'obs_mail',
             client_uid: 'uid-1',
             client_access_token: 'access-1',
             client_refresh_token: 'refresh-1',
@@ -113,21 +116,11 @@ describe('ProtonDriveProvider', () => {
         expect(conn).toContain('client_refresh_token="refresh-1"');
         expect(conn).toContain('client_salted_key_pass="salt-1"');
         expect(conn).not.toContain('2fa=');
-        // otp secret is kept as fallback even when session is present
-        expect(conn).toContain('otp_secret_key="obs_otp"');
-        expect(conn).toContain('mailbox_password="obs_mail"');
+        expect(conn).not.toContain('otp_secret_key=');
+        expect(conn).not.toContain('mailbox_password=');
     });
 
-    test('should fall back to otp secret or 2fa when session is missing', () => {
-        const withOtp = provider.getConnectionString({
-            username: 'alice',
-            password: 'obs_secret',
-            two_factor: '123456',
-            otp_secret_key: 'obs_otp'
-        });
-        expect(withOtp).toContain('otp_secret_key="obs_otp"');
-        expect(withOtp).not.toContain('2fa=');
-
+    test('should fall back to the one-time 2fa code when session is missing', () => {
         const withCode = provider.getConnectionString({
             username: 'alice',
             password: 'obs_secret',
@@ -144,7 +137,7 @@ describe('ProtonDriveProvider', () => {
         expect(persistedStaleCode).not.toContain('2fa=');
     });
 
-    test('should walk through 2fa flow with one-time code first and capture session', async () => {
+    test('should walk the 2fa flow and finalize at the code step, capturing session', async () => {
         const { CloudTool } = await import('../../../src/services/rclone.js');
         CloudTool.validateConfigWithWritableSession.mockResolvedValue({
             success: true,
@@ -161,21 +154,14 @@ describe('ProtonDriveProvider', () => {
         const use2faResult = await provider.handleInput('WAIT_USE_2FA', 'yes', { data: passwordResult.data });
         expect(use2faResult).toMatchObject({ success: true, nextStep: 'WAIT_2FA' });
 
-        const codeResult = await provider.handleInput('WAIT_2FA', '123456', { data: use2faResult.data });
-        expect(codeResult).toMatchObject({ success: true, nextStep: 'WAIT_OTP_SECRET_KEY' });
-
-        const otpResult = await provider.handleInput('WAIT_OTP_SECRET_KEY', '跳过', { data: codeResult.data });
-        expect(otpResult).toMatchObject({ success: true, nextStep: 'WAIT_MAILBOX_PASSWORD' });
-
-        const finalResult = await provider.handleInput('WAIT_MAILBOX_PASSWORD', '跳过', { data: otpResult.data });
+        const finalResult = await provider.handleInput('WAIT_2FA', '123456', { data: use2faResult.data });
         expect(finalResult.success).toBe(true);
+        expect(finalResult.nextStep == null).toBe(true);
         expect(finalResult.data).toMatchObject({
             username: 'alice',
             password: 'secret',
             two_factor_enabled: true,
             two_factor: '123456',
-            otp_secret_key: '',
-            mailbox_password: '',
             client_uid: 'uid-1',
             client_access_token: 'access-1',
             client_refresh_token: 'refresh-1',
@@ -187,39 +173,7 @@ describe('ProtonDriveProvider', () => {
         expect(stored).not.toHaveProperty('two_factor');
     });
 
-    test('should accept optional otp secret and mailbox password', async () => {
-        const { CloudTool } = await import('../../../src/services/rclone.js');
-        CloudTool.validateConfigWithWritableSession.mockResolvedValue({
-            success: true,
-            remoteConfig: {
-                client_uid: 'uid-2',
-                client_access_token: 'access-2',
-                client_refresh_token: 'refresh-2',
-                client_salted_key_pass: 'salt-2'
-            }
-        });
-
-        const usernameResult = await provider.handleInput('WAIT_USERNAME', 'alice', {});
-        const passwordResult = await provider.handleInput('WAIT_PASSWORD', 'secret', { data: usernameResult.data });
-        const use2faResult = await provider.handleInput('WAIT_USE_2FA', 'yes', { data: passwordResult.data });
-        const codeResult = await provider.handleInput('WAIT_2FA', '654321', { data: use2faResult.data });
-        const otpResult = await provider.handleInput('WAIT_OTP_SECRET_KEY', 'otp-secret', { data: codeResult.data });
-        expect(otpResult).toMatchObject({ success: true, nextStep: 'WAIT_MAILBOX_PASSWORD' });
-
-        const finalResult = await provider.handleInput('WAIT_MAILBOX_PASSWORD', 'mail-secret', { data: otpResult.data });
-        expect(finalResult.success).toBe(true);
-        expect(finalResult.data).toMatchObject({
-            username: 'alice',
-            password: 'secret',
-            two_factor_enabled: true,
-            two_factor: '654321',
-            otp_secret_key: 'otp-secret',
-            mailbox_password: 'mail-secret',
-            client_uid: 'uid-2'
-        });
-    });
-
-    test('should skip 2fa steps when user says no to 2fa', async () => {
+    test('should finalize directly when user says no to 2fa', async () => {
         const { CloudTool } = await import('../../../src/services/rclone.js');
         CloudTool.validateConfigWithWritableSession.mockResolvedValue({
             success: true,
@@ -233,18 +187,14 @@ describe('ProtonDriveProvider', () => {
 
         const usernameResult = await provider.handleInput('WAIT_USERNAME', 'alice', {});
         const passwordResult = await provider.handleInput('WAIT_PASSWORD', 'secret', { data: usernameResult.data });
-        const use2faResult = await provider.handleInput('WAIT_USE_2FA', 'no', { data: passwordResult.data });
-        expect(use2faResult).toMatchObject({ success: true, nextStep: 'WAIT_MAILBOX_PASSWORD' });
-
-        const finalResult = await provider.handleInput('WAIT_MAILBOX_PASSWORD', '跳过', { data: use2faResult.data });
+        const finalResult = await provider.handleInput('WAIT_USE_2FA', 'no', { data: passwordResult.data });
         expect(finalResult.success).toBe(true);
+        expect(finalResult.nextStep == null).toBe(true);
         expect(finalResult.data).toMatchObject({
             username: 'alice',
             password: 'secret',
             two_factor_enabled: false,
             two_factor: '',
-            otp_secret_key: '',
-            mailbox_password: '',
             client_uid: 'uid-3'
         });
     });
@@ -271,26 +221,18 @@ describe('ProtonDriveProvider', () => {
         const runtime = await provider.prepareConfigForRuntime({
             username: 'alice',
             password: 'plain-pass',
-            two_factor: '123456',
-            otp_secret_key: 'otp-plain',
-            mailbox_password: 'mail-plain'
+            two_factor: '123456'
         });
 
         expect(runtime).toMatchObject({
             username: 'alice',
             password: 'obs_plain-pass',
             password_format: 'rclone_obscured',
-            two_factor: '123456',
-            otp_secret_key: 'obs_otp-plain',
-            otp_secret_key_format: 'rclone_obscured',
-            mailbox_password: 'obs_mail-plain',
-            mailbox_password_format: 'rclone_obscured'
+            two_factor: '123456'
         });
 
         const { CloudTool } = await import('../../../src/services/rclone.js');
         expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('plain-pass', { format: 'plain' });
-        expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('otp-plain', { format: 'plain' });
-        expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('mail-plain', { format: 'plain' });
     });
 
     test('should strip one-time 2fa when reusable session is already present', async () => {
@@ -313,55 +255,13 @@ describe('ProtonDriveProvider', () => {
         const runtime = await provider.prepareConfigForRuntime({
             username: 'alice',
             password: 'obs_stored',
-            password_format: 'rclone_obscured',
-            otp_secret_key: 'obs_otp',
-            otp_secret_key_format: 'rclone_obscured',
-            mailbox_password: 'obs_mail',
-            mailbox_password_format: 'rclone_obscured'
+            password_format: 'rclone_obscured'
         });
 
         expect(runtime.password).toBe('obs_stored');
-        expect(runtime.otp_secret_key).toBe('obs_otp');
-        expect(runtime.mailbox_password).toBe('obs_mail');
 
         const { CloudTool } = await import('../../../src/services/rclone.js');
         expect(CloudTool.normalizePasswordForRclone).toHaveBeenCalledWith('obs_stored', { format: 'rclone_obscured' });
-    });
-
-    test('should persist runtime-bootstrapped session when drive context is available', async () => {
-        const { CloudTool } = await import('../../../src/services/rclone.js');
-        CloudTool.validateConfigWithWritableSession.mockResolvedValue({
-            success: true,
-            remoteConfig: {
-                client_uid: 'uid-9',
-                client_access_token: 'access-9',
-                client_refresh_token: 'refresh-9',
-                client_salted_key_pass: 'salt-9'
-            }
-        });
-
-        const next = await provider.ensureRuntimeSession({
-            username: 'alice',
-            password: 'obs_secret',
-            password_format: 'rclone_obscured',
-            otp_secret_key: 'obs_otp',
-            otp_secret_key_format: 'rclone_obscured'
-        }, {
-            userId: 'u1',
-            activeDrive: { id: 'd1' },
-            cloudTool: CloudTool
-        });
-
-        expect(next.client_uid).toBe('uid-9');
-        expect(next.two_factor).toBe('');
-        expect(DriveRepository.updateConfigData).toHaveBeenCalledWith(
-            'u1',
-            'd1',
-            expect.objectContaining({
-                client_uid: 'uid-9',
-                session_bootstrap_ok: true
-            })
-        );
     });
 
     test('writable conf entries should prefer session and avoid stale 2fa', () => {
@@ -449,21 +349,6 @@ describe('ProtonDriveProvider', () => {
         expect(DriveRepository.updateConfigData).toHaveBeenCalled();
     });
 
-    test('writable conf entries should keep otp secret with session for fallback', () => {
-        const entries = provider.getWritableRcloneConfigEntries({
-            username: 'alice',
-            password: 'obs_secret',
-            otp_secret_key: 'obs_otp',
-            client_uid: 'uid-1',
-            client_access_token: 'access-1',
-            client_refresh_token: 'refresh-1',
-            client_salted_key_pass: 'salt-1'
-        });
-        expect(entries.otp_secret_key).toBe('obs_otp');
-        expect(entries.client_uid).toBe('uid-1');
-        expect(entries).not.toHaveProperty('2fa');
-    });
-
     test('should surface session bootstrap failure message', async () => {
         const { CloudTool } = await import('../../../src/services/rclone.js');
         CloudTool.validateConfigWithWritableSession.mockResolvedValue({
@@ -471,13 +356,11 @@ describe('ProtonDriveProvider', () => {
             remoteConfig: {}
         });
 
-        const finalResult = await provider.handleInput('WAIT_MAILBOX_PASSWORD', '跳过', {
+        const finalResult = await provider.handleInput('WAIT_2FA', '123456', {
             data: {
                 username: 'alice',
                 password: 'secret',
-                two_factor_enabled: true,
-                two_factor: '123456',
-                otp_secret_key: ''
+                two_factor_enabled: true
             }
         });
         expect(finalResult.success).toBe(false);
