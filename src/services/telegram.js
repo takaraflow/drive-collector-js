@@ -1,4 +1,4 @@
-import { TelegramClient } from "telegram";
+import { TelegramClient, utils } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import { getConfig } from "../config/index.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
@@ -934,6 +934,69 @@ export const ensureConnected = async () => {
         };
         checkConnected();
     });
+};
+
+/**
+ * 重置某个文件所属 DC 的「导出下载 sender」(gramjs per-DC exported sender)。
+ *
+ * 背景:文件下载走 client.getSender(dcId) → _borrowExportedSender,与主连接的 _sender
+ * 完全独立。当这个 exported sender 的传输层自动重连(复用 authKey、_authenticated 仍为 true)
+ * 却漏发 InitConnection 时,socket 活着(isConnected()=true)但服务端认为「从未 init」,
+ * upload.GetFile 会持续回 "CONNECTION_NOT_INITED"。ensureConnected 只看主连接 client.connected,
+ * 对独立的 _exportedSenderPromises Map 视而不见,救不了它——原地重试必然复撞同一错。
+ *
+ * 复用 gramjs 自带的 _cleanupExportedSender(dcId):清该 DC authKey + 删 _exportedSenderPromises
+ * Map 项 + 断开旧 sender;下次 getSender(dcId) 会新建 sender 对象并重发 InitConnection。
+ * best-effort:触碰 gramjs 私有 API,全程 typeof 守卫 + try/catch,永不抛。
+ * ponytail: gramjs 私有 API 隔离在此单点,升级 gramjs 若改名只改这里。
+ *
+ * @param {object} fileLocation - message.media / Api.Message / Document 等,交 utils.getFileInfo 解析 dcId
+ * @returns {Promise<boolean>} 是否确实重置了至少一个 sender
+ */
+export const resetExportedDownloadSender = async (fileLocation) => {
+    let client;
+    try {
+        // 必须用真实 client(getClient),不能用上面的 Proxy 导出——Proxy 对非函数属性
+        // (如 _exportedSenderPromises)会误代理成 async 函数,读 Map 会拿到假值。
+        client = await getClient();
+    } catch (e) {
+        log.warn("⚠️ resetExportedDownloadSender: 获取客户端失败,跳过重置", { error: e?.message });
+        return false;
+    }
+    if (!client || typeof client._cleanupExportedSender !== "function") return false;
+
+    let dcId;
+    try {
+        dcId = fileLocation != null ? utils.getFileInfo(fileLocation)?.dcId : undefined;
+    } catch {
+        dcId = undefined; // 某些 media 无法解析 dcId → 走下方全清兜底
+    }
+
+    const cleanup = async (id) => {
+        try {
+            await client._cleanupExportedSender(id);
+            return true;
+        } catch (e) {
+            log.warn("⚠️ 重置导出下载 sender 失败", { dcId: id, error: e?.message });
+            return false;
+        }
+    };
+
+    if (dcId != null) {
+        const ok = await cleanup(dcId);
+        if (ok) log.info("♻️ 已重置卡死的导出下载 sender,下次将重发 InitConnection", { dcId });
+        return ok;
+    }
+
+    // dcId 未知:兜底清掉所有已借出的 exported sender(下载涉及的 DC 数量极少,代价可忽略)。
+    const map = client._exportedSenderPromises;
+    if (!map || typeof map.keys !== "function") return false;
+    let any = false;
+    for (const id of Array.from(map.keys())) {
+        if (await cleanup(id)) any = true;
+    }
+    if (any) log.info("♻️ dcId 未知,已兜底重置全部导出下载 sender");
+    return any;
 };
 
 /**

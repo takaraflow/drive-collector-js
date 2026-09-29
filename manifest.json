@@ -587,6 +587,12 @@
         "default": 86400000,
         "description": "Time-to-live for large-file local staging fallback files before cleanup (default 24h)"
       },
+      "DIRECT_TRANSFER_RESET_SENDER_ON_RETRY": {
+        "type": "boolean",
+        "required": false,
+        "default": true,
+        "description": "On telegram_source retryable failures (e.g. CONNECTION_NOT_INITED), tear down the per-DC exported download sender between retries so a fresh sender re-sends InitConnection. Escape hatch: set false to disable."
+      },
       "EXTERNAL_DOWNLOAD_MAX_BYTES": {
         "type": "number",
         "required": false,

@@ -267,6 +267,64 @@ describe("DirectTransferService", () => {
     expect(client.iterDownload).toHaveBeenCalledTimes(3);
   });
 
+  test("重试 telegram_source 失败前调用 resetSource(拆卡死下载 sender),成功后不再调", async () => {
+    // 直接打桩重试循环的内层调用,精准验证「重试之间是否重置 sender」这条逻辑,
+    // 不牵扯 rcat/iterDownload/校验等无关内部管线。
+    const svc = new DirectTransferService();
+    svc._delay = async () => {};
+    let calls = 0;
+    svc._transferTelegramMediaToRemoteOnce = async () => {
+      calls += 1;
+      return calls <= 2
+        ? { success: false, retryable: true, retryScope: "telegram_source", errorCode: "TELEGRAM_SOURCE_TRANSIENT" }
+        : { success: true };
+    };
+
+    const resetCalls = [];
+    const res = await svc.transferTelegramMediaToRemote({
+      task: { id: "t-reset" },
+      config: { directTransfer: { resetSenderOnRetry: true, maxAttempts: 5, retryDelayMs: 0 } },
+      resetSource: async () => { resetCalls.push(calls); }
+    });
+
+    expect(res.success).toBe(true);
+    // 前两次失败后各重置一次,且都发生在下一次(最终成功的)尝试之前。
+    expect(resetCalls).toEqual([1, 2]);
+  });
+
+  test("resetSenderOnRetry=false 时不调 resetSource(逃生开关)", async () => {
+    const svc = new DirectTransferService();
+    svc._delay = async () => {};
+    svc._transferTelegramMediaToRemoteOnce = async () =>
+      ({ success: false, retryable: true, retryScope: "telegram_source", errorCode: "TELEGRAM_SOURCE_TRANSIENT" });
+
+    let resetCount = 0;
+    await svc.transferTelegramMediaToRemote({
+      task: { id: "t-noreset" },
+      config: { directTransfer: { resetSenderOnRetry: false, maxAttempts: 3, retryDelayMs: 0 } },
+      resetSource: async () => { resetCount += 1; }
+    });
+
+    expect(resetCount).toBe(0);
+  });
+
+  test("rclone_target 可重试失败不触发 resetSource(不误拆 TG 下载 sender)", async () => {
+    const svc = new DirectTransferService();
+    svc._delay = async () => {};
+    svc._transferTelegramMediaToRemoteOnce = async () =>
+      ({ success: false, retryable: true, retryScope: "rclone_target", errorCode: "RCLONE_TRANSIENT" });
+
+    let resetCount = 0;
+    const res = await svc.transferTelegramMediaToRemote({
+      task: { id: "t-rclone" },
+      config: { directTransfer: { resetSenderOnRetry: true, maxAttempts: 2, retryDelayMs: 0 } },
+      resetSource: async () => { resetCount += 1; }
+    });
+
+    expect(res.retryScope).not.toBe("telegram_source");
+    expect(resetCount).toBe(0);
+  });
+
   test("redacts sensitive rclone stderr before returning fallback errors", async () => {
     const proc = createProcess({
       exitCode: 1,

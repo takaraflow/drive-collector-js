@@ -469,7 +469,8 @@ function buildConfigObject(env) {
             minStallTimeoutMs: parseNonNegativeInt(env.DIRECT_TRANSFER_MIN_STALL_TIMEOUT_MS, undefined),
             maxAttempts: parsePositiveInt(env.DIRECT_TRANSFER_MAX_ATTEMPTS, 5),
             retryDelayMs: parseNonNegativeInt(env.DIRECT_TRANSFER_RETRY_DELAY_MS, 2000),
-            localStagingTtlMs: parsePositiveNumber(env.DIRECT_TRANSFER_LOCAL_STAGING_TTL_MS, 24 * 60 * 60 * 1000)
+            localStagingTtlMs: parsePositiveNumber(env.DIRECT_TRANSFER_LOCAL_STAGING_TTL_MS, 24 * 60 * 60 * 1000),
+            resetSenderOnRetry: parseBoolean(env.DIRECT_TRANSFER_RESET_SENDER_ON_RETRY, true)
         },
         instance: {
             id: env.INSTANCE_ID || null,

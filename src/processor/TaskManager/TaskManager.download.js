@@ -15,7 +15,7 @@ import { TASK_QUEUE_TRIGGER_SOURCES, TaskProcessingLockBusyError } from "../../d
 import { isRetryableInfrastructureError } from "../../domain/infrastructure-error.js";
 import { parseBoolean } from "../../config/boolean.js";
 import { redactSensitiveText } from "../../utils/serializer.js";
-import { ensureConnected } from "../../services/telegram.js";
+import { ensureConnected, resetExportedDownloadSender } from "../../services/telegram.js";
 import { resumableDownloadService } from "../../services/ResumableDownloadService.js";
 
 // 获取模块日志记录器
@@ -628,6 +628,8 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
         driveType,
         existingRemoteFile,
         isCancelled: () => context.cancelledTaskIds.has(task.id),
+        // 源端 sender 卡死时,直传重试循环据此拆除该文件 DC 的导出下载 sender(见 DirectTransferService 重试逻辑)。
+        resetSource: () => resetExportedDownloadSender(message?.media),
         onProgress: async (progress) => {
             await heartbeat('uploading', 0, 0, {
                 bytes: progress.bytes,

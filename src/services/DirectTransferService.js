@@ -177,6 +177,17 @@ export class DirectTransferService {
                 reason: redactSensitiveText(lastResult.error || lastResult.reason || "retryable direct transfer failure")
             });
 
+            // 源端 sender 卡死(CONNECTION_NOT_INITED 等)时,拆掉该文件 DC 的导出下载 sender,
+            // 让下次 iterDownload 拿到全新 sender 并重发 InitConnection——否则原地重试必然复撞同一错。
+            // 只对 telegram_source 生效,不动 rclone_target(网盘侧)的重试。
+            if (
+                lastResult.retryScope === "telegram_source" &&
+                parseBoolean(config?.directTransfer?.resetSenderOnRetry, true) &&
+                typeof args?.resetSource === "function"
+            ) {
+                await Promise.resolve(args.resetSource()).catch(() => {});
+            }
+
             await this._delay(backoffMs);
         }
 
