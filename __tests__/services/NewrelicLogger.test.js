@@ -230,6 +230,58 @@ describe('NewrelicLogger Security Vulnerability Reproduction', () => {
         });
     });
 
+    it('should mirror allowlisted diagnostic fields to top level using OTel semconv names', async () => {
+        const payload = logger._buildPayload('warn', 'Direct transfer failed closed', {
+            errorCode: 'DRIVE_AUTH_INVALID',
+            reason: 'rclone rcat failed; 401 Invalid access token',
+            taskId: 'task-42',
+            userId: 'user-9',
+            driveType: 'protondrive',
+            retryScope: 'rclone_target',
+            fileName: 'video.mov',
+            attempts: 1
+        }, { module: 'DirectTransferService' }, 'instance-1');
+
+        // 顶层按 OTel semconv 命名，可直接查询（值班人无需展开 attributes.details.*）
+        expect(payload['error.type']).toBe('DRIVE_AUTH_INVALID');
+        expect(payload['error.message']).toContain('401 Invalid access token');
+        expect(payload['task.id']).toBe('task-42');
+        expect(payload['drive.type']).toBe('protondrive');
+        // userId 不提升——OTel 将 enduser.id 标注为 PII，遵循最小化（details 里仍可查）
+        expect(payload.userId).toBeUndefined();
+        expect(payload['enduser.id']).toBeUndefined();
+        // details.* 仍完整保留（只做加法，不搬字段）
+        expect(payload.attributes.details).toMatchObject({
+            errorCode: 'DRIVE_AUTH_INVALID',
+            taskId: 'task-42',
+            userId: 'user-9',
+            reason: 'rclone rcat failed; 401 Invalid access token'
+        });
+    });
+
+    it('should not truncate diagnostic details beyond 5 keys', async () => {
+        // 回归锁：ConsoleLogger 走的 serializeToString 曾把每层截到 5 个 key，
+        // 把排第 6+ 的 errorCode/reason 挤掉。这里用 10 字段对象确认 NR details 完整保留。
+        const payload = logger._buildPayload('warn', 'Direct transfer failed closed', {
+            errorCode: 'DRIVE_AUTH_INVALID',
+            retryable: false,
+            userRetryable: false,
+            fallbackAllowed: false,
+            reason: 'requires a 2FA code',
+            taskId: 'task-77',
+            userId: 'user-3',
+            fileName: 'clip.mp4',
+            driveType: 'protondrive',
+            attempts: 1
+        }, { module: 'DirectTransferService' }, 'instance-1');
+
+        // 第 6+ 个字段（errorCode 之后的 reason/taskId/... 及 errorCode 本身）不被吃掉
+        expect(payload.attributes.details).toHaveProperty('reason', 'requires a 2FA code');
+        expect(payload.attributes.details).toHaveProperty('taskId', 'task-77');
+        expect(payload.attributes.details).toHaveProperty('attempts', 1);
+        expect(payload.attributes.details._truncated).toBeUndefined();
+    });
+
     it('should attach build identity fields to log payloads', async () => {
         process.env.APP_VERSION = '9.9.9';
         process.env.GIT_SHA = 'abcdef1234567890';
