@@ -430,6 +430,21 @@ describe("Telegram Service", () => {
             expect(settled).toBe(true);
             vi.useRealTimers();
         });
+
+        test("handleTelegramClientError 绝不触发主连接重连(不调度 setImmediate 恢复)", async () => {
+            vi.useFakeTimers();
+            // 回归点:洪流来自下载用的导出 sender 超时,主连接是健康的。钩子若借洪流去重连主连接,
+            // 会每 ~40s 拔掉健康主连接 → 断 sendMessage(绑盘确认失败)/断在途下载(任务无进度),
+            // 且重连清空 client._sender 连累在途 sender 再报错 → 洪流自激。此处必须只退避、不重连。
+            const immediateSpy = vi.spyOn(global, "setImmediate");
+            const p = module.handleTelegramClientError(new Error("TIMEOUT"));
+            // 恢复触发(若存在)是 await sleep 之前的同步调度,此刻即可断言其从未发生。
+            expect(immediateSpy).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(5000);
+            await p;
+            immediateSpy.mockRestore();
+            vi.useRealTimers();
+        });
     });
 
 });
