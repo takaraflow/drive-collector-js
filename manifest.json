@@ -593,6 +593,12 @@
         "default": true,
         "description": "On telegram_source retryable failures (e.g. CONNECTION_NOT_INITED), tear down the per-DC exported download sender between retries so a fresh sender re-sends InitConnection. Escape hatch: set false to disable."
       },
+      "PROTON_SESSION_LOCK_ENABLED": {
+        "type": "boolean",
+        "required": false,
+        "default": true,
+        "description": "Serialize session-bearing rclone ops (rcat/moveto/delete) per Proton drive with an in-process lock and re-read the session inside it, so concurrent tasks can't collide on Proton's single-use refresh_token and brick the binding with Code=10013. Escape hatch: set false to disable."
+      },
       "EXTERNAL_DOWNLOAD_MAX_BYTES": {
         "type": "number",
         "required": false,

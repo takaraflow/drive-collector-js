@@ -472,6 +472,11 @@ function buildConfigObject(env) {
             localStagingTtlMs: parsePositiveNumber(env.DIRECT_TRANSFER_LOCAL_STAGING_TTL_MS, 24 * 60 * 60 * 1000),
             resetSenderOnRetry: parseBoolean(env.DIRECT_TRANSFER_RESET_SENDER_ON_RETRY, true)
         },
+        drives: {
+            // Kill-switch for per-drive serialization of the single-use Proton refresh_token.
+            // Default on; set false only to hot-roll-back if the lock ever causes queueing pain.
+            protonSessionLockEnabled: parseBoolean(env.PROTON_SESSION_LOCK_ENABLED, true)
+        },
         instance: {
             id: env.INSTANCE_ID || null,
             publicUrl: env.INSTANCE_PUBLIC_URL || env.APP_EXTERNAL_URL || env.LB_WEBHOOK_URL || null,
