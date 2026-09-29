@@ -609,6 +609,50 @@ describe("DriveConfigFlow", () => {
         });
     });
 
+    describe("branch-aware terminal step (input-threaded isFinalBindingStep)", () => {
+        test("forwards the pending input to isFinalBindingStep and persists a terminal no-2FA bind", async () => {
+            const mockProvider = DriveProviderFactory.create();
+            // Mirror ProtonDriveProvider's real contract: terminal only when the pending answer is "no".
+            mockProvider.isFinalBindingStep.mockImplementation((step, session, input) => step === "WAIT_USE_2FA" && input === "no");
+            mockProvider.isSensitiveBindingStep.mockReturnValue(false);
+            mockProvider.handleInput.mockResolvedValueOnce({
+                success: true,
+                data: { username: "alice", user: "alice", password: "secret", two_factor_enabled: false },
+                message: "✅ bound"
+            });
+
+            const event = { message: { message: "no", peerId: "chat123", id: "msg9" } };
+            const session = { current_step: "PROTONDRIVE:WAIT_USE_2FA", temp_data: JSON.stringify({ username: "alice", password: "secret" }) };
+
+            const result = await DriveConfigFlow.handleInput(event, "user456", session);
+
+            expect(result).toBe(true);
+            // Load-bearing: the flow must forward the pending input as the 3rd arg so a branch
+            // step can be terminal for one answer only.
+            expect(mockProvider.isFinalBindingStep).toHaveBeenCalledWith("WAIT_USE_2FA", expect.any(Object), "no");
+            expect(mockDriveRepository.create).toHaveBeenCalled();
+            expect(mockSessionManager.clear).toHaveBeenCalledWith("user456");
+        });
+
+        test("clears the session when a terminal no-2FA bind fails validation", async () => {
+            const mockProvider = DriveProviderFactory.create();
+            mockProvider.isFinalBindingStep.mockImplementation((step, session, input) => step === "WAIT_USE_2FA" && input === "no");
+            mockProvider.isSensitiveBindingStep.mockReturnValue(false);
+            mockProvider.handleInput.mockResolvedValueOnce({ success: false, message: "登录失败" });
+
+            const event = { message: { message: "no", peerId: "chat123", id: "msg9" } };
+            const session = { current_step: "PROTONDRIVE:WAIT_USE_2FA", temp_data: JSON.stringify({ username: "alice", password: "secret" }) };
+
+            const result = await DriveConfigFlow.handleInput(event, "user456", session);
+
+            expect(result).toBe(true);
+            // A failed terminal bind must clear the session and edit the verifying message —
+            // not fall through to the non-final branch and leave a dangling session.
+            expect(mockSessionManager.clear).toHaveBeenCalledWith("user456");
+            expect(mockClient.editMessage).toHaveBeenCalled();
+        });
+    });
+
     describe("handleUnbind", () => {
         test("should ask for confirmation before unbinding all drives", async () => {
             mockDriveRepository.findByUserId.mockResolvedValue([{ id: "drive1" }]);

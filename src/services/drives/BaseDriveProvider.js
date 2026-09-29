@@ -60,13 +60,17 @@ export class BaseDriveProvider {
 
     /**
      * Whether this step is the terminal validation/submit step for the current branch.
-     * Providers with dynamic branches should override when needed.
+     * Providers with dynamic branches should override when needed. `input` is the pending
+     * user input for this step, letting a branch step (e.g. a yes/no choice) decide finality
+     * from the answer it is about to process.
      * @param {string} stepName
      * @param {Object} [session]
+     * @param {string} [input]
      * @returns {boolean}
      */
-    isFinalBindingStep(stepName, session = null) {
+    isFinalBindingStep(stepName, session = null, input = null) {
         void session;
+        void input;
         const steps = this.getBindingSteps() || [];
         if (!steps.length) return false;
         return steps[steps.length - 1]?.step === stepName;
