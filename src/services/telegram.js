@@ -184,12 +184,10 @@ const FLOOD_BACKOFF_BASE_MS = 250;
 const FLOOD_BACKOFF_MAX_MS = 5000;
 const FLOOD_RESET_AFTER_MS = 30000;      // 静默超过此值则重置连续计数
 const FLOOD_LOG_THROTTLE_MS = 5000;      // 结构化日志最多每 5s 一条,不给洪流添柴
-const FLOOD_RECOVERY_THROTTLE_MS = 10000; // 触发主连接重连最多每 10s 一次
 const floodState = {
     consecutive: 0,
     lastErrorAt: 0,
     lastLogAt: 0,
-    lastRecoveryAt: 0,
     suppressed: 0,
 };
 
@@ -230,20 +228,11 @@ export async function handleTelegramClientError(err) {
         floodState.suppressed += 1;
     }
 
-    // 限频触发主连接重连;handleConnectionIssue 自身按 isReconnecting/锁/断路器去重,
-    // 门禁 !isReconnecting && !isClientInitializing 避免干扰正在进行的合法重连/初始化。
-    if (
-        now - floodState.lastRecoveryAt >= FLOOD_RECOVERY_THROTTLE_MS &&
-        !isReconnecting &&
-        !isClientInitializing
-    ) {
-        floodState.lastRecoveryAt = now;
-        setImmediate(() => {
-            handleConnectionIssue(true, errorType).catch((e) => {
-                log.error("❌ onError 恢复触发失败:", { error: e?.message });
-            });
-        });
-    }
+    // 不在此触发主连接重连。洪流来自下载用的导出 sender(export sender)超时,主连接通常是健康的
+    // (线上实测每次误重连后 getMe 均成功)。误重连会每 ~40s 拔掉健康主连接,打断所有在途 sendMessage
+    // 与下载,且重连清空 client._sender 会连累在途下载 sender 再报错 → 洪流自激、永不收敛。
+    // 主连接真正停摆的兜底不在这里:updateHealthMonitor(更新停滞 60-120s)与 startWatchdog(心跳超时
+    // 5min / 连续失败≥3)按"主连接是否真停摆"这一正确信号重连。原触发(794099a2)是本 bug 引入点,已移除。
 
     // 命门:await 一个 setTimeout,让出定时器阶段,打断纯 microtask 递归洪流。
     await sleep(computeFloodBackoff(floodState.consecutive));
