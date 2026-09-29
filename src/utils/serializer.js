@@ -376,7 +376,7 @@ export const pruneData = (obj, maxDepth = 2, maxKeys = 5, currentDepth = 0, seen
  * @param {number} maxLength - 最大长度，默认 5000
  * @returns {string} - 安全的 JSON 字符串
  */
-export const serializeToString = (data, maxDepth = 2, maxLength = 5000) => {
+export const serializeToString = (data, maxDepth = 2, maxLength = 5000, maxKeys = 50) => {
   // 处理特殊原始值
   if (data === undefined) return '{"value":"undefined"}';
   if (typeof data === 'function') return '{"value":"[Function]"}';
@@ -386,10 +386,10 @@ export const serializeToString = (data, maxDepth = 2, maxLength = 5000) => {
   let pruned;
 
   try {
-    pruned = pruneData(data, maxDepth, 5, 0, seen);
+    pruned = pruneData(data, maxDepth, maxKeys, 0, seen);
   } catch (e) {
-    return JSON.stringify({ 
-      error: '[Prune failed]', 
+    return JSON.stringify({
+      error: '[Prune failed]',
       reason: redactSensitiveText(e.message)
     });
   }

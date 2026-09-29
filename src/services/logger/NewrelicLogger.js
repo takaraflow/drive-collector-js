@@ -14,6 +14,20 @@ const NEW_RELIC_SEVERITY = Object.freeze({
     error: 'ERROR'
 });
 
+// 关键诊断字段顶层提升映射（源字段 → OTel 语义约定名）：
+// 结构化失败对象（如 "Direct transfer failed closed" 的 {errorCode, taskId, reason, ...}）
+// 不是 Error 形态，不走 errorLike 提升，根因只埋在 attributes.details.* 里查不到。
+// 这里按 OTel semconv 命名镜像到顶层（details.* 仍完整保留，只做加法）。
+// 注意：userId 不提升——OTel 将 enduser.id 标注为 PII，值班按 error.type/task.id 定位足够。
+// 值统一转字符串并脱敏，长度封顶防止顶层属性超限。
+const NR_TOP_LEVEL_DIAGNOSTIC_FIELDS = Object.freeze({
+    errorCode: 'error.type',
+    reason: 'error.message',
+    taskId: 'task.id',
+    driveType: 'drive.type'
+});
+const NR_TOP_LEVEL_DIAGNOSTIC_MAX_LEN = 500;
+
 export const setInstanceIdProvider = (provider) => {
     getInstanceIdFunc = provider;
 };
@@ -192,6 +206,21 @@ class NewrelicLogger extends BaseLogger {
             }
             if (errorLike.stack) {
                 payload.error_stack = redactSensitiveText(String(errorLike.stack)).substring(0, 4000);
+            }
+        }
+
+        // 关键诊断字段顶层提升（源字段 → OTel 语义约定名）：
+        // 结构化失败对象不是 Error 形态，不会走上面的 errorLike 提升，根因只埋在
+        // attributes.details.* 里。这里按 OTel 命名镜像到顶层（details.* 仍保留），
+        // 值班人可直接 WHERE `error.type` = ... 定位根因。
+        if (finalData && typeof finalData === 'object' && !(finalData instanceof Error)) {
+            for (const [sourceKey, targetKey] of Object.entries(NR_TOP_LEVEL_DIAGNOSTIC_FIELDS)) {
+                if (payload[targetKey] !== undefined) continue; // 不覆盖已有顶层字段（如 context 注入）
+                const value = finalData[sourceKey];
+                if (value === undefined || value === null) continue;
+                payload[targetKey] = typeof value === 'boolean' || typeof value === 'number'
+                    ? value
+                    : redactSensitiveText(String(value)).substring(0, NR_TOP_LEVEL_DIAGNOSTIC_MAX_LEN);
             }
         }
 
