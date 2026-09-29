@@ -254,7 +254,8 @@
         "DIRECT_TRANSFER_TIMEOUT_MS",
         "DIRECT_TRANSFER_STALL_TIMEOUT_MS",
         "DIRECT_TRANSFER_MAX_ATTEMPTS",
-        "DIRECT_TRANSFER_RETRY_DELAY_MS"
+        "DIRECT_TRANSFER_RETRY_DELAY_MS",
+        "DIRECT_TRANSFER_RESET_SENDER_ON_RETRY"
       ],
       "reinitializationStrategy": {
         "type": "none",
@@ -268,6 +269,7 @@
         "DIRECT_TRANSFER_TIMEOUT_MS 控制单次 rcat 直传最长运行时间，避免子进程挂死导致任务长期卡住",
         "DIRECT_TRANSFER_STALL_TIMEOUT_MS 控制零落盘链路无进展超时，覆盖 Telegram 读取、rclone stdin 写入和进度回调",
         "DIRECT_TRANSFER_MAX_ATTEMPTS / DIRECT_TRANSFER_RETRY_DELAY_MS 控制零落盘直传遇到可重试错误时的重试预算，耗尽后才按 fallback 策略处理",
+        "DIRECT_TRANSFER_RESET_SENDER_ON_RETRY 默认 true：telegram_source 类可重试失败(如 CONNECTION_NOT_INITED)重试前，拆除该文件 DC 的导出下载 sender，逼下次重发 InitConnection，避免在卡死的子连接上空转；设 false 可关闭",
         "直传只复用 rclone 支持的流式能力；OSS/R2 的 multipart stream 未收口前必须使用 fallback=true 才会走本地暂存"
       ]
     },
