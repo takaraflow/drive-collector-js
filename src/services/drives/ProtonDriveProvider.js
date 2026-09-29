@@ -606,6 +606,46 @@ export class ProtonDriveProvider extends BaseDriveProvider {
         return SESSION_KEYS.every((key) => Boolean(normalizeBindingText(config[key])));
     }
 
+    /**
+     * Recovery for a server-side-dead Proton session (Code=10013): clear the stored session
+     * tokens so `_hasReusableSession` turns false and the next transfer re-bootstraps a login
+     * instead of feeding the dead refresh_token to rclone forever. Non-2FA (or stored-OTP)
+     * accounts self-heal; a 2FA account with no durable OTP surfaces a clean "please rebind"
+     * signal instead of silently looping 10013. Best-effort — never throws into the caller.
+     * Username/password/otp_secret_key/mailbox_password are preserved so bootstrap can run.
+     */
+    async invalidateStoredSession(userId) {
+        if (!userId) return false;
+        try {
+            const drive = await DriveRepository.getDefaultDrive(userId);
+            if (!drive?.id || String(drive.type || '').toLowerCase() !== this.type) {
+                return false;
+            }
+            let current;
+            try {
+                current = JSON.parse(drive.config_data || '{}');
+            } catch {
+                current = {};
+            }
+            if (!this._hasReusableSession(current)) {
+                return false; // already cleared — avoid a redundant write / re-bootstrap churn
+            }
+            const cleared = { ...current };
+            for (const key of SESSION_KEYS) delete cleared[key];
+            cleared.session_bootstrap_ok = false;
+            await DriveRepository.updateConfigData(userId, drive.id, cleared);
+            log.warn('Cleared dead Proton session after Code=10013; next op will re-bootstrap', {
+                userId,
+                driveId: drive.id
+            });
+            return true;
+        } catch (error) {
+            log.warn('invalidateStoredSession failed', { userId, error: error.message });
+            return false;
+        }
+    }
+
+
     async _normalizeSecret(secret, format) {
         return await CloudTool.normalizePasswordForRclone(secret, { format: format || 'plain' });
     }

@@ -39,6 +39,15 @@ const AUTH_ERROR_PATTERNS = [
     /requires a 2FA code/i
 ];
 
+// Narrow signal: the stored Proton refresh_token has been server-side invalidated
+// (single-use rotation consumed it, or a concurrent op rotated it out from under us).
+// Deliberately NARROWER than AUTH_ERROR_PATTERNS — must NOT fire on "requires a 2FA code",
+// "bad password" or generic "unauthorized", or we would clear a still-recoverable session.
+export function isProtonRefreshTokenDead(errorText) {
+    const text = String(errorText || "");
+    return /Code=10013/i.test(text) || /invalid\s+refresh\s+token/i.test(text);
+}
+
 const QUOTA_ERROR_PATTERNS = [
     /quota exceeded/i,
     /over quota/i,

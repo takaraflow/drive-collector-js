@@ -10,6 +10,7 @@ import { localCache } from "../utils/LocalCache.js";
 import { cache } from "./CacheService.js";
 import { logger } from "./logger/index.js";
 import { DriveProviderFactory } from "./drives/index.js";
+import { Mutex } from "async-mutex";
 import { CACHE_KEYS } from "../domain/cache-keys.js";
 import { redactSensitiveText } from "../utils/serializer.js";
 import { classifyRcloneError, isRetryableRcloneError, RCLONE_ERROR_CODES } from "../domain/rclone-error.js";
@@ -32,6 +33,27 @@ const buildRcloneEnv = () => ({
 });
 
 const getRuntimeConfig = () => getConfig();
+
+// Per-(driveType,userId) in-process mutex serializing the "read session → rclone rotates
+// single-use refresh_token → harvest rotated token back to DB" critical section for
+// session-capable providers (Proton). Without it, two concurrent tasks on the same drive
+// both use refresh_token R1; one rotates R1→R2 (Proton instantly voids R1), the other's R1
+// is now dead → Code=10013 → permanent brick needing rebind. 100% of observed collisions
+// were same-instance (NF_01), which this fully covers.
+// ponytail: in-process lock only. Cross-instance collisions (webhook dispatch to a second
+// instance) remain a theoretical residual — unobserved in 30d of NR data, and the Code=10013
+// self-heal (ProtonDriveProvider.invalidateStoredSession) turns any residual brick into a
+// recoverable one. Escalate to the Redis lock in src/services/DistributedLock.js only if NR
+// shows cross-instance token loss.
+const _driveSessionMutexes = new Map();
+export function _driveSessionMutex(key) {
+    let m = _driveSessionMutexes.get(key);
+    if (!m) {
+        m = new Mutex();
+        _driveSessionMutexes.set(key, m); // ponytail: no GC, bounded by distinct (type,userId); add eviction only if cardinality grows
+    }
+    return m;
+}
 
 // 确定 rclone 二进制路径 (兼容 Zeabur 和 本地)
 const rcloneBinary = fs.existsSync("/app/rclone/rclone") 
@@ -724,7 +746,7 @@ export class CloudTool {
      * @private
      */
     static async _openUserRemoteRuntime(userId, conf = null) {
-        const resolvedConf = conf || await this._getUserConfig(userId);
+        let resolvedConf = conf || await this._getUserConfig(userId);
         const provider = DriveProviderFactory.getProvider(resolvedConf.type);
         const usesWritableConf = typeof provider.getWritableRcloneConfigEntries === 'function';
 
@@ -745,6 +767,25 @@ export class CloudTool {
             };
         }
 
+        // Session-capable (Proton) branch — serialize the single-use refresh_token critical
+        // section per drive so concurrent same-drive tasks can't collide on it, and re-read the
+        // authoritative session INSIDE the lock (a sibling may have rotated it while we waited).
+        const lockEnabled = getRuntimeConfig()?.drives?.protonSessionLockEnabled !== false;
+        const lockKey = `drive-session:${resolvedConf.type}:${userId}`;
+        const releaseLock = lockEnabled ? await _driveSessionMutex(lockKey).acquire() : null;
+        let lockReleased = false;
+        const releaseSessionLock = () => {
+            if (lockReleased || !releaseLock) return;
+            lockReleased = true;
+            releaseLock();
+        };
+        try {
+        if (lockEnabled) {
+            // A sibling op may have rotated R1→R2 and cleared the drive cache while we waited on
+            // the lock; re-read now so rclone is fed the live refresh_token, not a consumed one.
+            resolvedConf = await this._getUserConfig(userId);
+        }
+
         const remoteName = `u${String(userId || 'anon').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'anon'}`;
         const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'rclone-user-'));
         const configPath = path.join(tempDir, 'rclone.conf');
@@ -752,6 +793,7 @@ export class CloudTool {
         await fsp.writeFile(configPath, body, { encoding: 'utf8', mode: 0o600 });
 
         let finalized = false;
+        let disposed = false;
         const runtime = {
             conf: resolvedConf,
             provider,
@@ -783,11 +825,22 @@ export class CloudTool {
                 return runtime.conf;
             },
             async dispose() {
-                await runtime.finalize();
-                await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+                if (disposed) return runtime.conf;
+                disposed = true;
+                try {
+                    await runtime.finalize();
+                    await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+                } finally {
+                    releaseSessionLock();
+                }
+                return runtime.conf;
             }
         };
         return runtime;
+        } catch (error) {
+            releaseSessionLock();
+            throw error;
+        }
     }
 
     /**

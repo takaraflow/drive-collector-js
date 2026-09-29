@@ -10,11 +10,31 @@ import { resolveRcloneFailureMetadata } from "../../utils/rcloneErrorMessage.js"
 import { classifyInfrastructureError } from "../../domain/infrastructure-error.js";
 import { getInfrastructureErrorUserMessage } from "../../utils/infrastructureErrorMessage.js";
 import { escapeHTML } from "../../utils/common.js";
+import { DriveProviderFactory } from "../../services/drives/index.js";
+import { isProtonRefreshTokenDead } from "../../domain/rclone-error.js";
 export { escapeHTML };
 
 // 获取依赖项的辅助函数
 const getDeps = () => dependencyContainer.getAll();
 const getLog = () => getDeps().logger.withModule('TaskManager.utils');
+
+// A server-side-dead Proton refresh_token (Code=10013) never recovers on its own: the stored
+// session tokens are non-empty so the provider keeps feeding the dead token to rclone forever.
+// On a terminal auth failure, clear the dead session so the next op re-bootstraps a fresh login
+// (non-2FA / stored-OTP self-heal) or surfaces a clean "please rebind" instead of looping 10013.
+// Best-effort — never throws into the failure handler.
+async function healDeadProtonSessionIfNeeded(task, errorText) {
+    try {
+        const userId = task?.userId;
+        if (!userId || !isProtonRefreshTokenDead(errorText)) return;
+        const provider = DriveProviderFactory.getProvider('protondrive');
+        if (typeof provider?.invalidateStoredSession === 'function') {
+            await provider.invalidateStoredSession(userId);
+        }
+    } catch (error) {
+        getLog().warn?.('Proton session self-heal skipped', { error: error?.message });
+    }
+}
 const looksLikeRcloneDiagnostic = (message) => /rclone|failed to create file system|slog\/logger\.go|:mega|copyto|rcat/i.test(message || "");
 const CANONICAL_HEARTBEAT_MIN_INTERVAL_MS = 60_000;
 const UI_HEARTBEAT_MIN_INTERVAL_MS = 3000;
@@ -202,6 +222,7 @@ export async function handleTaskFailure(task, context, updateStatus, errorMessag
     const failure = errorMessage && typeof errorMessage === 'object' ? errorMessage : null;
     const rawErrorMessage = failure?.diagnosticMessage || failure?.error || failure?.message || errorMessage;
     const safeErrorMessage = redactSensitiveText(rawErrorMessage);
+    await healDeadProtonSessionIfNeeded(task, safeErrorMessage);
     const rcloneFailure = looksLikeRcloneDiagnostic(safeErrorMessage)
         ? resolveRcloneFailureMetadata({ ...failure, error: safeErrorMessage }, { operation: "uploadBatch", remotePathScoped: true })
         : null;
@@ -247,6 +268,7 @@ export async function handleUploadFailure(task, context, updateStatus, uploadRes
 
     const failure = uploadResult || {};
     const errorMessage = redactSensitiveText(failure.error || "Upload failed");
+    await healDeadProtonSessionIfNeeded(task, errorMessage);
     const userMessage = resolveUploadFailureUserMessage(failure);
     const displayReason = userMessage || errorMessage;
     const showRetry = failure.userRetryable !== false;
