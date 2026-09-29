@@ -38,8 +38,11 @@ const getRuntimeConfig = () => getConfig();
 // single-use refresh_token → harvest rotated token back to DB" critical section for
 // session-capable providers (Proton). Without it, two concurrent tasks on the same drive
 // both use refresh_token R1; one rotates R1→R2 (Proton instantly voids R1), the other's R1
-// is now dead → Code=10013 → permanent brick needing rebind. 100% of observed collisions
-// were same-instance (NF_01), which this fully covers.
+// is now dead → Code=10013 → permanent brick needing rebind. Every runtime Proton rclone op
+// routes through _openUserRemoteRuntime (rcat/moveto/delete/copy/copyto/lsjson), so all
+// same-instance (NF_01) collisions serialize here. The only unsynchronized consumer left is
+// first-use bootstrap login (ensureRuntimeSession), which mints the first token rather than
+// rotating an existing one, so it has no live R1 to void.
 // ponytail: in-process lock only. Cross-instance collisions (webhook dispatch to a second
 // instance) remain a theoretical residual — unobserved in 30d of NR data, and the Code=10013
 // self-heal (ProtonDriveProvider.invalidateStoredSession) turns any residual brick into a
@@ -135,8 +138,8 @@ export class CloudTool {
         }).code === RCLONE_ERROR_CODES.DRIVE_REMOTE_NOT_FOUND;
     }
 
-    static async _verifyRemoteRootAvailable(connectionString, timeout = 15000) {
-        const ret = await this._runRclone(["lsjson", "--max-depth", "1", connectionString], timeout);
+    static async _verifyRemoteRootAvailable(connectionString, timeout = 15000, configArgs = ["--config", "/dev/null"]) {
+        const ret = await this._runRclone(["lsjson", "--max-depth", "1", connectionString], timeout, configArgs);
         if (ret.code === 0) {
             return { available: true };
         }
@@ -287,13 +290,14 @@ export class CloudTool {
 
     static async _resolvePathScopedNotFound(ret, connectionString, {
         rootTimeout = 15000,
-        missingResult = null
+        missingResult = null,
+        configArgs = ["--config", "/dev/null"]
     } = {}) {
         if (!ret?.stderr || !this._isRemotePathNotFound(ret)) {
             return null;
         }
 
-        const rootProbe = await this._verifyRemoteRootAvailable(connectionString, rootTimeout);
+        const rootProbe = await this._verifyRemoteRootAvailable(connectionString, rootTimeout, configArgs);
         if (!rootProbe.available) {
             throw this._buildFailureError(rootProbe.failure);
         }
@@ -345,7 +349,7 @@ export class CloudTool {
         }
 
         try {
-            await this._resolvePathScopedNotFound(ret, connectionString);
+            await this._resolvePathScopedNotFound(ret, connectionString, { configArgs });
         } catch (error) {
             return {
                 success: false,
@@ -463,11 +467,11 @@ export class CloudTool {
      * 处理 spawn、超时保护、错误缓冲和日志
      * @private
      */
-    static async _runRclone(args, timeout = 30000) {
+    static async _runRclone(args, timeout = 30000, configArgs = ["--config", "/dev/null"]) {
         return new Promise((resolve, reject) => {
             let completed = false;
             try {
-                const fullArgs = ["--config", "/dev/null", ...args];
+                const fullArgs = [...configArgs, ...args];
                 const proc = spawn(rcloneBinary, fullArgs, { env: buildRcloneEnv() });
 
                 const timer = setTimeout(() => {
@@ -1221,10 +1225,18 @@ export class CloudTool {
     static async _spawnUploadBatchOnce(tasks, onProgress) {
         return new Promise(async (resolve) => {
             let isResolved = false;
+            let runtime = null;
+            let disposed = false;
+            const disposeOnce = async () => {
+                if (disposed || !runtime) return;
+                disposed = true;
+                try { await runtime.dispose(); } catch {}
+            };
             const safeResolve = (value) => {
                 if (isResolved) return;
                 isResolved = true;
-                resolve(value);
+                // Harvest Proton's rotated session (writable-conf path) before resolving.
+                disposeOnce().finally(() => resolve(value));
             };
 
             try {
@@ -1233,11 +1245,11 @@ export class CloudTool {
                     safeResolve({ success: false, error: "CANCELLED" });
                     return;
                 }
-                const conf = await this._getUserConfig(firstTask.userId);
-                const connectionString = this._getConnectionString(conf);
+                runtime = await this._openUserRemoteRuntime(firstTask.userId);
+                const connectionString = runtime.connectionString;
                 const userUploadPath = await this._getUploadPath(firstTask.userId);
                 const remotePath = this._joinRemotePath(connectionString, userUploadPath);
-                const ensureDirectoryResult = await this._ensureUploadDirectory(connectionString, userUploadPath);
+                const ensureDirectoryResult = await this._ensureUploadDirectory(connectionString, userUploadPath, { configArgs: runtime.configArgs });
                 if (!ensureDirectoryResult.success) {
                     safeResolve(ensureDirectoryResult);
                     return;
@@ -1249,7 +1261,7 @@ export class CloudTool {
                     .join('\n');
 
                 const args = [
-                    "--config", "/dev/null",
+                    ...runtime.configArgs,
                     "copy", commonSourceDir, remotePath,
                     "--files-from-raw", "-",
                     "--progress",
@@ -1400,6 +1412,13 @@ export class CloudTool {
             let resolved = false;
             let proc = null;
             let abortHandler = null;
+            let runtime = null;
+            let disposed = false;
+            const disposeOnce = async () => {
+                if (disposed || !runtime) return;
+                disposed = true;
+                try { await runtime.dispose(); } catch {}
+            };
             const removeAbortHandler = () => {
                 if (abortHandler && options.signal?.removeEventListener) {
                     options.signal.removeEventListener('abort', abortHandler);
@@ -1410,7 +1429,8 @@ export class CloudTool {
                 if (resolved) return;
                 resolved = true;
                 removeAbortHandler();
-                resolve(value);
+                // Harvest Proton's rotated session (writable-conf path) before resolving.
+                disposeOnce().finally(() => resolve(value));
             };
 
             try {
@@ -1426,24 +1446,24 @@ export class CloudTool {
                     options.signal.addEventListener('abort', abortHandler, { once: true });
                 }
 
-                const conf = await this._getUserConfig(userId);
-                if (resolved || options.signal?.aborted) return;
-                const connectionString = this._getConnectionString(conf);
+                runtime = await this._openUserRemoteRuntime(userId);
+                if (resolved || options.signal?.aborted) { await disposeOnce(); return; }
+                const connectionString = runtime.connectionString;
                 const userUploadPath = await this._getUploadPath(userId);
-                if (resolved || options.signal?.aborted) return;
+                if (resolved || options.signal?.aborted) { await disposeOnce(); return; }
                 const safeFileName = this.sanitizeRemoteFileName(fileName);
                 const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath, safeFileName);
-                if (resolved || options.signal?.aborted) return;
+                if (resolved || options.signal?.aborted) { await disposeOnce(); return; }
 
-                const ensureDirectoryResult = await this._ensureUploadDirectory(connectionString, userUploadPath);
+                const ensureDirectoryResult = await this._ensureUploadDirectory(connectionString, userUploadPath, { configArgs: runtime.configArgs });
                 if (!ensureDirectoryResult.success) {
                     safeResolve(ensureDirectoryResult);
                     return;
                 }
-                if (resolved || options.signal?.aborted) return;
+                if (resolved || options.signal?.aborted) { await disposeOnce(); return; }
 
                 const args = [
-                    "--config", "/dev/null",
+                    ...runtime.configArgs,
                     "copyto", localPath, fullRemotePath,
                     "--progress",
                     "--use-json-log",
@@ -1684,28 +1704,29 @@ export class CloudTool {
         }
 
         this.loading = true;
+        let runtime = null;
         try {
-            const conf = await this._getUserConfig(userId);
-            const connectionString = this._getConnectionString(conf);
+            runtime = await this._openUserRemoteRuntime(userId);
+            const connectionString = runtime.connectionString;
 
             // 获取用户自定义上传路径
             const userUploadPath = await this._getUploadPath(userId);
             const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath);
 
-            let ret = await this._runRclone(["lsjson", fullRemotePath]);
+            let ret = await this._runRclone(["lsjson", fullRemotePath], 30000, runtime.configArgs);
 
             if (ret.code !== 0 && this._isRemotePathNotFound(ret, { operation: "listRemoteFiles" })) {
-                await this._resolvePathScopedNotFound(ret, connectionString);
+                await this._resolvePathScopedNotFound(ret, connectionString, { configArgs: runtime.configArgs });
                 log.info(`Directory ${userUploadPath} not found, attempting to create it...`);
                 // 尝试创建一个空目录/触发目录初始化 (异步化)
-                await this._runRclone(["mkdir", fullRemotePath], 10000);
+                await this._runRclone(["mkdir", fullRemotePath], 10000, runtime.configArgs);
                 // 再次尝试
-                ret = await this._runRclone(["lsjson", fullRemotePath]);
+                ret = await this._runRclone(["lsjson", fullRemotePath], 30000, runtime.configArgs);
             }
 
             if (ret.code !== 0) {
                 if (this._isRemotePathNotFound(ret, { operation: "listRemoteFiles" })) {
-                    await this._resolvePathScopedNotFound(ret, connectionString);
+                    await this._resolvePathScopedNotFound(ret, connectionString, { configArgs: runtime.configArgs });
                     log.warn("Rclone directory still not found after attempt, returning empty list.");
                     this.loading = false;
                     return [];
@@ -1757,6 +1778,8 @@ export class CloudTool {
                 throw e;
             }
             return [];
+        } finally {
+            if (runtime) await runtime.dispose();
         }
     }
 
@@ -1815,24 +1838,33 @@ export class CloudTool {
     static async getRemoteFileInfo(fileName, userId, retries = 3, skipFallback = false) {
         if (!userId) return null;
 
+        let runtime = null;
+        try {
+            runtime = await this._openUserRemoteRuntime(userId);
+        } catch (e) {
+            if (NON_RETRYABLE_RCLONE_ERROR_CODES.has(e?.errorCode)) throw e;
+            log.warn(`[getRemoteFileInfo] runtime open failed for ${fileName}:`, e.message);
+            return null;
+        }
+
+        try {
+        const connectionString = runtime.connectionString;
         for (let i = 0; i < retries; i++) {
             try {
-                const conf = await this._getUserConfig(userId);
-                const connectionString = this._getConnectionString(conf);
 
                 // 获取用户自定义上传路径
                 const userUploadPath = await this._getUploadPath(userId);
 
                 // 优先尝试直接查询文件（更高效）
                 const fullRemotePath = this._joinRemotePath(connectionString, userUploadPath, fileName);
-                let ret = await this._runRclone(["lsjson", fullRemotePath], 10000);
+                let ret = await this._runRclone(["lsjson", fullRemotePath], 10000, runtime.configArgs);
 
                 // 如果明确返回“不存在”类错误，先确认远端根仍可访问。
                 // MEGA 会把凭据/根节点异常和路径节点异常都写成 Object not found；
                 // 根可用才表示目标文件/目录不存在，否则应暴露真实绑定问题。
                 if (ret.code !== 0 && ret.stderr) {
                     if (this._isRemotePathNotFound(ret, { operation: "lsjson" })) {
-                        await this._resolvePathScopedNotFound(ret, connectionString);
+                        await this._resolvePathScopedNotFound(ret, connectionString, { configArgs: runtime.configArgs });
                         log.debug(`[getRemoteFileInfo] File clearly not found: ${fileName}`);
                         return null;
                     }
@@ -1843,7 +1875,7 @@ export class CloudTool {
                     // 仅当非超时错误时尝试 fallback
                     if (ret.stderr !== "TIMEOUT") {
                         const fullRemoteFolder = this._joinRemotePath(connectionString, userUploadPath);
-                        ret = await this._runRclone(["lsjson", "--files-only", "--max-depth", "1", fullRemoteFolder], 15000);
+                        ret = await this._runRclone(["lsjson", "--files-only", "--max-depth", "1", fullRemoteFolder], 15000, runtime.configArgs);
 
                         if (ret.code === 0) {
                             try {
@@ -1894,8 +1926,11 @@ export class CloudTool {
             }
         }
         return null;
+        } finally {
+            await runtime.dispose();
+        }
     }
-    
+
     /**
      * Generic execute method for rclone commands
      * @param {Array} commandArgs - Command arguments (e.g., ['copy', 'source', 'destination'])

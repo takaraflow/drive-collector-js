@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { _driveSessionMutex } from "../../src/services/rclone.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { _driveSessionMutex, CloudTool } from "../../src/services/rclone.js";
 import { isProtonRefreshTokenDead } from "../../src/domain/rclone-error.js";
 
 // Regression guards for the Proton refresh_token race fix.
@@ -58,5 +58,49 @@ describe("isProtonRefreshTokenDead — narrow dead-refresh-token signal", () => 
         expect(isProtonRefreshTokenDead("invalid access token")).toBe(false);
         expect(isProtonRefreshTokenDead("")).toBe(false);
         expect(isProtonRefreshTokenDead(null)).toBe(false);
+    });
+});
+
+// Remaining side-door token-loss fix: probe/list/upload paths must run rclone through the
+// writable runtime (so a rotated single-use refresh_token is harvested), never a stateless
+// inline connection string + --config /dev/null which discards the rotated token → 10013.
+describe("read side-door routes through _openUserRemoteRuntime (no /dev/null token discard)", () => {
+    let runtime;
+    beforeEach(() => {
+        runtime = {
+            connectionString: "u1:",
+            configArgs: ["--config", "/tmp/sentinel-writable.conf"],
+            provider: {},
+            finalize: vi.fn(async () => {}),
+            dispose: vi.fn(async () => {})
+        };
+        vi.spyOn(CloudTool, "_openUserRemoteRuntime").mockResolvedValue(runtime);
+        vi.spyOn(CloudTool, "_getUploadPath").mockResolvedValue("uploads/");
+    });
+    afterEach(() => vi.restoreAllMocks());
+
+    it("getRemoteFileInfo feeds rclone the writable runtime.configArgs (not /dev/null) and disposes to harvest", async () => {
+        const runSpy = vi.spyOn(CloudTool, "_runRclone").mockResolvedValue({ code: 0, stdout: "[]", stderr: "" });
+
+        await CloudTool.getRemoteFileInfo("f.bin", "u1", 1, true);
+
+        expect(CloudTool._openUserRemoteRuntime).toHaveBeenCalledWith("u1");
+        expect(runSpy).toHaveBeenCalled();
+        // Every rclone invocation must carry the writable runtime's configArgs — never the
+        // stateless /dev/null that would throw away Proton's rotated refresh_token.
+        for (const call of runSpy.mock.calls) {
+            expect(call[2]).toBe(runtime.configArgs);
+            expect(call[2]).not.toEqual(["--config", "/dev/null"]);
+        }
+        // dispose() runs finalize()/mergeRuntimeSessionFromRemoteConfig — the token harvest.
+        expect(runtime.dispose).toHaveBeenCalled();
+    });
+
+    it("getRemoteFileInfo still disposes the runtime when the rclone call throws", async () => {
+        vi.spyOn(CloudTool, "_runRclone").mockRejectedValue(new Error("boom"));
+
+        await CloudTool.getRemoteFileInfo("f.bin", "u1", 1, true);
+
+        expect(runtime.dispose).toHaveBeenCalled();
     });
 });
