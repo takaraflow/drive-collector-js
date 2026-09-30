@@ -334,6 +334,32 @@ export class DirectTransferService {
                 );
             }
 
+            // gramjs 在照片解析的任一步失败时都静默返回空 buffer(downloads.js 的
+            // _downloadPhoto / 未知 media 分支都是 return Buffer.alloc(0)),不抛错。
+            // 0 字节喂给 rclone 会被报成 "sizes differ src 0",既误导又跳过重试——
+            // 实为源侧失败。归类成 telegram_source 瞬时错误,让它走既有的重置 sender + 重试。
+            if (uploadedBytes === 0) {
+                const emptyStreamError = new Error(
+                    `Telegram source produced an empty stream (expected ${totalSize} bytes) for "${finalFileName}"`
+                );
+                emptyStreamError.errorCode = TELEGRAM_SOURCE_TRANSIENT_ERROR_CODE;
+                emptyStreamError.retryScope = "telegram_source";
+                throw emptyStreamError;
+            }
+
+            // gramjs 在照片解析的任一步失败时都静默返回空 buffer(downloads.js 的
+            // _downloadPhoto / 未知 media 分支都是 return Buffer.alloc(0)),不抛错。
+            // 0 字节喂给 rclone 会被报成 "sizes differ src 0",既误导又跳过重试——
+            // 实为源侧失败。归类成 telegram_source 瞬时错误,让它走既有的重置 sender + 重试。
+            if (uploadedBytes === 0) {
+                const emptyStreamError = new Error(
+                    `Telegram source produced an empty stream (expected ${totalSize} bytes) for "${finalFileName}"`
+                );
+                emptyStreamError.errorCode = TELEGRAM_SOURCE_TRANSIENT_ERROR_CODE;
+                emptyStreamError.retryScope = "telegram_source";
+                throw emptyStreamError;
+            }
+
             const endAdaptiveTimeout = speedMonitor.getAdaptiveStallTimeoutMs(effectiveChunkSize, stallTimeoutMs, { minTimeoutMs: minStallTimeoutMs });
             await this._withStallTimeout(
                 () => this._endWritable(stdin),

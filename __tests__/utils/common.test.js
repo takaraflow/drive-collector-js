@@ -221,6 +221,78 @@ describe('common utils', () => {
             });
         });
 
+        it('should read the real size from an Api.Photo container (no own size field)', () => {
+            // MessageMediaPhoto.photo is an Api.Photo container, not a PhotoSize: it has
+            // no `size` of its own, so the old code reported 0 and every downstream
+            // consumer (progress, dedupe, empty-stream guard) went blind.
+            const media = {
+                photo: {
+                    id: '123',
+                    sizes: [
+                        { type: 'x', size: 1200 },
+                        { type: 'y', size: 80482 },
+                        { type: 'z', size: 4096 }
+                    ]
+                }
+            };
+
+            const result = getMediaInfo(media);
+            expect(result.size).toBe(80482); // largest, not array order dependent
+            expect(result.name).toMatch(/transfer_\d+_[a-z0-9]+\.jpg/);
+        });
+
+        it('should read sizes from the raw TL `photo` array when sizes is absent', () => {
+            const media = {
+                photo: {
+                    id: '123',
+                    photo: [{ type: 'x', size: 3000 }, { type: 'y', size: 9000 }]
+                }
+            };
+
+            expect(getMediaInfo(media).size).toBe(9000);
+        });
+
+        it('should report 0 for an empty photo container rather than throwing', () => {
+            const result = getMediaInfo({ photo: { id: '1', sizes: [] } });
+            expect(result.size).toBe(0);
+        });
+
+        it('should read the real size from an Api.Photo container (no own size field)', () => {
+            // MessageMediaPhoto.photo is an Api.Photo container, not a PhotoSize: it has
+            // no `size` of its own, so the old code reported 0 and every downstream
+            // consumer (progress, dedupe, empty-stream guard) went blind.
+            const media = {
+                photo: {
+                    id: '123',
+                    sizes: [
+                        { type: 'x', size: 1200 },
+                        { type: 'y', size: 80482 },
+                        { type: 'z', size: 4096 }
+                    ]
+                }
+            };
+
+            const result = getMediaInfo(media);
+            expect(result.size).toBe(80482); // largest, not array order dependent
+            expect(result.name).toMatch(/transfer_\d+_[a-z0-9]+\.jpg/);
+        });
+
+        it('should read sizes from the raw TL `photo` array when sizes is absent', () => {
+            const media = {
+                photo: {
+                    id: '123',
+                    photo: [{ type: 'x', size: 3000 }, { type: 'y', size: 9000 }]
+                }
+            };
+
+            expect(getMediaInfo(media).size).toBe(9000);
+        });
+
+        it('should report 0 for an empty photo container rather than throwing', () => {
+            const result = getMediaInfo({ photo: { id: '1', sizes: [] } });
+            expect(result.size).toBe(0);
+        });
+
         it('should return null for media without document/video/photo', () => {
             const media = { audio: {} };
 

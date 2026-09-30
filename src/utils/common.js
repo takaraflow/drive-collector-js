@@ -126,17 +126,25 @@ export const getMediaInfo = (input) => {
     const media = input?.media || input;
     if (!media) return null;
 
-    const obj = media.document || media.video || media.photo;
+    const photo = media.photo;
+    const obj = media.document || media.video || photo;
     if (!obj) return null;
     let name = obj.attributes?.find(a => a.fileName)?.fileName;
     if (!name) {
         // 使用时间戳 + UUID 确保文件名唯一，特别是在处理媒体组时
         const uuid = crypto.randomUUID().substring(0, 8);
         const timestamp = Date.now();
-        const ext = media.video ? ".mp4" : (media.photo ? ".jpg" : ".bin");
+        const ext = media.video ? ".mp4" : (photo ? ".jpg" : ".bin");
         name = `transfer_${timestamp}_${uuid}${ext}`;
     }
-    const size = obj.size || (obj.sizes ? obj.sizes[obj.sizes.length - 1].size : 0);
+    // MessageMediaPhoto.photo 是 Api.Photo 容器(不是 PhotoSize),自身没有 size;
+    // 真实字节大小在 sizes/photo 数组里。读 obj.size 恒得 0,会让进度、去重和
+    // 空流守卫全部失真。
+    const photoSizes = photo ? (Array.isArray(photo) ? photo : (photo.sizes || photo.photo)) : null;
+    const largestPhotoSize = Array.isArray(photoSizes)
+        ? photoSizes.reduce((best, s) => ((s?.size || 0) > (best?.size || 0) ? s : best), null)
+        : null;
+    const size = obj.size || largestPhotoSize?.size || 0;
     const parsedSize = parseInt(size, 10);
     return { name, size: Number.isFinite(parsedSize) ? parsedSize : 0 };
 };
