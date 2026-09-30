@@ -386,9 +386,16 @@ export class DirectTransferService {
                 throw error;
             }
 
+            // 源侧定性优先于 rclone 的死信号:源侧 stall 是我们自己的超时钩子 SIGTERM 掉
+            // rclone 的,rclone 只会报 "terminated by signal SIGTERM",说不出是谁掐的。拿它当
+            // effectiveError 会把 Telegram 下载故障误标成 rclone_target,重试时便跳过
+            // resetExportedDownloadSender——卡死的导出下载 sender 每次重试原地复撞,必然次次全死。
             const effectiveError = rcloneFailure?.success === false ? rcloneFailure : error;
-            const message = redactSensitiveText(effectiveError?.error || effectiveError?.message || String(effectiveError));
-            if (!rcloneFailure && effectiveError?.retryScope === "telegram_source") {
+            const sourceScoped = error?.retryScope === "telegram_source";
+            const message = redactSensitiveText(sourceScoped
+                ? [error?.message, rcloneFailure?.error].filter(Boolean).join("; ")
+                : (effectiveError?.error || effectiveError?.message || String(effectiveError)));
+            if (sourceScoped) {
                 return {
                     success: false,
                     fallback: false,
