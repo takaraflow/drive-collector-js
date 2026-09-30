@@ -691,6 +691,153 @@ describe("DirectTransferService", () => {
     expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
   });
 
+  test("keeps telegram_source scope when the stall hook SIGTERMs rclone", async () => {
+    vi.useFakeTimers();
+    const proc = createProcess();
+    // 真实 OS 语义:我们的 stall 钩子 SIGTERM 掉 rclone,rclone 随后以 (null, SIGTERM) 关闭,
+    // 于是 _watchRcloneProcess 报 "terminated by signal SIGTERM" —— 这条死信号不能盖掉源侧定性。
+    proc.kill = vi.fn(() => proc.emit("close", null, "SIGTERM"));
+    const stdin = createWritable(proc);
+    const stagingName = ".drive-collector-task-source-sigterm-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    const sourceIterator = {
+      next: vi.fn(() => new Promise(() => {})),
+      return: vi.fn(async () => ({ done: true }))
+    };
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+    client.iterDownload.mockReturnValue(sourceIterator);
+
+    const resultPromise = service.transferTelegramMediaToRemote({
+      task: { id: "task-source-sigterm", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 5 },
+      fileName: "file.bin",
+      config: {
+        directTransfer: {
+          enabled: true,
+          fallbackToLocal: false,
+          timeoutMs: 10000,
+          stallTimeoutMs: 100,
+          minStallTimeoutMs: 0,
+          maxAttempts: 1,
+          retryDelayMs: 0
+        },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(1600);
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false,
+      errorCode: "TELEGRAM_SOURCE_TRANSIENT",
+      retryable: true,
+      userRetryable: true,
+      retryScope: "telegram_source"
+    });
+    expect(result.error).toContain("direct transfer stall timeout");
+    expect(result.error).toContain("terminated by signal SIGTERM");
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
+  });
+
+  test("keeps rclone_target when the stalled run also produced its own rclone diagnostic", async () => {
+    vi.useFakeTimers();
+    const proc = createProcess({ exitCode: null, signal: "SIGTERM", stderr: "ERROR : 存储空间超限 (Code=200002)" });
+    proc.kill = vi.fn(() => proc.complete());
+    const stdin = createWritable(proc);
+    const stagingName = ".drive-collector-task-src-diag-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    const sourceIterator = {
+      next: vi.fn(() => new Promise(() => {})),
+      return: vi.fn(async () => ({ done: true }))
+    };
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+    client.iterDownload.mockReturnValue(sourceIterator);
+
+    const resultPromise = service.transferTelegramMediaToRemote({
+      task: { id: "task-src-diag", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 5 },
+      fileName: "file.bin",
+      config: {
+        directTransfer: {
+          enabled: true,
+          fallbackToLocal: false,
+          timeoutMs: 10000,
+          stallTimeoutMs: 100,
+          minStallTimeoutMs: 0,
+          maxAttempts: 1,
+          retryDelayMs: 0
+        },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(1600);
+    const result = await resultPromise;
+
+    // rclone 带上了自己的诊断 → 那是另一个独立的、可能是永久性的网盘故障,定性归它,
+    // 不能因为源侧也恰好 stall 了就一律盖成可重试的 TELEGRAM_SOURCE_TRANSIENT。
+    expect(result.retryScope).toBe("rclone_target");
+    expect(result.errorCode).not.toBe("TELEGRAM_SOURCE_TRANSIENT");
+    expect(result.error).toContain("存储空间超限");
+    // 源侧原因仍然留在 message 里,不丢证据
+    expect(result.error).toContain("direct transfer stall timeout");
+  });
+
+  test("keeps rclone_target when the stalled run also produced its own rclone diagnostic", async () => {
+    vi.useFakeTimers();
+    const proc = createProcess({ exitCode: null, signal: "SIGTERM", stderr: "ERROR : 存储空间超限 (Code=200002)" });
+    proc.kill = vi.fn(() => proc.complete());
+    const stdin = createWritable(proc);
+    const stagingName = ".drive-collector-task-src-diag-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    const sourceIterator = {
+      next: vi.fn(() => new Promise(() => {})),
+      return: vi.fn(async () => ({ done: true }))
+    };
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+    client.iterDownload.mockReturnValue(sourceIterator);
+
+    const resultPromise = service.transferTelegramMediaToRemote({
+      task: { id: "task-src-diag", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 5 },
+      fileName: "file.bin",
+      config: {
+        directTransfer: {
+          enabled: true,
+          fallbackToLocal: false,
+          timeoutMs: 10000,
+          stallTimeoutMs: 100,
+          minStallTimeoutMs: 0,
+          maxAttempts: 1,
+          retryDelayMs: 0
+        },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(1600);
+    const result = await resultPromise;
+
+    // rclone 带上了自己的诊断 → 那是另一个独立的、可能是永久性的网盘故障,定性归它,
+    // 不能因为源侧也恰好 stall 了就一律盖成可重试的 TELEGRAM_SOURCE_TRANSIENT。
+    expect(result.retryScope).toBe("rclone_target");
+    expect(result.errorCode).not.toBe("TELEGRAM_SOURCE_TRANSIENT");
+    expect(result.error).toContain("存储空间超限");
+    // 源侧原因仍然留在 message 里,不丢证据
+    expect(result.error).toContain("direct transfer stall timeout");
+  });
+
   test("fails strict zero-disk transfer when rclone stdin backpressure stalls", async () => {
     vi.useFakeTimers();
     const proc = createProcess();
