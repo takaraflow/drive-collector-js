@@ -31,6 +31,12 @@ const ADAPTIVE_STALL_MAX_TIMEOUT_MS = 30 * 60 * 1000;
 const ADAPTIVE_STALL_SAFETY_FACTOR = 5;
 const ADAPTIVE_STALL_WARMUP_BYTES = 512 * 1024;
 const LOCAL_STAGING_REQUIRED_DRIVE_TYPES = new Set(["oss", "r2", "s3"]);
+// Proton 的服务端 move(moveto)最不可靠:目录最终一致性会让它稳定报
+// "Server side directory move failed: directory not found",而此时 staging 文件的字节
+// 其实早已完整传上去了 —— 整段转存只死在最后这一步。直写最终路径把这次 move 整个跳过。
+// 失败残留由 rclone 的 replace_existing_draft 在重试时替换(见 ProtonDriveProvider),
+// 因为最终名不是 _isManagedStagingFile 认的 staging 名,不能走 _cleanupRemote 删。
+const DIRECT_WRITE_DRIVE_TYPES = new Set(["protondrive"]);
 const TELEGRAM_SOURCE_TRANSIENT_ERROR_CODE = "TELEGRAM_SOURCE_TRANSIENT";
 const TELEGRAM_SOURCE_TRANSIENT_ERROR_PATTERNS = [
     /^TIMEOUT$/i,
@@ -224,7 +230,10 @@ export class DirectTransferService {
             ? chunkSize
             : (totalSize > LARGE_FILE_THRESHOLD ? DEFAULT_LARGE_CHUNK_SIZE : DEFAULT_SMALL_CHUNK_SIZE);
         const finalFileName = this.cloudTool.sanitizeRemoteFileName?.(fileName) || path.basename(String(fileName || "unnamed.bin"));
-        const stagingFileName = this._buildStagingFileName(task.id, finalFileName);
+        const directWrite = DIRECT_WRITE_DRIVE_TYPES.has(String(driveType || "").toLowerCase());
+        const stagingFileName = directWrite
+            ? finalFileName
+            : this._buildStagingFileName(task.id, finalFileName);
         let stagedRemoteName = stagingFileName;
         let movedToFinal = false;
         let uploadedBytes = 0;
@@ -352,7 +361,10 @@ export class DirectTransferService {
             const preMoveRemote = await this.cloudTool.getRemoteFileInfo(finalFileName, task.userId, 1, true);
             if (preMoveRemote) {
                 if (this._isSizeMatch(preMoveRemote.Size, totalSize)) {
-                    await this._cleanupRemote(stagedRemoteName, task.userId, "remote_completed_concurrently");
+                    // 直写模式下 stagedRemoteName 就是 finalFileName,删它等于删掉本次要交付的文件
+                    if (!directWrite) {
+                        await this._cleanupRemote(stagedRemoteName, task.userId, "remote_completed_concurrently");
+                    }
                     return this._buildExistingRemoteResult(finalFileName, totalSize, uploadedBytes);
                 }
                 throw new DirectTransferFallbackError(
@@ -360,11 +372,16 @@ export class DirectTransferService {
                 );
             }
 
-            const moveResult = await this.cloudTool.moveRemoteFile(stagedRemoteName, finalFileName, task.userId);
-            if (!moveResult?.success) {
-                throw new DirectTransferFallbackError(moveResult?.error || "rclone moveto failed");
+            if (directWrite) {
+                // rcat 已把字节写在最终路径上,没有 staging,也就没有那次服务端 move
+                movedToFinal = true;
+            } else {
+                const moveResult = await this.cloudTool.moveRemoteFile(stagedRemoteName, finalFileName, task.userId);
+                if (!moveResult?.success) {
+                    throw new DirectTransferFallbackError(moveResult?.error || "rclone moveto failed");
+                }
+                movedToFinal = true;
             }
-            movedToFinal = true;
 
             const finalRemote = await this._waitForRemoteValidation(finalFileName, task.userId, totalSize);
             if (!this._isSizeMatch(finalRemote?.Size, totalSize)) {
@@ -383,7 +400,7 @@ export class DirectTransferService {
             const rcloneFailure = await this._resolveRcloneFailureAfterStreamError(rcloneCompletion, task.id, error);
             this._abortRclone(stdin, proc);
             await this._closeSourceIterator(sourceIterator, task.id);
-            if (!movedToFinal) {
+            if (!movedToFinal && !directWrite) {
                 await this._cleanupRemote(stagedRemoteName, task.userId, "transfer_failed");
             }
             if (error?.message === "CANCELLED") {
