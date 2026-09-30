@@ -1330,7 +1330,11 @@ export class CloudTool {
                 "--use-json-log",
                 "--buffer-size", "32M"
             ];
-            if (Number.isFinite(size) && size >= 0) {
+            // 只在 size 确实可信时才传。rclone rcat --size 是"期望的源字节数",
+            // 收尾时会拿它和实际写入比对,不符即报 "corrupted on transfer: sizes differ"。
+            // 传 0(或任何错值)会让一次本来成功的上传被误判为损坏 —— Telegram 不会发空文件,
+            // 所以 size<=0 一律视为未知,交给 rclone 从 stdin 自己数。
+            if (Number.isFinite(size) && size > 0) {
                 args.push("--size", String(size));
             }
 

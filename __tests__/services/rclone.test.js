@@ -1190,6 +1190,61 @@ describe('CloudTool', () => {
             expect(args).toEqual(expect.arrayContaining([expect.stringContaining('test-folder/movie.mkv')]));
         });
 
+        it('should not pass --size when the size is unknown (0)', async () => {
+            // rclone rcat --size 是"期望的源字节数",收尾时拿它和实际写入比对,
+            // 不符即报 "corrupted on transfer: sizes differ"。传 0 会把一次
+            // 本来成功的上传误判成损坏(线上 src 0 vs dst 103211 即此)。
+            mockGetDefaultDrive.mockResolvedValue({
+                type: 'drive',
+                config_data: JSON.stringify({ user: 'u', pass: 'p' })
+            });
+            const proc = createAutoProcess();
+            mockSpawn
+                .mockImplementationOnce((cmd, args) => createAutoProcess((p) => {
+                    p.stderr.emit('end');
+                    p.stderr.emit('close');
+                    p.stdout.emit('end');
+                    p.stdout.emit('close');
+                    p.emit('exit', 0);
+                    p.emit('close', 0);
+                }))
+                .mockReturnValueOnce(proc);
+
+            await CloudTool.createRcatStream('photo.jpg', 'user123', { size: 0 });
+
+            expect(mockSpawn.mock.calls[1][1]).not.toContain('--size');
+        });
+
+        it('should not pass --size for a negative or missing size', async () => {
+            mockGetDefaultDrive.mockResolvedValue({
+                type: 'drive',
+                config_data: JSON.stringify({ user: 'u', pass: 'p' })
+            });
+            const doneSpawn = () => createAutoProcess((p) => {
+                p.stderr.emit('end');
+                p.stderr.emit('close');
+                p.stdout.emit('end');
+                p.stdout.emit('close');
+                p.emit('exit', 0);
+                p.emit('close', 0);
+            });
+            // 每次 createRcatStream 都先跑一次 _ensureUploadDirectory 的 mkdir
+            mockSpawn
+                .mockImplementationOnce(doneSpawn)
+                .mockReturnValueOnce(createAutoProcess())
+                .mockImplementationOnce(doneSpawn)
+                .mockReturnValueOnce(createAutoProcess());
+
+            await CloudTool.createRcatStream('photo.jpg', 'user123', { size: -1 });
+            await CloudTool.createRcatStream('photo2.jpg', 'user123', {});
+
+            const rcatCalls = mockSpawn.mock.calls.filter(c => c[1].includes('rcat'));
+            expect(rcatCalls).toHaveLength(2);
+            for (const call of rcatCalls) {
+                expect(call[1]).not.toContain('--size');
+            }
+        });
+
         it('should surface upload directory failures before opening rcat', async () => {
             mockGetDefaultDrive.mockResolvedValue({
                 type: 'mega',
