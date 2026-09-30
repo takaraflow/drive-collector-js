@@ -805,6 +805,116 @@ describe("DirectTransferService", () => {
     expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
   });
 
+  test("treats a 0-byte Telegram source as a retryable telegram_source failure, not an rclone error", async () => {
+    // gramjs 的 _downloadPhoto / 未知 media 分支都是 `return Buffer.alloc(0)`,不抛错。
+    // 照片解析失败时 iterDownload 因此"成功"地产出空流;喂给 rclone 会被报成
+    // "sizes differ src 0" —— 既误导(rclone 背锅)又跳过重试(源侧真凶被掩盖)。
+    vi.useFakeTimers();
+    const proc = createProcess();
+    const stdin = createWritable(proc);
+    const stagingName = ".drive-collector-task-empty-1-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    const sourceIterator = {
+      next: vi.fn(async () => ({ done: true })), // 一个字节都没有
+      return: vi.fn(async () => ({ done: true }))
+    };
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+    client.iterDownload.mockReturnValue(sourceIterator);
+
+    const resultPromise = service.transferTelegramMediaToRemote({
+      task: { id: "task-empty-source", userId: "user-1" },
+      message: { media: { photo: {} } },
+      client,
+      info: { size: 80482 },
+      fileName: "photo.jpg",
+      config: {
+        directTransfer: {
+          enabled: true,
+          fallbackToLocal: false,
+          timeoutMs: 10000,
+          stallTimeoutMs: 100,
+          minStallTimeoutMs: 0,
+          maxAttempts: 1,
+          retryDelayMs: 0
+        },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(1600);
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false,
+      errorCode: "TELEGRAM_SOURCE_TRANSIENT",
+      retryable: true,
+      userRetryable: true,
+      retryScope: "telegram_source"
+    });
+    expect(result.error).toContain("empty stream");
+    expect(result.error).toContain("80482");
+    // 空流绝不能 end stdin 让 rclone 自顾自跑完 —— 必须主动收掉
+    expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(sourceIterator.return).toHaveBeenCalled();
+  });
+
+  test("treats a 0-byte Telegram source as a retryable telegram_source failure, not an rclone error", async () => {
+    // gramjs 的 _downloadPhoto / 未知 media 分支都是 `return Buffer.alloc(0)`,不抛错。
+    // 照片解析失败时 iterDownload 因此"成功"地产出空流;喂给 rclone 会被报成
+    // "sizes differ src 0" —— 既误导(rclone 背锅)又跳过重试(源侧真凶被掩盖)。
+    vi.useFakeTimers();
+    const proc = createProcess();
+    const stdin = createWritable(proc);
+    const stagingName = ".drive-collector-task-empty-1-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
+    const sourceIterator = {
+      next: vi.fn(async () => ({ done: true })), // 一个字节都没有
+      return: vi.fn(async () => ({ done: true }))
+    };
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
+    client.iterDownload.mockReturnValue(sourceIterator);
+
+    const resultPromise = service.transferTelegramMediaToRemote({
+      task: { id: "task-empty-source", userId: "user-1" },
+      message: { media: { photo: {} } },
+      client,
+      info: { size: 80482 },
+      fileName: "photo.jpg",
+      config: {
+        directTransfer: {
+          enabled: true,
+          fallbackToLocal: false,
+          timeoutMs: 10000,
+          stallTimeoutMs: 100,
+          minStallTimeoutMs: 0,
+          maxAttempts: 1,
+          retryDelayMs: 0
+        },
+        remoteName: "mega",
+        oss: {}
+      }
+    });
+
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(1600);
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      success: false,
+      fallback: false,
+      errorCode: "TELEGRAM_SOURCE_TRANSIENT",
+      retryable: true,
+      userRetryable: true,
+      retryScope: "telegram_source"
+    });
+    expect(result.error).toContain("empty stream");
+    expect(result.error).toContain("80482");
+    // 空流绝不能 end stdin 让 rclone 自顾自跑完 —— 必须主动收掉
+    expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(sourceIterator.return).toHaveBeenCalled();
+  });
+
   test("keeps telegram_source scope when the stall hook SIGTERMs rclone", async () => {
     vi.useFakeTimers();
     const proc = createProcess();
