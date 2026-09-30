@@ -128,6 +128,32 @@ describe("DirectTransferService", () => {
     vi.useRealTimers();
   });
 
+  test("sweeps only expired orphan staging files, sparing live transfers and user files", async () => {
+    const now = 1_700_000_000_000;
+    const orphan = `.drive-collector-task-old-${now - 60 * 60 * 1000}-123e4567-e89b-12d3-a456-426614174000.part.movie.mkv`;
+    const inFlight = `.drive-collector-task-live-${now - 60 * 1000}-223e4567-e89b-12d3-a456-426614174000.part.movie2.mkv`;
+    cloudTool.listRemoteFiles = vi.fn().mockResolvedValue([
+      { Name: orphan, Size: 800_000_000 },
+      { Name: inFlight, Size: 400_000_000 },
+      { Name: "user-own-video.mp4", Size: 1_000_000 },
+      { Name: "folder", IsDir: true }
+    ]);
+
+    const result = await service.sweepOrphanStagingFiles({ userId: "user-1", now });
+
+    expect(result).toEqual({ deleted: 1, failed: 0 });
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledTimes(1);
+    expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(orphan, "user-1");
+  });
+
+  test("orphan sweep survives an unlistable drive without throwing", async () => {
+    cloudTool.listRemoteFiles = vi.fn().mockRejectedValue(new Error("drive not found"));
+
+    await expect(service.sweepOrphanStagingFiles({ userId: "user-1" }))
+      .resolves.toEqual({ deleted: 0, failed: 0 });
+    expect(cloudTool.deleteRemoteFile).not.toHaveBeenCalled();
+  });
+
   test("streams Telegram chunks into rcat, moves staging file, and validates remote size", async () => {
     const proc = createProcess();
     const stdin = createWritable(proc);

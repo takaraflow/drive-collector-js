@@ -595,6 +595,24 @@ async function _handleDirectTransfer(context, deps, task, info, fileName, heartb
     }
 
     await assertClaimFenceCurrent(task, instanceCoordinator);
+
+    // 动这个用户的网盘之前,先把他上次进程被杀时留下的半截 staging 文件清掉。
+    // 清不掉也不能影响本次转存,所以整段兜住。
+    if (parseBoolean(config?.directTransfer?.sweepOrphanStaging, true)) {
+        try {
+            await directTransferService.sweepOrphanStagingFiles?.({
+                userId: task.userId,
+                maxAgeMs: config?.directTransfer?.orphanStagingMaxAgeMs
+            });
+        } catch (error) {
+            log.warn("遗留直传临时文件清理未完成", {
+                taskId: task.id,
+                userId: task.userId,
+                error: error.message
+            });
+        }
+    }
+
     const streamStartTransition = await TaskRepository.transitionStatus(task.id, TASK_EVENTS.START_STREAM_UPLOAD, null, {
         ...getClaimFenceOptions(task),
         returnResult: true,
