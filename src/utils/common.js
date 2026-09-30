@@ -139,12 +139,22 @@ export const getMediaInfo = (input) => {
     }
     // MessageMediaPhoto.photo 是 Api.Photo 容器(不是 PhotoSize),自身没有 size;
     // 真实字节大小在 sizes/photo 数组里。读 obj.size 恒得 0,会让进度、去重和
-    // 空流守卫全部失真。
+    // rclone 的 --size 校验全失真(错值会让 rclone 收尾时误判 "corrupted on transfer")。
+    // PhotoSizeProgressive 把各档尺寸放在 sizes 这个 int 数组里、自身没有 size,
+    // 与 gramjs 的 Math.max(...thumb.sizes) 对齐。
     const photoSizes = photo ? (Array.isArray(photo) ? photo : (photo.sizes || photo.photo)) : null;
+    const photoBytes = (s) => {
+        if (!s) return 0;
+        const direct = Number(s.size);
+        const progressive = Array.isArray(s.sizes)
+            ? Math.max(0, ...s.sizes.filter(Number.isFinite))
+            : 0;
+        return Math.max(Number.isFinite(direct) ? direct : 0, progressive);
+    };
     const largestPhotoSize = Array.isArray(photoSizes)
-        ? photoSizes.reduce((best, s) => ((s?.size || 0) > (best?.size || 0) ? s : best), null)
+        ? photoSizes.reduce((best, s) => (photoBytes(s) > photoBytes(best) ? s : best), null)
         : null;
-    const size = obj.size || largestPhotoSize?.size || 0;
+    const size = obj.size || photoBytes(largestPhotoSize) || 0;
     const parsedSize = parseInt(size, 10);
     return { name, size: Number.isFinite(parsedSize) ? parsedSize : 0 };
 };
