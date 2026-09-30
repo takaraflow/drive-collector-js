@@ -327,7 +327,11 @@ export class ProtonDriveProvider extends BaseDriveProvider {
     getWritableRcloneConfigEntries(config = {}) {
         const entries = {
             username: normalizeBindingText(config.username),
-            password: normalizeBindingText(config.password)
+            password: normalizeBindingText(config.password),
+            // 直写最终路径时,中断的 rcat 会在该位置留下 Proton draft;不开启替换,重试会一直
+            // 撞 "a draft exist" 传不上去。真正的同名不同内容冲突已被前置的
+            // getRemoteFileInfo 挡住(见 DirectTransferService 直写分支),不会误覆盖用户文件。
+            replace_existing_draft: 'true'
         };
 
         if (this._hasReusableSession(config)) {

@@ -197,6 +197,94 @@ describe("DirectTransferService", () => {
     expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ bytes: 11, size: 11 }));
   });
 
+  test("protondrive streams straight to the final name and skips the server-side move", async () => {
+    const proc = createProcess();
+    const stdin = createWritable(proc);
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: "movie.mkv" });
+    cloudTool.getRemoteFileInfo
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ Name: "movie.mkv", Size: 11 });
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-proton", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "movie.mkv",
+      driveType: "protondrive"
+    });
+
+    expect(result).toMatchObject({ success: true, method: "direct_stream", fileName: "movie.mkv" });
+    // Proton 的 moveto 会因目录最终一致性稳定报 directory not found,直写整段跳过它
+    expect(cloudTool.createRcatStream).toHaveBeenCalledWith("movie.mkv", "user-1", { size: 11 });
+    expect(cloudTool.moveRemoteFile).not.toHaveBeenCalled();
+    expect(cloudTool.deleteRemoteFile).not.toHaveBeenCalled();
+  });
+
+  test("protondrive never deletes the final name when the direct write fails", async () => {
+    const proc = createProcess({ exitCode: 1, stderr: "boom" });
+    const stdin = createWritable(proc);
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: "file.bin" });
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-proton-fail", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "file.bin",
+      driveType: "protondrive"
+    });
+
+    expect(result).toMatchObject({ success: false, fallback: true });
+    // 最终名不是 _isManagedStagingFile 认的 staging 名,删它等于删用户文件
+    expect(cloudTool.deleteRemoteFile).not.toHaveBeenCalled();
+  });
+
+  test("protondrive streams straight to the final name and skips the server-side move", async () => {
+    const proc = createProcess();
+    const stdin = createWritable(proc);
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: "movie.mkv" });
+    cloudTool.getRemoteFileInfo
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ Name: "movie.mkv", Size: 11 });
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-proton", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "movie.mkv",
+      driveType: "protondrive"
+    });
+
+    expect(result).toMatchObject({ success: true, method: "direct_stream", fileName: "movie.mkv" });
+    // Proton 的 moveto 会因目录最终一致性稳定报 directory not found,直写整段跳过它
+    expect(cloudTool.createRcatStream).toHaveBeenCalledWith("movie.mkv", "user-1", { size: 11 });
+    expect(cloudTool.moveRemoteFile).not.toHaveBeenCalled();
+    expect(cloudTool.deleteRemoteFile).not.toHaveBeenCalled();
+  });
+
+  test("protondrive never deletes the final name when the direct write fails", async () => {
+    const proc = createProcess({ exitCode: 1, stderr: "boom" });
+    const stdin = createWritable(proc);
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: "file.bin" });
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-proton-fail", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11 },
+      fileName: "file.bin",
+      driveType: "protondrive"
+    });
+
+    expect(result).toMatchObject({ success: false, fallback: true });
+    // 最终名不是 _isManagedStagingFile 认的 staging 名,删它等于删用户文件
+    expect(cloudTool.deleteRemoteFile).not.toHaveBeenCalled();
+  });
+
   test("falls back and cleans remote staging when rcat fails", async () => {
     const proc = createProcess({ exitCode: 1, stderr: "backend does not support rcat" });
     const stdin = createWritable(proc);
