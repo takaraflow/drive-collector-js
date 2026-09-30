@@ -355,7 +355,9 @@ describe("Config Module", () => {
       maxAttempts: 5,
       retryDelayMs: 2000,
       localStagingTtlMs: 86400000,
-      resetSenderOnRetry: true
+      resetSenderOnRetry: true,
+      sweepOrphanStaging: true,
+      orphanStagingMaxAgeMs: 1800000
     });
   });
 
@@ -377,7 +379,9 @@ describe("Config Module", () => {
       maxAttempts: 5,
       retryDelayMs: 2000,
       localStagingTtlMs: 86400000,
-      resetSenderOnRetry: true
+      resetSenderOnRetry: true,
+      sweepOrphanStaging: true,
+      orphanStagingMaxAgeMs: 1800000
     });
 
     delete process.env.DIRECT_TRANSFER_ENABLED;

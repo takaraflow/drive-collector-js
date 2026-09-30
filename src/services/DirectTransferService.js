@@ -51,6 +51,10 @@ const NON_FALLBACK_RCLONE_ERROR_CODES = new Set([
 ]);
 
 const RCLONE_TARGET_RETRY_SCOPE = "rclone_target";
+// 我们自己的 staging 命名:.drive-collector-<taskId>-<创建时间戳>-<uuid>.part.<原文件名>
+// 第 3 段的毫秒时间戳既用来识别"自己人文件",也用来判断它是不是早于本次启动的孤儿。
+const MANAGED_STAGING_FILE_PATTERN = /^\.drive-collector-[a-zA-Z0-9_-]+-(\d+)-[0-9a-f-]{36}\.part\./;
+const DEFAULT_ORPHAN_STAGING_MAX_AGE_MS = 30 * 60 * 1000;
 
 class TransferSpeedMonitor {
     constructor({ windowMs = ADAPTIVE_STALL_WINDOW_MS } = {}) {
@@ -714,7 +718,80 @@ export class DirectTransferService {
     }
 
     _isManagedStagingFile(fileName) {
-        return /^\.drive-collector-[a-zA-Z0-9_-]+-\d+-[0-9a-f-]{36}\.part\./.test(String(fileName || ""));
+        return MANAGED_STAGING_FILE_PATTERN.test(String(fileName || ""));
+    }
+
+    _getStagingCreatedAt(fileName) {
+        const matched = MANAGED_STAGING_FILE_PATTERN.exec(String(fileName || ""));
+        return matched ? Number(matched[1]) : null;
+    }
+
+    /**
+     * 清掉上一次进程被杀(部署重启/OOM/实例切换)时留在用户网盘里的半截 staging 文件。
+     *
+     * 失败当场的那次清理只覆盖"进程活着走到 catch"的路径;进程中途没了,这些 .part. 文件
+     * 就永久留着——用户转存的都是几百 MB 起步的大文件,砍几次就把网盘塞满,Proton 直接
+     * 200002,之后所有任务全挂。只删我们自己这个命名格式、且创建时间超过 maxAgeMs 的:
+     * 在途传输的时间戳是新的,天然碰不到;用户自己的文件根本不符合格式。
+     */
+    async sweepOrphanStagingFiles({
+        userId,
+        maxAgeMs = DEFAULT_ORPHAN_STAGING_MAX_AGE_MS,
+        now = Date.now()
+    } = {}) {
+        const empty = { deleted: 0, failed: 0 };
+        if (!userId || typeof this.cloudTool?.listRemoteFiles !== "function") return empty;
+
+        let files;
+        try {
+            files = await this.cloudTool.listRemoteFiles(userId);
+        } catch (error) {
+            log.warn("孤儿 staging 扫描失败,跳过清理", {
+                userId,
+                error: redactSensitiveText(error?.message || String(error))
+            });
+            return empty;
+        }
+
+        let deleted = 0;
+        let failed = 0;
+        for (const file of Array.isArray(files) ? files : []) {
+            if (file?.IsDir) continue;
+            const createdAt = this._getStagingCreatedAt(file?.Name);
+            if (!createdAt || now - createdAt < maxAgeMs) continue;
+
+            try {
+                const result = await this.cloudTool.deleteRemoteFile(file.Name, userId);
+                if (result?.success) {
+                    deleted++;
+                    log.info("已清理遗留的直传临时文件", {
+                        userId,
+                        fileName: file.Name,
+                        sizeBytes: file.Size,
+                        ageMs: now - createdAt
+                    });
+                } else {
+                    failed++;
+                    log.warn("清理遗留直传临时文件失败", {
+                        userId,
+                        fileName: file.Name,
+                        error: redactSensitiveText(result?.error || "delete remote staging file failed")
+                    });
+                }
+            } catch (error) {
+                failed++;
+                log.warn("清理遗留直传临时文件抛错", {
+                    userId,
+                    fileName: file.Name,
+                    error: redactSensitiveText(error?.message || String(error))
+                });
+            }
+        }
+
+        if (deleted || failed) {
+            log.info("遗留直传临时文件清理完成", { userId, deleted, failed });
+        }
+        return { deleted, failed };
     }
 
     _delay(ms) {

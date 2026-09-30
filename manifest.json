@@ -593,6 +593,18 @@
         "default": true,
         "description": "On telegram_source retryable failures (e.g. CONNECTION_NOT_INITED), tear down the per-DC exported download sender between retries so a fresh sender re-sends InitConnection. Escape hatch: set false to disable."
       },
+      "DIRECT_TRANSFER_SWEEP_ORPHAN_STAGING": {
+        "type": "boolean",
+        "required": false,
+        "default": true,
+        "description": "Before touching a user's remote, sweep direct-transfer staging files (.drive-collector-<task>-<ts>-<uuid>.part.*) left behind by a process that died mid-upload (deploy/OOM/instance switch). Those partials are never cleaned up otherwise and fill the user's drive until Proton returns 200002. Escape hatch: set false to disable."
+      },
+      "DIRECT_TRANSFER_ORPHAN_STAGING_MAX_AGE_MS": {
+        "type": "number",
+        "required": false,
+        "default": 1800000,
+        "description": "Minimum age before a staging file is treated as an orphan. Must exceed the longest expected single-file transfer (default 30min)."
+      },
       "PROTON_SESSION_LOCK_ENABLED": {
         "type": "boolean",
         "required": false,

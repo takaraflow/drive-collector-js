@@ -470,7 +470,11 @@ function buildConfigObject(env) {
             maxAttempts: parsePositiveInt(env.DIRECT_TRANSFER_MAX_ATTEMPTS, 5),
             retryDelayMs: parseNonNegativeInt(env.DIRECT_TRANSFER_RETRY_DELAY_MS, 2000),
             localStagingTtlMs: parsePositiveNumber(env.DIRECT_TRANSFER_LOCAL_STAGING_TTL_MS, 24 * 60 * 60 * 1000),
-            resetSenderOnRetry: parseBoolean(env.DIRECT_TRANSFER_RESET_SENDER_ON_RETRY, true)
+            resetSenderOnRetry: parseBoolean(env.DIRECT_TRANSFER_RESET_SENDER_ON_RETRY, true),
+            // 进程被杀(部署/OOM/实例切换)时留在用户网盘里的半截 staging 文件没有任何人会清理,
+            // 几个 800MB 的半截文件就能把用户网盘塞满,进而 200002 让后续任务全挂。转存前扫一次。
+            sweepOrphanStaging: parseBoolean(env.DIRECT_TRANSFER_SWEEP_ORPHAN_STAGING, true),
+            orphanStagingMaxAgeMs: parsePositiveNumber(env.DIRECT_TRANSFER_ORPHAN_STAGING_MAX_AGE_MS, 30 * 60 * 1000)
         },
         drives: {
             // Kill-switch for per-drive serialization of the single-use Proton refresh_token.
