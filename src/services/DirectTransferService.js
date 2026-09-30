@@ -386,15 +386,22 @@ export class DirectTransferService {
                 throw error;
             }
 
-            // 源侧定性优先于 rclone 的死信号:源侧 stall 是我们自己的超时钩子 SIGTERM 掉
-            // rclone 的,rclone 只会报 "terminated by signal SIGTERM",说不出是谁掐的。拿它当
-            // effectiveError 会把 Telegram 下载故障误标成 rclone_target,重试时便跳过
-            // resetExportedDownloadSender——卡死的导出下载 sender 每次重试原地复撞,必然次次全死。
+            // 源侧定性 vs rclone 死信号:源侧 stall 是我们自己的超时钩子 SIGTERM 掉 rclone 的,
+            // rclone 只会报 "terminated by signal SIGTERM",说不出是谁掐的。拿它当 effectiveError
+            // 会把 Telegram 下载故障误标成 rclone_target,重试时便跳过 resetExportedDownloadSender
+            // ——卡死的导出下载 sender 每次重试原地复撞,必然次次全死。
+            // 但只要 rclone 带上了自己的诊断(stderr 尾巴或非零 exit code),那就是另一个独立的、
+            // 可能是永久性的网盘故障,定性交给它自己的分类——我们只把源侧原因留在 message 里不丢证据。
             const effectiveError = rcloneFailure?.success === false ? rcloneFailure : error;
-            const sourceScoped = error?.retryScope === "telegram_source";
-            const message = redactSensitiveText(sourceScoped
-                ? [error?.message, rcloneFailure?.error].filter(Boolean).join("; ")
-                : (effectiveError?.error || effectiveError?.message || String(effectiveError)));
+            const rcloneOnlyGotKilled = Boolean(rcloneFailure?.error)
+                && /terminated by signal \w+$/.test(String(rcloneFailure.error).trim());
+            const sourceScoped = error?.retryScope === "telegram_source" && (!rcloneFailure || rcloneOnlyGotKilled);
+            const message = redactSensitiveText(
+                [
+                    error?.retryScope === "telegram_source" ? error?.message : null,
+                    effectiveError?.error || effectiveError?.message || String(effectiveError)
+                ].filter(Boolean).join("; ")
+            );
             if (sourceScoped) {
                 return {
                     success: false,
