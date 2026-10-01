@@ -219,7 +219,7 @@ export async function handleTelegramClientError(err) {
 
     if (now - floodState.lastLogAt >= FLOOD_LOG_THROTTLE_MS) {
         log.warn(
-            `🌊 拦截 gramjs 导出连接错误洪流 [类型=${errorType}, 连续=${floodState.consecutive}, 期间抑制=${floodState.suppressed}]: ${(err?.message || "").slice(0, 200)}`,
+            `🌊 拦截 gramjs update loop 心跳超时 [类型=${errorType}, 连续=${floodState.consecutive}, 期间抑制=${floodState.suppressed}]: ${(err?.message || "").slice(0, 200)}`,
             { service: "telegram" }
         );
         floodState.lastLogAt = now;
@@ -228,9 +228,11 @@ export async function handleTelegramClientError(err) {
         floodState.suppressed += 1;
     }
 
-    // 不在此触发主连接重连。洪流来自下载用的导出 sender(export sender)超时,主连接通常是健康的
-    // (线上实测每次误重连后 getMe 均成功)。误重连会每 ~40s 拔掉健康主连接,打断所有在途 sendMessage
-    // 与下载,且重连清空 client._sender 会连累在途下载 sender 再报错 → 洪流自激、永不收敛。
+    // 不在此触发主连接重连。该 TIMEOUT 是**主连接自己 update loop 的心跳超时**
+    // (gramjs updates.js 的 ping 失败重试:9s 间隔 + 10s 超时 × 3 次 = 39.2s 一轮),
+    // 而重连只能救活着的 client,救不了已经被丢弃的旧实例——真正的修法是在丢弃时
+    // destroy() 而不是 disconnect(),见 stopLocalClientIfPresent。
+    // 误重连还会每 ~40s 拔掉健康主连接,打断所有在途 sendMessage 与下载。
     // 主连接真正停摆的兜底不在这里:updateHealthMonitor(更新停滞 60-120s)与 startWatchdog(心跳超时
     // 5min / 连续失败≥3)按"主连接是否真停摆"这一正确信号重连。原触发(794099a2)是本 bug 引入点,已移除。
 
@@ -395,10 +397,14 @@ export async function getCurrentDCInfo() {
 }
 
 export function resetTelegramDcConfig() {
+    // 丢引用前先 destroy():update loop 只认 _destroyed,不置位就留下孤儿心跳。
+    // 不 await —— 这是同步配置重置,不能因此变成异步。
+    const orphan = telegramClient;
     telegramDcConfig = null;
     telegramDcConfigLogged = false;
     telegramClient = null;
     isClientInitializing = false;
+    if (orphan?.destroy) Promise.resolve(orphan.destroy()).catch(() => {});
 }
 
 /**
@@ -518,15 +524,20 @@ const stopLocalClientIfPresent = async (reason) => {
     if (!telegramClient) return;
 
     if (telegramClient.connected) {
-        log.debug(`🔒 ${reason}; disconnecting local Telegram client`);
+        log.debug(`🔒 ${reason}; destroying local Telegram client`);
         try {
-            if (telegramClient._sender) {
-                await telegramClient._sender.disconnect().catch(() => {});
-            }
-            await telegramClient.disconnect();
+            // 必须 destroy() 而不是 disconnect():gramjs 的 update loop 条件是
+            // `while (!client._destroyed)`,而 _destroyed 只有 destroy() 会置位。
+            // 只 disconnect() 会让旧实例的心跳循环继续跑——往 _userConnected=false
+            // 的 sender 里 send(),promise 永不 settle,每 39.2s 打一发 TIMEOUT。
+            // destroy() 内部已 await disconnect(),不重复。
+            await telegramClient.destroy();
         } catch (error) {
-            log.debug(`🔒 Local Telegram client disconnect skipped: ${error.message || error}`);
+            log.debug(`🔒 Local Telegram client destroy skipped: ${error.message || error}`);
         }
+    } else {
+        // 未连接也要 destroy:update loop 只看 _destroyed,不看 connected。
+        await telegramClient.destroy?.().catch(() => {});
     }
 
     telegramClient = null;
@@ -1129,11 +1140,9 @@ const handleAuthKeyDuplicated = async () => {
         // 修复: 避免调用 resetClientSession() 再次触发 disconnect 导致 crash
         if (telegramClient) {
             try {
-                // 尝试断开底层连接，忽略错误
-                if (telegramClient._sender) {
-                    await telegramClient._sender.disconnect().catch(() => {});
-                }
-                await telegramClient.disconnect().catch(() => {});
+                // 同 stopLocalClientIfPresent:只有 destroy() 能停掉 update loop,
+                // disconnect() 留下孤儿心跳循环(每 39.2s 一发 TIMEOUT)。
+                await telegramClient.destroy().catch(() => {});
             } catch (err) {
                 // ignore
             }

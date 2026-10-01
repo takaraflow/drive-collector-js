@@ -990,35 +990,18 @@ export class TaskRepository {
 
     /**
      * 根据 msg_id 获取该消息组下的所有任务状态（用于看板）
+     *
+     * 不缓存：调用方要么只查一次做 isGroup 判断，要么是已被 2s 节流的看板刷新，
+     * 两者都要当前状态。缓存快照会让看板最长 2 分钟不更新。
      */
     static async findByMsgId(msgId) {
         if (!msgId) return [];
-        
-        // 尝试从缓存获取
-        const cacheKey = `tasks:msg:${msgId}:group`;
+
         try {
-            const cachedTasks = await cache.get(cacheKey, 'json');
-            if (cachedTasks) {
-                return cachedTasks;
-            }
-        } catch (e) {
-            // 缓存读取失败，继续查询数据库
-        }
-        
-        try {
-            const tasks = await d1.fetchAll(
+            return await d1.fetchAll(
                 "SELECT id, user_id, chat_id, msg_id, file_name, status, error_msg, source_type FROM tasks WHERE msg_id = ? ORDER BY created_at ASC",
                 [msgId]
             );
-            
-            // 缓存消息组任务，过期时间 2 分钟
-            try {
-                await cache.set(cacheKey, tasks, 120);
-            } catch (e) {
-                // 缓存写入失败，忽略
-            }
-            
-            return tasks;
         } catch (e) {
             log.error(`TaskRepository.findByMsgId error for ${msgId}:`, e);
             return [];

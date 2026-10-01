@@ -1059,6 +1059,17 @@ describe('TaskRepository', () => {
             expect(result).toEqual([]);
             expect(mockD1.fetchAll).not.toHaveBeenCalled();
         });
+
+        it('should not serve a cached snapshot (the group monitor needs current state)', async () => {
+            // 曾经缓存 120s 且全项目无人失效 → 看板最长 2 分钟不更新。
+            mockD1.fetchAll
+                .mockResolvedValueOnce([{ id: 'task1', status: 'downloading' }])
+                .mockResolvedValueOnce([{ id: 'task1', status: 'completed' }]);
+
+            expect((await TaskRepository.findByMsgId('msg123'))[0].status).toBe('downloading');
+            expect((await TaskRepository.findByMsgId('msg123'))[0].status).toBe('completed');
+            expect(mockD1.fetchAll).toHaveBeenCalledTimes(2);
+        });
     });
 
     describe('markCancelled', () => {

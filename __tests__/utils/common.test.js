@@ -238,6 +238,22 @@ describe('common utils', () => {
 
             const result = getMediaInfo(media);
             expect(result.size).toBe(80482); // largest, not array order dependent
+            expect(result.name).toBe('transfer_123.jpg');
+        });
+
+        it('should derive a stable name from the Telegram media id so resends dedupe', () => {
+            // 随机名会让同一张图每次重发都新传一份。dcId + id 在 Telegram 侧恒定，
+            // 所以同名 → getRemoteFileInfo 命中 → 按大小判定"已存在"。
+            const photo = { dcId: 4, id: 5123894712330000001n, sizes: [{ size: 900 }] };
+            const first = getMediaInfo({ photo });
+            const second = getMediaInfo({ photo: { ...photo } });
+
+            expect(first.name).toBe('transfer_4_5123894712330000001.jpg');
+            expect(second.name).toBe(first.name);
+        });
+
+        it('should fall back to a nonce when the media carries no Telegram id', () => {
+            const result = getMediaInfo({ photo: { attributes: [], sizes: [{ size: 512 }] } });
             expect(result.name).toMatch(/transfer_\d+_[a-z0-9]+\.jpg/);
         });
 
