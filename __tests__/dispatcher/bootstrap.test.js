@@ -29,6 +29,16 @@ function createMocks() {
         hasLock: vi.fn()
       }
     },
+    mediaGroupBuffer: {
+      default: {
+        restore: vi.fn().mockResolvedValue(undefined)
+      }
+    },
+    mediaGroupBuffer: {
+      default: {
+        restore: vi.fn().mockResolvedValue(undefined)
+      }
+    },
     config: {
       config: {
         botToken: 'mock_token',
@@ -59,6 +69,8 @@ async function loadBootstrap() {
   vi.doMock('../../src/services/telegram.js', () => mocks.telegram);
   vi.doMock('../../src/dispatcher/MessageHandler.js', () => mocks.messageHandler);
   vi.doMock('../../src/services/InstanceCoordinator.js', () => mocks.instanceCoordinator);
+  vi.doMock('../../src/services/MediaGroupBuffer.js', () => mocks.mediaGroupBuffer);
+  vi.doMock('../../src/services/MediaGroupBuffer.js', () => mocks.mediaGroupBuffer);
   vi.doMock('../../src/config/index.js', () => mocks.config);
   vi.doMock('../../src/services/logger/index.js', () => ({
     default: mocks.logger,
@@ -90,6 +102,8 @@ describe('Dispatcher Bootstrap', () => {
     vi.doUnmock('../../src/services/telegram.js');
     vi.doUnmock('../../src/dispatcher/MessageHandler.js');
     vi.doUnmock('../../src/services/InstanceCoordinator.js');
+    vi.doUnmock('../../src/services/MediaGroupBuffer.js');
+    vi.doUnmock('../../src/services/MediaGroupBuffer.js');
     vi.doUnmock('../../src/config/index.js');
     vi.doUnmock('../../src/services/logger/index.js');
     vi.useRealTimers();
@@ -124,6 +138,34 @@ describe('Dispatcher Bootstrap', () => {
     expect(telegram.client.addEventHandler).toHaveBeenCalled();
     expect(messageHandler.MessageHandler.init).toHaveBeenCalled();
   });
+
+  test('restores media group buffers on takeover even when client instance is unchanged', async () => {
+    // start() 只在非 test 环境启动后台接管循环(bootstrap.js:321),这里必须先摘掉 test 标记,
+    // 否则循环不注册,第二轮接管永远测不到。afterEach 会还原。
+    process.env.NODE_ENV = 'development';
+
+    const { startDispatcher, telegram, instanceCoordinator, mediaGroupBuffer } = await loadBootstrap();
+    instanceCoordinator.instanceCoordinator.hasLock.mockResolvedValue(true);
+    instanceCoordinator.instanceCoordinator.acquireLock.mockResolvedValue(true);
+    telegram.client.start.mockResolvedValue();
+    telegram.saveSession.mockResolvedValue();
+
+    await startDispatcher();
+    await finishStartupTimers();
+
+    expect(mediaGroupBuffer.default.restore).toHaveBeenCalled();
+
+    const afterStartup = mediaGroupBuffer.default.restore.mock.calls.length;
+
+    // 推进后台循环两轮以上: getClient 返回同一个 client 对象(runtimeClient === client)。
+    // restore 必须发生在该短路【之前】—— 断线重连会复用 client 对象,若 restore 被
+    // 放到短路之后,锁在实例间转移时 Redis 里的遗留媒体组就永远捞不回来。
+    await vi.advanceTimersByTimeAsync(200000);
+
+    expect(instanceCoordinator.instanceCoordinator.acquireLock.mock.calls.length).toBeGreaterThan(1);
+    expect(mediaGroupBuffer.default.restore.mock.calls.length).toBeGreaterThan(afterStartup);
+  });
+
 
   test('should not start client when lock not acquired', async () => {
     const { startDispatcher, telegram, instanceCoordinator } = await loadBootstrap();

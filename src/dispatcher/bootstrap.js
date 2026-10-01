@@ -1,6 +1,7 @@
 import { getClient, startTelegramWatchdog, saveSession, resetClientSession, clearSession, setConnectionStatusCallback } from "../services/telegram.js";
 import { MessageHandler } from "./MessageHandler.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
+import mediaGroupBuffer from "../services/MediaGroupBuffer.js";
 import { logger } from "../services/logger/index.js";
 import { getConfig } from "../config/index.js";
 
@@ -263,6 +264,17 @@ class DispatcherManager {
         const client = await getClient();
         if (this.stopped) return null;
 
+        // 持有 telegram_client 锁 = 本实例是当前消息处理者,此刻 Redis 里可能残留上一任
+        // 未 flush 的媒体组(它崩溃时本地定时器随进程一起没了)。每次接管都捞一次,
+        // 否则组只能等 staleThreshold 过期被清掉 —— 用户表现为"发了媒体组没反应"。
+        // 必须放在下面的 runtimeClient 比较【之前】:断线重连可能复用同一个 client 对象,
+        // 那时 runtimeClient === client 会直接 return,漏掉恢复。索引平时为空,开销是一次 Redis 读。
+        try {
+            await mediaGroupBuffer.restore();
+        } catch (error) {
+            log.error('Failed to restore media group buffers on takeover:', error);
+        }
+
         if (this.runtimeClient === client) {
             return client;
         }
@@ -293,6 +305,7 @@ class DispatcherManager {
         }, 1000);
 
         this.runtimeClient = client;
+
         return client;
     }
 
