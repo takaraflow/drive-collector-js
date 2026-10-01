@@ -233,9 +233,10 @@ export class UIHelper {
             const compactLines = statusLines.length > 0
                 ? statusLines
                 : overflowTasks.slice(0, 3);
-            const hiddenCount = Math.max(0, totalCount - compactLines.length);
-            if (hiddenCount > 0) {
-                compactLines.push(`… 其余 ${hiddenCount} 个文件正在队列中`);
+            // 排队数只数未到终态的：已完成的藏在 overflow 里，说它"正在队列中"会和汇总的 ✅ 打架
+            const queuedCount = overflowTasks.filter(l => !/^[✅❌🚫]/u.test(l)).length;
+            if (queuedCount > 0) {
+                compactLines.push(`… 其余 ${queuedCount} 个文件正在队列中`);
             }
 
             text = format(STRINGS.task.batch_monitor, {
