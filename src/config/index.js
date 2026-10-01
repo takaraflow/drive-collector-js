@@ -463,7 +463,9 @@ function buildConfigObject(env) {
         },
         directTransfer: {
             enabled: parseBoolean(env.DIRECT_TRANSFER_ENABLED, true),
-            fallbackToLocal: parseBoolean(env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL, false),
+            // 默认允许回退本地暂存:直传失败(fail closed)对用户就是"文件没了",而多写一次盘
+            // 只是慢一点。显式设false 才切回严格零落盘(容器磁盘小/不想留本地副本时用)。
+            fallbackToLocal: parseBoolean(env.DIRECT_TRANSFER_FALLBACK_TO_LOCAL, true),
             timeoutMs: parsePositiveNumber(env.DIRECT_TRANSFER_TIMEOUT_MS, 6 * 60 * 60 * 1000),
             stallTimeoutMs: parsePositiveNumber(env.DIRECT_TRANSFER_STALL_TIMEOUT_MS, 3 * 60 * 1000),
             minStallTimeoutMs: parseNonNegativeInt(env.DIRECT_TRANSFER_MIN_STALL_TIMEOUT_MS, undefined),

@@ -21,7 +21,11 @@ const TRANSIENT_ERROR_PATTERNS = [
     /timeout awaiting response headers/i,
     /server closed idle connection/i,
     /unexpected EOF/i,
-    /EOF while (reading|waiting|connecting)/i
+    /EOF while (reading|waiting|connecting)/i,
+    // 网盘后端返回 5xx(rclone rcat 会把 stderr 原样带回来)。这是网盘侧的瞬时抽风,不是我们的 bug:
+    // 漏判会掉进 UNKNOWN/retryable:false,任务第一次撞上就被判死,白白浪费掉剩下的重试预算。
+    /\b5\d\d (?:Bad Gateway|Service Unavailable|Gateway Time-?out|Internal Server Error)\b/i,
+    /\(\s*Code=-?\d+,\s*Status=5\d\d\s*\)/i
 ];
 
 const AUTH_ERROR_PATTERNS = [

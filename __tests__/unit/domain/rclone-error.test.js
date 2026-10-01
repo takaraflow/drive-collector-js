@@ -112,4 +112,21 @@ describe("rclone error classification", () => {
             userRetryable: false
         });
     });
+
+    test("keeps drive-backend 5xx retryable instead of failing the task on first hit", () => {
+        const error = `rclone rcat exited with code 1; {"time":"2026-10-01T11:19:29.416704427Z","level":"notice","msg":"Failed to rcat with 2 errors: last error was: 502 POST https://zrh-storage.proton.me/storage/blocks: 502 Bad Gateway (Code=0, Status=502)","source":"cmd/cmd.go:336"}`;
+
+        expect(classifyRcloneError(error)).toMatchObject({
+            code: RCLONE_ERROR_CODES.RCLONE_TRANSIENT,
+            retryable: true,
+            userRetryable: true
+        });
+        expect(isRetryableRcloneError(error)).toBe(true);
+
+        // 只有括号里带 Status=5xx、没有 "502 Bad Gateway" 字样的也要认出来
+        expect(classifyRcloneError("Failed to rcat: storage backend refused (Code=0, Status=503)")).toMatchObject({
+            code: RCLONE_ERROR_CODES.RCLONE_TRANSIENT,
+            retryable: true
+        });
+    });
 });
