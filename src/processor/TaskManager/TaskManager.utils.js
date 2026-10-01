@@ -156,7 +156,13 @@ export function createHeartbeat(task, context, updateStatus, fileName = null) {
 
         if (task.isGroup) {
             // Update group monitor for group tasks
-            await context._refreshGroupMonitor(task, status, downloaded, total);
+            // 上传进度在 uploadProgress 里；看板只认 (已传, 总量) 两个数，直接顶替，渲染层无需知道二者区别
+            await context._refreshGroupMonitor(
+                task,
+                status,
+                uploadProgress?.bytes ?? downloaded,
+                uploadProgress?.size ?? total
+            );
         } else {
             let text;
             if (status === 'uploading' && uploadProgress) {

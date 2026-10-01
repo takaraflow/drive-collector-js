@@ -250,6 +250,26 @@ describe("TaskManager heartbeat handling", () => {
         expect(updateStatus).toHaveBeenCalledTimes(2);
     });
 
+    test("group monitor receives upload progress instead of always 0/0", async () => {
+        const _refreshGroupMonitor = vi.fn();
+        const heartbeat = createHeartbeat(
+            { id: "task-group-upload", isGroup: true },
+            { cancelledTaskIds: new Set(), _refreshGroupMonitor },
+            vi.fn(),
+            "file.bin"
+        );
+
+        await heartbeat("uploading", 0, 0, { bytes: 2048, size: 4096 });
+
+        // 否则媒体组看板永远停在"[上传中]"死文字
+        expect(_refreshGroupMonitor).toHaveBeenLastCalledWith(
+            expect.objectContaining({ id: "task-group-upload" }),
+            "uploading",
+            2048,
+            4096
+        );
+    });
+
     test("refreshes canonical liveness after the heartbeat interval", async () => {
         const updateStatus = vi.fn();
         const heartbeat = createHeartbeat(
