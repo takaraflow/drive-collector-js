@@ -27,7 +27,11 @@ func TestOnUpdateRecordsButNeverErrors(t *testing.T) {
 		{"Updates", &tg.Updates{Updates: []tg.UpdateClass{updateNewMessage(1), updateNewMessage(2)}}},
 		{"UpdatesCombined", &tg.UpdatesCombined{Updates: []tg.UpdateClass{updateNewMessage(3)}}},
 		{"UpdatesTooLong", &tg.UpdatesTooLong{}},
-		{"UpdateShortMessage", &tg.UpdateShortMessage{Date: 1, ID: 9, UserID: 12345}},
+		// UpdateShortMessage 在真实链路里到不了这里:gotd 的
+		// handle_updates.go 会先把它转成 *tg.UpdateShort 包着
+		// *tg.UpdateNewMessage 再交给 handler。所以下面那个 case
+		// 走的是 default 分支,只记日志不记录 —— 这正是期望。
+		{"UpdateShortMessage(被 gotd 预先转换)", &tg.UpdateShortMessage{Date: 1, ID: 9, UserID: 12345}},
 	}
 
 	for _, tc := range cases {
@@ -38,12 +42,42 @@ func TestOnUpdateRecordsButNeverErrors(t *testing.T) {
 		})
 	}
 
-	// nil update 不产生观察。批次型容器会被拆成单条,
-	// 所以这里的期望值按「拆开后有几条」算,不是按容器个数。
 	// nil=0, UpdateShort=1, Updates(2条)=2, UpdatesCombined(1条)=1,
-	// UpdatesTooLong=0(流截断,不可比), UpdateShortMessage=1 → 合计 5
-	if c.observer.Count != 5 {
-		t.Errorf("记录 %d 次,期望 5(批次已拆成单条)", c.observer.Count)
+	// UpdatesTooLong=0(流截断,不可比), UpdateShortMessage=0(不可达)
+	// → 合计 4
+	if got := c.observer.Total(); got != 4 {
+		t.Errorf("记录 %d 次,期望 4(批次已拆成单条)", got)
+	}
+}
+
+// TestShortMessagesArriveAsUpdateShort 锁死 gotd 的预处理行为。
+//
+// 如果哪天 gotd 不再预先转换,updateShortMessage 会走到 default 分支
+// 变成不可观测 —— diff 里会凭空多一类 Node 有、Go 没有的指纹。
+// 这个断言让那种变化显式失败,而不是安静地污染比对结果。
+func TestShortMessagesArriveAsUpdateShort(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+
+	before := c.observer.Total()
+	_ = c.onUpdate(ctx, &tg.UpdateShortMessage{Date: 1, ID: 9, UserID: 1})
+	if got := c.observer.Total(); got != before {
+		t.Errorf("UpdateShortMessage 被记录了 %d 次 —— gotd 不再预先转换它了?"+
+			"需要在 onUpdate 里补一个分支,否则这类消息在 Go 侧不可观测",
+			got-before)
+	}
+
+	// 确认转换后的形态确实会被记录
+	_ = c.onUpdate(ctx, &tg.UpdateShort{
+		Date: 1,
+		Update: &tg.UpdateNewMessage{
+			Message:  &tg.Message{ID: 9, Message: "hi"},
+			Pts:      1,
+			PtsCount: 1,
+		},
+	})
+	if got := c.observer.Total(); got != before+1 {
+		t.Errorf("转换后的 UpdateShort 未被记录")
 	}
 }
 

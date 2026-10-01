@@ -37,6 +37,18 @@ type DiffRow struct {
 // 刻意输出「逐指纹的 delta」而不是一个总数:总数一致但构成不同
 // (Node 收了 10 条 A、0 条 B;Go 收了 0 条 A、10 条 B)是最危险的
 // 情况,而它恰好在总数比对下看不出来。
+// minSamples 是给出「可以切流量」结论所需的最小样本量。
+const minSamples = 20
+
+// DiffSummaries 比对 Node 与 Go 的影子计数。
+//
+// 这是「能不能切」的判据:
+//   - Match=true  → 两边看到的 update 构成一致,可以进入下一阶段
+//   - Match=false → 有差异,或样本不足,继续观察或查差异来源
+//
+// 刻意输出「逐指纹的 delta」而不是一个总数:总数一致但构成不同
+// (Node 收了 10 条 A、0 条 B;Go 收了 0 条 A、10 条 B)是最危险的
+// 情况,而它恰好在总数比对下看不出来。
 func DiffSummaries(nodeCounts, goCounts map[string]int, window string) Diff {
 	keys := map[string]bool{}
 	for k := range nodeCounts {
@@ -53,9 +65,12 @@ func DiffSummaries(nodeCounts, goCounts map[string]int, window string) Diff {
 	sort.Strings(sorted)
 
 	rows := make([]DiffRow, 0, len(sorted))
+	nodeTotal, goTotal := 0, 0
 	match := true
 	for _, fp := range sorted {
 		n, g := nodeCounts[fp], goCounts[fp]
+		nodeTotal += n
+		goTotal += g
 		row := DiffRow{Fingerprint: fp, Node: n, Go: g, Delta: g - n}
 		if row.Delta != 0 {
 			match = false
@@ -63,12 +78,16 @@ func DiffSummaries(nodeCounts, goCounts map[string]int, window string) Diff {
 		rows = append(rows, row)
 	}
 
-	return Diff{
-		Window: window,
-		Rows:   rows,
-		Match:  match,
-		Note:   "delta = Go - Node。非零即构成不一致,切流量前必须先解释清楚。",
+	note := "delta = Go - Node。非零即构成不一致,切流量前必须先解释清楚。"
+	if nodeTotal < minSamples || goTotal < minSamples {
+		match = false
+		note = fmt.Sprintf(
+			"样本不足(Node=%d, Go=%d,门槛=%d),无法据此判断 —— 一律记为不匹配。"+
+				"两侧同时为空时 diff 会假报「可以切流量」,这是最危险的假阳性。",
+			nodeTotal, goTotal, minSamples)
 	}
+
+	return Diff{Window: window, Rows: rows, Match: match, Note: note}
 }
 
 // ReadShadowCounts 读 Node 侧写的影子计数。
@@ -101,10 +120,7 @@ func (o *Observer) DiffAgainstNode(ctx context.Context, client *redis.Client) (D
 		return Diff{}, err
 	}
 
-	goCounts := make(map[string]int, len(o.byFingerprint))
-	for fp, n := range o.byFingerprint {
-		goCounts[fp] += n
-	}
+	goCounts := o.Snapshot()
 
 	window := o.Summary().Window
 	if window == "" {

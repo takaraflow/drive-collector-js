@@ -2,6 +2,7 @@ package shadow
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -69,6 +70,61 @@ func TestReadOnlyStorageFeedsGotdsFormat(t *testing.T) {
 	}
 }
 
+// TestAuthKeyIDPassesGotdValidation 是「影子模式能不能连上」的唯一真判据。
+//
+// gotd 的 telegram/session.go 恢复连接时会校验
+// `key.Value.ID() != key.ID`,不等就返回 "corrupted key" 直接失败。
+// 之前的测试只检查 LoadSession 返回的字节,从没让 gotd 走过那条路,
+// 所以 AuthKeyID 留空这个致命 bug 能一直存在而测试全绿。
+func TestAuthKeyIDPassesGotdValidation(t *testing.T) {
+	sess := sampleSession(t)
+	st, err := NewReadOnlyStorage(sess, quietLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := (&session.Loader{Storage: st}).Load(context.Background())
+	if err != nil {
+		t.Fatalf("gotd Loader 解析失败: %v", err)
+	}
+
+	// 复刻 gotd 的校验逻辑,而不是只断言字段非空 ——
+	// 断言非空挡不住「算错但非空」的情况。
+	var key struct {
+		ID    [8]byte
+		Value [256]byte
+	}
+	copy(key.ID[:], data.AuthKeyID)
+	copy(key.Value[:], data.AuthKey)
+
+	sum := sha1.Sum(data.AuthKey)
+	var want [8]byte
+	copy(want[:], sum[12:])
+
+	if key.ID != want {
+		t.Errorf("auth_key_id 不匹配:\n  got  %x\n  want %x\n"+
+			"gotd 会返回 \"corrupted key\",影子模式连不上。", key.ID, want)
+	}
+}
+
+// TestAuthKeyIDDerivation 直接验证 SHA1(authkey)[12:20]。
+func TestAuthKeyIDDerivation(t *testing.T) {
+	key := make([]byte, 256)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	s := &tgsession.Session{AuthKey: key}
+
+	sum := sha1.Sum(key)
+	got := s.AuthKeyID()
+	if len(got) != 8 {
+		t.Fatalf("auth_key_id 长度 = %d,期望 8", len(got))
+	}
+	for i := 0; i < 8; i++ {
+		if got[i] != sum[12+i] {
+			t.Fatalf("第 %d 字节 = %x,期望 %x", i, got[i], sum[12+i])
+		}
+	}
+}
 // TestStoreSessionIsNoOp 是影子模式最关键的一条铁律。
 //
 // 一旦有人给这个类型加上真正的写逻辑,session 就会被 Go 侧覆盖,

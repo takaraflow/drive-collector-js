@@ -38,9 +38,9 @@ type ReadOnlyStorage struct {
 
 // NewReadOnlyStorage 把解析好的 gramjs session 转成 gotd 能读的格式。
 //
-// AuthKeyID / Salt gramjs 不存(它的 StringSession 只保留 dc/addr/port/key),
-// 留空即可:gotd 在 authKey 有效时会自己算 AuthKeyID。Addr 带上端口,
-// 因为 gotd 的 session.Data.Addr 期望的是 host:port。
+// AuthKeyID 必须由我们算:gramjs 的 StringSession 只保存 dc/addr/port/key,
+// 不存 auth_key_id,而 gotd 恢复连接时会校验 `key.Value.ID() != key.ID`,
+// 不等就返回 "corrupted key" 失败。留空等于 100% 连不上。
 func NewReadOnlyStorage(s *tgsession.Session, log *slog.Logger) (*ReadOnlyStorage, error) {
 	if s == nil {
 		return nil, tgsession.ErrTooShort
@@ -48,9 +48,10 @@ func NewReadOnlyStorage(s *tgsession.Session, log *slog.Logger) (*ReadOnlyStorag
 	payload, err := json.Marshal(readOnlyJSON{
 		Version: 1, // gotd session.latestVersion
 		Data: session.Data{
-			DC:      s.DCID,
-			Addr:    s.Addr(),
-			AuthKey: s.AuthKey,
+			DC:        s.DCID,
+			Addr:      s.Addr(),
+			AuthKey:   s.AuthKey,
+			AuthKeyID: s.AuthKeyID(),
 		},
 	})
 	if err != nil {

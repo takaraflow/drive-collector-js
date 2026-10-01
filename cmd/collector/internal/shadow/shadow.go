@@ -24,6 +24,7 @@ package shadow
 import (
 	"encoding/json"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/shadowfingerprint"
@@ -52,40 +53,70 @@ type Observation struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
-
 // Observer 汇总观察结果。
+//
+// 锁是必需的:gotd 从多个 goroutine 调 UpdateHandler,不加锁时
+// map 写入会 data race(实测 race detector 报 shadow.go 的 map 写)。
+// 注意:测试「碰巧」串行调用时 race detector 不会报 —— 必须有真正
+// 并发的测试才守得住,见 race_test.go。
 type Observer struct {
-	Log    *slog.Logger
-	Count  int
-	ByType map[string]int
-	// byFingerprint 是 diff 的数据基础:按共享指纹统计构成。
+	Log *slog.Logger
+
+	mu           sync.Mutex
+	Count        int
+	ByType       map[string]int
 	byFingerprint map[string]int
-	First time.Time
-	Last  time.Time
+	First        time.Time
+	Last         time.Time
 }
 
 func NewObserver(log *slog.Logger) *Observer {
-	return &Observer{Log: log, ByType: map[string]int{}, byFingerprint: map[string]int{}}
+	return &Observer{
+		Log:           log,
+		ByType:        map[string]int{},
+		byFingerprint: map[string]int{},
+	}
 }
 
 // Record 记录一次观察。只打印摘要,不打消息内容。
 func (o *Observer) Record(obs Observation) {
+	fp := shadowfingerprint.Compute(obs.Feature)
+
+	o.mu.Lock()
 	o.Count++
 	o.ByType[obs.Feature.TypeID]++
+	o.byFingerprint[fp]++
 	if o.First.IsZero() {
 		o.First = obs.At
 	}
 	o.Last = obs.At
+	o.mu.Unlock()
 
-	obs.Fingerprint = shadowfingerprint.Compute(obs.Feature)
-	o.byFingerprint[obs.Fingerprint]++
-
+	obs.Fingerprint = fp
 	o.Log.Info("shadow update",
 		"kind", obs.Kind,
 		"points", obs.Points,
 		"typeId", obs.Feature.TypeID,
-		"fingerprint", obs.Fingerprint,
+		"fingerprint", fp,
 	)
+}
+
+// Snapshot 返回指纹计数的副本,供 diff 在无锁读的情况下使用。
+func (o *Observer) Snapshot() map[string]int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	out := make(map[string]int, len(o.byFingerprint))
+	for k, v := range o.byFingerprint {
+		out[k] = v
+	}
+	return out
+}
+
+// Total 返回已记录条数。
+func (o *Observer) Total() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.Count
 }
 
 // Summary 输出可与 Node 侧比对的摘要。
@@ -98,13 +129,21 @@ type Summary struct {
 }
 
 func (o *Observer) Summary() Summary {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	w := ""
 	if !o.First.IsZero() {
 		w = o.Last.Sub(o.First).String()
 	}
+	// 复制而不是直接暴露内部 map —— 直接暴露会让调用方在无锁情况下
+	// 读到一半的 map,竞争会以更难查的形式炸在别处。
+	byType := make(map[string]int, len(o.ByType))
+	for k, v := range o.ByType {
+		byType[k] = v
+	}
 	return Summary{
 		Total:  o.Count,
-		ByType: o.ByType,
+		ByType: byType,
 		First:  o.First,
 		Last:   o.Last,
 		Window: w,

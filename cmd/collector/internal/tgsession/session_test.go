@@ -106,7 +106,7 @@ func TestRejectsTruncatedAuthKey(t *testing.T) {
 // TestRejectsTelethonFormat gramjs 在总长 352 时按 Telethon 格式解析
 // (无 addrLen 字段)。我们不解它,但必须能识别并明说,而不是解出垃圾。
 func TestRejectsTelethonFormat(t *testing.T) {
-	raw := make([]byte, telethonSessionLen)
+	raw := make([]byte, telethonSessionByteLen)
 	raw[0] = 2
 	raw[1], raw[2], raw[3], raw[4] = 149, 154, 175, 116
 	s := "1" + base64.StdEncoding.EncodeToString(raw)

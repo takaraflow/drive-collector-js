@@ -117,14 +117,6 @@ func (c *Client) onUpdate(ctx context.Context, u tg.UpdatesClass) error {
 			c.record(uu, v.Date)
 		}
 
-	case *tg.UpdateShortMessage:
-		// 「未读计数变化」类。gramjs 侧同样会收到 —— 漏记会造成假差异
-		// (diff 里凭空多出一类 Node 有、Go 没有的指纹)。
-		c.recordSimple("UpdateShortMessage", tg.UpdateShortMessageTypeID, v.Date)
-
-	case *tg.UpdateShortChatMessage:
-		c.recordSimple("UpdateShortMessage", tg.UpdateShortMessageTypeID, v.Date)
-
 	case *tg.UpdatesTooLong:
 		// 流被截断重拉:该时段 Node 侧也会重拉,构成不可比。
 		// 显式告警,否则会拿着残缺的流判定「不一致」。
@@ -137,18 +129,6 @@ func (c *Client) onUpdate(ctx context.Context, u tg.UpdatesClass) error {
 
 	// 恒返回 nil:影子模式不因单条 update 失败而中断。
 	return nil
-}
-
-// recordSimple 记录没有 message 字段的 update 变体。
-func (c *Client) recordSimple(kind string, typeID uint32, date int) {
-	c.observer.Record(Observation{
-		At:   time.Now().UTC(),
-		Kind: kind,
-		Date: date,
-		Feature: shadowfingerprint.Observation{
-			TypeID: shadowfingerprint.NormalizeTypeID(typeID),
-		},
-	})
 }
 
 // record 记录单条 update。这是真正与 Node 侧对齐的粒度。
@@ -171,10 +151,12 @@ func (c *Client) record(u tg.UpdateClass, date int) {
 // 只取 Node 侧也算得出来的量 —— gramjs 的 update 对象有同样的
 // message / media / groupedId 字段。
 func applyFeature(f *shadowfingerprint.Observation, u tg.UpdateClass) {
-	// 用 TL TypeID 而不是 TypeName():gotd 的 TypeName 返回小写开头的
-	// "updateNewMessage",gramjs 返回 "UpdateNewMessage",大小写对不上。
-	// TypeID 是协议层稳定标识,两个库对同一类型给出同一个数字。
-	f.TypeID = shadowfingerprint.NormalizeTypeID(typeIDOf(u))
+	// 用 tg.UpdateClass 自带的 TypeID() —— 早先手写了一个 6 项的
+	// typeIDOf switch,其余所有 update(打字状态、已读历史、频道网页
+	// 预览……,占实际流量绝大多数)全落进 default: return 0,被压成
+	// t=00000000 这一个桶,而 Node 侧记的是各自的真实 ID。
+	// 结果是 diff 里凭空多出一整类 Go 侧噪声。
+	f.TypeID = shadowfingerprint.NormalizeTypeID(u.TypeID())
 
 	switch v := u.(type) {
 	case *tg.UpdateNewMessage:
@@ -188,26 +170,6 @@ func applyFeature(f *shadowfingerprint.Observation, u tg.UpdateClass) {
 	default:
 		// 非消息类 update(权限变更、命令列表变更等)没有可提取特征,
 		// 留空即可 —— TypeID 本身已经足够区分。
-	}
-}
-
-// typeIDOf 取 update 的 TL 类型 ID。
-func typeIDOf(u tg.UpdateClass) uint32 {
-	switch u.(type) {
-	case *tg.UpdateNewMessage:
-		return tg.UpdateNewMessageTypeID
-	case *tg.UpdateNewChannelMessage:
-		return tg.UpdateNewChannelMessageTypeID
-	case *tg.UpdateEditMessage:
-		return tg.UpdateEditMessageTypeID
-	case *tg.UpdateEditChannelMessage:
-		return tg.UpdateEditChannelMessageTypeID
-	case *tg.UpdateBotCallbackQuery:
-		return tg.UpdateBotCallbackQueryTypeID
-	case *tg.UpdateDeleteMessages:
-		return tg.UpdateDeleteMessagesTypeID
-	default:
-		return 0
 	}
 }
 
