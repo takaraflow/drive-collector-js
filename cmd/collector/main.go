@@ -7,6 +7,12 @@
 //	shadow      Telegram 影子客户端:连上 Telegram、收到 update、记指纹,
 //	            一条都不处理。用于验证「Go 看到的流和 Node 是否一致」。
 //	both        上面两个同时跑(影子验证期间用)。
+//	worker      完整的 Go worker:连 Telegram、建任务、下载、上传。
+//	            这是「Node 之外全接管」的模式 —— 上线前必须先有
+//	            影子模式 Match=true 的结论,否则就是闭眼切流量。
+//	worker      完整的 Go worker:连 Telegram、建任务、下载、上传。
+//	            这是「Node 之外全接管」的模式 —— 上线前必须先有
+//	            影子模式 Match=true 的结论,否则就是闭眼切流量。
 //
 // 环境变量与 JS 侧读同一套,这样无缝替换时不需要改任何部署配置:
 //
@@ -23,6 +29,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -31,12 +38,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/youngsx/drive-collector/cmd/collector/internal/app"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/d1"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/edge"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/leader"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/qstash"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/redisenv"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/shadow"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/shadowreport"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/tgsession"
 )
 
@@ -56,8 +66,10 @@ func main() {
 		err = runShadow(log)
 	case "both":
 		err = runBoth(log)
+	case "worker":
+		err = runWorker(log)
 	default:
-		err = errors.New("未知 RUN_MODE:" + mode + "(可选:edge / shadow / both)")
+		err = errors.New("未知 RUN_MODE:" + mode + "(可选:edge / shadow / both / worker)")
 	}
 
 	if err != nil {
@@ -248,6 +260,66 @@ func envInt(key string, def int) int {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
 		}
+	}
+	return def
+}
+
+// runWorker 启动完整的 Go worker —— 「Node 之外全接管」的模式。
+//
+// 与 edge/shadow 的关键区别:它【真的处理消息】—— 建任务、下载、上传。
+// 上线前必须先让影子模式跑出 Match=true,否则就是闭眼切流量。
+func runWorker(log *slog.Logger) error {
+	ctx, stop := signalCtx()
+	defer stop()
+
+	sessionStr := os.Getenv("SETTING_TG_SESSION")
+	if sessionStr == "" {
+		return errors.New("SETTING_TG_SESSION 未配置 —— worker 模式需要已登录的 session 串")
+	}
+	parsed, err := tgsession.Parse(sessionStr)
+	if err != nil {
+		return errors.New("解析 session 失败: " + err.Error())
+	}
+	apiID, err := strconv.Atoi(os.Getenv("API_ID"))
+	if err != nil || apiID == 0 {
+		return errors.New("API_ID 未配置或不是合法数字")
+	}
+
+	// D1 是硬依赖 —— 没有它连任务都建不了,必须硬失败而不是降级。
+	db, err := d1.New(d1.Config{
+		AccountID:  os.Getenv("CLOUDFLARE_D1_ACCOUNT_ID"),
+		DatabaseID: os.Getenv("CLOUDFLARE_D1_DATABASE_ID"),
+		Token:      os.Getenv("CLOUDFLARE_D1_TOKEN"),
+		Log:        log,
+	})
+	if err != nil {
+		return fmt.Errorf("D1 配置不完整: %w", err)
+	}
+
+	application, err := app.New(app.Config{
+		APIID:       apiID,
+		APIHash:     os.Getenv("API_HASH"),
+		Session:     parsed,
+		DownloadDir: os.Getenv("DOWNLOAD_DIR"),
+		RemoteBase:  os.Getenv("REMOTE_FOLDER"),
+		Repo:        store.NewTaskRepository(db),
+		Log:         log,
+	})
+	if err != nil {
+		return err
+	}
+
+	log.Info("worker 模式启动",
+		"dc", parsed.DCID,
+		"下载目录", envOr("DOWNLOAD_DIR", "/tmp/downloads"),
+		"提醒", "这会真的处理消息 —— 上线前必须先有影子 Match=true 的结论")
+
+	return application.Run(ctx)
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
 	return def
 }
