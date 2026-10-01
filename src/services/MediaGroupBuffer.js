@@ -68,7 +68,12 @@ export class MediaGroupBuffer {
             maxMessageIds: options.maxMessageIds || 1000,
             messageIdsMaxAge: options.messageIdsMaxAge || 3600000,
             useLocalTimers: options.useLocalTimers ?? !isRuntimeTestEnv(),
-            remoteFlushEnabled: options.remoteFlushEnabled ?? !isRuntimeTestEnv(),
+            // 远端 flush 事件默认【关闭】:buffer 本身就在 Redis 里,接管 telegram_client 锁时
+            // bootstrap 会调 restore() 捞起所有遗留组,所以"实例重启丢组"已被覆盖。
+            // 而远端事件每条消息都会 publish 一次(add() 无去重),本地定时器必然先赢、
+            // 远端 100% 扑空 —— 纯烧 QStash 配额(1000/天),还会打出误导性的 "Buffer empty" 警告。
+            // 需要跨进程保险时按 gid 显式开启,且调用方应自行做去重。
+            remoteFlushEnabled: options.remoteFlushEnabled ?? false,
             ...options
         };
 

@@ -38,7 +38,9 @@ class RedisCache extends BaseCache {
         const redisOptions = {
             ...config,
             // Connection keepalive settings to prevent "Connection closed while receiving data"
-            keepAlive: 10000, // Send keepalive every 10 seconds
+            // ioredis 的 keepAlive 单位是【秒】,不是毫秒。写 10000 等于 2.8 小时,
+            // 形同关闭 —— Aiven 侧空闲回收会把连接掐断(线上每 2 分钟重连一次的直接原因)。
+            keepAlive: 10, // Send keepalive every 10 seconds
             retryStrategy: (times) => {
                 // Exponential backoff with max 30 seconds
                 const delay = Math.min(times * 100, 30000);
