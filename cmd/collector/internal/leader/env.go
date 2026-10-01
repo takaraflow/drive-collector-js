@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/youngsx/drive-collector/cmd/collector/internal/redisenv"
 )
 
 // instancePrefix 与 JS 侧 InstanceRepository.PREFIX 一致。
@@ -22,34 +23,15 @@ const instanceTimeoutMs = 45_000
 // 刻意不引 D1 客户端:活跃实例存在 Redis 里(InstanceRepository 走
 // cache.listKeys + cache.get),不查 D1。少一个依赖就少一处配置漂移。
 //
-// Redis URL 的取值顺序与 src/config/index.js:499 一致:
-// NF_REDIS_URL 优先于 REDIS_URL —— Northflank 部署下前者才是对的。
+// Redis 配置走 redisenv 共享包,和 shadow diff 用同一套解析 ——
+// 两边漂移会出现「leader 找得到但 diff 读不到」这种极难查的现象。
 func NewResolverFromEnv() *Resolver {
-	raw := os.Getenv("NF_REDIS_URL")
-	if raw == "" {
-		raw = os.Getenv("REDIS_URL")
-	}
-	if raw == "" {
+	client := redisenv.FromEnv()
+	if client == nil {
 		// 不配 Redis 时返回空 resolver:所有请求都会拿到 "Not Leader"
 		// 而 503。比静默猜一个地址安全。
 		return &Resolver{}
 	}
-
-	opts, err := redis.ParseURL(raw)
-	if err != nil {
-		return &Resolver{}
-	}
-	// 与 JS 侧保持同一套连接参数:10s 心跳、指数退避上限 30s。
-	// JS 侧的 keepAlive 单位是【秒】,不是毫秒 —— 这个坑踩过一次。
-	opts.DialTimeout = 10 * time.Second
-	opts.ReadTimeout = 10 * time.Second
-	opts.WriteTimeout = 10 * time.Second
-
-	if tok := firstEnv("REDIS_TOKEN", "UPSTASH_REDIS_REST_TOKEN"); tok != "" {
-		opts.Password = tok
-	}
-
-	client := redis.NewClient(opts)
 
 	return &Resolver{
 		LockGetter: func(ctx context.Context, key string) ([]byte, error) {
@@ -59,15 +41,6 @@ func NewResolverFromEnv() *Resolver {
 			return listActiveInstances(ctx, client, instanceTimeoutMs)
 		},
 	}
-}
-
-func firstEnv(keys ...string) string {
-	for _, k := range keys {
-		if v := os.Getenv(k); v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 // listActiveInstances 复刻 InstanceRepository.findAllActive:

@@ -34,7 +34,9 @@ import (
 	"github.com/youngsx/drive-collector/cmd/collector/internal/edge"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/leader"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/qstash"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/redisenv"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/shadow"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/shadowreport"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/tgsession"
 )
 
@@ -152,12 +154,13 @@ func runShadow(log *slog.Logger) error {
 		return errors.New("API_ID 未配置或不是合法数字")
 	}
 
+	observer := shadow.NewObserver(log)
 	client, err := shadow.New(shadow.Config{
 		APIID:    apiID,
 		APIHash:  os.Getenv("API_HASH"),
 		Session:  parsed,
 		Log:      log,
-		Observer: shadow.NewObserver(log),
+		Observer: observer,
 	})
 	if err != nil {
 		return err
@@ -166,6 +169,10 @@ func runShadow(log *slog.Logger) error {
 	log.Info("shadow 模式启动",
 		"dc", parsed.DCID, "addr", parsed.ServerAddr,
 		"注意", "只观察不处理;不碰 telegram_client 锁;不写回 session")
+
+	// 比对报告器:这是影子验证的出口。不跑它就只能看日志,
+	// 「能不能切流量」永远没有答案。
+	go shadowreport.New(observer, redisenv.FromEnv(), log).Run(ctx)
 
 	err = client.Run(ctx)
 	if err != nil && ctx.Err() == nil {
@@ -218,14 +225,17 @@ func runShadowCtx(ctx context.Context, log *slog.Logger) error {
 	if err != nil || apiID == 0 {
 		return errors.New("API_ID 未配置或不是合法数字")
 	}
+	observer := shadow.NewObserver(log)
 	client, err := shadow.New(shadow.Config{
 		APIID: apiID, APIHash: os.Getenv("API_HASH"),
-		Session: parsed, Log: log, Observer: shadow.NewObserver(log),
+		Session: parsed, Log: log, Observer: observer,
 	})
 	if err != nil {
 		return err
 	}
 	log.Info("shadow 模式启动(与 edge 并行)", "dc", parsed.DCID, "mode", "read-only")
+
+	go shadowreport.New(observer, redisenv.FromEnv(), log).Run(ctx)
 
 	if err := client.Run(ctx); err != nil && ctx.Err() == nil {
 		return err
