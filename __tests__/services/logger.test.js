@@ -45,15 +45,6 @@ vi.mock('../../src/services/logger/index.js', () => ({
     createLogger: () => mockLogger
 }));
 
-// Mock timeProvider
-vi.mock('../../src/utils/timeProvider.js', () => ({
-    getTime: () => 1699970000000,
-    timers: {
-        now: () => 1699970000000,
-        setTimeout: global.setTimeout,
-        clearTimeout: global.clearTimeout
-    }
-}));
 
 describe("Logger Service", () => {
     beforeEach(() => {

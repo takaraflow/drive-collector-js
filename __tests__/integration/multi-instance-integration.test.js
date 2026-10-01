@@ -64,13 +64,6 @@ vi.mock("../../src/services/logger/AxiomLogger.js", () => ({
   setInstanceIdProvider: vi.fn()
 }));
 
-// Mock TunnelService
-vi.mock("../../src/services/TunnelService.js", () => ({
-  tunnelService: {
-    getPublicUrl: vi.fn().mockResolvedValue(null)
-  }
-}));
-
 let instanceCoordinator;
 
 describe("Multi-Instance Integration", () => {

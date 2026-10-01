@@ -399,7 +399,6 @@ export class UIHelper {
                   'kv': 'KV-ST',
                   'rclone': 'RCLONE',
                   'bot': 'TG-BOT',
-                  'tunnel': 'TUNNEL',
                   'redis': 'REDIS'
               };
  

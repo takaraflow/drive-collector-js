@@ -156,13 +156,6 @@ const mockDirectTransferService = {
     transferTelegramMediaToRemote: vi.fn()
 };
 
-const mockTunnelService = {
-    getPublicUrl: vi.fn().mockResolvedValue("https://leader.example.com")
-};
-vi.mock("../../src/services/TunnelService.js", () => ({
-    tunnelService: mockTunnelService
-}));
-
 // Mock fs
 const mockFs = {
     existsSync: vi.fn(),
@@ -233,7 +226,6 @@ describe("TaskManager - Second Transfer (Sec-Transfer) Logic", () => {
             url: "https://worker.example.com"
         });
         mockStreamTransferService.clearStreamOwner.mockResolvedValue();
-        mockTunnelService.getPublicUrl.mockResolvedValue("https://leader.example.com");
         mockInstanceCoordinator.getActiveInstances.mockResolvedValue([]);
         mockFs.promises.access.mockResolvedValue();
         mockFs.promises.mkdir.mockResolvedValue();

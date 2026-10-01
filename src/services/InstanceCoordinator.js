@@ -136,25 +136,10 @@ export class InstanceCoordinator {
      */
     async registerInstance() {
         const now = Date.now();
-        
-        // 尝试获取 CF Tunnel URL
-        let tunnelUrl = null;
-        try {
-            const { tunnelService } = await import("./TunnelService.js");
-            tunnelUrl = await tunnelService.getPublicUrl();
-            logWithProvider().debug(`Fetched tunnel URL for registration: ${tunnelUrl || 'null'}`);
-        } catch (error) {
-            logWithProvider().warn('Failed to get Tunnel URL', {
-                error: error.message,
-                willContinue: true
-            });
-            tunnelUrl = null;
-        }
 
         const instanceData = {
             id: this.instanceId,
             url: this._getPreferredPublicUrl(),
-            tunnelUrl: tunnelUrl, // 新增：CF Tunnel 访问地址
             hostname: process.env.HOSTNAME || 'unknown',
             region: process.env.INSTANCE_REGION || 'unknown',
             startedAt: now,
@@ -246,21 +231,9 @@ export class InstanceCoordinator {
                 if (!existing) {
                     await this.registerInstance();
                 } else {
-                    // 如果当前没有隧道地址，尝试重新获取一次
-                    let currentTunnelUrl = existing.tunnelUrl;
-                    if (!currentTunnelUrl) {
-                        try {
-                            const { tunnelService } = await import("./TunnelService.js");
-                            currentTunnelUrl = await tunnelService.getPublicUrl();
-                        } catch (e) {
-                            // 忽略获取失败
-                        }
-                    }
-
                     const instanceData = {
                         ...existing,
                         url: this._getPreferredPublicUrl() || existing.url || null,
-                        tunnelUrl: currentTunnelUrl, // 补全或保持地址
                         lastHeartbeat: Date.now(),
                         activeTaskCount: this.getLocalActiveTaskCount(),
                         timeoutMs: this.instanceTimeout

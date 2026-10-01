@@ -37,18 +37,6 @@ vi.mock("../../src/services/cache/UpstashRHCache.js", () => ({
     }))
 }));
 
-vi.mock("../../src/services/cache/MemoryCache.js", () => ({
-    MemoryCache: vi.fn().mockImplementation(() => ({
-        initialize: vi.fn(),
-        getProviderName: vi.fn(() => 'MemoryCache'),
-        get: vi.fn(() => null),
-        set: vi.fn(() => true),
-        delete: vi.fn(() => true),
-        listKeys: vi.fn(() => []),
-        disconnect: vi.fn()
-    }))
-}));
-
 // Import after mocking
 import { CacheService } from "../../src/services/CacheService.js";
 import { localCache } from "../../src/utils/LocalCache.js";

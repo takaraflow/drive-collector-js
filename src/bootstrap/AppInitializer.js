@@ -2,7 +2,6 @@ import { gracefulShutdown } from '../services/GracefulShutdown.js';
 import { initConfig, validateConfig, getConfig } from '../config/index.js';
 import { summarizeStartupConfig } from '../utils/startupConfig.js';
 import { registerShutdownHooks } from '../utils/lifecycle.js';
-import { tunnelService } from '../services/TunnelService.js';
 import { startMemoryMonitor } from '../utils/memoryMonitor.js';
 import { getBuildIdentity, getBuildLogFields } from '../utils/buildIdentity.js';
 
@@ -67,17 +66,6 @@ export class AppInitializer {
             const config = getConfig();
             const { ensureDatabaseSchemaReady } = await import("../database/schema.js");
             await ensureDatabaseSchemaReady({ d1, config, log });
-
-            // TunnelService 单独初始化，不阻塞主流程
-            try {
-                await tunnelService.initialize();
-                const tunnelUrl = await tunnelService.getPublicUrl();
-                if (tunnelUrl) {
-                    log.info(`🌐 Tunnel 活跃于: ${tunnelUrl}`);
-                }
-            } catch (tunnelError) {
-                log.warn('TunnelService 初始化失败，将禁用隧道功能:', tunnelError.message);
-            }
 
         } catch (err) {
             console.error("❌ 核心服务初始化失败:", err.message);
