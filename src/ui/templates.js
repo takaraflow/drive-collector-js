@@ -88,6 +88,91 @@ export class UIHelper {
         return { text, buttons };
     }
 
+    /**
+     * 重复文件扫描的判重依据说明。
+     * 哈希不可用时必须如实告知,不能把"没有哈希"折叠成"没有重复"。
+     */
+    static _dupScanBasisNote({ hashAvailable, hashed, scanned }) {
+        if (hashAvailable && hashed >= scanned) {
+            return format(STRINGS.dup_scan.basis_hash, { algo: 'md5' });
+        }
+        if (hashAvailable) {
+            return format(STRINGS.dup_scan.basis_partial, { hashed, scanned });
+        }
+        return format(STRINGS.dup_scan.basis_no_hash, {});
+    }
+
+    /**
+     * 渲染单页重复文件清单。
+     * 每页 3 组:一组里可能挂着几百个路径,6 组装不进 Telegram 的 4096 字符上限。
+     */
+    static renderDupScanPage(driveName, scanResult, page = 0, pageSize = 3) {
+        const groups = scanResult?.groups || [];
+        const totalPages = Math.max(1, Math.ceil(groups.length / pageSize));
+        const clamped = Math.min(Math.max(0, page), totalPages - 1);
+        const slice = groups.slice(clamped * pageSize, clamped * pageSize + pageSize);
+
+        if (groups.length === 0) {
+            return {
+                text: format(STRINGS.dup_scan.no_duplicates, {
+                    name: escapeHTML(driveName),
+                    scanned: scanResult?.total ?? 0,
+                    basisNote: UIHelper._dupScanBasisNote(scanResult || {})
+                }),
+                buttons: []
+            };
+        }
+
+        const lines = slice.map(group => {
+            const header = group.basis === 'hash'
+                ? format(STRINGS.dup_scan.group_hash, {
+                    count: group.paths.length,
+                    size: formatBytes(group.size || 0),
+                    algo: escapeHTML(group.algo || '')
+                })
+                : format(STRINGS.dup_scan.group_size, {
+                    count: group.paths.length,
+                    size: formatBytes(group.size || 0)
+                });
+
+            // 单组最多列 6 条路径,剩下的折叠成"另有 N 份" —— 长路径会让消息超限
+            const shown = group.paths.slice(0, 6).map(p => `    • ${escapeHTML(p)}`);
+            if (group.paths.length > 6) {
+                shown.push(format(STRINGS.dup_scan.group_more, { count: group.paths.length - 6 }));
+            }
+            return [header, ...shown].join('\n');
+        });
+
+        const text = [
+            format(STRINGS.dup_scan.title, {}),
+            lines.join('\n\n'),
+            format(STRINGS.dup_scan.page_info, {
+                current: clamped + 1,
+                total: totalPages,
+                count: groups.length
+            }),
+            UIHelper._dupScanBasisNote(scanResult),
+            format(STRINGS.dup_scan.manual_note, {})
+        ].join('\n\n');
+
+        const row = [];
+        if (clamped > 0) {
+            row.push(Button.inline(
+                STRINGS.dup_scan.btn_prev,
+                Buffer.from(`dupscan_page_${clamped - 1}`)
+            ));
+        }
+        if (clamped < totalPages - 1) {
+            row.push(Button.inline(
+                STRINGS.dup_scan.btn_next,
+                Buffer.from(`dupscan_page_${clamped + 1}`)
+            ));
+        }
+        row.push(Button.inline(STRINGS.dup_scan.btn_rerun, Buffer.from('dupscan_scope_default')));
+
+        return { text, buttons: [row], page: clamped, totalPages };
+    }
+
     static _buildPaginationRow({ page, totalPages, refreshData, pageData, labels = {} }) {
         const lastPage = Math.max(0, (totalPages || 1) - 1);
         const row = [];
