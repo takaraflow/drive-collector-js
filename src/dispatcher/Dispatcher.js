@@ -17,6 +17,13 @@ import { UIHelper } from "../ui/templates.js";
 import { CloudTool } from "../services/rclone.js";
 import { SettingsRepository } from "../repositories/SettingsRepository.js";
 import { DriveRepository } from "../repositories/DriveRepository.js";
+import {
+    resolveDrives,
+    scanDrive,
+    readScanState,
+    writeScanState,
+    requestCancel
+} from "../services/DuplicateScanner.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
 import { UserRepository } from "../repositories/UserRepository.js";
 import { ApiKeyRepository } from "../repositories/ApiKeyRepository.js";
@@ -745,6 +752,9 @@ export class Dispatcher {
             } else if (data.startsWith("files_")) {
                 await this._handleFilesCallback(event, data, userId, answer);
 
+            } else if (data.startsWith("dupscan_")) {
+                await this._handleDupScanCallback(event, data, userId, answer);
+
             } else if (data.startsWith("tq_")) {
                 await this._handleTaskQueueCallback(event, data, userId, answer);
 
@@ -917,6 +927,8 @@ export class Dispatcher {
                 await DriveConfigFlow.handleUnbind(target, userId); return true;
             case "/files":
                 await this._handleFilesCommand(target, userId); return true;
+            case "/scan_dup":
+                await this._handleDupScanCommand(target, userId); return true;
             case "/status":
                 await this._handleStatusCommand(target, userId, text); return true;
             case "/help":
@@ -1159,6 +1171,162 @@ export class Dispatcher {
                 await safeEdit(target, placeholder.id, STRINGS.files.load_failed, this._getFilesRecoveryButtons(0), userId);
             }
         })();
+    }
+
+    // ---- 重复文件扫描(只读) ----
+
+    static _getDupScanScopeButtons() {
+        return [[
+            Button.inline(STRINGS.dup_scan.btn_scope_default, Buffer.from("dupscan_scope_default")),
+            Button.inline(STRINGS.dup_scan.btn_scope_all, Buffer.from("dupscan_scope_all"))
+        ]];
+    }
+
+    static _getDupScanCancelButtons() {
+        return [[Button.inline(STRINGS.dup_scan.btn_cancel, Buffer.from("dupscan_cancel"))]];
+    }
+
+    /**
+     * [私有] /scan_dup — 只读扫描,列清单,不删除任何东西
+     */
+    static async _handleDupScanCommand(target, userId) {
+        const drives = await DriveRepository.findByUserId(userId);
+        if (!drives || drives.length === 0) {
+            const drives2 = await DriveRepository.findByUserId(userId, true);
+            if (!drives2 || drives2.length === 0) {
+                return await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: STRINGS.dup_scan.no_drive,
+                    parseMode: "html"
+                }), userId, {}, false, 3);
+            }
+        }
+
+        return await runBotTaskWithRetry(() => client.sendMessage(target, {
+            message: format(STRINGS.dup_scan.title, {}) + STRINGS.dup_scan.intro,
+            buttons: this._getDupScanScopeButtons(),
+            parseMode: "html"
+        }), userId, { priority: PRIORITY.UI }, false, 3);
+    }
+
+    /**
+     * [私有] 处理扫描范围选择 / 取消 / 翻页
+     */
+    static async _handleDupScanCallback(event, data, userId, answer) {
+        if (data === "dupscan_cancel") {
+            const ok = await requestCancel(userId);
+            await answer(ok ? STRINGS.task.cmd_sent : STRINGS.task.task_not_found);
+            return;
+        }
+
+        if (data.startsWith("dupscan_page_")) {
+            const page = parseInt(data.slice("dupscan_page_".length), 10) || 0;
+            const state = await readScanState(userId);
+            if (!state || state.status !== "done" || !state.result) {
+                return await answer(STRINGS.task.task_not_found);
+            }
+            const { text, buttons } = UIHelper.renderDupScanPage(state.driveName, state.result, page);
+            await safeEdit(event.userId, event.msgId, text, buttons, userId);
+            return await answer();
+        }
+
+        if (data === "dupscan_scope_default" || data === "dupscan_scope_all") {
+            // 同一用户只允许一个扫描:两个扫描是两个 msgId,safeEdit 的去抖互不保护
+            const existing = await readScanState(userId);
+            if (existing && existing.status === "running") {
+                await safeEdit(event.userId, event.msgId, STRINGS.dup_scan.already_running, null, userId);
+                return await answer();
+            }
+
+            const scope = data === "dupscan_scope_all" ? "all" : "default";
+            const drives = await resolveDrives(userId, scope);
+            if (!drives || drives.length === 0) {
+                await safeEdit(event.userId, event.msgId, STRINGS.dup_scan.no_drive, this._getNoDriveButtons(), userId);
+                return await answer();
+            }
+
+            // 立刻开始刷新,让用户看到"已在扫"
+            await safeEdit(event.userId, event.msgId, format(STRINGS.dup_scan.running, {
+                name: escapeHTML(drives[0].name || drives[0].type),
+                done: 0, total: drives.length, seconds: 0
+            }), this._getDupScanCancelButtons(), userId);
+
+            // 后台执行,不阻塞回调响应
+            this._runDupScan(userId, event.userId, event.msgId, drives).catch(e =>
+                log.error("Dup scan background error:", e)
+            );
+            return await answer();
+        }
+
+        await answer();
+    }
+
+    /**
+     * [私有] 扫描主循环。每个网盘之间检查取消标志。
+     * userId 是 Redis 状态键;chatId 只用来定位要刷新的那条消息。
+     */
+    static async _runDupScan(userId, chatId, msgId, drives) {
+        const startedAt = Date.now();
+        let lastEdit = 0;
+
+        await writeScanState(userId, {
+            status: "running",
+            chatId: String(chatId),
+            msgId,
+            total: drives.length,
+            cancelRequested: false,
+            started_at: startedAt
+        });
+
+        const progressButtons = this._getDupScanCancelButtons();
+
+        for (let i = 0; i < drives.length; i++) {
+            const drive = drives[i];
+
+            // 取消检查放在扫描之间:正在跑的 lsjson 由超时兜底(它会 SIGKILL)
+            const state = await readScanState(userId);
+            if (state?.cancelRequested) {
+                await writeScanState(userId, { status: "cancelled" });
+                await safeEdit(chatId, msgId, STRINGS.dup_scan.cancelled, null, userId);
+                return;
+            }
+
+            // 节流:每盘至少间隔 3s,避免慢盘连发多条编辑
+            const now = Date.now();
+            if (now - lastEdit >= 3000) {
+                lastEdit = now;
+                await safeEdit(chatId, msgId, format(STRINGS.dup_scan.running, {
+                    name: escapeHTML(drive.name || drive.type),
+                    done: i,
+                    total: drives.length,
+                    seconds: Math.round((now - startedAt) / 1000)
+                }), progressButtons, userId);
+            }
+
+            let outcome;
+            try {
+                outcome = await scanDrive(userId, drive);
+            } catch (e) {
+                log.error("Dup scan drive error:", { userId, driveId: drive.id, error: e.message });
+                outcome = { ok: false, reason: e.message };
+            }
+
+            if (!outcome.ok) {
+                // 单盘失败不中断整体,但必须如实告诉用户这一盘没扫成
+                await safeEdit(chatId, msgId, format(STRINGS.dup_scan.failed, {
+                    name: escapeHTML(drive.name || drive.type),
+                    reason: escapeHTML(outcome.reason || "未知错误")
+                }), progressButtons, userId);
+                continue;
+            }
+
+            const { text, buttons } = UIHelper.renderDupScanPage(drive.name || drive.type, outcome.result, 0);
+            await writeScanState(userId, {
+                status: "done",
+                driveName: drive.name || drive.type,
+                result: outcome.result
+            });
+            await safeEdit(chatId, msgId, text, buttons, userId);
+        }
     }
 
     /**

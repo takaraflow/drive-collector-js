@@ -392,15 +392,20 @@ export class CloudTool {
         return sanitizeRemoteFileName(fileName);
     }
 
-    static async _getUserConfig(userId) {
+    /**
+     * @param {string} userId
+     * @param {object|null} driveRow - 显式指定网盘；为空时回退到用户默认网盘。
+     *   非默认网盘的运维（如重复文件扫描）必须显式传入，否则会拿到默认网盘的凭据。
+     */
+    static async _getUserConfig(userId, driveRow = null) {
         if (!userId) throw new Error(STRINGS.drive.user_id_required);
 
-        const activeDrive = await DriveRepository.getDefaultDrive(userId);
+        const activeDrive = driveRow || await DriveRepository.getDefaultDrive(userId);
 
         if (!activeDrive) {
             throw new Error(STRINGS.drive.no_drive_found);
         }
-        
+
         const driveConfig = JSON.parse(activeDrive.config_data);
         
         // 3. 使用 Provider 处理密码混淆
@@ -747,10 +752,13 @@ export class CloudTool {
      * Open a per-user rclone remote runtime.
      * Session-capable providers (e.g. Proton Drive) get a temporary writable conf so refreshed
      * tokens can be harvested after the command completes.
+     * @param {object|null} driveRow - 显式指定网盘；为空时用用户默认网盘。
+     *   非默认网盘的运维必须传入，并保证下面两处都跟着指向同一个 driveRow：
+     *   锁内重读(否则读回默认网盘 token) 和 finalize 的 activeDrive(否则轮换出的新 token 被丢弃)。
      * @private
      */
-    static async _openUserRemoteRuntime(userId, conf = null) {
-        let resolvedConf = conf || await this._getUserConfig(userId);
+    static async _openUserRemoteRuntime(userId, conf = null, driveRow = null) {
+        let resolvedConf = conf || await this._getUserConfig(userId, driveRow);
         const provider = DriveProviderFactory.getProvider(resolvedConf.type);
         const usesWritableConf = typeof provider.getWritableRcloneConfigEntries === 'function';
 
@@ -787,7 +795,9 @@ export class CloudTool {
         if (lockEnabled) {
             // A sibling op may have rotated R1→R2 and cleared the drive cache while we waited on
             // the lock; re-read now so rclone is fed the live refresh_token, not a consumed one.
-            resolvedConf = await this._getUserConfig(userId);
+            // Keep driveRow: a non-default drive's op must not silently fall back to the default
+            // drive's token here.
+            resolvedConf = await this._getUserConfig(userId, driveRow);
         }
 
         const remoteName = `u${String(userId || 'anon').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'anon'}`;
@@ -813,8 +823,13 @@ export class CloudTool {
                     const confText = await fsp.readFile(configPath, 'utf8').catch(() => '');
                     const remoteConfig = CloudTool._parseRcloneConfSection(confText, remoteName);
                     if (typeof provider.mergeRuntimeSessionFromRemoteConfig === 'function') {
+                        // activeDrive must be the drive we actually ran against. Without it the
+                        // provider falls back to getDefaultDrive(userId) and, on a type mismatch,
+                        // silently drops the freshly rotated refresh_token — bricking that drive
+                        // (Proton voids the old token the moment rclone rotates it).
                         const merged = await provider.mergeRuntimeSessionFromRemoteConfig(resolvedConf, remoteConfig, {
                             userId,
+                            activeDrive: driveRow,
                             cloudTool: CloudTool
                         });
                         if (merged) runtime.conf = merged;

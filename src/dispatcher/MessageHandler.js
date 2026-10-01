@@ -124,6 +124,7 @@ export class MessageHandler {
                     new Api.BotCommand({ command: 'start', description: '🚀 启动机器人' }),
                     new Api.BotCommand({ command: 'drive', description: '🔑 绑定或管理网盘' }),
                     new Api.BotCommand({ command: 'files', description: '📁 浏览已转存文件' }),
+                    new Api.BotCommand({ command: 'scan_dup', description: '🔍 查找网盘重复文件' }),
                     new Api.BotCommand({ command: 'status', description: '📊 查看我的任务' }),
                     new Api.BotCommand({ command: 'remote_folder', description: '📂 保存目录设置' }),
                     new Api.BotCommand({ command: 'help', description: '📖 显示帮助菜单' }),

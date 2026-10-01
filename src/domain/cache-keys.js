@@ -12,7 +12,8 @@ export const CACHE_KEYS = Object.freeze({
         distributedLock: 'distributed_lock:',
         streamOwner: 'stream:owner:',
         streamProgress: 'stream:progress:',
-        streamFinalization: 'stream:final:'
+        streamFinalization: 'stream:final:',
+        dupScan: 'dupscan:'
     }),
 
     setting: key => `setting:${key}`,
@@ -43,5 +44,8 @@ export const CACHE_KEYS = Object.freeze({
 
     streamOwner: taskId => `stream:owner:${taskId}`,
     streamProgress: taskId => `stream:progress:${taskId}`,
-    streamFinalization: taskId => `stream:final:${taskId}`
+    streamFinalization: taskId => `stream:final:${taskId}`,
+
+    // 重复文件扫描状态。只读任务，不进 D1 tasks 表；Redis 存可跨实例重启读取。
+    dupScan: userId => `dupscan:${userId}`
 });

@@ -7,6 +7,7 @@ export const STRINGS = {
               "<b>常用操作</b>\n" +
               "• 绑定或管理网盘\n" +
               "• 查看已转存文件\n" +
+              "• 查找网盘里的重复文件（/scan_dup，只列清单不删除）\n" +
               "• 查看我的任务进度\n" +
               "• 设置保存目录\n\n" +
               "遇到问题请联系管理员。",
@@ -178,6 +179,60 @@ export const STRINGS = {
         btn_retry_load: "重新加载文件列表",
         btn_next: "下一页",
         btn_end: "末页",
+    },
+
+    // --- 重复文件扫描(只读,不删除) ---
+    dup_scan: {
+        title: "🔍 <b>网盘重复文件扫描</b>\n\n",
+        intro: "扫描整个网盘，找出重复的文件，<b>只列清单，不会删除任何东西</b>。\n请选择扫描范围：",
+        btn_scope_default: "当前默认网盘",
+        btn_scope_all: "扫描所有网盘",
+        btn_cancel: "🚫 停止扫描",
+        no_drive: "🚫 <b>还没有绑定网盘</b>\n\n请先发送 /drive 绑定网盘。",
+        already_running: "🕒 <b>已有扫描在进行中</b>\n\n请等待当前扫描结束，或点击它消息里的「停止扫描」。",
+        running: "🔍 <b>正在扫描重复文件</b>\n\n📂 网盘: <code>{{name}}</code>\n📄 已扫描: {{done}}/{{total}}\n⏱ 用时: {{seconds}} 秒\n\n<i>可随时点下方按钮停止</i>",
+        cancelled: "🚫 <b>扫描已停止</b>\n\n已扫描部分的结果不会被保留，重新发送 /scan_dup 可以再扫一次。",
+        failed: "❌ <b>扫描失败</b>\n\n📂 网盘: <code>{{name}}</code>\n原因: {{reason}}\n\n其他网盘仍会继续扫描。",
+        no_duplicates: "✅ <b>未发现重复文件</b>\n\n📂 网盘: <code>{{name}}</code>\n📄 扫描文件: {{scanned}} 个\n\n{{basisNote}}",
+        // 哈希不可用时必须明说,否则用户会误以为网盘是干净的
+        basis_hash: "✅ 判重依据: <b>内容哈希</b>，结果准确。",
+        basis_no_hash: "⚠️ 判重依据: <b>文件大小</b>。该网盘后端不返回内容哈希，无法做内容级判重，<b>下面同大小的文件内容可能不同</b>。",
+        basis_partial: "⚠️ 判重依据: <b>混合</b>。该网盘仅 {{hashed}}/{{scanned}} 个文件带内容哈希：带哈希的按内容判重，其余按大小归组（内容可能不同）。",
+        manual_note: "📌 清单仅供参考，<b>请自行到网盘里确认后再删除</b>。",
+        page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 组重复</i>",
+        group_hash: "🔁 <b>{{count}} 份相同内容</b>（每个 {{size}}，哈希 {{algo}}）",
+        group_size: "🔁 <b>{{count}} 份相同大小</b>（每个 {{size}}，内容可能不同）",
+        group_more: "    <i>…另有 {{count}} 份</i>",
+        btn_prev: "上一页",
+        btn_next: "下一页",
+        btn_rerun: "重新扫描",
+    },
+
+    // --- 重复文件扫描(只读,不删除) ---
+    dup_scan: {
+        title: "🔍 <b>网盘重复文件扫描</b>\n\n",
+        intro: "扫描整个网盘，找出重复的文件，<b>只列清单，不会删除任何东西</b>。\n请选择扫描范围：",
+        btn_scope_default: "当前默认网盘",
+        btn_scope_all: "扫描所有网盘",
+        btn_cancel: "🚫 停止扫描",
+        no_drive: "🚫 <b>还没有绑定网盘</b>\n\n请先发送 /drive 绑定网盘。",
+        already_running: "🕒 <b>已有扫描在进行中</b>\n\n请等待当前扫描结束，或点击它消息里的「停止扫描」。",
+        running: "🔍 <b>正在扫描重复文件</b>\n\n📂 网盘: <code>{{name}}</code>\n📄 已扫描: {{done}}/{{total}}\n⏱ 用时: {{seconds}} 秒\n\n<i>可随时点下方按钮停止</i>",
+        cancelled: "🚫 <b>扫描已停止</b>\n\n已扫描部分的结果不会被保留，重新发送 /scan_dup 可以再扫一次。",
+        failed: "❌ <b>扫描失败</b>\n\n📂 网盘: <code>{{name}}</code>\n原因: {{reason}}\n\n其他网盘仍会继续扫描。",
+        no_duplicates: "✅ <b>未发现重复文件</b>\n\n📂 网盘: <code>{{name}}</code>\n📄 扫描文件: {{scanned}} 个\n\n{{basisNote}}",
+        // 哈希不可用时必须明说,否则用户会误以为网盘是干净的
+        basis_hash: "✅ 判重依据: <b>内容哈希</b>，结果准确。",
+        basis_no_hash: "⚠️ 判重依据: <b>文件大小</b>。该网盘后端不返回内容哈希，无法做内容级判重，<b>下面同大小的文件内容可能不同</b>。",
+        basis_partial: "⚠️ 判重依据: <b>混合</b>。该网盘仅 {{hashed}}/{{scanned}} 个文件带内容哈希：带哈希的按内容判重，其余按大小归组（内容可能不同）。",
+        manual_note: "📌 清单仅供参考，<b>请自行到网盘里确认后再删除</b>。",
+        page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 组重复</i>",
+        group_hash: "🔁 <b>{{count}} 份相同内容</b>（每个 {{size}}，哈希 {{algo}}）",
+        group_size: "🔁 <b>{{count}} 份相同大小</b>（每个 {{size}}，内容可能不同）",
+        group_more: "    <i>…另有 {{count}} 份</i>",
+        btn_prev: "上一页",
+        btn_next: "下一页",
+        btn_rerun: "重新扫描",
     },
 
     // --- 状态相关 ---
