@@ -1,0 +1,112 @@
+[
+ {
+  "name": "new-message",
+  "input": {
+   "typeId": "1f2b0afd",
+   "hasMedia": false,
+   "textLen": 10,
+   "groupId": null
+  },
+  "expected": "t=1f2b0afd|media=false|text=10|gid="
+ },
+ {
+  "name": "new-channel-message",
+  "input": {
+   "typeId": "62ba04d9",
+   "hasMedia": true,
+   "textLen": 0,
+   "groupId": 987654
+  },
+  "expected": "t=62ba04d9|media=true|text=0|gid=987654"
+ },
+ {
+  "name": "callback-query",
+  "input": {
+   "typeId": "b9cfc48d",
+   "hasMedia": false,
+   "textLen": 5,
+   "groupId": null
+  },
+  "expected": "t=b9cfc48d|media=false|text=5|gid="
+ },
+ {
+  "name": "edit-message",
+  "input": {
+   "typeId": "e40370a3",
+   "hasMedia": false,
+   "textLen": 20,
+   "groupId": null
+  },
+  "expected": "t=e40370a3|media=false|text=20|gid="
+ },
+ {
+  "name": "delete-messages",
+  "input": {
+   "typeId": "a20db0e5",
+   "hasMedia": false,
+   "textLen": 0,
+   "groupId": null
+  },
+  "expected": "t=a20db0e5|media=false|text=0|gid="
+ },
+ {
+  "name": "null-group",
+  "input": {
+   "typeId": "1f2b0afd",
+   "hasMedia": false,
+   "textLen": 3,
+   "groupId": null
+  },
+  "expected": "t=1f2b0afd|media=false|text=3|gid="
+ },
+ {
+  "name": "negative-textlen",
+  "input": {
+   "typeId": "1f2b0afd",
+   "hasMedia": false,
+   "textLen": -1,
+   "groupId": null
+  },
+  "expected": "t=1f2b0afd|media=false|text=0|gid="
+ },
+ {
+  "name": "zero-textlen",
+  "input": {
+   "typeId": "1f2b0afd",
+   "hasMedia": false,
+   "textLen": 0,
+   "groupId": null
+  },
+  "expected": "t=1f2b0afd|media=false|text=0|gid="
+ },
+ {
+  "name": "string-group",
+  "input": {
+   "typeId": "1f2b0afd",
+   "hasMedia": true,
+   "textLen": 0,
+   "groupId": "grp-123"
+  },
+  "expected": "t=1f2b0afd|media=true|text=0|gid=grp-123"
+ },
+ {
+  "name": "no-typeid",
+  "input": {
+   "typeId": "",
+   "hasMedia": false,
+   "textLen": 1,
+   "groupId": null
+  },
+  "expected": "t=|media=false|text=1|gid="
+ },
+ {
+  "name": "large-text",
+  "input": {
+   "typeId": "1f2b0afd",
+   "hasMedia": false,
+   "textLen": 4096,
+   "groupId": null
+  },
+  "expected": "t=1f2b0afd|media=false|text=4096|gid="
+ }
+]

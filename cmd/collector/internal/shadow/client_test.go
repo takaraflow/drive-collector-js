@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/gotd/td/tg"
+
+	"github.com/youngsx/drive-collector/cmd/collector/internal/shadowfingerprint"
 )
 
 // TestOnUpdateRecordsButNeverErrors 影子模式的核心保证。
@@ -36,9 +38,12 @@ func TestOnUpdateRecordsButNeverErrors(t *testing.T) {
 		})
 	}
 
-	// nil update 不产生观察,但其余每条都必须留下记录
-	if c.observer.Count != len(cases)-1 {
-		t.Errorf("记录 %d 次,期望 %d(nil 不计入)", c.observer.Count, len(cases)-1)
+	// nil update 不产生观察。批次型容器会被拆成单条,
+	// 所以这里的期望值按「拆开后有几条」算,不是按容器个数。
+	// nil=0, UpdateShort=1, Updates(2条)=2, UpdatesCombined(1条)=1,
+	// UpdatesTooLong=0(流截断,不可比), UpdateShortMessage=1 → 合计 5
+	if c.observer.Count != 5 {
+		t.Errorf("记录 %d 次,期望 5(批次已拆成单条)", c.observer.Count)
 	}
 }
 
@@ -56,35 +61,43 @@ func TestObserverSummary(t *testing.T) {
 	ctx := context.Background()
 
 	before := c.observer.Count
+	// 批次必须被拆开 —— gramjs 是逐条回调,Node 侧记的也是逐条。
+	// 不拆的话 Go 记「Updates×1」Node 记「UpdateNewMessage×3」,diff 全红。
 	_ = c.onUpdate(ctx, &tg.Updates{Updates: []tg.UpdateClass{
 		updateNewMessage(1), updateNewMessage(2), updateNewMessage(3),
 	}})
 	_ = c.onUpdate(ctx, &tg.UpdateShort{Date: 1, Update: updateNewMessage(4)})
 	_ = c.onUpdate(ctx, &tg.UpdatesTooLong{})
 
-	if got := c.observer.Count - before; got != 3 {
-		t.Errorf("记录 %d 次,期望 3(nil update 不该计入)", got)
+	if got := c.observer.Count - before; got != 4 {
+		t.Errorf("记录 %d 次,期望 4(3 条批次 + 1 条 short)", got)
 	}
 
 	s := c.observer.Summary()
-	if s.ByType["Updates"] != 1 {
-		t.Errorf("Updates 计数 = %d,期望 1", s.ByType["Updates"])
+	// ByType 用 TL TypeID 做键(跨语言稳定标识)
+	if s.ByType["1f2b0afd"] != 4 {
+		t.Errorf("UpdateNewMessage(TypeID 1f2b0afd) 计数 = %d,期望 4(批次应被拆成单条)",
+			s.ByType["1f2b0afd"])
 	}
-	if s.ByType["UpdatesTooLong"] != 1 {
-		t.Errorf("UpdatesTooLong 计数 = %d,期望 1", s.ByType["UpdatesTooLong"])
+	if s.ByType["UpdatesTooLong"] != 0 {
+		t.Errorf("UpdatesTooLong 不应计入构成(该时段不可比),却记了 %d",
+			s.ByType["UpdatesTooLong"])
 	}
 	if s.Window == "" {
 		t.Error("窗口时长不应为空")
 	}
 
 	// 指纹必须稳定:同一批观察两次算出同一个值,否则没法比对。
-	f1 := Fingerprint(Observation{UpdateType: "Updates", Points: 3, DCID: 2, TextLen: 10})
-	f2 := Fingerprint(Observation{UpdateType: "Updates", Points: 3, DCID: 2, TextLen: 10})
-	if f1 != f2 {
-		t.Errorf("指纹不稳定: %q vs %q", f1, f2)
+	// 用共享契约算 —— Node 侧用的是同一份算法。
+	mk := func(textLen int) string {
+		return shadowfingerprint.Compute(shadowfingerprint.Observation{
+			TypeID: "1f2b0afd", TextLen: textLen,
+		})
 	}
-	f3 := Fingerprint(Observation{UpdateType: "Updates", Points: 4, DCID: 2, TextLen: 10})
-	if f1 == f3 {
+	if mk(10) != mk(10) {
+		t.Error("指纹不稳定")
+	}
+	if mk(10) == mk(11) {
 		t.Error("不同观察不应得到相同指纹")
 	}
 }

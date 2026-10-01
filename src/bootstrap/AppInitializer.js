@@ -3,6 +3,7 @@ import { initConfig, validateConfig, getConfig } from '../config/index.js';
 import { summarizeStartupConfig } from '../utils/startupConfig.js';
 import { registerShutdownHooks } from '../utils/lifecycle.js';
 import { startMemoryMonitor } from '../utils/memoryMonitor.js';
+import { startShadowRecorder } from '../services/ShadowRecorder.js';
 import { getBuildIdentity, getBuildLogFields } from '../utils/buildIdentity.js';
 
 /**
@@ -213,6 +214,10 @@ export class AppInitializer {
 
         // 启动内存监控（仅在容器环境中生效）
         startMemoryMonitor();
+
+        // 影子记录(仅 SHADOW_RECORD=true 时真正启动)。
+        // 默认关闭:它是 Go↔JS 迁移验证的旁路,不是生产需要的功能。
+        startShadowRecorder();
 
         this.isInitialized = true;
     }

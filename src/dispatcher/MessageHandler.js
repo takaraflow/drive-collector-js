@@ -1,6 +1,7 @@
 import { Api } from "telegram";
 import { Dispatcher } from "./Dispatcher.js";
 import { instanceCoordinator } from "../services/InstanceCoordinator.js";
+import { recordUpdate } from "../services/ShadowRecorder.js";
 import { logger } from "../services/logger/index.js";
 import { getConfig } from "../config/index.js";
 
@@ -336,6 +337,15 @@ export class MessageHandler {
      */
     static async handleEvent(event, client) {
         const start = Date.now();
+
+        // 影子记录走旁路:必须在任何业务判断之前(否则「被过滤掉的消息」
+        // 就统计不到了),但自己永不抛,也永不改变返回值。
+        // 未开启时 recordUpdate 立刻返回,开销是一次布尔判断。
+        try {
+            recordUpdate(event);
+        } catch {
+            // 影子记录任何问题都不该影响线上。
+        }
 
         const message = this._extractMessage(event);
 

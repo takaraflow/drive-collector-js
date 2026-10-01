@@ -23,9 +23,10 @@ package shadow
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/youngsx/drive-collector/cmd/collector/internal/shadowfingerprint"
 )
 
 // SettingsKey 与 JS 侧 SettingsRepository.getSettingsKey 对应。
@@ -37,60 +38,52 @@ const SettingsKey = "setting:tg_bot_session"
 //   - 完整消息体含用户内容,落盘等于建了个隐私黑洞
 //   - 迁移要比的是「看到什么」,不是「内容是什么」
 type Observation struct {
-	At          time.Time      `json:"at"`
-	SessionID   int            `json:"sessionId"`
-	Kind        string         `json:"kind"`
-	UpdateType  string         `json:"updateType"`
-	DCID        int            `json:"dcId,omitempty"`
-	Points      int            `json:"points"`
-	Date        int            `json:"date,omitempty"`
-	TextLen     int            `json:"textLen,omitempty"`
-	HasMedia    bool           `json:"hasMedia"`
-	GroupID     string         `json:"groupId,omitempty"`
-	Fingerprint string         `json:"fingerprint"`
+	At      time.Time `json:"at"`
+	Kind    string    `json:"kind"`
+	Points  int       `json:"points"`
+	Date    int       `json:"date,omitempty"`
+	Session int       `json:"sessionId"`
+
+	// Feature 是跨语言共享的指纹输入。用共享契约而不是本地字段 ——
+	// 两份指纹实现必然漂移,而漂移的表现是「diff 全是噪声」。
+	Feature shadowfingerprint.Observation `json:"feature"`
+
+	// Fingerprint 由共享契约算出。
+	Fingerprint string `json:"fingerprint"`
 }
 
-// Fingerprint 是 update 的稳定指纹:同一批消息在 Node 和 Go 两侧必须
-// 算出同一个值,否则说明两边收到的不是同一批东西。
-//
-// 用「类型 + 点数 + 内容长度 + 媒体组 ID」而不是消息 ID —— 消息 ID
-// 在 MTProto 层本来就该一致,但一旦不一致我们更想先知道「差在哪一维」。
-func Fingerprint(o Observation) string {
-	return fmt.Sprintf("%s|p%d|d%d|tl%d|media=%t|gid=%s",
-		o.UpdateType, o.Points, o.DCID, o.TextLen, o.HasMedia, o.GroupID)
-}
 
 // Observer 汇总观察结果。
 type Observer struct {
 	Log    *slog.Logger
 	Count  int
 	ByType map[string]int
-	First  time.Time
-	Last   time.Time
+	// byFingerprint 是 diff 的数据基础:按共享指纹统计构成。
+	byFingerprint map[string]int
+	First time.Time
+	Last  time.Time
 }
 
 func NewObserver(log *slog.Logger) *Observer {
-	return &Observer{Log: log, ByType: map[string]int{}}
+	return &Observer{Log: log, ByType: map[string]int{}, byFingerprint: map[string]int{}}
 }
 
 // Record 记录一次观察。只打印摘要,不打消息内容。
 func (o *Observer) Record(obs Observation) {
 	o.Count++
-	o.ByType[obs.UpdateType]++
+	o.ByType[obs.Feature.TypeID]++
 	if o.First.IsZero() {
 		o.First = obs.At
 	}
 	o.Last = obs.At
 
-	obs.Fingerprint = Fingerprint(obs)
+	obs.Fingerprint = shadowfingerprint.Compute(obs.Feature)
+	o.byFingerprint[obs.Fingerprint]++
+
 	o.Log.Info("shadow update",
-		"sessionId", obs.SessionID,
 		"kind", obs.Kind,
-		"updateType", obs.UpdateType,
-		"dcId", obs.DCID,
 		"points", obs.Points,
-		"hasMedia", obs.HasMedia,
-		"textLen", obs.TextLen,
+		"typeId", obs.Feature.TypeID,
 		"fingerprint", obs.Fingerprint,
 	)
 }
