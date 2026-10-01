@@ -1117,6 +1117,12 @@ describe("DirectTransferService", () => {
     expect(stdin.destroy).toHaveBeenCalled();
     expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
     expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
+    // stall 必须自己留痕:下游只看得到 rclone 的 "terminated by signal SIGTERM"
+    // (是我们的钩子掐的),不记 phase 的话线上无从判断卡在哪个阶段。
+    expect(loggerFns.warn).toHaveBeenCalledWith(
+      "Direct transfer stall timeout fired",
+      expect.objectContaining({ taskId: "task-write-stall", phase: "rclone_stdin", timeoutMs: 100 })
+    );
   });
 
   test("fails closed by default when fallback is not explicitly enabled", async () => {

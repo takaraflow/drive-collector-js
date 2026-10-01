@@ -605,6 +605,14 @@ export class DirectTransferService {
                     `direct transfer stall timeout after ${timeoutMs}ms during ${phase || "unknown"}`,
                     { phase, timeoutMs }
                 );
+                // stall 触发时下游只会看到 rclone 的 "terminated by signal SIGTERM" ——
+                // 那是我们的 onTimeout 钩子掐的,rclone 说不出是谁掐的,更说不出卡在哪个阶段。
+                // 不在这里留痕,线上就只能靠猜(telegram_source 还是 rclone_completion)。
+                log.warn("Direct transfer stall timeout fired", {
+                    taskId,
+                    phase: phase || "unknown",
+                    timeoutMs
+                });
                 try {
                     onTimeout?.(error);
                 } catch (abortError) {
