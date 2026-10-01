@@ -150,7 +150,8 @@ describe('集成测试示例', () => {
 
       expect(mediaInfo).toEqual({
         name: expect.stringContaining('transfer_'),
-        size: 1024
+        size: 1024,
+        sizeExact: true
       });
     });
   });

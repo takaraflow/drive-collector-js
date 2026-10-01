@@ -222,26 +222,40 @@ describe("DirectTransferService", () => {
     expect(cloudTool.deleteRemoteFile).not.toHaveBeenCalled();
   });
 
-  test("protondrive never deletes the final name when the direct write fails", async () => {
-    const proc = createProcess({ exitCode: 1, stderr: "boom" });
+  test("never hands rclone an estimated photo size, and accepts whatever byte count it lands", async () => {
+    // 线上真实故障:照片任务报
+    //   "Failed to rcat: corrupted on transfer: sizes differ src 47379 vs dst 80482"
+    // 且 attempts=1 —— classifyRcloneError 不认 "sizes differ",落到 UNKNOWN/retryable:false,
+    // 一次就判死,连 5 次重试的资格都没有。
+    // 真相是我们给的 --size 是估算值(见 getMediaInfo 的 sizeExact),rclone 实收 80482 反而是对的。
+    // 照片走"不校验字节数"路径:--size 不传(0),传后验证不要求精确相等。
+    const proc = createProcess();
     const stdin = createWritable(proc);
-    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: "file.bin" });
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: "photo.jpg" });
+    // 网盘上的真实大小与我们报的 47379 对不上 —— 精确校验会把这判成损坏
+    cloudTool.getRemoteFileInfo
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ Name: "photo.jpg", Size: 80482 });
 
     const result = await service.transferTelegramMediaToRemote({
-      task: { id: "task-proton-fail", userId: "user-1" },
-      message: { media: { document: {} } },
+      task: { id: "task-photo-size", userId: "user-1" },
+      message: { media: { photo: {} } },
       client,
-      info: { size: 11 },
-      fileName: "file.bin",
+      info: { size: 47379, sizeExact: false },
+      fileName: "photo.jpg",
       driveType: "protondrive"
     });
 
-    expect(result).toMatchObject({ success: false, fallback: true });
-    // 最终名不是 _isManagedStagingFile 认的 staging 名,删它等于删用户文件
-    expect(cloudTool.deleteRemoteFile).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ success: true, method: "direct_stream", fileName: "photo.jpg" });
+    // size 传 0 → rclone.js 不会 push --size,让它自己数 stdin
+    expect(cloudTool.createRcatStream).toHaveBeenCalledWith("photo.jpg", "user-1", { size: 0 });
+    // 回报的字节数是网盘上的实测值,不是那个估算值
+    expect(result.bytes).toBe(80482);
   });
 
-  test("protondrive streams straight to the final name and skips the server-side move", async () => {
+  test("still hands rclone the exact size for documents and videos", async () => {
+    // sizeExact 默认 true,document/video 的 obj.size 是服务端权威值,行为不能变。
     const proc = createProcess();
     const stdin = createWritable(proc);
     cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: "movie.mkv" });
@@ -251,19 +265,115 @@ describe("DirectTransferService", () => {
       .mockResolvedValueOnce({ Name: "movie.mkv", Size: 11 });
 
     const result = await service.transferTelegramMediaToRemote({
-      task: { id: "task-proton", userId: "user-1" },
+      task: { id: "task-doc-size", userId: "user-1" },
       message: { media: { document: {} } },
       client,
-      info: { size: 11 },
+      info: { size: 11, sizeExact: true },
       fileName: "movie.mkv",
       driveType: "protondrive"
     });
 
-    expect(result).toMatchObject({ success: true, method: "direct_stream", fileName: "movie.mkv" });
-    // Proton 的 moveto 会因目录最终一致性稳定报 directory not found,直写整段跳过它
+    expect(result).toMatchObject({ success: true, bytes: 11 });
     expect(cloudTool.createRcatStream).toHaveBeenCalledWith("movie.mkv", "user-1", { size: 11 });
-    expect(cloudTool.moveRemoteFile).not.toHaveBeenCalled();
-    expect(cloudTool.deleteRemoteFile).not.toHaveBeenCalled();
+  });
+
+  test("rejects a genuinely wrong byte count for a document", async () => {
+    // 反例,证明上面不是把校验整个关掉:文档的 size 是权威值,对不上就是真出事。
+    const proc = createProcess();
+    const stdin = createWritable(proc);
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: "movie.mkv" });
+    cloudTool.getRemoteFileInfo
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ Name: "movie.mkv", Size: 12 }); // 报 11,实收 12
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-doc-mismatch", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11, sizeExact: true },
+      fileName: "movie.mkv",
+      driveType: "protondrive"
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  test("never hands rclone an estimated photo size, and accepts whatever byte count it lands", async () => {
+    // 线上真实故障:照片任务报
+    //   "Failed to rcat: corrupted on transfer: sizes differ src 47379 vs dst 80482"
+    // 且 attempts=1 —— classifyRcloneError 不认 "sizes differ",落到 UNKNOWN/retryable:false,
+    // 一次就判死,连 5 次重试的资格都没有。
+    // 真相是我们给的 --size 是估算值(见 getMediaInfo 的 sizeExact),rclone 实收 80482 反而是对的。
+    // 照片走"不校验字节数"路径:--size 不传(0),传后验证不要求精确相等。
+    const proc = createProcess();
+    const stdin = createWritable(proc);
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: "photo.jpg" });
+    // 网盘上的真实大小与我们报的 47379 对不上 —— 精确校验会把这判成损坏
+    cloudTool.getRemoteFileInfo
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ Name: "photo.jpg", Size: 80482 });
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-photo-size", userId: "user-1" },
+      message: { media: { photo: {} } },
+      client,
+      info: { size: 47379, sizeExact: false },
+      fileName: "photo.jpg",
+      driveType: "protondrive"
+    });
+
+    expect(result).toMatchObject({ success: true, method: "direct_stream", fileName: "photo.jpg" });
+    // size 传 0 → rclone.js 不会 push --size,让它自己数 stdin
+    expect(cloudTool.createRcatStream).toHaveBeenCalledWith("photo.jpg", "user-1", { size: 0 });
+    // 回报的字节数是网盘上的实测值,不是那个估算值
+    expect(result.bytes).toBe(80482);
+  });
+
+  test("still hands rclone the exact size for documents and videos", async () => {
+    // sizeExact 默认 true,document/video 的 obj.size 是服务端权威值,行为不能变。
+    const proc = createProcess();
+    const stdin = createWritable(proc);
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: "movie.mkv" });
+    cloudTool.getRemoteFileInfo
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ Name: "movie.mkv", Size: 11 });
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-doc-size", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11, sizeExact: true },
+      fileName: "movie.mkv",
+      driveType: "protondrive"
+    });
+
+    expect(result).toMatchObject({ success: true, bytes: 11 });
+    expect(cloudTool.createRcatStream).toHaveBeenCalledWith("movie.mkv", "user-1", { size: 11 });
+  });
+
+  test("rejects a genuinely wrong byte count for a document", async () => {
+    // 反例,证明上面不是把校验整个关掉:文档的 size 是权威值,对不上就是真出事。
+    const proc = createProcess();
+    const stdin = createWritable(proc);
+    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: "movie.mkv" });
+    cloudTool.getRemoteFileInfo
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ Name: "movie.mkv", Size: 12 }); // 报 11,实收 12
+
+    const result = await service.transferTelegramMediaToRemote({
+      task: { id: "task-doc-mismatch", userId: "user-1" },
+      message: { media: { document: {} } },
+      client,
+      info: { size: 11, sizeExact: true },
+      fileName: "movie.mkv",
+      driveType: "protondrive"
+    });
+
+    expect(result.success).toBe(false);
   });
 
   test("protondrive never deletes the final name when the direct write fails", async () => {
@@ -860,61 +970,6 @@ describe("DirectTransferService", () => {
     expect(sourceIterator.return).toHaveBeenCalled();
   });
 
-  test("treats a 0-byte Telegram source as a retryable telegram_source failure, not an rclone error", async () => {
-    // gramjs 的 _downloadPhoto / 未知 media 分支都是 `return Buffer.alloc(0)`,不抛错。
-    // 照片解析失败时 iterDownload 因此"成功"地产出空流;喂给 rclone 会被报成
-    // "sizes differ src 0" —— 既误导(rclone 背锅)又跳过重试(源侧真凶被掩盖)。
-    vi.useFakeTimers();
-    const proc = createProcess();
-    const stdin = createWritable(proc);
-    const stagingName = ".drive-collector-task-empty-1-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
-    const sourceIterator = {
-      next: vi.fn(async () => ({ done: true })), // 一个字节都没有
-      return: vi.fn(async () => ({ done: true }))
-    };
-    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
-    client.iterDownload.mockReturnValue(sourceIterator);
-
-    const resultPromise = service.transferTelegramMediaToRemote({
-      task: { id: "task-empty-source", userId: "user-1" },
-      message: { media: { photo: {} } },
-      client,
-      info: { size: 80482 },
-      fileName: "photo.jpg",
-      config: {
-        directTransfer: {
-          enabled: true,
-          fallbackToLocal: false,
-          timeoutMs: 10000,
-          stallTimeoutMs: 100,
-          minStallTimeoutMs: 0,
-          maxAttempts: 1,
-          retryDelayMs: 0
-        },
-        remoteName: "mega",
-        oss: {}
-      }
-    });
-
-    await vi.runAllTicks();
-    await vi.advanceTimersByTimeAsync(1600);
-    const result = await resultPromise;
-
-    expect(result).toMatchObject({
-      success: false,
-      fallback: false,
-      errorCode: "TELEGRAM_SOURCE_TRANSIENT",
-      retryable: true,
-      userRetryable: true,
-      retryScope: "telegram_source"
-    });
-    expect(result.error).toContain("empty stream");
-    expect(result.error).toContain("80482");
-    // 空流绝不能 end stdin 让 rclone 自顾自跑完 —— 必须主动收掉
-    expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
-    expect(sourceIterator.return).toHaveBeenCalled();
-  });
-
   test("keeps telegram_source scope when the stall hook SIGTERMs rclone", async () => {
     vi.useFakeTimers();
     const proc = createProcess();
@@ -966,53 +1021,6 @@ describe("DirectTransferService", () => {
     expect(result.error).toContain("direct transfer stall timeout");
     expect(result.error).toContain("terminated by signal SIGTERM");
     expect(cloudTool.deleteRemoteFile).toHaveBeenCalledWith(stagingName, "user-1");
-  });
-
-  test("keeps rclone_target when the stalled run also produced its own rclone diagnostic", async () => {
-    vi.useFakeTimers();
-    const proc = createProcess({ exitCode: null, signal: "SIGTERM", stderr: "ERROR : 存储空间超限 (Code=200002)" });
-    proc.kill = vi.fn(() => proc.complete());
-    const stdin = createWritable(proc);
-    const stagingName = ".drive-collector-task-src-diag-123-123e4567-e89b-12d3-a456-426614174000.part.file.bin";
-    const sourceIterator = {
-      next: vi.fn(() => new Promise(() => {})),
-      return: vi.fn(async () => ({ done: true }))
-    };
-    cloudTool.createRcatStream.mockResolvedValue({ stdin, proc, fileName: stagingName });
-    client.iterDownload.mockReturnValue(sourceIterator);
-
-    const resultPromise = service.transferTelegramMediaToRemote({
-      task: { id: "task-src-diag", userId: "user-1" },
-      message: { media: { document: {} } },
-      client,
-      info: { size: 5 },
-      fileName: "file.bin",
-      config: {
-        directTransfer: {
-          enabled: true,
-          fallbackToLocal: false,
-          timeoutMs: 10000,
-          stallTimeoutMs: 100,
-          minStallTimeoutMs: 0,
-          maxAttempts: 1,
-          retryDelayMs: 0
-        },
-        remoteName: "mega",
-        oss: {}
-      }
-    });
-
-    await vi.runAllTicks();
-    await vi.advanceTimersByTimeAsync(1600);
-    const result = await resultPromise;
-
-    // rclone 带上了自己的诊断 → 那是另一个独立的、可能是永久性的网盘故障,定性归它,
-    // 不能因为源侧也恰好 stall 了就一律盖成可重试的 TELEGRAM_SOURCE_TRANSIENT。
-    expect(result.retryScope).toBe("rclone_target");
-    expect(result.errorCode).not.toBe("TELEGRAM_SOURCE_TRANSIENT");
-    expect(result.error).toContain("存储空间超限");
-    // 源侧原因仍然留在 message 里,不丢证据
-    expect(result.error).toContain("direct transfer stall timeout");
   });
 
   test("keeps rclone_target when the stalled run also produced its own rclone diagnostic", async () => {

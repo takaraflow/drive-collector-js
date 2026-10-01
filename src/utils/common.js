@@ -160,7 +160,19 @@ export const getMediaInfo = (input) => {
         : null;
     const size = obj.size || photoBytes(largestPhotoSize) || 0;
     const parsedSize = parseInt(size, 10);
-    return { name, size: Number.isFinite(parsedSize) ? parsedSize : 0 };
+    // sizeExact=false 表示"这是估算值,别拿它当字节数的判据"。
+    //
+    // document/video 的 obj.size 是 Telegram 服务端给的权威字节数,可以直接用。
+    // 照片不行:gramjs 下载时自己挑档(_downloadPhoto → getThumb → 下载哪一档由它的
+    // sortThumb 决定,progressive 取 Math.max(...sizes),cached/stripped 取 bytes.length),
+    // 我们在这里重算只是近似。两边算法各自漂移 → 我们报 47379 而 rclone 实收 80482,
+    // rclone 收尾拿 --size 一比就报 "corrupted on transfer: sizes differ",把一次
+    // 完好的上传判成损坏,且该错误码不可重试,用户只能手动重发。
+    //
+    // 与其把 gramjs 的选档逻辑再抄一遍(已经漂移过一次,见上),不如承认照片大小
+    // 事前不可知:让调用方对照片走"不校验字节数"的路径(见 DirectTransferService)。
+    const sizeExact = !photo;
+    return { name, size: Number.isFinite(parsedSize) ? parsedSize : 0, sizeExact };
 };
 
 // 统一更新任务状态 (带取消按钮)

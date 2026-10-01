@@ -226,6 +226,11 @@ export class DirectTransferService {
         }
 
         const totalSize = Number(info?.size || 0);
+        // 照片的 size 是估算值(见 getMediaInfo 的 sizeExact),拿它当字节数判据会
+        // 让 rclone 收尾误判 "corrupted on transfer: sizes differ"、让传后验证把
+        // 完好文件判成不匹配。估算值只用来挑 chunk 大小和显示进度,不参与任何判定。
+        const sizeIsExact = info?.sizeExact !== false;
+        const expectedSize = sizeIsExact ? totalSize : 0;
         const effectiveChunkSize = Number.isFinite(chunkSize) && chunkSize > 0
             ? chunkSize
             : (totalSize > LARGE_FILE_THRESHOLD ? DEFAULT_LARGE_CHUNK_SIZE : DEFAULT_SMALL_CHUNK_SIZE);
@@ -246,14 +251,14 @@ export class DirectTransferService {
             existingRemoteFile = await this.cloudTool.getRemoteFileInfo(finalFileName, task.userId, 1, true);
         }
         if (existingRemoteFile) {
-            if (this._isSizeMatch(existingRemoteFile.Size, totalSize)) {
-                return this._buildExistingRemoteResult(finalFileName, totalSize, uploadedBytes);
+            if (this._isSizeMatch(existingRemoteFile.Size, expectedSize)) {
+                return this._buildExistingRemoteResult(finalFileName, expectedSize, uploadedBytes);
             }
             return this._buildFallbackResult(config, "remote-name-conflict");
         }
 
         try {
-            const rcat = await this.cloudTool.createRcatStream(stagingFileName, task.userId, { size: totalSize });
+            const rcat = await this.cloudTool.createRcatStream(stagingFileName, task.userId, { size: expectedSize });
             stdin = rcat.stdin;
             proc = rcat.proc;
             const remoteStagingName = rcat.fileName;
@@ -386,15 +391,15 @@ export class DirectTransferService {
 
             const preMoveRemote = await this.cloudTool.getRemoteFileInfo(finalFileName, task.userId, 1, true);
             if (preMoveRemote) {
-                if (this._isSizeMatch(preMoveRemote.Size, totalSize)) {
+                if (this._isSizeMatch(preMoveRemote.Size, expectedSize)) {
                     // 直写模式下 stagedRemoteName 就是 finalFileName,删它等于删掉本次要交付的文件
                     if (!directWrite) {
                         await this._cleanupRemote(stagedRemoteName, task.userId, "remote_completed_concurrently");
                     }
-                    return this._buildExistingRemoteResult(finalFileName, totalSize, uploadedBytes);
+                    return this._buildExistingRemoteResult(finalFileName, expectedSize, uploadedBytes);
                 }
                 throw new DirectTransferFallbackError(
-                    `Remote file name conflict before finalize: local(${totalSize}) vs remote(${preMoveRemote.Size ?? "unknown"})`
+                    `Remote file name conflict before finalize: local(${expectedSize || "unknown"}) vs remote(${preMoveRemote.Size ?? "unknown"})`
                 );
             }
 
@@ -409,10 +414,10 @@ export class DirectTransferService {
                 movedToFinal = true;
             }
 
-            const finalRemote = await this._waitForRemoteValidation(finalFileName, task.userId, totalSize);
-            if (!this._isSizeMatch(finalRemote?.Size, totalSize)) {
+            const finalRemote = await this._waitForRemoteValidation(finalFileName, task.userId, expectedSize);
+            if (!this._isSizeMatch(finalRemote?.Size, expectedSize)) {
                 throw new DirectTransferFallbackError(
-                    `Direct transfer validation failed: local(${totalSize}) vs remote(${finalRemote?.Size ?? "not found"})`
+                    `Direct transfer validation failed: local(${expectedSize || "unknown"}) vs remote(${finalRemote?.Size ?? "not found"})`
                 );
             }
 
@@ -420,7 +425,9 @@ export class DirectTransferService {
                 success: true,
                 method: "direct_stream",
                 fileName: finalFileName,
-                bytes: totalSize || uploadedBytes
+                // 照片的权威字节数是 rclone 实收的量(它没拿到 --size,自己数的),
+                // 估算值只用于展示,不能写进结果里冒充真实大小。
+                bytes: expectedSize || Number(finalRemote?.Size) || uploadedBytes
             };
         } catch (error) {
             const rcloneFailure = await this._resolveRcloneFailureAfterStreamError(rcloneCompletion, task.id, error);
