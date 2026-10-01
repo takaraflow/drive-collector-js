@@ -24,6 +24,7 @@
     "test:vectors": "node scripts/gen-contract-vectors.js",
     "test:vectors:qstash": "node scripts/gen-qstash-vectors.js",
     "test:vectors:task-queue": "node scripts/gen-task-queue-vectors.js",
+    "test:vectors:tgsession": "node scripts/gen-tgsession-vectors.js",
     "test:go": "go test ./cmd/collector/...",
     "db:migrate": "node scripts/db-migrate.js",
     "db:migrate:dry": "node scripts/db-migrate.js --dry-run",
