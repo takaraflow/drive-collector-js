@@ -18,11 +18,17 @@ const BODY = JSON.stringify({
 
 const bodyHash = createHash("sha256").update(BODY).digest("base64url");
 
+// 固定的 iat —— 签名必须可复现。
+//
+// JWT 里带 iat(签发时刻),每次重跑都不同 → 向量文件每次都变 →
+// CI 的「向量是否最新」检查会永远红。固定时间戳后重跑是幂等的。
+const FIXED_IAT = 1767225600; // 2026-01-01 00:00:00 UTC
+
 async function sign(claims, { key = KEY, issuer = "Upstash" } = {}) {
     return await new SignJWT(claims)
         .setProtectedHeader({ alg: "HS256" })
         .setIssuer(issuer)
-        .setIssuedAt()
+        .setIssuedAt(FIXED_IAT)
         .sign(new TextEncoder().encode(key));
 }
 
@@ -84,12 +90,9 @@ const vectors = [
 ];
 
 // 补一份「用另一个 key 签的合法签名」,确认 Receiver 会依次尝试 current/next。
+// 同样用固定 iat,理由见上。
 const nextKey = "next-signing-key-67890";
-const nextKeySig = await new SignJWT({ sub: URL_UNDER_TEST, body: bodyHash })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuer("Upstash")
-    .setIssuedAt()
-    .sign(new TextEncoder().encode(nextKey));
+const nextKeySig = await sign({ sub: URL_UNDER_TEST, body: bodyHash }, { key: nextKey });
 vectors.push({
     name: "signed-with-next-key",
     signature: nextKeySig,
