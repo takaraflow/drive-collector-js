@@ -228,4 +228,3 @@ EOF`)
 		t.Errorf("names = %v", names)
 	}
 }
-

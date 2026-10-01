@@ -53,9 +53,9 @@ func TestMegaConnectionString(t *testing.T) {
 // 旋转,而并发两个任务共用它就是账号砖化的起点(记忆里的 Code=10013)。
 func TestProtonPrefersSessionOverPassword(t *testing.T) {
 	sess := &ProtonSession{
-		ClientUID:          "uid",
-		ClientAccessToken:  "access",
-		ClientRefreshToken: "refresh",
+		ClientUID:           "uid",
+		ClientAccessToken:   "access",
+		ClientRefreshToken:  "refresh",
 		ClientSaltedKeyPass: "salted",
 	}
 	got, err := ConnectionString(TypeProton, Config{

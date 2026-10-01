@@ -125,6 +125,7 @@ func TestAuthKeyIDDerivation(t *testing.T) {
 		}
 	}
 }
+
 // TestStoreSessionIsNoOp 是影子模式最关键的一条铁律。
 //
 // 一旦有人给这个类型加上真正的写逻辑,session 就会被 Go 侧覆盖,

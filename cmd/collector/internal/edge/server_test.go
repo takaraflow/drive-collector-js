@@ -142,7 +142,7 @@ func TestRejectsBadSignature(t *testing.T) {
 }
 
 // TestNoLeaderReturns503 与 JS 侧 "Not Leader" 契约一致:
-//让 QStash 重试,而不是丢弃。
+// 让 QStash 重试,而不是丢弃。
 func TestNoLeaderReturns503(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("无 leader 时不应转发")

@@ -24,7 +24,7 @@ type fakeD1 struct {
 	mu       sync.Mutex
 	requests []capturedReq
 	// responder 按顺序返回响应;用尽后返回最后一个。
-	responder func(req capturedReq) string
+	responder   func(req capturedReq) string
 	rowsWritten int64
 }
 

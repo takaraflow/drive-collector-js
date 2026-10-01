@@ -122,7 +122,10 @@ func TestStateMachineEdgeCases(t *testing.T) {
 	t.Run("幂等转移 allowed 且 idempotent", func(t *testing.T) {
 		// 这些是 JS 侧 from 集合里真的包含自身的事件 —— 重复投递时
 		// 不会因为「已完成」而报错(媒体组重试会走到这里)。
-		for _, tc := range []struct{ from TaskStatus; ev TaskEvent }{
+		for _, tc := range []struct {
+			from TaskStatus
+			ev   TaskEvent
+		}{
 			{StatusDownloading, EventStartDownload},
 			{StatusDownloaded, EventFinishDownload},
 			{StatusUploading, EventStartUpload},

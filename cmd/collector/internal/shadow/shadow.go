@@ -71,10 +71,10 @@ type Observation struct {
 
 // bucket 是一分钟内的计数。
 type bucket struct {
-	start    time.Time
-	byFP     map[string]int
-	byType   map[string]int
-	total    int
+	start  time.Time
+	byFP   map[string]int
+	byType map[string]int
+	total  int
 }
 
 // Observer 汇总观察结果,按分钟分桶实现滚动窗口。
@@ -88,7 +88,7 @@ type Observer struct {
 
 	mu      sync.Mutex
 	buckets []*bucket // 按 start 升序,长度不超过 windowBuckets
-	total   int        // 进程启动至今的累计,只用于「是否启动过」的判断
+	total   int       // 进程启动至今的累计,只用于「是否启动过」的判断
 	first   time.Time
 	last    time.Time
 }
@@ -195,11 +195,11 @@ func (o *Observer) Started() bool {
 
 // Summary 输出可与 Node 侧比对的摘要。
 type Summary struct {
-	Total    int            `json:"total"`
-	ByType   map[string]int `json:"byType"`
-	First    time.Time      `json:"first"`
-	Last     time.Time      `json:"last"`
-	Window   string         `json:"window"`
+	Total  int            `json:"total"`
+	ByType map[string]int `json:"byType"`
+	First  time.Time      `json:"first"`
+	Last   time.Time      `json:"last"`
+	Window string         `json:"window"`
 	// WindowedTotal 是窗口内条数(与 Node 侧同口径),Total 是进程累计。
 	WindowedTotal int `json:"windowedTotal"`
 }

@@ -18,8 +18,8 @@ func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)
 // memRepo 是内存版的任务仓储,足够驱动 Manager 的状态推进。
 // 乐观锁在这里天然成立(单进程互斥),但仍然按仓储层的语义返回结果。
 type memRepo struct {
-	mu       sync.Mutex
-	tasks    map[string]*store.Task
+	mu    sync.Mutex
+	tasks map[string]*store.Task
 	// failTransition 让指定任务的转移被拒,模拟状态机拒绝。
 	blockFrom map[string]contract.TaskStatus
 	updates   int

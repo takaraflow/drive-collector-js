@@ -11,9 +11,9 @@ import (
 
 type vectors struct {
 	Cases []struct {
-		Name   string `json:"name"`
-		S      string `json:"s"`
-		Key    string `json:"key"`
+		Name string `json:"name"`
+		S    string `json:"s"`
+		Key  string `json:"key"`
 	} `json:"cases"`
 	Malformed []struct {
 		Name string `json:"name"`

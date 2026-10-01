@@ -87,7 +87,7 @@ type cloudflareError struct {
 }
 
 type queryResult struct {
-	Success bool                   `json:"success"`
+	Success bool                     `json:"success"`
 	Results []map[string]interface{} `json:"results"`
 	Meta    struct {
 		RowsRead    int `json:"rows_read"`

@@ -8,13 +8,13 @@ package contract
 type TaskStatus string
 
 const (
-	StatusQueued     TaskStatus = "queued"
+	StatusQueued      TaskStatus = "queued"
 	StatusDownloading TaskStatus = "downloading"
-	StatusDownloaded TaskStatus = "downloaded"
-	StatusUploading  TaskStatus = "uploading"
-	StatusCompleted  TaskStatus = "completed"
-	StatusFailed     TaskStatus = "failed"
-	StatusCancelled  TaskStatus = "cancelled"
+	StatusDownloaded  TaskStatus = "downloaded"
+	StatusUploading   TaskStatus = "uploading"
+	StatusCompleted   TaskStatus = "completed"
+	StatusFailed      TaskStatus = "failed"
+	StatusCancelled   TaskStatus = "cancelled"
 )
 
 // AllStatuses 的顺序与 JS 侧 Object.values(TASK_STATUSES) 一致。
@@ -65,9 +65,9 @@ type Transition struct {
 
 // Transitions 与 JS 侧 TASK_TRANSITIONS 逐字对应。
 var Transitions = map[TaskEvent]Transition{
-	EventStartDownload:  {StatusDownloading, []TaskStatus{StatusQueued, StatusDownloading}},
-	EventFinishDownload: {StatusDownloaded, []TaskStatus{StatusDownloading, StatusDownloaded}},
-	EventStartUpload:    {StatusUploading, []TaskStatus{StatusDownloaded, StatusUploading}},
+	EventStartDownload:     {StatusDownloading, []TaskStatus{StatusQueued, StatusDownloading}},
+	EventFinishDownload:    {StatusDownloaded, []TaskStatus{StatusDownloading, StatusDownloaded}},
+	EventStartUpload:       {StatusUploading, []TaskStatus{StatusDownloaded, StatusUploading}},
 	EventStartStreamUpload: {StatusUploading, []TaskStatus{StatusDownloading, StatusUploading}},
 	EventComplete: {StatusCompleted, []TaskStatus{
 		StatusQueued, StatusDownloading, StatusDownloaded,
@@ -96,13 +96,13 @@ var Transitions = map[TaskEvent]Transition{
 
 // eventByTargetStatus 与 JS 侧 EVENT_BY_TARGET_STATUS 对应。
 var eventByTargetStatus = map[TaskStatus]TaskEvent{
-	StatusQueued:     EventRetry,
+	StatusQueued:      EventRetry,
 	StatusDownloading: EventStartDownload,
-	StatusDownloaded: EventFinishDownload,
-	StatusUploading:  EventStartUpload,
-	StatusCompleted:  EventComplete,
-	StatusFailed:     EventFail,
-	StatusCancelled:  EventCancel,
+	StatusDownloaded:  EventFinishDownload,
+	StatusUploading:   EventStartUpload,
+	StatusCompleted:   EventComplete,
+	StatusFailed:      EventFail,
+	StatusCancelled:   EventCancel,
 }
 
 // TransitionError 对应 JS 侧 TaskStateTransitionError,Code 与其一致。
@@ -124,12 +124,12 @@ func invalidTransition(msg string) *TransitionError {
 
 // Resolution 对应 JS 侧 resolveTransition 的返回值。
 type Resolution struct {
-	Allowed     bool
-	Event       TaskEvent
-	FromStatus  TaskStatus
-	ToStatus    TaskStatus
-	Idempotent  bool
-	Reason      string
+	Allowed    bool
+	Event      TaskEvent
+	FromStatus TaskStatus
+	ToStatus   TaskStatus
+	Idempotent bool
+	Reason     string
 }
 
 func IsKnownStatus(s TaskStatus) bool { return knownStatuses[s] }

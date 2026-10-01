@@ -7,14 +7,14 @@ import (
 )
 
 type stubResolver struct {
-	lock []byte
-	lerr error
-	list []Instance
+	lock  []byte
+	lerr  error
+	list  []Instance
 	lerr2 error
 }
 
-func (s stubResolver) LockGetter(context.Context, string) ([]byte, error)   { return s.lock, s.lerr }
-func (s stubResolver) ActiveLister(context.Context) ([]Instance, error)     { return s.list, s.lerr2 }
+func (s stubResolver) LockGetter(context.Context, string) ([]byte, error) { return s.lock, s.lerr }
+func (s stubResolver) ActiveLister(context.Context) ([]Instance, error)   { return s.list, s.lerr2 }
 
 func TestBaseURL(t *testing.T) {
 	cases := []struct {
@@ -45,7 +45,7 @@ func TestBaseURL(t *testing.T) {
 		{
 			name: "锁为空 → 无 leader",
 			r: Resolver{
-				LockGetter: stubResolver{lock: nil}.LockGetter,
+				LockGetter:   stubResolver{lock: nil}.LockGetter,
 				ActiveLister: stubResolver{list: []Instance{{ID: "i1", DirectURL: "https://x.example.com"}}}.ActiveLister,
 			},
 			want: "",
@@ -53,7 +53,7 @@ func TestBaseURL(t *testing.T) {
 		{
 			name: "锁里没 instanceId → 无 leader",
 			r: Resolver{
-				LockGetter: stubResolver{lock: []byte(`{}`)}.LockGetter,
+				LockGetter:   stubResolver{lock: []byte(`{}`)}.LockGetter,
 				ActiveLister: stubResolver{list: []Instance{{ID: "i1", DirectURL: "https://x.example.com"}}}.ActiveLister,
 			},
 			want: "",
@@ -61,7 +61,7 @@ func TestBaseURL(t *testing.T) {
 		{
 			name: "锁 JSON 损坏 → 降级而非崩溃",
 			r: Resolver{
-				LockGetter: stubResolver{lock: []byte(`{bad`)}.LockGetter,
+				LockGetter:   stubResolver{lock: []byte(`{bad`)}.LockGetter,
 				ActiveLister: stubResolver{list: []Instance{}}.ActiveLister,
 			},
 			want: "",
@@ -79,7 +79,7 @@ func TestBaseURL(t *testing.T) {
 		{
 			name: "Redis 读失败 → 降级(不是错误)",
 			r: Resolver{
-				LockGetter: stubResolver{lerr: errors.New("connection refused")}.LockGetter,
+				LockGetter:   stubResolver{lerr: errors.New("connection refused")}.LockGetter,
 				ActiveLister: stubResolver{list: []Instance{}}.ActiveLister,
 			},
 			want: "",

@@ -29,13 +29,13 @@ import (
 // 字段与 JS 侧 handleDownloadWebhook 的返回值对齐 —— 边缘节点原样
 // 转发给 QStash,状态码决定 QStash 认不认这次投递。
 type Result struct {
-	Success  bool   `json:"success"`
-	StatusCode int  `json:"statusCode"`
-	Message  string `json:"message"`
+	Success    bool   `json:"success"`
+	StatusCode int    `json:"statusCode"`
+	Message    string `json:"message"`
 }
 
-func ok(msg string) Result     { return Result{Success: true, StatusCode: 200, Message: msg} }
-func notFound() Result         { return Result{Success: false, StatusCode: 404, Message: "Task not found"} }
+func ok(msg string) Result { return Result{Success: true, StatusCode: 200, Message: msg} }
+func notFound() Result     { return Result{Success: false, StatusCode: 404, Message: "Task not found"} }
 func retryLater(kind string) Result {
 	return Result{Success: false, StatusCode: 503, Message: kind + " task is active; retry later"}
 }

@@ -14,10 +14,10 @@ const ShadowCountsKey = "shadow:counts"
 
 // Diff 是两侧计数比对的结果。
 type Diff struct {
-	Window string         `json:"window"`
-	Rows   []DiffRow      `json:"rows"`
-	Match  bool           `json:"match"`
-	Note   string         `json:"note,omitempty"`
+	Window string    `json:"window"`
+	Rows   []DiffRow `json:"rows"`
+	Match  bool      `json:"match"`
+	Note   string    `json:"note,omitempty"`
 }
 
 type DiffRow struct {

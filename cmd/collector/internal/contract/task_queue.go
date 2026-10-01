@@ -16,10 +16,10 @@ const (
 
 // 触发来源,与 JS 侧 TASK_QUEUE_TRIGGER_SOURCES 逐字对应。
 const (
-	TriggerQStash        = "qstash-v2"
-	TriggerDirectQStash  = "direct-qstash"
-	TriggerManualRetry   = "manual-retry"
-	TriggerDownloadDone  = "download-complete"
+	TriggerQStash         = "qstash-v2"
+	TriggerDirectQStash   = "direct-qstash"
+	TriggerManualRetry    = "manual-retry"
+	TriggerDownloadDone   = "download-complete"
 	TriggerLocalFileReady = "local-file-ready"
 )
 

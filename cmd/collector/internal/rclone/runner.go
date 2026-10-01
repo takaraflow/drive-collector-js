@@ -54,12 +54,12 @@ type Config struct {
 
 // LogEntry 是 rclone --use-json-log 输出的一行。
 type LogEntry struct {
-	Level   string  `json:"level"`
-	Msg     string  `json:"msg"`
-	Error   string  `json:"error"`
-	Obj     *LogObj `json:"obj"`
-	Stats   *Stats  `json:"stats"`
-	Time    string  `json:"time"`
+	Level string  `json:"level"`
+	Msg   string  `json:"msg"`
+	Error string  `json:"error"`
+	Obj   *LogObj `json:"obj"`
+	Stats *Stats  `json:"stats"`
+	Time  string  `json:"time"`
 }
 
 type LogObj struct {
@@ -68,9 +68,9 @@ type LogObj struct {
 }
 
 type Stats struct {
-	Bytes     int64   `json:"bytes"`
-	TotalBytes int64  `json:"totalBytes"`
-	Speed     float64 `json:"speed"`
+	Bytes      int64   `json:"bytes"`
+	TotalBytes int64   `json:"totalBytes"`
+	Speed      float64 `json:"speed"`
 }
 
 // ProgressFunc 接收进度回调(0..1)。传输大文件时用于更新 UI。

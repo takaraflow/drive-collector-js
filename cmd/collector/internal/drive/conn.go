@@ -63,9 +63,9 @@ type Config struct {
 //
 // 所以 Session 必须配合 drive.SessionLock 使用,见 manager.go。
 type ProtonSession struct {
-	ClientUID         string
-	ClientAccessToken string
-	ClientRefreshToken string
+	ClientUID           string
+	ClientAccessToken   string
+	ClientRefreshToken  string
 	ClientSaltedKeyPass string
 }
 
@@ -77,6 +77,7 @@ func (s *ProtonSession) HasRefreshToken() bool {
 // ConnectionString 拼出 rclone 连接串。
 //
 // 格式来自 JS 侧 BaseDriveProvider.getConnectionString:
+//
 //	:backend,key="value",key2="value2":
 //
 // 转义规则逐字照搬:反斜杠和双引号都要转义 —— 密码里出现

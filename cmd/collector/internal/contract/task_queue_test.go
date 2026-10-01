@@ -139,10 +139,10 @@ func TestSafeIDLabel(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"download", "download"},
 		{"Download Tasks", "download-tasks"},
-		{"a  b", "a-b"},   // 连续空格折叠成一个 -
+		{"a  b", "a-b"},    // 连续空格折叠成一个 -
 		{"!!!", "x"},       // 全非法字符 → x
-		{"--x--", "x"},    // 首尾 - 去掉
-		{"任务_中文", "_"}, // 非 ASCII 折叠掉,但 _ 是合法字符故保留
+		{"--x--", "x"},     // 首尾 - 去掉
+		{"任务_中文", "_"},     // 非 ASCII 折叠掉,但 _ 是合法字符故保留
 		{"a/b/c", "a-b-c"}, // / 折叠
 		{"keep_under-score", "keep_under-score"},
 	} {
