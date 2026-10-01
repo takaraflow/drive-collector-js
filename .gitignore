@@ -62,3 +62,11 @@ Thumbs.db
 skills/
 .salmonloop/
 .worktrees/
+
+# Go 构建产物
+/collector
+/dist/
+
+# Go 构建产物
+/collector
+/dist/

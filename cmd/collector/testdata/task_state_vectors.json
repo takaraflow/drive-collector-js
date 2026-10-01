@@ -1,0 +1,1136 @@
+[
+ {
+  "from": "queued",
+  "input": "start_download",
+  "allowed": true,
+  "event": "start_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "queued",
+  "input": "finish_download",
+  "allowed": false,
+  "event": "finish_download",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from queued to downloaded via finish_download"
+ },
+ {
+  "from": "queued",
+  "input": "start_upload",
+  "allowed": false,
+  "event": "start_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from queued to uploading via start_upload"
+ },
+ {
+  "from": "queued",
+  "input": "start_stream_upload",
+  "allowed": false,
+  "event": "start_stream_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from queued to uploading via start_stream_upload"
+ },
+ {
+  "from": "queued",
+  "input": "complete",
+  "allowed": true,
+  "event": "complete",
+  "toStatus": "completed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "queued",
+  "input": "fail",
+  "allowed": true,
+  "event": "fail",
+  "toStatus": "failed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "queued",
+  "input": "cancel",
+  "allowed": true,
+  "event": "cancel",
+  "toStatus": "cancelled",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "queued",
+  "input": "retry",
+  "allowed": true,
+  "event": "retry",
+  "toStatus": "queued",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "queued",
+  "input": "reset_upload",
+  "allowed": false,
+  "event": "reset_upload",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from queued to downloaded via reset_upload"
+ },
+ {
+  "from": "queued",
+  "input": "reset_stream_download",
+  "allowed": false,
+  "event": "reset_stream_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": "Cannot transition task from queued to downloading via reset_stream_download"
+ },
+ {
+  "from": "queued",
+  "input": "reset_stalled",
+  "allowed": false,
+  "event": "reset_stalled",
+  "toStatus": "queued",
+  "idempotent": true,
+  "reason": "Cannot transition task from queued to queued via reset_stalled"
+ },
+ {
+  "from": "queued",
+  "input": "queued",
+  "allowed": true,
+  "event": "retry",
+  "toStatus": "queued",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "queued",
+  "input": "downloading",
+  "allowed": true,
+  "event": "start_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "queued",
+  "input": "downloaded",
+  "allowed": false,
+  "event": "finish_download",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from queued to downloaded via finish_download"
+ },
+ {
+  "from": "queued",
+  "input": "uploading",
+  "allowed": false,
+  "event": "start_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from queued to uploading via start_upload"
+ },
+ {
+  "from": "queued",
+  "input": "completed",
+  "allowed": true,
+  "event": "complete",
+  "toStatus": "completed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "queued",
+  "input": "failed",
+  "allowed": true,
+  "event": "fail",
+  "toStatus": "failed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "queued",
+  "input": "cancelled",
+  "allowed": true,
+  "event": "cancel",
+  "toStatus": "cancelled",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "start_download",
+  "allowed": true,
+  "event": "start_download",
+  "toStatus": "downloading",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "finish_download",
+  "allowed": true,
+  "event": "finish_download",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "start_upload",
+  "allowed": false,
+  "event": "start_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from downloading to uploading via start_upload"
+ },
+ {
+  "from": "downloading",
+  "input": "start_stream_upload",
+  "allowed": true,
+  "event": "start_stream_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "complete",
+  "allowed": true,
+  "event": "complete",
+  "toStatus": "completed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "fail",
+  "allowed": true,
+  "event": "fail",
+  "toStatus": "failed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "cancel",
+  "allowed": true,
+  "event": "cancel",
+  "toStatus": "cancelled",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "retry",
+  "allowed": true,
+  "event": "retry",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "reset_upload",
+  "allowed": false,
+  "event": "reset_upload",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from downloading to downloaded via reset_upload"
+ },
+ {
+  "from": "downloading",
+  "input": "reset_stream_download",
+  "allowed": true,
+  "event": "reset_stream_download",
+  "toStatus": "downloading",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "reset_stalled",
+  "allowed": true,
+  "event": "reset_stalled",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "queued",
+  "allowed": true,
+  "event": "retry",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "downloading",
+  "allowed": true,
+  "event": "start_download",
+  "toStatus": "downloading",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "downloaded",
+  "allowed": true,
+  "event": "finish_download",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "uploading",
+  "allowed": false,
+  "event": "start_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from downloading to uploading via start_upload"
+ },
+ {
+  "from": "downloading",
+  "input": "completed",
+  "allowed": true,
+  "event": "complete",
+  "toStatus": "completed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "failed",
+  "allowed": true,
+  "event": "fail",
+  "toStatus": "failed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloading",
+  "input": "cancelled",
+  "allowed": true,
+  "event": "cancel",
+  "toStatus": "cancelled",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloaded",
+  "input": "start_download",
+  "allowed": false,
+  "event": "start_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": "Cannot transition task from downloaded to downloading via start_download"
+ },
+ {
+  "from": "downloaded",
+  "input": "finish_download",
+  "allowed": true,
+  "event": "finish_download",
+  "toStatus": "downloaded",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "downloaded",
+  "input": "start_upload",
+  "allowed": true,
+  "event": "start_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloaded",
+  "input": "start_stream_upload",
+  "allowed": false,
+  "event": "start_stream_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from downloaded to uploading via start_stream_upload"
+ },
+ {
+  "from": "downloaded",
+  "input": "complete",
+  "allowed": true,
+  "event": "complete",
+  "toStatus": "completed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloaded",
+  "input": "fail",
+  "allowed": true,
+  "event": "fail",
+  "toStatus": "failed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloaded",
+  "input": "cancel",
+  "allowed": true,
+  "event": "cancel",
+  "toStatus": "cancelled",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloaded",
+  "input": "retry",
+  "allowed": true,
+  "event": "retry",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloaded",
+  "input": "reset_upload",
+  "allowed": true,
+  "event": "reset_upload",
+  "toStatus": "downloaded",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "downloaded",
+  "input": "reset_stream_download",
+  "allowed": false,
+  "event": "reset_stream_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": "Cannot transition task from downloaded to downloading via reset_stream_download"
+ },
+ {
+  "from": "downloaded",
+  "input": "reset_stalled",
+  "allowed": true,
+  "event": "reset_stalled",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloaded",
+  "input": "queued",
+  "allowed": true,
+  "event": "retry",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloaded",
+  "input": "downloading",
+  "allowed": false,
+  "event": "start_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": "Cannot transition task from downloaded to downloading via start_download"
+ },
+ {
+  "from": "downloaded",
+  "input": "downloaded",
+  "allowed": true,
+  "event": "finish_download",
+  "toStatus": "downloaded",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "downloaded",
+  "input": "uploading",
+  "allowed": true,
+  "event": "start_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloaded",
+  "input": "completed",
+  "allowed": true,
+  "event": "complete",
+  "toStatus": "completed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloaded",
+  "input": "failed",
+  "allowed": true,
+  "event": "fail",
+  "toStatus": "failed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "downloaded",
+  "input": "cancelled",
+  "allowed": true,
+  "event": "cancel",
+  "toStatus": "cancelled",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "uploading",
+  "input": "start_download",
+  "allowed": false,
+  "event": "start_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": "Cannot transition task from uploading to downloading via start_download"
+ },
+ {
+  "from": "uploading",
+  "input": "finish_download",
+  "allowed": false,
+  "event": "finish_download",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from uploading to downloaded via finish_download"
+ },
+ {
+  "from": "uploading",
+  "input": "start_upload",
+  "allowed": true,
+  "event": "start_upload",
+  "toStatus": "uploading",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "uploading",
+  "input": "start_stream_upload",
+  "allowed": true,
+  "event": "start_stream_upload",
+  "toStatus": "uploading",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "uploading",
+  "input": "complete",
+  "allowed": true,
+  "event": "complete",
+  "toStatus": "completed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "uploading",
+  "input": "fail",
+  "allowed": true,
+  "event": "fail",
+  "toStatus": "failed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "uploading",
+  "input": "cancel",
+  "allowed": true,
+  "event": "cancel",
+  "toStatus": "cancelled",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "uploading",
+  "input": "retry",
+  "allowed": true,
+  "event": "retry",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "uploading",
+  "input": "reset_upload",
+  "allowed": true,
+  "event": "reset_upload",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "uploading",
+  "input": "reset_stream_download",
+  "allowed": true,
+  "event": "reset_stream_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "uploading",
+  "input": "reset_stalled",
+  "allowed": true,
+  "event": "reset_stalled",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "uploading",
+  "input": "queued",
+  "allowed": true,
+  "event": "retry",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "uploading",
+  "input": "downloading",
+  "allowed": false,
+  "event": "start_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": "Cannot transition task from uploading to downloading via start_download"
+ },
+ {
+  "from": "uploading",
+  "input": "downloaded",
+  "allowed": false,
+  "event": "finish_download",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from uploading to downloaded via finish_download"
+ },
+ {
+  "from": "uploading",
+  "input": "uploading",
+  "allowed": true,
+  "event": "start_upload",
+  "toStatus": "uploading",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "uploading",
+  "input": "completed",
+  "allowed": true,
+  "event": "complete",
+  "toStatus": "completed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "uploading",
+  "input": "failed",
+  "allowed": true,
+  "event": "fail",
+  "toStatus": "failed",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "uploading",
+  "input": "cancelled",
+  "allowed": true,
+  "event": "cancel",
+  "toStatus": "cancelled",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "completed",
+  "input": "start_download",
+  "allowed": false,
+  "event": "start_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to downloading via start_download"
+ },
+ {
+  "from": "completed",
+  "input": "finish_download",
+  "allowed": false,
+  "event": "finish_download",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to downloaded via finish_download"
+ },
+ {
+  "from": "completed",
+  "input": "start_upload",
+  "allowed": false,
+  "event": "start_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to uploading via start_upload"
+ },
+ {
+  "from": "completed",
+  "input": "start_stream_upload",
+  "allowed": false,
+  "event": "start_stream_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to uploading via start_stream_upload"
+ },
+ {
+  "from": "completed",
+  "input": "complete",
+  "allowed": true,
+  "event": "complete",
+  "toStatus": "completed",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "completed",
+  "input": "fail",
+  "allowed": false,
+  "event": "fail",
+  "toStatus": "failed",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to failed via fail"
+ },
+ {
+  "from": "completed",
+  "input": "cancel",
+  "allowed": false,
+  "event": "cancel",
+  "toStatus": "cancelled",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to cancelled via cancel"
+ },
+ {
+  "from": "completed",
+  "input": "retry",
+  "allowed": false,
+  "event": "retry",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to queued via retry"
+ },
+ {
+  "from": "completed",
+  "input": "reset_upload",
+  "allowed": false,
+  "event": "reset_upload",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to downloaded via reset_upload"
+ },
+ {
+  "from": "completed",
+  "input": "reset_stream_download",
+  "allowed": false,
+  "event": "reset_stream_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to downloading via reset_stream_download"
+ },
+ {
+  "from": "completed",
+  "input": "reset_stalled",
+  "allowed": false,
+  "event": "reset_stalled",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to queued via reset_stalled"
+ },
+ {
+  "from": "completed",
+  "input": "queued",
+  "allowed": false,
+  "event": "retry",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to queued via retry"
+ },
+ {
+  "from": "completed",
+  "input": "downloading",
+  "allowed": false,
+  "event": "start_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to downloading via start_download"
+ },
+ {
+  "from": "completed",
+  "input": "downloaded",
+  "allowed": false,
+  "event": "finish_download",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to downloaded via finish_download"
+ },
+ {
+  "from": "completed",
+  "input": "uploading",
+  "allowed": false,
+  "event": "start_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to uploading via start_upload"
+ },
+ {
+  "from": "completed",
+  "input": "completed",
+  "allowed": true,
+  "event": "complete",
+  "toStatus": "completed",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "completed",
+  "input": "failed",
+  "allowed": false,
+  "event": "fail",
+  "toStatus": "failed",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to failed via fail"
+ },
+ {
+  "from": "completed",
+  "input": "cancelled",
+  "allowed": false,
+  "event": "cancel",
+  "toStatus": "cancelled",
+  "idempotent": false,
+  "reason": "Cannot transition task from completed to cancelled via cancel"
+ },
+ {
+  "from": "failed",
+  "input": "start_download",
+  "allowed": false,
+  "event": "start_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": "Cannot transition task from failed to downloading via start_download"
+ },
+ {
+  "from": "failed",
+  "input": "finish_download",
+  "allowed": false,
+  "event": "finish_download",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from failed to downloaded via finish_download"
+ },
+ {
+  "from": "failed",
+  "input": "start_upload",
+  "allowed": false,
+  "event": "start_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from failed to uploading via start_upload"
+ },
+ {
+  "from": "failed",
+  "input": "start_stream_upload",
+  "allowed": false,
+  "event": "start_stream_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from failed to uploading via start_stream_upload"
+ },
+ {
+  "from": "failed",
+  "input": "complete",
+  "allowed": false,
+  "event": "complete",
+  "toStatus": "completed",
+  "idempotent": false,
+  "reason": "Cannot transition task from failed to completed via complete"
+ },
+ {
+  "from": "failed",
+  "input": "fail",
+  "allowed": true,
+  "event": "fail",
+  "toStatus": "failed",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "failed",
+  "input": "cancel",
+  "allowed": false,
+  "event": "cancel",
+  "toStatus": "cancelled",
+  "idempotent": false,
+  "reason": "Cannot transition task from failed to cancelled via cancel"
+ },
+ {
+  "from": "failed",
+  "input": "retry",
+  "allowed": true,
+  "event": "retry",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "failed",
+  "input": "reset_upload",
+  "allowed": false,
+  "event": "reset_upload",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from failed to downloaded via reset_upload"
+ },
+ {
+  "from": "failed",
+  "input": "reset_stream_download",
+  "allowed": true,
+  "event": "reset_stream_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "failed",
+  "input": "reset_stalled",
+  "allowed": false,
+  "event": "reset_stalled",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": "Cannot transition task from failed to queued via reset_stalled"
+ },
+ {
+  "from": "failed",
+  "input": "queued",
+  "allowed": true,
+  "event": "retry",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": null
+ },
+ {
+  "from": "failed",
+  "input": "downloading",
+  "allowed": false,
+  "event": "start_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": "Cannot transition task from failed to downloading via start_download"
+ },
+ {
+  "from": "failed",
+  "input": "downloaded",
+  "allowed": false,
+  "event": "finish_download",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from failed to downloaded via finish_download"
+ },
+ {
+  "from": "failed",
+  "input": "uploading",
+  "allowed": false,
+  "event": "start_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from failed to uploading via start_upload"
+ },
+ {
+  "from": "failed",
+  "input": "completed",
+  "allowed": false,
+  "event": "complete",
+  "toStatus": "completed",
+  "idempotent": false,
+  "reason": "Cannot transition task from failed to completed via complete"
+ },
+ {
+  "from": "failed",
+  "input": "failed",
+  "allowed": true,
+  "event": "fail",
+  "toStatus": "failed",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "failed",
+  "input": "cancelled",
+  "allowed": false,
+  "event": "cancel",
+  "toStatus": "cancelled",
+  "idempotent": false,
+  "reason": "Cannot transition task from failed to cancelled via cancel"
+ },
+ {
+  "from": "cancelled",
+  "input": "start_download",
+  "allowed": false,
+  "event": "start_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to downloading via start_download"
+ },
+ {
+  "from": "cancelled",
+  "input": "finish_download",
+  "allowed": false,
+  "event": "finish_download",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to downloaded via finish_download"
+ },
+ {
+  "from": "cancelled",
+  "input": "start_upload",
+  "allowed": false,
+  "event": "start_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to uploading via start_upload"
+ },
+ {
+  "from": "cancelled",
+  "input": "start_stream_upload",
+  "allowed": false,
+  "event": "start_stream_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to uploading via start_stream_upload"
+ },
+ {
+  "from": "cancelled",
+  "input": "complete",
+  "allowed": false,
+  "event": "complete",
+  "toStatus": "completed",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to completed via complete"
+ },
+ {
+  "from": "cancelled",
+  "input": "fail",
+  "allowed": false,
+  "event": "fail",
+  "toStatus": "failed",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to failed via fail"
+ },
+ {
+  "from": "cancelled",
+  "input": "cancel",
+  "allowed": true,
+  "event": "cancel",
+  "toStatus": "cancelled",
+  "idempotent": true,
+  "reason": null
+ },
+ {
+  "from": "cancelled",
+  "input": "retry",
+  "allowed": false,
+  "event": "retry",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to queued via retry"
+ },
+ {
+  "from": "cancelled",
+  "input": "reset_upload",
+  "allowed": false,
+  "event": "reset_upload",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to downloaded via reset_upload"
+ },
+ {
+  "from": "cancelled",
+  "input": "reset_stream_download",
+  "allowed": false,
+  "event": "reset_stream_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to downloading via reset_stream_download"
+ },
+ {
+  "from": "cancelled",
+  "input": "reset_stalled",
+  "allowed": false,
+  "event": "reset_stalled",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to queued via reset_stalled"
+ },
+ {
+  "from": "cancelled",
+  "input": "queued",
+  "allowed": false,
+  "event": "retry",
+  "toStatus": "queued",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to queued via retry"
+ },
+ {
+  "from": "cancelled",
+  "input": "downloading",
+  "allowed": false,
+  "event": "start_download",
+  "toStatus": "downloading",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to downloading via start_download"
+ },
+ {
+  "from": "cancelled",
+  "input": "downloaded",
+  "allowed": false,
+  "event": "finish_download",
+  "toStatus": "downloaded",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to downloaded via finish_download"
+ },
+ {
+  "from": "cancelled",
+  "input": "uploading",
+  "allowed": false,
+  "event": "start_upload",
+  "toStatus": "uploading",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to uploading via start_upload"
+ },
+ {
+  "from": "cancelled",
+  "input": "completed",
+  "allowed": false,
+  "event": "complete",
+  "toStatus": "completed",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to completed via complete"
+ },
+ {
+  "from": "cancelled",
+  "input": "failed",
+  "allowed": false,
+  "event": "fail",
+  "toStatus": "failed",
+  "idempotent": false,
+  "reason": "Cannot transition task from cancelled to failed via fail"
+ },
+ {
+  "from": "cancelled",
+  "input": "cancelled",
+  "allowed": true,
+  "event": "cancel",
+  "toStatus": "cancelled",
+  "idempotent": true,
+  "reason": null
+ }
+]

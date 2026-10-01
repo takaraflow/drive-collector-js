@@ -1,0 +1,5262 @@
+{
+ "keys": [
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download_download_EcMbUkuhJ9eBM-dw05indcfq1op7TAezgIKDOww6ByQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download_download_EcMbUkuhJ9eBM-dw05indcfq1op7TAezgIKDOww6ByQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_download_download_EcMbUkuhJ9eBM-dw05indcfq1op7TAezgIKDOww6ByQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_download_download_EcMbUkuhJ9eBM-dw05indcfq1op7TAezgIKDOww6ByQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_download_download_WJupdKqvgG-xhGgdbyKwk7WFySpHRk_kt-Nfy01-avc",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_download_download_EcMbUkuhJ9eBM-dw05indcfq1op7TAezgIKDOww6ByQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download_download_lTxsE6Zq9NErXB9b1E6OLPniappy9B6jCoP16T4NY08",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download_download_lTxsE6Zq9NErXB9b1E6OLPniappy9B6jCoP16T4NY08",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_download_download_lTxsE6Zq9NErXB9b1E6OLPniappy9B6jCoP16T4NY08",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_download_download_lTxsE6Zq9NErXB9b1E6OLPniappy9B6jCoP16T4NY08",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_download_download_ToWE4ykpF074_iuQgOo4eFnBOOHZPhcjXJhafZmxJLE",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_download_download_lTxsE6Zq9NErXB9b1E6OLPniappy9B6jCoP16T4NY08",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download_download_253zaHIpgPHSkCfqCi_t9KrR-HMhCKM74iIia0HKNdg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download_download_253zaHIpgPHSkCfqCi_t9KrR-HMhCKM74iIia0HKNdg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_download_download_253zaHIpgPHSkCfqCi_t9KrR-HMhCKM74iIia0HKNdg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_download_download_253zaHIpgPHSkCfqCi_t9KrR-HMhCKM74iIia0HKNdg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_download_download_uvsxKTsDnFAS0fwj3YHkvu-ejG3yCWYnDm0OeGp2r84",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_download_download_253zaHIpgPHSkCfqCi_t9KrR-HMhCKM74iIia0HKNdg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download_download_Y1vI9yW-SNrELa6kUexQKaUUzFmOltAC0Lv4mNMgdVc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download_download_Y1vI9yW-SNrELa6kUexQKaUUzFmOltAC0Lv4mNMgdVc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_download_download_Y1vI9yW-SNrELa6kUexQKaUUzFmOltAC0Lv4mNMgdVc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_download_download_Y1vI9yW-SNrELa6kUexQKaUUzFmOltAC0Lv4mNMgdVc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_download_download_jjmgDAbsYoSDiIIhuq3Sr1UXc1KuyFfO8bX2N1UR0Iw",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download",
+   "type": "download",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_download_download_Y1vI9yW-SNrELa6kUexQKaUUzFmOltAC0Lv4mNMgdVc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download_upload_zKgrsAZqfFJeW-1GvxWY3svDI2rfYiqMr4Si3g2F57U",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download_upload_zKgrsAZqfFJeW-1GvxWY3svDI2rfYiqMr4Si3g2F57U",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_download_upload_zKgrsAZqfFJeW-1GvxWY3svDI2rfYiqMr4Si3g2F57U",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_download_upload_zKgrsAZqfFJeW-1GvxWY3svDI2rfYiqMr4Si3g2F57U",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_download_upload_mi7Tj3RdvwYQH4nRfLR3bWrnFphMZRWM4mQCqdP1YQo",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_download_upload_zKgrsAZqfFJeW-1GvxWY3svDI2rfYiqMr4Si3g2F57U",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download_upload_RvMhV2Lzpgf8UERgzo0IGPCCimV0LNIUfhAoiJa11Oo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download_upload_RvMhV2Lzpgf8UERgzo0IGPCCimV0LNIUfhAoiJa11Oo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_download_upload_RvMhV2Lzpgf8UERgzo0IGPCCimV0LNIUfhAoiJa11Oo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_download_upload_RvMhV2Lzpgf8UERgzo0IGPCCimV0LNIUfhAoiJa11Oo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_download_upload_mP5Q2dIfyY6SxLJnIqDgiNPdBTc-1SuToH06K7HYXLU",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_download_upload_RvMhV2Lzpgf8UERgzo0IGPCCimV0LNIUfhAoiJa11Oo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download_upload_EjYl7qUk8MdHn2jZJZ5oY5c0XKBQ4hh1Vm6AX4rGErc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download_upload_EjYl7qUk8MdHn2jZJZ5oY5c0XKBQ4hh1Vm6AX4rGErc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_download_upload_EjYl7qUk8MdHn2jZJZ5oY5c0XKBQ4hh1Vm6AX4rGErc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_download_upload_EjYl7qUk8MdHn2jZJZ5oY5c0XKBQ4hh1Vm6AX4rGErc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_download_upload_N8qoO5V9JpD-JUbSb7EdNmhte_WNJlke8u8KF7uaQuc",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_download_upload_EjYl7qUk8MdHn2jZJZ5oY5c0XKBQ4hh1Vm6AX4rGErc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download_upload_WXwwJ04Duv3tdbi73xsW_648P1S063wKS03aPW8ZCyk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download_upload_WXwwJ04Duv3tdbi73xsW_648P1S063wKS03aPW8ZCyk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_download_upload_WXwwJ04Duv3tdbi73xsW_648P1S063wKS03aPW8ZCyk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_download_upload_WXwwJ04Duv3tdbi73xsW_648P1S063wKS03aPW8ZCyk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_download_upload_8Sc7j-wpEzEywMeZGENHBUr_xMAt4iO_gg_fv90OEIM",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_download_upload_WXwwJ04Duv3tdbi73xsW_648P1S063wKS03aPW8ZCyk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download_x_33KBMHT-VDQeOSYKA24Igm9hpBKZ1SGu5VbRAan_s3Y",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download_x_33KBMHT-VDQeOSYKA24Igm9hpBKZ1SGu5VbRAan_s3Y",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_download_x_33KBMHT-VDQeOSYKA24Igm9hpBKZ1SGu5VbRAan_s3Y",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_download_x_33KBMHT-VDQeOSYKA24Igm9hpBKZ1SGu5VbRAan_s3Y",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_download_x_MpuVd6l7PWvQqMPGHoRuXsVsfU0kuEGs8N34pBmimT0",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_download_x_33KBMHT-VDQeOSYKA24Igm9hpBKZ1SGu5VbRAan_s3Y",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download_x_5sHGmkz9xbt1EnZHTTqAFKRgvuXMWh54rO37yo_cQRo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download_x_5sHGmkz9xbt1EnZHTTqAFKRgvuXMWh54rO37yo_cQRo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_download_x_5sHGmkz9xbt1EnZHTTqAFKRgvuXMWh54rO37yo_cQRo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_download_x_5sHGmkz9xbt1EnZHTTqAFKRgvuXMWh54rO37yo_cQRo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_download_x_tmolg6VQYfVkfxFtR0BhkdBJiuR3VCl9Ja0JyHxfcWA",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_download_x_5sHGmkz9xbt1EnZHTTqAFKRgvuXMWh54rO37yo_cQRo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download_x_cCRZ9f2XjEEIbJaCpTycLKcKRMrTG2aEbImcYKOTn90",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download_x_cCRZ9f2XjEEIbJaCpTycLKcKRMrTG2aEbImcYKOTn90",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_download_x_cCRZ9f2XjEEIbJaCpTycLKcKRMrTG2aEbImcYKOTn90",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_download_x_cCRZ9f2XjEEIbJaCpTycLKcKRMrTG2aEbImcYKOTn90",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_download_x_BP80_YbgmCrNOiM-oz2amHBThQNPQUlHt7BplOxe7gg",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_download_x_cCRZ9f2XjEEIbJaCpTycLKcKRMrTG2aEbImcYKOTn90",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download_x_youHBtOi4cA4-_pV3YQbzPwmUpQMliQHbjmar5ImXPE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download_x_youHBtOi4cA4-_pV3YQbzPwmUpQMliQHbjmar5ImXPE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_download_x_youHBtOi4cA4-_pV3YQbzPwmUpQMliQHbjmar5ImXPE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_download_x_youHBtOi4cA4-_pV3YQbzPwmUpQMliQHbjmar5ImXPE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_download_x_Uzq9s8hgGJkW9zrYics2XYLosoQEHbOJvCwxtPvGIhU",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download",
+   "type": "",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_download_x_youHBtOi4cA4-_pV3YQbzPwmUpQMliQHbjmar5ImXPE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_LF_yzXiyC6P4GG1-R5gtfo0ShJwox3CPKI_vmu6Wmwc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_LF_yzXiyC6P4GG1-R5gtfo0ShJwox3CPKI_vmu6Wmwc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_download-tasks_download_LF_yzXiyC6P4GG1-R5gtfo0ShJwox3CPKI_vmu6Wmwc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_download_LF_yzXiyC6P4GG1-R5gtfo0ShJwox3CPKI_vmu6Wmwc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_download_y7EGjwvwBJXCOuCSdF3wnwS_pXMeui-7OgSGfENOqjI",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_download_LF_yzXiyC6P4GG1-R5gtfo0ShJwox3CPKI_vmu6Wmwc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_E2mvmadgAVRu8BanRQgRw6_D4bgqidXbCNgFMyp7Gu8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_E2mvmadgAVRu8BanRQgRw6_D4bgqidXbCNgFMyp7Gu8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_download-tasks_download_E2mvmadgAVRu8BanRQgRw6_D4bgqidXbCNgFMyp7Gu8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_download_E2mvmadgAVRu8BanRQgRw6_D4bgqidXbCNgFMyp7Gu8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_download_DiJscMAv3qdMP4Q2PuNQYnCTE9gI-PNT6mn2ATo_HO0",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_download_E2mvmadgAVRu8BanRQgRw6_D4bgqidXbCNgFMyp7Gu8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_X1sBNpT-5keR3EeEyHqSrVEqDTmGfLbD3NgdjcHHnic",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_X1sBNpT-5keR3EeEyHqSrVEqDTmGfLbD3NgdjcHHnic",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_download-tasks_download_X1sBNpT-5keR3EeEyHqSrVEqDTmGfLbD3NgdjcHHnic",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_download_X1sBNpT-5keR3EeEyHqSrVEqDTmGfLbD3NgdjcHHnic",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_download_axH1_En-RL3W_ZMNIg5XD8yY4QphNfROFEVLGK1QxxE",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_download_X1sBNpT-5keR3EeEyHqSrVEqDTmGfLbD3NgdjcHHnic",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_ANSiSwIswOmQtzavERKOMOm1VCOmfxEEXH7M9xXm7eQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_ANSiSwIswOmQtzavERKOMOm1VCOmfxEEXH7M9xXm7eQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_download-tasks_download_ANSiSwIswOmQtzavERKOMOm1VCOmfxEEXH7M9xXm7eQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_download_ANSiSwIswOmQtzavERKOMOm1VCOmfxEEXH7M9xXm7eQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_download_L422yfD5iMGvUI6dI1tTEtNOmHh--6lwb-qgLVunV8Y",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "download",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_download_ANSiSwIswOmQtzavERKOMOm1VCOmfxEEXH7M9xXm7eQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_1F86SWLhccfuOMZt_opKb6OPtgvE_-2JpnMLJ2oB1ZE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_1F86SWLhccfuOMZt_opKb6OPtgvE_-2JpnMLJ2oB1ZE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_download-tasks_upload_1F86SWLhccfuOMZt_opKb6OPtgvE_-2JpnMLJ2oB1ZE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_upload_1F86SWLhccfuOMZt_opKb6OPtgvE_-2JpnMLJ2oB1ZE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_upload_tyV_Xpeqjr4vD3JU0a_W2ZUyVHUUSxb0ToDhlCk9oic",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_upload_1F86SWLhccfuOMZt_opKb6OPtgvE_-2JpnMLJ2oB1ZE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_QAqE1Yum60M8BaytXFdF9wnaR1sJkgQCHEA3wmSA7k8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_QAqE1Yum60M8BaytXFdF9wnaR1sJkgQCHEA3wmSA7k8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_download-tasks_upload_QAqE1Yum60M8BaytXFdF9wnaR1sJkgQCHEA3wmSA7k8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_upload_QAqE1Yum60M8BaytXFdF9wnaR1sJkgQCHEA3wmSA7k8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_upload_E36x8szzhjsKPnkrTVbRBqokmC9mCiYYZV3bD7Z9Q8c",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_upload_QAqE1Yum60M8BaytXFdF9wnaR1sJkgQCHEA3wmSA7k8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_uSbiGARv0MOgrBoXy8bm9iFuS7lNEAUAnpKuRyiSKSA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_uSbiGARv0MOgrBoXy8bm9iFuS7lNEAUAnpKuRyiSKSA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_download-tasks_upload_uSbiGARv0MOgrBoXy8bm9iFuS7lNEAUAnpKuRyiSKSA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_upload_uSbiGARv0MOgrBoXy8bm9iFuS7lNEAUAnpKuRyiSKSA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_upload_6OUTNPbVx-kxPmMTERX338meq9SAypk1Ijd_9Pqhj9Y",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_upload_uSbiGARv0MOgrBoXy8bm9iFuS7lNEAUAnpKuRyiSKSA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_NCV38uUD283BSbpfYfa1YAS9864jYRvEek5jjCgeDPk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_NCV38uUD283BSbpfYfa1YAS9864jYRvEek5jjCgeDPk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_download-tasks_upload_NCV38uUD283BSbpfYfa1YAS9864jYRvEek5jjCgeDPk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_upload_NCV38uUD283BSbpfYfa1YAS9864jYRvEek5jjCgeDPk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_upload_eUVnWNGvQgKWQtsOqZ-TrSU1KNhLMAo2zogcm3LcUYA",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_upload_NCV38uUD283BSbpfYfa1YAS9864jYRvEek5jjCgeDPk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_dC3mW30bXUCn0fuAdDE0cniltIQTPT-hemAY5LVswL4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_dC3mW30bXUCn0fuAdDE0cniltIQTPT-hemAY5LVswL4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_download-tasks_x_dC3mW30bXUCn0fuAdDE0cniltIQTPT-hemAY5LVswL4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_x_dC3mW30bXUCn0fuAdDE0cniltIQTPT-hemAY5LVswL4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_x_Ys2vXjY0X0Gy_xlAQPnMbj2LQRzWo_TjiX02F86Q2gE",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_x_dC3mW30bXUCn0fuAdDE0cniltIQTPT-hemAY5LVswL4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_8Ss66VqLx9gIZ5GhXKsn8d_jixRDYiJkVJSTaWTxJQ4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_8Ss66VqLx9gIZ5GhXKsn8d_jixRDYiJkVJSTaWTxJQ4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_download-tasks_x_8Ss66VqLx9gIZ5GhXKsn8d_jixRDYiJkVJSTaWTxJQ4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_x_8Ss66VqLx9gIZ5GhXKsn8d_jixRDYiJkVJSTaWTxJQ4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_x_A3GhiYTqAWQtUdsvf_Sx-xS1EHM85T8qcy_IYb3vuiI",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_x_8Ss66VqLx9gIZ5GhXKsn8d_jixRDYiJkVJSTaWTxJQ4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_W0UUd-TXsmZYZPBQJwyVolOA6URULnD1VwA1WcJYPeY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_W0UUd-TXsmZYZPBQJwyVolOA6URULnD1VwA1WcJYPeY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_download-tasks_x_W0UUd-TXsmZYZPBQJwyVolOA6URULnD1VwA1WcJYPeY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_x_W0UUd-TXsmZYZPBQJwyVolOA6URULnD1VwA1WcJYPeY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_x_vQo_P_TEWFv2U8sF-l-rsZUP18E1rEo9sB89sM851yU",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_x_W0UUd-TXsmZYZPBQJwyVolOA6URULnD1VwA1WcJYPeY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_RsA2M_eYf-aJGyzZ0LdWMfH9zVpjpukmyqshxCbThgQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_RsA2M_eYf-aJGyzZ0LdWMfH9zVpjpukmyqshxCbThgQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_download-tasks_x_RsA2M_eYf-aJGyzZ0LdWMfH9zVpjpukmyqshxCbThgQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_x_RsA2M_eYf-aJGyzZ0LdWMfH9zVpjpukmyqshxCbThgQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_x_cWfqnu-WutAt5fkKrQNsGn63JbXWWF-sF2IKZxnfyVY",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "download-tasks",
+   "type": "",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_x_RsA2M_eYf-aJGyzZ0LdWMfH9zVpjpukmyqshxCbThgQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_Nf212ALcXsF3CwTVMSfbkbvCTYEDQA1qZgGmWV55HPA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_Nf212ALcXsF3CwTVMSfbkbvCTYEDQA1qZgGmWV55HPA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_download-tasks_download_Nf212ALcXsF3CwTVMSfbkbvCTYEDQA1qZgGmWV55HPA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_download_Nf212ALcXsF3CwTVMSfbkbvCTYEDQA1qZgGmWV55HPA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_download_oJ5PtVpcFq7eCQgOadH7mxanUByHV06050KwSy_u6RU",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_download_Nf212ALcXsF3CwTVMSfbkbvCTYEDQA1qZgGmWV55HPA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_56T2CrptEgZRBYM3OdzLs91tYtWTDpZ5NUZGEXSB5Cg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_56T2CrptEgZRBYM3OdzLs91tYtWTDpZ5NUZGEXSB5Cg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_download-tasks_download_56T2CrptEgZRBYM3OdzLs91tYtWTDpZ5NUZGEXSB5Cg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_download_56T2CrptEgZRBYM3OdzLs91tYtWTDpZ5NUZGEXSB5Cg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_download_skha9b-_teN-mFRQm-Olh3RwKw_ntka-OzIChFzv8vc",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_download_56T2CrptEgZRBYM3OdzLs91tYtWTDpZ5NUZGEXSB5Cg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_97RqqV2QIPdZE8BTZTzdp-YQlxFS4Il12nvefTMZDEA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_97RqqV2QIPdZE8BTZTzdp-YQlxFS4Il12nvefTMZDEA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_download-tasks_download_97RqqV2QIPdZE8BTZTzdp-YQlxFS4Il12nvefTMZDEA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_download_97RqqV2QIPdZE8BTZTzdp-YQlxFS4Il12nvefTMZDEA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_download_z-j6Jf9CSMhVWW69qW2CSg0IOQKV4d41mC9X7UvOog8",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_download_97RqqV2QIPdZE8BTZTzdp-YQlxFS4Il12nvefTMZDEA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_Ymsw7O49U9akbTm2Sco2W2RA6k69FT2srygNk-y4i54",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download-tasks_download_Ymsw7O49U9akbTm2Sco2W2RA6k69FT2srygNk-y4i54",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_download-tasks_download_Ymsw7O49U9akbTm2Sco2W2RA6k69FT2srygNk-y4i54",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_download_Ymsw7O49U9akbTm2Sco2W2RA6k69FT2srygNk-y4i54",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_download_1Fca9nq1l_wwmUAvOFj0sBpt34THKlPzo2C7DBDinwc",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "download",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_download_Ymsw7O49U9akbTm2Sco2W2RA6k69FT2srygNk-y4i54",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_WVfw3DJxMusYzv1b7zxbuZghI23KFpUEiJ_YuKhcc28",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_WVfw3DJxMusYzv1b7zxbuZghI23KFpUEiJ_YuKhcc28",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_download-tasks_upload_WVfw3DJxMusYzv1b7zxbuZghI23KFpUEiJ_YuKhcc28",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_upload_WVfw3DJxMusYzv1b7zxbuZghI23KFpUEiJ_YuKhcc28",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_upload_DlwxurniN7g4DNU2vgwz5e_nDtg6tlHlXtpziABfjY8",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_upload_WVfw3DJxMusYzv1b7zxbuZghI23KFpUEiJ_YuKhcc28",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_dVYCyflANkVzuKvnuQX8RvlShNvdbzRkLmzR86D_XCQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_dVYCyflANkVzuKvnuQX8RvlShNvdbzRkLmzR86D_XCQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_download-tasks_upload_dVYCyflANkVzuKvnuQX8RvlShNvdbzRkLmzR86D_XCQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_upload_dVYCyflANkVzuKvnuQX8RvlShNvdbzRkLmzR86D_XCQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_upload_bslPja0GZenV_wnywkyKi_0gkc4xahc5OaBDk2x2_fk",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_upload_dVYCyflANkVzuKvnuQX8RvlShNvdbzRkLmzR86D_XCQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_Ale8w5LSe_EpY917dbNeNGR62btLKu3ey3I7UdHs8so",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_Ale8w5LSe_EpY917dbNeNGR62btLKu3ey3I7UdHs8so",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_download-tasks_upload_Ale8w5LSe_EpY917dbNeNGR62btLKu3ey3I7UdHs8so",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_upload_Ale8w5LSe_EpY917dbNeNGR62btLKu3ey3I7UdHs8so",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_upload_5x_mWHHeFpdzN2BFWi0ezwHbnNUZEkuBdul8hU_GmYY",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_upload_Ale8w5LSe_EpY917dbNeNGR62btLKu3ey3I7UdHs8so",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_fxJcdGCmI848JOmM4Qep435Wv1Y7lXrw83bnRCaRbcw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download-tasks_upload_fxJcdGCmI848JOmM4Qep435Wv1Y7lXrw83bnRCaRbcw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_download-tasks_upload_fxJcdGCmI848JOmM4Qep435Wv1Y7lXrw83bnRCaRbcw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_upload_fxJcdGCmI848JOmM4Qep435Wv1Y7lXrw83bnRCaRbcw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_upload_9elGdwhXGj2jVGd9olvDh_aIQUidsmDOppAPfNplgak",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_upload_fxJcdGCmI848JOmM4Qep435Wv1Y7lXrw83bnRCaRbcw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_PpvT2mdQ7dvZUNjHWQUXougQalBIEXT6kuYyJ8HQuz8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_PpvT2mdQ7dvZUNjHWQUXougQalBIEXT6kuYyJ8HQuz8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_download-tasks_x_PpvT2mdQ7dvZUNjHWQUXougQalBIEXT6kuYyJ8HQuz8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_x_PpvT2mdQ7dvZUNjHWQUXougQalBIEXT6kuYyJ8HQuz8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_x_4oE1QiNLfnnrRJhELAHjCf7L6eS6hlZWLyicgCxLUUE",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_x_PpvT2mdQ7dvZUNjHWQUXougQalBIEXT6kuYyJ8HQuz8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_5G7Q2mddCPPr9o8i8TI_d8sHGHopNhitTFnRLQmx8Zk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_5G7Q2mddCPPr9o8i8TI_d8sHGHopNhitTFnRLQmx8Zk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_download-tasks_x_5G7Q2mddCPPr9o8i8TI_d8sHGHopNhitTFnRLQmx8Zk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_x_5G7Q2mddCPPr9o8i8TI_d8sHGHopNhitTFnRLQmx8Zk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_x_rIVBgMDFCC4kjMg_XBz2XBEkp554LgfFQGNAPidwbOM",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_x_5G7Q2mddCPPr9o8i8TI_d8sHGHopNhitTFnRLQmx8Zk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_YU5Hmf7a-i8uhahtMy_f9QvgfnOBr0_tDMUHDeByAEc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_YU5Hmf7a-i8uhahtMy_f9QvgfnOBr0_tDMUHDeByAEc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_download-tasks_x_YU5Hmf7a-i8uhahtMy_f9QvgfnOBr0_tDMUHDeByAEc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_x_YU5Hmf7a-i8uhahtMy_f9QvgfnOBr0_tDMUHDeByAEc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_x_U9m87vA5IuuGW1ms9XF1GaCpB7gB5AHtfiyHFwg6UYk",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_x_YU5Hmf7a-i8uhahtMy_f9QvgfnOBr0_tDMUHDeByAEc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_LRpOrz8SOQWEVEbFclrDl-ZUfNtpilw4ujoWlKZRAOc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_download-tasks_x_LRpOrz8SOQWEVEbFclrDl-ZUfNtpilw4ujoWlKZRAOc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_download-tasks_x_LRpOrz8SOQWEVEbFclrDl-ZUfNtpilw4ujoWlKZRAOc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_download-tasks_x_LRpOrz8SOQWEVEbFclrDl-ZUfNtpilw4ujoWlKZRAOc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_download-tasks_x_SV5GlUAQCY6Z-Mw7MwK4IkHOL1PZocvwx2uIqECS-aQ",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "Download Tasks",
+   "type": "",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_download-tasks_x_LRpOrz8SOQWEVEbFclrDl-ZUfNtpilw4ujoWlKZRAOc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_media-batch_download_ii2jnqc_5GLbVJ-e6RdDgACHqHr7M0Sx-FCWFOQD2ZI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_media-batch_download_ii2jnqc_5GLbVJ-e6RdDgACHqHr7M0Sx-FCWFOQD2ZI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_media-batch_download_ii2jnqc_5GLbVJ-e6RdDgACHqHr7M0Sx-FCWFOQD2ZI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_media-batch_download_ii2jnqc_5GLbVJ-e6RdDgACHqHr7M0Sx-FCWFOQD2ZI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_media-batch_download_A_C_RQgE3p68wq4r_t6Lyu-9crhJ6JDnPgOxl_VtQRc",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_media-batch_download_ii2jnqc_5GLbVJ-e6RdDgACHqHr7M0Sx-FCWFOQD2ZI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_media-batch_download_Gu2ZNeQzSg3e_CkNKTyZcEhhBYzAXbUnOcrSoKeUCWc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_media-batch_download_Gu2ZNeQzSg3e_CkNKTyZcEhhBYzAXbUnOcrSoKeUCWc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_media-batch_download_Gu2ZNeQzSg3e_CkNKTyZcEhhBYzAXbUnOcrSoKeUCWc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_media-batch_download_Gu2ZNeQzSg3e_CkNKTyZcEhhBYzAXbUnOcrSoKeUCWc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_media-batch_download_gFONbHZUCYilSDlziELtbd1dKdPHt1LpagGUX7ZyFUk",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_media-batch_download_Gu2ZNeQzSg3e_CkNKTyZcEhhBYzAXbUnOcrSoKeUCWc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_media-batch_download_SmOjLK_gWD0YJfkqToHoUkmyvb1d73uIOS2RC7wz3eU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_media-batch_download_SmOjLK_gWD0YJfkqToHoUkmyvb1d73uIOS2RC7wz3eU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_media-batch_download_SmOjLK_gWD0YJfkqToHoUkmyvb1d73uIOS2RC7wz3eU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_media-batch_download_SmOjLK_gWD0YJfkqToHoUkmyvb1d73uIOS2RC7wz3eU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_media-batch_download_iN82042po8MN9nxyCWYMc4NRMj36w-ki4PY1cGKp4H4",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_media-batch_download_SmOjLK_gWD0YJfkqToHoUkmyvb1d73uIOS2RC7wz3eU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_media-batch_download_S0quKwNaTHeFhnZ29ZfRqX4Dxcshwey2xDY7aeX-TS8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_media-batch_download_S0quKwNaTHeFhnZ29ZfRqX4Dxcshwey2xDY7aeX-TS8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_media-batch_download_S0quKwNaTHeFhnZ29ZfRqX4Dxcshwey2xDY7aeX-TS8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_media-batch_download_S0quKwNaTHeFhnZ29ZfRqX4Dxcshwey2xDY7aeX-TS8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_media-batch_download_197L_stuZiYImNaY2PW3ijVr0ypeGbxymneKW7EA4tU",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "media-batch",
+   "type": "download",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_media-batch_download_S0quKwNaTHeFhnZ29ZfRqX4Dxcshwey2xDY7aeX-TS8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_media-batch_upload_STzYUeKaMHdX28KQSlCLmcuLNa-iaCGuAzbTRDUuz5g",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_media-batch_upload_STzYUeKaMHdX28KQSlCLmcuLNa-iaCGuAzbTRDUuz5g",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_media-batch_upload_STzYUeKaMHdX28KQSlCLmcuLNa-iaCGuAzbTRDUuz5g",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_media-batch_upload_STzYUeKaMHdX28KQSlCLmcuLNa-iaCGuAzbTRDUuz5g",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_media-batch_upload_XEQI4HGNpigQ_gc7Igo87OIHgEzlGAgVoaTa4ej0EWU",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_media-batch_upload_STzYUeKaMHdX28KQSlCLmcuLNa-iaCGuAzbTRDUuz5g",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_media-batch_upload_q89l4L3PfZPE5Lzv1_CZK9lwOs27Mwo5p2UwXidbcQM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_media-batch_upload_q89l4L3PfZPE5Lzv1_CZK9lwOs27Mwo5p2UwXidbcQM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_media-batch_upload_q89l4L3PfZPE5Lzv1_CZK9lwOs27Mwo5p2UwXidbcQM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_media-batch_upload_q89l4L3PfZPE5Lzv1_CZK9lwOs27Mwo5p2UwXidbcQM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_media-batch_upload_VtRFgYZhlVPGoqnr6Jarv255h6K8xIs_bQYmKOZF7y0",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_media-batch_upload_q89l4L3PfZPE5Lzv1_CZK9lwOs27Mwo5p2UwXidbcQM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_media-batch_upload_M5IBt7QE5Y7GlbXUosmdCs9e1z78kKQB8d1vAiQhR8w",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_media-batch_upload_M5IBt7QE5Y7GlbXUosmdCs9e1z78kKQB8d1vAiQhR8w",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_media-batch_upload_M5IBt7QE5Y7GlbXUosmdCs9e1z78kKQB8d1vAiQhR8w",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_media-batch_upload_M5IBt7QE5Y7GlbXUosmdCs9e1z78kKQB8d1vAiQhR8w",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_media-batch_upload_1IDkoEUy4j-_3iptEIFX57knRIlGa7PmU8KExOsUXDo",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_media-batch_upload_M5IBt7QE5Y7GlbXUosmdCs9e1z78kKQB8d1vAiQhR8w",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_media-batch_upload_ryGOhhiX2ASIP1qGBzRfqyL9-lQSz8dh6zXJXbO00bs",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_media-batch_upload_ryGOhhiX2ASIP1qGBzRfqyL9-lQSz8dh6zXJXbO00bs",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_media-batch_upload_ryGOhhiX2ASIP1qGBzRfqyL9-lQSz8dh6zXJXbO00bs",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_media-batch_upload_ryGOhhiX2ASIP1qGBzRfqyL9-lQSz8dh6zXJXbO00bs",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_media-batch_upload_M1tNNlSiqKEsHZalkjU9Hrweo1l_zy6znkbOVzdhFQ4",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "media-batch",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_media-batch_upload_ryGOhhiX2ASIP1qGBzRfqyL9-lQSz8dh6zXJXbO00bs",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_media-batch_x_cpf4FgfYMPJIbAKV06EmuGJuoVbQafhOrPS8up_nulg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_media-batch_x_cpf4FgfYMPJIbAKV06EmuGJuoVbQafhOrPS8up_nulg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_media-batch_x_cpf4FgfYMPJIbAKV06EmuGJuoVbQafhOrPS8up_nulg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_media-batch_x_cpf4FgfYMPJIbAKV06EmuGJuoVbQafhOrPS8up_nulg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_media-batch_x_rnA_Fune0hRXdXOVFe_HgowleuWsalvcVP2woiK1SIg",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_media-batch_x_cpf4FgfYMPJIbAKV06EmuGJuoVbQafhOrPS8up_nulg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_media-batch_x_21ToMg_SYpQjs3gQESHKEPvWIEHo9dy56jkPiGt_eC4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_media-batch_x_21ToMg_SYpQjs3gQESHKEPvWIEHo9dy56jkPiGt_eC4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_media-batch_x_21ToMg_SYpQjs3gQESHKEPvWIEHo9dy56jkPiGt_eC4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_media-batch_x_21ToMg_SYpQjs3gQESHKEPvWIEHo9dy56jkPiGt_eC4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_media-batch_x_uCJyN8DmbW7XE7O2u3mb48w40Nv3GFQLZvCzCuxA4xE",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_media-batch_x_21ToMg_SYpQjs3gQESHKEPvWIEHo9dy56jkPiGt_eC4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_media-batch_x_i_ur6bqH1AspYV49GaBKXcd4PcmrtsTMRSPWdJL32ys",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_media-batch_x_i_ur6bqH1AspYV49GaBKXcd4PcmrtsTMRSPWdJL32ys",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_media-batch_x_i_ur6bqH1AspYV49GaBKXcd4PcmrtsTMRSPWdJL32ys",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_media-batch_x_i_ur6bqH1AspYV49GaBKXcd4PcmrtsTMRSPWdJL32ys",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_media-batch_x_2R-olNvsqqkgCW_1LHp1Arl-TxkquOqUjDte14IyOiM",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_media-batch_x_i_ur6bqH1AspYV49GaBKXcd4PcmrtsTMRSPWdJL32ys",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_media-batch_x_03jIvzWIsBjG8Iv8u0bBZREj02foiyYDNy2-mqk8XLU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_media-batch_x_03jIvzWIsBjG8Iv8u0bBZREj02foiyYDNy2-mqk8XLU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_media-batch_x_03jIvzWIsBjG8Iv8u0bBZREj02foiyYDNy2-mqk8XLU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_media-batch_x_03jIvzWIsBjG8Iv8u0bBZREj02foiyYDNy2-mqk8XLU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_media-batch_x_Dfcf31XNehXJb0NCMVQHbIYhPoI3vZ4qKIltZe8Cacc",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "media-batch",
+   "type": "",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_media-batch_x_03jIvzWIsBjG8Iv8u0bBZREj02foiyYDNy2-mqk8XLU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_weird-topic_download_K5suDqPxW_T6mkipxtBHMMzhYfivyLQWxrlCce21dSI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_weird-topic_download_K5suDqPxW_T6mkipxtBHMMzhYfivyLQWxrlCce21dSI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_weird-topic_download_K5suDqPxW_T6mkipxtBHMMzhYfivyLQWxrlCce21dSI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_weird-topic_download_K5suDqPxW_T6mkipxtBHMMzhYfivyLQWxrlCce21dSI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_weird-topic_download_hSzJPEBHQJkA_Flh0hnHnRq9fHM-XW2SnR94AoXZzFI",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_weird-topic_download_K5suDqPxW_T6mkipxtBHMMzhYfivyLQWxrlCce21dSI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_weird-topic_download_j0_bScBF3WAJ7SSGm-09zX0z7pDhnz8a3XCjmyjAeFM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_weird-topic_download_j0_bScBF3WAJ7SSGm-09zX0z7pDhnz8a3XCjmyjAeFM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_weird-topic_download_j0_bScBF3WAJ7SSGm-09zX0z7pDhnz8a3XCjmyjAeFM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_weird-topic_download_j0_bScBF3WAJ7SSGm-09zX0z7pDhnz8a3XCjmyjAeFM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_weird-topic_download_KmPP0nfBA7VsKnN2K7_3g4En3q4AXSP1OnjEKtVrV5o",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_weird-topic_download_j0_bScBF3WAJ7SSGm-09zX0z7pDhnz8a3XCjmyjAeFM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_weird-topic_download_kRsawGRg4_GRdjxEMpkpHGAETF4yCaD3N3g6Yc4aajY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_weird-topic_download_kRsawGRg4_GRdjxEMpkpHGAETF4yCaD3N3g6Yc4aajY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_weird-topic_download_kRsawGRg4_GRdjxEMpkpHGAETF4yCaD3N3g6Yc4aajY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_weird-topic_download_kRsawGRg4_GRdjxEMpkpHGAETF4yCaD3N3g6Yc4aajY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_weird-topic_download_xfTfNshL5k_KEaSDJdKPbikhpxN8VLSebco4ZzfLnzo",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_weird-topic_download_kRsawGRg4_GRdjxEMpkpHGAETF4yCaD3N3g6Yc4aajY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_weird-topic_download_FQADB0Au3qIoYd1W1DhDffgPRqqxkH-xzz7qvjvV0-I",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_weird-topic_download_FQADB0Au3qIoYd1W1DhDffgPRqqxkH-xzz7qvjvV0-I",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_weird-topic_download_FQADB0Au3qIoYd1W1DhDffgPRqqxkH-xzz7qvjvV0-I",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_weird-topic_download_FQADB0Au3qIoYd1W1DhDffgPRqqxkH-xzz7qvjvV0-I",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_weird-topic_download_8A9rCJ6bb5gaqKHAuJj6rx4gVVTNWRtHjr6NGHAc9BY",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "download",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_weird-topic_download_FQADB0Au3qIoYd1W1DhDffgPRqqxkH-xzz7qvjvV0-I",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_weird-topic_upload_4PH6JG3I32S3P6yy-uE3SEzfn8Edcc8WSoDvV7dll-8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_weird-topic_upload_4PH6JG3I32S3P6yy-uE3SEzfn8Edcc8WSoDvV7dll-8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_weird-topic_upload_4PH6JG3I32S3P6yy-uE3SEzfn8Edcc8WSoDvV7dll-8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_weird-topic_upload_4PH6JG3I32S3P6yy-uE3SEzfn8Edcc8WSoDvV7dll-8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_weird-topic_upload_YmQdMoxcdUD7VXXoYHVNgBuC1OznNYAFkEeN37eMO4s",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_weird-topic_upload_4PH6JG3I32S3P6yy-uE3SEzfn8Edcc8WSoDvV7dll-8",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_weird-topic_upload_HFAruPPCERh9qLInPNeYPut5QPJCIDPZ-0dExt89sdQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_weird-topic_upload_HFAruPPCERh9qLInPNeYPut5QPJCIDPZ-0dExt89sdQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_weird-topic_upload_HFAruPPCERh9qLInPNeYPut5QPJCIDPZ-0dExt89sdQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_weird-topic_upload_HFAruPPCERh9qLInPNeYPut5QPJCIDPZ-0dExt89sdQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_weird-topic_upload_s16H22VR85mr6g05DJxKZDNP-Jr5m0PZy0l3jLWX80Y",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_weird-topic_upload_HFAruPPCERh9qLInPNeYPut5QPJCIDPZ-0dExt89sdQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_weird-topic_upload_RQevS6wVu_Oq5xcT2LutxKRiPLGGA8zPVUSbMgn21jM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_weird-topic_upload_RQevS6wVu_Oq5xcT2LutxKRiPLGGA8zPVUSbMgn21jM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_weird-topic_upload_RQevS6wVu_Oq5xcT2LutxKRiPLGGA8zPVUSbMgn21jM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_weird-topic_upload_RQevS6wVu_Oq5xcT2LutxKRiPLGGA8zPVUSbMgn21jM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_weird-topic_upload_IIcDTqmXotWK5_pH5ac3cW4OJ5N2QsS9vmz8biKo28o",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_weird-topic_upload_RQevS6wVu_Oq5xcT2LutxKRiPLGGA8zPVUSbMgn21jM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_weird-topic_upload_PqjSHC9NyVohlG9ffVMyrkkEbsooA5lsy73KNWNo8zw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_weird-topic_upload_PqjSHC9NyVohlG9ffVMyrkkEbsooA5lsy73KNWNo8zw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_weird-topic_upload_PqjSHC9NyVohlG9ffVMyrkkEbsooA5lsy73KNWNo8zw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_weird-topic_upload_PqjSHC9NyVohlG9ffVMyrkkEbsooA5lsy73KNWNo8zw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_weird-topic_upload_y9pTqm4YGvAXtoJ_WhAME4QTnckNJ4U8S53uRmx4pmQ",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_weird-topic_upload_PqjSHC9NyVohlG9ffVMyrkkEbsooA5lsy73KNWNo8zw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_weird-topic_x_12dTP7HPfdzzBTQHZXNwiOU1VvQ67BfhqlyThnKVbcI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_weird-topic_x_12dTP7HPfdzzBTQHZXNwiOU1VvQ67BfhqlyThnKVbcI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_weird-topic_x_12dTP7HPfdzzBTQHZXNwiOU1VvQ67BfhqlyThnKVbcI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_weird-topic_x_12dTP7HPfdzzBTQHZXNwiOU1VvQ67BfhqlyThnKVbcI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_weird-topic_x_RQVTO3DslqsDHOi_N8fvvuiYDYyD1KYPIxbmAIm1KtI",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_weird-topic_x_12dTP7HPfdzzBTQHZXNwiOU1VvQ67BfhqlyThnKVbcI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_weird-topic_x_-IKJA7YBtjbbx-AoaPj9X_SiFpSlnhq916JKQXmVArM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_weird-topic_x_-IKJA7YBtjbbx-AoaPj9X_SiFpSlnhq916JKQXmVArM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_weird-topic_x_-IKJA7YBtjbbx-AoaPj9X_SiFpSlnhq916JKQXmVArM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_weird-topic_x_-IKJA7YBtjbbx-AoaPj9X_SiFpSlnhq916JKQXmVArM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_weird-topic_x_XpyiV1lA2BV6M9asBsVjx8SykABqlW0Cn7Iv81ZlM6U",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_weird-topic_x_-IKJA7YBtjbbx-AoaPj9X_SiFpSlnhq916JKQXmVArM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_weird-topic_x_ie61BsAuBlIydPUr7lGn2OH16eWNDsprMC6A_Aj0Lhk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_weird-topic_x_ie61BsAuBlIydPUr7lGn2OH16eWNDsprMC6A_Aj0Lhk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_weird-topic_x_ie61BsAuBlIydPUr7lGn2OH16eWNDsprMC6A_Aj0Lhk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_weird-topic_x_ie61BsAuBlIydPUr7lGn2OH16eWNDsprMC6A_Aj0Lhk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_weird-topic_x_61vuCl7FhDqrqDPjPLqbVEXySOITR8vnCJl_MivO_Pw",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_weird-topic_x_ie61BsAuBlIydPUr7lGn2OH16eWNDsprMC6A_Aj0Lhk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_weird-topic_x_iU3Ngr9K1pBuEfbNy_YBVhkvMsDYC99Jeqii4D2maq4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_weird-topic_x_iU3Ngr9K1pBuEfbNy_YBVhkvMsDYC99Jeqii4D2maq4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_weird-topic_x_iU3Ngr9K1pBuEfbNy_YBVhkvMsDYC99Jeqii4D2maq4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_weird-topic_x_iU3Ngr9K1pBuEfbNy_YBVhkvMsDYC99Jeqii4D2maq4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_weird-topic_x_FkEFOK8EQeKW6-WfC4LLwMCJ5g_K-Uoen_EP5Uge2gI",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "weird!!!topic",
+   "type": "",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_weird-topic_x_iU3Ngr9K1pBuEfbNy_YBVhkvMsDYC99Jeqii4D2maq4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_download_STRgf1fWb9qKFCLUZwVLbPy3ldkX96RmgA_o50f7iCM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_download_STRgf1fWb9qKFCLUZwVLbPy3ldkX96RmgA_o50f7iCM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_leading-and-trailing_download_STRgf1fWb9qKFCLUZwVLbPy3ldkX96RmgA_o50f7iCM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_leading-and-trailing_download_STRgf1fWb9qKFCLUZwVLbPy3ldkX96RmgA_o50f7iCM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_leading-and-trailing_download_jzGbt-Z3EHA9RjqmhDNKXi0a7uUTc8_j9Yz92oc3J-8",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_leading-and-trailing_download_STRgf1fWb9qKFCLUZwVLbPy3ldkX96RmgA_o50f7iCM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_download_g05gntv8oHPz_z4SBGfF6Smxx5rmcm39-tY3A6sD8kM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_download_g05gntv8oHPz_z4SBGfF6Smxx5rmcm39-tY3A6sD8kM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_leading-and-trailing_download_g05gntv8oHPz_z4SBGfF6Smxx5rmcm39-tY3A6sD8kM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_leading-and-trailing_download_g05gntv8oHPz_z4SBGfF6Smxx5rmcm39-tY3A6sD8kM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_leading-and-trailing_download_mFAJNH_O6MxhcqdPA6fvUPQlEy_Pez3I4uGzj1OeYck",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_leading-and-trailing_download_g05gntv8oHPz_z4SBGfF6Smxx5rmcm39-tY3A6sD8kM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_download_l21OLN_VmzsxNIcRKu44-LP04yjc2t3XjQfa5kYx3CE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_download_l21OLN_VmzsxNIcRKu44-LP04yjc2t3XjQfa5kYx3CE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_leading-and-trailing_download_l21OLN_VmzsxNIcRKu44-LP04yjc2t3XjQfa5kYx3CE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_leading-and-trailing_download_l21OLN_VmzsxNIcRKu44-LP04yjc2t3XjQfa5kYx3CE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_leading-and-trailing_download_cwFY6jX7WS6O3f57Sw4JYFo4Fhas51vBd6zdkKD_Bxo",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_leading-and-trailing_download_l21OLN_VmzsxNIcRKu44-LP04yjc2t3XjQfa5kYx3CE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_download_-bID-f0_8YzrJJk0cSj8A5cnnnC3LjY1czfg8T5FyBA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_download_-bID-f0_8YzrJJk0cSj8A5cnnnC3LjY1czfg8T5FyBA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_leading-and-trailing_download_-bID-f0_8YzrJJk0cSj8A5cnnnC3LjY1czfg8T5FyBA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_leading-and-trailing_download_-bID-f0_8YzrJJk0cSj8A5cnnnC3LjY1czfg8T5FyBA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_leading-and-trailing_download_-ymY6VALiGmPlo_K-gOVc0A_k8i5frOAChbWRuyaAFc",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "download",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_leading-and-trailing_download_-bID-f0_8YzrJJk0cSj8A5cnnnC3LjY1czfg8T5FyBA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_upload_BWiT73E61KIgYUEw-AUbO-d9QPvCuVYU-lRmVqU7Gjg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_upload_BWiT73E61KIgYUEw-AUbO-d9QPvCuVYU-lRmVqU7Gjg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_leading-and-trailing_upload_BWiT73E61KIgYUEw-AUbO-d9QPvCuVYU-lRmVqU7Gjg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_leading-and-trailing_upload_BWiT73E61KIgYUEw-AUbO-d9QPvCuVYU-lRmVqU7Gjg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_leading-and-trailing_upload_dXC2UHCy52O5ZEf7-Mc_gaWxbUkrBOyMQZV7I5jcLcw",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_leading-and-trailing_upload_BWiT73E61KIgYUEw-AUbO-d9QPvCuVYU-lRmVqU7Gjg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_upload_76KUxgbijW8CASb47_DKPh3esEsZ7eoILG8OICDR-is",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_upload_76KUxgbijW8CASb47_DKPh3esEsZ7eoILG8OICDR-is",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_leading-and-trailing_upload_76KUxgbijW8CASb47_DKPh3esEsZ7eoILG8OICDR-is",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_leading-and-trailing_upload_76KUxgbijW8CASb47_DKPh3esEsZ7eoILG8OICDR-is",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_leading-and-trailing_upload_6O61cvRZrzVRkkv1jMz-W4u3eSPJeHoowXTabWNpQJ4",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_leading-and-trailing_upload_76KUxgbijW8CASb47_DKPh3esEsZ7eoILG8OICDR-is",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_upload_EI3PZcgWRF2U2UnuPN-IjVP5_ukzXH0FbT9KIzwedL4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_upload_EI3PZcgWRF2U2UnuPN-IjVP5_ukzXH0FbT9KIzwedL4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_leading-and-trailing_upload_EI3PZcgWRF2U2UnuPN-IjVP5_ukzXH0FbT9KIzwedL4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_leading-and-trailing_upload_EI3PZcgWRF2U2UnuPN-IjVP5_ukzXH0FbT9KIzwedL4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_leading-and-trailing_upload_ZewaTrCTHNOyX_I_lUOS3Inn5-j_2BS9vTzSazkk4FQ",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_leading-and-trailing_upload_EI3PZcgWRF2U2UnuPN-IjVP5_ukzXH0FbT9KIzwedL4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_upload_onIAE1Ji89uYw1fTCcCJUXyjl_fKrA--XBIbF2xB-Mo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_upload_onIAE1Ji89uYw1fTCcCJUXyjl_fKrA--XBIbF2xB-Mo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_leading-and-trailing_upload_onIAE1Ji89uYw1fTCcCJUXyjl_fKrA--XBIbF2xB-Mo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_leading-and-trailing_upload_onIAE1Ji89uYw1fTCcCJUXyjl_fKrA--XBIbF2xB-Mo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_leading-and-trailing_upload_OUCy7GtIzhGpwXgF4uo2k_3UIv6d2wTRCarKx4VDxx0",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_leading-and-trailing_upload_onIAE1Ji89uYw1fTCcCJUXyjl_fKrA--XBIbF2xB-Mo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_x_P4roOtF54myi1JHk8-mRhkaaxzGjxGmqAThLBIgJZwo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_x_P4roOtF54myi1JHk8-mRhkaaxzGjxGmqAThLBIgJZwo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_leading-and-trailing_x_P4roOtF54myi1JHk8-mRhkaaxzGjxGmqAThLBIgJZwo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_leading-and-trailing_x_P4roOtF54myi1JHk8-mRhkaaxzGjxGmqAThLBIgJZwo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_leading-and-trailing_x_SIQSYPHDIA1MmQgfcFnAXku2mrvr5dCRDEbc5CAJipY",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_leading-and-trailing_x_P4roOtF54myi1JHk8-mRhkaaxzGjxGmqAThLBIgJZwo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_x_SdwAkqo4nm_xzTDkc7jQDMxVu_U0qZeLmyGrYK06Oo0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_x_SdwAkqo4nm_xzTDkc7jQDMxVu_U0qZeLmyGrYK06Oo0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_leading-and-trailing_x_SdwAkqo4nm_xzTDkc7jQDMxVu_U0qZeLmyGrYK06Oo0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_leading-and-trailing_x_SdwAkqo4nm_xzTDkc7jQDMxVu_U0qZeLmyGrYK06Oo0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_leading-and-trailing_x_ON_-hyjjsLpPEFn1B05pKG28QsEP0yQAqwtmmtNuQSk",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_leading-and-trailing_x_SdwAkqo4nm_xzTDkc7jQDMxVu_U0qZeLmyGrYK06Oo0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_x_A-py1Zx7FFVq3NTBsk4ug24V7tYKDkvolJSA5TqElyY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_x_A-py1Zx7FFVq3NTBsk4ug24V7tYKDkvolJSA5TqElyY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_leading-and-trailing_x_A-py1Zx7FFVq3NTBsk4ug24V7tYKDkvolJSA5TqElyY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_leading-and-trailing_x_A-py1Zx7FFVq3NTBsk4ug24V7tYKDkvolJSA5TqElyY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_leading-and-trailing_x_z5rRfcnMyXmQ0tzFWexXcE8r_LCkW03pJIZjeuUVziY",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_leading-and-trailing_x_A-py1Zx7FFVq3NTBsk4ug24V7tYKDkvolJSA5TqElyY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_x_1NtAcYIdrtdyTjrbJib3I-HRIE6Rw5Qlvc0pDSQbtAM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_leading-and-trailing_x_1NtAcYIdrtdyTjrbJib3I-HRIE6Rw5Qlvc0pDSQbtAM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_leading-and-trailing_x_1NtAcYIdrtdyTjrbJib3I-HRIE6Rw5Qlvc0pDSQbtAM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_leading-and-trailing_x_1NtAcYIdrtdyTjrbJib3I-HRIE6Rw5Qlvc0pDSQbtAM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_leading-and-trailing_x_C30kNwwJ0z6PNIeNWe4it9-czXmMO1YKPHxJg3z8xRY",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "---leading-and-trailing---",
+   "type": "",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_leading-and-trailing_x_1NtAcYIdrtdyTjrbJib3I-HRIE6Rw5Qlvc0pDSQbtAM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_dvbGDgYDvniWvLQtBT5NpO1mQvm-DkMbIEP2eS5r_Yg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_dvbGDgYDvniWvLQtBT5NpO1mQvm-DkMbIEP2eS5r_Yg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_dvbGDgYDvniWvLQtBT5NpO1mQvm-DkMbIEP2eS5r_Yg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_dvbGDgYDvniWvLQtBT5NpO1mQvm-DkMbIEP2eS5r_Yg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_rIREshH9_mawITiPgFLcn9ZrmdaWTHOgObsKrtD5yEQ",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_dvbGDgYDvniWvLQtBT5NpO1mQvm-DkMbIEP2eS5r_Yg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_aOGc73lJJjTbg9sUOV8jWMyhzRe5pJgIjTAr_AW_VnI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_aOGc73lJJjTbg9sUOV8jWMyhzRe5pJgIjTAr_AW_VnI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_aOGc73lJJjTbg9sUOV8jWMyhzRe5pJgIjTAr_AW_VnI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_aOGc73lJJjTbg9sUOV8jWMyhzRe5pJgIjTAr_AW_VnI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_PeVEvqvCfYJhYuxM6-sZ6QMopW-nbuFJd70N18Nn7rA",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_aOGc73lJJjTbg9sUOV8jWMyhzRe5pJgIjTAr_AW_VnI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_5zs6opdG2aZx_sn3ct6GL1JnUSP5BMxvLiO7y64rIm0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_5zs6opdG2aZx_sn3ct6GL1JnUSP5BMxvLiO7y64rIm0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_5zs6opdG2aZx_sn3ct6GL1JnUSP5BMxvLiO7y64rIm0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_5zs6opdG2aZx_sn3ct6GL1JnUSP5BMxvLiO7y64rIm0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_sIgrp2uRd46WMxvMqXMQJs4XHdqq0r-vR9mKX12Uh20",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_5zs6opdG2aZx_sn3ct6GL1JnUSP5BMxvLiO7y64rIm0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_N6rGp2WLaLb2T1Z-s4O9yY6r75K7HEoBh7f_3FfO8vg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_N6rGp2WLaLb2T1Z-s4O9yY6r75K7HEoBh7f_3FfO8vg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_N6rGp2WLaLb2T1Z-s4O9yY6r75K7HEoBh7f_3FfO8vg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_N6rGp2WLaLb2T1Z-s4O9yY6r75K7HEoBh7f_3FfO8vg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_32bnCrUsaFQqdYxPZoHG0u-f8oUuRRDl3a9rpVyg21I",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "download",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_download_N6rGp2WLaLb2T1Z-s4O9yY6r75K7HEoBh7f_3FfO8vg",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_aMyPz6pm9UdUihrovdmAjTBinTDFpqmWSjHBWAUTiSM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_aMyPz6pm9UdUihrovdmAjTBinTDFpqmWSjHBWAUTiSM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_aMyPz6pm9UdUihrovdmAjTBinTDFpqmWSjHBWAUTiSM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_aMyPz6pm9UdUihrovdmAjTBinTDFpqmWSjHBWAUTiSM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload__-EiEAnVTJzMgktOE45gVFgyze7DJIe-bbqmhfZObd4",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_aMyPz6pm9UdUihrovdmAjTBinTDFpqmWSjHBWAUTiSM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_98wC_5WEnAhvojXMIOsxPQ0Nqj9QRBcEDTYzzcgfxcw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_98wC_5WEnAhvojXMIOsxPQ0Nqj9QRBcEDTYzzcgfxcw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_98wC_5WEnAhvojXMIOsxPQ0Nqj9QRBcEDTYzzcgfxcw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_98wC_5WEnAhvojXMIOsxPQ0Nqj9QRBcEDTYzzcgfxcw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_TE2ZgNjCkflaJ8bQVqFHU55uosp2X1NRl3qQUMoWzws",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_98wC_5WEnAhvojXMIOsxPQ0Nqj9QRBcEDTYzzcgfxcw",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_ueOMBxepBqXcaGBLXz-m2iLmpvGgOwCpJbI5MFN0va4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_ueOMBxepBqXcaGBLXz-m2iLmpvGgOwCpJbI5MFN0va4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_ueOMBxepBqXcaGBLXz-m2iLmpvGgOwCpJbI5MFN0va4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_ueOMBxepBqXcaGBLXz-m2iLmpvGgOwCpJbI5MFN0va4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_80fLMCobvFj76sKJGgcCNF7c-oGL6rbcBmiV-FY_vsA",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_ueOMBxepBqXcaGBLXz-m2iLmpvGgOwCpJbI5MFN0va4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_bfIvtNEXkaMAkPnRPWuKUdatDE5YS7et8fW7VMibCuc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_bfIvtNEXkaMAkPnRPWuKUdatDE5YS7et8fW7VMibCuc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_bfIvtNEXkaMAkPnRPWuKUdatDE5YS7et8fW7VMibCuc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_bfIvtNEXkaMAkPnRPWuKUdatDE5YS7et8fW7VMibCuc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_9gb2JM2bbZ8ZIifni9ZfMSFMpE1yFWJOqHCMvAOIPX8",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_upload_bfIvtNEXkaMAkPnRPWuKUdatDE5YS7et8fW7VMibCuc",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_vZJ3C8zcUUWFwXfM1PV_yL7OMiXOohMW2RsW4ZibNnI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_vZJ3C8zcUUWFwXfM1PV_yL7OMiXOohMW2RsW4ZibNnI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_vZJ3C8zcUUWFwXfM1PV_yL7OMiXOohMW2RsW4ZibNnI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_vZJ3C8zcUUWFwXfM1PV_yL7OMiXOohMW2RsW4ZibNnI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_YijkHIqzAC7kVJ-MhsaiIObpGdnw9IUCHo6W-9WU7VM",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_vZJ3C8zcUUWFwXfM1PV_yL7OMiXOohMW2RsW4ZibNnI",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_dswmHVFhNG-FnaBaNMgHKvUqHoe71OUpZM1YJ4nMtsM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_dswmHVFhNG-FnaBaNMgHKvUqHoe71OUpZM1YJ4nMtsM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_dswmHVFhNG-FnaBaNMgHKvUqHoe71OUpZM1YJ4nMtsM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_dswmHVFhNG-FnaBaNMgHKvUqHoe71OUpZM1YJ4nMtsM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_I0bjYO59WN9lCnZMMblSzRHBcbkGIejsCBo54NjzEXA",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_dswmHVFhNG-FnaBaNMgHKvUqHoe71OUpZM1YJ4nMtsM",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_vy7HDHIuAtWcbeAO8v7eplCavGCrQlb1qsNEiD57he0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_vy7HDHIuAtWcbeAO8v7eplCavGCrQlb1qsNEiD57he0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_vy7HDHIuAtWcbeAO8v7eplCavGCrQlb1qsNEiD57he0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_vy7HDHIuAtWcbeAO8v7eplCavGCrQlb1qsNEiD57he0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_gqFjgaW3CQ2D5phPgfmnkQV-gtJKL7gxI0meeWWJybg",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_vy7HDHIuAtWcbeAO8v7eplCavGCrQlb1qsNEiD57he0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_j-cwO1XiFChTB7F9OIHMASlS3A34rgwceLRb2GHgdwY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_j-cwO1XiFChTB7F9OIHMASlS3A34rgwceLRb2GHgdwY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_j-cwO1XiFChTB7F9OIHMASlS3A34rgwceLRb2GHgdwY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_j-cwO1XiFChTB7F9OIHMASlS3A34rgwceLRb2GHgdwY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_8OJka0KtZBhjRWQvSbSm92HETLlaVJc-hl6NzEuhPkA",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "type": "",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_aaaaaaaaaaaaaaaaaaaaaaaa_x_j-cwO1XiFChTB7F9OIHMASlS3A34rgwceLRb2GHgdwY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1___download_hhbTpa1JTp53R2Mdms8abE3opShTb0d_acMMh9FSAjk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1___download_hhbTpa1JTp53R2Mdms8abE3opShTb0d_acMMh9FSAjk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1___download_hhbTpa1JTp53R2Mdms8abE3opShTb0d_acMMh9FSAjk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1___download_hhbTpa1JTp53R2Mdms8abE3opShTb0d_acMMh9FSAjk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1___download_JccShrW9Q7uZA4lH5DlSV4_Ze-hppaIAdRFlp_s6KRw",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1___download_hhbTpa1JTp53R2Mdms8abE3opShTb0d_acMMh9FSAjk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1___download_syw0Jexa7BSHiTTk4hAAPeLFB2rrWARqQxPIhVxVLmk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1___download_syw0Jexa7BSHiTTk4hAAPeLFB2rrWARqQxPIhVxVLmk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1___download_syw0Jexa7BSHiTTk4hAAPeLFB2rrWARqQxPIhVxVLmk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1___download_syw0Jexa7BSHiTTk4hAAPeLFB2rrWARqQxPIhVxVLmk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1___download_rPtSEuD_drf5lPerEDXpEFmmm5mfIbo1kKKHqnBLKvs",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1___download_syw0Jexa7BSHiTTk4hAAPeLFB2rrWARqQxPIhVxVLmk",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1___download_I4ryIZEv-M1kkoPBjOwbQC7_65MNlONm3yZ53Y-4kJY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1___download_I4ryIZEv-M1kkoPBjOwbQC7_65MNlONm3yZ53Y-4kJY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1___download_I4ryIZEv-M1kkoPBjOwbQC7_65MNlONm3yZ53Y-4kJY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1___download_I4ryIZEv-M1kkoPBjOwbQC7_65MNlONm3yZ53Y-4kJY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1___download_nEHLoZ8zGzZn4kAP4C1Lg1riULryirUmBcdKnLLlhoI",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1___download_I4ryIZEv-M1kkoPBjOwbQC7_65MNlONm3yZ53Y-4kJY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1___download_c-wLVrgUHanYGMc5rHMEjRHj7_dHvZxnui-wmD3VKAE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1___download_c-wLVrgUHanYGMc5rHMEjRHj7_dHvZxnui-wmD3VKAE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1___download_c-wLVrgUHanYGMc5rHMEjRHj7_dHvZxnui-wmD3VKAE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1___download_c-wLVrgUHanYGMc5rHMEjRHj7_dHvZxnui-wmD3VKAE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1___download_cvdcxl5yOkSXUlRDGilOZh6xgtOWETKtu3KyTO9TFjw",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "download",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1___download_c-wLVrgUHanYGMc5rHMEjRHj7_dHvZxnui-wmD3VKAE",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1___upload_MZ-w3tFFtARwDQ7WlKoNngXyogf14Ww00wEIkL02ZQ0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1___upload_MZ-w3tFFtARwDQ7WlKoNngXyogf14Ww00wEIkL02ZQ0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1___upload_MZ-w3tFFtARwDQ7WlKoNngXyogf14Ww00wEIkL02ZQ0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1___upload_MZ-w3tFFtARwDQ7WlKoNngXyogf14Ww00wEIkL02ZQ0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1___upload_8yXiVbZLL-jn9eG2l_wi9Cz09Qs6mV2_z7h6Bk9rTvw",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1___upload_MZ-w3tFFtARwDQ7WlKoNngXyogf14Ww00wEIkL02ZQ0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1___upload_N7o5u7n8mECoCiB0kaIwqdQrPdOzdKcUGFUDKliLTVA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1___upload_N7o5u7n8mECoCiB0kaIwqdQrPdOzdKcUGFUDKliLTVA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1___upload_N7o5u7n8mECoCiB0kaIwqdQrPdOzdKcUGFUDKliLTVA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1___upload_N7o5u7n8mECoCiB0kaIwqdQrPdOzdKcUGFUDKliLTVA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1___upload_gZbnFcH8XQ7soQTGUwDabqv9mMZkG97bPAAvz2vwKqY",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1___upload_N7o5u7n8mECoCiB0kaIwqdQrPdOzdKcUGFUDKliLTVA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1___upload_NCsWgLAdmOQqi1MsUeF7Pjt8QQvmvbumZZpkvYoBAHY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1___upload_NCsWgLAdmOQqi1MsUeF7Pjt8QQvmvbumZZpkvYoBAHY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1___upload_NCsWgLAdmOQqi1MsUeF7Pjt8QQvmvbumZZpkvYoBAHY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1___upload_NCsWgLAdmOQqi1MsUeF7Pjt8QQvmvbumZZpkvYoBAHY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1___upload_EKzELQ6-Vk6Lp95JswoCu2qzGK8NY0ITlhgGTK2fAeU",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1___upload_NCsWgLAdmOQqi1MsUeF7Pjt8QQvmvbumZZpkvYoBAHY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1___upload_mtoZoL-8boiz_jBsCSJUc41thu0voUPy1DPF-FvT19I",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1___upload_mtoZoL-8boiz_jBsCSJUc41thu0voUPy1DPF-FvT19I",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1___upload_mtoZoL-8boiz_jBsCSJUc41thu0voUPy1DPF-FvT19I",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1___upload_mtoZoL-8boiz_jBsCSJUc41thu0voUPy1DPF-FvT19I",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1___upload_JuFJSaU_mcR2zxnXXUBVv4NXNDuujRAuTLIH5cGLAX4",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1___upload_mtoZoL-8boiz_jBsCSJUc41thu0voUPy1DPF-FvT19I",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1___x_Ooha9spnHfDNkYEJ3-eN6RZqUXrTsINQM2gow-GaR2M",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1___x_Ooha9spnHfDNkYEJ3-eN6RZqUXrTsINQM2gow-GaR2M",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1___x_Ooha9spnHfDNkYEJ3-eN6RZqUXrTsINQM2gow-GaR2M",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1___x_Ooha9spnHfDNkYEJ3-eN6RZqUXrTsINQM2gow-GaR2M",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1___x__8Q-0M5acVo2ekQJCktehmeDyXZKVS9NDIWfSdtVbRs",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1___x_Ooha9spnHfDNkYEJ3-eN6RZqUXrTsINQM2gow-GaR2M",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1___x_eZE80GgG9aJ0A4R_eRzmAqFd6zRxjPgDnml4PbxD2n0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1___x_eZE80GgG9aJ0A4R_eRzmAqFd6zRxjPgDnml4PbxD2n0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1___x_eZE80GgG9aJ0A4R_eRzmAqFd6zRxjPgDnml4PbxD2n0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1___x_eZE80GgG9aJ0A4R_eRzmAqFd6zRxjPgDnml4PbxD2n0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1___x_6ilmwKturshmdPTcs_66Nu-7A4t47h1hbX3nwkhGpnk",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1___x_eZE80GgG9aJ0A4R_eRzmAqFd6zRxjPgDnml4PbxD2n0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1___x_sA4BSjSeTzwKCJ5-KEkxU1sJGZ6UcjEEosU1DPtIsKU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1___x_sA4BSjSeTzwKCJ5-KEkxU1sJGZ6UcjEEosU1DPtIsKU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1___x_sA4BSjSeTzwKCJ5-KEkxU1sJGZ6UcjEEosU1DPtIsKU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1___x_sA4BSjSeTzwKCJ5-KEkxU1sJGZ6UcjEEosU1DPtIsKU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1___x_7f4bTWu7MI9TnhyySScfOuBCW3-mV5vc3d7rBWO0PtQ",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1___x_sA4BSjSeTzwKCJ5-KEkxU1sJGZ6UcjEEosU1DPtIsKU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1___x_UIaTDgAZyCyLRSkr-o12fYTMuAPJSV-H3Steoj8CILA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1___x_UIaTDgAZyCyLRSkr-o12fYTMuAPJSV-H3Steoj8CILA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1___x_UIaTDgAZyCyLRSkr-o12fYTMuAPJSV-H3Steoj8CILA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1___x_UIaTDgAZyCyLRSkr-o12fYTMuAPJSV-H3Steoj8CILA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1___x__nIrt87KH_1xGyFkgHMlyveHVQ_V6QKAeEXYd14T51o",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "任务_中文",
+   "type": "",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1___x_UIaTDgAZyCyLRSkr-o12fYTMuAPJSV-H3Steoj8CILA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_x_download_qyz9y64ttpmihzKiAfmqjyRWynf6xlIpCtap6TFDKzQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_x_download_qyz9y64ttpmihzKiAfmqjyRWynf6xlIpCtap6TFDKzQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_x_download_qyz9y64ttpmihzKiAfmqjyRWynf6xlIpCtap6TFDKzQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_x_download_qyz9y64ttpmihzKiAfmqjyRWynf6xlIpCtap6TFDKzQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_x_download_250PiGA-MURgOmX47N1wvse92qC2CyRNQwdh8ZHpqY0",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_x_download_qyz9y64ttpmihzKiAfmqjyRWynf6xlIpCtap6TFDKzQ",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_x_download_pca1GurL46FGIqJCoR6CbO0V9bUcxKdRrHGjcSBo4Mo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_x_download_pca1GurL46FGIqJCoR6CbO0V9bUcxKdRrHGjcSBo4Mo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_x_download_pca1GurL46FGIqJCoR6CbO0V9bUcxKdRrHGjcSBo4Mo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_x_download_pca1GurL46FGIqJCoR6CbO0V9bUcxKdRrHGjcSBo4Mo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_x_download_pQy0P3S9189tuIS2wjyLxXIQYEdrOQtRrBebQGzOZeU",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_x_download_pca1GurL46FGIqJCoR6CbO0V9bUcxKdRrHGjcSBo4Mo",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_x_download_l7X5E1X4u5Q8gJu5C4wmNRDzLP6hUHe_I408WL5JHl0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_x_download_l7X5E1X4u5Q8gJu5C4wmNRDzLP6hUHe_I408WL5JHl0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_x_download_l7X5E1X4u5Q8gJu5C4wmNRDzLP6hUHe_I408WL5JHl0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_x_download_l7X5E1X4u5Q8gJu5C4wmNRDzLP6hUHe_I408WL5JHl0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_x_download_3KRNkatLOY8x3YIoZse54pMZ-b95EWbYpo8HVg21OrQ",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_x_download_l7X5E1X4u5Q8gJu5C4wmNRDzLP6hUHe_I408WL5JHl0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_x_download_gurS4iu7oJC23GnS87bxWWRyfz5v14AZtp7gjqwcGVU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_x_download_gurS4iu7oJC23GnS87bxWWRyfz5v14AZtp7gjqwcGVU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_x_download_gurS4iu7oJC23GnS87bxWWRyfz5v14AZtp7gjqwcGVU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_x_download_gurS4iu7oJC23GnS87bxWWRyfz5v14AZtp7gjqwcGVU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_x_download_cwKFQ0h23QfS24od1l3f1vJSJjo-HRnvZ8N5fpT6ZEo",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "",
+   "type": "download",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_x_download_gurS4iu7oJC23GnS87bxWWRyfz5v14AZtp7gjqwcGVU",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_x_upload_D3JPeQB7C_nVq_deMwZ_yfU1XBwoOtqBQieJjlFTL38",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_x_upload_D3JPeQB7C_nVq_deMwZ_yfU1XBwoOtqBQieJjlFTL38",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_x_upload_D3JPeQB7C_nVq_deMwZ_yfU1XBwoOtqBQieJjlFTL38",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_x_upload_D3JPeQB7C_nVq_deMwZ_yfU1XBwoOtqBQieJjlFTL38",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_x_upload_rUXFjitljyDHXQOVpv1fMJJ5Q7TjdRVahufQYS2Nsf0",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_x_upload_D3JPeQB7C_nVq_deMwZ_yfU1XBwoOtqBQieJjlFTL38",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_x_upload_ERr-U1GlHC-g5AxNB5imZgF3xxfrgByjK7XB63DLlmA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_x_upload_ERr-U1GlHC-g5AxNB5imZgF3xxfrgByjK7XB63DLlmA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_x_upload_ERr-U1GlHC-g5AxNB5imZgF3xxfrgByjK7XB63DLlmA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_x_upload_ERr-U1GlHC-g5AxNB5imZgF3xxfrgByjK7XB63DLlmA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_x_upload_EVXwVhcOQGGHcruvhWlhfssHvz6aaDKPbZBgtRNVWhU",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_x_upload_ERr-U1GlHC-g5AxNB5imZgF3xxfrgByjK7XB63DLlmA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_x_upload__uz_M_rE5kO6pEd8zcdmI1tty6OP8UGze-yh-arjg7M",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_x_upload__uz_M_rE5kO6pEd8zcdmI1tty6OP8UGze-yh-arjg7M",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_x_upload__uz_M_rE5kO6pEd8zcdmI1tty6OP8UGze-yh-arjg7M",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_x_upload__uz_M_rE5kO6pEd8zcdmI1tty6OP8UGze-yh-arjg7M",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_x_upload_ae46whN-iYDCv4x2oLGSKHF7eWaFSE4UBhOjLp6t6Rk",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_x_upload__uz_M_rE5kO6pEd8zcdmI1tty6OP8UGze-yh-arjg7M",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_x_upload_bKp-vnhiI8J7QjFxJBOarqt8qIxC7esQpbNAL7vvGq0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_x_upload_bKp-vnhiI8J7QjFxJBOarqt8qIxC7esQpbNAL7vvGq0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_x_upload_bKp-vnhiI8J7QjFxJBOarqt8qIxC7esQpbNAL7vvGq0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_x_upload_bKp-vnhiI8J7QjFxJBOarqt8qIxC7esQpbNAL7vvGq0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_x_upload_cUmexcWbtVC7eT28bvccogxFrnTUkITJQWM8lp-E2zE",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "",
+   "type": "upload",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_x_upload_bKp-vnhiI8J7QjFxJBOarqt8qIxC7esQpbNAL7vvGq0",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_x_x_zr71D1cde92xUs3yU_YLN2jPJF1tq_YKsOp2OwfKVJA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": null,
+   "key": "tqv1_x_x_zr71D1cde92xUs3yU_YLN2jPJF1tq_YKsOp2OwfKVJA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "",
+   "key": "tqv1_x_x_zr71D1cde92xUs3yU_YLN2jPJF1tq_YKsOp2OwfKVJA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "  ",
+   "key": "tqv1_x_x_zr71D1cde92xUs3yU_YLN2jPJF1tq_YKsOp2OwfKVJA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "retry-2",
+   "key": "tqv1_x_x_p9Pjv5KXH7HHQl1n1-bYuC8q8g0AUHJJ1w9IahpceKw",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "task-abc-123",
+   "attempt": "initial",
+   "key": "tqv1_x_x_zr71D1cde92xUs3yU_YLN2jPJF1tq_YKsOp2OwfKVJA",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_x_x_PStKdJkU8jnfwI5AfONVyEEVYDJTU0BpXG2WDT-NM-k",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": null,
+   "key": "tqv1_x_x_PStKdJkU8jnfwI5AfONVyEEVYDJTU0BpXG2WDT-NM-k",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "",
+   "key": "tqv1_x_x_PStKdJkU8jnfwI5AfONVyEEVYDJTU0BpXG2WDT-NM-k",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "  ",
+   "key": "tqv1_x_x_PStKdJkU8jnfwI5AfONVyEEVYDJTU0BpXG2WDT-NM-k",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "retry-2",
+   "key": "tqv1_x_x_S3gMx-bF5ofZRQjy_9BXVBakrVqJ8udzkJQ7LHYFJYI",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "TASK_UPPER",
+   "attempt": "initial",
+   "key": "tqv1_x_x_PStKdJkU8jnfwI5AfONVyEEVYDJTU0BpXG2WDT-NM-k",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_x_x_M3XSmhPS3NNq1WGuHycJbB_y5BkmeXBO_QSAgf3eVd4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": null,
+   "key": "tqv1_x_x_M3XSmhPS3NNq1WGuHycJbB_y5BkmeXBO_QSAgf3eVd4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "",
+   "key": "tqv1_x_x_M3XSmhPS3NNq1WGuHycJbB_y5BkmeXBO_QSAgf3eVd4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "  ",
+   "key": "tqv1_x_x_M3XSmhPS3NNq1WGuHycJbB_y5BkmeXBO_QSAgf3eVd4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "retry-2",
+   "key": "tqv1_x_x_tTQvIU_I0B9SUcI8lK_3eP3-0DSR-34NLAc1933e1kw",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "with spaces and / slashes",
+   "attempt": "initial",
+   "key": "tqv1_x_x_M3XSmhPS3NNq1WGuHycJbB_y5BkmeXBO_QSAgf3eVd4",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_x_x_v1fZoupnplG8SDuoOJIC1qCor4q1_Ic3uE_oCH-SdMY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "",
+   "attempt": null,
+   "key": "tqv1_x_x_v1fZoupnplG8SDuoOJIC1qCor4q1_Ic3uE_oCH-SdMY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "",
+   "attempt": "",
+   "key": "tqv1_x_x_v1fZoupnplG8SDuoOJIC1qCor4q1_Ic3uE_oCH-SdMY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "",
+   "attempt": "  ",
+   "key": "tqv1_x_x_v1fZoupnplG8SDuoOJIC1qCor4q1_Ic3uE_oCH-SdMY",
+   "normalized": "initial"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "",
+   "attempt": "retry-2",
+   "key": "tqv1_x_x_vzmAhnBtkwP_uRa5_g-HLha8IwfcKYTEQ7Mav6DSaiU",
+   "normalized": "retry-2"
+  },
+  {
+   "topic": "",
+   "type": "",
+   "taskId": "",
+   "attempt": "initial",
+   "key": "tqv1_x_x_v1fZoupnplG8SDuoOJIC1qCor4q1_Ic3uE_oCH-SdMY",
+   "normalized": "initial"
+  }
+ ],
+ "payloads": [
+  {
+   "name": "full",
+   "taskId": "t1",
+   "type": "download",
+   "groupId": "g1",
+   "triggerSource": "qstash-v2",
+   "instanceId": "i1",
+   "hasTimestamp": true
+  },
+  {
+   "name": "groupId-from-meta",
+   "taskId": "t2",
+   "type": "upload",
+   "groupId": "g2",
+   "triggerSource": "manual-retry",
+   "instanceId": "i2",
+   "hasTimestamp": true
+  },
+  {
+   "name": "empty-groupId-falls-back",
+   "taskId": "t3",
+   "type": null,
+   "groupId": "g3",
+   "triggerSource": "unknown",
+   "instanceId": "unknown",
+   "hasTimestamp": true
+  },
+  {
+   "name": "no-meta",
+   "taskId": "t4",
+   "type": "download",
+   "groupId": null,
+   "triggerSource": "unknown",
+   "instanceId": "unknown",
+   "hasTimestamp": true
+  },
+  {
+   "name": "empty-taskId",
+   "taskId": null,
+   "type": "download",
+   "groupId": null,
+   "triggerSource": "unknown",
+   "instanceId": "unknown",
+   "hasTimestamp": true
+  },
+  {
+   "name": "meta-null",
+   "taskId": "t5",
+   "type": null,
+   "groupId": null,
+   "triggerSource": "unknown",
+   "instanceId": "unknown",
+   "hasTimestamp": true
+  },
+  {
+   "name": "empty-object",
+   "taskId": null,
+   "type": null,
+   "groupId": null,
+   "triggerSource": "unknown",
+   "instanceId": "unknown",
+   "hasTimestamp": true
+  }
+ ],
+ "rawBodies": {
+  "full": "{\"taskId\":\"t1\",\"type\":\"download\",\"groupId\":\"g1\",\"_meta\":{\"triggerSource\":\"qstash-v2\",\"instanceId\":\"i1\",\"timestamp\":100}}",
+  "groupId-from-meta": "{\"taskId\":\"t2\",\"type\":\"upload\",\"_meta\":{\"groupId\":\"g2\",\"triggerSource\":\"manual-retry\",\"instanceId\":\"i2\",\"timestamp\":200}}",
+  "empty-groupId-falls-back": "{\"taskId\":\"t3\",\"groupId\":\"\",\"_meta\":{\"groupId\":\"g3\"}}",
+  "no-meta": "{\"taskId\":\"t4\",\"type\":\"download\"}",
+  "empty-taskId": "{\"taskId\":\"\",\"type\":\"download\"}",
+  "meta-null": "{\"taskId\":\"t5\",\"_meta\":null}",
+  "empty-object": "{}"
+ }
+}
