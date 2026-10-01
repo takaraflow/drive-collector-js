@@ -131,11 +131,15 @@ export const getMediaInfo = (input) => {
     if (!obj) return null;
     let name = obj.attributes?.find(a => a.fileName)?.fileName;
     if (!name) {
-        // 使用时间戳 + UUID 确保文件名唯一，特别是在处理媒体组时
-        const uuid = crypto.randomUUID().substring(0, 8);
-        const timestamp = Date.now();
+        // Telegram 没有 fileName 属性(照片/无名文件)时自己编一个。
+        // 必须用 Telegram 服务端的稳定标识(dcId + id)而不是时间戳/UUID：
+        // 随机名每次都不同，同一张图重发会反复新传一份，去重永远命中不了。
+        // dcId + id 对同一份媒体在 Telegram 侧恒定，所以重发会得到同名文件。
+        const fingerprint = [obj.dcId, obj.id].filter(v => v !== undefined && v !== null).join('_');
         const ext = media.video ? ".mp4" : (photo ? ".jpg" : ".bin");
-        name = `transfer_${timestamp}_${uuid}${ext}`;
+        name = fingerprint
+            ? `transfer_${fingerprint}${ext}`
+            : `transfer_${Date.now()}_${crypto.randomUUID().substring(0, 8)}${ext}`;
     }
     // MessageMediaPhoto.photo 是 Api.Photo 容器(不是 PhotoSize),自身没有 size;
     // 真实字节大小在 sizes/photo 数组里。读 obj.size 恒得 0,会让进度、去重和

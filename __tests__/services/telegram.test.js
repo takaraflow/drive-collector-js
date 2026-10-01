@@ -266,6 +266,53 @@ describe("Telegram Service", () => {
         }
     });
 
+    describe("orphan client teardown", () => {
+        // 回归:gramjs 的 update loop 条件是 `while (!client._destroyed)`,而 _destroyed
+        // 只有 destroy() 会置位。只 disconnect() 丢引用 → 孤儿心跳循环每 39.2s 往
+        // _userConnected=false 的 sender 里 send(),永远不 settle,打一发 TIMEOUT。
+        test("resetTelegramDcConfig destroys the client instead of orphaning its update loop", async () => {
+            if (module.resetTelegramDcConfig) module.resetTelegramDcConfig();
+            const orphan = { destroyed: false, destroy() { this.destroyed = true; } };
+            const instance = await module.connectAndStart();
+            // 让模块内部持有我们的孤儿对象,再触发配置重置
+            if (instance) instance.destroy = orphan.destroy.bind(orphan);
+
+            module.resetTelegramDcConfig();
+
+            expect(orphan.destroyed || !instance).toBe(true);
+        });
+
+        test("resetTelegramDcConfig tolerates a client without destroy()", () => {
+            expect(() => module.resetTelegramDcConfig()).not.toThrow();
+        });
+    });
+
+    describe("orphan client teardown", () => {
+        // 回归:gramjs 的 update loop 条件是 `while (!client._destroyed)`,而 _destroyed
+        // 只有 destroy() 会置位。只 disconnect() 丢引用 → 孤儿心跳循环每 39.2s 往
+        // _userConnected=false 的 sender 里 send(),永远不 settle,打一发 TIMEOUT。
+        test("resetTelegramDcConfig destroys the client instead of orphaning its update loop", async () => {
+            if (module.resetTelegramDcConfig) module.resetTelegramDcConfig();
+
+            const instance = await module.connectAndStart();
+            let destroyed = false;
+            instance.destroy = async () => { destroyed = true; };
+
+            module.resetTelegramDcConfig();
+            await new Promise(r => setImmediate(r));
+
+            expect(destroyed).toBe(true);
+        });
+
+        test("resetTelegramDcConfig tolerates a client without destroy()", async () => {
+            if (module.resetTelegramDcConfig) module.resetTelegramDcConfig();
+            const instance = await module.connectAndStart();
+            instance.destroy = undefined;
+
+            expect(() => module.resetTelegramDcConfig()).not.toThrow();
+        });
+    });
+
     describe("Telegram DC configuration", () => {
         beforeEach(async () => {
             resetMockTelegramConfig();
