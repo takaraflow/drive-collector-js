@@ -186,7 +186,8 @@ describe('common utils', () => {
             const result = getMediaInfo(media);
             expect(result).toEqual({
                 name: 'test.pdf',
-                size: 1024
+                size: 1024,
+                sizeExact: true
             });
         });
 
@@ -201,7 +202,8 @@ describe('common utils', () => {
             const result = getMediaInfo(media);
             expect(result).toEqual({
                 name: 'video.mp4',
-                size: 2048
+                size: 2048,
+                sizeExact: true
             });
         });
 
@@ -217,7 +219,10 @@ describe('common utils', () => {
             const result = getMediaInfo(media);
             expect(result).toEqual({
                 name: expect.stringMatching(/transfer_\d+_[a-z0-9]+\.jpg/), // Generated name with nonce
-                size: 512 // obj.size takes precedence over sizes
+                size: 512, // obj.size takes precedence over sizes
+                // 照片大小是估算值:gramjs 下载时自己挑档,与我们这里的重算可能不一致,
+                // 拿它当字节数判据会让 rclone 误报 "sizes differ" 并判成不可重试。
+                sizeExact: false
             });
         });
 
