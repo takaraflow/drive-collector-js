@@ -1,0 +1,42 @@
+# --- Go 边缘节点构建 ---
+#
+# 独立于 Node 镜像:边缘节点只做 webhook 接收与转发,不需要 rclone /
+# s6-overlay / Node 运行时。两者并行运行,由 LB 按路径分流。
+#
+#   /api/v2/tasks/*  →  Go 边缘节点(本镜像)
+#   其余全部        →  Node 主服务(现有镜像)
+FROM golang:1.25-alpine AS build
+
+WORKDIR /src
+
+# 先只拷 go.mod/go.sum,让依赖层能被缓存复用 —— 改代码时不必重下依赖。
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY cmd/ ./cmd/
+
+# CGO_ENABLED=0 出静态二进制,才能跑在 alpine 上。
+# -trimpath 去掉构建机路径,-s -w 去符号表,二进制从 15M 降到 ~11M。
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath -ldflags="-s -w" \
+    -o /out/collector ./cmd/collector
+
+# --- 运行环境 ---
+FROM alpine:3.20
+
+# ca-certificates:转发到 leader 时可能走 https 校验
+# wget:healthcheck 用(与 Node 侧 curl 探针风格一致)
+RUN apk add --no-cache ca-certificates wget \
+    && adduser -D -u 10001 collector
+
+COPY --from=build /out/collector /usr/local/bin/collector
+
+# 不以 root 运行。
+USER collector
+
+# 与 Node 的 7860 错开:同机并行时两个服务都起得来。
+EXPOSE 7861
+
+ENV PORT=7861
+
+ENTRYPOINT ["/usr/local/bin/collector"]
