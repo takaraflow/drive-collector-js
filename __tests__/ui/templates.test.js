@@ -197,7 +197,9 @@ describe("UIHelper", () => {
             expect(result.text).not.toContain("file2.mp4");
             expect(result.text).not.toContain("file3.mp4");
             expect(result.text).toContain("🔄 file1.mp4 [50%]");
-            expect(result.text).toContain("… 其余 2 个文件正在队列中");
+            expect(result.text).toContain("… 其余 1 个文件正在队列中");
+            // 已完成的不算在队列里，否则与汇总的 ✅ 矛盾
+            expect(result.text).not.toContain("其余 2 个");
         });
 
         test("should render different status emojis correctly", () => {
@@ -216,7 +218,7 @@ describe("UIHelper", () => {
             expect(result.text).not.toContain("file2.mp4");
             expect(result.text).not.toContain("file3.mp4");
             expect(result.text).toContain("❌ file4.mp4 (失败)");
-            expect(result.text).toContain("… 其余 3 个文件正在队列中");
+            expect(result.text).toContain("… 其余 1 个文件正在队列中");
         });
 
         test("should handle empty task list", () => {
