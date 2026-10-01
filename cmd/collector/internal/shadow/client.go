@@ -137,7 +137,11 @@ func (c *Client) record(u tg.UpdateClass, date int) {
 		return
 	}
 	obs := Observation{
-		At:      time.Now().UTC(),
+		// 用 update 自带的时间戳,不是 time.Now()。前者是「消息什么时候
+		// 产生的」,跨语言可比;后者是「我们什么时候收到的」,带网络延迟,
+		// 而 Node 侧根本没有「收到时刻」这个概念 —— 拿它分桶会让两侧的
+		// 窗口边界对不齐。
+		At:      time.Unix(int64(date), 0).UTC(),
 		Kind:    u.TypeName(),
 		Date:    date,
 		Session: ptsOf(u),

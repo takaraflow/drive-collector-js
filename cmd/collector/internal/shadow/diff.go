@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -91,40 +90,48 @@ func DiffSummaries(nodeCounts, goCounts map[string]int, window string) Diff {
 }
 
 // ReadShadowCounts 读 Node 侧写的影子计数。
-func ReadShadowCounts(ctx context.Context, client *redis.Client) (map[string]int, error) {
+//
+// 第二个返回值 present 区分两种「空」:
+//   - present=false:Redis 里没这个 key —— Node 侧记录器没启动,
+//     或窗口内确实一条都没记。判据绝不能把它当成「一致」。
+//   - present=true 且 map 为空:key 存在但计数全零,属于正常空窗。
+func ReadShadowCounts(ctx context.Context, client *redis.Client) (map[string]int, bool, error) {
 	raw, err := client.Get(ctx, ShadowCountsKey).Bytes()
 	if err == redis.Nil {
-		// Node 侧还没落盘(刚启动或窗口内没消息)。返回空而不是报错 ——
-		// 「没数据」是影子验证初期的正常状态。
-		return map[string]int{}, nil
+		return map[string]int{}, false, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("读影子计数失败: %w", err)
+		return nil, false, fmt.Errorf("读影子计数失败: %w", err)
 	}
 
-	var raw2 map[string]float64
-	if err := json.Unmarshal(raw, &raw2); err != nil {
-		return nil, fmt.Errorf("解析影子计数失败: %w", err)
+	var decoded map[string]float64
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil, false, fmt.Errorf("解析影子计数失败: %w", err)
 	}
-	out := make(map[string]int, len(raw2))
-	for k, v := range raw2 {
+	out := make(map[string]int, len(decoded))
+	for k, v := range decoded {
 		out[k] = int(v)
 	}
-	return out, nil
+	return out, true, nil
 }
 
-// DiffAgainstNode 从 Redis 读 Node 侧计数,与本地观察做 diff。
+// DiffAgainstNode 从 Redis 读 Node 侧计数,与本地窗口做 diff。
 func (o *Observer) DiffAgainstNode(ctx context.Context, client *redis.Client) (Diff, error) {
-	nodeCounts, err := ReadShadowCounts(ctx, client)
+	nodeCounts, present, err := ReadShadowCounts(ctx, client)
 	if err != nil {
 		return Diff{}, err
 	}
+	goCounts, _ := o.WindowedSnapshot()
 
-	goCounts := o.Snapshot()
-
-	window := o.Summary().Window
-	if window == "" {
-		window = time.Duration(0).String()
+	d := DiffSummaries(nodeCounts, goCounts, o.Summary().Window)
+	if !present {
+		d.Match = false
+		d.Note = "Node 侧尚无影子记录(SHADOW_RECORD 未开启,或还没到第一次 flush)。" +
+			"这不是「一致」,是「没数据可比」——绝不能据此切流量。"
 	}
-	return DiffSummaries(nodeCounts, goCounts, window), nil
+	if !o.Started() {
+		d.Match = false
+		d.Note = "Go 侧影子客户端还没收到任何 update(可能没连上)。" + d.Note
+	}
+	return d, nil
 }

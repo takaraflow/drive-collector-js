@@ -33,6 +33,22 @@ import (
 // SettingsKey 与 JS 侧 SettingsRepository.getSettingsKey 对应。
 const SettingsKey = "setting:tg_bot_session"
 
+// 窗口参数必须与 Node 侧 ShadowRecorder 完全一致,否则 diff 拿
+// 「最近 15 分钟的滚动窗」去比「进程启动至今的累计」,Match 恒为
+// false,判据直接失效。
+//
+// 判定口径:只统计【已走完的整分钟】,当前这一分钟不计入。
+// 理由是 Node 侧每 60s 才 flush 一次,正在积累的这一分钟它也看不到 ——
+// 双方都排除掉才对得齐。
+const (
+	// WindowSeconds 是 Node 侧 cache.set 的 TTL(15 分钟)。
+	WindowSeconds = 15 * 60
+	// bucketSeconds 与 Node 侧 flush 间隔一致,保证桶边界对齐。
+	bucketSeconds = 60
+	// windowBuckets 是窗口内保留的桶数。
+	windowBuckets = WindowSeconds / bucketSeconds
+)
+
 // Observation 是一次观察到的 update 的最小摘要。
 //
 // 刻意只记「可比较的指纹」而非完整消息体:
@@ -53,7 +69,15 @@ type Observation struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
-// Observer 汇总观察结果。
+// bucket 是一分钟内的计数。
+type bucket struct {
+	start    time.Time
+	byFP     map[string]int
+	byType   map[string]int
+	total    int
+}
+
+// Observer 汇总观察结果,按分钟分桶实现滚动窗口。
 //
 // 锁是必需的:gotd 从多个 goroutine 调 UpdateHandler,不加锁时
 // map 写入会 data race(实测 race detector 报 shadow.go 的 map 写)。
@@ -62,37 +86,36 @@ type Observation struct {
 type Observer struct {
 	Log *slog.Logger
 
-	mu           sync.Mutex
-	Count        int
-	ByType       map[string]int
-	byFingerprint map[string]int
-	First        time.Time
-	Last         time.Time
+	mu      sync.Mutex
+	buckets []*bucket // 按 start 升序,长度不超过 windowBuckets
+	total   int        // 进程启动至今的累计,只用于「是否启动过」的判断
+	first   time.Time
+	last    time.Time
 }
 
 func NewObserver(log *slog.Logger) *Observer {
-	return &Observer{
-		Log:           log,
-		ByType:        map[string]int{},
-		byFingerprint: map[string]int{},
-	}
+	return &Observer{Log: log}
 }
 
 // Record 记录一次观察。只打印摘要,不打消息内容。
 func (o *Observer) Record(obs Observation) {
 	fp := shadowfingerprint.Compute(obs.Feature)
+	start := obs.At.Truncate(bucketSeconds * time.Second)
 
 	o.mu.Lock()
-	o.Count++
-	o.ByType[obs.Feature.TypeID]++
-	o.byFingerprint[fp]++
-	if o.First.IsZero() {
-		o.First = obs.At
+	o.total++
+	if o.first.IsZero() {
+		o.first = obs.At
 	}
-	o.Last = obs.At
+	o.last = obs.At
+
+	b := o.bucketForLocked(start)
+	b.total++
+	b.byFP[fp]++
+	b.byType[obs.Feature.TypeID]++
+	o.evictLocked()
 	o.mu.Unlock()
 
-	obs.Fingerprint = fp
 	o.Log.Info("shadow update",
 		"kind", obs.Kind,
 		"points", obs.Points,
@@ -101,22 +124,73 @@ func (o *Observer) Record(obs Observation) {
 	)
 }
 
-// Snapshot 返回指纹计数的副本,供 diff 在无锁读的情况下使用。
+// bucketForLocked 找到 start 对应的桶,没有就建。调用方必须持锁。
+func (o *Observer) bucketForLocked(start time.Time) *bucket {
+	if n := len(o.buckets); n > 0 && o.buckets[n-1].start.Equal(start) {
+		return o.buckets[n-1]
+	}
+	b := &bucket{start: start, byFP: map[string]int{}, byType: map[string]int{}}
+	o.buckets = append(o.buckets, b)
+	return b
+}
+
+// evictLocked 丢掉超出窗口的桶。调用方必须持锁。
+func (o *Observer) evictLocked() {
+	if len(o.buckets) <= windowBuckets {
+		return
+	}
+	o.buckets = o.buckets[len(o.buckets)-windowBuckets:]
+}
+
+// Snapshot 返回窗口内指纹计数的副本。
+//
+// 只统计【已走完的整分钟】—— 当前这一分钟排除,理由见 WindowSeconds
+// 的注释。这样 Go 侧看到的时间跨度与 Node 侧 Redis 里的一致。
 func (o *Observer) Snapshot() map[string]int {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	out := make(map[string]int, len(o.byFingerprint))
-	for k, v := range o.byFingerprint {
-		out[k] = v
-	}
-	return out
+	snap, _ := o.windowedLocked()
+	return snap
 }
 
-// Total 返回已记录条数。
+// WindowedSnapshot 返回窗口内的指纹计数与总条数(与 Node 侧同口径)。
+func (o *Observer) WindowedSnapshot() (map[string]int, int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.windowedLocked()
+}
+
+// windowedLocked 汇总窗口内(不含当前分钟)的计数。调用方必须持锁。
+func (o *Observer) windowedLocked() (map[string]int, int) {
+	cutoff := o.last.Truncate(bucketSeconds * time.Second)
+	out := make(map[string]int)
+	total := 0
+	for _, b := range o.buckets {
+		if !b.start.Before(cutoff) {
+			continue
+		}
+		for fp, n := range b.byFP {
+			out[fp] += n
+		}
+		total += b.total
+	}
+	return out, total
+}
+
+// Total 返回进程启动至今的累计条数(跨窗口,不衰减)。
 func (o *Observer) Total() int {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return o.Count
+	return o.total
+}
+
+// Started 报告是否收到过任何 update —— 用来区分「Go 还没连上」
+// 和「连上了但这段时间确实没消息」。这两种情况在 diff 里必须
+// 区分开:前者是环境没就绪,后者是真实的空窗。
+func (o *Observer) Started() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.total > 0
 }
 
 // Summary 输出可与 Node 侧比对的摘要。
@@ -126,27 +200,39 @@ type Summary struct {
 	First    time.Time      `json:"first"`
 	Last     time.Time      `json:"last"`
 	Window   string         `json:"window"`
+	// WindowedTotal 是窗口内条数(与 Node 侧同口径),Total 是进程累计。
+	WindowedTotal int `json:"windowedTotal"`
 }
 
 func (o *Observer) Summary() Summary {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	w := ""
-	if !o.First.IsZero() {
-		w = o.Last.Sub(o.First).String()
+
+	cutoff := o.last.Truncate(bucketSeconds * time.Second)
+	byType := map[string]int{}
+	windowed := 0
+	for _, b := range o.buckets {
+		if !b.start.Before(cutoff) {
+			continue
+		}
+		for k, v := range b.byType {
+			byType[k] += v
+		}
+		windowed += b.total
 	}
-	// 复制而不是直接暴露内部 map —— 直接暴露会让调用方在无锁情况下
-	// 读到一半的 map,竞争会以更难查的形式炸在别处。
-	byType := make(map[string]int, len(o.ByType))
-	for k, v := range o.ByType {
-		byType[k] = v
+
+	w := "0s"
+	if len(o.buckets) > 0 {
+		w = cutoff.Sub(o.buckets[0].start).String()
 	}
+
 	return Summary{
-		Total:  o.Count,
-		ByType: byType,
-		First:  o.First,
-		Last:   o.Last,
-		Window: w,
+		Total:         o.total,
+		ByType:        byType,
+		First:         o.first,
+		Last:          o.last,
+		Window:        w,
+		WindowedTotal: windowed,
 	}
 }
 
