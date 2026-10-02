@@ -1,10 +1,12 @@
-# --- Go 边缘节点构建 ---
+# --- Go 边缘节点 / worker 镜像 ---
 #
-# 独立于 Node 镜像:边缘节点只做 webhook 接收与转发,不需要 rclone /
-# s6-overlay / Node 运行时。两者并行运行,由 LB 按路径分流。
+# 独立于 Node 镜像:不含 s6-overlay 和 Node 运行时。
 #
-#   /api/v2/tasks/*  →  Go 边缘节点(本镜像)
-#   其余全部        →  Node 主服务(现有镜像)
+# 两种 RUN_MODE:
+#   edge(默认)  只接管 /api/v2/tasks/*,其余路由仍由 Node 处理
+#   worker       全接管 —— 连 Telegram、建任务、下载、上传
+#
+# 两者并行时由 LB 按路径分流;全接管时停掉 Node。
 FROM golang:1.25-alpine AS build
 
 WORKDIR /src
@@ -29,23 +31,29 @@ FROM alpine:3.20
 # 但那个仓库是私有的,CI 里会 unauthorized。
 #
 # 不用 Git LFS:rclone 每个平台 ~25-30MB,arm64+amd64 就 60MB。
-# LFS 对象跟着分支走,升级后旧版本还一直留在仓库里,而这只是个
+# LFS 对象跟着分支走,升级后旧版本还会一直留在仓库里,而这只是个
 # 构建期依赖 —— 从官方源拉更合适。
 #
 # 刻意【不 pin 版本】:Node 镜像也是拉最新版,pin 了反而两边不一致。
-# 要锁版本应该两边一起锁,不是只锁一边。
-# 装完立刻删 zip:它在 /tmp,留着会让镜像白白大 30MB。
-# bash + unzip 是 rclone.org/install.sh 自己的依赖:
-#   - 脚本是 bash 的,Alpine 默认只有 sh(sh: bash: not found → 退出码 127)
-#   - 它下载 zip 后要解压
+# 要锁版本应该两边一起锁,而不是只锁一边。
+#
+# 构建期需要 bash + unzip:
+#   - 脚本是 bash 的,Alpine 默认只有 sh(缺了会挂在
+#     "sh: bash: not found",退出码 127 —— 第一次构建就踩了这个)
+#   - 脚本下载 zip 后要解压
 # 两者 Node 镜像(基于 Debian)都有,Alpine 要显式装。
 #
-# 装完删掉 curl/unzip/bash 的包索引,但保留 bash —— 运行时用不到,
-# 只是删了能少几 MB;真正必须留的是 rclone 本体和 ca-certificates。
-RUN apk add --no-cache ca-certificates curl unzip bash fuse \
+# 装完把构建期工具全删掉:curl / unzip / bash 运行时用不到。
+# 留着不只是白占空间 —— 那等于给攻击者预装了工具。
+# 不装 fuse:当前只用 copyto / mkdir / lsjson,全是 HTTP API 操作,
+# 不需要挂载。以后真要加 mount remote 时,补这一行即可 —— 那时
+# 少一个 1MB 的包,比留一个用不上的 fuse 划算。
+RUN apk add --no-cache --virtual .build-deps curl unzip bash \
+    && apk add --no-cache ca-certificates \
     && curl -fsSL https://rclone.org/install.sh | bash \
     && rclone version | head -1 \
-    && rm -rf /tmp/rclone*
+    && rm -rf /tmp/rclone* \
+    && apk del .build-deps
 
 # 不以 root 运行。
 RUN adduser -D -u 10001 collector
@@ -58,5 +66,16 @@ USER collector
 EXPOSE 7861
 
 ENV PORT=7861
+
+# 存活探针。
+#
+# 只在 edge 模式下有意义:worker 模式不起 HTTP 端口,探针必然失败 ——
+# 而一个永远失败的探针会让编排器不停重启容器。
+#
+# 用一个自检子命令而不是 curl /health:curl 已被构建期删掉,而
+# edge 模式本来就不接管 /health(那属于 Node)。
+# SKIP_HEALTHCHECK 让 worker 模式能显式关掉它。
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["/usr/local/bin/collector", "healthcheck"]
 
 ENTRYPOINT ["/usr/local/bin/collector"]

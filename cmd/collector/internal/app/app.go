@@ -28,6 +28,12 @@ import (
 	"github.com/youngsx/drive-collector/cmd/collector/internal/tgsession"
 )
 
+// DefaultDownloadDir 是下载落盘的默认位置。
+//
+// 刻意与 Node 侧一致:挂载卷、目录权限、清理脚本都按这个路径写的。
+// 换路径会让「上传失败回退本地暂存」这条链路静默失效。
+const DefaultDownloadDir = "/tmp/downloads"
+
 // Config 是编排层的配置。
 type Config struct {
 	APIID   int
@@ -70,7 +76,11 @@ func New(cfg Config) (*App, error) {
 		cfg.Log = slog.Default()
 	}
 	if cfg.DownloadDir == "" {
-		cfg.DownloadDir = filepath.Join(os.TempDir(), "drive-collector")
+		// 与 Node 侧一致(Dockerfile 里 chown node:node /tmp/downloads,
+		// docker-compose 挂 ./downloads:/tmp/downloads)。
+		// 之前用 /tmp/drive-collector,既不匹配挂载点也没人给过写权限 ——
+		// 容器里以非 root 运行时,下载会直接失败。
+		cfg.DownloadDir = DefaultDownloadDir
 	}
 
 	a := &App{

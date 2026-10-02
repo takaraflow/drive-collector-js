@@ -1,6 +1,6 @@
 // Command collector 是 Go 边缘节点。
 //
-// 三种模式,由 RUN_MODE 决定:
+// 两种模式,由 RUN_MODE 决定:
 //
 //	edge(默认)  接管 QStash 任务 webhook 的接收与转发(/api/v2/tasks/*),
 //	            其余路由仍由 Node 处理。两者并行,由 LB 按路径分流。
@@ -14,6 +14,12 @@
 //	REDIS_URL / NF_REDIS_URL    查 leader 用
 //	SETTING_TG_SESSION          gramjs session 字符串(worker 必填)
 //	API_ID / API_HASH           Telegram 应用凭据(worker 必填)
+//	CLOUDFLARE_D1_*             D1 凭据(worker 必填)
+//	DOWNLOAD_DIR                下载落盘目录(默认 /tmp/downloads,与 Node 一致)
+//	REMOTE_FOLDER               网盘上的保存目录
+//	CLOUDFLARE_D1_*             D1 凭据(worker 必填)
+//	DOWNLOAD_DIR                下载落盘目录(默认 /tmp/downloads,与 Node 一致)
+//	REMOTE_FOLDER               网盘上的保存目录
 //	INSTANCE_ID                 本实例标识,写进 X-Forwarded-By-Instance
 //	EDGE_SKIP_SIGNATURE_VERIFY  仅本地调试,生产必须 false
 package main
@@ -40,6 +46,13 @@ import (
 )
 
 func main() {
+	// healthcheck 子命令:给容器探针用。不读 RUN_MODE,也不加载任何配置 ——
+	// 探针要的是「进程还活着」,不是「配置齐不齐」。
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		runHealthcheck()
+		return
+	}
+
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	mode := os.Getenv("RUN_MODE")
@@ -182,8 +195,32 @@ func runWorker(log *slog.Logger) error {
 
 	log.Info("worker 模式启动",
 		"dc", parsed.DCID,
-		"下载目录", envOr("DOWNLOAD_DIR", "/tmp/downloads"))
+		"下载目录", envOr("DOWNLOAD_DIR", app.DefaultDownloadDir))
 	return application.Run(ctx)
+}
+
+// runHealthcheck 自检:请求本地 edge 端口,通了退 0。
+//
+// 刻意只查「HTTP 端口是否响应」,不查依赖(D1 / Redis / Telegram)——
+// 那些挂了进程还在,探针不该把它重启;真正需要重启的是进程本身出问题。
+func runHealthcheck() {
+	port := envInt("PORT", 7861)
+
+	// worker 模式不起 HTTP 端口。此时探针没有意义,直接成功 ——
+	// 否则编排器会不停重启一个健康的 worker。
+	if os.Getenv("RUN_MODE") == "worker" {
+		os.Exit(0)
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	// 探针打自己的 /healthz:edge 模式会 404(那属于 Node),
+	// 但「404」本身证明 HTTP 栈在工作,这就是我们要的。
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/healthz", port))
+	if err != nil {
+		os.Exit(1)
+	}
+	resp.Body.Close()
+	os.Exit(0)
 }
 
 func envOr(key, def string) string {
