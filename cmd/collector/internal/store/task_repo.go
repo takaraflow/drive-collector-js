@@ -29,15 +29,18 @@ type Task struct {
 	ChatID      sql.NullString
 	MsgID       sql.NullInt64
 	SourceMsgID sql.NullInt64
-	SourceType  string
-	SourceRef   sql.NullString
-	FileName    sql.NullString
-	FileSize    int64
-	Status      contract.TaskStatus
-	ErrorMsg    sql.NullString
-	ClaimedBy   sql.NullString
-	CreatedAt   int64
-	UpdatedAt   int64
+	// GroupedID 标识这批任务来自同一个媒体组,批量取消按它归组。
+	// 与 SourceMsgID 严格区分:后者是「具体哪条消息」。
+	GroupedID  sql.NullInt64
+	SourceType string
+	SourceRef  sql.NullString
+	FileName   sql.NullString
+	FileSize   int64
+	Status     contract.TaskStatus
+	ErrorMsg   sql.NullString
+	ClaimedBy  sql.NullString
+	CreatedAt  int64
+	UpdatedAt  int64
 }
 
 // Repository 是任务仓储。

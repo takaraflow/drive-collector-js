@@ -77,7 +77,7 @@ func newTestBuffer(t *testing.T) (*MediaGroupBuffer, *miniredis.Miniredis, *flus
 		BufferTimeout: 50 * time.Millisecond, // 测试里不用等 1 秒
 		Log:           mgQuiet(),
 	})
-	b.FlushGroup = func(_ context.Context, _ string, ids []int64) error {
+	b.FlushGroup = func(_ context.Context, _ string, _ GroupMeta, ids []int64) error {
 		col.add(ids)
 		return nil
 	}
@@ -179,14 +179,18 @@ func TestFlushClearsState(t *testing.T) {
 	const gid = "grp-clear"
 
 	_ = b.Add(ctx, gid, 555, 555, 1)
+
+	// 等【索引】清空,而不是等 buffer key 消失 —— drop() 先删 buffer
+	// 再删索引,只看前者会在这两步之间断言,60% 概率假失败。
+	// flaky 比稳定失败更糟:它会让 CI 随机红,久了没人信 CI。
 	if !waitFor(t, 2*time.Second, func() bool {
-		return !mr.Exists(b.bufferKey(gid))
+		n, _ := mr.SCard(b.indexKey())
+		return n == 0
 	}) {
-		t.Error("刷出后 buffer key 仍存在")
+		t.Error("刷出后索引未清空")
 	}
-	n, _ := mr.SCard(b.indexKey())
-	if n != 0 {
-		t.Errorf("刷出后索引仍有 %d 个成员", n)
+	if mr.Exists(b.bufferKey(gid)) {
+		t.Error("刷出后 buffer key 仍存在")
 	}
 }
 
@@ -214,7 +218,7 @@ func TestRestoreRecoversOrphanedGroups(t *testing.T) {
 	var mu sync.Mutex
 	var flushed [][]int64
 	b2 := NewMediaGroupBuffer(rdb, BufferConfig{Log: mgQuiet()})
-	b2.FlushGroup = func(_ context.Context, _ string, ids []int64) error {
+	b2.FlushGroup = func(_ context.Context, _ string, _ GroupMeta, ids []int64) error {
 		mu.Lock()
 		flushed = append(flushed, append([]int64(nil), ids...))
 		mu.Unlock()
@@ -246,7 +250,7 @@ func TestStaleGroupDiscarded(t *testing.T) {
 	var mu sync.Mutex
 	var flushed [][]int64
 	b := NewMediaGroupBuffer(rdb, BufferConfig{Log: mgQuiet()})
-	b.FlushGroup = func(_ context.Context, _ string, ids []int64) error {
+	b.FlushGroup = func(_ context.Context, _ string, _ GroupMeta, ids []int64) error {
 		mu.Lock()
 		flushed = append(flushed, append([]int64(nil), ids...))
 		mu.Unlock()
@@ -282,7 +286,7 @@ func TestFailedFlushIsRetained(t *testing.T) {
 	ctx := context.Background()
 
 	b := NewMediaGroupBuffer(rdb, BufferConfig{BufferTimeout: 30 * time.Millisecond, Log: mgQuiet()})
-	b.FlushGroup = func(context.Context, string, []int64) error {
+	b.FlushGroup = func(_ context.Context, _ string, _ GroupMeta, ids []int64) error {
 		return context.DeadlineExceeded
 	}
 
@@ -318,7 +322,7 @@ func TestConcurrentAddsDoNotLose(t *testing.T) {
 	var mu sync.Mutex
 	var flushed [][]int64
 	b := NewMediaGroupBuffer(rdb, BufferConfig{BufferTimeout: 200 * time.Millisecond, Log: mgQuiet()})
-	b.FlushGroup = func(_ context.Context, _ string, ids []int64) error {
+	b.FlushGroup = func(_ context.Context, _ string, _ GroupMeta, ids []int64) error {
 		mu.Lock()
 		flushed = append(flushed, append([]int64(nil), ids...))
 		mu.Unlock()
