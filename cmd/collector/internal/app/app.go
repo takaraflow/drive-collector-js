@@ -53,6 +53,9 @@ type Config struct {
 	Repo *store.Repository
 	Log  *slog.Logger
 
+	// Drives 是网盘仓储 —— 凭据按用户存在 D1,不能从环境变量读。
+	Drives *store.DriveRepository
+
 	// Coord 是实例协调器(注册 + telegram_client 锁)。
 	//
 	// 必填:它决定 LB 把 webhook 转发给谁。缺了它,Go 会在没有抢到锁的
@@ -68,6 +71,7 @@ type App struct {
 	locks  *drive.SessionLock
 	rclone *rclone.Runner
 	repo   *store.Repository
+	drives *store.DriveRepository
 	cfg    Config
 	log    *slog.Logger
 }
@@ -95,6 +99,7 @@ func New(cfg Config) (*App, error) {
 		locks:  drive.NewSessionLock(),
 		rclone: rclone.NewRunner(),
 		repo:   cfg.Repo,
+		drives: cfg.Drives,
 		cfg:    cfg,
 		log:    cfg.Log,
 	}
@@ -278,36 +283,34 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 	}
 	local := filepath.Join(a.cfg.DownloadDir, sanitize(t.FileName.String))
 
-	// 驱动配置从哪来属于「用户绑定」范畴,暂由环境注入。
-	// 这里只负责把它拼成连接串并调度 rclone。
-	driveType := drive.Type(os.Getenv("DRIVE_TYPE"))
-	if !drive.IsSupported(driveType) {
-		return fmt.Errorf("网盘 %q 尚未实现(占位)", driveType)
+	// 凭据从 D1 按用户取 —— 每个用户的网盘凭据不同,存在
+	// drives.config_data 里(明文 JSON,不是加密的)。
+	// 不能从环境变量读:生产没有 DRIVE_USER/DRIVE_PASS 这类变量。
+	d, err := a.drives.DefaultDrive(ctx, t.UserID)
+	if err != nil {
+		return fmt.Errorf("查询用户 %s 的网盘失败: %w", t.UserID, err)
 	}
-	conn, err := drive.ConnectionString(driveType, drive.Config{
-		User: os.Getenv("DRIVE_USER"),
-		Pass: os.Getenv("DRIVE_PASS"),
-		Session: &drive.ProtonSession{
-			ClientUID:           os.Getenv("PROTON_CLIENT_UID"),
-			ClientAccessToken:   os.Getenv("PROTON_CLIENT_ACCESS_TOKEN"),
-			ClientRefreshToken:  os.Getenv("PROTON_CLIENT_REFRESH_TOKEN"),
-			ClientSaltedKeyPass: os.Getenv("PROTON_CLIENT_SALTED_KEY_PASS"),
-		},
-	})
+	if d == nil {
+		return fmt.Errorf("用户 %s 没有绑定网盘", t.UserID)
+	}
+
+	conn, err := drive.ToConnectionString(d)
 	if err != nil {
 		return err
 	}
 
 	cfg := rclone.Config{Connection: conn, Timeout: 6 * time.Hour}
-	remote := filepath.Join(a.cfg.RemoteBase, t.FileName.String)
+	// 用户在 UI 里设的目录优先,退回全局默认。
+	remoteBase := d.RemotePath(a.cfg.RemoteBase)
+	remote := filepath.Join(remoteBase, t.FileName.String)
 
-	if err := a.rclone.Mkdir(ctx, cfg, a.cfg.RemoteBase); err != nil {
+	if err := a.rclone.Mkdir(ctx, cfg, remoteBase); err != nil {
 		return fmt.Errorf("创建远端目录失败: %w", err)
 	}
 
 	// Proton 的 session 操作必须串行 —— refresh_token 是一次性的,
 	// 并发用会导致 Code=10013 账号永久砖化(记忆里的 proton-refresh-token-race)。
-	key := drive.Key(driveType, t.UserID)
+	key := drive.Key(drive.Type(d.Type), t.UserID)
 	return a.locks.WithSession(ctx, key, func() error {
 		if err := a.rclone.Upload(ctx, cfg, local, remote, nil); err != nil {
 			return fmt.Errorf("上传失败: %w", err)

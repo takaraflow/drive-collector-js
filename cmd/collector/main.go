@@ -197,6 +197,7 @@ func runWorker(log *slog.Logger) error {
 		DownloadDir: os.Getenv("DOWNLOAD_DIR"),
 		RemoteBase:  os.Getenv("REMOTE_FOLDER"),
 		Repo:        store.NewTaskRepository(db),
+		Drives:      store.NewDriveRepository(db),
 		Log:         log,
 		Coord:       coord,
 	})
