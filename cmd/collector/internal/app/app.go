@@ -18,8 +18,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/youngsx/drive-collector/cmd/collector/internal/auth"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/dispatcher"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/instance"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
@@ -53,6 +56,12 @@ type Config struct {
 	Repo *store.Repository
 	Log  *slog.Logger
 
+	// Drives 是网盘仓储 —— 凭据按用户存在 D1,不能从环境变量读。
+	Drives *store.DriveRepository
+
+	// Auth 做 RBAC 判定。为 nil 时不装配 Dispatcher,命令被静默忽略。
+	Auth *auth.Guard
+
 	// Coord 是实例协调器(注册 + telegram_client 锁)。
 	//
 	// 必填:它决定 LB 把 webhook 转发给谁。缺了它,Go 会在没有抢到锁的
@@ -63,13 +72,15 @@ type Config struct {
 
 // App 是编排后的应用。
 type App struct {
-	tg     *tgclient.Client
-	tasks  *task.Manager
-	locks  *drive.SessionLock
-	rclone *rclone.Runner
-	repo   *store.Repository
-	cfg    Config
-	log    *slog.Logger
+	tg         *tgclient.Client
+	tasks      *task.Manager
+	locks      *drive.SessionLock
+	rclone     *rclone.Runner
+	repo       *store.Repository
+	drives     *store.DriveRepository
+	dispatcher *dispatcher.Dispatcher
+	cfg        Config
+	log        *slog.Logger
 }
 
 // New 构造 App。此时不连接 Telegram、不碰网盘。
@@ -95,6 +106,7 @@ func New(cfg Config) (*App, error) {
 		locks:  drive.NewSessionLock(),
 		rclone: rclone.NewRunner(),
 		repo:   cfg.Repo,
+		drives: cfg.Drives,
 		cfg:    cfg,
 		log:    cfg.Log,
 	}
@@ -117,6 +129,18 @@ func New(cfg Config) (*App, error) {
 
 	a.tg = tg
 	a.tasks = manager
+
+	// Dispatcher 在这里装配而不是在 main —— 它需要 tg / auth / tasks 三样
+	// 依赖,而 tg 是本包内部创建的。放外面就得额外导出一个构造顺序约束。
+	if cfg.Auth != nil {
+		a.dispatcher = dispatcher.New(dispatcher.Deps{
+			Telegram: tg,
+			Auth:     cfg.Auth,
+			Tasks:    a,
+			Renders:  a,
+			Log:      cfg.Log,
+		})
+	}
 	return a, nil
 }
 
@@ -191,19 +215,69 @@ func (a *App) HandleUploadWebhook(ctx context.Context, taskID string) (task.Resu
 	return a.tasks.HandleUpload(ctx, taskID)
 }
 
-// onUpdate 收到 Telegram update 时创建任务。
+// onUpdate 是 Telegram update 的总入口。
 //
-// 只处理「带媒体的入站消息」—— 用户发文件或图片给 bot,建任务。
-// 其他(update、callback、编辑)留给未来扩展,现在记一条 debug 就够:
-// 猜错业务规则的风险远大于漏处理的风险。
+// 分流顺序很关键:命令优先,媒体其次。
+// 反过来的话,用户发「/status」会先被判成「无媒体的文本消息」而丢弃 ——
+// 而带媒体的 /status 之类消息会被误建任务。
 func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 	switch u.Kind {
+	case tgclient.KindCallbackQuery:
+		return a.handleCallback(ctx, u)
+
 	case tgclient.KindNewMessage, tgclient.KindMediaGroup:
+		msg, ok := messageOf(u)
+		if !ok {
+			return nil
+		}
+
+		// 命令优先:带媒体的消息里也可能带 / 开头的内容,
+		// 但命令是用户明确的意图,不能被当成文件投递。
+		if strings.HasPrefix(strings.TrimSpace(msg.Text), "/") {
+			return a.routeCommand(ctx, msg)
+		}
+
+		if !msg.HasMedia {
+			return nil // 普通聊天内容,不做任何事
+		}
 		return a.createTaskFrom(ctx, u)
+
 	default:
 		a.log.Debug("暂不处理的 update", "kind", u.Kind, "pts", u.Pts)
 		return nil
 	}
+}
+
+// routeCommand 把命令交给 Dispatcher。
+func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
+	if a.dispatcher == nil {
+		a.log.Debug("命令被忽略:dispatcher 未装配", "text", msg.Text)
+		return nil
+	}
+	_, err := a.dispatcher.HandleText(ctx, msg.ChatID, fmt.Sprintf("%d", msg.SenderID), msg.Text)
+	if err != nil {
+		// 命令处理失败不该让客户端重连 —— 否则一条坏命令会变成
+		// 断线重连风暴。记日志就好。
+		a.log.Error("命令处理失败", "text", msg.Text, "err", err)
+	}
+	return nil
+}
+
+// handleCallback 处理按钮点击。
+//
+// B 方案没实现需要按钮的命令,所以这里只回一个「暂不可用」——
+// 静默不回会让 Telegram 客户端的转圈动画一直转(15 秒超时)。
+func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
+	callbackID, data, ok := tgclient.CallbackData(u)
+	if !ok {
+		return nil
+	}
+	// 无论如何都要回应 —— 不回应客户端会一直转圈。
+	if err := a.tg.AnswerCallback(ctx, callbackID, "该功能暂未迁移", false); err != nil {
+		a.log.Warn("回应按钮失败", "err", err)
+	}
+	a.log.Debug("收到按钮点击", "data", data)
+	return nil
 }
 
 func (a *App) createTaskFrom(ctx context.Context, u tgclient.Update) error {
@@ -222,13 +296,17 @@ func (a *App) createTaskFrom(ctx context.Context, u tgclient.Update) error {
 
 	taskID := newTaskID()
 	t := store.Task{
-		ID:          taskID,
-		UserID:      fmt.Sprintf("%d", msg.SenderID),
-		SourceType:  "telegram_media",
-		FileName:    nullableString(msg.FileName),
-		SourceRef:   nullableString(fmt.Sprintf("%d/%d", msg.ChatID, msg.ID)),
+		ID:         taskID,
+		UserID:     fmt.Sprintf("%d", msg.SenderID),
+		SourceType: "telegram_media",
+		FileName:   nullableString(msg.FileName),
+		SourceRef:  nullableString(fmt.Sprintf("%d/%d", msg.ChatID, msg.ID)),
+		// MsgID 是这条状态消息本身;SourceMsgID 是【被转存的那条消息】。
+		// 两者都是单条消息 id —— Node 侧 addBatchTasks 写的也是 msg.id。
+		// 曾经写成 grouped_id,会让「按源消息反查任务」全部失效,
+		// 而且不报错(取消整批时只表现为"点了没反应")。
 		MsgID:       nullableInt(int64(msg.ID)),
-		SourceMsgID: nullableInt(int64(msg.GroupedID)),
+		SourceMsgID: nullableInt(msg.SourceMsgID),
 	}
 
 	if err := a.repo.Create(ctx, t); err != nil {
@@ -278,36 +356,34 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 	}
 	local := filepath.Join(a.cfg.DownloadDir, sanitize(t.FileName.String))
 
-	// 驱动配置从哪来属于「用户绑定」范畴,暂由环境注入。
-	// 这里只负责把它拼成连接串并调度 rclone。
-	driveType := drive.Type(os.Getenv("DRIVE_TYPE"))
-	if !drive.IsSupported(driveType) {
-		return fmt.Errorf("网盘 %q 尚未实现(占位)", driveType)
+	// 凭据从 D1 按用户取 —— 每个用户的网盘凭据不同,存在
+	// drives.config_data 里(明文 JSON,不是加密的)。
+	// 不能从环境变量读:生产没有 DRIVE_USER/DRIVE_PASS 这类变量。
+	d, err := a.drives.DefaultDrive(ctx, t.UserID)
+	if err != nil {
+		return fmt.Errorf("查询用户 %s 的网盘失败: %w", t.UserID, err)
 	}
-	conn, err := drive.ConnectionString(driveType, drive.Config{
-		User: os.Getenv("DRIVE_USER"),
-		Pass: os.Getenv("DRIVE_PASS"),
-		Session: &drive.ProtonSession{
-			ClientUID:           os.Getenv("PROTON_CLIENT_UID"),
-			ClientAccessToken:   os.Getenv("PROTON_CLIENT_ACCESS_TOKEN"),
-			ClientRefreshToken:  os.Getenv("PROTON_CLIENT_REFRESH_TOKEN"),
-			ClientSaltedKeyPass: os.Getenv("PROTON_CLIENT_SALTED_KEY_PASS"),
-		},
-	})
+	if d == nil {
+		return fmt.Errorf("用户 %s 没有绑定网盘", t.UserID)
+	}
+
+	conn, err := drive.ToConnectionString(d)
 	if err != nil {
 		return err
 	}
 
 	cfg := rclone.Config{Connection: conn, Timeout: 6 * time.Hour}
-	remote := filepath.Join(a.cfg.RemoteBase, t.FileName.String)
+	// 用户在 UI 里设的目录优先,退回全局默认。
+	remoteBase := d.RemotePath(a.cfg.RemoteBase)
+	remote := filepath.Join(remoteBase, t.FileName.String)
 
-	if err := a.rclone.Mkdir(ctx, cfg, a.cfg.RemoteBase); err != nil {
+	if err := a.rclone.Mkdir(ctx, cfg, remoteBase); err != nil {
 		return fmt.Errorf("创建远端目录失败: %w", err)
 	}
 
 	// Proton 的 session 操作必须串行 —— refresh_token 是一次性的,
 	// 并发用会导致 Code=10013 账号永久砖化(记忆里的 proton-refresh-token-race)。
-	key := drive.Key(driveType, t.UserID)
+	key := drive.Key(drive.Type(d.Type), t.UserID)
 	return a.locks.WithSession(ctx, key, func() error {
 		if err := a.rclone.Upload(ctx, cfg, local, remote, nil); err != nil {
 			return fmt.Errorf("上传失败: %w", err)

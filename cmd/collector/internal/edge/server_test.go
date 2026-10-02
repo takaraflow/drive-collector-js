@@ -17,13 +17,18 @@ const testKey = "edge-test-signing-key"
 
 func newServer(t *testing.T, l *leader.Resolver, upstream *httptest.Server) *Server {
 	t.Helper()
-	return New(Config{
+	cfg := Config{
 		Log:        discardLogger(),
 		InstanceID: "edge-1",
 		Receiver:   &qstash.Receiver{CurrentSigningKey: testKey},
 		Leader:     l,
-		Outbound:   upstream.Client(),
-	})
+	}
+	// 端点级测试(健康/版本)不需要上游 —— 之前无条件
+	// upstream.Client() 会在 nil 上崩。
+	if upstream != nil {
+		cfg.Outbound = upstream.Client()
+	}
+	return New(cfg)
 }
 
 func leaderWith(base string) *leader.Resolver {
@@ -187,10 +192,21 @@ func TestNonTaskPathsNotHandled(t *testing.T) {
 
 	s := newServer(t, leaderWith(upstream.URL), upstream)
 
-	for _, p := range []string{"/health", "/healthz", "/version", "/api/v2/stream/x", "/api/v2/config/refresh"} {
+	// 健康与版本端点本节点自己实现(平台探针打的就是它们),
+	// 但只答 GET/HEAD —— POST 一律 405。
+	for _, p := range []string{"/health", "/healthz", "/version"} {
 		t.Run(p, func(t *testing.T) {
-			r := signedRequest(t, "POST", p, []byte(taskBody), testKey)
-			rec := do(t, s, r)
+			rec := do(t, s, signedRequest(t, "POST", p, []byte(taskBody), testKey))
+			if rec.Code != http.StatusMethodNotAllowed {
+				t.Errorf("%s POST 状态码 = %d,期望 405", p, rec.Code)
+			}
+		})
+	}
+
+	// 这些仍由 Node 处理,本节点不接管。
+	for _, p := range []string{"/api/v2/stream/x", "/api/v2/config/refresh"} {
+		t.Run(p, func(t *testing.T) {
+			rec := do(t, s, signedRequest(t, "POST", p, []byte(taskBody), testKey))
 			if rec.Code != http.StatusNotFound {
 				t.Errorf("%s 状态码 = %d,期望 404(不接管)", p, rec.Code)
 			}
@@ -269,4 +285,66 @@ func TestSystemEventsForwardsWithoutLeaderLock(t *testing.T) {
 		t.Errorf("system-events 不应因缺 leader 被拒")
 	}
 	_ = called
+}
+
+// TestHealthEndpointsAreReachable 平台探针打的就是这两个路径。
+//
+// 缺了它们,容器会被判定不健康并无限重启 —— 而且探针失败时容器
+// 根本来不及打印有用日志,只剩一句重启循环。
+func TestHealthEndpointsAreReachable(t *testing.T) {
+	s := newServer(t, nil, nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/health", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/health = %d,期望 200(平台探针靠它判断存活)", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "ok") {
+		t.Errorf("响应体 = %q", rec.Body.String())
+	}
+
+	// /healthz 是别名,探针两个都打
+	rec2 := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec2, httptest.NewRequest("GET", "/healthz", nil))
+	if rec2.Code != http.StatusOK {
+		t.Errorf("/healthz = %d,期望 200", rec2.Code)
+	}
+}
+
+// TestHealthRejectsPost 健康端点只答 GET/HEAD。
+func TestHealthRejectsPost(t *testing.T) {
+	s := newServer(t, nil, nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/health", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST /health = %d,期望 405", rec.Code)
+	}
+}
+
+// TestVersionReportsBuildIdentity /version 用来确认线上跑的是哪个版本。
+func TestVersionReportsBuildIdentity(t *testing.T) {
+	t.Setenv("APP_VERSION", "4.33.8-go")
+	t.Setenv("GIT_SHA", "abc1234")
+
+	s := newServer(t, nil, nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/version", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/version = %d", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["version"] != "4.33.8-go" {
+		t.Errorf("version = %v", body["version"])
+	}
+	if body["sha"] != "abc1234" {
+		t.Errorf("sha = %v", body["sha"])
+	}
+	// mode 让人一眼看出这是 edge 还是 worker 实例
+	if body["mode"] == nil {
+		t.Error("响应里应有 mode 字段")
+	}
 }

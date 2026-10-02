@@ -7,12 +7,12 @@
 // 路由边界(QSTASH_PATH_TEMPLATE = /api/v2/tasks/${topic}):
 //
 //	/api/v2/tasks/*       本节点:验签 → 解析 → 转发 leader
-//	/health /healthz      不接管 —— 平台(Northflank/fly)探针指向 Node
+//	/health /healthz      本节点 —— 平台探针必须能打到它,否则容器
+//	                       被判定不健康并无限重启,而探针失败时
+//	                       容器来不及打印任何有用日志
+//	/version              本节点 —— 确认线上跑的是哪个版本
 //	/api/v2/stream/*      不接管 —— 跨实例 chunk 中转协议仍在 Node
 //	/api/v2/config/refresh 不接管
-//
-// 健康检查刻意留在 Node:平台探针指向的是 Node 的就绪状态(Telegram
-// 连接 + D1 + schema),边缘节点活着不代表业务就绪。
 package edge
 
 import (
@@ -21,6 +21,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -44,6 +45,8 @@ type Config struct {
 	Leader     *leader.Resolver
 	// SkipVerify 仅供本地调试,生产必须为 false。
 	SkipVerify bool
+	// Mode 是运行模式,仅用于 /version 回报。
+	Mode string
 	// Outbound 是转发用客户端。nil 时用带超时的默认客户端。
 	Outbound *http.Client
 }
@@ -76,7 +79,17 @@ func New(cfg Config) *Server {
 }
 
 func (s *Server) routes() {
+	// 健康与版本端点 —— 与 Node 侧路径逐字一致。
+	//
+	// 不能省:平台探针(Northflank / fly.io)打的就是 /health 和
+	// /healthz。缺了它们,容器会被判定不健康并无限重启 ——
+	// 而且探针失败时容器根本来不及打印任何有用日志。
+	s.mux.HandleFunc("/health", s.handleHealth)
+	s.mux.HandleFunc("/healthz", s.handleHealth)
+	s.mux.HandleFunc("/version", s.handleVersion)
+
 	s.mux.HandleFunc("/api/v2/tasks/", s.handleTask)
+
 	// 其余路径一律 404,不静默接管 —— 静默接管会让「本该走 Node 的
 	// 路径」在这里悄悄 404,比报错更难排查。
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +99,52 @@ func (s *Server) routes() {
 			"path":    r.URL.Path,
 		})
 	})
+}
+
+// handleHealth 存活探针。
+//
+// 只回答「进程还活着」,不查依赖 —— Redis/D1 挂了进程还在,
+// 探针不该因为那个重启它。依赖健康由 /ready 之类表达,而 Node 侧
+// 也没把两者分开。
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+			"success": false, "message": "method not allowed",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+// handleVersion 返回构建身份,便于确认线上跑的是哪个版本。
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+			"success": false, "message": "method not allowed",
+		})
+		return
+	}
+	version := os.Getenv("APP_VERSION")
+	if version == "" {
+		version = "dev"
+	}
+	sha := os.Getenv("GIT_SHA")
+	if sha == "" {
+		sha = "unknown"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version": version,
+		"sha":     sha,
+		"mode":    modeOf(s.cfg),
+	})
+}
+
+// modeOf 报告当前运行模式 —— /version 能一眼看出这个实例是 edge 还是 worker。
+func modeOf(cfg Config) string {
+	if cfg.Mode != "" {
+		return cfg.Mode
+	}
+	return "edge"
 }
 
 // handleTask 处理 /api/v2/tasks/{topic}。
