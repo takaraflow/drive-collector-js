@@ -11,14 +11,8 @@ describe('instanceUrl SSOT helpers', () => {
     it('should resolve instance base URL with shared priority order', () => {
         expect(resolveInstanceBaseUrl({
             directUrl: 'https://direct.example.com/',
-            tunnelUrl: 'https://tunnel.example.com/',
             url: 'https://fallback.example.com/'
         })).toBe('https://direct.example.com');
-
-        expect(resolveInstanceBaseUrl({
-            tunnelUrl: 'https://tunnel.example.com/',
-            url: 'https://fallback.example.com/'
-        })).toBe('https://tunnel.example.com');
 
         expect(resolveInstanceBaseUrl({
             url: 'https://fallback.example.com/'

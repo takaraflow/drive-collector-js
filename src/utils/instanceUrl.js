@@ -12,6 +12,5 @@ export function normalizePublicUrl(url) {
 export function resolveInstanceBaseUrl(instance) {
     if (!instance || typeof instance !== 'object') return null;
     return normalizePublicUrl(instance.directUrl)
-        || normalizePublicUrl(instance.tunnelUrl)
         || normalizePublicUrl(instance.url);
 }

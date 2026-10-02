@@ -78,12 +78,6 @@ vi.mock('../../../src/services/DistributedLock.js', () => ({
     }
 }));
 
-vi.mock('../../../src/services/TunnelService.js', () => ({
-    tunnelService: {
-        stop: vi.fn(),
-    }
-}));
-
 // Mocks for buildWebhookServer
 vi.mock('http2', () => ({
     default: {
@@ -192,7 +186,6 @@ describe('lifecycle utilities', () => {
                 ['media-group-buffer-cleanup', 48],
                 ['queue-service', 49],
                 ['cache-service', 50],
-                ['tunnel-service', 55],
                 ['logger-flush-after', 60]
             ];
 
@@ -303,9 +296,6 @@ describe('lifecycle utilities', () => {
 
             const cacheServiceHook = hooks.find(call => call[2] === 'cache-service');
             await cacheServiceHook[0]();
-
-            const tunnelServiceHook = hooks.find(call => call[2] === 'tunnel-service');
-            await tunnelServiceHook[0]();
         });
 
         it('should execute logger flush hooks successfully', async () => {

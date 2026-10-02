@@ -98,7 +98,6 @@ describe("SSOT architecture boundaries", () => {
         const packageJson = JSON.parse(read("package.json"));
         const manifest = JSON.parse(read("manifest.json"));
         const s6AppRun = read("etc/s6-overlay/s6-rc.d/app/run");
-        const s6CloudflaredRun = read("etc/s6-overlay/s6-rc.d/cloudflared/run");
 
         expect(read("src/bootstrap/start.js")).toContain("telemetry/tracing.js");
         expect(manifest.entrypoint).toBe("src/bootstrap/start.js");
@@ -114,16 +113,13 @@ describe("SSOT architecture boundaries", () => {
         expect(s6AppRun).toContain('NODE_MODE="${NODE_MODE:-all}"');
         expect(s6AppRun).not.toContain("NODE_MODE=all exec node");
         expect(s6AppRun.startsWith("#!/command/with-contenv sh")).toBe(true);
-        expect(s6CloudflaredRun.startsWith("#!/command/with-contenv sh")).toBe(true);
-        expect(s6CloudflaredRun).toContain('TUNNEL_ENABLED:-false');
     });
 
     test("deployment shell entrypoints should remain syntactically valid", () => {
         [
             "entrypoint.sh",
             "etc/s6-overlay/s6-rc.d/app/run",
-            "etc/s6-overlay/s6-rc.d/app/finish",
-            "etc/s6-overlay/s6-rc.d/cloudflared/run"
+            "etc/s6-overlay/s6-rc.d/app/finish"
         ].forEach(file => {
             expect(() => execFileSync("sh", ["-n", path.join(root, file)])).not.toThrow();
         });

@@ -95,35 +95,4 @@ describe("s6 app run smoke", () => {
         expect(result.status).toBe(0);
         expect(fs.readFileSync(captureFile, "utf8")).toContain("NODE_MODE=processor");
     });
-
-    test("should keep cloudflared idle unless tunnel is explicitly enabled", () => {
-        const tempDir = makeTempDir();
-        const fakeBin = path.join(tempDir, "bin");
-        const captureFile = path.join(tempDir, "sleep-capture.txt");
-        fs.mkdirSync(fakeBin, { recursive: true });
-
-        const fakeSleep = path.join(fakeBin, "sleep");
-        fs.writeFileSync(fakeSleep, [
-            "#!/bin/sh",
-            "printf 'sleep_args=%s\\n' \"$*\" > \"$CAPTURE_FILE\"",
-            "exit 0",
-            ""
-        ].join("\n"));
-        fs.chmodSync(fakeSleep, 0o755);
-
-        const result = spawnSync("sh", [path.join(root, "etc/s6-overlay/s6-rc.d/cloudflared/run")], {
-            cwd: tempDir,
-            env: {
-                ...process.env,
-                CAPTURE_FILE: captureFile,
-                TUNNEL_ENABLED: "false",
-                PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`
-            },
-            encoding: "utf8"
-        });
-
-        expect(result.status).toBe(0);
-        expect(result.stdout).toContain("cloudflared disabled");
-        expect(fs.readFileSync(captureFile, "utf8")).toContain("sleep_args=infinity");
-    });
 });

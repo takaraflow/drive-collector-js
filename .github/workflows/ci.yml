@@ -50,43 +50,70 @@ jobs:
       - name: Run Test and Coverage Gate
         run: bash ci/run.sh test
 
-  docker-build:
+  # Go 侧。跨语言向量是这个 job 的重点 ——
+  # 那些测试文件是 JS 与 Go 之间的契约锁,任一侧漂移都会红。
+  go:
     runs-on: ubuntu-latest
-    needs: [lint, test]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
         with:
-          fetch-depth: 0
+          go-version: '1.25'
+          cache-dependency-path: go.sum
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
 
-      - name: Run Docker Build Gate
-        run: bash ci/run.sh build
-        env:
-          CI_DOCKER_PLATFORM: linux/amd64
+      - name: Install dependencies
+        # 向量生成脚本 import 了 gramjs / jose —— 它们的输出才是
+        # 跨语言契约的权威来源,不能用 mock 替代。
+        run: npm ci --omit=dev --ignore-scripts
 
-  docker-publish:
+      - name: Verify cross-language vectors are current
+        # 契约向量由 JS 权威实现生成。如果有人改了 JS 侧算法却忘了
+        # 重跑生成脚本,这个 job 会拦住 —— 否则 Go 测试会读着新向量
+        # 一路绿灯,锁的方向就反了。
+        run: |
+          npm run test:vectors
+          npm run test:vectors:qstash
+          npm run test:vectors:task-queue
+          npm run test:vectors:tgsession
+          if ! git diff --quiet -- testdata/; then
+            echo "::error::跨语言契约向量与实现不一致 —— 跑 npm run test:vectors:* 并提交"
+            git diff --stat -- testdata/
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./cmd/...
+
+      - name: Test with race detector
+        # -count=1 强制重跑:cached 的测试不会重新执行,
+        # 而 data race 恰恰是「测试碰巧串行调用时测不出」的那类问题。
+        run: go test -race -count=1 ./cmd/...
+
+  docker-edge-build:
     runs-on: ubuntu-latest
-    needs: [lint, test]
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
-    permissions:
-      contents: read
-      packages: write
+    needs: [lint, test, go]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@v3
 
-      - name: Run Docker Publish Gate
-        run: bash ci/run.sh full
-        env:
-          CI_MODE: build-only
-          CI_DOCKER_PUSH: 'true'
-          CI_DOCKER_PLATFORM: linux/amd64
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build Go edge image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.edge
+          push: false
+          load: true
+          tags: drive-collector-edge:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -6,25 +6,6 @@ const mockTimeProvider = {
     clearTimeout: global.clearTimeout
 };
 
-// Mock time
-vi.mock('../src/utils/timeProvider.js', () => ({
-    default: {
-        now: () => 1700000000000,
-        setTimeout: global.setTimeout,
-        clearTimeout: global.clearTimeout
-    },
-    now: () => 1700000000000,
-    setTimeout: global.setTimeout,
-    clearTimeout: global.clearTimeout
-}));
-
-// Mock environment
-vi.mock('../src/config/env.js', () => ({
-    getEnv: () => ({ NODE_ENV: 'test', DEBUG: 'false' }),
-    NODE_ENV: 'test',
-    DEBUG: 'false'
-}));
-
 // Setup before any tests - 只设置全局状态，不尝试 mock 已加载的模块
 beforeAll(() => {
     // Mock console globally

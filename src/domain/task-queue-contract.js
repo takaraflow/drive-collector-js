@@ -89,7 +89,9 @@ export function buildUploadQueueMessage(taskId, data = {}, runtime = {}) {
 }
 
 export function parseTaskQueuePayload(payload = {}) {
-    const meta = payload && typeof payload._meta === "object" ? payload._meta : {};
+    // typeof null === "object",所以只判 typeof 挡不住 _meta: null ——
+    // 那是外部网络输入,曾导致读 meta.groupId 直接抛异常打挂 webhook。
+    const meta = payload && payload._meta && typeof payload._meta === "object" ? payload._meta : {};
     return {
         taskId: payload?.taskId || null,
         type: payload?.type || null,

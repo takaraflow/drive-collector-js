@@ -563,12 +563,6 @@ function buildConfigObject(env) {
                 password: env.TG_PROXY_PASSWORD || env.TELEGRAM_PROXY_PASSWORD
             } : null
         },
-        tunnel: {
-            enabled: parseBoolean(env.TUNNEL_ENABLED, false),
-            provider: env.TUNNEL_PROVIDER || 'cloudflare',
-            metricsPort: parseInt(env.TUNNEL_METRICS_PORT) || 2000,
-            metricsHost: env.TUNNEL_METRICS_HOST || '127.0.0.1'
-        },
         streamForwarding: (() => {
             const enabled = parseBoolean(env.STREAM_FORWARDING_ENABLED, false);
             const secret = typeof env.INSTANCE_SECRET === 'string' ? env.INSTANCE_SECRET.trim() : '';

@@ -50,15 +50,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
     xz-utils \
     && curl -fsSL https://rclone.org/install.sh | bash \
-    && runtime_arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
-    && case "${runtime_arch}" in \
-        amd64) cloudflared_arch="amd64" ;; \
-        arm64) cloudflared_arch="arm64" ;; \
-        *) echo "Unsupported cloudflared architecture: ${runtime_arch}" >&2; exit 1 ;; \
-    esac \
-    && curl -fsSL --output cloudflared.deb "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cloudflared_arch}.deb" \
-    && dpkg -i cloudflared.deb \
-    && rm cloudflared.deb \
     && apt-get purge -y --auto-remove unzip \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 

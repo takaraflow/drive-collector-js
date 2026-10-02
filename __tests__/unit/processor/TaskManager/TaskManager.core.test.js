@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { TaskManagerCore } from '../../../../src/processor/TaskManager/TaskManager.core.js';
+import { TaskManager } from '../../../../src/processor/TaskManager.js';
 import { TaskRepository } from '../../../../src/repositories/TaskRepository.js';
 
 vi.mock('../../../../src/services/d1.js', () => ({
@@ -34,19 +34,19 @@ vi.mock('../../../../src/services/logger/index.js', async (importOriginal) => {
     };
 });
 
-describe('TaskManagerCore', () => {
+describe('TaskManager', () => {
     beforeEach(() => {
         vi.clearAllMocks();
     });
 
     describe('batchUpdateStatus', () => {
         it('should return early if updates array is empty', async () => {
-            await TaskManagerCore.batchUpdateStatus([]);
+            await TaskManager.batchUpdateStatus([]);
             expect(TaskRepository.transitionStatus).not.toHaveBeenCalled();
         });
 
         it('should return early if updates is null', async () => {
-            await TaskManagerCore.batchUpdateStatus(null);
+            await TaskManager.batchUpdateStatus(null);
             expect(TaskRepository.transitionStatus).not.toHaveBeenCalled();
         });
 
@@ -58,7 +58,7 @@ describe('TaskManagerCore', () => {
 
             TaskRepository.transitionStatus.mockResolvedValue({ changed: true });
 
-            await TaskManagerCore.batchUpdateStatus(updates);
+            await TaskManager.batchUpdateStatus(updates);
 
             expect(TaskRepository.transitionStatus).toHaveBeenCalledTimes(2);
             expect(TaskRepository.transitionStatus).toHaveBeenNthCalledWith(1, '1', 'completed', undefined, expect.objectContaining({ source: 'TaskManager.batchUpdateStatus' }));
@@ -76,7 +76,7 @@ describe('TaskManagerCore', () => {
                 .mockResolvedValueOnce({ changed: true })
                 .mockResolvedValueOnce({ changed: true });
 
-            await TaskManagerCore.batchUpdateStatus(updates);
+            await TaskManager.batchUpdateStatus(updates);
 
             expect(TaskRepository.transitionStatus).toHaveBeenCalledTimes(4);
             expect(TaskRepository.transitionStatus).toHaveBeenNthCalledWith(3, '1', 'completed', undefined, expect.objectContaining({ source: 'TaskManager.batchUpdateStatus.fallback' }));
@@ -95,7 +95,7 @@ describe('TaskManagerCore', () => {
                 .mockResolvedValueOnce()
                 .mockResolvedValueOnce();
 
-            await TaskManagerCore.batchUpdateStatus(updates);
+            await TaskManager.batchUpdateStatus(updates);
 
             expect(TaskRepository.transitionStatus).toHaveBeenCalledTimes(4);
             expect(TaskRepository.transitionStatus).toHaveBeenNthCalledWith(3, '1', 'completed', undefined, expect.any(Object));

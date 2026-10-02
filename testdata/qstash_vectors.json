@@ -1,0 +1,62 @@
+{
+ "key": "test-signing-key-12345",
+ "vectors": [
+  {
+   "name": "valid",
+   "signature": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJodHRwczovL2xiLmV4YW1wbGUuY29tL2FwaS92Mi90YXNrcy9kb3dubG9hZC10YXNrcyIsImJvZHkiOiI1ZHIyZ3ZTc3IwdXJHWG1xQXBsenF6dTZwN19mQ3ItV0JsZGV6TkNCTHg0IiwiaXNzIjoiVXBzdGFzaCIsImlhdCI6MTc2NzIyNTYwMH0.vXHhrbKQEH78QD8WGxtJM590Qe3Mbvb4VGZQa4irvcM",
+   "body": "{\"taskId\":\"task-abc-123\",\"type\":\"download\",\"meta\":{\"triggerSource\":\"telegram\",\"instanceId\":\"inst-1\",\"timestamp\":1790862775}}",
+   "url": "https://lb.example.com/api/v2/tasks/download-tasks",
+   "expect": "ok"
+  },
+  {
+   "name": "body-tampered",
+   "signature": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJodHRwczovL2xiLmV4YW1wbGUuY29tL2FwaS92Mi90YXNrcy9kb3dubG9hZC10YXNrcyIsImJvZHkiOiI1ZHIyZ3ZTc3IwdXJHWG1xQXBsenF6dTZwN19mQ3ItV0JsZGV6TkNCTHg0IiwiaXNzIjoiVXBzdGFzaCIsImlhdCI6MTc2NzIyNTYwMH0.vXHhrbKQEH78QD8WGxtJM590Qe3Mbvb4VGZQa4irvcM",
+   "body": "{\"taskId\":\"evil\"}",
+   "url": "https://lb.example.com/api/v2/tasks/download-tasks",
+   "expect": "body-hash"
+  },
+  {
+   "name": "url-mismatch",
+   "signature": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJodHRwczovL2xiLmV4YW1wbGUuY29tL2FwaS92Mi90YXNrcy9kb3dubG9hZC10YXNrcyIsImJvZHkiOiI1ZHIyZ3ZTc3IwdXJHWG1xQXBsenF6dTZwN19mQ3ItV0JsZGV6TkNCTHg0IiwiaXNzIjoiVXBzdGFzaCIsImlhdCI6MTc2NzIyNTYwMH0.vXHhrbKQEH78QD8WGxtJM590Qe3Mbvb4VGZQa4irvcM",
+   "body": "{\"taskId\":\"task-abc-123\",\"type\":\"download\",\"meta\":{\"triggerSource\":\"telegram\",\"instanceId\":\"inst-1\",\"timestamp\":1790862775}}",
+   "url": "https://evil.com/api/v2/tasks/download-tasks",
+   "expect": "subject"
+  },
+  {
+   "name": "signed-with-wrong-key",
+   "signature": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJodHRwczovL2xiLmV4YW1wbGUuY29tL2FwaS92Mi90YXNrcy9kb3dubG9hZC10YXNrcyIsImJvZHkiOiI1ZHIyZ3ZTc3IwdXJHWG1xQXBsenF6dTZwN19mQ3ItV0JsZGV6TkNCTHg0IiwiaXNzIjoiVXBzdGFzaCIsImlhdCI6MTc2NzIyNTYwMH0.M39ymFzrSFOk8WQXYEiRsKhvoIYFIgJgkn1UAuxUb6M",
+   "body": "{\"taskId\":\"task-abc-123\",\"type\":\"download\",\"meta\":{\"triggerSource\":\"telegram\",\"instanceId\":\"inst-1\",\"timestamp\":1790862775}}",
+   "url": "https://lb.example.com/api/v2/tasks/download-tasks",
+   "expect": "signature"
+  },
+  {
+   "name": "wrong-issuer",
+   "signature": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJodHRwczovL2xiLmV4YW1wbGUuY29tL2FwaS92Mi90YXNrcy9kb3dubG9hZC10YXNrcyIsImJvZHkiOiI1ZHIyZ3ZTc3IwdXJHWG1xQXBsenF6dTZwN19mQ3ItV0JsZGV6TkNCTHg0IiwiaXNzIjoiTm90VXBzdGFzaCIsImlhdCI6MTc2NzIyNTYwMH0.ukQSQjp7mZlg7iEIoO-jtEaWyuLIIrfW9GG27C9qaFw",
+   "body": "{\"taskId\":\"task-abc-123\",\"type\":\"download\",\"meta\":{\"triggerSource\":\"telegram\",\"instanceId\":\"inst-1\",\"timestamp\":1790862775}}",
+   "url": "https://lb.example.com/api/v2/tasks/download-tasks",
+   "expect": "issuer"
+  },
+  {
+   "name": "malformed",
+   "signature": "not-a-jwt",
+   "body": "{\"taskId\":\"task-abc-123\",\"type\":\"download\",\"meta\":{\"triggerSource\":\"telegram\",\"instanceId\":\"inst-1\",\"timestamp\":1790862775}}",
+   "url": "https://lb.example.com/api/v2/tasks/download-tasks",
+   "expect": "malformed"
+  },
+  {
+   "name": "empty-signature",
+   "signature": "",
+   "body": "{\"taskId\":\"task-abc-123\",\"type\":\"download\",\"meta\":{\"triggerSource\":\"telegram\",\"instanceId\":\"inst-1\",\"timestamp\":1790862775}}",
+   "url": "https://lb.example.com/api/v2/tasks/download-tasks",
+   "expect": "malformed"
+  },
+  {
+   "name": "signed-with-next-key",
+   "signature": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJodHRwczovL2xiLmV4YW1wbGUuY29tL2FwaS92Mi90YXNrcy9kb3dubG9hZC10YXNrcyIsImJvZHkiOiI1ZHIyZ3ZTc3IwdXJHWG1xQXBsenF6dTZwN19mQ3ItV0JsZGV6TkNCTHg0IiwiaXNzIjoiVXBzdGFzaCIsImlhdCI6MTc2NzIyNTYwMH0.ELxe6IJvvs7Urfwv1YM5lFdTvSUc--VU_CN7y5Syn8E",
+   "body": "{\"taskId\":\"task-abc-123\",\"type\":\"download\",\"meta\":{\"triggerSource\":\"telegram\",\"instanceId\":\"inst-1\",\"timestamp\":1790862775}}",
+   "url": "https://lb.example.com/api/v2/tasks/download-tasks",
+   "expect": "ok",
+   "nextKey": "next-signing-key-67890"
+  }
+ ]
+}

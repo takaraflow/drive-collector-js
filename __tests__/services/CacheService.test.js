@@ -76,21 +76,6 @@ vi.mock("../../src/services/cache/NorthFlankRTCache.js", () => ({
     }
 }));
 
-vi.mock("../../src/services/cache/MemoryCache.js", () => ({
-    MemoryCache: vi.fn().mockImplementation(function() {
-        return {
-            connect: vi.fn().mockResolvedValue(undefined),
-            initialize: vi.fn(),
-            getProviderName: vi.fn(() => 'MemoryCache'),
-            get: vi.fn(() => null),
-            set: vi.fn(() => true),
-            delete: vi.fn(() => true),
-            listKeys: vi.fn(() => []),
-            disconnect: vi.fn()
-        };
-    })
-}));
-
 // Mock fetch globally
 const mockFetch = vi.fn();
 global.fetch = mockFetch;

@@ -378,9 +378,7 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, hear
                     registeredBy: instanceCoordinator.instanceId
                 });
 
-                const { tunnelService } = await import("../../services/TunnelService.js");
-                const tunnelUrl = await tunnelService.getPublicUrl();
-                let leaderUrl = tunnelUrl || config.streamForwarding.externalUrl;
+                let leaderUrl = config.streamForwarding.externalUrl;
                 if (!leaderUrl) {
                     const activeInstances = (await instanceCoordinator.getActiveInstances?.()) || [];
                     const self = activeInstances.find(inst => inst.id === instanceCoordinator.instanceId);
@@ -535,7 +533,7 @@ async function _handleStreamForwarding(context, deps, task, info, fileName, hear
             }
         } else {
             log.warn(`⚠️ Stream transfer disabled for task ${task.id}: no direct worker URL available`, {
-                otherInstances: otherInstances.map(inst => ({ id: inst.id, url: inst.url, tunnelUrl: inst.tunnelUrl, directUrl: inst.directUrl }))
+                otherInstances: otherInstances.map(inst => ({ id: inst.id, url: inst.url, directUrl: inst.directUrl }))
             });
         }
     }

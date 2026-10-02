@@ -529,8 +529,7 @@ class LoggerService {
             'Config': '⚙️', 'Infisical': '⚙️',
             'InstanceCoordinator': '🏗️', 'App': '🏗️',
             'Processor': '⛓️', 'LinkParser': '⛓️', 'TaskManager': '📋',
-            'Tunnel': '🚇', 'TunnelService': '🚇'
-        };
+                    };
 
         const levelEmojis = { info: 'ℹ️', warn: '⚠️', error: '🚨', debug: '🔍' };
         let emoji = moduleEmojis[mod] || levelEmojis[level] || '';
