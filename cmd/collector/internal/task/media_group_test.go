@@ -16,26 +16,72 @@ import (
 // mgQuiet 与 manager_test.go 的 quiet() 同包同义,这里换个名避免冲突。
 func mgQuiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-func newTestBuffer(t *testing.T) (*MediaGroupBuffer, *miniredis.Miniredis, *[][]int64) {
+// flushCollector 收集刷盘记录。
+//
+// 【必须带锁】flush 跑在后台 goroutine 里(定时器触发),而测试在
+// waitFor 里读 —— 不加锁就是 data race。
+//
+// 之前返回裸指针 *[][]int64 让调用方绕过锁直接读,竞态窗口很窄,
+// 本地 -race 常常抓不到,CI 上负载一高就炸。
+type flushCollector struct {
+	mu      sync.Mutex
+	batches [][]int64
+}
+
+func (c *flushCollector) add(ids []int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.batches = append(c.batches, append([]int64(nil), ids...))
+}
+
+// snapshot 返回拷贝,调用方随便读。
+func (c *flushCollector) snapshot() [][]int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([][]int64(nil), c.batches...)
+}
+
+// batchSize 取第 i 批的条数。
+func (c *flushCollector) batchSize(i int) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if i >= len(c.batches) {
+		return -1
+	}
+	return len(c.batches[i])
+}
+
+func (c *flushCollector) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.batches)
+}
+
+func (c *flushCollector) total() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, b := range c.batches {
+		n += len(b)
+	}
+	return n
+}
+
+func newTestBuffer(t *testing.T) (*MediaGroupBuffer, *miniredis.Miniredis, *flushCollector) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
-	// 记录每次刷盘收到哪些消息
-	var mu sync.Mutex
-	var flushed [][]int64
-
+	col := &flushCollector{}
 	b := NewMediaGroupBuffer(rdb, BufferConfig{
 		BufferTimeout: 50 * time.Millisecond, // 测试里不用等 1 秒
 		Log:           mgQuiet(),
 	})
 	b.FlushGroup = func(_ context.Context, _ string, ids []int64) error {
-		mu.Lock()
-		flushed = append(flushed, append([]int64(nil), ids...))
-		mu.Unlock()
+		col.add(ids)
 		return nil
 	}
-	return b, mr, &flushed
+	return b, mr, col
 }
 
 func waitFor(t *testing.T, d time.Duration, cond func() bool) bool {
@@ -65,13 +111,13 @@ func TestGroupsMessagesIntoOneFlush(t *testing.T) {
 		}
 	}
 
-	if !waitFor(t, 2*time.Second, func() bool { return len(*flushed) > 0 }) {
+	if !waitFor(t, 2*time.Second, func() bool { return flushed.count() > 0 }) {
 		t.Fatal("缓冲窗口后没有刷盘")
 	}
-	if len(*flushed) != 1 {
-		t.Fatalf("刷了 %d 次,期望 1 次 —— 消息被拆成了多个任务", len(*flushed))
+	if flushed.count() != 1 {
+		t.Fatalf("刷了 %d 次,期望 1 次 —— 消息被拆成了多个任务", flushed.count())
 	}
-	if got := len((*flushed)[0]); got != 3 {
+	if got := flushed.batchSize(0); got != 3 {
 		t.Errorf("一批应有 3 条消息,实际 %d", got)
 	}
 }
@@ -90,10 +136,10 @@ func TestDuplicatePushDoesNotDuplicate(t *testing.T) {
 		}
 	}
 
-	if !waitFor(t, 2*time.Second, func() bool { return len(*flushed) > 0 }) {
+	if !waitFor(t, 2*time.Second, func() bool { return flushed.count() > 0 }) {
 		t.Fatal("没有刷盘")
 	}
-	if got := len((*flushed)[0]); got != 1 {
+	if got := flushed.batchSize(0); got != 1 {
 		t.Errorf("同一 msgID 推 3 次应只留 1 条,实际 %d 条", got)
 	}
 }
@@ -113,14 +159,14 @@ func TestFullBatchFlushesImmediately(t *testing.T) {
 	}
 	elapsed := time.Since(start)
 
-	if !waitFor(t, 2*time.Second, func() bool { return len(*flushed) > 0 }) {
+	if !waitFor(t, 2*time.Second, func() bool { return flushed.count() > 0 }) {
 		t.Fatal("满批没有刷出")
 	}
 	// 缓冲窗口是 50ms(测试配置),满批应该远快于此
 	if elapsed > 40*time.Millisecond {
 		t.Errorf("满批耗时 %v,应远小于缓冲窗口 50ms", elapsed)
 	}
-	if got := len((*flushed)[0]); got != 10 {
+	if got := flushed.batchSize(0); got != 10 {
 		t.Errorf("一批应有 10 条,实际 %d", got)
 	}
 }
