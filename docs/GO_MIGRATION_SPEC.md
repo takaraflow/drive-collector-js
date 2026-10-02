@@ -56,7 +56,6 @@ RedisTLSCache / ValkeyCache / NorthFlankRTCache / AivenVTCache
 | Key | 处置 |
 |---|---|
 | `setting:tg_bot_session` | **必须保留** —— 登录态,丢了要重新走 OTP 绑定 |
-| `shadow:counts` | 可清(影子验证自己会重建) |
 | `instance:*` | 可清(单实例不需要注册) |
 | MediaGroupBuffer 的 key | **清理前先把队列跑空** —— 正在缓冲的媒体组会静默丢失 |
 
@@ -106,20 +105,20 @@ scanner := bufio.NewScanner(stderr)   // rclone --use-json-log 的逐行 JSON
 
 ```
 cmd/collector/
-├─ main.go                 RUN_MODE: edge | shadow | both
-├─ internal/
-│  ├─ contract/            ✅ 已完成 —— 跨语言契约层
-│  ├─ qstash/              ✅ 已完成 —— 签名验证
-│  ├─ edge/                ✅ 已完成 —— webhook 边缘
-│  ├─ leader/              ✅ 已完成 —— leader 解析
-│  ├─ shadow/              ✅ 已完成 —— 影子模式 + diff
-│  ├─ tgsession/           ✅ 已完成 —— gramjs session 解析
-│  ├─ shadowfingerprint/   ✅ 已完成 —— 指纹契约
-│  ├─ telegram/            🔜 本阶段 —— MTProto 客户端
-│  ├─ task/                🔜 本阶段 —— 任务编排
-│  ├─ drive/               🔜 本阶段 —— Mega + Proton
-│  ├─ rclone/              🔜 本阶段 —— 进程调度
-│  └─ store/               🔜 本阶段 —— D1 直连 + Redis
+├─ main.go                RUN_MODE: edge | worker
+└─ internal/
+   ├─ contract/           跨语言契约(状态机 + 幂等键)
+   ├─ qstash/             签名验证
+   ├─ edge/               webhook 边缘节点
+   ├─ leader/             leader 解析
+   ├─ redisenv/           共享 Redis 配置
+   ├─ tgsession/          gramjs session 解析
+   ├─ d1/ + store/        D1 客户端 + 任务仓储
+   ├─ task/               任务编排
+   ├─ drive/              网盘层(Mega + Proton)
+   ├─ rclone/             rclone 调度
+   ├─ telegram/           MTProto 客户端
+   └─ app/                编排层
 ```
 
 **预估:约 3000 行 Go,对比现在 2.5 万行 JS。**
@@ -140,22 +139,26 @@ cmd/collector/
 
 **当前规模:4708 行生产代码 + 4181 行测试(150 个用例),16 个包。**
 
-### 上线前唯一还缺的验证
+### 上线方式
 
-```bash
-# 1. Node 侧开启影子记录
-SHADOW_RECORD=true
+Go 直接接管,Node 镜像保留两周用于回滚。回滚 = 把 LB 指回 Node,
+不需要重新构建任何东西。
 
-# 2. 起 Go 影子容器(RUN_MODE=shadow),只连只记不动手
-#    前提:Node 侧的 SETTING:TG_SESSION 已有值
+**没有并行验证期。** Node 和 Go 不能同时连同一个 Telegram 账号 ——
+那会触发 AUTH_KEY_DUPLICATED,把另一边踢下线。所以切换只能是原子的:
+要么全 Go,要么全 Node。
 
-# 3. 跑满 2 周,读结论
-redis-cli GET shadow:diff | jq '.diff'
-```
+代价说清楚:某些差异(少认一类 update、媒体组边界)只有在特定
+条件下才出现,测试覆盖不到,只能等线上碰到。缓解手段是 Node 镜像
+保留两周 —— 出事回滚,而不是等用户投诉。
 
-**`Match=true` 是切 worker 模式的硬门槛。**
-没跑出这个结论就直接切,等于闭眼上线 —— 影子模式存在的全部意义
-就是产出这个结论。
+**没有并行验证期。** Node 和 Go 不能同时连同一个 Telegram 账号 ——
+那会触发 AUTH_KEY_DUPLICATED,把另一边踢下线。所以切换只能是原子的:
+要么全 Go,要么全 Node。
+
+代价说清楚:某些差异(少认一类 update、媒体组边界)只有在特定
+条件下才出现,测试覆盖不到,只能等线上碰到。缓解手段是 Node 镜像
+保留两周 —— 出事回滚,而不是等用户投诉。
 
 ---
 
@@ -174,8 +177,7 @@ redis-cli GET shadow:diff | jq '.diff'
 
 | 风险 | 缓解 |
 |---|---|
-| 影子 diff 长期 Match=false | 已修窗口对齐;若仍不绿,先查两侧 update 流,不通则不进阶段 D |
 | Proton session 处理出错 → 账号砖化 | 保留 `_driveSessionMutex` 的等价实现 + 10013 回归测试 |
-| Telegram 连接病理无法验证 | 影子模式是唯一手段;`Match=true` 是硬门槛 |
+| Telegram 连接病理无法提前验证 | 单实例下无并发竞争;出问题靠 Node 镜像回滚 |
 | D1 数据格式 | 已验证纯 TEXT/INTEGER,零转换成本 |
-| 回滚 | 阶段 A-C 每步都可切回 Node;阶段 D 后 Node 保留 2 周 |
+| 回滚 | Node 镜像保留两周,把 LB 指回即可,无需重新构建 |

@@ -83,7 +83,6 @@ jobs:
           npm run test:vectors:qstash
           npm run test:vectors:task-queue
           npm run test:vectors:tgsession
-          npm run test:vectors:shadow-fingerprint
           if ! git diff --quiet -- testdata/; then
             echo "::error::跨语言契约向量与实现不一致 —— 跑 npm run test:vectors:* 并提交"
             git diff --stat -- testdata/
